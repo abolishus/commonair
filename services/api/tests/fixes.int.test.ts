@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { BUS } from "@commonair/contracts/events";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, mediaPath } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
-import { sha256Hex } from "@commonair/tokens";
+import { hmacHex, sha256Hex } from "@commonair/tokens";
 import { instanceMediaBase } from "../src/lib/media-ref.ts";
 import { client, mailTo, signUpAndSignIn, startApi, subscriber, waitFor, type TestApi } from "./harness.ts";
 
@@ -424,5 +424,39 @@ describe("playback heartbeats", () => {
     clock += 10_000;
     await verified.beat(60); // inconsistent beat
     expect((await verified.row()).verdict).toBe("verified");
+  });
+});
+
+describe("ingest auth records the publisher's address hash", () => {
+  test("a successful publish sets stream_keys.last_used_ip_hash with the playback ip_hash scheme", async () => {
+    const s = await signUpAndSignIn(api);
+    const r = await s.client.call<{ key: string }>("POST", `/api/channels/${s.username}/stream-keys`);
+    expect(r.status).toBe(200);
+    const secret = r.body.key.split("?key=")[1] ?? "";
+    const auth = (ip: string, key: string) =>
+      fetch(`${api.url}${INTERNAL_ROUTES.mediaAuth}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ip,
+          protocol: "rtmp",
+          action: "publish",
+          path: mediaPath(s.username),
+          query: `key=${key}`,
+        }),
+      });
+    const keyRow = async () => {
+      const c = await channelOf(s.username);
+      const [k] = await db().select().from(schema.streamKeys).where(eq(schema.streamKeys.channelId, c.id));
+      return k;
+    };
+    expect((await auth("198.51.100.20", "wrong")).status).toBe(401);
+    expect((await keyRow())?.lastUsedIpHash).toBeNull();
+    expect((await auth("198.51.100.20", secret)).status).toBe(200);
+    const hash = (await keyRow())?.lastUsedIpHash;
+    expect(hash).toBe(await hmacHex(api.deps.env.AUTH_SECRET, "ip:198.51.100.20"));
+    expect(hash).not.toContain("198.51.100.20");
+    expect((await auth("203.0.113.9", secret)).status).toBe(200);
+    expect((await keyRow())?.lastUsedIpHash).toBe(await hmacHex(api.deps.env.AUTH_SECRET, "ip:203.0.113.9"));
   });
 });

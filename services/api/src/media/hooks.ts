@@ -12,7 +12,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { KEYS, MediaMtxAuthRequest, MediaReadyHook, mediaPath } from "@commonair/contracts/internal";
 import type { INGEST_PROTOCOLS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
-import { sha256Hex } from "@commonair/tokens";
+import { hmacHex, sha256Hex } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
 import { broadcasterFields, emit } from "../events/outbox.ts";
 import { isSuspended } from "../lib/caller.ts";
@@ -70,7 +70,15 @@ export async function mediaAuth(deps: Deps, body: unknown): Promise<number> {
     ownerSuspended: isSuspended(row.owner, deps.now()) || row.owner.deletedAt !== null,
     keyMatches: key !== undefined,
   });
-  if (ok && key) await deps.valkey.set(publishKey(plan.slug), key.id, "EX", MARKER_TTL_SECONDS);
+  if (ok && key) {
+    await deps.valkey.set(publishKey(plan.slug), key.id, "EX", MARKER_TTL_SECONDS);
+    // Same scheme as playback_sessions.ip_hash, so integrity can exclude the streamer's own
+    // address from their viewer counts.
+    await deps.db
+      .update(streamKeys)
+      .set({ lastUsedIpHash: await hmacHex(deps.env.AUTH_SECRET, `ip:${req.ip}`) })
+      .where(eq(streamKeys.id, key.id));
+  }
   if (!ok) deps.logger.info("media publish refused", { channelId: row.channel.id, keyMatched: key !== undefined });
   return ok ? 200 : 401;
 }
