@@ -340,6 +340,28 @@
         "vite-plus": "catalog:",
       },
     },
+    "services/media": {
+      "name": "@commonair/media",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/config": "workspace:*",
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/observability": "workspace:*",
+        "@commonair/service": "workspace:*",
+        "@commonair/storage": "workspace:*",
+        "@commonair/tokens": "workspace:*",
+        "bullmq": "6.3.16",
+        "drizzle-orm": "catalog:",
+        "iovalkey": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "services/origin": {
       "name": "@commonair/origin",
       "version": "0.0.0",
@@ -494,6 +516,8 @@
     "@commonair/irc": ["@commonair/irc@workspace:services/irc"],
 
     "@commonair/ledger": ["@commonair/ledger@workspace:packages/ledger"],
+
+    "@commonair/media": ["@commonair/media@workspace:services/media"],
 
     "@commonair/observability": ["@commonair/observability@workspace:packages/observability"],
 

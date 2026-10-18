@@ -33,7 +33,8 @@ export const MediaMtxAuthRequest = z.object({
   ip: z.string(),
   action: z.enum(["publish", "read", "playback", "api", "metrics", "pprof"]),
   path: z.string().default(""),
-  protocol: z.enum(["rtsp", "rtmp", "hls", "webrtc", "srt"]),
+  /** Empty for `api`/`metrics` actions (MediaMTX 1.21 sends ""). */
+  protocol: z.enum(["rtsp", "rtmp", "hls", "webrtc", "srt"]).or(z.literal("")),
   id: z.string().nullable().optional(),
   query: z.string().default(""),
 });
