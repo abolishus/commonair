@@ -18,7 +18,8 @@ import { newChallenge } from "./auth/altcha.ts";
 import { createAuth, type Auth } from "./auth/index.ts";
 import type { Deps } from "./deps.ts";
 import { toClientError } from "./lib/errors.ts";
-import { clientIp } from "./lib/ip.ts";
+import { clientIp, looksProxied } from "./lib/ip.ts";
+import { rateLimitSubjectIp } from "./lib/netrange.ts";
 import type { BaseContext, RequestInfo } from "./lib/orpc.ts";
 import { rateLimitKey } from "./lib/ratelimit.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
@@ -111,19 +112,29 @@ export function createApp(deps: Deps): ApiApp {
     });
   }
 
+  let warnedUntrustedProxy = false;
+
   async function requestInfo(
     req: Request,
     url: URL,
     server?: Pick<Server<undefined>, "requestIP">,
   ): Promise<RequestInfo> {
     const socketIp = server?.requestIP(req as Request)?.address ?? "0.0.0.0";
-    const ip = clientIp(socketIp, req.headers.get("x-forwarded-for"), deps.env.TRUSTED_PROXY_CIDRS);
+    const forwardedFor = req.headers.get("x-forwarded-for");
+    const ip = clientIp(socketIp, forwardedFor, deps.env.TRUSTED_PROXY_CIDRS);
+    if (!warnedUntrustedProxy && looksProxied(socketIp, forwardedFor, deps.env.TRUSTED_PROXY_CIDRS)) {
+      warnedUntrustedProxy = true;
+      deps.logger.warn(
+        "requests carry X-Forwarded-For from an untrusted private peer: every client behind that proxy shares one rate-limit subject; set TRUSTED_PROXY_CIDRS",
+      );
+    }
     return {
       headers: req.headers,
       url,
       method: req.method,
       ip,
       ipHash: await hmacHex(deps.env.AUTH_SECRET, `ip:${ip}`),
+      rateLimitHash: await hmacHex(deps.env.AUTH_SECRET, `rl:${rateLimitSubjectIp(ip)}`),
       userAgent: req.headers.get("user-agent"),
     };
   }
@@ -174,7 +185,7 @@ export function createApp(deps: Deps): ApiApp {
       if (raw.method !== "GET") {
         const nowMs = deps.now().getTime();
         const rl = await deps.rateLimitStore.hit(
-          rateLimitKey("auth", `ip:${info.ipHash}`),
+          rateLimitKey("auth", `ip:${info.rateLimitHash}`),
           deps.rateLimits.auth,
           nowMs,
           `${nowMs}:${crypto.randomUUID()}`,
