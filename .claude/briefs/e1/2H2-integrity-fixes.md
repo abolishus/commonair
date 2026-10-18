@@ -4,9 +4,11 @@ Integrity), PLAN.md, docs/architecture.md and ADR 0003 decisions 5 and 8 first. 
 outside the repository.
 
 ## You own (write only these)
+
 - `packages/integrity/**`
 
 ## Contracts you must honor (read-only for you)
+
 - `packages/db` schema (`playback_sessions`, stream keys, appeals, relays, …), `packages/contracts`,
   `packages/config` (`membership.classes.streamer.minVerifiedViewers` etc.), `services/worker`
   (the jobs that call you — read how). The orchestrator is adding these indexes as a migration in
@@ -16,6 +18,7 @@ outside the repository.
   Write your candidate-session queries so they use them (predicates matching the index `where`).
 
 ## Fix (each with tests)
+
 1. Fetch-less heartbeat bots get verified: a session whose heartbeats claim playback but whose
    token fetched no (or far too few) media segments from origin/relay must not verify. Use the
    segment-fetch accounting that origin/relay receipts produce (read the schema/worker).
@@ -41,11 +44,13 @@ outside the repository.
    trivial and inside your paths.
 
 ## Tests you must add
+
 - Exhaustive unit tests for every signal change (boundaries, empty sets, clamped timers, reload
   overlap). Integration tests with `createTestDatabase()` for eligibility, appeal stickiness,
   relay reinstatement and the fetch-less rule against real tables.
 
 ## Done means
+
 - `bun run verify --quick` passes plus `bun run --filter @commonair/integrity test:int` (infra is
   up; never drop databases you did not create). If the worker's call sites need changing,
   report the exact change as a contract request rather than editing `services/worker`.

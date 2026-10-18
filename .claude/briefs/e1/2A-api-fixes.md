@@ -3,14 +3,17 @@ Read AGENTS.md, HANDOFF.md ("Open review findings" → API), PLAN.md and docs/ar
 first. Do not look outside the repository.
 
 ## You own (write only these)
+
 - `services/api/**`
 
 ## Contracts you must honor (read-only for you)
+
 - `packages/contracts`, `packages/db` schema, `packages/config` env schema, `services/chat`'s word
   filter (read it: it has its own shape check + 25 ms budget). Any change needed there is a
   contract request, not an edit.
 
 ## Fix (in priority order; each with tests)
+
 1. **HIGH — ReDoS in word filters.** The API's "ReDoS check" accepts catastrophic patterns such as
    `((a+))+$`, `(a|a)*$`, `(a*)*b`, `(.*a){20}`. Replace it with a strict, linear-time-safe subset:
    refuse nested quantifiers, quantified groups containing alternation with overlapping branches,
@@ -47,11 +50,13 @@ Do 1 and 2 first and make sure they are complete and tested even if you run out 
 rest; list what remains.
 
 ## Tests you must add
+
 - Unit tests for every pure change (validator corpus, IP range checks incl. IPv6 edge cases,
   /64 bucketing). Integration tests (`*.int.test.ts`, `createTestDatabase()`) for the auth hook,
   category mature gate, theme key validation, admin audit, tokens list/revoke, TOTP.
 
 ## Done means
+
 - `bun run verify --quick` passes plus `bun run --filter @commonair/api test:int` (infra is up:
   `bun scripts/infra.ts test`; never drop databases you did not create).
 - No files outside `services/api/**` changed (`git status`).

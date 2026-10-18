@@ -3,10 +3,12 @@ Read AGENTS.md, HANDOFF.md (Milestone E1), PLAN.md, docs/architecture.md and
 docs/testing/e1-selectors.md first. Do not look outside the repository.
 
 ## You own (write only these)
+
 - `apps/web/**` (new workspace `@commonair/web`)
 - `bun.lock` only as a side effect of `bun install` for your new dependencies (the orchestrator reconciles)
 
 ## Contracts you must honor (read-only for you)
+
 - `docs/testing/e1-selectors.md` — routes and `data-testid`s, verbatim. The harness scenario is
   written against it in parallel; do not deviate. If something in it is impossible, say so in
   your final message (contract request) and implement the closest thing.
@@ -26,6 +28,7 @@ docs/testing/e1-selectors.md first. Do not look outside the repository.
   on `/healthz` (`infra/containers/healthcheck.ts`). Make that work unchanged.
 
 ## Build
+
 - TanStack Start (React 19) on Bun, Vite via the repo's `vp` (vite-plus). Tailwind v4 with
   `@commonair/ui/globals.css`. Pick current stable versions at least two weeks old, pin exactly,
   verify each new dependency's license from its repository at that version (OSI only), and make
@@ -67,6 +70,7 @@ docs/testing/e1-selectors.md first. Do not look outside the repository.
 - No third-party client-side code, no CDN, fonts self-hosted via `@commonair/ui`.
 
 ## Tests you must add
+
 - Unit tests (`*.test.ts[x]`): proxy header handling (hop-by-hop dropped, x-forwarded-for,
   set-cookie passthrough), heartbeat delta accounting, chat frame handling/reconnect backoff,
   i18n catalog has every key used (a test that greps `t("…")` keys against the catalog).
@@ -78,6 +82,7 @@ docs/testing/e1-selectors.md first. Do not look outside the repository.
   verification email from Mailpit (http://localhost:8025). Report what you saw.
 
 ## Done means
+
 - `bun run verify --quick` passes plus `bun run --filter @commonair/web test:int`, with your tests.
 - `podman build -f infra/containers/service.Containerfile --build-arg SERVICE=web .` succeeds.
 - No files outside your ownership list changed (`git status`).
