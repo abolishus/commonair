@@ -22,24 +22,31 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
-Phase 2 units, each a background subagent in its own git worktree (briefs in
-`.claude/briefs/phase2/`), started 2026-10-18:
+Phase 2 (each unit a background subagent in its own worktree; briefs in `.claude/briefs/phase2/`).
+"Merged" means merged into `main` with the gate green; every merged unit gets an independent review,
+and its author fixes the findings in a follow-up round.
 
-| Unit                       | Owns                                                     | Status  |
-| -------------------------- | -------------------------------------------------------- | ------- |
-| 2A api-core                | `services/api/**`                                        | running |
-| 2B chat                    | `services/chat/**`                                       | running |
-| 2C irc                     | `services/irc/**`                                        | running |
-| 2D origin                  | `services/origin/**`                                     | running |
-| 2E media                   | `services/media/**`, `infra/mediamtx/**`                 | running |
-| 2F relay                   | `relay/**`                                               | running |
-| 2G ui                      | `packages/ui/**`                                         | running |
-| 2H1 ledger + patronage     | `packages/ledger/**`, `packages/patronage/**`            | running |
-| 2H2 governance + integrity | `packages/governance/**`, `packages/integrity/**`        | running |
-| 2I infra                   | `compose.yaml`, `infra/**` (not mediamtx)                | running |
-| 2J harness core            | `harness/**`                                             | running |
-| 2L worker                  | `services/worker/**`                                     | running |
-| 2M email + OTel SDK        | `packages/email/**`, `packages/observability/src/sdk.ts` | running |
+| Unit                       | Status                                                                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2A api-core                | running                                                                                                                                       |
+| 2B chat                    | merged; review running; contract-adoption round running                                                                                       |
+| 2C irc                     | merged; reviewed; fix round running (WS without subprotocol, nonce pairing, join pacing, caps)                                                |
+| 2D origin                  | merged (worker owns `egress_samples`); reviewed; fix round running (issuance persistence + leader, upstream pools, CDN tokens, token refresh) |
+| 2E media                   | running                                                                                                                                       |
+| 2F relay                   | merged; reviewed; fix round running (fetch limits, shutdown drain, reload verification)                                                       |
+| 2G ui                      | merged; review running                                                                                                                        |
+| 2H1 ledger + patronage     | merged; reviewed; fix round running (payout race, payout clearing, FIFO holds, locked reversals)                                              |
+| 2H2 governance + integrity | merged; review running                                                                                                                        |
+| 2I infra                   | running                                                                                                                                       |
+| 2J harness core            | running                                                                                                                                       |
+| 2L worker                  | merged; reviewed; fix round running (broadcaster-bound webhook auth, VOD prefix guard, poison entries, flaky timing tests)                    |
+| 2M email + OTel            | merged; reviewed; fixes merged                                                                                                                |
+
+Orchestrator changes since fan-out: gate runs uncached; contract absorption (webhook jobs, integrity
+keys, cut/payout shapes, workerEnv, NOREPLY_EMAIL, SMTP_REQUIRE_TLS, chat control shapes, nonce echo,
+bot verification); migrations 0003 (patronage retained, nominations) and 0004 (bot_verified).
+
+Known decisions: relay receipts count media bytes only (segments, parts, init); issuance counts the same.
 
 ## Next
 
