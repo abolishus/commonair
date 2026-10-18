@@ -8,6 +8,7 @@
  * `@commonair/ui/toast`, tokens in `@commonair/ui/globals.css`.
  */
 export { LocaleProvider, useLocale, useUiMessages, type LocaleProviderProps } from "./lib/locale.tsx";
+export { NowProvider, useRequestNow, type NowProviderProps } from "./lib/now.tsx";
 export { enMessages, type UiMessages, type DiscoveryReason } from "./lib/messages.ts";
 export {
   formatMoney,

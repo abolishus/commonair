@@ -5,6 +5,7 @@ import * as React from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/tooltip.tsx";
 import { formatDateTime, formatRelativeTime } from "../lib/format.ts";
 import { useLocale } from "../lib/locale.tsx";
+import { toEpochMs, useRequestNow } from "../lib/now.tsx";
 import { cn } from "../lib/utils.ts";
 
 export interface RelativeTimeProps extends Omit<React.ComponentProps<"time">, "children" | "dateTime"> {
@@ -14,9 +15,18 @@ export interface RelativeTimeProps extends Omit<React.ComponentProps<"time">, "c
   timeZone?: string;
   /** Re-render as time passes (default). Turn off for static lists such as exports. */
   live?: boolean;
+  /**
+   * The reference time for the server render and the first client render (hydration).
+   * Defaults to `NowProvider`; after mount the live clock takes over.
+   */
+  now?: number | Date | string;
   /** Show the absolute time in a tooltip on hover/focus (default). */
   tooltip?: boolean;
 }
+
+const noopSubscribe = (): (() => void) => () => {};
+const isClient = (): boolean => true;
+const isServer = (): boolean => false;
 
 function toDate(value: string | Date | number): Date {
   return value instanceof Date ? value : new Date(value);
@@ -32,6 +42,7 @@ export function RelativeTime({
   timeZone,
   live = true,
   tooltip = true,
+  now: nowProp,
   className,
   ...props
 }: RelativeTimeProps): React.JSX.Element {
@@ -40,13 +51,20 @@ export function RelativeTime({
   const resolvedZone = timeZone ?? ctx.timeZone;
   const parsed = toDate(date);
   const valid = !Number.isNaN(parsed.getTime());
-  const [now, setNow] = React.useState(() => Date.now());
+  const requestNow = useRequestNow();
+  const initialNow = nowProp === undefined ? requestNow : toEpochMs(nowProp);
+  // False on the server and during hydration, true afterwards: until then render with the
+  // request time so server and client markup match, then switch to the live clock.
+  const hydrated = React.useSyncExternalStore(noopSubscribe, isClient, isServer);
+  const [clock, setClock] = React.useState(() => Date.now());
+  const useRequestTime = initialNow !== undefined && (!hydrated || !live);
+  const now = useRequestTime ? initialNow : clock;
 
   const result = valid ? formatRelativeTime(parsed, now, resolvedLocale) : { text: "", nextUpdateMs: null };
 
   React.useEffect(() => {
     if (!live || result.nextUpdateMs === null) return;
-    const id = setTimeout(() => setNow(Date.now()), result.nextUpdateMs);
+    const id = setTimeout(() => setClock(Date.now()), result.nextUpdateMs);
     return () => clearTimeout(id);
   }, [live, result.nextUpdateMs, now]);
 
@@ -56,6 +74,8 @@ export function RelativeTime({
     <time
       data-slot="relative-time"
       dateTime={parsed.toISOString()}
+      // The text may legitimately differ from the server render by the time the client hydrates.
+      suppressHydrationWarning
       className={cn("tabular-nums", className)}
       {...props}
     >

@@ -52,8 +52,14 @@ that AGENTS.md requires ("use X, not Y").
   chips) come from `UiMessages` via `LocaleProvider`. `enMessages` is only the fallback; the app
   passes its translated catalog.
 - **Formatting.** Every number, date and amount goes through `Intl` with the provider's locale
-  (or a `locale` prop): `formatMoney(cents, currency, locale)` (integer minor units, JPY has none),
-  `formatCompactNumber`, `formatRelativeTime`, `getInitial`.
+  (or a `locale` prop): `formatMoney(cents, currency, locale)`, `formatCompactNumber`,
+  `formatRelativeTime`, `getInitial`. Money minor units come from ISO 4217
+  (`minorUnits()` in `@commonair/contracts/currency`), never from `Intl` (V8 and JSC disagree for
+  HUF, IDR, IQD, …), and Intl is pinned to exactly that many fraction digits.
+- **SSR.** Wrap the app in `<NowProvider now={requestTime}>` (same value on server and client) so
+  `<RelativeTime>` renders identical markup on the server and the first client render; it switches
+  to the live clock after mount. `tests/ssr.test.tsx` server-renders and hydrates every primitive
+  and fails on any hydration warning.
 
 ## House primitives
 
@@ -97,6 +103,8 @@ dependency.
   the CLI is not a runtime dependency. Re-copy it when bumping the CLI version.
 - **Strings.** `dialog`, `sheet`, `pagination`, `breadcrumb` and `sonner` read their screen-reader
   labels from `useUiMessages()` instead of hard-coded English.
+- **`button.tsx`** focus rings are full-opacity `ring-ring` / `ring-destructive` (3:1 on
+  background, card and popover; checked per variant in `tests/tokens.test.ts`).
 - **`sonner.tsx`** takes the theme as a prop instead of `next-themes`.
 - **`field.tsx`** `FieldError` also accepts plain-string errors (TanStack Form validators can return
   either) and uses `===`.
@@ -113,7 +121,9 @@ images are inline SVG data URIs.
 
 ## Tests
 
-`bun run test` (Vitest under Bun, happy-dom, Testing Library): formatting (money incl. JPY/KWD and
+`bun run test` (Vitest under Bun) and `bun run test:node` (the same suite under Node/V8, so engine
+differences in `Intl` show up), with happy-dom and Testing Library: SSR hydration of every primitive,
+formatting (money incl. JPY/KWD and
 negatives, compact counts, relative time), token contrast, the no-Radix / no-`title=` /
 no-native-dialog guards, and behavior of each primitive (avatar fallback, RelativeTime updates with
 fake timers, ConfirmDialog keyboard and async flows, IconButton tooltip, CommandPalette filtering and

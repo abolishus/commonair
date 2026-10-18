@@ -8,6 +8,8 @@
  * and chat/directory views format hundreds of values per render.
  */
 
+import { minorUnits } from "@commonair/contracts/currency";
+
 const cache = new Map<string, Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat>();
 
 function cached<T extends Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat>(
@@ -38,6 +40,7 @@ export interface FormatMoneyOptions {
 export function formatMoney(cents: number, currency: string, locale: string, options: FormatMoneyOptions = {}): string {
   if (!Number.isSafeInteger(cents)) throw new RangeError(`formatMoney: cents must be a safe integer, got ${cents}`);
   const code = currency.toUpperCase();
+  const digits = minorDigits(code);
   const fmt = cached(
     `money|${locale}|${code}|${options.signDisplay ?? ""}|${options.currencyDisplay ?? ""}`,
     () =>
@@ -46,29 +49,36 @@ export function formatMoney(cents: number, currency: string, locale: string, opt
         currency: code,
         signDisplay: options.signDisplay ?? "auto",
         currencyDisplay: options.currencyDisplay ?? "symbol",
+        // Pin the digits to ISO 4217 so Intl never re-rounds with its own (engine-specific) idea of them.
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
       }),
   );
-  return fmt.format(toMajorUnits(cents, minorDigits(code)));
+  // A decimal string is formatted exactly (Intl.NumberFormat v3); older engines coerce it to a Number, still correct here.
+  return fmt.format(toMajorUnits(cents, digits));
 }
 
-/** ISO 4217 minor-unit digits as `Intl` knows them (USD 2, JPY 0, KWD 3). */
+/**
+ * ISO 4217 minor-unit digits (USD 2, JPY 0, KWD 3, HUF 2). From the contracts table, never from
+ * `Intl`: V8 and JavaScriptCore disagree for HUF, IDR, IQD and others, which would make server and
+ * client render different amounts.
+ */
 export function minorDigits(currency: string): number {
-  const fmt = cached(`digits|${currency}`, () => new Intl.NumberFormat("en", { style: "currency", currency }));
-  return fmt.resolvedOptions().maximumFractionDigits ?? 2;
+  return minorUnits(currency);
 }
 
 /**
  * Integer minor units to a decimal number for display only. Uses string
  * arithmetic so large amounts never pick up binary-float noise.
  */
-function toMajorUnits(cents: number, digits: number): number {
-  if (digits === 0) return cents;
+function toMajorUnits(cents: number, digits: number): `${number}` {
+  if (digits === 0) return `${cents}`;
   const negative = cents < 0;
   const abs = Math.abs(cents)
     .toString()
     .padStart(digits + 1, "0");
   const major = `${abs.slice(0, -digits)}.${abs.slice(-digits)}`;
-  return Number(negative ? `-${major}` : major);
+  return negative ? (`-${major}` as `${number}`) : (major as `${number}`);
 }
 
 /** 1234 -> "1.2K" (en), "1234" -> "1234" below 1000, locale-aware. */
@@ -103,6 +113,9 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["second", SECOND],
 ];
 
+/** Future offsets up to this size are treated as "now" (clock skew). */
+export const FUTURE_SKEW_MS = 5 * SECOND;
+
 export interface RelativeTimeResult {
   text: string;
   /** Milliseconds until the text would change; `null` when it will not change soon enough to matter. */
@@ -114,7 +127,9 @@ export interface RelativeTimeResult {
  * Also returns when the text next changes, so `<RelativeTime>` re-renders exactly then.
  */
 export function formatRelativeTime(date: Date, now: number, locale: string): RelativeTimeResult {
-  const diff = date.getTime() - now;
+  const raw = date.getTime() - now;
+  // Small clock skew between server and client must not read "in 3 seconds".
+  const diff = raw > 0 && raw <= FUTURE_SKEW_MS ? 0 : raw;
   const abs = Math.abs(diff);
   const fmt = cached(`rel|${locale}`, () => new Intl.RelativeTimeFormat(locale, { numeric: "auto" }));
   const [unit, size] = UNITS.find(([, ms]) => abs >= ms) ?? ["second", SECOND];

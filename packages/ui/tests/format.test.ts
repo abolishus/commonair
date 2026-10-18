@@ -32,6 +32,20 @@ describe("formatMoney", () => {
     expect(plain(formatMoney(1500, "KWD", "en-US"))).toBe("KWD 1.500");
   });
 
+  test("minor units come from ISO 4217, not the engine (HUF, IDR, IQD, UYW differ between V8 and JSC)", () => {
+    expect(minorDigits("HUF")).toBe(2);
+    expect(minorDigits("IDR")).toBe(2);
+    expect(minorDigits("IQD")).toBe(3);
+    expect(minorDigits("UYW")).toBe(4);
+    expect(plain(formatMoney(123456, "HUF", "en-US"))).toBe("HUF 1,234.56");
+    expect(plain(formatMoney(123456, "HUF", "hu-HU"))).toBe("1234,56 Ft");
+    expect(plain(formatMoney(123456, "IDR", "en-US"))).toBe("IDR 1,234.56");
+    expect(plain(formatMoney(1500, "IQD", "en-US"))).toBe("IQD 1.500");
+    expect(plain(formatMoney(-1500, "KWD", "en-US"))).toBe("-KWD 1.500");
+    expect(plain(formatMoney(12345, "UYW", "en-US"))).toBe("UYW 1.2345");
+    expect(formatMoney(1234, "jpy", "en-US")).toBe("¥1,234");
+  });
+
   test("negative amounts keep their sign and exact digits", () => {
     expect(formatMoney(-500, "USD", "en-US")).toBe("-$5.00");
     expect(formatMoney(-1, "USD", "en-US")).toBe("-$0.01");
@@ -98,6 +112,9 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(at(-8 * 86_400_000), now, "en").text).toBe("last week");
     expect(formatRelativeTime(at(-400 * 86_400_000), now, "en").text).toBe("last year");
     expect(formatRelativeTime(at(2 * 3_600_000), now, "en").text).toBe("in 2 hours");
+    // Clock skew: up to 5 s in the future still reads "now".
+    expect(formatRelativeTime(at(5_000), now, "en").text).toBe("now");
+    expect(formatRelativeTime(at(6_000), now, "en").text).toBe("in 6 seconds");
   });
 
   test("is locale-aware", () => {

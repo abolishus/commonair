@@ -10,7 +10,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./components/*": "./src/components/*.tsx",
-    "./hooks/*": "./src/hooks/*.ts",
     "./globals.css": "./src/styles/globals.css",
     "./toast": "./src/toast.tsx",
     "./lib/utils": "./src/lib/utils.ts",
@@ -19,6 +18,7 @@
   },
   "scripts": {
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "test:node": "vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
     "typecheck": "tsc -p .",
     "storybook": "storybook dev -p 6006 --no-open",
     "build-storybook": "storybook build --disable-telemetry"

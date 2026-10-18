@@ -48,6 +48,12 @@ export function StreamCard({
   // A missing or broken thumbnail falls back to the accent placeholder instead of a broken-image icon.
   const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
   const { channel, broadcast } = stream;
+  const imgRef = React.useRef<HTMLImageElement>(null);
+  // A server-rendered <img> can fail before React hydrates and attaches onError; catch that case too.
+  React.useLayoutEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth === 0 && broadcast.thumbnailUrl) setFailedSrc(broadcast.thumbnailUrl);
+  }, [broadcast.thumbnailUrl]);
   const accent = channel.accent ?? "zinc";
   const Heading = `h${headingLevel}` as const;
   const tags = stream.tags.slice(0, Math.max(0, maxTags));
@@ -65,6 +71,7 @@ export function StreamCard({
           <div className="relative aspect-video w-full overflow-hidden bg-muted ring-channel-accent transition-shadow group-hover/stream-card-link:ring-2">
             {broadcast.thumbnailUrl && failedSrc !== broadcast.thumbnailUrl ? (
               <img
+                ref={imgRef}
                 src={broadcast.thumbnailUrl}
                 alt=""
                 loading={lazy ? "lazy" : "eager"}
