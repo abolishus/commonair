@@ -11,6 +11,9 @@ Do not look outside the repository.
 ## You own (write only these)
 
 - `services/worker/**`
+- In `services/origin/**`, only the segment-accounting call (`account()` / the XADD to
+  `stream:segments`): set the new optional `obj` field (`<rendition dir>/<file>`) of
+  `SegmentFetch` (packages/contracts/src/internal.ts), with a test.
 - `harness/scenarios/viewers.ts` and a new `harness/scenarios/integrity-basic.ts` (only these
   harness files)
 
@@ -34,7 +37,8 @@ Do not look outside the repository.
   at startup and on SIGHUP.
 - In `src/segments/consumer.ts` `processEntries`, call
   `recordFetches(client, fetches.filter((f) => f.src !== "relay" && f.src !== "cdn"))` after
-  `writeAggregate` (check the current integrity signature; it may count distinct segments).
+  `writeAggregate`, mapping `obj` to `FetchRecord.object` so integrity counts distinct segments
+  (see "Jobs and worker integration" in `packages/integrity/README.md`).
 - Job failures retry with backoff and never crash the worker; a stuck job must not block the
   others (separate job names / concurrency).
 - Make sure verified-viewer counters the API/web read (`viewers:<channel>` or whatever the API
