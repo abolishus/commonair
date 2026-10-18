@@ -4,6 +4,7 @@
 /** Entry point: `bun services/irc/src/main.ts`. */
 import { coreEnv, instanceSite, internalEnv, loadEnv, servicePorts } from "@commonair/config";
 import { createLogger, initTelemetry } from "@commonair/observability";
+import { connectionLimits, ircEnv, trustedProxies } from "./env.ts";
 import { startGateway } from "./gateway.ts";
 import { startHealth } from "./health.ts";
 import { loadTls } from "./tls.ts";
@@ -13,6 +14,7 @@ const core = loadEnv(coreEnv);
 // Only the upstream URL: the gateway authenticates with each client's own token, never a shared secret.
 const { CHAT_INTERNAL_URL } = loadEnv(internalEnv.pick({ CHAT_INTERNAL_URL: true }));
 const ports = loadEnv(servicePorts);
+const irc = loadEnv(ircEnv);
 
 const telemetry = await initTelemetry({ serviceName: core.OTEL_SERVICE_NAME ?? "irc" });
 const logger = createLogger({ service: "irc", level: core.LOG_LEVEL });
@@ -34,6 +36,8 @@ const gateway = startGateway({
   upstream: websocketUpstream(CHAT_INTERNAL_URL, logger),
   logger,
   motd: `Welcome to ${site.name} chat. Source: ${site.sourceUrl}`,
+  connectionLimits: connectionLimits(irc),
+  trustedProxies: trustedProxies(core.TRUSTED_PROXY_CIDRS),
 });
 
 startHealth({

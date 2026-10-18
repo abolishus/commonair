@@ -8,7 +8,9 @@
  */
 import type { Logger } from "@commonair/observability";
 import { meter } from "@commonair/observability";
+import { Admission, DEFAULT_CONNECTION_LIMITS, REFUSAL_TEXT, type ConnectionLimits } from "./admission.ts";
 import { LIMITS } from "./constants.ts";
+import type { Cidr } from "./net.ts";
 import { listenSocket, listenWebSocket, type Accept } from "./listeners.ts";
 import { IrcSession, type SessionLimits, type TransportKind } from "./session.ts";
 import type { TlsMaterial } from "./tls.ts";
@@ -25,6 +27,9 @@ export interface GatewayOptions {
   logger: Logger;
   motd: string;
   limits?: Partial<SessionLimits>;
+  connectionLimits?: Partial<ConnectionLimits>;
+  /** Proxies whose X-Forwarded-For is believed for WebSocket clients (TRUSTED_PROXY_CIDRS). */
+  trustedProxies?: readonly Cidr[];
 }
 
 export interface GatewayStats {
@@ -32,6 +37,7 @@ export interface GatewayStats {
   total: number;
   registered: number;
   channels: number;
+  limits: ConnectionLimits;
 }
 
 export interface Gateway {
@@ -48,17 +54,29 @@ export function startGateway(opts: GatewayOptions): Gateway {
   const opened = meter("irc").createCounter("irc.connections.opened");
   let accepting = true;
 
-  const accept: Accept = (transport) => {
+  const refused = meter("irc").createCounter("irc.connections.refused");
+  const admission = new Admission({ ...DEFAULT_CONNECTION_LIMITS, ...opts.connectionLimits });
+
+  const accept: Accept = (transport, address) => {
+    const refusal = accepting ? admission.admit(address) : "server_full";
+    if (refusal !== null) {
+      refused.add(1, { reason: refusal });
+      transport.write([`ERROR :Closing Link: ${accepting ? REFUSAL_TEXT[refusal] : "Server shutting down"}`]);
+      transport.close();
+      return null;
+    }
     const session = new IrcSession(transport, {
       upstream: opts.upstream,
       logger: opts.logger,
       motd: opts.motd,
       limits: opts.limits,
-      onClosed: (s) => sessions.delete(s),
+      onClosed: (s) => {
+        sessions.delete(s);
+        admission.release(address);
+      },
     });
     sessions.add(session);
     opened.add(1, { transport: transport.kind });
-    if (!accepting) session.close("Server shutting down", true);
     return session;
   };
 
@@ -68,7 +86,10 @@ export function startGateway(opts: GatewayOptions): Gateway {
     opts.tlsPort === null || !opts.tls
       ? null
       : listenSocket({ kind: "tls", hostname, port: opts.tlsPort, maxFrameBytes, tls: opts.tls, accept });
-  const ws = opts.wsPort === null ? null : listenWebSocket({ hostname, port: opts.wsPort, maxFrameBytes, accept });
+  const ws =
+    opts.wsPort === null
+      ? null
+      : listenWebSocket({ hostname, port: opts.wsPort, maxFrameBytes, trustedProxies: opts.trustedProxies, accept });
 
   const stats = (): GatewayStats => {
     const connections: Record<TransportKind, number> = { tcp: 0, tls: 0, ws: 0 };
@@ -79,7 +100,7 @@ export function startGateway(opts: GatewayOptions): Gateway {
       if (s.registered) registered++;
       channels += s.channelCount;
     }
-    return { connections, total: sessions.size, registered, channels };
+    return { connections, total: sessions.size, registered, channels, limits: admission.limits };
   };
 
   meter("irc")
@@ -109,6 +130,7 @@ export function startGateway(opts: GatewayOptions): Gateway {
       tcp?.stop(true);
       tls?.stop(true);
       await ws?.stop(true);
+      admission.stop();
     },
   };
 }

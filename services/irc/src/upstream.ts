@@ -16,9 +16,24 @@ export type UpstreamCloseKind =
   /** An established connection closed. */
   | "closed";
 
+/**
+ * CONTRACT-REQUEST: add `nonce: z.string().max(64).optional()` to the `notice` ServerFrame in
+ * packages/contracts/src/chat.ts (echo of the request's nonce). Until it is in the schema, Zod
+ * strips it, so it is read from the raw JSON here.
+ */
+export type UpstreamFrame =
+  | Exclude<ServerFrame, { op: "notice" }>
+  | (Extract<ServerFrame, { op: "notice" }> & { nonce?: string | undefined });
+
+export function withNoticeNonce(frame: ServerFrame, raw: unknown): UpstreamFrame {
+  if (frame.op !== "notice") return frame;
+  const nonce = (raw as { nonce?: unknown } | null)?.nonce;
+  return typeof nonce === "string" && nonce.length <= 64 ? { ...frame, nonce } : frame;
+}
+
 export interface UpstreamHandlers {
   open(): void;
-  frame(frame: ServerFrame): void;
+  frame(frame: UpstreamFrame): void;
   close(kind: UpstreamCloseKind, reason: string): void;
 }
 
@@ -54,7 +69,7 @@ export function websocketUpstream(url: string, logger: Logger): UpstreamFactory 
         logger.warn("upstream sent an unknown frame", { op: (json as { op?: unknown } | null)?.op });
         return;
       }
-      handlers.frame(parsed.data);
+      handlers.frame(withNoticeNonce(parsed.data, json));
     });
     ws.addEventListener("close", (ev: CloseEvent) => {
       if (closed) return;

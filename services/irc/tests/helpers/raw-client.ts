@@ -89,3 +89,63 @@ export async function rawClient(opts: { port: number; tls?: { ca: string } }): P
     },
   };
 }
+
+/** A raw IRC-over-WebSocket client (optionally with subprotocols and extra headers). */
+export async function wsRawClient(opts: {
+  port: number;
+  protocols?: string[];
+  headers?: Record<string, string>;
+}): Promise<RawClient & { protocol: string }> {
+  const lines: string[] = [];
+  let consumed = 0;
+  const waiters = new Set<() => void>();
+  let resolveClosed!: () => void;
+  const closed = new Promise<void>((r) => (resolveClosed = r));
+  const ws = new WebSocket(`ws://127.0.0.1:${opts.port}/`, {
+    ...(opts.protocols ? { protocols: opts.protocols } : {}),
+    headers: opts.headers ?? {},
+  });
+  ws.addEventListener("message", (ev: MessageEvent) => {
+    const text = typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
+    for (const l of text.split("\r\n")) if (l) lines.push(l);
+    for (const w of waiters) w();
+  });
+  ws.addEventListener("close", () => {
+    resolveClosed();
+    for (const w of waiters) w();
+  });
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener("open", () => resolve());
+    ws.addEventListener("error", () => reject(new Error("WebSocket failed to open")));
+  });
+  return {
+    authorized: null,
+    protocol: ws.protocol,
+    lines,
+    closed,
+    send: (...ls) => ws.send(ls.join("\r\n")),
+    close: () => ws.close(),
+    waitFor(pred, timeoutMs = 3000) {
+      return new Promise((resolve, reject) => {
+        const check = () => {
+          while (consumed < lines.length) {
+            const raw = lines[consumed++] ?? "";
+            const m = parseMessage(raw);
+            if (m && pred(m, raw)) {
+              waiters.delete(check);
+              clearTimeout(timer);
+              resolve(m);
+              return;
+            }
+          }
+        };
+        const timer = setTimeout(() => {
+          waiters.delete(check);
+          reject(new Error(`timed out; got:\n${lines.join("\n")}`));
+        }, timeoutMs);
+        waiters.add(check);
+        check();
+      });
+    },
+  };
+}

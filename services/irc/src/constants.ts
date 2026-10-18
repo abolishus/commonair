@@ -35,4 +35,9 @@ export const LIMITS = {
   /** Send PING after this long without client traffic; disconnect after twice that. */
   idlePingMs: 240_000,
   pendingCommandTimeoutMs: 10_000,
+  /** Joins/parts sent upstream: burst, then per second (matches the chat service's control-frame rate). */
+  controlBurst: 20,
+  controlPerSecond: 2,
+  /** A join upstream has not answered after this long is dropped, freeing its channel slot. */
+  joinTimeoutMs: 15_000,
 } as const;

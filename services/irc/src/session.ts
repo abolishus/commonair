@@ -6,14 +6,14 @@
  * Owns exactly one upstream chat WebSocket and translates in both directions.
  * No chat rule is decided here; the gateway only enforces protocol limits.
  */
-import type { ChannelChatSettings, ClientFrame, ServerFrame } from "@commonair/contracts";
+import type { ChannelChatSettings, ClientFrame } from "@commonair/contracts";
 import type { ChatMessage } from "@commonair/contracts/dto";
 import type { Logger } from "@commonair/observability";
 import { CapNegotiator, type Cap } from "./caps.ts";
 import { translatePrivmsg } from "./commands.ts";
 import { LIMITS, SERVER_NAME } from "./constants.ts";
 import { parseMessage, type IrcMessage, type OutgoingMessage } from "./irc/message.ts";
-import { noticeMsgId } from "./notices.ts";
+import { NOTICE_MSG_IDS, noticeMsgId } from "./notices.ts";
 import { TokenBucket } from "./ratelimit.ts";
 import {
   clearchat,
@@ -33,9 +33,9 @@ import {
   type RoomInfo,
   type SelfState,
 } from "./translate.ts";
-import type { Upstream, UpstreamCloseKind, UpstreamFactory } from "./upstream.ts";
+import type { Upstream, UpstreamCloseKind, UpstreamFactory, UpstreamFrame } from "./upstream.ts";
 
-type Frame<Op extends ServerFrame["op"]> = Extract<ServerFrame, { op: Op }>;
+type Frame<Op extends UpstreamFrame["op"]> = Extract<UpstreamFrame, { op: Op }>;
 
 export type TransportKind = "tcp" | "tls" | "ws";
 
@@ -75,6 +75,23 @@ interface PendingCommand {
   expiresAt: number;
 }
 
+/** A JOIN the client asked for that upstream has not answered yet. `nonce` is null while still queued. */
+interface PendingJoin {
+  nonce: string | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+interface ControlItem {
+  op: "join" | "part";
+  slug: string;
+}
+
+/** What an upstream notice/error turned out to answer. */
+interface Reply {
+  command?: string;
+  failedJoin?: string;
+}
+
 const SLUG = /^[a-z0-9_]{3,25}$/;
 const NICK = /^[a-z0-9_]{1,25}$/;
 const ANON_NICK = /^justinfan\d+$/;
@@ -85,6 +102,15 @@ const SELF_ECHO_HOLD_MS = 2000;
 const MIN_HEARTBEAT_MS = 5000;
 
 let sessionSeq = 0;
+
+/** Make client-supplied text safe as a middle param (no spaces, no leading colon, not empty). */
+export function middleParam(s: string): string {
+  const cleaned = s
+    .replace(/[\s\0]/g, "")
+    .replace(/^:+/, "")
+    .slice(0, 64);
+  return cleaned === "" ? "*" : cleaned;
+}
 
 export class IrcSession {
   readonly id = `irc-${++sessionSeq}`;
@@ -101,9 +127,17 @@ export class IrcSession {
   private upstream: Upstream | null = null;
 
   private readonly rooms = new Map<string, Room>();
-  private readonly pendingJoins = new Set<string>();
+  private readonly pendingJoins = new Map<string, PendingJoin>();
+  /** nonce → slug, for joins and parts sent upstream. */
+  private readonly joinNonces = new Map<string, string>();
+  private readonly partNonces = new Map<string, string>();
   private readonly pendingSends = new Map<string, string>();
-  private readonly pendingCommands: PendingCommand[] = [];
+  /** nonce → command, in send order (Map iteration order) for the no-nonce fallback. */
+  private readonly pendingCommands = new Map<string, PendingCommand>();
+  /** Joins and parts wait here so we never exceed upstream's control-frame rate. */
+  private readonly controlQueue: ControlItem[] = [];
+  private readonly controlBucket: TokenBucket;
+  private controlTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly ackedIds = new Set<string>();
   private readonly heldSelf = new Map<string, ReturnType<typeof setTimeout>>();
   private nonceSeq = 0;
@@ -124,6 +158,7 @@ export class IrcSession {
     this.limits = { ...LIMITS, ...opts.limits };
     this.log = opts.logger.child({ session: this.id, transport: transport.kind });
     this.bucket = new TokenBucket(this.limits.rateBurst, this.limits.ratePerSecond);
+    this.controlBucket = new TokenBucket(this.limits.controlBurst, this.limits.controlPerSecond);
     this.timers.push(
       setTimeout(() => {
         if (this.state !== "registered") this.close("Registration timeout", true);
@@ -176,7 +211,12 @@ export class IrcSession {
     if (!this.withinLength(raw)) return this.reply("417", "Input line was too long");
     const msg = parseMessage(raw);
     if (!msg) return;
-    this.dispatch(msg);
+    try {
+      this.dispatch(msg);
+    } catch (err) {
+      // One bad line must never take down the connection or the rest of its frame.
+      this.log.error("failed to handle client line", { err, command: msg.command });
+    }
   }
 
   private withinLength(raw: string): boolean {
@@ -255,7 +295,7 @@ export class IrcSession {
 
   private onJoin(list: string): void {
     if (list === "0") {
-      for (const slug of [...this.rooms.keys(), ...this.pendingJoins]) this.sendPart(slug);
+      for (const slug of [...this.rooms.keys(), ...this.pendingJoins.keys()]) this.part(slug);
       return;
     }
     for (const name of list.split(",").filter(Boolean)) {
@@ -269,21 +309,77 @@ export class IrcSession {
         this.reply("405", "You have joined too many channels", [name]);
         continue;
       }
-      this.pendingJoins.add(slug);
-      this.send({ op: "join", channel: slug });
+      this.pendingJoins.set(slug, { nonce: null, timer: null });
+      this.enqueueControl({ op: "join", slug });
     }
   }
 
   private onPart(list: string): void {
     for (const name of list.split(",").filter(Boolean)) {
       const slug = name.replace(/^#/, "").toLowerCase();
-      if (this.rooms.has(slug) || this.pendingJoins.has(slug)) this.sendPart(slug);
+      if (this.rooms.has(slug) || this.pendingJoins.has(slug)) this.part(slug);
     }
   }
 
-  private sendPart(slug: string): void {
+  private part(slug: string): void {
+    const pending = this.pendingJoins.get(slug);
+    if (pending) {
+      this.forgetJoin(slug);
+      if (pending.nonce === null) {
+        // Never sent: just take it off the queue.
+        const i = this.controlQueue.findIndex((c) => c.op === "join" && c.slug === slug);
+        if (i !== -1) this.controlQueue.splice(i, 1);
+        return;
+      }
+    }
+    // Queued behind the join (if any), so upstream sees join-then-part and ends parted.
+    this.enqueueControl({ op: "part", slug });
+  }
+
+  private forgetJoin(slug: string): void {
+    const pending = this.pendingJoins.get(slug);
+    if (!pending) return;
+    if (pending.timer) clearTimeout(pending.timer);
+    if (pending.nonce !== null) this.joinNonces.delete(pending.nonce);
     this.pendingJoins.delete(slug);
-    this.send({ op: "part", channel: slug });
+  }
+
+  private enqueueControl(item: ControlItem): void {
+    this.controlQueue.push(item);
+    this.pumpControl();
+  }
+
+  /** Send queued joins/parts as fast as the control-frame budget allows. */
+  private pumpControl(): void {
+    this.controlTimer = null;
+    if (this.state === "closed") return;
+    while (this.controlQueue.length > 0 && this.controlBucket.take()) {
+      const item = this.controlQueue.shift();
+      if (!item) break;
+      const nonce = this.nextNonce();
+      if (item.op === "part") {
+        this.partNonces.set(nonce, item.slug);
+        this.send({ op: "part", channel: item.slug, nonce });
+        continue;
+      }
+      const pending = this.pendingJoins.get(item.slug);
+      if (!pending) continue;
+      pending.nonce = nonce;
+      this.joinNonces.set(nonce, item.slug);
+      // Free the slot if upstream never answers, so the 100-channel cap cannot fill up with ghosts.
+      pending.timer = setTimeout(() => {
+        if (this.pendingJoins.get(item.slug)?.nonce !== nonce) return;
+        this.log.info("join timed out", { channel: item.slug });
+        this.forgetJoin(item.slug);
+      }, this.limits.joinTimeoutMs);
+      this.send({ op: "join", channel: item.slug, nonce });
+    }
+    if (this.controlQueue.length > 0 && this.controlTimer === null)
+      this.controlTimer = setTimeout(() => this.pumpControl(), Math.ceil(1000 / this.limits.controlPerSecond));
+  }
+
+  private nextNonce(): string {
+    return `irc${++this.nonceSeq}`;
   }
 
   private onPrivmsg(target: string, text: string, tags: Record<string, string>): void {
@@ -291,7 +387,7 @@ export class IrcSession {
     // Twitch has no PRIVMSG to users (whispers moved to the API); drop like Twitch does.
     if (!target.startsWith("#") || !SLUG.test(slug)) return;
     const t = translatePrivmsg(text);
-    const nonce = `irc${++this.nonceSeq}`;
+    const nonce = this.nextNonce();
     switch (t.kind) {
       case "ignore":
         return;
@@ -299,7 +395,7 @@ export class IrcSession {
         return this.emit(notice(ircChannel(slug), t.msgId, t.text), "twitch.tv/commands");
       case "command":
         this.prunePendingCommands();
-        this.pendingCommands.push({
+        this.pendingCommands.set(nonce, {
           slug,
           command: t.command,
           expiresAt: Date.now() + this.limits.pendingCommandTimeoutMs,
@@ -374,7 +470,7 @@ export class IrcSession {
 
   // ------------------------------------------------------------ upstream (chat → gateway)
 
-  private onFrame(f: ServerFrame): void {
+  private onFrame(f: UpstreamFrame): void {
     if (this.state === "closed") return;
     if (f.op === "welcome") {
       if (this.state === "registering") this.completeRegistration(f);
@@ -383,7 +479,12 @@ export class IrcSession {
     if (f.op === "error") {
       if (this.state !== "registered") return this.loginFailed();
       this.log.warn("upstream error frame", { code: f.code });
-      return this.emit(notice("*", null, f.message), "twitch.tv/commands");
+      const reply = this.takeReply(f.nonce, f.channel ?? null, f.code);
+      const known = (NOTICE_MSG_IDS as Record<string, string | undefined>)[f.code];
+      // tmi.js rejects a pending join() on msg_room_not_found.
+      const msgId = known ?? (reply.failedJoin ? "msg_room_not_found" : null);
+      const target = f.channel ? ircChannel(f.channel) : "*";
+      return this.emit(notice(target, msgId, f.message), "twitch.tv/commands");
     }
     if (this.state !== "registered") return;
     switch (f.op) {
@@ -431,8 +532,15 @@ export class IrcSession {
   private onJoined(f: Frame<"joined">): void {
     const self = this.self;
     if (!self) return;
-    const wasPending = this.pendingJoins.delete(f.channel);
-    if (!wasPending || this.rooms.has(f.channel)) return; // parted while the join was in flight, or duplicate
+    const pending = this.pendingJoins.get(f.channel);
+    if (this.rooms.has(f.channel)) return; // duplicate
+    if (!pending || pending.nonce === null) {
+      // Parted or timed out while the join was in flight: leave upstream too, so both sides agree.
+      if (!this.controlQueue.some((c) => c.op === "part" && c.slug === f.channel))
+        this.enqueueControl({ op: "part", slug: f.channel });
+      return;
+    }
+    this.forgetJoin(f.channel);
     const room: Room = {
       slug: f.channel,
       channelId: f.channelId,
@@ -455,7 +563,7 @@ export class IrcSession {
   }
 
   private onParted(slug: string): void {
-    this.pendingJoins.delete(slug);
+    for (const [nonce, s] of this.partNonces) if (s === slug) this.partNonces.delete(nonce);
     if (!this.rooms.delete(slug) || !this.self) return;
     this.emit({ prefix: userPrefix(this.self.login), command: "PART", params: [ircChannel(slug)] });
   }
@@ -519,24 +627,53 @@ export class IrcSession {
 
   private onNotice(f: Frame<"notice">): void {
     const slug = f.channel;
-    let command: string | undefined;
-    if (slug !== null) {
-      this.prunePendingCommands();
-      const idx = this.pendingCommands.findIndex((c) => c.slug === slug);
-      // Every command gets exactly one answer from upstream; pair it with the oldest one for that channel.
-      if (idx !== -1 && ["cmd_success", "no_permission", "unrecognized_cmd"].includes(f.code))
-        command = this.pendingCommands.splice(idx, 1)[0]?.command;
-      if (this.pendingJoins.has(slug) && f.code !== "cmd_success") this.pendingJoins.delete(slug);
-    }
+    const { command } = this.takeReply(f.nonce, slug, f.code);
     const msgId = noticeMsgId(f.code, f.code === "cmd_success" ? (command ?? "") : undefined);
     if (msgId === null) return;
     this.emit(notice(slug === null ? "*" : ircChannel(slug), msgId, f.text), "twitch.tv/commands");
   }
 
+  /**
+   * Work out which request an upstream notice/error answers. Replies carry our nonce;
+   * for a reply without one (older upstream), the oldest pending command on that
+   * channel is taken as answered, and failing that a pending join on it.
+   */
+  private takeReply(nonce: string | undefined, slug: string | null, code: string): Reply {
+    this.prunePendingCommands();
+    if (nonce !== undefined) {
+      const cmd = this.pendingCommands.get(nonce);
+      if (cmd) {
+        this.pendingCommands.delete(nonce);
+        return { command: cmd.command };
+      }
+      const joinSlug = this.joinNonces.get(nonce);
+      if (joinSlug !== undefined) {
+        if (code !== "cmd_success") this.forgetJoin(joinSlug);
+        return { failedJoin: joinSlug };
+      }
+      this.partNonces.delete(nonce);
+      return {};
+    }
+    if (slug === null) return {};
+    for (const [n, c] of this.pendingCommands) {
+      if (c.slug !== slug) continue;
+      this.pendingCommands.delete(n);
+      return { command: c.command };
+    }
+    const join = this.pendingJoins.get(slug);
+    if (join && join.nonce !== null && code !== "cmd_success") {
+      this.forgetJoin(slug);
+      return { failedJoin: slug };
+    }
+    return {};
+  }
+
   private prunePendingCommands(): void {
     const now = Date.now();
-    while (this.pendingCommands.length > 0 && (this.pendingCommands[0]?.expiresAt ?? 0) < now)
-      this.pendingCommands.shift();
+    for (const [n, c] of this.pendingCommands) {
+      if (c.expiresAt >= now) break; // Map order = send order, and every entry has the same timeout
+      this.pendingCommands.delete(n);
+    }
   }
 
   private onUpstreamClose(kind: UpstreamCloseKind, reason: string): void {
@@ -568,7 +705,7 @@ export class IrcSession {
     this.emit({
       prefix: SERVER_NAME,
       command: code,
-      params: [this.self?.login ?? this.nick ?? "*", ...extra],
+      params: [this.self?.login ?? this.nick ?? "*", ...extra.map(middleParam)],
       trailing: text,
     });
   }
@@ -618,6 +755,8 @@ export class IrcSession {
     if (this.heartbeat) clearInterval(this.heartbeat);
     for (const t of this.heldSelf.values()) clearTimeout(t);
     this.heldSelf.clear();
+    if (this.controlTimer) clearTimeout(this.controlTimer);
+    for (const slug of this.pendingJoins.keys()) this.forgetJoin(slug);
     this.upstream?.close();
     this.upstream = null;
     this.transport.close();

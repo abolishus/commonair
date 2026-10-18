@@ -7,14 +7,14 @@ import type { ChatMessage } from "@commonair/contracts/dto";
 import { createLogger } from "@commonair/observability";
 import { parseMessage } from "../src/irc/message.ts";
 import { IrcSession, type SessionLimits, type Transport } from "../src/session.ts";
-import type { UpstreamCloseKind, UpstreamHandlers } from "../src/upstream.ts";
+import type { UpstreamCloseKind, UpstreamFrame, UpstreamHandlers } from "../src/upstream.ts";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const USER = { id: "0190f1c2-0000-7000-8000-0000000000aa", username: "bot", displayName: "Bot" };
 const CHANNEL_ID = "0190f1c2-0000-7000-8000-00000000c0de";
 const settings = ChannelChatSettings.parse({});
 
-function harness(limits: Partial<SessionLimits> = {}) {
+function harness(limits: Partial<SessionLimits> = {}, opts: { failSend?: (f: ClientFrame) => boolean } = {}) {
   const out: string[] = [];
   let closed = false;
   let buffered = 0;
@@ -38,7 +38,10 @@ function harness(limits: Partial<SessionLimits> = {}) {
       tokens.push(token);
       handlers = h;
       return {
-        send: (f) => sent.push(f),
+        send: (f) => {
+          if (opts.failSend?.(f)) throw new Error("upstream send failed");
+          sent.push(f);
+        },
         close: () => {
           upstreamClosed = true;
         },
@@ -63,7 +66,7 @@ function harness(limits: Partial<SessionLimits> = {}) {
       for (const l of ls) session.line(l);
       await tick();
     },
-    async frame(f: ServerFrame) {
+    async frame(f: ServerFrame | UpstreamFrame) {
       handlers?.frame(f);
       await tick();
     },
@@ -219,7 +222,7 @@ describe("channels", () => {
     await h.login();
     h.take();
     await h.lines("JOIN #Dallas");
-    expect(h.sent.at(-1)).toEqual({ op: "join", channel: "dallas" });
+    expect(h.sent.at(-1)).toMatchObject({ op: "join", channel: "dallas" });
     await h.frame({
       op: "joined",
       channel: "dallas",
@@ -254,7 +257,7 @@ describe("channels", () => {
     const h = harness();
     await h.login();
     await h.lines("JOIN #aaa,#bbb");
-    expect(h.sent.slice(-2)).toEqual([
+    expect(h.sent.slice(-2)).toMatchObject([
       { op: "join", channel: "aaa" },
       { op: "join", channel: "bbb" },
     ]);
@@ -267,7 +270,7 @@ describe("channels", () => {
     });
     h.take();
     await h.lines("PART #aaa");
-    expect(h.sent.at(-1)).toEqual({ op: "part", channel: "aaa" });
+    expect(h.sent.at(-1)).toMatchObject({ op: "part", channel: "aaa" });
     await h.frame({ op: "parted", channel: "aaa" });
     expect(h.take()).toEqual([":bot!bot@bot.tmi.twitch.tv PART #aaa"]);
     h.session.close("done", false);
@@ -293,7 +296,7 @@ describe("channels", () => {
     await h.frame({ op: "notice", channel: "aaa", code: "msg_channel_suspended", text: "suspended" });
     h.take();
     await h.lines("JOIN #bbb");
-    expect(h.sent.at(-1)).toEqual({ op: "join", channel: "bbb" });
+    expect(h.sent.at(-1)).toMatchObject({ op: "join", channel: "bbb" });
     h.session.close("done", false);
   });
 });
@@ -531,6 +534,162 @@ describe("limits and lifecycle", () => {
     h.take();
     await h.lines("WHO #dallas");
     expect(h.take()).toEqual([":tmi.twitch.tv 421 bot WHO :Unknown command"]);
+    h.session.close("done", false);
+  });
+});
+
+const nonceOf = (f: ClientFrame | undefined) => (f && "nonce" in f ? f.nonce : undefined);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const notMember = { badges: [], canModerate: false, canChat: true };
+
+describe("reply pairing by nonce", () => {
+  test("every join/part/send/command carries a unique nonce", async () => {
+    const h = harness();
+    await h.login();
+    await h.join();
+    await h.lines("PRIVMSG #dallas :hi", "PRIVMSG #dallas :/ban troll", "PART #dallas");
+    const nonces = h.sent.filter((f) => f.op !== "ping").map(nonceOf);
+    expect(nonces).toHaveLength(4);
+    expect(nonces.every((n) => typeof n === "string")).toBe(true);
+    expect(new Set(nonces).size).toBe(nonces.length);
+    h.session.close("done", false);
+  });
+
+  test("replies arriving out of order are paired with the right command", async () => {
+    const h = harness();
+    await h.login();
+    await h.join();
+    h.take();
+    await h.lines("PRIVMSG #dallas :/ban troll", "PRIVMSG #dallas :/timeout other 60");
+    const [ban, timeout] = h.sent.slice(-2);
+    await h.frame({ op: "notice", channel: "dallas", code: "cmd_success", text: "timed out", nonce: nonceOf(timeout) });
+    await h.frame({ op: "notice", channel: "dallas", code: "no_permission", text: "nope", nonce: nonceOf(ban) });
+    expect(h.take()).toEqual([
+      "@msg-id=timeout_success :tmi.twitch.tv NOTICE #dallas :timed out",
+      "@msg-id=no_permission :tmi.twitch.tv NOTICE #dallas :nope",
+    ]);
+    h.session.close("done", false);
+  });
+
+  test("a notice for a send's nonce does not consume a pending command", async () => {
+    const h = harness();
+    await h.login();
+    await h.join();
+    await h.lines("PRIVMSG #dallas :/ban troll", "PRIVMSG #dallas :hello");
+    const [ban, send] = h.sent.slice(-2);
+    h.take();
+    await h.frame({ op: "notice", channel: "dallas", code: "msg_slowmode", text: "slow", nonce: nonceOf(send) });
+    await h.frame({ op: "notice", channel: "dallas", code: "cmd_success", text: "banned", nonce: nonceOf(ban) });
+    expect(h.take()).toEqual([
+      "@msg-id=msg_slowmode :tmi.twitch.tv NOTICE #dallas :slow",
+      "@msg-id=ban_success :tmi.twitch.tv NOTICE #dallas :banned",
+    ]);
+    h.session.close("done", false);
+  });
+
+  test("without a nonce, the oldest pending command on that channel takes any notice", async () => {
+    const h = harness();
+    await h.login();
+    await h.join();
+    h.take();
+    await h.lines("PRIVMSG #dallas :/unban a", "PRIVMSG #dallas :/vip b");
+    await h.frame({ op: "notice", channel: "dallas", code: "invalid_user", text: "no such user" });
+    await h.frame({ op: "notice", channel: "dallas", code: "cmd_success", text: "added" });
+    expect(h.take()).toEqual([
+      "@msg-id=invalid_user :tmi.twitch.tv NOTICE #dallas :no such user",
+      "@msg-id=vip_success :tmi.twitch.tv NOTICE #dallas :added",
+    ]);
+    h.session.close("done", false);
+  });
+
+  test("an error frame for a join's nonce frees the slot and reports msg_room_not_found", async () => {
+    const h = harness({ maxChannels: 1 });
+    await h.login();
+    h.take();
+    await h.lines("JOIN #ghost");
+    const nonce = nonceOf(h.sent.at(-1));
+    await h.frame({ op: "error", code: "not_found", message: "No such channel", channel: "ghost", nonce });
+    expect(h.take()).toEqual(["@msg-id=msg_room_not_found :tmi.twitch.tv NOTICE #ghost :No such channel"]);
+    await h.lines("JOIN #other");
+    expect(h.sent.at(-1)).toMatchObject({ op: "join", channel: "other" });
+    h.session.close("done", false);
+  });
+});
+
+describe("join pacing and expiry", () => {
+  const joinsSent = (h: ReturnType<typeof harness>) => h.sent.flatMap((f) => (f.op === "join" ? [f.channel] : []));
+
+  test("joins beyond the burst are paced at the control rate", async () => {
+    const h = harness({ controlBurst: 2, controlPerSecond: 20 });
+    await h.login();
+    await h.lines("JOIN #aaa,#bbb,#ccc,#ddd");
+    expect(joinsSent(h)).toEqual(["aaa", "bbb"]);
+    await sleep(70);
+    expect(joinsSent(h)).toEqual(["aaa", "bbb", "ccc"]);
+    await sleep(60);
+    expect(joinsSent(h)).toEqual(["aaa", "bbb", "ccc", "ddd"]);
+    h.session.close("done", false);
+  });
+
+  test("parting a queued join drops it without sending anything", async () => {
+    const h = harness({ controlBurst: 1, controlPerSecond: 20 });
+    await h.login();
+    await h.lines("JOIN #aaa,#bbb", "PART #bbb");
+    await sleep(120);
+    expect(h.sent.filter((f) => f.op === "join" || f.op === "part")).toMatchObject([{ op: "join", channel: "aaa" }]);
+    h.session.close("done", false);
+  });
+
+  test("unanswered joins expire, freeing the channel cap, and can be retried", async () => {
+    const h = harness({ maxChannels: 1, joinTimeoutMs: 30 });
+    await h.login();
+    h.take();
+    await h.lines("JOIN #slow", "JOIN #other");
+    expect(h.take()).toEqual([":tmi.twitch.tv 405 bot #other :You have joined too many channels"]);
+    await sleep(50);
+    await h.lines("JOIN #slow");
+    expect(joinsSent(h)).toEqual(["slow", "slow"]);
+    await h.frame({ op: "joined", channel: "slow", channelId: CHANNEL_ID, settings, me: notMember });
+    expect(h.session.channelCount).toBe(1);
+    h.session.close("done", false);
+  });
+
+  test("a `joined` for a channel we no longer want is parted upstream", async () => {
+    const h = harness({ joinTimeoutMs: 20 });
+    await h.login();
+    await h.lines("JOIN #late");
+    await sleep(40);
+    h.take();
+    await h.frame({ op: "joined", channel: "late", channelId: CHANNEL_ID, settings, me: notMember });
+    expect(h.take()).toEqual([]);
+    expect(h.sent.at(-1)).toMatchObject({ op: "part", channel: "late" });
+    expect(h.session.channelCount).toBe(0);
+    h.session.close("done", false);
+  });
+});
+
+describe("hostile input", () => {
+  test("client tokens echoed as middle params are sanitized", async () => {
+    const h = harness();
+    await h.lines("CAP :FOO BAR");
+    expect(h.take()).toEqual([":tmi.twitch.tv 410 * FOOBAR :Invalid CAP command"]);
+    await h.login();
+    h.take();
+    await h.lines("JOIN #ok_chan,:x", "JOIN :#a b");
+    expect(h.take()).toEqual([
+      ":tmi.twitch.tv 403 bot x :No such channel",
+      ":tmi.twitch.tv 403 bot #ab :No such channel",
+    ]);
+    h.session.close("done", false);
+  });
+
+  test("an exception while handling one line does not drop the following lines", async () => {
+    const h = harness({}, { failSend: (f) => f.op === "join" });
+    await h.login();
+    h.take();
+    await h.lines("JOIN #boom", "PING :still-here");
+    expect(h.take()).toEqual([":tmi.twitch.tv PONG tmi.twitch.tv :still-here"]);
+    expect(h.closed).toBe(false);
     h.session.close("done", false);
   });
 });

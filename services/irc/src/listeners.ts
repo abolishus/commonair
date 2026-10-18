@@ -7,6 +7,7 @@
  */
 import type { Server, ServerWebSocket, Socket, TCPSocketListener } from "bun";
 import { LineFramer, splitFrame, type FramerSink } from "./irc/framer.ts";
+import { clientAddress, type Cidr } from "./net.ts";
 import type { Transport, TransportKind } from "./session.ts";
 
 const encoder = new TextEncoder();
@@ -17,8 +18,12 @@ export interface SessionSink extends FramerSink {
   transportClosed(): void;
 }
 
-/** Creates the session for a new connection and returns its line sink. */
-export type Accept = (transport: Transport) => SessionSink;
+/**
+ * Admits a new connection from `address` (already resolved through trusted proxies)
+ * and returns its line sink, or null when the gateway refused it (it has then
+ * written the ERROR line and closed the transport).
+ */
+export type Accept = (transport: Transport, address: string) => SessionSink | null;
 
 // ------------------------------------------------------------ TCP / TLS
 
@@ -94,7 +99,9 @@ export function listenSocket(opts: {
     socket: {
       open(socket) {
         socket.data = { sink: null, framer: null, pending: [], pendingBytes: 0, closing: false };
-        const sink = opts.accept(socketTransport(opts.kind, socket));
+        // No PROXY protocol support: a TCP/TLS peer address is always the client's own.
+        const sink = opts.accept(socketTransport(opts.kind, socket), clientAddress(socket.remoteAddress, null, []));
+        if (!sink) return;
         socket.data.sink = sink;
         socket.data.framer = new LineFramer(opts.maxFrameBytes, sink);
       },
@@ -120,6 +127,7 @@ type Subprotocol = (typeof SUBPROTOCOLS)[number] | null;
 
 interface WsState {
   protocol: Subprotocol;
+  address: string;
   sink: SessionSink | null;
 }
 
@@ -148,6 +156,8 @@ export function listenWebSocket(opts: {
   hostname: string;
   port: number;
   maxFrameBytes: number;
+  /** Peers whose X-Forwarded-For is believed (TRUSTED_PROXY_CIDRS). */
+  trustedProxies?: readonly Cidr[];
   accept: Accept;
 }): Server<WsState> {
   return Bun.serve<WsState>({
@@ -161,8 +171,14 @@ export function listenWebSocket(opts: {
         .filter(Boolean);
       const protocol = SUBPROTOCOLS.find((p) => offered.includes(p)) ?? null;
       if (offered.length > 0 && protocol === null) return new Response("unsupported subprotocol", { status: 400 });
-      const headers: Record<string, string> = protocol ? { "Sec-WebSocket-Protocol": protocol } : {};
-      if (server.upgrade(req, { data: { protocol, sink: null }, headers })) return undefined;
+      const peer = server.requestIP(req)?.address ?? "";
+      const address = clientAddress(peer, req.headers.get("x-forwarded-for"), opts.trustedProxies ?? []);
+      const data: WsState = { protocol, address, sink: null };
+      // Bun fails the upgrade with a 500 when given an empty headers object, so pass one only to echo a protocol.
+      const upgraded = protocol
+        ? server.upgrade(req, { data, headers: { "Sec-WebSocket-Protocol": protocol } })
+        : server.upgrade(req, { data });
+      if (upgraded) return undefined;
       return new Response("expected a WebSocket upgrade", { status: 426 });
     },
     websocket: {
@@ -170,7 +186,7 @@ export function listenWebSocket(opts: {
       maxPayloadLength: opts.maxFrameBytes * 4,
       idleTimeout: 0, // the session runs its own PING/timeout logic
       open(ws) {
-        ws.data.sink = opts.accept(wsTransport(ws));
+        ws.data.sink = opts.accept(wsTransport(ws), ws.data.address);
       },
       message(ws, message) {
         const sink = ws.data.sink;

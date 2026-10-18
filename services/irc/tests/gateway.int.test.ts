@@ -10,10 +10,11 @@ import tmi from "tmi.js";
 import { createLogger } from "@commonair/observability";
 import { startGateway, type Gateway } from "../src/gateway.ts";
 import { startHealth } from "../src/health.ts";
+import { trustedProxies } from "../src/env.ts";
 import { generateSelfSignedCert } from "../src/tls.ts";
 import { websocketUpstream } from "../src/upstream.ts";
 import { channelIdOf, startFakeUpstream } from "./helpers/fake-upstream.ts";
-import { rawClient } from "./helpers/raw-client.ts";
+import { rawClient, wsRawClient } from "./helpers/raw-client.ts";
 
 const logger = createLogger({ service: "irc-test", write: () => {} });
 const users = {
@@ -335,5 +336,149 @@ describe("health and shutdown", () => {
     } finally {
       await up.stop();
     }
+  });
+});
+
+describe("WebSocket subprotocols", () => {
+  test("no subprotocol: upgrade succeeds and batched lines work", async () => {
+    const c = await wsRawClient({ port: gateway.ports.ws ?? 0 });
+    expect(c.protocol).toBe("");
+    c.send("PASS oauth:viewer-token", "NICK viewer");
+    await c.waitFor((_m, raw) => raw === ":tmi.twitch.tv 001 viewer :Welcome, GLHF!");
+    c.close();
+    await c.closed;
+  });
+
+  test("text.ircv3.net is negotiated and echoed", async () => {
+    const c = await wsRawClient({ port: gateway.ports.ws ?? 0, protocols: ["text.ircv3.net"] });
+    expect(c.protocol).toBe("text.ircv3.net");
+    c.send("PASS oauth:viewer-token");
+    c.send("NICK viewer");
+    await c.waitFor((m) => m.command === "376");
+    c.close();
+    await c.closed;
+  });
+
+  test("an unsupported subprotocol is refused", async () => {
+    await expect(wsRawClient({ port: gateway.ports.ws ?? 0, protocols: ["mqtt"] })).rejects.toThrow(/failed to open/);
+  });
+});
+
+describe("reply pairing end to end", () => {
+  test("a broadcast notice without a nonce does not steal a command's success", async () => {
+    const c = await rawClient({ port: gateway.ports.tcp ?? 0 });
+    c.send("CAP REQ :twitch.tv/tags twitch.tv/commands", "PASS oauth:streamer-token", "NICK streamer");
+    await c.waitFor((m) => m.command === "376");
+    c.send("JOIN #pairing");
+    await c.waitFor((m) => m.command === "ROOMSTATE");
+    c.send("PRIVMSG #pairing :/slow 10", "PRIVMSG #pairing :/ban troll");
+    await c.waitFor((m) => m.command === "NOTICE" && m.tags["msg-id"] === "slow_on");
+    const ban = await c.waitFor((m) => m.command === "NOTICE" && m.tags["msg-id"] === "ban_success");
+    expect(ban.params).toEqual(["#pairing", "troll done."]);
+    c.send("QUIT");
+    await c.closed;
+  });
+
+  test("tmi.js join() of a channel upstream rejects fails fast and frees the slot", async () => {
+    const client = tmiClient({ username: "viewer", password: "oauth:viewer-token" });
+    await client.connect();
+    await expect(client.join("missingchan")).rejects.toBe("msg_room_not_found");
+    await expect(client.join("dallas")).resolves.toEqual(["#dallas"]);
+    await client.disconnect();
+  });
+});
+
+describe("connection admission", () => {
+  async function withGateway(
+    extra: Pick<Parameters<typeof startGateway>[0], "connectionLimits" | "trustedProxies">,
+    fn: (gw: Gateway) => Promise<void>,
+  ) {
+    const up = startFakeUpstream(users);
+    const gw = startGateway({
+      hostname: "127.0.0.1",
+      tcpPort: 0,
+      tlsPort: null,
+      wsPort: 0,
+      upstream: websocketUpstream(up.url, logger),
+      logger,
+      motd: "m",
+      ...extra,
+    });
+    try {
+      await fn(gw);
+    } finally {
+      await gw.shutdown(50);
+      await up.stop();
+    }
+  }
+
+  test("per-IP cap refuses with an ERROR line and frees the slot on disconnect", async () => {
+    await withGateway({ connectionLimits: { maxPerIp: 1 } }, async (gw) => {
+      const first = await rawClient({ port: gw.ports.tcp ?? 0 });
+      first.send("PASS oauth:viewer-token", "NICK viewer");
+      await first.waitFor((m) => m.command === "376");
+      const second = await rawClient({ port: gw.ports.tcp ?? 0 });
+      const err = await second.waitFor((m) => m.command === "ERROR");
+      expect(err.params).toEqual(["Closing Link: Too many connections from your address"]);
+      await second.closed;
+      first.send("QUIT");
+      await first.closed;
+      await until(() => gw.stats().total === 0);
+      const third = await rawClient({ port: gw.ports.tcp ?? 0 });
+      third.send("PASS oauth:viewer-token", "NICK viewer");
+      await third.waitFor((m) => m.command === "376");
+      third.close();
+      await third.closed;
+    });
+  });
+
+  test("global cap and connection rate", async () => {
+    await withGateway({ connectionLimits: { maxConnections: 1 } }, async (gw) => {
+      const first = await rawClient({ port: gw.ports.tcp ?? 0 });
+      const second = await rawClient({ port: gw.ports.tcp ?? 0 });
+      expect((await second.waitFor((m) => m.command === "ERROR")).params).toEqual(["Closing Link: Server full"]);
+      first.close();
+      await first.closed;
+    });
+    await withGateway({ connectionLimits: { connectBurstPerIp: 2, connectPerSecondPerIp: 0.01 } }, async (gw) => {
+      const a = await rawClient({ port: gw.ports.tcp ?? 0 });
+      const b = await rawClient({ port: gw.ports.tcp ?? 0 });
+      const c = await rawClient({ port: gw.ports.tcp ?? 0 });
+      expect((await c.waitFor((m) => m.command === "ERROR")).params).toEqual(["Closing Link: Reconnecting too fast"]);
+      a.close();
+      b.close();
+      await Promise.all([a.closed, b.closed]);
+    });
+  });
+
+  test("X-Forwarded-For counts per client only behind a trusted proxy", async () => {
+    const xff = (ip: string) => ({ "X-Forwarded-For": ip });
+    const register = async (c: Awaited<ReturnType<typeof wsRawClient>>) => {
+      c.send("PASS oauth:viewer-token", "NICK viewer");
+      return c.waitFor((m) => m.command === "376" || m.command === "ERROR");
+    };
+    await withGateway(
+      { connectionLimits: { maxPerIp: 1 }, trustedProxies: trustedProxies(["127.0.0.1/32"]) },
+      async (gw) => {
+        const port = gw.ports.ws ?? 0;
+        const a = await wsRawClient({ port, headers: xff("198.51.100.1") });
+        const b = await wsRawClient({ port, headers: xff("198.51.100.2") });
+        expect((await register(a)).command).toBe("376");
+        expect((await register(b)).command).toBe("376");
+        const again = await wsRawClient({ port, headers: xff("198.51.100.1") });
+        expect((await again.waitFor((m) => m.command === "ERROR")).params[0]).toMatch(/Too many connections/);
+        a.close();
+        b.close();
+      },
+    );
+    await withGateway({ connectionLimits: { maxPerIp: 1 } }, async (gw) => {
+      const port = gw.ports.ws ?? 0;
+      const a = await wsRawClient({ port, headers: xff("198.51.100.1") });
+      expect((await register(a)).command).toBe("376");
+      // Untrusted peer: the header is ignored, so this is the same address (127.0.0.1).
+      const spoof = await wsRawClient({ port, headers: xff("198.51.100.2") });
+      expect((await spoof.waitFor((m) => m.command === "ERROR")).params[0]).toMatch(/Too many connections/);
+      a.close();
+    });
   });
 });
