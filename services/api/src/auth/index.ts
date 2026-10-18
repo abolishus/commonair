@@ -16,6 +16,7 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { eq } from "drizzle-orm";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { publishUserControl } from "../lib/control.ts";
 import { instanceMediaPrefixes, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
@@ -248,6 +249,9 @@ export function createAuth(deps: Deps) {
             if (data.twoFactorEnabled === true && ctx) twoFactorEnabling.add(ctx);
           },
           after: async (user, ctx) => {
+            // Chat and IRC cache display names and avatars.
+            if (ctx?.path === "/update-user")
+              await publishUserControl(deps, { op: "invalidate", userId: user.id, reason: "profile_changed" });
             if (!ctx || !twoFactorEnabling.has(ctx) || user.twoFactorEnabled !== true) return;
             twoFactorEnabling.delete(ctx);
             await sendNotice(logger, "twoFactorEnabled", () =>
