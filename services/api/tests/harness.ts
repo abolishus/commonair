@@ -24,6 +24,7 @@ export interface TestApi {
   app: ApiApp;
   db: TestDatabase;
   internalSecret: string;
+  mediaPassword: string;
   keyPrefix: string;
   stop(): Promise<void>;
 }
@@ -34,6 +35,7 @@ export async function startApi(
   const db = await createTestDatabase();
   const { pkcs8B64 } = await generateSigningKey();
   const internalSecret = randomSecret("", 32);
+  const mediaPassword = randomSecret("", 32);
   const keyPrefix = `test:${crypto.randomUUID()}:`;
   let app: ApiApp | null = null;
   const server = Bun.serve({
@@ -51,6 +53,7 @@ export async function startApi(
     DATABASE_URL: db.appUrl,
     VALKEY_URL,
     INTERNAL_API_SECRET: internalSecret,
+    MEDIA_INTERNAL_PASSWORD: mediaPassword,
     AUTH_SECRET: randomSecret("", 32),
     AUTH_TRUSTED_ORIGINS: "http://localhost:3000",
     ALTCHA_HMAC_KEY: randomSecret("", 32),
@@ -84,6 +87,7 @@ export async function startApi(
     app,
     db,
     internalSecret,
+    mediaPassword,
     keyPrefix,
     async stop() {
       await server.stop(true);

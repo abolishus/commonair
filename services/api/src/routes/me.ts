@@ -35,12 +35,8 @@ const MAX_BOTS_PER_OWNER = 10;
 export const BOT_EMAIL_DOMAIN = "bots.invalid";
 
 export async function matureConfirmed(db: Executor, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ at: users.matureConfirmedAt })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  return row?.at != null;
+  const [row] = await db.select({ at: users.matureConfirmedAt }).from(users).where(eq(users.id, userId)).limit(1);
+  return row !== undefined && row.at !== null;
 }
 
 /** Signed-in adult who confirmed 18+: the gate for mature streams. */

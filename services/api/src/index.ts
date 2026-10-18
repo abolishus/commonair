@@ -37,7 +37,7 @@ export function statusProbes(env: ApiEnv, doFetch: typeof fetch = fetch): Record
     u.pathname = "/readyz";
     return u.toString();
   };
-  const basic = `Basic ${Buffer.from(`internal:${env.INTERNAL_API_SECRET}`).toString("base64")}`;
+  const basic = `Basic ${Buffer.from(`internal:${env.MEDIA_INTERNAL_PASSWORD}`).toString("base64")}`;
   return {
     mediamtx: () =>
       ok(`${env.MEDIAMTX_API_URL.replace(/\/+$/, "")}/v3/paths/list`, { headers: { authorization: basic } }),

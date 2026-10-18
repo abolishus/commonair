@@ -144,10 +144,18 @@ describe("stream keys and MediaMTX auth", () => {
           path,
           protocol: "rtsp",
           user: MEDIA_INTERNAL_USER,
-          password: api.internalSecret,
+          password: api.mediaPassword,
         })
       ).status,
     ).toBe(200);
+    // The service-to-service secret is not a MediaMTX credential.
+    const as = (password: string, extra: Record<string, unknown>) =>
+      mediaAuth({ user: MEDIA_INTERNAL_USER, password, ...extra }).then((r) => r.status);
+    expect(await as(api.internalSecret, { action: "read", path, protocol: "rtsp" })).toBe(401);
+    expect(await as(api.mediaPassword, { action: "api", path: "", protocol: "" })).toBe(200);
+    // Renditions are published only by the media service.
+    expect(await as(api.mediaPassword, { action: "publish", path: `${path}/720p`, protocol: "rtsp" })).toBe(200);
+    expect(await as("nope", { action: "publish", path: `${path}/720p`, protocol: "rtsp" })).toBe(401);
     expect(
       (await mediaAuth({ action: "api", path: "", protocol: "hls", user: MEDIA_INTERNAL_USER, password: "nope" }))
         .status,
@@ -159,7 +167,7 @@ describe("stream keys and MediaMTX auth", () => {
           path: "",
           protocol: "hls",
           user: MEDIA_INTERNAL_USER,
-          password: api.internalSecret,
+          password: api.mediaPassword,
         })
       ).status,
     ).toBe(401);
