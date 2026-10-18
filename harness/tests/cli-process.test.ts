@@ -34,11 +34,12 @@ describe("harness CLI", () => {
   test("list shows every scenario and full", async () => {
     const { stdout, code } = await cli(["list"]);
     expect(code).toBe(0);
-    for (const n of ["full", "smoke", "ingest-rtmp", "ingest-whip", "viewers", "load-smoke"])
+    for (const n of ["full", "smoke", "ingest-rtmp", "ingest-whip", "viewers", "load-smoke", "e2e-basic"])
       expect(stdout).toContain(n);
     const json = await cli(["list", "--json"]);
     const parsed = JSON.parse(json.stdout) as { name: string; needs: string[] }[];
     expect(parsed.find((s) => s.name === "smoke")?.needs).toEqual(["api", "mail"]);
+    expect(parsed.find((s) => s.name === "e2e-basic")?.needs).toContain("web");
   }, 30_000);
 
   test("usage errors exit 2", async () => {
@@ -66,5 +67,18 @@ describe("harness CLI", () => {
     expect(stdout).toContain("SKIP  smoke");
     const latest = JSON.parse(readFileSync(join(dir, "latest.json"), "utf8")) as RunReport;
     expect(latest.summary).toEqual({ passed: 0, failed: 0, skipped: 1 });
+  }, 30_000);
+
+  test("e2e-basic skips cleanly when the web app is unreachable", async () => {
+    const reportPath = join(dir, "e2e.json");
+    const { code, stdout } = await cli(["run", "e2e-basic", "--skip-unavailable", "--report", reportPath], {
+      ...deadStack,
+      HARNESS_WEB_URL: "http://127.0.0.1:9",
+    });
+    expect(code).toBe(0);
+    expect(stdout).toContain("SKIP  e2e-basic");
+    const report = JSON.parse(readFileSync(reportPath, "utf8")) as RunReport;
+    expect(report.scenarios[0]?.status).toBe("skipped");
+    expect(report.scenarios[0]?.skipReason).toMatch(/web: web app unreachable/);
   }, 30_000);
 });

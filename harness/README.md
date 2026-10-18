@@ -198,13 +198,21 @@ The full breakdown is in the report under `scenarios[].data.load`.
 
 ## Scenarios
 
-| Scenario      | What it proves                                                                                                                                          |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`       | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                         |
-| `ingest-rtmp` | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                    |
-| `ingest-whip` | The same over WHIP.                                                                                                                                     |
-| `viewers`     | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave. |
-| `load-smoke`  | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                    |
+| Scenario      | What it proves                                                                                                                                             |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`       | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                            |
+| `ingest-rtmp` | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                       |
+| `ingest-whip` | The same over WHIP.                                                                                                                                        |
+| `viewers`     | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.    |
+| `load-smoke`  | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                       |
+| `e2e-basic`   | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline. |
+
+`e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
+[docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
+(a unit test fails when they drift). The `web` need is met when `HARNESS_WEB_URL/healthz` answers 200. It publishes to `<stream-server-url>/<stream-key>` exactly as shown on the dashboard;
+`--set ingest=harness` swaps the host for `HARNESS_RTMP_URL` when the public ingest host is not
+reachable from the harness. TTFF (< 15 s) and glass-to-glass (< 20 s) are soft checks for now. On
+failure every open page is screenshotted into `<report dir>/<run id>-e2e-basic/`.
 
 Until the API, origin and media units are running, these scenarios fail on unmet needs (and say
 which). The drivers themselves are verified against a throwaway MediaMTX by the integration tests.
