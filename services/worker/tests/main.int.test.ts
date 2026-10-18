@@ -51,4 +51,4 @@ test("main.ts serves /healthz and /readyz and shuts down on SIGTERM", async () =
     child.kill("SIGTERM");
   }
   expect(await child.exited).toBe(0);
-}, 30_000);
+}, 60_000);

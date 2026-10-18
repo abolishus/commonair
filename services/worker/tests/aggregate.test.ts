@@ -3,7 +3,7 @@
 
 import type { SegmentFetch } from "@commonair/contracts/internal";
 import { describe, expect, test } from "vite-plus/test";
-import { aggregate, minuteBucket, parseEntry } from "../src/segments/aggregate.ts";
+import { aggregate, MAX_AGE_MS, MAX_SKEW_MS, minuteBucket, parseEntry } from "../src/segments/aggregate.ts";
 import { BroadcastCache } from "../src/segments/consumer.ts";
 
 const S1 = "0193e6a0-0000-7000-8000-000000000001";
@@ -107,7 +107,7 @@ describe("aggregate", () => {
 describe("parseEntry", () => {
   test("decodes stream field pairs and coerces numbers", () => {
     expect(
-      parseEntry(["sid", S1, "cid", C, "src", "origin", "kind", "segment", "bytes", "42", "at", String(T0)]),
+      parseEntry(["sid", S1, "cid", C, "src", "origin", "kind", "segment", "bytes", "42", "at", String(T0)], T0),
     ).toEqual({ sid: S1, cid: C, src: "origin", kind: "segment", bytes: 42, at: T0 });
   });
   test("rejects malformed entries", () => {
@@ -117,6 +117,16 @@ describe("parseEntry", () => {
     ).toBeNull();
     expect(parseEntry(["sid", S1, "cid", C, "src", "origin", "kind", "segment", "bytes", "-1", "at", "1"])).toBeNull();
     expect(parseEntry([])).toBeNull();
+  });
+  test("rejects timestamps outside the accepted window", () => {
+    const at = (ms: number) =>
+      parseEntry(["sid", S1, "cid", C, "src", "origin", "kind", "segment", "bytes", "1", "at", String(ms)], T0);
+    expect(at(T0 - MAX_AGE_MS)).not.toBeNull();
+    expect(at(T0 - MAX_AGE_MS - 1)).toBeNull();
+    expect(at(T0 + MAX_SKEW_MS)).not.toBeNull();
+    expect(at(T0 + MAX_SKEW_MS + 1)).toBeNull();
+    expect(at(8.64e15 + 1)).toBeNull();
+    expect(at(-1)).toBeNull();
   });
 });
 
@@ -130,5 +140,22 @@ describe("BroadcastCache", () => {
     c.set("c", "3");
     expect(c.has("a")).toBe(false);
     expect(c.get("c")).toBe("3");
+  });
+  test("a missing broadcast is cached only briefly; a known one is kept", () => {
+    let now = 1_000;
+    const c = new BroadcastCache(10, 60_000, () => now);
+    c.set("pending", null);
+    c.set("known", "b1");
+    now += 59_999;
+    expect(c.has("pending")).toBe(true);
+    now += 1;
+    expect(c.has("pending")).toBe(false);
+    expect(c.get("pending")).toBeUndefined();
+    now += 10 * 86_400_000;
+    expect(c.get("known")).toBe("b1");
+    // Re-setting a null with a broadcast once it exists replaces the short-lived entry.
+    c.set("pending", "b2");
+    now += 120_000;
+    expect(c.get("pending")).toBe("b2");
   });
 });

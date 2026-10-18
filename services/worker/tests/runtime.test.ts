@@ -8,7 +8,7 @@ import { creditSeconds } from "../src/counters.ts";
 import { DEFAULT_CONCURRENCY, parseConcurrency, QUEUE_NAMES, type QueueName } from "../src/env.ts";
 import { JOBS } from "../src/jobs/index.ts";
 import { WEBHOOK_JOBS } from "../src/jobs/names.ts";
-import { toBusEvent } from "../src/outbox.ts";
+import { toBusEvent, withTimeout } from "../src/outbox.ts";
 import { AdaptiveDelay } from "../src/runtime/loop.ts";
 import { buildRegistry, defineJob, scheduledJobs } from "../src/runtime/registry.ts";
 
@@ -127,5 +127,26 @@ describe("toBusEvent", () => {
   });
   test("prototype keys are not event types", () => {
     expect(toBusEvent({ ...base, type: "constructor" }).ok).toBe(false);
+  });
+});
+
+describe("withTimeout", () => {
+  test("passes results through and rejects slow calls", async () => {
+    expect(await withTimeout(Promise.resolve(3), 100, "x")).toBe(3);
+    await expect(withTimeout(new Promise(() => {}), 20, "bus publish")).rejects.toThrow(/bus publish timed out/);
+    await expect(withTimeout(Promise.reject(new Error("boom")), 100, "x")).rejects.toThrow("boom");
+  });
+});
+
+describe("webhook job retries", () => {
+  test("deliver and fanout survive long infrastructure outages", () => {
+    const webhooks = buildRegistry(JOBS).get(QUEUES.webhooks);
+    for (const name of [WEBHOOK_JOBS.deliver, WEBHOOK_JOBS.fanout]) {
+      const def = webhooks?.get(name);
+      expect(def?.attempts).toBeGreaterThanOrEqual(10);
+      // Sum of the exponential series: the total retry window spans several hours.
+      const windowMs = (def?.backoffMs ?? 0) * (2 ** ((def?.attempts ?? 1) - 1) - 1);
+      expect(windowMs).toBeGreaterThan(4 * 3_600_000);
+    }
   });
 });

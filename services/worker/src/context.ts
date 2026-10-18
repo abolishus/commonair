@@ -16,6 +16,10 @@ export interface EnqueueOptions {
 }
 
 export type Enqueue = (queue: QueueName, name: string, data: unknown, opts?: EnqueueOptions) => Promise<void>;
+export type EnqueueBulk = (
+  queue: QueueName,
+  jobs: readonly { name: string; data: unknown; opts?: EnqueueOptions }[],
+) => Promise<void>;
 
 /** Everything a job handler or loop may touch. Built once per process in `createWorker`. */
 export interface WorkerContext {
@@ -25,6 +29,7 @@ export interface WorkerContext {
   valkey: ValkeyClient;
   logger: Logger;
   enqueue: Enqueue;
+  enqueueBulk: EnqueueBulk;
   webhooks: WebhookSettings;
   /** Object storage for VOD retention; absent when S3 is not configured. */
   storage?: ObjectStorage;

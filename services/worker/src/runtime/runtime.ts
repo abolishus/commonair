@@ -24,6 +24,7 @@ export interface RuntimeOptions {
 }
 
 const DEFAULT_ATTEMPTS = 3;
+const DEFAULT_BACKOFF_MS = 5_000;
 
 export class JobRuntime {
   private readonly queues = new Map<QueueName, Queue>();
@@ -48,18 +49,36 @@ export class JobRuntime {
     return this.opts.registry.get(queue)?.get(name);
   }
 
-  readonly enqueue = async (queue: QueueName, name: string, data: unknown, opts: EnqueueOptions = {}) => {
+  private prepare(queue: QueueName, name: string, data: unknown, opts: EnqueueOptions) {
     const def = this.definition(queue, name);
     // Validate locally registered payloads at the producer, where a bug is easiest to trace.
-    const payload = def ? def.data.parse(data) : data;
-    await this.queue(queue).add(name, payload, {
-      jobId: opts.jobId,
-      delay: opts.delayMs,
-      attempts: def?.attempts ?? DEFAULT_ATTEMPTS,
-      backoff: { type: "exponential", delay: 5_000 },
-      removeOnComplete: { age: 3600, count: 5000 },
-      removeOnFail: { age: 7 * 24 * 3600, count: 10_000 },
-    });
+    const payload: unknown = def ? def.data.parse(data) : data;
+    return {
+      name,
+      data: payload,
+      opts: {
+        jobId: opts.jobId,
+        delay: opts.delayMs,
+        attempts: def?.attempts ?? DEFAULT_ATTEMPTS,
+        backoff: { type: "exponential", delay: def?.backoffMs ?? DEFAULT_BACKOFF_MS },
+        removeOnComplete: { age: 3600, count: 5000 },
+        removeOnFail: { age: 7 * 24 * 3600, count: 10_000 },
+      },
+    };
+  }
+
+  readonly enqueue = async (queue: QueueName, name: string, data: unknown, opts: EnqueueOptions = {}) => {
+    const job = this.prepare(queue, name, data, opts);
+    await this.queue(queue).add(job.name, job.data, job.opts);
+  };
+
+  /** Many jobs in one round trip (one MULTI). */
+  readonly enqueueBulk = async (
+    queue: QueueName,
+    jobs: readonly { name: string; data: unknown; opts?: EnqueueOptions }[],
+  ) => {
+    if (jobs.length === 0) return;
+    await this.queue(queue).addBulk(jobs.map((j) => this.prepare(queue, j.name, j.data, j.opts ?? {})));
   };
 
   private processor(queue: QueueName, ctx: WorkerContext) {

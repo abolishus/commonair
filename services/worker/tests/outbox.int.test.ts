@@ -4,7 +4,7 @@
 import { BusEvent } from "@commonair/contracts/events";
 import { schema } from "@commonair/db";
 import { createValkey } from "@commonair/service";
-import { isNull } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { relayOutboxBatch } from "../src/outbox.ts";
 import { broadcasterFields, insertEvent, makeUser, setup, VALKEY_URL, waitFor, type TestEnv } from "./fixtures.ts";
@@ -56,4 +56,16 @@ test("events are published in occurrence order within a relay", async () => {
   expect(await relayOutboxBatch(env.worker.ctx, 100)).toBe(10);
   await waitFor(async () => seen.length === 10);
   expect(seen).toEqual(ids);
+});
+
+test("a hung Valkey/BullMQ call times out, rolls back and releases the row locks", async () => {
+  const { user, channel } = await makeUser(env.t.db);
+  const e = await insertEvent(env.t.db, "stream.offline", channel.id, broadcasterFields(user));
+  const hung = { ...env.worker.ctx, enqueueBulk: () => new Promise<void>(() => {}) };
+  await expect(relayOutboxBatch(hung, 100, 200)).rejects.toThrow(/fan-out enqueue timed out/);
+  const [row] = await env.t.db.select().from(schema.events).where(eq(schema.events.id, e.id));
+  expect(row?.publishedAt).toBeNull();
+  // The lock is gone: a healthy relay claims and publishes the same row right away.
+  expect(await relayOutboxBatch(env.worker.ctx, 100)).toBeGreaterThanOrEqual(1);
+  await waitFor(async () => seen.includes(e.id), { label: "republished" });
 });

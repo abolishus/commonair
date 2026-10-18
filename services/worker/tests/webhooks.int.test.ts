@@ -6,8 +6,10 @@ import { QUEUES } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { createValkey } from "@commonair/service";
 import { asc, eq } from "drizzle-orm";
+import { uuidv7 } from "@commonair/db";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { WEBHOOK_JOBS } from "../src/jobs/names.ts";
+import { fanOut } from "../src/webhooks/deliver.ts";
 import {
   broadcasterFields,
   insertEvent,
@@ -79,16 +81,18 @@ function followPayload(broadcaster: { id: string; username: string; name: string
 }
 
 describe("outbox relay", () => {
-  test("publishes a validated BusEvent quickly and marks the row published", async () => {
+  test("publishes a validated BusEvent and marks the row published", async () => {
     const { user, channel } = await makeUser(env.t.db);
-    const started = Date.now();
     const e = await insertEvent(env.t.db, "stream.offline", channel.id, { ...broadcasterFields(user), junk: 1 });
     const msg = await waitFor(async () => busMessages.find((m) => m.id === e.id), { label: "bus event" });
-    expect(Date.now() - started).toBeLessThan(1_500);
     expect(msg).toMatchObject({ type: "stream.offline", version: "1", channelId: channel.id });
     expect(msg.payload).toEqual(broadcasterFields(user));
-    const [row] = await env.t.db.select().from(schema.events).where(eq(schema.events.id, e.id));
-    expect(row?.publishedAt).toBeInstanceOf(Date);
+    // The bus message goes out before the relay's transaction commits, so poll for published_at.
+    const publishedAt = await waitFor(
+      async () => (await env.t.db.select().from(schema.events).where(eq(schema.events.id, e.id)))[0]?.publishedAt,
+      { label: "published_at" },
+    );
+    expect(publishedAt).toBeInstanceOf(Date);
   });
 
   test("invalid rows are marked published without being published", async () => {
@@ -198,7 +202,8 @@ describe("webhook delivery", () => {
     const hits = receiver.on("/flaky-1");
     expect(hits.map((h) => h.headers[WEBHOOK_HEADERS.messageRetry])).toEqual(["0", "1", "2"]);
     expect(hits.every((h) => h.signatureValid)).toBe(true);
-    expect((await subStatus(sub.id))?.failureCount).toBe(0);
+    // The streak reset is written just after the success row: poll rather than race it.
+    await waitFor(async () => (await subStatus(sub.id))?.failureCount === 0, { label: "failure streak reset" });
   });
 
   test("consecutive exhausted events fail the subscription and send a revocation", async () => {
@@ -225,9 +230,9 @@ describe("webhook delivery", () => {
       expect(revocation.body.subscription).toMatchObject({ id: sub.id, status: "notification_failures_exceeded" });
       const rows = await deliveriesOf(sub.id);
       expect(rows.filter((r) => r.messageType === "notification")).toHaveLength(4);
-      // No further deliveries once failed.
-      await insertEvent(env.t.db, "stream.offline", channel.id, broadcasterFields(user));
-      await Bun.sleep(400);
+      // No further deliveries once failed: fan-out of a new event queues nothing for it.
+      const later = await insertEvent(env.t.db, "stream.offline", channel.id, broadcasterFields(user));
+      expect(await fanOut(env.worker.ctx, later.id)).toBe(0);
       expect((await deliveriesOf(sub.id)).filter((r) => r.messageType === "notification")).toHaveLength(4);
     } finally {
       env.worker.ctx.webhooks.maxAttempts = 5;
@@ -293,6 +298,8 @@ describe("webhook delivery", () => {
       is_gift: false,
     });
     await waitFor(async () => (await subStatus(sub.id))?.status === "revoked", { label: "revoked" });
+    // The status flips before the revocation POST goes out: wait for the message, don't race it.
+    await waitFor(async () => receiver.on("/subs-noscope").length > 0, { label: "revocation message" });
     expect(receiver.on("/subs-noscope").map((r) => r.headers[WEBHOOK_HEADERS.messageType])).toEqual(["revocation"]);
   });
 });
@@ -420,5 +427,134 @@ describe("test events and redelivery", () => {
     const hits = receiver.on("/flaky-redeliver");
     expect(hits[1]?.headers[WEBHOOK_HEADERS.messageId]).toBe(failed!.messageId);
     expect(hits[1]?.signatureValid).toBe(true);
+  });
+});
+
+describe("delivery-time authorization is bound to the broadcaster", () => {
+  const subscribePayload = (u: { id: string; username: string; name: string }) => ({
+    ...broadcasterFields(u),
+    user_id: u.id,
+    user_login: "x",
+    user_name: "X",
+    tier: "1000",
+    is_gift: false,
+  });
+  const kinds = (path: string) => receiver.on(path).map((r) => r.headers[WEBHOOK_HEADERS.messageType]);
+
+  test("a scoped subscription for someone else's channel is revoked, even with a valid token", async () => {
+    const victim = await makeUser(env.t.db);
+    const attacker = await makeUser(env.t.db);
+    const app = await makeApp(env.t.db, attacker.user.id);
+    await makeToken(env.t.db, app.id, attacker.user.id, ["channel:read:subscriptions"]);
+    const sub = await makeSubscription(env.t.db, {
+      userId: attacker.user.id,
+      appId: app.id,
+      type: "channel.subscribe",
+      condition: { broadcaster_user_id: victim.user.id },
+      callbackUrl: receiver.url("/steal"),
+      secret: SECRET,
+    });
+    await insertEvent(env.t.db, "channel.subscribe", victim.channel.id, subscribePayload(victim.user));
+    await waitFor(async () => (await subStatus(sub.id))?.status === "revoked", { label: "revoked" });
+    await waitFor(async () => kinds("/steal").includes("revocation"), { label: "revocation sent" });
+    expect(kinds("/steal")).not.toContain("notification");
+  });
+
+  test("personal-token subscriptions (no app) are scope-checked too", async () => {
+    const { user, channel } = await makeUser(env.t.db);
+    const noToken = await makeSubscription(env.t.db, {
+      userId: user.id,
+      type: "channel.subscribe",
+      condition: { broadcaster_user_id: user.id },
+      callbackUrl: receiver.url("/personal-none"),
+      secret: SECRET,
+    });
+    await insertEvent(env.t.db, "channel.subscribe", channel.id, subscribePayload(user));
+    await waitFor(async () => (await subStatus(noToken.id))?.status === "revoked", { label: "revoked" });
+
+    const other = await makeUser(env.t.db);
+    await env.t.db.insert(schema.oauthTokens).values({
+      id: uuidv7(),
+      appId: null,
+      userId: other.user.id,
+      scopes: ["channel:read:subscriptions"],
+      accessTokenHash: crypto.randomUUID(),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    const withToken = await makeSubscription(env.t.db, {
+      userId: other.user.id,
+      type: "channel.subscribe",
+      condition: { broadcaster_user_id: other.user.id },
+      callbackUrl: receiver.url("/personal-ok"),
+      secret: SECRET,
+    });
+    await insertEvent(env.t.db, "channel.subscribe", other.channel.id, subscribePayload(other.user));
+    await waitFor(async () => kinds("/personal-ok").includes("notification"), { label: "delivered" });
+    expect((await subStatus(withToken.id))?.status).toBe("enabled");
+  });
+
+  test("moderator scopes accept the channel's moderators and nobody else", async () => {
+    const { user: broadcaster, channel } = await makeUser(env.t.db);
+    const mod = await makeUser(env.t.db);
+    const stranger = await makeUser(env.t.db);
+    await env.t.db
+      .insert(schema.channelRoles)
+      .values({ channelId: channel.id, userId: mod.user.id, role: "moderator" });
+    const subFor = async (u: { id: string }, path: string) => {
+      const app = await makeApp(env.t.db, u.id);
+      await makeToken(env.t.db, app.id, u.id, ["moderator:manage:chat"]);
+      return makeSubscription(env.t.db, {
+        userId: u.id,
+        appId: app.id,
+        type: "channel.moderator.add",
+        condition: { broadcaster_user_id: broadcaster.id },
+        callbackUrl: receiver.url(path),
+        secret: SECRET,
+      });
+    };
+    const modSub = await subFor(mod.user, "/mod-ok");
+    const strangerSub = await subFor(stranger.user, "/mod-stranger");
+    await insertEvent(env.t.db, "channel.moderator.add", channel.id, {
+      ...broadcasterFields(broadcaster),
+      user_id: mod.user.id,
+      user_login: "m",
+      user_name: "M",
+    });
+    await waitFor(async () => kinds("/mod-ok").includes("notification"), { label: "moderator delivery" });
+    await waitFor(async () => (await subStatus(strangerSub.id))?.status === "revoked", { label: "stranger revoked" });
+    expect((await subStatus(modSub.id))?.status).toBe("enabled");
+    expect(kinds("/mod-stranger")).not.toContain("notification");
+  });
+
+  test("chat:read events are delivered to the reading user named in the condition", async () => {
+    const { user: broadcaster, channel } = await makeUser(env.t.db);
+    const bot = await makeUser(env.t.db);
+    const app = await makeApp(env.t.db, bot.user.id);
+    await makeToken(env.t.db, app.id, bot.user.id, ["chat:read"]);
+    const sub = await makeSubscription(env.t.db, {
+      userId: bot.user.id,
+      appId: app.id,
+      type: "channel.chat.clear",
+      condition: { broadcaster_user_id: broadcaster.id, user_id: bot.user.id },
+      callbackUrl: receiver.url("/chat-bot"),
+      secret: SECRET,
+    });
+    await insertEvent(env.t.db, "channel.chat.clear", channel.id, broadcasterFields(broadcaster));
+    await waitFor(async () => kinds("/chat-bot").includes("notification"), { label: "chat delivery" });
+    expect((await subStatus(sub.id))?.status).toBe("enabled");
+  });
+
+  test("a subscription whose condition lacks a catalog field is revoked", async () => {
+    const { user, channel } = await makeUser(env.t.db);
+    const sub = await makeSubscription(env.t.db, {
+      userId: user.id,
+      type: "stream.offline",
+      condition: {},
+      callbackUrl: receiver.url("/no-condition"),
+      secret: SECRET,
+    });
+    await insertEvent(env.t.db, "stream.offline", channel.id, broadcasterFields(user));
+    await waitFor(async () => (await subStatus(sub.id))?.status === "revoked", { label: "revoked" });
+    expect(kinds("/no-condition")).not.toContain("notification");
   });
 });

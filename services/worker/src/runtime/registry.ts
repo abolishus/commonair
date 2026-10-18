@@ -31,6 +31,8 @@ export interface JobDefinition<S extends z.ZodType = z.ZodType> {
    * retries are not these: they are scheduled explicitly as new jobs.
    */
   attempts?: number;
+  /** Base of the exponential backoff between those attempts (default 5 s). */
+  backoffMs?: number;
   handler: (data: z.output<S>, ctx: WorkerContext, meta: JobMeta) => Promise<unknown>;
 }
 

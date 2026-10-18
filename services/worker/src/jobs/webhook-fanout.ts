@@ -11,5 +11,8 @@ export const job = defineJob({
   name: WEBHOOK_JOBS.fanout,
   description: "Match an outbox event against enabled webhook subscriptions and enqueue deliveries",
   data: FanoutJob,
+  // As for deliveries: a database outage must not silently drop an event's webhooks.
+  attempts: 10,
+  backoffMs: 30_000,
   handler: async ({ eventId }, ctx) => ({ queued: await fanOut(ctx, eventId) }),
 });

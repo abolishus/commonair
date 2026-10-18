@@ -41,7 +41,20 @@ export function toBusEvent(row: EventRow): { ok: true; event: BusEvent } | { ok:
 }
 
 /** Relay one batch. Returns how many rows were claimed. */
-export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200): Promise<number> {
+/** Reject when `p` takes longer than `ms`; the caller treats it as a failed round trip. */
+export async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valkeyTimeoutMs = 2_000): Promise<number> {
   return ctx.db.transaction(async (tx) => {
     const rows = await tx
       .select()
@@ -79,16 +92,19 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200): Pro
           ).map((r) => r.type),
     );
 
+    // The claimed rows stay locked until commit, so each Valkey round trip is bounded: on a
+    // timeout the transaction rolls back and the batch is retried (at-least-once; fan-out
+    // job ids are idempotent and bus consumers dedupe by event id).
     const pipeline = ctx.valkey.pipeline();
     for (const e of valid) pipeline.publish(ctx.busChannel, JSON.stringify(e));
-    const results = await pipeline.exec();
+    const results = await withTimeout(pipeline.exec(), valkeyTimeoutMs, "bus publish");
     const failed = results?.find(([err]) => err);
     if (failed) throw failed[0];
 
-    for (const e of valid) {
-      if (hooked.has(e.type))
-        await ctx.enqueue(QUEUES.webhooks, WEBHOOK_JOBS.fanout, { eventId: e.id }, { jobId: `fanout-${e.id}` });
-    }
+    const fanouts = valid
+      .filter((e) => hooked.has(e.type))
+      .map((e) => ({ name: WEBHOOK_JOBS.fanout, data: { eventId: e.id }, opts: { jobId: `fanout-${e.id}` } }));
+    await withTimeout(ctx.enqueueBulk(QUEUES.webhooks, fanouts), valkeyTimeoutMs, "fan-out enqueue");
 
     const now = ctx.now();
     await tx

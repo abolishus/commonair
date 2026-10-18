@@ -69,6 +69,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     valkey,
     logger: opts.logger,
     enqueue: runtime.enqueue,
+    enqueueBulk: runtime.enqueueBulk,
     webhooks: opts.webhooks,
     storage: opts.storage,
     mediaBucket: opts.mediaBucket ?? "commonair-media",
