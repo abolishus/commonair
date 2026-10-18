@@ -47,14 +47,31 @@ class Refusal extends Error {}
 const emptySet = (): CharSet => ({ ascii: Array<boolean>(128).fill(false), nonAscii: false });
 const fullSet = (): CharSet => ({ ascii: Array<boolean>(128).fill(true), nonAscii: true });
 
+/**
+ * Under `iu`, two non-ASCII code points case-fold onto ASCII letters: KELVIN SIGN (U+212A) is `k`
+ * and LATIN SMALL LETTER LONG S (U+017F) is `s`. Without this, `s+ſ+s+ſ+x` looks like disjoint
+ * repeats and backtracks for seconds.
+ */
+const FOLDS_TO_ASCII: readonly [number, number][] = [
+  [0x212a, 0x6b], // K → k
+  [0x017f, 0x73], // ſ → s
+];
+
 function addCode(set: CharSet, cp: number) {
-  if (cp < 128) set.ascii[cp] = true;
-  else set.nonAscii = true;
+  addRange(set, cp, cp);
 }
 
+/** The two folding code points are recorded as their ASCII letter: under `iu` they are the same. */
 function addRange(set: CharSet, lo: number, hi: number) {
   for (let c = lo; c <= Math.min(hi, 127); c++) set.ascii[c] = true;
-  if (hi >= 128) set.nonAscii = true;
+  let folded = 0;
+  for (const [from, to] of FOLDS_TO_ASCII)
+    if (lo <= from && from <= hi) {
+      set.ascii[to] = true;
+      folded++;
+    }
+  const nonAsciiCount = hi < 128 ? 0 : hi - Math.max(lo, 128) + 1;
+  if (nonAsciiCount > folded) set.nonAscii = true;
 }
 
 function union(a: CharSet, b: CharSet): CharSet {
@@ -469,12 +486,17 @@ function analyzeSeq(seq: Elem[]): { cost: number; unbounded: number } {
   let unbounded = 0;
   for (const chain of chains.values()) {
     if (chain.unbounded > 1)
-      throw new Refusal("two unbounded repeats can match the same text; make them distinct or bound them");
+      throw new Refusal(
+        "two unbounded repeats can match the same text: merge them (l+l+ → l{2,}) or bound one (.{0,20} instead of .*)",
+      );
     worst = Math.max(worst, chain.cost);
     unbounded = Math.max(unbounded, chain.unbounded);
   }
   const cost = worst * fixedProduct;
-  if (cost > MAX_CHAIN_COST) throw new Refusal("too many overlapping optional or repeated parts");
+  if (cost > MAX_CHAIN_COST)
+    throw new Refusal(
+      "too many overlapping optional or repeated parts: merge them (a?a?a? → a{0,3}) or use a bounded repeat like .{0,20}",
+    );
   return { cost, unbounded };
 }
 

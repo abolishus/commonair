@@ -27,6 +27,20 @@ const CATASTROPHIC = [
   "(?:.|a)*z",
   "(?:a+)?a+!",
   "(?:a|ab)?",
+  // Unicode case folding under `iu`: U+212A is k and U+017F is s.
+  "k+\u212A+x",
+  "k+K+k+K+x",
+  "k+\u212A+k+\u212A+x",
+  "s+\u017F+s+\u017F+s+x",
+  "s+ſ+s+ſ+s+x",
+  "S+ſ+x",
+  "K+k+x",
+  "\\w+\u212A+x",
+  "\\w+ſ+x",
+  "[k]+[\u212A]+x",
+  "[a-z]+[\u0100-\u024F]+x",
+  "(?:k|\u212A)+x",
+  "(?:s|ſ)+x",
   "\\w*\\w*!",
   "\\w+\\w+",
   ".*.*=.*",
@@ -178,24 +192,44 @@ describe("unsafeFilterRegexReason", () => {
     expect(unsafeFilterRegexReason("[a-z]+@[a-z]+\\.[a-z]+")).toBeNull();
   });
 
-  test("accepted patterns stay fast on adversarial input", () => {
-    const inputs = [
-      "a".repeat(500),
-      "aaaaaaaaaa ".repeat(45),
-      "1".repeat(500),
-      `${"ha".repeat(249)}x`,
-      "f".repeat(250) + "u".repeat(250),
+  test("accepted patterns stay fast on hostile input built from their own and folding characters", () => {
+    const FOLDING = ["k", "K", "\u212A", "s", "S", "\u017F"];
+    const extra = [
+      "\\w+a?a?a?a?a?!",
+      "a?a?a?a?a?a?a?a?a?a?aaaaa!",
+      "\\d+\\s+\\d+!",
+      "(?:a|b)+c",
+      "[^x]+!",
+      "k+s+x",
+      "\\w+!",
     ];
-    const extra = ["\\w+a?a?a?a?a?!", "a?a?a?a?a?a?a?a?a?a?aaaaa!", "\\d+\\s+\\d+!", "(?:a|b)+c", "[^x]+!"];
     for (const p of [...REALISTIC, ...extra]) {
-      expect(unsafeFilterRegexReason(p)).toBeNull();
+      expect(unsafeFilterRegexReason(p), p).toBeNull();
+      // Every character the pattern names, plus the case-fold partners, a digit, a space and a letter.
+      const own = [
+        ...new Set(
+          Array.from(p.replace(/\\[pPux]\{?[0-9A-Za-z_]*\}?/g, "")).filter((c) => /[\p{L}\p{N} @.!/-]/u.test(c)),
+        ),
+      ];
+      const alphabet = [...new Set([...own, ...FOLDING, "a", "1", " "])];
+      const inputs: string[] = [];
+      for (const a of alphabet) {
+        inputs.push(a.repeat(200));
+        for (const b of alphabet) if (a !== b) inputs.push((a + b).repeat(100));
+      }
+      inputs.push(
+        alphabet
+          .join("")
+          .repeat(Math.ceil(200 / alphabet.length))
+          .slice(0, 200),
+      );
       const re = new RegExp(p, "giu");
       const started = performance.now();
       for (const s of inputs) {
         re.lastIndex = 0;
         re.test(s);
       }
-      expect(performance.now() - started, p).toBeLessThan(100);
+      expect(performance.now() - started, p).toBeLessThan(250);
     }
   });
 });
