@@ -98,6 +98,7 @@ export const ServerFrame = z.discriminatedUnion("op", [
     userId: z.uuid(),
     username: z.string(),
     expiresAt: z.string().nullable(),
+    /** Delivered to moderators only; viewers receive an empty string. */
     reason: z.string(),
   }),
   z.object({ op: z.literal("settings"), channel, settings: ChannelChatSettings }),

@@ -530,6 +530,8 @@ export const BUS = {
   chatControl: (channelId: string) => `chat-control:${channelId}`,
   /** Live status changes (online/offline/transcode) for media and origin services. */
   live: "bus:live",
+  /** Platform-wide per-user control (UserControlMessage): suspension, deletion, token revocation. */
+  userControl: "bus:user-control",
 } as const;
 
 export const BusEvent = z.object({
@@ -541,3 +543,17 @@ export const BusEvent = z.object({
   occurredAt: ts,
 });
 export type BusEvent = z.infer<typeof BusEvent>;
+
+/**
+ * Published by the API on BUS.userControl when a user's standing or credentials change platform-wide.
+ * Chat, IRC and the EventSub WebSocket drop caches (`invalidate`) or close the user's sockets
+ * (`disconnect`, optionally only those authenticated with one token).
+ */
+export const UserControlMessage = z.object({
+  op: z.enum(["invalidate", "disconnect"]),
+  userId: id,
+  /** sha256 of the revoked access token, when only sockets using that token must close. */
+  tokenHash: z.string().optional(),
+  reason: z.enum(["suspended", "deleted", "token_revoked", "role_changed", "profile_changed"]),
+});
+export type UserControlMessage = z.infer<typeof UserControlMessage>;
