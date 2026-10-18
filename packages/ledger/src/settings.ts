@@ -9,19 +9,10 @@
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { type Executor, schema } from "@commonair/db";
+import { PayoutRulesSetting, PlatformCutSetting } from "@commonair/contracts/shapes";
 import type { PlatformCut } from "./rules.ts";
 
-// CONTRACT-REQUEST: these shapes belong in @commonair/contracts/shapes next to PatronageWeights.
-export const PlatformCutSetting = z
-  .object({ streamerShare: z.number().min(0).max(1), coopShare: z.number().min(0).max(1) })
-  .refine((c) => Math.abs(c.streamerShare + c.coopShare - 1) < 1e-9, { message: "cut shares must sum to 1" });
-
-export const PayoutRulesSetting = z.object({
-  minimumCents: z.number().int().nonnegative(),
-  schedule: z.string(),
-  holdDays: z.number().nonnegative(),
-  currency: z.string().regex(/^[a-z]{3}$/),
-});
+export { PayoutRulesSetting, PlatformCutSetting };
 export type PayoutRules = z.infer<typeof PayoutRulesSetting>;
 
 export interface MoneySettings {

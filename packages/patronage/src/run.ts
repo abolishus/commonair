@@ -95,6 +95,8 @@ export async function computePeriod(db: Executor, opts: ComputeOptions): Promise
       formulaVersion: formula.version,
       weights: setting.weights,
       surplusCents: opts.surplusCents,
+      retainedCents: result.retainedCents,
+      retainedLines: result.retainedLines,
       currency: opts.currency,
       computedAt: new Date(),
     };

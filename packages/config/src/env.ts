@@ -176,6 +176,13 @@ export const developerEnv = z.object({
   EVENTSUB_ALLOW_INSECURE_CALLBACKS: bool.default(false),
 });
 
+export const workerEnv = z.object({
+  /** Per-queue concurrency, e.g. "webhooks=32,retention=1". Unlisted queues use defaults. */
+  WORKER_CONCURRENCY: z.string().default(""),
+  /** BullMQ key prefix in Valkey. */
+  WORKER_BULL_PREFIX: z.string().min(1).default("bull"),
+});
+
 export const servicePorts = z.object({
   WEB_PORT: port.default(3000),
   API_PORT: port.default(3001),
@@ -247,5 +254,6 @@ export const ALL_ENV_SCHEMAS = {
   playbackEnv,
   integrityEnv,
   developerEnv,
+  workerEnv,
   servicePorts,
 } as const;

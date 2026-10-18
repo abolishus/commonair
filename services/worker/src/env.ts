@@ -1,23 +1,21 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { authEnv, coreEnv, databaseEnv, developerEnv, servicePorts, storageEnv, valkeyEnv } from "@commonair/config";
+import {
+  authEnv,
+  coreEnv,
+  databaseEnv,
+  developerEnv,
+  servicePorts,
+  storageEnv,
+  valkeyEnv,
+  workerEnv as workerTuningEnv,
+} from "@commonair/config";
 import { QUEUES } from "@commonair/contracts/internal";
 import { z } from "zod";
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 export const QUEUE_NAMES = Object.values(QUEUES) as QueueName[];
-
-/**
- * Worker-only tuning knobs.
- * CONTRACT-REQUEST: move WORKER_CONCURRENCY and WORKER_BULL_PREFIX into `@commonair/config`
- * (a `workerEnv` schema) and `.env.example`. Until then they are optional and default sensibly.
- */
-const workerLocalEnv = z.object({
-  /** Per-queue concurrency, e.g. "webhooks=32,retention=1". Unlisted queues use DEFAULT_CONCURRENCY. */
-  WORKER_CONCURRENCY: z.string().default(""),
-  WORKER_BULL_PREFIX: z.string().min(1).default("bull"),
-});
 
 export const workerEnv = z.object({
   ...coreEnv.shape,
@@ -27,7 +25,7 @@ export const workerEnv = z.object({
   ...developerEnv.shape,
   ...servicePorts.pick({ WORKER_PORT: true }).shape,
   ...storageEnv.partial({ S3_ENDPOINT: true, S3_ACCESS_KEY_ID: true, S3_SECRET_ACCESS_KEY: true }).shape,
-  ...workerLocalEnv.shape,
+  ...workerTuningEnv.shape,
 });
 export type WorkerEnv = z.output<typeof workerEnv>;
 
