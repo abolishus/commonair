@@ -29,6 +29,7 @@ const out = readFileSync(".env.example", "utf8")
   .map((line) => {
     const [key] = line.split("=");
     if (line.endsWith("=__generate_ed25519__")) return `${key}=${pkcs8B64}`;
+    if (line.endsWith("=__generate_hex64__")) return `${key}=${hex(32)}`;
     if (!line.endsWith("=__generate__")) return line;
     // Garage requires its own key formats: GK + 24 hex for ids, 64 hex for secrets.
     if (key === "S3_ACCESS_KEY_ID") return `${key}=GK${hex(12)}`;

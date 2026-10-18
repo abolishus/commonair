@@ -190,6 +190,29 @@ export const workerEnv = z.object({
   WORKER_BULL_PREFIX: z.string().min(1).default("bull"),
 });
 
+/**
+ * Variables read only by compose/Quadlet and infrastructure containers (not by Bun services).
+ * Kept here so `.env.example` stays the single documented list.
+ */
+export const infraEnv = z.object({
+  POSTGRES_PASSWORD: z.string().min(1).optional(),
+  /** Garage requires exactly 64 hex characters. */
+  GARAGE_RPC_SECRET: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  GARAGE_ADMIN_TOKEN: z.string().min(32).optional(),
+  GRAFANA_ADMIN_PASSWORD: z.string().min(16).optional(),
+  /** Host interface for published ports (default 127.0.0.1). */
+  BIND_ADDRESS: z.string().optional(),
+  /** Public hostname Caddy serves with TLS (profile `tls`). */
+  PUBLIC_HOSTNAME: z.string().optional(),
+  IMAGE_REGISTRY: z.string().optional(),
+  IMAGE_TAG: z.string().optional(),
+  WALG_RETAIN_FULL: z.coerce.number().int().positive().optional(),
+  COMMONAIR_ENV_FILE: z.string().optional(),
+});
+
 export const servicePorts = z.object({
   WEB_PORT: port.default(3000),
   API_PORT: port.default(3001),
@@ -262,5 +285,6 @@ export const ALL_ENV_SCHEMAS = {
   integrityEnv,
   developerEnv,
   workerEnv,
+  infraEnv,
   servicePorts,
 } as const;
