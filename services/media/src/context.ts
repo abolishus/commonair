@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/** Dependencies shared by every per-broadcast worker. */
+import type { Valkey } from "iovalkey";
+import type { LiveEvent } from "@commonair/contracts/internal";
+import type { Database } from "@commonair/db";
+import type { Logger } from "@commonair/observability";
+import type { ObjectStorage } from "@commonair/storage";
+import type { Capabilities } from "./ffmpeg/hwaccel.ts";
+import type { MediaMtxClient } from "./mediamtx.ts";
+import type { HashMatchEnforcer } from "./safety/enforce.ts";
+import type { MediaTimings } from "./settings.ts";
+
+export interface MediaContext {
+  db: Database;
+  /** Command connection (keys are prefixed in tests). */
+  valkey: Valkey;
+  publishLive: (event: LiveEvent) => Promise<void>;
+  storage: ObjectStorage;
+  bucket: string;
+  mtx: MediaMtxClient;
+  logger: Logger;
+  timings: MediaTimings;
+  caps: Capabilities;
+  enforcer: HashMatchEnforcer;
+  /** Root for per-broadcast segment directories and clip scratch space. */
+  workDir: string;
+  ffmpeg: string;
+  ffprobe: string;
+  /** INTERNAL_API_SECRET: the internal MediaMTX user's password. */
+  internalSecret: string;
+  /** AUTH_SECRET: decrypts simulcast stream keys. */
+  authSecret: string;
+  /** MEDIAMTX_RTSP_URL. */
+  rtspBase: string;
+  transcodeThreshold: number;
+  enqueueVodFinalize: (vodId: string) => Promise<void>;
+}
+
+/** What workers need to know about a live broadcast. */
+export interface BroadcastInfo {
+  broadcastId: string;
+  channelId: string;
+  slug: string;
+  /** MediaMTX path, `live/<slug>`. */
+  path: string;
+  title: string;
+  startedAt: Date;
+  vodEnabled: boolean;
+}
