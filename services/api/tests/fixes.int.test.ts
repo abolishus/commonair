@@ -294,3 +294,135 @@ describe("user control fan-out", () => {
     }
   });
 });
+
+describe("playback heartbeats", () => {
+  let clock = Date.now();
+  let realNow: () => Date;
+  let streamer: Awaited<ReturnType<typeof signUpAndSignIn>>;
+
+  beforeAll(async () => {
+    streamer = await signUpAndSignIn(api);
+    const ready = await hook(INTERNAL_ROUTES.mediaReady, {
+      path: mediaPath(streamer.username),
+      sourceType: "rtmpConn",
+      sourceId: crypto.randomUUID(),
+    });
+    if (ready.status !== 204) throw new Error(`mediaReady failed: ${ready.status}`);
+    realNow = api.deps.now;
+    api.deps.now = () => new Date(clock);
+  });
+  afterAll(() => {
+    api.deps.now = realNow;
+  });
+
+  async function session() {
+    const viewer = client(api);
+    const start = await viewer.call<{ sessionId: string; token: string }>(
+      "POST",
+      `/api/channels/${streamer.username}/playback`,
+      { deviceId: "device-0123456789abcdef" },
+    );
+    expect(start.status, JSON.stringify(start.body)).toBe(200);
+    const beat = (playedSeconds: number) =>
+      viewer.call("POST", "/api/playback/heartbeat", {
+        sessionId: start.body.sessionId,
+        token: start.body.token,
+        playedSeconds,
+        bufferSeconds: 3,
+        stalls: 0,
+        bytesHttp: 100,
+        bytesP2p: 0,
+        rendition: "source",
+        latencySeconds: 2,
+        ttffMs: 800,
+        visible: true,
+        muted: false,
+      });
+    const row = async () => {
+      const [r] = await db()
+        .select()
+        .from(schema.playbackSessions)
+        .where(eq(schema.playbackSessions.id, start.body.sessionId));
+      if (!r) throw new Error("no session");
+      return r;
+    };
+    return { id: start.body.sessionId, beat, row };
+  }
+
+  test("a beat sooner than 5 s credits no watch time and leaves the clock alone", async () => {
+    const s = await session();
+    clock += 1000;
+    expect((await s.beat(1)).status).toBe(200);
+    let r = await s.row();
+    expect(r).toMatchObject({ heartbeats: 1, watchSeconds: 0, lastHeartbeatAt: null });
+    clock += 1000;
+    expect((await s.beat(1)).status).toBe(200);
+    r = await s.row();
+    expect(r).toMatchObject({ heartbeats: 2, watchSeconds: 0, lastHeartbeatAt: null });
+    clock += 8000; // 10 s since start
+    expect((await s.beat(10)).status).toBe(200);
+    r = await s.row();
+    expect(r.watchSeconds).toBe(10);
+    expect(r.lastHeartbeatAt?.getTime()).toBe(clock);
+  });
+
+  test("concurrent beats: only one is credited (compare-and-set on the clock)", async () => {
+    const s = await session();
+    clock += 10_000;
+    const results = await Promise.all([s.beat(10), s.beat(10), s.beat(10)]);
+    expect(results.every((x) => x.status === 200)).toBe(true);
+    const r = await s.row();
+    expect(r.watchSeconds).toBe(10);
+    expect(r.heartbeats).toBe(1);
+  });
+
+  const threeGoodBeats = async (s: Awaited<ReturnType<typeof session>>) => {
+    for (let i = 0; i < 4; i++) {
+      clock += 10_000;
+      expect((await s.beat(10)).status).toBe(200);
+    }
+  };
+
+  test("an unscored session is promoted by the interim check", async () => {
+    const s = await session();
+    await threeGoodBeats(s);
+    expect((await s.row()).verdict).toBe("verified");
+  });
+
+  test("a media_unconfirmed hold from the scorer is never lifted by heartbeats", async () => {
+    const s = await session();
+    await db()
+      .update(schema.playbackSessions)
+      .set({ verdictReasons: ["media_unconfirmed"] })
+      .where(eq(schema.playbackSessions.id, s.id));
+    await threeGoodBeats(s);
+    expect((await s.row()).verdict).toBe("pending");
+  });
+
+  test("once scored, the scorer's verdict stands: no promotion, no demotion", async () => {
+    const pending = await session();
+    await db()
+      .update(schema.playbackSessions)
+      .set({ scoredAt: new Date(clock), verdict: "pending" })
+      .where(eq(schema.playbackSessions.id, pending.id));
+    await threeGoodBeats(pending);
+    expect((await pending.row()).verdict).toBe("pending");
+
+    const excluded = await session();
+    await db()
+      .update(schema.playbackSessions)
+      .set({ scoredAt: new Date(clock), verdict: "excluded", verdictReasons: ["headless"] })
+      .where(eq(schema.playbackSessions.id, excluded.id));
+    await threeGoodBeats(excluded);
+    expect((await excluded.row()).verdict).toBe("excluded");
+
+    const verified = await session();
+    await db()
+      .update(schema.playbackSessions)
+      .set({ scoredAt: new Date(clock), verdict: "verified" })
+      .where(eq(schema.playbackSessions.id, verified.id));
+    clock += 10_000;
+    await verified.beat(60); // inconsistent beat
+    expect((await verified.row()).verdict).toBe("verified");
+  });
+});
