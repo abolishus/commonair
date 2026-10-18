@@ -128,6 +128,22 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/patronage": {
+      "name": "@commonair/patronage",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/ledger": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/service": {
       "name": "@commonair/service",
       "version": "0.0.0",
@@ -227,6 +243,8 @@
     "@commonair/ledger": ["@commonair/ledger@workspace:packages/ledger"],
 
     "@commonair/observability": ["@commonair/observability@workspace:packages/observability"],
+
+    "@commonair/patronage": ["@commonair/patronage@workspace:packages/patronage"],
 
     "@commonair/scripts": ["@commonair/scripts@workspace:scripts"],
 
