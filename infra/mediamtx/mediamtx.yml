@@ -1,0 +1,120 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# MediaMTX configuration for docker.io/bluenviron/mediamtx:1.21.2-ffmpeg (alpine; busybox wget).
+# Only settings that differ from the upstream defaults are listed; everything else keeps the
+# MediaMTX 1.21.2 default. Secrets never live in this file: INTERNAL_API_SECRET comes from the
+# container environment (MediaMTX expands $VARS in hook commands from its own environment).
+#
+# Ports (all >= 1024, rootless-friendly):
+#   1935/tcp  RTMP ingest            8554/tcp  RTSP (TCP only; internal readers/publishers)
+#   8888/tcp  LL-HLS (origin pulls)  8889/tcp  WebRTC / WHIP ingest     8189/udp  WebRTC ICE
+#   9997/tcp  control API (internal) 9998/tcp  Prometheus metrics (internal)
+
+logLevel: info
+logStructured: true
+
+readTimeout: 10s
+writeTimeout: 10s
+
+###############################################
+# Authentication: every action is decided by the API (services/api, /internal/media/auth).
+# MediaMTX cannot add headers to this request; the API recognizes internal callers by
+# user `internal` + password INTERNAL_API_SECRET in the JSON body, and streamers by the
+# stream key in the query (`?key=`) or the WHIP bearer token. Nothing is excluded: the control
+# API and metrics also go through the hook, so they need the internal credentials too.
+authMethod: http
+authHTTPAddress: http://api:3001/internal/media/auth
+authHTTPExclude: []
+
+###############################################
+# Control API and metrics (never exposed by Caddy; reachable on the internal network only).
+api: true
+apiAddress: :9997
+metrics: true
+metricsAddress: :9998
+pprof: false
+playback: false
+
+###############################################
+# RTSP: TCP only. Used by services/media to read sources and publish renditions.
+rtsp: true
+rtspTransports: [tcp]
+rtspAddress: :8554
+rtspEncryption: "no"
+rtspAuthMethods: [basic]
+
+###############################################
+# RTMP ingest (OBS and friends).
+rtmp: true
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+###############################################
+# LL-HLS, pulled by services/origin. hlsAlwaysRemux is a global MediaMTX setting; it is safe to
+# enable globally because only live/ paths exist (see `paths` below), so the effect is exactly
+# "always remux paths under live/": the first viewer never waits for a muxer to start.
+hls: true
+hlsAddress: :8888
+hlsEncryption: false
+hlsAllowOrigins: []
+hlsAlwaysRemux: true
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+hlsSegmentMaxSize: 50M
+hlsMuxerCloseAfter: 60s
+
+###############################################
+# WebRTC: WHIP ingest. ICE over a single UDP port (>= 1024, rootless).
+webrtc: true
+webrtcAddress: :8889
+webrtcEncryption: false
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: ""
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: []
+webrtcICEServers2: []
+
+###############################################
+# Protocols we do not serve.
+srt: false
+moq: false
+
+###############################################
+pathDefaults:
+  source: publisher
+  # A second publisher on the same path is refused instead of silently replacing the first;
+  # a reconnecting encoder gets the path back once the old session times out.
+  overridePublisher: false
+  record: false
+
+paths:
+  # Channel ingest: live/<slug>. Slugs are usernames: 3-25 of [a-z0-9_].
+  # The hooks tell the API the stream went online/offline; the API owns the broadcast row and
+  # publishes LiveEvent on the bus, which services/media consumes. No shell is involved:
+  # MediaMTX expands $VARS itself (the $MTX_* hook variables, then its own environment for
+  # $INTERNAL_API_SECRET) and only then splits the command with shell quoting rules, so the
+  # variables expand even inside the single-quoted JSON. MTX_QUERY is URL-encoded, so it
+  # cannot break out of the JSON string.
+  "~^live/[a-z0-9_]{3,25}$":
+    runOnOnline: >-
+      wget -q -O- -T 10
+      --header "x-internal-secret: $INTERNAL_API_SECRET"
+      --header "content-type: application/json"
+      --post-data '{"path":"$MTX_PATH","sourceType":"$MTX_SOURCE_TYPE","sourceId":"$MTX_SOURCE_ID","query":"$MTX_QUERY"}'
+      http://api:3001/internal/media/ready
+    runOnOnlineRestart: false
+    runOnOffline: >-
+      wget -q -O- -T 10
+      --header "x-internal-secret: $INTERNAL_API_SECRET"
+      --header "content-type: application/json"
+      --post-data '{"path":"$MTX_PATH","sourceType":"$MTX_SOURCE_TYPE","sourceId":"$MTX_SOURCE_ID","query":"$MTX_QUERY"}'
+      http://api:3001/internal/media/not-ready
+
+  # Transcoded renditions: live/<slug>/<rendition>, published over RTSP by services/media.
+  # The API auth hook allows publishing here only to the internal user.
+  "~^live/[a-z0-9_]{3,25}/(1080p|720p|480p|audio)$":
+    source: publisher
