@@ -1,0 +1,6 @@
+# Address pool for well-behaved simulated viewers and chatters. Shared address space (CGNAT,
+# typical of mobile carriers) plus large consumer-ISP blocks, none overlapping the datacenter
+# sample. Each simulated user gets one stable address from this pool for the whole run.
+100.64.0.0/10
+73.0.0.0/8
+86.128.0.0/10

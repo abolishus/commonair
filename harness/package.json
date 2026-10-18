@@ -5,10 +5,27 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
+    "harness": "bun src/cli.ts",
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
-    "test:int": "bun --bun vp test run .int.test --passWithNoTests"
+    "test:int": "bun --bun vp test run .int.test",
+    "typecheck": "tsc -p .",
+    "browsers": "playwright install chromium webkit"
+  },
+  "dependencies": {
+    "@commonair/config": "workspace:*",
+    "@commonair/contracts": "workspace:*",
+    "@commonair/observability": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "altcha-lib": "2.6.0",
+    "hls.js": "1.7.3",
+    "playwright": "1.64.1",
+    "tmi.js": "1.8.5",
+    "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
     "vite-plus": "catalog:"
   }
 }

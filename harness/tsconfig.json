@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "types": ["bun"], "lib": ["es2024", "dom", "dom.iterable"] },
+  "include": ["src", "scenarios", "player", "tests"]
+}

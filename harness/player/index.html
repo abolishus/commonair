@@ -1,0 +1,30 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harness player</title>
+    <style>
+      body {
+        margin: 0;
+        background: #000;
+      }
+      #players {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+      }
+      video {
+        background: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="players"></div>
+    <script type="module" src="/player.js"></script>
+  </body>
+</html>
