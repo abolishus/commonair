@@ -22,7 +22,8 @@ type counts struct {
 
 // Ledger accumulates per-session bytes and segments for the current receipt
 // period. Bytes are added as they are written to the viewer, so an aborted
-// response is reported only up to what was written.
+// response is reported only up to what was written. Only media objects are
+// recorded here; playlists never are (receipts are media-only).
 type Ledger struct {
 	mu      sync.Mutex
 	start   time.Time

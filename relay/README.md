@@ -39,7 +39,7 @@ the token out of `ps` output and shell history.
 ### With Podman (or Docker)
 
 ```sh
-podman run -d --name commonair-relay --restart=always \
+podman run -d --name commonair-relay --restart=always --stop-timeout 50 \
   -p 8443:8443 \
   -v commonair-relay:/data \
   -e COMMONAIR_RELAY_TOKEN=relay_xxx \
@@ -49,7 +49,9 @@ podman run -d --name commonair-relay --restart=always \
 ```
 
 The image is distroless, runs as a non-root user, and keeps its key and unsent receipts in the
-`/data` volume. Keep that volume: it is the relay's identity.
+`/data` volume. Keep that volume: it is the relay's identity. `--stop-timeout 50` gives the
+relay time to drain (30 s by default) and send its final receipt (10 s) before the runtime
+kills it; set `TimeoutStopSec=50` likewise under systemd.
 
 ## Flags
 
@@ -67,7 +69,7 @@ The image is distroless, runs as a non-root user, and keeps its key and unsent r
 | `--behind-proxy`     | `false`             | Serve plain HTTP for a TLS-terminating proxy.                              |
 | `--region`           |                     | Optional label such as `eu-west`.                                          |
 | `--log-level`        | `info`              | `debug`, `info`, `warn`, `error`. Logs are JSON on stderr.                 |
-| `--shutdown-timeout` | `25s`               | Time for in-flight requests and the final receipt on SIGTERM.              |
+| `--drain-timeout`    | `30s`               | On SIGTERM, time for in-flight requests (min 25 s); then 10 s for receipts. |
 | `--version`          |                     | Print the version.                                                         |
 
 ## What it does
@@ -85,24 +87,32 @@ The image is distroless, runs as a non-root user, and keeps its key and unsent r
   relay and carry the viewer's token. Segments go through a size-bounded LRU cache with
   coalesced misses, so each segment is fetched from the origin once.
 - **Limits.** New viewers beyond capacity get `503` (the platform's assignment should prevent
-  this). When the API marks the relay `suspended`, viewer requests get `410` and heartbeats
-  continue so a reinstatement takes effect immediately.
+  this). At most 256 distinct origin fetches run at once (more get `503`), over at most 128
+  connections to the origin; one viewer session may have at most 8 requests in flight (more
+  get `429`). A fetch nobody waits for any more is cancelled. Blocking playlist requests for a
+  segment more than one past the newest one in the current playlist, or for a part number
+  beyond what a segment can hold, get `400` without reaching the origin. When the API marks
+  the relay `suspended`, viewer requests get `410` and heartbeats continue so a reinstatement
+  takes effect immediately.
 - **Health.** `GET /healthz` returns `{"status","version","viewers"}`; the origin health-checks it.
   It reports `starting` until registration succeeds and `draining` (503) during shutdown.
 - **Heartbeats** report active viewers, egress (an exponentially weighted moving average, in
   Mbps) and cache size at the interval the API sets.
-- **Shutdown.** On SIGTERM the relay stops accepting connections, finishes in-flight requests,
-  closes the current period and tries to deliver every queued receipt.
+- **Shutdown.** On SIGTERM the relay reports `draining`, stops accepting connections and lets
+  in-flight requests finish for `--drain-timeout` (longer than a blocking playlist request can
+  be held). Connections still open after that are closed, the relay waits briefly for their
+  handlers to finish, and only then closes the final period and delivers queued receipts.
 - **Privacy.** Logs never contain viewer IP addresses or tokens; the HTTP server's own error log
   is redacted.
 
 ## How earnings are verified
 
-1. For every viewer session the relay counts the bytes it actually delivered and the media
-   objects (segments, parts, init) delivered completely. Bytes count only after they were
-   flushed to the connection; a viewer who disconnects mid-segment is counted for what was
-   written, never the full segment. Playlist bytes are not counted, which keeps receipts
-   comparable to what the origin issues.
+1. Receipts are **media-only**. For every viewer session the relay counts the bytes of media
+   objects (segments, parts, init sections) it actually delivered, and the number of media
+   objects delivered completely. Playlists are never counted, neither bytes nor objects: the
+   origin's issuance log, which receipts are cross-checked against, counts media objects the
+   same way. Bytes count only after they were flushed to the connection; a viewer who
+   disconnects mid-segment is counted for what was written, never the full segment.
 2. Every receipt interval (60 s by default) the relay closes the period and builds a receipt:
    `{v, relayId, nonce, periodStart, periodEnd, entries: [{sessionId, segments, bytes}]}` with a
    random 128-bit nonce. It signs the exact UTF-8 bytes of that JSON with its Ed25519 key and
@@ -111,7 +121,9 @@ The image is distroless, runs as a non-root user, and keeps its key and unsent r
 3. Receipts are written to `data-dir/receipts/` before sending and deleted only once the API
    accepts them (or permanently rejects one as malformed or replayed). Failures retry with
    exponential backoff; an API outage or a restart loses nothing. The backlog is capped at two
-   days of periods; beyond that the oldest are dropped with an error log.
+   days of periods; beyond that the oldest are dropped with an error log. On start, every
+   queued receipt is verified against the relay's own key; unreadable or unverifiable files are
+   renamed to `*.corrupt` and never sent.
 4. The platform verifies each signature against the key the relay registered, rejects reused
    nonces, and cross-checks the claimed bytes against what the origin issued to the sessions it
    assigned to this relay. Only verified receipts count toward patronage; over-reporting beyond

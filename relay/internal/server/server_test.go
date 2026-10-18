@@ -81,16 +81,20 @@ type fixture struct {
 
 const rid = "01890000-0000-7000-8000-0000000000aa"
 
-func newFixture(t *testing.T, originHandler http.HandlerFunc) *fixture {
+func newFixture(t *testing.T, originHandler http.HandlerFunc, opts ...func(*Config)) *fixture {
 	origin := httptest.NewServer(originHandler)
 	t.Cleanup(origin.Close)
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	ledger := accounting.NewLedger(time.Now())
-	s := New(Config{
+	cfg := Config{
 		Version: "test", PullToken: "relay_x", Store: cache.NewStore(64 << 20), Ledger: ledger,
 		Viewers: accounting.NewViewers(10), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		MediaTimeout: 300 * time.Millisecond,
-	})
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	s := New(cfg)
 	pull, _ := url.Parse(origin.URL + "/relay-pull/")
 	s.SetState(&State{RelayID: rid, PullBase: pull, OriginKey: pub, Status: "active"})
 	ts := httptest.NewServer(s.Handler())

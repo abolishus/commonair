@@ -7,6 +7,7 @@ package relay
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -83,6 +84,8 @@ const (
 	defaultReceiptInterval   = 60 * time.Second
 	defaultHeartbeatInterval = 15 * time.Second
 	meterInterval            = 5 * time.Second
+	// MaxOriginConns caps TCP connections to the origin host.
+	MaxOriginConns = 128
 )
 
 // New loads (or creates) the identity and prepares every component. It does
@@ -126,7 +129,8 @@ func New(opts Options) (*Relay, error) {
 	if runtime.GOOS != "windows" && identity.Insecure(opts.DataDir) {
 		opts.Log.Warn("relay key file is readable by other users; run chmod 600", "file", filepath.Join(opts.DataDir, identity.KeyFile))
 	}
-	queue, problems := receipts.OpenQueue(filepath.Join(opts.DataDir, "receipts"), opts.MaxPending)
+	pub, _ := key.Private.Public().(ed25519.PublicKey)
+	queue, problems := receipts.OpenQueue(filepath.Join(opts.DataDir, "receipts"), opts.MaxPending, pub)
 	for _, p := range problems {
 		opts.Log.Warn("receipt queue problem", "err", p.Error())
 	}
@@ -168,6 +172,9 @@ func validatePublicURL(s string) error {
 func originTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.MaxIdleConnsPerHost = 64
+	// Hard cap on connections to the origin; together with the server's
+	// fetch budget this bounds what one relay can ask of the origin.
+	t.MaxConnsPerHost = MaxOriginConns
 	t.ResponseHeaderTimeout = 0 // blocking playlist requests are held on purpose; contexts bound them
 	t.IdleConnTimeout = 90 * time.Second
 	return t
@@ -193,6 +200,31 @@ func (r *Relay) Start() {
 // Drain makes /healthz report draining and refuses new viewer requests.
 func (r *Relay) Drain() { r.srv.Drain() }
 
+// MinDrainWindow is the shortest HTTP drain GracefulStop accepts: longer than
+// the origin hold time of a blocking playlist request, so a reload in flight
+// at SIGTERM can finish instead of being cut.
+const MinDrainWindow = server.DefaultPlaylistTimeout + 5*time.Second
+
+// handlerGrace bounds the wait for handlers after the HTTP server is closed.
+const handlerGrace = 3 * time.Second
+
+// GracefulStop is the SIGTERM sequence: report draining, let in-flight
+// requests finish within drain (forcing the connections closed after it),
+// then cut the final period and deliver receipts within flush.
+func (r *Relay) GracefulStop(httpSrv *http.Server, drain, flush time.Duration) error {
+	r.Drain()
+	drainCtx, cancel := context.WithTimeout(context.Background(), drain)
+	err := httpSrv.Shutdown(drainCtx)
+	cancel()
+	if err != nil {
+		r.log.Warn("drain window over; closing remaining connections", "err", err.Error())
+		_ = httpSrv.Close()
+	}
+	flushCtx, cancelFlush := context.WithTimeout(context.Background(), flush+handlerGrace)
+	defer cancelFlush()
+	return r.Shutdown(flushCtx)
+}
+
 // Shutdown stops background work, closes the final period and tries to
 // deliver every queued receipt before ctx ends. Whatever is not delivered
 // stays on disk for the next start. Call it after the HTTP server has
@@ -210,7 +242,15 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 		r.cancel()
 	}
 	r.wg.Wait()
-	r.srv.Close()
+	r.srv.Close() // abort origin fetches so blocked handlers return promptly
+	// Handlers cut off by an HTTP server Close may still be finishing their
+	// last write; wait for them so their bytes land in the final period
+	// instead of after it.
+	idleCtx, cancelIdle := context.WithTimeout(ctx, handlerGrace)
+	if err := r.srv.WaitIdle(idleCtx); err != nil {
+		r.log.Warn("handlers still running at the final receipt; their remaining bytes are not reported")
+	}
+	cancelIdle()
 	r.closePeriod(time.Now())
 	err := r.sender.SendAll(ctx)
 	if n := r.queue.Len(); n > 0 {
