@@ -607,3 +607,78 @@ describe("governance", () => {
     await expectPgError(setStatus(id, "council_review", { body: "sneaky" }), /cannot change during a transition/);
   });
 });
+
+describe("users identity", () => {
+  async function adult(name: string): Promise<string> {
+    const [u] = await app
+      .insert(s.users)
+      .values({ name, email: `${name}@example.test`, username: name, birthDate: "1990-01-01" })
+      .returning({ id: s.users.id });
+    return u!.id;
+  }
+
+  test("a set birth date cannot be changed by the app role", async () => {
+    const id = await adult(`idb${++userSeq}`);
+    await expectPgError(
+      app.update(s.users).set({ birthDate: "2015-01-01" }).where(eq(s.users.id, id)),
+      /birth_date cannot be changed/,
+    );
+    await expectPgError(
+      app.update(s.users).set({ birthDate: null }).where(eq(s.users.id, id)),
+      /birth_date cannot be changed/,
+    );
+  });
+
+  test("a missing birth date can be filled in once", async () => {
+    const id = await makeUser();
+    await app.update(s.users).set({ birthDate: "2000-05-05" }).where(eq(s.users.id, id));
+    await expectPgError(
+      app.update(s.users).set({ birthDate: "2000-05-06" }).where(eq(s.users.id, id)),
+      /birth_date cannot be changed/,
+    );
+  });
+
+  test("account type and username are fixed", async () => {
+    const id = await makeUser();
+    await expectPgError(
+      app.update(s.users).set({ accountType: "bot" }).where(eq(s.users.id, id)),
+      /account_type cannot be changed/,
+    );
+    await expectPgError(
+      app
+        .update(s.users)
+        .set({ username: `renamed${userSeq}` })
+        .where(eq(s.users.id, id)),
+      /username cannot be changed/,
+    );
+  });
+
+  test("other profile fields and no-op writes still work", async () => {
+    const id = await adult(`idn${++userSeq}`);
+    const [before] = await app.select().from(s.users).where(eq(s.users.id, id));
+    await app
+      .update(s.users)
+      .set({ name: "New Name", birthDate: before!.birthDate, username: before!.username })
+      .where(eq(s.users.id, id));
+    const [after] = await app.select().from(s.users).where(eq(s.users.id, id));
+    expect(after!.name).toBe("New Name");
+  });
+
+  test("pseudonymization may rewrite identity fields", async () => {
+    const id = await adult(`idp${++userSeq}`);
+    await app
+      .update(s.users)
+      .set({ username: `deleted-${id}`, birthDate: null, pseudonymizedAt: new Date(), deletedAt: new Date() })
+      .where(eq(s.users.id, id));
+    const [after] = await app.select().from(s.users).where(eq(s.users.id, id));
+    expect(after!.username).toBe(`deleted-${id}`);
+    expect(after!.birthDate).toBeNull();
+  });
+
+  test("the table owner is not restricted", async () => {
+    const id = await adult(`ido${++userSeq}`);
+    await t.db.update(s.users).set({ birthDate: "1991-02-02" }).where(eq(s.users.id, id));
+    const [after] = await app.select().from(s.users).where(eq(s.users.id, id));
+    expect(after!.birthDate).toBe("1991-02-02");
+  });
+});

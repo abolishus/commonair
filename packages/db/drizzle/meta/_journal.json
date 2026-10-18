@@ -50,6 +50,20 @@
       "when": 1792362823535,
       "tag": "0006_integrity_scan_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792364478118,
+      "tag": "0007_users_identity_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792364516648,
+      "tag": "0008_appeals_subject_index",
+      "breakpoints": true
     }
   ]
 }

@@ -147,6 +147,8 @@ export const appeals = pgTable(
   },
   (t) => [
     index("appeals_queue_idx").on(t.status, t.createdAt),
+    // Integrity allowance lookups: overturned appeals for a session, user or flag.
+    index("appeals_subject_idx").on(t.subjectType, t.subjectId),
     uniqueIndex("appeals_open_uq")
       .on(t.appellantId, t.subjectType, t.subjectId)
       .where(sql`${t.status} = 'open'`),

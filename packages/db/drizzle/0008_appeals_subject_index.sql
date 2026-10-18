@@ -1,0 +1,1 @@
+CREATE INDEX "appeals_subject_idx" ON "appeals" USING btree ("subject_type","subject_id");
