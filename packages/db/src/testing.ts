@@ -51,8 +51,18 @@ function withDatabase(url: string, name: string): string {
 export interface TestDatabase extends DbHandle {
   url: string;
   name: string;
+  /**
+   * The same database as the least-privilege application role (see
+   * `commonair_configure_app_role`), i.e. what services run as in production. Use it for
+   * anything that exercises the protections.
+   */
+  app: DbHandle;
+  appUrl: string;
   drop(): Promise<void>;
 }
+
+export const TEST_APP_ROLE = "commonair_app_test";
+const TEST_APP_PASSWORD = "commonair_app_test";
 
 export async function createTestDatabase(
   opts: { adminUrl?: string; governance?: GovernanceOverrides } = {},
@@ -75,13 +85,26 @@ export async function createTestDatabase(
     await admin`select pg_advisory_unlock(hashtext(${template}))`;
     const name = `commonair_test_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await admin.unsafe(`create database "${name}" template "${template}"`);
+    // Cluster-wide role, created once; concurrent creators race harmlessly.
+    await admin.unsafe(`do $$ begin
+        create role ${TEST_APP_ROLE} login password '${TEST_APP_PASSWORD}';
+      exception when duplicate_object or unique_violation then null; end $$`);
     const url = withDatabase(adminUrl, name);
     const handle = createDb({ url, max: 5, applicationName: "commonair-test" });
+    await handle.sql`select commonair_configure_app_role(${TEST_APP_ROLE})`;
+    const appUrlObj = new URL(url);
+    appUrlObj.username = TEST_APP_ROLE;
+    appUrlObj.password = TEST_APP_PASSWORD;
+    const appUrl = appUrlObj.toString();
+    const app = createDb({ url: appUrl, max: 5, applicationName: "commonair-test-app" });
     return {
       ...handle,
       url,
       name,
+      app,
+      appUrl,
       async drop() {
+        await app.close();
         await handle.close();
         const a = postgres(adminUrl, { max: 1, onnotice: () => {} });
         try {

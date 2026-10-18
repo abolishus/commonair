@@ -15,6 +15,13 @@
       "when": 1792357403230,
       "tag": "0001_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792358332083,
+      "tag": "0002_protections_hardening",
+      "breakpoints": true
     }
   ]
 }

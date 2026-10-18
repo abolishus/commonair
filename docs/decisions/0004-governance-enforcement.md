@@ -49,11 +49,25 @@ attacker who holds ordinary DML (and TEMP) on every table but does not own the t
    that created their ledger transaction (txid check); non-zero amounts; balanced per currency
    at commit; account owners may be cleared (pseudonymization) but never reassigned.
 7. **History tables** (`governance_settings_history`, `vote_history`, `membership_history`,
-   `governance_applications`, `proposal_electorate`) are written only by triggers.
+   `governance_applications`, `proposal_electorate`) are written only by `SECURITY DEFINER`
+   trigger functions owned by the migration owner (not executable by PUBLIC); their guards
+   check table ownership, not trigger depth (a caller can raise `pg_trigger_depth()` with its
+   own temp-table trigger). The app role holds no write privilege on them at all.
+8. **Fail closed**: rule snapshots must be well-formed (typed numbers and booleans) and the
+   tally treats anything missing as failing. `governance.protections` and `governance.ordinary`
+   are type- and range-checked (periods ≤ 90 days, quorums ≤ 0.5) so no decision can lock out
+   future decisions.
+9. **Applying is all-or-nothing**: every change and the `applied` status in one transaction
+   (deferred check), refused if the key changed after the proposal's vote opened.
+10. **Votes take a share lock** on the proposal, so the outcome waits for in-flight votes.
+11. The ledger balance is checked at commit per transaction and per entry, so
+    `SET CONSTRAINTS ALL IMMEDIATE` cannot fire it early.
 
-Deployment requirement: the application connects as a role that does not own the tables and
-holds no `TRIGGER`, `REFERENCES` or DDL rights; migrations run as the owner. (compose and the
-self-hosting guide set this up.)
+Deployment requirement: the application connects as a role that does not own the tables;
+migrations run as the owner, which then calls `commonair_configure_app_role('<role>')` to grant
+DML on ordinary tables and nothing on history tables (compose and the self-hosting guide do
+this). Integration tests run the protections as such a role (`createTestDatabase().app`).
+Hardening landed in `0002_protections_hardening.sql` after a second review.
 
 ## Residual risk
 
