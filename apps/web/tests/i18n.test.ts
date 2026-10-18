@@ -29,8 +29,8 @@ describe("message catalog", () => {
   });
 
   it("never builds keys dynamically (the check above would miss them)", () => {
-    // The two exceptions: the definition of `t`, and the error map checked below.
-    const allowed = [join(SRC, "i18n/index.ts"), join(SRC, "lib/form-errors.ts")];
+    // The exceptions: the definition of `t`, and the code-to-key maps (typed as MessageKey).
+    const allowed = [join(SRC, "i18n/index.ts"), join(SRC, "lib/form-errors.ts"), join(SRC, "chat/messages.ts")];
     const dynamic = files
       .filter(([f, text]) => !allowed.includes(f) && /\bt\(\s*[`'a-zA-Z_]/.test(text))
       .map(([f]) => f);

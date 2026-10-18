@@ -87,7 +87,7 @@ function setup(opts: { tokenFails?: number } = {}) {
     onMessage: (m) => messages.push(m),
     onDelete: (id) => deleted.push(id),
     onClear: () => cleared++,
-    onNotice: (text, kind) => notices.push([kind, text]),
+    onNotice: (code, kind) => notices.push([kind, code]),
   };
   const conn = new ChatConnection(
     CHANNEL,
@@ -214,7 +214,7 @@ describe("ChatConnection", () => {
     expect(t.messages.map((m) => m.body)).toEqual(["hi 1"]);
   });
 
-  it("forwards deletes, clears, notices and errors", async () => {
+  it("forwards deletes, clears, and notice and error codes", async () => {
     const t = await connected();
     t.socket.frame({ op: "delete", channel: CHANNEL, messageId: UUID(101), username: "viewer_two" });
     t.socket.frame({ op: "clear", channel: CHANNEL });
@@ -225,9 +225,9 @@ describe("ChatConnection", () => {
     expect(t.deleted).toEqual([UUID(101)]);
     expect(t.cleared()).toBe(1);
     expect(t.notices).toEqual([
-      ["notice", "Slow mode is on"],
-      ["notice", "Too fast"],
-      ["error", "Sign in to chat"],
+      ["notice", "msg_slowmode"],
+      ["notice", "msg_ratelimit"],
+      ["error", "UNAUTHORIZED"],
     ]);
   });
 

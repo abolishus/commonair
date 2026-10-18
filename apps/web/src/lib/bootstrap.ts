@@ -4,12 +4,17 @@
 import { getRouteApi } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { getRequestHeader } from "@tanstack/react-start/server";
-import { loadBootstrap } from "../server/bootstrap.ts";
+import { loadBootstrap, loadSessionUser } from "../server/bootstrap.ts";
 import type { Bootstrap } from "./bootstrap-types.ts";
 
 /** Runs on the web server (SSR or as an RPC from the browser) so it can read env and cookies. */
 export const getBootstrap = createServerFn({ method: "GET" }).handler((): Promise<Bootstrap> =>
   loadBootstrap(getRequestHeader("cookie")),
+);
+
+/** Just the session, for route guards (`beforeLoad`). */
+export const getSessionUser = createServerFn({ method: "GET" }).handler(() =>
+  loadSessionUser(getRequestHeader("cookie")),
 );
 
 const rootApi = getRouteApi("__root__");

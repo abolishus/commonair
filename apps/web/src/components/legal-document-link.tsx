@@ -32,8 +32,9 @@ export function LegalDocumentLink({ doc }: { doc: LegalDoc }): React.JSX.Element
         <DialogHeader>
           <DialogTitle>{doc.title}</DialogTitle>
           <DialogDescription>
-            {t("legal.version", { version: doc.version })}
-            {doc.isDraft ? ` · ${t("legal.draft")}` : ""}
+            {doc.isDraft
+              ? t("legal.versionDraft", { version: doc.version })
+              : t("legal.version", { version: doc.version })}
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh]">

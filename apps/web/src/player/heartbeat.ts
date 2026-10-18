@@ -4,8 +4,8 @@
 /**
  * Heartbeat accounting for the playback contract (`playback.heartbeat`): the player keeps
  * cumulative counters; each heartbeat reports what happened since the last *acknowledged* one.
- * A failed heartbeat commits nothing, so its share rolls into the next report (played time
- * clamped to the contract's 120 s per heartbeat). Mirrors `PlaybackSession` in the harness.
+ * A failed heartbeat commits nothing, so its share rolls into the next report. Played time is
+ * capped at the contract's 120 s per heartbeat; the excess is carried, never dropped.
  */
 
 export const RENDITION_SOURCE = "source" as const;
@@ -56,9 +56,17 @@ export class HeartbeatAccountant {
     };
   }
 
-  /** Record that the server accepted a heartbeat built from `c`. */
+  /**
+   * Record that the server accepted a heartbeat built from `c`. Only the played time actually
+   * reported counts as sent: anything above the per-heartbeat cap carries over to the next one.
+   */
   commit(c: CumulativeStats): void {
-    this.sent = { played: c.playedSeconds, stalls: c.stalls, bytesHttp: c.bytesHttp, bytesP2p: c.bytesP2p };
+    this.sent = {
+      played: this.sent.played + this.delta(c).playedSeconds,
+      stalls: c.stalls,
+      bytesHttp: c.bytesHttp,
+      bytesP2p: c.bytesP2p,
+    };
   }
 }
 

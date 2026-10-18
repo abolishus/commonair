@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vite-plus/test";
-import { createHandler, staticPath } from "../src/server/http.ts";
+import { createHandler, securityHeaders, staticPath } from "../src/server/http.ts";
 import {
   HOP_BY_HOP,
   downstreamResponse,
@@ -14,6 +14,7 @@ import {
 } from "../src/server/proxy.ts";
 
 const API = "http://api.internal:3001";
+const TARGET = { api: API, publicUrl: "https://stream.example.org" };
 
 describe("isProxied", () => {
   it("matches /api/* and /rpc only", () => {
@@ -80,7 +81,7 @@ describe("upstreamRequest", () => {
       },
       body: "{}",
     });
-    const up = upstreamRequest(req, API, "10.1.2.3");
+    const up = upstreamRequest(req, TARGET, "10.1.2.3");
     expect(up.url).toBe(`${API}/rpc/me/get?x=1`);
     expect(up.method).toBe("POST");
     expect(up.redirect).toBe("manual");
@@ -89,12 +90,36 @@ describe("upstreamRequest", () => {
     expect(up.headers.get("cookie")).toBe("commonair.session_token=abc");
     expect(up.headers.get("origin")).toBe("http://localhost:3000");
     expect(up.headers.get("x-forwarded-for")).toBe("198.51.100.7, 10.1.2.3");
-    expect(up.headers.get("x-forwarded-host")).toBe("localhost:3000");
-    expect(up.headers.get("x-forwarded-proto")).toBe("http");
+    expect(up.headers.get("x-forwarded-host")).toBe("stream.example.org");
+    expect(up.headers.get("x-forwarded-proto")).toBe("https");
+  });
+
+  it("drops client-sent forwarding headers and reports the configured public origin", () => {
+    const req = new Request("http://evil.example:3000/rpc/me/get", {
+      headers: {
+        forwarded: "for=1.2.3.4;host=evil.example",
+        "x-real-ip": "1.2.3.4",
+        "x-forwarded-host": "evil.example",
+        "x-forwarded-port": "8443",
+        "x-forwarded-proto": "https",
+        "x-forwarded-prefix": "/admin",
+      },
+    });
+    const up = upstreamRequest(req, TARGET, "10.0.0.9");
+    for (const h of ["forwarded", "x-real-ip", "x-forwarded-port", "x-forwarded-prefix"])
+      expect(up.headers.has(h)).toBe(false);
+    expect(up.headers.get("x-forwarded-host")).toBe("stream.example.org");
+    expect(up.headers.get("x-forwarded-proto")).toBe("https");
+    expect(up.headers.get("x-forwarded-for")).toBe("10.0.0.9");
+  });
+
+  it("sends no x-forwarded-for when there is no address at all", () => {
+    const up = upstreamRequest(new Request("http://localhost/rpc/x"), TARGET, null);
+    expect(up.headers.has("x-forwarded-for")).toBe(false);
   });
 
   it("sends no body for GET", () => {
-    const up = upstreamRequest(new Request("http://localhost:3000/api/auth/altcha-challenge"), API, "127.0.0.1");
+    const up = upstreamRequest(new Request("http://localhost:3000/api/auth/altcha-challenge"), TARGET, "127.0.0.1");
     expect(up.body).toBeNull();
   });
 });
@@ -129,7 +154,7 @@ describe("proxy", () => {
       return new Response(stream, { status: 201, headers: { "set-cookie": "s=1; HttpOnly" } });
     };
     const req = new Request("http://localhost:3000/api/auth/sign-up/email", { method: "POST", body: '{"a":1}' });
-    const res = await proxy(req, API, "192.0.2.4", fetcher);
+    const res = await proxy(req, TARGET, "192.0.2.4", fetcher);
     expect(seen).toEqual({ url: `${API}/api/auth/sign-up/email`, body: '{"a":1}', xff: "192.0.2.4" });
     expect(res.status).toBe(201);
     expect(res.headers.getSetCookie()).toEqual(["s=1; HttpOnly"]);
@@ -137,7 +162,7 @@ describe("proxy", () => {
   });
 
   it("answers 502 when the API is unreachable", async () => {
-    const res = await proxy(new Request("http://localhost:3000/rpc/x"), API, null, () =>
+    const res = await proxy(new Request("http://localhost:3000/rpc/x"), TARGET, null, () =>
       Promise.reject(new Error("ECONNREFUSED")),
     );
     expect(res.status).toBe(502);
@@ -161,6 +186,7 @@ describe("staticPath", () => {
 describe("createHandler", () => {
   const handler = createHandler({
     apiUrl: API,
+    publicUrl: "https://stream.example.org",
     clientDir: "/nonexistent-dir-for-tests/",
     ssr: () => new Response("ssr"),
     fetchUpstream: async (req) => new Response(`api:${new URL(req.url).pathname}`),
@@ -180,5 +206,34 @@ describe("createHandler", () => {
     );
     expect(await (await handler(new Request("http://localhost/some_channel"), null)).text()).toBe("ssr");
     expect(await (await handler(new Request("http://localhost/assets/missing.js"), null)).text()).toBe("ssr");
+  });
+
+  it("protects pages from framing, except embeds", async () => {
+    const page = await handler(new Request("http://localhost/some_channel"), null);
+    expect(page.headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+    expect(page.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(page.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    const embed = await handler(new Request("http://localhost/embed/some_channel"), null);
+    expect(embed.headers.get("content-security-policy")).toBe("frame-ancestors *");
+    const health = await handler(new Request("http://localhost/healthz"), null);
+    expect(health.headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+  });
+
+  it("never lets shared caches store rendered pages", async () => {
+    const page = await handler(new Request("http://localhost/dashboard"), null);
+    expect(page.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("leaves API responses' headers to the API", async () => {
+    const res = await handler(new Request("http://localhost/rpc/instance/info"), null);
+    expect(res.headers.has("content-security-policy")).toBe(false);
+  });
+});
+
+describe("securityHeaders", () => {
+  it("only treats /embed/ paths as embeddable", () => {
+    expect(securityHeaders("/embed/x")["content-security-policy"]).toBe("frame-ancestors *");
+    expect(securityHeaders("/embedded")["content-security-policy"]).toBe("frame-ancestors 'self'");
+    expect(securityHeaders("/embed")["content-security-policy"]).toBe("frame-ancestors 'self'");
   });
 });

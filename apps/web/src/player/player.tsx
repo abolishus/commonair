@@ -8,6 +8,7 @@ import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { api, apiKeepalive } from "../lib/api.ts";
 import { PlayerController, type PlayerState } from "./controller.ts";
+import { pageLifecycle } from "./lifecycle.ts";
 
 export interface PlayerProps {
   channel: string;
@@ -49,11 +50,16 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
     });
     setState("loading");
     void controller.start();
-    const onPageHide = () => void controller.stop();
-    window.addEventListener("pagehide", onPageHide);
+    const lifecycle = pageLifecycle(
+      () => void controller.stop(),
+      () => setAttempt((n) => n + 1),
+    );
+    window.addEventListener("pagehide", lifecycle.pagehide);
+    window.addEventListener("pageshow", lifecycle.pageshow);
     return () => {
       clearTimeout(retry);
-      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pagehide", lifecycle.pagehide);
+      window.removeEventListener("pageshow", lifecycle.pageshow);
       void controller.stop();
     };
   }, [channel, live, embed, attempt]);

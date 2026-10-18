@@ -1,20 +1,24 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { IconButton, SkeletonText } from "@commonair/ui";
+import { ConfirmDialog, IconButton, SkeletonText } from "@commonair/ui";
 import { Button, buttonVariants } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { toast } from "@commonair/ui/toast";
 import { Copy01Icon } from "@hugeicons/core-free-icons";
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { Confirm } from "../../components/confirm.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
-import { useBootstrap } from "../../lib/bootstrap.ts";
+import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
+import { requireSession } from "../../lib/guard.ts";
 
-export const Route = createFileRoute("/_app/dashboard")({ component: DashboardPage });
+export const Route = createFileRoute("/_app/dashboard")({
+  // Server-side guard (SSR and client navigation); the component keeps a client fallback.
+  beforeLoad: () => requireSession(() => getSessionUser()),
+  component: DashboardPage,
+});
 
 function DashboardPage(): React.JSX.Element {
   const { me } = useBootstrap();
@@ -113,7 +117,7 @@ function StreamSetup({ channel }: { channel: string }): React.JSX.Element {
           {ingest ? (
             <code className="bg-muted px-2 py-1">
               <span data-testid="stream-key-prefix">{ingest.activeKeyPrefix ?? ""}</span>
-              {ingest.activeKeyPrefix ? "…" : t("dashboard.noKey")}
+              {ingest.activeKeyPrefix ? t("dashboard.keyTruncated") : t("dashboard.noKey")}
             </code>
           ) : (
             <SkeletonText lines={1} />
@@ -139,7 +143,7 @@ function StreamSetup({ channel }: { channel: string }): React.JSX.Element {
         )}
         <div>
           {ingest?.activeKeyPrefix ? (
-            <Confirm
+            <ConfirmDialog
               trigger={rotateButton}
               title={t("dashboard.rotateConfirmTitle")}
               description={t("dashboard.rotateConfirmBody")}

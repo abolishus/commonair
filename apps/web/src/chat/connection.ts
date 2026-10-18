@@ -35,8 +35,8 @@ export interface ChatEvents {
   onMessage: (message: ChatMessageFrame) => void;
   onDelete: (messageId: string) => void;
   onClear: () => void;
-  /** Server notices (slow mode, bans, rejected messages…) and protocol errors, for a toast. */
-  onNotice: (text: string, kind: "notice" | "error") => void;
+  /** Server notice and error codes (slow mode, bans, rejected messages…), for a toast. */
+  onNotice: (code: string, kind: "notice" | "error") => void;
 }
 
 const OPEN = 1;
@@ -162,10 +162,10 @@ export class ChatConnection {
         if (f.channel === this.channel) this.events.onClear();
         return;
       case "notice":
-        if (f.channel === null || f.channel === this.channel) this.events.onNotice(f.text, "notice");
+        if (f.channel === null || f.channel === this.channel) this.events.onNotice(f.code, "notice");
         return;
       case "error":
-        this.events.onNotice(f.message, "error");
+        this.events.onNotice(f.code, "error");
         return;
       default:
         return;

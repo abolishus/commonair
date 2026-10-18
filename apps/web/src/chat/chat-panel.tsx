@@ -5,12 +5,14 @@ import { EmptyState, IconButton } from "@commonair/ui";
 import { buttonVariants } from "@commonair/ui/components/button";
 import { Input } from "@commonair/ui/components/input";
 import { toast } from "@commonair/ui/toast";
+import { cn } from "@commonair/ui/lib/utils";
 import { Message01Icon, SentIcon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { api } from "../lib/api.ts";
 import { ChatConnection, appendMessage, type ChatMessageFrame, type ChatStatus } from "./connection.ts";
+import { errorMessage, noticeMessage } from "./messages.ts";
 
 /** Chat name colors come from the AA-checked `--chat-N` tokens, picked by username. */
 const NAME_COLORS = [
@@ -67,7 +69,8 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
         onMessage: (m) => setMessages((list) => appendMessage(list, m)),
         onDelete: (id) => setMessages((list) => list.filter((m) => m.id !== id)),
         onClear: () => setMessages([]),
-        onNotice: (text, kind) => (kind === "error" ? toast.error(text) : toast.info(text)),
+        onNotice: (code, kind) =>
+          kind === "error" ? toast.error(errorMessage(code)) : toast.info(noticeMessage(code)),
       },
     );
     connection.current = conn;
@@ -94,7 +97,7 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
       data-testid="chat"
       data-state={status}
       aria-label={t("chat.title")}
-      className={`flex min-h-0 flex-col border border-border ${className ?? ""}`}
+      className={cn("flex min-h-0 flex-col border border-border", className)}
     >
       <header className="flex items-center justify-between border-b border-border px-3 py-2 text-xs font-medium">
         <span>{t("chat.title")}</span>
@@ -115,8 +118,8 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
         ) : (
           messages.map((m) => (
             <li key={m.id} data-testid="chat-message" data-author={m.user.username} className="py-0.5 break-words">
-              <span className={`font-semibold ${nameColor(m.user.username)}`}>{m.user.displayName}</span>
-              <span className="text-muted-foreground">: </span>
+              <span className={cn("font-semibold", nameColor(m.user.username))}>{m.user.displayName}</span>
+              <span className="text-muted-foreground">{t("chat.nameSeparator")}</span>
               <span className={m.isAction ? "italic" : undefined}>{m.body}</span>
             </li>
           ))
