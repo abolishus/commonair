@@ -9,7 +9,19 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ACCENTS } from "@commonair/contracts/shapes";
 import { describe, expect, test } from "vite-plus/test";
+import { buttonVariants } from "../src/components/button.tsx";
+import { cn } from "../src/lib/utils.ts";
 import { contrast } from "./support/color.ts";
+
+const BUTTON_VARIANTS = ["default", "outline", "secondary", "ghost", "destructive", "link"] as const;
+
+/** The focus-ring color token a button variant actually ends up with (after tailwind-merge, as Button renders). */
+function focusRing(variant: (typeof BUTTON_VARIANTS)[number]): string[] {
+  const classes = cn(buttonVariants({ variant })).split(/\s+/);
+  return classes
+    .map((c) => /^(?:dark:)?focus-visible:ring-([a-z-]+(?:\/\d+)?)$/.exec(c)?.[1])
+    .filter((c): c is string => c !== undefined && !/^(offset|inset|\d)/.test(c));
+}
 
 const css = readFileSync(join(import.meta.dirname, "../src/styles/globals.css"), "utf8");
 
@@ -72,6 +84,19 @@ describe.each(Object.entries(themes))("%s theme", (_name, theme) => {
   ])("%s on %s is AA", (fg, surface) => {
     expect(contrast(value(theme, fg), value(theme, surface), bg)).toBeGreaterThanOrEqual(AA);
   });
+
+  test.each(BUTTON_VARIANTS)(
+    "button %s: full-opacity focus ring with 3:1 on background, card and popover",
+    (variant) => {
+      const rings = focusRing(variant);
+      expect(rings).toHaveLength(1);
+      const token = rings[0]!;
+      expect(token).not.toContain("/");
+      for (const surface of ["--background", "--card", "--popover"]) {
+        expect(contrast(value(theme, `--${token}`), value(theme, surface), bg)).toBeGreaterThanOrEqual(3);
+      }
+    },
+  );
 
   test("focus ring is visible against the background (non-text 3:1)", () => {
     expect(contrast(value(theme, "--ring"), bg)).toBeGreaterThanOrEqual(3);

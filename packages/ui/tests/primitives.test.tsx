@@ -29,6 +29,7 @@ import { Toaster, toast } from "../src/toast.tsx";
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 function advance(totalMs: number, stepMs: number): void {
@@ -267,8 +268,14 @@ function RouterLink({ children, ...props }: React.ComponentProps<"a">) {
   );
 }
 
+/** happy-dom reports every <img> as complete with no size; real browsers report "still loading". */
+function imagesStillLoading(): void {
+  vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(false);
+}
+
 describe("StreamCard", () => {
   test("is one keyboard-focusable link with title, channel, category, live and viewer count", async () => {
+    imagesStillLoading();
     const user = userEvent.setup();
     const { container } = render(<StreamCard stream={stream} href="/pixel_pioneer" locale="en" />);
     const link = screen.getByRole("link");
@@ -304,10 +311,25 @@ describe("StreamCard", () => {
   });
 
   test("a thumbnail that fails to load falls back to the accent placeholder", () => {
+    imagesStillLoading();
     const { container } = render(<StreamCard stream={stream} href="/x" />);
     fireEvent.error(container.querySelector("img")!);
     expect(container.querySelector("img")).toBeNull();
     expect(container.querySelector(".bg-channel-accent\\/15")).toBeTruthy();
+  });
+
+  test("a thumbnail that already failed before hydration (complete, no size) falls back too", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(0);
+    const { container } = render(<StreamCard stream={stream} href="/x" />);
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  test("a loaded thumbnail is kept", () => {
+    vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+    vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(320);
+    const { container } = render(<StreamCard stream={stream} href="/x" />);
+    expect(container.querySelector("img")).toBeTruthy();
   });
 
   test("renders through a custom link element", () => {
