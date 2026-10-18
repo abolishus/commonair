@@ -17,6 +17,10 @@ export const WARNINGS = {
   videoMissing: "video_missing",
   videoCodec: "video_codec_unsupported",
   audioCodec: "audio_codec_unsupported",
+  /** Server-side: the ladder should run but every transcode slot on the host is taken. */
+  transcodeCapacity: "transcode_capacity",
+  /** Server-side: VOD recording/clip buffer paused, the media work dir is over its disk budget. */
+  recordingDiskBudget: "recording_disk_budget",
 } as const;
 export type Warning = (typeof WARNINGS)[keyof typeof WARNINGS];
 

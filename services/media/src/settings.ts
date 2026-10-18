@@ -29,6 +29,16 @@ export interface MediaTimings {
   segmentSeconds: number;
   /** Reconcile live broadcasts against the database and MediaMTX. */
   reconcileMs: number;
+  /** Timestamped thumbnails kept per broadcast (older ones are deleted). */
+  thumbnailHistory: number;
+  /** Work-dir sweep interval. */
+  sweepMs: number;
+  /** A broadcast directory no session owns is recovered and removed once untouched this long. */
+  broadcastDirMaxAgeMs: number;
+  /** An unfinished VOD this long after its broadcast ended is marked failed. */
+  vodFailAfterMs: number;
+  /** Wait this long after a finalize job failed for good before re-queueing it. */
+  vodRetryAfterMs: number;
 }
 
 export const DEFAULT_TIMINGS: MediaTimings = {
@@ -44,6 +54,11 @@ export const DEFAULT_TIMINGS: MediaTimings = {
   clipBufferSeconds: 90,
   segmentSeconds: 4,
   reconcileMs: 30_000,
+  thumbnailHistory: 10,
+  sweepMs: 5 * 60_000,
+  broadcastDirMaxAgeMs: 15 * 60_000,
+  vodFailAfterMs: 24 * 3600_000,
+  vodRetryAfterMs: 10 * 60_000,
 };
 
 /** Viewer sessions whose last heartbeat is older than this are not counted. */

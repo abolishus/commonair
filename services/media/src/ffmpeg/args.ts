@@ -6,6 +6,7 @@
  * the exact flags reviewable and unit-testable; the supervisor only spawns what these return.
  */
 import { MEDIA_INTERNAL_USER } from "@commonair/contracts/internal";
+import { hostPort, type ParsedTarget } from "../net/ssrf.ts";
 import type { Rung } from "../transcode/ladder.ts";
 
 export type H264Encoder = "h264_nvenc" | "libx264";
@@ -26,14 +27,44 @@ export function internalRtspUrl(base: string, path: string, secret: string): str
   return u.toString();
 }
 
-/** Destination for a simulcast target: the configured RTMP URL with the stream key appended. */
-export function simulcastTargetUrl(rtmpUrl: string, streamKey: string): string {
-  return `${rtmpUrl.replace(/\/+$/, "")}/${streamKey}`;
+export interface SimulcastOutput {
+  /** Full publish URL including the stream key: secret, redact it everywhere. */
+  url: string;
+  /** Set when the host was replaced by the vetted IP, so the server still sees its own name. */
+  tcUrl: string | null;
+}
+
+/**
+ * Publish URL for a vetted simulcast target: path, then the stream key, then any query. For
+ * `rtmp:` the host is the address the SSRF check approved (no second DNS lookup by ffmpeg); for
+ * `rtmps:` the host name stays so TLS SNI matches the server.
+ */
+export function simulcastOutput(target: ParsedTarget, streamKey: string, vettedAddress: string): SimulcastOutput {
+  const pinned = target.protocol === "rtmp:";
+  const host = hostPort(pinned ? vettedAddress : target.host, target.explicitPort || pinned ? target.port : null);
+  return {
+    url: `${target.protocol}//${host}${target.path}/${streamKey}${target.search}`,
+    tcUrl: pinned ? target.tcUrl : null,
+  };
 }
 
 /** Restream the source unchanged to an RTMP target. */
-export function simulcastArgs(input: string, target: string): string[] {
-  return [...BASE, ...PROGRESS, ...RTSP_IN, "-i", input, "-map", "0", "-c", "copy", "-f", "flv", target];
+export function simulcastArgs(input: string, out: SimulcastOutput): string[] {
+  return [
+    ...BASE,
+    ...PROGRESS,
+    ...RTSP_IN,
+    "-i",
+    input,
+    "-map",
+    "0",
+    "-c",
+    "copy",
+    ...(out.tcUrl ? ["-rtmp_tcurl", out.tcUrl] : []),
+    "-f",
+    "flv",
+    out.url,
+  ];
 }
 
 export interface EncoderSettings {

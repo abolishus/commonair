@@ -188,6 +188,8 @@ beforeAll(async () => {
     AUTH_SECRET,
     TRANSCODE_VIEWER_THRESHOLD: "2",
     TRANSCODE_HWACCEL: "none",
+    // The mock simulcast target listens on loopback, which production refuses (SSRF).
+    OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true",
   });
   await sub.subscribe(busChannel);
   sub.on("message", (_c: string, m: string) => busEvents.push(LiveEvent.parse(JSON.parse(m))));

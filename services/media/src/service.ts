@@ -13,6 +13,7 @@ import { createValkey, valkeyCheck, type ReadinessCheck } from "@commonair/servi
 import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
+import { DiskBudget } from "./disk.ts";
 import { probeCapabilities, type Capabilities } from "./ffmpeg/hwaccel.ts";
 import { startJobs, type Jobs } from "./jobs.ts";
 import { LiveCoordinator } from "./lifecycle.ts";
@@ -20,7 +21,9 @@ import { every, type Loop } from "./loop.ts";
 import { MediaMtxClient } from "./mediamtx.ts";
 import { HashMatchEnforcer } from "./safety/enforce.ts";
 import { createHashMatcher, type HashMatcher } from "./safety/hashmatch.ts";
+import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "./recovery.ts";
 import { DEFAULT_TIMINGS, type MediaTimings } from "./settings.ts";
+import { defaultTranscodeSlots, SlotLimiter } from "./transcode/slots.ts";
 
 export interface MediaServiceOptions {
   env: MediaServiceEnv;
@@ -83,7 +86,20 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     stopBroadcast: async (id) => coordinator?.offline(id, true, false),
   });
 
+  const diskBudget = new DiskBudget({
+    dir: workDir,
+    config: { maxBytes: env.MEDIA_WORK_DIR_MAX_BYTES, minFreeBytes: env.MEDIA_WORK_DIR_MIN_FREE_BYTES },
+    logger,
+  });
+  const transcodeSlots = new SlotLimiter(env.TRANSCODE_MAX_LADDERS ?? defaultTranscodeSlots(caps.encoder));
+  logger.info("media limits", {
+    transcodeSlots: transcodeSlots.capacity,
+    workDirMaxBytes: diskBudget.config.maxBytes,
+    workDirMinFreeBytes: diskBudget.config.minFreeBytes,
+  });
+
   const jobsRef: { jobs?: Jobs } = {};
+  const jobsNotStarted = () => new Error("job queues not started");
   const ctx: MediaContext = {
     db: dbh.db,
     valkey,
@@ -105,13 +121,27 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     rtspBase: env.MEDIAMTX_RTSP_URL,
     transcodeThreshold: env.TRANSCODE_VIEWER_THRESHOLD,
     enqueueVodFinalize: async (vodId) => {
-      if (!jobsRef.jobs) throw new Error("job queues not started");
+      if (!jobsRef.jobs) throw jobsNotStarted();
       await jobsRef.jobs.enqueueVodFinalize(vodId);
     },
+    vodJobs: {
+      info: async (vodId) => {
+        if (!jobsRef.jobs) throw jobsNotStarted();
+        return jobsRef.jobs.vodFinalize.info(vodId);
+      },
+      requeue: async (vodId) => {
+        if (!jobsRef.jobs) throw jobsNotStarted();
+        await jobsRef.jobs.vodFinalize.requeue(vodId);
+      },
+    },
+    diskBudget,
+    transcodeSlots,
+    simulcastAllowPrivate: env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
   };
   coordinator = new LiveCoordinator(ctx);
   const live = coordinator;
 
+  const activeScratch = new ActiveScratch();
   const jobs = startJobs({
     valkeyUrl: env.VALKEY_URL,
     prefix: opts.bullPrefix,
@@ -125,6 +155,8 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       imageFormat: caps.imageFormat,
       workDir,
       logger,
+      diskBudget,
+      scratch: activeScratch,
     },
     clips: {
       db: dbh.db,
@@ -136,12 +168,28 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       imageFormat: caps.imageFormat,
       workDir,
       logger,
+      diskBudget,
+      scratch: activeScratch,
       liveWindow: (id, start, d) => live.liveWindow(id, start, d),
     },
   });
   jobsRef.jobs = jobs;
 
   let reconcileLoop: Loop | null = null;
+  let sweepLoop: Loop | null = null;
+  const sweep = async () => {
+    const { removed } = await sweepWorkDir({
+      db: dbh.db,
+      storage,
+      bucket: ctx.bucket,
+      workDir,
+      logger,
+      owned: new Set(live.liveBroadcasts),
+      activeScratch,
+      broadcastDirMaxAgeMs: timings.broadcastDirMaxAgeMs,
+    });
+    if (removed.length > 0) diskBudget.invalidate();
+  };
   const onMessage = (channel: string, message: string) => {
     if (channel !== busChannel) return;
     void live.handleMessage(message).catch((err: unknown) => logger.error("live event handling failed", { err }));
@@ -168,17 +216,31 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       await storage.ensureBucket(ctx.bucket).catch((err: unknown) => {
         logger.warn("could not ensure media bucket exists (bootstrap should create it)", { err });
       });
+      // Crash recovery first: no session records and no job reads a playlist until the work dir
+      // left by a previous process is repaired. Job workers are idle until now, so every
+      // scratch directory is a leftover.
+      try {
+        const r = await recoverWorkDir({ db: dbh.db, storage, bucket: ctx.bucket, workDir, logger });
+        if (r.directories > 0) logger.info("work dir recovered", { ...r });
+        await sweepScratchAtStartup({ workDir, logger });
+        diskBudget.invalidate();
+      } catch (err) {
+        logger.warn("work dir recovery failed", { err });
+      }
+      jobs.run();
       subscriber.on("message", onMessage);
       await subscriber.subscribe(busChannel);
       // Recover broadcasts that went live while we were down, then keep reconciling.
       await live.reconcile().catch((err: unknown) => logger.warn("initial reconcile failed", { err }));
       reconcileLoop = every(timings.reconcileMs, () => live.reconcile(), { logger, name: "reconcile" });
+      sweepLoop = every(timings.sweepMs, () => sweep(), { logger, name: "work-dir-sweep" });
       logger.info("media service started");
     },
     async stop() {
       await subscriber.unsubscribe(busChannel).catch(() => {});
       subscriber.off("message", onMessage);
       await reconcileLoop?.stop();
+      await sweepLoop?.stop();
       await live.shutdown();
       await jobs.close();
       await Promise.allSettled([subscriber.quit(), bus.quit(), valkey.quit()]);
