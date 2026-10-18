@@ -1,0 +1,25 @@
+{
+  "name": "@commonair/tokens",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./vectors.json": "./vectors.json"
+  },
+  "scripts": {
+    "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "typecheck": "tsc -p .",
+    "vectors": "bun src/vectors.ts > vectors.json"
+  },
+  "dependencies": {
+    "@commonair/contracts": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
