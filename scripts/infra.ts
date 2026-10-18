@@ -5,6 +5,7 @@
  * Local infrastructure helper around `podman compose`.
  *
  *   bun scripts/infra.ts test   start the data services integration tests need, wait for health
+ *   bun scripts/infra.ts stack  build and start the whole platform (+ harness profile), wait for health
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
@@ -13,6 +14,24 @@ export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage
 export const HEALTHY_SERVICES = ["postgres", "valkey", "mailpit", "garage"];
 /** One-shot jobs that must exit 0. */
 export const ONE_SHOT_SERVICES = ["garage-init", "migrate"];
+/** Long-running services of the whole platform plus the harness profile (`stack`). */
+export const STACK_HEALTHY_SERVICES = [
+  ...HEALTHY_SERVICES,
+  "mediamtx",
+  "api",
+  "chat",
+  "irc",
+  "origin",
+  "media",
+  "worker",
+  "web",
+  "otel-collector",
+  "prometheus",
+  "loki",
+  "tempo",
+  "grafana",
+  "mock-rtmp",
+];
 /** Locally built images the test subset needs (`migrate` shares the tools image). */
 const BUILD_SERVICES = ["postgres", "garage-init"];
 
@@ -99,12 +118,18 @@ if (import.meta.main) {
     await waitHealthy(HEALTHY_SERVICES);
     await waitExited(ONE_SHOT_SERVICES);
     console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);
+  } else if (cmd === "stack") {
+    compose(["--profile", "harness", "build"]);
+    compose(["--profile", "harness", "up", "-d"]);
+    await waitExited(ONE_SHOT_SERVICES);
+    await waitHealthy(STACK_HEALTHY_SERVICES, 300_000);
+    console.log("infra: platform healthy");
   } else if (cmd === "down") {
     compose(["down"]);
   } else if (cmd === "reset") {
     compose(["down", "-v"]);
   } else {
-    console.error("usage: bun scripts/infra.ts test|down|reset");
+    console.error("usage: bun scripts/infra.ts test|stack|down|reset");
     process.exit(2);
   }
 }
