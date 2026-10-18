@@ -64,7 +64,10 @@ export function seatCouncil(
   config: Pick<CouncilConfig, "size" | "eligibilityWindowDays" | "minStreamingHours">,
   weights: Pick<ContributionWeights, "revenue" | "streamingHours" | "relayBandwidth" | "viewerHours">,
 ): CouncilSeating {
-  const eligible = candidates.filter((c) => clean(c.eligibleHours) >= config.minStreamingHours);
+  // Sorted first so floating-point sums do not depend on input order.
+  const eligible = candidates
+    .filter((c) => clean(c.eligibleHours) >= config.minStreamingHours)
+    .toSorted((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
   const totals = { revenueCents: 0, eligibleHours: 0, relayBytes: 0, viewerHours: 0 };
   for (const c of eligible) for (const [k] of COMPONENTS) totals[k] += clean(c[k]);
 

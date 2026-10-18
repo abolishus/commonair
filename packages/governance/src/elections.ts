@@ -8,15 +8,13 @@
  * result is deterministic and reproducible from the public ballot data.
  */
 import { and, eq, sql } from "drizzle-orm";
+import type { Database } from "@commonair/db";
 import { schema, type Executor } from "@commonair/db";
 import type { MemberClass } from "./tally.ts";
 
 export interface ElectionCandidate {
   userId: string;
-  /**
-   * When the candidate was nominated. CONTRACT-REQUEST: `election_candidates` has no
-   * nomination timestamp yet; add `nominated_at timestamptz not null default now()`.
-   */
+  /** When the candidate was nominated (`election_candidates.nominated_at`). */
   nominatedAt: Date;
 }
 
@@ -121,4 +119,110 @@ export async function eligibleVoters(db: Executor, electionClass: MemberClass): 
       ),
     );
   return new Set(rows.map((r) => r.userId));
+}
+
+export class ElectionError extends Error {
+  constructor(
+    public readonly code: "not_found" | "still_open",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ElectionError";
+  }
+}
+
+export interface ClosedElection extends ElectionResult {
+  electionId: string;
+  /** Candidates who no longer hold the election's class at close; they cannot be elected. */
+  ineligibleCandidates: string[];
+  alreadyClosed: boolean;
+}
+
+/**
+ * Close an election whose voting has ended: tally the approval ballots of eligible voters,
+ * record each candidate's approvals and whether they were elected, seat the winners on the
+ * board for `termMonths`, and write an audit row. Closing twice returns the stored outcome.
+ */
+export async function closeElection(db: Database, electionId: string, now: Date): Promise<ClosedElection> {
+  return db.transaction(async (tx) => {
+    const [election] = await tx
+      .select()
+      .from(schema.elections)
+      .where(eq(schema.elections.id, electionId))
+      .for("update");
+    if (!election) throw new ElectionError("not_found", `election ${electionId} not found`);
+    const candidates = await tx
+      .select()
+      .from(schema.electionCandidates)
+      .where(eq(schema.electionCandidates.electionId, electionId));
+
+    if (election.status === "closed") {
+      const ordered = candidates.toSorted(
+        (a, b) =>
+          b.votes - a.votes ||
+          a.nominatedAt.getTime() - b.nominatedAt.getTime() ||
+          (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0),
+      );
+      return {
+        electionId,
+        seats: election.seats,
+        results: ordered.map((c, i) => ({ userId: c.userId, votes: c.votes, rank: i + 1, elected: c.elected })),
+        ballotsCounted: 0,
+        spoiled: [],
+        ignoredApprovals: 0,
+        ineligibleCandidates: [],
+        alreadyClosed: true,
+      };
+    }
+    if (election.votingEndsAt.getTime() > now.getTime()) {
+      throw new ElectionError("still_open", `election ${electionId} is still open`);
+    }
+
+    const voters = await eligibleVoters(tx, election.class);
+    const ineligible = candidates.filter((c) => !voters.has(c.userId)).map((c) => c.userId);
+    const ballots = await tx
+      .select({ voterId: schema.electionBallots.voterId, candidateIds: schema.electionBallots.candidateIds })
+      .from(schema.electionBallots)
+      .where(eq(schema.electionBallots.electionId, electionId));
+    const result = tallyElection({
+      seats: election.seats,
+      candidates: candidates.filter((c) => voters.has(c.userId)),
+      ballots,
+      eligibleVoters: voters,
+    });
+
+    const byUser = new Map(result.results.map((r) => [r.userId, r]));
+    for (const c of candidates) {
+      const r = byUser.get(c.userId);
+      await tx
+        .update(schema.electionCandidates)
+        .set({ votes: r?.votes ?? 0, elected: r?.elected ?? false })
+        .where(
+          and(eq(schema.electionCandidates.electionId, electionId), eq(schema.electionCandidates.userId, c.userId)),
+        );
+    }
+    await tx.update(schema.elections).set({ status: "closed" }).where(eq(schema.elections.id, electionId));
+    const termEnd = new Date(now);
+    termEnd.setUTCMonth(termEnd.getUTCMonth() + election.termMonths);
+    const winners = result.results.filter((r) => r.elected);
+    if (winners.length) {
+      await tx
+        .insert(schema.boardSeats)
+        .values(winners.map((w) => ({ userId: w.userId, class: election.class, electionId, termStart: now, termEnd })));
+    }
+    await tx.insert(schema.auditLog).values({
+      actorType: "system",
+      action: "election.close",
+      subjectType: "election",
+      subjectId: electionId,
+      reason: "voting ended",
+      details: {
+        elected: winners.map((w) => w.userId),
+        ballotsCounted: result.ballotsCounted,
+        spoiled: result.spoiled.length,
+        ineligibleCandidates: ineligible,
+      },
+    });
+    return { electionId, ...result, ineligibleCandidates: ineligible, alreadyClosed: false };
+  });
 }

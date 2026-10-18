@@ -153,7 +153,8 @@ describe("syncMemberships", () => {
     expect(await activeOf(lonely.userId)).toEqual([]);
     expect(await activeOf(old.userId)).toEqual([]);
     expect(await activeOf(banned.userId)).toEqual([]);
-    expect(await activeOf(exited.userId)).toEqual([]);
+    // Exited members who qualify again are re-activated with a new row.
+    expect(await activeOf(exited.userId)).toEqual([{ class: "streamer", basis: "streaming_hours" }]);
     expect(await activeOf(shareholder)).toEqual([{ class: "viewer", basis: "share" }]);
     expect(await activeOf(shortShare)).toEqual([]);
     expect(await activeOf(subscriber)).toEqual([{ class: "viewer", basis: "subscription" }]);
@@ -161,14 +162,16 @@ describe("syncMemberships", () => {
     expect(await activeOf(lapsingViewer)).toEqual([]);
     expect(await activeOf(worker)).toEqual([{ class: "worker", basis: "board_appointment" }]);
 
-    expect(r.activated.map((a) => a.userId).sort()).toEqual([good.userId, shareholder, subscriber].sort());
+    expect(r.activated.map((a) => a.userId).sort()).toEqual(
+      [good.userId, exited.userId, shareholder, subscriber].sort(),
+    );
     expect(r.lapsed.map((a) => a.userId).sort()).toEqual([old.userId, lapsingViewer].sort());
 
     // Lapsed rows keep their history; audit rows exist for every change, with ids only.
     const [lapsed] = await app.select().from(s.memberships).where(eq(s.memberships.userId, old.userId));
     expect(lapsed).toMatchObject({ status: "lapsed", lapsedAt: NOW });
     const audits = await app.select().from(s.auditLog).where(eq(s.auditLog.subjectType, "membership"));
-    expect(audits).toHaveLength(5);
+    expect(audits).toHaveLength(6);
     expect(JSON.stringify(audits.map((a) => a.details))).not.toMatch(/@example/);
     const history = await app.select().from(s.membershipHistory).where(eq(s.membershipHistory.userId, old.userId));
     expect(history.map((h) => h.status)).toEqual(["active", "lapsed"]);
@@ -177,7 +180,7 @@ describe("syncMemberships", () => {
     const again = await syncMemberships(app, NOW);
     expect(again.activated).toEqual([]);
     expect(again.lapsed).toEqual([]);
-    expect(again.confirmed).toBe(3);
+    expect(again.confirmed).toBe(4);
   });
 });
 
