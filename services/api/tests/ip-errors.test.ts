@@ -67,12 +67,12 @@ test("audit details refuse personal data and free text", () => {
   expect(() => assertSafeDetails({ note: "x".repeat(100) })).toThrow("free text");
 });
 
-test("relay URL shape: no credentials, query or fragment; https in production", () => {
-  expect(relayUrlProblem("https://relay.example.invalid", true)).toBeNull();
-  expect(relayUrlProblem("http://relay.example.invalid", true)).not.toBeNull();
-  expect(relayUrlProblem("http://127.0.0.1:8080", false)).toBeNull();
-  expect(relayUrlProblem("https://user:pw@relay.example.invalid", false)).not.toBeNull();
-  expect(relayUrlProblem("ftp://relay.example.invalid", false)).not.toBeNull();
+test("relay URL shape: no credentials, query or fragment; https unless private networks are allowed", () => {
+  expect(relayUrlProblem("https://relay.example.invalid", false)).toBeNull();
+  expect(relayUrlProblem("http://relay.example.invalid", false)).not.toBeNull();
+  expect(relayUrlProblem("http://127.0.0.1:8080", true)).toBeNull();
+  expect(relayUrlProblem("https://user:pw@relay.example.invalid", true)).not.toBeNull();
+  expect(relayUrlProblem("ftp://relay.example.invalid", true)).not.toBeNull();
 });
 
 test("word filter regexes must compile and avoid catastrophic patterns", () => {

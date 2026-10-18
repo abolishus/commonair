@@ -55,11 +55,15 @@ const toTarget = (states: Map<string, z.infer<typeof SimulcastState>>) => (t: ty
   };
 };
 
-/** The media service pushes to this URL: rtmp(s) only, and in production public hosts only. */
+/**
+ * The media service pushes to this URL: rtmp(s) only, public hosts only unless the local stack
+ * opted into private networks. The media service re-checks the target when it connects, since
+ * DNS may change after this check.
+ */
 async function checkRtmpUrl(deps: Deps, url: string) {
   const problem = await outboundUrlProblem(url, {
     protocols: ["rtmp:", "rtmps:"],
-    allowPrivate: deps.env.NODE_ENV !== "production",
+    allowPrivate: deps.env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
     resolve: deps.resolveHost,
   });
   if (problem === "credentials") throw badRequest("Put credentials in the stream key, not the URL");

@@ -3,8 +3,8 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import type { Deps } from "../src/deps.ts";
-import { outboundUrlProblem, type OutboundPolicy } from "../src/lib/outbound.ts";
-import { relayTargetProblem } from "../src/routes/relays.ts";
+import { outboundUrlProblem, pinnedGet, type OutboundPolicy } from "../src/lib/outbound.ts";
+import { healthCheck, relayTargetProblem } from "../src/routes/relays.ts";
 
 const DNS: Record<string, string[]> = {
   "relay.example.test": ["93.184.216.250"],
@@ -52,7 +52,15 @@ describe("outboundUrlProblem (production)", () => {
     ["rtmp://media.localhost/live", "non-public host"],
     ["rtmp://metadata.google.internal/live", "non-public host"],
     ["rtmp://garage/live", "non-public host"],
-    ["rtmp://2130706433/live", "non-public host"], // decimal 127.0.0.1
+    ["rtmp://2130706433/live", "non-canonical numeric host"], // decimal 127.0.0.1
+    ["rtmp://0177.0.0.1/live", "non-canonical numeric host"], // octal 127.0.0.1 to glibc
+    ["rtmp://017.0.0.1/live", "non-canonical numeric host"], // octal 15.0.0.1, not 17.0.0.1
+    ["rtmp://10.0.0.01/live", "non-canonical numeric host"],
+    ["rtmp://0x7f.1/live", "non-canonical numeric host"],
+    ["rtmp://0x7f000001/live", "non-canonical numeric host"],
+    ["rtmp://127.1/live", "non-canonical numeric host"],
+    ["rtmp://1.2.3/live", "non-canonical numeric host"],
+    ["rtmp://93.184.216.34.5/live", "non-canonical numeric host"],
     ["rtmp://rebind.example.test/live", "resolves to a non-public address"],
     ["rtmp://metadata.example.test/live", "resolves to a non-public address"],
     ["rtmp://mixed.example.test/live", "resolves to a non-public address"],
@@ -83,18 +91,59 @@ describe("outboundUrlProblem (production)", () => {
 });
 
 describe("relayTargetProblem", () => {
-  const deps = (NODE_ENV: string) => ({ env: { NODE_ENV }, resolveHost: resolve }) as unknown as Deps;
+  const deps = (allow: boolean) =>
+    ({ env: { OUTBOUND_ALLOW_PRIVATE_NETWORKS: allow }, resolveHost: resolve }) as unknown as Deps;
 
-  test("production: https only, public hosts only", async () => {
-    expect(await relayTargetProblem(deps("production"), "https://relay.example.test")).toBeNull();
-    expect(await relayTargetProblem(deps("production"), "http://relay.example.test")).toBe("protocol");
-    expect(await relayTargetProblem(deps("production"), "https://rebind.example.test")).not.toBeNull();
-    expect(await relayTargetProblem(deps("production"), "https://127.0.0.1:8443")).not.toBeNull();
+  test("default (strict): https only, public hosts only", async () => {
+    expect(await relayTargetProblem(deps(false), "https://relay.example.test")).toBeNull();
+    expect(await relayTargetProblem(deps(false), "http://relay.example.test")).toBe("protocol");
+    expect(await relayTargetProblem(deps(false), "https://rebind.example.test")).not.toBeNull();
+    expect(await relayTargetProblem(deps(false), "https://127.0.0.1:8443")).not.toBeNull();
   });
 
-  test("development: http allowed and private hosts allowed", async () => {
-    expect(await relayTargetProblem(deps("development"), "http://127.0.0.1:8080")).toBeNull();
-    expect(await relayTargetProblem(deps("test"), "http://localhost:8080")).toBeNull();
-    expect(await relayTargetProblem(deps("test"), "ftp://localhost")).toBe("protocol");
+  test("OUTBOUND_ALLOW_PRIVATE_NETWORKS: http and private hosts allowed", async () => {
+    expect(await relayTargetProblem(deps(true), "http://127.0.0.1:8080")).toBeNull();
+    expect(await relayTargetProblem(deps(true), "http://localhost:8080")).toBeNull();
+    expect(await relayTargetProblem(deps(true), "ftp://localhost")).toBe("protocol");
+  });
+});
+
+describe("relay health checks connect to the vetted address", () => {
+  test("the address checked is the address dialled; a non-public answer is never dialled", async () => {
+    const dialled: [string, string | null][] = [];
+    let answer = ["93.184.216.34"];
+    const deps = {
+      env: { OUTBOUND_ALLOW_PRIVATE_NETWORKS: false },
+      resolveHost: async () => answer,
+      pinnedGet: async (url: URL, address: string | null) => {
+        dialled.push([url.toString(), address]);
+        return 200;
+      },
+    } as unknown as Deps;
+    expect((await healthCheck(deps, "https://relay.example.test")).ok).toBe(true);
+    expect(dialled).toEqual([["https://relay.example.test/healthz", "93.184.216.34"]]);
+    answer = ["10.0.0.5"]; // rebinding to an internal address
+    expect((await healthCheck(deps, "https://relay.example.test")).ok).toBe(false);
+    expect(dialled).toHaveLength(1);
+  });
+
+  test("pinnedGet dials the given address and keeps the URL's Host", async () => {
+    const seen: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (req) => {
+        seen.push(req.headers.get("host") ?? "");
+        return new Response("ok", { status: new URL(req.url).pathname === "/healthz" ? 204 : 404 });
+      },
+    });
+    try {
+      // The name does not resolve: only the pinned address can reach the server.
+      const url = new URL(`http://relay.example.invalid:${server.port}/healthz`);
+      expect(await pinnedGet(url, "127.0.0.1", 2000)).toBe(204);
+      expect(seen).toEqual([`relay.example.invalid:${server.port}`]);
+    } finally {
+      await server.stop(true);
+    }
   });
 });

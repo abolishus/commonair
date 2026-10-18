@@ -15,13 +15,10 @@ let member: Awaited<ReturnType<typeof signUpAndSignIn>>;
 
 beforeAll(async () => {
   api = await startApi({
-    fetch: Object.assign(
-      async (input: RequestInfo | URL) => {
-        healthCalls.push(input instanceof Request ? input.url : input.toString());
-        return new Response(healthy ? "ok" : "down", { status: healthy ? 200 : 503 });
-      },
-      { preconnect: () => {} },
-    ) as typeof fetch,
+    pinnedGet: async (url) => {
+      healthCalls.push(url.toString());
+      return healthy ? 200 : 503;
+    },
   });
   member = await signUpAndSignIn(api);
 }, 120_000);

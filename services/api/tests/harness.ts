@@ -30,7 +30,7 @@ export interface TestApi {
 }
 
 export async function startApi(
-  opts: { rateLimits?: Partial<Deps["rateLimits"]>; fetch?: typeof fetch } = {},
+  opts: { rateLimits?: Partial<Deps["rateLimits"]>; pinnedGet?: Deps["pinnedGet"] } = {},
 ): Promise<TestApi> {
   const db = await createTestDatabase();
   const { pkcs8B64 } = await generateSigningKey();
@@ -46,6 +46,8 @@ export async function startApi(
   const url = `http://127.0.0.1:${server.port}`;
   const env = loadApiEnv({
     NODE_ENV: "test",
+    // Relays and simulcast targets in tests live on loopback.
+    OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true",
     LOG_LEVEL: process.env.API_TEST_LOG ? "debug" : "error",
     // Mail links must be on PUBLIC_URL; in tests the API itself serves that origin.
     PUBLIC_URL: url,
@@ -77,7 +79,7 @@ export async function startApi(
         ...opts.rateLimits,
       },
       probes: {},
-      ...(opts.fetch ? { fetch: opts.fetch } : {}),
+      ...(opts.pinnedGet ? { pinnedGet: opts.pinnedGet } : {}),
     },
   });
   app = createApp(built.deps);

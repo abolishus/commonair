@@ -14,7 +14,7 @@ import type { Deps, StatusProbe } from "./deps.ts";
 import type { ApiEnv } from "./env.ts";
 import { createApiMailer, recipientLimitedMailer } from "./mail.ts";
 import { DEFAULT_RATE_LIMITS, valkeyRateLimitStore } from "./lib/ratelimit.ts";
-import { resolveHost } from "./lib/outbound.ts";
+import { pinnedGet, resolveHost } from "./lib/outbound.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
 export { loadApiEnv, type ApiEnv } from "./env.ts";
@@ -72,7 +72,7 @@ export async function buildDeps(
     mailer,
     logger,
     signingKey: await importSigningKey(env.PLAYBACK_SIGNING_KEY),
-    fetch,
+    pinnedGet,
     resolveHost,
     rateLimits: DEFAULT_RATE_LIMITS,
     rateLimitStore: valkeyRateLimitStore(valkey),
