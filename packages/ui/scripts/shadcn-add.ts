@@ -24,12 +24,14 @@ const componentsDir = join(root, "src", "components");
 /** Registry dependencies we replace with house code (see README). */
 export const REPLACED_DEPENDENCIES = ["cn", "next-themes", "cmdk", "shadcn"];
 
+// REUSE-IgnoreStart
 export const HEADER = [
   "// SPDX-FileCopyrightText: 2023 shadcn (https://ui.shadcn.com, MIT)",
   "// SPDX-FileCopyrightText: 2026 CommonAir contributors",
   "// SPDX-License-Identifier: AGPL-3.0-or-later",
   "",
 ].join("\n");
+// REUSE-IgnoreEnd
 
 /** Rewrites one CLI-generated source file to the house conventions. Pure, so it is unit-tested. */
 export function normalizeComponentSource(source: string): string {
