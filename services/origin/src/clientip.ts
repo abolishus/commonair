@@ -46,12 +46,17 @@ function parseV6(s: string): bigint | null {
   const missing = 8 - head.length - tail.length;
   if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
   let n = 0n;
-  for (const g of [...head, ...Array<string>(missing).fill("0"), ...tail]) n = (n << 16n) | BigInt(Number.parseInt(g, 16));
+  for (const g of [...head, ...Array<string>(missing).fill("0"), ...tail])
+    n = (n << 16n) | BigInt(Number.parseInt(g, 16));
   return n;
 }
 
 export function parseIp(raw: string): Ip | null {
-  const s = raw.trim().replace(/^\[|\]$/g, "").split("%")[0] ?? "";
+  const s =
+    raw
+      .trim()
+      .replace(/^\[|\]$/g, "")
+      .split("%")[0] ?? "";
   const v4 = parseV4(s);
   if (v4 !== null) return { v: 4, n: v4 };
   const v6 = parseV6(s);

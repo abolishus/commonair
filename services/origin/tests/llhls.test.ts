@@ -27,8 +27,15 @@ describe("playlistState", () => {
   });
 
   test("delta updates count skipped segments", () => {
-    const delta = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-SKIP:SKIPPED-SEGMENTS=4\n#EXTINF:2,\na.mp4\n";
-    expect(playlistState(delta)).toEqual({ lastMsn: 14, lastFullMsn: 14, lastPart: -1, targetDuration: 2, partTarget: undefined });
+    const delta =
+      "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:10\n#EXT-X-SKIP:SKIPPED-SEGMENTS=4\n#EXTINF:2,\na.mp4\n";
+    expect(playlistState(delta)).toEqual({
+      lastMsn: 14,
+      lastFullMsn: 14,
+      lastPart: -1,
+      targetDuration: 2,
+      partTarget: undefined,
+    });
   });
 
   test("multivariant and garbage have no state", () => {

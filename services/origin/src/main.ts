@@ -45,6 +45,7 @@ const origin = await createOrigin({
   playbackSigningKey: env.PLAYBACK_SIGNING_KEY,
   mediamtxHlsUrl: env.MEDIAMTX_HLS_URL,
   internalSecret: env.INTERNAL_API_SECRET,
+  mediaPassword: env.MEDIA_INTERNAL_PASSWORD,
   cacheMb: env.ORIGIN_CACHE_MB,
   cdn: { provider: env.CDN_PROVIDER, baseUrl: env.CDN_BASE_URL },
   trustedProxyCidrs: env.TRUSTED_PROXY_CIDRS,

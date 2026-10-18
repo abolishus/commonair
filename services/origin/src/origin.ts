@@ -25,7 +25,10 @@ export interface OriginOptions {
   /** PLAYBACK_SIGNING_KEY: verifies viewer tokens and re-signs them near expiry. */
   playbackSigningKey: string;
   mediamtxHlsUrl: string;
+  /** INTERNAL_API_SECRET: keys the CDN origin-pull HMAC. */
   internalSecret: string;
+  /** MEDIA_INTERNAL_PASSWORD: basic-auth password of MediaMTX's `internal` user. */
+  mediaPassword: string;
   cacheMb: number;
   cdn: { provider: "none" | "origin-pull"; baseUrl?: string };
   /** TRUSTED_PROXY_CIDRS. */
@@ -69,7 +72,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
   const upstream = new MediaUpstream({
     baseUrl: opts.mediamtxHlsUrl,
     user: MEDIA_INTERNAL_USER,
-    password: opts.internalSecret,
+    password: opts.mediaPassword,
     concurrency: opts.upstreamConcurrency,
     blockingConcurrency: opts.upstreamBlockingConcurrency,
     queueWaitMs: opts.upstreamQueueWaitMs,

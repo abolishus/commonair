@@ -117,4 +117,3 @@ describe("SegmentLog", () => {
     expect(v.calls).toHaveLength(1);
   });
 });
-

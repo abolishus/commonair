@@ -142,7 +142,7 @@ export class ProductionStore {
 
   /** Wait for every write issued so far (shutdown, tests). */
   async flush(): Promise<void> {
-    await Promise.allSettled([...this.pending]);
+    await Promise.allSettled(this.pending);
   }
 
   /** Aggregated production of all replicas for the minute starting at `bucketStartMs`. */

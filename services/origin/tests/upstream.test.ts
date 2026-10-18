@@ -37,7 +37,13 @@ function fakeMediaMtx(opts: FakeOptions = {}) {
     }
     const session = url.searchParams.get("session") ?? "";
     if (!sessions.has(session)) return Response.json({ error: "session not found" }, { status: 401 });
-    if (url.searchParams.has("_HLS_msn")) await Bun.sleep(opts.blockMs ?? 0);
+    if (url.searchParams.has("_HLS_msn")) {
+      const signal = init?.signal;
+      await Promise.race([
+        Bun.sleep(opts.blockMs ?? 0),
+        new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason as Error))),
+      ]);
+    }
     return new Response(`body:${url.pathname}`, { headers: { "content-type": "video/mp4" } });
   }) as typeof fetch;
   return { fetch: fetchFn, log, sessions };
@@ -190,5 +196,84 @@ describe("ContentStore", () => {
     await store.get(pl);
     await store.get(seg);
     expect(f.log.length).toBe(n + 1);
+  });
+});
+
+describe("load shedding", () => {
+  test("blocking long-polls have their own pool: a full blocking pool never delays segments", async () => {
+    const f = fakeMediaMtx({ blockMs: 200 });
+    const up = new MediaUpstream({
+      baseUrl: "http://mtx:8888",
+      user: "internal",
+      password: "secret",
+      fetch: f.fetch,
+      blockingConcurrency: 1,
+      queueWaitMs: 30,
+    });
+    await up.get("live/a", "index.m3u8");
+    const longPoll = up.get("live/a", "v.m3u8", "_HLS_msn=1", { blockingTimeoutMs: 1000 });
+    // A second long-poll cannot get a socket within the queue wait …
+    await expect(up.get("live/a", "v.m3u8", "_HLS_msn=2", { blockingTimeoutMs: 1000 })).rejects.toMatchObject({
+      kind: "queue",
+    });
+    // … while a segment goes straight through.
+    const t0 = performance.now();
+    expect((await up.get("live/a", "x_seg1.mp4")).status).toBe(200);
+    expect(performance.now() - t0).toBeLessThan(100);
+    await longPoll;
+  });
+
+  test("blocking requests time out with kind 'timeout'", async () => {
+    const f = fakeMediaMtx({ blockMs: 500 });
+    const up = mk(f);
+    await up.get("live/a", "index.m3u8");
+    await expect(up.get("live/a", "v.m3u8", "_HLS_msn=1", { blockingTimeoutMs: 30 })).rejects.toMatchObject({
+      kind: "timeout",
+    });
+  });
+
+  test("per-path cap on distinct blocking keys; joining an existing key is always allowed", async () => {
+    const f = fakeMediaMtx({ blockMs: 50 });
+    const store = new ContentStore({ upstream: mk(f), cacheBytes: 1 << 20, maxBlockingKeysPerPath: 2 });
+    const ref = { upstreamPath: "live/a", file: "v.m3u8", kind: "playlist" as const };
+    const a = store.get(ref, { msn: 1 });
+    const b = store.get(ref, { msn: 2 });
+    await expect(store.get(ref, { msn: 3 })).rejects.toMatchObject({ kind: "queue" });
+    // Same key as an in-flight one: coalesced, not refused.
+    const a2 = store.get(ref, { msn: 1 });
+    // Other paths are unaffected.
+    const other = store.get({ ...ref, upstreamPath: "live/b" }, { msn: 3 });
+    await Promise.all([a, b, a2, other]);
+    expect((await store.get(ref, { msn: 4 })).status).toBe(200);
+  });
+
+  test("directives are judged against the playlist's current end (refreshed when stale)", async () => {
+    const playlist = [
+      "#EXTM3U",
+      "#EXT-X-TARGETDURATION:1",
+      "#EXT-X-PART-INF:PART-TARGET=0.2",
+      "#EXT-X-MEDIA-SEQUENCE:10",
+      '#EXT-X-PART:DURATION=0.2,URI="p1.mp4"',
+      "#EXTINF:1,",
+      "s10.mp4",
+      '#EXT-X-PART:DURATION=0.2,URI="p2.mp4"',
+      "",
+    ].join("\n");
+    const fetchFn = (async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      if (url.pathname.endsWith("index.m3u8")) return new Response("#EXTM3U\nv.m3u8?session=s1\n");
+      return new Response(playlist);
+    }) as typeof fetch;
+    const store = new ContentStore({
+      upstream: new MediaUpstream({ baseUrl: "http://mtx", user: "u", password: "p", fetch: fetchFn }),
+      cacheBytes: 1 << 20,
+    });
+    const ref = { upstreamPath: "live/a", file: "v.m3u8", kind: "playlist" as const };
+    expect(await store.checkBlocking(ref, { msn: 11, part: 1 })).toBe("ok");
+    expect(store.state(ref)).toMatchObject({ lastMsn: 11, lastFullMsn: 10, lastPart: 0 });
+    expect(await store.checkBlocking(ref, { msn: 12, part: 0 })).toBe("ok");
+    expect(await store.checkBlocking(ref, { msn: 13 })).toBe("msn_too_far");
+    expect(await store.checkBlocking(ref, { msn: 11, part: 9 })).toBe("part_out_of_range");
+    expect(await store.checkBlocking(ref, {})).toBe("ok");
   });
 });

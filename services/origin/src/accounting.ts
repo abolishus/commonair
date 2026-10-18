@@ -134,4 +134,3 @@ function fields(e: SegmentFetch): string[] {
 // ---------------------------------------------------------------------------------------
 
 export type EgressSource = (typeof DELIVERY_SOURCES)[number];
-

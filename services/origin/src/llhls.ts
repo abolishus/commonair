@@ -49,7 +49,13 @@ export function playlistState(text: string): PlaylistState | null {
   const lastFull = seq + full - 1;
   const partTarget = pt !== undefined && Number.isFinite(pt) && pt > 0 ? pt : undefined;
   if (partsSinceSegment > 0)
-    return { lastMsn: lastFull + 1, lastFullMsn: lastFull, lastPart: partsSinceSegment - 1, targetDuration: td, partTarget };
+    return {
+      lastMsn: lastFull + 1,
+      lastFullMsn: lastFull,
+      lastPart: partsSinceSegment - 1,
+      targetDuration: td,
+      partTarget,
+    };
   return { lastMsn: lastFull, lastFullMsn: lastFull, lastPart: partsOfLastSegment - 1, targetDuration: td, partTarget };
 }
 
