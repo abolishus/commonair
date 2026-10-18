@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 You are fixing **open media review findings (2E round three)** for CommonAir (repo: /Users/joshe/Repos/bcon).
 Read AGENTS.md, HANDOFF.md ("Open review findings" → Media), PROGRESS.md (2E row), PLAN.md and
 docs/architecture.md first. Do not look outside the repository.
