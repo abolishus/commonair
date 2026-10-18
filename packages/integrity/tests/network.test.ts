@@ -4,6 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   CidrClassifier,
+  PRIVACY_RELAY_LABEL_PREFIX,
   SAMPLE_HOSTING_CIDRS_FILE,
   classifierFromEnv,
   loadNetworkList,
@@ -78,11 +79,52 @@ not-a-cidr
   });
 
   test("matches IPv4, IPv6, mapped addresses and ASNs with labels", () => {
-    expect(classifier.classify("203.0.113.9")).toEqual({ hosting: true, label: "Example Hosting", asn: null });
+    expect(classifier.classify("203.0.113.9")).toEqual({
+      hosting: true,
+      label: "Example Hosting",
+      asn: null,
+      kind: "hosting",
+    });
     expect(classifier.classify("::ffff:203.0.113.9").hosting).toBe(true);
     expect(classifier.classify("2001:db8:1::5")).toMatchObject({ hosting: true, label: "Example v6" });
-    expect(classifier.classify(null, 64500)).toEqual({ hosting: true, label: "Example Transit", asn: 64500 });
-    expect(classifier.classify("198.51.100.1", 64501)).toEqual({ hosting: false, label: null, asn: 64501 });
+    expect(classifier.classify(null, 64500)).toEqual({
+      hosting: true,
+      label: "Example Transit",
+      asn: 64500,
+      kind: "hosting",
+    });
+    expect(classifier.classify("198.51.100.1", 64501)).toEqual({ hosting: false, label: null, asn: 64501, kind: null });
+  });
+
+  test("class tokens: privacy relays are listed but labelled with the prefix; unknown classes are invalid", () => {
+    const r = parseNetworkList(
+      [
+        "3fff::/20 class=privacy_relay Example Relay",
+        "AS64600 class=privacy_relay",
+        "192.0.2.0/24 class=hosting Example Host",
+        "198.51.100.0/24 class=bogus Nope",
+        "203.0.113.0/24 class=privacy_relay",
+      ].join("\n"),
+    );
+    expect(r.invalidLines).toEqual([4]);
+    expect(r.classifier.classify("3fff::1")).toEqual({
+      hosting: true,
+      label: `${PRIVACY_RELAY_LABEL_PREFIX}Example Relay`,
+      asn: null,
+      kind: "privacy_relay",
+    });
+    expect(r.classifier.classify(null, 64600)).toMatchObject({
+      label: PRIVACY_RELAY_LABEL_PREFIX,
+      kind: "privacy_relay",
+    });
+    expect(r.classifier.classify("192.0.2.1")).toMatchObject({ label: "Example Host", kind: "hosting" });
+    expect(r.classifier.classify("203.0.113.1").label).toBe(PRIVACY_RELAY_LABEL_PREFIX);
+    expect(r.classifier.classify("198.51.100.1").hosting).toBe(false);
+  });
+
+  test("the constructor still accepts plain ASN labels", () => {
+    const c = new CidrClassifier([], new Map([[1, "One"]]));
+    expect(c.classify(null, 1)).toEqual({ hosting: true, label: "One", asn: 1, kind: "hosting" });
   });
 
   test("finds addresses inside a large range that a later, smaller range does not cover", () => {
@@ -121,6 +163,9 @@ describe("loading", () => {
       expect(classifier.classify(ip).hosting, ip).toBe(true);
     }
     expect(classifier.classify(null, 14061).hosting).toBe(true);
+    expect(classifier.classify("3fff::10").kind).toBe("privacy_relay");
+    // Hyperscaler ASNs that also carry consumer traffic are not listed wholesale.
+    for (const asn of [16509, 15169, 8075]) expect(classifier.classify(null, asn).hosting, `AS${asn}`).toBe(false);
   });
 
   test("env: unset means a classifier that matches nothing; a missing file is an error", () => {

@@ -12,17 +12,37 @@
  *   203.0.113.0/24  Example Hosting      # CIDR (IPv4 or IPv6), optional label
  *   2001:db8::/32   Example Cloud
  *   AS64500         Example Transit      # an ASN, optional label
+ *   3fff::/20       class=privacy_relay Example Relay   # optional class token before the label
  *   # comment lines and blank lines are ignored
+ *
+ * Classes: `hosting` (default; servers, VPS, cloud compute) and `privacy_relay` (consumer
+ * privacy proxies such as browser or OS relays: real people, so only a weak signal).
+ * Privacy-relay matches carry `PRIVACY_RELAY_LABEL_PREFIX` in their label, which is what the
+ * API stores in `playback_sessions.datacenter`, so scoring can tell the classes apart from
+ * that column alone.
  */
 import { readFileSync } from "node:fs";
 import { integrityEnv, loadEnv } from "@commonair/config";
 
+export const NETWORK_KINDS = ["hosting", "privacy_relay"] as const;
+export type NetworkKind = (typeof NETWORK_KINDS)[number];
+
+/** Prefix of a stored network label that names a privacy relay rather than a hosting provider. */
+export const PRIVACY_RELAY_LABEL_PREFIX = "privacy_relay:";
+
 export interface NetworkClassification {
-  /** True when the address (or ASN) belongs to a hosting provider. */
+  /** True when the address (or ASN) is on the operator's list (any class). */
   hosting: boolean;
-  /** Operator label of the matching range or ASN, e.g. "Example Cloud". */
+  /** Operator label of the matching range or ASN, e.g. "Example Cloud" (privacy relays are prefixed). */
   label: string | null;
   asn: number | null;
+  /** Class of the matching entry; null when nothing matched. */
+  kind?: NetworkKind | null;
+}
+
+export interface AsnEntry {
+  label: string | null;
+  kind: NetworkKind;
 }
 
 /** Pluggable lookup so operators can swap in their own data source. */
@@ -35,7 +55,11 @@ interface Range {
   start: bigint;
   end: bigint;
   label: string | null;
+  kind?: NetworkKind;
 }
+
+const labelFor = (label: string | null, kind: NetworkKind): string | null =>
+  kind === "privacy_relay" ? `${PRIVACY_RELAY_LABEL_PREFIX}${label ?? ""}` : label;
 
 /** Parse an IPv4 or IPv6 address to its family and integer value; null if invalid. */
 export function parseIp(input: string): { family: 4 | 6; value: bigint } | null {
@@ -113,9 +137,9 @@ export class CidrClassifier implements NetworkClassifier {
   private readonly ranges: Range[];
   /** Running maximum of `end` so overlapping ranges are still found by binary search. */
   private readonly maxEnd: bigint[];
-  private readonly asns: Map<number, string | null>;
+  private readonly asns: Map<number, AsnEntry>;
 
-  constructor(ranges: readonly Range[], asns: ReadonlyMap<number, string | null> = new Map()) {
+  constructor(ranges: readonly Range[], asns: ReadonlyMap<number, string | null | AsnEntry> = new Map()) {
     this.ranges = [...ranges].sort(
       (a, b) => a.family - b.family || (a.start < b.start ? -1 : a.start > b.start ? 1 : 0),
     );
@@ -130,7 +154,9 @@ export class CidrClassifier implements NetworkClassifier {
       if (r.end > max) max = r.end;
       this.maxEnd.push(max);
     }
-    this.asns = new Map(asns);
+    this.asns = new Map(
+      [...asns].map(([n, v]) => [n, v !== null && typeof v === "object" ? v : { label: v, kind: "hosting" }]),
+    );
   }
 
   get size(): number {
@@ -138,13 +164,17 @@ export class CidrClassifier implements NetworkClassifier {
   }
 
   classify(ip: string | null, asn: number | null = null): NetworkClassification {
-    if (asn !== null && this.asns.has(asn)) return { hosting: true, label: this.asns.get(asn) ?? null, asn };
+    const byAsn = asn === null ? undefined : this.asns.get(asn);
+    if (byAsn) return { hosting: true, label: labelFor(byAsn.label, byAsn.kind), asn, kind: byAsn.kind };
     const parsed = ip ? parseIp(ip) : null;
     if (parsed) {
       const hit = this.find(parsed.family, parsed.value);
-      if (hit) return { hosting: true, label: hit.label, asn };
+      if (hit) {
+        const kind = hit.kind ?? "hosting";
+        return { hosting: true, label: labelFor(hit.label, kind), asn, kind };
+      }
     }
-    return { hosting: false, label: null, asn };
+    return { hosting: false, label: null, asn, kind: null };
   }
 
   private find(family: 4 | 6, value: bigint): Range | null {
@@ -180,23 +210,34 @@ export interface ParseResult {
 /** Parse the operator file format described at the top of this module. */
 export function parseNetworkList(text: string): ParseResult {
   const ranges: Range[] = [];
-  const asns = new Map<number, string | null>();
+  const asns = new Map<number, AsnEntry>();
   const invalidLines: number[] = [];
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.replace(/#.*$/, "").trim();
     if (!line) return;
-    const [entry, ...labelParts] = line.split(/\s+/);
-    const label = labelParts.join(" ") || null;
+    const [entry, ...rest] = line.split(/\s+/);
+    let kind: NetworkKind = "hosting";
+    const classMatch = /^class=(.*)$/.exec(rest[0] ?? "");
+    if (classMatch) {
+      const k = NETWORK_KINDS.find((n) => n === classMatch[1]);
+      if (!k) {
+        invalidLines.push(i + 1);
+        return;
+      }
+      kind = k;
+      rest.shift();
+    }
+    const label = rest.join(" ") || null;
     const asMatch = /^AS(\d{1,10})$/i.exec(entry ?? "");
     if (asMatch) {
       const n = Number(asMatch[1]);
       if (n <= 4_294_967_295) {
-        asns.set(n, label);
+        asns.set(n, { label, kind });
         return;
       }
     }
     const cidr = entry ? parseCidr(entry) : null;
-    if (cidr) ranges.push({ ...cidr, label });
+    if (cidr) ranges.push({ ...cidr, label, kind });
     else invalidLines.push(i + 1);
   });
   return { classifier: new CidrClassifier(ranges, asns), invalidLines };

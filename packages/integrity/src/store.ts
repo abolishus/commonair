@@ -40,6 +40,31 @@ export async function recordFetch(valkey: ValkeyClient, fetch: Pick<SegmentFetch
   await valkey.multi().hincrby(key, fetch.kind, 1).expire(key, EVIDENCE_TTL_SECONDS).exec();
 }
 
+/**
+ * Batch form of `recordFetch` for the worker's `stream:segments` consumer: one round trip
+ * per batch. Only origin-served fetches belong here (the counters describe what the origin
+ * saw for the session's token).
+ */
+export async function recordFetches(
+  valkey: ValkeyClient,
+  fetches: readonly Pick<SegmentFetch, "sid" | "kind">[],
+): Promise<void> {
+  if (fetches.length === 0) return;
+  const counts = new Map<string, Map<string, number>>();
+  for (const f of fetches) {
+    const byKind = counts.get(f.sid) ?? new Map<string, number>();
+    byKind.set(f.kind, (byKind.get(f.kind) ?? 0) + 1);
+    counts.set(f.sid, byKind);
+  }
+  const pipe = valkey.multi();
+  for (const [sid, byKind] of counts) {
+    const key = INTEGRITY_KEYS.fetches(sid);
+    for (const [kind, n] of byKind) pipe.hincrby(key, kind, n);
+    pipe.expire(key, EVIDENCE_TTL_SECONDS);
+  }
+  await pipe.exec();
+}
+
 const parseBeats = (raw: readonly string[]): HeartbeatSample[] =>
   raw.flatMap((r) => {
     try {

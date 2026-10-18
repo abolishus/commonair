@@ -2,20 +2,39 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `fetch_pattern`: what the origin served this session does not match what it claims
- * to have watched. Only origin- and CDN-assigned sessions are checked: relay viewers
- * fetch from the relay (covered by receipt cross-checks), and bytes received over P2P
- * reduce the HTTP segments we expect.
+ * `fetch_pattern`: what the delivery path served this session does not match what it
+ * claims to have watched. Heartbeats are the client's claim; the accounting is what the
+ * server side saw:
  *
+ *   origin / p2p  the origin's per-session request counters (`stream:segments`: Valkey
+ *                 counters with playlists and LL-HLS parts, else the database segment counter)
+ *   relay         the per-session entries of the relay's signed receipts
+ *   cdn           nothing per session (CDN pulls are tokenless): not judged
+ *
+ * Checks (combined as a noisy-OR):
+ *
+ *   no_media_fetched            claims ≥ 10 segments' worth of playback, accounting shows no media at all
  *   playlists_without_segments  ≥ 10 playlist requests and no segment/part at all (playlist pollers)
  *   segments_without_playlists  ≥ 10 segments and zero playlist requests (direct segment scraping)
- *   too_few_segments            < 25 % of the HTTP segments expected for the watch time (≥ 10 expected)
- *   too_many_segments           > 4 × the segments expected for the watch time (≥ 10 expected)
+ *   too_few_segments            < 25 % of the HTTP media expected for the watch time (≥ 10 expected)
+ *   too_many_segments           > 4 × the segments expected (origin with known part counts only)
+ *
+ * Independently of the score, a session whose media is not confirmed (`mediaUnconfirmed`)
+ * never verifies: it stays pending with reason `media_unconfirmed`. That covers the case
+ * where only the database segment counter is known and it is zero.
  */
-import type { FetchSummary, ScoringContext, SessionFacts, Signal } from "../types.ts";
+import {
+  type FetchEvidence,
+  type HeartbeatSample,
+  isRelayFetch,
+  type ScoringContext,
+  type SessionFacts,
+  type Signal,
+} from "../types.ts";
 import { noisyOr, round } from "./combine.ts";
 
 export const FETCH_WEIGHTS = {
+  no_media_fetched: 0.9,
   playlists_without_segments: 0.8,
   segments_without_playlists: 0.6,
   too_few_segments: 0.6,
@@ -27,15 +46,61 @@ export const FETCH_MIN_REQUESTS = 10;
 export const MIN_EXPECTED_SEGMENTS = 10;
 export const TOO_FEW_RATIO = 0.25;
 export const TOO_MANY_RATIO = 4;
+/**
+ * P2P bytes are self-reported, so they can lower the HTTP media expected only down to this
+ * share: a P2P player still fetches the live edge over HTTP.
+ */
+export const MIN_HTTP_SHARE = 0.1;
 
-export function fetchChecks(
-  session: Pick<SessionFacts, "assignedSource" | "watchSeconds" | "bytesHttp" | "bytesP2p">,
-  fetches: FetchSummary,
-  ctx: Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment">,
-): { checks: FetchCheck[]; measures: Record<string, number> } {
+type FetchSession = Pick<SessionFacts, "assignedSource" | "watchSeconds" | "bytesHttp" | "bytesP2p">;
+type FetchCtx = Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment">;
+
+export interface FetchFindings {
+  checks: FetchCheck[];
+  measures: Record<string, number>;
+  /** True when the session must not verify on its delivery evidence. */
+  mediaUnconfirmed: boolean;
+  /** Why the session was not judged, when it was not. */
+  skipped: "cdn" | "no_accounting" | null;
+}
+
+export function httpShare(session: Pick<SessionFacts, "bytesHttp" | "bytesP2p">): number {
+  const total = session.bytesHttp + session.bytesP2p;
+  const share = total > 0 ? session.bytesHttp / total : 1;
+  return Math.max(MIN_HTTP_SHARE, share);
+}
+
+export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): FetchFindings {
   const checks: FetchCheck[] = [];
   const measures: Record<string, number> = {};
-  if (session.assignedSource === "relay") return { checks, measures };
+  const none = (skipped: FetchFindings["skipped"]): FetchFindings => ({
+    checks,
+    measures,
+    mediaUnconfirmed: false,
+    skipped,
+  });
+  if (session.assignedSource === "cdn") return none("cdn");
+  if (fetches === null) return none("no_accounting");
+  const segDur = Math.max(0.1, ctx.segmentDurationSeconds);
+  const share = httpShare(session);
+
+  if (isRelayFetch(fetches)) {
+    // Relays count every media object (a part counts as one), so only "too few" is meaningful.
+    const expected = (Math.max(0, fetches.claimedSeconds) / segDur) * share;
+    measures.relayObjects = fetches.relayObjects;
+    measures.claimedSeconds = round(fetches.claimedSeconds);
+    measures.expectedSegments = round(expected);
+    if (expected >= MIN_EXPECTED_SEGMENTS) {
+      const ratio = fetches.relayObjects / expected;
+      measures.segmentRatio = round(ratio);
+      if (fetches.relayObjects === 0) checks.push("no_media_fetched");
+      else if (ratio < TOO_FEW_RATIO) checks.push("too_few_segments");
+    }
+    return { checks, measures, mediaUnconfirmed: checks.length > 0, skipped: null };
+  }
+  if (session.assignedSource === "relay") return none("no_accounting");
+
+  const partsKnown = fetches.parts !== null;
   const parts = fetches.parts ?? 0;
   const effectiveSegments = fetches.segments + parts / Math.max(1, ctx.partsPerSegment);
   measures.segments = round(effectiveSegments);
@@ -45,24 +110,49 @@ export function fetchChecks(
       checks.push("playlists_without_segments");
     if (fetches.playlists === 0 && fetches.segments >= FETCH_MIN_REQUESTS) checks.push("segments_without_playlists");
   }
-  const totalBytes = session.bytesHttp + session.bytesP2p;
-  const httpShare = totalBytes > 0 ? session.bytesHttp / totalBytes : 1;
-  const expected = (session.watchSeconds / Math.max(0.1, ctx.segmentDurationSeconds)) * httpShare;
+  const expected = (Math.max(0, session.watchSeconds) / segDur) * share;
   measures.expectedSegments = round(expected);
-  if (expected >= MIN_EXPECTED_SEGMENTS && !checks.includes("playlists_without_segments")) {
-    const ratio = effectiveSegments / expected;
-    measures.segmentRatio = round(ratio);
-    if (ratio < TOO_FEW_RATIO) checks.push("too_few_segments");
-    else if (ratio > TOO_MANY_RATIO) checks.push("too_many_segments");
+  let mediaUnconfirmed = checks.includes("playlists_without_segments");
+  if (expected >= MIN_EXPECTED_SEGMENTS && !mediaUnconfirmed) {
+    if (!partsKnown) {
+      // Database counter only (full segments): zero cannot be told apart from a part-only
+      // low-latency player, so it holds the session pending instead of scoring it.
+      if (fetches.segments === 0) mediaUnconfirmed = true;
+    } else if (effectiveSegments === 0) {
+      checks.push("no_media_fetched");
+      mediaUnconfirmed = true;
+    } else {
+      const ratio = effectiveSegments / expected;
+      measures.segmentRatio = round(ratio);
+      if (ratio < TOO_FEW_RATIO) {
+        checks.push("too_few_segments");
+        mediaUnconfirmed = true;
+      } else if (ratio > TOO_MANY_RATIO) checks.push("too_many_segments");
+    }
   }
-  return { checks, measures };
+  return { checks, measures, mediaUnconfirmed, skipped: null };
 }
 
-export function fetchSignal(
-  session: Pick<SessionFacts, "assignedSource" | "watchSeconds" | "bytesHttp" | "bytesP2p">,
-  fetches: FetchSummary,
-  ctx: Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment">,
-): Signal | null {
+/**
+ * Playback a session claimed up to `untilMs` (the end of the window its relay's receipts
+ * cover). From the heartbeat history when there is one (each beat reports the seconds played
+ * since the previous one); otherwise the database watch time spread evenly over the
+ * session's life.
+ */
+export function claimedSecondsUntil(
+  beats: readonly HeartbeatSample[],
+  untilMs: number,
+  session: Pick<SessionFacts, "watchSeconds" | "startedAt" | "lastHeartbeatAt">,
+): number {
+  if (beats.length > 0) return round(beats.filter((b) => b.at <= untilMs).reduce((a, b) => a + b.playedSeconds, 0));
+  const start = session.startedAt.getTime();
+  const end = (session.lastHeartbeatAt ?? session.startedAt).getTime();
+  if (end <= start) return 0;
+  const covered = Math.min(1, Math.max(0, (untilMs - start) / (end - start)));
+  return round(session.watchSeconds * covered);
+}
+
+export function fetchSignal(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): Signal | null {
   const { checks, measures } = fetchChecks(session, fetches, ctx);
   if (checks.length === 0) return null;
   return {

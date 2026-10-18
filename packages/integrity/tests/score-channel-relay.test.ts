@@ -68,9 +68,30 @@ describe("scoreSession verdicts", () => {
     expect(scoreSession(session({ heartbeats: 5 }), [], fetches, ctx()).verdict).toBe("verified");
   });
 
-  test("a datacenter session alone is excluded (0.8 > 0.7) even before 3 heartbeats", () => {
-    const r = scoreSession(session({ datacenter: "Example Cloud", heartbeats: 0 }), [], fetches, ctx());
-    expect(r).toMatchObject({ verdict: "excluded", score: 0.8, reasons: ["datacenter_ip"] });
+  test("a datacenter session alone is not excluded (0.6); with corroboration it is, even before 3 beats", () => {
+    const alone = scoreSession(session({ datacenter: "Example Cloud" }), beats(6), fetches, ctx());
+    expect(alone).toMatchObject({ verdict: "verified", score: 0.6, reasons: ["datacenter_ip"] });
+    const r = scoreSession(
+      session({ datacenter: "Example Cloud", heartbeats: 0, fingerprint: { webdriver: true } }),
+      [],
+      fetches,
+      ctx(),
+    );
+    expect(r).toMatchObject({ verdict: "excluded", reasons: ["datacenter_ip", "headless"] });
+    expect(r.score).toBeCloseTo(0.84, 6);
+  });
+
+  test("a privacy relay is a weak signal: never fatal alone, below exclusion even with a headless flag", () => {
+    const relay = session({ datacenter: "privacy_relay:Example Relay" });
+    expect(scoreSession(relay, beats(6), fetches, ctx())).toMatchObject({
+      verdict: "verified",
+      score: 0.3,
+      reasons: ["privacy_relay"],
+    });
+    const plusWebdriver = scoreSession({ ...relay, fingerprint: { webdriver: true } }, beats(6), fetches, ctx());
+    expect(plusWebdriver.score).toBeCloseTo(0.72, 6);
+    // The default threshold is 0.7, so two weak signals still exclude: never *alone*.
+    expect(plusWebdriver.verdict).toBe("excluded");
   });
 
   test("a weak signal alone keeps the session verified but explained", () => {
@@ -81,13 +102,22 @@ describe("scoreSession verdicts", () => {
   test("weak signals combine to an exclusion, strongest reason first", () => {
     const r = scoreSession(
       session({ fingerprint: { webdriver: true } }),
-      beats(6).map((b) => ({ ...b, visible: false, muted: true })),
+      beats(6).map((b) => ({ ...b, playedSeconds: 16 })),
       fetches,
       ctx(),
     );
     expect(r.verdict).toBe("excluded");
     expect(r.score).toBeCloseTo(0.8, 6);
     expect(r.reasons).toEqual(["headless", "heartbeat_inconsistent"]);
+  });
+
+  test("a background tab (hidden and muted) is not a bot, even with one weak flag", () => {
+    const hidden = beats(12).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000, visible: false, muted: true }));
+    const r = scoreSession(session({ fingerprint: { webdriver: true } }), hidden, fetches, ctx());
+    // 1 − 0.4 × 0.75 = 0.7: not above the threshold. Clamped (perfectly regular) hidden beats add nothing.
+    expect(r).toMatchObject({ verdict: "verified", reasons: ["headless", "heartbeat_inconsistent"] });
+    expect(r.score).toBeCloseTo(0.7, 6);
+    expect(r.signals[1]!.details.checks).toEqual(["never_visible_and_muted"]);
   });
 
   test("exactly the threshold is not above it", () => {
@@ -118,6 +148,103 @@ describe("scoreSession verdicts", () => {
     const b = beats(6);
     b[5] = { ...b[5]!, fingerprint: { webdriver: true } };
     expect(scoreSession(session(), b, fetches, ctx()).reasons).toEqual(["headless"]);
+  });
+});
+
+describe("scoreSession: fetch-less heartbeat bots never verify", () => {
+  test("origin counters with no media at all exclude (claims playback, fetched nothing)", () => {
+    const r = scoreSession(session(), beats(6), { playlists: 0, segments: 0, parts: 0 }, ctx());
+    expect(r).toMatchObject({ verdict: "excluded", score: 0.9, reasons: ["fetch_pattern"] });
+    expect(r.signals[0]!.details.checks).toEqual(["no_media_fetched"]);
+  });
+
+  test("far too few segments: weak score, but held pending (media_unconfirmed), never verified", () => {
+    const r = scoreSession(session(), beats(6), { playlists: 60, segments: 10, parts: 0 }, ctx());
+    expect(r).toMatchObject({ verdict: "pending", reasons: ["fetch_pattern", "media_unconfirmed"], score: 0.6 });
+  });
+
+  test("database counter only: zero segments holds pending; any segment lets it verify (parts unknown)", () => {
+    const db0 = scoreSession(session(), beats(6), { playlists: null, segments: 0, parts: null }, ctx());
+    expect(db0).toMatchObject({ verdict: "pending", score: 0, reasons: ["media_unconfirmed"] });
+    // A low-latency player fetches mostly parts the database counter does not see: no ratio check.
+    const db3 = scoreSession(session(), beats(6), { playlists: null, segments: 3, parts: null }, ctx());
+    expect(db3).toMatchObject({ verdict: "verified", reasons: [] });
+  });
+
+  test("short watch times are not judged", () => {
+    const r = scoreSession(session({ watchSeconds: 9 }), beats(6), { playlists: 0, segments: 0, parts: 0 }, ctx());
+    expect(r.verdict).toBe("verified");
+  });
+
+  test("relay sessions are judged by their relay's receipts", () => {
+    const relay = session({ assignedSource: "relay" });
+    expect(scoreSession(relay, beats(6), { relayObjects: 0, claimedSeconds: 60 }, ctx())).toMatchObject({
+      verdict: "excluded",
+      reasons: ["fetch_pattern"],
+    });
+    expect(scoreSession(relay, beats(6), { relayObjects: 10, claimedSeconds: 60 }, ctx()).verdict).toBe("pending");
+    // A part-only player has ~5 objects per second: never "too many" for relays.
+    expect(scoreSession(relay, beats(6), { relayObjects: 300, claimedSeconds: 60 }, ctx())).toMatchObject({
+      verdict: "verified",
+      reasons: [],
+    });
+    // No receipts for the window: unknown, not judged.
+    expect(scoreSession(relay, beats(6), null, ctx()).verdict).toBe("verified");
+  });
+
+  test("CDN sessions have no per-session accounting and are never judged on fetches", () => {
+    const cdn = session({ assignedSource: "cdn" });
+    expect(scoreSession(cdn, beats(6), null, ctx()).verdict).toBe("verified");
+    expect(scoreSession(cdn, beats(6), { playlists: 0, segments: 0, parts: 0 }, ctx()).verdict).toBe("verified");
+  });
+});
+
+describe("scoreSession: allowances (appeal stickiness)", () => {
+  const T = 1_000_000 + 5 * 10_000;
+  test("covered signals no longer count; the reason says why", () => {
+    const dc = session({ datacenter: "Example Cloud", fingerprint: { webdriver: true } });
+    expect(scoreSession(dc, beats(6), fetches, ctx()).verdict).toBe("excluded");
+    const r = scoreSession(
+      dc,
+      beats(6),
+      fetches,
+      ctx({ allowance: { since: T, codes: ["datacenter_ip", "headless"] } }),
+    );
+    expect(r).toMatchObject({ verdict: "verified", score: 0, reasons: ["allowed_on_appeal"] });
+  });
+
+  test("a signal not covered is new evidence and can exclude again", () => {
+    const r = scoreSession(
+      session({ datacenter: "Example Cloud" }),
+      beats(6),
+      fetches,
+      ctx({ allowance: { since: T, codes: ["datacenter_ip"] }, device: { rank: 5, concurrent: 5 } }),
+    );
+    expect(r).toMatchObject({ verdict: "excluded", reasons: ["device_concurrency", "allowed_on_appeal"] });
+  });
+
+  test("heartbeat checks only look at beats after the decision", () => {
+    const periodic = beats(24).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000, bufferSeconds: 2 }));
+    const before = periodic.slice(0, 12);
+    const since = before.at(-1)!.at;
+    const webdriver = session({ fingerprint: { webdriver: true }, heartbeats: 24 });
+    // Old periodic beats were part of what was appealed: not counted again.
+    const onlyOld = scoreSession(webdriver, before, fetches, ctx({ allowance: { since, codes: ["headless"] } }));
+    expect(onlyOld.reasons).toEqual(["allowed_on_appeal"]);
+    // New periodic beats after the decision are new evidence.
+    const withNew = scoreSession(webdriver, periodic, fetches, ctx({ allowance: { since, codes: ["headless"] } }));
+    expect(withNew.reasons).toEqual(["heartbeat_inconsistent", "allowed_on_appeal"]);
+    expect(withNew.verdict).toBe("excluded");
+  });
+
+  test("an allowed fetch pattern also lifts the media_unconfirmed hold", () => {
+    const r = scoreSession(
+      session(),
+      beats(6),
+      { playlists: 60, segments: 10, parts: 0 },
+      ctx({ allowance: { since: 0, codes: ["fetch_pattern"] } }),
+    );
+    expect(r).toMatchObject({ verdict: "verified", reasons: ["allowed_on_appeal"] });
   });
 });
 
@@ -233,12 +360,32 @@ describe("checkReceipt", () => {
       status: "verified",
       bytesVerified: 1000,
       overReportRatio: expect.closeTo(0.1, 9),
+      issuance: "complete",
     });
     expect(checkReceipt(800, 1000, 0.1)).toEqual({
       status: "verified",
       bytesVerified: 800,
       overReportRatio: expect.closeTo(-0.2, 9),
+      issuance: "complete",
     });
+  });
+
+  test("incomplete issuance (origin restart) is unknown: paid for issued bytes only, never an over-report", () => {
+    expect(checkReceipt(5000, 1000, 0.1, false)).toEqual({
+      status: "verified",
+      bytesVerified: 1000,
+      overReportRatio: null,
+      issuance: "unknown",
+    });
+    expect(checkReceipt(5000, null, 0.1, false)).toEqual({
+      status: "verified",
+      bytesVerified: 0,
+      overReportRatio: null,
+      issuance: "unknown",
+    });
+    // Within tolerance it is an ordinary verification even with gaps.
+    expect(checkReceipt(1000, 1000, 0.1, false)).toMatchObject({ status: "verified", issuance: "complete" });
+    expect(checkReceipt(0, null, 0.1, false)).toMatchObject({ status: "verified", bytesVerified: 0 });
   });
 
   test("beyond tolerance: rejected with the over-report ratio", () => {
@@ -258,8 +405,13 @@ describe("checkReceipt", () => {
       reason: "no_issuance",
     });
     expect(checkReceipt(10, 0, 0.1).status).toBe("rejected");
-    expect(checkReceipt(0, null, 0.1)).toEqual({ status: "verified", bytesVerified: 0, overReportRatio: 0 });
-    expect(checkReceipt(0, 50, 0.1)).toEqual({ status: "verified", bytesVerified: 0, overReportRatio: -1 });
+    expect(checkReceipt(0, null, 0.1)).toEqual({
+      status: "verified",
+      bytesVerified: 0,
+      overReportRatio: 0,
+      issuance: "complete",
+    });
+    expect(checkReceipt(0, 50, 0.1)).toMatchObject({ status: "verified", bytesVerified: 0, overReportRatio: -1 });
   });
 });
 
@@ -308,5 +460,31 @@ describe("relayStanding", () => {
       reason: "gross_over_report",
       worstRatio: null,
     });
+  });
+
+  test("a verified receipt with unknown issuance (null ratio) counts as clean", () => {
+    expect(relayStanding([h(1, null, "verified"), h(2, null, "verified")], 0.1)).toMatchObject({
+      suspend: false,
+      overReportingPeriods: 0,
+      worstRatio: 0,
+    });
+  });
+
+  test("after reinstatement only periods that started at or after it count", () => {
+    const withStart = (m: number, ratio: number | null) => ({ ...h(m, ratio), periodStart: at(m - 1) });
+    const history = [withStart(1, 0.5), withStart(2, null), withStart(5, 0), withStart(6, 0.05)];
+    expect(relayStanding(history, 0.1).suspend).toBe(true);
+    // Reinstated at minute 3: the gross over-reports before it are forgiven.
+    expect(relayStanding(history, 0.1, at(3))).toMatchObject({ suspend: false, periodsConsidered: 2 });
+    // A period straddling the reinstatement (started before it) is not counted either.
+    expect(relayStanding([withStart(4, 0.5)], 0.1, new Date(at(3).getTime() + 30_000)).suspend).toBe(false);
+    // Fresh over-reporting after reinstatement still suspends.
+    expect(relayStanding([...history, withStart(7, 0.4)], 0.1, at(3))).toMatchObject({
+      suspend: true,
+      reason: "gross_over_report",
+    });
+    // Exactly at the boundary counts; an empty post-reinstatement history stands.
+    expect(relayStanding([withStart(4, 0.5)], 0.1, at(3)).suspend).toBe(true);
+    expect(relayStanding(history, 0.1, at(60))).toMatchObject({ suspend: false, periodsConsidered: 0 });
   });
 });

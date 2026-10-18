@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+export * from "./allowance.ts";
 export * from "./channel.ts";
+export * from "./concurrency.ts";
 export * from "./jobs.ts";
 export * from "./network.ts";
 export * from "./relay.ts";

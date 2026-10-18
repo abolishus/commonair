@@ -63,7 +63,7 @@ async function session(channelId: string, o: Partial<typeof s.playbackSessions.$
     .values({
       channelId,
       deviceHash: `dev-${crypto.randomUUID()}`,
-      ipHash: "ip",
+      ipHash: `ip-${crypto.randomUUID()}`,
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
       fingerprint: DESKTOP_FP,
@@ -106,7 +106,14 @@ describe("scoreActiveSessions", () => {
     const clean = await session(channelId);
     await humanHistory(clean);
     const fresh = await session(channelId, { heartbeats: 1 });
-    const dc = await session(channelId, { datacenter: "TEST-NET-3 (sample hosting)", asn: 64500 });
+    // A hosting address alone is not enough (0.6); with a webdriver flag it is.
+    const dcOnly = await session(channelId, { datacenter: "TEST-NET-3 (sample hosting)", asn: 64500 });
+    await humanHistory(dcOnly);
+    const dc = await session(channelId, {
+      datacenter: "TEST-NET-3 (sample hosting)",
+      asn: 64500,
+      fingerprint: { ...DESKTOP_FP, webdriver: true },
+    });
     await humanHistory(dc);
     const device = "shared-device";
     const multi: string[] = [];
@@ -139,24 +146,25 @@ describe("scoreActiveSessions", () => {
     expect((await sessionRow(clean)).verdict).toBe("verified");
     expect((await sessionRow(clean)).verdictReasons).toEqual([]);
     expect(await sessionRow(fresh)).toMatchObject({ verdict: "pending", verdictReasons: ["insufficient_heartbeats"] });
-    expect(await sessionRow(dc)).toMatchObject({ verdict: "excluded", verdictReasons: ["datacenter_ip"], score: 0.8 });
+    expect(await sessionRow(dcOnly)).toMatchObject({
+      verdict: "verified",
+      verdictReasons: ["datacenter_ip"],
+      score: 0.6,
+    });
+    expect(await sessionRow(dc)).toMatchObject({ verdict: "excluded", verdictReasons: ["datacenter_ip", "headless"] });
+    // Newest first: the two oldest of five concurrent sessions on one device fire.
     const multiRows = await Promise.all(multi.map(sessionRow));
-    expect(multiRows.map((m) => m.verdict)).toEqual(["verified", "verified", "verified", "excluded", "excluded"]);
-    expect(multiRows[3]!.verdictReasons).toEqual(["device_concurrency"]);
+    expect(multiRows.map((m) => m.verdict)).toEqual(["excluded", "excluded", "verified", "verified", "verified"]);
+    expect(multiRows[0]!.verdictReasons).toEqual(["device_concurrency"]);
     const botRow = await sessionRow(bot);
     expect(botRow.verdict).toBe("excluded");
     expect(botRow.verdictReasons).toEqual(["fetch_pattern", "heartbeat_inconsistent"]);
     expect((await sessionRow(ended)).scoredAt).toBeNull();
-    expect(r.newlyExcluded.sort()).toEqual([dc, multi[3]!, multi[4]!, bot].sort());
+    expect(r.newlyExcluded.sort()).toEqual([dc, multi[0]!, multi[1]!, bot].sort());
 
     const dcFlags = await flagsFor(dc);
-    expect(dcFlags).toHaveLength(1);
-    expect(dcFlags[0]).toMatchObject({
-      subjectType: "session",
-      signal: "datacenter_ip",
-      decision: "excluded",
-      channelId,
-    });
+    expect(dcFlags.map((f) => f.signal).sort()).toEqual(["datacenter_ip", "headless"]);
+    expect(dcFlags[0]).toMatchObject({ subjectType: "session", decision: "excluded", channelId });
     expect((await flagsFor(bot)).map((f) => f.signal).sort()).toEqual(["fetch_pattern", "heartbeat_inconsistent"]);
     const audits = await app.select().from(s.auditLog).where(eq(s.auditLog.action, "integrity.session.exclude"));
     expect(audits.map((a) => a.subjectId).sort()).toEqual(r.newlyExcluded.sort());
@@ -166,14 +174,227 @@ describe("scoreActiveSessions", () => {
     const again = await scoreActiveSessions(app, valkey, NOW);
     expect(again.newlyExcluded).toEqual([]);
     expect((await sessionRow(dc)).verdict).toBe("excluded");
-    expect(await flagsFor(dc)).toHaveLength(1);
+    expect(await flagsFor(dc)).toHaveLength(2);
     const [{ n }] = (await app
       .select({ n: count() })
       .from(s.playbackSessions)
       .where(eq(s.playbackSessions.channelId, channelId))) as [{ n: number }];
-    expect(n).toBe(10);
+    expect(n).toBe(11);
+  });
+
+  test("fetch-less heartbeat sessions never verify; part-only, CDN and receipt-less relay sessions are fine", async () => {
+    const { channelId } = await channel();
+    // Heartbeats claim 60 s of playback; the database counter saw no segment and no counters exist.
+    const dbZero = await session(channelId, { segmentsFetched: 0 });
+    await humanHistory(dbZero);
+    // Origin counters exist (the consumer saw this token) and show no media at all.
+    const known = await session(channelId, { segmentsFetched: 0 });
+    await humanHistory(known);
+    for (let i = 0; i < 5; i++) await recordFetch(valkey, { sid: known, kind: "playlist" });
+    // A low-latency player: parts only, zero full segments.
+    const llhls = await session(channelId, { segmentsFetched: 0 });
+    await humanHistory(llhls);
+    for (let i = 0; i < 60; i++) await recordFetch(valkey, { sid: llhls, kind: "playlist" });
+    for (let i = 0; i < 290; i++) await recordFetch(valkey, { sid: llhls, kind: "part" });
+    // CDN delivery has no per-session accounting.
+    const cdn = await session(channelId, { assignedSource: "cdn", segmentsFetched: 0 });
+    await humanHistory(cdn);
+
+    // Relay sessions: judged by their relay's receipts.
+    const relayId = await relayNode();
+    const relayBot = await session(channelId, { assignedSource: "relay", relayId, segmentsFetched: 0 });
+    const relayViewer = await session(channelId, { assignedSource: "relay", relayId, segmentsFetched: 0 });
+    for (const id of [relayBot, relayViewer]) await humanHistory(id);
+    const start = new Date(NOW.getTime() - 120_000);
+    const end = new Date(NOW.getTime() - 10_000);
+    const nonce = crypto.randomUUID();
+    await app.insert(s.relayReceipts).values({
+      relayId,
+      nonce,
+      periodStart: start,
+      periodEnd: end,
+      bytesReported: 1000,
+      segmentsReported: 300,
+      tokensReported: 1,
+      payload: {
+        v: 1,
+        relayId,
+        nonce,
+        periodStart: start.toISOString(),
+        periodEnd: end.toISOString(),
+        entries: [{ sessionId: relayViewer, segments: 300, bytes: 1000 }],
+      },
+      signature: "sig",
+      status: "verified",
+    });
+    const silentRelay = await relayNode();
+    const unaccounted = await session(channelId, { assignedSource: "relay", relayId: silentRelay, segmentsFetched: 0 });
+    await humanHistory(unaccounted);
+
+    const r = await scoreActiveSessions(app, valkey, NOW);
+
+    expect(await sessionRow(dbZero)).toMatchObject({ verdict: "pending", verdictReasons: ["media_unconfirmed"] });
+    expect(await sessionRow(known)).toMatchObject({ verdict: "excluded", verdictReasons: ["fetch_pattern"] });
+    expect((await flagsFor(known))[0]!.details).toMatchObject({ checks: ["no_media_fetched"] });
+    expect(await sessionRow(llhls)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    expect(await sessionRow(cdn)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    expect(await sessionRow(relayBot)).toMatchObject({ verdict: "excluded", verdictReasons: ["fetch_pattern"] });
+    expect(await sessionRow(relayViewer)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    expect(await sessionRow(unaccounted)).toMatchObject({ verdict: "verified" });
+    expect(r.newlyExcluded).toEqual(expect.arrayContaining([known, relayBot]));
+    expect(r.newlyExcluded).not.toContain(dbZero);
+  });
+
+  test("a reload supersedes the stale session: it ends, and neither is counted as a duplicate", async () => {
+    const { channelId } = await channel();
+    const other = await channel();
+    const device = `reload-${crypto.randomUUID()}`;
+    // Two other live tabs on the same device (another channel) use up most of the allowance (3).
+    const tabs = [
+      await session(other.channelId, { deviceHash: device, startedAt: new Date(NOW.getTime() - 900_000) }),
+      await session(other.channelId, { deviceHash: device, startedAt: new Date(NOW.getTime() - 800_000) }),
+    ];
+    const lastBeat = new Date(NOW.getTime() - 70_000);
+    const stale = await session(channelId, {
+      deviceHash: device,
+      startedAt: new Date(NOW.getTime() - 600_000),
+      lastHeartbeatAt: lastBeat,
+      verdict: "verified",
+    });
+    const reload = await session(channelId, { deviceHash: device, startedAt: new Date(NOW.getTime() - 65_000) });
+    for (const id of [...tabs, stale, reload]) await humanHistory(id);
+    await valkey.zadd(`viewers:${channelId}`, NOW.getTime() - 70_000, stale);
+
+    const r = await scoreActiveSessions(app, valkey, NOW);
+
+    expect(r.superseded).toEqual([stale]);
+    const staleRow = await sessionRow(stale);
+    expect(staleRow.endedAt?.getTime()).toBe(lastBeat.getTime());
+    expect(staleRow.verdict).not.toBe("excluded");
+    expect(await sessionRow(reload)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    for (const id of tabs) expect((await sessionRow(id)).verdict).toBe("verified");
+    expect(await valkey.zscore(`viewers:${channelId}`, stale)).toBeNull();
+    // Idempotent: nothing left to supersede.
+    expect((await scoreActiveSessions(app, valkey, NOW)).superseded).toEqual([]);
+  });
+
+  test("appeal overturns and allowed flags stick unless new evidence arrives", async () => {
+    // Flags are stamped with the database clock, so this test runs on wall-clock time.
+    const T = new Date();
+    const live = { startedAt: new Date(T.getTime() - 120_000), lastHeartbeatAt: new Date(T.getTime() - 5_000) };
+    const { channelId } = await channel();
+    const viewer = await user();
+    const hosted = { datacenter: "TEST-NET-3 (sample hosting)", fingerprint: { ...DESKTOP_FP, webdriver: true } };
+    const appealed = await session(channelId, { userId: viewer, ...hosted, ...live });
+    const cleared = await session(channelId, { ...hosted, ...live });
+    for (const id of [appealed, cleared]) await humanHistory(id);
+    await scoreActiveSessions(app, valkey, T);
+    expect((await sessionRow(appealed)).verdict).toBe("excluded");
+    expect((await sessionRow(cleared)).verdict).toBe("excluded");
+
+    // The appeal is overturned (the resolver does not touch the verdict); an admin clears one of two flags.
+    const decidedAt = new Date(Date.now() + 1_000);
+    await app.insert(s.appeals).values({
+      appellantId: viewer,
+      kind: "integrity",
+      subjectType: "session",
+      subjectId: appealed,
+      body: "I was on my office VPN, this is me.",
+      status: "overturned",
+      resolution: "VPN user",
+      resolvedAt: decidedAt,
+    });
+    const [dcFlag] = (await flagsFor(cleared)).filter((f) => f.signal === "datacenter_ip");
+    await app
+      .update(s.integrityFlags)
+      .set({ decision: "allowed", decidedAt })
+      .where(eq(s.integrityFlags.id, dcFlag!.id));
+
+    const later = new Date(decidedAt.getTime() + 4_000);
+    const r = await scoreActiveSessions(app, valkey, later);
+    expect(r.restored).toEqual(expect.arrayContaining([appealed, cleared]));
+    expect(await sessionRow(appealed)).toMatchObject({ verdict: "verified", verdictReasons: ["allowed_on_appeal"] });
+    // The other flag (headless, 0.6) still shows but no longer excludes on its own.
+    expect(await sessionRow(cleared)).toMatchObject({
+      verdict: "verified",
+      verdictReasons: ["headless", "allowed_on_appeal"],
+    });
+    const restores = await app.select().from(s.auditLog).where(eq(s.auditLog.action, "integrity.session.restore"));
+    expect(restores.map((a) => a.subjectId)).toEqual(expect.arrayContaining([appealed, cleared]));
+
+    // Rescoring again does not re-exclude (no new evidence) and writes no new flags.
+    const flagsBefore = (await flagsFor(appealed)).length;
+    const again = await scoreActiveSessions(app, valkey, new Date(later.getTime() + 5_000));
+    expect(again.newlyExcluded).not.toContain(appealed);
+    expect((await sessionRow(appealed)).verdict).toBe("verified");
+    expect(await flagsFor(appealed)).toHaveLength(flagsBefore);
+
+    // New evidence after the decision (a signal not covered) still excludes.
+    const device = (await sessionRow(appealed)).deviceHash;
+    for (let i = 0; i < 3; i++) {
+      const id = await session(channelId, {
+        deviceHash: device,
+        startedAt: new Date(T.getTime() - 60_000 + i * 1000),
+        lastHeartbeatAt: live.lastHeartbeatAt,
+      });
+      await humanHistory(id);
+    }
+    const third = await scoreActiveSessions(app, valkey, new Date(later.getTime() + 10_000));
+    expect(third.newlyExcluded).toContain(appealed);
+    expect(await sessionRow(appealed)).toMatchObject({
+      verdict: "excluded",
+      verdictReasons: ["device_concurrency", "allowed_on_appeal"],
+    });
+  });
+
+  test("an account-level overturn covers the account's later sessions too", async () => {
+    const T = new Date();
+    const live = { startedAt: new Date(T.getTime() - 120_000), lastHeartbeatAt: new Date(T.getTime() - 5_000) };
+    const { channelId } = await channel();
+    const viewer = await user();
+    const hosted = { datacenter: "TEST-NET-3 (sample hosting)", fingerprint: { ...DESKTOP_FP, webdriver: true } };
+    const first = await session(channelId, { userId: viewer, ...hosted, ...live, endedAt: live.lastHeartbeatAt });
+    await humanHistory(first);
+    await scoreActiveSessions(app, valkey, T);
+    expect((await sessionRow(first)).verdict).toBe("excluded");
+    const resolvedAt = new Date(Date.now() + 1_000);
+    await app.insert(s.appeals).values({
+      appellantId: viewer,
+      kind: "integrity",
+      subjectType: "user",
+      subjectId: viewer,
+      body: "My whole household uses this VPN.",
+      status: "overturned",
+      resolvedAt,
+    });
+    const next = await session(channelId, { userId: viewer, ...hosted, ...live });
+    await humanHistory(next);
+    await scoreActiveSessions(app, valkey, new Date(resolvedAt.getTime() + 1_000));
+    expect(await sessionRow(next)).toMatchObject({ verdict: "verified", verdictReasons: ["allowed_on_appeal"] });
+    // Another account with the same setup is still excluded.
+    const stranger = await session(channelId, { userId: await user(), ...hosted, ...live });
+    await humanHistory(stranger);
+    await scoreActiveSessions(app, valkey, new Date(resolvedAt.getTime() + 2_000));
+    expect((await sessionRow(stranger)).verdict).toBe("excluded");
   });
 });
+
+async function relayNode(status: "active" | "suspended" = "active") {
+  const ownerId = await user();
+  const [r] = await app
+    .insert(s.relayNodes)
+    .values({
+      ownerId,
+      name: `relay${seq}`,
+      publicUrl: `http://127.0.0.1:${9000 + seq}`,
+      declaredCapacityMbps: 100,
+      publicKey: "k",
+      tokenHash: crypto.randomUUID(),
+      status,
+    })
+    .returning({ id: s.relayNodes.id });
+  return r!.id;
+}
 
 describe("verifyReceipts", () => {
   async function relay() {
@@ -270,10 +491,82 @@ describe("verifyReceipts", () => {
 
     // Idempotent: nothing pending → nothing changes, no second suspension.
     const again = await verifyReceipts(app, NOW);
-    expect(again).toEqual({ verified: 0, rejected: 0, suspendedRelays: [] });
+    expect(again).toEqual({ verified: 0, rejected: 0, unknown: 0, suspendedRelays: [] });
     // Once the grace period passes, the late receipt is checked.
     const later = await verifyReceipts(app, new Date(NOW.getTime() + 5 * 60_000));
     expect(later.verified).toBe(1);
+  });
+
+  test("a reinstated relay is not suspended again for receipts from before its reinstatement", async () => {
+    const r = await relay();
+    // Checked history from before the suspension: gross over-reports.
+    for (const m of [30, 29]) {
+      const id = await period(r, m, null, 5000);
+      await app
+        .update(s.relayReceipts)
+        .set({ status: "rejected", rejectionReason: "no_issuance", checkedAt: NOW })
+        .where(eq(s.relayReceipts.id, id));
+    }
+    // Still pending from before the reinstatement, checked only now: rejected, but forgiven.
+    const old = await period(r, 25, 1000, 2000);
+    await app.insert(s.auditLog).values({
+      actorType: "admin",
+      action: "relay.reinstate",
+      subjectType: "relay",
+      subjectId: r,
+      reason: "operator fixed the counter",
+      createdAt: minute(20),
+    });
+    const fresh = await period(r, 10, 1000, 1000);
+
+    const res = await verifyReceipts(app, NOW);
+    expect(await receipt(old)).toMatchObject({ status: "rejected", rejectionReason: "over_report" });
+    expect(await receipt(fresh)).toMatchObject({ status: "verified", bytesVerified: 1000 });
+    expect(res.suspendedRelays).not.toContain(r);
+    expect((await relayRow(r)).status).toBe("active");
+
+    // Fresh misbehaviour after the reinstatement still suspends.
+    await period(r, 8, 1000, 4000);
+    const res2 = await verifyReceipts(app, NOW);
+    expect(res2.suspendedRelays).toContain(r);
+    expect(await relayRow(r)).toMatchObject({ status: "suspended", suspendedReason: "integrity:gross_over_report" });
+  });
+
+  test("missing issuance while the relay had live sessions is unknown, not over-reporting", async () => {
+    const r = await relay();
+    const { channelId } = await channel();
+    // A live viewer assigned to the relay for the whole window.
+    await session(channelId, {
+      assignedSource: "relay",
+      relayId: r,
+      startedAt: new Date(NOW.getTime() - 30 * 60_000),
+      lastHeartbeatAt: new Date(NOW.getTime() - 5_000),
+    });
+    // Origin restarted: no issuance rows at all for these minutes.
+    const gap1 = await period(r, 12, null, 5000);
+    const gap2 = await period(r, 11, null, 5000);
+    // Production record lost: a row with sessions but no bytes.
+    await app
+      .insert(s.relayIssuance)
+      .values({ relayId: r, bucketStart: minute(10), sessions: 1, segmentTokens: 0, bytesIssued: 0 });
+    const lost = await period(r, 10, null, 5000);
+    // Complete issuance is still checked as usual.
+    const ok = await period(r, 9, 1000, 1050);
+
+    const res = await verifyReceipts(app, NOW);
+    for (const id of [gap1, gap2, lost]) {
+      expect(await receipt(id)).toMatchObject({ status: "verified", bytesVerified: 0, overReportRatio: null });
+    }
+    expect(await receipt(ok)).toMatchObject({ status: "verified", bytesVerified: 1000 });
+    expect(res.unknown).toBe(3);
+    expect(res.suspendedRelays).not.toContain(r);
+    expect((await relayRow(r)).status).toBe("active");
+    const unknownFlags = await app
+      .select()
+      .from(s.integrityFlags)
+      .where(and(eq(s.integrityFlags.subjectId, r), eq(s.integrityFlags.signal, "relay_issuance_unknown")));
+    expect(unknownFlags).toHaveLength(3);
+    expect(unknownFlags[0]).toMatchObject({ decision: "pending_review" });
   });
 });
 
@@ -292,10 +585,24 @@ describe("excludeFollowBursts", () => {
         startedAt: new Date(burstMinute.getTime() - 86_400_000),
         endedAt: new Date(burstMinute.getTime() - 80_000_000),
         watchSeconds: 1800,
+        verdict: "verified",
+      });
+    }
+    // Old accounts whose only "prior viewing" was botted (excluded or never verified) sessions.
+    const botted: string[] = [];
+    for (const verdict of ["excluded", "pending"] as const) {
+      const id = await user();
+      botted.push(id);
+      await session(channelId, {
+        userId: id,
+        startedAt: new Date(burstMinute.getTime() - 86_400_000),
+        endedAt: new Date(burstMinute.getTime() - 80_000_000),
+        watchSeconds: 1800,
+        verdict,
       });
     }
     await app.insert(s.follows).values(
-      [...fresh, ...established].map((followerId, i) => ({
+      [...fresh, ...established, ...botted].map((followerId, i) => ({
         followerId,
         channelId,
         createdAt: new Date(burstMinute.getTime() + i * 1000),
@@ -315,7 +622,7 @@ describe("excludeFollowBursts", () => {
       .select({ followerId: s.follows.followerId })
       .from(s.follows)
       .where(and(eq(s.follows.channelId, channelId), isNotNull(s.follows.excludedAt)));
-    expect(excluded.map((e) => e.followerId).sort()).toEqual([...fresh].sort());
+    expect(excluded.map((e) => e.followerId).sort()).toEqual([...fresh, ...botted].sort());
     const calmExcluded = await app
       .select()
       .from(s.follows)
@@ -323,12 +630,12 @@ describe("excludeFollowBursts", () => {
     expect(calmExcluded).toEqual([]);
     // Follows are kept (not deleted) and each exclusion is flagged with a stable subject.
     const all = await app.select().from(s.follows).where(eq(s.follows.channelId, channelId));
-    expect(all).toHaveLength(35);
+    expect(all).toHaveLength(37);
     const followFlags = await app
       .select()
       .from(s.integrityFlags)
       .where(and(eq(s.integrityFlags.channelId, channelId), eq(s.integrityFlags.subjectType, "follow")));
-    expect(followFlags.map((f) => f.subjectId).sort()).toEqual([...fresh].sort());
+    expect(followFlags.map((f) => f.subjectId).sort()).toEqual([...fresh, ...botted].sort());
     expect(await app.select().from(s.auditLog).where(eq(s.auditLog.action, "integrity.follows.exclude"))).toHaveLength(
       1,
     );
@@ -378,12 +685,13 @@ describe("markEligibleStreamHours", () => {
       .from(s.streamHours)
       .where(eq(s.streamHours.broadcastId, st.broadcastId))
       .orderBy(s.streamHours.hourStart);
+    // An hour needs membership.classes.streamer.minVerifiedViewers (2) distinct viewers.
     expect(rows.map((x) => [x.verifiedOtherViewers, x.eligible])).toEqual([
       [0, false],
       [2, true],
-      [1, true],
+      [1, false],
     ]);
-    expect(r).toEqual({ updated: 2, eligible: 2 });
+    expect(r).toEqual({ updated: 2, eligible: 1 });
 
     // Idempotent; and a later exclusion makes the hour ineligible again.
     expect(await markEligibleStreamHours(app, NOW)).toEqual({ updated: 0, eligible: 0 });
@@ -396,8 +704,48 @@ describe("markEligibleStreamHours", () => {
       .orderBy(s.streamHours.hourStart);
     expect(after.map((x) => [x.verifiedOtherViewers, x.eligible])).toEqual([
       [0, false],
-      [1, true],
+      [1, false],
       [0, false],
     ]);
+  });
+
+  test("viewers on the streamer's own network (watch address or ingest address) do not count", async () => {
+    const st = await channel();
+    const hourStart = new Date(Math.floor(NOW.getTime() / 3_600_000) * 3_600_000 - 5 * 3_600_000);
+    await app
+      .insert(s.streamHours)
+      .values({ broadcastId: st.broadcastId, channelId: st.channelId, hourStart, liveSeconds: 3600 });
+    const inHour = {
+      verdict: "verified" as const,
+      startedAt: new Date(hourStart.getTime() + 60_000),
+      endedAt: new Date(hourStart.getTime() + 1_800_000),
+    };
+    const homeIp = `home-${crypto.randomUUID()}`;
+    const studioIp = `studio-${crypto.randomUUID()}`;
+    // The streamer once watched from home (any channel, signed in): that address is theirs.
+    const elsewhere = await channel();
+    await session(elsewhere.channelId, { userId: st.ownerId, ipHash: homeIp, ...inHour });
+    // The stream key was last used from the studio.
+    await app.insert(s.streamKeys).values({
+      channelId: st.channelId,
+      keyHash: crypto.randomUUID(),
+      prefix: "live_xx",
+      lastUsedIpHash: studioIp,
+    });
+    // Sock puppets: fresh devices and accounts on the streamer's addresses.
+    await session(st.channelId, { ipHash: homeIp, ...inHour });
+    await session(st.channelId, { userId: await user(), ipHash: studioIp, ...inHour });
+    // One genuine viewer.
+    await session(st.channelId, { userId: await user(), ...inHour });
+
+    const count = async () =>
+      (await app.select().from(s.streamHours).where(eq(s.streamHours.broadcastId, st.broadcastId)))[0]!;
+    await markEligibleStreamHours(app, NOW);
+    expect(await count()).toMatchObject({ verifiedOtherViewers: 1, eligible: false });
+
+    // A second genuine viewer makes the hour count.
+    await session(st.channelId, { userId: null, ...inHour });
+    await markEligibleStreamHours(app, NOW);
+    expect(await count()).toMatchObject({ verifiedOtherViewers: 2, eligible: true });
   });
 });

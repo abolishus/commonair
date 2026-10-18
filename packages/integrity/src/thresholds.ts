@@ -34,3 +34,24 @@ export async function loadThresholds(db: Executor): Promise<IntegrityThresholds>
   if (!row) throw new Error(`governance setting ${INTEGRITY_THRESHOLDS_KEY} is missing`);
   return IntegrityThresholds.parse(row.value);
 }
+
+export const MEMBERSHIP_CLASSES_KEY = "membership.classes";
+/** Default when the protected setting does not carry the field yet (as in `@commonair/governance`). */
+export const DEFAULT_MIN_VERIFIED_VIEWERS = 2;
+
+/** The part of `membership.classes` (protected) stream-hour eligibility reads. */
+const StreamerEligibility = z.object({
+  streamer: z.object({
+    minVerifiedViewers: z.number().int().min(1).default(DEFAULT_MIN_VERIFIED_VIEWERS),
+  }),
+});
+
+/** `membership.classes.streamer.minVerifiedViewers`: distinct verified viewers an hour needs to count. */
+export async function loadMinVerifiedViewers(db: Executor): Promise<number> {
+  const [row] = await db
+    .select({ value: schema.governanceSettings.value })
+    .from(schema.governanceSettings)
+    .where(eq(schema.governanceSettings.key, MEMBERSHIP_CLASSES_KEY));
+  if (!row) throw new Error(`governance setting ${MEMBERSHIP_CLASSES_KEY} is missing`);
+  return StreamerEligibility.parse(row.value).streamer.minVerifiedViewers;
+}
