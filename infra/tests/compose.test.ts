@@ -346,13 +346,16 @@ describe("Quadlet mirror", () => {
 
   test("app units carry the same in-network environment as compose", () => {
     const appEnv = compose.services.api!.environment!;
+    // Compose lets .env override it; the units pin the network's subnet.
+    expect(appEnv.TRUSTED_PROXY_CIDRS).toBe("${TRUSTED_PROXY_CIDRS:-10.89.42.0/24}");
     for (const name of ["api", "chat", "irc", "origin", "media", "worker", "tracker", "web"]) {
       const env = Object.fromEntries(
         keys(units[name]!, "Environment").map((e) => [e.slice(0, e.indexOf("=")), e.slice(e.indexOf("=") + 1)]),
       );
       for (const [k, v] of Object.entries(appEnv)) {
         if (k === "DATABASE_URL" || k.startsWith("SMTP_") || k === "OTEL_SERVICE_NAME") continue;
-        expect(env[k], `${name}: ${k}`).toBe(v);
+        const expected = k === "TRUSTED_PROXY_CIDRS" ? "10.89.42.0/24" : v;
+        expect(env[k], `${name}: ${k}`).toBe(expected);
       }
     }
   });

@@ -37,6 +37,15 @@ function renderDialog(props: Partial<React.ComponentProps<typeof ConfirmDialog>>
 }
 
 describe("ConfirmDialog", () => {
+  test("buttons carry the stable e2e test ids", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.click(screen.getByRole("button", { name: "Delete clip" }));
+    await screen.findByRole("alertdialog");
+    expect(screen.getByTestId("confirm-dialog-confirm").textContent).toContain("Delete");
+    expect(screen.getByTestId("confirm-dialog-cancel").textContent).toContain("Cancel");
+  });
+
   test("keyboard flow: open with Enter, focus starts on Cancel, Tab to confirm, Enter confirms", async () => {
     const user = userEvent.setup();
     const { onConfirm } = renderDialog();

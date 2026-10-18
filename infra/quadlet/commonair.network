@@ -4,3 +4,4 @@
 # The private network every CommonAir container joins (compose's `default`).
 [Network]
 NetworkName=commonair
+Subnet=10.89.42.0/24

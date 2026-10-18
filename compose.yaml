@@ -47,6 +47,8 @@ x-app-env: &app-env
   SMTP_HOST: mailpit
   SMTP_PORT: "1025"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  # In-stack proxies (web, Caddy) forward the client address; trust only them.
+  TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-10.89.42.0/24}
   # Container-side ports are fixed (internal URLs above rely on them); host ports vary.
   WEB_PORT: "3000"
   API_PORT: "3001"
@@ -481,6 +483,14 @@ services:
           "Authorization: Bearer sk_test_123",
           "http://127.0.0.1:12111/v1/customers",
         ]
+
+# A fixed subnet so services can trust forwarded client addresses from in-stack proxies
+# (web's /api proxy, Caddy) without trusting the world. Override with COMPOSE_SUBNET.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.89.42.0/24
 
 volumes:
   postgres-data:

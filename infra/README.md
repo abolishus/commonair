@@ -225,8 +225,9 @@ Routes: `/api/*`, `/rpc/*` → api; `/chat` → chat `/ws` (WebSocket); `/hls/*`
 frame), nosniff, referrer and permissions policies; services may send a stricter CSP, which
 wins. No access log (it would record viewer IPs). Set `PUBLIC_URL`, `API_PUBLIC_URL`,
 `PLAYBACK_PUBLIC_URL` to `https://<host>`, `CHAT_PUBLIC_URL=wss://<host>/chat`,
-`P2P_TRACKER_URL=wss://<host>/tracker` and `TRUSTED_PROXY_CIDRS` to the compose network's
-subnet (`podman network inspect commonair_default`).
+`P2P_TRACKER_URL=wss://<host>/tracker`. Services trust `x-forwarded-for` only from the compose
+network (its fixed subnet `10.89.42.0/24`; a non-empty `TRUSTED_PROXY_CIDRS` overrides it), so the
+web proxy and Caddy pass real client addresses through.
 
 ACME needs ports 80 and 443 on the public address. Rootless Podman cannot bind them by default:
 either `sysctl net.ipv4.ip_unprivileged_port_start=80` on the host and set

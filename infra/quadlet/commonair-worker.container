@@ -31,6 +31,7 @@ Environment=API_INTERNAL_URL=http://api:3001
 Environment=CHAT_INTERNAL_URL=ws://chat:3002/ws
 Environment=ORIGIN_INTERNAL_URL=http://origin:3003
 Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+Environment=TRUSTED_PROXY_CIDRS=10.89.42.0/24
 Environment=WEB_PORT=3000
 Environment=API_PORT=3001
 Environment=CHAT_PORT=3002

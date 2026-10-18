@@ -114,10 +114,12 @@ export function ConfirmDialog({
         </AlertDialogHeader>
         {children}
         <AlertDialogFooter>
-          <AlertDialogCancel ref={cancelRef} disabled={pending}>
+          {/* Stable test ids: e2e scenarios confirm any dialog the same way (docs/testing). */}
+          <AlertDialogCancel ref={cancelRef} disabled={pending} data-testid="confirm-dialog-cancel">
             {cancelLabel ?? messages.cancel}
           </AlertDialogCancel>
           <AlertDialogAction
+            data-testid="confirm-dialog-confirm"
             variant={variant === "destructive" ? "destructive" : "default"}
             disabled={pending}
             focusableWhenDisabled
