@@ -65,3 +65,13 @@ test("excluded is never promoted; verified stays verified", () => {
   expect(run([hb(), hb(), hb(), hb()], "excluded")).toEqual(["excluded", "excluded", "excluded", "excluded"]);
   expect(run([hb({ playedSeconds: 0 })], "verified")).toEqual(["verified"]);
 });
+
+test("heartbeats closer than 5 s of server time never count: no sub-15 s verification", () => {
+  expect(isConsistent({ playedSeconds: 1, wallSeconds: 1 })).toBe(false);
+  expect(isConsistent({ playedSeconds: 4.9, wallSeconds: 4.99 })).toBe(false);
+  expect(isConsistent({ playedSeconds: 5, wallSeconds: 5 })).toBe(true);
+  const fast = hb({ playedSeconds: 0.3, wallSeconds: 0.3 });
+  expect(run(Array.from({ length: 50 }, () => fast)).at(-1)).toBe("pending");
+  const slow = hb({ playedSeconds: 5, wallSeconds: 5 });
+  expect(run([slow, slow, slow]).at(-1)).toBe("verified");
+});

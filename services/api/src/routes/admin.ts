@@ -4,6 +4,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { schema } from "@commonair/db";
 import { audit } from "../events/audit.ts";
+import { publishUserControl } from "../lib/control.ts";
 import { userByUsername } from "../lib/dto.ts";
 import { badRequest, notFound, notImplemented } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
@@ -66,6 +67,7 @@ export const admin = {
         details: { from: target.role, to: input.role },
       });
     });
+    await publishUserControl(deps, { op: "invalidate", userId: target.id, reason: "role_changed" });
     return { ok: true as const };
   }),
 

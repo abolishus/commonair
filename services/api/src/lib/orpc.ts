@@ -25,8 +25,10 @@ export interface RequestInfo {
   method: string;
   /** Client address after trusted-proxy resolution. Never stored or logged raw. */
   ip: string;
-  /** hmac(AUTH_SECRET, ip): what we may store and use as a rate-limit subject. */
+  /** hmac(AUTH_SECRET, ip): what we may store (integrity evidence). */
   ipHash: string;
+  /** hmac of the rate-limit subject: the IPv4 address or the IPv6 /64. */
+  rateLimitHash: string;
   userAgent: string | null;
 }
 
@@ -131,7 +133,7 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
   if (!decision.ok) throw apiError(decision.code, decision.message);
 
   const bucket = meta.rateLimit ?? "default";
-  const subject = caller ? `u:${caller.user.id}` : relay ? `r:${relay.id}` : `ip:${req.ipHash}`;
+  const subject = caller ? `u:${caller.user.id}` : relay ? `r:${relay.id}` : `ip:${req.rateLimitHash}`;
   const nowMs = deps.now().getTime();
   const rl = await deps.rateLimitStore.hit(
     rateLimitKey(bucket, subject),

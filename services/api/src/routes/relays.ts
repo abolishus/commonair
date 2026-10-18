@@ -16,7 +16,7 @@ import { audit } from "../events/audit.ts";
 import { iso, isoOrNull, loadUsersPublic } from "../lib/dto.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { apiError, badRequest, conflict, forbidden, isUniqueViolation, notFound, precondition } from "../lib/errors.ts";
-import { parseIp, inCidr } from "../lib/ip.ts";
+import { resolveOutbound } from "../lib/outbound.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import type { RelayEntry } from "../playback/delivery.ts";
 
@@ -30,21 +30,8 @@ const MAX_RELAYS_PER_MEMBER = 5;
 export const UNREGISTERED_URL = "http://unregistered.invalid/";
 const RECHECK_MS = 60_000;
 
-const PRIVATE_RANGES = [
-  "10.0.0.0/8",
-  "172.16.0.0/12",
-  "192.168.0.0/16",
-  "127.0.0.0/8",
-  "169.254.0.0/16",
-  "100.64.0.0/10",
-  "0.0.0.0/8",
-  "::1/128",
-  "fc00::/7",
-  "fe80::/10",
-];
-
-/** Relay URLs are fetched by the API (health checks): refuse internal targets in production. */
-export function relayUrlProblem(raw: string, production: boolean): string | null {
+/** Relay URLs are fetched by the API (health checks) and handed to viewers. */
+export function relayUrlProblem(raw: string, allowInsecure: boolean): string | null {
   let u: URL;
   try {
     u = new URL(raw);
@@ -52,13 +39,27 @@ export function relayUrlProblem(raw: string, production: boolean): string | null
     return "invalid URL";
   }
   if (u.username || u.password || u.search || u.hash) return "URL must not carry credentials, query or fragment";
-  if (production && u.protocol !== "https:") return "relays must use https";
+  if (!allowInsecure && u.protocol !== "https:") return "relays must use https";
   if (!["http:", "https:"].includes(u.protocol)) return "relays must use http(s)";
-  const host = u.hostname.replace(/^\[|\]$/g, "");
-  if (production && (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")))
-    return "relay host must be public";
-  if (production && parseIp(host) && PRIVATE_RANGES.some((c) => inCidr(host, c))) return "relay host must be public";
   return null;
+}
+
+/**
+ * Network check: https to hosts that resolve only to public addresses, unless the local stack
+ * opted into private networks (OUTBOUND_ALLOW_PRIVATE_NETWORKS, which also allows http).
+ */
+export function relayTarget(deps: Deps, raw: string) {
+  const allowPrivate = deps.env.OUTBOUND_ALLOW_PRIVATE_NETWORKS;
+  return resolveOutbound(raw, {
+    protocols: allowPrivate ? ["https:", "http:"] : ["https:"],
+    allowPrivate,
+    resolve: deps.resolveHost,
+  });
+}
+
+export async function relayTargetProblem(deps: Deps, raw: string): Promise<string | null> {
+  const t = await relayTarget(deps, raw);
+  return t.ok ? null : t.reason;
 }
 
 async function bytesVerified30d(deps: Deps, ids: string[]) {
@@ -96,12 +97,13 @@ const toRelayDto = (r: RelayRow, bytes: number) => ({
 export async function healthCheck(deps: Deps, publicUrl: string): Promise<{ ok: boolean; latencyMs: number }> {
   const started = performance.now();
   try {
-    const res = await deps.fetch(new URL("healthz", publicUrl.endsWith("/") ? publicUrl : `${publicUrl}/`), {
-      signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
-      redirect: "manual",
-    });
-    await res.body?.cancel();
-    return { ok: res.ok, latencyMs: Math.round(performance.now() - started) };
+    // Resolve and vet now, then connect to exactly the vetted address: a DNS answer that
+    // changes between the check and the connection (rebinding) cannot point us inward.
+    const target = await relayTarget(deps, publicUrl);
+    if (!target.ok) return { ok: false, latencyMs: 0 };
+    const url = new URL("healthz", publicUrl.endsWith("/") ? publicUrl : `${publicUrl}/`);
+    const status = await deps.pinnedGet(url, target.addresses[0] ?? null, HEALTH_TIMEOUT_MS);
+    return { ok: status >= 200 && status < 300, latencyMs: Math.round(performance.now() - started) };
   } catch {
     return { ok: false, latencyMs: Math.round(performance.now() - started) };
   }
@@ -200,8 +202,13 @@ export const relays = {
   register: os.relays.register.handler(async ({ context, input }) => {
     const { deps } = context;
     const relay = requireRelay(context);
-    const problem = relayUrlProblem(input.publicUrl, deps.env.NODE_ENV === "production");
+    const problem = relayUrlProblem(input.publicUrl, deps.env.OUTBOUND_ALLOW_PRIVATE_NETWORKS);
     if (problem) throw badRequest(`publicUrl: ${problem}`);
+    const target = await relayTargetProblem(deps, input.publicUrl);
+    if (target) {
+      deps.logger.info("relay registration refused", { relayId: relay.id, reason: target });
+      throw badRequest("publicUrl: must be a publicly reachable https URL");
+    }
     let [row] = await deps.db
       .update(relayNodes)
       .set({

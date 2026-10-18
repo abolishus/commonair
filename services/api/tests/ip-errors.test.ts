@@ -67,20 +67,19 @@ test("audit details refuse personal data and free text", () => {
   expect(() => assertSafeDetails({ note: "x".repeat(100) })).toThrow("free text");
 });
 
-test("relay URLs: no credentials; public https in production", () => {
-  expect(relayUrlProblem("https://relay.example.invalid", true)).toBeNull();
-  expect(relayUrlProblem("http://relay.example.invalid", true)).not.toBeNull();
-  expect(relayUrlProblem("http://127.0.0.1:8080", false)).toBeNull();
-  expect(relayUrlProblem("https://127.0.0.1", true)).not.toBeNull();
-  expect(relayUrlProblem("https://10.1.2.3", true)).not.toBeNull();
-  expect(relayUrlProblem("https://user:pw@relay.example.invalid", false)).not.toBeNull();
-  expect(relayUrlProblem("ftp://relay.example.invalid", false)).not.toBeNull();
+test("relay URL shape: no credentials, query or fragment; https unless private networks are allowed", () => {
+  expect(relayUrlProblem("https://relay.example.invalid", false)).toBeNull();
+  expect(relayUrlProblem("http://relay.example.invalid", false)).not.toBeNull();
+  expect(relayUrlProblem("http://127.0.0.1:8080", true)).toBeNull();
+  expect(relayUrlProblem("https://user:pw@relay.example.invalid", true)).not.toBeNull();
+  expect(relayUrlProblem("ftp://relay.example.invalid", true)).not.toBeNull();
 });
 
 test("word filter regexes must compile and avoid catastrophic patterns", () => {
   expect(() => checkFilterPattern("bad(word)?", true)).not.toThrow();
-  expect(() => checkFilterPattern("(a+)+", true)).toThrow("Nested quantifiers");
-  expect(() => checkFilterPattern("(", true)).toThrow("Invalid regular expression");
+  expect(() => checkFilterPattern("(a+)+", true)).toThrow("nested quantifiers");
+  expect(() => checkFilterPattern("(", true)).toThrow("unbalanced parentheses");
   expect(() => checkFilterPattern("(", false)).not.toThrow();
   expect(() => checkFilterPattern("(a)\\1", true)).toThrow("backreferences");
+  expect(() => checkFilterPattern("((a+))+$", true)).toThrow("Filter pattern refused");
 });

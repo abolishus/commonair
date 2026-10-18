@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { RENDITIONS } from "@commonair/contracts/enums";
 import { KEYS, mediaPath } from "@commonair/contracts/internal";
@@ -15,10 +15,10 @@ import { apiError, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
 import { viewerCount } from "../lib/viewers.ts";
 import { assignSource, RelayEntry, type Assignment } from "../playback/delivery.ts";
-import { nextVerdict, type VerifyState } from "../playback/verify.ts";
+import { MIN_HEARTBEAT_WALL_SECONDS, nextVerdict, type VerifyState } from "../playback/verify.ts";
 import { confirmedAdult } from "./me.ts";
 
-const { playbackSessions, broadcasts } = schema;
+const { playbackSessions, broadcasts, categories } = schema;
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 /** Refresh the token when it has less than this left. */
 const REFRESH_BEFORE_SECONDS = 60;
@@ -84,6 +84,18 @@ async function checkToken(deps: Deps, sessionId: string, token: string): Promise
   return r.value;
 }
 
+/** A mature category forces the label even if the broadcast row predates the category flag. */
+async function inMatureCategory(deps: Deps, ids: (string | null)[]): Promise<boolean> {
+  const present = ids.filter((id): id is string => id !== null);
+  if (present.length === 0) return false;
+  const rows = await deps.db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(and(inArray(categories.id, present), eq(categories.mature, true)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -94,7 +106,10 @@ export const playback = {
       ? await deps.db.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId))
       : [];
     if (!b || b.endedAt) throw precondition("live", "This channel is offline");
-    if ((b.mature || c.mature) && !(await confirmedAdult(deps, caller?.user.id)))
+    if (
+      (b.mature || c.mature || (await inMatureCategory(deps, [b.categoryId, c.categoryId]))) &&
+      !(await confirmedAdult(deps, caller?.user.id))
+    )
       throw precondition("mature_confirmation", "Confirm you are 18 or older to watch mature streams");
 
     const sid = uuidv7();
@@ -157,9 +172,11 @@ export const playback = {
       visible: input.visible,
       muted: input.muted,
     });
-    // Watch time can never exceed wall-clock time (plus a little jitter).
-    const watched = Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
-    await deps.db
+    // A beat sooner than the floor earns nothing and does not move the clock, so flooding cannot
+    // mint watch time or verification. Watch time never exceeds wall-clock time (plus jitter).
+    const tooSoon = wallSeconds < MIN_HEARTBEAT_WALL_SECONDS;
+    const watched = tooSoon ? 0 : Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
+    const updated = await deps.db
       .update(playbackSessions)
       .set({
         heartbeats: sql`${playbackSessions.heartbeats} + 1`,
@@ -169,16 +186,41 @@ export const playback = {
         stalls: sql`${playbackSessions.stalls} + ${input.stalls}`,
         latencyMs: input.latencySeconds === null ? s.latencyMs : input.latencySeconds * 1000,
         ttffMs: s.ttffMs ?? input.ttffMs,
-        lastHeartbeatAt: now,
+        ...(tooSoon ? {} : { lastHeartbeatAt: now }),
         ...(input.fingerprint ? { fingerprint: { ...s.fingerprint, ...input.fingerprint } } : {}),
       })
-      .where(and(eq(playbackSessions.id, s.id), isNull(playbackSessions.endedAt)));
-    // Only promote pending sessions: an integrity decision made meanwhile wins.
-    if (v.verdict !== s.verdict)
-      await deps.db
-        .update(playbackSessions)
-        .set({ verdict: v.verdict })
-        .where(and(eq(playbackSessions.id, s.id), eq(playbackSessions.verdict, "pending")));
+      // Compare-and-set on the clock we read: of two concurrent beats only one is credited.
+      .where(
+        and(
+          eq(playbackSessions.id, s.id),
+          isNull(playbackSessions.endedAt),
+          s.lastHeartbeatAt === null
+            ? isNull(playbackSessions.lastHeartbeatAt)
+            : eq(playbackSessions.lastHeartbeatAt, s.lastHeartbeatAt),
+        ),
+      )
+      .returning({ id: playbackSessions.id });
+    if (updated.length === 0) return { ok: true as const };
+    // Interim promotion only for sessions the integrity scorer has not decided: once scored_at is
+    // set its verdict stands (no demotion, no re-promotion), and its media_unconfirmed hold is
+    // never lifted here.
+    let promoted = false;
+    if (v.verdict !== s.verdict && v.verdict === "verified" && s.scoredAt === null)
+      promoted =
+        (
+          await deps.db
+            .update(playbackSessions)
+            .set({ verdict: v.verdict })
+            .where(
+              and(
+                eq(playbackSessions.id, s.id),
+                eq(playbackSessions.verdict, "pending"),
+                isNull(playbackSessions.scoredAt),
+                sql`not (${playbackSessions.verdictReasons} @> array['media_unconfirmed']::text[])`,
+              ),
+            )
+            .returning({ id: playbackSessions.id })
+        ).length > 0;
     // Evidence for the integrity scorer (worker), which takes over verdicts from verify.ts.
     await recordHeartbeat(deps.valkey, s.id, {
       at: now.getTime(),
@@ -197,7 +239,7 @@ export const playback = {
       .expire(verifyKey(s.id), VERIFY_STATE_TTL_SECONDS)
       .zadd(KEYS.viewers(s.channelId), now.getTime(), s.id);
     // A newly verified viewer should show up without waiting for the cache to expire.
-    if (v.verdict !== s.verdict) tx.del(KEYS.viewerCount(s.channelId));
+    if (promoted) tx.del(KEYS.viewerCount(s.channelId));
     await tx.exec();
 
     // Move viewers off a relay that left the active set.
