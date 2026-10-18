@@ -29,7 +29,7 @@ test("health, readiness and security headers", async () => {
   healthy = false;
   const r = await fetch(new URL("/readyz", svc.url));
   expect(r.status).toBe(503);
-  expect(await r.json()).toMatchObject({ ok: false, checks: { dep: "dep down" } });
+  expect(await r.json()).toEqual({ ok: false, checks: { dep: "fail" } });
   const res = await fetch(new URL("/", svc.url));
   expect(await res.text()).toBe("hi");
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");

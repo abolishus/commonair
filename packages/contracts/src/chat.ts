@@ -13,8 +13,8 @@ import { ChannelChatSettings } from "./shapes.ts";
 const channel = z.string().min(3).max(25);
 
 export const ClientFrame = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("join"), channel }),
-  z.object({ op: z.literal("part"), channel }),
+  z.object({ op: z.literal("join"), channel, nonce: z.string().max(64).optional() }),
+  z.object({ op: z.literal("part"), channel, nonce: z.string().max(64).optional() }),
   z.object({
     op: z.literal("send"),
     channel,
@@ -53,6 +53,8 @@ export const NOTICE_CODES = [
   "msg_requires_login",
   "msg_links_blocked",
   "no_permission",
+  "usage",
+  "invalid_user",
   "unrecognized_cmd",
   "cmd_success",
   "slow_on",
@@ -81,7 +83,13 @@ export const ServerFrame = z.discriminatedUnion("op", [
     me: z.object({ badges: z.array(z.string()), canModerate: z.boolean(), canChat: z.boolean() }),
   }),
   z.object({ op: z.literal("parted"), channel }),
-  z.object({ op: z.literal("message"), channel, message: ChatMessage }),
+  z.object({
+    op: z.literal("message"),
+    channel,
+    message: ChatMessage,
+    /** True for a message held by a word filter (delivered to moderators only). */
+    held: z.boolean().optional(),
+  }),
   z.object({ op: z.literal("delete"), channel, messageId: z.uuid(), username: z.string() }),
   z.object({ op: z.literal("clear"), channel }),
   z.object({
@@ -113,7 +121,14 @@ export const ServerFrame = z.discriminatedUnion("op", [
     data: z.record(z.string(), z.unknown()),
   }),
   z.object({ op: z.literal("pong"), nonce: z.string().optional() }),
-  z.object({ op: z.literal("error"), code: z.string(), message: z.string() }),
+  z.object({
+    op: z.literal("error"),
+    code: z.string(),
+    message: z.string(),
+    /** The channel a failed join/part/send referred to, when there is one. */
+    channel: channel.optional(),
+    nonce: z.string().optional(),
+  }),
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 
@@ -127,3 +142,34 @@ export const CHAT_LIMITS = {
   duplicateWindowMs: 30_000,
   maxBodyLength: 500,
 } as const;
+
+/**
+ * Messages on BUS.chatControl(channelId): a client-visible control frame (`ban`, `delete`,
+ * `clear`, `settings`) every chat instance forwards after updating caches, or an `invalidate`
+ * signal (role changes, unbans, follows, subscriptions, emote/filter/suspension edits) that only
+ * drops caches. The API publishes these after REST moderation and related writes.
+ */
+export const InvalidateMessage = z.object({
+  op: z.literal("invalidate"),
+  scope: z.enum(["channel", "user"]),
+  userId: z.uuid().optional(),
+});
+export type InvalidateMessage = z.infer<typeof InvalidateMessage>;
+
+const CONTROL_OPS = new Set(["ban", "delete", "clear", "settings"]);
+export const ChatControlMessage = z.union([
+  InvalidateMessage,
+  ServerFrame.refine((f) => CONTROL_OPS.has(f.op), "not a control frame"),
+]);
+export type ChatControlMessage = z.infer<typeof ChatControlMessage>;
+
+/** Fan-out envelope on BUS.chat(channelId). */
+export const ChatFanout = z.object({
+  v: z.literal(1),
+  /** "moderators" for messages held by a word filter. */
+  audience: z.enum(["all", "moderators"]),
+  /** Publish time (epoch ms) for the fan-out latency histogram. */
+  sentAt: z.number(),
+  frame: ServerFrame,
+});
+export type ChatFanout = z.infer<typeof ChatFanout>;

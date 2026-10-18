@@ -13,6 +13,8 @@ import type { NoticeCode } from "@commonair/contracts";
  */
 export const NOTICE_MSG_IDS: Readonly<Record<NoticeCode, string>> = {
   msg_banned: "msg_banned",
+  usage: "unrecognized_cmd",
+  invalid_user: "invalid_user",
   msg_timedout: "msg_timedout",
   msg_slowmode: "msg_slowmode",
   msg_followersonly: "msg_followersonly",
