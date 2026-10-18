@@ -3,8 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import type { SegmentFetch } from "@commonair/contracts/internal";
-import type { Executor } from "@commonair/db";
-import { EgressAccumulator, ProductionTracker, SegmentLog, minuteOf } from "../src/accounting.ts";
+import { ProductionTracker, SegmentLog, minuteOf } from "../src/accounting.ts";
 import type { OriginMetrics } from "../src/metrics.ts";
 import { noopMetrics } from "../src/metrics.ts";
 
@@ -116,64 +115,6 @@ describe("SegmentLog", () => {
     log.record(entry(1));
     await log.stop();
     expect(v.calls).toHaveLength(1);
-  });
-});
-
-function fakeDb(fail = { value: false }) {
-  const inserted: Record<string, unknown>[][] = [];
-  const db = {
-    insert: () => ({
-      values: (rows: Record<string, unknown>[]) => ({
-        onConflictDoUpdate: async () => {
-          if (fail.value) throw new Error("db down");
-          inserted.push(rows);
-        },
-      }),
-    }),
-  };
-  return { db: db as unknown as Executor, inserted };
-}
-
-describe("EgressAccumulator", () => {
-  const B = "0190a0a0-0000-7000-8000-0000000000bb";
-  test("aggregates by broadcast × minute × source", async () => {
-    const { db, inserted } = fakeDb();
-    const e = new EgressAccumulator({ db });
-    e.add(B, "origin", 100, 60_000);
-    e.add(B, "origin", 50, 119_999);
-    e.add(B, "origin", 7, 120_000);
-    e.add(B, "relay", 1, 60_001);
-    await e.flush();
-    expect(inserted).toHaveLength(1);
-    const rows = (inserted[0] ?? []).map((r) => ({ ...r, bucketStart: (r.bucketStart as Date).getTime() }));
-    expect(rows).toEqual([
-      { broadcastId: B, bucketStart: 60_000, source: "origin", bytes: 150, requests: 2 },
-      { broadcastId: B, bucketStart: 120_000, source: "origin", bytes: 7, requests: 1 },
-      { broadcastId: B, bucketStart: 60_000, source: "relay", bytes: 1, requests: 1 },
-    ]);
-    expect(e.pending()).toEqual([]);
-  });
-
-  test("a failed flush keeps the totals for the next attempt (no loss, no double count)", async () => {
-    const fail = { value: true };
-    const { db, inserted } = fakeDb(fail);
-    const e = new EgressAccumulator({ db });
-    e.add(B, "cdn", 10, 0);
-    await e.flush();
-    e.add(B, "cdn", 5, 0);
-    expect(e.pending()).toMatchObject([{ bytes: 15, requests: 2 }]);
-    fail.value = false;
-    await e.flush();
-    expect(inserted[0]).toMatchObject([{ bytes: 15, requests: 2 }]);
-  });
-
-  test("bounded number of cells", () => {
-    const { db } = fakeDb();
-    const { m, dropped } = countingMetrics();
-    const e = new EgressAccumulator({ db, maxCells: 2, metrics: m });
-    for (let i = 0; i < 4; i++) e.add(B, "origin", 1, i * 60_000);
-    expect(e.pending()).toHaveLength(2);
-    expect(dropped.egress).toBe(2);
   });
 });
 

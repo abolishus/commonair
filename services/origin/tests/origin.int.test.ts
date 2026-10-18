@@ -230,7 +230,6 @@ beforeAll(async () => {
     cdn: { provider: "origin-pull", baseUrl: CDN_BASE },
     segmentStream: stream,
     segmentFlushMs: 50,
-    egressFlushMs: 3_600_000,
     // Offline answers are cached 2 s; keep tests fast by not caching negatives while MediaMTX warms up.
     ttls: { negativeMs: 0 },
   });
@@ -439,29 +438,34 @@ describe("CDN origin-pull (/cdn)", () => {
 });
 
 describe("accounting", () => {
-  test("egress per source is flushed to egress_samples (upsert adds)", async () => {
-    const tk = await token();
-    await get(`/hls/live/test/video1_stream.m3u8?t=${tk}`);
-    const pending = origin.egress.pending();
-    expect(new Set(pending.map((c) => c.source))).toEqual(new Set(["origin", "relay", "cdn"]));
-    await origin.egress.flush();
-    const rows = await t.db
-      .select()
-      .from(schema.egressSamples)
-      .where(eq(schema.egressSamples.broadcastId, ids.broadcast));
-    const sum = (src: string) => rows.filter((r) => r.source === src).reduce((a, r) => a + r.bytes, 0);
-    const expected = (src: string) => pending.filter((c) => c.source === src).reduce((a, c) => a + c.bytes, 0);
-    for (const src of ["origin", "relay", "cdn"]) expect(sum(src)).toBe(expected(src));
-    // A second flush of new traffic adds to the same minute rows.
-    await get(`/hls/live/test/video1_stream.m3u8?t=${tk}`);
-    const more = origin.egress.pending();
-    await origin.egress.flush();
-    const after = await t.db
-      .select()
-      .from(schema.egressSamples)
-      .where(eq(schema.egressSamples.broadcastId, ids.broadcast));
-    const originAfter = after.filter((r) => r.source === "origin").reduce((a, r) => a + r.bytes, 0);
-    expect(originAfter).toBe(expected("origin") + more.reduce((a, c) => a + c.bytes, 0));
+  test("SegmentFetch bytes and src match what was served; the origin never writes egress_samples", async () => {
+    // egress_samples belongs to the worker (aggregated from STREAMS.segments); start the stream clean.
+    await origin.segments.flush();
+    await valkey.del(stream);
+    const served: { kind: string; bytes: number; src: string }[] = [];
+    for (const src of ["origin", "cdn"] as const) {
+      const pl = await get(`/hls/live/test/video1_stream.m3u8?t=${await token({ src })}`);
+      served.push({ kind: "playlist", bytes: (await pl.arrayBuffer()).byteLength, src });
+    }
+    const pl = await text(`/hls/live/test/video1_stream.m3u8?t=${await token()}`);
+    served.push({ kind: "playlist", bytes: new TextEncoder().encode(pl.body).byteLength, src: "origin" });
+    const seg = uris(pl.body)
+      .filter((u) => u.includes("_seg"))
+      .at(-1);
+    const segRes = await get(`/hls/live/test/${seg}`);
+    served.push({ kind: "segment", bytes: (await segRes.arrayBuffer()).byteLength, src: "origin" });
+    // Relay and CDN pulls carry no viewer session, so they produce no SegmentFetch.
+    await get("/relay-pull/live/test/video1_stream.m3u8", { headers: { authorization: `Bearer ${relayToken}` } });
+    await get("/cdn/live/test/video1_stream.m3u8", { headers: { "x-cdn-auth": await cdnAuthValue(secret) } });
+    await origin.segments.flush();
+    const entries = await valkey.xrange(stream, "-", "+");
+    const recorded = entries.map(([, f]) => {
+      const m = Object.fromEntries(f.flatMap((_, i, a) => (i % 2 === 0 ? [[a[i], a[i + 1]]] : [])));
+      return { kind: String(m.kind), bytes: Number(m.bytes), src: String(m.src), sid: m.sid, cid: m.cid };
+    });
+    expect(recorded.map(({ kind, bytes, src }) => ({ kind, bytes, src }))).toEqual(served);
+    for (const r of recorded) expect(r).toMatchObject({ sid: ids.viewerSession, cid: ids.channel });
+    expect(await t.db.select().from(schema.egressSamples)).toEqual([]);
   });
 
   test("relay issuance: sessions × production for the minute, upserted idempotently", async () => {

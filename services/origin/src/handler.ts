@@ -14,7 +14,7 @@ import type { Logger } from "@commonair/observability";
 import { authorizeViewer, checkCdnAuth, CDN_AUTH_HEADER, type RelayAuth } from "./auth.ts";
 import type { ChannelDirectory, LiveChannel } from "./channels.ts";
 import type { ContentStore, MediaObject } from "./content.ts";
-import type { EgressAccumulator, EgressSource, SegmentLog } from "./accounting.ts";
+import type { EgressSource, SegmentLog } from "./accounting.ts";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
 import {
   contentTypeFor,
@@ -34,7 +34,6 @@ export interface HandlerDeps {
   channels: ChannelDirectory;
   relays: RelayAuth;
   segments: SegmentLog;
-  egress: EgressAccumulator;
   cdn: { enabled: boolean; baseUrl?: string; authValue: string };
   metrics?: OriginMetrics;
   logger?: Logger;
@@ -125,7 +124,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     return isBlocking(d) ? `${scope}, max-age=6` : "no-cache";
   }
 
-  function account(p: Puller, mr: MediaRequest, channel: LiveChannel, bytes: number): void {
+  function account(p: Puller, mr: MediaRequest, bytes: number): void {
     const at = now();
     let source: EgressSource;
     if (p.route === "hls") {
@@ -140,7 +139,6 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         at,
       });
     } else source = sourceOf(p);
-    deps.egress.add(channel.broadcastId, source, bytes, at);
     metrics.egress(source, bytes);
   }
 
@@ -191,7 +189,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       ...(p.route === "relayPull" ? {} : CORS),
     };
     const isHead = req.method === "HEAD";
-    account(p, mr, channel, isHead ? 0 : body.byteLength);
+    account(p, mr, isHead ? 0 : body.byteLength);
     metrics.request(mr.route, mr.kind, sourceOf(p), 200);
     return new Response(isHead ? null : body, { status: 200, headers });
   }
