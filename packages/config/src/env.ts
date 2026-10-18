@@ -37,6 +37,8 @@ const coreShape = z.object({
   ABUSE_EMAIL: z.email().optional(),
   DMCA_EMAIL: z.email().optional(),
   PRIVACY_EMAIL: z.email().optional(),
+  /** Sender for automated mail; defaults to the flagship noreply on the flagship, else noreply@<public host>. */
+  NOREPLY_EMAIL: z.email().optional(),
   SOURCE_URL: z.url().default(SITE.repository.url),
   SOURCE_COMMIT: z.string().default("unknown"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
@@ -114,6 +116,8 @@ export const mailEnv = z.object({
   SMTP_HOST: z.string().default("localhost"),
   SMTP_PORT: z.coerce.number().int().positive().default(1025),
   SMTP_SECURE: bool.default(false),
+  /** Refuse to send credentials or mail without TLS (STARTTLS). Leave false only for a local catcher like Mailpit. */
+  SMTP_REQUIRE_TLS: bool.default(false),
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   MAIL_FROM: z.string().optional(),
@@ -222,6 +226,9 @@ export function instanceSite(env: z.output<typeof coreShape>): InstanceSite {
       ...(env.ABUSE_EMAIL ? { abuse: env.ABUSE_EMAIL } : {}),
       ...(env.DMCA_EMAIL ? { dmca: env.DMCA_EMAIL } : {}),
       ...(env.PRIVACY_EMAIL ? { privacy: env.PRIVACY_EMAIL } : {}),
+      noreply:
+        env.NOREPLY_EMAIL ??
+        (env.INSTANCE_IS_FLAGSHIP ? SITE.contacts.noreply : `noreply@${new URL(env.PUBLIC_URL).hostname}`),
     },
   };
 }

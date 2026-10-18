@@ -1,0 +1,34 @@
+{
+  "name": "@commonair/origin",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./issuance": "./src/issuance.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts",
+    "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "test:int": "bun --bun vp test run .int.test",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@commonair/config": "workspace:*",
+    "@commonair/contracts": "workspace:*",
+    "@commonair/db": "workspace:*",
+    "@commonair/observability": "workspace:*",
+    "@commonair/service": "workspace:*",
+    "@commonair/tokens": "workspace:*",
+    "@opentelemetry/api": "catalog:",
+    "drizzle-orm": "catalog:",
+    "iovalkey": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

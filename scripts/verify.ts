@@ -9,6 +9,9 @@
  *   bun run verify --scenario chat ...plus the named harness scenario(s)
  *   bun run verify:full            everything, plus the full harness scenario
  *
+ * Workspace tasks run with --no-cache: the task cache keys on a package's own inputs and can
+ * replay a stale pass when a dependency changed.
+ *
  * Integration tests need Postgres, Valkey, Garage and Mailpit: verify starts
  * them with `podman compose` (scripts/infra.ts) unless VERIFY_INFRA=external.
  */
@@ -29,8 +32,8 @@ interface Step {
 const steps: Step[] = [
   { name: "format", cmd: ["vp", "fmt", "--check"] },
   { name: "lint", cmd: ["vp", "lint", "--deny-warnings"] },
-  { name: "typecheck", cmd: ["vp", "run", "-r", "typecheck"] },
-  { name: "unit tests", cmd: ["vp", "run", "-r", "test"] },
+  { name: "typecheck", cmd: ["vp", "run", "--no-cache", "-r", "typecheck"] },
+  { name: "unit tests", cmd: ["vp", "run", "--no-cache", "-r", "test"] },
   {
     name: "infra up",
     cmd: ["bun", "scripts/infra.ts", "test"],
@@ -41,7 +44,7 @@ const steps: Step[] = [
     cmd: ["bun", "run", "--filter", "@commonair/db", "migrate"],
     when: () => !quick && existsSync("packages/db/package.json"),
   },
-  { name: "integration tests", cmd: ["vp", "run", "-r", "test:int"], when: () => !quick },
+  { name: "integration tests", cmd: ["vp", "run", "--no-cache", "-r", "test:int"], when: () => !quick },
   { name: "licenses", cmd: ["bun", "scripts/check-licenses.ts"] },
   { name: "stray domains", cmd: ["bun", "scripts/check-domains.ts"] },
   { name: "reuse lint", cmd: ["reuse", "lint", "--quiet"] },

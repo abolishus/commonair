@@ -3,3 +3,4 @@
 
 export * from "./logger.ts";
 export * from "./telemetry.ts";
+export * from "./sdk.ts";
