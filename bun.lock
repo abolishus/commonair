@@ -69,6 +69,38 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/governance": {
+      "name": "@commonair/governance",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
+    "packages/integrity": {
+      "name": "@commonair/integrity",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/config": "workspace:*",
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/service": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/observability": {
       "name": "@commonair/observability",
       "version": "0.0.0",
@@ -171,9 +203,13 @@
 
     "@commonair/db": ["@commonair/db@workspace:packages/db"],
 
+    "@commonair/governance": ["@commonair/governance@workspace:packages/governance"],
+
     "@commonair/harness": ["@commonair/harness@workspace:harness"],
 
     "@commonair/infra": ["@commonair/infra@workspace:infra"],
+
+    "@commonair/integrity": ["@commonair/integrity@workspace:packages/integrity"],
 
     "@commonair/observability": ["@commonair/observability@workspace:packages/observability"],
 
