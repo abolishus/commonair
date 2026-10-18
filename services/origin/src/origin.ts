@@ -7,7 +7,7 @@ import type { Executor } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { importSigningKey } from "@commonair/tokens";
-import { EgressAccumulator, MINUTE_MS, ProductionTracker, SegmentLog } from "./accounting.ts";
+import { MINUTE_MS, ProductionTracker, SegmentLog } from "./accounting.ts";
 import { cdnAuthValue, RelayAuth } from "./auth.ts";
 import { ChannelDirectory } from "./channels.ts";
 import { ContentStore, type ObjectRef, type MediaObject, type TtlPolicy } from "./content.ts";
@@ -29,7 +29,6 @@ export interface OriginOptions {
   /** Stream name for SegmentFetch entries (tests use a unique one). */
   segmentStream?: string;
   segmentFlushMs?: number;
-  egressFlushMs?: number;
   /** Run relay issuance on a 60 s timer in this process. */
   issuance?: { enabled: boolean; graceMs?: number };
   ttls?: Partial<TtlPolicy>;
@@ -44,7 +43,6 @@ export interface Origin {
   upstream: MediaUpstream;
   store: ContentStore;
   segments: SegmentLog;
-  egress: EgressAccumulator;
   production: ProductionTracker;
   /** Compute and store relay issuance for one minute bucket (defaults to the last complete minute). */
   runIssuance(bucketStartMs?: number): Promise<IssuanceRow[]>;
@@ -88,7 +86,6 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     logger: opts.logger,
     metrics,
   });
-  const egress = new EgressAccumulator({ db: opts.db, flushMs: opts.egressFlushMs, logger: opts.logger, metrics });
   const channels = new ChannelDirectory({ db: opts.db, valkey: opts.valkey, logger: opts.logger });
   const relays = new RelayAuth({ db: opts.db });
   const fetchHandler = createHandler({
@@ -97,7 +94,6 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     channels,
     relays,
     segments,
-    egress,
     cdn: {
       enabled: opts.cdn.provider === "origin-pull",
       baseUrl: opts.cdn.baseUrl,
@@ -129,12 +125,10 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     upstream,
     store,
     segments,
-    egress,
     production,
     runIssuance: issuance,
     start() {
       segments.start();
-      egress.start();
       if (opts.issuance?.enabled) {
         // Fire `grace` after each minute boundary so heartbeats just after the minute are counted.
         const grace = opts.issuance.graceMs ?? 10_000;
@@ -149,7 +143,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
       clearTimeout(align);
       clearInterval(every);
       await issuing;
-      await Promise.allSettled([segments.stop(), egress.stop()]);
+      await segments.stop();
     },
   };
 }

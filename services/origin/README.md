@@ -121,17 +121,21 @@ CORS preflights.
   viewer (`sid, cid, src, rid?, kind, bytes, at`), buffered and XADDed in pipelined batches every
   250 ms (or every 500 entries) with `MAXLEN ~ 1e6`. While Valkey is down up to 100 000 entries
   are kept, then drops are counted in `origin.accounting.dropped`.
-- **Egress** (`egress_samples`): bytes and requests per broadcast × minute × delivery source
-  (`origin`/`cdn` from the viewer's token, `relay` for relay pulls, `cdn` for CDN pulls), summed
-  in process and upserted (adding) once a minute and on shutdown. A failed flush keeps the
-  totals for the next attempt.
+- **Egress** (`egress_samples`): **not written by the origin.** The worker is the single writer:
+  it aggregates `STREAMS.segments` per broadcast × minute × source, which stays correct with any
+  number of origin replicas. The origin keeps only in-process egress metrics
+  (`origin.egress.bytes{source}`, which also covers relay and CDN pulls). Relay pulls and CDN
+  pulls carry no viewer session, so they produce no SegmentFetch and therefore do not show up in
+  `egress_samples`.
 - **Relay issuance** (`relay_issuance`): computed every minute (10 s after the boundary, for the
   previous minute) by `src/issuance.ts`. The formula is documented there and unit-tested:
   sessions assigned to the relay that were alive in the minute × what MediaMTX produced in that
   minute (new segments listed in media playlists; bytes of segments or parts first pulled, the
   larger of the two, maximum over renditions). Rows are recomputed, not added, so re-running a
-  minute is idempotent. Production is tracked in process, so with several origin replicas run
-  issuance on one of them only.
+  minute is idempotent. **Issuance must run on a single origin replica** until it moves to the
+  worker: production is tracked in each origin's memory, and replicas would overwrite each
+  other's rows with partial views. Start other replicas with issuance disabled
+  (`createOrigin({ issuance: { enabled: false } })`).
 
 ## CDN mode
 

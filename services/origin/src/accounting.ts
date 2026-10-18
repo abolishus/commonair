@@ -6,19 +6,18 @@
  *
  * - SegmentLog buffers one SegmentFetch per playlist/segment/part served to a viewer
  *   and XADDs them to STREAMS.segments in pipelined batches (the worker aggregates).
- * - EgressAccumulator sums bytes per broadcast × minute × delivery source in process
- *   and upserts (adding) into `egress_samples` once a minute.
+ * - `egress_samples` is NOT written here: the worker is its single writer, aggregating
+ *   STREAMS.segments (which also works with several origin replicas). The origin only
+ *   keeps in-process egress metrics.
  * - ProductionTracker records what MediaMTX produced per channel per minute (new
  *   segments listed in media playlists, bytes of media objects pulled), the input to
  *   relay issuance (see issuance.ts).
  *
- * All three are bounded: under sustained backpressure they drop records and count
+ * Both are bounded: under sustained backpressure they drop records and count
  * the drops in metrics rather than grow without limit.
  */
-import { sql } from "drizzle-orm";
+import type { DELIVERY_SOURCES } from "@commonair/contracts/enums";
 import type { SegmentFetch } from "@commonair/contracts/internal";
-import type { Executor } from "@commonair/db";
-import { schema } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
@@ -137,95 +136,7 @@ function fields(e: SegmentFetch): string[] {
 
 // ---------------------------------------------------------------------------------------
 
-export type EgressSource = (typeof schema.egressSamples.$inferInsert)["source"];
-
-interface EgressCell {
-  broadcastId: string;
-  bucketStart: number;
-  source: EgressSource;
-  bytes: number;
-  requests: number;
-}
-
-export interface EgressOptions {
-  db: Executor;
-  flushMs?: number;
-  maxCells?: number;
-  logger?: Logger;
-  metrics?: OriginMetrics;
-}
-
-export class EgressAccumulator {
-  private cells = new Map<string, EgressCell>();
-  private readonly ticker: Ticker;
-  private readonly metrics: OriginMetrics;
-
-  constructor(private readonly opts: EgressOptions) {
-    this.metrics = opts.metrics ?? noopMetrics;
-    this.ticker = new Ticker(opts.flushMs ?? MINUTE_MS, () => this.flushNow());
-  }
-
-  start(): void {
-    this.ticker.start();
-  }
-  stop(): Promise<void> {
-    return this.ticker.stop();
-  }
-  flush(): Promise<void> {
-    return this.ticker.tick();
-  }
-  /** Snapshot of unflushed totals (tests, diagnostics). */
-  pending(): EgressCell[] {
-    return [...this.cells.values()].map((c) => ({ ...c }));
-  }
-
-  add(broadcastId: string, source: EgressSource, bytes: number, at: number): void {
-    this.merge({ broadcastId, source, bytes, requests: 1, bucketStart: minuteOf(at) });
-  }
-
-  private merge(c: EgressCell): void {
-    const key = `${c.broadcastId}|${c.bucketStart}|${c.source}`;
-    const cur = this.cells.get(key);
-    if (cur) {
-      cur.bytes += c.bytes;
-      cur.requests += c.requests;
-    } else if (this.cells.size >= (this.opts.maxCells ?? 200_000)) {
-      this.metrics.accountingDropped("egress", 1);
-    } else this.cells.set(key, { ...c });
-  }
-
-  private async flushNow(): Promise<void> {
-    if (this.cells.size === 0) return;
-    const batch = [...this.cells.values()];
-    this.cells = new Map();
-    const t = schema.egressSamples;
-    let i = 0;
-    try {
-      for (; i < batch.length; i += 1000) {
-        await this.opts.db
-          .insert(t)
-          .values(
-            batch.slice(i, i + 1000).map((c) => ({
-              broadcastId: c.broadcastId,
-              bucketStart: new Date(c.bucketStart),
-              source: c.source,
-              bytes: c.bytes,
-              requests: c.requests,
-            })),
-          )
-          .onConflictDoUpdate({
-            target: [t.broadcastId, t.bucketStart, t.source],
-            set: { bytes: sql`${t.bytes} + excluded.bytes`, requests: sql`${t.requests} + excluded.requests` },
-          });
-      }
-    } catch (err) {
-      // Each chunk is its own statement: chunks before `i` are committed, so only the failed chunk
-      // and those after it go back into the accumulator (re-merging all would double count).
-      this.opts.logger?.warn("egress flush failed", { err, cells: batch.length - i });
-      for (const c of batch.slice(i)) this.merge(c);
-    }
-  }
-}
+export type EgressSource = (typeof DELIVERY_SOURCES)[number];
 
 // ---------------------------------------------------------------------------------------
 
