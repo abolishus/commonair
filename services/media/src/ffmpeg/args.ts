@@ -26,14 +26,42 @@ export function internalRtspUrl(base: string, path: string, secret: string): str
   return u.toString();
 }
 
-/** Destination for a simulcast target: the configured RTMP URL with the stream key appended. */
-export function simulcastTargetUrl(rtmpUrl: string, streamKey: string): string {
-  return `${rtmpUrl.replace(/\/+$/, "")}/${streamKey}`;
+export interface SimulcastOutput {
+  /** Loopback port of the stream-key proxy (see net/rtmp-proxy.ts). */
+  proxyPort: number;
+  /** RTMP application of the real target. */
+  app: string;
+  /** `rtmp[s]://host[:port]/app` of the real target (no key), sent as the RTMP tcUrl. */
+  tcUrl: string;
+  /** Play path with a placeholder where the stream key goes; the proxy swaps in the key. */
+  playpath: string;
 }
 
-/** Restream the source unchanged to an RTMP target. */
-export function simulcastArgs(input: string, target: string): string[] {
-  return [...BASE, ...PROGRESS, ...RTSP_IN, "-i", input, "-map", "0", "-c", "copy", "-f", "flv", target];
+/**
+ * Restream the source unchanged to an RTMP target through the loopback key proxy. The stream
+ * key is never in these arguments (they are world-readable through `ps`).
+ */
+export function simulcastArgs(input: string, out: SimulcastOutput): string[] {
+  return [
+    ...BASE,
+    ...PROGRESS,
+    ...RTSP_IN,
+    "-i",
+    input,
+    "-map",
+    "0",
+    "-c",
+    "copy",
+    "-rtmp_app",
+    out.app,
+    "-rtmp_tcurl",
+    out.tcUrl,
+    "-rtmp_playpath",
+    out.playpath,
+    "-f",
+    "flv",
+    `rtmp://127.0.0.1:${out.proxyPort}/simulcast`,
+  ];
 }
 
 export interface EncoderSettings {

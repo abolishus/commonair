@@ -13,6 +13,7 @@ import { z } from "zod";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
+import type { DiskBudget } from "../disk.ts";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
 import type { HashMatchEnforcer } from "../safety/enforce.ts";
@@ -33,8 +34,12 @@ export interface FinalizeDeps {
   imageFormat: ImageFormat;
   workDir: string;
   logger: Logger;
+  diskBudget?: DiskBudget;
   now?: () => Date;
 }
+
+/** `removedReason` of a VOD that recorded nothing. */
+export const VOD_EMPTY_REASON = "no_segments";
 
 const DAY_MS = 86_400_000;
 export const imageExt = (f: ImageFormat) => (f === "webp" ? "webp" : "jpg");
@@ -74,6 +79,10 @@ export async function finalizeVod(
     await quarantineVod(deps, vodId, vod.broadcastId);
     return "removed";
   }
+  // Frame sampling needs scratch space; over budget, BullMQ retries later (and the stale-VOD
+  // reconcile re-queues the job if every retry is used up).
+  const budget = await deps.diskBudget?.check("vod-finalize");
+  if (budget && !budget.ok) throw new Error("media work dir over disk budget");
   await db.update(schema.vods).set({ status: "processing" }).where(eq(schema.vods.id, vodId));
 
   const prefix = vodPrefix(vodId);
@@ -81,7 +90,10 @@ export async function finalizeVod(
   const segments = res ? parsePlaylist(await res.text()).segments : [];
   if (segments.length === 0) {
     log.warn("VOD has no segments; marking failed");
-    await db.update(schema.vods).set({ status: "failed" }).where(eq(schema.vods.id, vodId));
+    await db
+      .update(schema.vods)
+      .set({ status: "failed", removedReason: VOD_EMPTY_REASON })
+      .where(eq(schema.vods.id, vodId));
     return "failed";
   }
 

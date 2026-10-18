@@ -7,10 +7,13 @@ import type { LiveEvent } from "@commonair/contracts/internal";
 import type { Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
+import type { DiskBudget } from "./disk.ts";
 import type { Capabilities } from "./ffmpeg/hwaccel.ts";
 import type { MediaMtxClient } from "./mediamtx.ts";
 import type { HashMatchEnforcer } from "./safety/enforce.ts";
 import type { MediaTimings } from "./settings.ts";
+import type { SlotLimiter } from "./transcode/slots.ts";
+import type { FinalizeJobControl } from "./vod/reconcile.ts";
 
 export interface MediaContext {
   db: Database;
@@ -36,6 +39,14 @@ export interface MediaContext {
   rtspBase: string;
   transcodeThreshold: number;
   enqueueVodFinalize: (vodId: string) => Promise<void>;
+  /** Finalize-job state, for the stale-VOD reconcile. */
+  vodJobs: FinalizeJobControl;
+  /** Global budget for `workDir`: refuses new recordings and clip cuts when exceeded. */
+  diskBudget: DiskBudget;
+  /** Per-host cap on concurrent transcode ladders. */
+  transcodeSlots: SlotLimiter;
+  /** Dev/test only: allow simulcast targets on loopback/private addresses. */
+  simulcastAllowPrivate: boolean;
 }
 
 /** What workers need to know about a live broadcast. */

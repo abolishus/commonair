@@ -200,6 +200,8 @@ beforeAll(async () => {
     workDir,
     hashMatcher: testMatcher,
     capabilities: await probeCapabilities("none"),
+    // The mock simulcast target listens on loopback, which production refuses (SSRF).
+    simulcastAllowPrivate: true,
     timings: {
       healthSampleMs: 1_000,
       probeIntervalMs: 3_000,
@@ -326,6 +328,10 @@ describe("media pipeline", () => {
     expect(arrived.tracks).toContain("H264");
     // The key never leaks into status or errors.
     expect(JSON.stringify(await valkey.hgetall(KEYS.simulcastStatus(broadcastId)))).not.toContain(SIMULCAST_KEY);
+    // Nor into any process's argv (world-readable through ps): the proxy injected it.
+    const ps = Bun.spawnSync(["ps", "-axww", "-o", "args="], { stdout: "pipe" }).stdout.toString();
+    expect(ps).toContain("-rtmp_playpath");
+    expect(ps).not.toContain(SIMULCAST_KEY);
   }, 60_000);
 
   test("transcode ladder starts above the viewer threshold and stops below it", async () => {

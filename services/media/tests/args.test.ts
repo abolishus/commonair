@@ -9,10 +9,11 @@ import {
   probeArgs,
   recorderArgs,
   simulcastArgs,
-  simulcastTargetUrl,
   thumbnailArgs,
 } from "../src/ffmpeg/args.ts";
 import { REDACTED, redact, redactArgs } from "../src/ffmpeg/redact.ts";
+import { placeholderFor } from "../src/net/rtmp-proxy.ts";
+import { parseTargetUrl } from "../src/net/ssrf.ts";
 import { selectRungs } from "../src/transcode/ladder.ts";
 
 const SECRET = "s3cr3t/with+chars=and@at";
@@ -29,16 +30,18 @@ describe("URLs", () => {
     const parsed = new URL(u);
     expect(decodeURIComponent(parsed.password)).toBe(SECRET);
   });
-
-  test("simulcast target URL appends the key to the ingest URL", () => {
-    expect(simulcastTargetUrl("rtmp://live.example.net/app/", KEY)).toBe(`rtmp://live.example.net/app/${KEY}`);
-    expect(simulcastTargetUrl("rtmp://live.example.net/app", KEY)).toBe(`rtmp://live.example.net/app/${KEY}`);
-  });
 });
 
 describe("simulcast args", () => {
   const input = internalRtspUrl("rtsp://mediamtx:8554", "live/alice", SECRET);
-  const args = simulcastArgs(input, simulcastTargetUrl("rtmp://ingest.example.net/live", KEY));
+  const target = parseTargetUrl("rtmps://ingest.example.net/live/extra");
+  const placeholder = placeholderFor(KEY);
+  const args = simulcastArgs(input, {
+    proxyPort: 40123,
+    app: target.app,
+    tcUrl: target.tcUrl,
+    playpath: `${target.playpathPrefix}/${placeholder}`,
+  });
 
   test("copies streams to FLV over RTSP/TCP with machine-readable progress", () => {
     expect(values(args, "-c")).toEqual(["copy"]);
@@ -48,12 +51,20 @@ describe("simulcast args", () => {
     expect(args).toContain("-nostdin");
   });
 
-  test("redaction removes the stream key and the internal password from logged args", () => {
+  test("the stream key is never in argv: ffmpeg publishes a placeholder to the loopback proxy", () => {
+    expect(args.join(" ")).not.toContain(KEY);
+    expect(args.at(-1)).toBe("rtmp://127.0.0.1:40123/simulcast");
+    expect(values(args, "-rtmp_app")).toEqual(["live"]);
+    expect(values(args, "-rtmp_tcurl")).toEqual(["rtmps://ingest.example.net/live"]);
+    expect(values(args, "-rtmp_playpath")).toEqual([`extra/${placeholder}`]);
+    expect(placeholder).toHaveLength(KEY.length);
+    expect(placeholder).not.toBe(KEY);
+  });
+
+  test("redaction removes the internal password from logged args", () => {
     const logged = redactArgs(args, [KEY, SECRET]).join(" ");
-    expect(logged).not.toContain(KEY);
     expect(logged).not.toContain(SECRET);
     expect(logged).not.toContain(encodeURIComponent(SECRET));
-    expect(logged).toContain(`rtmp://ingest.example.net/live/${REDACTED}`);
     expect(logged).toContain(`rtsp://internal:${REDACTED}@mediamtx:8554/live/alice`);
   });
 

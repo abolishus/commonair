@@ -4,8 +4,13 @@
 /**
  * Simulcast: restream the source unchanged (`-c copy`) to each enabled target of the channel.
  * Status lives in `simulcast_sessions` (durable) and `KEYS.simulcastStatus` (live dashboard):
- * connecting → live (ffmpeg reports output) → error (with the last ffmpeg line, key redacted)
- * → connecting again after backoff (capped at 60 s) … → stopped when the broadcast ends.
+ * connecting → live (ffmpeg reports output) → error → connecting again after backoff (capped at
+ * 60 s) … → stopped when the broadcast ends.
+ *
+ * Targets are user-supplied URLs: only `rtmp:`/`rtmps:` to public addresses (net/ssrf.ts), and
+ * ffmpeg reaches them through a loopback proxy that injects the stream key (net/rtmp-proxy.ts),
+ * so the key never appears in a process argument list. `lastError` (shown to the streamer) is
+ * one of the generic SIMULCAST_ERRORS codes; details (redacted) go to the logs only.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import type { SIMULCAST_STATUSES } from "@commonair/contracts/enums";
@@ -13,12 +18,22 @@ import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { decryptSecret } from "@commonair/tokens";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
-import { internalRtspUrl, simulcastArgs, simulcastTargetUrl } from "./ffmpeg/args.ts";
+import { internalRtspUrl, simulcastArgs } from "./ffmpeg/args.ts";
 import { Supervisor } from "./ffmpeg/supervisor.ts";
+import { placeholderFor, RtmpKeyProxy } from "./net/rtmp-proxy.ts";
+import { parseTargetUrl, TargetNotAllowedError, type ParsedTarget } from "./net/ssrf.ts";
 import { SIMULCAST_MAX_BACKOFF_MS, SIMULCAST_SECRET_PURPOSE } from "./settings.ts";
 
 export type SimulcastStatus = (typeof SIMULCAST_STATUSES)[number];
 const STATUS_TTL_SECONDS = 24 * 3600;
+
+/** Generic, stable `lastError` codes (the web app translates them); never ffmpeg output. */
+export const SIMULCAST_ERRORS = {
+  keyUnreadable: "stream_key_unreadable",
+  targetNotAllowed: "target_not_allowed",
+  connectionFailed: "connection_failed",
+} as const;
+export type SimulcastError = (typeof SIMULCAST_ERRORS)[keyof typeof SIMULCAST_ERRORS];
 
 interface Target {
   id: string;
@@ -28,6 +43,7 @@ interface Target {
 
 class SimulcastRunner {
   private supervisor: Supervisor | null = null;
+  private proxy: RtmpKeyProxy | null = null;
   private status: SimulcastStatus = "connecting";
   private bytesSent = 0;
   private stopping = false;
@@ -44,22 +60,48 @@ class SimulcastRunner {
   }
 
   async start(): Promise<void> {
+    let target: ParsedTarget;
+    try {
+      target = parseTargetUrl(this.target.rtmpUrl);
+    } catch (err) {
+      this.log.warn("simulcast target refused", {
+        reason: err instanceof TargetNotAllowedError ? err.reason : "invalid",
+      });
+      await this.setStatus("error", SIMULCAST_ERRORS.targetNotAllowed);
+      return;
+    }
     let key: string;
     try {
       key = await decryptSecret(this.ctx.authSecret, SIMULCAST_SECRET_PURPOSE, this.target.streamKeyCiphertext);
     } catch {
       // Rotating AUTH_SECRET invalidates stored keys; the streamer must re-enter the key.
-      await this.setStatus("error", "stream key could not be decrypted; re-enter it in the dashboard");
+      this.log.warn("simulcast stream key could not be decrypted");
+      await this.setStatus("error", SIMULCAST_ERRORS.keyUnreadable);
       return;
     }
+    if (key.length === 0) {
+      await this.setStatus("error", SIMULCAST_ERRORS.keyUnreadable);
+      return;
+    }
+    if (this.stopping) return;
+    const placeholder = placeholderFor(key);
+    const proxy = new RtmpKeyProxy({
+      target,
+      placeholder,
+      secret: key,
+      logger: this.log,
+      resolve: { allowPrivate: this.ctx.simulcastAllowPrivate },
+    });
+    this.proxy = proxy;
+    const proxyPort = await proxy.listen();
     const { rtspBase, internalSecret } = this.ctx;
     const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
-    const output = simulcastTargetUrl(this.target.rtmpUrl, key);
+    const playpath = target.playpathPrefix ? `${target.playpathPrefix}/${placeholder}` : placeholder;
     await this.setStatus("connecting", null);
     this.supervisor = new Supervisor({
       name: `simulcast:${this.target.id}`,
       binary: this.ctx.ffmpeg,
-      args: () => simulcastArgs(input, output),
+      args: () => simulcastArgs(input, { proxyPort, app: target.app, tcUrl: target.tcUrl, playpath }),
       secrets: [key, internalSecret],
       logger: this.log,
       backoff: { initialMs: 1_000, maxMs: SIMULCAST_MAX_BACKOFF_MS, stableAfterMs: 30_000 },
@@ -73,7 +115,13 @@ class SimulcastRunner {
       },
       onExit: (info) => {
         if (this.stopping) return;
-        void this.setStatus("error", info.lastError ?? `ffmpeg exited with code ${info.code ?? "unknown"}`);
+        // The supervisor already logged the (redacted) ffmpeg line; the streamer sees a code.
+        this.log.warn("simulcast ffmpeg exited", { code: info.code, proxyFailure: proxy.lastFailure });
+        const code =
+          proxy.lastFailure === "target_not_allowed"
+            ? SIMULCAST_ERRORS.targetNotAllowed
+            : SIMULCAST_ERRORS.connectionFailed;
+        void this.setStatus("error", code);
       },
     });
     this.supervisor.start();
@@ -82,6 +130,8 @@ class SimulcastRunner {
   async stop(): Promise<void> {
     this.stopping = true;
     await this.supervisor?.stop();
+    await this.proxy?.close();
+    this.proxy = null;
     await this.setStatus("stopped", null, true);
   }
 

@@ -6,7 +6,7 @@
  * periodic reconcile against Postgres (`broadcasts where ended_at is null`) and the MediaMTX
  * path list repairs anything missed (service restarts, dropped pub/sub messages).
  */
-import { and, eq, isNotNull, isNull, type SQL } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { LiveEvent } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
@@ -14,6 +14,7 @@ import { isLive } from "./mediamtx.ts";
 import { BroadcastSession } from "./session.ts";
 import type { LocalWindow } from "./vod/recorder.ts";
 import { vodPrefix } from "./vod/recorder.ts";
+import { reconcileVods } from "./vod/reconcile.ts";
 
 /** Consecutive reconciles a session's path may be missing from MediaMTX before it is stopped. */
 const MISSING_PATH_TOLERANCE = 2;
@@ -188,16 +189,16 @@ export class LiveCoordinator {
     return id;
   }
 
-  /** VODs still `recording` whose broadcast ended while no session was running (e.g. we were down). */
+  /**
+   * VODs nobody is finishing: `recording` after their broadcast ended while no session ran (we
+   * were down), or `processing` with no finalize job left. Runs inside `serial`, so it never
+   * races a session that is still flushing its last segments.
+   */
   private async finalizeOrphans(): Promise<void> {
-    const v = schema.vods;
-    const ended = await this.ctx.db
-      .select({ id: v.id, broadcastId: v.broadcastId })
-      .from(v)
-      .innerJoin(schema.broadcasts, eq(schema.broadcasts.id, v.broadcastId))
-      .where(and(eq(v.status, "recording"), isNotNull(schema.broadcasts.endedAt)));
-    const orphans = ended.filter((r) => !this.sessions.has(r.broadcastId));
-    for (const o of orphans) await this.ctx.enqueueVodFinalize(o.id);
-    if (orphans.length > 0) this.log.info("reconcile: finalizing orphaned VODs", { count: orphans.length });
+    const { db, vodJobs, logger, timings } = this.ctx;
+    await reconcileVods(
+      { db, jobs: vodJobs, logger, failAfterMs: timings.vodFailAfterMs, retryAfterMs: timings.vodRetryAfterMs },
+      new Set(this.sessions.keys()),
+    );
   }
 }

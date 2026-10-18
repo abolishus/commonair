@@ -13,7 +13,7 @@ import { probeSource, type ProbeResult } from "../ffmpeg/probe.ts";
 import { every, type Loop } from "../loop.ts";
 import { isLive, pathBytes, type MtxPath } from "../mediamtx.ts";
 import { addLiveSeconds, LiveTimeAccumulator } from "./hours.ts";
-import { bitrateKbps, droppedFrames, healthWarnings } from "./rules.ts";
+import { bitrateKbps, droppedFrames, healthWarnings, type Warning } from "./rules.ts";
 
 export class HealthSampler {
   private loops: Loop[] = [];
@@ -28,6 +28,8 @@ export class HealthSampler {
   constructor(
     private readonly ctx: MediaContext,
     private readonly b: BroadcastInfo,
+    /** Server-side conditions (transcode queue, disk budget) reported alongside source health. */
+    private readonly serverWarnings: () => Warning[] = () => [],
   ) {}
 
   get latestProbe(): ProbeResult | null {
@@ -84,7 +86,10 @@ export class HealthSampler {
     const kbps = bitrateKbps(prev.bytes, prev.at, bytes, now);
     if (kbps === null) return;
     const probe = this.probe;
-    const warnings = healthWarnings({ bitrateKbps: kbps, sourceType: this.sourceType, probe });
+    const warnings = [
+      ...healthWarnings({ bitrateKbps: kbps, sourceType: this.sourceType, probe }),
+      ...this.serverWarnings(),
+    ];
     const errDelta = framesInError !== null && prev.framesInError !== null ? framesInError - prev.framesInError : null;
     await this.ctx.db
       .insert(schema.broadcastHealthSamples)

@@ -43,6 +43,29 @@ it starts sessions missed while the service was down, stops sessions whose broad
 whose path has gone, and finalizes VODs orphaned by a crash. On SIGTERM sessions stop without
 finalizing; the next process resumes the same VOD (with a discontinuity).
 
+## Housekeeping and limits
+
+- **Unfinished VODs.** The reconcile also looks at `recording` VODs whose broadcast ended and
+  `processing` VODs. The finalize job id is the VOD id, so its BullMQ state tells whether a worker
+  owns the VOD. Unowned VODs are re-queued (finalize is idempotent; a job that used up its retries
+  is retried after 10 min). A VOD still unfinished 24 h after its broadcast ended is marked
+  `failed` with `removedReason = finalize_stalled` (`no_segments` when nothing was recorded).
+- **Crash recovery.** On startup, before any session or job runs, every `broadcasts/<id>/` in
+  `MEDIA_WORK_DIR` is examined: completed segments of a still-open VOD that the dead process never
+  uploaded are uploaded and appended to the VOD playlist, partial `.tmp` segments are dropped, and
+  the directory is removed. Job scratch dirs (`clip-*`, `vod-*`) are deleted too.
+- **Work-dir sweep.** Every 5 min, broadcast directories no session owns (untouched for 15 min)
+  and job scratch dirs older than 1 h are deleted.
+- **Disk budget.** New recordings and clip cuts are refused while the work dir holds more than
+  20 GiB or the filesystem has less than 2 GiB free (`DEFAULT_DISK_BUDGET`; embedders pass
+  `diskBudget`). A refusal logs the `media.disk_budget_exceeded` event; a refused recording shows
+  `recording_disk_budget` in stream health and starts by itself once space is back; a refused clip
+  fails with `removedReason = disk_budget_exceeded`; VOD finalization retries later.
+- **Transcode slots.** At most `defaultTranscodeSlots()` ladders run per host (2 with NVENC, one
+  per four CPU cores with libx264; embedders pass `transcodeSlots`). Further broadcasts queue in
+  arrival order, retry every poll and show `transcode_capacity` in stream health meanwhile.
+- **Thumbnail history.** Only the newest 10 timestamped thumbnails per broadcast are kept.
+
 ## Health warning codes
 
 `bitrate_high` (> 8000 kbps), `bitrate_low` (below 1000 kbps at ≥ 720p, 600 at ≥ 480p, 300
@@ -50,7 +73,9 @@ below), `keyframe_interval` (not 2 s ± 0.5 s), `fps_drop` (> 10% below the decl
 `b_frames_webrtc` (B-frames on a WHIP source), `audio_missing`, `video_missing`,
 `video_codec_unsupported` (not H.264), `audio_codec_unsupported` (not AAC, or Opus for WHIP).
 `droppedFrames` is the larger of MediaMTX's corrupt-frame counter and the fps deficit over the
-interval (RTMP does not report encoder drops).
+interval (RTMP does not report encoder drops). Two codes describe the server, not the source:
+`transcode_capacity` (the ladder is queued for a free slot) and `recording_disk_budget`
+(recording paused, work dir over its disk budget).
 
 ## Hardware encoding
 
@@ -78,4 +103,20 @@ a vendor adapter is a non-goal of this repository; operators who are approved im
 
 Simulcast keys are decrypted with `decryptSecret(AUTH_SECRET, "simulcast", …)` only when a
 broadcast starts. Every ffmpeg argument list and error line is passed through `redact()` (stream
-keys, the internal RTSP password, any URL userinfo) before it is logged or stored.
+keys, the internal RTSP password, any URL userinfo) before it is logged.
+
+**Stream keys never reach ffmpeg's argv** (readable by any local user through `ps`). ffmpeg
+cannot take an output URL or an RTMP protocol option from a file: `-/option file` only covers
+ffmpeg's own options, and `-fpre` values never reach the protocol (both verified with ffmpeg
+9.0). So ffmpeg publishes to a per-target loopback proxy (`src/net/rtmp-proxy.ts`) with
+`-rtmp_app`, `-rtmp_tcurl` (the real target, no key) and `-rtmp_playpath` set to a random
+placeholder of the key's byte length. The proxy replaces the placeholder with the key in the
+RTMP command phase (`releaseStream`/`FCPublish`/`publish`; equal lengths leave every RTMP length
+field intact) and forwards everything else unchanged, with TLS for `rtmps:`.
+
+**Simulcast targets are SSRF-checked** (`src/net/ssrf.ts`): only `rtmp:`/`rtmps:` URLs without
+credentials; the host is resolved on every connection and refused if any address is loopback,
+private, link-local, CGNAT, multicast, reserved, documentation or a cloud metadata address
+(IPv4 and IPv6, including IPv4-mapped, NAT64 and 6to4 forms). The proxy dials the vetted address
+itself, so DNS rebinding cannot redirect a stream. Streamers only see generic `lastError` codes
+(`target_not_allowed`, `connection_failed`, `stream_key_unreadable`); details go to the logs.

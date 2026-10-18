@@ -12,6 +12,7 @@ import { QUEUES } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
 import { ClipJob, ClipUnavailableError, markClipFailed, processClip, type ClipDeps } from "./clips.ts";
 import { finalizeVod, VodFinalizeJob, type FinalizeDeps } from "./vod/finalize.ts";
+import type { FinalizeJobControl, FinalizeJobInfo, FinalizeJobState } from "./vod/reconcile.ts";
 
 export interface JobsOptions {
   valkeyUrl: string;
@@ -24,7 +25,14 @@ export interface JobsOptions {
 }
 
 export interface Jobs {
+  /**
+   * Start consuming. Workers are created paused so crash recovery can repair local recordings
+   * before a finalize job reads their playlists.
+   */
+  run(): void;
   enqueueVodFinalize(vodId: string): Promise<void>;
+  /** State of a VOD's finalize job, for the stale-VOD reconcile. */
+  vodFinalize: FinalizeJobControl;
   /** Producer for clips, used by tests and the harness (the API enqueues in production). */
   enqueueClip(clipId: string): Promise<void>;
   close(): Promise<void>;
@@ -50,7 +58,7 @@ export function startJobs(opts: JobsOptions): Jobs {
       const { vodId } = VodFinalizeJob.parse(job.data);
       return finalizeVod(opts.finalize, vodId);
     },
-    { connection: conn(), prefix, concurrency: opts.concurrency ?? 2 },
+    { connection: conn(), prefix, concurrency: opts.concurrency ?? 2, autorun: false },
   );
 
   const clipsWorker = new Worker(
@@ -67,14 +75,14 @@ export function startJobs(opts: JobsOptions): Jobs {
       } catch (err) {
         const lastAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
         if (err instanceof ClipUnavailableError || lastAttempt) {
-          await markClipFailed(opts.clips.db, clipId);
+          await markClipFailed(opts.clips.db, clipId, err instanceof ClipUnavailableError ? err.reason : null);
           log.warn("clip failed", { clipId, err });
           if (err instanceof ClipUnavailableError) return "failed";
         }
         throw err;
       }
     },
-    { connection: conn(), prefix, concurrency: opts.concurrency ?? 2 },
+    { connection: conn(), prefix, concurrency: opts.concurrency ?? 2, autorun: false },
   );
 
   for (const w of [finalizeWorker, clipsWorker]) {
@@ -82,20 +90,44 @@ export function startJobs(opts: JobsOptions): Jobs {
     w.on("error", (err) => log.error("worker error", { queue: w.name, err }));
   }
 
+  const addFinalize = async (vodId: string) => {
+    // jobId = vodId: duplicate enqueues (offline + reconcile) collapse into one job.
+    await finalizeQueue.add(
+      "finalize",
+      { vodId },
+      {
+        jobId: vodId,
+        attempts: 5,
+        backoff: { type: "exponential", delay: 5_000 },
+        removeOnComplete: 1000,
+        removeOnFail: 5000,
+      },
+    );
+  };
+  let running = false;
+
   return {
-    async enqueueVodFinalize(vodId) {
-      // jobId = vodId: duplicate enqueues (offline + reconcile) collapse into one job.
-      await finalizeQueue.add(
-        "finalize",
-        { vodId },
-        {
-          jobId: vodId,
-          attempts: 5,
-          backoff: { type: "exponential", delay: 5_000 },
-          removeOnComplete: 1000,
-          removeOnFail: 5000,
-        },
-      );
+    run() {
+      if (running) return;
+      running = true;
+      for (const w of [finalizeWorker, clipsWorker])
+        void w.run().catch((err: unknown) => log.error("worker stopped", { queue: w.name, err }));
+    },
+    enqueueVodFinalize: addFinalize,
+    vodFinalize: {
+      async info(vodId): Promise<FinalizeJobInfo> {
+        const job = await finalizeQueue.getJob(vodId);
+        if (!job) return { state: "unknown", finishedOn: null };
+        const state = (await job.getState()) as FinalizeJobState;
+        return { state, finishedOn: job.finishedOn ?? null };
+      },
+      async requeue(vodId) {
+        const job = await finalizeQueue.getJob(vodId);
+        // Only finished jobs are replaced; an active one is locked by its worker.
+        if (job && (await job.isActive())) return;
+        await job?.remove();
+        await addFinalize(vodId);
+      },
     },
     async enqueueClip(clipId) {
       await clipsQueue.add(

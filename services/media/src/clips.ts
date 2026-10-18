@@ -13,6 +13,7 @@ import { z } from "zod";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
+import type { DiskBudget } from "./disk.ts";
 import { clipArgs, frameArgs, type H264Encoder, type ImageFormat } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
 import type { HashMatchEnforcer } from "./safety/enforce.ts";
@@ -30,11 +31,18 @@ export const clipThumbKey = (clipId: string, f: ImageFormat) => `clips/${clipId}
 
 /** The clip can never be produced (no source media); retrying will not help. */
 export class ClipUnavailableError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    /** Stored as the clip's `removedReason` when set. */
+    readonly reason: string | null = null,
+  ) {
     super(message);
     this.name = "ClipUnavailableError";
   }
 }
+
+/** `removedReason` of a clip refused because the media work dir is over its disk budget. */
+export const CLIP_DISK_REASON = "disk_budget_exceeded";
 
 export interface ClipDeps {
   db: Database;
@@ -46,6 +54,8 @@ export interface ClipDeps {
   imageFormat: ImageFormat;
   workDir: string;
   logger: Logger;
+  /** Refuses the cut when the work dir is over budget (optional for embedding/tests). */
+  diskBudget?: DiskBudget;
   /** Local rolling buffer of a broadcast that is live on this instance. */
   liveWindow: (broadcastId: string, start: Date, durationSeconds: number) => LocalWindow | null;
 }
@@ -78,6 +88,9 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
     return "removed";
   }
   const start = new Date(clip.startedAt.getTime() + clip.startOffset * 1000);
+  // Refused outright, never queued behind a full disk: the creator can simply clip again.
+  const budget = await deps.diskBudget?.check("clip");
+  if (budget && !budget.ok) throw new ClipUnavailableError("media work dir over disk budget", CLIP_DISK_REASON);
 
   const scratch = await mkdtemp(join(deps.workDir, "clip-"));
   try {
@@ -175,9 +188,9 @@ async function findVod(db: Database, broadcastId: string): Promise<string | null
   return row?.id ?? null;
 }
 
-export async function markClipFailed(db: Database, clipId: string): Promise<void> {
+export async function markClipFailed(db: Database, clipId: string, reason: string | null = null): Promise<void> {
   await db
     .update(schema.clips)
-    .set({ status: "failed" })
+    .set({ status: "failed", ...(reason ? { removedReason: reason } : {}) })
     .where(and(eq(schema.clips.id, clipId), eq(schema.clips.status, "processing")));
 }
