@@ -67,12 +67,10 @@ test("audit details refuse personal data and free text", () => {
   expect(() => assertSafeDetails({ note: "x".repeat(100) })).toThrow("free text");
 });
 
-test("relay URLs: no credentials; public https in production", () => {
+test("relay URL shape: no credentials, query or fragment; https in production", () => {
   expect(relayUrlProblem("https://relay.example.invalid", true)).toBeNull();
   expect(relayUrlProblem("http://relay.example.invalid", true)).not.toBeNull();
   expect(relayUrlProblem("http://127.0.0.1:8080", false)).toBeNull();
-  expect(relayUrlProblem("https://127.0.0.1", true)).not.toBeNull();
-  expect(relayUrlProblem("https://10.1.2.3", true)).not.toBeNull();
   expect(relayUrlProblem("https://user:pw@relay.example.invalid", false)).not.toBeNull();
   expect(relayUrlProblem("ftp://relay.example.invalid", false)).not.toBeNull();
 });

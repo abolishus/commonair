@@ -14,6 +14,7 @@ import { badRequest, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { displayPrefix, newStreamKeySecret, obsStreamKey } from "../lib/streamkeys.ts";
 import { viewerBreakdown } from "../lib/viewers.ts";
+import { outboundUrlProblem } from "../lib/outbound.ts";
 import { RECOMMENDED_ENCODER, ingestUrls, obsServiceConfig } from "../stream/ingest.ts";
 
 const { streamKeys, broadcasts, broadcastHealthSamples, simulcastTargets } = schema;
@@ -54,15 +55,18 @@ const toTarget = (states: Map<string, z.infer<typeof SimulcastState>>) => (t: ty
   };
 };
 
-function checkRtmpUrl(url: string) {
-  let u: URL;
-  try {
-    u = new URL(url);
-  } catch {
+/** The media service pushes to this URL: rtmp(s) only, and in production public hosts only. */
+async function checkRtmpUrl(deps: Deps, url: string) {
+  const problem = await outboundUrlProblem(url, {
+    protocols: ["rtmp:", "rtmps:"],
+    allowPrivate: deps.env.NODE_ENV !== "production",
+    resolve: deps.resolveHost,
+  });
+  if (problem === "credentials") throw badRequest("Put credentials in the stream key, not the URL");
+  if (problem) {
+    deps.logger.info("simulcast target refused", { reason: problem });
     throw badRequest("Invalid RTMP URL");
   }
-  if (!["rtmp:", "rtmps:"].includes(u.protocol) || !u.hostname) throw badRequest("Invalid RTMP URL");
-  if (u.username || u.password) throw badRequest("Put credentials in the stream key, not the URL");
 }
 
 const toKeyDto = (k: typeof streamKeys.$inferSelect) => ({
@@ -221,7 +225,7 @@ export const stream = {
     create: os.stream.simulcast.create.handler(async ({ context, input }) => {
       const { deps } = context;
       const c = requireChannel(context);
-      checkRtmpUrl(input.rtmpUrl);
+      await checkRtmpUrl(deps, input.rtmpUrl);
       const [{ n } = { n: 0 }] = await deps.db
         .select({ n: count() })
         .from(simulcastTargets)
