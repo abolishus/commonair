@@ -44,6 +44,8 @@ const env: Record<string, string> = {
   ...secrets,
   COMMONAIR_ENV_FILE: join(envDir, "it.env"),
   IMAGE_TAG: "it",
+  // The shared stack owns the default subnet; podman refuses overlapping networks.
+  COMPOSE_SUBNET: `10.89.${100 + (Number.parseInt(SUFFIX.slice(0, 4), 16) % 100)}.0/24`,
   BIND_ADDRESS: "127.0.0.1",
 };
 

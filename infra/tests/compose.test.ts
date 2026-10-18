@@ -344,6 +344,12 @@ describe("Quadlet mirror", () => {
     expect(dbSecret).toBe(Boolean(s.environment?.DATABASE_URL));
   });
 
+  test("the network subnet default matches the trusted proxy default", () => {
+    const raw = readFileSync(new URL("../../compose.yaml", import.meta.url), "utf8");
+    expect(raw).toContain("subnet: ${COMPOSE_SUBNET:-10.89.42.0/24}");
+    expect(compose.services.api!.environment!.TRUSTED_PROXY_CIDRS).toBe("${TRUSTED_PROXY_CIDRS:-10.89.42.0/24}");
+  });
+
   test("app units carry the same in-network environment as compose", () => {
     const appEnv = compose.services.api!.environment!;
     // Compose lets .env override it; the units pin the network's subnet.

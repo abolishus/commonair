@@ -221,6 +221,8 @@ export const infraEnv = z.object({
   IMAGE_REGISTRY: z.string().optional(),
   IMAGE_TAG: z.string().optional(),
   WALG_RETAIN_FULL: z.coerce.number().int().positive().optional(),
+  /** Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own. */
+  COMPOSE_SUBNET: z.string().optional(),
   COMMONAIR_ENV_FILE: z.string().optional(),
 });
 

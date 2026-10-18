@@ -490,7 +490,7 @@ networks:
   default:
     ipam:
       config:
-        - subnet: 10.89.42.0/24
+        - subnet: ${COMPOSE_SUBNET:-10.89.42.0/24}
 
 volumes:
   postgres-data:
