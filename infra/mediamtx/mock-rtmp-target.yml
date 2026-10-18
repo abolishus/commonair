@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# A mock simulcast target for the harness and integration tests (stands in for Twitch/YouTube
+# ingest). Same image as the real MediaMTX (docker.io/bluenviron/mediamtx:1.21.2-ffmpeg).
+# Accepts any RTMP publish on :1936 to any path (the "stream key" is just the last path
+# element), records nothing, serves nothing else. The control API on :9997 lets a test confirm
+# that a restream arrived (GET /v3/paths/list). Never deploy this anywhere reachable.
+
+logLevel: info
+logStructured: true
+
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: api
+
+api: true
+apiAddress: :9997
+metrics: false
+pprof: false
+playback: false
+
+rtmp: true
+rtmpAddress: :1936
+rtmpEncryption: "no"
+
+rtsp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+
+pathDefaults:
+  record: false
+  overridePublisher: true
+
+paths:
+  all_others:
