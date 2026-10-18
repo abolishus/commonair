@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# TLS termination for a real domain (compose profile `tls`). Caddy obtains and renews
+# certificates automatically (ACME) for {$PUBLIC_HOSTNAME}; the host must be reachable
+# on 80/443 (see infra/README.md for rootless port options).
+#
+# Public URLs this implies (set them in .env):
+#   PUBLIC_URL=https://<host>  API_PUBLIC_URL=https://<host>  PLAYBACK_PUBLIC_URL=https://<host>
+#   CHAT_PUBLIC_URL=wss://<host>/chat  P2P_TRACKER_URL=wss://<host>/tracker
+{
+	# ACME works without an account email; add `email you@domain` here to get expiry notices.
+	servers {
+		# Clients' real addresses reach the services only through X-Forwarded-For,
+		# which they trust from TRUSTED_PROXY_CIDRS.
+		trusted_proxies static private_ranges
+	}
+}
+
+{$PUBLIC_HOSTNAME:localhost} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+
+	# Service-to-service endpoints are never reachable from outside.
+	@internal path /internal /internal/*
+	handle @internal {
+		respond 404
+	}
+
+	# The embeddable player must be frameable by any site; everything else must not be.
+	@embed path /embed /embed/*
+	@framed not path /embed /embed/*
+	header @embed ?Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors *"
+	header @framed {
+		?Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		?X-Frame-Options "DENY"
+	}
+
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+	handle /rpc/* {
+		reverse_proxy api:3001
+	}
+
+	# Chat WebSocket: wss://<host>/chat → chat:3002/ws
+	handle /chat {
+		rewrite * /ws
+		reverse_proxy chat:3002
+	}
+
+	handle /hls/* {
+		reverse_proxy origin:3003
+	}
+	handle /relay-pull/* {
+		reverse_proxy origin:3003
+	}
+	handle /cdn/* {
+		reverse_proxy origin:3003
+	}
+
+	handle_path /tracker* {
+		reverse_proxy tracker:8000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	# No access log: it would record viewers' IP addresses (AGENTS.md: no PII in logs).
+}

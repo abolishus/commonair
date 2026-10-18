@@ -22,8 +22,15 @@
     "infra": {
       "name": "@commonair/infra",
       "version": "0.0.0",
+      "dependencies": {
+        "postgres": "catalog:",
+      },
       "devDependencies": {
+        "@commonair/storage": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
         "vite-plus": "catalog:",
+        "yaml": "2.9.1",
       },
     },
     "packages/config": {

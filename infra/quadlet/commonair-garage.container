@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Garage S3 object storage (single node).
+[Unit]
+Description=CommonAir garage
+
+[Container]
+Image=docker.io/dxflrs/garage:v2.4.1
+ContainerName=commonair-garage
+Network=commonair.network
+NetworkAlias=garage
+EnvironmentFile=%h/.config/commonair/commonair.env
+PublishPort=127.0.0.1:3900:3900
+Volume=%h/commonair/infra/garage/garage.toml:/etc/garage.toml:ro,Z
+Volume=commonair-garage-meta.volume:/var/lib/garage/meta
+Volume=commonair-garage-data.volume:/var/lib/garage/data
+HealthCmd=/garage status
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

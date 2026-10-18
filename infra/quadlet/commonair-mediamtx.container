@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# MediaMTX ingest (RTMP/WHIP) and LL-HLS.
+[Unit]
+Description=CommonAir mediamtx
+
+[Container]
+Image=docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+ContainerName=commonair-mediamtx
+Network=commonair.network
+NetworkAlias=mediamtx
+EnvironmentFile=%h/.config/commonair/commonair.env
+PublishPort=127.0.0.1:1935:1935
+PublishPort=127.0.0.1:8889:8889
+PublishPort=127.0.0.1:8189:8189/udp
+Volume=%h/commonair/infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro,Z
+HealthCmd=nc -z 127.0.0.1 1935
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

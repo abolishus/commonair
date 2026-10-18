@@ -6,9 +6,17 @@
   "type": "module",
   "scripts": {
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
-    "test:int": "bun --bun vp test run .int.test --passWithNoTests"
+    "test:int": "bun --bun vp test run .int.test",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "postgres": "catalog:"
   },
   "devDependencies": {
-    "vite-plus": "catalog:"
+    "@commonair/storage": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "yaml": "2.9.1"
   }
 }
