@@ -14,7 +14,7 @@ const DEADLINE_MS = 60_000;
 let upstream: ReturnType<typeof Bun.serve> | null = null;
 let web: ReturnType<typeof Bun.spawn> | null = null;
 let base = "";
-const seen: { path: string; xff: string | null; cookie: string | null; body: string }[] = [];
+const seen: { path: string; xff: string | null; cookie: string | null; host: string | null; body: string }[] = [];
 
 function freePort(): number {
   const probe = Bun.serve({ port: 0, fetch: () => new Response() });
@@ -47,6 +47,7 @@ beforeAll(async () => {
         path: url.pathname,
         xff: req.headers.get("x-forwarded-for"),
         cookie: req.headers.get("cookie"),
+        host: req.headers.get("x-forwarded-host"),
         body: await req.text(),
       });
       if (url.pathname === "/api/auth/sign-in/email") {
@@ -70,6 +71,7 @@ beforeAll(async () => {
       WEB_PORT: String(port),
       API_INTERNAL_URL: `http://127.0.0.1:${upstream.port}`,
       LOG_LEVEL: "warn",
+      PUBLIC_URL: "https://stream.example.org",
     },
     stdout: "ignore",
     stderr: "inherit",
@@ -118,9 +120,36 @@ describe("production server", () => {
     expect(req?.body).toBe('{"email":"x"}');
     expect(req?.cookie).toBe("a=1");
     expect(req?.xff).toBe("203.0.113.5, 127.0.0.1");
+    expect(req?.host).toBe("stream.example.org");
 
     const redirect = await fetch(`${base}/api/auth/verify-email?token=t`, { redirect: "manual" });
     expect(redirect.status).toBe(302);
     expect(redirect.headers.get("location")).toBe("/dashboard");
+  });
+
+  it("sends framing, sniffing and referrer protections and keeps pages out of shared caches", async () => {
+    const page = await fetch(`${base}/signin`);
+    expect(page.headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+    expect(page.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(page.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(page.headers.get("cache-control")).toBe("private, no-store");
+    const embed = await fetch(`${base}/embed/nobody_here`);
+    expect(embed.headers.get("content-security-policy")).toBe("frame-ancestors *");
+  });
+
+  it("redirects /dashboard to /signin on the server when signed out", async () => {
+    const res = await fetch(`${base}/dashboard`, { redirect: "manual" });
+    expect(res.status).toBeGreaterThanOrEqual(300);
+    expect(res.status).toBeLessThan(400);
+    expect(new URL(res.headers.get("location") ?? "", base).pathname).toBe("/signin");
+  });
+
+  it("refuses request bodies over 1 MB", async () => {
+    const res = await fetch(`${base}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "x".repeat(1024 * 1024 + 1),
+    });
+    expect(res.status).toBe(413);
   });
 });

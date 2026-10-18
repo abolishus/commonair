@@ -35,7 +35,7 @@ export function Header(): React.JSX.Element {
         >
           {instance.name}
         </Link>
-        <ThemeToggle value={theme} onValueChange={setTheme} className="hidden sm:flex" />
+        <ThemeToggle value={theme} onValueChange={setTheme} />
         {me ? (
           <div data-testid="nav-user" data-username={me.username} className="flex items-center gap-2">
             <Link
@@ -44,7 +44,7 @@ export function Header(): React.JSX.Element {
               aria-label={t("nav.dashboardFor", { name: me.displayName })}
             >
               <ChannelAvatar name={me.displayName} size="xs" decorative />
-              <span className="max-w-32 truncate">{me.username}</span>
+              <span className="hidden max-w-32 truncate sm:inline">{me.username}</span>
             </Link>
             <IconButton label={t("nav.signOut")} icon={Logout03Icon} variant="ghost" onClick={() => void onSignOut()} />
           </div>

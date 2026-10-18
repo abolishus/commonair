@@ -133,14 +133,14 @@ function SignUpPage(): React.JSX.Element {
               <label htmlFor="signup-legal">{t("signup.legalAccept")}</label>{" "}
               {docs && docs.length > 0 && (
                 <span className="text-muted-foreground">
-                  (
+                  {t("common.openParen")}
                   {docs.map((d, i) => (
                     <React.Fragment key={d.id}>
-                      {i > 0 && ", "}
+                      {i > 0 && t("common.listSeparator")}
                       <LegalDocumentLink doc={d} />
                     </React.Fragment>
                   ))}
-                  )
+                  {t("common.closeParen")}
                 </span>
               )}
             </span>

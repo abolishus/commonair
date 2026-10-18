@@ -60,15 +60,36 @@ export function forwardedFor(existing: string | null, clientAddress: string | nu
   return chain.length > 0 ? chain.join(", ") : null;
 }
 
-export function upstreamRequest(req: Request, target: string, clientAddress: string | null): Request {
+/** Forwarding headers a client could forge; the proxy sets its own (`x-forwarded-for` is appended to). */
+export const CLIENT_FORWARDING_HEADERS = [
+  "forwarded",
+  "x-real-ip",
+  "x-forwarded-host",
+  "x-forwarded-port",
+  "x-forwarded-proto",
+  "x-forwarded-prefix",
+] as const;
+
+export interface UpstreamTarget {
+  /** API_INTERNAL_URL. */
+  api: string;
+  /** PUBLIC_URL: the origin browsers use, reported as x-forwarded-host/proto. */
+  publicUrl: string;
+}
+
+export function upstreamRequest(req: Request, target: UpstreamTarget, clientAddress: string | null): Request {
   const url = new URL(req.url);
-  const upstream = new URL(`${url.pathname}${url.search}`, target);
+  const upstream = new URL(`${url.pathname}${url.search}`, target.api);
   const headers = stripHopByHop(req.headers);
   headers.delete("host");
+  for (const h of CLIENT_FORWARDING_HEADERS) headers.delete(h);
   const xff = forwardedFor(req.headers.get("x-forwarded-for"), clientAddress);
   if (xff) headers.set("x-forwarded-for", xff);
-  headers.set("x-forwarded-host", url.host);
-  headers.set("x-forwarded-proto", url.protocol.replace(":", ""));
+  else headers.delete("x-forwarded-for");
+  // From config, not from the request: the Host header is client-controlled.
+  const pub = new URL(target.publicUrl);
+  headers.set("x-forwarded-host", pub.host);
+  headers.set("x-forwarded-proto", pub.protocol.replace(":", ""));
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   return new Request(upstream, {
     method: req.method,
@@ -95,7 +116,7 @@ const bunFetch: Fetcher = (req) => fetch(req, { redirect: "manual", decompress: 
 
 export async function proxy(
   req: Request,
-  target: string,
+  target: UpstreamTarget,
   clientAddress: string | null,
   doFetch: Fetcher = bunFetch,
 ): Promise<Response> {

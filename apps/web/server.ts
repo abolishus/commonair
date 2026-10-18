@@ -21,6 +21,7 @@ const ssr = (await import(new URL("server/server.js", distDir).href)) as {
 const server = createWebServer({
   port: env.WEB_PORT,
   apiUrl: env.API_INTERNAL_URL,
+  publicUrl: env.PUBLIC_URL,
   clientDir: new URL("client/", distDir).pathname,
   ssr: (req) => ssr.default.fetch(req),
 });

@@ -6,14 +6,22 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite-plus";
+import { securityHeaders } from "./src/server/security.ts";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
-/** `/healthz` and `/readyz` in dev, matching what `server.ts` answers in production. */
+/** Page security headers, `/healthz` and `/readyz` in dev, matching what `server.ts` answers in production. */
 function healthz(): Plugin {
   return {
     name: "commonair-healthz",
     configureServer(server) {
+      // Same page headers as production (the API proxy keeps the API's own).
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url ?? "/").split("?")[0] ?? "/";
+        if (!path.startsWith("/api/") && !path.startsWith("/rpc/"))
+          for (const [k, v] of Object.entries(securityHeaders(path))) res.setHeader(k, v);
+        next();
+      });
       for (const path of ["/healthz", "/readyz"])
         server.middlewares.use(path, (_req, res) => {
           res.setHeader("content-type", "application/json");

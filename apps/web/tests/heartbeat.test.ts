@@ -48,6 +48,20 @@ describe("HeartbeatAccountant", () => {
     expect(acc.delta(totals({ playedSeconds: 500 })).playedSeconds).toBe(MAX_PLAYED_PER_HEARTBEAT);
   });
 
+  it("carries played time above the cap into later heartbeats instead of dropping it", () => {
+    const acc = new HeartbeatAccountant();
+    // E.g. heartbeats failed for a while: 300 s accumulated before one got through.
+    const backlog = totals({ playedSeconds: 300 });
+    expect(acc.delta(backlog).playedSeconds).toBe(120);
+    acc.commit(backlog);
+    expect(acc.delta(backlog).playedSeconds).toBe(120);
+    acc.commit(backlog);
+    const later = totals({ playedSeconds: 310 });
+    expect(acc.delta(later).playedSeconds).toBe(70);
+    acc.commit(later);
+    expect(acc.delta(later).playedSeconds).toBe(0);
+  });
+
   it("never reports negative or non-finite values", () => {
     const acc = new HeartbeatAccountant();
     acc.commit(totals({ playedSeconds: 50, stalls: 4, bytesHttp: 900 }));

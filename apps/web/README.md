@@ -42,21 +42,31 @@ land signed in on `/dashboard`. Publish to `<server URL>/<stream key>` and open 
 - **Same-origin API.** The browser only talks to the web origin. `server.ts` (production) and
   Vite's dev proxy forward `/api/*` and `/rpc/*` to `API_INTERNAL_URL`, streaming bodies, keeping
   every `set-cookie`, passing redirects through (`redirect: manual`), dropping hop-by-hop headers
-  and appending the socket address to `x-forwarded-for` (`src/server/proxy.ts`). better-auth
-  cookies are therefore first-party, and the verification link (`PUBLIC_URL/api/auth/verify-email…`)
-  works as-is.
+  and appending the socket address to `x-forwarded-for` (`src/server/proxy.ts`). Client-sent
+  `forwarded`, `x-real-ip` and `x-forwarded-host/port/proto/prefix` are dropped; host and proto
+  come from `PUBLIC_URL`. Request bodies are capped at 1 MB. better-auth cookies are therefore
+  first-party, and the verification link (`PUBLIC_URL/api/auth/verify-email…`) works as-is.
+- **Page headers** (`src/server/security.ts`, production and dev): `frame-ancestors 'self'`
+  everywhere except `/embed/*` (`frame-ancestors *`), `nosniff`,
+  `strict-origin-when-cross-origin`. Rendered pages and server-function results are
+  `private, no-store` (they carry the session).
+- **Guards:** `/dashboard` checks the session in `beforeLoad` (server-side during SSR, redirect to
+  `/signin`); the component keeps a client-side fallback.
 - **Instance config from the env, at request time.** The root route's loader is a server
   function (`src/lib/bootstrap.ts`) that returns the public URLs (`PublicConfig`: chat, ingest,
   playback), `instance.info` (name + AGPL source link) and the visitor's session (`me.get` with
   the request's cookie). Nothing instance-specific is baked into the client bundle.
 - **Player** (`src/player/`, framework-free except `player.tsx`): `playback.start`, hls.js over
   MSE, native HLS on WebKit/Safari or where MSE is missing, heartbeats with per-heartbeat deltas
-  (`HeartbeatAccountant`; a failed heartbeat rolls into the next one), token refresh for every
-  hls.js request, `switchTo`, `playback.end` on stop/pagehide (keepalive fetch). Retries a failed
+  (`HeartbeatAccountant`; a failed heartbeat rolls into the next one, played time above the 120 s
+  cap carries over), token refresh for every hls.js request, `switchTo`, `playback.end` on stop
+  or a real unload (keepalive fetch). A page kept in the back/forward cache keeps its session and
+  starts a fresh one when restored. Retries a failed
   start every 5 s while the channel is live. Kept separate so it can move to `packages/player`.
 - **Chat** (`src/chat/`): a fresh `chat.connectToken` per (re)connect (anonymous viewers get a
   read-only token), `join` after `welcome`, pings at half the server heartbeat, frames validated
-  with the contract's `ServerFrame`, exponential backoff with jitter on unexpected closes.
+  with the contract's `ServerFrame`, exponential backoff with jitter on unexpected closes. Notices
+  and errors are shown from the catalog by code (`src/chat/messages.ts`), never the server's text.
 - **Channel state** comes from `channels.get` (SSR snapshot, then polled every 5 s).
 - **i18n:** every visible string is `t("key")` from `src/i18n/en.ts`; `tests/i18n.test.ts` fails on
   a missing or dynamically built key.
