@@ -37,6 +37,8 @@ const coreShape = z.object({
   ABUSE_EMAIL: z.email().optional(),
   DMCA_EMAIL: z.email().optional(),
   PRIVACY_EMAIL: z.email().optional(),
+  /** Sender for automated mail; defaults to the flagship noreply on the flagship, else noreply@<public host>. */
+  NOREPLY_EMAIL: z.email().optional(),
   SOURCE_URL: z.url().default(SITE.repository.url),
   SOURCE_COMMIT: z.string().default("unknown"),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
@@ -222,6 +224,9 @@ export function instanceSite(env: z.output<typeof coreShape>): InstanceSite {
       ...(env.ABUSE_EMAIL ? { abuse: env.ABUSE_EMAIL } : {}),
       ...(env.DMCA_EMAIL ? { dmca: env.DMCA_EMAIL } : {}),
       ...(env.PRIVACY_EMAIL ? { privacy: env.PRIVACY_EMAIL } : {}),
+      noreply:
+        env.NOREPLY_EMAIL ??
+        (env.INSTANCE_IS_FLAGSHIP ? SITE.contacts.noreply : `noreply@${new URL(env.PUBLIC_URL).hostname}`),
     },
   };
 }

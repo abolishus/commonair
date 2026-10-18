@@ -52,14 +52,13 @@ export class InvalidRecipientError extends Error {
 const SINGLE_ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+$/;
 
 /**
- * `MAIL_FROM` wins. Otherwise the flagship uses the project's noreply contact
- * and any other instance a noreply mailbox on its own host, so mail never
- * claims to come from a domain the instance does not control.
+ * `MAIL_FROM` wins. Otherwise the instance's noreply contact (`NOREPLY_EMAIL`, defaulting in
+ * `instanceSite()` to the flagship's on the flagship and to noreply@<public host> elsewhere), so
+ * mail never claims to come from a domain the instance does not control.
  */
 export function defaultFrom(site: InstanceSite, mailFrom?: string): OutgoingMail["from"] {
   if (mailFrom) return mailFrom;
-  const address = site.isFlagship ? site.contacts.noreply : `noreply@${new URL(site.publicUrl).hostname}`;
-  return { name: site.name, address };
+  return { name: site.name, address: site.contacts.noreply };
 }
 
 export async function buildMail<K extends TemplateId>(
