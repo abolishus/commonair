@@ -86,6 +86,10 @@ export interface Identity {
   /** OAuth app the connection acts for (bots, the IRC gateway's clients). */
   appId: string | null;
   via: "token" | "oauth" | "anonymous";
+  /** When the credential stops being valid (epoch ms); the socket is closed then. */
+  expiresAt: number | null;
+  /** SHA-256 of the OAuth access token, for revocation checks and targeted disconnects. */
+  tokenHash: string | null;
 }
 
 export interface Rejection {

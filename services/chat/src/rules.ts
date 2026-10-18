@@ -99,6 +99,15 @@ export function rateLimitFor(
   return { limit: user.accountType === "bot" ? Math.max(base, CHAT_LIMITS.bot) : base, bucket: channelId };
 }
 
+/** A user's messages across all channels may not exceed this multiple of their per-channel limit. */
+export const GLOBAL_RATE_MULTIPLIER = 3;
+
+/** Cross-channel cap per user, or null when the per-channel limit is already global (verified bots). */
+export function globalRateLimitFor(user: UserProfile, standing: Standing): number | null {
+  const rate = rateLimitFor(user, standing, "");
+  return rate.bucket === ALL_CHANNELS ? null : rate.limit * GLOBAL_RATE_MULTIPLIER;
+}
+
 /** Whether the socket may send at all in this channel (the `joined.me.canChat` hint). */
 export function canChatHint(
   user: UserProfile | null,

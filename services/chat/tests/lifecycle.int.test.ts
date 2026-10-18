@@ -193,24 +193,24 @@ describe("ValkeyLimiter", () => {
     expect(await limiter.hit(c, "u", CHAT_LIMITS.user, 1000, now + 1001)).toBe(true);
   });
 
-  test("slow mode and duplicates are recorded on commit with TTLs", async () => {
+  test("slow mode is reserved atomically across concurrent senders", async () => {
     const c = crypto.randomUUID();
-    expect(await limiter.slowRemainingMs(c, "u")).toBe(0);
-    expect(await limiter.isDuplicate(c, "u", "hello")).toBe(false);
-    await limiter.commit(c, "u", "hello", 2, 500);
-    const slow = await limiter.slowRemainingMs(c, "u");
-    expect(slow).toBeGreaterThan(1000);
-    expect(slow).toBeLessThanOrEqual(2000);
-    expect(await limiter.isDuplicate(c, "u", "hello")).toBe(true);
-    expect(await limiter.isDuplicate(c, "u", "hello!")).toBe(false);
-    expect(await limiter.isDuplicate(c, "v", "hello")).toBe(false);
-    await Bun.sleep(600);
-    expect(await limiter.isDuplicate(c, "u", "hello")).toBe(false);
+    const results = await Promise.all(Array.from({ length: 20 }, () => limiter.reserveSlow(c, "u", 2)));
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    const denied = results.find((r) => !r.ok);
+    expect(denied && !denied.ok && denied.waitMs).toBeGreaterThan(1000);
+    const winner = results.find((r) => r.ok);
+    if (winner?.ok) await winner.reservation.release();
+    expect((await limiter.reserveSlow(c, "u", 2)).ok).toBe(true);
   });
 
-  test("commit without slow mode leaves no slow key", async () => {
+  test("duplicates are reserved per exact body with a TTL", async () => {
     const c = crypto.randomUUID();
-    await limiter.commit(c, "u", "x", 0, 500);
-    expect(await limiter.slowRemainingMs(c, "u")).toBe(0);
+    const claims = await Promise.all(Array.from({ length: 10 }, () => limiter.reserveDuplicate(c, "u", "hello", 500)));
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(await limiter.reserveDuplicate(c, "u", "hello!", 500)).not.toBeNull();
+    expect(await limiter.reserveDuplicate(c, "v", "hello", 500)).not.toBeNull();
+    await Bun.sleep(600);
+    expect(await limiter.reserveDuplicate(c, "u", "hello", 500)).not.toBeNull();
   });
 });

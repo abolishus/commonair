@@ -19,6 +19,8 @@ export interface DirectoryOptions {
   channelTtlMs?: number;
   profileTtlMs?: number;
   standingTtlMs?: number;
+  /** How long "no such channel" is remembered (short, so a new channel is joinable quickly). */
+  missingTtlMs?: number;
   onInvalidFilter?: (channelId: string, filterId: string, reason: string) => void;
 }
 
@@ -35,6 +37,7 @@ export class Directory {
   private readonly globalEmotes: TtlCache<"global", EmoteDef[]>;
   private readonly profiles: TtlCache<string, UserProfile | null>;
   private readonly standings: TtlCache<string, Standing>;
+  private readonly missing = new Map<string, number>();
 
   constructor(
     private readonly db: Database,
@@ -42,12 +45,24 @@ export class Directory {
   ) {
     this.bySlug = new TtlCache(opts.channelTtlMs ?? 60_000, 5_000);
     this.globalEmotes = new TtlCache(opts.channelTtlMs ?? 60_000, 1);
-    this.profiles = new TtlCache(opts.profileTtlMs ?? 60_000, 50_000);
+    this.profiles = new TtlCache(opts.profileTtlMs ?? 15_000, 50_000);
     this.standings = new TtlCache(opts.standingTtlMs ?? 30_000, 100_000);
   }
 
-  channel(slug: string): Promise<LoadedChannel | null> {
-    return this.bySlug.get(slug.toLowerCase(), () => this.loadChannel(slug.toLowerCase()));
+  async channel(slug: string): Promise<LoadedChannel | null> {
+    const key = slug.toLowerCase();
+    const missingUntil = this.missing.get(key);
+    if (missingUntil !== undefined) {
+      if (missingUntil > Date.now()) return null;
+      this.missing.delete(key);
+    }
+    const loaded = await this.bySlug.get(key, () => this.loadChannel(key));
+    if (loaded) return loaded;
+    // Misses are not kept in the main cache: a channel created a moment later must be joinable.
+    this.bySlug.delete(key);
+    if (this.missing.size >= 10_000) this.missing.clear();
+    this.missing.set(key, Date.now() + (this.opts.missingTtlMs ?? 5_000));
+    return null;
   }
 
   profile(userId: string): Promise<UserProfile | null> {
@@ -80,6 +95,12 @@ export class Directory {
 
   invalidateProfile(userId: string): void {
     this.profiles.delete(userId);
+  }
+
+  /** Drop everything cached about a user, in every channel (BUS.userControl). */
+  invalidateUser(userId: string): void {
+    this.profiles.delete(userId);
+    this.standings.deleteWhere((k) => k.endsWith(`:${userId}`));
   }
 
   private async loadChannel(slug: string): Promise<LoadedChannel | null> {

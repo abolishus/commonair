@@ -11,7 +11,8 @@ export type DropReason =
   | "persist_failed"
   | "persist_overflow"
   | "bad_frame"
-  | "idle";
+  | "idle"
+  | "credentials";
 
 export function createMetrics() {
   const m = meter("chat");

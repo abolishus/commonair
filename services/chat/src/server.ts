@@ -11,15 +11,18 @@ import { ClientFrame } from "@commonair/contracts";
 import type { Database } from "@commonair/db";
 import { createLogger, type Logger } from "@commonair/observability";
 import { createValkey, runService, valkeyCheck, type RunningService } from "@commonair/service";
-import { authenticate } from "./auth.ts";
+import { Authenticator } from "./auth.ts";
 import { Bus } from "./bus.ts";
 import { splitChatCommand } from "./commands.ts";
-import { ChatCore } from "./core.ts";
+import { ChatCore, REQUIRES_LOGIN } from "./core.ts";
 import { Directory, type DirectoryOptions } from "./directory.ts";
 import { type Limiter, ValkeyLimiter } from "./limiter.ts";
 import { createMetrics } from "./metrics.ts";
 import { MODERATE_SCOPE, Moderation } from "./moderation.ts";
-import { dbErrorFields, MessageWriter, type WriterOptions } from "./persistence.ts";
+import { MessageWriter, type WriterOptions } from "./persistence.ts";
+import { errorFields } from "./errors.ts";
+import { BUS, UserControlMessage } from "@commonair/contracts";
+import { parseJson } from "./control.ts";
 import type { MessageMiddleware, PluginHost } from "./pipeline.ts";
 import { plugins } from "./plugins/index.ts";
 import { Rooms } from "./rooms.ts";
@@ -46,6 +49,8 @@ export interface ChatServiceOptions {
   limiter?: Limiter;
   logger?: Logger;
   deleteRetryMs?: number;
+  /** How long an OAuth token's validity is cached between re-checks (≤ 30 s). */
+  oauthRevalidateMs?: number;
   /** Runs last during shutdown (close the DB pool, flush telemetry). */
   onShutdown?: () => Promise<void>;
 }
@@ -79,6 +84,22 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   const frameWriter: Writer = { maxBufferedBytes: opts.maxBufferedBytes ?? 1024 * 1024, metrics };
   const middlewares = opts.middlewares ?? plugins;
   const sockets = new Set<ChatSocket>();
+  const auth = new Authenticator(opts.db, opts.internalSecret, opts.oauthRevalidateMs);
+
+  /** BUS.userControl: platform-wide suspension, deletion, token revocation, role/profile changes. */
+  const onUserControl = (raw: string): void => {
+    const msg = parseJson(UserControlMessage, raw);
+    if (!msg) return;
+    if (msg.tokenHash) auth.forget(msg.tokenHash);
+    core?.invalidateUser(msg.userId);
+    if (msg.op !== "disconnect") return;
+    for (const ws of sockets) {
+      const id = ws.data.identity;
+      if (id.userId !== msg.userId) continue;
+      if (msg.tokenHash && id.tokenHash !== msg.tokenHash) continue;
+      expire(ws, msg.reason);
+    }
+  };
   let draining = false;
 
   // `core` is assigned right below; room handlers only fire after a join, which needs it.
@@ -92,7 +113,10 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     db: opts.db,
     directory,
     publishControl: (channelId, message) => bus.publish(bus.names.control(channelId), JSON.stringify(message)),
-    flushMessages: () => writer.flush(),
+    // Bounded: a delete must not wait behind a backlog during a database outage.
+    flushMessages: async () => {
+      await writer.flushWithin(1_000);
+    },
     logger,
     deleteRetryMs: opts.deleteRetryMs,
   });
@@ -115,6 +139,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   await Promise.all([
     bus.acquire(bus.names.events(), (raw) => chat.onEvent(raw)),
     bus.acquire(bus.names.live(), (raw) => chat.onLive(raw)),
+    bus.acquire((opts.busPrefix ?? "") + BUS.userControl, (raw) => onUserControl(raw)),
   ]);
   await initPlugins(middlewares, chat, logger);
 
@@ -133,9 +158,38 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     sendFrame(ws, { op: "error", code, message, ...where }, frameWriter);
   };
 
+  /** Close a socket whose credentials lapsed or were revoked. */
+  const expire = (ws: ChatSocket, reason: string): void => {
+    metrics.dropped("credentials");
+    ws.close(CLOSE.credentials, reason);
+  };
+
+  /** Send and command need live credentials and a joined room (so this instance hears its control channel). */
+  const precheck = async (ws: ChatSocket, frame: ClientFrame & { channel: string }, to: Reply): Promise<boolean> => {
+    const id = ws.data.identity;
+    const isMe = frame.op === "command" && frame.command === "me";
+    if (!id.userId || (frame.op === "send" || isMe ? !id.scopes.includes("chat:edit") : false)) {
+      replyNotice(ws, to, REQUIRES_LOGIN);
+      if (frame.op === "send") sendFrame(ws, { op: "ack", nonce: frame.nonce, id: null, held: false }, frameWriter);
+      return false;
+    }
+    if (!(await auth.stillValid(id))) {
+      replyNotice(ws, to, { code: "msg_requires_login", text: "Your credentials expired or were revoked." });
+      expire(ws, "credentials expired");
+      return false;
+    }
+    if (!ws.data.rooms.has(frame.channel.toLowerCase())) {
+      replyNotice(ws, to, { code: "msg_rejected", text: "Join the channel first." });
+      if (frame.op === "send") sendFrame(ws, { op: "ack", nonce: frame.nonce, id: null, held: false }, frameWriter);
+      return false;
+    }
+    return true;
+  };
+
   const handleFrame = async (ws: ChatSocket, frame: ClientFrame): Promise<void> => {
     const data = ws.data;
     const to = replyTo(frame);
+    if ((frame.op === "send" || frame.op === "command") && !(await precheck(ws, frame, to))) return;
     switch (frame.op) {
       case "ping":
         sendFrame(ws, { op: "pong", nonce: frame.nonce }, frameWriter);
@@ -220,7 +274,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     data.queue = data.queue
       .then(() => handleFrame(ws, f))
       .catch((err: unknown) => {
-        logger.error("chat frame failed", { ...dbErrorFields(err), op: f.op });
+        logger.error("chat frame failed", { ...errorFields(err), op: f.op });
         if (f.op === "command") replyNotice(ws, to, { code: "msg_rejected", text: "The command failed. Try again." });
         else replyError(ws, to, "internal_error", "Something went wrong.");
       })
@@ -244,13 +298,19 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   const sweeper = setInterval(
     () => {
       const cutoff = Date.now() - heartbeatMs * 2;
+      const now = Date.now();
       for (const ws of sockets) {
+        const exp = ws.data.identity.expiresAt;
+        if (exp !== null && exp <= now) {
+          expire(ws, "credentials expired");
+          continue;
+        }
         if (ws.data.lastSeen >= cutoff) continue;
         metrics.dropped("idle");
         ws.close(CLOSE.idle, "heartbeat timeout");
       }
     },
-    Math.max(250, Math.floor(heartbeatMs / 2)),
+    Math.max(250, Math.min(1_000, Math.floor(heartbeatMs / 2))),
   );
   sweeper.unref();
 
@@ -280,14 +340,16 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
         ws.data.closed = true;
         if (!sockets.delete(ws)) return;
         metrics.connectionClosed(ws.data.identity.via);
-        void chat.partAll(ws).catch((err: unknown) => logger.warn("part on close failed", { err }));
+        void chat.partAll(ws).catch((err: unknown) => logger.warn("part on close failed", errorFields(err)));
       },
     },
     onShutdown: async () => {
       clearInterval(sweeper);
       await writer.close();
       for (const mw of middlewares)
-        await mw.close?.().catch((err: unknown) => logger.warn("plugin close failed", { err, plugin: mw.name }));
+        await mw
+          .close?.()
+          .catch((err: unknown) => logger.warn("plugin close failed", { ...errorFields(err), plugin: mw.name }));
       await Promise.allSettled([subscriber.quit(), valkey.quit()]);
       await opts.onShutdown?.();
     },
@@ -299,19 +361,19 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     if (draining) return Response.json({ error: "shutting_down" }, { status: 503 });
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket")
       return Response.json({ error: "websocket_required" }, { status: 426 });
-    const auth = await authenticate(req, opts.db, opts.internalSecret);
-    if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
+    const result = await auth.authenticate(req);
+    if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
     let user: ConnData["user"] = null;
-    if (auth.identity.userId) {
-      directory.invalidateProfile(auth.identity.userId);
-      const profile = await directory.profile(auth.identity.userId);
+    if (result.identity.userId) {
+      directory.invalidateProfile(result.identity.userId);
+      const profile = await directory.profile(result.identity.userId);
       if (!profile || profile.deleted) return Response.json({ error: "unknown_user" }, { status: 401 });
       user = { id: profile.id, username: profile.username, displayName: profile.displayName };
     }
     const now = Date.now();
     const data: ConnData = {
       sessionId: crypto.randomUUID(),
-      identity: auth.identity,
+      identity: result.identity,
       user,
       rooms: new Map(),
       lastSeen: now,
@@ -347,7 +409,14 @@ async function initPlugins(middlewares: readonly MessageMiddleware[], chat: Chat
   const host: PluginHost = {
     logger,
     async say({ channel, userId, body, isAction }) {
-      const identity: Identity = { userId, scopes: ["chat:read", "chat:edit"], appId: null, via: "token" };
+      const identity: Identity = {
+        userId,
+        scopes: ["chat:read", "chat:edit"],
+        appId: null,
+        via: "token",
+        expiresAt: null,
+        tokenHash: null,
+      };
       const r = await chat.submit(
         identity,
         { channel, body, isAction: isAction ?? false, replyToId: null },
@@ -361,6 +430,8 @@ async function initPlugins(middlewares: readonly MessageMiddleware[], chat: Chat
         scopes: ["chat:read", "chat:edit", MODERATE_SCOPE],
         appId: null,
         via: "token",
+        expiresAt: null,
+        tokenHash: null,
       };
       const n = await chat.command(identity, channel, command, args);
       return [n.code];

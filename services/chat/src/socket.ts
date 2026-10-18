@@ -30,6 +30,8 @@ export type ChatSocket = ServerWebSocket<ConnData>;
 
 export const CLOSE = {
   idle: 4000,
+  /** Token expired or revoked; reconnect with fresh credentials. */
+  credentials: 4001,
   tooManyErrors: 4009,
   restart: 1012,
 } as const;
