@@ -1,0 +1,6 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC0-1.0
+-->
+
+@AGENTS.md
