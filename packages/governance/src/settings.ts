@@ -50,12 +50,27 @@ export const CouncilConfig = z.object({
 });
 export type CouncilConfig = z.infer<typeof CouncilConfig>;
 
+/**
+ * `membership.classes` (protected). Fields marked "defaulted" are not in the seed yet and
+ * are read with their default here. CONTRACT-REQUEST: add `streamer.minVerifiedViewers: 2`,
+ * `streamer.lapseGraceDays: 14` and `viewer.minSubscriptionCents: 300` to the seed
+ * (`packages/db/src/seed.ts`) so they become part of the protected value.
+ */
 export const MembershipClasses = z.object({
-  streamer: z.object({ minStreamingHours: z.number().min(0), windowDays: z.number().int().min(1) }),
+  streamer: z.object({
+    minStreamingHours: z.number().min(0),
+    windowDays: z.number().int().min(1),
+    /** Distinct verified viewers other than the streamer an hour needs to count (defaulted). */
+    minVerifiedViewers: z.number().int().min(1).default(2),
+    /** Extra days past the window before an active streamer is lapsed (defaulted). */
+    lapseGraceDays: z.number().int().min(0).max(365).default(14),
+  }),
   viewer: z.object({
     shareCents: z.number().int().min(0),
     shareRefundableOnExit: z.boolean(),
     activeSubscriptionQualifies: z.boolean(),
+    /** Cheapest subscription that qualifies for viewer membership (defaulted). */
+    minSubscriptionCents: z.number().int().min(0).default(300),
   }),
   worker: z.object({ appointedBy: z.literal("board") }),
 });
