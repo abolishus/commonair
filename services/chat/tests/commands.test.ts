@@ -127,3 +127,12 @@ describe("parseCommand", () => {
     expect(parseCommand("nuke", [])).toMatchObject({ ok: false, code: "unrecognized_cmd" });
   });
 });
+
+describe("parse error codes", () => {
+  test("bad arguments are usage errors", () => {
+    expect(parseCommand("ban", [])).toMatchObject({ ok: false, code: "usage" });
+    expect(parseCommand("timeout", ["bob", "0"])).toMatchObject({ ok: false, code: "usage" });
+    expect(parseCommand("delete", ["x"])).toMatchObject({ ok: false, code: "usage" });
+    expect(parseCommand("me", [])).toMatchObject({ ok: false, code: "usage" });
+  });
+});

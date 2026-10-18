@@ -3,7 +3,7 @@
 
 /** Per-socket state and the one place frames are written, so backpressure is enforced everywhere. */
 import type { ServerWebSocket } from "bun";
-import type { ServerFrame } from "@commonair/contracts";
+import type { NoticeCode, ServerFrame } from "@commonair/contracts";
 import type { Metrics } from "./metrics.ts";
 import type { Identity } from "./types.ts";
 
@@ -60,6 +60,25 @@ export function sendRaw(ws: ChatSocket, data: string, w: Writer): boolean {
 
 export const sendFrame = (ws: ChatSocket, frame: ServerFrame, w: Writer): boolean =>
   sendRaw(ws, JSON.stringify(frame), w);
+
+/**
+ * A notice, echoing the nonce of the frame it answers.
+ * CONTRACT-REQUEST: add `nonce: z.string().optional()` to the `notice` ServerFrame (it is on
+ * `error` and `ack` already); until then the field is written outside the typed frame.
+ */
+export function sendNotice(
+  ws: ChatSocket,
+  n: { channel: string | null; code: NoticeCode; text: string; nonce?: string | undefined },
+  w: Writer,
+): boolean {
+  const frame: Extract<ServerFrame, { op: "notice" }> = {
+    op: "notice",
+    channel: n.channel,
+    code: n.code,
+    text: n.text,
+  };
+  return sendRaw(ws, JSON.stringify(n.nonce ? { ...frame, nonce: n.nonce } : frame), w);
+}
 
 /** Refill-on-read token bucket; returns false when the socket is over its control-frame budget. */
 export function takeToken(data: ConnData, now: number, capacity = 20, perSecond = 2): boolean {

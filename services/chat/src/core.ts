@@ -47,9 +47,6 @@ export interface SendOutcome {
   notice: Rejection | null;
 }
 
-/** Frame type for held messages, delivered to moderators only. */
-export const HELD_EVENT = "chat.message.held";
-
 export interface CoreDeps {
   db: Database;
   bus: Bus;
@@ -136,11 +133,7 @@ export class ChatCore {
       createdAt: receivedAt,
     });
     if (result.held) {
-      await this.fanout(
-        channel.id,
-        { op: "event", channel: channel.slug, type: HELD_EVENT, data: { message } },
-        "moderators",
-      );
+      await this.fanout(channel.id, { op: "message", channel: channel.slug, message, held: true }, "moderators");
       return {
         id: messageId,
         held: true,
@@ -228,26 +221,14 @@ export class ChatCore {
     return identity.userId !== null && canModerate(rankOf(standing)) && identity.scopes.includes(MODERATE_SCOPE);
   }
 
-  async join(ws: ChatSocket, slug: string): Promise<void> {
+  /** Join a room and send `joined`; returns the error to report (with the request's nonce) on failure. */
+  async join(ws: ChatSocket, slug: string): Promise<{ code: string; message: string } | null> {
     const data = ws.data;
     const w = this.d.frameWriter;
-    if (!data.rooms.has(slug) && data.rooms.size >= this.d.maxRoomsPerConnection) {
-      sendFrame(
-        ws,
-        {
-          op: "error",
-          code: "too_many_rooms",
-          message: `At most ${this.d.maxRoomsPerConnection} rooms per connection.`,
-        },
-        w,
-      );
-      return;
-    }
+    if (!data.rooms.has(slug) && data.rooms.size >= this.d.maxRoomsPerConnection)
+      return { code: "too_many_rooms", message: `At most ${this.d.maxRoomsPerConnection} rooms per connection.` };
     const loaded = await this.d.directory.channel(slug);
-    if (!loaded) {
-      sendFrame(ws, { op: "error", code: "channel_not_found", message: `No channel named ${slug}.` }, w);
-      return;
-    }
+    if (!loaded) return { code: "channel_not_found", message: `No channel named ${slug}.` };
     const ch = loaded.state;
     const user = data.identity.userId ? await this.d.directory.profile(data.identity.userId) : null;
     const standing = user ? await this.d.directory.standing(ch, user.id) : NO_STANDING;
@@ -259,10 +240,11 @@ export class ChatCore {
     });
     if (data.closed) {
       await this.d.rooms.part(ws, ch.id);
-      return;
+      return null;
     }
     data.rooms.set(ch.slug, ch.id);
     sendFrame(ws, this.joinedFrame(ch, user, standing, data.identity, canMod), w);
+    return null;
   }
 
   private joinedFrame(
@@ -316,7 +298,7 @@ export class ChatCore {
     if (env.v !== 1 || !env.frame || typeof env.frame.op !== "string") return;
     if (typeof env.sentAt === "number") this.d.metrics.fanoutLatency(Date.now() - env.sentAt);
     const frame = env.frame;
-    if (frame.op === "message")
+    if (frame.op === "message" && !frame.held)
       this.d.rooms.remember(channelId, frame.message.id, frame.message.user.username, frame.message.body);
     this.d.rooms.deliver(channelId, JSON.stringify(frame), env.audience === "moderators" ? "moderators" : "all");
   }

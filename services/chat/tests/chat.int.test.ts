@@ -9,7 +9,6 @@ import { BUS, type BusEvent, EVENTS, type ServerFrame } from "@commonair/contrac
 import { schema } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import type { ChatService } from "../src/server.ts";
-import { HELD_EVENT } from "../src/core.ts";
 import {
   chatToken,
   Client,
@@ -206,10 +205,10 @@ describe("rules across instances", () => {
     expect(ack.held).toBe(true);
     expect(ack.id).toBeTruthy();
     expect(notice?.code).toBe("msg_held");
-    const held = await modClient.waitFor<"event">((f) => f.op === "event" && f.type === HELD_EVENT);
-    expect((held.data.message as { id: string }).id).toBe(ack.id);
-    const notHeld = (f: ServerFrame) =>
-      (f.op === "event" && f.type === HELD_EVENT) || (f.op === "message" && f.message.id === ack.id);
+    const held = await modClient.waitFor<"message">((f) => f.op === "message" && f.message.id === ack.id);
+    expect(held.held).toBe(true);
+    expect(held.message.body).toBe("this is suspicious");
+    const notHeld = (f: ServerFrame) => f.op === "message" && f.message.id === ack.id;
     expect(await bystander.never(notHeld)).toBe(true);
     expect(await other.never(notHeld, 0)).toBe(true);
     expect(await sender.never(notHeld, 0)).toBe(true);
@@ -390,6 +389,34 @@ describe("moderation commands", () => {
     // As a command frame it still answers with exactly one notice.
     expect((await c.command(ch.slug, "me", ["dances"])).code).toBe("cmd_success");
     await c.waitFor((f) => f.op === "message" && f.message.body === "dances" && f.message.isAction);
+  });
+
+  test("replies echo the request nonce; usage and invalid_user codes", async () => {
+    const { mod, ch } = await room();
+    const c = await connect(a, mod.id);
+    c.send({ op: "command", channel: ch.slug, command: "ban", args: [], nonce: "n-usage" });
+    expect(await c.waitFor((f) => f.op === "notice" && (f as { nonce?: string }).nonce === "n-usage")).toMatchObject({
+      code: "usage",
+      channel: ch.slug,
+    });
+    c.send({ op: "command", channel: ch.slug, command: "timeout", args: ["nobody_here"], nonce: "n-user" });
+    expect(await c.waitFor((f) => f.op === "notice" && (f as { nonce?: string }).nonce === "n-user")).toMatchObject({
+      code: "invalid_user",
+    });
+    c.send({ op: "join", channel: "no_such_room", nonce: "n-join" });
+    expect(await c.waitFor((f) => f.op === "error" && f.nonce === "n-join")).toMatchObject({
+      code: "channel_not_found",
+      channel: "no_such_room",
+    });
+    // A rejected send: notice and ack both carry the nonce.
+    const viewer = await createUser(t.db, { emailVerified: false });
+    const v = await connect(a, viewer.id);
+    v.send({ op: "send", channel: ch.slug, body: "hi", nonce: "n-send" });
+    expect(await v.waitFor((f) => f.op === "notice" && (f as { nonce?: string }).nonce === "n-send")).toMatchObject({
+      code: "msg_verified_email",
+      channel: ch.slug,
+    });
+    expect(await v.waitFor((f) => f.op === "ack" && f.nonce === "n-send")).toMatchObject({ id: null });
   });
 
   test("every command frame gets exactly one notice", async () => {
