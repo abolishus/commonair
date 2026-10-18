@@ -97,6 +97,11 @@ func newFakeOrigin(t *testing.T) *fakeOrigin {
 			_, _ = io.WriteString(w, originPlaylist)
 			return
 		}
+		if name == "big.mp4" {
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = w.Write(make([]byte, bigBytes))
+			return
+		}
 		if _, ok := media[name]; !ok {
 			http.NotFound(w, r)
 			return
@@ -513,10 +518,30 @@ func TestBlockingParamsPassThroughAndCoalesce(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	// Beyond the live edge (newest msn 3 incl. the in-progress segment, 5 parts
+	// per segment): refused without bothering the origin.
+	for _, q := range []string{"_HLS_msn=5", "_HLS_msn=3&_HLS_part=6", "_HLS_msn=999999999"} {
+		if status, _, _ := h.get(t, "/hls/live/alice/index.m3u8?"+q+"&t="+h.token(sid(1))); status != http.StatusBadRequest {
+			t.Fatalf("%s: status %d, want 400", q, status)
+		}
+	}
+	if status, _, _ := h.get(t, "/hls/live/alice/index.m3u8?_HLS_msn=4&_HLS_part=0&t="+h.token(sid(1))); status != http.StatusOK {
+		t.Fatalf("next segment's first part refused: %d", status)
+	}
 	h.origin.mu.Lock()
 	defer h.origin.mu.Unlock()
-	if len(h.origin.queries) != 1 || h.origin.queries[0] != "_HLS_msn=3&_HLS_part=1" {
-		t.Fatalf("origin playlist queries %q, want one canonical blocking request", h.origin.queries)
+	var blocking []string
+	plain := 0
+	for _, q := range h.origin.queries {
+		if q == "" {
+			plain++ // bounds check; refreshed when its short TTL lapses
+		} else {
+			blocking = append(blocking, q)
+		}
+	}
+	want := []string{"_HLS_msn=3&_HLS_part=1", "_HLS_msn=4&_HLS_part=0"}
+	if plain == 0 || fmt.Sprint(blocking) != fmt.Sprint(want) {
+		t.Fatalf("origin playlist queries %q, want plain bounds checks plus exactly %q", h.origin.queries, want)
 	}
 }
 

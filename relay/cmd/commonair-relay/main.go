@@ -31,6 +31,10 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
+// finalReceiptWindow is how long shutdown spends delivering queued receipts
+// after the drain; anything undelivered stays on disk for the next start.
+const finalReceiptWindow = 10 * time.Second
+
 type config struct {
 	api, token, publicURL, listen, dataDir, region string
 	tlsCert, tlsKey                                string
@@ -58,7 +62,7 @@ func parseFlags(args []string, getenv func(string) string, stderr io.Writer) (co
 	fs.StringVar(&c.tlsKey, "tls-key", "", "TLS private key (PEM)")
 	fs.BoolVar(&c.behindProxy, "behind-proxy", false, "serve plain HTTP behind a TLS-terminating reverse proxy")
 	fs.StringVar(&c.logLevel, "log-level", "info", "debug, info, warn or error")
-	fs.DurationVar(&c.shutdownTimeout, "shutdown-timeout", 25*time.Second, "time allowed for in-flight requests and the final receipt")
+	fs.DurationVar(&c.shutdownTimeout, "drain-timeout", 30*time.Second, fmt.Sprintf("on SIGTERM, time for in-flight requests to finish (at least %s); the final receipt gets %s more", relay.MinDrainWindow, finalReceiptWindow))
 	fs.BoolVar(&c.showVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return c, err
@@ -87,6 +91,9 @@ func parseFlags(args []string, getenv func(string) string, stderr io.Writer) (co
 	}
 	if u, err := url.Parse(c.publicURL); err == nil && u.Scheme == "https" && c.tlsCert == "" && !c.behindProxy {
 		problems = append(problems, "an https --public-url needs --tls-cert/--tls-key or --behind-proxy")
+	}
+	if c.shutdownTimeout < relay.MinDrainWindow {
+		problems = append(problems, fmt.Sprintf("--drain-timeout must be at least %s (longer than a blocking playlist request)", relay.MinDrainWindow))
 	}
 	if c.cacheMB < 16 {
 		problems = append(problems, "--cache-mb must be at least 16")
@@ -204,17 +211,9 @@ func run(cfg config, logger *slog.Logger) error {
 			runErr = err
 		}
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.shutdownTimeout)
-	defer cancel()
-	rel.Drain()
-	// Finish in-flight requests first so the final receipt counts them.
-	httpCtx, httpCancel := context.WithTimeout(shutdownCtx, cfg.shutdownTimeout*3/5)
-	if err := srv.Shutdown(httpCtx); err != nil {
-		logger.Warn("in-flight requests cut off at shutdown", "err", err.Error())
-		_ = srv.Close()
-	}
-	httpCancel()
-	if err := rel.Shutdown(shutdownCtx); err != nil {
+	// Finish in-flight requests (including blocking playlist reloads held by
+	// the origin) before the final receipt, then deliver it.
+	if err := rel.GracefulStop(srv, cfg.shutdownTimeout, finalReceiptWindow); err != nil {
 		logger.Warn("final receipt delivery incomplete; will retry on next start", "err", err.Error())
 	}
 	logger.Info("stopped")

@@ -12,7 +12,7 @@ import { DELIVERY_SOURCES, RENDITIONS } from "./enums.ts";
 
 export const INTERNAL_SECRET_HEADER = "x-internal-secret";
 
-/** Username MediaMTX accepts for internal readers/publishers (origin, media); password = INTERNAL_API_SECRET. */
+/** Username MediaMTX accepts for internal readers/publishers (origin, media); password = MEDIA_INTERNAL_PASSWORD. */
 export const MEDIA_INTERNAL_USER = "internal";
 
 /**

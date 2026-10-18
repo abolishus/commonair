@@ -36,6 +36,7 @@ func TestParseFlagsErrors(t *testing.T) {
 		"cert without key":   {"--api", "https://i.test/", "--token", "t", "--public-url", "https://r.test", "--tls-cert", "c.pem"},
 		"tls and proxy":      {"--api", "https://i.test/", "--token", "t", "--public-url", "https://r.test", "--tls-cert", "c", "--tls-key", "k", "--behind-proxy"},
 		"tiny cache":         {"--api", "https://i.test/", "--token", "t", "--public-url", "http://r.test", "--cache-mb", "1"},
+		"drain too short":    {"--api", "https://i.test/", "--token", "t", "--public-url", "http://r.test", "--drain-timeout", "20s"},
 	}
 	for name, args := range cases {
 		if _, err := parseFlags(args, env(nil), io.Discard); err == nil {

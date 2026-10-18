@@ -6,6 +6,7 @@
 package receipts
 
 import (
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,9 +41,12 @@ type Queue struct {
 	items []Item
 }
 
-// OpenQueue loads queued receipts from dir. Unreadable files are renamed to
-// *.corrupt and skipped, keeping them for inspection.
-func OpenQueue(dir string, maxPending int) (*Queue, []error) {
+// OpenQueue loads queued receipts from dir. Files that are unreadable or
+// whose signature does not verify against pub (tampered, truncated, or
+// signed by a key this relay no longer holds) are renamed to *.corrupt and
+// skipped, keeping them for inspection; sending them would only earn a
+// rejection and could look like forgery.
+func OpenQueue(dir string, maxPending int, pub ed25519.PublicKey) (*Queue, []error) {
 	if maxPending <= 0 {
 		maxPending = DefaultMaxPending
 	}
@@ -70,6 +74,11 @@ func OpenQueue(dir string, maxPending int) (*Queue, []error) {
 		}
 		if err == nil && (r.Payload == "" || r.Signature == "") {
 			err = errors.New("empty receipt")
+		}
+		if err == nil {
+			if _, ok := tokens.VerifyReceipt(pub, r); !ok {
+				err = errors.New("signature does not verify with the relay key")
+			}
 		}
 		if err != nil {
 			problems = append(problems, fmt.Errorf("%s: %w", name, err))
