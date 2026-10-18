@@ -40,10 +40,11 @@ Landed this session (all reviewed before merge, gate green):
   index (0008). Storage: presigned PUT signs content type and length.
 - Config: media disk budget / ladder cap, `OUTBOUND_ALLOW_PRIVATE_NETWORKS`.
 
-In flight: web review fixes; API, media and integrity review fix rounds (briefs in
-`.claude/briefs/e1/`); then worker integrity wiring (`2L-worker-integrity.md`).
+Also merged after review: API (2A) rounds one and two, integrity (2H2) and media (2E) review
+fixes, web review fixes. Open: worker integrity wiring (branch `worktree-agent-a07b926d662d5d4bd`,
+WIP), API round 3 and the contract requests listed in HANDOFF.md.
 
-## Handoff status (end of session one, 2026-10-18)
+## Handoff status (end of session one, 2026-10-18; superseded by HANDOFF.md)
 
 `main` at the handoff commit passes the full `bun run verify` (format, lint, typecheck, unit,
 integration, licenses, domains, reuse, relay). All units below are merged except infra.

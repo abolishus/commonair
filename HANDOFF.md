@@ -5,150 +5,105 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # HANDOFF — for the next head agent
 
-Written 2026-10-18 at the end of the first orchestration session. Read this, then
-[AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md), [PROGRESS.md](PROGRESS.md),
-[docs/architecture.md](docs/architecture.md) and ADRs 0001–0004 in `docs/decisions/`.
-The original product brief's constraints still apply in full (FOSS-first, Podman, local-first on
-`main`, DCO, verify gate, subagent pods with disjoint ownership, reviewer before commit).
+Written 2026-10-18 at the end of orchestration session two. Read this, then
+[AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) (see "Milestones — end-to-end vertical slices"),
+[PROGRESS.md](PROGRESS.md), [docs/architecture.md](docs/architecture.md), ADRs 0001–0004 in
+`docs/decisions/`, and [docs/testing/e1-selectors.md](docs/testing/e1-selectors.md). The original
+product brief's constraints still apply in full: FOSS-first, Podman, local-first on `main`, DCO
+sign-off, the verify gate, subagent pods with disjoint ownership (≤ ~6 at once), and an
+independent reviewer **before** every merge.
 
-## New priority: one full end-to-end flow first, then build around it
+## Where things stand
 
-The first session built contracts and backend units in breadth (13 parallel units) before any UI
-or end-to-end flow existed. **Change of approach:** get a thin, real, end-to-end flow working
-locally under `podman compose up`, prove it with a harness scenario in Chromium and WebKit, and
-then grow features as vertical slices (API route + worker job + web page + harness scenario
-together), each landing green.
+**Milestone E1 is reached locally.** With the platform up, `e2e-basic` passes: web sign-up with
+ALTCHA and email verification, stream key rotation, ffmpeg RTMP publish, playback in Chromium
+(signed in) and WebKit (anonymous, native HLS), chat in both directions, offline detection. First
+run: TTFF 1.0 s / 1.8 s, glass-to-glass 2.1 s / 3.9 s (Chromium / WebKit).
 
-### Milestone E1 — "sign up, go live, watch, chat" (do this first)
+```
+bun scripts/infra.ts stack                       # build + start everything (+ harness profile), wait healthy
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-basic
+VERIFY_INFRA=external bun run verify             # the gate, reusing the running data services
+```
 
-Done when `podman compose up -d && bun harness/src/cli.ts run e2e-basic` passes:
+`main` (last merge `5400a83`, plus this handoff commit) has every unit from this session merged
+after review. The last full gate run on the final merge (API round two) was interrupted by a hung
+`podman compose up` (see "Known issues") and handed to the user to re-run; every earlier merge this
+session was verified GREEN with the full gate. **Not pushed yet** — push `main` once the gate is
+confirmed green.
 
-1. **Stack up**: `compose.yaml` brings Postgres (+migrate job creating the least-privilege app
-   role via `commonair_configure_app_role`), Valkey, Garage (+bootstrap), Mailpit, MediaMTX
-   (`infra/mediamtx/mediamtx.yml`), api, chat, origin, media, worker, web to healthy. The infra
-   unit's branch has most of this (see "Branches" below) — merge it first and fix what's broken.
-2. **Web app (minimal, real)**: `apps/web` (TanStack Start + `@commonair/ui`): sign up (ALTCHA +
-   birth date + legal acceptance), verify email (link from Mailpit), sign in, dashboard page showing
-   the stream key + RTMP URL (`stream.ingest`, `stream.rotateKey`), channel page with the player
-   (hls.js calling `playback.start` + heartbeats; native HLS on WebKit) and chat (chat WebSocket via
-   `chat.connectToken`), footer with the AGPL Source link (`instance.info`). Use the house
-   primitives; i18n-ready strings; no UI polish beyond the design rules.
-3. **Harness scenario `e2e-basic`**: sign up a streamer through the web UI (Playwright), read the
-   verification email from Mailpit, copy the stream key, publish an ffmpeg RTMP test pattern,
-   open the channel as a second user in Chromium AND as an anonymous viewer in WebKit, assert
-   first frame, measure TTFF and glass-to-glass latency, send a chat message and see it on the
-   other client, stop the stream, assert offline.
-4. Add `e2e-basic` to `bun run verify:full` and CI on main.
+### Merged this session
 
-### Then, as vertical slices (each with its harness scenario, each merged green)
+| Area                  | What landed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Reviewed           |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| Infra (2I)            | full compose stack; WAL-G push under `timeout 20` (fixed the DROP DATABASE hang); Garage + garage-init + migrate in `infra.ts test`; new `infra.ts stack`; `init-env --merge`; tracker behind `--profile p2p` (not built); fixed compose subnet `10.89.42.0/24` trusted for `x-forwarded-for` (Quadlet mirrors it)                                                                                                                                                                                                  | session one + here |
+| Web (3A-e1)           | `apps/web`: TanStack Start on Bun; server proxies `/api` + `/rpc`; sign-up/in, dashboard, `/$channel` (hls.js or native HLS, heartbeats, bfcache-safe), chat, `/embed/$channel`; security headers, server-side dashboard guard, i18n catalog                                                                                                                                                                                                                                                                        | 2 rounds           |
+| Harness               | `e2e-basic` (+ failure screenshots with the key redacted); API-path sign-ups follow web-origin verification links; `verify --full/--scenario` start the platform and install browsers; CI installs browser deps                                                                                                                                                                                                                                                                                                     | 2 rounds           |
+| API (2A)              | all HANDOFF HIGH/MED items: linear-time regex subset for word filters (incl. Unicode case folding), birthDate etc. immutable via better-auth hook, category mature gate, instance-only media refs, admin plugin endpoints 404, /64 rate-limit buckets, SSRF-safe relay/simulcast URLs with pinned dialing, per-template per-mailbox mail cap, heartbeat floor + CAS, no verdict promotion once scored, `developer.tokens.list/revoke`, `UserControlMessage` publishing, TOTP tests, `stream_keys.last_used_ip_hash` | 3 passes           |
+| Integrity (2H2)       | all HANDOFF items + review: fetch-less bots held/excluded, time-bounded allowances, relay coverage required, distinct-segment counting (HLL), owner-IP exclusion time-aligned, reload supersede, datacenter 0.6 + privacy-relay class, relay reinstatement/unknown issuance                                                                                                                                                                                                                                         | 2 rounds           |
+| Media (2E)            | stale VOD reconcile, crash recovery + safe sweeps, disk budget, transcode slots, simulcast SSRF; simulcast key isolation by container PID namespace (a key-swapping proxy was built, reviewed as unsafe, removed)                                                                                                                                                                                                                                                                                                   | 2 rounds           |
+| DB / config / storage | migrations 0006 integrity scan indexes, 0007 users identity immutability trigger, 0008 appeals subject index; `MEDIA_WORK_DIR_*`, `TRANSCODE_MAX_LADDERS`, `OUTBOUND_ALLOW_PRIVATE_NETWORKS`; presigned PUT signs content type + length; `SegmentFetch.obj`; ConfirmDialog test ids                                                                                                                                                                                                                                 | orchestrator       |
+
+## In flight: worker integrity wiring (do this first)
+
+Brief: `.claude/briefs/e1/2L-worker-integrity.md`. Branch `worktree-agent-a07b926d662d5d4bd`
+(worktree `.claude/worktrees/agent-a07b926d662d5d4bd`). The unit was asked to commit a
+`wip(worker): …` checkpoint whose message lists done / passing / failing / left — read it with
+`git log -1 worktree-agent-a07b926d662d5d4bd`. It touches `services/worker/**`, origin's
+accounting call (sets `SegmentFetch.obj`), `harness/scenarios/viewers.ts` and a new
+`harness/scenarios/integrity-basic.ts`. **Without it no integrity job runs in the stack** (the API's
+interim heartbeat verification is the only verdict source). Finish it in a fresh unit from that
+branch, review, merge, then make `viewers` and `integrity-basic` pass. If the unit rebuilt the
+`worker`/`origin` images from its worktree, rebuild them from `main` afterwards
+(`podman compose build worker origin && podman compose up -d --no-deps worker origin`).
+
+## Open items (not done)
+
+- **API round 3** (from the final re-review; no HIGH left): (MED) safe-regex cost model treats an
+  unbounded repeat as 32 instead of the input length and does not cap total cost across top-level
+  alternatives (`.*.{0,20}!|…` ×18 ≈ 40–120 ms per message) — fix the model and/or run chat filters
+  in a Worker with a hard timeout; (LOW) heartbeats under the 5 s floor still increment counters
+  and record evidence — return early; canonicalize IPs before hashing (`::ffff:` unwrap, IPv6
+  compression) in both `media/hooks.ts` and `http.ts`; `pinnedGet` needs a total timeout.
+- **Contract requests still open**: move `services/api/src/lib/safe-regex.ts` into a shared package
+  and use it in chat's `compileFilters` (re-validate saved patterns on load); export better-auth
+  paths + ALTCHA field name from `packages/contracts` (web and harness keep copies); API should
+  record P2P-enabled sessions as `assignedSource: "p2p"` (integrity otherwise holds heavy-P2P
+  viewers at pending); appeals resolver (still a 501 stub) must set `resolved_at` and use subject
+  types `session|user|integrity_flag`; ingest auth should set `stream_keys.last_used_at` per
+  broadcast; optional `vods.failed_reason` column; document the `mail` rate-limit bucket;
+  `IRC_*` env vars into config; `ORIGIN_ISSUANCE_ENABLED`/`ISSUANCE_KEYS` into config.
+- Media: internal RTSP password still in ffmpeg argv (isolation-protected, documented).
+- Integrity: CDN-delivered sessions are not fetch-judged (README "known limitations").
+- `legal.current` returns nothing locally (no seed docs) — sign-up shows no document links.
+- UI web: ALTCHA widget tick colour is not a token; one large chunk warning in `vp build`;
+  web strings for new media health codes (`transcode_capacity`, `recording_disk_budget`,
+  simulcast `lastError` codes, VOD failure reasons).
+- Governance: `subscriptionQualifies` and `closeElection` tests.
+
+## Next slices (PLAN.md "Milestones")
 
 E2 follows + directory/discovery page + a moderation action (ban/timeout) + tmi.js bot via the IRC
-gateway; E3 relay node joins and serves viewers (Go relay + origin issuance + receipts verified by
-the worker) + viewbot swarm excluded; E4 money with the manual adapter (subscription, tip, ledger,
-revenue dashboard, chargeback clawback), then the Stripe adapter against stripe-mock; E5 co-op
-(memberships, a governance vote including the protected-decision rejection, council review,
-patronage run with statement); E6 the rest of "Done means" (simulcast to the mock target,
-overlays, VOD/clips, data export, account deletion, backup restore, load test, no-proprietary
-profile). Keep PLAN.md's Phase 3–5 content as the backlog, reordered into these slices.
+gateway; E3 relay joins and serves viewers + viewbot swarm excluded (needs the worker wiring above;
+local relays need `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true` in `.env`); E4 money (manual adapter, then
+Stripe against stripe-mock); E5 co-op; E6 the rest. Each slice: a `docs/testing/<slice>-selectors.md`
+contract, briefs in `.claude/briefs/<slice>/`, API + worker + web + harness scenario together.
 
-## State of `main`
+## Known issues and process lessons (session two)
 
-- All shared contracts: `packages/contracts` (oRPC contract with REST routes, events catalog,
-  chat protocol, internal service contract, scopes, shapes, ISO currency minor units), `packages/db`
-  (schema + migrations 0000–0005; 0001/0002 are database-enforced ledger and governance protections,
-  reviewed twice — see ADR 0004), `packages/config` (env schemas; `.env.example` must stay in sync),
-  `packages/tokens`, `packages/service`, `packages/observability`, `packages/storage`.
-- Merged units: email + OTel SDK (2M, with review fixes), ledger + patronage (2H1), relay (2F, with
-  review fixes), origin (2D), worker (2L), IRC gateway (2C), governance + integrity (2H2), UI (2G),
-  chat (2B, first fix round), media (2E), API core (2A).
-- Harness core (2J) is merged. **Infra/compose (2I) is not**: its branch is complete, but merging it
-  makes `DROP DATABASE` hang in integration tests — see "First task" below.
-- Gate status at handoff: full `bun run verify` GREEN on `main` (pushed). Per-unit status and open
-  items: PROGRESS.md "Handoff status".
-
-## First task: merge infra (2I) and bring the stack up
-
-1. `git merge --no-ff worktree-agent-a856cff1eae87abf9` (head 0b1f3f9).
-2. Fix the WAL archiver hang: `archive_command = 'wal-g wal-push %p'` blocks forever when Garage
-   is unreachable; Postgres's `DROP DATABASE` then waits on a ProcSignalBarrier the archiver never
-   absorbs (seen in `pg_stat_activity` as `wait_event = ProcSignalBarrier`, archiver in
-   `ArchiveCommand`). Wrap it with a timeout (e.g. `timeout 30 wal-g wal-push %p`) AND start
-   Garage + garage-init + migrate in `scripts/infra.ts` (`TEST_SERVICES`, building `postgres` and
-   `garage-init` first, waiting for exit 0 of the one-shot jobs), as the infra unit requested.
-3. Fill the new infra variables in `.env` (`bun scripts/init-env.ts --force` regenerates; note an
-   existing Postgres volume keeps its old password — set `POSTGRES_PASSWORD` to match or reset the
-   volume with `bun scripts/infra.ts reset`).
-4. Add an `apps/web` `start` script serving the build on `WEB_PORT` with `/healthz` (needed by the
-   compose `web` service), then `podman compose up -d` until every service is healthy.
-
-## Branches and worktrees
-
-Each unit ran in a git worktree under `.claude/worktrees/agent-<id>/` on branch
-`worktree-agent-<id>`. The final status of each (merged / unmerged commits / open items) is in
-the table in PROGRESS.md "Handoff status". To integrate a branch:
-
-```
-git merge --no-ff --no-edit worktree-agent-<id>
-# bun.lock conflicts: take ours and regenerate
-git checkout --ours bun.lock && bun install && git add bun.lock && git commit -s --no-edit
-bun run verify   # check the EXIT CODE, not grep output
-```
-
-Remove a worktree when its branch is merged and nothing uncommitted remains:
-`git worktree remove .claude/worktrees/agent-<id>` then `git branch -d worktree-agent-<id>`.
-
-## Open review findings (not yet fixed on main)
-
-Every merged unit got an independent review; fix rounds were in progress at handoff. Anything a
-unit did not report as fixed is still open. Highest priority open items:
-
-- **API (2A)** — review findings, none fixed yet: (HIGH) the API's word-filter "ReDoS check" lets
-  catastrophic patterns like `((a+))+$` through and chat compiles them with backtracking `RegExp`
-  (the chat service now has its own shape check + 25 ms budget, but the API should refuse such
-  patterns too, ideally via a linear-time subset); (HIGH) `birthDate` is writable through
-  better-auth `update-user`, so minors can unlock mature content — refuse it in
-  `databaseHooks.user.update.before`; (MED) playback mature gate ignores the category's mature
-  flag; theme `avatarKey`/`bannerKey` and `image` accept third-party URLs (tracking, breaks the
-  no-third-party rule); better-auth `admin` plugin endpoints bypass audit and safeguards; rate-limit
-  subjects collapse behind an unconfigured proxy and aren't /64-bucketed for IPv6; (MED-LOW) relay
-  and simulcast URLs need DNS-resolved private-range checks; (LOW) presigned uploads don't sign
-  content-length; no per-recipient mail limits; interim viewer verification passes in under a
-  second. Also still to do: publish `UserControlMessage`; `developer.tokens.list/revoke`; TOTP tests.
-- **Integrity (2H2, integrity half)** — none fixed yet: fetch-less heartbeat bots get verified;
-  stream-hour eligibility gameable (exclude owner's ipHash incl. stream key `last_used_ip_hash`,
-  require `membership.classes.streamer.minVerifiedViewers` = 2 viewers); appeal overturns/`allowed`
-  flags don't stick; concurrency ranks the live reload as the duplicate; datacenter weight 0.8 is
-  fatal alone (lower to 0.6, privacy-relay class, drop hyperscaler ASNs from the sample);
-  periodic-timing/background-tab/CDN false positives; relay suspension on missing issuance and
-  post-reinstatement history; candidate-session scans need indexes:
-  `create index playback_sessions_scoring_idx on playback_sessions (scored_at nulls first) where ended_at is null or verdict = 'pending';`
-  `create index playback_sessions_live_hb_idx on playback_sessions (last_heartbeat_at) where ended_at is null;`
-  (add as a migration); follow-burst prior viewing should count verified sessions only.
-- **Media (2E)**: CSAM quarantine and kick-before-record are fixed; still open: stale
-  `processing` VODs, crash recovery + work-dir sweep, disk budget, transcode slot limit,
-  simulcast SSRF/protocol whitelist/generic errors, simulcast key in argv, thumbnail cleanup.
-- Ledger, worker, origin, chat, IRC, relay and UI review findings are fixed (see PROGRESS.md for
-  the small remainders).
-
-## Process lessons from session one (keep doing / stop doing)
-
-- **Check exit codes.** `bun run verify | grep GREEN` hides failures; capture the log and test
-  `$?`. One commit (`cc5a7b5`) landed while unit tests were red and was fixed in `d2ba28d`.
-- The gate runs workspace tasks with `--no-cache` because the task cache replayed a stale pass.
-- **Never drop databases you didn't create** on the shared Postgres; agents' test databases live
-  there (`commonair_test_*`, `commonair_tpl_*`).
-- Integration tests must not assert tight wall-clock latencies; machines are loaded when many
-  agents run. Poll until a condition holds, with generous deadlines.
-- Fewer parallel units at once (≤ 6) made integration and review tractable; 13 at once produced a
-  long tail of fix rounds. Prefer vertical slices with a harness scenario each.
-- Review **before** merging, not after (session one merged several units before review).
-- Briefs live in `.claude/briefs/`; contract requests from units are applied by the head agent
-  only (contracts, db schema, config, root package.json, scripts).
-
-## Local environment notes
-
-- Podman machine `podman-machine-default` (8 CPU / 12 GB / 120 GB, rootless) with podman-compose
-  1.6.0. Data services run as compose project `commonair` (`bun scripts/infra.ts test`).
-- `.env` (gitignored) was generated with `bun scripts/init-env.ts`; regenerate with `--force` if new
-  `__generate__` variables were added to `.env.example`, or append them by hand.
-- GitHub repo `abolishus/commonair` is public with secret scanning and push protection enabled.
+- **Check exit codes, and gate commits on them**: `cmd; echo EXIT $?; git commit` commits even when
+  red (happened once this session; amended before push). Use `rc=$?; [ $rc = 0 ] && git commit …`.
+- `podman compose up -d` can hang when another process (e.g. a unit rebuilding images) runs
+  compose concurrently. Kill it and use `VERIFY_INFRA=external` when the services are already up;
+  avoid parallel compose commands from several agents.
+- Changing the compose subnet needs `podman compose --profile harness down` and
+  `podman network rm commonair_default` once.
+- Worktrees may be created from an older commit than `main`: tell every unit to `git merge main`
+  first, and format/SPDX-header briefs before committing them (both bit this session).
+- Local machine: an unrelated Vite dev server holds `[::1]:3000`, so the local `.env` here uses
+  `WEB_PORT=3100`, `PUBLIC_URL=http://localhost:3100`, `AUTH_TRUSTED_ORIGINS=http://localhost:3100`;
+  pass `HARNESS_WEB_URL=http://localhost:3100` to the harness. CI uses the defaults (3000).
+- The local `.env` has `NODE_ENV=development`, which overrides the images' `NODE_ENV=production`
+  via `env_file`; fine for local runs, not for production.
+- Review before merge paid off: every unit's first review found real HIGHs (regex folding,
+  botting whitelist, key-substituting proxy). Keep doing focused re-reviews of fix rounds for HIGHs.
