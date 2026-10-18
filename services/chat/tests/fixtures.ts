@@ -24,6 +24,7 @@ export const user = (over: Partial<UserProfile> = {}): UserProfile => ({
   username: "alice",
   displayName: "Alice",
   accountType: "human",
+  botVerified: false,
   platformRole: "user",
   emailVerified: true,
   createdAt: new Date(NOW.getTime() - 365 * 86_400_000),

@@ -82,11 +82,21 @@ export function checkGates(i: GateInput): Rejection | null {
 export const slowModeApplies = (channel: ChannelState, standing: Standing): boolean =>
   channel.settings.slowModeSeconds > 0 && !isPrivileged(standing) && !standing.isVip;
 
-/** Messages allowed per CHAT_LIMITS.windowMs for this user in this channel. */
-export function rateLimitFor(user: UserProfile, standing: Standing): number {
+/** Rate-limit bucket key for "across channels" limits (verified bots). */
+export const ALL_CHANNELS = "*";
+
+/**
+ * Messages allowed per CHAT_LIMITS.windowMs and the bucket they count against: per channel for
+ * everyone, except verified bots, whose (much higher) limit is shared across all channels.
+ */
+export function rateLimitFor(
+  user: UserProfile,
+  standing: Standing,
+  channelId: string,
+): { limit: number; bucket: string } {
+  if (user.accountType === "bot" && user.botVerified) return { limit: CHAT_LIMITS.botVerified, bucket: ALL_CHANNELS };
   const base = isPrivileged(standing) ? CHAT_LIMITS.moderator : CHAT_LIMITS.user;
-  // CONTRACT-REQUEST: a `users.botVerified` flag would unlock CHAT_LIMITS.botVerified.
-  return user.accountType === "bot" ? Math.max(base, CHAT_LIMITS.bot) : base;
+  return { limit: user.accountType === "bot" ? Math.max(base, CHAT_LIMITS.bot) : base, bucket: channelId };
 }
 
 /** Whether the socket may send at all in this channel (the `joined.me.canChat` hint). */

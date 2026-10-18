@@ -14,6 +14,8 @@ export interface UserProfile {
   username: string;
   displayName: string;
   accountType: AccountType;
+  /** Bot reviewed by platform staff: gets CHAT_LIMITS.botVerified across channels. */
+  botVerified: boolean;
   platformRole: PlatformRole;
   emailVerified: boolean;
   createdAt: Date;

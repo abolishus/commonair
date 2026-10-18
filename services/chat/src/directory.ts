@@ -19,7 +19,7 @@ export interface DirectoryOptions {
   channelTtlMs?: number;
   profileTtlMs?: number;
   standingTtlMs?: number;
-  onInvalidFilter?: (channelId: string, filterId: string) => void;
+  onInvalidFilter?: (channelId: string, filterId: string, reason: string) => void;
 }
 
 export interface LoadedChannel {
@@ -121,7 +121,10 @@ export class Directory {
       filters,
     };
     this.slugById.set(row.id, row.slug);
-    return { state, filters: compileFilters(filters, (f) => this.opts.onInvalidFilter?.(row.id, f.id)) };
+    return {
+      state,
+      filters: compileFilters(filters, (f, reason) => this.opts.onInvalidFilter?.(row.id, f.id, reason)),
+    };
   }
 
   private async loadProfile(userId: string): Promise<UserProfile | null> {
@@ -139,6 +142,7 @@ export class Directory {
       username: row.username,
       displayName: row.displayUsername ?? row.name,
       accountType: row.accountType,
+      botVerified: row.botVerified,
       platformRole: row.role,
       emailVerified: row.emailVerified,
       createdAt: row.createdAt,

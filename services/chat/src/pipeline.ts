@@ -114,13 +114,8 @@ export async function runSendPipeline(deps: PipelineDeps, input: PipelineInput):
         `This room is in slow mode. You may send another message in ${Math.ceil(wait / 1000)} seconds.`,
       );
   }
-  const allowed = await deps.limiter.hit(
-    channel.id,
-    user.id,
-    rateLimitFor(user, standing),
-    CHAT_LIMITS.windowMs,
-    receivedAt.getTime(),
-  );
+  const rate = rateLimitFor(user, standing, channel.id);
+  const allowed = await deps.limiter.hit(rate.bucket, user.id, rate.limit, CHAT_LIMITS.windowMs, receivedAt.getTime());
   if (!allowed) return reject("msg_ratelimit", "You are sending messages too quickly.");
   if (await deps.limiter.isDuplicate(channel.id, user.id, input.body))
     return reject("msg_duplicate", "Your message was not sent because it is identical to a recent message.");
@@ -133,6 +128,8 @@ export async function runSendPipeline(deps: PipelineDeps, input: PipelineInput):
   let held = false;
   if (!privileged) {
     const outcome = applyFilters(body, input.filters);
+    if (outcome.action !== "block" && outcome.timedOut)
+      input.logger.warn("word filters exceeded their time budget; message held", { channelId: channel.id });
     if (outcome.action === "block")
       return reject("msg_rejected", "Your message was not sent because it matched a channel filter.");
     body = outcome.body;

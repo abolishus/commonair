@@ -32,7 +32,9 @@ export type Command =
   | { kind: "mod" | "unmod" | "vip" | "unvip"; target: string }
   | { kind: "me"; text: string };
 
-export type ParseResult = { ok: true; command: Command } | { ok: false; code: "unrecognized_cmd"; text: string };
+export type ParseResult =
+  | { ok: true; command: Command }
+  | { ok: false; code: "usage" | "unrecognized_cmd"; text: string };
 
 const USERNAME = /^[a-z0-9_]{3,25}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,7 +65,7 @@ export function splitChatCommand(text: string): { name: string; args: string[] }
   return { name: head.toLowerCase(), args };
 }
 
-const usage = (text: string): ParseResult => ({ ok: false, code: "unrecognized_cmd", text: `Usage: ${text}` });
+const usage = (text: string): ParseResult => ({ ok: false, code: "usage", text: `Usage: ${text}` });
 
 const withTarget = (args: string[], syntax: string, build: (target: string) => Command): ParseResult => {
   const target = normalizeUsername(args[0]);

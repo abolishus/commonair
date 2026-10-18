@@ -44,35 +44,42 @@ Frames are JSON text messages, validated against `ClientFrame` / `ServerFrame` i
    `subscribersoff`, `emoteonly`, `emoteonlyoff`, `mod`/`unmod`/`vip`/`unvip` (broadcaster
    only), `me`. Durations accept `s/m/h/d/w` suffixes. Every `command` frame is answered by
    exactly one `notice` (`cmd_success`, a mode code such as `slow_on`, `no_permission`,
-   `unrecognized_cmd`, `msg_ratelimit` …).
+   `usage` for bad arguments, `invalid_user` for unknown targets, `unrecognized_cmd`,
+   `msg_ratelimit` …).
 5. **Moderation frames** (`ban`, `delete`, `clear`, `settings`) and inline platform
    **events** (`channel.subscribe`, `channel.subscription.gift`, `channel.tip`, `channel.raid`,
    `channel.poll.*`, `channel.prediction.*`) are pushed to the room as they happen.
 6. **Held messages** (word filter `hold`) are acked with `held: true` and a `msg_held` notice,
-   persisted with `held_at`, and delivered only to moderators as
-   `{op:"event", type:"chat.message.held", data:{message}}`.
+   persisted with `held_at`, and delivered only to moderators as `{op:"message", held:true}`.
+7. **Reply pairing.** The `notice`, `error` and `ack` answering a `send`, `command`, `join` or
+   `part` frame echo its `nonce`; errors about a join/part/send carry its `channel`.
 
 ### Send pipeline
 
 Rules run in this order; the first failure wins (notice code in parentheses):
 
-| #   | Rule                                                           | Exempt                          |
-| --- | -------------------------------------------------------------- | ------------------------------- |
-| 1   | logged in with `chat:edit` (`msg_requires_login`)              |                                 |
-| 2   | no platform suspension (`msg_banned`)                          |                                 |
-| 3   | channel not suspended (`msg_channel_suspended`)                |                                 |
-| 4   | no channel ban / active timeout (`msg_banned`, `msg_timedout`) |                                 |
-| 5   | `requireVerifiedEmail` (`msg_verified_email`)                  | broadcaster, mods, bot accounts |
-| 6   | `minAccountAgeDays` (`msg_account_too_new`)                    | broadcaster, mods               |
-| 7   | `followersOnlyMinutes` (`msg_followersonly`)                   | broadcaster, mods, VIPs         |
-| 8   | `subscribersOnly` (`msg_subsonly`)                             | broadcaster, mods, VIPs         |
-| 9   | `emoteOnly` (`msg_emoteonly`)                                  | broadcaster, mods               |
-| 10  | `slowModeSeconds` (`msg_slowmode`)                             | broadcaster, mods, VIPs         |
-| 11  | rate limit, `CHAT_LIMITS` per 30 s (`msg_ratelimit`)           | mods 100, bots 50, users 20     |
-| 12  | duplicate within 30 s, exact body (`msg_duplicate`)            |                                 |
-| 13  | links when `linksAllowed=false` (`msg_links_blocked`)          | broadcaster, mods               |
-| 14  | word filters: block (`msg_rejected`), hold, replace            | broadcaster, mods               |
-| 15  | plugin middleware chain                                        |                                 |
+| #   | Rule                                                           | Exempt                                                          |
+| --- | -------------------------------------------------------------- | --------------------------------------------------------------- |
+| 1   | logged in with `chat:edit` (`msg_requires_login`)              |                                                                 |
+| 2   | no platform suspension (`msg_banned`)                          |                                                                 |
+| 3   | channel not suspended (`msg_channel_suspended`)                |                                                                 |
+| 4   | no channel ban / active timeout (`msg_banned`, `msg_timedout`) |                                                                 |
+| 5   | `requireVerifiedEmail` (`msg_verified_email`)                  | broadcaster, mods, bot accounts                                 |
+| 6   | `minAccountAgeDays` (`msg_account_too_new`)                    | broadcaster, mods                                               |
+| 7   | `followersOnlyMinutes` (`msg_followersonly`)                   | broadcaster, mods, VIPs                                         |
+| 8   | `subscribersOnly` (`msg_subsonly`)                             | broadcaster, mods, VIPs                                         |
+| 9   | `emoteOnly` (`msg_emoteonly`)                                  | broadcaster, mods                                               |
+| 10  | `slowModeSeconds` (`msg_slowmode`)                             | broadcaster, mods, VIPs                                         |
+| 11  | rate limit, `CHAT_LIMITS` per 30 s (`msg_ratelimit`)           | mods 100, bots 50, verified bots 7500 across channels, users 20 |
+| 12  | duplicate within 30 s, exact body (`msg_duplicate`)            |                                                                 |
+| 13  | links when `linksAllowed=false` (`msg_links_blocked`)          | broadcaster, mods                                               |
+| 14  | word filters: block (`msg_rejected`), hold, replace            | broadcaster, mods                                               |
+| 15  | plugin middleware chain                                        |                                                                 |
+
+Regex word filters are screened when a channel loads: backreferences, quantified groups that
+contain a quantifier or an alternation (`(a+)+`, `(a|aa)*`) and repetition counts above 1000 are
+rejected (and logged), since they can backtrack catastrophically. All filters together get a
+25 ms budget per message; past it the message is held for moderators rather than passed.
 
 Slow mode and duplicate detection are recorded only once a message is accepted, so a rejected
 message never starts a wait; the rate limit counts every attempt.
