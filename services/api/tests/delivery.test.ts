@@ -53,9 +53,9 @@ test("deterministic per session id", () => {
   const sid = uuidv7();
   const first = assignSource({ sessionId: sid, relays, cdn: noCdn, channelVerifiedViewers: 0 });
   for (let i = 0; i < 5; i++)
-    expect(assignSource({ sessionId: sid, relays: [...relays].reverse(), cdn: noCdn, channelVerifiedViewers: 0 })).toEqual(
-      first,
-    );
+    expect(
+      assignSource({ sessionId: sid, relays: [...relays].reverse(), cdn: noCdn, channelVerifiedViewers: 0 }),
+    ).toEqual(first);
 });
 
 test("relays that are not active or lack headroom get nothing", () => {

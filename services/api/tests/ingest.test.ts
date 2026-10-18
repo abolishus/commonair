@@ -44,7 +44,12 @@ test("OBS service file has the server and recommendations, never a key", () => {
   const svc = doc.services[0];
   expect(svc?.name).toBe("Test Air");
   expect(svc?.servers[0]?.url).toBe("rtmp://ingest.example.invalid/live");
-  expect(svc?.recommended).toMatchObject({ keyint: 2, "max video bitrate": 6000, "max audio bitrate": 160, profile: "high" });
+  expect(svc?.recommended).toMatchObject({
+    keyint: 2,
+    "max video bitrate": 6000,
+    "max audio bitrate": 160,
+    profile: "high",
+  });
   expect(json).not.toMatch(/live_[A-Za-z0-9_-]{43}/);
   expect(json.toLowerCase()).not.toContain("key=");
 });

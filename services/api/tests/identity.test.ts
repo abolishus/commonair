@@ -13,7 +13,8 @@ test("usernames follow slug rules and avoid reserved names", () => {
   expect(usernameProblem("a".repeat(26))).toBe("format");
   expect(usernameProblem("al-ice")).toBe("format");
   expect(usernameProblem("ali ce")).toBe("format");
-  for (const r of ["admin", "api", "www", "mod", "help", "settings", "ADMIN"]) expect(usernameProblem(r)).toBe("reserved");
+  for (const r of ["admin", "api", "www", "mod", "help", "settings", "ADMIN"])
+    expect(usernameProblem(r)).toBe("reserved");
   expect(usernameProblem("admin_bob")).toBe("reserved");
 });
 

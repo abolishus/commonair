@@ -17,7 +17,15 @@ import {
   toUserPublic,
 } from "../lib/dto.ts";
 import { encodeCursor, decodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented, precondition } from "../lib/errors.ts";
+import {
+  badRequest,
+  conflict,
+  forbidden,
+  isUniqueViolation,
+  notFound,
+  notImplemented,
+  precondition,
+} from "../lib/errors.ts";
 import { pendingDocuments, recordAcceptances } from "../lib/legal.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 
@@ -305,4 +313,3 @@ export const me = {
     }),
   },
 };
-

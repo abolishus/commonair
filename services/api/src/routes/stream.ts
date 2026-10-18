@@ -41,19 +41,18 @@ async function simulcastStates(deps: Deps, broadcastId: string | null) {
   return out;
 }
 
-const toTarget =
-  (states: Map<string, z.infer<typeof SimulcastState>>) => (t: typeof simulcastTargets.$inferSelect) => {
-    const s = states.get(t.id);
-    return {
-      id: t.id,
-      platform: t.platform,
-      name: t.name,
-      rtmpUrl: t.rtmpUrl,
-      enabled: t.enabled,
-      status: s?.status ?? "idle",
-      lastError: s?.lastError ?? null,
-    };
+const toTarget = (states: Map<string, z.infer<typeof SimulcastState>>) => (t: typeof simulcastTargets.$inferSelect) => {
+  const s = states.get(t.id);
+  return {
+    id: t.id,
+    platform: t.platform,
+    name: t.name,
+    rtmpUrl: t.rtmpUrl,
+    enabled: t.enabled,
+    status: s?.status ?? "idle",
+    lastError: s?.lastError ?? null,
   };
+};
 
 function checkRtmpUrl(url: string) {
   let u: URL;
@@ -95,7 +94,11 @@ export const stream = {
   obsConfig: os.stream.obsConfig.handler(async ({ context }) => {
     const { deps } = context;
     requireChannel(context);
-    const slug = deps.site.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "stream";
+    const slug =
+      deps.site.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "stream";
     return obsServiceConfig({
       instanceName: deps.site.name,
       instanceSlug: slug,

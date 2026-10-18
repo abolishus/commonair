@@ -41,7 +41,11 @@ export async function activeRelays(deps: Deps) {
 
 function playlistBase(deps: Deps, a: Assignment): string {
   const base =
-    a.source === "relay" ? a.url : a.source === "cdn" ? (deps.env.CDN_BASE_URL ?? deps.env.PLAYBACK_PUBLIC_URL) : deps.env.PLAYBACK_PUBLIC_URL;
+    a.source === "relay"
+      ? a.url
+      : a.source === "cdn"
+        ? (deps.env.CDN_BASE_URL ?? deps.env.PLAYBACK_PUBLIC_URL)
+        : deps.env.PLAYBACK_PUBLIC_URL;
   return base.replace(/\/+$/, "");
 }
 
@@ -98,7 +102,10 @@ export const playback = {
     const assignment = assignSource({
       sessionId: sid,
       relays: await activeRelays(deps),
-      cdn: { enabled: deps.env.CDN_PROVIDER === "origin-pull" && Boolean(deps.env.CDN_BASE_URL), threshold: deps.env.CDN_BURST_VIEWER_THRESHOLD },
+      cdn: {
+        enabled: deps.env.CDN_PROVIDER === "origin-pull" && Boolean(deps.env.CDN_BASE_URL),
+        threshold: deps.env.CDN_BURST_VIEWER_THRESHOLD,
+      },
       channelVerifiedViewers: await viewerCount(deps, c.id),
     });
     const network = deps.classifier.classify(req.ip);
@@ -210,7 +217,11 @@ export const playback = {
     const a: Assignment =
       assignment ??
       (claims.src === "relay" && claims.rid
-        ? { source: "relay", relayId: claims.rid, url: (await activeRelays(deps)).find((r) => r.id === claims.rid)?.url ?? "" }
+        ? {
+            source: "relay",
+            relayId: claims.rid,
+            url: (await activeRelays(deps)).find((r) => r.id === claims.rid)?.url ?? "",
+          }
         : claims.src === "cdn"
           ? { source: "cdn" }
           : { source: "origin" });

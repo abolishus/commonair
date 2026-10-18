@@ -63,7 +63,11 @@ async function goLive(slug: string, sourceId = crypto.randomUUID()) {
 describe("follows", () => {
   test("follow/unfollow keeps followerCount and writes the outbox", async () => {
     const c = await channelOf(alice.username);
-    const f = await bob.client.call<{ following: boolean; followerCount: number }>("PUT", `/api/channels/${alice.username}/follow`, {});
+    const f = await bob.client.call<{ following: boolean; followerCount: number }>(
+      "PUT",
+      `/api/channels/${alice.username}/follow`,
+      {},
+    );
     expect(f.status).toBe(200);
     expect(f.body).toEqual({ following: true, followerCount: 1 });
     // Following twice is idempotent: no second event, no double count.
@@ -74,7 +78,10 @@ describe("follows", () => {
     const evs = await eventsOf(c.id, "channel.follow");
     expect(evs).toHaveLength(1);
     expect(evs[0]?.payload).toMatchObject({ broadcaster_user_login: alice.username, user_login: bob.username });
-    const mine = await bob.client.call<{ items: { channel: { slug: string }; notify: boolean }[] }>("GET", "/api/me/follows");
+    const mine = await bob.client.call<{ items: { channel: { slug: string }; notify: boolean }[] }>(
+      "GET",
+      "/api/me/follows",
+    );
     expect(mine.body.items.map((i) => i.channel.slug)).toContain(alice.username);
     expect(mine.body.items[0]?.notify).toBe(false);
     const followers = await alice.client.call<{ items: { user: { username: string } }[] }>(
@@ -112,7 +119,9 @@ describe("stream keys and MediaMTX auth", () => {
     // WHIP presents the key as a bearer token.
     expect((await mediaAuth({ action: "publish", path, protocol: "webrtc", token: second.secret })).status).toBe(200);
     // A key for one channel never publishes another.
-    expect((await mediaAuth({ action: "publish", path: mediaPath(bob.username), query: `key=${second.secret}` })).status).toBe(401);
+    expect(
+      (await mediaAuth({ action: "publish", path: mediaPath(bob.username), query: `key=${second.secret}` })).status,
+    ).toBe(401);
     const keys = await alice.client.call<{ revokedAt: string | null; revokedReason: string | null }[]>(
       "GET",
       `/api/channels/${alice.username}/stream-keys`,
@@ -129,20 +138,47 @@ describe("stream keys and MediaMTX auth", () => {
     const path = mediaPath(alice.username);
     expect((await mediaAuth({ action: "read", path, protocol: "rtsp" })).status).toBe(401);
     expect(
-      (await mediaAuth({ action: "read", path, protocol: "rtsp", user: MEDIA_INTERNAL_USER, password: api.internalSecret })).status,
+      (
+        await mediaAuth({
+          action: "read",
+          path,
+          protocol: "rtsp",
+          user: MEDIA_INTERNAL_USER,
+          password: api.internalSecret,
+        })
+      ).status,
     ).toBe(200);
-    expect((await mediaAuth({ action: "api", path: "", protocol: "hls", user: MEDIA_INTERNAL_USER, password: "nope" })).status).toBe(401);
-    expect((await mediaAuth({ action: "pprof", path: "", protocol: "hls", user: MEDIA_INTERNAL_USER, password: api.internalSecret })).status).toBe(401);
-    expect((await fetch(`${api.url}${INTERNAL_ROUTES.mediaAuth}`, { method: "POST", body: "not json" })).status).toBe(401);
+    expect(
+      (await mediaAuth({ action: "api", path: "", protocol: "hls", user: MEDIA_INTERNAL_USER, password: "nope" }))
+        .status,
+    ).toBe(401);
+    expect(
+      (
+        await mediaAuth({
+          action: "pprof",
+          path: "",
+          protocol: "hls",
+          user: MEDIA_INTERNAL_USER,
+          password: api.internalSecret,
+        })
+      ).status,
+    ).toBe(401);
+    expect((await fetch(`${api.url}${INTERNAL_ROUTES.mediaAuth}`, { method: "POST", body: "not json" })).status).toBe(
+      401,
+    );
   });
 
   test("suspended channels cannot publish", async () => {
     const k = await rotate(bob.client, bob.username);
     const c = await channelOf(bob.username);
     await db().update(schema.channels).set({ suspendedAt: new Date() }).where(eq(schema.channels.id, c.id));
-    expect((await mediaAuth({ action: "publish", path: mediaPath(bob.username), query: `key=${k.secret}` })).status).toBe(401);
+    expect(
+      (await mediaAuth({ action: "publish", path: mediaPath(bob.username), query: `key=${k.secret}` })).status,
+    ).toBe(401);
     await db().update(schema.channels).set({ suspendedAt: null }).where(eq(schema.channels.id, c.id));
-    expect((await mediaAuth({ action: "publish", path: mediaPath(bob.username), query: `key=${k.secret}` })).status).toBe(200);
+    expect(
+      (await mediaAuth({ action: "publish", path: mediaPath(bob.username), query: `key=${k.secret}` })).status,
+    ).toBe(200);
   });
 
   test("a leaked key in a panel is revoked and the owner notified", async () => {
@@ -152,10 +188,18 @@ describe("stream keys and MediaMTX auth", () => {
     });
     expect(res.status).toBe(200);
     expect(res.body[0]?.body).not.toContain(k.secret);
-    expect((await mediaAuth({ action: "publish", path: mediaPath(alice.username), query: `key=${k.secret}` })).status).toBe(401);
-    const notes = await alice.client.call<{ items: { payload: Record<string, unknown> }[] }>("GET", "/api/me/notifications");
+    expect(
+      (await mediaAuth({ action: "publish", path: mediaPath(alice.username), query: `key=${k.secret}` })).status,
+    ).toBe(401);
+    const notes = await alice.client.call<{ items: { payload: Record<string, unknown> }[] }>(
+      "GET",
+      "/api/me/notifications",
+    );
     expect(notes.body.items.some((n) => n.payload.kind === "stream_key_leaked")).toBe(true);
-    const audit = await db().select().from(schema.auditLog).where(eq(schema.auditLog.action, "stream_key.revoke_leaked"));
+    const audit = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.action, "stream_key.revoke_leaked"));
     expect(audit.length).toBeGreaterThan(0);
   });
 });
@@ -168,9 +212,14 @@ describe("live lifecycle, playback and discovery", () => {
     sub.on("message", (_ch, msg) => live.push(JSON.parse(msg) as Record<string, unknown>));
     try {
       const k = await rotate(alice.client, alice.username);
-      expect((await mediaAuth({ action: "publish", path: mediaPath(alice.username), query: `key=${k.secret}` })).status).toBe(200);
+      expect(
+        (await mediaAuth({ action: "publish", path: mediaPath(alice.username), query: `key=${k.secret}` })).status,
+      ).toBe(200);
       // Hooks need the internal secret.
-      expect((await hook(INTERNAL_ROUTES.mediaReady, { path: mediaPath(alice.username), sourceType: "rtmpConn" }, "wrong")).status).toBe(401);
+      expect(
+        (await hook(INTERNAL_ROUTES.mediaReady, { path: mediaPath(alice.username), sourceType: "rtmpConn" }, "wrong"))
+          .status,
+      ).toBe(401);
       const sourceId = await goLive(alice.username);
       await goLive(alice.username, sourceId); // duplicate
       const c = await channelOf(alice.username);
@@ -179,7 +228,10 @@ describe("live lifecycle, playback and discovery", () => {
       expect(bs).toHaveLength(1);
       expect(bs[0]).toMatchObject({ ingestProtocol: "rtmp", path: mediaPath(alice.username), endedAt: null });
       expect(bs[0]?.streamKeyId).not.toBeNull();
-      const [key] = await db().select().from(schema.streamKeys).where(eq(schema.streamKeys.id, bs[0]?.streamKeyId ?? ""));
+      const [key] = await db()
+        .select()
+        .from(schema.streamKeys)
+        .where(eq(schema.streamKeys.id, bs[0]?.streamKeyId ?? ""));
       expect(key?.lastUsedAt).not.toBeNull();
       expect(await eventsOf(c.id, "stream.online")).toHaveLength(1);
       const pub = await client(api).call<{ live: { id: string } | null }>("GET", `/api/channels/${alice.username}`);
@@ -210,16 +262,21 @@ describe("live lifecycle, playback and discovery", () => {
     api.deps.now = () => new Date(clock);
     try {
       const viewer = client(api);
-      const start = await viewer.call<{ sessionId: string; token: string; playlistUrl: string; source: string; p2p: { enabled: boolean } }>(
-        "POST",
-        `/api/channels/${alice.username}/playback`,
-        { deviceId: "device-0123456789abcdef", nativeHls: true },
-      );
+      const start = await viewer.call<{
+        sessionId: string;
+        token: string;
+        playlistUrl: string;
+        source: string;
+        p2p: { enabled: boolean };
+      }>("POST", `/api/channels/${alice.username}/playback`, { deviceId: "device-0123456789abcdef", nativeHls: true });
       expect(start.status).toBe(200);
       expect(start.body.source).toBe("origin");
       expect(start.body.p2p.enabled).toBe(false);
       expect(start.body.playlistUrl).toContain(`/hls/${mediaPath(alice.username)}/index.m3u8?t=`);
-      const [row] = await db().select().from(schema.playbackSessions).where(eq(schema.playbackSessions.id, start.body.sessionId));
+      const [row] = await db()
+        .select()
+        .from(schema.playbackSessions)
+        .where(eq(schema.playbackSessions.id, start.body.sessionId));
       expect(row?.ipHash).toMatch(/^[0-9a-f]{64}$/);
       expect(row?.deviceHash).not.toContain("device-0123456789abcdef");
 
@@ -240,8 +297,8 @@ describe("live lifecycle, playback and discovery", () => {
           ...over,
         });
       const pub = async () =>
-        (await client(api).call<{ live: { viewerCount: number } | null }>("GET", `/api/channels/${alice.username}`)).body.live
-          ?.viewerCount;
+        (await client(api).call<{ live: { viewerCount: number } | null }>("GET", `/api/channels/${alice.username}`))
+          .body.live?.viewerCount;
       for (let i = 0; i < 2; i++) {
         clock += 10_000;
         expect((await beat()).status).toBe(200);
@@ -251,7 +308,10 @@ describe("live lifecycle, playback and discovery", () => {
       clock += 10_000;
       expect((await beat()).status).toBe(200);
       expect(await pub()).toBe(1);
-      const [verified] = await db().select().from(schema.playbackSessions).where(eq(schema.playbackSessions.id, start.body.sessionId));
+      const [verified] = await db()
+        .select()
+        .from(schema.playbackSessions)
+        .where(eq(schema.playbackSessions.id, start.body.sessionId));
       expect(verified).toMatchObject({ verdict: "verified", heartbeats: 3, watchSeconds: 30, bytesHttp: 3000 });
 
       // Tokens are refreshed before they expire.
@@ -268,7 +328,14 @@ describe("live lifecycle, playback and discovery", () => {
       );
       expect(health.body).toMatchObject({ live: true, viewers: { verified: 1 } });
 
-      expect((await viewer.call("POST", "/api/playback/end", { sessionId: start.body.sessionId, token: refreshed.body.token })).status).toBe(200);
+      expect(
+        (
+          await viewer.call("POST", "/api/playback/end", {
+            sessionId: start.body.sessionId,
+            token: refreshed.body.token,
+          })
+        ).status,
+      ).toBe(200);
       expect((await beat(refreshed.body.token)).status).toBe(409);
     } finally {
       api.deps.now = realNow;
@@ -276,7 +343,9 @@ describe("live lifecycle, playback and discovery", () => {
   });
 
   test("offline channels cannot start playback", async () => {
-    const r = await client(api).call("POST", `/api/channels/${bob.username}/playback`, { deviceId: "device-0123456789abcdef" });
+    const r = await client(api).call("POST", `/api/channels/${bob.username}/playback`, {
+      deviceId: "device-0123456789abcdef",
+    });
     expect(r.status).toBe(412);
   });
 
@@ -298,7 +367,10 @@ describe("live lifecycle, playback and discovery", () => {
     expect(bobs.body.following.map((c) => c.channel.slug)).toEqual([alice.username]);
     const random = await client(api).call<{ reason: string } | null>("GET", "/api/directory/random");
     expect(random.body?.reason).toBe("random");
-    const ranking = await client(api).call<{ explanation: string; config: { spotlightSlots: number } }>("GET", "/api/directory/ranking");
+    const ranking = await client(api).call<{ explanation: string; config: { spotlightSlots: number } }>(
+      "GET",
+      "/api/directory/ranking",
+    );
     expect(ranking.body.config.spotlightSlots).toBeGreaterThan(0);
     expect(ranking.body.explanation).toContain("verified");
     const found = await client(api).call<{ channels: { slug: string }[] }>("GET", `/api/search?q=${alice.username}`);
@@ -307,10 +379,16 @@ describe("live lifecycle, playback and discovery", () => {
 
   test("mature streams are hidden unless includeMature and a confirmed adult", async () => {
     await alice.client.call("PATCH", `/api/channels/${alice.username}`, { mature: true });
-    const anon = await client(api).call<{ live: { channel: { slug: string } }[] }>("GET", "/api/directory?includeMature=true");
+    const anon = await client(api).call<{ live: { channel: { slug: string } }[] }>(
+      "GET",
+      "/api/directory?includeMature=true",
+    );
     expect(anon.body.live.map((c) => c.channel.slug)).not.toContain(alice.username);
     expect((await bob.client.call("POST", "/api/me/mature-confirmation")).status).toBe(200);
-    const adult = await bob.client.call<{ live: { channel: { slug: string } }[] }>("GET", "/api/directory?includeMature=true");
+    const adult = await bob.client.call<{ live: { channel: { slug: string } }[] }>(
+      "GET",
+      "/api/directory?includeMature=true",
+    );
     expect(adult.body.live.map((c) => c.channel.slug)).toContain(alice.username);
     const notAsked = await bob.client.call<{ live: { channel: { slug: string } }[] }>("GET", "/api/directory");
     expect(notAsked.body.live.map((c) => c.channel.slug)).not.toContain(alice.username);
@@ -334,7 +412,10 @@ describe("chat moderation", () => {
       expect(ban.status).toBe(200);
       expect(ban.body.user.username).toBe(bob.username);
       expect(ban.body.expiresAt).not.toBeNull();
-      const audit = await db().select().from(schema.auditLog).where(and(eq(schema.auditLog.channelId, c.id), eq(schema.auditLog.action, "chat.timeout")));
+      const audit = await db()
+        .select()
+        .from(schema.auditLog)
+        .where(and(eq(schema.auditLog.channelId, c.id), eq(schema.auditLog.action, "chat.timeout")));
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({ actorId: alice.userId, subjectId: bob.userId, reason: "spam" });
       const mods = await db().select().from(schema.modActions).where(eq(schema.modActions.channelId, c.id));
@@ -343,14 +424,22 @@ describe("chat moderation", () => {
       const list = await alice.client.call<{ items: unknown[] }>("GET", `/api/channels/${alice.username}/bans`);
       expect(list.body.items).toHaveLength(1);
       // Bob cannot moderate, and nobody can ban the broadcaster.
-      expect((await bob.client.call("POST", `/api/channels/${alice.username}/bans`, { username: alice.username })).status).toBe(403);
+      expect(
+        (await bob.client.call("POST", `/api/channels/${alice.username}/bans`, { username: alice.username })).status,
+      ).toBe(403);
       const unban = await alice.client.call("DELETE", `/api/channels/${alice.username}/bans/${bob.username}`);
       expect(unban.status).toBe(200);
       expect(await eventsOf(c.id, "channel.unban")).toHaveLength(1);
-      expect((await alice.client.call("DELETE", `/api/channels/${alice.username}/bans/${bob.username}`)).status).toBe(404);
-      const settings = await alice.client.call<{ slowModeSeconds: number }>("PATCH", `/api/channels/${alice.username}/chat/settings`, {
-        slowModeSeconds: 5,
-      });
+      expect((await alice.client.call("DELETE", `/api/channels/${alice.username}/bans/${bob.username}`)).status).toBe(
+        404,
+      );
+      const settings = await alice.client.call<{ slowModeSeconds: number }>(
+        "PATCH",
+        `/api/channels/${alice.username}/chat/settings`,
+        {
+          slowModeSeconds: 5,
+        },
+      );
       expect(settings.body.slowModeSeconds).toBe(5);
       expect(await eventsOf(c.id, "channel.chat_settings.update")).toHaveLength(1);
       await Bun.sleep(200);
@@ -363,11 +452,21 @@ describe("chat moderation", () => {
 
   test("moderators can ban viewers but not other moderators", async () => {
     const carol = await signUpAndSignIn(api);
-    expect((await alice.client.call("PUT", `/api/channels/${alice.username}/roles/${bob.username}`, { role: "moderator" })).status).toBe(200);
-    expect((await alice.client.call("PUT", `/api/channels/${alice.username}/roles/${carol.username}`, { role: "moderator" })).status).toBe(200);
-    expect((await bob.client.call("POST", `/api/channels/${alice.username}/bans`, { username: carol.username })).status).toBe(403);
+    expect(
+      (await alice.client.call("PUT", `/api/channels/${alice.username}/roles/${bob.username}`, { role: "moderator" }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await alice.client.call("PUT", `/api/channels/${alice.username}/roles/${carol.username}`, { role: "moderator" }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await bob.client.call("POST", `/api/channels/${alice.username}/bans`, { username: carol.username })).status,
+    ).toBe(403);
     await alice.client.call("DELETE", `/api/channels/${alice.username}/roles/${carol.username}`, { role: "moderator" });
-    expect((await bob.client.call("POST", `/api/channels/${alice.username}/bans`, { username: carol.username })).status).toBe(200);
+    expect(
+      (await bob.client.call("POST", `/api/channels/${alice.username}/bans`, { username: carol.username })).status,
+    ).toBe(200);
     const roles = await bob.client.call<{ role: string }[]>("GET", `/api/channels/${alice.username}/roles`);
     expect(roles.body.map((r) => r.role)).toEqual(["moderator"]);
   });
@@ -387,10 +486,14 @@ describe("chat moderation", () => {
 
 describe("tokens, bots and the API surface", () => {
   test("bot token with insufficient scope is refused", async () => {
-    const bot = await alice.client.call<{ id: string; accountType: string; botOwner: { username: string } }>("POST", "/api/me/bots", {
-      username: `${alice.username.slice(0, 18)}_bot`,
-      displayName: "Alice Bot",
-    });
+    const bot = await alice.client.call<{ id: string; accountType: string; botOwner: { username: string } }>(
+      "POST",
+      "/api/me/bots",
+      {
+        username: `${alice.username.slice(0, 18)}_bot`,
+        displayName: "Alice Bot",
+      },
+    );
     expect(bot.status).toBe(200);
     expect(bot.body).toMatchObject({ accountType: "bot", botOwner: { username: alice.username } });
     const minted = await alice.client.call<{ accessToken: string }>("POST", `/api/me/bots/${bot.body.id}/tokens`, {
@@ -401,7 +504,10 @@ describe("tokens, bots and the API surface", () => {
     expect((await asBot.call("GET", "/api/me")).status).toBe(403); // needs user:read:email
     expect((await asBot.call("GET", "/api/me/follows")).status).toBe(403); // needs user:read:follows
     expect((await asBot.call("GET", "/api/me/bots")).status).toBe(403); // session only
-    const validate = await asBot.call<{ login: string; scopes: string[]; expires_in: number }>("GET", "/api/oauth2/validate");
+    const validate = await asBot.call<{ login: string; scopes: string[]; expires_in: number }>(
+      "GET",
+      "/api/oauth2/validate",
+    );
     expect(validate.status).toBe(200);
     expect(validate.body.scopes).toEqual(["chat:read"]);
     expect(validate.body.expires_in).toBeGreaterThan(0);
@@ -413,7 +519,9 @@ describe("tokens, bots and the API surface", () => {
     expect((await asBot2.call("GET", "/api/me")).status).toBe(200);
     expect((await client(api, { bearer: "ca_not-a-token" }).call("GET", "/api/me")).status).toBe(401);
     // Someone else's bot cannot be given tokens.
-    expect((await bob.client.call("POST", `/api/me/bots/${bot.body.id}/tokens`, { scopes: ["chat:read"] })).status).toBe(404);
+    expect(
+      (await bob.client.call("POST", `/api/me/bots/${bot.body.id}/tokens`, { scopes: ["chat:read"] })).status,
+    ).toBe(404);
   });
 
   test("OpenAPI document, instance info and status", async () => {
@@ -422,9 +530,15 @@ describe("tokens, bots and the API surface", () => {
     const json = (await doc.json()) as { openapi: string; paths: Record<string, unknown> };
     expect(json.openapi).toMatch(/^3\.1/);
     expect(Object.keys(json.paths)).toContain("/channels/{channel}/follow");
-    const info = await client(api).call<{ sourceUrl: string; minAge: number; features: { payments: string } }>("GET", "/api/instance");
+    const info = await client(api).call<{ sourceUrl: string; minAge: number; features: { payments: string } }>(
+      "GET",
+      "/api/instance",
+    );
     expect(info.body).toMatchObject({ minAge: 13, features: { payments: "manual" } });
-    const status = await client(api).call<{ status: string; components: { id: string; status: string }[] }>("GET", "/api/status");
+    const status = await client(api).call<{ status: string; components: { id: string; status: string }[] }>(
+      "GET",
+      "/api/status",
+    );
     expect(status.body.components.map((c) => c.id).sort()).toEqual(["postgres", "valkey"]);
     expect(status.body.status).toBe("operational");
   });
@@ -433,14 +547,22 @@ describe("tokens, bots and the API surface", () => {
     const r = await client(api).call<{ code: string }>("GET", `/api/channels/${alice.username}/vods`);
     expect(r.status).toBe(501);
     expect(r.body.code).toBe("NOT_IMPLEMENTED");
-    const rpc = await fetch(`${api.url}/rpc/legal/current`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const rpc = await fetch(`${api.url}/rpc/legal/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
     expect(rpc.status).toBe(501);
   });
 
   test("validation errors are 400 with issues; unknown routes 404", async () => {
-    const r = await alice.client.call<{ code: string; data: { issues: unknown[] } }>("PATCH", `/api/channels/${alice.username}`, {
-      title: "x".repeat(500),
-    });
+    const r = await alice.client.call<{ code: string; data: { issues: unknown[] } }>(
+      "PATCH",
+      `/api/channels/${alice.username}`,
+      {
+        title: "x".repeat(500),
+      },
+    );
     expect(r.status).toBe(400);
     expect(r.body.data.issues.length).toBeGreaterThan(0);
     expect((await client(api).call("GET", "/api/nope")).status).toBe(404);
@@ -450,7 +572,9 @@ describe("tokens, bots and the API surface", () => {
     const trusted = await fetch(`${api.url}/api/instance`, { headers: { origin: "http://localhost:3000" } });
     expect(trusted.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
     expect(trusted.headers.get("access-control-allow-credentials")).toBe("true");
-    const other = await fetch(`${api.url}/api/me`, { headers: { origin: "https://evil.example.invalid", cookie: alice.client.jar.header() } });
+    const other = await fetch(`${api.url}/api/me`, {
+      headers: { origin: "https://evil.example.invalid", cookie: alice.client.jar.header() },
+    });
     expect(other.headers.get("access-control-allow-origin")).toBe("*");
     expect(other.headers.get("access-control-allow-credentials")).toBeNull();
     // Cookies from untrusted origins are ignored.

@@ -21,7 +21,11 @@ test("re-homed links pass the email package's link policy", async () => {
   const mailer = new MemoryMailer({ site });
   await mailer.send(
     "verifyEmail",
-    { displayName: "A", verifyUrl: publicLink(site, "http://localhost:3001/api/auth/verify-email?token=t"), expiresInMinutes: 60 },
+    {
+      displayName: "A",
+      verifyUrl: publicLink(site, "http://localhost:3001/api/auth/verify-email?token=t"),
+      expiresInMinutes: 60,
+    },
     "a@test.invalid",
   );
   expect(mailer.to("a@test.invalid")[0]?.text).toContain("https://air.example.invalid/api/auth/verify-email?token=t");

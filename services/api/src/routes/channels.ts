@@ -118,8 +118,10 @@ export const channelsRoutes = {
         linkUrl: p.linkUrl,
       });
     for (const p of panels)
-      if (p.imageKey && !p.imageKey.startsWith(`channels/${c.id}/`)) throw badRequest("Panel images must be your uploads");
-    for (const p of panels) if (p.linkUrl && !/^https?:\/\//i.test(p.linkUrl)) throw badRequest("Links must be http(s)");
+      if (p.imageKey && !p.imageKey.startsWith(`channels/${c.id}/`))
+        throw badRequest("Panel images must be your uploads");
+    for (const p of panels)
+      if (p.linkUrl && !/^https?:\/\//i.test(p.linkUrl)) throw badRequest("Links must be http(s)");
     const rows = await deps.db.transaction(async (tx) => {
       await tx.delete(channelPanels).where(eq(channelPanels.channelId, c.id));
       return panels.length ? tx.insert(channelPanels).values(panels).returning() : [];
@@ -335,7 +337,5 @@ async function changeRole(
       });
     return true;
   });
-  if (changed)
-    await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
+  if (changed) await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
 }
-

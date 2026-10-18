@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { expect, test } from "vite-plus/test";
-import { isConsistent, nextVerdict, type HeartbeatFacts, type Verdict, type VerifyState } from "../src/playback/verify.ts";
+import {
+  isConsistent,
+  nextVerdict,
+  type HeartbeatFacts,
+  type Verdict,
+  type VerifyState,
+} from "../src/playback/verify.ts";
 
 const hb = (over: Partial<HeartbeatFacts> = {}): HeartbeatFacts => ({
   playedSeconds: 10,

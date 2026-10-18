@@ -87,7 +87,9 @@ const channelSlugOf = (input: unknown): string | null => {
 };
 
 // Validate input before the middleware so access decisions see parsed values (e.g. the channel slug).
-export const base = implement(contract, { initialInputValidationIndex: Number.NEGATIVE_INFINITY }).$context<BaseContext>();
+export const base = implement(contract, {
+  initialInputValidationIndex: Number.NEGATIVE_INFINITY,
+}).$context<BaseContext>();
 
 export const os = base.use(async ({ context, next, procedure }, input) => {
   const { deps, auth, req } = context;

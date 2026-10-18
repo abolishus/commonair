@@ -55,7 +55,12 @@ describe("signup gates", () => {
 
   test("reserved and malformed usernames are refused", async () => {
     for (const username of ["admin", "settings", "x"]) {
-      const res = await signUp({ ...base(uniqueName()), username, birthDate: "1990-01-01", altcha: await solveAltcha(api) });
+      const res = await signUp({
+        ...base(uniqueName()),
+        username,
+        birthDate: "1990-01-01",
+        altcha: await solveAltcha(api),
+      });
       expect(res.status, username).toBe(400);
     }
   });
@@ -77,7 +82,10 @@ test("signup → verification email in Mailpit → sign-in; channel auto-created
   expect(user?.accountType).toBe("human");
   const [channel] = await api.db.db.select().from(schema.channels).where(eq(schema.channels.ownerId, s.userId));
   expect(channel?.slug).toBe(s.username);
-  const pub = await client(api).call<{ slug: string; owner: { username: string } }>("GET", `/api/channels/${s.username}`);
+  const pub = await client(api).call<{ slug: string; owner: { username: string } }>(
+    "GET",
+    `/api/channels/${s.username}`,
+  );
   expect(pub.body).toMatchObject({ slug: s.username, owner: { username: s.username } });
 });
 

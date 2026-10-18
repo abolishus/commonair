@@ -25,7 +25,11 @@ const token = (scopes: Scope[], over: Partial<CallerUser> = {}): Caller => ({
 });
 const meta = (m: Partial<ProcedureMeta> & Pick<ProcedureMeta, "access">): ProcedureMeta => m;
 const ownChannel = { exists: true, ownerId: "u1", callerRoles: [] };
-const otherChannel = (roles: ("moderator" | "vip" | "editor")[] = []) => ({ exists: true, ownerId: "u2", callerRoles: roles });
+const otherChannel = (roles: ("moderator" | "vip" | "editor")[] = []) => ({
+  exists: true,
+  ownerId: "u2",
+  callerRoles: roles,
+});
 
 describe("token scope rule", () => {
   test("undefined scopes = session only", () => {
@@ -81,7 +85,9 @@ describe("decideAccess", () => {
     const m = meta({ access: "owner" });
     expect(decideAccess({ meta: m, caller: session(), write: true, channel: ownChannel }).ok).toBe(true);
     expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel(["editor"]) }).ok).toBe(true);
-    expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel(["moderator"]) }).ok).toBe(false);
+    expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel(["moderator"]) }).ok).toBe(
+      false,
+    );
     expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel() })).toMatchObject({
       code: "FORBIDDEN",
     });
@@ -100,7 +106,9 @@ describe("decideAccess", () => {
   test("moderator: owner, editor or moderator; VIPs are refused", () => {
     const m = meta({ access: "moderator" });
     for (const roles of [["moderator"], ["editor"]] as const)
-      expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel([...roles]) }).ok).toBe(true);
+      expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel([...roles]) }).ok).toBe(
+        true,
+      );
     expect(decideAccess({ meta: m, caller: session(), write: true, channel: otherChannel(["vip"]) }).ok).toBe(false);
     expect(decideAccess({ meta: m, caller: session(), write: true, channel: ownChannel }).ok).toBe(true);
   });
@@ -108,7 +116,9 @@ describe("decideAccess", () => {
   test("token callers on owner procedures still need the scope", () => {
     const m = meta({ access: "owner", scopes: ["channel:manage"] });
     expect(decideAccess({ meta: m, caller: token([]), write: true, channel: ownChannel }).ok).toBe(false);
-    expect(decideAccess({ meta: m, caller: token(["channel:manage"]), write: true, channel: ownChannel }).ok).toBe(true);
+    expect(decideAccess({ meta: m, caller: token(["channel:manage"]), write: true, channel: ownChannel }).ok).toBe(
+      true,
+    );
   });
 
   test.each([
@@ -126,10 +136,14 @@ describe("decideAccess", () => {
 
   test("relay and overlay need their machine credential", () => {
     for (const access of ["relay", "overlay"] as const) {
-      expect(decideAccess({ meta: meta({ access }), caller: null, write: true, machineCredential: false })).toMatchObject({
+      expect(
+        decideAccess({ meta: meta({ access }), caller: null, write: true, machineCredential: false }),
+      ).toMatchObject({
         code: "UNAUTHORIZED",
       });
-      expect(decideAccess({ meta: meta({ access }), caller: null, write: true, machineCredential: true }).ok).toBe(true);
+      expect(decideAccess({ meta: meta({ access }), caller: null, write: true, machineCredential: true }).ok).toBe(
+        true,
+      );
     }
   });
 });

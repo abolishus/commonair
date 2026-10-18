@@ -28,7 +28,9 @@ export interface TestApi {
   stop(): Promise<void>;
 }
 
-export async function startApi(opts: { rateLimits?: Partial<Deps["rateLimits"]>; fetch?: typeof fetch } = {}): Promise<TestApi> {
+export async function startApi(
+  opts: { rateLimits?: Partial<Deps["rateLimits"]>; fetch?: typeof fetch } = {},
+): Promise<TestApi> {
   const db = await createTestDatabase();
   const { pkcs8B64 } = await generateSigningKey();
   const internalSecret = randomSecret("", 32);
@@ -64,7 +66,13 @@ export async function startApi(opts: { rateLimits?: Partial<Deps["rateLimits"]>;
     logger: createLogger({ service: "api-test", write: process.env.API_TEST_LOG ? (l) => console.error(l) : () => {} }),
     valkeyKeyPrefix: keyPrefix,
     overrides: {
-      rateLimits: { ...DEFAULT_RATE_LIMITS, default: { max: 10_000, windowMs: 60_000 }, auth: { max: 1000, windowMs: 60_000 }, write: { max: 1000, windowMs: 60_000 }, ...opts.rateLimits },
+      rateLimits: {
+        ...DEFAULT_RATE_LIMITS,
+        default: { max: 10_000, windowMs: 60_000 },
+        auth: { max: 1000, windowMs: 60_000 },
+        write: { max: 1000, windowMs: 60_000 },
+        ...opts.rateLimits,
+      },
       probes: {},
       ...(opts.fetch ? { fetch: opts.fetch } : {}),
     },
@@ -131,11 +139,9 @@ export function client(api: TestApi, auth: { jar?: Jar; bearer?: string } = {}):
       if (body !== undefined) headers["content-type"] = "application/json";
       if (auth.bearer) headers.authorization = `Bearer ${auth.bearer}`;
       else if (jar.cookies.size) headers.cookie = jar.header();
-      const res = await fetch(`${api.url}${path}`, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
+      const init: RequestInit = { method, headers };
+      if (body !== undefined) init.body = JSON.stringify(body);
+      const res = await fetch(`${api.url}${path}`, init);
       jar.absorb(res);
       const text = await res.text();
       let parsed: unknown = text;

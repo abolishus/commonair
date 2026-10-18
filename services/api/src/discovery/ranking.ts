@@ -45,7 +45,10 @@ export function scoreParts(
   const smallChannelBoost = e.viewers <= small ? 1 : (small + 1) / (e.viewers + 1);
   const w = cfg.weights;
   const score =
-    w.viewers * viewers + w.freshness * freshness + w.followMomentum * followMomentum + w.smallChannelBoost * smallChannelBoost;
+    w.viewers * viewers +
+    w.freshness * freshness +
+    w.followMomentum * followMomentum +
+    w.smallChannelBoost * smallChannelBoost;
   return { viewers, freshness, followMomentum, smallChannelBoost, score };
 }
 

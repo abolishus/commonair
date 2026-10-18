@@ -67,7 +67,13 @@ async function bytesVerified30d(deps: Deps, ids: string[]) {
   const rows = await deps.db
     .select({ id: relayReceipts.relayId, n: sql<string>`coalesce(sum(${relayReceipts.bytesVerified}), 0)::text` })
     .from(relayReceipts)
-    .where(and(inArray(relayReceipts.relayId, ids), eq(relayReceipts.status, "verified"), gt(relayReceipts.periodStart, since)))
+    .where(
+      and(
+        inArray(relayReceipts.relayId, ids),
+        eq(relayReceipts.status, "verified"),
+        gt(relayReceipts.periodStart, since),
+      ),
+    )
     .groupBy(relayReceipts.relayId);
   return new Map(rows.map((r) => [r.id, Number(r.n)]));
 }
@@ -103,7 +109,12 @@ export async function healthCheck(deps: Deps, publicUrl: string): Promise<{ ok: 
 
 async function publishRelay(deps: Deps, r: RelayRow, loadMbps: number) {
   if (r.status === "active") {
-    const entry: RelayEntry = { url: r.publicUrl.replace(/\/+$/, ""), capacityMbps: r.declaredCapacityMbps, status: r.status, load: loadMbps };
+    const entry: RelayEntry = {
+      url: r.publicUrl.replace(/\/+$/, ""),
+      capacityMbps: r.declaredCapacityMbps,
+      status: r.status,
+      load: loadMbps,
+    };
     await deps.valkey.hset(KEYS.relays, r.id, JSON.stringify(entry));
   } else await deps.valkey.hdel(KEYS.relays, r.id);
 }
@@ -154,7 +165,8 @@ export const relays = {
       .select({ n: sql<number>`count(*)::int` })
       .from(relayNodes)
       .where(and(eq(relayNodes.ownerId, caller.user.id), sql`${relayNodes.status} <> 'offline'`));
-    if (Number(n) >= MAX_RELAYS_PER_MEMBER) throw precondition("relay_limit", `At most ${MAX_RELAYS_PER_MEMBER} relays per member`);
+    if (Number(n) >= MAX_RELAYS_PER_MEMBER)
+      throw precondition("relay_limit", `At most ${MAX_RELAYS_PER_MEMBER} relays per member`);
     const token = randomSecret("relay_");
     const [row] = await deps.db
       .insert(relayNodes)
@@ -272,12 +284,22 @@ export const relays = {
       .where(
         and(
           input.status ? eq(relayNodes.status, input.status) : undefined,
-          cur ? or(lt(relayNodes.createdAt, new Date(cur.t)), and(eq(relayNodes.createdAt, new Date(cur.t)), lt(relayNodes.id, cur.id))) : undefined,
+          cur
+            ? or(
+                lt(relayNodes.createdAt, new Date(cur.t)),
+                and(eq(relayNodes.createdAt, new Date(cur.t)), lt(relayNodes.id, cur.id)),
+              )
+            : undefined,
         ),
       )
       .orderBy(desc(relayNodes.createdAt), desc(relayNodes.id))
       .limit(input.limit + 1);
-    const page = pageOf(rows, input.limit, (r) => r, (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }));
+    const page = pageOf(
+      rows,
+      input.limit,
+      (r) => r,
+      (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }),
+    );
     const [owners, bytes] = await Promise.all([
       loadUsersPublic(
         deps,

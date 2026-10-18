@@ -21,7 +21,8 @@ import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.t
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
 
-const { chatMessages, chatBans, channelRoles, users, wordFilters, emotes, modActions, channels, subscriptions } = schema;
+const { chatMessages, chatBans, channelRoles, users, wordFilters, emotes, modActions, channels, subscriptions } =
+  schema;
 type ChannelRow = typeof channels.$inferSelect;
 const CHAT_SCOPES: Scope[] = ["chat:read", "chat:edit", "moderator:manage:chat"];
 const MAX_FILTERS = 200;
@@ -33,7 +34,10 @@ export const chatSettingsOf = (c: ChannelRow) => {
 };
 
 async function actorRow(db: Executor, id: string) {
-  const [u] = await db.select({ id: users.id, username: users.username, name: users.name }).from(users).where(eq(users.id, id));
+  const [u] = await db
+    .select({ id: users.id, username: users.username, name: users.name })
+    .from(users)
+    .where(eq(users.id, id));
   if (!u) throw notFound("User not found");
   return u;
 }
@@ -66,7 +70,10 @@ export function checkFilterPattern(pattern: string, isRegex: boolean) {
 
 async function badgesFor(deps: Deps, c: ChannelRow, userIds: string[]) {
   const ids = [...new Set(userIds)];
-  const out = new Map<string, { type: "broadcaster" | "moderator" | "vip" | "subscriber" | "bot" | "staff"; tier?: number }[]>();
+  const out = new Map<
+    string,
+    { type: "broadcaster" | "moderator" | "vip" | "subscriber" | "bot" | "staff"; tier?: number }[]
+  >();
   if (ids.length === 0) return out;
   const [roles, subs, people] = await Promise.all([
     deps.db
@@ -76,8 +83,17 @@ async function badgesFor(deps: Deps, c: ChannelRow, userIds: string[]) {
     deps.db
       .select({ userId: subscriptions.subscriberId, tier: subscriptions.tier })
       .from(subscriptions)
-      .where(and(eq(subscriptions.channelId, c.id), eq(subscriptions.status, "active"), inArray(subscriptions.subscriberId, ids))),
-    deps.db.select({ id: users.id, role: users.role, accountType: users.accountType }).from(users).where(inArray(users.id, ids)),
+      .where(
+        and(
+          eq(subscriptions.channelId, c.id),
+          eq(subscriptions.status, "active"),
+          inArray(subscriptions.subscriberId, ids),
+        ),
+      ),
+    deps.db
+      .select({ id: users.id, role: users.role, accountType: users.accountType })
+      .from(users)
+      .where(inArray(users.id, ids)),
   ]);
   for (const id of ids) out.set(id, []);
   for (const p of people) {
@@ -101,7 +117,10 @@ function isActiveBan(b: typeof chatBans.$inferSelect, now: Date) {
 async function toBanDtos(deps: Deps, rows: (typeof chatBans.$inferSelect)[]) {
   const ids = [...new Set(rows.flatMap((r) => [r.userId, ...(r.moderatorId ? [r.moderatorId] : [])]))];
   const people = ids.length
-    ? await deps.db.select({ id: users.id, username: users.username, name: users.name }).from(users).where(inArray(users.id, ids))
+    ? await deps.db
+        .select({ id: users.id, username: users.username, name: users.name })
+        .from(users)
+        .where(inArray(users.id, ids))
     : [];
   const by = new Map(people.map((p) => [p.id, p]));
   return rows.flatMap((r) => {
@@ -151,7 +170,12 @@ export const chat = {
     const replyIds = rows.map((r) => r.m.replyToId).filter((x): x is string => x !== null);
     const replies = replyIds.length
       ? await deps.db
-          .select({ id: chatMessages.id, body: chatMessages.body, deletedAt: chatMessages.deletedAt, username: users.username })
+          .select({
+            id: chatMessages.id,
+            body: chatMessages.body,
+            deletedAt: chatMessages.deletedAt,
+            username: users.username,
+          })
           .from(chatMessages)
           .innerJoin(users, eq(users.id, chatMessages.userId))
           .where(inArray(chatMessages.id, replyIds))
@@ -200,10 +224,25 @@ export const chat = {
     const c = requireChannel(context);
     const { channel: _slug, ...patch } = input;
     const before = chatSettingsOf(c);
-    const settings = ChannelChatSettings.parse({ ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
-    const modes: { action: "slow_mode" | "followers_only" | "subscribers_only" | "emote_only"; changed: boolean; duration: number | null }[] = [
-      { action: "slow_mode", changed: before.slowModeSeconds !== settings.slowModeSeconds, duration: settings.slowModeSeconds || null },
-      { action: "followers_only", changed: before.followersOnlyMinutes !== settings.followersOnlyMinutes, duration: settings.followersOnlyMinutes === null ? null : settings.followersOnlyMinutes * 60 },
+    const settings = ChannelChatSettings.parse({
+      ...before,
+      ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),
+    });
+    const modes: {
+      action: "slow_mode" | "followers_only" | "subscribers_only" | "emote_only";
+      changed: boolean;
+      duration: number | null;
+    }[] = [
+      {
+        action: "slow_mode",
+        changed: before.slowModeSeconds !== settings.slowModeSeconds,
+        duration: settings.slowModeSeconds || null,
+      },
+      {
+        action: "followers_only",
+        changed: before.followersOnlyMinutes !== settings.followersOnlyMinutes,
+        duration: settings.followersOnlyMinutes === null ? null : settings.followersOnlyMinutes * 60,
+      },
       { action: "subscribers_only", changed: before.subscribersOnly !== settings.subscribersOnly, duration: null },
       { action: "emote_only", changed: before.emoteOnly !== settings.emoteOnly, duration: null },
     ];
@@ -254,12 +293,22 @@ export const chat = {
             eq(chatBans.channelId, c.id),
             isNull(chatBans.liftedAt),
             or(isNull(chatBans.expiresAt), gt(chatBans.expiresAt, now)),
-            cur ? or(lt(chatBans.createdAt, new Date(cur.t)), and(eq(chatBans.createdAt, new Date(cur.t)), lt(chatBans.id, cur.id))) : undefined,
+            cur
+              ? or(
+                  lt(chatBans.createdAt, new Date(cur.t)),
+                  and(eq(chatBans.createdAt, new Date(cur.t)), lt(chatBans.id, cur.id)),
+                )
+              : undefined,
           ),
         )
         .orderBy(desc(chatBans.createdAt), desc(chatBans.id))
         .limit(input.limit + 1);
-      const page = pageOf(rows, input.limit, (r) => r, (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }));
+      const page = pageOf(
+        rows,
+        input.limit,
+        (r) => r,
+        (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }),
+      );
       return { items: await toBanDtos(deps, page.items), nextCursor: page.nextCursor };
     }),
 
@@ -280,7 +329,14 @@ export const chat = {
           .where(and(eq(chatBans.channelId, c.id), eq(chatBans.userId, target.id), isNull(chatBans.liftedAt)));
         const [row] = await tx
           .insert(chatBans)
-          .values({ channelId: c.id, userId: target.id, moderatorId: caller.user.id, reason: input.reason, expiresAt, createdAt: now })
+          .values({
+            channelId: c.id,
+            userId: target.id,
+            moderatorId: caller.user.id,
+            reason: input.reason,
+            expiresAt,
+            createdAt: now,
+          })
           .returning();
         if (!row) throw new Error("ban insert returned no row");
         await tx.insert(modActions).values({
@@ -371,8 +427,18 @@ export const chat = {
   filters: {
     list: os.chat.filters.list.handler(async ({ context }) => {
       const c = requireChannel(context);
-      const rows = await context.deps.db.select().from(wordFilters).where(eq(wordFilters.channelId, c.id)).orderBy(wordFilters.createdAt);
-      return rows.map((f) => ({ id: f.id, pattern: f.pattern, isRegex: f.isRegex, action: f.action, replacement: f.replacement }));
+      const rows = await context.deps.db
+        .select()
+        .from(wordFilters)
+        .where(eq(wordFilters.channelId, c.id))
+        .orderBy(wordFilters.createdAt);
+      return rows.map((f) => ({
+        id: f.id,
+        pattern: f.pattern,
+        isRegex: f.isRegex,
+        action: f.action,
+        replacement: f.replacement,
+      }));
     }),
 
     create: os.chat.filters.create.handler(async ({ context, input }) => {
@@ -380,7 +446,8 @@ export const chat = {
       const caller = requireCaller(context);
       const c = requireChannel(context);
       checkFilterPattern(input.pattern, input.isRegex);
-      if (input.action === "replace" && input.replacement === null) throw badRequest("A replace filter needs a replacement");
+      if (input.action === "replace" && input.replacement === null)
+        throw badRequest("A replace filter needs a replacement");
       const row = await deps.db.transaction(async (tx) => {
         const [{ n } = { n: 0 }] = await tx
           .select({ n: sql<number>`count(*)::int` })
@@ -389,7 +456,13 @@ export const chat = {
         if (Number(n) >= MAX_FILTERS) throw badRequest(`At most ${MAX_FILTERS} filters per channel`);
         const [f] = await tx
           .insert(wordFilters)
-          .values({ channelId: c.id, pattern: input.pattern, isRegex: input.isRegex, action: input.action, replacement: input.replacement })
+          .values({
+            channelId: c.id,
+            pattern: input.pattern,
+            isRegex: input.isRegex,
+            action: input.action,
+            replacement: input.replacement,
+          })
           .returning();
         if (!f) throw new Error("filter insert returned no row");
         await audit(tx, {
@@ -404,7 +477,13 @@ export const chat = {
         return f;
       });
       await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
-      return { id: row.id, pattern: row.pattern, isRegex: row.isRegex, action: row.action, replacement: row.replacement };
+      return {
+        id: row.id,
+        pattern: row.pattern,
+        isRegex: row.isRegex,
+        action: row.action,
+        replacement: row.replacement,
+      };
     }),
 
     remove: os.chat.filters.remove.handler(async ({ context, input }) => {
@@ -451,7 +530,8 @@ export const chat = {
     create: os.chat.emotes.create.handler(async ({ context, input }) => {
       const { deps } = context;
       const c = requireChannel(context);
-      if (!input.imageKey.startsWith(`channels/${c.id}/emote/`)) throw badRequest("Upload the emote image first (purpose: emote)");
+      if (!input.imageKey.startsWith(`channels/${c.id}/emote/`))
+        throw badRequest("Upload the emote image first (purpose: emote)");
       const [{ n } = { n: 0 }] = await deps.db
         .select({ n: sql<number>`count(*)::int` })
         .from(emotes)
@@ -460,7 +540,13 @@ export const chat = {
       try {
         const [row] = await deps.db
           .insert(emotes)
-          .values({ channelId: c.id, code: input.code, imageKey: input.imageKey, tier: input.tier, animated: input.imageKey.endsWith(".gif") })
+          .values({
+            channelId: c.id,
+            code: input.code,
+            imageKey: input.imageKey,
+            tier: input.tier,
+            animated: input.imageKey.endsWith(".gif"),
+          })
           .returning();
         if (!row) throw new Error("emote insert returned no row");
         await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
@@ -489,7 +575,10 @@ export const chat = {
     const exp = Math.floor(deps.now().getTime() / 1000) + CHAT_TOKEN_TTL_SECONDS;
     let scopes: Scope[] = ["chat:read"];
     if (caller && !caller.user.suspended)
-      scopes = caller.kind === "session" ? CHAT_SCOPES : CHAT_SCOPES.filter((s) => s === "chat:read" || caller.scopes.includes(s));
+      scopes =
+        caller.kind === "session"
+          ? CHAT_SCOPES
+          : CHAT_SCOPES.filter((s) => s === "chat:read" || caller.scopes.includes(s));
     const token = await signChatToken(deps.env.INTERNAL_API_SECRET, {
       v: 1,
       uid: caller?.user.id ?? null,
@@ -500,4 +589,3 @@ export const chat = {
     return { token, url: deps.env.CHAT_PUBLIC_URL, expiresAt: iso(new Date(exp * 1000)) };
   }),
 };
-

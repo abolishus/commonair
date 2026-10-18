@@ -39,7 +39,8 @@ export function statusProbes(env: ApiEnv, doFetch: typeof fetch = fetch): Record
   };
   const basic = `Basic ${Buffer.from(`internal:${env.INTERNAL_API_SECRET}`).toString("base64")}`;
   return {
-    mediamtx: () => ok(`${env.MEDIAMTX_API_URL.replace(/\/+$/, "")}/v3/paths/list`, { headers: { authorization: basic } }),
+    mediamtx: () =>
+      ok(`${env.MEDIAMTX_API_URL.replace(/\/+$/, "")}/v3/paths/list`, { headers: { authorization: basic } }),
     chat: () => ok(httpOf(env.CHAT_INTERNAL_URL)),
     origin: () => ok(`${env.ORIGIN_INTERNAL_URL.replace(/\/+$/, "")}/readyz`),
   };

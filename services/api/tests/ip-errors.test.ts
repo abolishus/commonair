@@ -46,7 +46,7 @@ describe("error mapping", () => {
     expect(mapped.data).toEqual({ issues: [{ path: ["name"], message: "too short" }] });
   });
   test("unique violations become CONFLICT; other errors hide details", () => {
-    const pg = Object.assign(new Error("duplicate key value violates unique constraint \"users_username_uq\""), {
+    const pg = Object.assign(new Error('duplicate key value violates unique constraint "users_username_uq"'), {
       code: "23505",
     });
     const wrapped = new Error("Failed query: insert into users ...", { cause: pg });
@@ -60,9 +60,11 @@ describe("error mapping", () => {
 });
 
 test("audit details refuse personal data and free text", () => {
-  expect(() => assertSafeDetails({ id: "0192e3a4-0000-7000-8000-000000000000", n: 3, role: "moderator" })).not.toThrow();
-  expect(() => assertSafeDetails({ email: "someone@example.invalid" })).toThrow();
-  expect(() => assertSafeDetails({ note: "x".repeat(100) })).toThrow();
+  expect(() =>
+    assertSafeDetails({ id: "0192e3a4-0000-7000-8000-000000000000", n: 3, role: "moderator" }),
+  ).not.toThrow();
+  expect(() => assertSafeDetails({ email: "someone@example.invalid" })).toThrow("personal data");
+  expect(() => assertSafeDetails({ note: "x".repeat(100) })).toThrow("free text");
 });
 
 test("relay URLs: no credentials; public https in production", () => {
@@ -77,8 +79,8 @@ test("relay URLs: no credentials; public https in production", () => {
 
 test("word filter regexes must compile and avoid catastrophic patterns", () => {
   expect(() => checkFilterPattern("bad(word)?", true)).not.toThrow();
-  expect(() => checkFilterPattern("(a+)+", true)).toThrow();
-  expect(() => checkFilterPattern("(", true)).toThrow();
+  expect(() => checkFilterPattern("(a+)+", true)).toThrow("Nested quantifiers");
+  expect(() => checkFilterPattern("(", true)).toThrow("Invalid regular expression");
   expect(() => checkFilterPattern("(", false)).not.toThrow();
-  expect(() => checkFilterPattern("(a)\\1", true)).toThrow();
+  expect(() => checkFilterPattern("(a)\\1", true)).toThrow("backreferences");
 });

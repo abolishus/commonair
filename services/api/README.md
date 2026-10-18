@@ -8,15 +8,15 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 The platform API: the oRPC contract from `@commonair/contracts` served as REST (OpenAPI) and
 oRPC RPC, better-auth, the MediaMTX hooks, playback sessions and the relay protocol.
 
-| Path                         | What                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------ |
-| `/api/*`                     | REST routes from the contract (`OpenAPIHandler`)                         |
-| `/api/openapi.json`          | Generated OpenAPI 3.1 document                                           |
-| `/api/auth/*`                | better-auth (email + password, magic link, passkeys, TOTP, OAuth)        |
-| `/api/auth/altcha-challenge` | ALTCHA proof-of-work challenge for signups                               |
-| `/rpc/*`                     | oRPC RPC (used by the web app)                                           |
-| `/internal/media/*`          | MediaMTX auth and ready/not-ready hooks (never exposed by Caddy)         |
-| `/healthz`, `/readyz`        | Liveness, and readiness (Postgres, Valkey)                               |
+| Path                         | What                                                              |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `/api/*`                     | REST routes from the contract (`OpenAPIHandler`)                  |
+| `/api/openapi.json`          | Generated OpenAPI 3.1 document                                    |
+| `/api/auth/*`                | better-auth (email + password, magic link, passkeys, TOTP, OAuth) |
+| `/api/auth/altcha-challenge` | ALTCHA proof-of-work challenge for signups                        |
+| `/rpc/*`                     | oRPC RPC (used by the web app)                                    |
+| `/internal/media/*`          | MediaMTX auth and ready/not-ready hooks (never exposed by Caddy)  |
+| `/healthz`, `/readyz`        | Liveness, and readiness (Postgres, Valkey)                        |
 
 ## Run locally
 

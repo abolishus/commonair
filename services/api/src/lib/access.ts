@@ -88,7 +88,10 @@ export function decideAccess(f: AccessFacts): AccessDecision {
     const isOwner = f.channel.ownerId === caller.user.id;
     const allowed: readonly ChannelRole[] = access === "owner" ? ["editor"] : ["editor", "moderator"];
     if (isOwner || f.channel.callerRoles.some((r) => allowed.includes(r))) return { ok: true };
-    return deny("FORBIDDEN", access === "owner" ? "Only the channel owner or an editor may do this" : "Moderators only");
+    return deny(
+      "FORBIDDEN",
+      access === "owner" ? "Only the channel owner or an editor may do this" : "Moderators only",
+    );
   }
   return { ok: true };
 }

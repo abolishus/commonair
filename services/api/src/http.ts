@@ -111,7 +111,11 @@ export function createApp(deps: Deps): ApiApp {
     });
   }
 
-  async function requestInfo(req: Request, url: URL, server?: Pick<Server<undefined>, "requestIP">): Promise<RequestInfo> {
+  async function requestInfo(
+    req: Request,
+    url: URL,
+    server?: Pick<Server<undefined>, "requestIP">,
+  ): Promise<RequestInfo> {
     const socketIp = server?.requestIP(req as Request)?.address ?? "0.0.0.0";
     const ip = clientIp(socketIp, req.headers.get("x-forwarded-for"), deps.env.TRUSTED_PROXY_CIDRS);
     return {
@@ -142,7 +146,8 @@ export function createApp(deps: Deps): ApiApp {
     if ((path === INTERNAL_ROUTES.mediaReady || path === INTERNAL_ROUTES.mediaNotReady) && raw.method === "POST") {
       if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
       const body = await readJson(raw);
-      const status = path === INTERNAL_ROUTES.mediaReady ? await mediaReady(deps, body) : await mediaNotReady(deps, body);
+      const status =
+        path === INTERNAL_ROUTES.mediaReady ? await mediaReady(deps, body) : await mediaNotReady(deps, body);
       return new Response(null, { status });
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
@@ -197,8 +202,13 @@ export function createApp(deps: Deps): ApiApp {
         const res = result.response;
         if (res.status === 429) {
           // Surface the retry hint to HTTP clients too.
-          const body = (await res.clone().json().catch(() => null)) as { data?: { retryAfterSeconds?: number } } | null;
-          const after = body?.data?.retryAfterSeconds ?? (body as { json?: { data?: { retryAfterSeconds?: number } } } | null)?.json?.data?.retryAfterSeconds;
+          const body = (await res
+            .clone()
+            .json()
+            .catch(() => null)) as { data?: { retryAfterSeconds?: number } } | null;
+          const after =
+            body?.data?.retryAfterSeconds ??
+            (body as { json?: { data?: { retryAfterSeconds?: number } } } | null)?.json?.data?.retryAfterSeconds;
           if (after) res.headers.set("retry-after", String(after));
         }
         if (!res.headers.has("cache-control")) res.headers.set("cache-control", "no-store");

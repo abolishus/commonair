@@ -113,12 +113,18 @@ export async function liveSummaries(deps: Deps, chans: readonly ChannelRow[]): P
     .select({ b: broadcasts, cat: categories })
     .from(broadcasts)
     .leftJoin(categories, eq(categories.id, broadcasts.categoryId))
-    .where(inArray(broadcasts.id, live.map((c) => c.liveBroadcastId as string)));
+    .where(
+      inArray(
+        broadcasts.id,
+        live.map((c) => c.liveBroadcastId as string),
+      ),
+    );
   const counts = await viewerCounts(
     deps,
     live.map((c) => c.id),
   );
-  for (const r of rows) if (!r.b.endedAt) out.set(r.b.channelId, toBroadcastSummary(deps, r.b, r.cat, counts.get(r.b.channelId) ?? 0));
+  for (const r of rows)
+    if (!r.b.endedAt) out.set(r.b.channelId, toBroadcastSummary(deps, r.b, r.cat, counts.get(r.b.channelId) ?? 0));
   return out;
 }
 
@@ -133,7 +139,11 @@ export async function toChannelDto(deps: Deps, c: ChannelRow): Promise<z.infer<t
           .then((r) => r[0] ?? null)
       : Promise.resolve(null),
     deps.db.select().from(channelPanels).where(eq(channelPanels.channelId, c.id)).orderBy(asc(channelPanels.position)),
-    deps.db.select().from(channelSubTiers).where(eq(channelSubTiers.channelId, c.id)).orderBy(asc(channelSubTiers.tier)),
+    deps.db
+      .select()
+      .from(channelSubTiers)
+      .where(eq(channelSubTiers.channelId, c.id))
+      .orderBy(asc(channelSubTiers.tier)),
     liveSummary(deps, c),
   ]);
   if (!owner) throw new Error(`channel ${c.id} has no owner row`);

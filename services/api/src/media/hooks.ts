@@ -108,7 +108,13 @@ export async function mediaReady(deps: Deps, body: unknown): Promise<number> {
     if (!b) throw new Error("broadcast insert returned no row");
     await tx.update(channels).set({ liveBroadcastId: b.id }).where(eq(channels.id, c.id));
     if (keyId) await tx.update(streamKeys).set({ lastUsedAt: now }).where(eq(streamKeys.id, keyId));
-    await emit(tx, "stream.online", c.id, { ...broadcasterFields(c), id: b.id, type: "live", started_at: now.toISOString() }, now);
+    await emit(
+      tx,
+      "stream.online",
+      c.id,
+      { ...broadcasterFields(c), id: b.id, type: "live", started_at: now.toISOString() },
+      now,
+    );
     return { channel: c, broadcast: b };
   });
   if (started)
@@ -150,7 +156,11 @@ export async function mediaNotReady(deps: Deps, body: unknown): Promise<number> 
     return { channel: c, broadcast: b };
   });
   if (ended) {
-    await deps.valkey.del(KEYS.viewers(ended.channel.id), KEYS.viewerCount(ended.channel.id), KEYS.renditions(ended.channel.id));
+    await deps.valkey.del(
+      KEYS.viewers(ended.channel.id),
+      KEYS.viewerCount(ended.channel.id),
+      KEYS.renditions(ended.channel.id),
+    );
     await publishLive(deps, {
       type: "offline",
       channelId: ended.channel.id,

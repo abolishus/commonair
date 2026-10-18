@@ -128,7 +128,12 @@ export function createAuth(deps: Deps) {
       sendVerificationEmail: async ({ user, url }) => {
         await mailer.send(
           "verifyEmail",
-          { displayName: user.name, verifyUrl: publicLink(site, url), expiresInMinutes: VERIFY_MINUTES, locale: localeOf(user) },
+          {
+            displayName: user.name,
+            verifyUrl: publicLink(site, url),
+            expiresInMinutes: VERIFY_MINUTES,
+            locale: localeOf(user),
+          },
           user.email,
         );
       },
@@ -166,7 +171,7 @@ export function createAuth(deps: Deps) {
         const body = bodyOf(ctx);
         const altcha = await verifyAltcha(body.altcha, { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });
         if (altcha) throw bad("ALTCHA_FAILED", `Proof-of-work check failed (${altcha})`);
-        const nameProblem = usernameProblem(String(body.username ?? ""));
+        const nameProblem = usernameProblem(typeof body.username === "string" ? body.username : "");
         if (nameProblem)
           throw bad(
             "INVALID_USERNAME",

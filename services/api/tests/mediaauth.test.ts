@@ -25,6 +25,8 @@ describe("planMediaAuth decision table", () => {
     ["read", "live/alice", "hls", "internal"],
     ["playback", "live/alice", "hls", "internal"],
     ["api", "", "hls", "internal"],
+    ["api", "", "", "internal"],
+    ["metrics", "", "", "internal"],
     ["metrics", "", "hls", "internal"],
     ["pprof", "", "hls", "deny"],
   ] as const)("%s %s via %s → %s", (action, path, protocol, kind) => {

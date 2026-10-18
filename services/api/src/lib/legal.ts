@@ -26,7 +26,9 @@ export async function currentRequiredDocuments(db: Executor, now: Date): Promise
     .orderBy(desc(legalDocuments.publishedAt));
   const latest = new Map<string, (typeof rows)[number]>();
   for (const r of rows) if (!latest.has(r.kind)) latest.set(r.kind, r);
-  return [...latest.values()].filter((r) => r.requiresAcceptance).map(({ id, kind, version }) => ({ id, kind, version }));
+  return [...latest.values()]
+    .filter((r) => r.requiresAcceptance)
+    .map(({ id, kind, version }) => ({ id, kind, version }));
 }
 
 export async function pendingDocuments(db: Executor, userId: string, now: Date): Promise<CurrentDocument[]> {

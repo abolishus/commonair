@@ -17,7 +17,7 @@ beforeAll(async () => {
   api = await startApi({
     fetch: Object.assign(
       async (input: RequestInfo | URL) => {
-        healthCalls.push(String(input));
+        healthCalls.push(input instanceof Request ? input.url : input.toString());
         return new Response(healthy ? "ok" : "down", { status: healthy ? 200 : 503 });
       },
       { preconnect: () => {} },
@@ -30,15 +30,27 @@ afterAll(async () => {
 });
 
 test("relay lifecycle: create → register (health-checked) → heartbeat → receipt → assignment", async () => {
-  const created = await member.client.call<{ relayId: string; registrationToken: string }>("POST", "/api/relays", { name: "home" });
+  const created = await member.client.call<{ relayId: string; registrationToken: string }>("POST", "/api/relays", {
+    name: "home",
+  });
   expect(created.status).toBe(200);
   expect(created.body.registrationToken.startsWith("relay_")).toBe(true);
   const relay = client(api, { bearer: created.body.registrationToken });
   const { key } = await generateSigningKey();
 
   // Heartbeats before registration are refused; unknown tokens are unauthorized.
-  expect((await relay.call("POST", "/api/relay/heartbeat", { activeViewers: 0, egressMbps: 0, cacheBytes: 0 })).status).toBe(412);
-  expect((await client(api, { bearer: "relay_nope" }).call("POST", "/api/relay/heartbeat", { activeViewers: 0, egressMbps: 0, cacheBytes: 0 })).status).toBe(401);
+  expect(
+    (await relay.call("POST", "/api/relay/heartbeat", { activeViewers: 0, egressMbps: 0, cacheBytes: 0 })).status,
+  ).toBe(412);
+  expect(
+    (
+      await client(api, { bearer: "relay_nope" }).call("POST", "/api/relay/heartbeat", {
+        activeViewers: 0,
+        egressMbps: 0,
+        cacheBytes: 0,
+      })
+    ).status,
+  ).toBe(401);
 
   healthy = false;
   const pending = await relay.call<{ status: string; originPublicKey: string }>("POST", "/api/relay/register", {
@@ -61,9 +73,16 @@ test("relay lifecycle: create → register (health-checked) → heartbeat → re
     version: "test",
   });
   expect(active.body.status).toBe("active");
-  const hb = await relay.call<{ status: string }>("POST", "/api/relay/heartbeat", { activeViewers: 2, egressMbps: 10, cacheBytes: 5 });
+  const hb = await relay.call<{ status: string }>("POST", "/api/relay/heartbeat", {
+    activeViewers: 2,
+    egressMbps: 10,
+    cacheBytes: 5,
+  });
   expect(hb.body.status).toBe("active");
-  const entry = JSON.parse((await api.deps.valkey.hget(KEYS.relays, created.body.relayId)) ?? "{}") as { load: number; capacityMbps: number };
+  const entry = JSON.parse((await api.deps.valkey.hget(KEYS.relays, created.body.relayId)) ?? "{}") as {
+    load: number;
+    capacityMbps: number;
+  };
   expect(entry).toMatchObject({ load: 10, capacityMbps: 100 });
 
   const now = Date.now();
@@ -91,14 +110,21 @@ test("relay lifecycle: create → register (health-checked) → heartbeat → re
     body: JSON.stringify({ path: mediaPath(member.username), sourceType: "rtmpConn" }),
   });
   const sources = new Set<string>();
+  const urls: [string, string][] = [];
   for (let i = 0; i < 30; i++) {
-    const r = await client(api).call<{ source: string; playlistUrl: string }>("POST", `/api/channels/${member.username}/playback`, {
-      deviceId: `device-${crypto.randomUUID()}`,
-    });
+    const r = await client(api).call<{ source: string; playlistUrl: string }>(
+      "POST",
+      `/api/channels/${member.username}/playback`,
+      {
+        deviceId: `device-${crypto.randomUUID()}`,
+      },
+    );
     sources.add(r.body.source);
-    if (r.body.source === "relay") expect(r.body.playlistUrl.startsWith("http://relay-test.invalid:8080/hls/")).toBe(true);
+    urls.push([r.body.source, r.body.playlistUrl]);
   }
   expect(sources).toEqual(new Set(["origin", "relay"]));
+  const relayUrls = urls.filter(([src]) => src === "relay").map(([, u]) => u);
+  expect(relayUrls.every((u) => u.startsWith("http://relay-test.invalid:8080/hls/"))).toBe(true);
 
   const mine = await member.client.call<{ id: string; status: string }[]>("GET", "/api/relays");
   expect(mine.body).toEqual([expect.objectContaining({ id: created.body.relayId, status: "active" })]);
@@ -106,7 +132,9 @@ test("relay lifecycle: create → register (health-checked) → heartbeat → re
   // Retiring the relay kills its token and removes it from assignment.
   expect((await member.client.call("DELETE", `/api/relays/${created.body.relayId}`)).status).toBe(200);
   expect(await api.deps.valkey.hget(KEYS.relays, created.body.relayId)).toBeNull();
-  expect((await relay.call("POST", "/api/relay/heartbeat", { activeViewers: 0, egressMbps: 0, cacheBytes: 0 })).status).toBe(401);
+  expect(
+    (await relay.call("POST", "/api/relay/heartbeat", { activeViewers: 0, egressMbps: 0, cacheBytes: 0 })).status,
+  ).toBe(401);
 });
 
 test("admin endpoints: relays list, reinstate, categories, roles", async () => {
@@ -117,17 +145,25 @@ test("admin endpoints: relays list, reinstate, categories, roles", async () => {
   expect(list.status).toBe(200);
   expect(list.body.items[0]?.owner.username).toBe(member.username);
 
-  const cat = await adminUser.client.call<{ slug: string; mature: boolean; liveChannels: number }>("PUT", "/api/admin/categories/just-chatting", {
-    name: "Just Chatting",
-  });
-  expect(cat.body).toMatchObject({ slug: "just-chatting", mature: false });
-  expect((await client(api).call<{ items: { slug: string }[] }>("GET", "/api/categories")).body.items.map((c) => c.slug)).toContain(
-    "just-chatting",
+  const cat = await adminUser.client.call<{ slug: string; mature: boolean; liveChannels: number }>(
+    "PUT",
+    "/api/admin/categories/just-chatting",
+    {
+      name: "Just Chatting",
+    },
   );
+  expect(cat.body).toMatchObject({ slug: "just-chatting", mature: false });
+  expect(
+    (await client(api).call<{ items: { slug: string }[] }>("GET", "/api/categories")).body.items.map((c) => c.slug),
+  ).toContain("just-chatting");
   expect((await client(api).call("GET", "/api/categories/just-chatting")).status).toBe(200);
 
-  expect((await adminUser.client.call("PUT", `/api/admin/users/${member.username}/role`, { role: "moderator" })).status).toBe(200);
-  expect((await adminUser.client.call("PUT", `/api/admin/users/${adminUser.username}/role`, { role: "user" })).status).toBe(400);
+  expect(
+    (await adminUser.client.call("PUT", `/api/admin/users/${member.username}/role`, { role: "moderator" })).status,
+  ).toBe(200);
+  expect(
+    (await adminUser.client.call("PUT", `/api/admin/users/${adminUser.username}/role`, { role: "user" })).status,
+  ).toBe(400);
   const audits = await api.db.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "user.set_role"));
   expect(audits).toHaveLength(1);
 });
