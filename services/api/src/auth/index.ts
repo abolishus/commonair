@@ -50,6 +50,11 @@ const bodyOf = (ctx: { body?: unknown } | null | undefined): Record<string, unkn
 
 const localeOf = (u: Record<string, unknown>) => (typeof u.locale === "string" ? u.locale : undefined);
 
+/** Never written through better-auth after the row exists. */
+const IMMUTABLE_USER_FIELDS = new Set(["birthDate", "accountType", "botOwnerId", "botVerified", "username"]);
+/** All a member may change about themselves through `/update-user` (the rest has its own flows). */
+const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
+
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
 export function createAuth(deps: Deps) {
@@ -206,6 +211,17 @@ export function createAuth(deps: Deps) {
         },
         update: {
           before: async (data, ctx) => {
+            // Identity fields are fixed after signup: a birth date edit would let a minor unlock
+            // mature content. No better-auth path may change it; staff corrections go through
+            // our own audited procedures.
+            if (Object.keys(data).some((k) => IMMUTABLE_USER_FIELDS.has(k)))
+              throw bad("FIELD_NOT_ALLOWED", "This field cannot be changed");
+            if (ctx?.path === "/update-user") {
+              const refused = Object.keys(data).filter(
+                (k) => data[k] !== undefined && !SELF_WRITABLE_USER_FIELDS.has(k),
+              );
+              if (refused.length > 0) throw bad("FIELD_NOT_ALLOWED", "This field cannot be changed");
+            }
             if (data.twoFactorEnabled === true && ctx) twoFactorEnabling.add(ctx);
           },
           after: async (user, ctx) => {
