@@ -55,6 +55,24 @@ Briefs follow the AGENTS.md template; each unit owns only the paths listed.
 | 2L worker                | `services/worker/**`                                     | BullMQ runtime + registry, outbox relay, webhooks (signed, retried, SSRF-safe), segment-stream aggregation, live counters, housekeeping                                                                                                                                                                                                                                                                                    |
 | 2M libs                  | `packages/email/**`, `packages/observability/src/sdk.ts` | React Email templates (i18n-ready, no remote assets), mailer; OTel SDK under Bun                                                                                                                                                                                                                                                                                                                                           |
 
+## Milestones — end-to-end vertical slices (current approach, from session two)
+
+Phase 3–5 below are the backlog. Work now lands as vertical slices: API route + worker job + web
+page + harness scenario together, at most ~6 units in parallel, each reviewed **before** merge and
+merged only with `bun run verify` green and its scenario passing against `podman compose up`.
+
+| Slice | Done when this harness scenario passes                                                                                                                                                             |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E1    | `e2e-basic`: sign up in the web UI, verify email, stream key, RTMP publish, watch in Chromium (signed in) and WebKit (anonymous), TTFF + glass-to-glass, chat both ways, offline. In `verify:full` |
+| E2    | follows + directory/discovery page + one moderation action (ban/timeout) + tmi.js bot through the IRC gateway                                                                                      |
+| E3    | a Go relay joins and serves viewers (origin issuance, receipts verified by the worker); a viewbot swarm is excluded from counts                                                                    |
+| E4    | money on the manual adapter (subscription, tip, ledger, revenue dashboard, chargeback clawback), then the Stripe adapter against stripe-mock                                                       |
+| E5    | co-op: memberships, a governance vote incl. the protected-decision rejection, council review, patronage run with statement                                                                         |
+| E6    | the rest of Phase 4: simulcast to the mock target, overlays, VOD/clips, data export, account deletion, backup restore, load test, `--no-proprietary` profile                                       |
+
+The web/harness contract for each slice is a `docs/testing/<slice>-selectors.md` file (E1:
+[docs/testing/e1-selectors.md](docs/testing/e1-selectors.md)); briefs live in `.claude/briefs/<slice>/`.
+
 ## Phase 3 — Product features (parallel pods, after Phase 2 integrates)
 
 | Unit                                             | Scope                                                                                                                                                                                                                          |
