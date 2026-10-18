@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
+    "paths": {
+      "@commonair/ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "tests", "scripts", "stories", ".storybook", "vite.config.ts"]
+}
