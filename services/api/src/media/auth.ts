@@ -8,7 +8,7 @@
  * - publish `live/<slug>`: the channel's active stream key (RTMP `?key=`, WHIP bearer token),
  *   channel and owner not suspended.
  * - publish `live/<slug>/<rendition>`: internal credentials (the media service's ladder).
- * - read / playback / api / metrics: internal credentials only; viewers go through the origin.
+ * - read / playback / api / metrics: internal credentials (MEDIA_INTERNAL_PASSWORD) only; viewers go through the origin.
  * - anything else (pprof, unknown paths): refused.
  */
 import { MEDIA_INTERNAL_USER, type MediaMtxAuthRequest } from "@commonair/contracts/internal";
@@ -50,8 +50,8 @@ export function planMediaAuth(req: MediaMtxAuthRequest): MediaAuthPlan {
   }
 }
 
-export const internalCredentialsOk = (req: Pick<MediaMtxAuthRequest, "user" | "password">, internalSecret: string) =>
-  timingSafeEqual(req.user, MEDIA_INTERNAL_USER) && timingSafeEqual(req.password, internalSecret);
+export const internalCredentialsOk = (req: Pick<MediaMtxAuthRequest, "user" | "password">, mediaPassword: string) =>
+  timingSafeEqual(req.user, MEDIA_INTERNAL_USER) && timingSafeEqual(req.password, mediaPassword);
 
 export interface PublishFacts {
   channelExists: boolean;

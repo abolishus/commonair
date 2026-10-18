@@ -89,7 +89,7 @@ export function createAuth(deps: Deps) {
         session: schema.sessions,
         account: schema.accounts,
         verification: schema.verifications,
-        ...(deps.authFeatures.twoFactor ? { twoFactor: schema.twoFactors } : {}),
+        twoFactor: schema.twoFactors,
         passkey: schema.passkeys,
       },
     }),
@@ -152,9 +152,7 @@ export function createAuth(deps: Deps) {
         adminRoles: ["admin"],
         roles: { user: userAc, moderator: userAc, treasurer: userAc, admin: adminAc },
       }),
-      ...(deps.authFeatures.twoFactor
-        ? [twoFactor({ issuer: site.name, backupCodeOptions: { amount: 10, length: 12 } })]
-        : []),
+      twoFactor({ issuer: site.name, backupCodeOptions: { amount: 10, length: 12 } }),
       magicLink({
         // Magic links sign existing members in; they never create accounts (no age gate on that path).
         disableSignUp: true,

@@ -31,8 +31,6 @@ export interface Deps {
   rateLimits: Record<RateLimitBucket, RateLimitRule>;
   rateLimitStore: RateLimitStore;
   probes: Record<string, StatusProbe>;
-  /** Auth features that depend on the database schema (see buildDeps). */
-  authFeatures: { twoFactor: boolean };
   /** Hosting-provider (datacenter) lookup for new playback sessions. */
   classifier: NetworkClassifier;
   now: () => Date;

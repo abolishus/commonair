@@ -37,26 +37,13 @@ export function statusProbes(env: ApiEnv, doFetch: typeof fetch = fetch): Record
     u.pathname = "/readyz";
     return u.toString();
   };
-  const basic = `Basic ${Buffer.from(`internal:${env.INTERNAL_API_SECRET}`).toString("base64")}`;
+  const basic = `Basic ${Buffer.from(`internal:${env.MEDIA_INTERNAL_PASSWORD}`).toString("base64")}`;
   return {
     mediamtx: () =>
       ok(`${env.MEDIAMTX_API_URL.replace(/\/+$/, "")}/v3/paths/list`, { headers: { authorization: basic } }),
     chat: () => ok(httpOf(env.CHAT_INTERNAL_URL)),
     origin: () => ok(`${env.ORIGIN_INTERNAL_URL.replace(/\/+$/, "")}/readyz`),
   };
-}
-
-/**
- * CONTRACT-REQUEST: two_factors needs `verified boolean default true`,
- * `failed_verification_count integer default 0` and `locked_until timestamptz` (better-auth
- * 1.7 two-factor plugin). Two-factor auth turns itself on once the migration adds them.
- */
-export async function detectAuthFeatures(db: DbHandle): Promise<{ twoFactor: boolean }> {
-  const rows = await db.sql<{ column_name: string }[]>`
-    select column_name from information_schema.columns
-    where table_schema = 'public' and table_name = 'two_factors'
-      and column_name in ('verified', 'failed_verification_count', 'locked_until')`;
-  return { twoFactor: rows.length === 3 };
 }
 
 export interface BuiltDeps {
@@ -88,13 +75,10 @@ export async function buildDeps(
     rateLimits: DEFAULT_RATE_LIMITS,
     rateLimitStore: valkeyRateLimitStore(valkey),
     probes: statusProbes(env),
-    authFeatures: await detectAuthFeatures(db),
     classifier: classifierFromEnv(process.env).classifier,
     now: () => new Date(),
     ...opts.overrides,
   };
-  if (!deps.authFeatures.twoFactor)
-    logger.warn("two-factor authentication disabled: two_factors table lacks the plugin's columns");
   return {
     deps,
     db,

@@ -44,7 +44,7 @@ export async function mediaAuth(deps: Deps, body: unknown): Promise<number> {
   const req = parsed.data;
   const plan = planMediaAuth(req);
   if (plan.kind === "deny") return 401;
-  if (plan.kind === "internal") return internalCredentialsOk(req, deps.env.INTERNAL_API_SECRET) ? 200 : 401;
+  if (plan.kind === "internal") return internalCredentialsOk(req, deps.env.MEDIA_INTERNAL_PASSWORD) ? 200 : 401;
   if (!plan.secret) return 401;
   const [row] = await deps.db
     .select({ channel: channels, owner: users })

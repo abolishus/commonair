@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, count, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import { randomSecret, sha256Hex } from "@commonair/tokens";
@@ -29,29 +29,14 @@ import {
 import { pendingDocuments, recordAcceptances } from "../lib/legal.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 
-const { users, channels, follows, memberships, notifications, consentRecords, oauthTokens } = schema;
+const { users, channels, follows, memberships, notifications, oauthTokens } = schema;
 
-/**
- * CONTRACT-REQUEST: users needs a `matureConfirmedAt timestamptz` column. Until then the
- * confirmation is a durable consent record with this policy version.
- */
-export const MATURE_POLICY = "mature-confirmation-v1";
 const MAX_BOTS_PER_OWNER = 10;
 export const BOT_EMAIL_DOMAIN = "bots.invalid";
 
 export async function matureConfirmed(db: Executor, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: consentRecords.id })
-    .from(consentRecords)
-    .where(
-      and(
-        eq(consentRecords.userId, userId),
-        eq(consentRecords.policyVersion, MATURE_POLICY),
-        sql`(${consentRecords.choices} ->> 'matureContent') = 'true'`,
-      ),
-    )
-    .limit(1);
-  return row !== undefined;
+  const [row] = await db.select({ at: users.matureConfirmedAt }).from(users).where(eq(users.id, userId)).limit(1);
+  return row !== undefined && row.at !== null;
 }
 
 /** Signed-in adult who confirmed 18+: the gate for mature streams. */
@@ -130,10 +115,10 @@ export const me = {
     const { deps } = context;
     const [u] = await deps.db.select({ birthDate: users.birthDate }).from(users).where(eq(users.id, caller.user.id));
     if (!u || !isAdult(u.birthDate, deps.now())) throw precondition("adult", "Only adults can view mature streams");
-    if (!(await matureConfirmed(deps.db, caller.user.id)))
-      await deps.db
-        .insert(consentRecords)
-        .values({ userId: caller.user.id, choices: { matureContent: true }, policyVersion: MATURE_POLICY });
+    await deps.db
+      .update(users)
+      .set({ matureConfirmedAt: deps.now() })
+      .where(and(eq(users.id, caller.user.id), isNull(users.matureConfirmedAt)));
     return { ok: true as const };
   }),
 
