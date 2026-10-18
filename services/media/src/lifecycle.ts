@@ -72,13 +72,14 @@ export class LiveCoordinator {
     });
   }
 
-  offline(broadcastId: string, final: boolean): Promise<void> {
+  /** `finalizeVod` false: the broadcast ended but its VOD must not be published (hash match). */
+  offline(broadcastId: string, final: boolean, finalizeVod = final): Promise<void> {
     return this.serial(async () => {
       const s = this.sessions.get(broadcastId);
       if (!s) return;
       this.sessions.delete(broadcastId);
       this.missing.delete(broadcastId);
-      await s.stop(final);
+      await s.stop(final, finalizeVod);
     });
   }
 

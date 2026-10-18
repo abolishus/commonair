@@ -16,7 +16,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import { clipArgs, frameArgs, type H264Encoder, type ImageFormat } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
 import type { HashMatchEnforcer } from "./safety/enforce.ts";
-import { SUSPEND_REASON } from "./safety/enforce.ts";
+import { broadcastTainted, quarantinePrefix, CSAM_REASON } from "./safety/quarantine.ts";
 import { assembleFromStorage, concatFiles } from "./vod/assemble.ts";
 import { imageExt, imageType } from "./vod/finalize.ts";
 import { findWindow, parsePlaylist } from "./vod/playlist.ts";
@@ -70,6 +70,13 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
   if (!clip || clip.status !== "processing") return "skipped";
   if (!clip.broadcastId || !clip.startedAt) throw new ClipUnavailableError("clip has no broadcast");
   if (!(clip.durationSeconds > 0)) throw new ClipUnavailableError("clip duration must be positive");
+  if (deps.enforcer.isTainted(clip.broadcastId) || (await broadcastTainted(db, clip.broadcastId))) {
+    await db
+      .update(schema.clips)
+      .set({ status: "deleted", removedReason: CSAM_REASON })
+      .where(eq(schema.clips.id, clipId));
+    return "removed";
+  }
   const start = new Date(clip.startedAt.getTime() + clip.startOffset * 1000);
 
   const scratch = await mkdtemp(join(deps.workDir, "clip-"));
@@ -117,11 +124,21 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
         subjectType: "clip",
         subjectId: clipId,
         channelId: clip.channelId,
+        broadcastId: clip.broadcastId,
       });
       if (matched) {
+        // Preserved for legal purposes, never published.
+        await storage.put(
+          bucket,
+          `${quarantinePrefix(clip.broadcastId)}${clipKey(clipId)}`,
+          await Bun.file(out).bytes(),
+          {
+            contentType: "video/mp4",
+          },
+        );
         await db
           .update(schema.clips)
-          .set({ status: "deleted", removedReason: SUSPEND_REASON })
+          .set({ status: "deleted", removedReason: CSAM_REASON })
           .where(eq(schema.clips.id, clipId));
         return "removed";
       }

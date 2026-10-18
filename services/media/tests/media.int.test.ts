@@ -44,6 +44,7 @@ const BUCKET = "commonair-media";
 const run = crypto.randomUUID().slice(0, 8);
 const SLUG = `it_${run}`;
 const INTERNAL_SECRET = `internal-${crypto.randomUUID()}`;
+const MEDIA_PASSWORD = `mediapw-${crypto.randomUUID()}`;
 const AUTH_SECRET = `auth-${crypto.randomUUID()}`;
 const SIMULCAST_KEY = `mockkey_${run}`;
 const keyPrefix = `test:${crypto.randomUUID()}:`;
@@ -75,8 +76,10 @@ const toggle = { match: false };
 const testMatcher: HashMatcher = {
   name: "test-toggle",
   records: true,
-  async check() {
-    return { matched: toggle.match, details: { test: true } };
+  // Only live thumbnails match: VOD samples and clip frames never do, so the test proves the
+  // live match alone keeps the VOD from being published.
+  async check(_image, ctx) {
+    return { matched: toggle.match && ctx.subjectType === "broadcast", details: { test: true } };
   },
 };
 
@@ -147,7 +150,7 @@ beforeAll(async () => {
   mtx = startMediaMtx({ apiBase, internalSecret: INTERNAL_SECRET });
   target = startMockTarget();
   garage = await startGarage(BUCKET);
-  mtxApi = new MediaMtxClient(`http://127.0.0.1:${mtx.port("9997/tcp")}`, INTERNAL_SECRET);
+  mtxApi = new MediaMtxClient(`http://127.0.0.1:${mtx.port("9997/tcp")}`, MEDIA_PASSWORD);
   targetApi = new MediaMtxClient(`http://127.0.0.1:${target.port("9997/tcp")}`, "unused");
   await waitFor("MediaMTX API", async () => (await mtxApi.check(), true), 30_000);
   await waitFor("mock target API", async () => (await targetApi.check(), true), 30_000);
@@ -181,7 +184,7 @@ beforeAll(async () => {
     MEDIAMTX_API_URL: `http://127.0.0.1:${mtx.port("9997/tcp")}`,
     MEDIAMTX_RTSP_URL: `rtsp://127.0.0.1:${mtx.port("8554/tcp")}`,
     INTERNAL_API_SECRET: INTERNAL_SECRET,
-    MEDIA_INTERNAL_PASSWORD: INTERNAL_SECRET,
+    MEDIA_INTERNAL_PASSWORD: MEDIA_PASSWORD,
     AUTH_SECRET,
     TRANSCODE_VIEWER_THRESHOLD: "2",
     TRANSCODE_HWACCEL: "none",
@@ -250,7 +253,9 @@ describe("media pipeline", () => {
 
     // Our own API calls authenticate as the internal user.
     const apiAuth = hooks.find((h) => (h.body as { action?: string } | null)?.action === "api");
-    expect(apiAuth?.body).toMatchObject({ user: "internal", password: INTERNAL_SECRET });
+    expect(apiAuth?.body).toMatchObject({ user: "internal", password: MEDIA_PASSWORD });
+    // The API secret is only ever sent as the hook header, never as a MediaMTX credential.
+    expect(hooks.some((h) => JSON.stringify(h.body).includes(INTERNAL_SECRET))).toBe(false);
   });
 
   test("health: ffprobe-based sample with resolution, codecs and 2 s keyframes; live seconds accrue", async () => {
@@ -479,6 +484,36 @@ describe("media pipeline", () => {
       const stored: string[] = [];
       for await (const o of media.ctx.storage.list(BUCKET, `thumbnails/${live.id}/`)) stored.push(o.key);
       expect(stored).toEqual([]);
+
+      // The broadcast's VOD (recorded while live) is quarantined, never finalized or published.
+      const vod = await waitFor("VOD quarantined", async () => {
+        const [v] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.broadcastId, live.id));
+        return v?.status === "deleted" ? v : null;
+      });
+      expect(vod.removedReason).toBe("csam_hash_match");
+      const quarantined: string[] = [];
+      for await (const o of media.ctx.storage.list(BUCKET, `quarantine/${live.id}/`)) quarantined.push(o.key);
+      expect(quarantined.some((k) => k.startsWith(`quarantine/${live.id}/vods/${vod.id}/`))).toBe(true);
+      // Give a late finalize job the chance to misbehave, then confirm nothing public remains.
+      await Bun.sleep(3000);
+      const [after] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, vod.id));
+      expect(after?.status).toBe("deleted");
+      const publicVod: string[] = [];
+      for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vod.id))) publicVod.push(o.key);
+      expect(publicVod).toEqual([]);
+      // A clip requested afterwards is refused.
+      const clipId = uuidv7();
+      await tdb.db.insert(schema.clips).values({
+        id: clipId,
+        channelId,
+        broadcastId: live.id,
+        title: "clip",
+        startOffset: 1,
+        durationSeconds: 2,
+      });
+      await media.jobs.enqueueClip(clipId);
+      const clip = await waitForClip(clipId);
+      expect(clip).toMatchObject({ status: "deleted", removedReason: "csam_hash_match" });
     } finally {
       toggle.match = false;
     }

@@ -28,7 +28,7 @@ export interface MediaContext {
   workDir: string;
   ffmpeg: string;
   ffprobe: string;
-  /** INTERNAL_API_SECRET: the internal MediaMTX user's password. */
+  /** MEDIA_INTERNAL_PASSWORD: the internal MediaMTX user's password (never INTERNAL_API_SECRET). */
   internalSecret: string;
   /** AUTH_SECRET: decrypts simulcast stream keys. */
   authSecret: string;

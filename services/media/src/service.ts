@@ -59,7 +59,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
   logger.info("media capabilities", { encoder: caps.encoder, imageFormat: caps.imageFormat });
   if (caps.imageFormat !== "webp") logger.warn("ffmpeg lacks libwebp: thumbnails are JPEG");
 
-  const workDir = opts.workDir ?? join(tmpdir(), "commonair-media");
+  const workDir = opts.workDir ?? env.MEDIA_WORK_DIR ?? join(tmpdir(), "commonair-media");
   await mkdir(workDir, { recursive: true });
   const busChannel = opts.busChannel ?? BUS.live;
 
@@ -68,16 +68,19 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
   const bus = createValkey(env.VALKEY_URL, { name: "media-bus" });
   const subscriber = createValkey(env.VALKEY_URL, { name: "media-sub" });
   const storage: ObjectStorage = storageFromEnv(env);
-  const mtx = new MediaMtxClient(env.MEDIAMTX_API_URL, env.INTERNAL_API_SECRET);
+  const mtx = new MediaMtxClient(env.MEDIAMTX_API_URL, env.MEDIA_INTERNAL_PASSWORD);
   const matcher = opts.hashMatcher ?? createHashMatcher(env);
 
   let coordinator: LiveCoordinator | undefined;
   const enforcer = new HashMatchEnforcer({
     db: dbh.db,
+    storage,
+    bucket: env.S3_BUCKET_MEDIA,
     mtx,
     matcher,
     logger,
-    stopBroadcast: async (id) => coordinator?.offline(id, true),
+    // The broadcast ended, but its VOD must not be finalized (published): it is quarantined.
+    stopBroadcast: async (id) => coordinator?.offline(id, true, false),
   });
 
   const jobsRef: { jobs?: Jobs } = {};
@@ -97,7 +100,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     workDir,
     ffmpeg,
     ffprobe,
-    internalSecret: env.INTERNAL_API_SECRET,
+    internalSecret: env.MEDIA_INTERNAL_PASSWORD,
     authSecret: env.AUTH_SECRET,
     rtspBase: env.MEDIAMTX_RTSP_URL,
     transcodeThreshold: env.TRANSCODE_VIEWER_THRESHOLD,
