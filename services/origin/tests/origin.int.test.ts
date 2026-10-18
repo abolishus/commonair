@@ -226,6 +226,7 @@ beforeAll(async () => {
     playbackSigningKey: generated.pkcs8B64,
     mediamtxHlsUrl: hlsUrl,
     internalSecret: secret,
+    mediaPassword: secret,
     cacheMb: 64,
     cdn: { provider: "origin-pull", baseUrl: CDN_BASE },
     segmentStream: stream,
@@ -476,11 +477,13 @@ describe("accounting", () => {
       const pl = await text("/relay-pull/live/test/video1_stream.m3u8", auth);
       for (const u of uris(pl.body).slice(-3)) await get(`/relay-pull/live/test/${u}`, auth);
       const m = minuteOf(Date.now());
-      const prod = origin.production.get("live/test", m);
+      await origin.production.flush();
+      const prod = (await origin.production.read(m)).get("live/test");
       return prod && sessionAllowance(prod).segments > 0 && sessionAllowance(prod).bytes > 0 ? m : undefined;
     });
+    await origin.production.flush();
     const rows = await origin.runIssuance(bucket);
-    const allowance = sessionAllowance(origin.production.get("live/test", bucket));
+    const allowance = sessionAllowance((await origin.production.read(bucket)).get("live/test"));
     expect(rows).toEqual([
       {
         relayId: ids.relay,

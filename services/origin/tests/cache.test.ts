@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { ByteLru, Coalescer, Semaphore, TtlCache } from "../src/cache.ts";
+import { ByteLru, Coalescer, QueueTimeoutError, Semaphore, TtlCache } from "../src/cache.ts";
 
 const v = (size: number) => ({ size });
 
@@ -125,5 +125,17 @@ describe("Semaphore", () => {
     const s = new Semaphore(1);
     await expect(s.use(() => Promise.reject(new Error("x")))).rejects.toThrow("x");
     expect(await s.use(() => Promise.resolve(5))).toBe(5);
+  });
+
+  test("waiters give up after the queue wait and do not take a slot later", async () => {
+    const s = new Semaphore(1, 20);
+    let release: () => void = () => {};
+    const holder = s.use(() => new Promise<void>((r) => (release = r)));
+    await expect(s.use(async () => "late")).rejects.toBeInstanceOf(QueueTimeoutError);
+    expect(s.queued).toBe(0);
+    release();
+    await holder;
+    expect(s.inUse).toBe(0);
+    expect(await s.use(async () => "next")).toBe("next");
   });
 });

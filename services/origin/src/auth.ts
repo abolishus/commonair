@@ -46,6 +46,9 @@ export async function authorizeViewer(
   return { ok: true, claims: v.value, token };
 }
 
+/** Relay tokens are `randomSecret("relay_")`: the prefix plus 32 random bytes in base64url (43 chars). */
+export const RELAY_BEARER = /^Bearer (relay_[A-Za-z0-9_-]{43})$/;
+
 export interface RelayAuthOptions {
   db: Executor;
   ttlMs?: number;
@@ -63,7 +66,8 @@ export class RelayAuth {
 
   /** Resolve an `Authorization` header to an active relay, or null. */
   async authenticate(header: string | null): Promise<AuthorizedRelay | null> {
-    const m = header ? /^Bearer\s+([\x21-\x7e]{16,512})$/.exec(header) : null;
+    // Shape check first: anything that is not a relay token never reaches Postgres.
+    const m = header ? RELAY_BEARER.exec(header) : null;
     if (!m?.[1]) return null;
     // Cache by hash so plaintext relay tokens never sit in memory longer than the request.
     const hash = await sha256Hex(m[1]);

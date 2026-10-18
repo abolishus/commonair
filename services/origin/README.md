@@ -14,8 +14,8 @@ bun run --filter @commonair/origin test      # unit tests
 bun run --filter @commonair/origin test:int  # MediaMTX in Podman + ffmpeg + Postgres + Valkey
 ```
 
-Environment: `coreEnv`, `databaseEnv`, `valkeyEnv`, `internalEnv` (`INTERNAL_API_SECRET`),
-`mediaEnv` (`MEDIAMTX_HLS_URL`), `playbackEnv` (`PLAYBACK_SIGNING_KEY`, `ORIGIN_CACHE_MB`,
+Environment: `coreEnv`, `databaseEnv`, `valkeyEnv`, `internalEnv` (`INTERNAL_API_SECRET`, CDN HMAC only),
+`mediaEnv` (`MEDIAMTX_HLS_URL`, `MEDIA_INTERNAL_PASSWORD`), `playbackEnv` (`PLAYBACK_SIGNING_KEY`, `ORIGIN_CACHE_MB`,
 `CDN_PROVIDER`, `CDN_BASE_URL`) and `ORIGIN_PORT`. `/healthz` and `/readyz` (Postgres, Valkey,
 MediaMTX reachable) come from `@commonair/service`.
 
@@ -43,13 +43,16 @@ else happens.
      `PLAYBACK_SIGNING_KEY` (signature, expiry with 30 s skew). Its `path` must equal the
      channel path `live/<slug>` (the same token covers every rendition) and `src` must be
      `origin` or `cdn`; anything else is 403. After the channel lookup, `cid` must match too.
-   - Relays: `sha256(token)` is looked up in `relay_nodes.token_hash` with status `active` or
-     `degraded`; results (including misses) are cached 30 s by hash. 401 otherwise.
+   - Relays: the bearer must look like a relay token (`relay_` + 43 base64url chars) before any
+     lookup; then `sha256(token)` is looked up in `relay_nodes.token_hash` with status `active` or
+     `degraded`; results (including misses) are cached 30 s by hash. 401 otherwise. After 10
+     failures per client IP per minute (X-Forwarded-For honoured only from `TRUSTED_PROXY_CIDRS`)
+     further attempts get 429 without touching Postgres.
    - CDN: see [CDN mode](#cdn-mode).
 3. **Channel lookup**: `channels` by slug. Unknown, offline (`live_broadcast_id` null) and
    suspended channels answer 404; that answer is cached 2 s, live answers 5 s.
 4. **Fetch** through the content store (below) from
-   `MEDIAMTX_HLS_URL/<path>/<file>` with basic auth `internal` / `INTERNAL_API_SECRET`.
+   `MEDIAMTX_HLS_URL/<path>/<file>` with basic auth `internal` / `MEDIA_INTERNAL_PASSWORD`.
 5. **Rewrite playlists** for the puller and **respond**; accounting is recorded after the
    response body is built and never awaited.
 
@@ -80,7 +83,7 @@ resolved against the playlist's directory and must stay inside `live/<slug>/`; M
 appended exactly once. Bases by delivery source:
 
 - `origin`: relative to the playlist (`video1_stream.m3u8?t=…`, `720p/video1_stream.m3u8?t=…`);
-- `cdn`: `CDN_BASE_URL/live/<slug>/…?t=…`;
+- `cdn`: `CDN_BASE_URL/live/<slug>/…` with **no token** (see [CDN mode](#cdn-mode));
 - relay pulls and CDN pulls: relative, no token.
 
 **Renditions.** When `KEYS.renditions(channelId)` lists renditions besides `source`, the
@@ -108,8 +111,23 @@ MediaMTX about once.
 | media playlist, blocking reload | 1 s          | `private`/`public`, `max-age=6` (the answer for a given msn/part never changes) |
 | 404 and other client errors     | 2 s          | `no-store`                                                                      |
 
-Upstream sockets are bounded by a semaphore (256), requests time out (10 s, 15 s for blocking
-reloads) and bodies are capped at 32 MiB. Upstream failures answer 502.
+Upstream sockets come from two bounded pools: blocking reloads (128) and everything else (256),
+so long-polls never starve segment fetches. Waiting for a socket is capped at 2 s (then 503 with
+`retry-after: 1`). Each MediaMTX path may have at most 16 distinct blocking keys in flight.
+Blocking directives are checked against the playlist's current end (RFC 8216bis §6.2.5.2):
+`_HLS_msn` more than two past the last complete segment, `_HLS_part` beyond the parts a segment can
+have, or beyond the Advance Part Limit answer 400 at once. A forwarded blocking reload waits at
+most 3 × target duration (1.5–15 s), then 503. The HTTP idle timeout is above that maximum.
+Other requests time out after 10 s; bodies are capped at 32 MiB; other upstream failures answer 502.
+
+### Player contract: tokens
+
+Playlist URIs carry the viewer's token. hls.js-based players replace it with the token each
+heartbeat returns. Native HLS players (Safari, iOS) never change URIs, so when the presented token
+has less than 60 s left, the origin embeds a freshly signed token (same claims, new `iat`/`exp`)
+in rewritten playlists, as long as the playback session exists and has not ended (checked in
+`playback_sessions`, cached 15 s). Ending the session (no heartbeats → the API ends it) therefore
+ends playback within one token lifetime.
 
 Viewer responses (`/hls`, `/cdn`) carry `access-control-allow-origin: *` (players on embeds),
 `cross-origin-resource-policy: cross-origin`, and never set or read cookies. `OPTIONS` answers
@@ -130,12 +148,13 @@ CORS preflights.
 - **Relay issuance** (`relay_issuance`): computed every minute (10 s after the boundary, for the
   previous minute) by `src/issuance.ts`. The formula is documented there and unit-tested:
   sessions assigned to the relay that were alive in the minute × what MediaMTX produced in that
-  minute (new segments listed in media playlists; bytes of segments or parts first pulled, the
-  larger of the two, maximum over renditions). Rows are recomputed, not added, so re-running a
-  minute is idempotent. **Issuance must run on a single origin replica** until it moves to the
-  worker: production is tracked in each origin's memory, and replicas would overwrite each
-  other's rows with partial views. Start other replicas with issuance disabled
-  (`createOrigin({ issuance: { enabled: false } })`).
+  minute (media objects — full segments, parts and init sections, as relays count them — and
+  bytes, maximum over renditions). Production is kept in Valkey (`issuance:production:<epochMinute>`
+  hashes, 20 min TTL), each object counted once across all replicas, so restarts lose nothing.
+  Each tick recomputes the last 5 closed minutes (idempotent upserts) under a Valkey leader lock
+  (`SET NX PX`), so with several replicas exactly one computes per tick, from everyone's production;
+  a final tick runs on shutdown. `ORIGIN_ISSUANCE_ENABLED=false` opts a replica out. Until issuance
+  moves to the worker, only origin replicas compute it.
 
 ## CDN mode
 
@@ -148,7 +167,9 @@ x-cdn-auth: <hex HMAC-SHA256(key = INTERNAL_API_SECRET, message = "cdn-origin-pu
 ```
 
 (`bun -e 'import {cdnAuthValue} from "@commonair/origin"; console.log(await cdnAuthValue(process.env.INTERNAL_API_SECRET))'`).
-CDN pulls get shareable responses: relative URIs, no viewer tokens, `public` caching. Viewers
+CDN pulls get shareable responses: relative URIs, no viewer tokens, `public` caching. Playlists
+served to CDN-assigned viewers point at `CDN_BASE_URL` without `t=`, one URL per object, so the CDN
+can cache it. Viewers
 assigned to the CDN load the multivariant playlist from the origin (token checked) and
 everything else from the CDN. Viewer tokens on CDN URLs are enforced only if the CDN edge can
 verify them, so **CDN mode trades token enforcement for burst capacity**: CDN-delivered sessions

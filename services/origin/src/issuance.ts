@@ -14,52 +14,56 @@
  *                 broadcast b, alive in B: startedAt < end, lastHeartbeatAt ≥ start,
  *                 and not ended before start.
  *
- *   For every directory d of b's channel (the source path and each rendition path):
- *     seg(d)   = distinct full media segments first listed in d's media playlists in B
- *                (all tracks of d: a viewer of d fetches its video and audio)
- *     bytes(d) = max(bytes of full segments + init sections first pulled in B,
- *                    bytes of LL-HLS parts first pulled in B)
- *                (a player fetches parts at the live edge or whole segments when behind,
- *                 not both, so the larger of the two bounds one viewer's needs)
+ *   For every directory d of b's channel (the source path and each rendition path),
+ *   from the production all origin replicas recorded for B (production.ts; each media
+ *   object counted once, in the minute it was first pulled from MediaMTX):
+ *     objects(d) = full segments + LL-HLS parts + init sections of d
+ *                  (relays count every fully delivered media object; playlists are excluded)
+ *     bytes(d)   = max(full segment bytes, part bytes) + init bytes
+ *                  (a player fetches parts at the live edge or whole segments when behind,
+ *                   not both, so the larger of the two bounds one viewer's media bytes)
  *
  *   A session watches one directory at a time, so its allowance is the maximum:
- *     segAllow(b, B)   = max_d seg(d)
+ *     objAllow(b, B)   = max_d objects(d)
  *     bytesAllow(b, B) = max_d bytes(d)
  *
  *   relay_issuance(R, B):
  *     sessions      = Σ_b S(R, b, B)
- *     segmentTokens = Σ_b S(R, b, B) × segAllow(b, B)
+ *     segmentTokens = Σ_b S(R, b, B) × objAllow(b, B)
  *     bytesIssued   = Σ_b S(R, b, B) × bytesAllow(b, B)
  *
- * bytesIssued is an upper bound on what R could legitimately have served in B; the
- * receipt verifier applies its own tolerance on top. Sessions on a broadcast with no
- * recorded production (origin restarted mid-minute, channel just went offline) still
- * count toward `sessions` but issue nothing.
+ * Both are upper bounds on what R could legitimately have served in B; the receipt
+ * verifier applies its own tolerance on top. Sessions on a broadcast with no recorded
+ * production still count toward `sessions` but issue nothing.
  *
- * The origin runs `runIssuance` for the previous minute on a 60 s timer (after a
- * grace period so heartbeats landing just after the minute are counted). Rows are
- * recomputed, not added, so re-running a bucket is idempotent.
+ * Every tick (60 s, 10 s after the minute boundary, and once on shutdown) recomputes
+ * the last 5 closed minutes, so late production writes and heartbeats are picked up.
+ * Rows are recomputed, not added, so recomputation is idempotent. A Valkey leader
+ * lock makes exactly one replica compute per tick.
  */
 import { and, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { Executor } from "@commonair/db";
 import { schema } from "@commonair/db";
-import { MINUTE_MS, type ChannelMinute, type DirProduction } from "./accounting.ts";
+import type { Logger } from "@commonair/observability";
+import type { ValkeyClient } from "@commonair/service";
+import { MINUTE_MS } from "./accounting.ts";
+import { ISSUANCE_KEYS, type ChannelMinute, type DirProduction, type ProductionStore } from "./production.ts";
 
 export interface Allowance {
+  /** Media objects one session could fetch. */
   segments: number;
   bytes: number;
 }
 
-export function dirBytes(d: DirProduction): number {
-  return Math.max(d.segmentBytes, d.partBytes);
-}
+export const dirObjects = (d: DirProduction) => d.segments + d.parts + d.inits;
+export const dirBytes = (d: DirProduction) => Math.max(d.segmentBytes, d.partBytes) + d.initBytes;
 
 /** Per-session allowance for one broadcast-minute: the max over its directories. */
 export function sessionAllowance(minute: ChannelMinute | undefined): Allowance {
   let segments = 0;
   let bytes = 0;
   for (const d of minute?.values() ?? []) {
-    segments = Math.max(segments, d.segments);
+    segments = Math.max(segments, dirObjects(d));
     bytes = Math.max(bytes, dirBytes(d));
   }
   return { segments, bytes };
@@ -104,8 +108,12 @@ export function computeIssuance(
   return [...byRelay.values()].sort((a, b) => a.relayId.localeCompare(b.relayId));
 }
 
-/** The bucket a run at `now` computes: the last complete minute. */
+/** The last complete minute at `now`. */
 export const issuanceBucket = (now: number) => Math.floor(now / MINUTE_MS) * MINUTE_MS - MINUTE_MS;
+
+/** The closed minutes a tick at `now` recomputes, oldest first. */
+export const recomputeBuckets = (now: number, lookback: number) =>
+  Array.from({ length: lookback }, (_, i) => issuanceBucket(now) - (lookback - 1 - i) * MINUTE_MS);
 
 export async function relaySessionCounts(db: Executor, start: Date, end: Date): Promise<RelaySessionCount[]> {
   const ps = schema.playbackSessions;
@@ -151,13 +159,52 @@ export async function upsertIssuance(db: Executor, rows: IssuanceRow[]): Promise
 /** Compute and store issuance for the minute starting at `bucketStartMs`. */
 export async function runIssuance(
   db: Executor,
-  production: (path: string, bucketStartMs: number) => ChannelMinute | undefined,
+  production: ProductionStore,
   bucketStartMs: number,
 ): Promise<IssuanceRow[]> {
   const start = new Date(bucketStartMs);
   const end = new Date(bucketStartMs + MINUTE_MS);
-  const counts = await relaySessionCounts(db, start, end);
-  const rows = computeIssuance(counts, (path) => production(path, bucketStartMs), start);
+  const [counts, minute] = await Promise.all([relaySessionCounts(db, start, end), production.read(bucketStartMs)]);
+  const rows = computeIssuance(counts, (path) => minute.get(path), start);
   await upsertIssuance(db, rows);
   return rows;
+}
+
+const RELEASE_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
+
+export interface IssuanceRunnerOptions {
+  db: Executor;
+  valkey: Pick<ValkeyClient, "set" | "eval">;
+  production: ProductionStore;
+  /** Closed minutes recomputed per tick. */
+  lookbackMinutes?: number;
+  /** Lock lifetime: longer than a tick takes, shorter than the tick interval. */
+  lockTtlMs?: number;
+  logger?: Logger;
+  now?: () => number;
+}
+
+export class IssuanceRunner {
+  private readonly id = crypto.randomUUID();
+  private readonly now: () => number;
+
+  constructor(private readonly opts: IssuanceRunnerOptions) {
+    this.now = opts.now ?? Date.now;
+  }
+
+  /** One tick: null when another replica holds the lock, otherwise the rows written. */
+  async tick(): Promise<IssuanceRow[] | null> {
+    const lock = await this.opts.valkey.set(ISSUANCE_KEYS.lock, this.id, "PX", this.opts.lockTtlMs ?? 50_000, "NX");
+    if (lock !== "OK") return null;
+    try {
+      const rows: IssuanceRow[] = [];
+      for (const bucket of recomputeBuckets(this.now(), this.opts.lookbackMinutes ?? 5))
+        rows.push(...(await runIssuance(this.opts.db, this.opts.production, bucket)));
+      return rows;
+    } finally {
+      await this.opts.valkey
+        .eval(RELEASE_SCRIPT, 1, ISSUANCE_KEYS.lock, this.id)
+        .catch((err: unknown) => this.opts.logger?.warn("issuance lock release failed", { err }));
+    }
+  }
 }

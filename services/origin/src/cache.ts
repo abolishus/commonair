@@ -86,6 +86,10 @@ export class Coalescer<T> {
     return this.inflight.size;
   }
 
+  has(key: string): boolean {
+    return this.inflight.has(key);
+  }
+
   run(key: string, fn: () => Promise<T>): { promise: Promise<T>; joined: boolean } {
     const existing = this.inflight.get(key);
     if (existing) return { promise: existing, joined: true };
@@ -128,26 +132,57 @@ export class TtlCache<V> {
   }
 }
 
-/** Counting semaphore bounding concurrent upstream sockets. */
+export class QueueTimeoutError extends Error {
+  override readonly name = "QueueTimeoutError";
+}
+
+/**
+ * Counting semaphore bounding concurrent upstream sockets. Waiters give up after
+ * `waitMs` so a saturated origin sheds load (503) instead of queueing without bound.
+ */
 export class Semaphore {
   private active = 0;
-  private readonly waiters: (() => void)[] = [];
-  constructor(private readonly limit: number) {}
+  private readonly waiters = new Set<() => void>();
+  constructor(
+    private readonly limit: number,
+    private readonly waitMs = Number.POSITIVE_INFINITY,
+  ) {}
 
   get inUse(): number {
     return this.active;
   }
+  get queued(): number {
+    return this.waiters.size;
+  }
 
   async use<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.active >= this.limit) await new Promise<void>((r) => this.waiters.push(r));
+    if (this.active >= this.limit) await this.wait();
     else this.active++;
     try {
       return await fn();
     } finally {
-      const next = this.waiters.shift();
+      const next = this.waiters.values().next().value;
       // Hand the slot straight to the next waiter; otherwise release it.
-      if (next) next();
-      else this.active--;
+      if (next) {
+        this.waiters.delete(next);
+        next();
+      } else this.active--;
     }
+  }
+
+  private wait(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const grant = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.waiters.add(grant);
+      if (Number.isFinite(this.waitMs))
+        timer = setTimeout(() => {
+          this.waiters.delete(grant);
+          reject(new QueueTimeoutError("upstream queue wait timed out"));
+        }, this.waitMs);
+    });
   }
 }

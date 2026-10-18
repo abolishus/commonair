@@ -9,11 +9,9 @@
  * - `egress_samples` is NOT written here: the worker is its single writer, aggregating
  *   STREAMS.segments (which also works with several origin replicas). The origin only
  *   keeps in-process egress metrics.
- * - ProductionTracker records what MediaMTX produced per channel per minute (new
- *   segments listed in media playlists, bytes of media objects pulled), the input to
- *   relay issuance (see issuance.ts).
+ * - Production for relay issuance lives in Valkey (production.ts).
  *
- * Both are bounded: under sustained backpressure they drop records and count
+ * The buffer is bounded: under sustained backpressure it drops records and counts
  * the drops in metrics rather than grow without limit.
  */
 import type { DELIVERY_SOURCES } from "@commonair/contracts/enums";
@@ -21,7 +19,6 @@ import type { SegmentFetch } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
-import type { MediaKind } from "./paths.ts";
 
 export const MINUTE_MS = 60_000;
 export const minuteOf = (ms: number) => Math.floor(ms / MINUTE_MS) * MINUTE_MS;
@@ -137,71 +134,3 @@ function fields(e: SegmentFetch): string[] {
 // ---------------------------------------------------------------------------------------
 
 export type EgressSource = (typeof DELIVERY_SOURCES)[number];
-
-// ---------------------------------------------------------------------------------------
-
-/** What MediaMTX produced in one directory (source or a rendition) of a channel in one minute. */
-export interface DirProduction {
-  /** Distinct full media segments first listed in a media playlist during the minute. */
-  segments: number;
-  /** Bytes of full segments (and init sections) first pulled from MediaMTX during the minute. */
-  segmentBytes: number;
-  /** Bytes of LL-HLS parts first pulled during the minute. */
-  partBytes: number;
-}
-
-export type ChannelMinute = Map<string, DirProduction>;
-
-export class ProductionTracker {
-  /** channel path → minute → dir → production */
-  private readonly minutes = new Map<string, Map<number, ChannelMinute>>();
-  /** dir → segment name → first-seen ms; a segment counts once, in the minute it first appears. */
-  private readonly seen = new Map<string, Map<string, number>>();
-
-  constructor(private readonly retainMs = 10 * MINUTE_MS) {}
-
-  notePlaylist(channelPath: string, dir: string, segmentNames: string[], at: number): void {
-    let seen = this.seen.get(dir);
-    if (!seen) this.seen.set(dir, (seen = new Map()));
-    let fresh = 0;
-    for (const name of segmentNames) {
-      if (seen.has(name)) continue;
-      seen.set(name, at);
-      fresh++;
-    }
-    if (fresh > 0) this.cell(channelPath, dir, at).segments += fresh;
-  }
-
-  noteObject(channelPath: string, dir: string, kind: Exclude<MediaKind, "playlist">, bytes: number, at: number): void {
-    const c = this.cell(channelPath, dir, at);
-    if (kind === "part") c.partBytes += bytes;
-    else c.segmentBytes += bytes;
-  }
-
-  get(channelPath: string, bucketStart: number): ChannelMinute | undefined {
-    return this.minutes.get(channelPath)?.get(bucketStart);
-  }
-
-  prune(now: number): void {
-    const cutoff = now - this.retainMs;
-    for (const [path, byMinute] of this.minutes) {
-      for (const m of byMinute.keys()) if (m < cutoff) byMinute.delete(m);
-      if (byMinute.size === 0) this.minutes.delete(path);
-    }
-    for (const [dir, names] of this.seen) {
-      for (const [n, at] of names) if (at < cutoff) names.delete(n);
-      if (names.size === 0) this.seen.delete(dir);
-    }
-  }
-
-  private cell(channelPath: string, dir: string, at: number): DirProduction {
-    const m = minuteOf(at);
-    let byMinute = this.minutes.get(channelPath);
-    if (!byMinute) this.minutes.set(channelPath, (byMinute = new Map()));
-    let minute = byMinute.get(m);
-    if (!minute) byMinute.set(m, (minute = new Map()));
-    let c = minute.get(dir);
-    if (!c) minute.set(dir, (c = { segments: 0, segmentBytes: 0, partBytes: 0 }));
-    return c;
-  }
-}
