@@ -1,0 +1,45 @@
+{
+  "name": "@commonair/web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --bun vp dev",
+    "build": "vp build",
+    "start": "bun server.ts",
+    "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "test:int": "bun --bun vp test run .int.test --passWithNoTests",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@commonair/config": "workspace:*",
+    "@commonair/contracts": "workspace:*",
+    "@commonair/observability": "workspace:*",
+    "@commonair/ui": "workspace:*",
+    "@hugeicons/core-free-icons": "4.3.5",
+    "@hugeicons/react": "1.1.10",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@tanstack/react-router": "1.170.41",
+    "@tanstack/react-start": "1.168.60",
+    "altcha": "3.2.4",
+    "hls.js": "1.7.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/react": "16.3.3",
+    "@types/bun": "catalog:",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "happy-dom": "21.0.3",
+    "tailwindcss": "4.3.3",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
