@@ -11,7 +11,7 @@ import nodemailer from "nodemailer";
 import type { z } from "zod";
 import type { Catalogs } from "./messages/index.ts";
 import type { TemplateData } from "./registry.ts";
-import { renderEmail } from "./render.tsx";
+import { normalizeInstanceUrl, renderEmail } from "./render.tsx";
 import type { TemplateId } from "./template.tsx";
 
 export type MailEnv = z.output<typeof mailEnv>;
@@ -79,7 +79,11 @@ export async function buildMail<K extends TemplateId>(
     "Auto-Submitted": "auto-generated",
   };
   if (rendered.unsubscribeUrl) {
-    headers["List-Unsubscribe"] = `<${rendered.unsubscribeUrl}>`;
+    // Normalised `href` only (already validated at render; re-checked here because it goes into a
+    // header): WHATWG serialisation percent-encodes `<`, `>`, spaces and controls, so the value
+    // cannot close the angle brackets and splice in a second URL.
+    const href = normalizeInstanceUrl(rendered.unsubscribeUrl, opts.site, "unsubscribeUrl");
+    headers["List-Unsubscribe"] = `<${href}>`;
     // RFC 8058 one-click: the URL must accept a POST without further interaction.
     headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click";
   }
@@ -102,36 +106,65 @@ export interface SmtpMailerOptions extends MailerOptions {
   maxConnections?: number;
 }
 
-/** SMTP mailer from `mailEnv`. Pooled; call `close()` on shutdown. */
-export function createMailer(env: MailEnv, opts: SmtpMailerOptions): Mailer {
-  const transport = nodemailer.createTransport({
+export class MailerClosedError extends Error {
+  constructor() {
+    super("mailer is closed");
+    this.name = "MailerClosedError";
+  }
+}
+
+/**
+ * nodemailer transport options from `mailEnv`. STARTTLS is required when `SMTP_REQUIRE_TLS`
+ * is set, and always when credentials would otherwise be sent over a plain connection.
+ */
+export function smtpTransportOptions(env: MailEnv, opts: Omit<SmtpMailerOptions, keyof MailerOptions> = {}) {
+  const auth = env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASSWORD ?? "" } : undefined;
+  return {
     host: env.SMTP_HOST,
     port: env.SMTP_PORT,
     secure: env.SMTP_SECURE,
-    ...(env.SMTP_USER ? { auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD ?? "" } } : {}),
-    pool: true,
+    requireTLS: !env.SMTP_SECURE && (env.SMTP_REQUIRE_TLS || auth !== undefined),
+    ...(auth ? { auth } : {}),
+    pool: true as const,
     maxConnections: opts.maxConnections ?? 3,
     connectionTimeout: opts.timeouts?.connection ?? 10_000,
     greetingTimeout: opts.timeouts?.greeting ?? 10_000,
     socketTimeout: opts.timeouts?.socket ?? 30_000,
-  });
+  };
+}
+
+/** SMTP mailer from `mailEnv`. Pooled; `close()` waits for in-flight sends, then closes the pool. */
+export function createMailer(env: MailEnv, opts: SmtpMailerOptions): Mailer {
+  const transport = nodemailer.createTransport(smtpTransportOptions(env, opts));
   const from = defaultFrom(opts.site, env.MAIL_FROM);
+  const inFlight = new Set<Promise<unknown>>();
+  let closing: Promise<void> | undefined;
+
+  const deliver = async <K extends TemplateId>(template: K, props: SendProps<K>, to: string) => {
+    const mail = await buildMail(template, props, to, { ...opts, from });
+    const info = await transport.sendMail({
+      from: mail.from,
+      to: mail.to,
+      subject: mail.subject,
+      html: mail.html,
+      text: mail.text,
+      headers: mail.headers,
+    });
+    return info.messageId;
+  };
 
   return {
-    async send(template, props, to) {
-      const mail = await buildMail(template, props, to, { ...opts, from });
-      const info = await transport.sendMail({
-        from: mail.from,
-        to: mail.to,
-        subject: mail.subject,
-        html: mail.html,
-        text: mail.text,
-        headers: mail.headers,
-      });
-      return info.messageId;
+    send(template, props, to) {
+      if (closing) return Promise.reject(new MailerClosedError());
+      const pending = deliver(template, props, to);
+      inFlight.add(pending);
+      const forget = () => inFlight.delete(pending);
+      pending.then(forget, forget);
+      return pending;
     },
-    async close() {
-      transport.close();
+    close() {
+      closing ??= Promise.allSettled(inFlight).then(() => transport.close());
+      return closing;
     },
   };
 }

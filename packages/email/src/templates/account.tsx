@@ -11,6 +11,7 @@ export interface VerifyEmailData {
 }
 
 export const verifyEmail = defineTemplate("verifyEmail", {
+  links: ["verifyUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: VerifyEmailData) => {
     const m = ctx.messages;
@@ -33,6 +34,7 @@ export interface MagicLinkData {
 }
 
 export const magicLink = defineTemplate("magicLink", {
+  links: ["signInUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: MagicLinkData) => {
     const m = ctx.messages;
@@ -54,6 +56,7 @@ export interface PasswordResetData {
 }
 
 export const passwordReset = defineTemplate("passwordReset", {
+  links: ["resetUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: PasswordResetData) => {
     const m = ctx.messages;

@@ -14,6 +14,7 @@ export interface DmcaNoticeReceivedData {
 }
 
 export const dmcaNoticeReceived = defineTemplate("dmcaNoticeReceived", {
+  links: ["noticeUrl"],
   subject: (ctx, d: DmcaNoticeReceivedData) => ctx.text(ctx.messages.subject, { content: d.contentTitle }),
   body: (ctx, d: DmcaNoticeReceivedData) => {
     const m = ctx.messages;
@@ -42,6 +43,7 @@ export interface ContentRestoredData {
 }
 
 export const contentRestored = defineTemplate("contentRestored", {
+  links: ["contentUrl"],
   subject: (ctx, d: ContentRestoredData) => ctx.text(ctx.messages.subject, { content: d.contentTitle }),
   body: (ctx, d: ContentRestoredData) => {
     const m = ctx.messages;
@@ -65,6 +67,7 @@ export interface AppealDecidedData {
 }
 
 export const appealDecided = defineTemplate("appealDecided", {
+  links: ["decisionUrl"],
   subject: (ctx, d: AppealDecidedData) => ctx.text(ctx.messages.subject, { appealRef: d.appealRef }),
   body: (ctx, d: AppealDecidedData) => {
     const m = ctx.messages;

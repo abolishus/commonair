@@ -32,9 +32,16 @@ await mailer.close();
   member announcements (governance vote opened / result published) `List-Unsubscribe` plus
   RFC 8058 `List-Unsubscribe-Post`. The unsubscribe URL must accept a one-click `POST`.
 - `to` must be one bare address; anything else throws `InvalidRecipientError`.
-- **Every `http(s)` link in the props must be on the instance's `PUBLIC_URL` origin**, or rendering
-  throws `EmailLinkError`. Signed downloads (data exports) go through an instance page that
-  checks the session and redirects, never a raw storage URL.
+- **Links are declared per template** (`links: ["resetUrl"]`). Each declared field must be an
+  absolute http(s) URL on the instance's `PUBLIC_URL` origin, without credentials, whitespace,
+  control characters or backslashes, or rendering throws `EmailLinkError` (naming the field, not
+  the value). The normalised `url.href` is what is rendered and put into `List-Unsubscribe`.
+  Every other field is free text, always rendered as escaped text, never as a link, so a title
+  that contains a URL cannot block a required notice. Signed downloads (data exports) go through
+  an instance page that checks the session and redirects, never a raw storage URL.
+- STARTTLS is required (`requireTLS`) when `SMTP_REQUIRE_TLS=true`, and always when SMTP
+  credentials are configured without implicit TLS. `close()` waits for in-flight sends, then
+  rejects new ones with `MailerClosedError`.
 - Tests use `new MemoryMailer({ site })`, which renders identically and records `sent`.
 
 ## Templates

@@ -14,6 +14,7 @@ export interface PayoutSentData {
 }
 
 export const payoutSent = defineTemplate("payoutSent", {
+  links: ["earningsUrl"],
   subject: (ctx, d: PayoutSentData) => ctx.text(ctx.messages.subject, { amount: ctx.money(d.amountCents, d.currency) }),
   body: (ctx, d: PayoutSentData) => {
     const m = ctx.messages;
@@ -46,6 +47,7 @@ export interface ChargebackNoticeData {
 }
 
 export const chargebackNotice = defineTemplate("chargebackNotice", {
+  links: ["earningsUrl"],
   subject: (ctx, d: ChargebackNoticeData) =>
     ctx.text(d.kind === "chargeback" ? ctx.messages.subjectChargeback : ctx.messages.subjectClawback, {
       amount: ctx.money(d.amountCents, d.currency),

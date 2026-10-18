@@ -4,7 +4,7 @@
 /** Sends through real SMTP (Mailpit) and reads the message back over Mailpit's API. */
 import { loadEnv, mailEnv } from "@commonair/config";
 import { afterAll, expect, test } from "vite-plus/test";
-import { createMailer, sampleData } from "../src/index.ts";
+import { createMailer, MailerClosedError, sampleData } from "../src/index.ts";
 import { testSite } from "./fixtures.ts";
 
 const MAILPIT_API = process.env.MAILPIT_API_URL ?? "http://localhost:8025";
@@ -66,4 +66,24 @@ test("pooled transport sends several messages concurrently", async () => {
   const ids = await Promise.all(recipients.map((r) => mailer.send("magicLink", samples.magicLink, r)));
   expect(new Set(ids).size).toBe(5);
   for (const r of recipients) expect((await waitForMessage(r)).Subject).toBe("Your sign-in link for Example Air");
+});
+
+test("SMTP_REQUIRE_TLS refuses a server without STARTTLS (Mailpit offers none)", async () => {
+  const strict = createMailer({ ...loadEnv(mailEnv), SMTP_REQUIRE_TLS: true }, { site });
+  const recipient = `tls-${crypto.randomUUID()}@air.example.test`;
+  try {
+    await expect(strict.send("magicLink", samples.magicLink, recipient)).rejects.toBeInstanceOf(Error);
+  } finally {
+    await strict.close();
+  }
+});
+
+test("close() lets an in-flight SMTP send finish", async () => {
+  const local = createMailer(loadEnv(mailEnv), { site });
+  const recipient = `close-${crypto.randomUUID()}@air.example.test`;
+  const sending = local.send("magicLink", samples.magicLink, recipient);
+  await local.close();
+  await expect(sending).resolves.toMatch(/^<.+>$/);
+  expect((await waitForMessage(recipient)).Subject).toBe("Your sign-in link for Example Air");
+  await expect(local.send("magicLink", samples.magicLink, recipient)).rejects.toBeInstanceOf(MailerClosedError);
 });

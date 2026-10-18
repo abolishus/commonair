@@ -18,6 +18,7 @@ export interface GovernanceVoteOpenedData {
 }
 
 export const governanceVoteOpened = defineTemplate("governanceVoteOpened", {
+  links: ["voteUrl", "unsubscribeUrl"],
   subject: (ctx, d: GovernanceVoteOpenedData) => ctx.text(ctx.messages.subject, { proposal: d.proposalTitle }),
   unsubscribeUrl: (d: GovernanceVoteOpenedData) => d.unsubscribeUrl,
   body: (ctx, d: GovernanceVoteOpenedData) => {
@@ -44,6 +45,7 @@ export interface GovernanceResultPublishedData {
 }
 
 export const governanceResultPublished = defineTemplate("governanceResultPublished", {
+  links: ["resultUrl", "unsubscribeUrl"],
   subject: (ctx, d: GovernanceResultPublishedData) => ctx.text(ctx.messages.subject, { proposal: d.proposalTitle }),
   unsubscribeUrl: (d: GovernanceResultPublishedData) => d.unsubscribeUrl,
   body: (ctx, d: GovernanceResultPublishedData) => {
@@ -72,6 +74,7 @@ export interface CouncilReviewRequestedData {
 }
 
 export const councilReviewRequested = defineTemplate("councilReviewRequested", {
+  links: ["respondUrl"],
   subject: (ctx, d: CouncilReviewRequestedData) => ctx.text(ctx.messages.subject, { proposal: d.proposalTitle }),
   body: (ctx, d: CouncilReviewRequestedData) => {
     const m = ctx.messages;

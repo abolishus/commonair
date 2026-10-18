@@ -30,12 +30,15 @@ export const templates = {
   dmcaNoticeReceived,
   contentRestored,
   appealDecided,
-} satisfies { [K in TemplateId]: TemplateDefinition<never, EmailCatalog[K]> };
+} satisfies {
+  [K in TemplateId]: Omit<TemplateDefinition<never, EmailCatalog[K]>, "links"> & { links: readonly string[] };
+};
 
 export type Templates = typeof templates;
 
 /** The data a template needs, e.g. `TemplateData<"payoutSent">`. */
-export type TemplateData<K extends TemplateId> =
-  Templates[K] extends TemplateDefinition<infer D, EmailCatalog[K]> ? D : never;
+export type TemplateData<K extends TemplateId> = Templates[K] extends { body(ctx: never, data: infer D): unknown }
+  ? D
+  : never;
 
 export const TEMPLATE_IDS = Object.keys(templates) as TemplateId[];

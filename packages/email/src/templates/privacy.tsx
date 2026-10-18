@@ -12,6 +12,7 @@ export interface DataExportReadyData {
 }
 
 export const dataExportReady = defineTemplate("dataExportReady", {
+  links: ["downloadUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: DataExportReadyData) => {
     const m = ctx.messages;
@@ -33,6 +34,7 @@ export interface AccountDeletionScheduledData {
 }
 
 export const accountDeletionScheduled = defineTemplate("accountDeletionScheduled", {
+  links: ["cancelUrl"],
   subject: (ctx, d: AccountDeletionScheduledData) => ctx.text(ctx.messages.subject, { date: ctx.date(d.deleteAt) }),
   body: (ctx, d: AccountDeletionScheduledData) => {
     const m = ctx.messages;
@@ -53,6 +55,7 @@ export interface AccountDeletionCompletedData {
 }
 
 export const accountDeletionCompleted = defineTemplate("accountDeletionCompleted", {
+  links: [],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: AccountDeletionCompletedData) => {
     const m = ctx.messages;

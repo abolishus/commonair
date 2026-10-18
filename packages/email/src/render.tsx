@@ -27,41 +27,50 @@ export interface RenderedEmail {
 }
 
 export class EmailLinkError extends Error {
-  constructor(public readonly url: string) {
-    super("email links must point at the instance's public URL");
+  /** The offending field; the value itself is not kept (it may be attacker-controlled). */
+  constructor(public readonly field: string) {
+    super(`email link "${field}" must be an http(s) URL on the instance's public origin`);
     this.name = "EmailLinkError";
   }
 }
 
+// ASCII whitespace, C0/C1 controls and backslashes: browsers strip or reinterpret them
+// (`java\tscript:`, `https:\\evil`), so a link containing any of them is refused outright.
+function hasUnsafeChar(value: string): boolean {
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code <= 0x20 || (code >= 0x7f && code <= 0x9f) || ch === "\\") return true;
+  }
+  return false;
+}
+
 /**
- * Every link in template data must stay on this instance: no third-party
- * hosts (tracking, phishing-lookalike redirects, raw storage URLs). Signed
- * downloads go through an instance page that redirects after a session check.
+ * Validate one link and return its normalised form (`url.href`), which is what gets rendered
+ * and put into headers. It must be an absolute http(s) URL on the instance's own origin, with
+ * no credentials, whitespace, control characters or backslashes: this rejects
+ * protocol-relative (`//evil`), relative, `javascript:`/`vbscript:`/`file:`/`data:` and
+ * lookalike-host links. Signed downloads go through an instance page that redirects.
  */
-export function assertInstanceLinks(data: unknown, site: InstanceSite): void {
+export function normalizeInstanceUrl(value: unknown, site: Pick<InstanceSite, "publicUrl">, field = "url"): string {
+  if (typeof value !== "string" || value === "" || hasUnsafeChar(value)) throw new EmailLinkError(field);
+  if (!/^https?:\/\//i.test(value)) throw new EmailLinkError(field);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new EmailLinkError(field);
+  }
   const origin = new URL(site.publicUrl).origin;
-  const visit = (value: unknown): void => {
-    if (typeof value === "string") {
-      if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) return;
-      let url: URL;
-      try {
-        url = new URL(value);
-      } catch {
-        return;
-      }
-      if ((url.protocol === "http:" || url.protocol === "https:") && url.origin === origin) return;
-      if (
-        url.protocol === "http:" ||
-        url.protocol === "https:" ||
-        url.protocol === "javascript:" ||
-        url.protocol === "data:"
-      )
-        throw new EmailLinkError(value);
-      return;
-    }
-    if (value && typeof value === "object" && !(value instanceof Date)) Object.values(value).forEach(visit);
-  };
-  visit(data);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== origin) throw new EmailLinkError(field);
+  if (url.username !== "" || url.password !== "") throw new EmailLinkError(field);
+  return url.href;
+}
+
+/** Return a copy of `data` with every declared link field validated and normalised. */
+export function normalizeLinks<D>(data: D, links: readonly string[], site: Pick<InstanceSite, "publicUrl">): D {
+  const out = { ...data } as Record<string, unknown>;
+  for (const key of links) out[key] = normalizeInstanceUrl(out[key], site, key);
+  return out as D;
 }
 
 // html-to-text upper-cases headings by default, which is wrong for many scripts (and Turkish i).
@@ -73,13 +82,13 @@ const TEXT_SELECTORS = [
 
 export async function renderEmail<K extends TemplateId>(
   id: K,
-  data: TemplateData<K>,
+  input: TemplateData<K>,
   opts: RenderOptions,
 ): Promise<RenderedEmail> {
-  assertInstanceLinks(data, opts.site);
   const { locale, catalog } = resolveCatalog(opts.locale, opts.catalogs);
   // The registry is keyed by id, so this pairing is sound; TS cannot correlate the generic.
   const def = templates[id] as unknown as TemplateDefinition<TemplateData<K>, unknown>;
+  const data = normalizeLinks(input, def.links, opts.site);
   const ctx = createContext(opts.site, locale, catalog.layout, catalog[id] as unknown) as EmailContext<unknown>;
   const subject = singleLine(def.subject(ctx, data));
   const preview = def.preview ? def.preview(ctx, data) : ctx.text((catalog[id] as { preview: string }).preview);

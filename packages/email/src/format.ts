@@ -13,7 +13,7 @@ const PLACEHOLDER = /\{(\w+)\}/g;
  * visible rather than dropped, so a broken translation is noticed, not silent.
  */
 export function interpolate(message: string, vars: Record<string, string | number>): string {
-  return message.replace(PLACEHOLDER, (whole, key: string) => (key in vars ? String(vars[key]) : whole));
+  return message.replace(PLACEHOLDER, (whole, key: string) => (Object.hasOwn(vars, key) ? String(vars[key]) : whole));
 }
 
 /** Like `interpolate`, but values may be React nodes (links, emphasis). */
@@ -24,7 +24,7 @@ export function interpolateNodes(message: string, vars: Record<string, ReactNode
     const key = match[1] ?? "";
     const index = match.index;
     if (index > last) parts.push(message.slice(last, index));
-    parts.push(key in vars ? createElement(Fragment, { key: `${key}-${index}` }, vars[key]) : match[0]);
+    parts.push(Object.hasOwn(vars, key) ? createElement(Fragment, { key: `${key}-${index}` }, vars[key]) : match[0]);
     last = index + match[0].length;
   }
   if (last < message.length) parts.push(message.slice(last));
