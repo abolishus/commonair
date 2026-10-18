@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The private network every CommonAir container joins (compose's `default`).
+[Network]
+NetworkName=commonair

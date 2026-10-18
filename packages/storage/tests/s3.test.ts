@@ -78,4 +78,27 @@ describe("S3 storage", () => {
     expect(u.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
     expect(u.searchParams.get("response-content-disposition")).toBe('attachment; filename="my _export_.zip"');
   });
+
+  test("presigned PUT signs the content type and exact length", async () => {
+    const s = createS3Storage(base);
+    const u = new URL(
+      await s.presignPut("media", "channels/c/avatar/a.png", {
+        expiresSeconds: 300,
+        contentType: "image/png",
+        contentLength: 1234,
+      }),
+    );
+    const signed = u.searchParams.get("X-Amz-SignedHeaders")?.split(";") ?? [];
+    expect(signed).toContain("content-type");
+    expect(signed).toContain("content-length");
+    expect(signed).toContain("host");
+  });
+
+  test("presigned PUT refuses a bad length", async () => {
+    const s = createS3Storage(base);
+    for (const contentLength of [-1, 1.5, Number.NaN])
+      await expect(
+        s.presignPut("media", "k", { expiresSeconds: 60, contentType: "image/png", contentLength }),
+      ).rejects.toThrow(RangeError);
+  });
 });

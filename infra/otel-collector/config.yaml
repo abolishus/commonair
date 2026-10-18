@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The one telemetry entry point. Services export OTLP (traces, metrics, logs) to
+# http://otel-collector:4318; the collector fans out:
+#   traces  → Tempo (OTLP gRPC)
+#   metrics → Prometheus exporter on :9464, scraped by Prometheus
+#   logs    → Loki's native OTLP endpoint
+# Podman's log files are not portable to read, so no filelog receiver: stdout JSON
+# logs stay available via `podman logs`, and OTLP is the shipped copy.
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+  batch:
+    timeout: 5s
+  # Defense in depth for "no PII in logs": drop attributes that commonly carry it.
+  attributes/scrub:
+    actions:
+      - { key: client.address, action: delete }
+      - { key: http.client_ip, action: delete }
+      - { key: user.email, action: delete }
+      - { key: enduser.id, action: hash }
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/scrub, batch]
+      exporters: [otlphttp/loki]

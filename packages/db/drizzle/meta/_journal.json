@@ -43,6 +43,13 @@
       "when": 1792360948820,
       "tag": "0005_two_factor_lockout_and_mature",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792362823535,
+      "tag": "0006_integrity_scan_indexes",
+      "breakpoints": true
     }
   ]
 }

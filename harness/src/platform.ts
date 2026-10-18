@@ -262,8 +262,14 @@ export class Platform {
     switch (need) {
       case "api":
         return http(`${e.HARNESS_API_URL}/healthz`, "API");
-      case "web":
-        return http(e.HARNESS_WEB_URL, "web app");
+      case "web": {
+        // The web app answers 200 on /healthz (docs/testing/e1-selectors.md); anything else on the
+        // port (a 404 from another server) does not count.
+        const url = new URL("/healthz", e.HARNESS_WEB_URL);
+        const res = await fetch(url, { signal: AbortSignal.timeout(3_000) }).catch(() => null);
+        if (!res) return `web app unreachable at ${url.origin}`;
+        return res.ok ? null : `web app /healthz answered HTTP ${res.status} at ${url.origin}`;
+      }
       case "chat":
         return http(e.HARNESS_CHAT_HEALTH_URL, "chat service");
       case "irc":

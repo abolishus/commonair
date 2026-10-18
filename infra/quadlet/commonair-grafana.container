@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Grafana OSS (provisioned datasources; admin password from the env file).
+[Unit]
+Description=CommonAir grafana
+Requires=commonair-prometheus.service
+After=commonair-prometheus.service
+Requires=commonair-loki.service
+After=commonair-loki.service
+Requires=commonair-tempo.service
+After=commonair-tempo.service
+
+[Container]
+Image=docker.io/grafana/grafana:13.2.4
+ContainerName=commonair-grafana
+Network=commonair.network
+NetworkAlias=grafana
+EnvironmentFile=%h/.config/commonair/commonair.env
+Environment=GF_SECURITY_ADMIN_USER=admin
+Environment=GF_AUTH_ANONYMOUS_ENABLED=false
+Environment=GF_USERS_ALLOW_SIGN_UP=false
+Environment=GF_ANALYTICS_REPORTING_ENABLED=false
+Environment=GF_ANALYTICS_CHECK_FOR_UPDATES=false
+Environment=GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+Environment=GF_NEWS_NEWS_FEED_ENABLED=false
+Environment=GF_PLUGINS_PLUGIN_ADMIN_ENABLED=false
+Secret=commonair-grafana-admin-password,type=env,target=GF_SECURITY_ADMIN_PASSWORD
+PublishPort=127.0.0.1:3030:3000
+Volume=%h/commonair/infra/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+Volume=%h/commonair/infra/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
+Volume=commonair-grafana-data.volume:/var/lib/grafana
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:3000/api/health
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

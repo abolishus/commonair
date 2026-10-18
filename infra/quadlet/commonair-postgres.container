@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# PostgreSQL 17 + WAL-G (infra/postgres/Containerfile).
+[Unit]
+Description=CommonAir postgres
+
+[Container]
+Image=localhost/commonair/postgres:latest
+ContainerName=commonair-postgres
+Network=commonair.network
+NetworkAlias=postgres
+EnvironmentFile=%h/.config/commonair/commonair.env
+Environment=POSTGRES_USER=commonair
+Environment=POSTGRES_DB=commonair
+Environment=WALG_S3_ENDPOINT=http://garage:3900
+Environment=S3_REGION=garage
+PublishPort=127.0.0.1:5432:5432
+Volume=commonair-postgres-data.volume:/var/lib/postgresql/data
+HealthCmd=pg_isready -U commonair -d commonair
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

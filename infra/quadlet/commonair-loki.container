@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Loki (logs via OTLP).
+[Unit]
+Description=CommonAir loki
+
+[Container]
+Image=localhost/commonair/loki:latest
+ContainerName=commonair-loki
+Network=commonair.network
+NetworkAlias=loki
+Volume=%h/commonair/infra/loki/loki.yaml:/etc/loki/config.yaml:ro,Z
+Volume=commonair-loki-data.volume:/loki
+Exec=-config.file=/etc/loki/config.yaml
+HealthCmd=/usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:3100/ready
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

@@ -4,6 +4,9 @@
 /**
  * Create `.env` from `.env.example`, replacing every `__generate__` placeholder
  * with a fresh random secret. Never overwrites an existing `.env` unless --force.
+ * --merge keeps every value already in the target and only fills keys it lacks, so new
+ * variables can be added without rotating secrets (an existing Postgres volume keeps its
+ * password).
  */
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { generateSigningKey, randomSecret } from "../packages/tokens/src/index.ts";
@@ -11,10 +14,18 @@ import { generateSigningKey, randomSecret } from "../packages/tokens/src/index.t
 const outIdx = process.argv.indexOf("--out");
 const target = outIdx === -1 ? ".env" : process.argv[outIdx + 1];
 if (!target || target.startsWith("--")) {
-  console.error("usage: bun scripts/init-env.ts [--out <path>] [--force]");
+  console.error("usage: bun scripts/init-env.ts [--out <path>] [--force | --merge]");
   process.exit(2);
 }
-if (existsSync(target) && !process.argv.includes("--force")) {
+const merge = process.argv.includes("--merge");
+const existing = new Map<string, string>();
+if (merge && existsSync(target)) {
+  for (const line of readFileSync(target, "utf8").replace(/\r\n/g, "\n").split("\n")) {
+    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line);
+    if (m?.[1] !== undefined && m[2] !== undefined) existing.set(m[1], m[2]);
+  }
+}
+if (existsSync(target) && !merge && !process.argv.includes("--force")) {
   console.error(`${target} already exists (use --force to regenerate)`);
   process.exit(1);
 }
@@ -28,6 +39,7 @@ const out = readFileSync(".env.example", "utf8")
   .split("\n")
   .map((line) => {
     const [key] = line.split("=");
+    if (key !== undefined && existing.has(key)) return `${key}=${existing.get(key)}`;
     if (line.endsWith("=__generate_ed25519__")) return `${key}=${pkcs8B64}`;
     if (line.endsWith("=__generate_hex64__")) return `${key}=${hex(32)}`;
     if (!line.endsWith("=__generate__")) return line;
