@@ -268,6 +268,27 @@
         "zod": "catalog:",
       },
     },
+    "services/chat": {
+      "name": "@commonair/chat",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/config": "workspace:*",
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/observability": "workspace:*",
+        "@commonair/service": "workspace:*",
+        "@commonair/tokens": "workspace:*",
+        "@opentelemetry/api": "catalog:",
+        "drizzle-orm": "catalog:",
+        "iovalkey": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "services/irc": {
       "name": "@commonair/irc",
       "version": "0.0.0",
@@ -396,6 +417,8 @@
     "@base-ui/utils": ["@base-ui/utils@0.5.0", "", { "dependencies": { "@babel/runtime": "^7.29.7 || ^8.0.0", "@floating-ui/utils": "^0.2.12", "reselect": "^5.3.0", "use-sync-external-store": "^1.7.0" }, "peerDependencies": { "@types/react": "^17 || ^18 || ^19", "react": "^17 || ^18 || ^19", "react-dom": "^17 || ^18 || ^19" }, "optionalPeers": ["@types/react"] }, "sha512-dYGGcEttjkYiMoa5nHm8vLaJ2UcuTWxo3BFAwOYXeRg/q7UVVvA6cacEIXEs3FgBfK1CGtW1ptElqs7wsx+t9A=="],
 
     "@blazediff/core": ["@blazediff/core@1.10.0", "", {}, "sha512-AOQff0zgR7cGsZL+4E7hVkmujoPUpm0J9xzWGWZj5wCjd3gmxESXAPfKyuzs93VdpQNFhHlBhfOjrcZ+XTERtQ=="],
+
+    "@commonair/chat": ["@commonair/chat@workspace:services/chat"],
 
     "@commonair/config": ["@commonair/config@workspace:packages/config"],
 
