@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
-import { templates } from "../mail.ts";
+import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
 import { ageProblem, usernameProblem } from "./identity.ts";
 
@@ -48,6 +48,8 @@ export async function ensureChannel(db: Executor, user: { id: string; username: 
 const bodyOf = (ctx: { body?: unknown } | null | undefined): Record<string, unknown> =>
   ctx?.body && typeof ctx.body === "object" ? (ctx.body as Record<string, unknown>) : {};
 
+const localeOf = (u: Record<string, unknown>) => (typeof u.locale === "string" ? u.locale : undefined);
+
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
 export function createAuth(deps: Deps) {
@@ -66,7 +68,9 @@ export function createAuth(deps: Deps) {
     if (clientId && clientSecret) social[id] = { clientId, clientSecret, disableImplicitSignUp: true };
 
   const publicUrl = new URL(site.publicUrl);
-  const send = (m: Parameters<typeof mailer.send>[0]) => mailer.send(m);
+  const VERIFY_MINUTES = 60;
+  const RESET_MINUTES = 60;
+  const MAGIC_MINUTES = 10;
 
   return betterAuth({
     appName: site.name,
@@ -108,12 +112,26 @@ export function createAuth(deps: Deps) {
       minPasswordLength: 10,
       maxPasswordLength: 256,
       revokeSessionsOnPasswordReset: true,
-      sendResetPassword: async ({ user, url }) => send(templates.resetPassword(site, user.email, url)),
+      resetPasswordTokenExpiresIn: RESET_MINUTES * 60,
+      sendResetPassword: async ({ user, url }) => {
+        await mailer.send(
+          "passwordReset",
+          { resetUrl: publicLink(site, url), expiresInMinutes: RESET_MINUTES, locale: localeOf(user) },
+          user.email,
+        );
+      },
     },
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
-      sendVerificationEmail: async ({ user, url }) => send(templates.verifyEmail(site, user.email, url)),
+      expiresIn: VERIFY_MINUTES * 60,
+      sendVerificationEmail: async ({ user, url }) => {
+        await mailer.send(
+          "verifyEmail",
+          { displayName: user.name, verifyUrl: publicLink(site, url), expiresInMinutes: VERIFY_MINUTES, locale: localeOf(user) },
+          user.email,
+        );
+      },
     },
     socialProviders: social,
     plugins: [
@@ -135,8 +153,10 @@ export function createAuth(deps: Deps) {
       magicLink({
         // Magic links sign existing members in; they never create accounts (no age gate on that path).
         disableSignUp: true,
-        expiresIn: 600,
-        sendMagicLink: async ({ email, url }) => send(templates.magicLink(site, email, url)),
+        expiresIn: MAGIC_MINUTES * 60,
+        sendMagicLink: async ({ email, url }) => {
+          await mailer.send("magicLink", { signInUrl: publicLink(site, url), expiresInMinutes: MAGIC_MINUTES }, email);
+        },
       }),
       passkey({ rpID: publicUrl.hostname, rpName: site.name, origin: site.publicUrl }),
     ],
@@ -188,8 +208,12 @@ export function createAuth(deps: Deps) {
           after: async (user, ctx) => {
             if (!ctx || !twoFactorEnabling.has(ctx) || user.twoFactorEnabled !== true) return;
             twoFactorEnabling.delete(ctx);
-            await send(templates.twoFactorEnabled(site, user.email)).catch((err: unknown) =>
-              logger.warn("2fa notice failed", { err }),
+            await sendNotice(logger, "twoFactorEnabled", () =>
+              mailer.send(
+                "twoFactorEnabled",
+                { changedAt: deps.now(), securityUrl: appUrl(site, "/settings/security"), locale: localeOf(user) },
+                user.email,
+              ),
             );
           },
         },

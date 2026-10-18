@@ -64,7 +64,8 @@ describe("signup gates", () => {
 test("signup → verification email in Mailpit → sign-in; channel auto-created", async () => {
   const s = await signUpAndSignIn(api);
   const mail = await mailTo(s.email);
-  expect(mail?.subject).toMatch(/verify/i);
+  expect(mail?.subject).toMatch(/confirm your email/i);
+  expect(mail?.text).toContain(`${api.url}/api/auth/verify-email?token=`);
   const me = await s.client.call<{ username: string; channelSlug: string; emailVerified: boolean; isAdult: boolean }>(
     "GET",
     "/api/me",

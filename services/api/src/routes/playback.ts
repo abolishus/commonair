@@ -7,6 +7,7 @@ import { RENDITIONS } from "@commonair/contracts/enums";
 import { KEYS, mediaPath } from "@commonair/contracts/internal";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
+import { recordHeartbeat } from "@commonair/integrity";
 import { hmacHex, signPlaybackToken, verifyPlaybackToken } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
 import { channelBySlug, iso } from "../lib/dto.ts";
@@ -100,6 +101,7 @@ export const playback = {
       cdn: { enabled: deps.env.CDN_PROVIDER === "origin-pull" && Boolean(deps.env.CDN_BASE_URL), threshold: deps.env.CDN_BURST_VIEWER_THRESHOLD },
       channelVerifiedViewers: await viewerCount(deps, c.id),
     });
+    const network = deps.classifier.classify(req.ip);
     await deps.db.insert(playbackSessions).values({
       id: sid,
       channelId: c.id,
@@ -108,6 +110,8 @@ export const playback = {
       deviceHash: await hmacHex(deps.env.AUTH_SECRET, `device:${input.deviceId}`),
       ipHash: req.ipHash,
       userAgent: req.userAgent?.slice(0, 256) ?? null,
+      asn: network.asn,
+      datacenter: network.hosting ? (network.label ?? "hosting") : null,
       assignedSource: assignment.source,
       relayId: assignment.source === "relay" ? assignment.relayId : null,
       startedAt: deps.now(),
@@ -168,6 +172,18 @@ export const playback = {
         .update(playbackSessions)
         .set({ verdict: v.verdict })
         .where(and(eq(playbackSessions.id, s.id), eq(playbackSessions.verdict, "pending")));
+    // Evidence for the integrity scorer (worker), which takes over verdicts from verify.ts.
+    await recordHeartbeat(deps.valkey, s.id, {
+      at: now.getTime(),
+      playedSeconds: input.playedSeconds,
+      bufferSeconds: input.bufferSeconds,
+      visible: input.visible,
+      muted: input.muted,
+      stalls: input.stalls,
+      bytesHttp: input.bytesHttp,
+      bytesP2p: input.bytesP2p,
+      ...(input.fingerprint ? { fingerprint: input.fingerprint } : {}),
+    });
     const tx = deps.valkey
       .multi()
       .hset(verifyKey(s.id), { consistent: String(v.state.consistent), engaged: v.state.engaged ? "1" : "0" })

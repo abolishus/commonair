@@ -7,6 +7,7 @@ import type { ValkeyClient } from "@commonair/service";
 import type { ObjectStorage } from "@commonair/storage";
 import type { SigningKey } from "@commonair/tokens";
 import type { InstanceSite } from "@commonair/config/site";
+import type { NetworkClassifier } from "@commonair/integrity";
 import type { ApiEnv } from "./env.ts";
 import type { Mailer } from "./mail.ts";
 import type { RateLimitBucket, RateLimitRule, RateLimitStore } from "./lib/ratelimit.ts";
@@ -32,5 +33,7 @@ export interface Deps {
   probes: Record<string, StatusProbe>;
   /** Auth features that depend on the database schema (see buildDeps). */
   authFeatures: { twoFactor: boolean };
+  /** Hosting-provider (datacenter) lookup for new playback sessions. */
+  classifier: NetworkClassifier;
   now: () => Date;
 }

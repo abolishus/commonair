@@ -43,7 +43,8 @@ export async function startApi(opts: { rateLimits?: Partial<Deps["rateLimits"]>;
   const env = loadApiEnv({
     NODE_ENV: "test",
     LOG_LEVEL: process.env.API_TEST_LOG ? "debug" : "error",
-    PUBLIC_URL: "http://localhost:3000",
+    // Mail links must be on PUBLIC_URL; in tests the API itself serves that origin.
+    PUBLIC_URL: url,
     API_PUBLIC_URL: url,
     DATABASE_URL: db.appUrl,
     VALKEY_URL,

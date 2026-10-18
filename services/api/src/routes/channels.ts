@@ -151,7 +151,7 @@ export const channelsRoutes = {
     const c = await channelBySlug(deps, input.channel);
     if (!c) throw notFound("Channel not found");
     if (c.ownerId === caller.user.id) throw badRequest("You cannot follow your own channel");
-    return deps.db.transaction(async (tx) => {
+    const result = await deps.db.transaction(async (tx) => {
       const [inserted] = await tx
         .insert(follows)
         .values({ followerId: caller.user.id, channelId: c.id, notify: input.notify })
@@ -182,6 +182,9 @@ export const channelsRoutes = {
         });
       return { following: true as const, followerCount: row?.n ?? c.followerCount + 1 };
     });
+    // Followers-only chat depends on follow state.
+    await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: caller.user.id });
+    return result;
   }),
 
   unfollow: os.channels.unfollow.handler(async ({ context, input }) => {
@@ -189,7 +192,7 @@ export const channelsRoutes = {
     const caller = requireCaller(context);
     const c = await channelBySlug(deps, input.channel);
     if (!c) throw notFound("Channel not found");
-    return deps.db.transaction(async (tx) => {
+    const result = await deps.db.transaction(async (tx) => {
       const [deleted] = await tx
         .delete(follows)
         .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)))
@@ -206,6 +209,8 @@ export const channelsRoutes = {
       const [row] = await tx.select({ n: channels.followerCount }).from(channels).where(eq(channels.id, c.id));
       return { following: false as const, followerCount: row?.n ?? 0 };
     });
+    await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: caller.user.id });
+    return result;
   }),
 
   followers: os.channels.followers.handler(async ({ context, input }) => {
@@ -331,11 +336,6 @@ async function changeRole(
     return true;
   });
   if (changed)
-    await publishControl(deps, c.id, {
-      op: "event",
-      channel: c.slug,
-      type: "roles",
-      data: { userId: target.id, role: input.role, change: op },
-    });
+    await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
 }
 

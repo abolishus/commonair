@@ -4,6 +4,7 @@
 /** Programmatic entry points: build dependencies and the app (main.ts and tests use these). */
 import { instanceSite } from "@commonair/config/env";
 import { createDb, type DbHandle } from "@commonair/db";
+import { classifierFromEnv } from "@commonair/integrity";
 import { createLogger, type Logger } from "@commonair/observability";
 import { createValkey } from "@commonair/service";
 import { storageFromEnv } from "@commonair/storage";
@@ -11,7 +12,7 @@ import { importSigningKey } from "@commonair/tokens";
 import pkg from "../package.json" with { type: "json" };
 import type { Deps, StatusProbe } from "./deps.ts";
 import type { ApiEnv } from "./env.ts";
-import { createSmtpMailer, defaultFrom } from "./mail.ts";
+import { createApiMailer } from "./mail.ts";
 import { DEFAULT_RATE_LIMITS, valkeyRateLimitStore } from "./lib/ratelimit.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
@@ -71,17 +72,7 @@ export async function buildDeps(
   const db = createDb({ url: env.DATABASE_URL, max: env.DATABASE_POOL_MAX, applicationName: "commonair-api" });
   const valkey = createValkey(env.VALKEY_URL, { keyPrefix: opts.valkeyKeyPrefix, name: "api" });
   const site = instanceSite(env);
-  const mailer = createSmtpMailer(
-    {
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
-      user: env.SMTP_USER,
-      password: env.SMTP_PASSWORD,
-      from: defaultFrom(site, env.MAIL_FROM),
-    },
-    logger,
-  );
+  const mailer = createApiMailer(env, site);
   const deps: Deps = {
     env,
     site,
@@ -97,6 +88,7 @@ export async function buildDeps(
     rateLimitStore: valkeyRateLimitStore(valkey),
     probes: statusProbes(env),
     authFeatures: await detectAuthFeatures(db),
+    classifier: classifierFromEnv(process.env).classifier,
     now: () => new Date(),
     ...opts.overrides,
   };

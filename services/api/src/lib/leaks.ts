@@ -13,7 +13,7 @@ import type { Logger } from "@commonair/observability";
 import type { InstanceSite } from "@commonair/config/site";
 import { sha256Hex } from "@commonair/tokens";
 import { audit } from "../events/audit.ts";
-import { templates, type Mailer } from "../mail.ts";
+import { appUrl, sendNotice, type Mailer } from "../mail.ts";
 import { findLeakedKeys, isStreamKeySecret } from "./streamkeys.ts";
 
 export { findLeakedKeys, redactKeys } from "./streamkeys.ts";
@@ -63,13 +63,24 @@ export async function revokeLeakedKey(deps: LeakDeps, secret: string, source: Le
   });
   if (!revoked) return null;
   const [owner] = await deps.db
-    .select({ email: schema.users.email })
+    .select({ email: schema.users.email, locale: schema.users.locale, channelName: schema.channels.displayName })
     .from(schema.users)
+    .innerJoin(schema.channels, eq(schema.channels.ownerId, schema.users.id))
     .where(eq(schema.users.id, revoked.ownerId));
   if (owner)
-    await deps.mailer
-      .send(templates.streamKeyLeaked(deps.site, owner.email))
-      .catch((err: unknown) => deps.logger.warn("leak notice failed", { err, channelId: revoked.channelId }));
+    await sendNotice(deps.logger, "streamKeyRevoked", () =>
+      deps.mailer.send(
+        "streamKeyRevoked",
+        {
+          channelName: owner.channelName,
+          detectedAt: now,
+          foundIn: source,
+          streamKeysUrl: appUrl(deps.site, "/dashboard/stream"),
+          locale: owner.locale,
+        },
+        owner.email,
+      ),
+    );
   deps.logger.warn("revoked leaked stream key", { channelId: revoked.channelId, source });
   return revoked.channelId;
 }

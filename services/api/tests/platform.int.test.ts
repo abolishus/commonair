@@ -354,7 +354,7 @@ describe("chat moderation", () => {
       expect(settings.body.slowModeSeconds).toBe(5);
       expect(await eventsOf(c.id, "channel.chat_settings.update")).toHaveLength(1);
       await Bun.sleep(200);
-      expect(frames.map((f) => f.op)).toEqual(["ban", "event", "settings"]);
+      expect(frames.map((f) => f.op)).toEqual(["ban", "invalidate", "settings"]);
       expect(frames[0]).toMatchObject({ userId: bob.userId, reason: "spam" });
     } finally {
       sub.disconnect();

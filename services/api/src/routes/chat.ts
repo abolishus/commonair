@@ -363,12 +363,7 @@ export const chat = {
           ...moderatorFields(await actorRow(tx, caller.user.id)),
         });
       });
-      await publishControl(deps, c.id, {
-        op: "event",
-        channel: c.slug,
-        type: "unban",
-        data: { userId: target.id, username: target.username },
-      });
+      await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
       return { ok: true as const };
     }),
   },
@@ -408,7 +403,7 @@ export const chat = {
         });
         return f;
       });
-      await publishControl(deps, c.id, { op: "event", channel: c.slug, type: "filters", data: { change: "create", id: row.id } });
+      await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
       return { id: row.id, pattern: row.pattern, isRegex: row.isRegex, action: row.action, replacement: row.replacement };
     }),
 
@@ -431,7 +426,7 @@ export const chat = {
           channelId: c.id,
         });
       });
-      await publishControl(deps, c.id, { op: "event", channel: c.slug, type: "filters", data: { change: "remove", id: input.id } });
+      await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
       return { ok: true as const };
     }),
   },
@@ -468,7 +463,7 @@ export const chat = {
           .values({ channelId: c.id, code: input.code, imageKey: input.imageKey, tier: input.tier, animated: input.imageKey.endsWith(".gif") })
           .returning();
         if (!row) throw new Error("emote insert returned no row");
-        await publishControl(deps, c.id, { op: "event", channel: c.slug, type: "emotes", data: { change: "create", id: row.id } });
+        await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
         return toEmote(deps, new Map([[c.id, c.slug]]))(row);
       } catch (err) {
         if (isUniqueViolation(err)) throw conflict("An emote with this code already exists");
@@ -484,7 +479,7 @@ export const chat = {
         .where(and(eq(emotes.id, input.id), eq(emotes.channelId, c.id)))
         .returning({ id: emotes.id });
       if (deleted.length === 0) throw notFound("Emote not found");
-      await publishControl(deps, c.id, { op: "event", channel: c.slug, type: "emotes", data: { change: "remove", id: input.id } });
+      await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
       return { ok: true as const };
     }),
   },
