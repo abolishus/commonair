@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import type * as React from "react";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { ViewIcon } from "@hugeicons/core-free-icons";
+import { cva, type VariantProps } from "class-variance-authority";
+import { formatCompactNumber, formatNumber } from "../lib/format.ts";
+import { useResolvedLocale, useUiMessages } from "../lib/locale.tsx";
+import { cn } from "../lib/utils.ts";
+
+const viewerCountVariants = cva("inline-flex items-center gap-1 tabular-nums", {
+  variants: {
+    variant: {
+      default: "text-muted-foreground",
+      overlay: "rounded-none bg-overlay px-1.5 py-0.5 text-overlay-foreground",
+    },
+    size: { sm: "text-[0.625rem] [&_svg]:size-3", md: "text-xs [&_svg]:size-3.5" },
+  },
+  defaultVariants: { variant: "default", size: "md" },
+});
+
+export interface ViewerCountProps
+  extends Omit<React.ComponentProps<"span">, "children">, VariantProps<typeof viewerCountVariants> {
+  /** Verified viewers only (the API never exposes excluded traffic). */
+  count: number;
+  locale?: string;
+  /** Accessible label; defaults to `messages.viewerCount` ("1,234 verified viewers"). */
+  label?: (formatted: string, count: number) => string;
+  icon?: boolean;
+}
+
+/** Compact viewer count ("1.2K") with a full, explicit "verified viewers" label for screen readers. */
+export function ViewerCount({
+  count,
+  locale,
+  label,
+  icon = true,
+  variant,
+  size,
+  className,
+  ...props
+}: ViewerCountProps): React.JSX.Element {
+  const messages = useUiMessages();
+  const resolved = useResolvedLocale(locale);
+  const safe = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+  const accessible = (label ?? messages.viewerCount)(formatNumber(safe, resolved), safe);
+  return (
+    <span data-slot="viewer-count" className={cn(viewerCountVariants({ variant, size }), className)} {...props}>
+      {icon && <HugeiconsIcon icon={ViewIcon} strokeWidth={2} aria-hidden />}
+      <span aria-hidden>{formatCompactNumber(safe, resolved)}</span>
+      <span className="sr-only">{accessible}</span>
+    </span>
+  );
+}
