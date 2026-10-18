@@ -13,6 +13,7 @@ import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import type { Logger } from "@commonair/observability";
 import { authorizeViewer, checkCdnAuth, CDN_AUTH_HEADER, type RelayAuth } from "./auth.ts";
 import type { ChannelDirectory, LiveChannel } from "./channels.ts";
+import { clientIp, FailureLimiter, type Cidr } from "./clientip.ts";
 import type { ContentStore, MediaObject } from "./content.ts";
 import type { EgressSource, SegmentLog } from "./accounting.ts";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
@@ -26,6 +27,7 @@ import {
   type MediaRequest,
 } from "./paths.ts";
 import { rewritePlaylist, synthesizeMultivariant, type UriTarget, type VariantSource } from "./playlist.ts";
+import type { TokenRefresher } from "./refresh.ts";
 import { UpstreamError } from "./upstream.ts";
 
 export interface HandlerDeps {
@@ -34,11 +36,18 @@ export interface HandlerDeps {
   channels: ChannelDirectory;
   relays: RelayAuth;
   segments: SegmentLog;
+  refresher: TokenRefresher;
   cdn: { enabled: boolean; baseUrl?: string; authValue: string };
+  /** Proxies whose X-Forwarded-For is believed (for per-IP limits). */
+  trustedProxies?: Cidr[];
+  /** Failed relay authentications per client IP before 429 (per minute). */
+  relayAuthFailuresPerMinute?: number;
   metrics?: OriginMetrics;
   logger?: Logger;
   now?: () => number;
 }
+
+export type OriginFetch = (req: Request, peerIp?: string) => Promise<Response>;
 
 /** Who is pulling, after authentication. */
 type Puller =
@@ -56,24 +65,32 @@ const CORS: Record<string, string> = {
 
 const dec = new TextDecoder();
 
-export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Response> {
+export function createHandler(deps: HandlerDeps): OriginFetch {
   const metrics = deps.metrics ?? noopMetrics;
   const now = deps.now ?? Date.now;
+  const relayFailures = new FailureLimiter(deps.relayAuthFailuresPerMinute ?? 10, 60_000, 50_000, now);
 
-  const fail = (status: number, error: string, mr?: MediaRequest) => {
-    const res = Response.json({ error }, { status, headers: mr?.route === "relayPull" ? {} : CORS });
+  const fail = (status: number, error: string, mr?: MediaRequest, headers: Record<string, string> = {}) => {
+    const res = Response.json(
+      { error },
+      { status, headers: { ...(mr?.route === "relayPull" ? {} : CORS), ...headers } },
+    );
     res.headers.set("cache-control", "no-store");
     return res;
   };
 
-  async function authenticate(req: Request, url: URL, mr: MediaRequest): Promise<Puller | Response> {
+  async function authenticate(req: Request, url: URL, mr: MediaRequest, peerIp?: string): Promise<Puller | Response> {
     if (mr.route === "hls") {
       const r = await authorizeViewer(deps.publicKey, url.searchParams.get("t"), mr);
       return r.ok ? { route: "hls", claims: r.claims, token: r.token } : fail(403, `forbidden: ${r.reason}`, mr);
     }
     if (mr.route === "relayPull") {
+      const ip = clientIp(peerIp, req.headers.get("x-forwarded-for"), deps.trustedProxies ?? []) ?? "unknown";
+      if (relayFailures.blocked(ip)) return fail(429, "too_many_failed_attempts", mr, { "retry-after": "60" });
       const relay = await deps.relays.authenticate(req.headers.get("authorization"));
-      return relay ? { route: "relayPull", relayId: relay.id } : fail(401, "unauthorized", mr);
+      if (relay) return { route: "relayPull", relayId: relay.id };
+      relayFailures.fail(ip);
+      return fail(401, "unauthorized", mr);
     }
     if (!deps.cdn.enabled) return fail(404, "not_found", mr);
     return checkCdnAuth(deps.cdn.authValue, req.headers.get(CDN_AUTH_HEADER))
@@ -81,11 +98,12 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       : fail(403, "forbidden", mr);
   }
 
-  function uriTarget(p: Puller): UriTarget {
+  async function uriTarget(p: Puller): Promise<UriTarget> {
     if (p.route !== "hls") return { kind: "relative" };
+    // CDN URIs stay tokenless: CDN pulls are tokenless too, and one URL per object is what lets the CDN cache it.
     if (p.claims.src === "cdn" && deps.cdn.baseUrl)
-      return { kind: "absolute", base: deps.cdn.baseUrl.replace(/\/+$/, ""), token: p.token };
-    return { kind: "relative", token: p.token };
+      return { kind: "absolute", base: deps.cdn.baseUrl.replace(/\/+$/, "") };
+    return { kind: "relative", token: await deps.refresher.tokenFor(p.claims, p.token) };
   }
 
   async function playlistBody(mr: MediaRequest, obj: MediaObject, channel: LiveChannel, p: Puller): Promise<string> {
@@ -112,7 +130,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         if (variants.length > 0) text = synthesizeMultivariant([{ rendition: "source", text }, ...variants]);
       }
     }
-    return rewritePlaylist(text, { dir: mr.upstreamPath, root: mr.channelPath, target: uriTarget(p) });
+    return rewritePlaylist(text, { dir: mr.upstreamPath, root: mr.channelPath, target: await uriTarget(p) });
   }
 
   function cacheControl(mr: MediaRequest, p: Puller, d: HlsDirectives): string {
@@ -125,10 +143,7 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
   }
 
   function account(p: Puller, mr: MediaRequest, bytes: number): void {
-    const at = now();
-    let source: EgressSource;
-    if (p.route === "hls") {
-      source = p.claims.src;
+    if (p.route === "hls")
       deps.segments.record({
         sid: p.claims.sid,
         cid: p.claims.cid,
@@ -136,13 +151,20 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
         ...(p.claims.rid ? { rid: p.claims.rid } : {}),
         kind: mr.kind,
         bytes,
-        at,
+        at: now(),
       });
-    } else source = sourceOf(p);
-    metrics.egress(source, bytes);
+    metrics.egress(sourceOf(p), bytes);
   }
 
-  async function serve(req: Request): Promise<Response> {
+  function upstreamFailure(err: UpstreamError, mr: MediaRequest, blocking: boolean): Response {
+    deps.logger?.warn("upstream failure", { err: err.message, failure: err.kind, kind: mr.kind });
+    // Saturation and unanswerable long-polls are retryable (RFC 8216bis asks for 503 on blocking timeouts).
+    if (err.kind === "queue" || (err.kind === "timeout" && blocking))
+      return fail(503, err.kind === "queue" ? "overloaded" : "blocking_reload_timeout", mr, { "retry-after": "1" });
+    return fail(502, "upstream_unavailable", mr);
+  }
+
+  async function serve(req: Request, peerIp?: string): Promise<Response> {
     const rawPath = rawPathOf(req.url);
     const mr = parseMediaPath(rawPath);
     if (req.method === "OPTIONS" && mr && mr.route !== "relayPull")
@@ -157,20 +179,23 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
     const directives = mr.kind === "playlist" ? parseHlsDirectives(url.searchParams) : {};
     if (!directives) return fail(400, "bad_hls_directives", mr);
 
-    const p = await authenticate(req, url, mr);
+    const p = await authenticate(req, url, mr, peerIp);
     if (p instanceof Response) return p;
 
     const channel = await deps.channels.lookup(mr.slug);
     if (!channel) return fail(404, "offline", mr);
     if (p.route === "hls" && p.claims.cid !== channel.id) return fail(403, "forbidden: wrong_channel", mr);
 
+    const ref = { upstreamPath: mr.upstreamPath, file: mr.file, kind: mr.kind };
+    const blocking = isBlocking(directives);
     let obj: MediaObject;
     try {
-      obj = await deps.store.get({ upstreamPath: mr.upstreamPath, file: mr.file, kind: mr.kind }, directives);
+      const verdict = await deps.store.checkBlocking(ref, directives);
+      if (verdict !== "ok") return fail(400, `bad_hls_directives: ${verdict}`, mr);
+      obj = await deps.store.get(ref, directives);
     } catch (err) {
       if (!(err instanceof UpstreamError)) throw err;
-      deps.logger?.warn("upstream failure", { err: err.message, kind: mr.kind });
-      return fail(502, "upstream_unavailable", mr);
+      return upstreamFailure(err, mr, blocking);
     }
     if (obj.status !== 200) {
       // 400 = a directive MediaMTX refused (e.g. _HLS_msn too far ahead); 404 = gone or not yet there.
@@ -189,13 +214,14 @@ export function createHandler(deps: HandlerDeps): (req: Request) => Promise<Resp
       ...(p.route === "relayPull" ? {} : CORS),
     };
     const isHead = req.method === "HEAD";
-    account(p, mr, isHead ? 0 : body.byteLength);
+    // HEAD transfers no media, so it is neither a fetch for integrity nor egress.
+    if (!isHead) account(p, mr, body.byteLength);
     metrics.request(mr.route, mr.kind, sourceOf(p), 200);
     return new Response(isHead ? null : body, { status: 200, headers });
   }
 
-  return async (req) => {
-    const res = await serve(req);
+  return async (req, peerIp) => {
+    const res = await serve(req, peerIp);
     if (res.status !== 200 && res.status !== 204) {
       const mr = parseMediaPath(rawPathOf(req.url));
       metrics.request(mr?.route ?? "other", mr?.kind ?? "other", "unauthenticated", res.status);

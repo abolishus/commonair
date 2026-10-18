@@ -92,7 +92,7 @@ describe("MediaUpstream", () => {
   test("passes LL-HLS directives after the session id", async () => {
     const f = fakeMediaMtx();
     const up = mk(f);
-    await up.get("live/a", "video1_stream.m3u8", "_HLS_msn=5&_HLS_part=1", true);
+    await up.get("live/a", "video1_stream.m3u8", "_HLS_msn=5&_HLS_part=1", { blockingTimeoutMs: 1000 });
     expect(f.log.at(-1)).toBe("/live/a/video1_stream.m3u8?session=s1&_HLS_msn=5&_HLS_part=1");
   });
 
