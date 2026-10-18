@@ -14,10 +14,11 @@ import type { MOD_ACTIONS } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { Command } from "./commands.ts";
+import { errorFields } from "./errors.ts";
 import type { ChatControlMessage } from "./control.ts";
 import type { Directory } from "./directory.ts";
 import { canActOn, canManageRoles, canModerate, rankOf, requiredRank } from "./permissions.ts";
-import { platformBanActive } from "./rules.ts";
+import { channelBanState, platformBanActive } from "./rules.ts";
 import type { ChannelState, Rejection, Standing, UserProfile } from "./types.ts";
 
 const { chatBans, chatMessages, channelRoles, channels, modActions, auditLog, events, users } = schema;
@@ -57,6 +58,9 @@ export class Moderation {
     const rank = rankOf(actor.standing);
     const need = requiredRank(cmd.kind);
     if (platformBanActive(actor.user, new Date()) || !actor.scopes.includes(MODERATE_SCOPE)) return denied();
+    // A moderator who is banned or timed out in this channel has no moderation rights in it.
+    if (channelBanState(actor.standing, new Date()) !== null)
+      return denied("You are banned or timed out in this channel.");
     if (need === "moderator" && !canModerate(rank)) return denied();
     if (need === "broadcaster" && !canManageRoles(rank)) return denied("Only the broadcaster can do that.");
 
@@ -114,7 +118,7 @@ export class Moderation {
     if ("code" in target) return target;
     const now = new Date();
     const expiresAt = seconds === null ? null : new Date(now.getTime() + seconds * 1000);
-    await this.deps.db.transaction(async (tx) => {
+    const demoted = await this.deps.db.transaction(async (tx) => {
       // The partial unique index allows one unlifted row per user; replace it (it may be an expired timeout).
       await tx
         .update(chatBans)
@@ -144,8 +148,29 @@ export class Moderation {
         ends_at: expiresAt?.toISOString() ?? null,
         is_permanent: expiresAt === null,
       });
+      // A permanent ban also strips the target's channel roles (only the broadcaster can ban a moderator).
+      if (seconds !== null) return false;
+      const removed = await tx
+        .delete(channelRoles)
+        .where(and(eq(channelRoles.channelId, channel.id), eq(channelRoles.userId, target.id)))
+        .returning({ role: channelRoles.role });
+      for (const { role } of removed) {
+        if (role !== "moderator" && role !== "vip") continue;
+        await this.record(tx, actor, channel, {
+          action: role === "moderator" ? "remove_moderator" : "remove_vip",
+          audit: role === "moderator" ? "chat.remove_moderator" : "chat.remove_vip",
+          target: target.id,
+        });
+        if (role === "moderator")
+          await this.outbox(tx, channel, "channel.moderator.remove", {
+            ...this.broadcaster(channel),
+            ...userFields(target),
+          });
+      }
+      return removed.length > 0;
     });
     this.deps.directory.invalidateStanding(channel.id, target.id);
+    if (demoted) await this.publish(channel.id, { op: "invalidate", scope: "user", userId: target.id });
     await this.publish(channel.id, {
       op: "ban",
       channel: channel.slug,
@@ -433,7 +458,7 @@ export class Moderation {
       await this.deps.publishControl(channelId, message);
     } catch (err) {
       // The write is committed; caches converge through their TTLs even if this publish is lost.
-      this.deps.logger.error("control publish failed", { err, channelId, op: message.op });
+      this.deps.logger.error("control publish failed", { ...errorFields(err), channelId, op: message.op });
     }
   }
 }

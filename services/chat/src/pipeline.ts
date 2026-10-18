@@ -16,8 +16,9 @@ import { CHAT_LIMITS, type dto, type EmoteRange, type NoticeCode } from "@common
 import type { Logger } from "@commonair/observability";
 import { applyFilters, type CompiledFilter, containsLink } from "./content.ts";
 import { emoteTierFor, parseEmotes } from "./emotes.ts";
-import type { Limiter } from "./limiter.ts";
-import { checkGates, isPrivileged, rateLimitFor, slowModeApplies } from "./rules.ts";
+import type { Limiter, Reservation } from "./limiter.ts";
+import { errorFields } from "./errors.ts";
+import { ALL_CHANNELS, checkGates, globalRateLimitFor, isPrivileged, rateLimitFor, slowModeApplies } from "./rules.ts";
 import type { ChannelState, Rejection, Standing, UserProfile } from "./types.ts";
 
 export interface MessageContext {
@@ -106,32 +107,45 @@ export async function runSendPipeline(deps: PipelineDeps, input: PipelineInput):
   // checkGates guarantees a user from here on; keep the narrowing explicit for the compiler.
   if (!user) return reject("msg_requires_login", "You must be logged in to chat.");
 
+  // Slow-mode and duplicate slots are claimed atomically now and released if a later rule rejects.
+  const reservations: Reservation[] = [];
+  const fail = async (code: NoticeCode, text: string): Promise<PipelineResult> => {
+    await Promise.all(reservations.map((r) => r.release()));
+    return reject(code, text);
+  };
+
   if (slowModeApplies(channel, standing)) {
-    const wait = await deps.limiter.slowRemainingMs(channel.id, user.id);
-    if (wait > 0)
+    const slow = await deps.limiter.reserveSlow(channel.id, user.id, channel.settings.slowModeSeconds);
+    if (!slow.ok)
       return reject(
         "msg_slowmode",
-        `This room is in slow mode. You may send another message in ${Math.ceil(wait / 1000)} seconds.`,
+        `This room is in slow mode. You may send another message in ${Math.ceil(slow.waitMs / 1000)} seconds.`,
       );
+    reservations.push(slow.reservation);
   }
+  const now = receivedAt.getTime();
   const rate = rateLimitFor(user, standing, channel.id);
-  const allowed = await deps.limiter.hit(rate.bucket, user.id, rate.limit, CHAT_LIMITS.windowMs, receivedAt.getTime());
-  if (!allowed) return reject("msg_ratelimit", "You are sending messages too quickly.");
-  if (await deps.limiter.isDuplicate(channel.id, user.id, input.body))
-    return reject("msg_duplicate", "Your message was not sent because it is identical to a recent message.");
+  if (!(await deps.limiter.hit(rate.bucket, user.id, rate.limit, CHAT_LIMITS.windowMs, now)))
+    return fail("msg_ratelimit", "You are sending messages too quickly.");
+  const global = globalRateLimitFor(user, standing);
+  if (global !== null && !(await deps.limiter.hit(ALL_CHANNELS, user.id, global, CHAT_LIMITS.windowMs, now)))
+    return fail("msg_ratelimit", "You are sending messages too quickly across channels.");
+  const dup = await deps.limiter.reserveDuplicate(channel.id, user.id, input.body, CHAT_LIMITS.duplicateWindowMs);
+  if (!dup) return fail("msg_duplicate", "Your message was not sent because it is identical to a recent message.");
+  reservations.push(dup);
 
   const privileged = isPrivileged(standing);
   if (!channel.settings.linksAllowed && !privileged && containsLink(input.body))
-    return reject("msg_links_blocked", "Links are not allowed in this channel.");
+    return fail("msg_links_blocked", "Links are not allowed in this channel.");
 
   let body = input.body;
   let held = false;
   if (!privileged) {
     const outcome = applyFilters(body, input.filters);
-    if (outcome.action !== "block" && outcome.timedOut)
-      input.logger.warn("word filters exceeded their time budget; message held", { channelId: channel.id });
     if (outcome.action === "block")
-      return reject("msg_rejected", "Your message was not sent because it matched a channel filter.");
+      return fail("msg_rejected", "Your message was not sent because it matched a channel filter.");
+    if (outcome.timedOut)
+      input.logger.warn("word filters exceeded their time budget; message held", { channelId: channel.id });
     body = outcome.body;
     held = outcome.action === "hold";
   }
@@ -155,23 +169,16 @@ export async function runSendPipeline(deps: PipelineDeps, input: PipelineInput):
       result = await mw.process(ctx());
     } catch (err) {
       // A broken plugin must not take chat down; it is skipped, not trusted.
-      input.logger.error("chat middleware failed", { err, middleware: mw.name });
+      input.logger.error("chat middleware failed", { ...errorFields(err), middleware: mw.name });
       continue;
     }
     if (result === "continue") continue;
-    if ("drop" in result) return reject(result.drop, result.text ?? "Your message was not sent.");
+    if ("drop" in result) return fail(result.drop, result.text ?? "Your message was not sent.");
     const next = result.transform.trim();
-    if (next.length === 0) return reject("msg_rejected", "Your message was not sent.");
+    if (next.length === 0) return fail("msg_rejected", "Your message was not sent.");
     body = next.slice(0, CHAT_LIMITS.maxBodyLength);
   }
 
-  await deps.limiter.commit(
-    channel.id,
-    user.id,
-    input.body,
-    slowModeApplies(channel, standing) ? channel.settings.slowModeSeconds : 0,
-    CHAT_LIMITS.duplicateWindowMs,
-  );
   const emotes = body === input.body ? parsed.ranges : parseEmotes(body, channel.emotes, tier).ranges;
   return { ok: true, held, body, emotes, ctx: ctx() };
 }

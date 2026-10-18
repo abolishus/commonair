@@ -20,7 +20,8 @@ import type { Limiter } from "./limiter.ts";
 import type { Metrics } from "./metrics.ts";
 import { MODERATE_SCOPE, type Moderation } from "./moderation.ts";
 import { canModerate, rankOf } from "./permissions.ts";
-import { dbErrorFields, type MessageWriter } from "./persistence.ts";
+import type { MessageWriter } from "./persistence.ts";
+import { errorFields } from "./errors.ts";
 import { type MessageContext, type MessageMiddleware, runSendPipeline } from "./pipeline.ts";
 import type { Audience, Rooms } from "./rooms.ts";
 import { canChatHint } from "./rules.ts";
@@ -63,6 +64,7 @@ export interface CoreDeps {
 }
 
 const noChannel: Rejection = { code: "msg_rejected", text: "No such channel." };
+export const REQUIRES_LOGIN: Rejection = { code: "msg_requires_login", text: "You must be logged in to chat." };
 
 export class ChatCore {
   constructor(private readonly d: CoreDeps) {}
@@ -70,6 +72,9 @@ export class ChatCore {
   // ── sending ────────────────────────────────────────────────────────────────
 
   async submit(identity: Identity, input: SendInput, opts: { skipMiddleware?: boolean } = {}): Promise<SendOutcome> {
+    // Cheapest check first: anonymous and read-only credentials never cost a channel lookup.
+    if (!identity.userId || !identity.scopes.includes("chat:edit"))
+      return { id: null, held: false, notice: REQUIRES_LOGIN };
     const receivedAt = new Date();
     const messageId = uuidv7(receivedAt.getTime());
     const loaded = await this.d.directory.channel(input.channel);
@@ -146,13 +151,13 @@ export class ChatCore {
     return { id: messageId, held: false, notice: null };
   }
 
-  private async fanout(channelId: string, frame: ServerFrame, audience: Audience): Promise<void> {
+  private async fanout(channelId: string, frame: ServerFrame, audience: Exclude<Audience, "viewers">): Promise<void> {
     const envelope: ChatFanout = { v: 1, audience, sentAt: Date.now(), frame };
     try {
       await this.d.bus.publish(this.d.bus.names.chat(channelId), JSON.stringify(envelope));
     } catch (err) {
       // Persisted but not delivered live; late joiners still see it in history.
-      this.d.logger.error("chat fan-out publish failed", { err, channelId });
+      this.d.logger.error("chat fan-out publish failed", { ...errorFields(err), channelId });
     }
   }
 
@@ -160,7 +165,7 @@ export class ChatCore {
     try {
       await this.d.bus.publish(this.d.bus.names.events(), JSON.stringify(event));
     } catch (err) {
-      this.d.logger.error("chat event publish failed", { err, channelId: event.channelId });
+      this.d.logger.error("chat event publish failed", { ...errorFields(err), channelId: event.channelId });
     }
   }
 
@@ -168,7 +173,7 @@ export class ChatCore {
     for (const mw of this.d.middlewares) {
       if (!mw.onMessage) continue;
       mw.onMessage(ctx, message).catch((err: unknown) =>
-        this.d.logger.error("chat middleware onMessage failed", { err, middleware: mw.name }),
+        this.d.logger.error("chat middleware onMessage failed", { ...errorFields(err), middleware: mw.name }),
       );
     }
   }
@@ -191,13 +196,13 @@ export class ChatCore {
   /** Run a command. Always yields exactly one notice for the caller (the IRC gateway relies on it). */
   async command(identity: Identity, slug: string, name: string, args: readonly string[]): Promise<Rejection> {
     const parsed = parseCommand(name, args);
+    if (!identity.userId) return { code: "msg_requires_login", text: "You must be logged in to use commands." };
     if (!parsed.ok) return { code: parsed.code, text: parsed.text };
     const cmd = parsed.command;
     if (cmd.kind === "me") {
       const r = await this.submit(identity, { channel: slug, body: cmd.text, isAction: true, replyToId: null });
       return r.notice ?? { code: "cmd_success", text: "Message sent." };
     }
-    if (!identity.userId) return { code: "msg_requires_login", text: "You must be logged in to use commands." };
     const loaded = await this.d.directory.channel(slug);
     if (!loaded) return noChannel;
     const user = await this.d.directory.profile(identity.userId);
@@ -207,7 +212,7 @@ export class ChatCore {
       return await this.d.moderation.execute({ user, standing, scopes: identity.scopes }, loaded.state, cmd);
     } catch (err) {
       this.d.logger.error("chat command failed", {
-        ...dbErrorFields(err),
+        ...errorFields(err),
         command: cmd.kind,
         channelId: loaded.state.id,
       });
@@ -299,7 +304,13 @@ export class ChatCore {
     if (typeof env.sentAt === "number") this.d.metrics.fanoutLatency(Date.now() - env.sentAt);
     const frame = env.frame;
     if (frame.op === "message" && !frame.held)
-      this.d.rooms.remember(channelId, frame.message.id, frame.message.user.username, frame.message.body);
+      this.d.rooms.remember(
+        channelId,
+        frame.message.id,
+        frame.message.user.id,
+        frame.message.user.username,
+        frame.message.body,
+      );
     this.d.rooms.deliver(channelId, JSON.stringify(frame), env.audience === "moderators" ? "moderators" : "all");
   }
 
@@ -317,9 +328,26 @@ export class ChatCore {
       }
       return;
     }
-    if (msg.op === "ban") this.d.directory.invalidateStanding(channelId, msg.userId);
     if (msg.op === "settings") this.d.directory.invalidateChannel(channelId);
+    // Replies must not quote messages that moderation has removed.
+    if (msg.op === "delete") this.d.rooms.forget(channelId, { messageId: msg.messageId });
+    if (msg.op === "clear") this.d.rooms.forget(channelId, { all: true });
+    if (msg.op === "ban") {
+      this.d.directory.invalidateStanding(channelId, msg.userId);
+      this.d.rooms.forget(channelId, { userId: msg.userId });
+      // The reason is for moderators; everyone else learns only that the user was removed.
+      this.d.rooms.deliver(channelId, JSON.stringify(msg), "moderators");
+      this.d.rooms.deliver(channelId, JSON.stringify({ ...msg, reason: "" }), "viewers");
+      return;
+    }
     this.d.rooms.deliver(channelId, JSON.stringify(msg));
+  }
+
+  /** BUS.userControl `invalidate`: drop the user's cached profile and standings, refresh mod flags. */
+  invalidateUser(userId: string): void {
+    this.d.directory.invalidateUser(userId);
+    for (const room of this.d.rooms.all())
+      if (this.d.rooms.usersIn(room.channelId).has(userId)) void this.refreshModerators(room.channelId, userId);
   }
 
   /** Recompute held-message visibility after a role change. */
@@ -335,7 +363,7 @@ export class ChatCore {
         this.d.rooms.setModeratorRole(channelId, id, canModerate(rankOf(standing)));
       }
     } catch (err) {
-      this.d.logger.warn("moderator refresh failed", { err, channelId });
+      this.d.logger.warn("moderator refresh failed", { ...errorFields(err), channelId });
     }
   }
 

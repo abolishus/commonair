@@ -102,6 +102,8 @@ export async function createOauthToken(db: Database, userId: string, scopes: str
 /** A WebSocket client that records every frame and can wait for one. */
 export class Client {
   readonly frames: ServerFrame[] = [];
+  /** Rooms this client joined; `say`/`command` join first, since the server requires it. */
+  readonly joined = new Set<string>();
   closed: { code: number; reason: string } | null = null;
   private waiters: { pred: (f: ServerFrame) => boolean; resolve: (f: ServerFrame) => void }[] = [];
 
@@ -165,11 +167,16 @@ export class Client {
 
   async join(channel: string): Promise<Extract<ServerFrame, { op: "joined" }>> {
     this.send({ op: "join", channel });
-    return this.waitFor<"joined">((f) => f.op === "joined" && f.channel === channel);
+    const joined = await this.waitFor<"joined">((f) => f.op === "joined" && f.channel === channel, 3000, {
+      includePast: false,
+    });
+    this.joined.add(channel);
+    return joined;
   }
 
   /** Send a chat message and resolve with its ack (and the notice, if any, that preceded it). */
   async say(channel: string, body: string, extra: Record<string, unknown> = {}) {
+    if (!this.joined.has(channel)) await this.join(channel);
     const nonce = crypto.randomUUID();
     const start = this.frames.length;
     this.send({ op: "send", channel, body, nonce, ...extra });
@@ -182,6 +189,7 @@ export class Client {
 
   /** Run a command frame and resolve with the resulting notice. */
   async command(channel: string, command: string, args: string[] = []) {
+    if (!this.joined.has(channel)) await this.join(channel);
     const start = this.frames.length;
     this.send({ op: "command", channel, command, args });
     await this.waitFor((f) => f.op === "notice" && this.frames.indexOf(f) >= start, 5000, { includePast: false });

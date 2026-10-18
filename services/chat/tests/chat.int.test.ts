@@ -154,9 +154,11 @@ describe("rules across instances", () => {
     const n = await modClient.command(ch.slug, "timeout", [viewer.username, "120", "cool", "off"]);
     expect(n.code).toBe("cmd_success");
     const ban = await viewerClient.waitFor<"ban">((f) => f.op === "ban" && f.userId === viewer.id);
-    expect(ban.reason).toBe("cool off");
+    // Viewers never see the reason; moderators do.
+    expect(ban.reason).toBe("");
     expect(ban.expiresAt).not.toBeNull();
-    await modClient.waitFor((f) => f.op === "ban" && f.userId === viewer.id);
+    const modBan = await modClient.waitFor<"ban">((f) => f.op === "ban" && f.userId === viewer.id);
+    expect(modBan.reason).toBe("cool off");
 
     const blocked = await viewerClient.say(ch.slug, "after");
     expect(blocked.ack.id).toBeNull();
@@ -394,6 +396,7 @@ describe("moderation commands", () => {
   test("replies echo the request nonce; usage and invalid_user codes", async () => {
     const { mod, ch } = await room();
     const c = await connect(a, mod.id);
+    await c.join(ch.slug);
     c.send({ op: "command", channel: ch.slug, command: "ban", args: [], nonce: "n-usage" });
     expect(await c.waitFor((f) => f.op === "notice" && (f as { nonce?: string }).nonce === "n-usage")).toMatchObject({
       code: "usage",
@@ -411,6 +414,7 @@ describe("moderation commands", () => {
     // A rejected send: notice and ack both carry the nonce.
     const viewer = await createUser(t.db, { emailVerified: false });
     const v = await connect(a, viewer.id);
+    await v.join(ch.slug);
     v.send({ op: "send", channel: ch.slug, body: "hi", nonce: "n-send" });
     expect(await v.waitFor((f) => f.op === "notice" && (f as { nonce?: string }).nonce === "n-send")).toMatchObject({
       code: "msg_verified_email",

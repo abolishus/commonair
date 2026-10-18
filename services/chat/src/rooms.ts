@@ -8,7 +8,8 @@
 import type { Bus } from "./bus.ts";
 import { type ChatSocket, sendRaw, type Writer } from "./socket.ts";
 
-export type Audience = "all" | "moderators";
+/** "viewers" = everyone who is not a moderator (e.g. ban frames without the reason). */
+export type Audience = "all" | "moderators" | "viewers";
 
 interface Member {
   canModerate: boolean;
@@ -22,7 +23,7 @@ export interface Room {
   slug: string;
   members: Map<ChatSocket, Member>;
   /** Recent messages for reply lookups: id → author + body. Bounded. */
-  recent: Map<string, { username: string; body: string }>;
+  recent: Map<string, { userId: string; username: string; body: string }>;
 }
 
 export interface RoomHandlers {
@@ -88,6 +89,7 @@ export class Rooms {
     let n = 0;
     for (const [ws, m] of room.members) {
       if (audience === "moderators" && !m.canModerate) continue;
+      if (audience === "viewers" && m.canModerate) continue;
       if (sendRaw(ws, data, this.writer)) n++;
     }
     return n;
@@ -106,14 +108,23 @@ export class Rooms {
     return out;
   }
 
-  remember(channelId: string, id: string, username: string, body: string): void {
+  remember(channelId: string, id: string, userId: string, username: string, body: string): void {
     const room = this.rooms.get(channelId);
     if (!room) return;
-    room.recent.set(id, { username, body });
+    room.recent.set(id, { userId, username, body });
     if (room.recent.size > RECENT_LIMIT) {
       const oldest = room.recent.keys().next();
       if (!oldest.done) room.recent.delete(oldest.value);
     }
+  }
+
+  /** Forget messages that must no longer be quoted in replies (deleted, cleared, author banned). */
+  forget(channelId: string, what: { messageId?: string; userId?: string; all?: boolean }): void {
+    const room = this.rooms.get(channelId);
+    if (!room) return;
+    if (what.all) room.recent.clear();
+    if (what.messageId) room.recent.delete(what.messageId);
+    if (what.userId) for (const [id, m] of room.recent) if (m.userId === what.userId) room.recent.delete(id);
   }
 
   all(): IterableIterator<Room> {

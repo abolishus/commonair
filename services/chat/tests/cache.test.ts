@@ -47,14 +47,31 @@ describe("TtlCache", () => {
 });
 
 describe("MemoryLimiter", () => {
-  test("slow mode is recorded only on commit", async () => {
+  test("slow-mode reservations are exclusive, expire, and release only their own claim", async () => {
     let now = 0;
     const l = new MemoryLimiter(() => now);
-    expect(await l.slowRemainingMs("c", "u")).toBe(0);
-    await l.commit("c", "u", "x", 10, 30_000);
+    const first = await l.reserveSlow("c", "u", 10);
+    expect(first.ok).toBe(true);
     now = 4000;
-    expect(await l.slowRemainingMs("c", "u")).toBe(6000);
-    expect(await l.slowRemainingMs("c", "other")).toBe(0);
+    expect(await l.reserveSlow("c", "u", 10)).toEqual({ ok: false, waitMs: 6000 });
+    expect((await l.reserveSlow("c", "other", 10)).ok).toBe(true);
+    if (first.ok) await first.reservation.release();
+    const again = await l.reserveSlow("c", "u", 10);
+    expect(again.ok).toBe(true);
+    now = 20_000;
+    // A stale release must not free a newer claim.
+    const third = await l.reserveSlow("c", "u", 10);
+    if (again.ok) await again.reservation.release();
+    expect(third.ok).toBe(true);
+    expect((await l.reserveSlow("c", "u", 10)).ok).toBe(false);
+  });
+
+  test("concurrent sends cannot both pass slow mode or the duplicate check", async () => {
+    const l = new MemoryLimiter(() => 0);
+    const slow = await Promise.all(Array.from({ length: 10 }, () => l.reserveSlow("c", "u", 30)));
+    expect(slow.filter((r) => r.ok)).toHaveLength(1);
+    const dups = await Promise.all(Array.from({ length: 10 }, () => l.reserveDuplicate("c", "u", "same", 1000)));
+    expect(dups.filter(Boolean)).toHaveLength(1);
   });
 
   test("windows are per channel and per user", async () => {

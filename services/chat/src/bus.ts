@@ -9,6 +9,7 @@
 import type { ValkeyClient } from "@commonair/service";
 import type { Logger } from "@commonair/observability";
 import { BUS } from "@commonair/contracts";
+import { errorFields } from "./errors.ts";
 
 export type BusHandler = (message: string) => void;
 
@@ -27,7 +28,7 @@ export class Bus {
       try {
         entry.handler(message);
       } catch (err) {
-        this.logger.error("bus handler failed", { err, channel });
+        this.logger.error("bus handler failed", { ...errorFields(err), channel });
       }
     });
   }
@@ -66,7 +67,7 @@ export class Bus {
     // Commands on one connection run in order, so a racing re-acquire's SUBSCRIBE lands after this.
     await this.sub
       .unsubscribe(channel)
-      .catch((err: unknown) => this.logger.warn("unsubscribe failed", { err, channel }));
+      .catch((err: unknown) => this.logger.warn("unsubscribe failed", { ...errorFields(err), channel }));
   }
 
   isSubscribed(channel: string): boolean {
