@@ -4,11 +4,11 @@
 import { sourceLink } from "@commonair/config";
 import { describe, expect, test } from "vite-plus/test";
 import {
-  assertInstanceLinks,
   EmailLinkError,
   en,
   formatMoney,
   interpolate,
+  normalizeInstanceUrl,
   renderEmail,
   resolveCatalog,
   sampleData,
@@ -227,16 +227,70 @@ test("user-provided text is escaped and cannot break the subject line", async ()
   expect(mail.subject).not.toMatch(/[\r\n]/);
 });
 
-test("links that leave the instance are rejected", async () => {
-  expect(() => assertInstanceLinks({ a: { b: ["https://evil.example.test/x"] } }, site)).toThrow(EmailLinkError);
-  expect(() => assertInstanceLinks({ u: "javascript:alert(1)" }, site)).toThrow(EmailLinkError);
-  expect(() => assertInstanceLinks({ u: "http://air.example.test/x" }, site)).toThrow(EmailLinkError); // scheme differs
-  expect(() =>
-    assertInstanceLinks({ u: `${site.publicUrl}/ok`, m: "mailto:x@air.example.test", n: 3 }, site),
-  ).not.toThrow();
-  await expect(
-    render("dataExportReady", { ...samples.dataExportReady, downloadUrl: "https://s3.example.test/bucket/export.zip" }),
-  ).rejects.toBeInstanceOf(EmailLinkError);
+const HOSTILE_LINKS = [
+  "https://evil.example.test/x",
+  "http://air.example.test/x", // scheme differs from the instance origin
+  "https://air.example.test.evil.example/x",
+  "https://air.example.test@evil.example/x",
+  "https://user:pw@air.example.test/x",
+  "//evil.example/x",
+  "/relative",
+  "relative/path",
+  "",
+  "javascript:alert(1)",
+  " javascript:alert(1)",
+  "java\tscript:alert(1)",
+  "JaVaScRiPt:alert(1)",
+  "vbscript:msgbox(1)",
+  "file:///etc/passwd",
+  "data:text/html,<script>alert(1)</script>",
+  "mailto:x@air.example.test",
+  " https://air.example.test/x",
+  "https://air.example.test/x ",
+  "https://air.example.test/x\r\nBcc: v@evil.example",
+  "https://air.example.test/u/x>, <https://evil.example/u",
+  "https:\\\\evil.example/x",
+  "https://air.example.test\\@evil.example/x",
+];
+
+test.each(HOSTILE_LINKS)("rejects link %j", async (link) => {
+  expect(() => normalizeInstanceUrl(link, site)).toThrow(EmailLinkError);
+  await expect(render("dataExportReady", { ...samples.dataExportReady, downloadUrl: link })).rejects.toBeInstanceOf(
+    EmailLinkError,
+  );
+});
+
+test("accepts and normalises links on the instance origin", async () => {
+  expect(normalizeInstanceUrl("HTTPS://AIR.example.test:443/a/../b?q=1#f", site)).toBe(
+    "https://air.example.test/b?q=1#f",
+  );
+  expect(normalizeInstanceUrl("https://air.example.test/p?x=<y>", site)).toBe("https://air.example.test/p?x=%3Cy%3E");
+  const mail = await render("contentRestored", {
+    ...samples.contentRestored,
+    contentUrl: "https://AIR.example.test/videos/%7e1",
+  });
+  expect(mail.html).toContain('href="https://air.example.test/videos/%7e1"');
+  // The error names the field, never echoes the attacker-controlled value.
+  const err = await render("contentRestored", {
+    ...samples.contentRestored,
+    contentUrl: "https://evil.example/x",
+  }).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(EmailLinkError);
+  expect((err as Error).message).toContain("contentUrl");
+  expect((err as Error).message).not.toContain("evil");
+});
+
+test("free-text fields may contain URLs: rendered as text, never as links", async () => {
+  const hostile = "watch https://evil.example/x and javascript:alert(1)";
+  const mail = await render("dmcaNoticeReceived", { ...samples.dmcaNoticeReceived, contentTitle: hostile });
+  expect(mail.text).toContain(hostile);
+  expect(mail.html).not.toMatch(/href="[^"]*evil/);
+  const vote = await render("governanceVoteOpened", { ...samples.governanceVoteOpened, proposalTitle: hostile });
+  expect(vote.subject).toContain(hostile);
+  const key = await render("streamKeyRevoked", { ...samples.streamKeyRevoked, channelName: "https://evil.example" });
+  expect(key.html).not.toMatch(/href="https:\/\/evil/);
+  const signIn = await render("newSignIn", { ...samples.newSignIn, device: "https://evil.example/ua" });
+  expect(signIn.html).not.toMatch(/href="https:\/\/evil/);
 });
 
 test("interpolation keeps unknown placeholders visible", () => {

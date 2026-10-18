@@ -25,7 +25,8 @@ await telemetry.shutdown();
 - batch span and log processors, a periodic metric reader every 15 s;
 - resource attributes `service.name`, `service.version`, `deployment.environment` (and
   `deployment.environment.name`) from `NODE_ENV`;
-- W3C trace-context + baggage propagation. Shutdown flushes and unregisters the globals.
+- W3C trace-context propagation only (no baggage). Shutdown flushes and unregisters the globals;
+  concurrent `startSdk` calls are serialised.
 
 ## Manual instrumentation (Bun)
 
@@ -35,18 +36,28 @@ Bun does not run Node's require hooks, so there are **no auto-instrumentations**
 import { traceHandler, tracedFetch, withSpan } from "@commonair/observability";
 
 Bun.serve({
-  // SERVER span per request, continues incoming `traceparent`, records status + duration histogram.
+  // SERVER span per request with status + duration histogram.
   fetch: traceHandler(app.fetch, { route: (req) => router.match(req)?.template }),
 });
+// Internal services (callers are other CommonAir services) continue the caller's trace:
+traceHandler(internalApp.fetch, { route, trustIncomingContext: true });
 
 await withSpan("ledger.post", async (span) => { span.setAttribute("entries", 2); … });
 
-const res = await tracedFetch(`${apiUrl}/internal/…`); // CLIENT span + `traceparent` header
+// CLIENT spans everywhere; `traceparent` only to the listed internal hosts.
+const internalFetch = createTracedFetch({ propagateTo: [new URL(env.API_INTERNAL_URL).host] });
 ```
 
-`route` must return a low-cardinality template (`/channels/:id`), never a raw path. Client spans
-record `url.full` without the query string so tokens never reach telemetry. `createTracedFetch(base)`
-wraps another fetch implementation; `extractContext` / `injectContext` handle other carriers.
+- By default `traceHandler` does **not** trust `traceparent` from clients: it starts a new root
+  span and attaches the remote context as a span link. `trustIncomingContext: true` is for
+  internal endpoints only.
+- `route` must return a low-cardinality template (`/channels/:id`); it is recorded as
+  `http.route`. The raw `url.path` is recorded only with `recordPath: true`.
+- `tracedFetch` (no allowlist) never sends trace headers; client spans record `url.full` without
+  the query string so tokens never reach telemetry.
+- Exception events and span status messages are scrubbed (`scrubErrorText`): emails, IPs,
+  Postgres `Key (…)=(…)` values, bearer/basic credentials, `token=`-style secrets and long opaque
+  strings are redacted.
 
 ## Logs
 

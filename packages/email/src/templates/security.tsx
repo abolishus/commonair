@@ -11,6 +11,7 @@ export interface TwoFactorChangeData {
 }
 
 export const twoFactorEnabled = defineTemplate("twoFactorEnabled", {
+  links: ["securityUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: TwoFactorChangeData) => {
     const m = ctx.messages;
@@ -27,6 +28,7 @@ export const twoFactorEnabled = defineTemplate("twoFactorEnabled", {
 });
 
 export const twoFactorDisabled = defineTemplate("twoFactorDisabled", {
+  links: ["securityUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: TwoFactorChangeData) => {
     const m = ctx.messages;
@@ -51,6 +53,7 @@ export interface NewSignInData {
 }
 
 export const newSignIn = defineTemplate("newSignIn", {
+  links: ["sessionsUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: NewSignInData) => {
     const m = ctx.messages;
@@ -81,6 +84,7 @@ export interface StreamKeyRevokedData {
 }
 
 export const streamKeyRevoked = defineTemplate("streamKeyRevoked", {
+  links: ["streamKeysUrl"],
   subject: (ctx, d: StreamKeyRevokedData) => ctx.text(ctx.messages.subject, { channel: d.channelName }),
   body: (ctx, d: StreamKeyRevokedData) => {
     const m = ctx.messages;

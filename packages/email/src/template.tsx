@@ -52,7 +52,16 @@ export interface EmailContext<M> {
   contact(kind: Contact): ReactNode;
 }
 
+/** Keys of `D` whose values are strings: the only fields that may be declared as links. */
+export type StringKeys<D> = { [K in keyof D]-?: D[K] extends string ? K : never }[keyof D] & string;
+
 export interface TemplateDefinition<D, M> {
+  /**
+   * The data fields that are URLs. Only these are rendered as links, and each must be an
+   * http(s) URL on the instance's own origin (validated and normalised before rendering).
+   * Everything else is free text and is only ever rendered as escaped text.
+   */
+  links: readonly StringKeys<D>[];
   subject(ctx: EmailContext<M>, data: D): string;
   preview?(ctx: EmailContext<M>, data: D): string;
   body(ctx: EmailContext<M>, data: D): ReactNode;

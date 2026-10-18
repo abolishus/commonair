@@ -9,7 +9,10 @@ import { metrics, SpanStatusCode } from "@opentelemetry/api";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import { createLogger, initTelemetry } from "../src/index.ts";
 import {
+  createTracedFetch,
   extractContext,
+  injectContext,
+  scrubErrorText,
   otelLogSink,
   startSdk,
   teeToOtel,
@@ -26,6 +29,7 @@ interface KeyValue {
   value: { stringValue?: string; intValue?: number | string; boolValue?: boolean; doubleValue?: number };
 }
 interface OtlpSpan {
+  links?: { traceId: string; spanId: string }[];
   traceId: string;
   spanId: string;
   parentSpanId?: string;
@@ -177,7 +181,7 @@ test("exports spans, metrics and logs over OTLP/HTTP with resource attributes", 
   expect(recordAttrs).not.toHaveProperty("trace_id");
 });
 
-test("traceparent propagates through tracedFetch into a traceHandler server span", async () => {
+test("traceparent propagates from an internal traced fetch into a trusting traceHandler", async () => {
   const h = await start();
   let seen: string | null = null;
   let innerTraceId: string | undefined;
@@ -192,12 +196,17 @@ test("traceparent propagates through tracedFetch into a traceHandler server span
         });
         return new Response("ok");
       },
-      { route: (req) => (new URL(req.url).pathname.startsWith("/items/") ? "/items/:id" : undefined) },
+      {
+        route: (req) => (new URL(req.url).pathname.startsWith("/items/") ? "/items/:id" : undefined),
+        trustIncomingContext: true,
+        recordPath: true,
+      },
     ),
   });
+  const internalFetch = createTracedFetch({ propagateTo: [`127.0.0.1:${app.port}`] });
   try {
     await withSpan("caller", async () => {
-      const res = await tracedFetch(`http://127.0.0.1:${app.port}/items/42?token=secret`);
+      const res = await internalFetch(`http://127.0.0.1:${app.port}/items/42?token=secret`);
       expect(await res.text()).toBe("ok");
     });
   } finally {
@@ -248,13 +257,114 @@ test("traceHandler marks 5xx responses and thrown errors as failed", async () =>
   expect(thrown!.status).toMatchObject({ code: SpanStatusCode.ERROR, message: "kaboom" });
   expect(thrown!.events?.map((e) => e.name)).toContain("exception");
   expect(attrs(thrown!.attributes)["http.response.status_code"]).toBe(500);
+  // Raw paths are not recorded unless opted in.
+  expect(attrs(thrown!.attributes)).not.toHaveProperty("url.path");
 });
 
-test("traceHandler continues an incoming W3C trace and starts a new root without one", async () => {
+test("public traceHandler starts a new root and links the untrusted remote context", async () => {
   const h = await start();
   const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
   const parentId = "00f067aa0ba902b7";
-  const handler = traceHandler(() => new Response(null, { status: 204 }));
+  const handler = traceHandler(() => new Response(null, { status: 204 }), { route: () => "/a" });
+  await handler(
+    new Request("http://svc.test/a/secret-id", { headers: { traceparent: `00-${traceId}-${parentId}-01` } }),
+  );
+  await handler(new Request("http://svc.test/a", { headers: { traceparent: "garbage" } }));
+  await h.shutdown();
+
+  const [linked, plain] = receiver.spans();
+  expect(linked!.traceId).not.toBe(traceId);
+  expect(linked!.parentSpanId ?? "").toBe("");
+  expect(linked!.links).toEqual([expect.objectContaining({ traceId, spanId: parentId })]);
+  expect(JSON.stringify(linked)).not.toContain("secret-id");
+  expect(plain!.links ?? []).toEqual([]);
+  expect(plain!.parentSpanId ?? "").toBe("");
+});
+
+test("traced fetch sends trace headers only to allowlisted internal hosts, never baggage", async () => {
+  const h = await start();
+  const seen: Record<string, Record<string, string | null>> = {};
+  const app = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: (req) => {
+      seen[new URL(req.url).pathname] = {
+        traceparent: req.headers.get("traceparent"),
+        baggage: req.headers.get("baggage"),
+      };
+      return new Response("ok");
+    },
+  });
+  try {
+    const internal = createTracedFetch({ propagateTo: ["127.0.0.1"] });
+    const external = createTracedFetch({ propagateTo: ["api.internal.test"] });
+    await withSpan("caller", async () => {
+      await internal(`http://127.0.0.1:${app.port}/internal`, { headers: {} });
+      await external(`http://127.0.0.1:${app.port}/external`);
+      await tracedFetch(`http://127.0.0.1:${app.port}/default`);
+    });
+    const injected = injectContext(new Headers());
+    expect(injected.has("baggage")).toBe(false);
+  } finally {
+    await app.stop(true);
+  }
+  await h.shutdown();
+  expect(seen["/internal"]!.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+  expect(seen["/external"]).toEqual({ traceparent: null, baggage: null });
+  expect(seen["/default"]).toEqual({ traceparent: null, baggage: null });
+  expect(seen["/internal"]!.baggage).toBeNull();
+  // Spans are still recorded for every call.
+  expect(receiver.spans().filter((s) => s.kind === 3)).toHaveLength(3);
+});
+
+test("span errors are scrubbed of PII and secrets", async () => {
+  const h = await start();
+  const err = new Error(
+    "duplicate key: Key (email)=(ada@air.example.test) already exists; token=abc123 from 203.0.113.9",
+  );
+  await expect(
+    withSpan("insert", () => {
+      throw err;
+    }),
+  ).rejects.toBe(err);
+  await h.shutdown();
+  const span = receiver.spans().find((s) => s.name === "insert")!;
+  const exported = JSON.stringify(span);
+  for (const leak of ["ada@air.example.test", "abc123", "203.0.113.9"]) expect(exported).not.toContain(leak);
+  expect(span.status?.message).toBe(
+    "duplicate key: Key (email)=([redacted]) already exists; token=[redacted] from [ip]",
+  );
+  expect(scrubErrorText("mail bob@example.test, Bearer eyJhbGciOiJIUzI1NiJ9.x.y")).toBe(
+    "mail [email], Bearer [redacted]",
+  );
+  expect(scrubErrorText(`key ${"A".repeat(40)} id 0190a8c2-7b1e-7f00-8a00-000000000000`)).toBe(
+    "key [redacted] id 0190a8c2-7b1e-7f00-8a00-000000000000",
+  );
+});
+
+test("concurrent startSdk calls are serialised and the last one wins", async () => {
+  const other = new Receiver();
+  try {
+    const [first, second] = await Promise.all([
+      startSdk({ serviceName: "first", endpoint: receiver.endpoint, batchDelayMillis: 50 }),
+      startSdk({ serviceName: "second", endpoint: other.endpoint, batchDelayMillis: 50 }),
+    ]);
+    handle = second;
+    await withSpan("after-race", () => {});
+    await second.shutdown();
+    await first.shutdown(); // already shut down by the second start; still resolves
+    expect(other.spans().map((s) => s.name)).toContain("after-race");
+    expect(receiver.spans().map((s) => s.name)).not.toContain("after-race");
+  } finally {
+    await other.stop();
+  }
+});
+
+test("trusting traceHandler continues an incoming W3C trace and starts a new root without one", async () => {
+  const h = await start();
+  const traceId = "4bf92f3577b34da6a3ce929d0e0e4736";
+  const parentId = "00f067aa0ba902b7";
+  const handler = traceHandler(() => new Response(null, { status: 204 }), { trustIncomingContext: true });
   await handler(new Request("http://svc.test/a", { headers: { traceparent: `00-${traceId}-${parentId}-01` } }));
   await handler(new Request("http://svc.test/b"));
   await h.shutdown();
