@@ -90,6 +90,21 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/ledger": {
+      "name": "@commonair/ledger",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/observability": {
       "name": "@commonair/observability",
       "version": "0.0.0",
@@ -208,6 +223,8 @@
     "@commonair/harness": ["@commonair/harness@workspace:harness"],
 
     "@commonair/infra": ["@commonair/infra@workspace:infra"],
+
+    "@commonair/ledger": ["@commonair/ledger@workspace:packages/ledger"],
 
     "@commonair/observability": ["@commonair/observability@workspace:packages/observability"],
 
