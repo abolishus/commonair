@@ -28,8 +28,15 @@ export interface ObjectStorage {
   /** Delete every object under a prefix; returns how many were deleted. */
   deletePrefix(bucket: string, prefix: string): Promise<number>;
   list(bucket: string, prefix: string): AsyncIterable<ObjectInfo>;
-  /** Presigned URL a browser can PUT to directly (uploads bypass our services). */
-  presignPut(bucket: string, key: string, opts: { expiresSeconds: number; contentType: string }): Promise<string>;
+  /**
+   * Presigned URL a browser can PUT to directly (uploads bypass our services). The content type
+   * and exact length are signed, so the upload must send those headers with those values.
+   */
+  presignPut(
+    bucket: string,
+    key: string,
+    opts: { expiresSeconds: number; contentType: string; contentLength: number },
+  ): Promise<string>;
   presignGet(bucket: string, key: string, opts: { expiresSeconds: number; filename?: string }): Promise<string>;
   ensureBucket(bucket: string): Promise<void>;
 }
@@ -151,12 +158,15 @@ export function createS3Storage(opts: S3Options): ObjectStorage {
       } while (token);
     },
     async presignPut(bucket, key, o) {
+      if (!Number.isSafeInteger(o.contentLength) || o.contentLength < 0)
+        throw new RangeError("contentLength must be a non-negative integer");
       const u = url(bucket, key, opts.publicEndpoint ?? opts.endpoint);
       u.searchParams.set("X-Amz-Expires", String(o.expiresSeconds));
       const signed = await client.sign(u.toString(), {
         method: "PUT",
-        headers: { "content-type": o.contentType },
-        aws: { signQuery: true },
+        headers: { "content-type": o.contentType, "content-length": String(o.contentLength) },
+        // aws4fetch leaves content-type and content-length unsigned unless told to sign every header.
+        aws: { signQuery: true, allHeaders: true },
       });
       return signed.url;
     },
