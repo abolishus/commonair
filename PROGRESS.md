@@ -20,6 +20,29 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session two (2026-10-18): end-to-end first
+
+**Milestone E1 reached locally:** `bun scripts/infra.ts stack && bun harness/src/cli.ts run e2e-basic`
+passes (web sign-up + email verification, stream key, RTMP publish, Chromium signed-in + WebKit
+anonymous playback, chat both ways, offline). First run: TTFF 1.0 s (Chromium) / 1.8 s (WebKit),
+glass-to-glass 2.1 s / 3.9 s. `verify --full` and `--scenario` now bring the platform up and install
+browsers; CI on main runs `verify:full`.
+
+Landed this session (all reviewed before merge, gate green):
+
+- Infra (2I) merged: WAL-G push under a timeout (DROP DATABASE hang), Garage + migrate in the
+  test subset, `infra.ts stack`, `init-env --merge`, tracker behind the `p2p` profile, fixed compose
+  subnet trusted for `x-forwarded-for`.
+- Web app (3A-e1): TanStack Start on Bun, `/api` + `/rpc` proxy, sign-up/in, dashboard, channel
+  page (hls.js / native HLS + heartbeats), chat, embed. Contract: `docs/testing/e1-selectors.md`.
+- Harness `e2e-basic` + fix: API-path sign-ups now verify via web-origin links.
+- DB: integrity scan indexes (0006), users identity immutability trigger (0007), appeals subject
+  index (0008). Storage: presigned PUT signs content type and length.
+- Config: media disk budget / ladder cap, `OUTBOUND_ALLOW_PRIVATE_NETWORKS`.
+
+In flight: web review fixes; API, media and integrity review fix rounds (briefs in
+`.claude/briefs/e1/`); then worker integrity wiring (`2L-worker-integrity.md`).
+
 ## Handoff status (end of session one, 2026-10-18)
 
 `main` at the handoff commit passes the full `bun run verify` (format, lint, typecheck, unit,
