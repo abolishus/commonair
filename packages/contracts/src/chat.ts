@@ -107,6 +107,8 @@ export const ServerFrame = z.discriminatedUnion("op", [
     channel: channel.nullable(),
     code: z.enum(NOTICE_CODES),
     text: z.string(),
+    /** Echo of the `command`/`send`/`join`/`part` frame's nonce this notice answers. */
+    nonce: z.string().optional(),
   }),
   z.object({
     op: z.literal("ack"),
