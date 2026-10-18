@@ -145,7 +145,7 @@ describe("compose.yaml: images", () => {
     expect(cf).toMatch(/WALG_SHA256_AMD64=[0-9a-f]{64}/);
     expect(cf).toMatch(/WALG_SHA256_ARM64=[0-9a-f]{64}/);
     expect(cf).toContain("sha256sum -c -");
-    expect(cf).toContain("archive_command=wal-g wal-push %p");
+    expect(cf).toContain("archive_command=timeout 20 wal-g wal-push %p");
     expect(cf).toContain("archive_timeout=60");
   });
 });
@@ -182,8 +182,9 @@ describe("compose.yaml: lifecycle", () => {
     expect(compose.services["mock-rtmp"]?.profiles).toEqual(["harness"]);
     expect(compose.services["stripe-mock"]?.profiles).toEqual(["stripe"]);
     expect(compose.services.caddy?.profiles).toEqual(["tls"]);
+    expect(compose.services.tracker?.profiles).toEqual(["p2p"]);
     const optional = services.filter(([, s]) => s.profiles).map(([n]) => n);
-    expect(optional.sort()).toEqual(["caddy", "mock-rtmp", "stripe-mock"]);
+    expect(optional.sort()).toEqual(["caddy", "mock-rtmp", "stripe-mock", "tracker"]);
   });
 
   test("every platform service is present", () => {

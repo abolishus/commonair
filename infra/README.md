@@ -175,7 +175,7 @@ hostname (path-style URLs cannot live under a path prefix of the web host, SigV4
 
 The Postgres image adds WAL-G (glibc build for Ubuntu 24.04, which runs on Debian trixie;
 SHA-256 for amd64 and arm64 pinned in the Containerfile and verified at build time) and runs
-with `archive_mode=on`, `archive_command='wal-g wal-push %p'`, `archive_timeout=60`.
+with `archive_mode=on`, `archive_command='timeout 20 wal-g wal-push %p'`, `archive_timeout=60`.
 `postgres/walg-env.sh` maps `S3_*` to WAL-G's `AWS_*` settings and sets
 `WALG_S3_PREFIX=s3://commonair-backups/wal`. If Garage starts later than Postgres, archiving
 fails and Postgres retries; segments stay in `pg_wal` until archived, so nothing is lost (watch
@@ -277,9 +277,7 @@ sysctl above).
 
 ## `scripts/infra.ts test`
 
-The integration tests of other packages need Garage too. `TEST_SERVICES` in `scripts/infra.ts`
-should become `["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate"]` and the
-health wait should cover the long-running ones only (`postgres`, `valkey`, `mailpit`,
-`garage`), then wait for `garage-init` and `migrate` to exit 0. Because `postgres` is now a
-built image, run `podman compose build postgres tools`-equivalent first
-(`podman compose build postgres garage-init`).
+The integration tests of other packages need Garage too. `scripts/infra.ts test` builds the
+`postgres` and tools images, starts `postgres`, `valkey`, `mailpit`, `garage`, `garage-init` and
+`migrate`, waits for the long-running ones to be healthy and for the two one-shot jobs to exit 0
+(printing the job's logs if one fails).

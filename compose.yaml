@@ -10,7 +10,7 @@
 # second stack can run alongside (`-p <name>` plus shifted ports).
 #
 # Profiles: (default) full platform incl. observability · harness: + mock-rtmp ·
-# stripe: + stripe-mock · tls: + caddy.
+# stripe: + stripe-mock · tls: + caddy · p2p: + tracker (not built yet).
 #
 # Secrets come from .env (`bun scripts/init-env.ts`); nothing secret has a default here.
 
@@ -304,7 +304,9 @@ services:
     depends_on: *app-depends
     healthcheck: *app-healthcheck
 
+  # services/tracker is not built yet (P2P slice); opt in with `--profile p2p` once it is.
   tracker:
+    profiles: [p2p]
     image: ${IMAGE_REGISTRY:-localhost/commonair}/tracker:${IMAGE_TAG:-dev}
     build:
       <<: *service-build

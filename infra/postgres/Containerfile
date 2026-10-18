@@ -42,7 +42,9 @@ RUN wal-g --version
 # WAL-G reads its target from the environment the server inherits: walg-env.sh maps
 # the platform's S3_* settings to AWS_* (explicit AWS_*/WALG_* win). Until Garage is
 # up and the key exists, wal-push fails and Postgres keeps the segment and retries:
-# no WAL is lost.
+# no WAL is lost. The timeout matters: a wal-push that blocks on an unreachable S3
+# endpoint keeps the archiver from absorbing ProcSignalBarriers, which hangs DROP
+# DATABASE (and anything else that needs a barrier) until the push returns.
 ENV WALG_COMPRESSION_METHOD=zstd \
     PGHOST=/var/run/postgresql
 
@@ -51,5 +53,5 @@ ENTRYPOINT ["commonair-entrypoint"]
 CMD ["postgres", \
      "-c", "wal_level=replica", \
      "-c", "archive_mode=on", \
-     "-c", "archive_command=wal-g wal-push %p", \
+     "-c", "archive_command=timeout 20 wal-g wal-push %p", \
      "-c", "archive_timeout=60"]
