@@ -138,6 +138,11 @@ export const paymentsEnv = z.object({
 });
 
 export const mediaEnv = z.object({
+  /**
+   * Password for the MediaMTX-internal user (origin and media read RTSP/HLS and publish renditions).
+   * Separate from INTERNAL_API_SECRET because it appears in ffmpeg process arguments.
+   */
+  MEDIA_INTERNAL_PASSWORD: secret,
   MEDIAMTX_API_URL: z.url().default("http://localhost:9997"),
   MEDIAMTX_HLS_URL: z.url().default("http://localhost:8888"),
   MEDIAMTX_RTSP_URL: z.string().default("rtsp://localhost:8554"),
