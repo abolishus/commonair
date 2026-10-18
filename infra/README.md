@@ -118,6 +118,11 @@ and compose overrides the hostnames for the compose network:
 `ORIGIN_INTERNAL_URL=http://origin:3003`, `SMTP_HOST=mailpit`,
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`, `OTEL_SERVICE_NAME=<service>`.
 
+Service secrets (`AUTH_SECRET`, `INTERNAL_API_SECRET`, `MEDIA_INTERNAL_PASSWORD` for api,
+origin and media, `PLAYBACK_SIGNING_KEY`, …) reach the services only through that env file.
+MediaMTX gets just `INTERNAL_API_SECRET` (for its hook header); its own requests are
+authorized by the API's auth hook.
+
 Variables used by compose itself (interpolated from `.env` or the shell). None of the secrets
 has a default; missing ones make the dependent container fail with a clear message.
 
