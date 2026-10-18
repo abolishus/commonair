@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# OpenTelemetry Collector (OTLP in; Tempo, Prometheus, Loki out).
+[Unit]
+Description=CommonAir otel-collector
+Requires=commonair-loki.service
+After=commonair-loki.service
+Requires=commonair-tempo.service
+After=commonair-tempo.service
+
+[Container]
+Image=localhost/commonair/otel-collector:latest
+ContainerName=commonair-otel-collector
+Network=commonair.network
+NetworkAlias=otel-collector
+PublishPort=127.0.0.1:4318:4318
+Volume=%h/commonair/infra/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro,Z
+Exec=--config=/etc/otelcol-contrib/config.yaml
+HealthCmd=/usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:13133/
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

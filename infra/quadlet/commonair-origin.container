@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# HLS origin (token checks, playlist rewriting).
+[Unit]
+Description=CommonAir origin
+Requires=commonair-migrate.service
+After=commonair-migrate.service
+Requires=commonair-garage-init.service
+After=commonair-garage-init.service
+Requires=commonair-valkey.service
+After=commonair-valkey.service
+Requires=commonair-otel-collector.service
+After=commonair-otel-collector.service
+Requires=commonair-mediamtx.service
+After=commonair-mediamtx.service
+
+[Container]
+Image=localhost/commonair/origin:latest
+ContainerName=commonair-origin
+Network=commonair.network
+NetworkAlias=origin
+EnvironmentFile=%h/.config/commonair/commonair.env
+Environment=VALKEY_URL=redis://valkey:6379
+Environment=S3_ENDPOINT=http://garage:3900
+Environment=S3_REGION=garage
+Environment=S3_FORCE_PATH_STYLE=true
+Environment=MEDIAMTX_API_URL=http://mediamtx:9997
+Environment=MEDIAMTX_HLS_URL=http://mediamtx:8888
+Environment=MEDIAMTX_RTSP_URL=rtsp://mediamtx:8554
+Environment=MEDIAMTX_RTMP_URL=rtmp://mediamtx:1935
+Environment=API_INTERNAL_URL=http://api:3001
+Environment=CHAT_INTERNAL_URL=ws://chat:3002/ws
+Environment=ORIGIN_INTERNAL_URL=http://origin:3003
+Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+Environment=WEB_PORT=3000
+Environment=API_PORT=3001
+Environment=CHAT_PORT=3002
+Environment=ORIGIN_PORT=3003
+Environment=MEDIA_PORT=3004
+Environment=WORKER_PORT=3005
+Environment=TRACKER_PORT=8000
+Environment=IRC_PORT=6667
+Environment=IRC_TLS_PORT=6697
+Environment=IRC_WS_PORT=6680
+Environment=IRC_HEALTH_PORT=6681
+Environment=OTEL_SERVICE_NAME=origin
+Secret=commonair-database-url,type=env,target=DATABASE_URL
+PublishPort=127.0.0.1:3003:3003
+HealthCmd=bun /opt/commonair/healthcheck.ts
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

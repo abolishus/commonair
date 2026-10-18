@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# One-shot: migrations as the owner, then the least-privilege app role.
+[Unit]
+Description=CommonAir migrate
+Requires=commonair-postgres.service
+After=commonair-postgres.service
+
+[Container]
+Image=localhost/commonair/tools:latest
+ContainerName=commonair-migrate
+Network=commonair.network
+NetworkAlias=migrate
+EnvironmentFile=%h/.config/commonair/commonair.env
+Secret=commonair-owner-database-url,type=env,target=DATABASE_URL
+Exec=sh -c "bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.ts"
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

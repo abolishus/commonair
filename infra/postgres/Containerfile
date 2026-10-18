@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# CommonAir Postgres: the official image plus WAL-G for continuous WAL archiving to
+# S3 (Garage by default). Build context is the repository root:
+#   podman build -f infra/postgres/Containerfile -t localhost/commonair/postgres:dev .
+#
+# WAL-G v3.0.9 (Apache-2.0, https://github.com/wal-g/wal-g/blob/v3.0.9/LICENSE.md).
+# Upstream ships glibc-linked (not fully static) builds; the Ubuntu 24.04 build
+# (glibc 2.39) runs on Debian trixie (glibc 2.41). Checksums were computed from the
+# release assets on 2026-10-18 and match the digests GitHub publishes for them.
+
+ARG POSTGRES_IMAGE=docker.io/library/postgres:17.11-trixie
+
+FROM ${POSTGRES_IMAGE} AS walg
+ARG WALG_VERSION=v3.0.9
+ARG WALG_SHA256_AMD64=444ce216230c254edef803e098a59a1746806da3e0d55671d7b0f0082db14ef4
+ARG WALG_SHA256_ARM64=cb37c5f8391bd8ef2efceeb9c6995059c0abf2fa74b9b717b42a16a7c93cfde1
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) asset=amd64; sum="$WALG_SHA256_AMD64" ;; \
+      arm64) asset=aarch64; sum="$WALG_SHA256_ARM64" ;; \
+      *) echo "unsupported architecture $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 -o /tmp/walg.tar.gz \
+      "https://github.com/wal-g/wal-g/releases/download/${WALG_VERSION}/wal-g-pg-24.04-${asset}.tar.gz"; \
+    echo "${sum}  /tmp/walg.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/walg.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/wal-g-pg-24.04-${asset}" /usr/local/bin/wal-g
+
+FROM ${POSTGRES_IMAGE}
+COPY --from=walg /usr/local/bin/wal-g /usr/local/bin/wal-g
+COPY --chmod=0755 infra/postgres/backup.sh /usr/local/bin/commonair-backup
+COPY --chmod=0755 infra/postgres/restore.sh /usr/local/bin/commonair-restore
+COPY --chmod=0755 infra/postgres/entrypoint.sh /usr/local/bin/commonair-entrypoint
+COPY --chmod=0644 infra/postgres/walg-env.sh /usr/local/lib/commonair/walg-env.sh
+# Fail the build if the binary cannot load its shared libraries on this base.
+RUN wal-g --version
+
+# WAL-G reads its target from the environment the server inherits: walg-env.sh maps
+# the platform's S3_* settings to AWS_* (explicit AWS_*/WALG_* win). Until Garage is
+# up and the key exists, wal-push fails and Postgres keeps the segment and retries:
+# no WAL is lost. The timeout matters: a wal-push that blocks on an unreachable S3
+# endpoint keeps the archiver from absorbing ProcSignalBarriers, which hangs DROP
+# DATABASE (and anything else that needs a barrier) until the push returns.
+ENV WALG_COMPRESSION_METHOD=zstd \
+    PGHOST=/var/run/postgresql
+
+ENTRYPOINT ["commonair-entrypoint"]
+
+CMD ["postgres", \
+     "-c", "wal_level=replica", \
+     "-c", "archive_mode=on", \
+     "-c", "archive_command=timeout 20 wal-g wal-push %p", \
+     "-c", "archive_timeout=60"]

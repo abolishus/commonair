@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Caddy TLS termination for PUBLIC_HOSTNAME (public: 80/443, see infra/README.md).
+[Unit]
+Description=CommonAir caddy
+Requires=commonair-web.service
+After=commonair-web.service
+Requires=commonair-api.service
+After=commonair-api.service
+
+[Container]
+Image=docker.io/library/caddy:2.11.7-alpine
+ContainerName=commonair-caddy
+Network=commonair.network
+NetworkAlias=caddy
+EnvironmentFile=%h/.config/commonair/commonair.env
+PublishPort=0.0.0.0:80:80
+PublishPort=0.0.0.0:443:443
+PublishPort=0.0.0.0:443:443/udp
+Volume=%h/commonair/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+Volume=commonair-caddy-data.volume:/data
+Volume=commonair-caddy-config.volume:/config
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:2019/config/
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

@@ -157,6 +157,12 @@ export const mediaEnv = z.object({
   HASH_MATCH_LIST_FILE: z.string().optional(),
   /** Scratch space for recordings, clip cuts and thumbnails (defaults to <tmpdir>/commonair-media). */
   MEDIA_WORK_DIR: z.string().optional(),
+  /** Most bytes the work dir may hold before new recordings and clips are refused (default 20 GiB). */
+  MEDIA_WORK_DIR_MAX_BYTES: z.coerce.number().int().positive().default(21_474_836_480),
+  /** Free space the work dir's filesystem must keep (default 2 GiB). */
+  MEDIA_WORK_DIR_MIN_FREE_BYTES: z.coerce.number().int().nonnegative().default(2_147_483_648),
+  /** Concurrent adaptive ladders per host; unset picks 2 with NVENC or one per 4 CPU cores. */
+  TRANSCODE_MAX_LADDERS: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional()),
 });
 
 export const playbackEnv = z.object({
@@ -181,6 +187,11 @@ export const integrityEnv = z.object({
 export const developerEnv = z.object({
   /** Allow http:// and private-network EventSub webhook callbacks. Development and harness only. */
   EVENTSUB_ALLOW_INSECURE_CALLBACKS: bool.default(false),
+  /**
+   * Allow relay URLs and simulcast targets on private, loopback and other non-public networks
+   * (and plain http relays). Development and harness only: the local stack runs on such addresses.
+   */
+  OUTBOUND_ALLOW_PRIVATE_NETWORKS: bool.default(false),
 });
 
 export const workerEnv = z.object({

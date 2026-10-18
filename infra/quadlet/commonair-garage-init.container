@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# One-shot: Garage layout, S3 key import, buckets (idempotent).
+[Unit]
+Description=CommonAir garage-init
+Requires=commonair-garage.service
+After=commonair-garage.service
+
+[Container]
+Image=localhost/commonair/tools:latest
+ContainerName=commonair-garage-init
+Network=commonair.network
+NetworkAlias=garage-init
+EnvironmentFile=%h/.config/commonair/commonair.env
+Environment=GARAGE_ADMIN_URL=http://garage:3903
+Exec=bun infra/garage/bootstrap.ts
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

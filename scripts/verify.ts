@@ -60,6 +60,17 @@ const steps: Step[] = [
     cwd: "relay",
     when: () => existsSync("relay/go.mod"),
   },
+  {
+    // Harness scenarios drive the whole platform in real browsers.
+    name: "platform up",
+    cmd: ["bun", "scripts/infra.ts", "stack"],
+    when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
+  },
+  {
+    name: "harness: browsers",
+    cmd: ["bun", "run", "--filter", "@commonair/harness", "browsers"],
+    when: () => full || scenarios.length > 0,
+  },
   ...scenarios.map((s) => ({
     name: `harness: ${s}`,
     cmd: ["bun", "harness/src/cli.ts", "run", s],
