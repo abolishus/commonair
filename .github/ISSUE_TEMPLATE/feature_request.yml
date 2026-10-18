@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+name: Feature request
+description: Propose a new feature or a change to existing behavior.
+title: "feat: "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check ROADMAP.md first; it lists planned work and non-goals.
+        Changes to protected settings (platform cut, patronage formula, payout rules, membership classes) are decided by member vote, not by issue. You can still open an issue to discuss implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way? Who is affected (streamers, viewers, moderators, developers, self-hosters)?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Project constraints
+      description: Features must fit the project's rules.
+      options:
+        - label: It works without proprietary services (any such service is an optional adapter).
+          required: true
+        - label: It adds no third-party analytics, trackers, or remote scripts.
+          required: true
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you like to work on this?
+      options:
+        - "Yes"
+        - Maybe, with guidance
+        - "No"

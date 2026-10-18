@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+name: Good first issue (maintainers)
+description: For maintainers. File a scoped, mentored task for a new contributor.
+labels: ["good first issue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write this for someone who has never seen the codebase. Name the files, the approach, and how to test it.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences on what needs doing and why.
+    validations:
+      required: true
+  - type: textarea
+    id: pointers
+    attributes:
+      label: Where to start
+      description: Files, functions, and related ADRs or docs.
+      placeholder: |
+        - `packages/...`
+        - See docs/decisions/...
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Suggested approach
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: Acceptance criteria, including the tests to add.
+      placeholder: |
+        - [ ] ...
+        - [ ] Unit test covering ...
+        - [ ] `bun run verify` is green
+    validations:
+      required: true
+  - type: input
+    id: mentor
+    attributes:
+      label: Mentor
+      description: GitHub handle of the maintainer who will help.
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Estimated size
+      options:
+        - A few hours
+        - A day
+        - A few days
+    validations:
+      required: true
