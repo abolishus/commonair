@@ -38,5 +38,14 @@ export function browserVerificationUrl(link: string, webUrl: string): string {
   const web = new URL(webUrl);
   if (u.origin === web.origin) return u.toString();
   if (!u.pathname.startsWith("/api/") && !u.pathname.startsWith("/rpc/")) return u.toString();
-  return new URL(`${u.pathname}${u.search}${u.hash}`, web.origin).toString();
+  const out = new URL(`${u.pathname}${u.search}${u.hash}`, web.origin);
+  // better-auth redirects to `callbackURL` afterwards; an absolute one on the public origin
+  // would take the browser off the origin holding its new session cookie.
+  const callback = out.searchParams.get("callbackURL");
+  if (callback && URL.canParse(callback)) {
+    const cb = new URL(callback);
+    if (cb.origin === u.origin)
+      out.searchParams.set("callbackURL", `${web.origin}${cb.pathname}${cb.search}${cb.hash}`);
+  }
+  return out.toString();
 }

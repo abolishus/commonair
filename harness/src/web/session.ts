@@ -42,8 +42,13 @@ export class WebSession {
   static async open(opts: WebSessionOptions): Promise<WebSession> {
     const browser = await opts.fleet.browser(opts.engine);
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "en-US" });
-    await context.addInitScript({ content: opts.probeScript });
-    if (opts.humanize !== false) await context.addInitScript({ content: HUMANIZE_SCRIPT });
+    try {
+      await context.addInitScript({ content: opts.probeScript });
+      if (opts.humanize !== false) await context.addInitScript({ content: HUMANIZE_SCRIPT });
+    } catch (err) {
+      await context.close().catch(() => undefined);
+      throw err;
+    }
     return new WebSession(opts.label, opts.engine, context, opts.webUrl, opts.log);
   }
 
@@ -66,8 +71,11 @@ export class WebSession {
     return page;
   }
 
-  /** Screenshot every open page into `dir`; returns the files written. Never throws. */
-  async screenshotAll(dir: string): Promise<string[]> {
+  /**
+   * Screenshot every open page into `dir`; returns the files written. Never throws. Elements
+   * matching `redact` (CSS selectors, e.g. the stream key) are blanked first.
+   */
+  async screenshotAll(dir: string, redact: readonly string[] = []): Promise<string[]> {
     if (this.closed) return [];
     const written: string[] = [];
     try {
@@ -77,6 +85,24 @@ export class WebSession {
     }
     for (const [name, page] of this.pages) {
       if (page.isClosed()) continue;
+      if (redact.length > 0) {
+        const redacted = await page
+          .evaluate(
+            (selectors) => {
+              for (const el of document.querySelectorAll(selectors.join(","))) {
+                if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.value = "[redacted]";
+                else el.textContent = "[redacted]";
+              }
+            },
+            [...redact],
+          )
+          .then(
+            () => true,
+            () => false,
+          );
+        // Never write a screenshot that might show a secret.
+        if (!redacted) continue;
+      }
       const file = join(dir, `${this.label}-${this.engine}-${name}.png`.replace(/[^a-z0-9._-]/gi, "_"));
       try {
         await page.screenshot({ path: file, fullPage: true, timeout: 10_000 });

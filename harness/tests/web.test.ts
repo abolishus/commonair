@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 import { extractLinks, findTokenLink } from "../src/mailpit.ts";
+import { verificationHop } from "../src/users.ts";
 import { ROUTES, ROUTE_PATTERNS, TEST_IDS, tid, webEmbedUrl } from "../src/web/selectors.ts";
 import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/urls.ts";
 
@@ -131,5 +132,59 @@ describe("verification link from the web-proxied URL", () => {
     expect(browserVerificationUrl("https://elsewhere.example/verify?token=t", "http://localhost:3000")).toBe(
       "https://elsewhere.example/verify?token=t",
     );
+  });
+
+  test("an absolute callbackURL on the public origin follows the rebase", () => {
+    const out = new URL(
+      browserVerificationUrl(
+        "https://commonair.example/api/auth/verify-email?token=t&callbackURL=https%3A%2F%2Fcommonair.example%2Fdashboard%3Fx%3D1",
+        "http://localhost:3000",
+      ),
+    );
+    expect(out.origin).toBe("http://localhost:3000");
+    expect(out.searchParams.get("token")).toBe("t");
+    expect(out.searchParams.get("callbackURL")).toBe("http://localhost:3000/dashboard?x=1");
+  });
+
+  test("relative or foreign callbackURLs are untouched", () => {
+    const rel = new URL(
+      browserVerificationUrl(
+        "https://commonair.example/api/auth/verify-email?token=t&callbackURL=%2Fdashboard",
+        "http://localhost:3000",
+      ),
+    );
+    expect(rel.searchParams.get("callbackURL")).toBe("/dashboard");
+    const foreign = new URL(
+      browserVerificationUrl(
+        "https://commonair.example/api/auth/verify-email?token=t&callbackURL=https%3A%2F%2Fother.example%2F",
+        "http://localhost:3000",
+      ),
+    );
+    expect(foreign.searchParams.get("callbackURL")).toBe("https://other.example/");
+  });
+});
+
+describe("verificationHop (API-path sign-ups)", () => {
+  const origins = { api: "http://localhost:3001", web: "http://localhost:3000", client: "http://127.0.0.1:45678" };
+  const hop = (u: string) => verificationHop(new URL(u), origins)?.toString() ?? null;
+
+  test("/api/ links on the web origin (PUBLIC_URL) go to the API through the client", () => {
+    expect(hop("http://localhost:3000/api/auth/verify-email?token=abc&callbackURL=%2Fdashboard")).toBe(
+      "http://127.0.0.1:45678/api/auth/verify-email?token=abc&callbackURL=%2Fdashboard",
+    );
+  });
+
+  test("/api/ links on the API or client origin too", () => {
+    expect(hop("http://localhost:3001/api/auth/verify-email?token=abc")).toBe(
+      "http://127.0.0.1:45678/api/auth/verify-email?token=abc",
+    );
+    expect(hop("http://127.0.0.1:45678/api/x")).toBe("http://127.0.0.1:45678/api/x");
+  });
+
+  test("leaving /api/ or a foreign origin ends the API part", () => {
+    expect(hop("http://localhost:3000/dashboard")).toBeNull();
+    expect(hop("http://localhost:3001/")).toBeNull();
+    expect(hop("https://evil.example/api/auth/verify-email?token=abc")).toBeNull();
+    expect(hop("http://localhost:3000/apix/y")).toBeNull();
   });
 });
