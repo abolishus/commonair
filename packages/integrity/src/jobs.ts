@@ -90,8 +90,20 @@ async function liveSessions(db: Executor, stale: Date): Promise<LiveSession[]> {
   }));
 }
 
-/** Per-session object counts from the receipts of each relay, and how far those receipts reach. */
-async function relayEvidence(
+/**
+ * Smallest bytes one delivered media object can plausibly carry (a 200 ms LL-HLS part of
+ * the audio-only rendition is ~1.6 kB). Caps what a receipt's entries can claim.
+ */
+export const MIN_RELAY_OBJECT_BYTES = 1000;
+
+/**
+ * Per-session object counts from each relay's receipts, and how far those receipts reach.
+ * Only receipts verified against complete issuance count (status `verified` with a ratio;
+ * pending, rejected and issuance-unknown receipts prove nothing). A receipt's entries can
+ * claim at most `bytes_verified / MIN_RELAY_OBJECT_BYTES` objects in total: beyond that its
+ * per-session counts are scaled down proportionally.
+ */
+export async function relayEvidence(
   db: Executor,
   sessions: readonly { id: string; relayId: string; startedAt: Date }[],
 ): Promise<{ objects: Map<string, number>; coveredUntil: Map<string, Date> }> {
@@ -100,27 +112,45 @@ async function relayEvidence(
   if (sessions.length === 0) return { objects, coveredUntil };
   const relayIds = [...new Set(sessions.map((s) => s.relayId))];
   const since = new Date(Math.min(...sessions.map((s) => s.startedAt.getTime())));
-  // Rejected receipts are not trusted for anything, including the coverage window.
+  const proven = sql`
+    select id, relay_id, period_end, bytes_verified, payload from relay_receipts
+     where relay_id in (select jsonb_array_elements_text(${json(relayIds)})::uuid)
+       and status = 'verified' and over_report_ratio is not null and period_end > ${tsz(since)}`;
   const coverage = rows(
-    await db.execute(sql`
-      select relay_id, max(period_end) as until from relay_receipts
-       where relay_id in (select jsonb_array_elements_text(${json(relayIds)})::uuid)
-         and status <> 'rejected' and period_end > ${tsz(since)}
-       group by relay_id`),
+    await db.execute(sql`select relay_id, max(period_end) as until from (${proven}) r group by relay_id`),
   );
   for (const c of coverage) coveredUntil.set(String(c.relay_id), date(c.until));
   const counts = rows(
     await db.execute(sql`
-      select e->>'sessionId' as sid, sum((e->>'segments')::bigint) as objects
-        from relay_receipts r
-       cross join lateral jsonb_array_elements(r.payload->'entries') e
-       where r.relay_id in (select jsonb_array_elements_text(${json(relayIds)})::uuid)
-         and r.status <> 'rejected' and r.period_end > ${tsz(since)}
-         and e->>'sessionId' in (select jsonb_array_elements_text(${json(sessions.map((s) => s.id))}))
-       group by 1`),
+      with r as (${proven}),
+      e as (
+        select r.id, r.bytes_verified, x->>'sessionId' as sid, greatest(0, (x->>'segments')::bigint) as objs
+          from r cross join lateral jsonb_array_elements(r.payload->'entries') x
+      ),
+      f as (
+        select id, least(1.0, bytes_verified::float8 / nullif(sum(objs) * ${MIN_RELAY_OBJECT_BYTES}::float8, 0)) as factor
+          from e group by id, bytes_verified
+      )
+      select e.sid, sum(e.objs * coalesce(f.factor, 0)) as objects
+        from e join f on f.id = e.id
+       where e.sid in (select jsonb_array_elements_text(${json(sessions.map((s) => s.id))}))
+       group by e.sid`),
   );
   for (const c of counts) objects.set(String(c.sid), num(c.objects));
   return { objects, coveredUntil };
+}
+
+/** Sessions whose latest recorded heartbeat reported the page hidden. */
+async function lastBeatHidden(valkey: ValkeyClient, ids: readonly string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (ids.length === 0) return out;
+  const evidence = await readEvidence(valkey, ids);
+  for (const id of ids) {
+    const beats = evidence.get(id)?.heartbeats ?? [];
+    const last = beats.reduce<(typeof beats)[number] | null>((a, b) => (a === null || b.at >= a.at ? b : a), null);
+    if (last && !last.visible) out.add(id);
+  }
+  return out;
 }
 
 /**
@@ -163,11 +193,18 @@ export async function scoreActiveSessions(
   );
 
   const live = await liveSessions(db, stale);
-  const superseded = findSuperseded(live, now, {
-    ...SUPERSEDE_DEFAULTS,
-    graceMs: (opts.supersedeGraceSeconds ?? SUPERSEDE_DEFAULTS.graceMs / 1000) * 1000,
-  });
-  const concurrency = rankConcurrency(live, superseded);
+  // A session that went quiet when a newer one on the same device and channel started is not
+  // counted toward concurrency at once; it is ended only after the grace period.
+  const quietCandidates = findSuperseded(live, now, { ...SUPERSEDE_DEFAULTS, graceMs: 0 });
+  const hidden = await lastBeatHidden(valkey, [...quietCandidates]);
+  const quiet = findSuperseded(live, now, { ...SUPERSEDE_DEFAULTS, graceMs: 0 }, hidden);
+  const superseded = findSuperseded(
+    live,
+    now,
+    { ...SUPERSEDE_DEFAULTS, graceMs: (opts.supersedeGraceSeconds ?? SUPERSEDE_DEFAULTS.graceMs / 1000) * 1000 },
+    hidden,
+  );
+  const concurrency = rankConcurrency(live, quiet);
 
   if (candidates.length > 0) {
     const facts: (SessionFacts & { relayId: string | null; previous: string })[] = candidates.map((c) => ({
@@ -209,6 +246,8 @@ export async function scoreActiveSessions(
       const beats = ev?.heartbeats ?? [];
       let fetches: FetchEvidence;
       if (f.assignedSource === "relay") {
+        // No proven coverage yet: null holds the session pending until receipts arrive (ended
+        // pending sessions stay candidates for `finalizeSeconds`, so late receipts still count).
         const until = f.relayId ? relay.coveredUntil.get(f.relayId) : undefined;
         fetches =
           until && until > f.startedAt
@@ -241,10 +280,17 @@ export async function scoreActiveSessions(
       );
       return { facts: f, score, allowed: allowance !== null };
     });
-    // An excluded session that stays excluded is left as it is (no repeated flags).
+    // An excluded session that stays excluded keeps its verdict and flags; only `scored_at`
+    // moves, so it rotates to the back of the queue instead of starving the rest.
+    const stillExcluded = scored.filter((s) => s.facts.previous === "excluded" && s.score.verdict === "excluded");
     const writes = scored.filter((s) => !(s.facts.previous === "excluded" && s.score.verdict === "excluded"));
 
     await db.transaction(async (tx) => {
+      if (stillExcluded.length) {
+        await tx.execute(sql`
+          update playback_sessions set scored_at = ${tsz(now)}
+           where id in (select jsonb_array_elements_text(${json(stillExcluded.map((s) => s.facts.id))})::uuid)`);
+      }
       const updated = writes.length
         ? rows(
             await tx.execute(sql`
@@ -318,12 +364,28 @@ export async function scoreActiveSessions(
   }
 
   if (superseded.size > 0) {
-    const ended = rows(
-      await db.execute(sql`
-        update playback_sessions set ended_at = coalesce(last_heartbeat_at, started_at)
-         where id in (select jsonb_array_elements_text(${json([...superseded])})::uuid) and ended_at is null
-        returning id, channel_id`),
-    );
+    const ended = await db.transaction(async (tx) => {
+      const r = rows(
+        await tx.execute(sql`
+          update playback_sessions set ended_at = coalesce(last_heartbeat_at, started_at)
+           where id in (select jsonb_array_elements_text(${json([...superseded])})::uuid) and ended_at is null
+          returning id, channel_id, device_hash, ended_at`),
+      );
+      if (r.length) {
+        await tx.insert(schema.auditLog).values(
+          r.map((x): AuditInsert => ({
+            actorType: "system",
+            action: "integrity.session.supersede",
+            subjectType: "session",
+            subjectId: String(x.id),
+            channelId: String(x.channel_id),
+            reason: "replaced by a newer session of the same device and channel",
+            details: { endedAt: date(x.ended_at).toISOString() },
+          })),
+        );
+      }
+      return r;
+    });
     const byChannel = new Map<string, string[]>();
     for (const r of ended) {
       result.superseded.push(String(r.id));
@@ -356,8 +418,10 @@ export interface VerifyReceiptsResult {
  * suspend relays whose recent history shows repeated or gross over-reporting.
  *
  * Issuance is incomplete for a receipt when some minute of its period had live sessions
- * assigned to the relay but no issuance row with bytes (the origin was down or lost its
- * production record). Such receipts are "unknown", never over-reports. Standing only
+ * assigned to the relay but the origin issued nothing to **any** relay in that minute (no
+ * issuance row with bytes at all: the origin was down or lost its production record). A
+ * minute where other relays were issued bytes but this one was not is real: nothing was
+ * issued to it. Incomplete receipts are "unknown", never over-reports. Standing only
  * looks at periods that started at or after the relay's latest reinstatement
  * (`relay.reinstate` audit row).
  */
@@ -386,7 +450,7 @@ export async function verifyReceipts(
                                   and ps.started_at < m + interval '1 minute' and ps.last_heartbeat_at >= m
                                   and (ps.ended_at is null or ps.ended_at >= m))
                    and not exists (select 1 from relay_issuance i
-                                    where i.relay_id = r.relay_id and i.bucket_start = m and i.bytes_issued > 0)
+                                    where i.bucket_start = m and i.bytes_issued > 0)
                ) as gap_minutes
           from relay_receipts r
          where r.status = 'pending' and r.period_end <= ${tsz(cutoff)}
@@ -545,7 +609,10 @@ export async function excludeFollowBursts(
     const facts: FollowFact[] = rows(
       await tx.execute(sql`
         select f.follower_id, f.channel_id, f.created_at, f.excluded_at, u.created_at as account_created_at,
-               coalesce((select sum(ps.watch_seconds) from playback_sessions ps
+               -- Watch time can only vouch for a follow up to the moment of the follow.
+               coalesce((select sum(least(ps.watch_seconds,
+                                          greatest(0, extract(epoch from (f.created_at - ps.started_at)))))
+                           from playback_sessions ps
                           where ps.user_id = f.follower_id and ps.channel_id = f.channel_id
                             and ps.verdict = 'verified' and ps.started_at < f.created_at), 0) as prior_seconds
           from follows f join users u on u.id = f.follower_id
@@ -629,9 +696,13 @@ export interface StreamHoursResult {
  * Recompute `stream_hours.verified_other_viewers` and `eligible` for recent hours. An hour
  * is eligible when at least `membership.classes.streamer.minVerifiedViewers` distinct
  * viewers (account, else device) with a verified session overlapped it, none of them the
- * streamer. The streamer is recognised by user id, by every device the streamer has
- * watched from while signed in, and by network: the address hashes of the streamer's own
- * recent sessions and each stream key's `last_used_ip_hash` (the ingest address).
+ * streamer. The streamer is recognised by user id, by the devices the streamer watched from
+ * while signed in during the last 30 days, and by network, time-aligned so a shared address
+ * (a campus, a café) only counts against viewers while the streamer is there:
+ *
+ *   - the address hash of a session of the streamer that overlapped the judged hour ± 1 h;
+ *   - a stream key's `last_used_ip_hash` (the ingest address) when the key was last used
+ *     during that broadcast (from 10 minutes before its start).
  */
 export async function markEligibleStreamHours(
   db: Database,
@@ -639,7 +710,7 @@ export async function markEligibleStreamHours(
   opts: { lookbackHours?: number } = {},
 ): Promise<StreamHoursResult> {
   const from = new Date(now.getTime() - (opts.lookbackHours ?? 48) * 3_600_000);
-  const ownerIpSince = new Date(from.getTime() - 86_400_000);
+  const ownerDevicesSince = new Date(from.getTime() - 30 * 86_400_000);
   const minViewers = await loadMinVerifiedViewers(db);
   return db.transaction(async (tx) => {
     const changed = rows(
@@ -649,17 +720,9 @@ export async function markEligibleStreamHours(
             from stream_hours sh join channels c on c.id = sh.channel_id
            where sh.hour_start >= ${tsz(from)} and sh.hour_start < ${tsz(now)}
         ),
-        owners as (select distinct owner_id, channel_id from hours),
         owner_devices as (
           select distinct ps.user_id as owner_id, ps.device_hash from playback_sessions ps
-           where ps.user_id in (select owner_id from owners)
-        ),
-        owner_ips as (
-          select distinct ps.user_id as owner_id, ps.ip_hash from playback_sessions ps
-           where ps.user_id in (select owner_id from owners) and ps.started_at >= ${tsz(ownerIpSince)}
-          union
-          select o.owner_id, sk.last_used_ip_hash from owners o join stream_keys sk on sk.channel_id = o.channel_id
-           where sk.last_used_ip_hash is not null
+           where ps.user_id in (select owner_id from hours) and ps.started_at >= ${tsz(ownerDevicesSince)}
         ),
         counts as (
           select h.broadcast_id, h.hour_start,
@@ -672,8 +735,15 @@ export async function markEligibleStreamHours(
            where ps.user_id is distinct from h.owner_id
              and not exists (select 1 from owner_devices od
                               where od.owner_id = h.owner_id and od.device_hash = ps.device_hash)
-             and not exists (select 1 from owner_ips oi
-                              where oi.owner_id = h.owner_id and oi.ip_hash = ps.ip_hash)
+             and not exists (select 1 from playback_sessions o
+                              where o.user_id = h.owner_id and o.ip_hash = ps.ip_hash
+                                and o.started_at < h.hour_start + interval '2 hours'
+                                and coalesce(o.ended_at, o.last_heartbeat_at, o.started_at)
+                                    > h.hour_start - interval '1 hour')
+             and not exists (select 1 from stream_keys sk join broadcasts b on b.id = h.broadcast_id
+                              where sk.channel_id = h.channel_id and sk.last_used_ip_hash = ps.ip_hash
+                                and sk.last_used_at >= b.started_at - interval '10 minutes'
+                                and sk.last_used_at <= coalesce(b.ended_at, ${tsz(now)}))
            group by h.broadcast_id, h.hour_start
         )
         update stream_hours sh

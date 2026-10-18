@@ -266,16 +266,23 @@ describe("fetch_pattern", () => {
     expect(fetchChecks({ ...base, watchSeconds: 5 }, { playlists: 5, segments: 0, parts: 0 }, ctx).checks).toEqual([]);
   });
 
-  test("P2P delivery lowers the HTTP segments expected", () => {
-    const p2p = { ...base, bytesHttp: 100, bytesP2p: 900 };
+  test("a p2p-assigned session is expected to fetch only a minimum HTTP share", () => {
+    const p2p = { ...base, assignedSource: "p2p" as const };
     expect(fetchChecks(p2p, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual([]);
+    // The same fetches from an origin-assigned session are far too few.
+    expect(fetchChecks(base, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
   });
 
-  test("relay-assigned sessions are not judged by origin fetches", () => {
+  test("relay-assigned sessions are not judged by origin fetches, and are held without receipts", () => {
     expect(fetchSignal({ ...base, assignedSource: "relay" }, { playlists: 40, segments: 0, parts: 0 }, ctx)).toBeNull();
     expect(
-      fetchChecks({ ...base, assignedSource: "relay" }, { playlists: 40, segments: 0, parts: 0 }, ctx).skipped,
-    ).toBe("no_accounting");
+      fetchChecks({ ...base, assignedSource: "relay" }, { playlists: 40, segments: 0, parts: 0 }, ctx),
+    ).toMatchObject({ skipped: "no_accounting", mediaUnconfirmed: true });
+    expect(fetchChecks({ ...base, assignedSource: "relay" }, null, ctx).mediaUnconfirmed).toBe(true);
+    expect(
+      fetchChecks({ ...base, assignedSource: "relay" }, { relayObjects: null, claimedSeconds: 60 }, ctx)
+        .mediaUnconfirmed,
+    ).toBe(true);
   });
 
   test("no media at all while claiming playback (known counters)", () => {
@@ -297,12 +304,25 @@ describe("fetch_pattern", () => {
     });
   });
 
-  test("database counter only (parts unknown): zero holds pending, no ratio checks", () => {
+  test("database counter only (parts unknown): a tolerant ratio holds, never scores", () => {
     const zero = fetchChecks(base, { playlists: null, segments: 0, parts: null }, ctx);
     expect(zero).toMatchObject({ checks: [], mediaUnconfirmed: true });
-    const few = fetchChecks(base, { playlists: null, segments: 2, parts: null }, ctx);
-    expect(few).toMatchObject({ checks: [], mediaUnconfirmed: false });
-    expect(few.measures.segmentRatio).toBeUndefined();
+    // 60 expected full segments × 10 % = 6.
+    expect(fetchChecks(base, { playlists: null, segments: 5, parts: null }, ctx)).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: true,
+    });
+    const enough = fetchChecks(base, { playlists: null, segments: 6, parts: null }, ctx);
+    expect(enough).toMatchObject({ checks: [], mediaUnconfirmed: false });
+    expect(enough.measures.segmentRatio).toBeCloseTo(0.1, 6);
+    // At the 10-segment boundary at least one full segment is required.
+    const short = { ...base, watchSeconds: 10 };
+    expect(fetchChecks(short, { playlists: null, segments: 0, parts: null }, ctx).mediaUnconfirmed).toBe(true);
+    expect(fetchChecks(short, { playlists: null, segments: 1, parts: null }, ctx).mediaUnconfirmed).toBe(false);
+    // One segment then hours of heartbeats.
+    const hours = { ...base, watchSeconds: 4 * 3600 };
+    expect(fetchChecks(hours, { playlists: null, segments: 1, parts: null }, ctx).mediaUnconfirmed).toBe(true);
+    expect(fetchChecks(hours, { playlists: null, segments: 1440, parts: null }, ctx).mediaUnconfirmed).toBe(false);
   });
 
   test("too few segments holds the session pending; too many does not", () => {
@@ -341,13 +361,15 @@ describe("fetch_pattern", () => {
     });
   });
 
-  test("self-reported P2P bytes cannot lower the HTTP share below 10 %", () => {
-    expect(httpShare({ bytesHttp: 0, bytesP2p: 1000 })).toBe(0.1);
-    expect(httpShare({ bytesHttp: 0, bytesP2p: 0 })).toBe(1);
-    expect(httpShare({ bytesHttp: 500, bytesP2p: 500 })).toBe(0.5);
-    // "All P2P" with 100 s claimed still expects 10 HTTP segments.
-    const allP2p = { ...base, watchSeconds: 100, bytesHttp: 0, bytesP2p: 10_000 };
-    expect(fetchChecks(allP2p, { playlists: 0, segments: 0, parts: 0 }, ctx).checks).toEqual(["no_media_fetched"]);
+  test("client-reported bytes never lower what is expected", () => {
+    expect(httpShare({ assignedSource: "origin" })).toBe(1);
+    expect(httpShare({ assignedSource: "p2p" })).toBe(0.1);
+    // An origin session claiming all its bytes came over P2P is still expected to fetch over HTTP.
+    const claimsP2p = { ...base, bytesHttp: 0, bytesP2p: 10_000 };
+    expect(fetchChecks(claimsP2p, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
+    // A p2p session claiming 100 s still expects 10 HTTP segments.
+    const p2p = { ...base, assignedSource: "p2p" as const, watchSeconds: 100 };
+    expect(fetchChecks(p2p, { playlists: 0, segments: 0, parts: 0 }, ctx).checks).toEqual(["no_media_fetched"]);
   });
 });
 

@@ -56,13 +56,16 @@ An **allowance** is a decision in the viewer's favour, at time T:
   session (`subject_type = 'session'`) or one of its flags (`'integrity_flag'`): covers every signal
   flagged on the session at or before T (`resolved_at`);
 - the same on the account (`'user'`, or a flag on the account): covers every signal flagged on any of
-  the account's sessions at or before T, for all of the account's sessions, later ones included.
+  the account's sessions at or before T.
 
-**Rule:** covered signals never count again for the covered sessions; the reason
-`allowed_on_appeal` is added instead. **New evidence after T still counts:** a signal that had not
-fired on the subject before T scores normally (and can exclude), and the heartbeat checks only look
-at beats received after T. An excluded session with an allowance is rescored, so an overturn
-restores it (audit `integrity.session.restore`) even if the resolver did not reset the verdict.
+**Rule:** an allowance applies only to sessions that **started at or before T**. A session started
+later is scored normally: no covered signals, no lifted `media_unconfirmed` hold, no lifted
+concurrency, so an overturn is never a standing whitelist for an account. For the sessions it
+applies to, covered signals never count again and the reason `allowed_on_appeal` is added instead.
+**New evidence after T still counts:** a signal that had not fired on the subject before T scores
+normally (and can exclude), and the heartbeat checks only look at beats received after T. An
+excluded session with an allowance is rescored, so an overturn restores it (audit
+`integrity.session.restore`) even if the resolver did not reset the verdict.
 
 ### `datacenter_ip` — strength 0.6; `privacy_relay` — strength 0.3
 
@@ -89,12 +92,14 @@ More than `maxSessionsPerDevice` live sessions (heartbeat in the last 2 minutes)
 or one signed-in account. Sessions are ranked **newest first**: the newest `maxSessionsPerDevice`
 are fine; each older session beyond them fires.
 
-A **reload** leaves a stale session behind. A session is **superseded** when a newer session of the
-same device and channel started at or after its last heartbeat (2 s slack) and it has stayed silent
-for 30 s since. Superseded sessions neither count nor fire; the scoring job ends them
-(`ended_at` = last heartbeat) and drops them from the live viewer set. Two tabs that both keep
-heartbeating are genuinely concurrent (a heavily throttled hidden duplicate of the same channel can
-be superseded, which is intended).
+A **reload** leaves a stale session behind. A session is **quiet** when a newer session of the same
+device and channel started at or after its last heartbeat (2 s slack) and its last heartbeat was
+visible. Quiet sessions are not counted at once (so the reload is never the duplicate). A quiet
+session that stays silent for **90 s** after the newer one started is **superseded**: the scoring
+job ends it (`ended_at` = last heartbeat, audit `integrity.session.supersede`, same transaction) and
+drops it from the live viewer set. Neither ever fires. A session whose last heartbeat was hidden is
+never quiet or superseded (browsers throttle background tabs to one timer run a minute), and two tabs
+that both keep heartbeating are genuinely concurrent.
 
 ### `headless` — weighted flags, noisy-OR
 
@@ -131,32 +136,45 @@ the API with `recordHeartbeat`. Without it, sessions are still scored from the d
 
 ### `fetch_pattern` — sub-checks, noisy-OR, and the `media_unconfirmed` hold
 
-Heartbeats are the client's claim; delivery accounting is what the server side saw:
+Heartbeats are the client's claim; delivery accounting is what the server side saw. Only
+server-observed quantities are used: client-reported bytes (HTTP or P2P) never lower what is
+expected.
 
-- **origin / p2p**: the origin's per-session request counters from `stream:segments` — Valkey
-  (`integrity:fetch:<session>`, playlists, segments and LL-HLS parts, written with
-  `recordFetch`/`recordFetches`), else `playback_sessions.segments_fetched` (full segments only);
-- **relay**: the per-session entries (`sessionId`, `segments`) of the relay's non-rejected
-  receipts, against the playback the session claimed inside the window those receipts cover;
-- **cdn**: CDN pulls are tokenless, so there is no per-session accounting: never judged.
+- **origin / p2p**: the origin's per-session counters from `stream:segments` in Valkey
+  (`integrity:fetch:<session>`: playlists, segments and LL-HLS parts, counted as **distinct
+  objects** when the consumer passes object ids to `recordFetches`), else
+  `playback_sessions.segments_fetched` (full segments only);
+- **relay**: the per-session entries (`sessionId`, `segments`) of the relay's receipts that were
+  **verified against complete issuance** (pending, rejected and issuance-unknown receipts prove
+  nothing). A receipt's entries can claim at most `bytes_verified / 1000` objects in total (1 kB is
+  the smallest plausible media object); beyond that they are scaled down. Expected media is the
+  playback the session claimed inside the window those receipts cover;
+- **cdn**: no per-session accounting. **Known limitation:** CDN pulls are tokenless and cached, so
+  the origin cannot attribute them to a session; CDN-delivered sessions are never judged on
+  fetches (the other signals still apply). Closing this needs CDN log ingestion keyed by playback
+  token, or a token-bearing edge.
 
-Expected segments = claimed watch seconds / segment duration (1 s) × HTTP byte share, judged only
-when at least 10 are expected. Self-reported P2P bytes can lower the share to 10 % at most. LL-HLS
-parts count as 1/5 segment.
+Expected segments = claimed watch seconds / segment duration (1 s), judged only when at least 10
+are expected. A `p2p`-assigned session is expected to fetch 10 % of that over HTTP; every other
+session 100 %. LL-HLS parts count as 1/5 segment.
 
 | Check                        | Weight | Fires when                                                       |
 | ---------------------------- | ------ | ---------------------------------------------------------------- |
 | `no_media_fetched`           | 0.9    | Accounting shows no media at all (counters or receipts known)    |
 | `playlists_without_segments` | 0.8    | ≥ 10 playlist requests and no segment or part                    |
 | `segments_without_playlists` | 0.6    | ≥ 10 segments and no playlist request                            |
-| `too_few_segments`           | 0.6    | < 25 % of the HTTP media expected                                |
+| `too_few_segments`           | 0.6    | < 25 % of the media expected                                     |
 | `too_many_segments`          | 0.4    | > 4 × the segments expected (origin with known part counts only) |
 
-Independently of the score, `no_media_fetched`, `playlists_without_segments` and `too_few_segments`
-hold the session at **pending** (`media_unconfirmed`). With only the database counter, a zero
-segment count also holds it (a part-only low-latency player cannot be told apart from a fetch-less
-bot by that counter, so it is held rather than scored) and ratio checks are skipped. A relay with
-no receipts for the window is not judged.
+Independently of the score, these hold the session at **pending** (`media_unconfirmed`), never
+verified:
+
+- `no_media_fetched`, `playlists_without_segments` or `too_few_segments`;
+- **database counter only**: fewer full segments than max(1, 10 % of watched seconds / segment
+  duration). That counter does not see LL-HLS parts, so the bar is tolerant and a shortfall only
+  holds the session (it never scores); one segment followed by hours of heartbeats stays pending;
+- **relay session without proven receipt coverage**. Ended sessions that are still pending stay
+  scoring candidates for an hour, so receipts that arrive late still verify them.
 
 ### Worked examples (default thresholds)
 
@@ -176,7 +194,8 @@ no receipts for the window is not judged.
 - `follow_burst` (`followBurst`, job `excludeFollowBursts`): in any clock minute with more than
   `followBurstPerMinute` follows on a channel, follows from accounts younger than 7 days or that
   never watched the channel before following are excluded (`follows.excluded_at`; rows kept).
-  Prior viewing counts **verified** sessions only. Established viewers following in the same
+  Prior viewing counts **verified** sessions only, and only watch time **before the follow**
+  (min(watch seconds, follow time − session start)). Established viewers following in the same
   minute are kept.
 - `raid_overstated` (`raidIntegrity`): a raid carries at most the source channel's verified viewers.
 
@@ -188,10 +207,12 @@ ends:
 - reported ≤ issued × (1 + tolerance) → **verified** for min(reported, issued) bytes;
 - beyond tolerance → **rejected** (`over_report`, ratio stored);
 - bytes reported with nothing issued → **rejected** (`no_issuance`);
-- **issuance unknown**: some minute of the period had live sessions assigned to the relay but no
-  issuance row with bytes (origin restart, lost production record). Beyond tolerance, the receipt
-  is **verified for the issued bytes only** (never more), ratio left empty, flag
-  `relay_issuance_unknown` (`pending_review`). It never counts as over-reporting.
+- **issuance unknown**: some minute of the period had live sessions assigned to the relay while the
+  origin issued nothing to **any** relay (no issuance row with bytes at all: origin restart, lost
+  production record). Beyond tolerance, the receipt is **verified for the issued bytes only**
+  (never more), ratio left empty, flag `relay_issuance_unknown` (`pending_review`). It never
+  counts as over-reporting. A minute where other relays were issued bytes but this one was not is
+  real: nothing was issued to it.
 
 A relay is **suspended** (status `suspended`, flag `relay_suspended`, audit row) when it
 over-reported beyond tolerance in **≥ 2 of its last 5** checked periods, or in any single period by
@@ -204,18 +225,37 @@ reinstatement count toward standing.
 
 An hour of `stream_hours` is eligible when at least `membership.classes.streamer.minVerifiedViewers`
 (default 2) distinct viewers (account, or device for anonymous sessions) with a **verified**
-session overlapped it, none of them the streamer. The streamer is recognised by user id, by every
-device the streamer has watched from while signed in, and by network: the address hashes of the
-streamer's own sessions in the window (plus a day) and each stream key's `last_used_ip_hash` (the
-ingest address). Recomputed over the last 48 hours, so later exclusions are reflected.
+session overlapped it, none of them the streamer. The streamer is recognised by user id, by the
+devices the streamer watched from while signed in during the last 30 days, and by network,
+time-aligned so a shared address (a campus, a café) only counts against viewers while the streamer
+is there:
 
-## Jobs
+- the address hash of a session of the streamer that overlapped the judged hour ± 1 hour;
+- a stream key's `last_used_ip_hash` (the ingest address) when the key was last used during that
+  broadcast (from 10 minutes before its start).
 
-| Function                               | Writes                                                                                             |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `scoreActiveSessions(db, valkey, now)` | session verdict/score/reasons; flags + audit for exclusions and restores; ends superseded sessions |
-| `verifyReceipts(db, now)`              | receipt status/bytes verified/ratio; relay suspension + flags                                      |
-| `excludeFollowBursts(db, now)`         | `follows.excluded_at`; follow and channel flags; audit                                             |
-| `markEligibleStreamHours(db, now)`     | `stream_hours.verified_other_viewers`, `eligible`; audit                                           |
+Recomputed over the last 48 hours, so later exclusions are reflected.
 
-All are idempotent and safe to retry; none deletes rows.
+## Jobs and worker integration
+
+Stable entry points for `services/worker` (all take an explicit `now`, are idempotent and safe to
+retry, and never delete rows):
+
+| Function                                      | Suggested schedule | Writes                                                                                                                 |
+| --------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `scoreActiveSessions(db, valkey, now, opts?)` | every 15–30 s      | session verdict/score/reasons/`scored_at`; flags + audit for exclusions and restores; ends superseded sessions (audit) |
+| `verifyReceipts(db, now, opts?)`              | every 60 s         | receipt status/bytes verified/ratio; `relay_issuance_unknown` flags; relay suspension + flags + audit                  |
+| `excludeFollowBursts(db, now, opts?)`         | every 60 s         | `follows.excluded_at`; follow and channel flags; audit                                                                 |
+| `markEligibleStreamHours(db, now, opts?)`     | every 5–10 min     | `stream_hours.verified_other_viewers`, `eligible`; audit                                                               |
+| `recordFetches(valkey, fetches)`              | per consumer batch | Valkey fetch counters (see below)                                                                                      |
+
+- `scoreActiveSessions` options: `classifier` (pass `classifierFromEnv().classifier`),
+  `segmentDurationSeconds` (1), `partsPerSegment` (5), `limit` (5000), `staleSeconds` (120),
+  `finalizeSeconds` (3600), `supersedeGraceSeconds` (90). Returns
+  `{ scored, counts, newlyExcluded, restored, superseded }`.
+- `verifyReceipts` options: `graceSeconds` (120), `limit` (1000). Returns
+  `{ verified, rejected, unknown, suspendedRelays }`.
+- `recordFetches(valkey, FetchRecord[])`: call once per `stream:segments` batch with the entries
+  whose `src` is `origin` or `p2p`. `FetchRecord = { sid, kind, object? }`; pass `object` (the
+  media object's path, e.g. `<rendition>/<file>`) so segments and parts count as distinct objects.
+  Keys expire after 6 h.

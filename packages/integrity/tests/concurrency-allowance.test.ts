@@ -18,24 +18,34 @@ const live = (id: string, o: Partial<LiveSession> & { start: number; seen?: numb
 
 describe("findSuperseded (reload overlap)", () => {
   test("a reload: the old session stopped beating when the new one started, after the grace it is superseded", () => {
-    const old = live("old", { start: 600, seen: 62 });
-    const reload = live("new", { start: 60, seen: 3 });
+    const old = live("old", { start: 600, seen: 102 });
+    const reload = live("new", { start: 100, seen: 3 });
     expect(findSuperseded([old, reload], NOW)).toEqual(new Set(["old"]));
   });
 
-  test("within the grace period nothing is decided yet", () => {
-    const old = live("old", { start: 600, seen: 40 });
-    const reload = live("new", { start: 29, seen: 1 });
+  test("within the grace period (> 60 s, throttled timers) nothing is decided yet", () => {
+    expect(SUPERSEDE_DEFAULTS.graceMs).toBeGreaterThan(60_000);
+    const old = live("old", { start: 600, seen: 95 });
+    const reload = live("new", { start: 89, seen: 1 });
     expect(findSuperseded([old, reload], NOW).size).toBe(0);
     // Exactly at the grace boundary it is.
-    expect(findSuperseded([old, live("new", { start: 30, seen: 1 })], NOW)).toEqual(new Set(["old"]));
+    expect(findSuperseded([old, live("new", { start: 90, seen: 1 })], NOW)).toEqual(new Set(["old"]));
+    // With no grace (the counting rule), a quiet predecessor is set aside at once.
+    expect(findSuperseded([old, reload], NOW, { ...SUPERSEDE_DEFAULTS, graceMs: 0 })).toEqual(new Set(["old"]));
+  });
+
+  test("a session whose last beat was hidden is never superseded (background tabs are throttled)", () => {
+    const old = live("old", { start: 600, seen: 102 });
+    const reload = live("new", { start: 100, seen: 3 });
+    expect(findSuperseded([old, reload], NOW, SUPERSEDE_DEFAULTS, new Set(["old"])).size).toBe(0);
+    expect(findSuperseded([old, reload], NOW, SUPERSEDE_DEFAULTS, new Set(["new"]))).toEqual(new Set(["old"]));
   });
 
   test("the final beat may race the new session's start by up to the slack", () => {
-    const old = live("old", { start: 600, seen: 59 }); // beat 1 s after the new session started
-    const reload = live("new", { start: 60, seen: 2 });
+    const old = live("old", { start: 600, seen: 99 }); // beat 1 s after the new session started
+    const reload = live("new", { start: 100, seen: 2 });
     expect(findSuperseded([old, reload], NOW)).toEqual(new Set(["old"]));
-    const later = live("old2", { start: 600, seen: 57 }); // 3 s after: still beating
+    const later = live("old2", { start: 600, seen: 97 }); // 3 s after: still beating
     expect(findSuperseded([later, reload], NOW).size).toBe(0);
   });
 
@@ -61,7 +71,6 @@ describe("findSuperseded (reload overlap)", () => {
   test("empty and single-session inputs", () => {
     expect(findSuperseded([], NOW).size).toBe(0);
     expect(findSuperseded([live("x", { start: 10 })], NOW).size).toBe(0);
-    expect(SUPERSEDE_DEFAULTS.graceMs).toBeGreaterThanOrEqual(30_000);
   });
 });
 

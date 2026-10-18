@@ -6,22 +6,27 @@
  * claims to have watched. Heartbeats are the client's claim; the accounting is what the
  * server side saw:
  *
- *   origin / p2p  the origin's per-session request counters (`stream:segments`: Valkey
- *                 counters with playlists and LL-HLS parts, else the database segment counter)
- *   relay         the per-session entries of the relay's signed receipts
- *   cdn           nothing per session (CDN pulls are tokenless): not judged
+ *   origin / p2p  the origin's per-session counters (`stream:segments`): Valkey counters with
+ *                 playlists, segments and LL-HLS parts (distinct objects when known), else the
+ *                 database full-segment counter
+ *   relay         the per-session entries of the relay's receipts verified with complete issuance
+ *   cdn           nothing per session (CDN pulls are tokenless): not judged (known limitation)
  *
  * Checks (combined as a noisy-OR):
  *
  *   no_media_fetched            claims ≥ 10 segments' worth of playback, accounting shows no media at all
  *   playlists_without_segments  ≥ 10 playlist requests and no segment/part at all (playlist pollers)
  *   segments_without_playlists  ≥ 10 segments and zero playlist requests (direct segment scraping)
- *   too_few_segments            < 25 % of the HTTP media expected for the watch time (≥ 10 expected)
+ *   too_few_segments            < 25 % of the media expected for the watch time (≥ 10 expected)
  *   too_many_segments           > 4 × the segments expected (origin with known part counts only)
  *
  * Independently of the score, a session whose media is not confirmed (`mediaUnconfirmed`)
- * never verifies: it stays pending with reason `media_unconfirmed`. That covers the case
- * where only the database segment counter is known and it is zero.
+ * never verifies: it stays pending with reason `media_unconfirmed`. That covers the database
+ * counter alone showing far too few full segments, and relay sessions without receipt coverage.
+ *
+ * Only server-observed quantities are used. Client-reported bytes (HTTP or P2P) never lower
+ * what is expected; a `p2p`-assigned session is expected to fetch a fixed minimum share over
+ * HTTP (`P2P_HTTP_SHARE`).
  */
 import {
   type FetchEvidence,
@@ -47,12 +52,15 @@ export const MIN_EXPECTED_SEGMENTS = 10;
 export const TOO_FEW_RATIO = 0.25;
 export const TOO_MANY_RATIO = 4;
 /**
- * P2P bytes are self-reported, so they can lower the HTTP media expected only down to this
- * share: a P2P player still fetches the live edge over HTTP.
+ * Database counter only: full segments (parts are not counted there). A low-latency player
+ * mixes full segments (start-up, catch-up, rendition switches) with parts, so the bar is
+ * tolerant: at least this share of watched seconds / segment duration, and at least one.
  */
-export const MIN_HTTP_SHARE = 0.1;
+export const DB_ONLY_MIN_RATIO = 0.1;
+/** HTTP share a `p2p`-assigned session must still fetch from the origin (the live edge). */
+export const P2P_HTTP_SHARE = 0.1;
 
-type FetchSession = Pick<SessionFacts, "assignedSource" | "watchSeconds" | "bytesHttp" | "bytesP2p">;
+type FetchSession = Pick<SessionFacts, "assignedSource" | "watchSeconds">;
 type FetchCtx = Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment">;
 
 export interface FetchFindings {
@@ -64,30 +72,29 @@ export interface FetchFindings {
   skipped: "cdn" | "no_accounting" | null;
 }
 
-export function httpShare(session: Pick<SessionFacts, "bytesHttp" | "bytesP2p">): number {
-  const total = session.bytesHttp + session.bytesP2p;
-  const share = total > 0 ? session.bytesHttp / total : 1;
-  return Math.max(MIN_HTTP_SHARE, share);
+/** Share of media expected over HTTP from the origin; never derived from client-reported bytes. */
+export function httpShare(session: Pick<SessionFacts, "assignedSource">): number {
+  return session.assignedSource === "p2p" ? P2P_HTTP_SHARE : 1;
 }
 
 export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): FetchFindings {
   const checks: FetchCheck[] = [];
   const measures: Record<string, number> = {};
-  const none = (skipped: FetchFindings["skipped"]): FetchFindings => ({
+  const none = (skipped: FetchFindings["skipped"], mediaUnconfirmed = false): FetchFindings => ({
     checks,
     measures,
-    mediaUnconfirmed: false,
+    mediaUnconfirmed,
     skipped,
   });
   if (session.assignedSource === "cdn") return none("cdn");
-  if (fetches === null) return none("no_accounting");
   const segDur = Math.max(0.1, ctx.segmentDurationSeconds);
-  const share = httpShare(session);
 
-  if (isRelayFetch(fetches)) {
+  if (session.assignedSource === "relay") {
+    // A relay session verifies only on its relay's receipts; without coverage it stays pending.
+    if (fetches === null || !isRelayFetch(fetches) || fetches.relayObjects === null) return none("no_accounting", true);
     // Relays count every media object (a part counts as one), so only "too few" is meaningful.
-    const expected = (Math.max(0, fetches.claimedSeconds) / segDur) * share;
-    measures.relayObjects = fetches.relayObjects;
+    const expected = Math.max(0, fetches.claimedSeconds) / segDur;
+    measures.relayObjects = round(fetches.relayObjects);
     measures.claimedSeconds = round(fetches.claimedSeconds);
     measures.expectedSegments = round(expected);
     if (expected >= MIN_EXPECTED_SEGMENTS) {
@@ -98,7 +105,7 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
     }
     return { checks, measures, mediaUnconfirmed: checks.length > 0, skipped: null };
   }
-  if (session.assignedSource === "relay") return none("no_accounting");
+  if (fetches === null || isRelayFetch(fetches)) return none("no_accounting");
 
   const partsKnown = fetches.parts !== null;
   const parts = fetches.parts ?? 0;
@@ -110,14 +117,16 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
       checks.push("playlists_without_segments");
     if (fetches.playlists === 0 && fetches.segments >= FETCH_MIN_REQUESTS) checks.push("segments_without_playlists");
   }
-  const expected = (Math.max(0, session.watchSeconds) / segDur) * share;
+  const expected = (Math.max(0, session.watchSeconds) / segDur) * httpShare(session);
   measures.expectedSegments = round(expected);
   let mediaUnconfirmed = checks.includes("playlists_without_segments");
   if (expected >= MIN_EXPECTED_SEGMENTS && !mediaUnconfirmed) {
     if (!partsKnown) {
-      // Database counter only (full segments): zero cannot be told apart from a part-only
-      // low-latency player, so it holds the session pending instead of scoring it.
-      if (fetches.segments === 0) mediaUnconfirmed = true;
+      // Database counter only (full segments): cannot be told apart from a part-heavy
+      // low-latency player well enough to score, so a shortfall only holds the session.
+      const ratio = fetches.segments / expected;
+      measures.segmentRatio = round(ratio);
+      if (fetches.segments < Math.max(1, expected * DB_ONLY_MIN_RATIO)) mediaUnconfirmed = true;
     } else if (effectiveSegments === 0) {
       checks.push("no_media_fetched");
       mediaUnconfirmed = true;
@@ -134,10 +143,10 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
 }
 
 /**
- * Playback a session claimed up to `untilMs` (the end of the window its relay's receipts
- * cover). From the heartbeat history when there is one (each beat reports the seconds played
- * since the previous one); otherwise the database watch time spread evenly over the
- * session's life.
+ * Playback a session claimed up to `untilMs` (the end of the window its relay's verified
+ * receipts cover). From the heartbeat history when there is one (each beat reports the
+ * seconds played since the previous one); otherwise the database watch time spread evenly
+ * over the session's life.
  */
 export function claimedSecondsUntil(
   beats: readonly HeartbeatSample[],

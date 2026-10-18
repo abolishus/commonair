@@ -8,8 +8,9 @@
  * device and channel: the old one has stopped heartbeating, the new one is the real one.
  * The old session is **superseded** when a newer session of the same device and channel
  * started at or after its last heartbeat (minus a small slack) and it has stayed silent for
- * `graceMs` since. Superseded sessions neither count toward concurrency nor fire; the job
- * ends them. Two tabs that both keep heartbeating are genuinely concurrent.
+ * `graceMs` since, and its last heartbeat was visible. Superseded sessions neither count
+ * toward concurrency nor fire; the job ends them. Two tabs that both keep heartbeating are
+ * genuinely concurrent.
  *
  * Remaining live sessions are ranked newest first per device and per account.
  */
@@ -32,8 +33,11 @@ export interface SupersedeOptions {
   slackMs: number;
 }
 
-/** 3 heartbeat intervals (10 s each): a live tab would have beaten by then. */
-export const SUPERSEDE_DEFAULTS: SupersedeOptions = { graceMs: 30_000, slackMs: 2_000 };
+/**
+ * 9 heartbeat intervals (10 s each), above the 60 s a throttled background tab may wait
+ * between timer runs: a live tab would have beaten by then.
+ */
+export const SUPERSEDE_DEFAULTS: SupersedeOptions = { graceMs: 90_000, slackMs: 2_000 };
 
 const byStart = (a: LiveSession, b: LiveSession) =>
   a.startedAt.getTime() - b.startedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -50,11 +54,16 @@ function groupBy<T>(xs: readonly T[], key: (x: T) => string | null): Map<string,
   return out;
 }
 
-/** Ids of sessions replaced by a newer session of the same device and channel. */
+/**
+ * Ids of sessions replaced by a newer session of the same device and channel. Sessions in
+ * `hidden` (last heartbeat reported `visible: false`) are never superseded: a background tab
+ * goes quiet because the browser throttles it, not because it was replaced.
+ */
 export function findSuperseded(
   live: readonly LiveSession[],
   now: Date,
   opts: SupersedeOptions = SUPERSEDE_DEFAULTS,
+  hidden: ReadonlySet<string> = new Set(),
 ): Set<string> {
   const out = new Set<string>();
   const settled = now.getTime() - opts.graceMs;
@@ -63,6 +72,7 @@ export function findSuperseded(
     group.sort(byStart);
     for (let i = 0; i < group.length - 1; i++) {
       const a = group[i]!;
+      if (hidden.has(a.id)) continue;
       const silentSince = a.lastSeenAt.getTime() - opts.slackMs;
       const replaced = group
         .slice(i + 1)

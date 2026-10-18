@@ -47,7 +47,9 @@ export function scoreSession(
   context: ScoringContext,
   classifier?: NetworkClassifier,
 ): SessionScore {
-  const allowance = context.allowance ?? null;
+  // A decision covers what existed when it was made: never a session that started later.
+  const given = context.allowance ?? null;
+  const allowance = given && session.startedAt.getTime() <= given.since ? given : null;
   const covered = new Set(allowance?.codes ?? []);
   // Only beats received after the decision are new evidence for the timing checks.
   const newBeats = allowance ? heartbeats.filter((b) => b.at > allowance.since) : heartbeats;

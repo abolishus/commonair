@@ -92,17 +92,24 @@ export interface FetchSummary {
   parts: number | null;
 }
 
-/** Relay-observed delivery for a session: the per-session entries of its relay's receipts. */
+/**
+ * Relay-observed delivery for a session: the per-session entries of its relay's receipts that
+ * were verified with complete issuance.
+ */
 export interface RelayFetchSummary {
-  /** Fully delivered media objects (segments, parts, init sections) the receipts list for the session. */
-  relayObjects: number;
+  /**
+   * Fully delivered media objects (segments, parts, init sections) the receipts list for the
+   * session, capped by the bytes verified. Null when no such receipt covers the session yet.
+   */
+  relayObjects: number | null;
   /** Seconds of playback the session claimed inside the window those receipts cover. */
   claimedSeconds: number;
 }
 
 /**
  * What the delivery path says a session fetched. Null when no per-session accounting
- * exists: CDN delivery (CDN pulls are tokenless) or a relay with no receipts for the window.
+ * exists (CDN delivery: CDN pulls are tokenless). For relay sessions, null counts as "no
+ * receipt coverage" and holds the session pending.
  */
 export type FetchEvidence = FetchSummary | RelayFetchSummary | null;
 
@@ -111,6 +118,7 @@ export const isRelayFetch = (f: FetchEvidence): f is RelayFetchSummary => f !== 
 /**
  * What an overturned appeal or an admin `allowed` decision covers (see `allowance.ts`).
  * Covered codes are ignored; heartbeat checks look only at beats received after `since`.
+ * An allowance never applies to a session that started after `since`.
  */
 export interface Allowance {
   /** Epoch ms of the latest covering decision. */

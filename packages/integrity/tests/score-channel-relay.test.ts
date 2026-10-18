@@ -163,12 +163,20 @@ describe("scoreSession: fetch-less heartbeat bots never verify", () => {
     expect(r).toMatchObject({ verdict: "pending", reasons: ["fetch_pattern", "media_unconfirmed"], score: 0.6 });
   });
 
-  test("database counter only: zero segments holds pending; any segment lets it verify (parts unknown)", () => {
+  test("database counter only: a tolerant full-segment ratio holds (never scores) the session", () => {
     const db0 = scoreSession(session(), beats(6), { playlists: null, segments: 0, parts: null }, ctx());
     expect(db0).toMatchObject({ verdict: "pending", score: 0, reasons: ["media_unconfirmed"] });
-    // A low-latency player fetches mostly parts the database counter does not see: no ratio check.
-    const db3 = scoreSession(session(), beats(6), { playlists: null, segments: 3, parts: null }, ctx());
-    expect(db3).toMatchObject({ verdict: "verified", reasons: [] });
+    // 60 s watched: at least 10 % of 60 full segments (parts are not counted there).
+    const db5 = scoreSession(session(), beats(6), { playlists: null, segments: 5, parts: null }, ctx());
+    expect(db5).toMatchObject({ verdict: "pending", score: 0, reasons: ["media_unconfirmed"] });
+    const db6 = scoreSession(session(), beats(6), { playlists: null, segments: 6, parts: null }, ctx());
+    expect(db6).toMatchObject({ verdict: "verified", reasons: [] });
+  });
+
+  test("one segment, then hours of heartbeats, does not verify on the database counter", () => {
+    const hours = session({ watchSeconds: 3 * 3600, heartbeats: 1080 });
+    const r = scoreSession(hours, beats(6), { playlists: null, segments: 1, parts: null }, ctx());
+    expect(r).toMatchObject({ verdict: "pending", reasons: ["media_unconfirmed"] });
   });
 
   test("short watch times are not judged", () => {
@@ -188,8 +196,14 @@ describe("scoreSession: fetch-less heartbeat bots never verify", () => {
       verdict: "verified",
       reasons: [],
     });
-    // No receipts for the window: unknown, not judged.
-    expect(scoreSession(relay, beats(6), null, ctx()).verdict).toBe("verified");
+    // No proven receipt coverage yet: held pending, never verified on heartbeats alone.
+    expect(scoreSession(relay, beats(6), null, ctx())).toMatchObject({
+      verdict: "pending",
+      reasons: ["media_unconfirmed"],
+    });
+    expect(scoreSession(relay, beats(6), { relayObjects: null, claimedSeconds: 60 }, ctx()).verdict).toBe("pending");
+    // Origin counters do not vouch for a relay session either.
+    expect(scoreSession(relay, beats(6), fetches, ctx()).verdict).toBe("pending");
   });
 
   test("CDN sessions have no per-session accounting and are never judged on fetches", () => {
@@ -201,8 +215,40 @@ describe("scoreSession: fetch-less heartbeat bots never verify", () => {
 
 describe("scoreSession: allowances (appeal stickiness)", () => {
   const T = 1_000_000 + 5 * 10_000;
+  /** A session that started before every decision in these tests (epoch 0). */
+  const early = (o: Partial<SessionFacts> = {}) => session({ startedAt: new Date(0), ...o });
+
+  test("an allowance never applies to a session that started after the decision", () => {
+    const later = early({
+      startedAt: new Date(T + 1),
+      datacenter: "Example Cloud",
+      fingerprint: { webdriver: true },
+    });
+    const allowance = { since: T, codes: ["datacenter_ip", "headless", "fetch_pattern", "device_concurrency"] };
+    const r = scoreSession(later, beats(6), fetches, ctx({ allowance }));
+    expect(r).toMatchObject({ verdict: "excluded", reasons: ["datacenter_ip", "headless"] });
+    // Nor does it lift the media hold or concurrency for such a session.
+    const held = scoreSession(
+      early({ startedAt: new Date(T + 1) }),
+      beats(6),
+      { playlists: 60, segments: 10, parts: 0 },
+      ctx({ allowance }),
+    );
+    expect(held).toMatchObject({ verdict: "pending", reasons: ["fetch_pattern", "media_unconfirmed"] });
+    const crowded = scoreSession(
+      early({ startedAt: new Date(T + 1) }),
+      beats(6),
+      fetches,
+      ctx({ allowance, device: { rank: 4, concurrent: 4 } }),
+    );
+    expect(crowded).toMatchObject({ verdict: "excluded", reasons: ["device_concurrency"] });
+    // Started exactly at the decision: covered.
+    expect(scoreSession({ ...later, startedAt: new Date(T) }, beats(6), fetches, ctx({ allowance })).verdict).toBe(
+      "verified",
+    );
+  });
   test("covered signals no longer count; the reason says why", () => {
-    const dc = session({ datacenter: "Example Cloud", fingerprint: { webdriver: true } });
+    const dc = early({ datacenter: "Example Cloud", fingerprint: { webdriver: true } });
     expect(scoreSession(dc, beats(6), fetches, ctx()).verdict).toBe("excluded");
     const r = scoreSession(
       dc,
@@ -215,7 +261,7 @@ describe("scoreSession: allowances (appeal stickiness)", () => {
 
   test("a signal not covered is new evidence and can exclude again", () => {
     const r = scoreSession(
-      session({ datacenter: "Example Cloud" }),
+      early({ datacenter: "Example Cloud" }),
       beats(6),
       fetches,
       ctx({ allowance: { since: T, codes: ["datacenter_ip"] }, device: { rank: 5, concurrent: 5 } }),
@@ -227,7 +273,7 @@ describe("scoreSession: allowances (appeal stickiness)", () => {
     const periodic = beats(24).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000, bufferSeconds: 2 }));
     const before = periodic.slice(0, 12);
     const since = before.at(-1)!.at;
-    const webdriver = session({ fingerprint: { webdriver: true }, heartbeats: 24 });
+    const webdriver = early({ fingerprint: { webdriver: true }, heartbeats: 24 });
     // Old periodic beats were part of what was appealed: not counted again.
     const onlyOld = scoreSession(webdriver, before, fetches, ctx({ allowance: { since, codes: ["headless"] } }));
     expect(onlyOld.reasons).toEqual(["allowed_on_appeal"]);
@@ -239,7 +285,7 @@ describe("scoreSession: allowances (appeal stickiness)", () => {
 
   test("an allowed fetch pattern also lifts the media_unconfirmed hold", () => {
     const r = scoreSession(
-      session(),
+      early(),
       beats(6),
       { playlists: 60, segments: 10, parts: 0 },
       ctx({ allowance: { since: 0, codes: ["fetch_pattern"] } }),

@@ -9,8 +9,9 @@
  * CONTRACT-REQUEST: add these keys to `KEYS` in `@commonair/contracts/internal`:
  *   integrityHeartbeats(sessionId) → LIST of JSON HeartbeatSample, newest last
  *     (written by the API on every accepted heartbeat via `recordHeartbeat`)
- *   integrityFetches(sessionId)    → HASH {playlist, segment, part} request counts
- *     (written by the worker's `stream:segments` consumer via `recordFetch`)
+ *   integrityFetches(sessionId)    → HASH {playlist, segment, part} request counts, plus
+ *     HyperLogLogs of distinct segments / parts (written by the worker's
+ *     `stream:segments` consumer via `recordFetches`)
  */
 import type { ValkeyClient } from "@commonair/service";
 import type { SegmentFetch } from "@commonair/contracts/internal";
@@ -19,6 +20,7 @@ import { HeartbeatSample, type FetchSummary } from "./types.ts";
 export const INTEGRITY_KEYS = {
   heartbeats: (sessionId: string) => `integrity:hb:${sessionId}`,
   fetches: (sessionId: string) => `integrity:fetch:${sessionId}`,
+  distinct: (sessionId: string, kind: "segment" | "part") => `integrity:fetch:${sessionId}:${kind}:u`,
 } as const;
 
 /** Enough history for the periodic-timing check with margin (10 s beats → 20 min). */
@@ -35,31 +37,53 @@ export async function recordHeartbeat(valkey: ValkeyClient, sessionId: string, s
     .exec();
 }
 
+/**
+ * One origin-served fetch for `recordFetches`. `object` identifies the media object (for
+ * example `<rendition dir>/<file name>`, which carries the segment / part sequence number);
+ * when given, segments and parts are counted as **distinct objects**, so re-requesting the
+ * same segment cannot inflate the count.
+ */
+export interface FetchRecord {
+  sid: SegmentFetch["sid"];
+  kind: SegmentFetch["kind"];
+  object?: string;
+}
+
+/** Single-fetch form of `recordFetches` (request counts only). */
 export async function recordFetch(valkey: ValkeyClient, fetch: Pick<SegmentFetch, "sid" | "kind">): Promise<void> {
-  const key = INTEGRITY_KEYS.fetches(fetch.sid);
-  await valkey.multi().hincrby(key, fetch.kind, 1).expire(key, EVIDENCE_TTL_SECONDS).exec();
+  await recordFetches(valkey, [fetch]);
 }
 
 /**
- * Batch form of `recordFetch` for the worker's `stream:segments` consumer: one round trip
- * per batch. Only origin-served fetches belong here (the counters describe what the origin
- * saw for the session's token).
+ * Record origin-served fetches for integrity scoring. Stable entry point for the worker's
+ * `stream:segments` consumer: call it once per batch with the origin- and p2p-sourced
+ * entries (not `relay` or `cdn`: those counters describe what the origin served the token).
+ * One Valkey round trip per call; keys expire after `EVIDENCE_TTL_SECONDS`.
+ *
+ *   integrity:fetch:<sid>            HASH kind → request count
+ *   integrity:fetch:<sid>:<kind>:u   HyperLogLog of distinct objects (segments/parts with `object`)
  */
-export async function recordFetches(
-  valkey: ValkeyClient,
-  fetches: readonly Pick<SegmentFetch, "sid" | "kind">[],
-): Promise<void> {
+export async function recordFetches(valkey: ValkeyClient, fetches: readonly FetchRecord[]): Promise<void> {
   if (fetches.length === 0) return;
   const counts = new Map<string, Map<string, number>>();
+  const objects = new Map<string, string[]>();
   for (const f of fetches) {
     const byKind = counts.get(f.sid) ?? new Map<string, number>();
     byKind.set(f.kind, (byKind.get(f.kind) ?? 0) + 1);
     counts.set(f.sid, byKind);
+    if (f.object && f.kind !== "playlist") {
+      const key = INTEGRITY_KEYS.distinct(f.sid, f.kind);
+      objects.set(key, [...(objects.get(key) ?? []), f.object]);
+    }
   }
   const pipe = valkey.multi();
   for (const [sid, byKind] of counts) {
     const key = INTEGRITY_KEYS.fetches(sid);
     for (const [kind, n] of byKind) pipe.hincrby(key, kind, n);
+    pipe.expire(key, EVIDENCE_TTL_SECONDS);
+  }
+  for (const [key, objs] of objects) {
+    pipe.pfadd(key, ...objs);
     pipe.expire(key, EVIDENCE_TTL_SECONDS);
   }
   await pipe.exec();
@@ -99,21 +123,31 @@ export async function readEvidence(
   for (const id of sessionIds) {
     pipe.lrange(INTEGRITY_KEYS.heartbeats(id), 0, -1);
     pipe.hgetall(INTEGRITY_KEYS.fetches(id));
+    pipe.pfcount(INTEGRITY_KEYS.distinct(id, "segment"));
+    pipe.pfcount(INTEGRITY_KEYS.distinct(id, "part"));
   }
   const results = (await pipe.exec()) ?? [];
+  const PER = 4;
   sessionIds.forEach((id, i) => {
-    const [hbErr, hb] = results[i * 2] ?? [null, []];
-    const [fErr, f] = results[i * 2 + 1] ?? [null, {}];
+    const [hbErr, hb] = results[i * PER] ?? [null, []];
+    const [fErr, f] = results[i * PER + 1] ?? [null, {}];
+    const [sErr, segDistinct] = results[i * PER + 2] ?? [null, 0];
+    const [pErr, partDistinct] = results[i * PER + 3] ?? [null, 0];
     const beats = hbErr ? [] : parseBeats((hb as string[]) ?? []);
     const counters = fErr ? {} : ((f as Record<string, string>) ?? {});
     const hasCounters = Object.keys(counters).length > 0;
+    // Distinct objects when they were recorded (never more than the requests seen).
+    const pick = (requests: number, distinct: unknown, err: unknown) => {
+      const d = err ? 0 : Number(distinct);
+      return Number.isFinite(d) && d > 0 ? Math.min(requests, d) : requests;
+    };
     out.set(id, {
       heartbeats: beats,
       fetches: hasCounters
         ? {
             playlists: toCount(counters.playlist) ?? 0,
-            segments: toCount(counters.segment) ?? 0,
-            parts: toCount(counters.part) ?? 0,
+            segments: pick(toCount(counters.segment) ?? 0, segDistinct, sErr),
+            parts: pick(toCount(counters.part) ?? 0, partDistinct, pErr),
           }
         : null,
     });
