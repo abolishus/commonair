@@ -29,6 +29,8 @@ export const users = pgTable(
     twoFactorEnabled: boolean().notNull().default(false),
     accountType: accountType().notNull().default("human"),
     /** For bot accounts: the human member who owns and answers for the bot. */
+    /** Verified bots (reviewed by platform staff) get the higher chat rate limits. */
+    botVerified: boolean().notNull().default(false),
     botOwnerId: uuid().references((): AnyPgColumn => users.id, { onDelete: "cascade" }),
     /** Collected at signup for the 13+ gate and to know when 18+ content may be shown. */
     birthDate: date({ mode: "string" }),

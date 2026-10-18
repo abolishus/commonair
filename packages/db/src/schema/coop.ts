@@ -306,6 +306,8 @@ export const electionCandidates = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     statement: text().notNull().default(""),
+    /** Tie-break: earlier nominations win ties. */
+    nominatedAt: ts().notNull().defaultNow(),
     votes: integer().notNull().default(0),
     elected: boolean().notNull().default(false),
   },
@@ -353,6 +355,9 @@ export const patronagePeriods = pgTable(
     formulaVersion: text().notNull(),
     weights: jsonb().$type<PatronageWeights>().notNull(),
     surplusCents: cents().notNull().default(0),
+    /** Surplus not allocated to members (empty pools, cap overflow) and why, line by line. */
+    retainedCents: cents().notNull().default(0),
+    retainedLines: jsonb().$type<PatronageLine[]>().notNull().default([]),
     currency: text().notNull(),
     computedAt: ts(),
     approvedAt: ts(),

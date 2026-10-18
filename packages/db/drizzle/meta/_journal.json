@@ -22,6 +22,20 @@
       "when": 1792358332083,
       "tag": "0002_protections_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792360044956,
+      "tag": "0003_patronage_retained_and_nominations",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792360420045,
+      "tag": "0004_bot_verified",
+      "breakpoints": true
     }
   ]
 }

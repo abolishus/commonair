@@ -93,6 +93,10 @@ export const KEYS = {
   simulcastStatus: (broadcastId: string) => `simulcast:${broadcastId}`,
   /** HASH relayId → JSON {url,capacityMbps,status,load} for origin assignment. */
   relays: "relays:active",
+  /** LIST of recent heartbeat evidence for a playback session (API writes, integrity reads). */
+  integrityHeartbeats: (sessionId: string) => `integrity:hb:${sessionId}`,
+  /** HASH of fetch counters for a playback session (worker's segment consumer writes, integrity reads). */
+  integrityFetches: (sessionId: string) => `integrity:fetch:${sessionId}`,
   /** Rate-limit buckets. */
   rateLimit: (bucket: string, subject: string) => `rl:${bucket}:${subject}`,
 } as const;
@@ -147,3 +151,29 @@ export const ChatTokenClaims = z.object({
 });
 export type ChatTokenClaims = z.infer<typeof ChatTokenClaims>;
 export const CHAT_TOKEN_TTL_SECONDS = 300;
+
+/** Job names and payloads on QUEUES.webhooks (producers: API and outbox relay; consumer: worker). */
+export const WEBHOOK_JOBS = {
+  /** Outbox event → matching subscriptions → one `deliver` job each. */
+  fanout: "fanout",
+  deliver: "deliver",
+  /** Enqueued by the API right after a webhook subscription is created. */
+  verifyCallback: "verify-callback",
+  /** `developer.events.sendTest`. */
+  testEvent: "test-event",
+  /** `developer.events.redeliver`. */
+  redeliver: "redeliver",
+} as const;
+
+export const FanoutJob = z.object({ eventId: z.uuid() });
+export const DeliverJob = z.object({
+  subscriptionId: z.uuid(),
+  eventId: z.uuid(),
+  attempt: z.number().int().min(1).default(1),
+  /** Test events have no outbox row: the synthesized payload travels with the job. */
+  sample: z.record(z.string(), z.unknown()).optional(),
+});
+export type DeliverJob = z.infer<typeof DeliverJob>;
+export const VerifyCallbackJob = z.object({ subscriptionId: z.uuid() });
+export const TestEventJob = z.object({ subscriptionId: z.uuid(), eventId: z.uuid().optional() });
+export const RedeliverJob = z.object({ deliveryId: z.uuid() });

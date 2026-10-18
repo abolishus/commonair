@@ -239,8 +239,16 @@ export const Heartbeat = z.object({
   ttffMs: z.number().int().min(0).nullable(),
   visible: z.boolean(),
   muted: z.boolean(),
-  /** Coarse client capability fingerprint for headless detection; no persistent identifiers. */
-  fingerprint: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+  /**
+   * Coarse client capability signals for headless detection; no persistent identifiers. Known keys:
+   * `webdriver` (navigator.webdriver), `automation` (automation globals present), `plugins`
+   * (navigator.plugins.length), `webgl` (context available), `innerWidth`, `innerHeight`,
+   * `audio` (AudioContext available). See packages/integrity/README.md.
+   */
+  fingerprint: z
+    .record(z.string().max(32), z.union([z.string().max(200), z.number(), z.boolean(), z.null()]))
+    .refine((f) => Object.keys(f).length <= 32, "too many fingerprint keys")
+    .optional(),
 });
 
 export const ChatBadge = z.enum(["broadcaster", "moderator", "vip", "subscriber", "bot", "staff", "member"]);

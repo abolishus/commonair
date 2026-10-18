@@ -32,8 +32,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.2"
-      - name: Tooling (reuse, podman-compose)
+      - name: Tooling (reuse, podman-compose, ffmpeg)
         run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
           pipx install reuse==6.2.0
           pipx install podman-compose==1.6.0
           podman --version

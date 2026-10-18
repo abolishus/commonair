@@ -26,6 +26,10 @@ export interface ServiceOptions<WS = undefined> {
   onShutdown?: () => Promise<void>;
   /** Max time to wait for onShutdown before exiting. */
   shutdownTimeoutMs?: number;
+  /** Seconds an idle connection stays open (Bun default 10). Raise above any long-poll timeout. */
+  idleTimeoutSeconds?: number;
+  /** Include failing checks' error text in /readyz (internal-only services). Default false. */
+  exposeReadinessDetails?: boolean;
 }
 
 export interface RunningService<WS = undefined> {
@@ -74,6 +78,7 @@ export function runService<WS = undefined>(opts: ServiceOptions<WS>): RunningSer
   const server = Bun.serve<WS>({
     port: opts.port,
     hostname: opts.hostname ?? "0.0.0.0",
+    idleTimeout: opts.idleTimeoutSeconds ?? 30,
     websocket: opts.websocket as WebSocketHandler<WS>,
     async fetch(req, srv) {
       const { pathname } = new URL(req.url);
@@ -83,7 +88,15 @@ export function runService<WS = undefined>(opts: ServiceOptions<WS>): RunningSer
         );
       if (pathname === "/readyz") {
         const r = await readiness(checks);
-        return withSecurityHeaders(Response.json(r, { status: r.ok && !stopping ? 200 : 503 }));
+        if (!r.ok) logger.warn("readiness check failed", { checks: r.checks });
+        // Public responses carry pass/fail only: error text can reveal internal hosts and queries.
+        const body = opts.exposeReadinessDetails
+          ? r
+          : {
+              ok: r.ok,
+              checks: Object.fromEntries(Object.entries(r.checks).map(([k, v]) => [k, v === "ok" ? "ok" : "fail"])),
+            };
+        return withSecurityHeaders(Response.json(body, { status: r.ok && !stopping ? 200 : 503 }));
       }
       try {
         const res = await opts.fetch(req, srv);

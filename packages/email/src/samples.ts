@@ -1,0 +1,105 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * Sample data for every template, used by `bun run preview` and the tests.
+ * Links are built from the instance's public URL, as real callers must.
+ */
+import type { TemplateData } from "./registry.ts";
+import type { TemplateId } from "./template.tsx";
+
+export type SampleData = { [K in TemplateId]: TemplateData<K> };
+
+export interface SampleValues {
+  displayName: string;
+  channelName: string;
+  proposalTitle: string;
+  contentTitle: string;
+  device: string;
+  location: string;
+  foundIn: string;
+}
+
+export const ENGLISH_SAMPLE_VALUES: SampleValues = {
+  displayName: "Ada",
+  channelName: "ada_plays",
+  proposalTitle: "Raise the creator share to 85%",
+  contentTitle: "Speedrun night, part 2",
+  device: "Firefox on Linux",
+  location: "Lisbon, Portugal",
+  foundIn: "a public code repository",
+};
+
+export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_VALUES): SampleData {
+  const url = (path: string) => `${publicUrl.replace(/\/+$/, "")}${path}`;
+  const at = "2026-10-18T14:30:00Z";
+  return {
+    verifyEmail: { displayName: v.displayName, verifyUrl: url("/verify-email?token=sample"), expiresInMinutes: 60 },
+    magicLink: { signInUrl: url("/sign-in/magic?token=sample"), expiresInMinutes: 15 },
+    passwordReset: { resetUrl: url("/reset-password?token=sample"), expiresInMinutes: 30 },
+    twoFactorEnabled: { changedAt: at, securityUrl: url("/settings/security") },
+    twoFactorDisabled: { changedAt: at, securityUrl: url("/settings/security") },
+    newSignIn: {
+      signedInAt: at,
+      device: v.device,
+      approximateLocation: v.location,
+      sessionsUrl: url("/settings/security/sessions"),
+    },
+    streamKeyRevoked: {
+      channelName: v.channelName,
+      detectedAt: at,
+      foundIn: v.foundIn,
+      streamKeysUrl: url("/dashboard/stream-keys"),
+    },
+    dataExportReady: { downloadUrl: url("/settings/privacy/exports/sample"), expiresAt: "2026-10-25T14:30:00Z" },
+    accountDeletionScheduled: { deleteAt: "2026-11-17T00:00:00Z", cancelUrl: url("/settings/account/deletion") },
+    accountDeletionCompleted: { deletedAt: at },
+    payoutSent: {
+      amountCents: 123_456,
+      currency: "EUR",
+      sentAt: at,
+      reference: "PO-2026-10-0042",
+      earningsUrl: url("/dashboard/earnings"),
+    },
+    chargebackNotice: {
+      kind: "chargeback",
+      amountCents: 499,
+      currency: "EUR",
+      occurredAt: at,
+      reference: "CB-7731",
+      earningsUrl: url("/dashboard/earnings"),
+    },
+    governanceVoteOpened: {
+      proposalTitle: v.proposalTitle,
+      closesAt: "2026-11-01T18:00:00Z",
+      voteUrl: url("/coop/proposals/sample"),
+      unsubscribeUrl: url("/settings/notifications/unsubscribe?list=governance&token=sample"),
+    },
+    governanceResultPublished: {
+      proposalTitle: v.proposalTitle,
+      outcome: "passed",
+      turnout: 0.412,
+      resultUrl: url("/coop/proposals/sample"),
+      unsubscribeUrl: url("/settings/notifications/unsubscribe?list=governance&token=sample"),
+    },
+    councilReviewRequested: {
+      proposalTitle: v.proposalTitle,
+      reviewEndsAt: "2026-10-25T18:00:00Z",
+      respondUrl: url("/coop/proposals/sample/council-response"),
+    },
+    dmcaNoticeReceived: {
+      contentTitle: v.contentTitle,
+      noticeRef: "DMCA-2026-0091",
+      receivedAt: at,
+      noticeUrl: url("/settings/copyright/notices/sample"),
+    },
+    contentRestored: { contentTitle: v.contentTitle, restoredAt: at, contentUrl: url("/videos/sample") },
+    appealDecided: {
+      appealRef: "AP-1207",
+      kind: "moderation",
+      outcome: "overturned",
+      decidedAt: at,
+      decisionUrl: url("/settings/appeals/sample"),
+    },
+  };
+}

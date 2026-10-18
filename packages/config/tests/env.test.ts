@@ -80,6 +80,16 @@ describe("env", () => {
     expect(() => loadEnv(coreEnv, { NODE_ENV: "production", ...contacts })).not.toThrow();
   });
 
+  test("noreply defaults to the instance's own host unless flagship or overridden", () => {
+    expect(instanceSite(loadEnv(coreEnv, { PUBLIC_URL: "https://air.example.org" })).contacts.noreply).toBe(
+      "noreply@air.example.org",
+    );
+    expect(instanceSite(loadEnv(coreEnv, { INSTANCE_IS_FLAGSHIP: "true" })).contacts.noreply).toBe(
+      SITE.contacts.noreply,
+    );
+    expect(instanceSite(loadEnv(coreEnv, { NOREPLY_EMAIL: "bot@x.test" })).contacts.noreply).toBe("bot@x.test");
+  });
+
   test("sourceLink points at the exact commit", () => {
     expect(sourceLink({ sourceUrl: SITE.repository.url, sourceCommit: "abc123" })).toBe(
       `${SITE.repository.url}/tree/abc123`,

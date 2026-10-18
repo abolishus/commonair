@@ -1,0 +1,155 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * Locale-aware formatting used by the house primitives. Pure functions so the
+ * app can format outside React (e.g. document titles) with the same rules.
+ * `Intl` formatters are cached because constructing them is comparatively slow
+ * and chat/directory views format hundreds of values per render.
+ */
+
+const cache = new Map<string, Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat>();
+
+function cached<T extends Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat>(
+  key: string,
+  make: () => T,
+): T {
+  let f = cache.get(key) as T | undefined;
+  if (!f) {
+    f = make();
+    // Bounded: locales x option sets is small in practice, but never let it grow without limit.
+    if (cache.size > 500) cache.clear();
+    cache.set(key, f);
+  }
+  return f;
+}
+
+export interface FormatMoneyOptions {
+  /** `"exceptZero"` for ledger-style +/− amounts. */
+  signDisplay?: Intl.NumberFormatOptions["signDisplay"];
+  currencyDisplay?: Intl.NumberFormatOptions["currencyDisplay"];
+}
+
+/**
+ * Formats an integer amount of the currency's minor unit ("cents"; for
+ * zero-decimal currencies such as JPY the minor unit is the whole yen).
+ * Throws on non-integers: money is never a float in this codebase.
+ */
+export function formatMoney(cents: number, currency: string, locale: string, options: FormatMoneyOptions = {}): string {
+  if (!Number.isSafeInteger(cents)) throw new RangeError(`formatMoney: cents must be a safe integer, got ${cents}`);
+  const code = currency.toUpperCase();
+  const fmt = cached(
+    `money|${locale}|${code}|${options.signDisplay ?? ""}|${options.currencyDisplay ?? ""}`,
+    () =>
+      new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: code,
+        signDisplay: options.signDisplay ?? "auto",
+        currencyDisplay: options.currencyDisplay ?? "symbol",
+      }),
+  );
+  return fmt.format(toMajorUnits(cents, minorDigits(code)));
+}
+
+/** ISO 4217 minor-unit digits as `Intl` knows them (USD 2, JPY 0, KWD 3). */
+export function minorDigits(currency: string): number {
+  const fmt = cached(`digits|${currency}`, () => new Intl.NumberFormat("en", { style: "currency", currency }));
+  return fmt.resolvedOptions().maximumFractionDigits ?? 2;
+}
+
+/**
+ * Integer minor units to a decimal number for display only. Uses string
+ * arithmetic so large amounts never pick up binary-float noise.
+ */
+function toMajorUnits(cents: number, digits: number): number {
+  if (digits === 0) return cents;
+  const negative = cents < 0;
+  const abs = Math.abs(cents)
+    .toString()
+    .padStart(digits + 1, "0");
+  const major = `${abs.slice(0, -digits)}.${abs.slice(-digits)}`;
+  return Number(negative ? `-${major}` : major);
+}
+
+/** 1234 -> "1.2K" (en), "1234" -> "1234" below 1000, locale-aware. */
+export function formatCompactNumber(value: number, locale: string): string {
+  const fmt = cached(
+    `compact|${locale}`,
+    () => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }),
+  );
+  return fmt.format(value);
+}
+
+/** Full grouping, for screen-reader labels: 1234 -> "1,234". */
+export function formatNumber(value: number, locale: string): string {
+  return cached(`number|${locale}`, () => new Intl.NumberFormat(locale)).format(value);
+}
+
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
+const MONTH = 30 * DAY;
+const YEAR = 365 * DAY;
+
+const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["year", YEAR],
+  ["month", MONTH],
+  ["week", WEEK],
+  ["day", DAY],
+  ["hour", HOUR],
+  ["minute", MINUTE],
+  ["second", SECOND],
+];
+
+export interface RelativeTimeResult {
+  text: string;
+  /** Milliseconds until the text would change; `null` when it will not change soon enough to matter. */
+  nextUpdateMs: number | null;
+}
+
+/**
+ * "5 minutes ago" / "in 2 hours" with `numeric: "auto"` ("now", "yesterday").
+ * Also returns when the text next changes, so `<RelativeTime>` re-renders exactly then.
+ */
+export function formatRelativeTime(date: Date, now: number, locale: string): RelativeTimeResult {
+  const diff = date.getTime() - now;
+  const abs = Math.abs(diff);
+  const fmt = cached(`rel|${locale}`, () => new Intl.RelativeTimeFormat(locale, { numeric: "auto" }));
+  const [unit, size] = UNITS.find(([, ms]) => abs >= ms) ?? ["second", SECOND];
+  // Truncate (90 s is "1 minute ago"), so unit switches land on whole multiples and never read "60 seconds".
+  const value = Math.trunc(diff / size);
+  // Truncation yields -0 for the first second in the past; Intl would render "0 seconds ago", not "now".
+  const text = fmt.format(value === 0 ? 0 : value, unit);
+  if (unit === "year" || unit === "month") return { text, nextUpdateMs: null };
+  // The text changes when |diff| crosses the next multiple of the unit: up for past dates, down for future ones.
+  const delay = diff <= 0 ? size - (abs % size) : abs % size;
+  return { text, nextUpdateMs: Math.max(SECOND, Math.min(delay, DAY)) };
+}
+
+/** Absolute timestamp for tooltips and screen readers. */
+export function formatDateTime(date: Date, locale: string, timeZone?: string): string {
+  return cached(
+    `dt|${locale}|${timeZone ?? ""}`,
+    () => new Intl.DateTimeFormat(locale, { dateStyle: "long", timeStyle: "short", timeZone }),
+  ).format(date);
+}
+
+const LETTER = /[\p{L}\p{N}]/u;
+
+/**
+ * The first letter or digit of a display name as one grapheme (so "Émile" -> "É",
+ * flags and combined emoji stay whole), upper-cased for the locale. Falls back to
+ * the first grapheme, or "?" for an empty name.
+ */
+export function getInitial(name: string, locale: string): string {
+  const trimmed = name.trim();
+  if (trimmed === "") return "?";
+  const graphemes = Array.from(
+    new Intl.Segmenter(locale, { granularity: "grapheme" }).segment(trimmed),
+    (s) => s.segment,
+  );
+  const first = graphemes.find((g) => LETTER.test(g)) ?? graphemes[0] ?? "?";
+  return first.toLocaleUpperCase(locale);
+}

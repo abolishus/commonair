@@ -214,3 +214,18 @@ export const AlertTemplate = z.object({
   showMessage: z.boolean().default(true),
 });
 export type AlertTemplate = z.infer<typeof AlertTemplate>;
+
+/** `platform.cut` governance setting. */
+export const PlatformCutSetting = z
+  .object({ streamerShare: z.number().min(0).max(1), coopShare: z.number().min(0).max(1) })
+  .refine((c) => Math.abs(c.streamerShare + c.coopShare - 1) < 1e-9, { message: "cut shares must sum to 1" });
+export type PlatformCutSetting = z.infer<typeof PlatformCutSetting>;
+
+/** `payout.rules` governance setting. */
+export const PayoutRulesSetting = z.object({
+  minimumCents: z.number().int().nonnegative(),
+  schedule: z.enum(["monthly"]),
+  holdDays: z.number().nonnegative(),
+  currency: z.string().regex(/^[a-z]{3}$/),
+});
+export type PayoutRulesSetting = z.infer<typeof PayoutRulesSetting>;

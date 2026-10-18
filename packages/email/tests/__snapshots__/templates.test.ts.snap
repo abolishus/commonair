@@ -1,0 +1,523 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`accountDeletionCompleted > renders accessible HTML and a plain-text alternative 1`] = `
+"Your Example Air account has been deleted
+
+Example Air https://air.example.test
+
+
+Your account has been deleted
+
+Your Example Air account was deleted on October 18, 2026. Your personal data has been removed.
+
+Records the law requires us to keep, such as payment records, are kept without your personal details.
+
+Thank you for being part of Example Air.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`accountDeletionScheduled > renders accessible HTML and a plain-text alternative 1`] = `
+"Your Example Air account will be deleted on November 17, 2026
+
+Example Air https://air.example.test
+
+
+Your account is scheduled for deletion
+
+You asked us to delete your Example Air account. It will be deleted permanently on November 17, 2026.
+
+Changed your mind? Cancel any time before then and everything stays as it is.
+
+Cancel deletion https://air.example.test/settings/account/deletion
+
+If you did not ask for this, cancel now and contact privacy@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`appealDecided > renders accessible HTML and a plain-text alternative 1`] = `
+"Your appeal AP-1207 has been decided
+
+Example Air https://air.example.test
+
+
+Your appeal has been decided
+
+We reviewed your appeal AP-1207.
+
+Appeal about
+
+A moderation action
+
+Decision
+
+Overturned: the original action has been reversed
+
+Decided
+
+October 18, 2026 at 2:30 PM UTC
+
+Read the decision https://air.example.test/settings/appeals/sample
+
+You can find the reasons and any further options on the decision page.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`chargebackNotice > renders accessible HTML and a plain-text alternative 1`] = `
+"A payment was charged back: €4.99
+
+Example Air https://air.example.test
+
+
+A supporter's payment was charged back
+
+A payment to your channel was disputed with the card issuer and the money was returned to the payer.
+
+Amount
+
+€4.99
+
+Date
+
+October 18, 2026 at 2:30 PM UTC
+
+Reference
+
+CB-7731
+
+The amount has been deducted from your balance. If your balance goes below zero, it is recovered from future earnings.
+
+View earnings https://air.example.test/dashboard/earnings
+
+If you think this is a mistake, contact hello@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`contentRestored > renders accessible HTML and a plain-text alternative 1`] = `
+"Your content is available again: Speedrun night, part 2
+
+Example Air https://air.example.test
+
+
+Your content has been restored
+
+Speedrun night, part 2 is available again.
+
+Restored
+
+October 18, 2026 at 2:30 PM UTC
+
+View the content https://air.example.test/videos/sample
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`councilReviewRequested > renders accessible HTML and a plain-text alternative 1`] = `
+"Council review requested: Raise the creator share to 85%
+
+Example Air https://air.example.test
+
+
+A proposal needs the council's review
+
+Raise the creator share to 85% affects creators and has entered council review.
+
+Review period ends
+
+October 25, 2026 at 6:00 PM UTC
+
+As a member of the creator council, you can publish the council's response before members vote.
+
+Review and respond https://air.example.test/coop/proposals/sample/council-response
+
+The council's response is published with the proposal.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dataExportReady > renders accessible HTML and a plain-text alternative 1`] = `
+"Your Example Air data export is ready
+
+Example Air https://air.example.test
+
+
+Your data export is ready
+
+The copy of your data you asked for is ready to download.
+
+Download your data https://air.example.test/settings/privacy/exports/sample
+
+The download is available until October 25, 2026 at 2:30 PM UTC. After that, request a new export.
+
+You will need to sign in to download it.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dmcaNoticeReceived > renders accessible HTML and a plain-text alternative 1`] = `
+"Copyright notice about Speedrun night, part 2
+
+Example Air https://air.example.test
+
+
+We received a copyright notice
+
+We received a copyright (DMCA) notice about Speedrun night, part 2, and it is no longer available while the notice is handled.
+
+Notice reference
+
+DMCA-2026-0091
+
+Received
+
+October 18, 2026 at 2:30 PM UTC
+
+If you believe the notice is a mistake or you have the rights to this content, you can send a counter-notice.
+
+Review the notice https://air.example.test/settings/copyright/notices/sample
+
+Questions about copyright? Write to dmca@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`governanceResultPublished > renders accessible HTML and a plain-text alternative 1`] = `
+"Vote result: Raise the creator share to 85%
+
+Example Air https://air.example.test
+
+
+The result is in
+
+The vote on Raise the creator share to 85% has closed.
+
+Outcome
+
+Passed
+
+Turnout
+
+41.2%
+
+See the full result https://air.example.test/coop/proposals/sample
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/settings/notifications/unsubscribe?list=governance&token=sample"
+`;
+
+exports[`governanceVoteOpened > renders accessible HTML and a plain-text alternative 1`] = `
+"Vote now: Raise the creator share to 85%
+
+Example Air https://air.example.test
+
+
+A new vote is open
+
+Members can now vote on: Raise the creator share to 85%
+
+Voting closes
+
+November 1, 2026 at 6:00 PM UTC
+
+As a member of the Example Air co-op, your vote decides how the platform is run.
+
+Read the proposal and vote https://air.example.test/coop/proposals/sample
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/settings/notifications/unsubscribe?list=governance&token=sample"
+`;
+
+exports[`magicLink > renders accessible HTML and a plain-text alternative 1`] = `
+"Your sign-in link for Example Air
+
+Example Air https://air.example.test
+
+
+Sign in to Example Air
+
+Use the button below to sign in. The link works once.
+
+Sign in https://air.example.test/sign-in/magic?token=sample
+
+This link expires in 15 minutes.
+
+If you did not ask to sign in, you can ignore this email. Nobody can sign in without this link.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`newSignIn > renders accessible HTML and a plain-text alternative 1`] = `
+"New sign-in to your Example Air account
+
+Example Air https://air.example.test
+
+
+New sign-in from a new device
+
+Your Example Air account was signed in to from a device we have not seen before.
+
+When
+
+October 18, 2026 at 2:30 PM UTC
+
+Device
+
+Firefox on Linux
+
+Approximate location
+
+Lisbon, Portugal
+
+If this was you, there is nothing to do.
+
+If this was not you, sign out that session and change your password.
+
+Review active sessions https://air.example.test/settings/security/sessions
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`passwordReset > renders accessible HTML and a plain-text alternative 1`] = `
+"Reset your Example Air password
+
+Example Air https://air.example.test
+
+
+Reset your password
+
+Someone asked to reset the password for your Example Air account. If it was you, choose a new password below.
+
+Choose a new password https://air.example.test/reset-password?token=sample
+
+This link expires in 30 minutes.
+
+If you did not ask for this, ignore this email. Your password stays the same.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`payoutSent > renders accessible HTML and a plain-text alternative 1`] = `
+"Payout sent: €1,234.56
+
+Example Air https://air.example.test
+
+
+Your payout is on its way
+
+We sent you a payout of €1,234.56.
+
+Amount
+
+€1,234.56
+
+Sent
+
+October 18, 2026 at 2:30 PM UTC
+
+Reference
+
+PO-2026-10-0042
+
+Depending on your bank, it can take a few business days to arrive.
+
+View earnings https://air.example.test/dashboard/earnings
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`streamKeyRevoked > renders accessible HTML and a plain-text alternative 1`] = `
+"Your stream key for ada_plays was revoked
+
+Example Air https://air.example.test
+
+
+We revoked a leaked stream key
+
+We found the stream key for ada_plays in a public place and revoked it so nobody else can stream to your channel.
+
+Detected
+
+October 18, 2026 at 2:30 PM UTC
+
+Found in
+
+a public code repository
+
+Create a new stream key and update it in your streaming software before you go live again.
+
+Manage stream keys https://air.example.test/dashboard/stream-keys
+
+Never show your stream key on stream or share it in screenshots.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`twoFactorDisabled > renders accessible HTML and a plain-text alternative 1`] = `
+"Two-factor authentication is off
+
+Example Air https://air.example.test
+
+
+Two-factor authentication is off
+
+Two-factor authentication was turned off for your Example Air account on October 18, 2026 at 2:30 PM UTC. Your account is now protected by your password alone.
+
+Turn it back on https://air.example.test/settings/security
+
+If you did not do this, change your password now and contact security@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`twoFactorEnabled > renders accessible HTML and a plain-text alternative 1`] = `
+"Two-factor authentication is on
+
+Example Air https://air.example.test
+
+
+Two-factor authentication is on
+
+Two-factor authentication was turned on for your Example Air account on October 18, 2026 at 2:30 PM UTC. You will now need your authenticator app or a security key to sign in.
+
+Keep your recovery codes somewhere safe. They are the only way in if you lose your device.
+
+Review security settings https://air.example.test/settings/security
+
+If you did not do this, secure your account now and contact security@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`verifyEmail > renders accessible HTML and a plain-text alternative 1`] = `
+"Confirm your email address for Example Air
+
+Example Air https://air.example.test
+
+
+Confirm your email address
+
+Hi Ada,
+
+Please confirm this is your email address to finish setting up your Example Air account.
+
+Confirm email address https://air.example.test/verify-email?token=sample
+
+This link expires in 60 minutes.
+
+If you did not create an account, you can ignore this email.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
