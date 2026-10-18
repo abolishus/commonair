@@ -19,7 +19,7 @@ export interface DiskBudgetConfig {
   minFreeBytes: number;
 }
 
-/** Defaults until an env var exists (contract request: MEDIA_WORK_DIR_MAX_BYTES / _MIN_FREE_BYTES). */
+/** Same defaults as MEDIA_WORK_DIR_MAX_BYTES / MEDIA_WORK_DIR_MIN_FREE_BYTES (for embedders and tests). */
 export const DEFAULT_DISK_BUDGET: DiskBudgetConfig = { maxBytes: 20 * GIB, minFreeBytes: 2 * GIB };
 
 export interface DiskUsage {

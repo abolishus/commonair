@@ -21,27 +21,28 @@ const rejection = (fn: () => unknown) => {
 };
 
 describe("parseTargetUrl", () => {
-  test("splits app, play-path prefix and tcUrl like ffmpeg, with protocol default ports", () => {
+  test("splits host, port, path, query and the tcUrl ffmpeg would derive, with default ports", () => {
     expect(parseTargetUrl("rtmp://live.twitch.tv/app")).toEqual({
       protocol: "rtmp:",
       host: "live.twitch.tv",
       port: 1935,
-      app: "app",
-      playpathPrefix: "",
+      explicitPort: false,
+      path: "/app",
+      search: "",
       tcUrl: "rtmp://live.twitch.tv/app",
     });
     expect(parseTargetUrl("rtmps://a.rtmp.youtube.com:443/live2/")).toMatchObject({
       protocol: "rtmps:",
       port: 443,
-      app: "live2",
-      playpathPrefix: "",
+      explicitPort: true,
+      path: "/live2",
       tcUrl: "rtmps://a.rtmp.youtube.com:443/live2",
     });
-    expect(parseTargetUrl("RTMP://Host.Example:1940/a/b/c")).toMatchObject({
+    expect(parseTargetUrl("RTMP://Host.Example:1940/a/b/c?token=x")).toMatchObject({
       host: "host.example",
       port: 1940,
-      app: "a",
-      playpathPrefix: "b/c",
+      path: "/a/b/c",
+      search: "?token=x",
       tcUrl: "rtmp://host.example:1940/a",
     });
     expect(parseTargetUrl("rtmp://[2001:4860::1]/live").host).toBe("2001:4860::1");
@@ -171,6 +172,14 @@ describe("resolveTarget", () => {
       address: "203.0.114.5",
       family: 4,
     });
+  });
+
+  test("prefers an IPv4 address, else keeps resolver order", async () => {
+    const t = parseTargetUrl("rtmp://dual.example/live");
+    const both = fake({ "dual.example": ["2606:4700::1", "2606:4700::2", "104.16.1.1"] });
+    await expect(resolveTarget(t, { resolver: both })).resolves.toEqual({ address: "104.16.1.1", family: 4 });
+    const v6 = fake({ "dual.example": ["2606:4700::1", "2606:4700::2"] });
+    await expect(resolveTarget(t, { resolver: v6 })).resolves.toEqual({ address: "2606:4700::1", family: 6 });
   });
 
   test("refuses a name with any non-public address (rebinding-style mixed answers)", async () => {

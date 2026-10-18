@@ -6,7 +6,7 @@
  * broadcast, from the live recorder's local buffer when the broadcast is still live, otherwise
  * from the VOD's segments in object storage. Output: `clips/<clipId>.mp4` plus a thumbnail.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+
 import { join } from "node:path";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "./disk.ts";
 import { clipArgs, frameArgs, type H264Encoder, type ImageFormat } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
+import { ActiveScratch } from "./recovery.ts";
 import type { HashMatchEnforcer } from "./safety/enforce.ts";
 import { broadcastTainted, quarantinePrefix, CSAM_REASON } from "./safety/quarantine.ts";
 import { assembleFromStorage, concatFiles } from "./vod/assemble.ts";
@@ -56,6 +57,8 @@ export interface ClipDeps {
   logger: Logger;
   /** Refuses the cut when the work dir is over budget (optional for embedding/tests). */
   diskBudget?: DiskBudget;
+  /** Registry of running jobs' scratch dirs, so the work-dir sweep leaves them alone. */
+  scratch?: ActiveScratch;
   /** Local rolling buffer of a broadcast that is live on this instance. */
   liveWindow: (broadcastId: string, start: Date, durationSeconds: number) => LocalWindow | null;
 }
@@ -92,7 +95,8 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
   const budget = await deps.diskBudget?.check("clip");
   if (budget && !budget.ok) throw new ClipUnavailableError("media work dir over disk budget", CLIP_DISK_REASON);
 
-  const scratch = await mkdtemp(join(deps.workDir, "clip-"));
+  const scratches = deps.scratch ?? new ActiveScratch();
+  const scratch = await scratches.create(deps.workDir, "clip-");
   try {
     const source = join(scratch, "source.mp4");
     let window: { offsetSeconds: number; durationSeconds: number };
@@ -172,7 +176,7 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
     log.info("clip ready", { durationSeconds: window.durationSeconds, fromLiveBuffer: live !== null });
     return "ready";
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    await scratches.release(scratch);
   }
 }
 

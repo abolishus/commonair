@@ -125,7 +125,15 @@ export function startJobs(opts: JobsOptions): Jobs {
         const job = await finalizeQueue.getJob(vodId);
         // Only finished jobs are replaced; an active one is locked by its worker.
         if (job && (await job.isActive())) return;
-        await job?.remove();
+        if (job) {
+          try {
+            await job.remove();
+          } catch (err) {
+            // A worker picked it up between the check and the remove (the job is locked): owned.
+            log.debug("finalize job became active during requeue", { vodId, err });
+            return;
+          }
+        }
         await addFinalize(vodId);
       },
     },

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vite-plus/test";
 import { createLogger } from "@commonair/observability";
-import { segmentsToRecover, sweepWorkDir } from "../src/recovery.ts";
+import { ActiveScratch, segmentsToRecover, sweepScratchAtStartup, sweepWorkDir } from "../src/recovery.ts";
 import { thumbnailsToDelete } from "../src/thumbnails.ts";
 import type { PlaylistSegment } from "../src/vod/playlist.ts";
 import { decideVod, type FinalizeJobInfo } from "../src/vod/reconcile.ts";
@@ -117,55 +117,65 @@ describe("sweepWorkDir", () => {
     utimesSync(path, t, t);
   };
 
-  test("removes old orphans, keeps owned, fresh and unrelated directories", async () => {
-    const mk = (p: string) => {
-      mkdirSync(join(dir, p), { recursive: true });
-      return join(dir, p);
-    };
-    const oldClip = mk("clip-abc");
-    const newVod = mk("vod-def");
+  const mk = (p: string) => {
+    mkdirSync(join(dir, p), { recursive: true });
+    return join(dir, p);
+  };
+  // Broadcast dirs in these unit tests have non-UUID names, which never touch the database
+  // (VOD-backed recovery is covered by housekeeping.int.test.ts).
+  const opts = (activeScratch = new ActiveScratch(), owned = new Set<string>()) => ({
+    db: undefined as never,
+    storage: undefined as never,
+    bucket: "unused",
+    workDir: dir,
+    logger,
+    owned,
+    activeScratch,
+    broadcastDirMaxAgeMs: 15 * 60_000,
+  });
+
+  test("removes scratch dirs no job owns (past the registration grace), never active ones", async () => {
+    const active = new ActiveScratch();
+    const running = await active.create(dir, "clip-");
+    const orphan = mk("vod-orphan");
+    const justCreated = mk("clip-new");
     const other = mk("something-else");
+    old(running, 48 * 3600_000);
+    old(orphan, 5 * 60_000);
+    old(other, 48 * 3600_000);
+
+    const { removed } = await sweepWorkDir(opts(active));
+    expect(removed).toEqual([orphan]);
+    for (const keep of [running, justCreated, other]) expect(existsSync(keep), keep).toBe(true);
+    expect(active.has(running)).toBe(true);
+    await active.release(running);
+    expect(active.has(running)).toBe(false);
+    expect(existsSync(running)).toBe(false);
+    rmSync(justCreated, { recursive: true });
+  });
+
+  test("broadcast dirs: owned and fresh ones stay, old unowned ones go", async () => {
     const orphan = mk("broadcasts/orphan");
     const owned = mk("broadcasts/owned");
     const fresh = mk("broadcasts/fresh");
-    old(oldClip, 2 * 3600_000);
-    old(other, 48 * 3600_000);
     old(orphan, 3600_000);
     old(owned, 3600_000);
-
-    const { removed } = await sweepWorkDir({
-      workDir: dir,
-      owned: new Set(["owned"]),
-      broadcastDirMaxAgeMs: 15 * 60_000,
-      scratchMaxAgeMs: 3600_000,
-      logger,
-    });
-    expect(removed.sort()).toEqual([orphan, oldClip].sort());
-    for (const keep of [newVod, other, owned, fresh]) expect(existsSync(keep), keep).toBe(true);
+    const { removed } = await sweepWorkDir(opts(new ActiveScratch(), new Set(["owned"])));
+    expect(removed).toEqual([orphan]);
+    expect(existsSync(owned)).toBe(true);
+    expect(existsSync(fresh)).toBe(true);
   });
 
-  test("age 0 removes every scratch directory (startup, before jobs run)", async () => {
-    mkdirSync(join(dir, "clip-fresh"));
-    const { removed } = await sweepWorkDir({
-      workDir: dir,
-      owned: new Set(),
-      broadcastDirMaxAgeMs: 15 * 60_000,
-      scratchMaxAgeMs: 0,
-      logger,
-    });
-    expect(removed).toContain(join(dir, "clip-fresh"));
-    expect(removed).toContain(join(dir, "vod-def"));
+  test("startup removes every scratch dir regardless of age", async () => {
+    const a = mk("clip-fresh");
+    const b = mk("vod-fresh");
+    const { removed } = await sweepScratchAtStartup({ workDir: dir, logger });
+    expect(removed.sort()).toEqual([a, b].sort());
+    expect(existsSync(join(dir, "something-else"))).toBe(true);
   });
 
   test("a missing work dir is not an error", async () => {
-    await expect(
-      sweepWorkDir({
-        workDir: join(dir, "nope"),
-        owned: new Set(),
-        broadcastDirMaxAgeMs: 0,
-        scratchMaxAgeMs: 0,
-        logger,
-      }),
-    ).resolves.toEqual({ removed: [] });
+    await expect(sweepWorkDir({ ...opts(), workDir: join(dir, "nope") })).resolves.toEqual({ removed: [] });
+    await expect(sweepScratchAtStartup({ workDir: join(dir, "nope"), logger })).resolves.toEqual({ removed: [] });
   });
 });

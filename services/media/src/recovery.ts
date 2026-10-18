@@ -11,10 +11,11 @@
  * keeps everything up to the crash. Partial segments (ffmpeg's `.tmp` files) are discarded.
  * The directory is then removed; a resumed session records into a fresh one.
  *
- * Periodic (`sweepWorkDir`): broadcast directories no session owns and clip/VOD scratch
- * directories left by crashed jobs are deleted once they are older than a threshold.
+ * Periodic (`sweepWorkDir`): broadcast directories no session owns are recovered the same way
+ * and deleted only once their segments are safe; clip/VOD scratch directories no running job
+ * owns (`ActiveScratch`) are deleted. Age alone decides only at startup, when no job runs.
  */
-import { readdir, rm, stat } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { eq, inArray, and } from "drizzle-orm";
 import { schema, type Database } from "@commonair/db";
@@ -128,42 +129,100 @@ export async function recoverWorkDir(deps: RecoveryDeps): Promise<RecoveryResult
     return result;
   }
   for (const name of names) {
-    const dir = join(root, name);
     result.directories++;
-    if (!UUID.test(name)) {
-      await rm(dir, { recursive: true, force: true });
-      continue;
-    }
-    try {
-      const [vod] = await deps.db
-        .select({ id: schema.vods.id })
-        .from(schema.vods)
-        .where(and(eq(schema.vods.broadcastId, name), inArray(schema.vods.status, ["recording", "processing"])))
-        .limit(1);
-      if (vod) {
-        const n = await recoverRecording(deps, dir, vod.id);
-        result.uploaded += n;
-        if (n > 0)
-          log.info("recovered segments of a crashed recording", { broadcastId: name, vodId: vod.id, segments: n });
-      }
-      await rm(dir, { recursive: true, force: true });
-    } catch (err) {
-      // Keep the files for the next start; the periodic sweep removes them once they are old.
-      result.kept++;
-      log.warn("could not recover a crashed recording; keeping its files", { broadcastId: name, err });
-    }
+    const outcome = await recoverBroadcastDir(deps, root, name, ["recording", "processing"], log);
+    if (outcome.kept) result.kept++;
+    result.uploaded += outcome.uploaded;
   }
   return result;
 }
 
-export interface SweepOptions {
-  workDir: string;
+type OpenVodStatus = "recording" | "processing";
+
+/**
+ * Recover (upload what is missing) and remove one unowned broadcast directory. The directory
+ * is deleted only once its segments are safe: recovery succeeded, or the broadcast has no VOD
+ * in one of `recoverable` states. A VOD in another unfinished state (e.g. `processing` while a
+ * finalize job may be running) keeps its directory until the VOD is ready, failed or gone.
+ */
+async function recoverBroadcastDir(
+  deps: RecoveryDeps,
+  root: string,
+  name: string,
+  recoverable: readonly OpenVodStatus[],
+  log: Logger,
+): Promise<{ kept: boolean; uploaded: number }> {
+  const dir = join(root, name);
+  if (!UUID.test(name)) {
+    await rm(dir, { recursive: true, force: true });
+    return { kept: false, uploaded: 0 };
+  }
+  try {
+    const [vod] = await deps.db
+      .select({ id: schema.vods.id, status: schema.vods.status })
+      .from(schema.vods)
+      .where(and(eq(schema.vods.broadcastId, name), inArray(schema.vods.status, ["recording", "processing"])))
+      .limit(1);
+    let uploaded = 0;
+    if (vod) {
+      if (!recoverable.includes(vod.status as OpenVodStatus)) return { kept: true, uploaded: 0 };
+      uploaded = await recoverRecording(deps, dir, vod.id);
+      if (uploaded > 0)
+        log.info("recovered unuploaded segments of a recording", {
+          broadcastId: name,
+          vodId: vod.id,
+          segments: uploaded,
+        });
+    }
+    await rm(dir, { recursive: true, force: true });
+    return { kept: false, uploaded };
+  } catch (err) {
+    // Keep the files; the next startup or sweep tries again.
+    log.warn("could not recover a recording; keeping its files", { broadcastId: name, err });
+    return { kept: true, uploaded: 0 };
+  }
+}
+
+/** Scratch directories of running clip/finalize jobs; the periodic sweep never touches them. */
+export class ActiveScratch {
+  private readonly paths = new Set<string>();
+
+  has(path: string): boolean {
+    return this.paths.has(path);
+  }
+
+  /** Create and register a scratch dir under `workDir`. Pair with `release`. */
+  async create(workDir: string, prefix: (typeof SCRATCH_PREFIXES)[number]): Promise<string> {
+    const dir = await mkdtemp(join(workDir, prefix));
+    this.paths.add(dir);
+    return dir;
+  }
+
+  /** Delete a scratch dir and forget it. */
+  async release(dir: string): Promise<void> {
+    try {
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      this.paths.delete(dir);
+    }
+  }
+}
+
+/** Unregistered scratch dirs younger than this may be between mkdtemp and registration. */
+const SCRATCH_REGISTRATION_GRACE_MS = 60_000;
+
+export interface SweepOptions extends RecoveryDeps {
   /** Broadcast ids with a running session (their directories are in use). */
   owned: ReadonlySet<string>;
+  /** Scratch dirs of running jobs. */
+  activeScratch: ActiveScratch;
   broadcastDirMaxAgeMs: number;
-  scratchMaxAgeMs: number;
-  logger: Logger;
   now?: number;
+}
+
+export interface StartupSweepOptions {
+  workDir: string;
+  logger: Logger;
 }
 
 export interface SweepResult {
@@ -178,28 +237,45 @@ async function ageMs(path: string, now: number): Promise<number | null> {
   }
 }
 
-/** Delete orphaned broadcast and scratch directories older than their thresholds. */
+async function scratchDirs(workDir: string): Promise<string[]> {
+  const top = await readdir(workDir, { withFileTypes: true }).catch(() => []);
+  return top
+    .filter((e) => e.isDirectory() && SCRATCH_PREFIXES.some((p) => e.name.startsWith(p)))
+    .map((e) => join(workDir, e.name));
+}
+
+/** Startup only (no job runs yet): every scratch directory is a leftover of a crashed job. */
+export async function sweepScratchAtStartup(opts: StartupSweepOptions): Promise<SweepResult> {
+  const removed = await scratchDirs(opts.workDir);
+  for (const path of removed) await rm(path, { recursive: true, force: true });
+  if (removed.length > 0) opts.logger.info("removed scratch dirs left by a crash", { count: removed.length });
+  return { removed };
+}
+
+/**
+ * Periodic: delete scratch dirs no running job owns, and recover-then-delete broadcast dirs no
+ * session owns once they are older than `broadcastDirMaxAgeMs`. Only `recording` VODs are
+ * recovered here; a `processing` VOD's finalize job may be reading its playlist right now.
+ */
 export async function sweepWorkDir(opts: SweepOptions): Promise<SweepResult> {
   const now = opts.now ?? Date.now();
+  const log = opts.logger.child({ component: "sweep" });
   const removed: string[] = [];
-  const remove = async (path: string, maxAge: number) => {
+  for (const path of await scratchDirs(opts.workDir)) {
+    if (opts.activeScratch.has(path)) continue;
     const age = await ageMs(path, now);
-    // maxAge 0 means "all of them" (mtime can be a hair ahead of the clock).
-    if (age === null || (maxAge > 0 && age < maxAge)) return;
+    if (age === null || age < SCRATCH_REGISTRATION_GRACE_MS) continue;
     await rm(path, { recursive: true, force: true });
     removed.push(path);
-  };
-  const top = await readdir(opts.workDir, { withFileTypes: true }).catch(() => []);
-  for (const e of top) {
-    if (!e.isDirectory()) continue;
-    if (SCRATCH_PREFIXES.some((p) => e.name.startsWith(p)))
-      await remove(join(opts.workDir, e.name), opts.scratchMaxAgeMs);
   }
   const root = join(opts.workDir, BROADCASTS_DIR);
   for (const name of await readdir(root).catch(() => [])) {
     if (opts.owned.has(name)) continue;
-    await remove(join(root, name), opts.broadcastDirMaxAgeMs);
+    const age = await ageMs(join(root, name), now);
+    if (age === null || age < opts.broadcastDirMaxAgeMs) continue;
+    const outcome = await recoverBroadcastDir(opts, root, name, ["recording"], log);
+    if (!outcome.kept) removed.push(join(root, name));
   }
-  if (removed.length > 0) opts.logger.info("swept orphaned work directories", { count: removed.length });
+  if (removed.length > 0) log.info("swept orphaned work directories", { count: removed.length });
   return { removed };
 }

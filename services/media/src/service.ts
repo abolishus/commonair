@@ -13,7 +13,7 @@ import { createValkey, valkeyCheck, type ReadinessCheck } from "@commonair/servi
 import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
-import { DiskBudget, type DiskBudgetConfig } from "./disk.ts";
+import { DiskBudget } from "./disk.ts";
 import { probeCapabilities, type Capabilities } from "./ffmpeg/hwaccel.ts";
 import { startJobs, type Jobs } from "./jobs.ts";
 import { LiveCoordinator } from "./lifecycle.ts";
@@ -21,7 +21,7 @@ import { every, type Loop } from "./loop.ts";
 import { MediaMtxClient } from "./mediamtx.ts";
 import { HashMatchEnforcer } from "./safety/enforce.ts";
 import { createHashMatcher, type HashMatcher } from "./safety/hashmatch.ts";
-import { recoverWorkDir, sweepWorkDir } from "./recovery.ts";
+import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "./recovery.ts";
 import { DEFAULT_TIMINGS, type MediaTimings } from "./settings.ts";
 import { defaultTranscodeSlots, SlotLimiter } from "./transcode/slots.ts";
 
@@ -41,12 +41,6 @@ export interface MediaServiceOptions {
   ffprobe?: string;
   /** Skip the startup encoder probe (tests). */
   capabilities?: Capabilities;
-  /** Work-dir disk budget (defaults: DEFAULT_DISK_BUDGET). */
-  diskBudget?: Partial<DiskBudgetConfig>;
-  /** Concurrent transcode ladders on this host (default: from the encoder and CPU count). */
-  transcodeSlots?: number;
-  /** Dev/test only: allow simulcast targets on loopback/private addresses (a local mock target). */
-  simulcastAllowPrivate?: boolean;
 }
 
 export interface MediaService {
@@ -92,8 +86,12 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     stopBroadcast: async (id) => coordinator?.offline(id, true, false),
   });
 
-  const diskBudget = new DiskBudget({ dir: workDir, config: opts.diskBudget, logger });
-  const transcodeSlots = new SlotLimiter(opts.transcodeSlots ?? defaultTranscodeSlots(caps.encoder));
+  const diskBudget = new DiskBudget({
+    dir: workDir,
+    config: { maxBytes: env.MEDIA_WORK_DIR_MAX_BYTES, minFreeBytes: env.MEDIA_WORK_DIR_MIN_FREE_BYTES },
+    logger,
+  });
+  const transcodeSlots = new SlotLimiter(env.TRANSCODE_MAX_LADDERS ?? defaultTranscodeSlots(caps.encoder));
   logger.info("media limits", {
     transcodeSlots: transcodeSlots.capacity,
     workDirMaxBytes: diskBudget.config.maxBytes,
@@ -138,11 +136,12 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     },
     diskBudget,
     transcodeSlots,
-    simulcastAllowPrivate: opts.simulcastAllowPrivate ?? false,
+    simulcastAllowPrivate: env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
   };
   coordinator = new LiveCoordinator(ctx);
   const live = coordinator;
 
+  const activeScratch = new ActiveScratch();
   const jobs = startJobs({
     valkeyUrl: env.VALKEY_URL,
     prefix: opts.bullPrefix,
@@ -157,6 +156,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       workDir,
       logger,
       diskBudget,
+      scratch: activeScratch,
     },
     clips: {
       db: dbh.db,
@@ -169,6 +169,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       workDir,
       logger,
       diskBudget,
+      scratch: activeScratch,
       liveWindow: (id, start, d) => live.liveWindow(id, start, d),
     },
   });
@@ -176,13 +177,16 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
 
   let reconcileLoop: Loop | null = null;
   let sweepLoop: Loop | null = null;
-  const sweep = async (scratchMaxAgeMs = timings.scratchMaxAgeMs) => {
+  const sweep = async () => {
     const { removed } = await sweepWorkDir({
+      db: dbh.db,
+      storage,
+      bucket: ctx.bucket,
       workDir,
-      owned: new Set(live.liveBroadcasts),
-      broadcastDirMaxAgeMs: timings.broadcastDirMaxAgeMs,
-      scratchMaxAgeMs,
       logger,
+      owned: new Set(live.liveBroadcasts),
+      activeScratch,
+      broadcastDirMaxAgeMs: timings.broadcastDirMaxAgeMs,
     });
     if (removed.length > 0) diskBudget.invalidate();
   };
@@ -214,11 +218,12 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       });
       // Crash recovery first: no session records and no job reads a playlist until the work dir
       // left by a previous process is repaired. Job workers are idle until now, so every
-      // scratch directory is a leftover (age 0).
+      // scratch directory is a leftover.
       try {
         const r = await recoverWorkDir({ db: dbh.db, storage, bucket: ctx.bucket, workDir, logger });
         if (r.directories > 0) logger.info("work dir recovered", { ...r });
-        await sweep(0);
+        await sweepScratchAtStartup({ workDir, logger });
+        diskBudget.invalidate();
       } catch (err) {
         logger.warn("work dir recovery failed", { err });
       }

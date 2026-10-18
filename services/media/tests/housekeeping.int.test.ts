@@ -6,7 +6,7 @@
  * Postgres, Valkey (BullMQ), a throwaway Garage and real ffmpeg. The "crash" is a work dir that
  * ffmpeg's HLS muxer wrote exactly as the recorder does, with only part of it uploaded.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -21,7 +21,7 @@ import { DiskBudget } from "../src/disk.ts";
 import { runCommand } from "../src/ffmpeg/run.ts";
 import { startJobs, type Jobs } from "../src/jobs.ts";
 import { MediaMtxClient } from "../src/mediamtx.ts";
-import { BROADCASTS_DIR, recoverWorkDir } from "../src/recovery.ts";
+import { ActiveScratch, BROADCASTS_DIR, recoverWorkDir, sweepWorkDir } from "../src/recovery.ts";
 import { HashMatchEnforcer } from "../src/safety/enforce.ts";
 import { NoopHashMatcher } from "../src/safety/hashmatch.ts";
 import { pruneThumbnails, thumbnailPrefix } from "../src/thumbnails.ts";
@@ -293,6 +293,51 @@ describe("crash recovery and stale VODs", () => {
     await waitFor("re-run finished", async () => (await vodRow(id))?.status === "failed");
     expect((await vodRow(id))?.removedReason).toBe("no_segments");
   }, 60_000);
+});
+
+describe("periodic sweep", () => {
+  test("recovers an unowned recording before deleting it; keeps a processing one; drops finished ones", async () => {
+    const root = join(workDir, BROADCASTS_DIR);
+    const age = (dir: string) => {
+      const t = (Date.now() - HOUR) / 1000;
+      utimesSync(dir, t, t);
+    };
+    const recordingB = await broadcast(HOUR);
+    const recordingVod = await vod(recordingB, "recording");
+    await recordRun(join(root, recordingB), "r1", 6);
+    const local = parsePlaylist(await Bun.file(join(root, recordingB, "r1.m3u8")).text()).segments;
+    const processingB = await broadcast(HOUR);
+    await vod(processingB, "processing");
+    await recordRun(join(root, processingB), "r1", 2);
+    const readyB = await broadcast(HOUR);
+    const readyVod = await vod(readyB, "processing");
+    await tdb.db.update(schema.vods).set({ status: "ready" }).where(eq(schema.vods.id, readyVod));
+    await recordRun(join(root, readyB), "r1", 2);
+    const ownedB = await broadcast(null);
+    await recordRun(join(root, ownedB), "r1", 2);
+    for (const b of [recordingB, processingB, readyB, ownedB]) age(join(root, b));
+
+    const { removed } = await sweepWorkDir({
+      db: tdb.db,
+      storage,
+      bucket: BUCKET,
+      workDir,
+      logger,
+      owned: new Set([ownedB]),
+      activeScratch: new ActiveScratch(),
+      broadcastDirMaxAgeMs: 15 * 60_000,
+    });
+    expect(removed.sort()).toEqual([join(root, recordingB), join(root, readyB)].sort());
+    expect(existsSync(join(root, processingB))).toBe(true);
+    expect(existsSync(join(root, ownedB))).toBe(true);
+    const published = parsePlaylist(
+      (await (await storage.get(BUCKET, vodPrefix(recordingVod) + VOD_PLAYLIST))?.text()) ?? "",
+    );
+    expect(published.segments.map((s) => s.uri)).toEqual(local.map((s) => s.uri));
+    expect(await storage.head(BUCKET, `${vodPrefix(recordingVod)}init_r1.mp4`)).not.toBeNull();
+    rmSync(join(root, processingB), { recursive: true, force: true });
+    rmSync(join(root, ownedB), { recursive: true, force: true });
+  }, 120_000);
 });
 
 describe("disk budget", () => {

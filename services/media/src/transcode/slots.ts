@@ -10,7 +10,7 @@ import { availableParallelism } from "node:os";
 import type { H264Encoder } from "../ffmpeg/args.ts";
 
 /**
- * Default slot count until an env var exists (contract request: TRANSCODE_MAX_LADDERS).
+ * Slot count when TRANSCODE_MAX_LADDERS is unset.
  * NVENC: consumer GPUs allow a handful of sessions and each ladder opens up to three.
  * libx264 veryfast: roughly four cores per 1080p ladder.
  */

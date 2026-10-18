@@ -4,9 +4,10 @@
 /**
  * Simulcast targets are user-supplied URLs the media host connects to, so they are an SSRF
  * vector: only `rtmp:`/`rtmps:` URLs whose host resolves exclusively to public unicast
- * addresses are allowed. The check runs on the resolved addresses (not the host string), and
- * the caller connects to the vetted address itself, so DNS rebinding between check and connect
- * cannot redirect the stream to an internal service.
+ * addresses are allowed. The check runs on the resolved addresses (not the host string) right
+ * before ffmpeg is spawned. For `rtmp:` ffmpeg is given the vetted IP, so DNS rebinding between
+ * check and connect cannot redirect the stream; for `rtmps:` the host name must stay (TLS
+ * certificate verification and SNI), leaving ffmpeg's own lookup a short rebinding window.
  */
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -32,15 +33,17 @@ export interface ParsedTarget {
   /** Host name or IP literal, without IPv6 brackets. */
   host: string;
   port: number;
-  /** RTMP application: the first path segment plus any query (how ffmpeg splits a URL). */
-  app: string;
-  /** Remaining path segments, prepended to the stream key as the RTMP play path. */
-  playpathPrefix: string;
-  /** `rtmp[s]://host[:port]/app` without any secret, sent as the RTMP `tcUrl`. */
+  /** Whether the URL named the port (kept as written in the URL ffmpeg gets). */
+  explicitPort: boolean;
+  /** Path without trailing slashes, e.g. `/app` (may be empty). */
+  path: string;
+  /** Query string including `?`, or empty. Allowed, but the whole URL is treated as secret. */
+  search: string;
+  /** `rtmp[s]://host[:port]/<first path segment>`, the RTMP `tcUrl` ffmpeg would derive. */
   tcUrl: string;
 }
 
-/** Validate the URL shape (protocol whitelist, no credentials) and split it the way RTMP needs. */
+/** Validate the URL shape (protocol whitelist, no credentials) and split it. */
 export function parseTargetUrl(raw: string): ParsedTarget {
   let u: URL;
   try {
@@ -55,12 +58,16 @@ export function parseTargetUrl(raw: string): ParsedTarget {
   if (!host) throw new TargetNotAllowedError("invalid_url", "no host");
   const port = u.port ? Number(u.port) : (DEFAULT_PORTS[protocol] ?? 1935);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new TargetNotAllowedError("invalid_url", "bad port");
-  const segments = u.pathname.split("/").filter((s) => s.length > 0);
-  const app = (segments[0] ?? "") + u.search;
-  const playpathPrefix = segments.slice(1).join("/");
-  const hostPart = host.includes(":") ? `[${host}]` : host;
-  const tcUrl = `${protocol}//${hostPart}${u.port ? `:${port}` : ""}/${app}`;
-  return { protocol, host, port, app, playpathPrefix, tcUrl };
+  const path = u.pathname.replace(/\/+$/, "");
+  const app = path.split("/").find((s) => s.length > 0) ?? "";
+  const tcUrl = `${protocol}//${hostPort(host, u.port ? port : null)}/${app}`;
+  return { protocol, host, port, explicitPort: u.port !== "", path, search: u.search, tcUrl };
+}
+
+/** `host[:port]` for a URL, bracketing IPv6 literals. */
+export function hostPort(host: string, port: number | null): string {
+  const h = host.includes(":") ? `[${host}]` : host;
+  return port === null ? h : `${h}:${port}`;
 }
 
 type Cidr4 = readonly [number, number];
@@ -201,5 +208,6 @@ export async function resolveTarget(target: ParsedTarget, opts: ResolveOptions =
     const bad = addrs.find((a) => isBlockedAddress(a.address));
     if (bad) throw new TargetNotAllowedError("address_not_allowed", "resolves to a non-public address");
   }
-  return addrs[0] as ResolvedAddress;
+  // Prefer IPv4 (many media hosts lack IPv6 egress), otherwise resolver order.
+  return addrs.find((a) => a.family === 4) ?? (addrs[0] as ResolvedAddress);
 }

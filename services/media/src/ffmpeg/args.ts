@@ -6,6 +6,7 @@
  * the exact flags reviewable and unit-testable; the supervisor only spawns what these return.
  */
 import { MEDIA_INTERNAL_USER } from "@commonair/contracts/internal";
+import { hostPort, type ParsedTarget } from "../net/ssrf.ts";
 import type { Rung } from "../transcode/ladder.ts";
 
 export type H264Encoder = "h264_nvenc" | "libx264";
@@ -27,20 +28,27 @@ export function internalRtspUrl(base: string, path: string, secret: string): str
 }
 
 export interface SimulcastOutput {
-  /** Loopback port of the stream-key proxy (see net/rtmp-proxy.ts). */
-  proxyPort: number;
-  /** RTMP application of the real target. */
-  app: string;
-  /** `rtmp[s]://host[:port]/app` of the real target (no key), sent as the RTMP tcUrl. */
-  tcUrl: string;
-  /** Play path with a placeholder where the stream key goes; the proxy swaps in the key. */
-  playpath: string;
+  /** Full publish URL including the stream key: secret, redact it everywhere. */
+  url: string;
+  /** Set when the host was replaced by the vetted IP, so the server still sees its own name. */
+  tcUrl: string | null;
 }
 
 /**
- * Restream the source unchanged to an RTMP target through the loopback key proxy. The stream
- * key is never in these arguments (they are world-readable through `ps`).
+ * Publish URL for a vetted simulcast target: path, then the stream key, then any query. For
+ * `rtmp:` the host is the address the SSRF check approved (no second DNS lookup by ffmpeg); for
+ * `rtmps:` the host name stays so TLS SNI matches the server.
  */
+export function simulcastOutput(target: ParsedTarget, streamKey: string, vettedAddress: string): SimulcastOutput {
+  const pinned = target.protocol === "rtmp:";
+  const host = hostPort(pinned ? vettedAddress : target.host, target.explicitPort || pinned ? target.port : null);
+  return {
+    url: `${target.protocol}//${host}${target.path}/${streamKey}${target.search}`,
+    tcUrl: pinned ? target.tcUrl : null,
+  };
+}
+
+/** Restream the source unchanged to an RTMP target. */
 export function simulcastArgs(input: string, out: SimulcastOutput): string[] {
   return [
     ...BASE,
@@ -52,15 +60,10 @@ export function simulcastArgs(input: string, out: SimulcastOutput): string[] {
     "0",
     "-c",
     "copy",
-    "-rtmp_app",
-    out.app,
-    "-rtmp_tcurl",
-    out.tcUrl,
-    "-rtmp_playpath",
-    out.playpath,
+    ...(out.tcUrl ? ["-rtmp_tcurl", out.tcUrl] : []),
     "-f",
     "flv",
-    `rtmp://127.0.0.1:${out.proxyPort}/simulcast`,
+    out.url,
   ];
 }
 

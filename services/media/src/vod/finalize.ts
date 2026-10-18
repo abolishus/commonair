@@ -6,7 +6,7 @@
  * (`#EXT-X-ENDLIST`), hash-check sampled frames, record duration/size, mark it `ready` and set
  * its expiry from the channel's retention. Idempotent: a finished VOD is left alone.
  */
-import { mkdtemp, rm } from "node:fs/promises";
+
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -16,6 +16,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "../disk.ts";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
+import { ActiveScratch } from "../recovery.ts";
 import type { HashMatchEnforcer } from "../safety/enforce.ts";
 import { broadcastTainted, quarantineVod } from "../safety/quarantine.ts";
 import { assembleFromStorage } from "./assemble.ts";
@@ -35,6 +36,8 @@ export interface FinalizeDeps {
   workDir: string;
   logger: Logger;
   diskBudget?: DiskBudget;
+  /** Registry of running jobs' scratch dirs, so the work-dir sweep leaves them alone. */
+  scratch?: ActiveScratch;
   now?: () => Date;
 }
 
@@ -97,7 +100,8 @@ export async function finalizeVod(
     return "failed";
   }
 
-  const scratch = await mkdtemp(join(deps.workDir, "vod-"));
+  const scratches = deps.scratch ?? new ActiveScratch();
+  const scratch = await scratches.create(deps.workDir, "vod-");
   let thumbnail: Uint8Array<ArrayBuffer> | null = null;
   try {
     for (const idx of sampleIndexes(segments.length)) {
@@ -118,7 +122,7 @@ export async function finalizeVod(
       if (thumbnail === null || idx === Math.floor(segments.length / 2)) thumbnail = image;
     }
   } finally {
-    await rm(scratch, { recursive: true, force: true });
+    await scratches.release(scratch);
   }
 
   await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {

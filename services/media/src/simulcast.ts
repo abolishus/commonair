@@ -7,10 +7,10 @@
  * connecting → live (ffmpeg reports output) → error → connecting again after backoff (capped at
  * 60 s) … → stopped when the broadcast ends.
  *
- * Targets are user-supplied URLs: only `rtmp:`/`rtmps:` to public addresses (net/ssrf.ts), and
- * ffmpeg reaches them through a loopback proxy that injects the stream key (net/rtmp-proxy.ts),
- * so the key never appears in a process argument list. `lastError` (shown to the streamer) is
- * one of the generic SIMULCAST_ERRORS codes; details (redacted) go to the logs only.
+ * Targets are user-supplied URLs: only `rtmp:`/`rtmps:` to public addresses, vetted right before
+ * each spawn (net/ssrf.ts). The stream key is in ffmpeg's argv; the media container's own PID
+ * namespace keeps it from other local users (README "Secrets"), and every log line is redacted.
+ * `lastError` (shown to the streamer) is one of the generic SIMULCAST_ERRORS codes.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import type { SIMULCAST_STATUSES } from "@commonair/contracts/enums";
@@ -18,10 +18,9 @@ import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { decryptSecret } from "@commonair/tokens";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
-import { internalRtspUrl, simulcastArgs } from "./ffmpeg/args.ts";
+import { internalRtspUrl, simulcastArgs, simulcastOutput } from "./ffmpeg/args.ts";
 import { Supervisor } from "./ffmpeg/supervisor.ts";
-import { placeholderFor, RtmpKeyProxy } from "./net/rtmp-proxy.ts";
-import { parseTargetUrl, TargetNotAllowedError, type ParsedTarget } from "./net/ssrf.ts";
+import { parseTargetUrl, resolveTarget, TargetNotAllowedError, type ParsedTarget } from "./net/ssrf.ts";
 import { SIMULCAST_MAX_BACKOFF_MS, SIMULCAST_SECRET_PURPOSE } from "./settings.ts";
 
 export type SimulcastStatus = (typeof SIMULCAST_STATUSES)[number];
@@ -43,7 +42,6 @@ interface Target {
 
 class SimulcastRunner {
   private supervisor: Supervisor | null = null;
-  private proxy: RtmpKeyProxy | null = null;
   private status: SimulcastStatus = "connecting";
   private bytesSent = 0;
   private stopping = false;
@@ -84,25 +82,36 @@ class SimulcastRunner {
       return;
     }
     if (this.stopping) return;
-    const placeholder = placeholderFor(key);
-    const proxy = new RtmpKeyProxy({
-      target,
-      placeholder,
-      secret: key,
-      logger: this.log,
-      resolve: { allowPrivate: this.ctx.simulcastAllowPrivate },
-    });
-    this.proxy = proxy;
-    const proxyPort = await proxy.listen();
     const { rtspBase, internalSecret } = this.ctx;
     const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
-    const playpath = target.playpathPrefix ? `${target.playpathPrefix}/${placeholder}` : placeholder;
+    // The whole target URL is secret (keys hide in paths and query strings too). The list is
+    // shared with the supervisor, so each spawn's actual output URL joins it before any logging.
+    const secrets: string[] = [key, internalSecret, this.target.rtmpUrl];
+    if (target.search.length > 1) secrets.push(target.search);
+    let refused = false;
     await this.setStatus("connecting", null);
     this.supervisor = new Supervisor({
       name: `simulcast:${this.target.id}`,
       binary: this.ctx.ffmpeg,
-      args: () => simulcastArgs(input, { proxyPort, app: target.app, tcUrl: target.tcUrl, playpath }),
-      secrets: [key, internalSecret],
+      // Resolve and vet right before every spawn: a target that later resolves to an internal
+      // address is refused (the supervisor treats the throw as a failed run and backs off).
+      args: async () => {
+        let address: string;
+        try {
+          ({ address } = await resolveTarget(target, { allowPrivate: this.ctx.simulcastAllowPrivate }));
+        } catch (err) {
+          refused = err instanceof TargetNotAllowedError;
+          this.log.warn("simulcast target refused", {
+            reason: refused ? (err as TargetNotAllowedError).reason : "dns",
+          });
+          throw new Error("simulcast target not allowed");
+        }
+        refused = false;
+        const out = simulcastOutput(target, key, address);
+        if (!secrets.includes(out.url)) secrets.push(out.url);
+        return simulcastArgs(input, out);
+      },
+      secrets,
       logger: this.log,
       backoff: { initialMs: 1_000, maxMs: SIMULCAST_MAX_BACKOFF_MS, stableAfterMs: 30_000 },
       onSpawn: () => {
@@ -116,12 +125,8 @@ class SimulcastRunner {
       onExit: (info) => {
         if (this.stopping) return;
         // The supervisor already logged the (redacted) ffmpeg line; the streamer sees a code.
-        this.log.warn("simulcast ffmpeg exited", { code: info.code, proxyFailure: proxy.lastFailure });
-        const code =
-          proxy.lastFailure === "target_not_allowed"
-            ? SIMULCAST_ERRORS.targetNotAllowed
-            : SIMULCAST_ERRORS.connectionFailed;
-        void this.setStatus("error", code);
+        this.log.warn("simulcast ffmpeg exited", { code: info.code, refused });
+        void this.setStatus("error", refused ? SIMULCAST_ERRORS.targetNotAllowed : SIMULCAST_ERRORS.connectionFailed);
       },
     });
     this.supervisor.start();
@@ -130,8 +135,6 @@ class SimulcastRunner {
   async stop(): Promise<void> {
     this.stopping = true;
     await this.supervisor?.stop();
-    await this.proxy?.close();
-    this.proxy = null;
     await this.setStatus("stopped", null, true);
   }
 

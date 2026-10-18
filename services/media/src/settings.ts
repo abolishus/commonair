@@ -33,10 +33,8 @@ export interface MediaTimings {
   thumbnailHistory: number;
   /** Work-dir sweep interval. */
   sweepMs: number;
-  /** A broadcast directory no session owns is deleted once untouched this long. */
+  /** A broadcast directory no session owns is recovered and removed once untouched this long. */
   broadcastDirMaxAgeMs: number;
-  /** Clip/VOD scratch directories older than this are leftovers of a crashed job. */
-  scratchMaxAgeMs: number;
   /** An unfinished VOD this long after its broadcast ended is marked failed. */
   vodFailAfterMs: number;
   /** Wait this long after a finalize job failed for good before re-queueing it. */
@@ -59,7 +57,6 @@ export const DEFAULT_TIMINGS: MediaTimings = {
   thumbnailHistory: 10,
   sweepMs: 5 * 60_000,
   broadcastDirMaxAgeMs: 15 * 60_000,
-  scratchMaxAgeMs: 60 * 60_000,
   vodFailAfterMs: 24 * 3600_000,
   vodRetryAfterMs: 10 * 60_000,
 };

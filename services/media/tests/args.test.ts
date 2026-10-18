@@ -9,10 +9,10 @@ import {
   probeArgs,
   recorderArgs,
   simulcastArgs,
+  simulcastOutput,
   thumbnailArgs,
 } from "../src/ffmpeg/args.ts";
 import { REDACTED, redact, redactArgs } from "../src/ffmpeg/redact.ts";
-import { placeholderFor } from "../src/net/rtmp-proxy.ts";
 import { parseTargetUrl } from "../src/net/ssrf.ts";
 import { selectRungs } from "../src/transcode/ladder.ts";
 
@@ -34,14 +34,8 @@ describe("URLs", () => {
 
 describe("simulcast args", () => {
   const input = internalRtspUrl("rtsp://mediamtx:8554", "live/alice", SECRET);
-  const target = parseTargetUrl("rtmps://ingest.example.net/live/extra");
-  const placeholder = placeholderFor(KEY);
-  const args = simulcastArgs(input, {
-    proxyPort: 40123,
-    app: target.app,
-    tcUrl: target.tcUrl,
-    playpath: `${target.playpathPrefix}/${placeholder}`,
-  });
+  const target = parseTargetUrl("rtmp://ingest.example.net/live/");
+  const args = simulcastArgs(input, simulcastOutput(target, KEY, "203.0.114.7"));
 
   test("copies streams to FLV over RTSP/TCP with machine-readable progress", () => {
     expect(values(args, "-c")).toEqual(["copy"]);
@@ -51,21 +45,32 @@ describe("simulcast args", () => {
     expect(args).toContain("-nostdin");
   });
 
-  test("the stream key is never in argv: ffmpeg publishes a placeholder to the loopback proxy", () => {
-    expect(args.join(" ")).not.toContain(KEY);
-    expect(args.at(-1)).toBe("rtmp://127.0.0.1:40123/simulcast");
-    expect(values(args, "-rtmp_app")).toEqual(["live"]);
-    expect(values(args, "-rtmp_tcurl")).toEqual(["rtmps://ingest.example.net/live"]);
-    expect(values(args, "-rtmp_playpath")).toEqual([`extra/${placeholder}`]);
-    expect(placeholder).toHaveLength(KEY.length);
-    expect(placeholder).not.toBe(KEY);
+  test("rtmp is pinned to the vetted address; the server still sees its host name as tcUrl", () => {
+    expect(args.at(-1)).toBe(`rtmp://203.0.114.7:1935/live/${KEY}`);
+    expect(values(args, "-rtmp_tcurl")).toEqual(["rtmp://ingest.example.net/live"]);
   });
 
-  test("redaction removes the internal password from logged args", () => {
-    const logged = redactArgs(args, [KEY, SECRET]).join(" ");
+  test("rtmps keeps the host name (SNI); query strings follow the key; IPv6 is bracketed", () => {
+    const tls = simulcastOutput(parseTargetUrl("rtmps://live.example.com:443/app?x=1"), KEY, "203.0.114.7");
+    expect(tls).toEqual({ url: `rtmps://live.example.com:443/app/${KEY}?x=1`, tcUrl: null });
+    expect(simulcastArgs(input, tls)).not.toContain("-rtmp_tcurl");
+    expect(simulcastOutput(parseTargetUrl("rtmps://live.example.com/app"), KEY, "x").url).toBe(
+      `rtmps://live.example.com/app/${KEY}`,
+    );
+    expect(simulcastOutput(parseTargetUrl("rtmp://h.example/app"), KEY, "2001:4860::1").url).toBe(
+      `rtmp://[2001:4860::1]:1935/app/${KEY}`,
+    );
+  });
+
+  test("redaction removes the stream key, the whole target URL and the internal password", () => {
+    const out = simulcastOutput(parseTargetUrl("rtmp://ingest.example.net/live?token=abc"), KEY, "203.0.114.7");
+    const logged = redactArgs(simulcastArgs(input, out), [KEY, SECRET, out.url, "?token=abc"]).join(" ");
+    expect(logged).not.toContain(KEY);
+    expect(logged).not.toContain("token=abc");
     expect(logged).not.toContain(SECRET);
     expect(logged).not.toContain(encodeURIComponent(SECRET));
     expect(logged).toContain(`rtsp://internal:${REDACTED}@mediamtx:8554/live/alice`);
+    expect(logged).not.toContain("203.0.114.7:1935/live");
   });
 
   test("redaction also cleans ffmpeg error lines that echo the URL", () => {
