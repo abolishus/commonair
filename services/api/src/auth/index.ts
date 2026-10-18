@@ -182,6 +182,10 @@ export function createAuth(deps: Deps) {
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // The admin plugin stays for its schema and banned-user sign-in checks, but its endpoints
+        // (ban, set-role, impersonate, remove-user, …) skip our audit log and safeguards such as
+        // "never remove the last administrator". Staff use the audited /api/admin procedures.
+        if (ctx.path.startsWith("/admin/")) throw new APIError("NOT_FOUND", { message: "Not found" });
         if (ctx.path !== "/sign-up/email") return;
         const body = bodyOf(ctx);
         const altcha = await verifyAltcha(body.altcha, { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });

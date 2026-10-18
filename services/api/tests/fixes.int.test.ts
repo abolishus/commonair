@@ -110,3 +110,33 @@ describe("media references stay on this instance", () => {
     expect(u?.image).toBeNull();
   });
 });
+
+describe("better-auth admin plugin endpoints", () => {
+  test("are closed even to admins; the audited admin procedure is the only path", async () => {
+    await db().update(schema.users).set({ role: "admin" }).where(eq(schema.users.id, alice.userId));
+    const calls: [string, Record<string, unknown>][] = [
+      ["/api/auth/admin/set-role", { userId: bob.userId, role: "admin" }],
+      ["/api/auth/admin/ban-user", { userId: bob.userId, banReason: "x" }],
+      ["/api/auth/admin/impersonate-user", { userId: bob.userId }],
+      ["/api/auth/admin/remove-user", { userId: bob.userId }],
+      ["/api/auth/admin/set-user-password", { userId: bob.userId, newPassword: "x".repeat(20) }],
+      ["/api/auth/admin/revoke-user-sessions", { userId: bob.userId }],
+      ["/api/auth/admin/create-user", { email: "x@test.invalid", password: "x".repeat(20), name: "x" }],
+    ];
+    for (const [path, body] of calls) {
+      const res = await alice.client.call("POST", path, body);
+      expect(res.status, path).toBe(404);
+    }
+    expect((await alice.client.call("GET", "/api/auth/admin/list-users")).status).toBe(404);
+    const [b] = await db().select().from(schema.users).where(eq(schema.users.id, bob.userId));
+    expect(b).toMatchObject({ role: "user", banned: false });
+    // Bob's session still works (no impersonation, no session revocation).
+    expect((await bob.client.call("GET", "/api/me")).status).toBe(200);
+
+    const set = await alice.client.call("PUT", `/api/admin/users/${bob.username}/role`, { role: "moderator" });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+    const logs = await db().select().from(schema.auditLog).where(eq(schema.auditLog.subjectId, bob.userId));
+    expect(logs.map((l) => l.action)).toContain("user.set_role");
+    await db().update(schema.users).set({ role: "user" }).where(eq(schema.users.id, bob.userId));
+  });
+});
