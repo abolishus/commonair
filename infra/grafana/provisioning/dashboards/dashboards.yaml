@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Dashboards are JSON files in infra/grafana/dashboards/ (added by the operations unit).
+apiVersion: 1
+
+providers:
+  - name: commonair
+    folder: CommonAir
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: true

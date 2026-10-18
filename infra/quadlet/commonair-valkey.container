@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Valkey (ephemeral: presence, caches, pub/sub, queues).
+[Unit]
+Description=CommonAir valkey
+
+[Container]
+Image=docker.io/valkey/valkey:9.1.2-trixie
+ContainerName=commonair-valkey
+Network=commonair.network
+NetworkAlias=valkey
+PublishPort=127.0.0.1:6379:6379
+Exec=valkey-server --appendonly no --save ""
+HealthCmd=valkey-cli ping
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

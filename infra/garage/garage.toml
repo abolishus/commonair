@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Single-node Garage for CommonAir (compose and Quadlet). Secrets are not in this
+# file: Garage reads them from the environment, which compose/Quadlet fill from .env:
+#   GARAGE_RPC_SECRET     (64 hex chars) node-to-node RPC secret
+#   GARAGE_ADMIN_TOKEN    bearer token for the admin API (:3903), used by garage-init
+# No metrics_token: /metrics on :3903 is scraped by Prometheus inside the compose
+# network, and the admin port is never published on the host.
+# s3_region must equal S3_REGION in .env (default "garage"): SigV4 signatures embed it.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+metadata_auto_snapshot_interval = "6h"
+
+replication_factor = 1
+consistency_mode = "consistent"
+
+rpc_bind_addr = "0.0.0.0:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "0.0.0.0:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "0.0.0.0:3903"

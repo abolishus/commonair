@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Prometheus.
+[Unit]
+Description=CommonAir prometheus
+
+[Container]
+Image=docker.io/prom/prometheus:v3.15.0
+ContainerName=commonair-prometheus
+Network=commonair.network
+NetworkAlias=prometheus
+PublishPort=127.0.0.1:9090:9090
+Volume=%h/commonair/infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+Volume=commonair-prometheus-data.volume:/prometheus
+Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d
+HealthCmd=wget -q -O /dev/null http://127.0.0.1:9090/-/ready
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target
