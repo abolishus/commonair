@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { publishUserControl } from "../lib/control.ts";
-import { instanceMediaPrefixes, isInstanceMediaRef } from "../lib/media-ref.ts";
+import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
@@ -57,9 +57,6 @@ const IMMUTABLE_USER_FIELDS = new Set(["birthDate", "accountType", "botOwnerId",
 /** All a member may change about themselves through `/update-user` (the rest has its own flows). */
 const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
 
-/** A key prefix no storage key can have: only instance URLs pass. */
-const NO_KEYS = "/";
-
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
 export function createAuth(deps: Deps) {
@@ -78,13 +75,13 @@ export function createAuth(deps: Deps) {
     if (clientId && clientSecret) social[id] = { clientId, clientSecret, disableImplicitSignUp: true };
 
   const publicUrl = new URL(site.publicUrl);
-  const mediaPrefixes = instanceMediaPrefixes(env);
-  /** An instance URL, or a key under the member's own channel avatar uploads. */
+  const mediaBase = instanceMediaBase(env);
+  /** One of the member's own channel avatar uploads (key or media-bucket URL). */
   const ownAvatarRef = async (ref: string, userId: string | undefined) => {
     const [c] = userId
       ? await db.select({ id: schema.channels.id }).from(schema.channels).where(eq(schema.channels.ownerId, userId))
       : [];
-    return isInstanceMediaRef(ref, mediaPrefixes, c ? `channels/${c.id}/avatar/` : NO_KEYS);
+    return c ? isInstanceMediaRef(ref, mediaBase, `channels/${c.id}/avatar/`) : false;
   };
   const VERIFY_MINUTES = 60;
   const RESET_MINUTES = 60;
@@ -219,12 +216,10 @@ export function createAuth(deps: Deps) {
             const age = ageProblem(user.birthDate, minAge, deps.now());
             if (age === "too_young") throw bad("TOO_YOUNG", `You must be at least ${minAge} to join`);
             if (age) throw bad("INVALID_BIRTH_DATE", "A valid birth date is required");
-            // Provider profile pictures are third-party URLs: drop them rather than embed them.
-            const image =
-              typeof user.image === "string" && isInstanceMediaRef(user.image, mediaPrefixes, NO_KEYS)
-                ? user.image
-                : null;
-            return { data: { ...user, image, username: name.toLowerCase(), accountType: "human", role: "user" } };
+            // A new account has no uploads yet, and provider profile pictures are third-party URLs.
+            return {
+              data: { ...user, image: null, username: name.toLowerCase(), accountType: "human", role: "user" },
+            };
           },
           after: async (user) => {
             // Normally done inside the transaction (account.create.before); this is the safety net.

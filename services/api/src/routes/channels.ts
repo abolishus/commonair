@@ -11,7 +11,7 @@ import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { badRequest, forbidden, notFound } from "../lib/errors.ts";
 import { redactKeys, scanAndRevoke, type LeakSource } from "../lib/leaks.ts";
-import { instanceMediaPrefixes, isInstanceMediaRef } from "../lib/media-ref.ts";
+import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
 
 const { channels, channelPanels, categories, follows, users, channelRoles, modActions } = schema;
@@ -74,10 +74,10 @@ export const channelsRoutes = {
     // A mature category forces the label; streamers cannot opt out of it.
     if (categoryMature) set.mature = true;
     if (input.theme !== undefined) {
-      const prefixes = instanceMediaPrefixes(deps.env);
-      if (input.theme.avatarKey && !isInstanceMediaRef(input.theme.avatarKey, prefixes, `channels/${c.id}/avatar/`))
+      const base = instanceMediaBase(deps.env);
+      if (input.theme.avatarKey && !isInstanceMediaRef(input.theme.avatarKey, base, `channels/${c.id}/avatar/`))
         throw badRequest("The avatar must be one of your uploads");
-      if (input.theme.bannerKey && !isInstanceMediaRef(input.theme.bannerKey, prefixes, `channels/${c.id}/banner/`))
+      if (input.theme.bannerKey && !isInstanceMediaRef(input.theme.bannerKey, base, `channels/${c.id}/banner/`))
         throw badRequest("The banner must be one of your uploads");
       set.theme = input.theme;
     }

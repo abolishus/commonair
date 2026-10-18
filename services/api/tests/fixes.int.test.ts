@@ -8,6 +8,7 @@ import { BUS } from "@commonair/contracts/events";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, mediaPath } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { sha256Hex } from "@commonair/tokens";
+import { instanceMediaBase } from "../src/lib/media-ref.ts";
 import { client, mailTo, signUpAndSignIn, startApi, subscriber, waitFor, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -96,17 +97,22 @@ describe("media references stay on this instance", () => {
       accent: "teal",
     });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    expect((await patch({ avatarKey: `${api.url}/static/default.png` })).status).toBe(200);
+    const bucket = instanceMediaBase(api.deps.env);
+    expect((await patch({ avatarKey: `${bucket}channels/${c.id}/avatar/02.png` })).status).toBe(200);
+    expect((await patch({ avatarKey: `${bucket}channels/${bobs.id}/avatar/02.png` })).status).toBe(400);
+    expect((await patch({ avatarKey: `${api.url}/static/default.png` })).status).toBe(400);
   });
 
-  test("profile image through update-user must be an own upload or instance URL", async () => {
+  test("profile image through update-user must be an own avatar upload", async () => {
     const c = await channelOf(bob.username);
     const set = (image: string | null) => bob.client.call("POST", "/api/auth/update-user", { image });
     expect((await set("https://tracker.invalid/me.png")).status).toBe(400);
     const alices = await channelOf(alice.username);
     expect((await set(`channels/${alices.id}/avatar/a.png`)).status).toBe(400);
     expect((await set(`channels/${c.id}/avatar/a.png`)).status).toBe(200);
-    expect((await set(`${api.url}/static/default.png`)).status).toBe(200);
+    expect((await set(`${instanceMediaBase(api.deps.env)}channels/${c.id}/avatar/b.png`)).status).toBe(200);
+    expect((await set(`${instanceMediaBase(api.deps.env)}channels/${alices.id}/avatar/b.png`)).status).toBe(400);
+    expect((await set(`${api.url}/static/default.png`)).status).toBe(400);
     expect((await set(null)).status).toBe(200);
     const [u] = await db().select().from(schema.users).where(eq(schema.users.id, bob.userId));
     expect(u?.image).toBeNull();

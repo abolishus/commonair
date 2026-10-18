@@ -3,53 +3,54 @@
 
 import { expect, test } from "vite-plus/test";
 import type { Deps } from "../src/deps.ts";
-import { instanceMediaPrefixes, isInstanceMediaRef } from "../src/lib/media-ref.ts";
+import { instanceMediaBase, isInstanceMediaRef } from "../src/lib/media-ref.ts";
 
-const prefixes = instanceMediaPrefixes({
-  PUBLIC_URL: "https://Example.Test",
-  API_PUBLIC_URL: "https://api.example.test/api",
+const base = instanceMediaBase({
   S3_ENDPOINT: "http://garage:3900",
-  S3_PUBLIC_ENDPOINT: "https://media.example.test/",
+  S3_PUBLIC_ENDPOINT: "https://Media.Example.Test/",
   S3_BUCKET_MEDIA: "media",
 } as Deps["env"]);
+const own = "channels/abc/avatar/";
 
-test("prefixes are normalized origins plus the public media bucket", () => {
-  expect(prefixes).toEqual(["https://example.test/", "https://api.example.test/", "https://media.example.test/media/"]);
+test("the base is the normalized public media bucket URL", () => {
+  expect(base).toBe("https://media.example.test/media/");
+  expect(instanceMediaBase({ S3_ENDPOINT: "http://localhost:3900", S3_BUCKET_MEDIA: "m" } as Deps["env"])).toBe(
+    "http://localhost:3900/m/",
+  );
 });
 
 test("own storage keys pass; foreign, climbing or malformed keys do not", () => {
-  const own = "channels/abc/avatar/";
-  expect(isInstanceMediaRef("channels/abc/avatar/01.png", prefixes, own)).toBe(true);
-  expect(isInstanceMediaRef("channels/xyz/avatar/01.png", prefixes, own)).toBe(false);
-  expect(isInstanceMediaRef("channels/abc/avatar/../../xyz/a.png", prefixes, own)).toBe(false);
-  expect(isInstanceMediaRef("channels/abc/avatar//a.png", prefixes, own)).toBe(false);
-  expect(isInstanceMediaRef("/channels/abc/avatar/a.png", prefixes, own)).toBe(false);
-  expect(isInstanceMediaRef("channels/abc/avatar/a b.png", prefixes, own)).toBe(false);
-  expect(isInstanceMediaRef("", prefixes, own)).toBe(false);
-  expect(isInstanceMediaRef("anything/at/all.png", prefixes)).toBe(true);
-  expect(isInstanceMediaRef("channels/abc/avatar/a.png", prefixes, "/")).toBe(false);
+  expect(isInstanceMediaRef("channels/abc/avatar/01.png", base, own)).toBe(true);
+  expect(isInstanceMediaRef("channels/xyz/avatar/01.png", base, own)).toBe(false);
+  expect(isInstanceMediaRef("channels/abc/avatar/../../xyz/a.png", base, own)).toBe(false);
+  expect(isInstanceMediaRef("channels/abc/avatar//a.png", base, own)).toBe(false);
+  expect(isInstanceMediaRef("/channels/abc/avatar/a.png", base, own)).toBe(false);
+  expect(isInstanceMediaRef("channels/abc/avatar/a b.png", base, own)).toBe(false);
+  expect(isInstanceMediaRef("", base, own)).toBe(false);
+  expect(isInstanceMediaRef("anything/at/all.png", base)).toBe(true);
 });
 
-test("same-instance URLs pass; third-party and look-alike URLs do not", () => {
-  for (const ok of [
-    "https://example.test/static/default-avatar.png",
-    "https://EXAMPLE.test/x.png",
-    "https://media.example.test/media/channels/a/avatar/b.png",
-    "https://api.example.test/anything",
-  ])
-    expect(isInstanceMediaRef(ok, prefixes), ok).toBe(true);
+test("URLs must be in the media bucket and their key must carry the channel prefix", () => {
+  expect(isInstanceMediaRef("https://media.example.test/media/channels/abc/avatar/b.png", base, own)).toBe(true);
+  expect(isInstanceMediaRef("https://MEDIA.example.test/media/channels/abc/avatar/b.png", base, own)).toBe(true);
   for (const bad of [
+    "https://media.example.test/media/channels/xyz/avatar/b.png", // another channel's upload
+    "https://media.example.test/media/channels/abc/banner/b.png", // wrong purpose
+    "https://media.example.test/media/channels/abc/avatar/%2e%2e/%2e%2e/xyz/avatar/b.png",
+    "https://media.example.test/media/channels/abc/avatar/../../xyz/avatar/b.png",
+    "https://media.example.test/media/channels/abc/avatar/b.png?x=1",
+    "https://media.example.test/media/channels/abc/avatar/b.png#f",
+    "https://example.test/static/default-avatar.png", // the web origin is not the media bucket
     "https://tracker.invalid/pixel.gif",
-    "https://example.test.evil.invalid/x.png",
-    "https://example.test@evil.invalid/x.png",
-    "https://user:pw@example.test/x.png",
-    "http://example.test/x.png", // wrong scheme for the configured origin
-    "https://media.example.test/other-bucket/x.png",
-    "https://media.example.test/mediaevil/x.png",
+    "https://media.example.test.evil.invalid/media/channels/abc/avatar/b.png",
+    "https://media.example.test@evil.invalid/media/channels/abc/avatar/b.png",
+    "https://user:pw@media.example.test/media/channels/abc/avatar/b.png",
+    "http://media.example.test/media/channels/abc/avatar/b.png", // wrong scheme
+    "https://media.example.test/other/channels/abc/avatar/b.png",
+    "https://media.example.test/mediaevil/channels/abc/avatar/b.png",
     "//evil.invalid/x.png",
     "javascript:alert(1)",
     "data:image/png;base64,AAAA",
-    "ftp://example.test/x.png",
   ])
-    expect(isInstanceMediaRef(bad, prefixes), bad).toBe(false);
+    expect(isInstanceMediaRef(bad, base, own), bad).toBe(false);
 });
