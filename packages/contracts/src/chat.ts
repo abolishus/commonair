@@ -98,6 +98,7 @@ export const ServerFrame = z.discriminatedUnion("op", [
     userId: z.uuid(),
     username: z.string(),
     expiresAt: z.string().nullable(),
+    /** Delivered to moderators only; viewers receive an empty string. */
     reason: z.string(),
   }),
   z.object({ op: z.literal("settings"), channel, settings: ChannelChatSettings }),
@@ -106,6 +107,8 @@ export const ServerFrame = z.discriminatedUnion("op", [
     channel: channel.nullable(),
     code: z.enum(NOTICE_CODES),
     text: z.string(),
+    /** Echo of the `command`/`send`/`join`/`part` frame's nonce this notice answers. */
+    nonce: z.string().optional(),
   }),
   z.object({
     op: z.literal("ack"),

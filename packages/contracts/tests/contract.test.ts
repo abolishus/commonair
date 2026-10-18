@@ -94,6 +94,15 @@ describe("events", () => {
   });
 });
 
+describe("currency", () => {
+  test("uses ISO 4217 minor units, not engine Intl data", async () => {
+    const { minorUnits } = await import("../src/currency.ts");
+    expect([minorUnits("usd"), minorUnits("JPY"), minorUnits("kwd"), minorUnits("huf"), minorUnits("iqd")]).toEqual([
+      2, 0, 3, 2, 3,
+    ]);
+  });
+});
+
 describe("shapes", () => {
   test("bot config defaults are complete", () => {
     const c = BotConfig.parse({});

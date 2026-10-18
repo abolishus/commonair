@@ -24,13 +24,56 @@ import (
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
+var testPriv = ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+var testPub = testPriv.Public().(ed25519.PublicKey)
+
+// receipt is a deterministic, genuinely signed receipt.
 func receipt(i int) tokens.SignedReceipt {
-	return tokens.SignedReceipt{Payload: fmt.Sprintf("p%d", i), Signature: fmt.Sprintf("s%d", i)}
+	return tokens.SignReceiptBytes(testPriv, fmt.Appendf(nil, `{"v":1,"i":%d}`, i))
+}
+
+func TestQueueQuarantinesUnverifiableReceipts(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, r tokens.SignedReceipt) {
+		b, _ := json.Marshal(r)
+		if err := os.WriteFile(filepath.Join(dir, name+".json"), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	good := receipt(1)
+	tampered := receipt(2)
+	tampered.Payload = tokens.EncodeB64URL([]byte(`{"v":1,"i":3}`)) // claims more than was signed
+	_, otherKey, _ := ed25519.GenerateKey(nil)
+	foreign := tokens.SignReceiptBytes(otherKey, []byte(`{"v":1,"i":4}`))
+	badSig := receipt(5)
+	badSig.Signature = "AAAA"
+	write("00000000000000000001-good", good)
+	write("00000000000000000002-tampered", tampered)
+	write("00000000000000000003-foreign", foreign)
+	write("00000000000000000004-badsig", badSig)
+
+	q, problems := OpenQueue(dir, 10, testPub)
+	if len(problems) != 3 {
+		t.Fatalf("problems %v, want 3", problems)
+	}
+	if items := q.Items(); len(items) != 1 || items[0].Receipt != good {
+		t.Fatalf("items %+v", items)
+	}
+	for _, n := range []string{"tampered", "foreign", "badsig"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*-"+n+".json.corrupt"))
+		if len(matches) != 1 {
+			t.Fatalf("%s not renamed to .corrupt", n)
+		}
+	}
+	// Quarantined files stay out of later loads.
+	if re, problems := OpenQueue(dir, 10, testPub); re.Len() != 1 || len(problems) != 0 {
+		t.Fatalf("reload: %d items, problems %v", re.Len(), problems)
+	}
 }
 
 func TestQueuePersistsAcrossReopen(t *testing.T) {
 	dir := t.TempDir()
-	q, problems := OpenQueue(dir, 10)
+	q, problems := OpenQueue(dir, 10, testPub)
 	if len(problems) != 0 {
 		t.Fatal(problems)
 	}
@@ -43,7 +86,7 @@ func TestQueuePersistsAcrossReopen(t *testing.T) {
 	if err := q.Remove(q.Items()[1].Name); err != nil {
 		t.Fatal(err)
 	}
-	re, problems := OpenQueue(dir, 10)
+	re, problems := OpenQueue(dir, 10, testPub)
 	if len(problems) != 0 {
 		t.Fatal(problems)
 	}
@@ -58,7 +101,7 @@ func TestQueuePersistsAcrossReopen(t *testing.T) {
 
 func TestQueueBoundDropsOldest(t *testing.T) {
 	dir := t.TempDir()
-	q, _ := OpenQueue(dir, 2)
+	q, _ := OpenQueue(dir, 2, testPub)
 	t0 := time.Unix(1700000000, 0)
 	q.Add(receipt(0), t0, "a")
 	q.Add(receipt(1), t0.Add(time.Minute), "b")
@@ -66,7 +109,7 @@ func TestQueueBoundDropsOldest(t *testing.T) {
 	if err != nil || len(dropped) != 1 {
 		t.Fatalf("dropped %v err %v", dropped, err)
 	}
-	re, _ := OpenQueue(dir, 2)
+	re, _ := OpenQueue(dir, 2, testPub)
 	if items := re.Items(); len(items) != 2 || items[0].Receipt != receipt(1) {
 		t.Fatalf("after bound: %+v", items)
 	}
@@ -78,7 +121,7 @@ func TestQueueQuarantinesCorruptFiles(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "00000000000000000002-y.json.tmp"), []byte("partial"), 0o600)
 	good, _ := json.Marshal(receipt(7))
 	os.WriteFile(filepath.Join(dir, "00000000000000000003-z.json"), good, 0o600)
-	q, problems := OpenQueue(dir, 10)
+	q, problems := OpenQueue(dir, 10, testPub)
 	if len(problems) != 1 {
 		t.Fatalf("problems %v", problems)
 	}
@@ -116,7 +159,7 @@ func (f *fakeAPI) SubmitReceipt(_ context.Context, r tokens.SignedReceipt) (apic
 }
 
 func TestSenderRetriesInOrderAndDiscardsPermanentFailures(t *testing.T) {
-	q, _ := OpenQueue(t.TempDir(), 10)
+	q, _ := OpenQueue(t.TempDir(), 10, testPub)
 	t0 := time.Unix(1700000000, 0)
 	for i := range 3 {
 		q.Add(receipt(i), t0.Add(time.Duration(i)*time.Second), fmt.Sprint(i))
@@ -149,7 +192,7 @@ func TestSenderRetriesInOrderAndDiscardsPermanentFailures(t *testing.T) {
 }
 
 func TestSenderRunBacksOffAndRecovers(t *testing.T) {
-	q, _ := OpenQueue(t.TempDir(), 10)
+	q, _ := OpenQueue(t.TempDir(), 10, testPub)
 	q.Add(receipt(0), time.Now(), "x")
 	api := &fakeAPI{fail: []error{errors.New("down"), errors.New("down")}}
 	s := &Sender{Queue: q, API: api, Log: quiet, MinBackoff: 5 * time.Millisecond, MaxBackoff: 20 * time.Millisecond}

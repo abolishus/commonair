@@ -84,7 +84,7 @@ func TestStoreCoalescesMisses(t *testing.T) {
 	const n = 50
 	release := make(chan struct{})
 	var fetches atomic.Int32
-	fetch := func() (Entry, error) {
+	fetch := func(context.Context) (Entry, error) {
 		fetches.Add(1)
 		<-release
 		return Entry{Body: []byte("segment")}, nil
@@ -123,7 +123,7 @@ func TestStoreCancelledWaiterDoesNotAbortFetch(t *testing.T) {
 	s := NewStore(1 << 20)
 	release := make(chan struct{})
 	var fetches atomic.Int32
-	fetch := func() (Entry, error) {
+	fetch := func(context.Context) (Entry, error) {
 		fetches.Add(1)
 		<-release
 		return Entry{Body: []byte("ok")}, nil
@@ -151,11 +151,55 @@ func TestStoreCancelledWaiterDoesNotAbortFetch(t *testing.T) {
 	}
 }
 
+func TestStoreCancelsFetchWhenLastWaiterLeaves(t *testing.T) {
+	s := NewStore(1 << 20)
+	var fetches atomic.Int32
+	aborted := make(chan error, 2)
+	blocking := func(ctx context.Context) (Entry, error) {
+		fetches.Add(1)
+		<-ctx.Done()
+		aborted <- ctx.Err()
+		return Entry{}, ctx.Err()
+	}
+	var wg sync.WaitGroup
+	ctxs := make([]context.CancelFunc, 2)
+	for i := range 2 {
+		ctx, cancel := context.WithCancel(context.Background())
+		ctxs[i] = cancel
+		wg.Go(func() { _, _ = s.Get(ctx, "hint", blocking) })
+	}
+	waitFor(t, func() bool { return s.group.waiters("hint") == 2 })
+	ctxs[0]()
+	select {
+	case <-aborted:
+		t.Fatal("fetch aborted while a waiter remained")
+	case <-time.After(20 * time.Millisecond):
+	}
+	ctxs[1]()
+	select {
+	case err := <-aborted:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("aborted with %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned fetch kept running")
+	}
+	wg.Wait()
+	// A new caller starts a fresh fetch rather than joining the cancelled one.
+	e, err := s.Get(context.Background(), "hint", func(context.Context) (Entry, error) {
+		fetches.Add(1)
+		return Entry{Body: []byte("part")}, nil
+	})
+	if err != nil || string(e.Body) != "part" || fetches.Load() != 2 {
+		t.Fatalf("fresh fetch: %q %v after %d fetches", e.Body, err, fetches.Load())
+	}
+}
+
 func TestStoreDoesNotCacheErrors(t *testing.T) {
 	s := NewStore(1 << 20)
 	var fetches atomic.Int32
 	boom := errors.New("origin down")
-	fetch := func() (Entry, error) {
+	fetch := func(context.Context) (Entry, error) {
 		fetches.Add(1)
 		return Entry{}, boom
 	}

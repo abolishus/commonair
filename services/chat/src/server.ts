@@ -23,7 +23,7 @@ import { dbErrorFields, MessageWriter, type WriterOptions } from "./persistence.
 import type { MessageMiddleware, PluginHost } from "./pipeline.ts";
 import { plugins } from "./plugins/index.ts";
 import { Rooms } from "./rooms.ts";
-import { type ChatSocket, CLOSE, type ConnData, sendFrame, takeToken, type Writer } from "./socket.ts";
+import { type ChatSocket, CLOSE, type ConnData, sendFrame, sendNotice, takeToken, type Writer } from "./socket.ts";
 import type { Identity, Rejection } from "./types.ts";
 
 export interface ChatServiceOptions {
@@ -71,7 +71,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   const subscriber = createValkey(opts.valkeyUrl, { name: "chat-sub" });
   const bus = new Bus(valkey, subscriber, opts.busPrefix ?? "", logger);
   const directory = new Directory(opts.db, {
-    onInvalidFilter: (channelId, filterId) => logger.warn("invalid word filter skipped", { channelId, filterId }),
+    onInvalidFilter: (channelId, filterId, reason) =>
+      logger.warn("word filter skipped", { channelId, filterId, reason }),
     ...opts.directory,
   });
   const writer = new MessageWriter(opts.db, logger, metrics, opts.writer);
@@ -117,8 +118,24 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   ]);
   await initPlugins(middlewares, chat, logger);
 
+  /** Reply addressing for a frame: the IRC gateway pairs replies with requests by nonce. */
+  type Reply = { channel: string | null; nonce: string | undefined };
+  const replyTo = (f: ClientFrame): Reply => ({
+    channel: "channel" in f ? f.channel.toLowerCase() : null,
+    nonce: f.nonce,
+  });
+
+  const replyNotice = (ws: ChatSocket, to: Reply, n: Rejection): void => {
+    sendNotice(ws, { ...to, ...n }, frameWriter);
+  };
+  const replyError = (ws: ChatSocket, to: Reply, code: string, message: string): void => {
+    const where = { ...(to.channel ? { channel: to.channel } : {}), ...(to.nonce ? { nonce: to.nonce } : {}) };
+    sendFrame(ws, { op: "error", code, message, ...where }, frameWriter);
+  };
+
   const handleFrame = async (ws: ChatSocket, frame: ClientFrame): Promise<void> => {
     const data = ws.data;
+    const to = replyTo(frame);
     switch (frame.op) {
       case "ping":
         sendFrame(ws, { op: "pong", nonce: frame.nonce }, frameWriter);
@@ -129,44 +146,40 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
         if (!takeToken(data, Date.now())) {
           // Commands always get exactly one notice back, even when throttled.
           if (frame.op === "command")
-            return replyNotice(ws, frame.channel, {
-              code: "msg_ratelimit",
-              text: "You are sending commands too quickly.",
-            });
-          sendFrame(ws, { op: "error", code: "rate_limited", message: "Too many requests." }, frameWriter);
+            return replyNotice(ws, to, { code: "msg_ratelimit", text: "You are sending commands too quickly." });
+          return replyError(ws, to, "rate_limited", "Too many requests.");
+        }
+        if (frame.op === "join") {
+          const failure = await chat.join(ws, frame.channel.toLowerCase());
+          if (failure) replyError(ws, to, failure.code, failure.message);
           return;
         }
-        if (frame.op === "join") return chat.join(ws, frame.channel.toLowerCase());
         if (frame.op === "part") return chat.part(ws, frame.channel.toLowerCase());
         return replyNotice(
           ws,
-          frame.channel,
+          to,
           await chat.command(data.identity, frame.channel.toLowerCase(), frame.command, frame.args),
         );
       case "send":
-        return handleSend(ws, frame);
+        return handleSend(ws, frame, to);
     }
   };
 
-  const replyNotice = (ws: ChatSocket, channel: string | null, n: Rejection | null) => {
-    if (n)
-      sendFrame(ws, { op: "notice", channel: channel?.toLowerCase() ?? null, code: n.code, text: n.text }, frameWriter);
-  };
-
-  const handleSend = async (ws: ChatSocket, frame: Extract<ClientFrame, { op: "send" }>): Promise<void> => {
+  const handleSend = async (ws: ChatSocket, frame: Extract<ClientFrame, { op: "send" }>, to: Reply): Promise<void> => {
     metrics.messageIn();
     const slug = frame.channel.toLowerCase();
+    const ack = (id: string | null, held: boolean): void => {
+      sendFrame(ws, { op: "ack", nonce: frame.nonce, id, held }, frameWriter);
+    };
     const cmd = frame.isAction ? null : splitChatCommand(frame.body);
     if (cmd && cmd.name !== "me") {
-      replyNotice(ws, slug, await chat.command(ws.data.identity, slug, cmd.name, cmd.args));
-      sendFrame(ws, { op: "ack", nonce: frame.nonce, id: null, held: false }, frameWriter);
-      return;
+      replyNotice(ws, to, await chat.command(ws.data.identity, slug, cmd.name, cmd.args));
+      return ack(null, false);
     }
     const body = cmd ? cmd.args.join(" ").trim() : frame.body;
     if (!body) {
-      replyNotice(ws, slug, { code: "unrecognized_cmd", text: "Usage: /me <text>" });
-      sendFrame(ws, { op: "ack", nonce: frame.nonce, id: null, held: false }, frameWriter);
-      return;
+      replyNotice(ws, to, { code: "usage", text: "Usage: /me <text>" });
+      return ack(null, false);
     }
     const r = await chat.submit(ws.data.identity, {
       channel: slug,
@@ -174,8 +187,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       isAction: frame.isAction || cmd !== null,
       replyToId: frame.replyToId ?? null,
     });
-    replyNotice(ws, slug, r.notice);
-    sendFrame(ws, { op: "ack", nonce: frame.nonce, id: r.id, held: r.held }, frameWriter);
+    if (r.notice) replyNotice(ws, to, r.notice);
+    ack(r.id, r.held);
   };
 
   const onMessage = (ws: ChatSocket, raw: string | Buffer<ArrayBuffer>) => {
@@ -196,19 +209,20 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       if (++data.errors > MAX_BAD_FRAMES) ws.close(CLOSE.tooManyErrors, "too many malformed frames");
       return;
     }
+    const f = frame;
+    const to = replyTo(f);
     if (data.pending >= MAX_PENDING_FRAMES) {
-      sendFrame(ws, { op: "error", code: "rate_limited", message: "Too many requests in flight." }, frameWriter);
+      if (f.op === "command") replyNotice(ws, to, { code: "msg_ratelimit", text: "Too many requests in flight." });
+      else replyError(ws, to, "rate_limited", "Too many requests in flight.");
       return;
     }
-    const f = frame;
     data.pending++;
     data.queue = data.queue
       .then(() => handleFrame(ws, f))
       .catch((err: unknown) => {
         logger.error("chat frame failed", { ...dbErrorFields(err), op: f.op });
-        if (f.op === "command")
-          replyNotice(ws, f.channel, { code: "msg_rejected", text: "The command failed. Try again." });
-        else sendFrame(ws, { op: "error", code: "internal_error", message: "Something went wrong." }, frameWriter);
+        if (f.op === "command") replyNotice(ws, to, { code: "msg_rejected", text: "The command failed. Try again." });
+        else replyError(ws, to, "internal_error", "Something went wrong.");
       })
       .finally(() => {
         data.pending--;

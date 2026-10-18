@@ -36,6 +36,13 @@
       "when": 1792360420045,
       "tag": "0004_bot_verified",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792360948820,
+      "tag": "0005_two_factor_lockout_and_mature",
+      "breakpoints": true
     }
   ]
 }

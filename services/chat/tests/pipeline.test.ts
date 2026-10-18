@@ -4,6 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { CHAT_LIMITS, type NoticeCode } from "@commonair/contracts";
 import { MemoryLimiter } from "../src/limiter.ts";
+import { ALL_CHANNELS, rateLimitFor } from "../src/rules.ts";
 import { type MessageMiddleware, runSendPipeline } from "../src/pipeline.ts";
 import { channel, deps, input, NOW, standing, user } from "./fixtures.ts";
 
@@ -375,5 +376,29 @@ describe("filters and middleware", () => {
       }),
     );
     expect(called).toBe(1);
+  });
+});
+
+describe("verified bots", () => {
+  test("get CHAT_LIMITS.botVerified shared across channels", async () => {
+    const limiter = new MemoryLimiter(() => NOW.getTime());
+    const bot = user({ accountType: "bot", botVerified: true });
+    let accepted = 0;
+    for (let i = 0; i < CHAT_LIMITS.bot + 10; i++) {
+      const ch = channel({}, { id: `00000000-0000-7000-8000-0000000000${(i % 3) + 10}` });
+      const r = await runSendPipeline(deps([], limiter), input({ body: `m${i}`, user: bot, channel: ch }));
+      accepted += r.ok ? 1 : 0;
+    }
+    expect(accepted).toBe(CHAT_LIMITS.bot + 10);
+    expect(rateLimitFor(bot, standing(), "c")).toEqual({ limit: CHAT_LIMITS.botVerified, bucket: ALL_CHANNELS });
+    expect(rateLimitFor(user({ accountType: "bot" }), standing(), "c")).toEqual({
+      limit: CHAT_LIMITS.bot,
+      bucket: "c",
+    });
+    // The flag means nothing on a human account.
+    expect(rateLimitFor(user({ botVerified: true }), standing(), "c")).toEqual({
+      limit: CHAT_LIMITS.user,
+      bucket: "c",
+    });
   });
 });

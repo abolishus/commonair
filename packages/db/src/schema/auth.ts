@@ -36,6 +36,8 @@ export const users = pgTable(
     birthDate: date({ mode: "string" }),
     /** Consent-respecting contact: may this user's email be included in a streamer's follower export? */
     shareEmailWithFollowedChannels: boolean().notNull().default(false),
+    /** When an adult confirmed they want to see mature (18+) streams. */
+    matureConfirmedAt: ts(),
     locale: text().notNull().default("en"),
     /** Set when deletion completes; the row is pseudonymized, not dropped, if retention requires it. */
     deletedAt: ts(),
@@ -111,6 +113,10 @@ export const twoFactors = pgTable("two_factors", {
     .references(() => users.id, { onDelete: "cascade" }),
   secret: text().notNull(),
   backupCodes: text().notNull(),
+  /** better-auth 1.7 two-factor plugin: enrollment verified, and brute-force lockout. */
+  verified: boolean().notNull().default(true),
+  failedVerificationCount: integer().notNull().default(0),
+  lockedUntil: ts(),
 });
 
 export const passkeys = pgTable(

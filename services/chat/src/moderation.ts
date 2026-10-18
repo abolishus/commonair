@@ -96,7 +96,7 @@ export class Moderation {
   /** Resolve a target user and check the actor may act on them. */
   private async target(actor: Actor, channel: ChannelState, username: string): Promise<Target | Rejection> {
     const target = await this.deps.directory.userByUsername(username);
-    if (!target) return notice("msg_rejected", `No user named ${username}.`);
+    if (!target) return notice("invalid_user", `No user named ${username}.`);
     if (target.id === actor.user.id) return denied("You cannot do that to yourself.");
     const standing = await this.deps.directory.standing(channel, target.id);
     if (!canActOn(rankOf(actor.standing), rankOf(standing))) return denied(`You cannot moderate ${target.username}.`);
@@ -324,7 +324,7 @@ export class Moderation {
     kind: "mod" | "unmod" | "vip" | "unvip",
   ): Promise<Rejection> {
     const target = await this.deps.directory.userByUsername(username);
-    if (!target) return notice("msg_rejected", `No user named ${username}.`);
+    if (!target) return notice("invalid_user", `No user named ${username}.`);
     if (target.id === channel.ownerId) return denied("The broadcaster's role cannot be changed.");
     const role = kind === "mod" || kind === "unmod" ? "moderator" : "vip";
     const adding = kind === "mod" || kind === "vip";

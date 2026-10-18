@@ -138,6 +138,11 @@ export const paymentsEnv = z.object({
 });
 
 export const mediaEnv = z.object({
+  /**
+   * Password for the MediaMTX-internal user (origin and media read RTSP/HLS and publish renditions).
+   * Separate from INTERNAL_API_SECRET because it appears in ffmpeg process arguments.
+   */
+  MEDIA_INTERNAL_PASSWORD: secret,
   MEDIAMTX_API_URL: z.url().default("http://localhost:9997"),
   MEDIAMTX_HLS_URL: z.url().default("http://localhost:8888"),
   MEDIAMTX_RTSP_URL: z.string().default("rtsp://localhost:8554"),
@@ -150,6 +155,8 @@ export const mediaEnv = z.object({
   /** CSAM hash-match hook: `none` (default) or `stub` (matches SHA-256s listed in HASH_MATCH_LIST_FILE; harness only). */
   HASH_MATCH_PROVIDER: z.enum(["none", "stub"]).default("none"),
   HASH_MATCH_LIST_FILE: z.string().optional(),
+  /** Scratch space for recordings, clip cuts and thumbnails (defaults to <tmpdir>/commonair-media). */
+  MEDIA_WORK_DIR: z.string().optional(),
 });
 
 export const playbackEnv = z.object({

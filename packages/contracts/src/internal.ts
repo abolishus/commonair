@@ -12,7 +12,7 @@ import { DELIVERY_SOURCES, RENDITIONS } from "./enums.ts";
 
 export const INTERNAL_SECRET_HEADER = "x-internal-secret";
 
-/** Username MediaMTX accepts for internal readers/publishers (origin, media); password = INTERNAL_API_SECRET. */
+/** Username MediaMTX accepts for internal readers/publishers (origin, media); password = MEDIA_INTERNAL_PASSWORD. */
 export const MEDIA_INTERNAL_USER = "internal";
 
 /**
@@ -33,7 +33,8 @@ export const MediaMtxAuthRequest = z.object({
   ip: z.string(),
   action: z.enum(["publish", "read", "playback", "api", "metrics", "pprof"]),
   path: z.string().default(""),
-  protocol: z.enum(["rtsp", "rtmp", "hls", "webrtc", "srt"]),
+  /** Empty for `api`/`metrics` actions (MediaMTX 1.21 sends ""). */
+  protocol: z.enum(["rtsp", "rtmp", "hls", "webrtc", "srt"]).or(z.literal("")),
   id: z.string().nullable().optional(),
   query: z.string().default(""),
 });
