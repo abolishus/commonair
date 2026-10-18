@@ -75,7 +75,7 @@ test("SMTP send failures surface as rejections (nothing listening)", async () =>
   const port = closed.port ?? 1;
   await closed.stop(true);
   const mailer = createMailer(
-    { SMTP_HOST: "127.0.0.1", SMTP_PORT: port, SMTP_SECURE: false },
+    { SMTP_HOST: "127.0.0.1", SMTP_PORT: port, SMTP_SECURE: false, SMTP_REQUIRE_TLS: false },
     { site, timeouts: { connection: 2_000, greeting: 2_000, socket: 2_000 } },
   );
   try {
