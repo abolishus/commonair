@@ -11,14 +11,18 @@ import {
   PayoutBelowMinimumError,
   chargeback,
   holdRelease,
-  holdReleaseAmount,
   holdReleaseDueAt,
   infrastructureCost,
   manualConfirmation,
   patronageAllocation,
   patronagePayout,
   paymentSucceeded,
-  payout,
+  chargebackReversal,
+  holdMemo,
+  payoutCancel,
+  payoutReserve,
+  payoutSent,
+  periodClose,
   refund,
   reversalSplit,
   sharePurchase,
@@ -89,7 +93,7 @@ function reversalInput(over: Partial<PaymentReversalInput> = {}): PaymentReversa
     cut: DEFAULT_PLATFORM_CUT,
     alreadyReversedCents: 0,
     amountCents: 1099,
-    balances: { liabilityCents: 0, holdCents: 900, paymentHoldCents: 900 },
+    balances: { liabilityCents: 0, holdLots: [{ paymentId: PAYMENT, cents: 900 }] },
     ...over,
   };
 }
@@ -187,14 +191,12 @@ describe("hold release", () => {
     expect(on(p, accounts.creatorHold(CREATOR))).toBe(900);
     expect(on(p, accounts.creator(CREATOR))).toBe(-900);
     expect(p.idempotencyKey).toBe(`hold-release:${PAYMENT}`);
+    expect(p.entries.find((e) => e.code === accounts.creatorHold(CREATOR))?.memo).toBe(holdMemo(PAYMENT));
   });
 
   test("due date and amount bounds", () => {
     expect(holdReleaseDueAt(AT, 7).toISOString()).toBe("2026-03-22T12:00:00.000Z");
     expect(() => holdReleaseDueAt(AT, -1)).toThrow(RangeError);
-    expect(holdReleaseAmount(900, 1000)).toBe(900);
-    expect(holdReleaseAmount(900, 300)).toBe(300);
-    expect(holdReleaseAmount(900, -50)).toBe(0);
     expect(() =>
       holdRelease({ paymentId: PAYMENT, creatorUserId: CREATOR, amountCents: 0, currency: "usd", occurredAt: AT }),
     ).toThrow(RangeError);
@@ -241,23 +243,36 @@ describe("reversalSplit", () => {
   });
 });
 
+const OTHER = "01890000-0000-7000-8000-0000000000bb";
+const OLDEST = "01890000-0000-7000-8000-0000000000cc";
+/** Hold entries by lot. */
+function lots(p: Posting): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const e of p.entries)
+    if (e.code === accounts.creatorHold(CREATOR)) out[e.memo ?? ""] = (out[e.memo ?? ""] ?? 0) + e.amountCents;
+  return out;
+}
+
 describe("refund", () => {
-  test("full refund within the hold reverses everything from this payment's hold", () => {
+  test("full refund within the hold reverses everything from this payment's own lot", () => {
     const p = refund(reversalInput());
     expectWellFormed(p);
     expect(on(p, accounts.cash("stripe"))).toBe(-1099);
     expect(on(p, accounts.taxPayable())).toBe(99);
-    expect(on(p, accounts.creatorHold(CREATOR))).toBe(900);
+    expect(lots(p)).toEqual({ [holdMemo(PAYMENT)]: 900 });
     expect(on(p, accounts.platformCut())).toBe(100);
     expect(on(p, accounts.creator(CREATOR))).toBe(0);
     expect(p.kind).toBe("refund");
-    expect(p.metadata.revenueGrossCents).toBe(-1099);
+    expect(p.metadata).toMatchObject({
+      revenueGrossCents: -1099,
+      provider: "stripe",
+      settlement: "cash",
+      receivableCents: 0,
+    });
   });
 
-  test("refund after the cut and after release draws on released earnings", () => {
-    const p = refund(
-      reversalInput({ amountCents: 550, balances: { liabilityCents: 2000, holdCents: 0, paymentHoldCents: 0 } }),
-    );
+  test("refund after release draws on released earnings", () => {
+    const p = refund(reversalInput({ amountCents: 550, balances: { liabilityCents: 2000, holdLots: [] } }));
     expectWellFormed(p);
     const s = reversalSplit({ grossCents: 1099, taxCents: 99 }, DEFAULT_PLATFORM_CUT, 0, 550);
     expect(on(p, accounts.creator(CREATOR))).toBe(s.creatorCents);
@@ -265,23 +280,40 @@ describe("refund", () => {
     expect(on(p, accounts.taxPayable())).toBe(s.taxCents);
   });
 
-  test("refund larger than every balance books a receivable", () => {
-    const p = refund(reversalInput({ balances: { liabilityCents: 100, holdCents: 200, paymentHoldCents: 50 } }));
+  test("order: own lot, released earnings, other lots oldest first, then a receivable", () => {
+    const p = refund(
+      reversalInput({
+        balances: {
+          liabilityCents: 100,
+          holdLots: [
+            { paymentId: OLDEST, cents: 150 },
+            { paymentId: PAYMENT, cents: 50 },
+            { paymentId: OTHER, cents: 300 },
+          ],
+        },
+      }),
+    );
     expectWellFormed(p);
-    expect(on(p, accounts.creatorHold(CREATOR))).toBe(200);
+    // 900 = 50 own + 100 released + 150 oldest + 300 other + 300 receivable
+    expect(lots(p)).toEqual({ [holdMemo(PAYMENT)]: 50, [holdMemo(OLDEST)]: 150, [holdMemo(OTHER)]: 300 });
     expect(on(p, accounts.creator(CREATOR))).toBe(100);
-    expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(600);
+    expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(300);
+    expect(p.metadata.receivableCents).toBe(300);
   });
 
-  test("property: random partial refunds balance and never over-draw a source", () => {
+  test("property: random partial refunds balance and never over-draw a lot", () => {
     const r = prng(99);
     for (let i = 0; i < 1000; i++) {
       const gross = 1 + int(r, 200_000);
       const tax = int(r, gross);
       const already = int(r, gross - 1);
       const amount = 1 + int(r, gross - already - 1);
-      const balances = { liabilityCents: int(r, 50_000), holdCents: int(r, 50_000), paymentHoldCents: 0 };
-      balances.paymentHoldCents = int(r, balances.holdCents);
+      const holdLots = [
+        { paymentId: OLDEST, cents: int(r, 20_000) },
+        { paymentId: PAYMENT, cents: int(r, 20_000) },
+        { paymentId: OTHER, cents: int(r, 20_000) },
+      ];
+      const balances = { liabilityCents: int(r, 50_000), holdLots };
       const p = refund(
         reversalInput({
           original: { grossCents: gross, taxCents: tax },
@@ -291,7 +323,8 @@ describe("refund", () => {
         }),
       );
       expectWellFormed(p);
-      expect(on(p, accounts.creatorHold(CREATOR))).toBeLessThanOrEqual(balances.holdCents);
+      const drawn = lots(p);
+      for (const l of holdLots) expect(drawn[holdMemo(l.paymentId)] ?? 0).toBeLessThanOrEqual(l.cents);
       expect(on(p, accounts.creator(CREATOR))).toBeLessThanOrEqual(balances.liabilityCents);
       expect(on(p, accounts.creatorReceivable(CREATOR))).toBeGreaterThanOrEqual(0);
     }
@@ -299,14 +332,22 @@ describe("refund", () => {
 });
 
 describe("chargeback", () => {
-  test("claws back from released earnings first, then hold, then a receivable; records the fee", () => {
+  test("claws back from released earnings, then lots (own first), then a receivable; records the fee", () => {
     const p = chargeback({
-      ...reversalInput({ balances: { liabilityCents: 300, holdCents: 400, paymentHoldCents: 400 } }),
+      ...reversalInput({
+        balances: {
+          liabilityCents: 300,
+          holdLots: [
+            { paymentId: OTHER, cents: 100 },
+            { paymentId: PAYMENT, cents: 300 },
+          ],
+        },
+      }),
       disputeFeeCents: 1500,
     });
     expectWellFormed(p);
     expect(on(p, accounts.creator(CREATOR))).toBe(300);
-    expect(on(p, accounts.creatorHold(CREATOR))).toBe(400);
+    expect(lots(p)).toEqual({ [holdMemo(PAYMENT)]: 300, [holdMemo(OTHER)]: 100 });
     expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(200);
     expect(on(p, accounts.paymentFees())).toBe(1500);
     expect(on(p, accounts.cash("stripe"))).toBe(-1099 - 1500);
@@ -314,10 +355,7 @@ describe("chargeback", () => {
   });
 
   test("with insufficient balance everything becomes a receivable", () => {
-    const p = chargeback({
-      ...reversalInput({ balances: { liabilityCents: 0, holdCents: 0, paymentHoldCents: 0 } }),
-      disputeFeeCents: 0,
-    });
+    const p = chargeback({ ...reversalInput({ balances: { liabilityCents: 0, holdLots: [] } }), disputeFeeCents: 0 });
     expectWellFormed(p);
     expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(900);
     expect(on(p, accounts.paymentFees())).toBe(0);
@@ -325,7 +363,7 @@ describe("chargeback", () => {
 
   test("negative balances are treated as nothing available", () => {
     const p = chargeback({
-      ...reversalInput({ balances: { liabilityCents: -500, holdCents: 100, paymentHoldCents: 0 } }),
+      ...reversalInput({ balances: { liabilityCents: -500, holdLots: [{ paymentId: OTHER, cents: 100 }] } }),
       disputeFeeCents: 0,
     });
     expectWellFormed(p);
@@ -335,46 +373,148 @@ describe("chargeback", () => {
   });
 });
 
-describe("payout", () => {
+describe("chargeback reversal", () => {
+  const base = {
+    disputeId: "01890000-0000-7000-8000-0000000000d1",
+    paymentId: PAYMENT,
+    creatorUserId: CREATOR,
+    provider: "stripe",
+    currency: "usd",
+    occurredAt: AT,
+    chargeback: { amountCents: 1099, taxCents: 99, creatorCents: 900, coopCents: 100 },
+  };
+
+  test("restores tax and cut, cancels the receivable first, credits the rest as released", () => {
+    const p = chargebackReversal({ ...base, receivableCents: 600, feeRefundCents: 1500 });
+    expectWellFormed(p);
+    expect(on(p, accounts.cash("stripe"))).toBe(1099 + 1500);
+    expect(on(p, accounts.taxPayable())).toBe(-99);
+    expect(on(p, accounts.platformCut())).toBe(-100);
+    expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(-600);
+    expect(on(p, accounts.creator(CREATOR))).toBe(-300);
+    expect(on(p, accounts.paymentFees())).toBe(-1500);
+    expect(on(p, accounts.creatorHold(CREATOR))).toBe(0);
+    expect(p.metadata.revenueGrossCents).toBe(1099);
+  });
+
+  test("never cancels more receivable than the creator share", () => {
+    const p = chargebackReversal({ ...base, receivableCents: 5000 });
+    expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(-900);
+    expect(on(p, accounts.creator(CREATOR))).toBe(0);
+  });
+
+  test("rejects inconsistent components", () => {
+    expect(() =>
+      chargebackReversal({ ...base, chargeback: { ...base.chargeback, coopCents: 99 }, receivableCents: 0 }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("payouts", () => {
   const base = {
     payoutId: "01890000-0000-7000-8000-0000000000b1",
     userId: CREATOR,
-    provider: "stripe",
     currency: "usd",
     occurredAt: AT,
     minimumCents: 2500,
   };
 
-  test("pays released earnings to cash", () => {
-    const p = payout({ ...base, amountCents: 3000, balances: { liabilityCents: 3000, receivableCents: 0 } });
-    expectWellFormed(p);
-    expect(on(p, accounts.creator(CREATOR))).toBe(3000);
-    expect(on(p, accounts.cash("stripe"))).toBe(-3000);
+  test("reserve moves earnings to clearing; send moves clearing to cash", () => {
+    const r = payoutReserve({ ...base, amountCents: 3000, balances: { liabilityCents: 3000, receivableCents: 0 } });
+    expectWellFormed(r);
+    expect(on(r, accounts.creator(CREATOR))).toBe(3000);
+    expect(on(r, accounts.payoutClearing(CREATOR))).toBe(-3000);
+    expect(r.kind).toBe("payout_reserve");
+    const s = payoutSent({
+      payoutId: base.payoutId,
+      userId: CREATOR,
+      provider: "stripe",
+      amountCents: 3000,
+      currency: "usd",
+      occurredAt: AT,
+    });
+    expectWellFormed(s);
+    expect(on(s, accounts.payoutClearing(CREATOR))).toBe(3000);
+    expect(on(s, accounts.cash("stripe"))).toBe(-3000);
+    expect(s.kind).toBe("payout");
   });
 
-  test("nets a clawback receivable against earnings", () => {
-    const p = payout({ ...base, amountCents: 2600, balances: { liabilityCents: 3000, receivableCents: 400 } });
-    expectWellFormed(p);
-    expect(on(p, accounts.creator(CREATOR))).toBe(3000);
-    expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(-400);
-    expect(on(p, accounts.cash("stripe"))).toBe(-2600);
+  test("reserve nets a clawback receivable; cancel restores it exactly", () => {
+    const r = payoutReserve({ ...base, amountCents: 2600, balances: { liabilityCents: 3000, receivableCents: 400 } });
+    expectWellFormed(r);
+    expect(on(r, accounts.creator(CREATOR))).toBe(3000);
+    expect(on(r, accounts.creatorReceivable(CREATOR))).toBe(-400);
+    expect(on(r, accounts.payoutClearing(CREATOR))).toBe(-2600);
+    const c = payoutCancel({
+      payoutId: base.payoutId,
+      userId: CREATOR,
+      amountCents: 2600,
+      receivableNettedCents: Number(r.metadata.receivableNettedCents),
+      currency: "usd",
+      occurredAt: AT,
+    });
+    expectWellFormed(c);
+    for (const code of [
+      accounts.creator(CREATOR),
+      accounts.creatorReceivable(CREATOR),
+      accounts.payoutClearing(CREATOR),
+    ]) {
+      expect(on(r, code) + on(c, code)).toBe(0);
+    }
   });
 
-  test("refuses below the minimum unless closing the account", () => {
+  test("reserve refuses below the minimum unless closing the account", () => {
     const b = { liabilityCents: 2000, receivableCents: 0 };
-    expect(() => payout({ ...base, amountCents: 2000, balances: b })).toThrow(PayoutBelowMinimumError);
-    const p = payout({ ...base, amountCents: 2000, balances: b, closingAccount: true });
+    expect(() => payoutReserve({ ...base, amountCents: 2000, balances: b })).toThrow(PayoutBelowMinimumError);
+    const p = payoutReserve({ ...base, amountCents: 2000, balances: b, closingAccount: true });
     expectWellFormed(p);
     expect(p.description).toMatch(/closed/);
   });
 
-  test("refuses more than is available", () => {
+  test("reserve refuses more than is available", () => {
     expect(() =>
-      payout({ ...base, amountCents: 3000, balances: { liabilityCents: 3000, receivableCents: 1 } }),
+      payoutReserve({ ...base, amountCents: 3000, balances: { liabilityCents: 3000, receivableCents: 1 } }),
     ).toThrow(InsufficientBalanceError);
-    expect(() => payout({ ...base, amountCents: 0, balances: { liabilityCents: 3000, receivableCents: 0 } })).toThrow(
+    expect(() =>
+      payoutReserve({ ...base, amountCents: 0, balances: { liabilityCents: 3000, receivableCents: 0 } }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe("period close", () => {
+  const range = {
+    periodStart: new Date("2026-01-01Z"),
+    periodEnd: new Date("2026-02-01Z"),
+    currency: "usd",
+    occurredAt: AT,
+  };
+  test("moves revenue and expenses into retained surplus", () => {
+    const p = periodClose({
+      ...range,
+      balances: [
+        { code: accounts.platformCut(), rawCents: -10_000 },
+        { code: accounts.paymentFees(), rawCents: 700 },
+        { code: accounts.infrastructure("hosting"), rawCents: 2000 },
+      ],
+    });
+    expectWellFormed(p);
+    expect(on(p, accounts.platformCut())).toBe(10_000);
+    expect(on(p, accounts.paymentFees())).toBe(-700);
+    expect(on(p, accounts.retainedSurplus())).toBe(-7300);
+    expect(p.metadata.surplusCents).toBe(7300);
+  });
+
+  test("a loss closes as a debit to retained surplus", () => {
+    const p = periodClose({ ...range, balances: [{ code: accounts.infrastructure("hosting"), rawCents: 500 }] });
+    expect(on(p, accounts.retainedSurplus())).toBe(500);
+    expect(p.metadata.surplusCents).toBe(-500);
+  });
+
+  test("only revenue and expense accounts can be closed", () => {
+    expect(() => periodClose({ ...range, balances: [{ code: accounts.cash("stripe"), rawCents: 5 }] })).toThrow(
       RangeError,
     );
+    expect(() => periodClose({ ...range, periodEnd: range.periodStart, balances: [] })).toThrow(RangeError);
   });
 });
 
