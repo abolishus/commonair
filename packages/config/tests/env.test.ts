@@ -1,0 +1,89 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, test } from "vite-plus/test";
+import { ALL_ENV_SCHEMAS, EnvError, coreEnv, instanceSite, loadEnv, paymentsEnv } from "../src/env.ts";
+import { SITE, sourceLink } from "../src/site.ts";
+
+const examplePath = fileURLToPath(new URL("../../../.env.example", import.meta.url));
+
+function exampleKeys(): Set<string> {
+  const keys = new Set<string>();
+  for (const line of readFileSync(examplePath, "utf8").split("\n")) {
+    const m = /^([A-Z0-9_]+)=/.exec(line);
+    if (m?.[1]) keys.add(m[1]);
+  }
+  return keys;
+}
+
+describe("env", () => {
+  test(".env.example documents every variable in every schema, and nothing else", () => {
+    const schemaKeys = new Set(Object.values(ALL_ENV_SCHEMAS).flatMap((s) => Object.keys(s.shape)));
+    const documented = exampleKeys();
+    expect([...schemaKeys].filter((k) => !documented.has(k))).toEqual([]);
+    expect([...documented].filter((k) => !schemaKeys.has(k))).toEqual([]);
+  });
+
+  test("empty strings fall back to defaults", () => {
+    const env = loadEnv(coreEnv, { INSTANCE_NAME: "", PUBLIC_URL: "" });
+    expect(env.INSTANCE_NAME).toBe(SITE.name);
+    expect(env.PUBLIC_URL).toBe("http://localhost:3000");
+  });
+
+  test("reports every invalid variable at once", () => {
+    const run = () => loadEnv(coreEnv, { NODE_ENV: "staging", PUBLIC_URL: "not a url" });
+    expect(run).toThrow(EnvError);
+    const issues = (() => {
+      try {
+        run();
+        return [];
+      } catch (e) {
+        return (e as EnvError).issues;
+      }
+    })();
+    expect(issues.map((i) => String(i.path[0])).toSorted((a, b) => a.localeCompare(b))).toEqual([
+      "NODE_ENV",
+      "PUBLIC_URL",
+    ]);
+  });
+
+  test("refuses live Stripe keys", () => {
+    expect(() => loadEnv(paymentsEnv, { STRIPE_SECRET_KEY: "sk_live_abc" })).toThrow(EnvError);
+    expect(loadEnv(paymentsEnv, { STRIPE_SECRET_KEY: "sk_test_abc" }).STRIPE_SECRET_KEY).toBe("sk_test_abc");
+    expect(loadEnv(paymentsEnv, {}).PAYMENTS_PROVIDER).toBe("manual");
+  });
+
+  test("instanceSite applies contact overrides and strips trailing slashes", () => {
+    const site = instanceSite(
+      loadEnv(coreEnv, {
+        PUBLIC_URL: "https://stream.example.org/",
+        CONTACT_EMAIL: "hi@example.org",
+      }),
+    );
+    expect(site.publicUrl).toBe("https://stream.example.org");
+    expect(site.contacts.general).toBe("hi@example.org");
+    expect(site.contacts.security).toBe(SITE.contacts.security);
+  });
+
+  test("non-flagship production instances must set their own contacts", () => {
+    expect(() => loadEnv(coreEnv, { NODE_ENV: "production" })).toThrow(/SECURITY_EMAIL/);
+    expect(() => loadEnv(coreEnv, { NODE_ENV: "production", INSTANCE_IS_FLAGSHIP: "true" })).not.toThrow();
+    const contacts = {
+      CONTACT_EMAIL: "a@x.test",
+      SECURITY_EMAIL: "b@x.test",
+      ABUSE_EMAIL: "c@x.test",
+      DMCA_EMAIL: "d@x.test",
+      PRIVACY_EMAIL: "e@x.test",
+    };
+    expect(() => loadEnv(coreEnv, { NODE_ENV: "production", ...contacts })).not.toThrow();
+  });
+
+  test("sourceLink points at the exact commit", () => {
+    expect(sourceLink({ sourceUrl: SITE.repository.url, sourceCommit: "abc123" })).toBe(
+      `${SITE.repository.url}/tree/abc123`,
+    );
+    expect(sourceLink({ sourceUrl: `${SITE.repository.url}/`, sourceCommit: "unknown" })).toBe(SITE.repository.url);
+  });
+});
