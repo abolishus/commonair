@@ -181,6 +181,7 @@ beforeAll(async () => {
     MEDIAMTX_API_URL: `http://127.0.0.1:${mtx.port("9997/tcp")}`,
     MEDIAMTX_RTSP_URL: `rtsp://127.0.0.1:${mtx.port("8554/tcp")}`,
     INTERNAL_API_SECRET: INTERNAL_SECRET,
+    MEDIA_INTERNAL_PASSWORD: INTERNAL_SECRET,
     AUTH_SECRET,
     TRANSCODE_VIEWER_THRESHOLD: "2",
     TRANSCODE_HWACCEL: "none",
