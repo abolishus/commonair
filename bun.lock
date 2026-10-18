@@ -133,6 +133,27 @@
         "zod": "catalog:",
       },
     },
+    "services/origin": {
+      "name": "@commonair/origin",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/config": "workspace:*",
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/observability": "workspace:*",
+        "@commonair/service": "workspace:*",
+        "@commonair/tokens": "workspace:*",
+        "@opentelemetry/api": "catalog:",
+        "drizzle-orm": "catalog:",
+        "iovalkey": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
   },
   "overrides": {
     "vite": "catalog:",
@@ -176,6 +197,8 @@
     "@commonair/infra": ["@commonair/infra@workspace:infra"],
 
     "@commonair/observability": ["@commonair/observability@workspace:packages/observability"],
+
+    "@commonair/origin": ["@commonair/origin@workspace:services/origin"],
 
     "@commonair/scripts": ["@commonair/scripts@workspace:scripts"],
 
