@@ -4,10 +4,10 @@
 import { describe, expect, test } from "vite-plus/test";
 import { parseNetworkList } from "../src/network.ts";
 import { noisyOr, stdev } from "../src/signals/combine.ts";
-import { fetchChecks, fetchSignal } from "../src/signals/fetch.ts";
+import { claimedSecondsUntil, fetchChecks, fetchSignal, httpShare } from "../src/signals/fetch.ts";
 import { HEADLESS_WEIGHTS, headlessFlags, headlessSignal } from "../src/signals/headless.ts";
-import { heartbeatChecks, heartbeatSignal } from "../src/signals/heartbeat.ts";
-import { concurrencySignal, datacenterSignal } from "../src/signals/network.ts";
+import { HEARTBEAT_WEIGHTS, heartbeatChecks, heartbeatSignal, visibleIntervals } from "../src/signals/heartbeat.ts";
+import { concurrencySignal, DATACENTER_SCORE, datacenterSignal, PRIVACY_RELAY_SCORE } from "../src/signals/network.ts";
 import type { HeartbeatSample } from "../src/types.ts";
 
 const CHROME_DESKTOP =
@@ -48,12 +48,28 @@ describe("combine", () => {
 });
 
 describe("datacenter_ip", () => {
-  const { classifier } = parseNetworkList("AS64500 Example Cloud");
+  const { classifier } = parseNetworkList("AS64500 Example Cloud\nAS64502 class=privacy_relay Example Relay");
   test("fires when the session was classified as hosting at start", () => {
     expect(datacenterSignal({ datacenter: "Example Hosting", asn: 64512 })).toEqual({
       code: "datacenter_ip",
-      score: 0.8,
+      score: 0.6,
       details: { network: "Example Hosting", asn: 64512 },
+    });
+  });
+  test("is below the default exclusion score: never fatal alone", () => {
+    expect(DATACENTER_SCORE).toBeLessThan(0.7);
+    expect(PRIVACY_RELAY_SCORE).toBeLessThan(DATACENTER_SCORE);
+  });
+  test("privacy relays (stored with the prefix, or by ASN class) are their own weak signal", () => {
+    expect(datacenterSignal({ datacenter: "privacy_relay:Example Relay", asn: null })).toEqual({
+      code: "privacy_relay",
+      score: 0.3,
+      details: { network: "Example Relay", asn: null },
+    });
+    expect(datacenterSignal({ datacenter: "privacy_relay:", asn: 1 })?.details).toEqual({ network: null, asn: 1 });
+    expect(datacenterSignal({ datacenter: null, asn: 64502 }, classifier)).toMatchObject({
+      code: "privacy_relay",
+      details: { network: "Example Relay" },
     });
   });
   test("fires for an ASN on the operator list", () => {
@@ -147,6 +163,13 @@ describe("heartbeat_inconsistent", () => {
     expect(heartbeatChecks(beats).checks).toEqual([]);
   });
 
+  test("a background tab is weak corroboration only: with any single weak flag it stays at the threshold", () => {
+    expect(HEARTBEAT_WEIGHTS.never_visible_and_muted).toBe(0.25);
+    expect(noisyOr([HEARTBEAT_WEIGHTS.never_visible_and_muted, 0.6])).toBeLessThanOrEqual(0.7);
+    // Hidden but audible (a music stream in the background) fires nothing.
+    expect(heartbeatChecks(humanBeats(20).map((b) => ({ ...b, visible: false, muted: false }))).checks).toEqual([]);
+  });
+
   test("buffer that never changes while playing (≥ 5 beats)", () => {
     const beats = humanBeats(5).map((b) => ({ ...b, bufferSeconds: 4 }));
     expect(heartbeatChecks(beats).checks).toContain("buffer_never_advances");
@@ -156,12 +179,45 @@ describe("heartbeat_inconsistent", () => {
     expect(heartbeatChecks(paused).checks).not.toContain("buffer_never_advances");
   });
 
-  test("perfectly periodic timing (< 5 ms stdev over ≥ 10 beats)", () => {
-    const periodic = humanBeats(10).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000 + (i % 2) * 3 }));
+  test("perfectly periodic timing (< 2 ms stdev over ≥ 10 visible intervals)", () => {
+    const periodic = humanBeats(11).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000 + (i % 2) * 1 }));
     expect(heartbeatChecks(periodic).checks).toContain("periodic_timing");
-    expect(heartbeatChecks(periodic.slice(0, 9)).checks).not.toContain("periodic_timing");
-    const jittery = humanBeats(10).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000 + (i % 2) * 12 }));
+    expect(heartbeatChecks(periodic.slice(0, 10)).checks).not.toContain("periodic_timing");
+    // Ordinary event-loop and network jitter of a few ms is human.
+    const jittery = humanBeats(11).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000 + (i % 2) * 5 }));
     expect(heartbeatChecks(jittery).checks).not.toContain("periodic_timing");
+    expect(heartbeatChecks(jittery).measures.intervalStdevMs).toBeGreaterThan(2);
+  });
+
+  test("clamped / throttled timers in hidden tabs never count as periodic", () => {
+    // Whole-second aligned, zero-jitter beats while hidden (Chrome timer alignment).
+    const clamped = humanBeats(30).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000, visible: false }));
+    expect(heartbeatChecks(clamped).checks).not.toContain("periodic_timing");
+    expect(heartbeatChecks(clamped).measures.intervalStdevMs).toBeUndefined();
+    // Intensive throttling: one beat a minute while hidden, then back to normal.
+    const throttled = humanBeats(30).map((b, i) => ({
+      ...b,
+      at: 1_000_000 + i * 60_000,
+      visible: i >= 25,
+    }));
+    expect(heartbeatChecks(throttled).checks).not.toContain("periodic_timing");
+    // Alternating visibility leaves no visible-to-visible interval.
+    const flicker = humanBeats(30).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000, visible: i % 2 === 0 }));
+    expect(visibleIntervals(flicker)).toEqual([]);
+    expect(heartbeatChecks(flicker).checks).not.toContain("periodic_timing");
+  });
+
+  test("periodic beats while visible still fire even when hidden beats are interleaved", () => {
+    const beats = humanBeats(16).map((b, i) => ({ ...b, at: 1_000_000 + i * 10_000, visible: i !== 7 }));
+    // 15 intervals, 2 touch the hidden beat: 13 visible ones remain.
+    expect(visibleIntervals(beats)).toHaveLength(13);
+    expect(heartbeatChecks(beats).checks).toContain("periodic_timing");
+  });
+
+  test("empty and single-beat histories yield nothing", () => {
+    expect(heartbeatChecks([])).toEqual({ checks: [], measures: { beats: 0 } });
+    expect(heartbeatChecks(humanBeats(1)).checks).toEqual([]);
+    expect(visibleIntervals([])).toEqual([]);
   });
 
   test("findings combine; the classic bot (periodic + frozen buffer) crosses 0.7", () => {
@@ -210,12 +266,124 @@ describe("fetch_pattern", () => {
     expect(fetchChecks({ ...base, watchSeconds: 5 }, { playlists: 5, segments: 0, parts: 0 }, ctx).checks).toEqual([]);
   });
 
-  test("P2P delivery lowers the HTTP segments expected", () => {
-    const p2p = { ...base, bytesHttp: 100, bytesP2p: 900 };
+  test("a p2p-assigned session is expected to fetch only a minimum HTTP share", () => {
+    const p2p = { ...base, assignedSource: "p2p" as const };
     expect(fetchChecks(p2p, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual([]);
+    // The same fetches from an origin-assigned session are far too few.
+    expect(fetchChecks(base, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
   });
 
-  test("relay-assigned sessions are not judged by origin fetches", () => {
+  test("relay-assigned sessions are not judged by origin fetches, and are held without receipts", () => {
     expect(fetchSignal({ ...base, assignedSource: "relay" }, { playlists: 40, segments: 0, parts: 0 }, ctx)).toBeNull();
+    expect(
+      fetchChecks({ ...base, assignedSource: "relay" }, { playlists: 40, segments: 0, parts: 0 }, ctx),
+    ).toMatchObject({ skipped: "no_accounting", mediaUnconfirmed: true });
+    expect(fetchChecks({ ...base, assignedSource: "relay" }, null, ctx).mediaUnconfirmed).toBe(true);
+    expect(
+      fetchChecks({ ...base, assignedSource: "relay" }, { relayObjects: null, claimedSeconds: 60 }, ctx)
+        .mediaUnconfirmed,
+    ).toBe(true);
+  });
+
+  test("no media at all while claiming playback (known counters)", () => {
+    const r = fetchChecks(base, { playlists: 0, segments: 0, parts: 0 }, ctx);
+    expect(r).toMatchObject({ checks: ["no_media_fetched"], mediaUnconfirmed: true, skipped: null });
+    expect(fetchSignal(base, { playlists: 0, segments: 0, parts: 0 }, ctx)!.score).toBe(0.9);
+    // Boundary: exactly 10 expected segments is judged, 9.x is not.
+    expect(fetchChecks({ ...base, watchSeconds: 10 }, { playlists: 0, segments: 0, parts: 0 }, ctx).checks).toEqual([
+      "no_media_fetched",
+    ]);
+    expect(fetchChecks({ ...base, watchSeconds: 9 }, { playlists: 0, segments: 0, parts: 0 }, ctx)).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: false,
+    });
+    // A playlist poller is reported as such, not twice.
+    expect(fetchChecks(base, { playlists: 40, segments: 0, parts: 0 }, ctx)).toMatchObject({
+      checks: ["playlists_without_segments"],
+      mediaUnconfirmed: true,
+    });
+  });
+
+  test("database counter only (parts unknown): a tolerant ratio holds, never scores", () => {
+    const zero = fetchChecks(base, { playlists: null, segments: 0, parts: null }, ctx);
+    expect(zero).toMatchObject({ checks: [], mediaUnconfirmed: true });
+    // 60 expected full segments × 10 % = 6.
+    expect(fetchChecks(base, { playlists: null, segments: 5, parts: null }, ctx)).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: true,
+    });
+    const enough = fetchChecks(base, { playlists: null, segments: 6, parts: null }, ctx);
+    expect(enough).toMatchObject({ checks: [], mediaUnconfirmed: false });
+    expect(enough.measures.segmentRatio).toBeCloseTo(0.1, 6);
+    // At the 10-segment boundary at least one full segment is required.
+    const short = { ...base, watchSeconds: 10 };
+    expect(fetchChecks(short, { playlists: null, segments: 0, parts: null }, ctx).mediaUnconfirmed).toBe(true);
+    expect(fetchChecks(short, { playlists: null, segments: 1, parts: null }, ctx).mediaUnconfirmed).toBe(false);
+    // One segment then hours of heartbeats.
+    const hours = { ...base, watchSeconds: 4 * 3600 };
+    expect(fetchChecks(hours, { playlists: null, segments: 1, parts: null }, ctx).mediaUnconfirmed).toBe(true);
+    expect(fetchChecks(hours, { playlists: null, segments: 1440, parts: null }, ctx).mediaUnconfirmed).toBe(false);
+  });
+
+  test("too few segments holds the session pending; too many does not", () => {
+    expect(fetchChecks(base, { playlists: 60, segments: 14, parts: 0 }, ctx).mediaUnconfirmed).toBe(true);
+    expect(fetchChecks(base, { playlists: 60, segments: 15, parts: 0 }, ctx)).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: false,
+    });
+    expect(fetchChecks(base, { playlists: 60, segments: 300, parts: 0 }, ctx).mediaUnconfirmed).toBe(false);
+  });
+
+  test("CDN delivery is never judged; missing accounting is not judged", () => {
+    const cdn = { ...base, assignedSource: "cdn" as const };
+    expect(fetchChecks(cdn, { playlists: 0, segments: 0, parts: 0 }, ctx)).toEqual({
+      checks: [],
+      measures: {},
+      mediaUnconfirmed: false,
+      skipped: "cdn",
+    });
+    expect(fetchChecks(base, null, ctx)).toMatchObject({ skipped: "no_accounting", mediaUnconfirmed: false });
+  });
+
+  test("relay receipts: no objects excludes, too few holds, many is fine", () => {
+    const relay = { ...base, assignedSource: "relay" as const };
+    expect(fetchChecks(relay, { relayObjects: 0, claimedSeconds: 60 }, ctx).checks).toEqual(["no_media_fetched"]);
+    expect(fetchChecks(relay, { relayObjects: 14, claimedSeconds: 60 }, ctx)).toMatchObject({
+      checks: ["too_few_segments"],
+      mediaUnconfirmed: true,
+    });
+    expect(fetchChecks(relay, { relayObjects: 15, claimedSeconds: 60 }, ctx).checks).toEqual([]);
+    expect(fetchChecks(relay, { relayObjects: 1000, claimedSeconds: 60 }, ctx).checks).toEqual([]);
+    // Too little claimed inside the receipts' window to judge.
+    expect(fetchChecks(relay, { relayObjects: 0, claimedSeconds: 9 }, ctx)).toMatchObject({
+      checks: [],
+      mediaUnconfirmed: false,
+    });
+  });
+
+  test("client-reported bytes never lower what is expected", () => {
+    expect(httpShare({ assignedSource: "origin" })).toBe(1);
+    expect(httpShare({ assignedSource: "p2p" })).toBe(0.1);
+    // An origin session claiming all its bytes came over P2P is still expected to fetch over HTTP.
+    const claimsP2p = { ...base, bytesHttp: 0, bytesP2p: 10_000 };
+    expect(fetchChecks(claimsP2p, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
+    // A p2p session claiming 100 s still expects 10 HTTP segments.
+    const p2p = { ...base, assignedSource: "p2p" as const, watchSeconds: 100 };
+    expect(fetchChecks(p2p, { playlists: 0, segments: 0, parts: 0 }, ctx).checks).toEqual(["no_media_fetched"]);
+  });
+});
+
+describe("claimedSecondsUntil", () => {
+  const s = { watchSeconds: 100, startedAt: new Date(0), lastHeartbeatAt: new Date(100_000) };
+  test("sums beats received up to the window end", () => {
+    const beats = humanBeats(5, 0).map((b) => ({ ...b, playedSeconds: 10 }));
+    expect(claimedSecondsUntil(beats, beats[2]!.at, s)).toBe(30);
+    expect(claimedSecondsUntil(beats, 0, s)).toBe(0);
+  });
+  test("without history, spreads the watch time over the session's life", () => {
+    expect(claimedSecondsUntil([], 50_000, s)).toBe(50);
+    expect(claimedSecondsUntil([], 500_000, s)).toBe(100);
+    expect(claimedSecondsUntil([], -1, s)).toBe(0);
+    expect(claimedSecondsUntil([], 50_000, { ...s, lastHeartbeatAt: null })).toBe(0);
   });
 });

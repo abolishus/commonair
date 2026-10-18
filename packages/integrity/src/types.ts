@@ -16,14 +16,22 @@ export const SESSION_SIGNALS = [
   "headless",
   "heartbeat_inconsistent",
   "fetch_pattern",
+  "privacy_relay",
 ] as const;
 export type SessionSignalCode = (typeof SESSION_SIGNALS)[number];
 
 /** Non-signal reason: not enough heartbeats yet to verify. */
 export const INSUFFICIENT_HEARTBEATS = "insufficient_heartbeats";
+/**
+ * Non-signal reason: the session claims playback but the delivery accounting does not show
+ * the media it would have needed. Such a session stays pending; it never verifies.
+ */
+export const MEDIA_UNCONFIRMED = "media_unconfirmed";
+/** Non-signal reason: signals an appeal or an admin decision allowed were ignored for this session. */
+export const ALLOWED_ON_APPEAL = "allowed_on_appeal";
 
 export const CHANNEL_SIGNALS = ["chat_viewer_anomaly", "follow_burst", "raid_overstated"] as const;
-export const RELAY_SIGNALS = ["relay_over_report", "relay_suspended"] as const;
+export const RELAY_SIGNALS = ["relay_over_report", "relay_suspended", "relay_issuance_unknown"] as const;
 
 export interface Signal<C extends string = SessionSignalCode> {
   code: C;
@@ -40,12 +48,14 @@ export interface SessionFacts {
   userId: string | null;
   deviceHash: string;
   asn: number | null;
-  /** Hosting-provider label recorded at session start, or null. */
+  /** Network-list label recorded at session start, or null (see `network.ts` for the privacy-relay prefix). */
   datacenter: string | null;
   userAgent: string | null;
   fingerprint: Record<string, unknown>;
   assignedSource: (typeof DELIVERY_SOURCES)[number];
   startedAt: Date;
+  /** Last heartbeat the API accepted (spreads watch time over a receipt window). */
+  lastHeartbeatAt?: Date | null;
   /** Heartbeat counter kept by the API. */
   heartbeats: number;
   watchSeconds: number;
@@ -74,12 +84,53 @@ export interface FetchSummary {
   /** Playlist requests, or null when unknown (only the segment counter is available). */
   playlists: number | null;
   segments: number;
-  /** LL-HLS partial segments, or null when unknown. */
+  /**
+   * LL-HLS partial segments, or null when unknown. The database counter
+   * (`playback_sessions.segments_fetched`) counts full segments only, so with it alone a
+   * low-latency player that fetches parts would look starved: ratio checks are skipped then.
+   */
   parts: number | null;
 }
 
+/**
+ * Relay-observed delivery for a session: the per-session entries of its relay's receipts that
+ * were verified with complete issuance.
+ */
+export interface RelayFetchSummary {
+  /**
+   * Fully delivered media objects (segments, parts, init sections) the receipts list for the
+   * session, capped by the bytes verified. Null when no such receipt covers the session yet.
+   */
+  relayObjects: number | null;
+  /** Seconds of playback the session claimed inside the window those receipts cover. */
+  claimedSeconds: number;
+}
+
+/**
+ * What the delivery path says a session fetched. Null when no per-session accounting
+ * exists (CDN delivery: CDN pulls are tokenless). For relay sessions, null counts as "no
+ * receipt coverage" and holds the session pending.
+ */
+export type FetchEvidence = FetchSummary | RelayFetchSummary | null;
+
+export const isRelayFetch = (f: FetchEvidence): f is RelayFetchSummary => f !== null && "relayObjects" in f;
+
+/**
+ * What an overturned appeal or an admin `allowed` decision covers (see `allowance.ts`).
+ * Covered codes are ignored; heartbeat checks look only at beats received after `since`.
+ * An allowance never applies to a session that started after `since`.
+ */
+export interface Allowance {
+  /** Epoch ms of the latest covering decision. */
+  since: number;
+  codes: readonly string[];
+}
+
 export interface Concurrency {
-  /** 1-based position of this session among concurrent sessions of the same device (oldest first). */
+  /**
+   * 1-based position among the concurrent sessions of the same device (or account), newest
+   * first: after a reload the new session is the real one.
+   */
   rank: number;
   concurrent: number;
 }
@@ -94,6 +145,8 @@ export interface ScoringContext {
   segmentDurationSeconds: number;
   /** LL-HLS parts per segment (MediaMTX default 200 ms parts → 5). */
   partsPerSegment: number;
+  /** Appeal / admin allowance covering this session, if any. */
+  allowance?: Allowance | null;
 }
 
 export type Verdict = "verified" | "excluded" | "pending";

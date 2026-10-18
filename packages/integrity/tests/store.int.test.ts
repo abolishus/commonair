@@ -9,6 +9,7 @@ import {
   INTEGRITY_KEYS,
   readEvidence,
   recordFetch,
+  recordFetches,
   recordHeartbeat,
 } from "../src/store.ts";
 
@@ -64,5 +65,35 @@ describe("integrity evidence store", () => {
     expect(ev.get(sid)!.fetches).toEqual({ playlists: 2, segments: 0, parts: 1 });
     expect(ev.get(other)).toEqual({ heartbeats: [], fetches: null });
     expect((await readEvidence(valkey, [])).size).toBe(0);
+  });
+
+  test("batch counting matches one-by-one counting, with a TTL", async () => {
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    await recordFetches(valkey, [
+      { sid: a, kind: "segment" },
+      { sid: a, kind: "part" },
+      { sid: a, kind: "part" },
+      { sid: b, kind: "playlist" },
+    ]);
+    await recordFetches(valkey, [{ sid: a, kind: "segment" }]);
+    await recordFetches(valkey, []);
+    const ev = await readEvidence(valkey, [a, b]);
+    expect(ev.get(a)!.fetches).toEqual({ playlists: 0, segments: 2, parts: 2 });
+    expect(ev.get(b)!.fetches).toEqual({ playlists: 1, segments: 0, parts: 0 });
+    expect(await valkey.ttl(INTEGRITY_KEYS.fetches(a))).toBeGreaterThan(EVIDENCE_TTL_SECONDS - 10);
+  });
+
+  test("with object ids, segments and parts count distinct objects, not requests", async () => {
+    const sid = crypto.randomUUID();
+    await recordFetches(valkey, [
+      ...Array.from({ length: 50 }, () => ({ sid, kind: "segment" as const, object: "720p/seg1.mp4" })),
+      ...Array.from({ length: 30 }, (_, i) => ({ sid, kind: "part" as const, object: `720p/part${i % 3}.mp4` })),
+      { sid, kind: "playlist" as const, object: "720p/index.m3u8" },
+    ]);
+    expect((await readEvidence(valkey, [sid])).get(sid)!.fetches).toEqual({ playlists: 1, segments: 1, parts: 3 });
+    expect(await valkey.ttl(INTEGRITY_KEYS.distinct(sid, "part"))).toBeGreaterThan(EVIDENCE_TTL_SECONDS - 10);
+    // Playlists are never tracked as distinct objects.
+    expect(await valkey.exists(`integrity:fetch:${sid}:playlist:u`)).toBe(0);
   });
 });
