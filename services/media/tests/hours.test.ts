@@ -31,7 +31,8 @@ describe("splitByHour", () => {
 describe("LiveTimeAccumulator", () => {
   test("carries sub-second remainders instead of losing them", () => {
     const acc = new LiveTimeAccumulator();
-    const base = t("2026-10-18T20:00:00Z");
+    // The accumulator prunes hours older than the real current hour, so anchor to now.
+    const base = Math.floor(Date.now() / 3_600_000) * 3_600_000;
     for (let i = 0; i < 10; i++) acc.add(base + i * 1500, base + (i + 1) * 1500);
     expect(acc.take()).toEqual([{ hourStart: new Date(base), seconds: 15 }]);
     acc.add(base + 15_000, base + 15_400);
