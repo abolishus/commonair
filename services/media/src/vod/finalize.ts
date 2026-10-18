@@ -16,7 +16,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
 import type { HashMatchEnforcer } from "../safety/enforce.ts";
-import { SUSPEND_REASON } from "../safety/enforce.ts";
+import { broadcastTainted, quarantineVod } from "../safety/quarantine.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
 import { VOD_PLAYLIST, vodPrefix } from "./recorder.ts";
@@ -60,12 +60,20 @@ export async function finalizeVod(
       id: schema.vods.id,
       status: schema.vods.status,
       channelId: schema.vods.channelId,
+      broadcastId: schema.vods.broadcastId,
       retentionDays: schema.channels.vodRetentionDays,
     })
     .from(schema.vods)
     .innerJoin(schema.channels, eq(schema.channels.id, schema.vods.channelId))
     .where(eq(schema.vods.id, vodId));
   if (!vod || vod.status === "ready" || vod.status === "deleted" || vod.status === "failed") return "skipped";
+  // Never publish anything from a broadcast with a hash match (the match may have been found live,
+  // before or while this job was queued).
+  if (deps.enforcer.isTainted(vod.broadcastId) || (await broadcastTainted(db, vod.broadcastId))) {
+    log.warn("refusing to publish VOD of a broadcast with a hash match; quarantining");
+    await quarantineVod(deps, vodId, vod.broadcastId);
+    return "removed";
+  }
   await db.update(schema.vods).set({ status: "processing" }).where(eq(schema.vods.id, vodId));
 
   const prefix = vodPrefix(vodId);
@@ -87,13 +95,11 @@ export async function finalizeVod(
         subjectType: "vod",
         subjectId: vodId,
         channelId: vod.channelId,
+        broadcastId: vod.broadcastId,
       });
       if (matched) {
-        await storage.deletePrefix(bucket, prefix);
-        await db
-          .update(schema.vods)
-          .set({ status: "deleted", removedReason: SUSPEND_REASON })
-          .where(eq(schema.vods.id, vodId));
+        // The enforcer quarantines the whole broadcast too; do this VOD now so it is never published.
+        await quarantineVod(deps, vodId, vod.broadcastId);
         return "removed";
       }
       // The middle sample doubles as the VOD's thumbnail.

@@ -44,7 +44,7 @@ export class BroadcastSession {
   }
 
   /** `final`: the broadcast ended (finalize the VOD). Otherwise the service is shutting down. */
-  stop(final: boolean): Promise<void> {
+  stop(final: boolean, finalizeVod = final): Promise<void> {
     this.stopped ??= (async () => {
       await Promise.all([
         this.guard("thumbnails", () => this.thumbnails.stop()),
@@ -53,7 +53,7 @@ export class BroadcastSession {
         this.guard("health", () => this.sampler.stop()),
         this.guard("recorder", () => this.recorder.stop(final)),
       ]);
-      if (final && this.vodId) {
+      if (finalizeVod && this.vodId) {
         const vodId = this.vodId;
         await this.guard("vod-finalize enqueue", () => this.ctx.enqueueVodFinalize(vodId));
       }
