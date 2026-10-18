@@ -44,18 +44,29 @@ confirmed green.
 | Media (2E)            | stale VOD reconcile, crash recovery + safe sweeps, disk budget, transcode slots, simulcast SSRF; simulcast key isolation by container PID namespace (a key-swapping proxy was built, reviewed as unsafe, removed)                                                                                                                                                                                                                                                                                                   | 2 rounds           |
 | DB / config / storage | migrations 0006 integrity scan indexes, 0007 users identity immutability trigger, 0008 appeals subject index; `MEDIA_WORK_DIR_*`, `TRANSCODE_MAX_LADDERS`, `OUTBOUND_ALLOW_PRIVATE_NETWORKS`; presigned PUT signs content type + length; `SegmentFetch.obj`; ConfirmDialog test ids                                                                                                                                                                                                                                 | orchestrator       |
 
-## In flight: worker integrity wiring (do this first)
+## In flight: worker integrity wiring — built, needs review + merge (do this first)
 
 Brief: `.claude/briefs/e1/2L-worker-integrity.md`. Branch `worktree-agent-a07b926d662d5d4bd`
-(worktree `.claude/worktrees/agent-a07b926d662d5d4bd`). The unit was asked to commit a
-`wip(worker): …` checkpoint whose message lists done / passing / failing / left — read it with
-`git log -1 worktree-agent-a07b926d662d5d4bd`. It touches `services/worker/**`, origin's
-accounting call (sets `SegmentFetch.obj`), `harness/scenarios/viewers.ts` and a new
-`harness/scenarios/integrity-basic.ts`. **Without it no integrity job runs in the stack** (the API's
-interim heartbeat verification is the only verdict source). Finish it in a fresh unit from that
-branch, review, merge, then make `viewers` and `integrity-basic` pass. If the unit rebuilt the
-`worker`/`origin` images from its worktree, rebuild them from `main` afterwards
+(worktree `.claude/worktrees/agent-a07b926d662d5d4bd`), commit `a9c7291`
+`wip(worker): run the integrity pipeline in the worker` — the commit body lists everything.
+Summary: the four integrity jobs are scheduled on the `integrity` queue (own schedulers + Valkey
+run locks, capped batches, metrics); the segment consumer calls `recordFetches` (origin/p2p,
+`obj` → object id); origin sets `SegmentFetch.obj`; viewer counts republish after scoring;
+scheduled jobs in the shared runtime now retry with backoff (affects existing scheduled jobs);
+new `harness/scenarios/integrity-basic.ts`. Reported: verify --quick green, worker 174 unit +
+43 int, origin 152; `viewers` and `integrity-basic` pass against the stack. **Not reviewed yet.**
+
+To land it: `git merge main` on the branch (it predates the API round-two merge), independent
+review (focus: runtime retry change, run-lock expiry, consumer double-count safety), merge, run
+`viewers integrity-basic e2e-basic`, and add `services/worker/README.md` docs for the jobs. The
+unit rebuilt the `worker` and `origin` images **from its worktree** and restarted them in the
+running stack; after merging, rebuild from `main`
 (`podman compose build worker origin && podman compose up -d --no-deps worker origin`).
+Its "API still promotes while verdict = pending" note is already fixed on `main` (API round two:
+promotion only while `scored_at is null` and not `media_unconfirmed`). `integrity-basic` reads bot
+reasons from Postgres because `integrity.flags` is not implemented in the API yet. The harness's
+host-side forwarding proxy is not in the trusted compose subnet, so simulated client addresses
+collapse to one at the API; decide whether the harness profile should trust the host gateway.
 
 ## Open items (not done)
 
