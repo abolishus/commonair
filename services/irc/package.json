@@ -1,0 +1,30 @@
+{
+  "name": "@commonair/irc",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun src/main.ts",
+    "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "test:int": "bun --bun vp test run .int.test",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@commonair/config": "workspace:*",
+    "@commonair/contracts": "workspace:*",
+    "@commonair/observability": "workspace:*",
+    "@commonair/service": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@types/tmi.js": "1.8.6",
+    "tmi.js": "1.8.5",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
