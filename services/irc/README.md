@@ -139,6 +139,15 @@ friends resolve in tmi.js.
   rate limits are upstream's.
 - 100 channels per connection (`405`), 30 s to register, `PING` after 4 min of silence and
   disconnect after 8, and slow readers are disconnected once 1 MiB of output is queued.
+- Joins and parts go upstream at the chat service's control-frame rate (burst 20, then 2/s);
+  a join upstream has not answered within 15 s is dropped, freeing its channel slot.
+- Every upstream request carries a nonce; notices and errors are paired with the request by
+  that nonce (falling back to the oldest pending command on the channel when absent).
+- Connection admission (refused with `ERROR :Closing Link: …`): `IRC_MAX_CONNECTIONS`
+  (20000), `IRC_MAX_CONNECTIONS_PER_IP` (50), and new connections per IP
+  `IRC_CONNECT_BURST_PER_IP` (20) / `IRC_CONNECT_PER_SECOND_PER_IP` (2). For WebSocket
+  clients behind a reverse proxy, `X-Forwarded-For` is honoured only when the peer is in
+  `TRUSTED_PROXY_CIDRS`; TCP/TLS always use the peer address (no PROXY protocol).
 
 ## Development
 

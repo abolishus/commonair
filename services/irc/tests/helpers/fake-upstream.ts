@@ -9,8 +9,9 @@
  * `ban`/`timeout` for moderators.
  */
 import type { ServerWebSocket } from "bun";
-import { ChannelChatSettings, ClientFrame, type ServerFrame } from "@commonair/contracts";
+import { ChannelChatSettings, ClientFrame } from "@commonair/contracts";
 import type { ChatMessage } from "@commonair/contracts/dto";
+import type { UpstreamFrame } from "../../src/upstream.ts";
 
 export interface FakeUser {
   id: string;
@@ -58,8 +59,8 @@ export function startFakeUpstream(users: Record<string, FakeUser>) {
     ...over,
   });
 
-  const send = (ws: ServerWebSocket<Conn>, f: ServerFrame) => ws.send(JSON.stringify(f));
-  const broadcast = (slug: string, f: ServerFrame) => {
+  const send = (ws: ServerWebSocket<Conn>, f: UpstreamFrame) => ws.send(JSON.stringify(f));
+  const broadcast = (slug: string, f: UpstreamFrame) => {
     for (const ws of sockets) if (ws.data.rooms.has(slug)) send(ws, f);
   };
 
@@ -67,6 +68,14 @@ export function startFakeUpstream(users: Record<string, FakeUser>) {
     const me = ws.data.user;
     switch (f.op) {
       case "join":
+        if (f.channel.startsWith("missing"))
+          return send(ws, {
+            op: "error",
+            code: "not_found",
+            message: "No such channel.",
+            channel: f.channel,
+            nonce: f.nonce,
+          });
         ws.data.rooms.add(f.channel);
         return send(ws, {
           op: "joined",
@@ -82,7 +91,13 @@ export function startFakeUpstream(users: Record<string, FakeUser>) {
         return send(ws, { op: "pong", nonce: f.nonce });
       case "send": {
         if (!me) {
-          send(ws, { op: "notice", channel: f.channel, code: "msg_requires_login", text: "Log in to chat." });
+          send(ws, {
+            op: "notice",
+            channel: f.channel,
+            code: "msg_requires_login",
+            text: "Log in to chat.",
+            nonce: f.nonce,
+          });
           return send(ws, { op: "ack", nonce: f.nonce, id: null, held: false });
         }
         const m = message(f.channel, me, f.body, { isAction: f.isAction });
@@ -97,12 +112,22 @@ export function startFakeUpstream(users: Record<string, FakeUser>) {
         return;
       }
       case "command": {
+        // A broadcast notice without a nonce first, as other moderators' actions produce: it must not
+        // be mistaken for this command's answer.
+        if (f.command === "slow")
+          broadcast(f.channel, {
+            op: "notice",
+            channel: f.channel,
+            code: "slow_on",
+            text: "This room is now in slow mode.",
+          });
         if (!me?.moderator)
           return send(ws, {
             op: "notice",
             channel: f.channel,
             code: "no_permission",
             text: "You don't have permission.",
+            nonce: f.nonce,
           });
         const target = f.args[0] ?? "";
         if (f.command === "ban" || f.command === "timeout") {
@@ -115,9 +140,21 @@ export function startFakeUpstream(users: Record<string, FakeUser>) {
             expiresAt: secs === null ? null : new Date(Date.now() + secs * 1000).toISOString(),
             reason: f.args[2] ?? "",
           });
-          return send(ws, { op: "notice", channel: f.channel, code: "cmd_success", text: `${target} done.` });
+          return send(ws, {
+            op: "notice",
+            channel: f.channel,
+            code: "cmd_success",
+            text: `${target} done.`,
+            nonce: f.nonce,
+          });
         }
-        return send(ws, { op: "notice", channel: f.channel, code: "unrecognized_cmd", text: "Unknown." });
+        return send(ws, {
+          op: "notice",
+          channel: f.channel,
+          code: "unrecognized_cmd",
+          text: "Unknown.",
+          nonce: f.nonce,
+        });
       }
     }
   }
