@@ -84,6 +84,9 @@ export async function markRelaysOffline(ctx: WorkerContext, missedMs = 180_000) 
   });
 }
 
+/** The only object prefix a VOD may own (trailing slash: "vods/a" must never match "vods/ab…"). */
+export const vodPrefix = (vodId: string) => `vods/${vodId}/`;
+
 /**
  * Expired VODs: delete their objects, then mark them deleted. A VOD whose
  * objects could not be deleted keeps its status and is retried next run.
@@ -94,25 +97,29 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
     ctx.logger.warn("VOD retention skipped: object storage is not configured");
     return { deleted: 0, failed: 0, objects: 0 };
   }
-  const expired = await ctx.db
-    .select({ id: v.id, storagePrefix: v.storagePrefix })
+  const due = and(isNotNull(v.expiresAt), lt(v.expiresAt, ctx.now()), ne(v.status, "deleted"));
+  // The media unit writes VODs under exactly `vods/<vod id>/`. Anything else is refused: a
+  // tampered or legacy prefix could otherwise delete another VOD's objects or the whole bucket.
+  const ownPrefix = sql`${v.storagePrefix} = 'vods/' || ${v.id}::text || '/'`;
+  const refused = await ctx.db
+    .select({ id: v.id })
     .from(v)
-    .where(and(isNotNull(v.expiresAt), lt(v.expiresAt, ctx.now()), ne(v.status, "deleted")))
+    .where(and(due, sql`not (${ownPrefix})`))
+    .limit(batch);
+  for (const r of refused) ctx.logger.error("VOD retention: refusing unexpected storage prefix", { vodId: r.id });
+  // Refused rows are excluded here so they can never starve valid ones out of the batch.
+  const expired = await ctx.db
+    .select({ id: v.id })
+    .from(v)
+    .where(and(due, ownPrefix))
+    .orderBy(v.expiresAt)
     .limit(batch);
   let deleted = 0;
-  let failed = 0;
+  let failed = refused.length;
   let objects = 0;
   for (const vod of expired) {
-    if (vod.storagePrefix.replace(/\/+$/, "").trim() === "") {
-      // An empty prefix would match the whole bucket.
-      failed++;
-      ctx.logger.error("VOD retention: refusing empty storage prefix", { vodId: vod.id });
-      continue;
-    }
     try {
-      // A prefix must end in "/" so "vods/abc" never also matches "vods/abcd…".
-      const prefix = vod.storagePrefix.endsWith("/") ? vod.storagePrefix : `${vod.storagePrefix}/`;
-      objects += await ctx.storage.deletePrefix(ctx.mediaBucket, prefix);
+      objects += await ctx.storage.deletePrefix(ctx.mediaBucket, vodPrefix(vod.id));
       await ctx.db.update(v).set({ status: "deleted", removedReason: "retention" }).where(eq(v.id, vod.id));
       deleted++;
     } catch (err) {

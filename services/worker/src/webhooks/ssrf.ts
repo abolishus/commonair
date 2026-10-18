@@ -111,8 +111,11 @@ function classifyV6(g: number[]): AddressClass {
   if (zeroHead && g5 === 0) return classifyV4(v4FromGroups(g6, g7));
   if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0xffff && g5 === 0)
     return classifyV4(v4FromGroups(g6, g7));
-  // NAT64 well-known (64:ff9b::/96) and local-use (64:ff9b:1::/48) prefixes embed an IPv4 address.
-  if (g0 === 0x64 && g1 === 0xff9b) return classifyV4(v4FromGroups(g6, g7));
+  // NAT64: the well-known /96 (64:ff9b::/96) maps to the IPv4 tail; the local-use /48 can translate to anything
+  // (operator-defined), and the rest of 64:ff9b::/32 is unassigned: both are refused.
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0)
+    return classifyV4(v4FromGroups(g6, g7));
+  if (g0 === 0x64 && g1 === 0xff9b) return "reserved";
   // 6to4 embeds the IPv4 address in groups 1–2.
   if (g0 === 0x2002) return classifyV4(v4FromGroups(g1, g2));
   if (g0 === 0x2001 && g1 === 0) return "reserved"; // Teredo: the real endpoint is obfuscated.

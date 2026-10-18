@@ -7,16 +7,21 @@ import { schema, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createLogger } from "@commonair/observability";
 import { encryptSecret, randomSecret, sha256Hex } from "@commonair/tokens";
+import { vi } from "vite-plus/test";
 import { createWorker, type CreateWorkerOptions, type WorkerHandle } from "../src/worker.ts";
 import type { WebhookSettings } from "../src/webhooks/settings.ts";
 
 export const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 export const AUTH_SECRET = "test-auth-secret-0123456789-abcdefghijklmnop";
+// Integration suites share the machine with other heavy suites: generous per-test deadlines,
+// and every wait polls for its condition instead of sleeping a fixed time.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
+
 export const quietLogger = createLogger({ service: "worker-test", level: "fatal" });
 
 export async function waitFor<T>(
   fn: () => Promise<T | undefined | null | false>,
-  { timeoutMs = 5_000, intervalMs = 25, label = "condition" } = {},
+  { timeoutMs = 15_000, intervalMs = 25, label = "condition" } = {},
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

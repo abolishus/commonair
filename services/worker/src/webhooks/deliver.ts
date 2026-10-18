@@ -10,10 +10,11 @@ import { EVENTS, type EventType } from "@commonair/contracts/events";
 import { QUEUES } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { decryptSecret, randomSecret } from "@commonair/tokens";
-import { and, arrayContains, desc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { WEBHOOK_JOBS, type DeliverJob } from "../jobs/names.ts";
 import { metrics } from "../metrics.ts";
+import { authorize } from "./authorization.ts";
 import { nextRetryDelay } from "./backoff.ts";
 import { matchesCondition } from "./conditions.ts";
 import { postWebhook, type PostResult } from "./http.ts";
@@ -28,7 +29,7 @@ import {
 } from "./messages.ts";
 import { samplePayload } from "./sample.ts";
 
-const { eventSubscriptions: subs, webhookDeliveries: deliveries, oauthTokens, events } = schema;
+const { eventSubscriptions: subs, webhookDeliveries: deliveries, events } = schema;
 
 const isEventType = (t: string): t is EventType => Object.hasOwn(EVENTS, t);
 
@@ -112,39 +113,20 @@ async function sendRevocation(ctx: WorkerContext, sub: SubscriptionRow, status: 
   await send(ctx, { sub, messageType: "revocation", messageId: uuidv7(), eventId, attempt: 1, body }, () => null);
 }
 
-/**
- * Does the user still authorize the app for these scopes? Checked against an
- * unrevoked token for the same app+user; an expired access token still counts
- * while it has a refresh token. Subscriptions without an app belong to the
- * account itself and need no delegated scopes.
- */
-export async function isAuthorized(ctx: WorkerContext, sub: SubscriptionRow, scopes: readonly string[]) {
-  if (scopes.length === 0 || sub.appId === null) return true;
-  const rows = await ctx.db
-    .select({ id: oauthTokens.id })
-    .from(oauthTokens)
-    .where(
-      and(
-        eq(oauthTokens.userId, sub.userId),
-        eq(oauthTokens.appId, sub.appId),
-        isNull(oauthTokens.revokedAt),
-        or(gt(oauthTokens.expiresAt, ctx.now()), isNotNull(oauthTokens.refreshTokenHash)),
-        arrayContains(oauthTokens.scopes, [...scopes]),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
-}
-
 /** Revoke (once) and tell the receiver. Returns false if another worker got there first. */
-export async function revoke(ctx: WorkerContext, sub: SubscriptionRow, eventId: string): Promise<boolean> {
+export async function revoke(
+  ctx: WorkerContext,
+  sub: SubscriptionRow,
+  eventId: string,
+  reason: string,
+): Promise<boolean> {
   const updated = await ctx.db
     .update(subs)
     .set({ status: "revoked" })
     .where(and(eq(subs.id, sub.id), sql`${subs.status} <> 'revoked'`))
     .returning({ id: subs.id });
   if (updated.length === 0) return false;
-  ctx.logger.info("webhook subscription revoked: authorization missing", { subscriptionId: sub.id, type: sub.type });
+  ctx.logger.info("webhook subscription revoked", { subscriptionId: sub.id, type: sub.type, reason });
   await sendRevocation(ctx, { ...sub, status: "revoked" }, ENVELOPE_STATUS.revoked, eventId);
   return true;
 }
@@ -169,12 +151,12 @@ export async function fanOut(ctx: WorkerContext, eventId: string): Promise<numbe
           : undefined,
       ),
     );
-  const scopes = EVENTS[event.type].scopes;
   let queued = 0;
   for (const sub of candidates) {
     if (!matchesCondition(sub.condition, event.payload, sub.userId)) continue;
-    if (!(await isAuthorized(ctx, sub, scopes))) {
-      await revoke(ctx, sub, event.id);
+    const auth = await authorize(ctx, sub, event.type);
+    if (!auth.ok) {
+      await revoke(ctx, sub, event.id, auth.reason);
       continue;
     }
     await ctx.enqueue(
@@ -202,11 +184,12 @@ export async function deliver(ctx: WorkerContext, job: DeliverJob): Promise<Deli
     const [event] = await ctx.db.select().from(events).where(eq(events.id, job.eventId)).limit(1);
     if (!event) return "skipped";
     payload = event.payload;
-    // Authorization can disappear between fan-out and a later retry.
-    if (!(await isAuthorized(ctx, sub, EVENTS[sub.type].scopes))) {
-      await revoke(ctx, sub, event.id);
-      return "skipped";
-    }
+  }
+  // Authorization can disappear between fan-out and a later retry; test events are checked too.
+  const auth = await authorize(ctx, sub, sub.type);
+  if (!auth.ok) {
+    await revoke(ctx, sub, job.eventId, auth.reason);
+    return "skipped";
   }
 
   const isTest = job.sample !== undefined;
@@ -314,8 +297,9 @@ export async function redeliver(ctx: WorkerContext, deliveryId: string): Promise
   if (!sub || sub.status !== "enabled" || !isEventType(sub.type)) return "skipped";
   const [event] = await ctx.db.select().from(events).where(eq(events.id, prior.eventId)).limit(1);
   if (!event) return "skipped"; // test events have no outbox row and cannot be replayed
-  if (!(await isAuthorized(ctx, sub, EVENTS[sub.type].scopes))) {
-    await revoke(ctx, sub, event.id);
+  const auth = await authorize(ctx, sub, sub.type);
+  if (!auth.ok) {
+    await revoke(ctx, sub, event.id, auth.reason);
     return "skipped";
   }
   const [last] = await ctx.db

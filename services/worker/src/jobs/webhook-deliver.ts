@@ -11,5 +11,9 @@ export const job = defineJob({
   name: WEBHOOK_JOBS.deliver,
   description: "One signed notification attempt; schedules the next attempt with backoff on failure",
   data: DeliverJob,
+  // Infrastructure errors (DB/Valkey down) after or around the POST must not end the retry
+  // chain: ~8.5 h of exponential retries from 30 s. Receivers dedupe repeats by message id.
+  attempts: 10,
+  backoffMs: 30_000,
   handler: async (data, ctx) => ({ result: await deliver(ctx, data) }),
 });

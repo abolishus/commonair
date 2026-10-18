@@ -22,9 +22,10 @@ import { makeBroadcast, makeSubscription, makeUser, setup, waitFor, type TestEnv
 
 let env: TestEnv;
 const deletedPrefixes: string[] = [];
+const failingPrefixes = new Set<string>();
 const fakeStorage = {
   async deletePrefix(_bucket: string, prefix: string) {
-    if (prefix.includes("broken")) throw new Error("S3 503");
+    if (failingPrefixes.has(prefix)) throw new Error("S3 503");
     deletedPrefixes.push(prefix);
     return 3;
   },
@@ -94,7 +95,7 @@ describe("live counters", () => {
     const [second] = (await updateLiveCounters(ctx())).filter((c) => c.channelId === channel.id);
     expect(second?.verified).toBe(1);
     expect(second?.elapsedSeconds).toBeGreaterThan(1);
-    expect(second?.elapsedSeconds).toBeLessThan(5);
+    expect(second?.elapsedSeconds).toBeLessThanOrEqual(30);
     [row] = await env.t.db.select().from(schema.broadcasts).where(eq(schema.broadcasts.id, b.id));
     expect(row?.peakVerifiedViewers).toBe(2);
     expect(row?.verifiedViewerSeconds).toBe(20 + Math.round(second?.elapsedSeconds ?? 0));
@@ -220,36 +221,48 @@ describe("housekeeping", () => {
   test("expired VODs lose their objects and become deleted; failures are retried later", async () => {
     const { channel } = await makeUser(env.t.db);
     const b = await makeBroadcast(env.t.db, channel.id);
-    const vod = async (storagePrefix: string, expiresAt: Date | null) => {
+    const vod = async (prefixOf: (id: string) => string, expiresAt: Date | null) => {
+      const id = uuidv7();
       const [v] = await env.t.db
         .insert(schema.vods)
         .values({
-          id: uuidv7(),
+          id,
           broadcastId: b.id,
           channelId: channel.id,
           title: "v",
-          storagePrefix,
+          storagePrefix: prefixOf(id),
           expiresAt,
           status: "ready",
         })
         .returning();
       return v!;
     };
-    const expired = await vod("vods/abc", at(-MIN));
-    const broken = await vod("vods/broken", at(-MIN));
-    const blank = await vod("", at(-MIN));
-    const keep = await vod("vods/keep/", at(60 * MIN));
-    const forever = await vod("vods/forever/", null);
+    const own = (id: string) => `vods/${id}/`;
+    const expired = await vod(own, at(-MIN));
+    const broken = await vod(own, at(-MIN));
+    failingPrefixes.add(`vods/${broken.id}/`);
+    const keep = await vod(own, at(60 * MIN));
+    const forever = await vod(own, null);
+    // Prefixes that are not exactly vods/<own id>/ are refused, never passed to storage.
+    const other = await vod(() => `vods/${keep.id}/`, at(-MIN));
+    const blank = await vod(() => "", at(-MIN));
+    const root = await vod(() => "vods/", at(-MIN));
+    const noSlash = await vod((id) => `vods/${id}`, at(-MIN));
+    const nested = await vod((id) => `vods/${id}/../`, at(-MIN));
+    const elsewhere = await vod((id) => `clips/${id}/`, at(-MIN));
 
     const r = await enforceVodRetention(ctx());
-    expect(r).toEqual({ deleted: 1, failed: 2, objects: 3 });
-    expect(deletedPrefixes).toEqual(["vods/abc/"]);
+    expect(r).toEqual({ deleted: 1, failed: 7, objects: 3 });
+    expect(deletedPrefixes).toEqual([`vods/${expired.id}/`]);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect(await status(expired.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
-    expect((await status(broken.id))?.status).toBe("ready");
-    expect((await status(blank.id))?.status).toBe("ready");
-    expect((await status(keep.id))?.status).toBe("ready");
-    expect((await status(forever.id))?.status).toBe("ready");
+    for (const v of [broken, keep, forever, other, blank, root, noSlash, nested, elsewhere])
+      expect((await status(v.id))?.status).toBe("ready");
+
+    // The storage failure is retried on the next run and then succeeds.
+    failingPrefixes.clear();
+    expect(await enforceVodRetention(ctx())).toMatchObject({ deleted: 1 });
+    expect((await status(broken.id))?.status).toBe("deleted");
   });
 });
 

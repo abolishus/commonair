@@ -18,6 +18,8 @@ export interface PostOptions {
   timeoutMs: number;
   maxResponseBytes: number;
   resolve?: Resolver;
+  /** Extra trusted CA (PEM) for TLS; tests and private PKI only. System CAs are used otherwise. */
+  ca?: string;
 }
 
 export type PostResult =
@@ -64,6 +66,7 @@ export async function postWebhook(
         path: `${url.pathname}${url.search}`,
         lookup: pinned,
         agent: false,
+        ...(opts.ca ? { ca: opts.ca } : {}),
         headers: {
           ...headers,
           "content-type": "application/json",

@@ -29,25 +29,45 @@ export interface SegmentConsumerOptions {
   maintenanceEveryMs?: number;
 }
 
-/** Bounded session → broadcast cache (sessions never change broadcast). */
+/**
+ * Bounded session → broadcast cache. A known broadcast never changes, so it is kept
+ * until evicted; "no broadcast yet" (unknown session, or a session whose broadcast is
+ * attached later) expires after `nullTtlMs` so it is looked up again.
+ */
 export class BroadcastCache {
-  private readonly map = new Map<string, string | null>();
-  constructor(private readonly max = 50_000) {}
+  private readonly map = new Map<string, { bid: string | null; until: number }>();
+  constructor(
+    private readonly max = 50_000,
+    private readonly nullTtlMs = 60_000,
+    private readonly clock: () => number = Date.now,
+  ) {}
+  private live(sid: string) {
+    const e = this.map.get(sid);
+    if (e && e.until <= this.clock()) {
+      this.map.delete(sid);
+      return undefined;
+    }
+    return e;
+  }
   get(sid: string) {
-    return this.map.get(sid);
+    return this.live(sid)?.bid;
   }
   has(sid: string) {
-    return this.map.has(sid);
+    return this.live(sid) !== undefined;
   }
   set(sid: string, bid: string | null) {
+    this.map.delete(sid);
     if (this.map.size >= this.max) {
       // Map iteration order is insertion order: drop the oldest entry.
       const oldest = this.map.keys().next().value;
       if (oldest !== undefined) this.map.delete(oldest);
     }
-    this.map.set(sid, bid);
+    this.map.set(sid, { bid, until: bid === null ? this.clock() + this.nullTtlMs : Number.POSITIVE_INFINITY });
   }
 }
+
+/** Entries delivered this many times without being acknowledged are dropped (and logged). */
+export const MAX_DELIVERIES = 5;
 
 export async function ensureGroup(client: ValkeyClient, stream: string): Promise<void> {
   try {
@@ -102,8 +122,9 @@ export async function processEntries(
   if (entries.length === 0) return 0;
   const fetches = [];
   let malformed = 0;
+  const nowMs = ctx.now().getTime();
   for (const [, fields] of entries) {
-    const f = parseEntry(fields);
+    const f = parseEntry(fields, nowMs);
     if (f) fetches.push(f);
     else malformed++;
   }
@@ -120,6 +141,64 @@ export async function processEntries(
   await client.xack(ctx.segmentStream, SEGMENT_GROUP, ...entries.map(([id]) => id));
   metrics.segmentEntries.add(entries.length);
   return entries.length;
+}
+
+/**
+ * Process a batch; if the batch as a whole fails, retry entry by entry so one bad
+ * entry cannot hold back the rest. Entries that still fail stay pending and are
+ * reclaimed later (and dropped after MAX_DELIVERIES).
+ */
+export async function processResilient(
+  ctx: WorkerContext,
+  client: ValkeyClient,
+  cache: BroadcastCache,
+  entries: readonly Entry[],
+): Promise<number> {
+  try {
+    return await processEntries(ctx, client, cache, entries);
+  } catch (err) {
+    if (entries.length <= 1) throw err;
+    ctx.logger.warn("segment batch failed; retrying entries one by one", { count: entries.length, err });
+    let done = 0;
+    for (const entry of entries) {
+      try {
+        done += await processEntries(ctx, client, cache, [entry]);
+      } catch (entryErr) {
+        ctx.logger.warn("segment entry failed; left pending", { id: entry[0], err: entryErr });
+      }
+    }
+    return done;
+  }
+}
+
+type PendingDetail = [id: string, consumer: string, idleMs: number, deliveries: number];
+
+/** Acknowledge (drop) claimed entries that have been delivered MAX_DELIVERIES times or more. */
+export async function dropPoison(
+  ctx: WorkerContext,
+  client: ValkeyClient,
+  claimed: readonly Entry[],
+): Promise<Entry[]> {
+  if (claimed.length === 0) return [];
+  const first = claimed[0]?.[0] ?? "-";
+  const last = claimed.at(-1)?.[0] ?? "+";
+  const pending = (await client.xpending(
+    ctx.segmentStream,
+    SEGMENT_GROUP,
+    first,
+    last,
+    claimed.length * 2 + 10,
+  )) as PendingDetail[];
+  const deliveries = new Map(pending.map(([id, , , n]) => [id, Number(n)]));
+  const poison = claimed.filter(([id]) => (deliveries.get(id) ?? 0) >= MAX_DELIVERIES);
+  if (poison.length === 0) return [...claimed];
+  await client.xack(ctx.segmentStream, SEGMENT_GROUP, ...poison.map(([id]) => id));
+  ctx.logger.error("dropping segment entries that failed repeatedly", {
+    count: poison.length,
+    ids: poison.slice(0, 10).map(([id]) => id),
+  });
+  const dropped = new Set(poison.map(([id]) => id));
+  return claimed.filter(([id]) => !dropped.has(id));
 }
 
 type ReadReply = [stream: string, entries: Entry[]][] | null;
@@ -140,6 +219,13 @@ export function startSegmentConsumer(ctx: WorkerContext, opts: SegmentConsumerOp
   let lastMaintenance = 0;
 
   const maintenance = async () => {
+    // Trim first and independently: a failing claim/process step must never stop trimming.
+    try {
+      const minId = `${ctx.now().getTime() - retentionMs}-0`;
+      await client.xtrim(ctx.segmentStream, "MINID", "~", minId);
+    } catch (err) {
+      ctx.logger.error("segment stream trim failed", { err });
+    }
     const reply = (await client.xautoclaim(
       ctx.segmentStream,
       SEGMENT_GROUP,
@@ -152,10 +238,8 @@ export function startSegmentConsumer(ctx: WorkerContext, opts: SegmentConsumerOp
     const claimed = (reply[1] ?? []).filter((e): e is Entry => Array.isArray(e) && Array.isArray(e[1]));
     if (claimed.length > 0) {
       ctx.logger.info("reclaimed stale segment entries", { count: claimed.length });
-      await processEntries(ctx, client, cache, claimed);
+      await processResilient(ctx, client, cache, await dropPoison(ctx, client, claimed));
     }
-    const minId = `${ctx.now().getTime() - retentionMs}-0`;
-    await client.xtrim(ctx.segmentStream, "MINID", "~", minId);
   };
 
   const loop = startLoop("segment consumer", ctx.logger, async () => {
@@ -187,7 +271,7 @@ export function startSegmentConsumer(ctx: WorkerContext, opts: SegmentConsumerOp
       throw err;
     }
     const entries = reply?.[0]?.[1] ?? [];
-    await processEntries(ctx, client, cache, entries);
+    await processResilient(ctx, client, cache, entries);
     return 0;
   });
 

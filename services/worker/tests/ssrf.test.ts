@@ -74,6 +74,10 @@ describe("classifyAddress: IPv6", () => {
     ["::ffff:0:127.0.0.1", "loopback"],
     ["64:ff9b::7f00:1", "loopback"],
     ["64:ff9b::808:808", "public"],
+    ["64:ff9b:1::808:808", "reserved"],
+    ["64:ff9b:1:abcd::1", "reserved"],
+    ["64:ff9b:0:0:1::808:808", "reserved"],
+    ["64:ff9b:ffff::1", "reserved"],
     ["2002:7f00:1::", "loopback"],
     ["2002:0808:0808::1", "public"],
   ])("embedded IPv4 %s → %s", (ip, cls) => {

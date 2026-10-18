@@ -31,12 +31,20 @@ export const MINUTE_MS = 60_000;
 export const minuteBucket = (atMs: number) => new Date(Math.floor(atMs / MINUTE_MS) * MINUTE_MS);
 
 /** Decode stream entry fields ([k, v, k, v, …]) into a SegmentFetch, or null when malformed. */
-export function parseEntry(fields: readonly string[]): SegmentFetch | null {
+export function parseEntry(fields: readonly string[], nowMs = Date.now()): SegmentFetch | null {
   const obj: Record<string, string> = {};
   for (let i = 0; i + 1 < fields.length; i += 2) obj[fields[i] as string] = fields[i + 1] as string;
   const r = SegmentFetch.safeParse(obj);
-  return r.success ? r.data : null;
+  if (!r.success) return null;
+  // A timestamp far outside "now" is a bug or forgery; one such entry must not fail a whole batch
+  // (an out-of-range Date would) or land in a bucket nobody will ever look at.
+  if (r.data.at < nowMs - MAX_AGE_MS || r.data.at > nowMs + MAX_SKEW_MS) return null;
+  return r.data;
 }
+
+/** Accepted `at` window: entries older than a day or more than 5 min in the future are dropped. */
+export const MAX_AGE_MS = 24 * 3_600_000;
+export const MAX_SKEW_MS = 5 * MINUTE_MS;
 
 /**
  * Fold fetches into rows. Egress counts every request (playlists included: they are
