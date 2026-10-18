@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+
+node_modules
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack
+storybook-static
+coverage
+*.log
+*.local
+.DS_Store
+.idea
+*.sw?
+.vscode/*
+!.vscode/extensions.json
+
+# Environment: only .env.example is committed
+.env
+.env.*
+!.env.example
+
+# Harness and local runtime output
+harness/reports/
+harness/.artifacts/
+test-results/
+playwright-report/
+.data/
+relay/bin/
+sbom/
+
+# AI agent worktrees
+.claude/worktrees/
+.claude/settings.local.json

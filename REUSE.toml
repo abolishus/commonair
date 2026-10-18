@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+version = 1
+
+# Files that cannot carry an inline header (JSON, lockfiles, generated output,
+# binary assets). Everything else carries its own SPDX header.
+[[annotations]]
+path = [
+  "**/package.json",
+  "**/tsconfig*.json",
+  "bun.lock",
+  "**/*.json",
+  "**/drizzle/**",
+  "**/routeTree.gen.ts",
+  "relay/go.mod",
+  "relay/go.sum",
+  ".github/ISSUE_TEMPLATE/config.yml",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 CommonAir contributors"
+SPDX-License-Identifier = "AGPL-3.0-or-later"
+
+[[annotations]]
+path = ["**/*.png", "**/*.svg", "**/*.ico", "**/*.webp", "**/*.jpg", "harness/fixtures/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 CommonAir contributors"
+SPDX-License-Identifier = "CC-BY-SA-4.0"
+
+# Tool-generated cache directory tags (reuse scans them even inside ignored dirs).
+[[annotations]]
+path = ["**/CACHEDIR.TAG"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 CommonAir contributors"
+SPDX-License-Identifier = "CC0-1.0"

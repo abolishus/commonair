@@ -1,0 +1,74 @@
+{
+  "name": "commonair",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CommonAir: a member-owned cooperative live streaming platform",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abolishus/commonair.git"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "services/*",
+    "harness",
+    "infra",
+    "scripts"
+  ],
+  "type": "module",
+  "scripts": {
+    "verify": "bun scripts/verify.ts",
+    "verify:full": "bun scripts/verify.ts --full",
+    "test": "vp run -r test",
+    "test:int": "vp run -r test:int",
+    "build": "vp run -r build",
+    "lint:licenses": "bun scripts/check-licenses.ts",
+    "lint:domains": "bun scripts/check-domains.ts",
+    "lint:headers": "bun scripts/check-headers.ts",
+    "lint:reuse": "reuse lint",
+    "sbom": "bun scripts/sbom.ts",
+    "infra:test": "bun scripts/infra.ts test",
+    "infra:down": "bun scripts/infra.ts down"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "overrides": {
+    "vite": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "1.4.3",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "bun": ">=1.4.3",
+    "node": ">=22.18.0"
+  },
+  "catalog": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.3.0",
+    "vite-plus": "1.3.0",
+    "typescript": "7.0.2",
+    "@types/node": "26.6.5",
+    "@types/bun": "1.4.3",
+    "zod": "4.6.7",
+    "drizzle-orm": "0.45.4",
+    "drizzle-kit": "0.31.11",
+    "postgres": "3.4.9",
+    "@orpc/contract": "1.15.7",
+    "@orpc/server": "1.15.7",
+    "@orpc/client": "1.15.7",
+    "@orpc/openapi": "1.15.7",
+    "@orpc/zod": "1.15.7",
+    "@orpc/tanstack-query": "1.15.7",
+    "iovalkey": "0.4.0",
+    "@opentelemetry/api": "1.9.1"
+  }
+}
