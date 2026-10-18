@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Backstop CI: runs the same `bun run verify` used locally. If it goes red on
+# main, fix main immediately.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.2"
+      - name: Tooling (reuse, podman-compose)
+        run: |
+          pipx install reuse==6.2.0
+          pipx install podman-compose==1.6.0
+          podman --version
+      - run: bun install --frozen-lockfile
+      - name: Environment
+        run: bun scripts/init-env.ts
+      - name: Verify
+        run: |
+          export PATH="$PWD/node_modules/.bin:$PATH"
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.ref }}" = "refs/heads/main" ] && [ -f harness/src/cli.ts ]; then
+            bun run verify:full
+          else
+            bun run verify
+          fi
