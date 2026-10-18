@@ -1,0 +1,25 @@
+/*
+ * SPDX-FileCopyrightText: 2026 CommonAir contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+@import "@commonair/ui/globals.css";
+
+/* Scan the app's own sources for utilities. */
+@source "./";
+
+/* The bundled ALTCHA widget, on design tokens instead of its own palette. */
+altcha-widget {
+  --altcha-border-color: var(--border);
+  --altcha-border-radius: 0;
+  --altcha-color-base: var(--card);
+  --altcha-color-base-content: var(--card-foreground);
+  --altcha-color-error: var(--destructive);
+  --altcha-color-neutral: var(--muted);
+  --altcha-color-neutral-content: var(--muted-foreground);
+  --altcha-color-primary: var(--primary);
+  --altcha-color-primary-content: var(--primary-foreground);
+  --altcha-checkbox-border-color: var(--input);
+  --altcha-checkbox-border-radius: 0;
+  --altcha-spinner-color: var(--primary);
+  --altcha-max-width: 100%;
+}
