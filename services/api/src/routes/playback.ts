@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { RENDITIONS } from "@commonair/contracts/enums";
 import { KEYS, mediaPath } from "@commonair/contracts/internal";
@@ -18,7 +18,7 @@ import { assignSource, RelayEntry, type Assignment } from "../playback/delivery.
 import { nextVerdict, type VerifyState } from "../playback/verify.ts";
 import { confirmedAdult } from "./me.ts";
 
-const { playbackSessions, broadcasts } = schema;
+const { playbackSessions, broadcasts, categories } = schema;
 export const HEARTBEAT_INTERVAL_MS = 10_000;
 /** Refresh the token when it has less than this left. */
 const REFRESH_BEFORE_SECONDS = 60;
@@ -84,6 +84,18 @@ async function checkToken(deps: Deps, sessionId: string, token: string): Promise
   return r.value;
 }
 
+/** A mature category forces the label even if the broadcast row predates the category flag. */
+async function inMatureCategory(deps: Deps, ids: (string | null)[]): Promise<boolean> {
+  const present = ids.filter((id): id is string => id !== null);
+  if (present.length === 0) return false;
+  const rows = await deps.db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(and(inArray(categories.id, present), eq(categories.mature, true)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -94,7 +106,10 @@ export const playback = {
       ? await deps.db.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId))
       : [];
     if (!b || b.endedAt) throw precondition("live", "This channel is offline");
-    if ((b.mature || c.mature) && !(await confirmedAdult(deps, caller?.user.id)))
+    if (
+      (b.mature || c.mature || (await inMatureCategory(deps, [b.categoryId, c.categoryId]))) &&
+      !(await confirmedAdult(deps, caller?.user.id))
+    )
       throw precondition("mature_confirmation", "Confirm you are 18 or older to watch mature streams");
 
     const sid = uuidv7();

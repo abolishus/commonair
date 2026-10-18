@@ -16,6 +16,7 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { eq } from "drizzle-orm";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { instanceMediaPrefixes, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
@@ -55,6 +56,9 @@ const IMMUTABLE_USER_FIELDS = new Set(["birthDate", "accountType", "botOwnerId",
 /** All a member may change about themselves through `/update-user` (the rest has its own flows). */
 const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
 
+/** A key prefix no storage key can have: only instance URLs pass. */
+const NO_KEYS = "/";
+
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
 export function createAuth(deps: Deps) {
@@ -73,6 +77,14 @@ export function createAuth(deps: Deps) {
     if (clientId && clientSecret) social[id] = { clientId, clientSecret, disableImplicitSignUp: true };
 
   const publicUrl = new URL(site.publicUrl);
+  const mediaPrefixes = instanceMediaPrefixes(env);
+  /** An instance URL, or a key under the member's own channel avatar uploads. */
+  const ownAvatarRef = async (ref: string, userId: string | undefined) => {
+    const [c] = userId
+      ? await db.select({ id: schema.channels.id }).from(schema.channels).where(eq(schema.channels.ownerId, userId))
+      : [];
+    return isInstanceMediaRef(ref, mediaPrefixes, c ? `channels/${c.id}/avatar/` : NO_KEYS);
+  };
   const VERIFY_MINUTES = 60;
   const RESET_MINUTES = 60;
   const MAGIC_MINUTES = 10;
@@ -202,7 +214,12 @@ export function createAuth(deps: Deps) {
             const age = ageProblem(user.birthDate, minAge, deps.now());
             if (age === "too_young") throw bad("TOO_YOUNG", `You must be at least ${minAge} to join`);
             if (age) throw bad("INVALID_BIRTH_DATE", "A valid birth date is required");
-            return { data: { ...user, username: name.toLowerCase(), accountType: "human", role: "user" } };
+            // Provider profile pictures are third-party URLs: drop them rather than embed them.
+            const image =
+              typeof user.image === "string" && isInstanceMediaRef(user.image, mediaPrefixes, NO_KEYS)
+                ? user.image
+                : null;
+            return { data: { ...user, image, username: name.toLowerCase(), accountType: "human", role: "user" } };
           },
           after: async (user) => {
             // Normally done inside the transaction (account.create.before); this is the safety net.
@@ -222,6 +239,8 @@ export function createAuth(deps: Deps) {
               );
               if (refused.length > 0) throw bad("FIELD_NOT_ALLOWED", "This field cannot be changed");
             }
+            if (typeof data.image === "string" && !(await ownAvatarRef(data.image, ctx?.context.session?.user.id)))
+              throw bad("INVALID_IMAGE", "The profile image must be one of your uploads");
             if (data.twoFactorEnabled === true && ctx) twoFactorEnabling.add(ctx);
           },
           after: async (user, ctx) => {
