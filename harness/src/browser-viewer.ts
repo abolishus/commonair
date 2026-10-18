@@ -8,7 +8,7 @@
  * tells so integrity treats them like people (viewbots skip it on purpose).
  *
  * `player: "harness"` opens the harness player page; `player: "web"` opens the real web app's
- * embed route (`/embed/<channel>`) once it exists. Both produce the same `Viewer` objects.
+ * embed route (`/embed/<channel>`, see docs/testing/e1-selectors.md). Both produce the same `Viewer` objects.
  */
 import type { Logger } from "@commonair/observability";
 import { type Browser, type BrowserContext, type Page, chromium, webkit } from "playwright";
@@ -16,6 +16,7 @@ import type { PlayerInfo } from "../player/player.ts";
 import type { ProbeVideoStats } from "../player/probe.ts";
 import type { PlayerServer } from "./player-server.ts";
 import { type Viewer, type ViewerReport, type ViewerTarget, emptyReport } from "./viewer.ts";
+import { webEmbedUrl } from "./web/selectors.ts";
 import { TimeoutError, waitFor } from "./wait.ts";
 
 export type BrowserEngine = "chromium" | "webkit";
@@ -247,7 +248,7 @@ export async function openBrowserViewers(opts: OpenBrowserViewersOptions): Promi
       });
     } else {
       if (!opts.webUrl || !("channel" in opts.target)) throw new Error("web player needs webUrl and a channel target");
-      url = new URL(`/embed/${opts.target.channel}`, opts.webUrl).toString();
+      url = webEmbedUrl(opts.webUrl, opts.target.channel);
     }
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     const ids = Array.from({ length: onPage }, (_, i) => (player === "harness" ? `p${i}` : "v0"));
