@@ -1,0 +1,14 @@
+{
+  "name": "@commonair/harness",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "test:int": "bun --bun vp test run .int.test --passWithNoTests"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  }
+}

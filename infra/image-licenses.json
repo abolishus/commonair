@@ -1,0 +1,110 @@
+{
+  "docker.io/library/postgres": {
+    "license": "PostgreSQL",
+    "source": "https://github.com/postgres/postgres/blob/REL_17_11/COPYRIGHT",
+    "tag": "17.11-trixie",
+    "notes": "PostgreSQL License (OSI-approved). Debian trixie base; Dockerfiles MIT (docker-library/postgres). Our own image extends this with the wal-g binary."
+  },
+  "docker.io/valkey/valkey": {
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/valkey-io/valkey/blob/9.1.2/COPYING",
+    "tag": "9.1.2-trixie",
+    "notes": "Latest stable 9.1.2 (9.2.0 is rc). 8.1.10 also available. BSD-3-Clause fork of pre-relicense Redis."
+  },
+  "docker.io/dxflrs/garage": {
+    "license": "AGPL-3.0-only",
+    "source": "https://github.com/deuxfleurs-org/garage/blob/v2.4.1/LICENSE",
+    "tag": "v2.4.1",
+    "notes": "Official image (Deuxfleurs). Canonical repo is git.deuxfleurs.fr/Deuxfleurs/garage; GitHub mirror checked. Cargo metadata says AGPL-3.0 (only). Run unmodified as a separate service."
+  },
+  "docker.io/bluenviron/mediamtx": {
+    "license": "MIT",
+    "source": "https://github.com/bluenviron/mediamtx/blob/v1.21.2/LICENSE",
+    "tag": "1.21.2",
+    "notes": "Also serves as the mock RTMP simulcast target (accepts RTMP publish). A 1.21.2-ffmpeg variant exists (alpine:3.24 + apk ffmpeg, GPL-2.0-or-later AND LGPL-2.1-or-later); if that tag is used the image is MIT AND GPL-2.0-or-later."
+  },
+  "docker.io/axllent/mailpit": {
+    "license": "MIT",
+    "source": "https://github.com/axllent/mailpit/blob/v1.31.6/LICENSE",
+    "tag": "v1.31.6",
+    "notes": "Dev/test SMTP sink only."
+  },
+  "docker.io/grafana/grafana": {
+    "license": "AGPL-3.0-only",
+    "source": "https://github.com/grafana/grafana/blob/v13.2.4/LICENSE",
+    "tag": "13.2.4",
+    "notes": "grafana/grafana is the OSS edition per grafana.com Docker docs (grafana/grafana-enterprise is the proprietary edition; never use it). Some packages Apache-2.0 per LICENSING.md. Separate program used over the network."
+  },
+  "docker.io/prom/prometheus": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/prometheus/prometheus/blob/v3.15.0/LICENSE",
+    "tag": "v3.15.0",
+    "notes": "Also published as -distroless and -busybox variants."
+  },
+  "docker.io/grafana/loki": {
+    "license": "AGPL-3.0-only",
+    "source": "https://github.com/grafana/loki/blob/v3.7.8/LICENSE",
+    "tag": "3.7.8",
+    "notes": "Separate program used over the network. Avoid main-* tags (nightly)."
+  },
+  "docker.io/grafana/tempo": {
+    "license": "AGPL-3.0-only",
+    "source": "https://github.com/grafana/tempo/blob/v3.1.0/LICENSE",
+    "tag": "3.1.0",
+    "notes": "Tempo 3.x is current; 2.10.8 is the last 2.x. Separate program used over the network."
+  },
+  "docker.io/otel/opentelemetry-collector-contrib": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/open-telemetry/opentelemetry-collector-releases/blob/v0.163.1/LICENSE",
+    "tag": "0.163.1",
+    "notes": "Built from opentelemetry-collector-releases (Apache-2.0); components from opentelemetry-collector-contrib (Apache-2.0). Avoid -nightly tags."
+  },
+  "docker.io/library/caddy": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/caddyserver/caddy/blob/v2.11.7/LICENSE",
+    "tag": "2.11.7-alpine",
+    "notes": "Image Dockerfiles Apache-2.0 (caddyserver/caddy-docker). Alpine base (musl MIT, busybox GPL-2.0-only)."
+  },
+  "docker.io/stripe/stripe-mock": {
+    "license": "MIT",
+    "source": "https://github.com/stripe/stripe-mock/blob/v0.206.0/LICENSE",
+    "tag": "v0.206.0",
+    "notes": "Test-only Stripe API mock."
+  },
+  "docker.io/oven/bun": {
+    "license": "MIT AND LGPL-2.0-or-later",
+    "source": "https://github.com/oven-sh/bun/blob/bun-v1.4.3/LICENSE.md",
+    "tag": "1.4.3-slim",
+    "notes": "Bun is MIT but statically links JavaScriptCore/WebKit (LGPL-2, relinkable per LICENSE.md) plus MIT/BSD/Apache/zlib libs. Use 1.4.3-slim (debian:trixie-slim) or 1.4.3-alpine (alpine:3.24). LGPL-2.0-or-later is OSI-approved but not yet in scripts/licenses.ts."
+  },
+  "docker.io/library/golang": {
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/golang/go/blob/go1.27.2/LICENSE",
+    "tag": "1.27.2-trixie",
+    "notes": "Build stage only; never shipped. Debian trixie base packages carry assorted OSI licenses."
+  },
+  "gcr.io/distroless/static-debian13": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/GoogleContainerTools/distroless/blob/main/LICENSE",
+    "tag": "nonroot",
+    "notes": "Recommended runtime base for the static Go relay (matches trixie builders). Contents: base-files, netbase, tzdata (public domain), ca-certificates (MPL-2.0 data). Pin by digest in compose."
+  },
+  "gcr.io/distroless/static-debian12": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/GoogleContainerTools/distroless/blob/main/LICENSE",
+    "tag": "nonroot",
+    "notes": "Bookworm variant; prefer static-debian13. Same contents and licensing."
+  },
+  "docker.io/library/alpine": {
+    "license": "MIT AND GPL-2.0-only",
+    "source": "https://git.musl-libc.org/cgit/musl/plain/COPYRIGHT",
+    "tag": "3.24.2",
+    "notes": "Primary software: musl libc (MIT) and BusyBox (GPL-2.0-only); other apk packages carry their own licenses. Alternative static runtime base."
+  },
+  "mcr.microsoft.com/playwright": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/microsoft/playwright/blob/v1.64.1/LICENSE",
+    "tag": "v1.64.1-noble",
+    "notes": "Matches @playwright/test 1.64.1. Ubuntu 24.04 base; bundled browsers: Chromium (BSD-3-Clause), Firefox (MPL-2.0), WebKit (LGPL-2.0-or-later/BSD-2-Clause). CI/test only."
+  }
+}

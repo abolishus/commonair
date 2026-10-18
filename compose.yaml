@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The whole platform: `podman compose up`. Rootless-compatible: no privileged
+# containers, no host ports below 1024, no container-engine socket mounts.
+# Image names are fully qualified and pinned; licenses in infra/image-licenses.json.
+
+name: commonair
+
+x-healthcheck: &healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 30
+
+services:
+  postgres:
+    image: docker.io/library/postgres:17.11-trixie
+    environment:
+      POSTGRES_USER: commonair
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commonair}
+      POSTGRES_DB: commonair
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "pg_isready -U commonair -d commonair"]
+
+  valkey:
+    image: docker.io/valkey/valkey:9.1.2-trixie
+    command: ["valkey-server", "--appendonly", "no", "--save", ""]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "valkey-cli", "ping"]
+
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.31.6
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/mailpit", "readyz"]
+
+volumes:
+  postgres-data:
