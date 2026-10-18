@@ -1,0 +1,16 @@
+# Sample hosting-provider IPv4 ranges for the harness viewbot swarm (ADR 0003, decision 8).
+# A small illustrative subset of ranges the providers publish; operators supply their own full
+# list to the platform via INTEGRITY_DATACENTER_CIDRS_FILE. Point the stack's integrity config at
+# this same file in harness runs so the swarm is detectable.
+3.5.140.0/22
+13.32.0.0/15
+34.64.0.0/10
+35.184.0.0/13
+20.33.0.0/16
+40.64.0.0/10
+104.131.0.0/16
+138.68.0.0/16
+95.216.0.0/16
+51.15.0.0/16
+45.32.0.0/16
+139.162.0.0/16
