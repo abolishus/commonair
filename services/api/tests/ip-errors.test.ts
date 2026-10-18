@@ -79,8 +79,9 @@ test("relay URLs: no credentials; public https in production", () => {
 
 test("word filter regexes must compile and avoid catastrophic patterns", () => {
   expect(() => checkFilterPattern("bad(word)?", true)).not.toThrow();
-  expect(() => checkFilterPattern("(a+)+", true)).toThrow("Nested quantifiers");
-  expect(() => checkFilterPattern("(", true)).toThrow("Invalid regular expression");
+  expect(() => checkFilterPattern("(a+)+", true)).toThrow("nested quantifiers");
+  expect(() => checkFilterPattern("(", true)).toThrow("unbalanced parentheses");
   expect(() => checkFilterPattern("(", false)).not.toThrow();
   expect(() => checkFilterPattern("(a)\\1", true)).toThrow("backreferences");
+  expect(() => checkFilterPattern("((a+))+$", true)).toThrow("Filter pattern refused");
 });

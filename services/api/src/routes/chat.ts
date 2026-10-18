@@ -20,6 +20,7 @@ import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
+import { unsafeFilterRegexReason } from "../lib/safe-regex.ts";
 
 const { chatMessages, chatBans, channelRoles, users, wordFilters, emotes, modActions, channels, subscriptions } =
   schema;
@@ -56,16 +57,11 @@ async function assertCanModerate(ctx: Ctx, c: ChannelRow, targetId: string) {
     throw forbidden("Only the broadcaster can act on moderators");
 }
 
-/** A pattern we compile in the chat hot path: must compile and avoid nested quantifiers (ReDoS). */
+/** A pattern chat compiles in its hot path: must fit the linear-time-safe subset (no ReDoS). */
 export function checkFilterPattern(pattern: string, isRegex: boolean) {
   if (!isRegex) return;
-  try {
-    new RegExp(pattern, "iu");
-  } catch {
-    throw badRequest("Invalid regular expression");
-  }
-  if (/\((?:[^()\\]|\\.)*[+*}](?:[^()\\]|\\.)*\)\s*[+*{]/.test(pattern) || /\\[1-9]/.test(pattern))
-    throw badRequest("Nested quantifiers and backreferences are not allowed in filters");
+  const reason = unsafeFilterRegexReason(pattern);
+  if (reason) throw badRequest(`Filter pattern refused: ${reason}`);
 }
 
 async function badgesFor(deps: Deps, c: ChannelRow, userIds: string[]) {
