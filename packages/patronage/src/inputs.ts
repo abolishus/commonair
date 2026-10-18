@@ -123,7 +123,7 @@ export async function revenueByMember(
   const rows = await db.execute<{ user_id: string; cents: string }>(sql`
     select t.metadata->>'creatorUserId' as user_id, sum((t.metadata->>'revenueGrossCents')::bigint)::text as cents
     from ledger_transactions t
-    where t.kind in ('payment', 'refund', 'chargeback')
+    where t.kind in ('payment', 'refund', 'chargeback', 'chargeback_reversal')
       and t.occurred_at >= ${iso(period.start)} and t.occurred_at < ${iso(period.end)}
       and t.metadata->>'creatorUserId' in (${sql.join(
         userIds.map((id) => sql`${id}`),

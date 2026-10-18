@@ -6,6 +6,7 @@ import type { Executor } from "@commonair/db";
 import { type AccountType, accounts, assertCurrency, isDebitNormal, parseStoredCode, storedCode } from "./accounts.ts";
 import { negate } from "./math.ts";
 import type { PostingKind } from "./posting.ts";
+import { type HoldLot, holdMemo } from "./rules.ts";
 
 /** int8/numeric arrive from the driver as strings. */
 const num = (v: string | number | null | undefined): number => (v === null || v === undefined ? 0 : Number(v));
@@ -26,36 +27,60 @@ export async function accountBalance(db: Executor, code: string, currency: strin
 }
 
 export interface CreatorBalanceSummary {
-  /** Released, unpaid earnings. */
+  /** Released, unpaid, unreserved earnings. */
   liabilityCents: number;
   /** Earnings still in the chargeback hold window. */
   holdCents: number;
   /** Clawback shortfall the creator owes. */
   receivableCents: number;
-  /** liability − receivable: what a payout may pay now. */
+  /** Reserved by a payout batch, not yet sent. */
+  reservedCents: number;
+  /** liability − receivable: what a new payout may reserve now. */
   availableCents: number;
 }
 
-/** A creator's balances, all in natural terms, from one query. */
+/** A creator's balances, all in natural terms, from one query (one snapshot). */
 export async function creatorBalances(db: Executor, userId: string, currency: string): Promise<CreatorBalanceSummary> {
   const codes = {
     liability: storedCode(accounts.creator(userId), currency),
     hold: storedCode(accounts.creatorHold(userId), currency),
     receivable: storedCode(accounts.creatorReceivable(userId), currency),
+    clearing: storedCode(accounts.payoutClearing(userId), currency),
   };
   const rows = await db.execute<{ code: string; total: string }>(sql`
     select a.code, coalesce(sum(e.amount_cents), 0)::text as total
     from ledger_accounts a left join ledger_entries e on e.account_id = a.id
-    where a.code in (${codes.liability}, ${codes.hold}, ${codes.receivable})
+    where a.code in (${codes.liability}, ${codes.hold}, ${codes.receivable}, ${codes.clearing})
     group by a.code`);
   const by = new Map([...rows].map((r) => [r.code, num(r.total)]));
   const liabilityCents = negate(by.get(codes.liability) ?? 0);
   const holdCents = negate(by.get(codes.hold) ?? 0);
   const receivableCents = by.get(codes.receivable) ?? 0;
-  return { liabilityCents, holdCents, receivableCents, availableCents: liabilityCents - receivableCents };
+  const reservedCents = negate(by.get(codes.clearing) ?? 0);
+  return {
+    liabilityCents,
+    holdCents,
+    receivableCents,
+    reservedCents,
+    availableCents: liabilityCents - receivableCents,
+  };
 }
 
-/** What remains on hold for one payment: its own postings on the creator's hold account. */
+/** Remaining hold per payment (lots with a positive remainder), oldest payment first. */
+export async function holdLots(db: Executor, creatorUserId: string, currency: string): Promise<HoldLot[]> {
+  const rows = await db.execute<{ memo: string; total: string }>(sql`
+    select e.memo, sum(e.amount_cents)::text as total
+    from ledger_entries e
+    join ledger_accounts a on a.id = e.account_id
+    join ledger_transactions t on t.id = e.transaction_id
+    where a.code = ${storedCode(accounts.creatorHold(creatorUserId), currency)} and e.memo like 'hold:%'
+    group by e.memo
+    having sum(e.amount_cents) < 0
+    order by min(t.occurred_at), e.memo`);
+  return [...rows].map((r) => ({ paymentId: r.memo.slice("hold:".length), cents: negate(num(r.total)) }));
+}
+
+/** What remains on hold for one payment: the entries attributed to its lot. */
 export async function paymentHoldRemaining(
   db: Executor,
   paymentId: string,
@@ -66,9 +91,8 @@ export async function paymentHoldRemaining(
     select coalesce(sum(e.amount_cents), 0)::text as total
     from ledger_entries e
     join ledger_accounts a on a.id = e.account_id
-    join ledger_transactions t on t.id = e.transaction_id
     where a.code = ${storedCode(accounts.creatorHold(creatorUserId), currency)}
-      and t.ref_type = 'payment' and t.ref_id = ${paymentId}`);
+      and e.memo = ${holdMemo(paymentId)}`);
   return Math.max(0, negate(num(rows[0]?.total)));
 }
 
@@ -166,7 +190,7 @@ export interface MonthlyAggregate {
   patronageDistributedCents: number;
 }
 
-const REVENUE_KINDS: PostingKind[] = ["payment", "refund", "chargeback"];
+const REVENUE_KINDS: PostingKind[] = ["payment", "refund", "chargeback", "chargeback_reversal"];
 
 /**
  * Monthly figures for the transparency page, from the ledger alone (so they always agree
@@ -209,6 +233,8 @@ export async function monthlyAggregates(
     const code = parseStoredCode(r.code).code;
     const total = num(r.total);
     const kind = r.kind as PostingKind;
+    // Closing entries move balances into equity; they are not activity.
+    if (kind === "period_close") continue;
     const creatorSide =
       code.startsWith("liability:creator:") ||
       code.startsWith("liability:creator-hold:") ||

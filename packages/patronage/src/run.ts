@@ -5,7 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { PatronageWeights } from "@commonair/contracts/shapes";
 import { type Executor, schema } from "@commonair/db";
-import { assertCents, assertCurrency, patronageAllocation, post } from "@commonair/ledger";
+import { assertCents, assertCurrency, patronageAllocation, post, retainedSurplus } from "@commonair/ledger";
 import { type AllocationResult, getFormula } from "./formula.ts";
 import { collectInputs, eligibleMembers } from "./inputs.ts";
 
@@ -24,6 +24,58 @@ export async function loadPatronageFormula(db: Executor): Promise<PatronageFormu
 
 export class PatronagePeriodStateError extends Error {
   override name = "PatronagePeriodStateError";
+}
+/** The period overlaps another computed or approved period: members would be paid twice. */
+export class PatronagePeriodOverlapError extends PatronagePeriodStateError {
+  override name = "PatronagePeriodOverlapError";
+}
+/** The ledger's retained surplus cannot cover the requested distribution. */
+export class SurplusUnavailableError extends PatronagePeriodStateError {
+  override name = "SurplusUnavailableError";
+}
+
+/** Serializes period computation and approval (overlap and surplus checks read, then write). */
+async function lockPeriods(tx: Executor): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('patronage:periods'))`);
+}
+
+async function assertNoOverlap(
+  tx: Executor,
+  opts: { periodStart: Date; periodEnd: Date; currency: string },
+  selfId: string | null,
+): Promise<void> {
+  const rows = await tx.execute<{ id: string; status: string }>(sql`
+    select id, status from patronage_periods
+    where currency = ${opts.currency} and status <> 'draft'
+      and period_start < ${opts.periodEnd.toISOString()}::timestamptz
+      and period_end > ${opts.periodStart.toISOString()}::timestamptz
+      ${selfId ? sql`and id <> ${selfId}` : sql``}
+    limit 1`);
+  const clash = rows[0];
+  if (clash) throw new PatronagePeriodOverlapError(`period overlaps ${clash.status} patronage period ${clash.id}`);
+}
+
+/**
+ * The surplus to distribute must be held in the ledger: retained surplus (after period
+ * closes), less what other computed-but-unapproved periods already intend to distribute.
+ */
+async function assertSurplusAvailable(
+  tx: Executor,
+  currency: string,
+  surplusCents: number,
+  selfId: string | null,
+): Promise<void> {
+  if (surplusCents === 0) return;
+  const held = await retainedSurplus(tx, currency);
+  const rows = await tx.execute<{ total: string }>(sql`
+    select coalesce(sum(surplus_cents), 0)::text as total from patronage_periods
+    where currency = ${currency} and status = 'computed' ${selfId ? sql`and id <> ${selfId}` : sql``}`);
+  const available = held - Number(rows[0]?.total ?? 0);
+  if (surplusCents > available) {
+    throw new SurplusUnavailableError(
+      `surplus of ${surplusCents} exceeds the ${available} cents of retained surplus available in ${currency}`,
+    );
+  }
 }
 
 export interface ComputeOptions {
@@ -58,8 +110,7 @@ export async function computePeriod(db: Executor, opts: ComputeOptions): Promise
   const period = { start: opts.periodStart, end: opts.periodEnd };
 
   return db.transaction(async (tx) => {
-    const lockKey = `patronage:${opts.periodStart.toISOString()}:${opts.periodEnd.toISOString()}`;
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${lockKey}))`);
+    await lockPeriods(tx);
     const [existing] = await tx
       .select()
       .from(schema.patronagePeriods)
@@ -73,6 +124,11 @@ export async function computePeriod(db: Executor, opts: ComputeOptions): Promise
     if (existing && existing.status !== "draft" && existing.status !== "computed") {
       throw new PatronagePeriodStateError(`patronage period ${existing.id} is ${existing.status}`);
     }
+    if (existing && existing.currency !== opts.currency) {
+      throw new PatronagePeriodStateError(`patronage period ${existing.id} is in ${existing.currency}`);
+    }
+    await assertNoOverlap(tx, opts, existing?.id ?? null);
+    await assertSurplusAvailable(tx, opts.currency, opts.surplusCents, existing?.id ?? null);
 
     const setting = opts.formula ?? (await loadPatronageFormula(tx));
     const formula = getFormula(setting.version);
@@ -151,6 +207,7 @@ export async function approvePeriod(
   opts: { periodId: string; approvedById: string; at?: Date },
 ): Promise<ApproveResult> {
   return db.transaction(async (tx) => {
+    await lockPeriods(tx);
     const [period] = await tx
       .select()
       .from(schema.patronagePeriods)
@@ -171,6 +228,11 @@ export async function approvePeriod(
     }
     if (totalCents > period.surplusCents) {
       throw new PatronagePeriodStateError(`allocations exceed the surplus of period ${period.id}`);
+    }
+    // Re-check against the ledger now: costs or other approvals may have reduced the surplus.
+    const held = await retainedSurplus(tx, period.currency);
+    if (totalCents > held) {
+      throw new SurplusUnavailableError(`allocations of ${totalCents} exceed the retained surplus of ${held} cents`);
     }
     const at = opts.at ?? new Date();
     let ledgerTransactionId: string | null = null;

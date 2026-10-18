@@ -4,17 +4,10 @@
 import { sql } from "drizzle-orm";
 import type { Executor } from "@commonair/db";
 import { assertCurrency } from "./accounts.ts";
+import { lockCreator } from "./locks.ts";
 import { post } from "./poster.ts";
-import { creatorBalances, paymentHoldRemaining } from "./queries.ts";
-import { holdRelease, holdReleaseAmount } from "./rules.ts";
-
-/**
- * Serialize money movements for one creator within a database transaction, so balance reads
- * and the posting that depends on them cannot interleave with another such posting.
- */
-export async function lockCreator(tx: Executor, userId: string): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`ledger:creator:${userId}`}))`);
-}
+import { paymentHoldRemaining } from "./queries.ts";
+import { holdRelease } from "./rules.ts";
 
 export interface ReleaseResult {
   released: number;
@@ -22,29 +15,28 @@ export interface ReleaseResult {
 }
 
 /**
- * Release the hold on every payment older than `holdDays` at `asOf` that has not been
- * released yet. Each release is its own idempotent posting, so a crash mid-batch is safe to
- * re-run. Payments whose hold was fully consumed by reversals post nothing.
+ * Release the hold lot of every payment older than `holdDays` at `asOf`. Only lots with a
+ * positive remainder are due, and each releases exactly what is still attributed to it, so
+ * a lot drained by reversals is never revisited and can never block the batch. Each release
+ * is its own idempotent posting, so a crash mid-batch is safe to re-run.
  */
 export async function releaseDueHolds(
   db: Executor,
   opts: { asOf: Date; holdDays: number; currency: string; limit?: number },
 ): Promise<ReleaseResult> {
   assertCurrency(opts.currency);
+  if (!Number.isFinite(opts.holdDays) || opts.holdDays < 0) throw new RangeError("holdDays must be non-negative");
   const cutoff = new Date(opts.asOf.getTime() - opts.holdDays * 86_400_000);
   const due = await db.execute<{ payment_id: string; creator: string }>(sql`
+    with lots as (
+      select e.memo from ledger_entries e join ledger_accounts a on a.id = e.account_id
+      where a.currency = ${opts.currency} and a.code like 'liability:creator-hold:%' and e.memo like 'hold:%'
+      group by e.memo having sum(e.amount_cents) < 0
+    )
     select t.ref_id as payment_id, t.metadata->>'creatorUserId' as creator
-    from ledger_transactions t
-    where t.kind = 'payment' and t.ref_type = 'payment' and t.occurred_at <= ${cutoff.toISOString()}::timestamptz
-      and exists (select 1 from ledger_entries e where e.transaction_id = t.id and e.currency = ${opts.currency})
-      and not exists (
-        select 1 from ledger_transactions r where r.idempotency_key = 'hold-release:' || t.ref_id::text)
-      -- Skip payments whose own hold was already consumed by refunds, so they never clog the batch.
-      and (select coalesce(sum(he.amount_cents), 0) from ledger_entries he
-           join ledger_accounts ha on ha.id = he.account_id
-           join ledger_transactions ht on ht.id = he.transaction_id
-           where ht.ref_type = 'payment' and ht.ref_id = t.ref_id
-             and ha.code like 'liability:creator-hold:%') < 0
+    from lots join ledger_transactions t on t.idempotency_key = 'payment:' || substr(lots.memo, 6)
+    where t.occurred_at <= ${cutoff.toISOString()}::timestamptz
+      and not exists (select 1 from ledger_transactions r where r.idempotency_key = 'hold-release:' || t.ref_id::text)
     order by t.occurred_at, t.id
     limit ${opts.limit ?? 1000}`);
 
@@ -53,9 +45,7 @@ export async function releaseDueHolds(
   for (const row of due) {
     const amount = await db.transaction(async (tx) => {
       await lockCreator(tx, row.creator);
-      const own = await paymentHoldRemaining(tx, row.payment_id, row.creator, opts.currency);
-      const { holdCents } = await creatorBalances(tx, row.creator, opts.currency);
-      const cents = holdReleaseAmount(own, holdCents);
+      const cents = await paymentHoldRemaining(tx, row.payment_id, row.creator, opts.currency);
       if (cents === 0) return 0;
       const r = await post(
         tx,

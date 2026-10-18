@@ -1,14 +1,22 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, eq, sql } from "drizzle-orm";
+/**
+ * Payout batch and lifecycle. The batch reserves each payout in the ledger (creator liability
+ * → payout clearing) in the same transaction that writes the `payouts` row, so the reserved
+ * money is no longer "available" to anything else: a later batch cannot pay it twice, and a
+ * later chargeback cannot draw on it. Sending moves clearing → cash and is never refused;
+ * a failed payout cancels the reservation.
+ */
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { z } from "zod";
 import { type Executor, schema } from "@commonair/db";
 import { assertCurrency, parseStoredCode } from "./accounts.ts";
+import { lockCreator, lockPayoutBatch } from "./locks.ts";
 import { assertCents } from "./math.ts";
-import { post } from "./poster.ts";
-import { lockCreator } from "./holds.ts";
+import { type PostResult, post } from "./poster.ts";
 import { creatorBalances } from "./queries.ts";
-import { payout } from "./rules.ts";
+import { payoutCancel, payoutReserve, payoutSent } from "./rules.ts";
 
 export interface CreatorAvailable {
   userId: string;
@@ -39,7 +47,7 @@ export function computePayoutBatch(creators: readonly CreatorAvailable[], minimu
 export interface PayoutRunResult {
   /** Rows created as `pending` (payout account ready). */
   created: number;
-  /** Rows created as `held` (payout account missing or not enabled). */
+  /** Rows created as `held` (payout account missing or not enabled); the money is reserved. */
   held: number;
   totalCents: number;
   carriedOver: CreatorAvailable[];
@@ -47,49 +55,47 @@ export interface PayoutRunResult {
 
 export const PAYOUT_ACCOUNT_NOT_READY = "payout_account_not_ready";
 
+/** Every creator's available balance (liability − receivable) in one statement. */
+async function availableByCreator(tx: Executor, currency: string): Promise<CreatorAvailable[]> {
+  const rows = await tx.execute<{ code: string; total: string }>(sql`
+    select a.code, coalesce(sum(e.amount_cents), 0)::text as total
+    from ledger_accounts a left join ledger_entries e on e.account_id = a.id
+    where a.currency = ${currency}
+      and (a.code like 'liability:creator:%' or a.code like 'asset:receivable:creator:%')
+    group by a.code`);
+  const available = new Map<string, number>();
+  for (const b of rows) {
+    const code = parseStoredCode(b.code).code;
+    const userId = code.slice(code.lastIndexOf(":") + 1);
+    // Liability is credit-normal (owed = −raw); the receivable reduces what can be paid (+raw).
+    available.set(userId, (available.get(userId) ?? 0) - Number(b.total));
+  }
+  return [...available].map(([userId, availableCents]) => ({ userId, availableCents }));
+}
+
 /**
- * Compute the payout batch for the period and write one `payouts` row per creator whose
- * available balance (released earnings − clawback receivable − payouts already scheduled but
- * not yet posted) reaches the minimum. Idempotent per (user, periodStart): a re-run creates
- * nothing new. Concurrent runs are serialized by an advisory lock.
+ * Compute the payout batch for the period: every creator whose available balance reaches the
+ * minimum gets a `payouts` row and a ledger reservation of that amount, atomically.
+ * Idempotent per (user, periodStart). Each creator's balance is re-read under the creator lock
+ * right before reserving, so concurrent reversals and releases are accounted for.
  */
 export async function runPayoutBatch(
   db: Executor,
   opts: { periodStart: Date; periodEnd: Date; currency: string; minimumCents: number },
 ): Promise<PayoutRunResult> {
   assertCurrency(opts.currency);
+  assertCents("minimum", opts.minimumCents);
   if (!(opts.periodStart < opts.periodEnd)) throw new RangeError("periodStart must be before periodEnd");
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`ledger:payout-batch:${opts.currency}`}))`);
-    const suffix = `@${opts.currency}`;
-    const balances = await tx.execute<{ code: string; total: string }>(sql`
-      select a.code, coalesce(sum(e.amount_cents), 0)::text as total
-      from ledger_accounts a left join ledger_entries e on e.account_id = a.id
-      where a.currency = ${opts.currency}
-        and (a.code like 'liability:creator:%' or a.code like 'asset:receivable:creator:%')
-      group by a.code`);
-    const pending = await tx.execute<{ user_id: string; total: string }>(sql`
-      select user_id, sum(amount_cents)::text as total from payouts
-      where currency = ${opts.currency} and ledger_transaction_id is null
-        and status in ('pending', 'scheduled', 'held')
-      group by user_id`);
-
-    const available = new Map<string, number>();
-    for (const b of balances) {
-      if (!b.code.endsWith(suffix)) continue;
-      const code = parseStoredCode(b.code).code;
-      const userId = code.slice(code.lastIndexOf(":") + 1);
-      const raw = Number(b.total);
-      // Liability is credit-normal (owed = −raw); the receivable reduces what can be paid (+raw).
-      available.set(userId, (available.get(userId) ?? 0) - raw);
-    }
-    for (const p of pending) {
-      if (available.has(p.user_id)) available.set(p.user_id, (available.get(p.user_id) ?? 0) - Number(p.total));
-    }
-
-    const batch = computePayoutBatch(
-      [...available].map(([userId, availableCents]) => ({ userId, availableCents })),
-      opts.minimumCents,
+    await lockPayoutBatch(tx, opts.currency);
+    const candidates = computePayoutBatch(await availableByCreator(tx, opts.currency), opts.minimumCents);
+    const already = new Set(
+      (
+        await tx
+          .select({ userId: schema.payouts.userId })
+          .from(schema.payouts)
+          .where(eq(schema.payouts.periodStart, opts.periodStart))
+      ).map((r) => r.userId),
     );
     const accountsByUser = new Map(
       (
@@ -103,17 +109,24 @@ export async function runPayoutBatch(
       ).map((a) => [a.userId, a]),
     );
 
-    const result: PayoutRunResult = { created: 0, held: 0, totalCents: 0, carriedOver: batch.carriedOver };
-    for (const p of batch.payouts) {
-      const acct = accountsByUser.get(p.userId);
+    const result: PayoutRunResult = { created: 0, held: 0, totalCents: 0, carriedOver: candidates.carriedOver };
+    for (const c of candidates.payouts) {
+      if (already.has(c.userId)) continue;
+      await lockCreator(tx, c.userId);
+      const b = await creatorBalances(tx, c.userId, opts.currency);
+      if (b.availableCents <= 0 || b.availableCents < opts.minimumCents) {
+        result.carriedOver.push({ userId: c.userId, availableCents: b.availableCents });
+        continue;
+      }
+      const acct = accountsByUser.get(c.userId);
       const ready = acct?.enabled === true;
       const [row] = await tx
         .insert(schema.payouts)
         .values({
-          userId: p.userId,
+          userId: c.userId,
           periodStart: opts.periodStart,
           periodEnd: opts.periodEnd,
-          amountCents: p.amountCents,
+          amountCents: b.availableCents,
           currency: opts.currency,
           status: ready ? "pending" : "held",
           provider: acct?.provider ?? "manual",
@@ -122,10 +135,23 @@ export async function runPayoutBatch(
         .onConflictDoNothing({ target: [schema.payouts.userId, schema.payouts.periodStart] })
         .returning({ id: schema.payouts.id });
       if (!row) continue;
+      await post(
+        tx,
+        payoutReserve({
+          payoutId: row.id,
+          userId: c.userId,
+          amountCents: b.availableCents,
+          currency: opts.currency,
+          occurredAt: opts.periodEnd,
+          balances: { liabilityCents: b.liabilityCents, receivableCents: b.receivableCents },
+          minimumCents: opts.minimumCents,
+        }),
+      );
       if (ready) result.created += 1;
       else result.held += 1;
-      result.totalCents += p.amountCents;
+      result.totalCents += b.availableCents;
     }
+    result.carriedOver.sort((a, b) => a.userId.localeCompare(b.userId));
     return result;
   });
 }
@@ -134,42 +160,48 @@ export class PayoutStateError extends Error {
   override name = "PayoutStateError";
 }
 
+const ReserveMeta = z.object({ amountCents: z.number().int().positive(), receivableNettedCents: z.number().int() });
+
+async function lockedPayout(tx: Executor, payoutId: string) {
+  const [peek] = await tx
+    .select({ currency: schema.payouts.currency })
+    .from(schema.payouts)
+    .where(eq(schema.payouts.id, payoutId));
+  if (!peek) throw new PayoutStateError(`payout ${payoutId} not found`);
+  await lockPayoutBatch(tx, peek.currency);
+  const [row] = await tx.select().from(schema.payouts).where(eq(schema.payouts.id, payoutId)).for("update");
+  if (!row) throw new PayoutStateError(`payout ${payoutId} not found`);
+  const [reservation] = await tx
+    .select({ id: schema.ledgerTransactions.id, metadata: schema.ledgerTransactions.metadata })
+    .from(schema.ledgerTransactions)
+    .where(eq(schema.ledgerTransactions.idempotencyKey, `payout-reserve:${payoutId}`));
+  return { row, reservation };
+}
+
 /**
- * Post a scheduled payout to the ledger once the money was sent, and mark the row paid.
- * Idempotent: a payout already posted returns its transaction. Throws
- * `InsufficientBalanceError` if a clawback since the batch left too little available.
+ * Record that a payout was sent: post clearing → cash and mark the row paid. Never refused
+ * for balance reasons (the money has left). Idempotent.
  */
 export async function postPayout(
   db: Executor,
-  opts: {
-    payoutId: string;
-    paidAt: Date;
-    providerRef?: string | null;
-    minimumCents: number;
-    closingAccount?: boolean;
-  },
-): Promise<{ transactionId: string; created: boolean }> {
+  opts: { payoutId: string; paidAt: Date; providerRef?: string | null },
+): Promise<PostResult> {
   return db.transaction(async (tx) => {
-    const [row] = await tx.select().from(schema.payouts).where(eq(schema.payouts.id, opts.payoutId)).for("update");
-    if (!row) throw new PayoutStateError(`payout ${opts.payoutId} not found`);
+    const { row, reservation } = await lockedPayout(tx, opts.payoutId);
     if (row.ledgerTransactionId) return { transactionId: row.ledgerTransactionId, created: false };
     if (row.status !== "pending" && row.status !== "scheduled") {
-      throw new PayoutStateError(`payout ${opts.payoutId} is ${row.status}`);
+      throw new PayoutStateError(`payout ${row.id} is ${row.status}`);
     }
-    await lockCreator(tx, row.userId);
-    const b = await creatorBalances(tx, row.userId, row.currency);
+    if (!reservation) throw new PayoutStateError(`payout ${row.id} was never reserved in the ledger`);
     const r = await post(
       tx,
-      payout({
+      payoutSent({
         payoutId: row.id,
         userId: row.userId,
         provider: row.provider,
         amountCents: row.amountCents,
         currency: row.currency,
         occurredAt: opts.paidAt,
-        balances: { liabilityCents: b.liabilityCents, receivableCents: b.receivableCents },
-        minimumCents: opts.minimumCents,
-        closingAccount: opts.closingAccount ?? false,
       }),
     );
     await tx
@@ -180,7 +212,44 @@ export async function postPayout(
         providerRef: opts.providerRef ?? row.providerRef,
         ledgerTransactionId: r.transactionId,
       })
-      .where(and(eq(schema.payouts.id, row.id), sql`${schema.payouts.ledgerTransactionId} is null`));
+      .where(and(eq(schema.payouts.id, row.id), isNull(schema.payouts.ledgerTransactionId)));
     return r;
+  });
+}
+
+/**
+ * A payout failed (or was cancelled) before money left: release the reservation back to the
+ * creator's earnings (restoring any netted receivable) and mark the row failed. Idempotent.
+ */
+export async function cancelPayout(
+  db: Executor,
+  opts: { payoutId: string; at: Date; reason?: string },
+): Promise<PostResult | null> {
+  return db.transaction(async (tx) => {
+    const { row, reservation } = await lockedPayout(tx, opts.payoutId);
+    if (row.status === "paid" || row.ledgerTransactionId) throw new PayoutStateError(`payout ${row.id} was paid`);
+    let result: PostResult | null = null;
+    if (reservation) {
+      const meta = ReserveMeta.parse(reservation.metadata);
+      await lockCreator(tx, row.userId);
+      result = await post(
+        tx,
+        payoutCancel({
+          payoutId: row.id,
+          userId: row.userId,
+          amountCents: meta.amountCents,
+          receivableNettedCents: meta.receivableNettedCents,
+          currency: row.currency,
+          occurredAt: opts.at,
+        }),
+      );
+    }
+    if (row.status !== "failed") {
+      await tx
+        .update(schema.payouts)
+        .set({ status: "failed", holdReason: opts.reason ?? row.holdReason })
+        .where(eq(schema.payouts.id, row.id));
+    }
+    return result;
   });
 }

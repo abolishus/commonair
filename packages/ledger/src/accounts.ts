@@ -51,6 +51,12 @@ const CHART: readonly ChartEntry[] = [
     owned: true,
     name: (p) => `Creator earnings on hold ${p}`,
   },
+  {
+    pattern: new RegExp(`^liability:payout-clearing:(${UUID})$`),
+    type: "liability",
+    owned: true,
+    name: (p) => `Payout reserved, not yet sent ${p}`,
+  },
   { pattern: /^liability:tax-payable$/, type: "liability", owned: false, name: () => "Sales tax payable" },
   {
     pattern: new RegExp(`^liability:member-share:(${UUID})$`),
@@ -115,6 +121,7 @@ export const accounts = {
   creatorReceivable: (user: string) => `asset:receivable:creator:${userId(user)}`,
   creator: (user: string) => `liability:creator:${userId(user)}`,
   creatorHold: (user: string) => `liability:creator-hold:${userId(user)}`,
+  payoutClearing: (user: string) => `liability:payout-clearing:${userId(user)}`,
   taxPayable: () => "liability:tax-payable",
   memberShare: (user: string) => `liability:member-share:${userId(user)}`,
   patronagePayable: (user: string) => `liability:patronage-payable:${userId(user)}`,
@@ -157,7 +164,8 @@ export async function ensureAccounts(
   codes: readonly string[],
   currency: string,
 ): Promise<Map<string, string>> {
-  const unique = [...new Set(codes)];
+  // Sorted, so concurrent multi-row inserts take row locks in the same order (no deadlocks).
+  const unique = [...new Set(codes)].sort();
   if (unique.length === 0) return new Map();
   const rows = unique.map((code) => {
     const info = describeAccount(code);

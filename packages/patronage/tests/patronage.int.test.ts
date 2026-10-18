@@ -10,9 +10,21 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { ReceiptPayload } from "@commonair/contracts/shapes";
 import { schema as s, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
-import { DEFAULT_PLATFORM_CUT, accounts, paymentSucceeded, post, rawBalance, refund } from "@commonair/ledger";
 import {
+  DEFAULT_PLATFORM_CUT,
+  accounts,
+  closePeriod,
+  infrastructureCost,
+  paymentSucceeded,
+  post,
+  postReversal,
+  rawBalance,
+  retainedSurplus,
+} from "@commonair/ledger";
+import {
+  PatronagePeriodOverlapError,
   PatronagePeriodStateError,
+  SurplusUnavailableError,
   approvePeriod,
   computePeriod,
   eligibleMembers,
@@ -177,22 +189,13 @@ beforeAll(async () => {
     occurredAt: new Date(day1 + HOUR),
   });
   await post(db, pa);
-  await post(
-    db,
-    refund({
-      disputeId: uuidv7(),
-      paymentId: pa.refId!,
-      provider: "stripe",
-      creatorUserId: ids.a,
-      currency: "usd",
-      occurredAt: new Date(day2),
-      original: { grossCents: 10_000, taxCents: 0 },
-      cut: DEFAULT_PLATFORM_CUT,
-      alreadyReversedCents: 0,
-      amountCents: 2000,
-      balances: { liabilityCents: 0, holdCents: 9000, paymentHoldCents: 9000 },
-    }),
-  );
+  await postReversal(db, {
+    kind: "refund",
+    disputeId: uuidv7(),
+    paymentId: pa.refId!,
+    amountCents: 2000,
+    occurredAt: new Date(day2),
+  });
   await post(
     db,
     paymentSucceeded({
@@ -208,6 +211,33 @@ beforeAll(async () => {
       occurredAt: new Date(day2),
     }),
   );
+
+  // Surplus the co-op actually holds: an old, closed period of a non-member's revenue.
+  for (const [currency, gross] of [
+    ["usd", 2_000_000],
+    ["eur", 100_000],
+  ] as const) {
+    await post(
+      db,
+      paymentSucceeded({
+        paymentId: uuidv7(),
+        paymentKind: "tip",
+        provider: "stripe",
+        creatorUserId: ids.n,
+        grossCents: gross,
+        taxCents: 0,
+        feeCents: 0,
+        currency,
+        cut: DEFAULT_PLATFORM_CUT,
+        occurredAt: new Date("2020-01-15T00:00:00Z"),
+      }),
+    );
+    await closePeriod(db, {
+      periodStart: new Date("2020-01-01T00:00:00Z"),
+      periodEnd: new Date("2020-02-01T00:00:00Z"),
+      currency,
+    });
+  }
 
   await member(ids.a, "streamer", "streaming_hours");
   await member(ids.b, "streamer", "streaming_hours");
@@ -354,6 +384,72 @@ describe("period run", () => {
     expect(r.totalCents).toBe(0);
     const a = await approvePeriod(db, { periodId: r.periodId, approvedById: ids.v });
     expect(a).toEqual({ ledgerTransactionId: null, totalCents: 0, approvedNow: true });
+  });
+
+  test("an overlapping period in the same currency is refused", async () => {
+    await expect(
+      computePeriod(db, {
+        periodStart: new Date(period.start.getTime() + DAY),
+        periodEnd: new Date(period.end.getTime() + DAY),
+        surplusCents: 1,
+        currency: "usd",
+      }),
+    ).rejects.toThrow(PatronagePeriodOverlapError);
+  });
+
+  test("a surplus the ledger does not hold is refused", async () => {
+    const start = new Date(period.end.getTime() + 10 * DAY);
+    await expect(
+      computePeriod(db, {
+        periodStart: start,
+        periodEnd: new Date(start.getTime() + DAY),
+        surplusCents: 1_000_000_000,
+        currency: "usd",
+      }),
+    ).rejects.toThrow(SurplusUnavailableError);
+  });
+
+  test("computed periods reserve surplus, and approval re-checks the ledger", async () => {
+    // Overlaps the approved usd period, but in another currency: allowed, with its own surplus.
+    const held = await retainedSurplus(db, "eur");
+    expect(held).toBe(10_000);
+    const r = await computePeriod(db, {
+      periodStart: new Date(period.start.getTime() - DAY),
+      periodEnd: period.end,
+      surplusCents: held,
+      currency: "eur",
+    });
+    expect(r.totalCents).toBeGreaterThan(0);
+    // The whole eur surplus is spoken for by the computed period.
+    const later = new Date(period.end.getTime() + 20 * DAY);
+    await expect(
+      computePeriod(db, {
+        periodStart: later,
+        periodEnd: new Date(later.getTime() + DAY),
+        surplusCents: 1,
+        currency: "eur",
+      }),
+    ).rejects.toThrow(SurplusUnavailableError);
+    // A loss closed into retained surplus before approval leaves too little to allocate.
+    await post(
+      db,
+      infrastructureCost({
+        infraCostId: uuidv7(),
+        category: "hosting",
+        provider: "stripe",
+        amountCents: 9000,
+        currency: "eur",
+        occurredAt: new Date("2021-01-10T00:00:00Z"),
+      }),
+    );
+    await closePeriod(db, {
+      periodStart: new Date("2021-01-01T00:00:00Z"),
+      periodEnd: new Date("2021-02-01T00:00:00Z"),
+      currency: "eur",
+    });
+    await expect(approvePeriod(db, { periodId: r.periodId, approvedById: ids.v })).rejects.toThrow(
+      SurplusUnavailableError,
+    );
   });
 
   test("approving an unknown period fails", async () => {
