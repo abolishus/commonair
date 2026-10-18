@@ -133,6 +133,27 @@
         "zod": "catalog:",
       },
     },
+    "services/chat": {
+      "name": "@commonair/chat",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/config": "workspace:*",
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/observability": "workspace:*",
+        "@commonair/service": "workspace:*",
+        "@commonair/tokens": "workspace:*",
+        "@opentelemetry/api": "catalog:",
+        "drizzle-orm": "catalog:",
+        "iovalkey": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
   },
   "overrides": {
     "vite": "catalog:",
@@ -164,6 +185,8 @@
     "@babel/runtime": ["@babel/runtime@7.29.10", "", {}, "sha512-NpugTzbKgGrNe45Ui32cN8vCFFMxVtP/9rtfwv0nP5FRDAjvYBxJcLVpYA9mr1jxP6cnIT7x9LUzuDTbWYYNRA=="],
 
     "@blazediff/core": ["@blazediff/core@1.10.0", "", {}, "sha512-AOQff0zgR7cGsZL+4E7hVkmujoPUpm0J9xzWGWZj5wCjd3gmxESXAPfKyuzs93VdpQNFhHlBhfOjrcZ+XTERtQ=="],
+
+    "@commonair/chat": ["@commonair/chat@workspace:services/chat"],
 
     "@commonair/config": ["@commonair/config@workspace:packages/config"],
 
