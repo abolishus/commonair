@@ -22,6 +22,12 @@ type Built struct {
 
 // Build signs the receipts for a closed period: one per chunk of entries,
 // each with a fresh random nonce. An empty period yields no receipts.
+//
+// Receipts are MEDIA-ONLY by decision: bytes and segments cover media
+// objects (segments, parts, init sections) and never playlists, because the
+// origin's issuance log, the ground truth receipts are cross-checked
+// against, counts media objects the same way. A segment counts once it was
+// delivered completely; bytes count as they are flushed to the viewer.
 func Build(key ed25519.PrivateKey, relayID string, p accounting.Period, chunk int) ([]Built, error) {
 	if chunk <= 0 || chunk > tokens.MaxReceiptEntries {
 		chunk = MaxEntriesPerReceipt

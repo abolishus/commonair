@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -56,7 +57,22 @@ type Config struct {
 	// held by the origin until the part exists, so they get more time.
 	PlaylistTimeout time.Duration
 	MediaTimeout    time.Duration
+	// MaxOriginFetches bounds distinct origin fetches in flight at once;
+	// beyond it viewers get 503 instead of the relay queueing without limit.
+	MaxOriginFetches int
+	// MaxRequestsPerSession bounds one viewer session's concurrent requests.
+	// An LL-HLS player needs a blocking playlist reload, a part or two and a
+	// rendition report at most; more means a misbehaving or abusive client.
+	MaxRequestsPerSession int
 }
+
+// Defaults for Config; exported so the command can size its shutdown window.
+const (
+	DefaultPlaylistTimeout       = 20 * time.Second
+	DefaultMediaTimeout          = 30 * time.Second
+	DefaultMaxOriginFetches      = 256
+	DefaultMaxRequestsPerSession = 8
+)
 
 // Server handles viewer requests.
 type Server struct {
@@ -66,6 +82,12 @@ type Server struct {
 	// fetchCtx parents origin fetches; cancelled when the relay stops.
 	fetchCtx    context.Context
 	cancelFetch context.CancelFunc
+	fetchSlots  chan struct{}
+
+	sessMu   sync.Mutex
+	sessReqs map[string]int
+
+	inflight sync.WaitGroup
 }
 
 // New returns a server with sensible defaults for unset Config fields.
@@ -86,13 +108,78 @@ func New(cfg Config) *Server {
 		cfg.BlockingPlaylistTTL = 2 * time.Second
 	}
 	if cfg.PlaylistTimeout <= 0 {
-		cfg.PlaylistTimeout = 20 * time.Second
+		cfg.PlaylistTimeout = DefaultPlaylistTimeout
 	}
 	if cfg.MediaTimeout <= 0 {
-		cfg.MediaTimeout = 30 * time.Second
+		cfg.MediaTimeout = DefaultMediaTimeout
+	}
+	if cfg.MaxOriginFetches <= 0 {
+		cfg.MaxOriginFetches = DefaultMaxOriginFetches
+	}
+	if cfg.MaxRequestsPerSession <= 0 {
+		cfg.MaxRequestsPerSession = DefaultMaxRequestsPerSession
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{cfg: cfg, fetchCtx: ctx, cancelFetch: cancel}
+	return &Server{
+		cfg: cfg, fetchCtx: ctx, cancelFetch: cancel,
+		fetchSlots: make(chan struct{}, cfg.MaxOriginFetches),
+		sessReqs:   map[string]int{},
+	}
+}
+
+// WaitIdle blocks until no handler is running or ctx ends. After the HTTP
+// server is closed, handlers still finishing their last write would
+// otherwise add bytes after the final receipt period was cut.
+func (s *Server) WaitIdle(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() { s.inflight.Wait(); close(done) }()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// enterSession counts a request against its session's cap.
+func (s *Server) enterSession(sid string) bool {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	if s.sessReqs[sid] >= s.cfg.MaxRequestsPerSession {
+		return false
+	}
+	s.sessReqs[sid]++
+	return true
+}
+
+func (s *Server) leaveSession(sid string) {
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	if s.sessReqs[sid] <= 1 {
+		delete(s.sessReqs, sid)
+		return
+	}
+	s.sessReqs[sid]--
+}
+
+// errBusy means the global origin fetch budget is exhausted.
+var errBusy = errors.New("too many origin fetches in flight")
+
+// limitedFetch runs an origin fetch if a slot is free, bounded by timeout,
+// the coalesced call's context (cancelled when no viewer waits any more) and
+// the server's lifetime.
+func (s *Server) limitedFetch(callCtx context.Context, timeout time.Duration, fetch func(context.Context) (cache.Entry, error)) (cache.Entry, error) {
+	select {
+	case s.fetchSlots <- struct{}{}:
+	default:
+		return cache.Entry{}, errBusy
+	}
+	defer func() { <-s.fetchSlots }()
+	ctx, cancel := context.WithTimeout(callCtx, timeout)
+	defer cancel()
+	stop := context.AfterFunc(s.fetchCtx, cancel)
+	defer stop()
+	return fetch(ctx)
 }
 
 // SetState installs registration state; nil means not registered.
@@ -113,7 +200,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/healthz", s.healthz)
 	mux.HandleFunc("/hls/", s.hls)
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { httpError(w, http.StatusNotFound, "not found") })
-	return securityHeaders(mux)
+	h := securityHeaders(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.inflight.Add(1)
+		defer s.inflight.Done()
+		h.ServeHTTP(w, r)
+	})
 }
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -225,6 +317,12 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusServiceUnavailable, "relay at capacity")
 		return
 	}
+	if !s.enterSession(claims.SID) {
+		w.Header().Set("Retry-After", "1")
+		httpError(w, http.StatusTooManyRequests, "too many concurrent requests for this session")
+		return
+	}
+	defer s.leaveSession(claims.SID)
 	if hls.IsPlaylist(p) {
 		s.servePlaylist(w, r, st, claims, p, token, q)
 		return
@@ -233,24 +331,21 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) servePlaylist(w http.ResponseWriter, r *http.Request, st *State, c tokens.PlaybackClaims, p, token string, q url.Values) {
-	directives, err := hls.BlockingQuery(q)
+	d, err := hls.ParseDirectives(q)
 	if err != nil {
 		httpError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rel, ttl, timeout := p, s.cfg.PlaylistTTL, s.cfg.PlaylistTimeout
-	if directives != "" {
-		rel, ttl = p+"?"+directives, s.cfg.BlockingPlaylistTTL
+	var entry cache.Entry
+	if d.Query == "" {
+		entry, err = s.playlist(r.Context(), st, p, "", s.cfg.PlaylistTTL)
+	} else {
+		entry, err = s.blockingPlaylist(r.Context(), st, p, d)
 	}
-	entry, err := s.cfg.Store.Get(r.Context(), "pl:"+rel, func() (cache.Entry, error) {
-		ctx, cancel := context.WithTimeout(s.fetchCtx, timeout)
-		defer cancel()
-		e, err := s.fetchOrigin(ctx, st.PullBase, rel, maxPlaylistBytes)
-		if err == nil {
-			e = cache.WithTTL(e, ttl)
-		}
-		return e, err
-	})
+	if errors.Is(err, hls.ErrBeyondLive) {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err != nil {
 		s.originFailure(w, r, p, err)
 		return
@@ -264,14 +359,51 @@ func (s *Server) servePlaylist(w http.ResponseWriter, r *http.Request, st *State
 	h := w.Header()
 	h.Set("Content-Type", "application/vnd.apple.mpegurl")
 	h.Set("Cache-Control", "no-cache")
+	// Playlist bytes are deliberately not counted: receipts are media-only
+	// (see internal/receipts) to match the origin's issuance ground truth.
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 
+// playlist returns the playlist at p (with optional directives query) from
+// cache or the origin.
+func (s *Server) playlist(ctx context.Context, st *State, p, query string, ttl time.Duration) (cache.Entry, error) {
+	rel := p
+	if query != "" {
+		rel = p + "?" + query
+	}
+	return s.cfg.Store.Get(ctx, "pl:"+rel, func(callCtx context.Context) (cache.Entry, error) {
+		return s.limitedFetch(callCtx, s.cfg.PlaylistTimeout, func(fctx context.Context) (cache.Entry, error) {
+			e, err := s.fetchOrigin(fctx, st.PullBase, rel, maxPlaylistBytes)
+			if err == nil {
+				e = cache.WithTTL(e, ttl)
+			}
+			return e, err
+		})
+	})
+}
+
+// blockingPlaylist checks the requested msn/part against the current plain
+// playlist before asking the origin to hold a request open for it.
+func (s *Server) blockingPlaylist(ctx context.Context, st *State, p string, d hls.Directives) (cache.Entry, error) {
+	if d.MSN >= 0 {
+		plain, err := s.playlist(ctx, st, p, "", s.cfg.PlaylistTTL)
+		if err != nil {
+			return cache.Entry{}, err
+		}
+		if limits, ok := hls.ParseLimits(plain.Body); ok {
+			if err := limits.Check(d.MSN, d.Part); err != nil {
+				return cache.Entry{}, err
+			}
+		}
+	}
+	return s.playlist(ctx, st, p, d.Query, s.cfg.BlockingPlaylistTTL)
+}
+
 func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, st *State, c tokens.PlaybackClaims, p string) {
-	entry, err := s.cfg.Store.Get(r.Context(), "m:"+p, func() (cache.Entry, error) {
-		ctx, cancel := context.WithTimeout(s.fetchCtx, s.cfg.MediaTimeout)
-		defer cancel()
-		return s.fetchOrigin(ctx, st.PullBase, p, maxMediaBytes)
+	entry, err := s.cfg.Store.Get(r.Context(), "m:"+p, func(callCtx context.Context) (cache.Entry, error) {
+		return s.limitedFetch(callCtx, s.cfg.MediaTimeout, func(fctx context.Context) (cache.Entry, error) {
+			return s.fetchOrigin(fctx, st.PullBase, p, maxMediaBytes)
+		})
 	})
 	if err != nil {
 		s.originFailure(w, r, p, err)
@@ -318,6 +450,9 @@ func (s *Server) originFailure(w http.ResponseWriter, r *http.Request, p string,
 		// The viewer left; nothing to answer.
 	case errors.Is(err, errNotFound):
 		httpError(w, http.StatusNotFound, "not found")
+	case errors.Is(err, errBusy):
+		w.Header().Set("Retry-After", "1")
+		httpError(w, http.StatusServiceUnavailable, "relay busy")
 	case errors.Is(err, context.DeadlineExceeded):
 		s.cfg.Log.Warn("origin timeout", "path", p)
 		httpError(w, http.StatusGatewayTimeout, "origin timeout")
