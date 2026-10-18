@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 You are fixing **open integrity review findings (2H2 integrity half, round two)** for CommonAir
 (repo: /Users/joshe/Repos/bcon). Read AGENTS.md, HANDOFF.md ("Open review findings" →
 Integrity), PLAN.md, docs/architecture.md and ADR 0003 decisions 5 and 8 first. Do not look

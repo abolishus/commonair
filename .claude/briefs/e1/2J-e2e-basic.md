@@ -1,3 +1,8 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 You are implementing **the `e2e-basic` harness scenario** for CommonAir (repo: /Users/joshe/Repos/bcon).
 Read AGENTS.md, HANDOFF.md (Milestone E1), harness/README.md and docs/testing/e1-selectors.md
 first. Do not look outside the repository.
