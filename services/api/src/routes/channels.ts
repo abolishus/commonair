@@ -146,11 +146,12 @@ export const channelsRoutes = {
     const uploadUrl = await deps.storage.presignPut(deps.env.S3_BUCKET_MEDIA, key, {
       expiresSeconds: UPLOAD_TTL_SECONDS,
       contentType: input.contentType,
+      contentLength: input.sizeBytes,
     });
     return {
       key,
       uploadUrl,
-      headers: { "content-type": input.contentType },
+      headers: { "content-type": input.contentType, "content-length": String(input.sizeBytes) },
       expiresAt: iso(new Date(deps.now().getTime() + UPLOAD_TTL_SECONDS * 1000)),
     };
   }),

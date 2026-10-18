@@ -18,10 +18,10 @@
     "notes": "Official image (Deuxfleurs). Canonical repo is git.deuxfleurs.fr/Deuxfleurs/garage; GitHub mirror checked. Cargo metadata says AGPL-3.0 (only). Run unmodified as a separate service."
   },
   "docker.io/bluenviron/mediamtx": {
-    "license": "MIT",
+    "license": "MIT AND GPL-2.0-or-later",
     "source": "https://github.com/bluenviron/mediamtx/blob/v1.21.2/LICENSE",
-    "tag": "1.21.2",
-    "notes": "Also serves as the mock RTMP simulcast target (accepts RTMP publish). A 1.21.2-ffmpeg variant exists (alpine:3.24 + apk ffmpeg, GPL-2.0-or-later AND LGPL-2.1-or-later); if that tag is used the image is MIT AND GPL-2.0-or-later."
+    "tag": "1.21.2-ffmpeg",
+    "notes": "compose uses the -ffmpeg variant (alpine:3.24 + apk ffmpeg, GPL-2.0-or-later AND LGPL-2.1-or-later): its wget runs the runOnReady hooks and it also serves as the mock RTMP target. MediaMTX itself is MIT; tests that run the plain 1.21.2 tag (MIT only) are covered by this entry."
   },
   "docker.io/axllent/mailpit": {
     "license": "MIT",

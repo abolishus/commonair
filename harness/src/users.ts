@@ -162,22 +162,29 @@ export class UserFactory {
     if (!res.ok) throw new AuthError("sign-up", res.status, await res.text());
   }
 
-  /** Follow the verification link from Mailpit, staying on the API host through redirects. */
+  /**
+   * Follow the verification link from Mailpit as API calls through this user's client. The link
+   * points at `PUBLIC_URL` (the web app, which proxies `/api/*`) or the public API; either way
+   * its `/api/` path goes straight to the API. Stops once a redirect leaves `/api/` (the landing
+   * page on the web app): the token check and session are done by then.
+   */
   async verifyEmail(api: Api, email: string): Promise<void> {
     const message = await this.mailpit.waitForMessage(email, (m) => findTokenLink(m) !== null);
     const link = findTokenLink(message);
     if (!link) throw new Error("verification email has no link");
-    const apiOrigin = new URL(this.opts.apiUrl).origin;
-    // Links point at the public API; this user's client may reach it through the harness proxy.
-    const viaClient = (u: URL) => (u.origin === apiOrigin ? new URL(`${u.pathname}${u.search}`, api.baseUrl) : u);
-    let url = viaClient(new URL(link));
+    const origins = {
+      api: new URL(this.opts.apiUrl).origin,
+      web: this.opts.webOrigin,
+      client: new URL(api.baseUrl).origin,
+    };
+    let url = verificationHop(new URL(link), origins);
+    if (!url) throw new Error("verification link is not an /api/ link on the web or API origin");
     for (let hop = 0; hop < 5; hop++) {
       const res = await api.fetch(new Request(url, { redirect: "manual" }));
       const location = res.headers.get("location");
       if (res.status >= 300 && res.status < 400 && location) {
-        const next = viaClient(new URL(location, url));
-        // The final hop lands on the web app; the API part (token check, session) is done.
-        if (next.origin !== new URL(api.baseUrl).origin) return;
+        const next = verificationHop(new URL(location, url), origins);
+        if (!next) return;
         url = next;
         continue;
       }
@@ -205,4 +212,15 @@ export class UserFactory {
     const res = await user.api.fetch(new Request(`${user.api.baseUrl}${AUTH_ROUTES.signOut}`, { method: "POST" }));
     if (!res.ok) throw new AuthError("sign-out", res.status, await res.text());
   }
+}
+
+/**
+ * Where the harness sends one hop of the verification flow: `/api/` paths on the API, web or
+ * client origin go to the client's API base (which may be the forwarding proxy); anything else
+ * (a page on the web app, another host) ends the API part, so null.
+ */
+export function verificationHop(target: URL, origins: { api: string; web: string; client: string }): URL | null {
+  if (!target.pathname.startsWith("/api/")) return null;
+  if (![origins.api, origins.web, origins.client].includes(target.origin)) return null;
+  return new URL(`${target.pathname}${target.search}`, origins.client);
 }

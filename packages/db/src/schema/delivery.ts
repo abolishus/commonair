@@ -96,6 +96,13 @@ export const playbackSessions = pgTable(
     index("playback_sessions_device_idx").on(t.deviceHash, t.startedAt),
     index("playback_sessions_user_idx").on(t.userId, t.startedAt),
     index("playback_sessions_relay_idx").on(t.relayId, t.startedAt),
+    // Integrity scans: sessions still to score, and live sessions by heartbeat age.
+    index("playback_sessions_scoring_idx")
+      .on(t.scoredAt.asc().nullsFirst())
+      .where(sql`${t.endedAt} is null or ${t.verdict} = 'pending'`),
+    index("playback_sessions_live_hb_idx")
+      .on(t.lastHeartbeatAt)
+      .where(sql`${t.endedAt} is null`),
   ],
 );
 

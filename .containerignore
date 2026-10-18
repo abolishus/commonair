@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Build-context exclusions for every image built from the repository root.
+# Secrets and local state never enter an image; node_modules are installed inside.
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+**/node_modules
+**/.output
+**/dist
+**/.vite
+**/.cache
+**/.tanstack
+**/coverage
+**/*.log
+**/.DS_Store
+relay/bin
+harness/reports

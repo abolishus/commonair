@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Tempo, monolithic, local block storage. Receives traces from the collector only
+# (OTLP gRPC :4317 inside the compose network); Grafana queries :3200.
+stream_over_http_enabled: true
+server:
+  http_listen_port: 3200
+  log_level: warn
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+usage_report:
+  reporting_enabled: false

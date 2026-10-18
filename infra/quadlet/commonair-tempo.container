@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Tempo (traces).
+[Unit]
+Description=CommonAir tempo
+
+[Container]
+Image=localhost/commonair/tempo:latest
+ContainerName=commonair-tempo
+Network=commonair.network
+NetworkAlias=tempo
+Volume=%h/commonair/infra/tempo/tempo.yaml:/etc/tempo.yaml:ro,Z
+Volume=commonair-tempo-data.volume:/var/tempo
+Exec=-config.file=/etc/tempo.yaml
+HealthCmd=/usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:3200/ready
+HealthInterval=10s
+HealthTimeout=3s
+HealthRetries=10
+HealthStartPeriod=30s
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

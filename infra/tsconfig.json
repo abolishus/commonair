@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "types": ["bun"], "lib": ["es2024", "dom"] },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

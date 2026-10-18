@@ -5,10 +5,35 @@
  * Local infrastructure helper around `podman compose`.
  *
  *   bun scripts/infra.ts test   start the data services integration tests need, wait for health
+ *   bun scripts/infra.ts stack  build and start the whole platform (+ harness profile), wait for health
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
-export const TEST_SERVICES = ["postgres", "valkey", "mailpit"];
+export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate"];
+/** Long-running services that report health. */
+export const HEALTHY_SERVICES = ["postgres", "valkey", "mailpit", "garage"];
+/** One-shot jobs that must exit 0. */
+export const ONE_SHOT_SERVICES = ["garage-init", "migrate"];
+/** Long-running services of the whole platform plus the harness profile (`stack`). */
+export const STACK_HEALTHY_SERVICES = [
+  ...HEALTHY_SERVICES,
+  "mediamtx",
+  "api",
+  "chat",
+  "irc",
+  "origin",
+  "media",
+  "worker",
+  "web",
+  "otel-collector",
+  "prometheus",
+  "loki",
+  "tempo",
+  "grafana",
+  "mock-rtmp",
+];
+/** Locally built images the test subset needs (`migrate` shares the tools image). */
+const BUILD_SERVICES = ["postgres", "garage-init"];
 
 function compose(args: string[]): void {
   const proc = Bun.spawnSync(["podman", "compose", ...args], {
@@ -35,6 +60,45 @@ function health(service: string): string {
   return out.stdout.toString().trim() || "unknown";
 }
 
+function containerId(service: string): string | undefined {
+  return Bun.spawnSync([
+    "podman",
+    "ps",
+    "-a",
+    "-q",
+    "--filter",
+    "label=com.docker.compose.project=commonair",
+    "--filter",
+    `label=com.docker.compose.service=${service}`,
+  ])
+    .stdout.toString()
+    .trim()
+    .split("\n")[0];
+}
+
+/** Wait for one-shot jobs to exit; throws with the job's logs if one exits non-zero. */
+export async function waitExited(services: string[], timeoutMs = 300_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  const pending = new Set(services);
+  while (pending.size > 0) {
+    for (const s of pending) {
+      const id = containerId(s);
+      if (!id) continue;
+      const out = Bun.spawnSync(["podman", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", id]);
+      const [status, code] = out.stdout.toString().trim().split(" ");
+      if (status !== "exited") continue;
+      if (code !== "0") {
+        const logs = Bun.spawnSync(["podman", "logs", "--tail", "40", id]);
+        throw new Error(`${s} exited ${code}:\n${logs.stdout.toString()}${logs.stderr.toString()}`);
+      }
+      pending.delete(s);
+    }
+    if (pending.size === 0) return;
+    if (Date.now() > deadline) throw new Error(`one-shot jobs did not finish: ${[...pending].join(", ")}`);
+    await Bun.sleep(1000);
+  }
+}
+
 export async function waitHealthy(services: string[], timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -49,15 +113,23 @@ export async function waitHealthy(services: string[], timeoutMs = 120_000): Prom
 if (import.meta.main) {
   const cmd = process.argv[2];
   if (cmd === "test") {
+    compose(["build", ...BUILD_SERVICES]);
     compose(["up", "-d", ...TEST_SERVICES]);
-    await waitHealthy(TEST_SERVICES);
+    await waitHealthy(HEALTHY_SERVICES);
+    await waitExited(ONE_SHOT_SERVICES);
     console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);
+  } else if (cmd === "stack") {
+    compose(["--profile", "harness", "build"]);
+    compose(["--profile", "harness", "up", "-d"]);
+    await waitExited(ONE_SHOT_SERVICES);
+    await waitHealthy(STACK_HEALTHY_SERVICES, 300_000);
+    console.log("infra: platform healthy");
   } else if (cmd === "down") {
     compose(["down"]);
   } else if (cmd === "reset") {
     compose(["down", "-v"]);
   } else {
-    console.error("usage: bun scripts/infra.ts test|down|reset");
+    console.error("usage: bun scripts/infra.ts test|stack|down|reset");
     process.exit(2);
   }
 }

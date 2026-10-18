@@ -38,6 +38,8 @@ jobs:
           pipx install reuse==6.2.0
           pipx install podman-compose==1.6.0
           podman --version
+          # Playwright needs WebKit/Chromium system libraries for the harness scenarios.
+          bunx playwright@1.64.1 install-deps chromium webkit
       - run: bun install --frozen-lockfile
       - name: Environment
         run: bun scripts/init-env.ts

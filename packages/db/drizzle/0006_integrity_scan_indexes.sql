@@ -1,0 +1,2 @@
+CREATE INDEX "playback_sessions_scoring_idx" ON "playback_sessions" USING btree ("scored_at" NULLS FIRST) WHERE "playback_sessions"."ended_at" is null or "playback_sessions"."verdict" = 'pending';--> statement-breakpoint
+CREATE INDEX "playback_sessions_live_hb_idx" ON "playback_sessions" USING btree ("last_heartbeat_at") WHERE "playback_sessions"."ended_at" is null;

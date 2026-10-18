@@ -1,9 +1,18 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# The whole platform: `podman compose up`. Rootless-compatible: no privileged
-# containers, no host ports below 1024, no container-engine socket mounts.
-# Image names are fully qualified and pinned; licenses in infra/image-licenses.json.
+# The whole platform: `podman compose up` (podman-compose ≥ 1.6, rootless). See infra/README.md.
+#
+# Rootless rules (enforced by infra/tests/compose.test.ts): no privileged containers, no
+# host ports below 1024, no container-engine socket mounts, fully qualified pinned images
+# (licenses in infra/image-licenses.json), named volumes, healthchecks everywhere.
+# Host ports bind to ${BIND_ADDRESS:-127.0.0.1}; every host port is an env var, so a
+# second stack can run alongside (`-p <name>` plus shifted ports).
+#
+# Profiles: (default) full platform incl. observability · harness: + mock-rtmp ·
+# stripe: + stripe-mock · tls: + caddy · p2p: + tracker (not built yet).
+#
+# Secrets come from .env (`bun scripts/init-env.ts`); nothing secret has a default here.
 
 name: commonair
 
@@ -12,33 +21,475 @@ x-healthcheck: &healthcheck
   timeout: 3s
   retries: 30
 
+# Our own images (built from this repo); the license checker skips templated refs.
+x-service-build: &service-build
+  context: .
+  dockerfile: infra/containers/service.Containerfile
+
+x-env-file: &env-file
+  - path: ${COMMONAIR_ENV_FILE:-.env}
+    required: false
+
+# Hostnames inside the compose network override the localhost defaults of .env.
+x-app-env: &app-env
+  DATABASE_URL: postgres://commonair_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/commonair
+  VALKEY_URL: redis://valkey:6379
+  S3_ENDPOINT: http://garage:3900
+  S3_REGION: garage
+  S3_FORCE_PATH_STYLE: "true"
+  MEDIAMTX_API_URL: http://mediamtx:9997
+  MEDIAMTX_HLS_URL: http://mediamtx:8888
+  MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+  MEDIAMTX_RTMP_URL: rtmp://mediamtx:1935
+  API_INTERNAL_URL: http://api:3001
+  CHAT_INTERNAL_URL: ws://chat:3002/ws
+  ORIGIN_INTERNAL_URL: http://origin:3003
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  # Container-side ports are fixed (internal URLs above rely on them); host ports vary.
+  WEB_PORT: "3000"
+  API_PORT: "3001"
+  CHAT_PORT: "3002"
+  ORIGIN_PORT: "3003"
+  MEDIA_PORT: "3004"
+  WORKER_PORT: "3005"
+  TRACKER_PORT: "8000"
+  IRC_PORT: "6667"
+  IRC_TLS_PORT: "6697"
+  IRC_WS_PORT: "6680"
+  IRC_HEALTH_PORT: "6681"
+
+x-app-depends: &app-depends
+  migrate:
+    condition: service_completed_successfully
+  garage-init:
+    condition: service_completed_successfully
+  valkey:
+    condition: service_healthy
+  otel-collector:
+    condition: service_healthy
+
+x-app-healthcheck: &app-healthcheck
+  test: ["CMD", "bun", "/opt/commonair/healthcheck.ts"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 30s
+
 services:
+  # ---------------------------------------------------------------- data
   postgres:
-    image: docker.io/library/postgres:17.11-trixie
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/postgres:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: infra/postgres/Containerfile
+    restart: unless-stopped
     environment:
       POSTGRES_USER: commonair
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commonair}
       POSTGRES_DB: commonair
-    ports: ["127.0.0.1:5432:5432"]
+      # WAL-G → Garage (infra/postgres/walg-env.sh maps S3_* to AWS_*). Archiving
+      # retries until garage-init has created the key and bucket.
+      WALG_S3_PREFIX: s3://${S3_BUCKET_BACKUPS:-commonair-backups}/wal
+      WALG_S3_ENDPOINT: http://garage:3900
+      S3_REGION: garage
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      WALG_RETAIN_FULL: ${WALG_RETAIN_FULL:-7}
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"]
     volumes: ["postgres-data:/var/lib/postgresql/data"]
     healthcheck:
       <<: *healthcheck
       test: ["CMD-SHELL", "pg_isready -U commonair -d commonair"]
 
+  # One-shot: migrations as the owner, then the least-privilege app role.
+  migrate:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/tools:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: tools }
+    restart: "no"
+    command: ["sh", "-c", "bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.ts"]
+    env_file: *env-file
+    environment:
+      DATABASE_URL: postgres://commonair:${POSTGRES_PASSWORD:-commonair}@postgres:5432/commonair
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
   valkey:
     image: docker.io/valkey/valkey:9.1.2-trixie
+    restart: unless-stopped
+    # Ephemeral by design (docs/architecture.md): presence, caches, pub/sub, job queues.
     command: ["valkey-server", "--appendonly", "no", "--save", ""]
-    ports: ["127.0.0.1:6379:6379"]
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${VALKEY_PORT:-6379}:6379"]
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "valkey-cli", "ping"]
 
+  garage:
+    image: docker.io/dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-}
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${GARAGE_S3_PORT:-3900}:3900"]
+    volumes:
+      - ./infra/garage/garage.toml:/etc/garage.toml:ro,Z
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/garage", "status"]
+
+  # One-shot: single-node layout, S3 key import, buckets (idempotent).
+  garage-init:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/tools:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: tools }
+    restart: "no"
+    command: ["bun", "infra/garage/bootstrap.ts"]
+    env_file: *env-file
+    environment:
+      GARAGE_ADMIN_URL: http://garage:3903
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+    depends_on:
+      garage:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+
   mailpit:
     image: docker.io/axllent/mailpit:v1.31.6
-    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${BIND_ADDRESS:-127.0.0.1}:${MAILPIT_HTTP_PORT:-8025}:8025"
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "/mailpit", "readyz"]
 
+  # ---------------------------------------------------------------- media
+  mediamtx:
+    image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+    restart: unless-stopped
+    environment:
+      # Expanded by MediaMTX itself in the runOnOnline/runOnOffline hooks of mediamtx.yml.
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
+    # RTSP :8554, LL-HLS :8888, API :9997 and metrics :9998 stay inside the network.
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${MEDIAMTX_RTMP_PORT:-1935}:1935"
+      - "${BIND_ADDRESS:-127.0.0.1}:${MEDIAMTX_WEBRTC_PORT:-8889}:8889"
+      # ICE candidates advertise 8189; keep host and container port equal.
+      - "${BIND_ADDRESS:-127.0.0.1}:${MEDIAMTX_ICE_UDP_PORT:-8189}:8189/udp"
+    volumes: ["./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro,Z"]
+    healthcheck:
+      <<: *healthcheck
+      # The control API sits behind the auth hook (api may not be up yet): probe RTMP instead.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 1935"]
+
+  mock-rtmp:
+    profiles: [harness]
+    image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+    restart: unless-stopped
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${MOCK_RTMP_PORT:-1936}:1936"]
+    volumes: ["./infra/mediamtx/mock-rtmp-target.yml:/mediamtx.yml:ro,Z"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 1936"]
+
+  # ---------------------------------------------------------------- application
+  api:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/api:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: api }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: api
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3001}:3001"]
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
+
+  chat:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/chat:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: chat }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: chat
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${CHAT_PORT:-3002}:3002"]
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
+
+  irc:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/irc:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: irc }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: irc
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${IRC_PORT:-6667}:6667"
+      - "${BIND_ADDRESS:-127.0.0.1}:${IRC_TLS_PORT:-6697}:6697"
+      - "${BIND_ADDRESS:-127.0.0.1}:${IRC_WS_PORT:-6680}:6680"
+    depends_on:
+      <<: *app-depends
+      chat:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  origin:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/origin:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: origin }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: origin
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${ORIGIN_PORT:-3003}:3003"]
+    depends_on:
+      <<: *app-depends
+      mediamtx:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  media:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/media:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: media }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: media
+      # Scratch space for VOD segments, clips and the live clip buffer.
+      MEDIA_WORK_DIR: /var/lib/commonair/media
+    volumes: ["media-work:/var/lib/commonair/media"]
+    depends_on:
+      <<: *app-depends
+      mediamtx:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+    # GPU (NVENC) is opt-in: see infra/README.md (CDI device `nvidia.com/gpu=all`).
+
+  worker:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/worker:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: worker }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: worker
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
+
+  # services/tracker is not built yet (P2P slice); opt in with `--profile p2p` once it is.
+  tracker:
+    profiles: [p2p]
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/tracker:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: tracker }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: tracker
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${TRACKER_PORT:-8000}:8000"]
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
+
+  web:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/web:${IMAGE_TAG:-dev}
+    build:
+      <<: *service-build
+      args: { SERVICE: web }
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: web
+      HEALTHCHECK_PATH: /healthz
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  # ---------------------------------------------------------------- observability (default-on)
+  otel-collector:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/otel-collector:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: infra/containers/probe.Containerfile
+      args: { BASE_IMAGE: "docker.io/otel/opentelemetry-collector-contrib:0.163.1" }
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    # Host services in local development export to localhost:4318 (.env.example default).
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${OTLP_HTTP_PORT:-4318}:4318"]
+    volumes: ["./infra/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro,Z"]
+    depends_on:
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
+
+  prometheus:
+    image: docker.io/prom/prometheus:v3.15.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - prometheus-data:/prometheus
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+
+  loki:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/loki:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: infra/containers/probe.Containerfile
+      args: { BASE_IMAGE: "docker.io/grafana/loki:3.7.8" }
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./infra/loki/loki.yaml:/etc/loki/config.yaml:ro,Z
+      - loki-data:/loki
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/ready"]
+
+  tempo:
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/tempo:${IMAGE_TAG:-dev}
+    build:
+      context: .
+      dockerfile: infra/containers/probe.Containerfile
+      args: { BASE_IMAGE: "docker.io/grafana/tempo:3.1.0" }
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./infra/tempo/tempo.yaml:/etc/tempo.yaml:ro,Z
+      - tempo-data:/var/tempo
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3200/ready"]
+
+  grafana:
+    image: docker.io/grafana/grafana:13.2.4
+    restart: unless-stopped
+    # Refuse to start with Grafana's built-in admin/admin.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'test -n "$$GF_SECURITY_ADMIN_PASSWORD" || { echo "GRAFANA_ADMIN_PASSWORD is required" >&2; exit 1; }; exec /run.sh'
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_DISABLE_SIGNOUT_MENU: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3030}:3000"]
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro,Z
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+
+  # ---------------------------------------------------------------- optional profiles
+  caddy:
+    profiles: [tls]
+    image: docker.io/library/caddy:2.11.7-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-localhost}
+    # Public by design; see infra/README.md for reaching 80/443 rootless.
+    ports:
+      - "${CADDY_BIND_ADDRESS:-0.0.0.0}:${CADDY_HTTP_PORT:-8080}:80"
+      - "${CADDY_BIND_ADDRESS:-0.0.0.0}:${CADDY_HTTPS_PORT:-8443}:443"
+      - "${CADDY_BIND_ADDRESS:-0.0.0.0}:${CADDY_HTTPS_PORT:-8443}:443/udp"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+
+  stripe-mock:
+    profiles: [stripe]
+    image: docker.io/stripe/stripe-mock:v0.206.0
+    restart: unless-stopped
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${STRIPE_MOCK_PORT:-12111}:12111"]
+    healthcheck:
+      <<: *healthcheck
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "--header",
+          "Authorization: Bearer sk_test_123",
+          "http://127.0.0.1:12111/v1/customers",
+        ]
+
 volumes:
   postgres-data:
+  media-work:
+  garage-meta:
+  garage-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+  grafana-data:
+  caddy-data:
+  caddy-config:
