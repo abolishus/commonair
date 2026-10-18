@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { oc } from "@orpc/contract";
+import { z } from "zod";
+import type { Scope } from "../scopes.ts";
+
+/**
+ * Who may call a procedure.
+ * - public: anyone, signed in or not
+ * - user: a signed-in member (session cookie) or an OAuth token with `scopes`
+ * - owner: the channel owner (or an editor) of the channel named in the input
+ * - moderator: owner, editor, or moderator of the channel in the input
+ * - admin / treasurer / platform-moderator: platform roles
+ * - relay: a registered relay node's token
+ * - overlay: an overlay token for one channel
+ */
+export type Access =
+  | "public"
+  | "user"
+  | "owner"
+  | "moderator"
+  | "admin"
+  | "treasurer"
+  | "platform-moderator"
+  | "relay"
+  | "overlay";
+
+export interface ProcedureMeta {
+  access: Access;
+  /**
+   * OAuth token callers: `undefined` = session only (tokens are refused); `[]` = any valid
+   * token; otherwise the token must hold every listed scope. Session callers act with full
+   * rights for themselves. Public procedures ignore this.
+   */
+  scopes?: Scope[];
+  /** Per-caller rate limit bucket name (see services/api rate limits). */
+  rateLimit?: "default" | "write" | "auth" | "chat" | "expensive";
+}
+
+export const base = oc.$meta<ProcedureMeta>({ access: "public" }).errors({
+  UNAUTHORIZED: { message: "Sign in required" },
+  FORBIDDEN: { message: "You do not have permission to do this" },
+  NOT_FOUND: { message: "Not found" },
+  CONFLICT: { message: "Conflicts with the current state" },
+  RATE_LIMITED: { message: "Too many requests", data: z.object({ retryAfterSeconds: z.number() }) },
+  PRECONDITION_FAILED: {
+    message: "A requirement for this action is not met",
+    data: z.object({ requirement: z.string() }),
+  },
+});
+
+export const Id = z.uuid();
+export const Slug = z
+  .string()
+  .min(3)
+  .max(25)
+  .regex(/^[a-z0-9_]+$/, "lowercase letters, digits and underscores");
+export const Timestamp = z.iso.datetime({ offset: true });
+export const Money = z.object({ cents: z.number().int(), currency: z.string().length(3) });
+export type Money = z.infer<typeof Money>;
+
+export const PageInput = z.object({
+  cursor: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(100).default(25),
+});
+export const page = <T extends z.ZodType>(item: T) =>
+  z.object({ items: z.array(item), nextCursor: z.string().nullable() });
+
+export const ChannelRef = z.object({ channel: Slug });
+/** Same-origin return path after checkout (relative only; never an absolute URL, to prevent open redirects). */
+export const ReturnPath = z
+  .string()
+  .max(500)
+  .regex(/^\/(?!\/)[^\s\\]*$/, "must be a relative path starting with a single /");
+/** A JSON value bounded in serialized size. */
+export const BoundedJson = (maxBytes: number) =>
+  z
+    .unknown()
+    .refine((v) => JSON.stringify(v ?? null).length <= maxBytes, `must serialize to at most ${maxBytes} bytes`);
+export const ShortText = z.string().max(64);
+export const Ok = z.object({ ok: z.literal(true) });

@@ -1,0 +1,35 @@
+{
+  "name": "@commonair/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./enums": "./src/enums.ts",
+    "./shapes": "./src/shapes.ts",
+    "./events": "./src/events.ts",
+    "./chat": "./src/chat.ts",
+    "./tokens": "./src/tokens.ts",
+    "./scopes": "./src/scopes.ts",
+    "./api": "./src/api/router.ts",
+    "./dto": "./src/api/entities.ts",
+    "./openapi": "./src/openapi.ts",
+    "./internal": "./src/internal.ts"
+  },
+  "scripts": {
+    "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@orpc/contract": "catalog:",
+    "@orpc/openapi": "catalog:",
+    "@orpc/zod": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@orpc/server": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

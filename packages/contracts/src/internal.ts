@@ -1,0 +1,149 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * Service-to-service contracts that are not part of the public API: internal
+ * HTTP hooks, Valkey keys and streams, BullMQ queue names, and the chat
+ * connection token. Internal HTTP calls carry `x-internal-secret: <INTERNAL_API_SECRET>`
+ * and are served on the API under `/internal/*`, which Caddy never exposes.
+ */
+import { z } from "zod";
+import { DELIVERY_SOURCES, RENDITIONS } from "./enums.ts";
+
+export const INTERNAL_SECRET_HEADER = "x-internal-secret";
+
+/** Username MediaMTX accepts for internal readers/publishers (origin, media); password = INTERNAL_API_SECRET. */
+export const MEDIA_INTERNAL_USER = "internal";
+
+/**
+ * Ingest URLs. Streamers publish to `rtmp://<host>/live/<slug>?key=<secret>`; OBS users enter
+ * server `rtmp://<host>/live` and stream key `<slug>?key=<secret>`. WHIP clients POST to
+ * `<whip base>/<slug>/whip` with `Authorization: Bearer <secret>`. The MediaMTX path is
+ * always `live/<slug>`; renditions are published back as `live/<slug>/<rendition>`.
+ */
+export const mediaPath = (slug: string) => `live/${slug}`;
+export const renditionPath = (slug: string, rendition: Exclude<(typeof RENDITIONS)[number], "source">) =>
+  `live/${slug}/${rendition}`;
+
+/** MediaMTX `authHTTPAddress` request body (MediaMTX 1.x). */
+export const MediaMtxAuthRequest = z.object({
+  user: z.string().default(""),
+  password: z.string().default(""),
+  token: z.string().default(""),
+  ip: z.string(),
+  action: z.enum(["publish", "read", "playback", "api", "metrics", "pprof"]),
+  path: z.string().default(""),
+  protocol: z.enum(["rtsp", "rtmp", "hls", "webrtc", "srt"]),
+  id: z.string().nullable().optional(),
+  query: z.string().default(""),
+});
+export type MediaMtxAuthRequest = z.infer<typeof MediaMtxAuthRequest>;
+
+/** Posted by MediaMTX `runOnReady` / `runOnNotReady` hooks to the API. */
+export const MediaReadyHook = z.object({
+  path: z.string(),
+  sourceType: z.string(),
+  sourceId: z.string().default(""),
+  query: z.string().default(""),
+});
+export const INTERNAL_ROUTES = {
+  mediaAuth: "/internal/media/auth",
+  mediaReady: "/internal/media/ready",
+  mediaNotReady: "/internal/media/not-ready",
+} as const;
+
+/** Published on BUS.live by the API when a broadcast starts/ends, and by media on transcode changes. */
+export const LiveEvent = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("online"),
+    channelId: z.uuid(),
+    broadcastId: z.uuid(),
+    slug: z.string(),
+    path: z.string(),
+    protocol: z.string(),
+    at: z.string(),
+  }),
+  z.object({
+    type: z.literal("offline"),
+    channelId: z.uuid(),
+    broadcastId: z.uuid(),
+    slug: z.string(),
+    path: z.string(),
+    at: z.string(),
+  }),
+  z.object({
+    type: z.literal("renditions"),
+    channelId: z.uuid(),
+    broadcastId: z.uuid(),
+    renditions: z.array(z.enum(RENDITIONS)),
+    at: z.string(),
+  }),
+]);
+export type LiveEvent = z.infer<typeof LiveEvent>;
+
+/** Valkey keys shared across services. */
+export const KEYS = {
+  /** ZSET sessionId → last heartbeat (ms). Members older than 30 s are stale. */
+  viewers: (channelId: string) => `viewers:${channelId}`,
+  /** Cached verified viewer count for the channel (integer string, short TTL). */
+  viewerCount: (channelId: string) => `viewer-count:${channelId}`,
+  /** JSON array of active renditions for a live channel, set by media; absent = source only. */
+  renditions: (channelId: string) => `renditions:${channelId}`,
+  /** HASH of simulcast target id → JSON {status,lastError,at}. */
+  simulcastStatus: (broadcastId: string) => `simulcast:${broadcastId}`,
+  /** HASH relayId → JSON {url,capacityMbps,status,load} for origin assignment. */
+  relays: "relays:active",
+  /** Rate-limit buckets. */
+  rateLimit: (bucket: string, subject: string) => `rl:${bucket}:${subject}`,
+} as const;
+
+/** Valkey streams (XADD) consumed by the worker. */
+export const STREAMS = {
+  /** One entry per segment/playlist served: fields of SegmentFetch. */
+  segments: "stream:segments",
+} as const;
+export const SegmentFetch = z.object({
+  sid: z.uuid(),
+  cid: z.uuid(),
+  src: z.enum(DELIVERY_SOURCES),
+  rid: z.uuid().optional(),
+  kind: z.enum(["playlist", "segment", "part"]),
+  bytes: z.coerce.number().int().nonnegative(),
+  /** Epoch ms. */
+  at: z.coerce.number().int(),
+});
+export type SegmentFetch = z.infer<typeof SegmentFetch>;
+
+/** BullMQ queues. Producers and consumers import names from here. */
+export const QUEUES = {
+  webhooks: "webhooks",
+  clips: "clips",
+  vodFinalize: "vod-finalize",
+  exports: "exports",
+  deletions: "deletions",
+  patronage: "patronage",
+  council: "council",
+  integrity: "integrity",
+  receipts: "receipts",
+  email: "email",
+  notifications: "notifications",
+  retention: "retention",
+  backups: "backups",
+} as const;
+
+/**
+ * Chat connection token, issued by the API (`chat.connectToken`) and verified by the
+ * chat service: base64url(JSON ChatTokenClaims) "." base64url(HMAC-SHA256(key, claimsBytes)),
+ * key = HMAC-SHA256(INTERNAL_API_SECRET, "chat-token-v1").
+ */
+export const ChatTokenClaims = z.object({
+  v: z.literal(1),
+  /** Null for anonymous read-only connections. */
+  uid: z.uuid().nullable(),
+  /** OAuth app id when the connection is on behalf of an app/bot. */
+  app: z.uuid().nullable(),
+  scopes: z.array(z.string()),
+  exp: z.number().int(),
+});
+export type ChatTokenClaims = z.infer<typeof ChatTokenClaims>;
+export const CHAT_TOKEN_TTL_SECONDS = 300;
