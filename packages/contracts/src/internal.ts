@@ -116,6 +116,11 @@ export const SegmentFetch = z.object({
   bytes: z.coerce.number().int().nonnegative(),
   /** Epoch ms. */
   at: z.coerce.number().int(),
+  /**
+   * Which media object was served (`<rendition dir>/<file>`), so integrity counts distinct
+   * segments per session rather than requests. Optional for older producers.
+   */
+  obj: z.string().max(256).optional(),
 });
 export type SegmentFetch = z.infer<typeof SegmentFetch>;
 
