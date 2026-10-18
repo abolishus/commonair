@@ -65,8 +65,13 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
     protected: true,
     description: "Membership classes and their eligibility rules.",
     value: {
-      streamer: { minStreamingHours: 10, windowDays: 90 },
-      viewer: { shareCents: 500, shareRefundableOnExit: true, activeSubscriptionQualifies: true },
+      streamer: { minStreamingHours: 10, windowDays: 90, minVerifiedViewers: 2, lapseGraceDays: 14 },
+      viewer: {
+        shareCents: 500,
+        shareRefundableOnExit: true,
+        activeSubscriptionQualifies: true,
+        minSubscriptionCents: 300,
+      },
       worker: { appointedBy: "board" },
     },
   },
