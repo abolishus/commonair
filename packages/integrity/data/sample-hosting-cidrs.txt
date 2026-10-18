@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# SAMPLE hosting-provider list for the harness and local development.
+#
+# This is NOT a complete or authoritative feed. Operators must supply their own list
+# (INTEGRITY_DATACENTER_CIDRS_FILE), e.g. built from the providers' published range
+# files, and keep it current. Format: one CIDR or ASN per line, optional label.
+#
+# Documentation ranges (RFC 5737 / RFC 3849): the harness viewbots use these, so tests
+# never depend on real third-party address space.
+192.0.2.0/24        TEST-NET-1 (sample hosting)
+198.51.100.0/24     TEST-NET-2 (sample hosting)
+203.0.113.0/24      TEST-NET-3 (sample hosting)
+2001:db8::/32       IPv6 documentation (sample hosting)
+#
+# A few well-known public cloud ranges and ASNs (illustrative subset).
+3.0.0.0/15          Amazon Web Services (sample)
+13.64.0.0/11        Microsoft Azure (sample)
+34.64.0.0/10        Google Cloud (sample)
+104.131.0.0/16      DigitalOcean (sample)
+139.59.0.0/16       DigitalOcean (sample)
+AS16509             Amazon (sample)
+AS15169             Google (sample)
+AS8075              Microsoft (sample)
+AS14061             DigitalOcean (sample)
+AS24940             Hetzner (sample)
+AS16276             OVH (sample)
