@@ -55,5 +55,6 @@ test("default buckets match the documented limits", () => {
     auth: { max: 10, windowMs: 60_000 },
     chat: { max: 20, windowMs: 30_000 },
     expensive: { max: 5, windowMs: 3_600_000 },
+    mail: { max: 10, windowMs: 3_600_000 },
   });
 });

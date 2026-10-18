@@ -5,7 +5,9 @@
  * Interim session verification, replaced wholesale by the integrity unit.
  * A session becomes `verified` after 3 consistent heartbeats (media played ≈ wall
  * clock between heartbeats, ±50%) provided the player was visible or unmuted at
- * least once. `excluded` is terminal here: only the integrity system lifts it.
+ * least once. A heartbeat only counts when at least MIN_HEARTBEAT_WALL_SECONDS of server
+ * time passed since the previous one, so verification takes ≥ 15 s of real playback
+ * however fast a client sends. `excluded` is terminal here: only the integrity system lifts it.
  */
 import type { SESSION_VERDICTS } from "@commonair/contracts/enums";
 
@@ -13,6 +15,8 @@ export type Verdict = (typeof SESSION_VERDICTS)[number];
 
 export const REQUIRED_CONSISTENT_HEARTBEATS = 3;
 export const CONSISTENCY_TOLERANCE = 0.5;
+/** Half the 10 s heartbeat interval: tolerant of jitter, useless to a flooding client. */
+export const MIN_HEARTBEAT_WALL_SECONDS = 5;
 
 export interface VerifyState {
   consistent: number;
@@ -28,7 +32,7 @@ export interface HeartbeatFacts {
 }
 
 export function isConsistent(h: Pick<HeartbeatFacts, "playedSeconds" | "wallSeconds">): boolean {
-  if (!(h.wallSeconds > 0)) return false;
+  if (!(h.wallSeconds >= MIN_HEARTBEAT_WALL_SECONDS)) return false;
   return Math.abs(h.playedSeconds - h.wallSeconds) <= CONSISTENCY_TOLERANCE * h.wallSeconds;
 }
 
