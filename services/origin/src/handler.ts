@@ -65,6 +65,15 @@ const CORS: Record<string, string> = {
 
 const dec = new TextDecoder();
 
+/**
+ * `SegmentFetch.obj` for a media request: `<rendition dir>/<file>` (`source` for the
+ * channel's own path). File names carry the sequence number, so integrity can count
+ * distinct segments and parts per session rather than requests.
+ */
+export function fetchObjectId(mr: Pick<MediaRequest, "rendition" | "file">): string {
+  return `${mr.rendition ?? "source"}/${mr.file}`;
+}
+
 export function createHandler(deps: HandlerDeps): OriginFetch {
   const metrics = deps.metrics ?? noopMetrics;
   const now = deps.now ?? Date.now;
@@ -152,6 +161,7 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
         kind: mr.kind,
         bytes,
         at: now(),
+        ...(mr.kind === "playlist" ? {} : { obj: fetchObjectId(mr) }),
       });
     metrics.egress(sourceOf(p), bytes);
   }

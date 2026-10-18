@@ -8,9 +8,11 @@
  * a minute. Processing is at-least-once: a crash between commit and XACK counts
  * that batch twice, which the per-minute granularity keeps negligible.
  */
+import { recordFetches } from "@commonair/integrity";
 import type { ValkeyClient } from "@commonair/service";
 import { hostname } from "node:os";
 import type { WorkerContext } from "../context.ts";
+import { fetchEvidence } from "../integrity/fetches.ts";
 import { metrics } from "../metrics.ts";
 import { startLoop, type LoopHandle } from "../runtime/loop.ts";
 import { aggregate, parseEntry, type Aggregate } from "./aggregate.ts";
@@ -112,6 +114,25 @@ export async function writeAggregate(ctx: WorkerContext, agg: Aggregate): Promis
   });
 }
 
+/**
+ * Integrity fetch counters for the batch (origin and p2p entries). Written through the
+ * application connection, where the scorer reads them (the consumer's own connection is
+ * unprefixed and reserved for the stream). A failure here is logged, not thrown: the batch
+ * is already committed, and retrying it would count its egress twice to save a few
+ * counter increments.
+ */
+async function recordEvidence(ctx: WorkerContext, fetches: Parameters<typeof fetchEvidence>[0]): Promise<void> {
+  const evidence = fetchEvidence(fetches);
+  if (evidence.length === 0) return;
+  try {
+    await recordFetches(ctx.valkey, evidence);
+    metrics.fetchEvidence.add(evidence.length, { outcome: "recorded" });
+  } catch (err) {
+    metrics.fetchEvidence.add(evidence.length, { outcome: "failed" });
+    ctx.logger.warn("recording integrity fetch evidence failed", { count: evidence.length, err });
+  }
+}
+
 /** Process one batch of entries end to end; returns how many entries were acknowledged. */
 export async function processEntries(
   ctx: WorkerContext,
@@ -138,6 +159,7 @@ export async function processEntries(
     ctx,
     aggregate(fetches, (sid) => cache.get(sid)),
   );
+  await recordEvidence(ctx, fetches);
   await client.xack(ctx.segmentStream, SEGMENT_GROUP, ...entries.map(([id]) => id));
   metrics.segmentEntries.add(entries.length);
   return entries.length;

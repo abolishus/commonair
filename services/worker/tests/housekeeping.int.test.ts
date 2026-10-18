@@ -316,7 +316,15 @@ describe("runtime", () => {
     try {
       await t.worker.start();
       const integrity = (await t.worker.runtime.queue(QUEUES.integrity).getJobSchedulers()).map((s) => s.id ?? s.key);
-      expect(integrity.sort()).toEqual(["close-stale-sessions", "live-counters", "relays-offline"]);
+      expect(integrity.sort()).toEqual([
+        "close-stale-sessions",
+        "follow-bursts",
+        "live-counters",
+        "relays-offline",
+        "score-sessions",
+        "stream-hours",
+        "verify-receipts",
+      ]);
       for (const check of Object.values(t.worker.checks)) await check();
     } finally {
       await t.close();

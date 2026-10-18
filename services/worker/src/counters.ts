@@ -8,7 +8,7 @@
  */
 import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
-import { isNull } from "drizzle-orm";
+import { and, inArray, isNull } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,6 +47,46 @@ export function creditSeconds(
   return Math.max(0, Math.min(maxElapsedSeconds, since));
 }
 
+/** Verdicts of a channel's live heartbeat set, publishing the verified count to KEYS.viewerCount. */
+async function countChannel(ctx: WorkerContext, channelId: string, nowMs: number, staleMs: number, ttl: number) {
+  const key = KEYS.viewers(channelId);
+  await ctx.valkey.zremrangebyscore(key, "-inf", nowMs - staleMs);
+  const members = (await ctx.valkey.zrange(key, 0, -1)).filter((m) => UUID.test(m));
+  const counts = { verified: 0, excluded: 0, pending: 0 };
+  if (members.length > 0) {
+    const rows = await ctx.sql<{ verdict: keyof typeof counts; n: number }[]>`
+      select verdict, count(*)::int as n from playback_sessions
+       where id = any(${members}::uuid[]) and channel_id = ${channelId} and ended_at is null
+       group by verdict`;
+    for (const r of rows) counts[r.verdict] = r.n;
+  }
+  await ctx.valkey.set(KEYS.viewerCount(channelId), String(counts.verified), "EX", ttl);
+  return counts;
+}
+
+/**
+ * Recount the published verified-viewer counts right after the integrity scorer changed
+ * verdicts or ended sessions, so an exclusion shows up at once instead of at the next
+ * live-counters tick. Only the cached count moves; viewer-seconds stay with live-counters.
+ */
+export async function refreshViewerCounts(
+  ctx: WorkerContext,
+  channelIds: readonly string[],
+  opts: Pick<CounterOptions, "staleMs" | "countTtlSeconds"> = {},
+): Promise<number> {
+  const ids = [...new Set(channelIds)];
+  if (ids.length === 0) return 0;
+  const b = schema.broadcasts;
+  const live = await ctx.db
+    .selectDistinct({ channelId: b.channelId })
+    .from(b)
+    .where(and(isNull(b.endedAt), inArray(b.channelId, ids)));
+  const nowMs = ctx.now().getTime();
+  for (const { channelId } of live)
+    await countChannel(ctx, channelId, nowMs, opts.staleMs ?? 30_000, opts.countTtlSeconds ?? 30);
+  return live.length;
+}
+
 export async function updateLiveCounters(ctx: WorkerContext, opts: CounterOptions = {}): Promise<ChannelCount[]> {
   const staleMs = opts.staleMs ?? 30_000;
   const tickSeconds = opts.tickSeconds ?? 10;
@@ -61,18 +101,7 @@ export async function updateLiveCounters(ctx: WorkerContext, opts: CounterOption
 
   const out: ChannelCount[] = [];
   for (const bc of live) {
-    const key = KEYS.viewers(bc.channelId);
-    await ctx.valkey.zremrangebyscore(key, "-inf", nowMs - staleMs);
-    const members = (await ctx.valkey.zrange(key, 0, -1)).filter((m) => UUID.test(m));
-    const counts = { verified: 0, excluded: 0, pending: 0 };
-    if (members.length > 0) {
-      const rows = await ctx.sql<{ verdict: keyof typeof counts; n: number }[]>`
-        select verdict, count(*)::int as n from playback_sessions
-         where id = any(${members}::uuid[]) and channel_id = ${bc.channelId} and ended_at is null
-         group by verdict`;
-      for (const r of rows) counts[r.verdict] = r.n;
-    }
-    await ctx.valkey.set(KEYS.viewerCount(bc.channelId), String(counts.verified), "EX", ttl);
+    const counts = await countChannel(ctx, bc.channelId, nowMs, staleMs, ttl);
 
     const prev = await ctx.valkey.set(lastTickKey(bc.id), String(nowMs), "EX", 3600, "GET");
     const lastMs = prev === null ? null : Number(prev);

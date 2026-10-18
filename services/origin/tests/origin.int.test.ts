@@ -462,10 +462,12 @@ describe("accounting", () => {
     const entries = await valkey.xrange(stream, "-", "+");
     const recorded = entries.map(([, f]) => {
       const m = Object.fromEntries(f.flatMap((_, i, a) => (i % 2 === 0 ? [[a[i], a[i + 1]]] : [])));
-      return { kind: String(m.kind), bytes: Number(m.bytes), src: String(m.src), sid: m.sid, cid: m.cid };
+      return { kind: String(m.kind), bytes: Number(m.bytes), src: String(m.src), sid: m.sid, cid: m.cid, obj: m.obj };
     });
     expect(recorded.map(({ kind, bytes, src }) => ({ kind, bytes, src }))).toEqual(served);
     for (const r of recorded) expect(r).toMatchObject({ sid: ids.viewerSession, cid: ids.channel });
+    // Media objects carry their id (rendition dir / file) for distinct-segment counting; playlists do not.
+    expect(recorded.map((r) => r.obj)).toEqual([undefined, undefined, undefined, `source/${seg?.split("?")[0]}`]);
     expect(await t.db.select().from(schema.egressSamples)).toEqual([]);
   });
 

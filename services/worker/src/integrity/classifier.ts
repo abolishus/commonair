@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The operator's network list (`INTEGRITY_DATACENTER_CIDRS_FILE`), loaded once at startup
+ * and again on SIGHUP. A list that cannot be read never stops the worker: at startup it
+ * scores without one (logged as an error), on reload it keeps the previous list.
+ */
+import { classifierFromEnv, type NetworkClassifier } from "@commonair/integrity";
+import type { Logger } from "@commonair/observability";
+
+export class ClassifierHolder {
+  private current: NetworkClassifier | undefined;
+
+  constructor(
+    private readonly logger: Logger,
+    private readonly source: Record<string, string | undefined> = process.env,
+    private readonly load: typeof classifierFromEnv = classifierFromEnv,
+  ) {}
+
+  get classifier(): NetworkClassifier | undefined {
+    return this.current;
+  }
+
+  /** Returns true when the list was (re)loaded. */
+  reload(): boolean {
+    try {
+      const { classifier, invalidLines } = this.load(this.source);
+      this.current = classifier;
+      if (invalidLines.length > 0)
+        this.logger.warn("network list has unparseable lines", {
+          count: invalidLines.length,
+          lines: invalidLines.slice(0, 20),
+        });
+      this.logger.info("network list loaded", { configured: Boolean(this.source.INTEGRITY_DATACENTER_CIDRS_FILE) });
+      return true;
+    } catch (err) {
+      this.logger.error(
+        this.current
+          ? "network list reload failed; keeping the previous list"
+          : "network list unreadable; scoring without it",
+        { err },
+      );
+      return false;
+    }
+  }
+
+  /** Reload on SIGHUP; returns a function that removes the handler. */
+  watchSighup(): () => void {
+    const onHup = () => void this.reload();
+    process.on("SIGHUP", onHup);
+    return () => process.off("SIGHUP", onHup);
+  }
+}
