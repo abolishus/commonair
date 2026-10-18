@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import type { Database } from "@commonair/db";
+import type { Logger } from "@commonair/observability";
+import type { ValkeyClient } from "@commonair/service";
+import type { ObjectStorage } from "@commonair/storage";
+import type { SigningKey } from "@commonair/tokens";
+import type { InstanceSite } from "@commonair/config/site";
+import type { NetworkClassifier } from "@commonair/integrity";
+import type { ApiEnv } from "./env.ts";
+import type { Mailer } from "./mail.ts";
+import type { RateLimitBucket, RateLimitRule, RateLimitStore } from "./lib/ratelimit.ts";
+
+/** Probes for components the API does not own, used by `instance.status`. */
+export type StatusProbe = () => Promise<void>;
+
+/** Everything a handler may touch. Built once in main.ts (or per test file). */
+export interface Deps {
+  env: ApiEnv;
+  site: InstanceSite;
+  version: string;
+  db: Database;
+  valkey: ValkeyClient;
+  storage: ObjectStorage;
+  mailer: Mailer;
+  logger: Logger;
+  signingKey: SigningKey;
+  /** Outbound HTTP (relay health checks); injectable for tests. */
+  fetch: typeof fetch;
+  rateLimits: Record<RateLimitBucket, RateLimitRule>;
+  rateLimitStore: RateLimitStore;
+  probes: Record<string, StatusProbe>;
+  /** Auth features that depend on the database schema (see buildDeps). */
+  authFeatures: { twoFactor: boolean };
+  /** Hosting-provider (datacenter) lookup for new playback sessions. */
+  classifier: NetworkClassifier;
+  now: () => Date;
+}
