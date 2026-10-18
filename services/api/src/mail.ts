@@ -54,16 +54,40 @@ export interface RecipientLimit {
   logger: Logger;
 }
 
+const GMAIL_DOMAINS = new Set(["gmail.com", "googlemail.com"]);
+
 /**
- * Caps mail per recipient address across all senders and IPs, so nobody can flood a stranger's
- * inbox with reset, magic-link or verification mail by rotating addresses. Over the cap the
- * message is dropped (logged without the address) and the caller sees a normal success, which
- * also keeps the endpoints from revealing whether an account exists.
+ * The mailbox an address delivers to, for rate limiting: lowercase, `+tag` dropped (every domain:
+ * a few providers do not honour tags, which only makes the cap stricter for them), and for Gmail
+ * dots dropped and googlemail.com folded into gmail.com.
+ */
+export function mailboxOf(address: string): string {
+  const a = address.trim().toLowerCase();
+  const at = a.lastIndexOf("@");
+  if (at <= 0) return a;
+  let local = a.slice(0, at);
+  let domain = a.slice(at + 1).replace(/\.$/, "");
+  const plus = local.indexOf("+");
+  if (plus > 0) local = local.slice(0, plus);
+  if (GMAIL_DOMAINS.has(domain)) {
+    local = local.replace(/\./g, "");
+    domain = "gmail.com";
+  }
+  return `${local}@${domain}`;
+}
+
+/**
+ * Caps mail per recipient mailbox and template across all senders and IPs, so nobody can flood a
+ * stranger's inbox with reset, magic-link or verification mail by rotating addresses or tag/dot
+ * spellings. The cap is per template, so a flood of one kind cannot block a password reset or a
+ * verification mail. Over the cap the message is dropped (logged without the address) and the
+ * caller sees a normal success, which also keeps the endpoints from revealing whether an account
+ * exists.
  */
 export function recipientLimitedMailer(inner: Mailer, limit: RecipientLimit): Mailer {
   return {
     async send(template, props, to) {
-      const subject = await hmacHex(limit.secret, `mail:${to.trim().toLowerCase()}`);
+      const subject = `${template}:${await hmacHex(limit.secret, `mail:${mailboxOf(to)}`)}`;
       const r = await limit
         .store()
         .hit(rateLimitKey("mail", subject), limit.rule(), limit.now().getTime(), crypto.randomUUID());

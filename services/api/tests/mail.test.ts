@@ -4,7 +4,7 @@
 import { expect, test } from "vite-plus/test";
 import { instanceSite, loadEnv, coreEnv } from "@commonair/config/env";
 import { MemoryMailer } from "@commonair/email";
-import { appUrl, publicLink, recipientLimitedMailer, sendNotice } from "../src/mail.ts";
+import { appUrl, mailboxOf, publicLink, recipientLimitedMailer, sendNotice } from "../src/mail.ts";
 import { memoryRateLimitStore } from "../src/lib/ratelimit.ts";
 import { createLogger } from "@commonair/observability";
 
@@ -69,4 +69,39 @@ test("mail is capped per recipient; over the cap it is dropped silently", async 
   now += 60_001;
   await send("victim@test.invalid");
   expect(inner.sent).toHaveLength(4);
+});
+
+test("mailboxOf folds tags, case and Gmail dots", () => {
+  expect(mailboxOf(" Victim+promo@Example.Test ")).toBe("victim@example.test");
+  expect(mailboxOf("v.i.c.t.i.m+x@googlemail.com")).toBe("victim@gmail.com");
+  expect(mailboxOf("V.ictim@GMAIL.com")).toBe("victim@gmail.com");
+  // Dots matter elsewhere.
+  expect(mailboxOf("first.last@example.test")).toBe("first.last@example.test");
+  expect(mailboxOf("+only@example.test")).toBe("+only@example.test");
+  expect(mailboxOf("not-an-address")).toBe("not-an-address");
+});
+
+test("the cap is per mailbox and per template", async () => {
+  const inner = new MemoryMailer({ site });
+  const store = memoryRateLimitStore();
+  const mailer = recipientLimitedMailer(inner, {
+    secret: "s".repeat(32),
+    store: () => store,
+    rule: () => ({ max: 2, windowMs: 60_000 }),
+    now: () => new Date(0),
+    logger: createLogger({ service: "t", write: () => {} }),
+  });
+  const magic = (to: string) =>
+    mailer.send("magicLink", { signInUrl: "https://air.example.invalid/x", expiresInMinutes: 10 }, to);
+  await magic("victim+1@gmail.com");
+  await magic("v.ictim+2@googlemail.com");
+  expect(await magic("VICTIM@gmail.com")).toBe(""); // same mailbox: capped
+  expect(inner.sent).toHaveLength(2);
+  // A flood of magic links does not block the password reset.
+  await mailer.send(
+    "passwordReset",
+    { resetUrl: "https://air.example.invalid/reset", expiresInMinutes: 60 },
+    "victim@gmail.com",
+  );
+  expect(inner.sent).toHaveLength(3);
 });
