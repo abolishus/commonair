@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { Executor } from "./client.ts";
+import { legalSeedDocuments } from "./legal/index.ts";
 import { governanceSettings } from "./schema/coop.ts";
+import { legalDocuments } from "./schema/safety.ts";
 
 /**
  * Default governance settings. Protected settings can only change through a
@@ -145,4 +147,21 @@ export async function seedGovernanceSettings(db: Executor, overrides: Governance
       .values({ key: s.key, value, protected: s.protected, description: s.description })
       .onConflictDoNothing({ target: governanceSettings.key });
   }
+}
+
+/**
+ * Insert the shipped legal drafts that do not exist yet, by `(kind, version)`. Never updates
+ * an existing row: users accepted that exact text. Returns the number of rows inserted.
+ */
+export async function seedLegalDocuments(db: Executor): Promise<number> {
+  let inserted = 0;
+  for (const d of legalSeedDocuments()) {
+    const rows = await db
+      .insert(legalDocuments)
+      .values(d)
+      .onConflictDoNothing({ target: [legalDocuments.kind, legalDocuments.version] })
+      .returning({ id: legalDocuments.id });
+    inserted += rows.length;
+  }
+  return inserted;
 }
