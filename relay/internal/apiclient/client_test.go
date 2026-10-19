@@ -54,6 +54,33 @@ func TestRegisterSendsContractShape(t *testing.T) {
 	}
 }
 
+func TestHeartbeatSendsDrainingFlag(t *testing.T) {
+	var got []map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		got = append(got, m)
+		_, _ = w.Write([]byte(`{"status":"offline","originPublicKey":"k"}`))
+	}))
+	defer ts.Close()
+	c, _ := New(ts.URL, "t", "v", nil)
+	if _, err := c.Heartbeat(context.Background(), HeartbeatRequest{ActiveViewers: 2}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.Heartbeat(context.Background(), HeartbeatRequest{Draining: true})
+	if err != nil || resp.Status != "offline" {
+		t.Fatalf("%+v %v", resp, err)
+	}
+	if got[0]["draining"] != false || got[0]["activeViewers"] != float64(2) || got[1]["draining"] != true {
+		t.Fatalf("bodies %v", got)
+	}
+	for _, k := range []string{"activeViewers", "egressMbps", "cacheBytes", "draining"} {
+		if _, ok := got[1][k]; !ok {
+			t.Fatalf("missing %s in %v", k, got[1])
+		}
+	}
+}
+
 func TestErrorsAreClassified(t *testing.T) {
 	status := http.StatusUnauthorized
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -133,6 +133,19 @@ func (v *Viewers) Admit(sid string, now time.Time) bool {
 	return true
 }
 
+// Touch marks sid active only if it is already a known, active session. A
+// draining relay keeps serving the viewers it has but takes no new ones.
+func (v *Viewers) Touch(sid string, now time.Time) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	seen, ok := v.lastSeen[sid]
+	if !ok || now.Sub(seen) > ViewerWindow {
+		return false
+	}
+	v.lastSeen[sid] = now
+	return true
+}
+
 func (v *Viewers) prune(now time.Time) {
 	v.lastPrune = now
 	for sid, seen := range v.lastSeen {

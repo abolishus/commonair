@@ -133,6 +133,8 @@ type fakeAPI struct {
 	status        string
 	receiptStatus int // non-zero: fail receipts with this status
 	unknownOnce   bool
+	heartbeatFail int // non-zero: fail heartbeats with this status
+	allFail       int // non-zero: fail every call with this status
 }
 
 func newFakeAPI(t *testing.T, originURL string, originKey ed25519.PublicKey) *fakeAPI {
@@ -149,6 +151,10 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.allFail != 0 {
+		writeJSON(w, a.allFail, map[string]any{"code": "UNAVAILABLE"})
+		return
+	}
 	switch r.URL.Path {
 	case "/api/relay/register":
 		var in apiclient.RegisterRequest
@@ -166,6 +172,10 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		if a.unknownOnce {
 			a.unknownOnce = false
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "UNAUTHORIZED"})
+			return
+		}
+		if a.heartbeatFail != 0 {
+			writeJSON(w, a.heartbeatFail, map[string]any{"code": "UNAVAILABLE"})
 			return
 		}
 		var in apiclient.HeartbeatRequest
