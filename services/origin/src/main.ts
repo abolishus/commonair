@@ -15,7 +15,6 @@ import {
 import { createDb } from "@commonair/db";
 import { createLogger, initTelemetry } from "@commonair/observability";
 import { createValkey, runService, valkeyCheck } from "@commonair/service";
-import { z } from "zod";
 import { MAX_BLOCKING_MS } from "./llhls.ts";
 import { createMetrics } from "./metrics.ts";
 import { createOrigin } from "./origin.ts";
@@ -23,13 +22,6 @@ import { createOrigin } from "./origin.ts";
 const env = loadEnv(
   coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(mediaEnv).and(playbackEnv).and(servicePorts),
 );
-// CONTRACT-REQUEST: add ORIGIN_ISSUANCE_ENABLED (bool, default true) to playbackEnv and .env.example;
-// read locally until then. With it on, replicas elect one issuance leader per tick through Valkey.
-const issuanceEnabled = z
-  .enum(["true", "false", "1", "0", ""])
-  .default("true")
-  .transform((v) => v !== "false" && v !== "0")
-  .parse(process.env.ORIGIN_ISSUANCE_ENABLED);
 
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "origin" });
 const logger = createLogger({ service: "origin", level: env.LOG_LEVEL });
@@ -49,7 +41,7 @@ const origin = await createOrigin({
   cacheMb: env.ORIGIN_CACHE_MB,
   cdn: { provider: env.CDN_PROVIDER, baseUrl: env.CDN_BASE_URL },
   trustedProxyCidrs: env.TRUSTED_PROXY_CIDRS,
-  issuance: { enabled: issuanceEnabled },
+  issuance: { enabled: env.ORIGIN_ISSUANCE_ENABLED },
   logger,
   metrics: createMetrics(),
 });

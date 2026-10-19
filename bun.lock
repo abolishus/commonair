@@ -233,6 +233,15 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/safe-regex": {
+      "name": "@commonair/safe-regex",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/service": {
       "name": "@commonair/service",
       "version": "0.0.0",
@@ -336,6 +345,7 @@
         "@commonair/email": "workspace:*",
         "@commonair/integrity": "workspace:*",
         "@commonair/observability": "workspace:*",
+        "@commonair/safe-regex": "workspace:*",
         "@commonair/service": "workspace:*",
         "@commonair/storage": "workspace:*",
         "@commonair/tokens": "workspace:*",
@@ -366,6 +376,7 @@
         "@commonair/contracts": "workspace:*",
         "@commonair/db": "workspace:*",
         "@commonair/observability": "workspace:*",
+        "@commonair/safe-regex": "workspace:*",
         "@commonair/service": "workspace:*",
         "@commonair/tokens": "workspace:*",
         "@opentelemetry/api": "catalog:",
@@ -581,6 +592,8 @@
     "@commonair/origin": ["@commonair/origin@workspace:services/origin"],
 
     "@commonair/patronage": ["@commonair/patronage@workspace:packages/patronage"],
+
+    "@commonair/safe-regex": ["@commonair/safe-regex@workspace:packages/safe-regex"],
 
     "@commonair/scripts": ["@commonair/scripts@workspace:scripts"],
 

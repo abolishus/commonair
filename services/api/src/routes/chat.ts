@@ -20,7 +20,7 @@ import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
-import { unsafeFilterRegexReason } from "../lib/safe-regex.ts";
+import { unsafeFilterRegexReason } from "@commonair/safe-regex";
 
 const { chatMessages, chatBans, channelRoles, users, wordFilters, emotes, modActions, channels, subscriptions } =
   schema;

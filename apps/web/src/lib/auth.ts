@@ -1,16 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/**
- * better-auth's HTTP surface as services/api configures it. These routes are not part of the
- * oRPC contract, so they are pinned here (the harness pins the same paths in `src/users.ts`).
- */
-export const AUTH_ROUTES = {
-  altchaChallenge: "/api/auth/altcha-challenge",
-  signUp: "/api/auth/sign-up/email",
-  signIn: "/api/auth/sign-in/email",
-  signOut: "/api/auth/sign-out",
-} as const;
+import { AUTH_ROUTES } from "@commonair/contracts/auth";
+
+/** better-auth's HTTP surface as services/api mounts it (outside the oRPC contract). */
+export { AUTH_ROUTES };
 
 export interface SignUpInput {
   email: string;

@@ -72,6 +72,18 @@ export const PATRONAGE_STATUSES = ["draft", "computed", "approved", "distributed
 export const INTEGRITY_SUBJECTS = ["session", "user", "channel", "relay", "follow", "chat_message", "raid"] as const;
 export const INTEGRITY_DECISIONS = ["pending_review", "excluded", "allowed"] as const;
 export const APPEAL_KINDS = ["integrity", "moderation", "dmca", "account"] as const;
+/**
+ * What an appeal is about. Integrity appeals use `session`, `user` or `integrity_flag` (the
+ * integrity allowance rules read exactly these); the others name the decision's own table.
+ */
+export const APPEAL_SUBJECTS = [
+  "session",
+  "user",
+  "integrity_flag",
+  "moderation_action",
+  "dmca_notice",
+  "account_action",
+] as const;
 export const APPEAL_STATUSES = ["open", "upheld", "overturned"] as const;
 export const ACTOR_TYPES = ["user", "moderator", "admin", "system", "bot", "app"] as const;
 

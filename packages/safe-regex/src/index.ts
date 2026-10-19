@@ -17,7 +17,7 @@
  * chain may hold at most one unbounded repeat, and the product of its repeat choices is capped.
  * This keeps the backtracking cost per start position small and roughly linear in the input.
  *
- * Pure module with no dependencies so chat can share it (see contract request in the 2A report).
+ * Pure module with no dependencies, shared by the API (validation on save) and chat (compile).
  */
 
 export const MAX_PATTERN_LENGTH = 200;

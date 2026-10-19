@@ -177,6 +177,8 @@ export const playbackEnv = z.object({
   CDN_BASE_URL: z.url().optional(),
   CDN_BURST_VIEWER_THRESHOLD: z.coerce.number().int().positive().default(5000),
   ORIGIN_CACHE_MB: z.coerce.number().int().positive().default(512),
+  /** Compute relay issuance on this origin; replicas elect one leader per tick through Valkey. */
+  ORIGIN_ISSUANCE_ENABLED: bool.default(true),
 });
 
 export const integrityEnv = z.object({
@@ -250,6 +252,15 @@ export const servicePorts = z.object({
     .default(false),
 });
 
+/** IRC gateway admission limits (per process). */
+export const ircEnv = z.object({
+  IRC_MAX_CONNECTIONS: z.coerce.number().int().positive().default(20_000),
+  IRC_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().positive().default(50),
+  /** Token bucket for new connections per client address: burst size and refill rate. */
+  IRC_CONNECT_BURST_PER_IP: z.coerce.number().int().positive().default(20),
+  IRC_CONNECT_PER_SECOND_PER_IP: z.coerce.number().positive().default(2),
+});
+
 export class EnvError extends Error {
   constructor(public readonly issues: z.core.$ZodIssue[]) {
     super(`Invalid environment:\n${issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n")}`);
@@ -308,4 +319,5 @@ export const ALL_ENV_SCHEMAS = {
   workerEnv,
   infraEnv,
   servicePorts,
+  ircEnv,
 } as const;

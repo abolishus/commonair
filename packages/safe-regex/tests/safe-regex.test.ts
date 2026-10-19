@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { MAX_PATTERN_LENGTH, unsafeFilterRegexReason } from "../src/lib/safe-regex.ts";
+import { MAX_PATTERN_LENGTH, unsafeFilterRegexReason } from "../src/index.ts";
 
 /** Known-catastrophic or exponential/polynomial shapes: every one must be refused. */
 const CATASTROPHIC = [

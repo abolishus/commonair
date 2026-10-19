@@ -19,6 +19,7 @@
     "@commonair/contracts": "workspace:*",
     "@commonair/db": "workspace:*",
     "@commonair/observability": "workspace:*",
+    "@commonair/safe-regex": "workspace:*",
     "@commonair/service": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@opentelemetry/api": "catalog:",

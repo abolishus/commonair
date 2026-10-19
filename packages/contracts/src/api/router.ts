@@ -2079,7 +2079,7 @@ export const contract = {
       .input(
         z.object({
           kind: z.enum(E.APPEAL_KINDS),
-          subjectType: z.string().min(1).max(40),
+          subjectType: z.enum(E.APPEAL_SUBJECTS),
           subjectId: Id,
           body: z.string().min(10).max(5000),
         }),

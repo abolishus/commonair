@@ -7,23 +7,15 @@
  * Mailpit, sign in. Usernames are unique per run so every scenario is idempotent against a
  * long-lived stack.
  */
+import { AUTH_ROUTES } from "@commonair/contracts/auth";
 import type { Me } from "@commonair/contracts/dto";
 import { solveAltcha } from "./altcha.ts";
 import { type Api, type ApiClientOptions, createApi } from "./api/client.ts";
 import { CookieJar } from "./api/cookies.ts";
 import { Mailpit, findTokenLink } from "./mailpit.ts";
 
-/**
- * better-auth's HTTP surface as configured by services/api. Auth routes are not part of the oRPC
- * contract, so they are pinned here in one place.
- * CONTRACT-REQUEST: export these paths (and the ALTCHA field name) from @commonair/contracts.
- */
-export const AUTH_ROUTES = {
-  altchaChallenge: "/api/auth/altcha-challenge",
-  signUp: "/api/auth/sign-up/email",
-  signIn: "/api/auth/sign-in/email",
-  signOut: "/api/auth/sign-out",
-} as const;
+/** better-auth's HTTP surface as services/api mounts it (outside the oRPC contract). */
+export { AUTH_ROUTES };
 
 export const ALTCHA_HEADER = "x-altcha";
 export const DEFAULT_PASSWORD_LENGTH = 24;

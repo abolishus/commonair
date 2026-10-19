@@ -9,6 +9,7 @@ export * from "./chat.ts";
 export * from "./tokens.ts";
 export * from "./internal.ts";
 export * from "./currency.ts";
+export * from "./auth.ts";
 export * from "./api/common.ts";
 export * as dto from "./api/entities.ts";
 export { contract, type Contract } from "./api/router.ts";
