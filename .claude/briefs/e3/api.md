@@ -49,6 +49,7 @@ git worktree: run `git merge main --no-edit` first.
   active; draining heartbeat removes it from `KEYS.relays` and a relay-assigned playback session
   gets `switchTo` with an origin playlist on its next heartbeat; a suspended relay heartbeats and
   sees `suspended`, is not assigned, and `reinstate` brings it back after a health check.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

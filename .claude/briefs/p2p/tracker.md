@@ -97,6 +97,7 @@ only touches `bun.lock` workspace entries; mention it in your final message).
   networks with `X-Forwarded-For` from a trusted proxy CIDR configured for the test). Refusals:
   no token, bad signature, too old `iat`, session not heartbeating, second socket for one
   session, oversized frame. A lapsed heartbeat closes the socket.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

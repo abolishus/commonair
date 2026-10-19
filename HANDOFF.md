@@ -5,11 +5,12 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # HANDOFF — for the next head agent
 
-Written 2026-10-18 at the end of orchestration session three. Read this, then
+Written 2026-10-18, updated at the end of orchestration session four (E3 finished). Read this, then
 [AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) ("Milestones — end-to-end vertical slices"),
 [PROGRESS.md](PROGRESS.md), [docs/architecture.md](docs/architecture.md), ADRs 0001–0004 in
 `docs/decisions/`, [docs/testing/e1-selectors.md](docs/testing/e1-selectors.md),
-[docs/testing/e2-selectors.md](docs/testing/e2-selectors.md) and
+[docs/testing/e2-selectors.md](docs/testing/e2-selectors.md),
+[docs/testing/e3-selectors.md](docs/testing/e3-selectors.md), ADR 0005 (P2P tracker) and
 [docs/deploy/railway.md](docs/deploy/railway.md). The original constraints still apply: FOSS-first,
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
@@ -22,15 +23,29 @@ an independent reviewer **before** every merge and a focused re-review of fix ro
 - Focus on development; after review, merge and push `main` so the user can test. Ask before
   pushing unless the user has said to push. Gate failures are fixed "in post".
 - Briefs must tell units the same (no verify, no dev servers/browsers, no live scenario runs).
+- Session four: the user asked for **lighter review** — one reviewer pass reporting HIGHs only, fix
+  rounds without a second review; small UI units get a head-agent rules scan instead of a reviewer.
 
 ## Where things stand
 
-`main` is pushed (last merge `61c6e2f`, plus this handoff commit). Everything below was reviewed
-before merge; every HIGH had a fix round and a focused re-review. **Not yet tested live by the
-user**: the E2 slice end to end (`e2e-social`), the rebuilt worker/origin integrity wiring, and the
-harness against Railway staging.
+`main` is pushed with the whole of **slice E3** merged (session four). **Not yet tested live by the
+user**: `e2e-relay`, the E2 slice end to end (`e2e-social`), the worker/origin integrity wiring and
+the harness against Railway staging.
 
-### Merged this session
+### Merged in session four
+
+| Area          | What landed                                                                                                                                                                                                                                                                                  | Review                        |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| E3 API        | relay lifecycle: retire (`retired_at` + token rotation, 401 forever), offline relays rejoin after a passing health check, draining heartbeat → offline + out of `KEYS.relays`, suspended relays authenticate but never publish, CAS status writes + re-read after HSET, README state diagram | 1 HIGH + race → fixed         |
+| E3 relay (Go) | draining heartbeat on SIGTERM, drain serves only current sessions then flushes receipts, explicit heartbeat state machine (offline/401/404/412 → re-register; suspended → 410), LL-HLS blocking-reload re-check, local-stack README                                                          | 1 HIGH (drain delay) → fixed  |
+| E3 web        | `/relays` (create/list/retire, token + run command once), `relays-link`, player `data-source` across `switchTo`, throttled heartbeat carry-over                                                                                                                                              | head rules scan               |
+| E3 harness    | `e2e-relay` (six steps, Go relay helper, TypeScript liar relay with inflated signed receipts), knobs in `harness/src/relay-plan.ts`; `inFull: false` (needs Go + private-network relays, ~15 min)                                                                                            | not reviewed (harness only)   |
+| P2P tracker   | `services/tracker`: WebTorrent WS tracker, completed-exchange links, `p2pChannelNet` per-channel network sets that leaving never shrinks, newer-token socket replacement, backpressure 1 MiB, IPv6 /64 connection key                                                                        | 2 HIGH (farm evasion) → fixed |
+| P2P integrity | per-session evidence: own-channel announce + exchange with another network + channel-wide cap of 16 per network + linked network under the cap; read errors never evidence                                                                                                                   | rework after HIGH             |
+| Legal         | draft legal documents seeded by the migrate job (not test DBs), legal API, consent on the `write` rate limit with bounded input                                                                                                                                                              | 1 HIGH (no seed) → fixed      |
+| Head          | `KEYS.p2pChannelNet` + amended `P2P_EVIDENCE` rule, `@commonair/db` legal exports, migration `0012` backfills `retired_at` for relays retired by the old remove                                                                                                                              | orchestrator                  |
+
+### Merged in session three
 
 | Area                    | What landed                                                                                                                                                                                                                                                                                                                                                           | Review                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
@@ -44,6 +59,11 @@ harness against Railway staging.
 ## For the user to run (agents: don't, unless asked)
 
 ```
+# E3: needs Go and OUTBOUND_ALLOW_PRIVATE_NETWORKS=true in .env
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set via=api
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set liar=false --set drain=false
+podman compose --profile p2p up -d tracker                   # P2P tracker
 bun scripts/infra.ts stack                                   # rebuild + start everything
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-social
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-social --set via=api   # backend only
@@ -60,38 +80,43 @@ Staging: set `HARNESS_*` URLs from `railway domain list` and `HARNESS_MAILPIT_AU
 
 ## Open items (not done)
 
-- **Contract requests (head agent):**
-  - integrity: judge P2P only with server-side swarm evidence (tracker announces / swarm size ≥ 2);
-    for `p2p` sessions judge "too few" against the reduced share but "too many" against share 1.
-    Until then the API records `origin` even for P2P viewers (client `p2pCapable` must not lower
-    the fetch bar). Needs `services/tracker`, which is still not built.
-  - `CidrClassifier` public `size` getter (worker reads private fields via `Reflect.get`).
-  - API surfaces stored word filters the new validator refuses: `WordFilter` DTO
-    `invalid: boolean`, `invalidReason: string | null` (chat skips them on load and only counts
-    `chat.filter.skipped`; a skipped `block` filter now passes messages — owner is not told).
-  - `appeals.create` on the `write` rate-limit bucket; heartbeat response `throttled` hint so
-    clients don't commit sub-floor deltas.
-  - optional `vods.failed_reason`; `ISSUANCE_KEYS` into contracts once the worker owns issuance.
-- Overturning a moderation appeal records the decision only (does not lift the ban); a relay leaving
-  moves viewers to `origin` (P2P-ness not stored server-side).
+- **E3 follow-ups (session four):**
+  - `playback_sessions.relay_until` (contract + DB): today a session switched off a relay is
+    re-recorded as `origin`/no relay, which fails safe (time before the switch is judged as origin,
+    honest relay viewers can be undercounted). With `relay_until`, integrity can judge the relay
+    part against receipts and the rest against origin fetches.
+  - Web: 320 px, keyboard flow and toasts on `/relays`, and the hls.js handover on `switchTo`, are
+    unchecked in a browser. Optional: `formatBytes` into `packages/ui`; a `source` field on the
+    heartbeat response so the player stops decoding the token's `src` claim for display.
+  - Harness: `e2e-relay` is not in `full`; the liar's 5× served bytes is ~1.25× issuance on a
+    multi-rendition ladder (still suspended as "repeated"; `--set liarFactor` raises it).
+  - Tracker: no test with a real p2p-media-loader client yet; `clientIp`/`canonicalIp`/netrange
+    helpers are copied into `services/tracker/src/ip.ts` (move into `@commonair/service`).
+  - Info hashes are still client-chosen (the per-channel cap makes that harmless for evidence);
+    deriving the allowed set from the channel's swarm ids would also stop junk swarms.
+  - Legal: `LegalDocument` DTO lacks `requiresAcceptance` (clients send every id); no retention job
+    for anonymous consent rows.
+- **Contract requests still open:** `CidrClassifier` public `size` getter; `WordFilter` DTO
+  `invalid`/`invalidReason`; `appeals.create` on the `write` bucket; `ISSUANCE_KEYS` into contracts.
+- Overturning a moderation appeal records the decision only (does not lift the ban).
 - IP canonicalization changed `ip_hash` for clients Bun reported as `::ffff:a.b.c.d`: owner-IP
   exclusion for broadcasts live across that deploy compares the old `last_used_ip_hash` until the
   streamer re-publishes (services/api README).
 - Some regex filters the old API check accepted are now refused (e.g. `(?:https?://)?\S+`,
   `(?:a(?:bc|bd))+`; safe rewrites are suggested in the error text).
-- Chat: test for OAuth revocation on an open socket. Media: internal RTSP password in ffmpeg argv.
-  Integrity: CDN-delivered sessions not fetch-judged. `legal.current` has no seed docs locally.
-  Web: ALTCHA tick colour token, large chunk warning, strings for media health codes; LOW: the
-  moderation `IconButton`-inside-`DropdownMenuTrigger` pattern needs a keyboard check in a browser.
-  Governance: `subscriptionQualifies` / `closeElection` tests.
+- Media: internal RTSP password in ffmpeg argv. Integrity: CDN-delivered sessions not fetch-judged.
+  Web: ALTCHA tick colour token, large chunk warning (`hls-*.js` 574 kB); LOW: the moderation
+  `IconButton`-inside-`DropdownMenuTrigger` pattern needs a keyboard check in a browser.
 
 ## Next slices
 
-E3 relay joins and serves viewers + viewbot swarm excluded (local relays need
-`OUTBOUND_ALLOW_PRIVATE_NETWORKS=true`); the P2P tracker + swarm evidence pairs naturally with it
-(both are bandwidth levers). E4 money (manual adapter, then Stripe against stripe-mock); E5 co-op;
-E6 the rest. Each slice: a `docs/testing/<slice>-selectors.md` contract, briefs in
-`.claude/briefs/<slice>/`, API + worker + web + harness scenario together.
+E3 is built; milestone E3 is reached when the user's live `e2e-relay` run passes. **E4 starts with
+the application design-system track** (shadcn CLI primitives under one theme, shared compositions in
+`packages/ui`, page stories per mockup board, enforcement tests, apps/web migration; the user's
+session-four prompt has the full brief and the mockup canvas URL), then money on top of it (manual
+adapter, then Stripe against stripe-mock). E5 co-op; E6 the rest. Each slice: a
+`docs/testing/<slice>-selectors.md` contract, briefs in `.claude/briefs/<slice>/`, API + worker +
+web + harness scenario together.
 
 ## Known issues and process lessons
 
@@ -100,7 +125,8 @@ E6 the rest. Each slice: a `docs/testing/<slice>-selectors.md` contract, briefs 
 - Stale `commonair-it-*` compose stacks from old integration runs may be lying around; remove them
   if they get in the way. `podman compose up` can hang when another process runs compose: kill it
   and use `VERIFY_INFRA=external`.
-- Worktrees: tell every unit to `git merge main` first; resume a finished unit with SendMessage for
+- Worktrees: tell every unit to `git merge main` first; after merging a branch that adds a
+  workspace package, run `bun install` in the main checkout before `tsc` (module resolution); resume a finished unit with SendMessage for
   its fix round (it keeps context). Old worktrees under `.claude/worktrees/` can be cleaned up.
 - Local machine: an unrelated Vite dev server holds `[::1]:3000`; the local `.env` uses
   `WEB_PORT=3100`, `PUBLIC_URL`/`AUTH_TRUSTED_ORIGINS` on 3100. The local `.env` has

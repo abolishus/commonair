@@ -65,6 +65,7 @@ repository. You work in your own git worktree: run `git merge main --no-edit` fi
   tracker would, run the scoring job over sessions with fetch evidence at ~15 % of expected:
   evidenced session verifies, the same session without a second network is flagged
   `too_few_segments`. The relay_id gap fix and immediate `relays:active` removal on suspension.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

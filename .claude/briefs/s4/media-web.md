@@ -45,6 +45,7 @@ repository. You work in your own git worktree: run `git merge main --no-edit` fi
    const in `services/media/src/health/rules.ts` and have web import it only if web already
    depends on media — otherwise mirror the list in web and file a contract request to move it into
    `packages/contracts/src/enums.ts`).
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

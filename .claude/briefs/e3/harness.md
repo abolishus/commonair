@@ -61,6 +61,7 @@ Do not look outside the repository. You work in your own git worktree: run `git 
   existing selector-parsing test), step-plan building from `--set` knobs.
 - Do **not** run the scenario against a live stack (the user does); `bunx tsc -p harness
   --noEmit` and the harness unit tests must pass.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

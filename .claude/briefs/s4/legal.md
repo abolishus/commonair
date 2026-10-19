@@ -56,6 +56,7 @@ outside the repository. You work in your own git worktree: run `git merge main -
 - Seed integration test: seeding twice inserts once; every kind present.
 - API tests: current returns five kinds with placeholders rendered (no `{{` left), get by
   version/404, consent stored for signed-in and anonymous callers, wrong `policyVersion` → 400.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

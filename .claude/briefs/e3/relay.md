@@ -47,6 +47,7 @@ git worktree: run `git merge main --no-edit` first.
 - Heartbeat `offline` → re-register; `suspended` → 410 serving; table tests for the client state
   machine.
 - Playlist rewrite cases for LL-HLS tags if you change them.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

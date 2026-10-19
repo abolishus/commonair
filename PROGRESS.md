@@ -20,6 +20,20 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session four (2026-10-18): E3 slice built
+
+All merged and pushed to `main`; live testing is the user's (HANDOFF.md "For the user to run").
+Review was lighter at the user's request (HIGHs only, no re-review of fix rounds).
+
+- **E3 built**: API relay lifecycle (retire/rejoin/drain/suspend), Go relay draining + heartbeat
+  state machine, web `/relays` + player `data-source`, harness `e2e-relay` with a liar relay.
+  Contract: `docs/testing/e3-selectors.md`. Milestone E3 is reached when the user's live
+  `e2e-relay` run passes.
+- P2P: `services/tracker` built; integrity judges P2P only on per-session evidence with a
+  channel-wide per-network cap (ADR 0005, `KEYS.p2pChannelNet`).
+- Legal drafts seeded by the migrate job; legal API; consent rate-limited.
+- Next: E4 opens with the design-system track, then money (PLAN.md).
+
 ## Session three (2026-10-18): E2 slice built, review-gated
 
 All merged after independent review (HIGH findings re-reviewed), pushed to `main`; live testing is

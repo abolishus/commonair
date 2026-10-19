@@ -42,6 +42,7 @@ work in your own git worktree: run `git merge main --no-edit` first.
 ## Tests you must add
 
 - As above. Name the root cause of the flake in your final message.
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness

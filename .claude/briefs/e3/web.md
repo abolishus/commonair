@@ -42,6 +42,7 @@ first. Do not look outside the repository. You work in your own git worktree: ru
    builder, heartbeat delta carry-over on `throttled`, switchTo source update).
 
 `vp build` must pass (note any chunk-size warning in your final message).
+
 ## Done means (session four process rules — every brief)
 
 - **Targeted checks only.** The user runs the gate (`bun run verify`), image rebuilds, harness
