@@ -14,6 +14,7 @@
   "dependencies": {
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
+    "@commonair/db": "workspace:*",
     "@commonair/observability": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@orpc/client": "catalog:",

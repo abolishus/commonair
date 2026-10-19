@@ -200,6 +200,8 @@ export const QUEUES = {
   notifications: "notifications",
   retention: "retention",
   backups: "backups",
+  /** Money housekeeping: pending-payment expiry, manual renewals, hold release (E4b). */
+  payments: "payments",
 } as const;
 
 /**
