@@ -149,6 +149,8 @@ export const vods = pgTable(
     thumbnailKey: text(),
     expiresAt: ts(),
     removedReason: text(),
+    /** Stable code for why processing failed (status `failed`); never free text or personal data. */
+    failedReason: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

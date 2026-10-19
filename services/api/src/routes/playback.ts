@@ -169,7 +169,7 @@ export const playback = {
     // A beat sooner than the floor is ignored outright: no counters, no clock, no verification
     // evidence. Flooding cannot mint watch time, inflate heartbeat counts or feed the scorer.
     // Token refresh and relay moves wait for the next beat at the normal interval.
-    if (wallSeconds < MIN_HEARTBEAT_WALL_SECONDS) return { ok: true as const };
+    if (wallSeconds < MIN_HEARTBEAT_WALL_SECONDS) return { ok: true as const, throttled: true };
 
     const raw = await deps.valkey.hgetall(verifyKey(s.id));
     const state: VerifyState = { consistent: Number(raw.consistent ?? 0) || 0, engaged: raw.engaged === "1" };

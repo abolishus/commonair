@@ -64,6 +64,23 @@ export function checkFilterPattern(pattern: string, isRegex: boolean) {
   if (reason) throw badRequest(`Filter pattern refused: ${reason}`);
 }
 
+/**
+ * Chat re-validates stored filters on load and skips the ones the current validator refuses, so
+ * the owner sees the same verdict here (filters stored before a stricter rule landed).
+ */
+function filterDto(f: typeof wordFilters.$inferSelect) {
+  const invalidReason = f.isRegex ? unsafeFilterRegexReason(f.pattern) : null;
+  return {
+    id: f.id,
+    pattern: f.pattern,
+    isRegex: f.isRegex,
+    action: f.action,
+    replacement: f.replacement,
+    invalid: invalidReason !== null,
+    invalidReason,
+  };
+}
+
 async function badgesFor(deps: Deps, c: ChannelRow, userIds: string[]) {
   const ids = [...new Set(userIds)];
   const out = new Map<
@@ -428,13 +445,7 @@ export const chat = {
         .from(wordFilters)
         .where(eq(wordFilters.channelId, c.id))
         .orderBy(wordFilters.createdAt);
-      return rows.map((f) => ({
-        id: f.id,
-        pattern: f.pattern,
-        isRegex: f.isRegex,
-        action: f.action,
-        replacement: f.replacement,
-      }));
+      return rows.map(filterDto);
     }),
 
     create: os.chat.filters.create.handler(async ({ context, input }) => {
@@ -473,13 +484,7 @@ export const chat = {
         return f;
       });
       await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
-      return {
-        id: row.id,
-        pattern: row.pattern,
-        isRegex: row.isRegex,
-        action: row.action,
-        replacement: row.replacement,
-      };
+      return filterDto(row);
     }),
 
     remove: os.chat.filters.remove.handler(async ({ context, input }) => {

@@ -192,6 +192,8 @@ export const Vod = z.object({
   playlistUrl: z.string().nullable(),
   createdAt: Timestamp,
   expiresAt: Timestamp.nullable(),
+  /** Why processing failed (status `failed`), as a stable code, else null. */
+  failedReason: z.string().nullable(),
 });
 export const Clip = z.object({
   id: Id,
@@ -287,6 +289,12 @@ export const WordFilter = z.object({
   isRegex: z.boolean(),
   action: z.enum(E.WORD_FILTER_ACTIONS),
   replacement: z.string().nullable(),
+  /**
+   * The pattern no longer passes the safe-regex validator (stored before a stricter rule landed).
+   * Chat skips it on load, so it filters nothing until the owner rewrites or removes it.
+   */
+  invalid: z.boolean(),
+  invalidReason: z.string().nullable(),
 });
 export const Emote = z.object({
   id: Id,

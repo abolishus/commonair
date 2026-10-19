@@ -8,7 +8,7 @@ import { createLogger, type Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { DEFAULT_CONCURRENCY } from "../src/env.ts";
-import { ClassifierHolder, entryCount } from "../src/integrity/classifier.ts";
+import { ClassifierHolder } from "../src/integrity/classifier.ts";
 import { fetchEvidence } from "../src/integrity/fetches.ts";
 import {
   INTEGRITY_BATCH,
@@ -246,10 +246,10 @@ describe("run lock lapses", () => {
 });
 
 describe("ClassifierHolder: empty reloads", () => {
-  test("entryCount counts ranges and ASNs", () => {
-    expect(entryCount(parseNetworkList("").classifier)).toBe(0);
-    expect(entryCount(parseNetworkList("# only a comment\n\nnot-a-cidr\n").classifier)).toBe(0);
-    expect(entryCount(parseNetworkList("203.0.113.0/24 a\n2001:db8::/32 b\nAS64500 c\n").classifier)).toBe(3);
+  test("CidrClassifier.size counts ranges and ASNs", () => {
+    expect(parseNetworkList("").classifier.size).toBe(0);
+    expect(parseNetworkList("# only a comment\n\nnot-a-cidr\n").classifier.size).toBe(0);
+    expect(parseNetworkList("203.0.113.0/24 a\n2001:db8::/32 b\nAS64500 c\n").classifier.size).toBe(3);
   });
 
   test("a reload that parses to no entries keeps the previous list and warns", () => {

@@ -613,6 +613,11 @@ export const contract = {
           ok: z.literal(true),
           token: z.string().optional(),
           switchTo: z.string().optional(),
+          /**
+           * The beat came sooner than the server's floor and was ignored (nothing recorded).
+           * Clients keep accumulating their counters and send them with the next beat.
+           */
+          throttled: z.boolean().optional(),
         }),
       ),
     end: base
@@ -2070,6 +2075,7 @@ export const contract = {
 
   appeals: {
     create: user
+      .meta({ access: "user", rateLimit: "write" })
       .route({
         method: "POST",
         path: "/appeals",

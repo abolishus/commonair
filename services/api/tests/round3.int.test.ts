@@ -92,7 +92,9 @@ describe("heartbeat floor", () => {
 
     for (let i = 0; i < 20; i++) {
       clock += 200; // 4 s in total: still under the 5 s floor
-      expect((await beat(1)).status).toBe(200);
+      const r = await beat(1);
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ ok: true, throttled: true });
     }
     const after = await sessionRow(s.sessionId);
     expect(after).toEqual(before);
@@ -100,7 +102,9 @@ describe("heartbeat floor", () => {
 
     // The first beat past the floor is credited normally.
     clock += 6000;
-    expect((await beat(10)).status).toBe(200);
+    const counted = await beat(10);
+    expect(counted.status).toBe(200);
+    expect(counted.body).not.toHaveProperty("throttled");
     const credited = await sessionRow(s.sessionId);
     expect(credited).toMatchObject({ heartbeats: 1, bytesHttp: 5000, bytesP2p: 700, stalls: 2, latencyMs: 2000 });
     expect(credited.lastHeartbeatAt?.getTime()).toBe(clock);
@@ -111,6 +115,28 @@ describe("heartbeat floor", () => {
     expect((await beat(1)).status).toBe(200);
     expect(await sessionRow(s.sessionId)).toEqual(credited);
     expect((await valkeyState()).evidence).toBe(1);
+  });
+});
+
+describe("word filters", () => {
+  test("a stored regex the validator now refuses is listed as invalid with the reason", async () => {
+    const [ch] = await db().select().from(schema.channels).where(eq(schema.channels.slug, streamer.username));
+    if (!ch) throw new Error("no channel");
+    // Inserted directly: the API refuses this pattern on create, but older rows may hold it.
+    await db()
+      .insert(schema.wordFilters)
+      .values([
+        { channelId: ch.id, pattern: "(?:a(?:bc|bd))+", isRegex: true, action: "block", replacement: null },
+        { channelId: ch.id, pattern: "spam", isRegex: false, action: "hold", replacement: null },
+      ]);
+    const res = await streamer.client.call<{ pattern: string; invalid: boolean; invalidReason: string | null }[]>(
+      "GET",
+      `/api/channels/${streamer.username}/word-filters`,
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const byPattern = new Map(res.body.map((f) => [f.pattern, f]));
+    expect(byPattern.get("(?:a(?:bc|bd))+")).toMatchObject({ invalid: true, invalidReason: expect.any(String) });
+    expect(byPattern.get("spam")).toMatchObject({ invalid: false, invalidReason: null });
   });
 });
 

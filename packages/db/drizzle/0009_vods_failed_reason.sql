@@ -1,0 +1,1 @@
+ALTER TABLE "vods" ADD COLUMN "failed_reason" text;
