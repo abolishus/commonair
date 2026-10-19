@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 import { en } from "../src/i18n/en.ts";
 import {
@@ -14,15 +13,6 @@ import {
   type PollEnv,
   type StreamHealthDto,
 } from "../src/lib/stream-health.ts";
-
-const RULES = new URL("../../../services/media/src/health/rules.ts", import.meta.url).pathname;
-
-/** The string values of `export const WARNINGS = { … }` in the media rules. */
-function mediaWarningCodes(): string[] {
-  const text = readFileSync(RULES, "utf8");
-  const body = text.split(/export const WARNINGS = \{/)[1]?.split(/\}\s*as const/)[0] ?? "";
-  return [...body.matchAll(/^\s*\w+:\s*"([a-z0-9_]+)"/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
-}
 
 type Sample = StreamHealthDto["samples"][number];
 const sample = (at: string, warnings: string[]): Sample => ({
@@ -39,12 +29,6 @@ const sample = (at: string, warnings: string[]): Sample => ({
 });
 
 describe("health warning codes", () => {
-  it("mirrors every code services/media can emit", () => {
-    const media = mediaWarningCodes();
-    expect(media.length).toBeGreaterThan(5);
-    expect([...HEALTH_WARNING_CODES].sort()).toEqual([...media].sort());
-  });
-
   it.each(HEALTH_WARNING_CODES)("%s has a title and a fix hint in the catalog", (code) => {
     const keys = HEALTH_WARNING_KEYS[code];
     expect(keys.title in en).toBe(true);

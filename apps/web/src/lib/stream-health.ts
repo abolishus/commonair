@@ -6,29 +6,13 @@
  * message for each warning code services/media emits.
  */
 import type { StreamHealth } from "@commonair/contracts/dto";
+import { HEALTH_WARNING_CODES, type HealthWarningCode } from "@commonair/contracts/enums";
 import type { z } from "zod";
 import { t, type MessageKey } from "../i18n/index.ts";
 
 export type StreamHealthDto = z.infer<typeof StreamHealth>;
 
-/**
- * Mirror of `WARNINGS` in services/media/src/health/rules.ts (web does not depend on media; a
- * test keeps the two lists equal until the codes move into @commonair/contracts).
- */
-export const HEALTH_WARNING_CODES = [
-  "bitrate_high",
-  "bitrate_low",
-  "keyframe_interval",
-  "fps_drop",
-  "b_frames_webrtc",
-  "audio_missing",
-  "video_missing",
-  "video_codec_unsupported",
-  "audio_codec_unsupported",
-  "transcode_capacity",
-  "recording_disk_budget",
-] as const;
-export type HealthWarningCode = (typeof HEALTH_WARNING_CODES)[number];
+export { HEALTH_WARNING_CODES, type HealthWarningCode };
 
 interface WarningKeys {
   title: MessageKey;
