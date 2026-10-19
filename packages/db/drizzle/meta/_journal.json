@@ -92,6 +92,13 @@
       "when": 1792380292467,
       "tag": "0012_relay_retired_at_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792451726515,
+      "tag": "0013_money_gifts_and_expiry",
+      "breakpoints": true
     }
   ]
 }

@@ -9,16 +9,25 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as AdminRouteImport } from './routes/_admin'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as StudioRouteImport } from './routes/_studio'
+import { Route as AdminTreasuryRouteImport } from './routes/_admin/treasury'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
+import { Route as AppTransparencyRouteImport } from './routes/_app/transparency'
 import { Route as StudioDashboardRouteImport } from './routes/_studio/dashboard'
 import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
+import { Route as StudioRevenueRouteImport } from './routes/_studio/revenue'
 import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
+import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
 
+const AdminRoute = AdminRouteImport.update({
+  id: '/_admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppRoute = AppRouteImport.update({
   id: '/_app',
   getParentRoute: () => rootRouteImport,
@@ -26,6 +35,11 @@ const AppRoute = AppRouteImport.update({
 const StudioRoute = StudioRouteImport.update({
   id: '/_studio',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AdminTreasuryRoute = AdminTreasuryRouteImport.update({
+  id: '/treasury',
+  path: '/treasury',
+  getParentRoute: () => AdminRoute,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
@@ -47,6 +61,11 @@ const AppSignupRoute = AppSignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTransparencyRoute = AppTransparencyRouteImport.update({
+  id: '/transparency',
+  path: '/transparency',
+  getParentRoute: () => AppRoute,
+} as any)
 const StudioDashboardRoute = StudioDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -57,75 +76,113 @@ const StudioRelaysRoute = StudioRelaysRouteImport.update({
   path: '/relays',
   getParentRoute: () => StudioRoute,
 } as any)
+const StudioRevenueRoute = StudioRevenueRouteImport.update({
+  id: '/revenue',
+  path: '/revenue',
+  getParentRoute: () => StudioRoute,
+} as any)
 const EmbedChannelRoute = EmbedChannelRouteImport.update({
   id: '/embed/$channel',
   path: '/embed/$channel',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppSettingsSubscriptionsRoute =
+  AppSettingsSubscriptionsRouteImport.update({
+    id: '/settings/subscriptions',
+    path: '/settings/subscriptions',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
+  '/transparency': typeof AppTransparencyRoute
   '/dashboard': typeof StudioDashboardRoute
   '/relays': typeof StudioRelaysRoute
+  '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
+  '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
+  '/transparency': typeof AppTransparencyRoute
   '/dashboard': typeof StudioDashboardRoute
   '/relays': typeof StudioRelaysRoute
+  '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/_admin': typeof AdminRouteWithChildren
   '/_app': typeof AppRouteWithChildren
   '/_studio': typeof StudioRouteWithChildren
+  '/_admin/treasury': typeof AdminTreasuryRoute
   '/_app/$channel': typeof AppChannelRoute
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
+  '/_app/transparency': typeof AppTransparencyRoute
   '/_studio/dashboard': typeof StudioDashboardRoute
   '/_studio/relays': typeof StudioRelaysRoute
+  '/_studio/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/treasury'
     | '/$channel'
     | '/signin'
     | '/signup'
+    | '/transparency'
     | '/dashboard'
     | '/relays'
+    | '/revenue'
     | '/embed/$channel'
+    | '/settings/subscriptions'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/treasury'
     | '/$channel'
     | '/signin'
     | '/signup'
+    | '/transparency'
     | '/dashboard'
     | '/relays'
+    | '/revenue'
     | '/embed/$channel'
+    | '/settings/subscriptions'
   id:
     | '__root__'
+    | '/_admin'
     | '/_app'
     | '/_studio'
+    | '/_admin/treasury'
     | '/_app/$channel'
     | '/_app/signin'
     | '/_app/signup'
+    | '/_app/transparency'
     | '/_studio/dashboard'
     | '/_studio/relays'
+    | '/_studio/revenue'
     | '/embed/$channel'
     | '/_app/'
+    | '/_app/settings/subscriptions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  AdminRoute: typeof AdminRouteWithChildren
   AppRoute: typeof AppRouteWithChildren
   StudioRoute: typeof StudioRouteWithChildren
   EmbedChannelRoute: typeof EmbedChannelRoute
@@ -133,6 +190,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/_admin': {
+      id: '/_admin'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app': {
       id: '/_app'
       path: ''
@@ -146,6 +210,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof StudioRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_admin/treasury': {
+      id: '/_admin/treasury'
+      path: '/treasury'
+      fullPath: '/treasury'
+      preLoaderRoute: typeof AdminTreasuryRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/_app/': {
       id: '/_app/'
@@ -175,6 +246,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSignupRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/transparency': {
+      id: '/_app/transparency'
+      path: '/transparency'
+      fullPath: '/transparency'
+      preLoaderRoute: typeof AppTransparencyRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_studio/dashboard': {
       id: '/_studio/dashboard'
       path: '/dashboard'
@@ -189,6 +267,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StudioRelaysRouteImport
       parentRoute: typeof StudioRoute
     }
+    '/_studio/revenue': {
+      id: '/_studio/revenue'
+      path: '/revenue'
+      fullPath: '/revenue'
+      preLoaderRoute: typeof StudioRevenueRouteImport
+      parentRoute: typeof StudioRoute
+    }
     '/embed/$channel': {
       id: '/embed/$channel'
       path: '/embed/$channel'
@@ -196,21 +281,42 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmbedChannelRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/settings/subscriptions': {
+      id: '/_app/settings/subscriptions'
+      path: '/settings/subscriptions'
+      fullPath: '/settings/subscriptions'
+      preLoaderRoute: typeof AppSettingsSubscriptionsRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
+
+interface AdminRouteChildren {
+  AdminTreasuryRoute: typeof AdminTreasuryRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminTreasuryRoute: AdminTreasuryRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
+  AppTransparencyRoute: typeof AppTransparencyRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
+  AppTransparencyRoute: AppTransparencyRoute,
   AppIndexRoute: AppIndexRoute,
+  AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -218,17 +324,20 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 interface StudioRouteChildren {
   StudioDashboardRoute: typeof StudioDashboardRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
+  StudioRevenueRoute: typeof StudioRevenueRoute
 }
 
 const StudioRouteChildren: StudioRouteChildren = {
   StudioDashboardRoute: StudioDashboardRoute,
   StudioRelaysRoute: StudioRelaysRoute,
+  StudioRevenueRoute: StudioRevenueRoute,
 }
 
 const StudioRouteWithChildren =
   StudioRoute._addFileChildren(StudioRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
+  AdminRoute: AdminRouteWithChildren,
   AppRoute: AppRouteWithChildren,
   StudioRoute: StudioRouteWithChildren,
   EmbedChannelRoute: EmbedChannelRoute,

@@ -1,7 +1,18 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { boolean, check, index, jsonb, pgTable, smallint, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  type AnyPgColumn,
+  boolean,
+  check,
+  index,
+  jsonb,
+  pgTable,
+  smallint,
+  text,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
@@ -40,6 +51,8 @@ export const subscriptions = pgTable(
     currentPeriodEnd: ts(),
     cancelAtPeriodEnd: boolean().notNull().default(false),
     giftedById: uuid().references(() => users.id, { onDelete: "set null" }),
+    /** The gift payment that paid for this subscription (one payment can buy many gift subs). */
+    giftPaymentId: uuid().references((): AnyPgColumn => payments.id, { onDelete: "restrict" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -49,6 +62,8 @@ export const subscriptions = pgTable(
       .on(t.subscriberId, t.channelId)
       .where(sql`${t.status} in ('active', 'past_due', 'incomplete')`),
     uniqueIndex("subscriptions_provider_ref_uq").on(t.provider, t.providerRef),
+    index("subscriptions_gift_payment_idx").on(t.giftPaymentId),
+    check("subscriptions_tier_range", sql`${t.tier} between 1 and 3`),
   ],
 );
 
@@ -89,6 +104,12 @@ export const payments = pgTable(
     feeCents: cents().notNull().default(0),
     currency: text().notNull(),
     refundedCents: cents().notNull().default(0),
+    /** Subscription tier paid for (subscriptions and gifts); null for tips and shares. */
+    tier: smallint(),
+    /** Gift subs bought by this payment; 1 otherwise. `amountCents` is the total. */
+    quantity: smallint().notNull().default(1),
+    /** A pending payment not confirmed by then expires as failed (manual adapter). */
+    expiresAt: ts(),
     succeededAt: ts(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -96,6 +117,10 @@ export const payments = pgTable(
   (t) => [
     uniqueIndex("payments_provider_ref_uq").on(t.provider, t.providerRef),
     index("payments_channel_idx").on(t.channelId),
+    index("payments_status_idx").on(t.status, t.createdAt),
+    index("payments_user_idx").on(t.userId, t.createdAt),
+    check("payments_quantity_range", sql`${t.quantity} between 1 and 100`),
+    check("payments_tier_range", sql`${t.tier} is null or ${t.tier} between 1 and 3`),
     check("payments_amount_positive", sql`${t.amountCents} > 0`),
     check("payments_currency_format", sql`${t.currency} ~ '^[a-z]{3}$'`),
     check("payments_refund_bounds", sql`${t.refundedCents} >= 0 and ${t.refundedCents} <= ${t.amountCents}`),

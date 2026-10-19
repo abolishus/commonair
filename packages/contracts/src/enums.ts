@@ -64,6 +64,8 @@ export const PAYMENT_STATUSES = [
 export const DISPUTE_KINDS = ["refund", "chargeback"] as const;
 export const DISPUTE_STATUSES = ["open", "won", "lost", "closed"] as const;
 export const PAYOUT_STATUSES = ["pending", "scheduled", "paid", "failed", "held"] as const;
+/** Rows on a creator's revenue ledger (`money.revenueLedger`): one per payment, reversal or payout. */
+export const REVENUE_LINE_TYPES = ["subscription", "gift", "tip", "refund", "chargeback", "payout"] as const;
 
 export const LEDGER_ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", "expense"] as const;
 

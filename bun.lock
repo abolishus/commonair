@@ -234,6 +234,18 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/payments": {
+      "name": "@commonair/payments",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/contracts": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/safe-regex": {
       "name": "@commonair/safe-regex",
       "version": "0.0.0",
@@ -347,7 +359,9 @@
         "@commonair/db": "workspace:*",
         "@commonair/email": "workspace:*",
         "@commonair/integrity": "workspace:*",
+        "@commonair/ledger": "workspace:*",
         "@commonair/observability": "workspace:*",
+        "@commonair/payments": "workspace:*",
         "@commonair/safe-regex": "workspace:*",
         "@commonair/service": "workspace:*",
         "@commonair/storage": "workspace:*",
@@ -478,7 +492,9 @@
         "@commonair/contracts": "workspace:*",
         "@commonair/db": "workspace:*",
         "@commonair/integrity": "workspace:*",
+        "@commonair/ledger": "workspace:*",
         "@commonair/observability": "workspace:*",
+        "@commonair/payments": "workspace:*",
         "@commonair/service": "workspace:*",
         "@commonair/storage": "workspace:*",
         "@commonair/tokens": "workspace:*",
@@ -616,6 +632,8 @@
     "@commonair/origin": ["@commonair/origin@workspace:services/origin"],
 
     "@commonair/patronage": ["@commonair/patronage@workspace:packages/patronage"],
+
+    "@commonair/payments": ["@commonair/payments@workspace:packages/payments"],
 
     "@commonair/safe-regex": ["@commonair/safe-regex@workspace:packages/safe-regex"],
 

@@ -377,6 +377,79 @@ export const RevenueSummary = z.object({
   tips: z.number().int(),
   split: z.object({ streamerShare: z.number(), coopShare: z.number() }),
   daily: z.array(z.object({ date: z.string(), gross: z.number().int(), net: z.number().int() })),
+  /** The creator's balances now (not limited to the period). `available` = released − owed − scheduled. */
+  balance: z.object({
+    available: Money,
+    held: Money,
+    owed: Money,
+    minimumPayout: Money,
+    holdDays: z.number(),
+  }),
+  /** Creator share in the period by source, cents, net of reversals. */
+  bySource: z.object({
+    subscriptions: z.number().int(),
+    gifts: z.number().int(),
+    tips: z.number().int(),
+  }),
+  /** Active subscriptions per tier and the creator's monthly share at today's price and cut. */
+  tiers: z.array(z.object({ tier: z.number().int(), active: z.number().int(), monthlyShare: Money })),
+  /** `net` for the period of the same length just before this one. */
+  previousNet: Money,
+});
+/** One row of a creator's revenue ledger, derived from the append-only ledger at read time. */
+export const RevenueLine = z.object({
+  /** Ledger transaction id. */
+  id: Id,
+  occurredAt: Timestamp,
+  type: z.enum(E.REVENUE_LINE_TYPES),
+  tier: z.number().int().nullable(),
+  /** Gift subs in one payment; 1 otherwise. */
+  quantity: z.number().int(),
+  /** Payer for payments (null when anonymous); the subscriber or tipper a reversal refers to. */
+  from: UserPublic.pick({ id: true, username: true, displayName: true }).nullable(),
+  /** Payout reference or payment reference; never free text. */
+  reference: z.string().nullable(),
+  /** Gross paid (negative for reversals); null for payouts. */
+  gross: Money.nullable(),
+  /** Tax, co-op share and fees taken from gross (opposite sign to gross); null for payouts. */
+  deductions: Money.nullable(),
+  /** Change to what the co-op owes the creator. */
+  net: Money,
+});
+/** Everything the Support dialog needs for one channel. */
+export const SupportInfo = z.object({
+  provider: z.enum(E.PAYMENT_PROVIDERS),
+  currency: z.string().length(3),
+  /** Empty until the owner sets tiers; subscriptions and gifts need all three. */
+  tiers: z.array(SubTierInfo),
+  split: z.object({ streamerShare: z.number(), coopShare: z.number() }),
+  tip: z.object({ minCents: z.number().int(), maxCents: z.number().int(), messageMaxLength: z.number().int() }),
+  gift: z.object({ maxCount: z.number().int() }),
+  /** Null for anonymous callers. */
+  viewer: z
+    .object({
+      /** The caller's own active, past-due or pending subscription to this channel. */
+      subscription: Subscription.nullable(),
+      /** The channel owner cannot pay their own channel. */
+      isOwner: z.boolean(),
+    })
+    .nullable(),
+});
+/** A payment as the treasurer sees it (manual adapter). */
+export const TreasurerPayment = z.object({
+  paymentId: Id,
+  reference: z.string(),
+  kind: z.enum(E.PAYMENT_KINDS),
+  status: z.enum(E.PAYMENT_STATUSES),
+  amount: Money,
+  refunded: Money,
+  tier: z.number().int().nullable(),
+  quantity: z.number().int(),
+  user: UserPublic.nullable(),
+  channelSlug: Slug.nullable(),
+  createdAt: Timestamp,
+  succeededAt: Timestamp.nullable(),
+  expiresAt: Timestamp.nullable(),
 });
 export const Payout = z.object({
   id: Id,
@@ -387,6 +460,12 @@ export const Payout = z.object({
   provider: z.enum(E.PAYMENT_PROVIDERS),
   holdReason: z.string().nullable(),
   paidAt: Timestamp.nullable(),
+});
+/** A payout row as the treasurer sees it. */
+export const TreasurerPayout = Payout.extend({
+  user: UserPublic.pick({ id: true, username: true, displayName: true }),
+  reference: z.string().nullable(),
+  createdAt: Timestamp,
 });
 export const LedgerLine = z.object({
   transactionId: Id,

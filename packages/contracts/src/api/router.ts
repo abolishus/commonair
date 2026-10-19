@@ -11,6 +11,7 @@ import * as E from "../enums.ts";
 import { AlertTemplate, BotConfig, ChannelChatSettings, ChannelTheme, GovernanceChange } from "../shapes.ts";
 import { SCOPE_NAMES } from "../scopes.ts";
 import { EVENT_TYPES } from "../events.ts";
+import { MONEY_LIMITS } from "../currency.ts";
 import { ChannelRef, Id, Money, Ok, PageInput, ReturnPath, ShortText, Slug, Timestamp, base, page } from "./common.ts";
 import * as D from "./entities.ts";
 
@@ -920,6 +921,15 @@ export const contract = {
   },
 
   money: {
+    support: base
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/support",
+        summary: "Tiers, split, limits and the caller's subscription for the Support dialog",
+        ...tag("Monetization"),
+      })
+      .input(ChannelRef)
+      .output(D.SupportInfo),
     tiers: base
       .route({
         method: "GET",
@@ -941,7 +951,9 @@ export const contract = {
           tiers: z
             .array(
               D.SubTierInfo.extend({
-                price: Money.extend({ cents: z.number().int().min(100).max(100_000) }),
+                price: Money.extend({
+                  cents: z.number().int().min(MONEY_LIMITS.tierMinCents).max(MONEY_LIMITS.tierMaxCents),
+                }),
               }),
             )
             .length(3),
@@ -959,7 +971,18 @@ export const contract = {
       .input(
         ChannelRef.extend({
           tier: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-          giftTo: Slug.optional(),
+          /**
+           * Gift subs instead of subscribing yourself. Without `to`, recipients are drawn at random
+           * from the channel's community (recent chatters and followers with no subscription).
+           * `to` names one recipient and needs `count: 1`.
+           */
+          gift: z
+            .object({ count: z.number().int().min(1).max(MONEY_LIMITS.giftMaxCount), to: Slug.optional() })
+            .refine((g) => g.to === undefined || g.count === 1, {
+              message: "A named recipient gets exactly one gift",
+              path: ["count"],
+            })
+            .optional(),
           returnPath: ReturnPath,
         }),
       )
@@ -991,8 +1014,8 @@ export const contract = {
       })
       .input(
         ChannelRef.extend({
-          amountCents: z.number().int().min(100).max(1_000_000),
-          message: z.string().max(300).default(""),
+          amountCents: z.number().int().min(MONEY_LIMITS.tipMinCents).max(MONEY_LIMITS.tipMaxCents),
+          message: z.string().max(MONEY_LIMITS.tipMessageMaxLength).default(""),
           anonymous: z.boolean().default(false),
           returnPath: ReturnPath,
         }),
@@ -1027,6 +1050,15 @@ export const contract = {
       })
       .input(ChannelRef.extend({ from: Timestamp.optional(), to: Timestamp.optional() }))
       .output(D.RevenueSummary),
+    revenueLedger: owner
+      .route({
+        method: "GET",
+        path: "/channels/{channel}/revenue/ledger",
+        summary: "Revenue ledger: one row per payment, reversal and payout, newest first",
+        ...tag("Monetization"),
+      })
+      .input(ChannelRef.extend(PageInput.shape).extend({ from: Timestamp.optional(), to: Timestamp.optional() }))
+      .output(page(D.RevenueLine)),
     payouts: user
       .route({
         method: "GET",
@@ -1061,27 +1093,21 @@ export const contract = {
       .output(page(D.LedgerLine)),
     /** Manual adapter: the treasurer records offline payments, refunds and payouts. */
     treasurer: {
-      pending: treasurer
+      payments: treasurer
         .route({
           method: "GET",
           path: "/treasurer/payments",
-          summary: "Payments awaiting offline confirmation",
+          summary: "Payments by status (default: awaiting offline confirmation), or by reference",
           ...tag("Treasury"),
         })
-        .input(PageInput)
-        .output(
-          page(
-            z.object({
-              paymentId: Id,
-              reference: z.string(),
-              kind: z.enum(E.PAYMENT_KINDS),
-              amount: Money,
-              user: D.UserPublic.nullable(),
-              channelSlug: Slug.nullable(),
-              createdAt: Timestamp,
-            }),
-          ),
-        ),
+        .input(
+          PageInput.extend({
+            status: z.enum(E.PAYMENT_STATUSES).default("pending"),
+            /** A payment reference (normalized like `normalizeManualReference`); ignores `status`. */
+            reference: z.string().max(64).optional(),
+          }),
+        )
+        .output(page(D.TreasurerPayment)),
       confirm: treasurer
         .route({
           method: "POST",
@@ -1130,6 +1156,31 @@ export const contract = {
         })
         .input(z.object({ periodEnd: Timestamp }))
         .output(z.object({ created: z.number().int(), held: z.number().int(), total: Money })),
+      payouts: treasurer
+        .route({
+          method: "GET",
+          path: "/treasurer/payouts",
+          summary: "Payouts by status",
+          ...tag("Treasury"),
+        })
+        .input(PageInput.extend({ status: z.enum(E.PAYOUT_STATUSES).optional() }))
+        .output(page(D.TreasurerPayout)),
+      setPayoutAccount: treasurer
+        .route({
+          method: "PUT",
+          path: "/treasurer/payout-accounts/{username}",
+          summary: "Manual adapter: record how a creator is paid and enable payouts",
+          ...tag("Treasury"),
+        })
+        .input(
+          z.object({
+            username: Slug,
+            payoutsEnabled: z.boolean(),
+            /** The treasurer's own reference for the arrangement (never bank details). */
+            reference: z.string().max(200),
+          }),
+        )
+        .output(Ok),
       markPaid: treasurer
         .route({
           method: "POST",

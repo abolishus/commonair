@@ -39,3 +39,19 @@ export const CURRENCY_MINOR_UNITS: Readonly<Record<string, number>> = {
 export function minorUnits(currency: string): number {
   return CURRENCY_MINOR_UNITS[currency.toLowerCase()] ?? 2;
 }
+
+/** Bounds every money input shares (API validation, the Support dialog, the harness). Cents. */
+export const MONEY_LIMITS = {
+  tierMinCents: 100,
+  tierMaxCents: 100_000,
+  tipMinCents: 100,
+  tipMaxCents: 1_000_000,
+  tipMessageMaxLength: 300,
+  giftMaxCount: 100,
+} as const;
+
+/**
+ * Manual-adapter payment reference the payer quotes to the treasurer: `CA-` + 8 Crockford base32
+ * characters (no I, L, O, U), stored as `payments.provider_ref`.
+ */
+export const MANUAL_REFERENCE_PATTERN = /^CA-[0-9A-HJKMNP-TV-Z]{8}$/;

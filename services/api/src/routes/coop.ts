@@ -4,6 +4,7 @@
 /** `coop.*`: not implemented in this unit (HTTP 501); a later unit replaces this file. */
 import { notImplemented } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
+import { transparencyHandler } from "../money/reports.ts";
 
 export const coop = {
   membership: os.coop.membership.handler(notImplemented),
@@ -36,5 +37,5 @@ export const coop = {
     run: os.coop.patronage.run.handler(notImplemented),
     approve: os.coop.patronage.approve.handler(notImplemented),
   },
-  transparency: os.coop.transparency.handler(notImplemented),
+  transparency: transparencyHandler,
 };

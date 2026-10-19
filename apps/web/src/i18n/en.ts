@@ -1,8 +1,13 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { moneyMessages } from "./money.ts";
+import { supportMessages } from "./support.ts";
+
 /** English catalog. Keys are dotted by area; `{name}` placeholders are filled by `t()`. */
 export const en = {
+  ...supportMessages,
+  ...moneyMessages,
   "app.title": "Live streaming, owned by the people who make it",
 
   "nav.account": "Account",

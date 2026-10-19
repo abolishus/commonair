@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The payment-provider adapter interface (ADR 0003, AGENTS.md rule 3): `manual` is the default
+ * and needs no vendor; `stripe` is optional. Adapters talk to the provider only. Ledger postings,
+ * subscription state, events and audit rows are the caller's, written in the caller's transaction
+ * from the normalized results returned here.
+ *
+ * Draft by the head agent; the E4b payments unit owns and may refine it (report changes).
+ */
+import type { PAYMENT_KINDS, PAYMENT_PROVIDERS } from "@commonair/contracts/enums";
+
+export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
+export type PaymentKind = (typeof PAYMENT_KINDS)[number];
+
+export interface CheckoutRequest {
+  /** Our `payments.id`, minted before the call so the provider can carry it as metadata. */
+  paymentId: string;
+  kind: PaymentKind;
+  /** Total in integer minor units (gift subs: quantity × price). */
+  amountCents: number;
+  currency: string;
+  /** Subscriptions and gifts. */
+  tier?: 1 | 2 | 3;
+  quantity: number;
+  /** Self subscriptions renew; gifts and tips are one-off. */
+  recurring: boolean;
+  payerUserId: string;
+  creatorUserId: string;
+  /** Absolute URLs on this instance the provider may send the payer back to. */
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export type CheckoutStart =
+  | { kind: "redirect"; url: string; providerRef: string }
+  | { kind: "instructions"; providerRef: string; instructions: string };
+
+export interface PaymentAdapter {
+  readonly provider: PaymentProvider;
+  startCheckout(request: CheckoutRequest): Promise<CheckoutStart>;
+}

@@ -17,7 +17,8 @@
     "migrate": "bun src/migrate.ts",
     "studio": "drizzle-kit studio",
     "demo:seed": "bun src/demo/cli.ts seed",
-    "demo:clear": "bun src/demo/cli.ts clear"
+    "demo:clear": "bun src/demo/cli.ts clear",
+    "role": "bun src/roles/cli.ts"
   },
   "dependencies": {
     "@commonair/config": "workspace:*",

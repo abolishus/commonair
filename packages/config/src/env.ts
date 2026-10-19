@@ -133,8 +133,31 @@ export const paymentsEnv = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   /** Override the Stripe API base, e.g. a local stripe-mock in the harness. */
   STRIPE_API_BASE: z.url().optional(),
-  PAYOUT_MINIMUM_CENTS: z.coerce.number().int().nonnegative().default(2500),
-  CURRENCY: z.string().length(3).default("usd"),
+  /**
+   * Instance currency for prices and tips. Must equal the `payout.rules` governance setting's
+   * currency (the payout minimum, schedule and hold period live there, not in env).
+   */
+  CURRENCY: z
+    .string()
+    .regex(/^[a-z]{3}$/)
+    .default("usd"),
+  /**
+   * Manual adapter: what the payer is told after checkout. `{reference}` and `{amount}` are filled
+   * in. Operator text, shown as is (not translated).
+   */
+  MANUAL_PAYMENT_INSTRUCTIONS: z
+    .string()
+    .min(1)
+    .default(
+      "Send {amount} to the co-op treasurer and quote the reference {reference}. It starts when the treasurer confirms the payment.",
+    ),
+  /** Manual adapter: shown on the creator's payout settings until the treasurer enables payouts. */
+  MANUAL_PAYOUT_INSTRUCTIONS: z
+    .string()
+    .min(1)
+    .default("Contact the co-op treasurer to set up how you are paid. Payouts start once they confirm it."),
+  /** Days a pending (unconfirmed) payment stays open before it expires as failed. */
+  PAYMENT_PENDING_DAYS: z.coerce.number().int().min(1).max(60).default(7),
 });
 
 export const mediaEnv = z.object({
