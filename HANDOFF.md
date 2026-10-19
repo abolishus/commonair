@@ -24,6 +24,21 @@ reviewer before every merge, focused re-review of fix rounds for any HIGH. The u
 Storybook and all visual checks; units run only targeted checks (unit tests, `tsc`, `vp lint`/`vp
 fmt` on changed files, `vp build` for web, `build-storybook` for packages/ui).
 
+### Resume point (2026-10-19)
+
+U1 (E4a primitives) is committed as `af745a6` and pushed after independent HIGH-only review. It
+adds the pinned shadcn component set, token/contrast and deviations guards, three house primitives,
+and the full component gallery. Targeted checks: 600 UI tests, UI TypeScript, strict lint, Storybook
+build, license check and `git diff --check` passed. The user runs the repository gate and visual
+review. Recharts 3.8.0 is MIT; compatible older transitive versions are pinned in the lockfile, and
+Base UI 1.8.0 is used with its declared `use-sync-external-store` range.
+
+Next: start E4a U2–U5 only after U1 is on `main`. Read `.claude/briefs/e4/U2-shells.md`,
+`U3-data.md`, `U4-forms.md`, `U5-media.md` and `_common.md`, plus `.claude/` memory and current
+worktree history, before assigning disjoint ownership. U6 starts after U2–U5. Keep the user's scope
+and process rules: application design only, targeted checks only, and the user handles the
+repository gate and visual/browser checks.
+
 ## Process rules from the user (session three)
 
 - **The user runs the gate (`bun run verify`), image rebuilds, harness scenarios and all visual

@@ -24,6 +24,9 @@ export {
 export { StreamCard, type StreamCardProps, type StreamCardData } from "./primitives/stream-card.tsx";
 export { ChannelAvatar, type ChannelAvatarProps, type Accent } from "./primitives/channel-avatar.tsx";
 export { LiveBadge, type LiveBadgeProps } from "./primitives/live-badge.tsx";
+export { StatusBadge, type StatusBadgeProps, type StatusTone } from "./primitives/status-badge.tsx";
+export { OverlayBadge, type OverlayBadgeProps } from "./primitives/overlay-badge.tsx";
+export { AccentButton, type AccentButtonProps } from "./primitives/accent-button.tsx";
 export { ViewerCount, type ViewerCountProps } from "./primitives/viewer-count.tsx";
 export { RelativeTime, type RelativeTimeProps } from "./primitives/relative-time.tsx";
 export { MoneyAmount, type MoneyAmountProps, type MoneyValue } from "./primitives/money-amount.tsx";
