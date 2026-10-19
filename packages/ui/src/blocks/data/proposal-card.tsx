@@ -6,7 +6,7 @@ import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { cn } from "@commonair/ui/lib/utils";
 import { StatusBadge, type StatusTone } from "../../primitives/status-badge.tsx";
-import { TargetLink, type LinkTarget } from "../feedback/link.tsx";
+import { TargetLink, type LinkTarget } from "../../lib/link.tsx";
 import { ProgressRow } from "./progress-row.tsx";
 
 export interface ProposalProgress {

@@ -9,6 +9,7 @@ import { Search01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { NavLink, type NavItem } from "./nav.tsx";
 import { cn } from "@commonair/ui/lib/utils";
+import { TargetLink, type LinkTarget } from "../lib/link.tsx";
 
 export interface Brand {
   mark: React.ReactNode;
@@ -18,11 +19,7 @@ export interface Brand {
   render?: React.ReactElement;
 }
 /** The area of the site after the brand ("Creator studio", "Admin"): `href`, or a router `render` element. */
-export interface HeaderContext {
-  label: string;
-  href?: string;
-  render?: React.ReactElement;
-}
+export type HeaderContext = LinkTarget & { label: string };
 export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   brand: Brand;
   /** Shown after the brand, separated by a rule; also heads the mobile sheet. */
@@ -122,13 +119,10 @@ export function SiteHeader({
 }
 
 function ContextLink({ context, className }: { context: HeaderContext; className: string }): React.JSX.Element {
-  const props = { className, "data-slot": "site-header-context" };
-  if (context.render)
-    return React.cloneElement(context.render as React.ReactElement<{ className?: string }>, props, context.label);
   return (
-    <a href={context.href} {...props}>
+    <TargetLink target={context} className={className} data-slot="site-header-context">
       {context.label}
-    </a>
+    </TargetLink>
   );
 }
 

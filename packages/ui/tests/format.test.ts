@@ -93,6 +93,10 @@ describe("formatUnitCost", () => {
     expect(formatUnitCost(1, "USD", "en-US")).toBe("$0.00");
     expect(formatUnitCost(1, "USD", "en-US", { maximumFractionDigits: 6 })).toBe("$0.000001");
     expect(formatUnitCost(-6_150, "USD", "en-US")).toBe("-$0.0062");
+    // A negative that rounds to zero shows no sign by default ("negative"), unless the caller asks.
+    expect(formatUnitCost(-1, "USD", "en-US")).toBe("$0.00");
+    expect(formatUnitCost(-1_000_000, "USD", "en-US")).toBe("-$1.00");
+    expect(formatUnitCost(-1, "USD", "en-US", { signDisplay: "auto" })).toBe("-$0.00");
   });
 
   test("clamps maximumFractionDigits between the minor digits and six", () => {

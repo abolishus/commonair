@@ -4,4 +4,4 @@
 export { AlertCallout, alertCalloutVariants, type AlertCalloutProps, type AlertCalloutTone } from "./alert-callout.tsx";
 export { QueueItemCard, type QueueItemCardProps, type QueueItemAction } from "./queue-item-card.tsx";
 export { IncidentCard, type IncidentCardProps } from "./incident-card.tsx";
-export { type LinkTarget } from "./link.tsx";
+export { type LinkTarget } from "../../lib/link.tsx";
