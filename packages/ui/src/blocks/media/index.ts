@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-export { StreamGrid, type StreamGridProps } from "./stream-grid.tsx";
+export { StreamGrid, type StreamGridProps, type StreamGridCardProps } from "./stream-grid.tsx";
 export {
   CategoryTile,
   CategoryGrid,
