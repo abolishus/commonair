@@ -1,0 +1,47 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board SignIn (structure only; icons shown as [i]). Sample data: data/SignIn.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="split">
+    <section class="main">
+      <div class="tabs" role="tablist" aria-label="Account"><button class="tab" role="tab" aria-selected="true">Sign up</button><button class="tab" role="tab" aria-selected="false">Sign in</button></div>
+      <div class="col"><h1 class="h-xl">Create your account</h1><p class="muted">Watch, chat, follow and stream. Members can join the co-op later.</p></div>
+      <form class="col">
+        <div class="field"><label class="label" for="u">Username</label><input id="u" class="input" value="mothwing" autocomplete="username"><span class="hint">Your channel lives at /mothwing. 3–25 letters, numbers or underscores.</span></div>
+        <div class="field"><label class="label" for="e">Email</label><input id="e" class="input" type="email" placeholder="you@example.org" autocomplete="email"></div>
+        <div class="field"><label class="label" for="p">Password</label><input id="p" class="input" type="password" value="••••••••••••" autocomplete="new-password"><span class="progress"><span></span></span><span class="hint">Strong. At least 12 characters.</span></div>
+        <fieldset class="field"><legend class="label">Date of birth</legend>
+          <div class="row"><select class="select" aria-label="Month"><option>Month</option></select><select class="select" aria-label="Day"><option>Day</option></select><select class="select" aria-label="Year"><option>Year</option></select></div>
+          <span class="hint">You must be 13 or older. Mature streams need 18+.</span>
+        </fieldset>
+        <div class="row bordered"><span class="check on">[i]</span><span class="grow">Verified — no tracking, proof-of-work only</span><span class="muted t-2xs">ALTCHA</span></div>
+        <label class="row"><span class="check"></span><span class="muted">I agree to the <a class="link" href="#">Terms of Service</a> (v3) and have read the <a class="link" href="#">Privacy Policy</a>.</span></label>
+        <button class="btn btn-lg btn-block" type="submit">Create account</button>
+      </form>
+      <div class="row muted"><hr class="sep grow"><span>or</span><hr class="sep grow"></div>
+      <div class="col">
+        <button class="btn btn-outline btn-lg btn-block">[i]Continue with a passkey</button>
+        <button class="btn btn-outline btn-lg btn-block">[i]Email me a sign-in link</button>
+        <button class="btn btn-ghost btn-lg btn-block muted">Other providers this instance enabled</button>
+      </div>
+    </section>
+    <aside class="aside">
+      <div class="card"><div class="card-h"><div class="col"><h2 class="card-t">What you get</h2><p class="card-d">Same account for viewing and streaming.</p></div></div>
+        <ul class="card-c col">
+          <li class="row">[i]<span>Stream from minute one. No follower threshold to earn.</span></li>
+          <li class="row">[i]<span>Creators keep the majority of every subscription; the split is set by member vote.</span></li>
+          <li class="row">[i]<span>No ads, trackers or third-party scripts on any page.</span></li>
+          <li class="row">[i]<span>Export or delete your data any time.</span></li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

@@ -1,0 +1,72 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Analytics (structure only; icons shown as [i]). Sample data: data/Analytics.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html" aria-current="page">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html">[i]Moderation</a>
+    <a class="nav-item" href="ChatBot.dc.html">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html">[i]Alerts &amp; overlays</a>
+  </nav>
+  <main class="shell-main"><div class="wrap">
+    <div class="row-wrap"><h1 class="h-xl">Analytics</h1>
+      <div class="seg ml-auto" role="group" aria-label="Range"><button aria-pressed="false">7 days</button><button aria-pressed="true">30 days</button><button aria-pressed="false">90 days</button><button aria-pressed="false">Custom</button></div>
+      <button class="btn btn-outline btn-sm">[i]Export CSV</button>
+    </div>
+    <div class="g4">
+      <div class="stat"><span class="k">Average viewers</span><span class="v">286</span><span class="delta-up t-2xs">+18% vs previous 30 days</span></div>
+      <div class="stat"><span class="k">Peak viewers</span><span class="v">612</span><span class="muted t-2xs">Oct 12</span></div>
+      <div class="stat"><span class="k">Hours watched</span><span class="v">9,140</span><span class="delta-up t-2xs">+22%</span></div>
+      <div class="stat"><span class="k">New followers</span><span class="v">+804</span><span class="delta-up t-2xs">+9%</span></div>
+      <div class="stat"><span class="k">Hours streamed</span><span class="v">48</span><span class="delta-down t-2xs">−4 h</span></div>
+      <div class="stat"><span class="k">Unique chatters</span><span class="v">1,322</span><span class="delta-up t-2xs">+12%</span></div>
+    </div>
+    <section class="card" aria-labelledby="ch-h">
+      <div class="card-h"><div class="col"><h2 id="ch-h" class="card-t">Average verified viewers per stream day</h2><p class="card-d">Traffic flagged by integrity checks is never counted.</p></div><select class="select ml-auto" aria-label="Metric"><option>Average viewers</option><option>Hours watched</option><option>Followers</option></select></div>
+      <div class="card-c">
+        <div class="bars" role="img" aria-label="Bar chart of average viewers over 30 days, rising from about 200 to about 340"><sc-for list="{{bars}}" as="b" hint-placeholder-count="30"><span></span></sc-for></div>
+        <div class="row muted num"><span>Sep 18</span><span class="ml-auto">Oct 17</span></div>
+      </div>
+    </section>
+    <div class="g2">
+      <section class="card" aria-labelledby="src-h">
+        <div class="card-h"><h2 id="src-h" class="card-t">Where viewers came from</h2></div>
+        <ul class="card-c col">
+          <sc-for list="{{sources}}" as="s" hint-placeholder-count="5">
+            <li class="col"><div class="row"><span class="legend-sw"></span><span>{{s.k}}</span><span class="ml-auto num">{{s.p}}%</span></div><span class="progress"><span></span></span></li>
+          </sc-for>
+        </ul>
+      </section>
+      <section class="card" aria-labelledby="int-h">
+        <div class="card-h"><div class="col"><h2 id="int-h" class="card-t row">[i]Integrity</h2><p class="card-d">Sessions excluded from your counts, and why.</p></div></div>
+        <div class="card-c col">
+          <div class="row"><span class="h-xl num">2.1%</span><span class="muted">of sessions excluded (61 of 2,904)</span></div>
+          <div class="tbl-box"><table class="tbl"><thead><tr><th scope="col">Reason</th><th scope="col" class="r">Sessions</th></tr></thead><tbody>
+            <tr><td>Datacenter network</td><td class="r num">38</td></tr>
+            <tr><td>Headless browser</td><td class="r num">14</td></tr>
+            <tr><td>Concurrency over limit</td><td class="r num">9</td></tr>
+          </tbody></table></div>
+          <p class="muted">Think something was excluded by mistake? <a class="link" href="#">Open an appeal</a>.</p>
+        </div>
+      </section>
+    </div>
+    <section class="col" aria-labelledby="top-h">
+      <h2 id="top-h" class="h-base">Streams in this period</h2>
+      <div class="tbl-box"><table class="tbl">
+        <thead><tr><th scope="col">Date</th><th scope="col">Title</th><th scope="col" class="r">Duration</th><th scope="col" class="r">Avg</th><th scope="col" class="r">Peak</th><th scope="col" class="r">Followers</th><th scope="col" class="r">Chat msgs</th></tr></thead>
+        <tbody><sc-for list="{{streams}}" as="r" hint-placeholder-count="5"><tr><td class="num muted">{{r.d}}</td><td class="strong">{{r.t}}</td><td class="r num">{{r.len}}</td><td class="r num">{{r.avg}}</td><td class="r num">{{r.peak}}</td><td class="r num">{{r.f}}</td><td class="r num">{{r.m}}</td></tr></sc-for></tbody>
+      </table></div>
+    </section>
+  </div></main>
+</div>
+</div>
+</x-dc>

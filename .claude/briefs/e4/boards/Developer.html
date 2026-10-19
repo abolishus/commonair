@@ -1,0 +1,53 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Developer (structure only; icons shown as [i]). Sample data: data/Developer.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="shell">
+    <aside class="col" aria-label="Your applications">
+      <div class="row"><h1 class="h-base">Applications</h1><button class="btn btn-outline btn-icon btn-sm ml-auto" aria-label="New application">[i]</button></div>
+      <ul class="col bordered">
+        <li><a class="side-item" href="#"><span class="av av-xs acc-teal">G</span><span class="col grow"><span class="strong">glazebot</span><span class="muted t-2xs">Bot account</span></span></a></li>
+        <li><a class="side-item" href="#"><span class="av av-xs acc-amber">K</span><span class="col grow"><span class="strong">kiln-overlay</span><span class="muted t-2xs">Web app</span></span></a></li>
+        <li><a class="side-item" href="#"><span class="av av-xs acc-sky">S</span><span class="col grow"><span class="strong">stats-export</span><span class="muted t-2xs">Server</span></span></a></li>
+      </ul>
+      <div class="callout">[i]<p class="muted">Every API route is in the OpenAPI spec. Existing Twitch IRC bots connect unchanged.</p></div>
+    </aside>
+    <div class="col">
+      <div class="row-wrap"><span class="av av-md acc-teal">G</span><div class="col"><h2 class="h-xl">glazebot</h2><span class="muted">Created Sep 2 · 1 channel authorized</span></div><button class="btn btn-destructive btn-sm ml-auto">Delete app</button></div>
+      <div class="tabs-line" role="tablist" aria-label="App settings"><button class="tab" role="tab" aria-selected="false">Credentials</button><button class="tab" role="tab" aria-selected="true">Events &amp; webhooks</button><button class="tab" role="tab" aria-selected="false">Scopes</button><button class="tab" role="tab" aria-selected="false">Logs</button></div>
+      <section class="card" aria-labelledby="cred-h">
+        <div class="card-h"><h3 id="cred-h" class="card-t">Credentials</h3></div>
+        <div class="card-c g2">
+          <div class="field"><span class="label">Client ID</span><div class="input-group"><input class="mono" aria-label="Client ID" value="app_01J9Z3K7Q2W8" readonly><button class="btn btn-ghost btn-sm">Copy</button></div></div>
+          <div class="field"><span class="label">Client secret</span><div class="input-group"><input class="mono" aria-label="Client secret" value="••••••••••••••••" readonly><button class="btn btn-ghost btn-sm">Rotate</button></div></div>
+          <div class="field"><span class="label">Scopes granted</span><div class="row-wrap"><span class="badge badge-outline mono">chat:read</span><span class="badge badge-outline mono">chat:write</span><span class="badge badge-outline mono">moderator:manage:timeouts</span><span class="badge badge-outline mono">channel:read:subscriptions</span></div></div>
+        </div>
+      </section>
+      <section class="card" aria-labelledby="sub-h">
+        <div class="card-h"><div class="col"><h3 id="sub-h" class="card-t">Event subscriptions</h3><p class="card-d">Signed HTTP webhooks (HMAC-SHA256) or a WebSocket session. Retries back off for 24 h.</p></div><button class="btn btn-sm ml-auto">[i]Subscribe</button></div>
+        <div class="card-c tbl-box"><table class="tbl">
+          <thead><tr><th scope="col">Event</th><th scope="col">Transport</th><th scope="col">Status</th><th scope="col" class="r">Success (24 h)</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            <tr><td class="mono">channel.follow</td><td class="muted mono">https://glaze.example/hook</td><td><span class="badge badge-ok">Enabled</span></td><td class="r num">100%</td><td><button class="btn btn-outline btn-xs">Send test</button></td></tr>
+            <tr><td class="mono">channel.subscribe</td><td class="muted mono">https://glaze.example/hook</td><td><span class="badge badge-ok">Enabled</span></td><td class="r num">99.2%</td><td><button class="btn btn-outline btn-xs">Send test</button></td></tr>
+            <tr><td class="mono">channel.tip</td><td class="muted mono">websocket</td><td><span class="badge badge-ok">Enabled</span></td><td class="r num">100%</td><td><button class="btn btn-outline btn-xs">Send test</button></td></tr>
+            <tr><td class="mono">stream.online</td><td class="muted mono">https://glaze.example/hook</td><td><span class="badge badge-warn">Failing</span></td><td class="r num delta-down">61%</td><td><button class="btn btn-outline btn-xs">Send test</button></td></tr>
+          </tbody></table></div>
+      </section>
+      <section class="col" aria-labelledby="dl-h">
+        <div class="row"><h3 id="dl-h" class="h-base">Recent deliveries</h3><select class="select ml-auto" aria-label="Filter status"><option>All statuses</option><option>Failed</option></select></div>
+        <div class="tbl-box"><table class="tbl">
+          <thead><tr><th scope="col">Time</th><th scope="col">Event</th><th scope="col">Response</th><th scope="col" class="r">Latency</th><th scope="col" class="r">Attempt</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody><sc-for list="{{dl}}" as="d" hint-placeholder-count="6"><tr><td class="mono muted">{{d.t}}</td><td class="mono">{{d.e}}</td><td><span class="badge {{d.cls}} mono">{{d.code}}</span></td><td class="r num">{{d.ms}}</td><td class="r num">{{d.n}}</td><td><button class="btn btn-ghost btn-xs">Redeliver</button></td></tr></sc-for></tbody>
+        </table></div>
+      </section>
+    </div>
+  </div>
+</main>
+</div>
+</x-dc>

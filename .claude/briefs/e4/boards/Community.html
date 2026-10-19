@@ -1,0 +1,76 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Community (structure only; icons shown as [i]). Sample data: data/Community.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html" aria-current="page">[i]Moderation<span class="badge badge-destructive ml-auto">3</span></a>
+    <a class="nav-item" href="ChatBot.dc.html">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html">[i]Alerts &amp; overlays</a>
+  </nav>
+  <main class="shell-main"><div class="wrap">
+    <h1 class="h-xl">Moderation</h1>
+    <div class="tabs-line" role="tablist" aria-label="Moderation">
+      <button class="tab" role="tab" aria-selected="true">Queue <span class="badge badge-destructive">3</span></button><button class="tab" role="tab" aria-selected="false">Banned &amp; timed out</button><button class="tab" role="tab" aria-selected="false">Moderators</button><button class="tab" role="tab" aria-selected="false">Mod log</button><button class="tab" role="tab" aria-selected="false">Appeals <span class="badge badge-secondary">1</span></button>
+    </div>
+    <div class="split">
+      <section class="main" aria-label="Queue">
+        <sc-for list="{{queue}}" as="q" hint-placeholder-count="3">
+          <article class="panel">
+            <div class="panel-h"><span class="badge {{q.cls}}">{{q.kind}}</span><span class="muted">{{q.reason}}</span><span class="muted ml-auto t-2xs">{{q.ago}}</span></div>
+            <div class="panel-c">
+              <p><span class="strong {{q.c}}">{{q.who}}</span><span class="muted">: </span>{{q.text}}</p>
+              <div class="row-wrap">
+                <button class="btn btn-sm">{{q.primary}}</button>
+                <button class="btn btn-outline btn-sm">{{q.secondary}}</button>
+                <button class="btn btn-outline btn-sm">Timeout 10 min</button>
+                <button class="btn btn-destructive btn-sm">Ban</button>
+                <button class="btn btn-ghost btn-sm ml-auto">Escalate to platform</button>
+              </div>
+            </div>
+          </article>
+        </sc-for>
+        <div class="empty"><p class="muted">That’s everything. Held messages expire after 5 minutes if nobody acts.</p></div>
+      </section>
+      <aside class="aside">
+        <section class="card acc-orange" aria-labelledby="uc-h">
+          <div class="card-h"><span class="av av-md">S</span><div class="col grow"><h2 id="uc-h" class="card-t">spamcannon_77</h2><span class="muted">Account 2 days old · not following</span></div></div>
+          <div class="card-c col">
+            <div class="g4">
+              <div class="stat"><span class="k t-2xs">Messages</span><span class="v t-sm">14</span></div>
+              <div class="stat"><span class="k t-2xs">Timeouts</span><span class="v t-sm">1</span></div>
+              <div class="stat"><span class="k t-2xs">Reports</span><span class="v t-sm">3</span></div>
+            </div>
+            <div class="field"><span class="label">Recent messages</span>
+              <ul class="bordered col">
+                <li><span class="mono muted">19:02</span> cheap followers at [link removed]</li>
+                <li><span class="mono muted">19:01</span> hey streamer check dm</li>
+                <li><span class="mono muted">18:58</span> first</li>
+              </ul>
+            </div>
+            <div class="field"><label class="label" for="note">Mod note (only mods see this)</label><textarea id="note" class="textarea" placeholder="Add context for other moderators"></textarea></div>
+          </div>
+          <div class="card-f"><button class="btn btn-outline btn-sm">Timeout…</button><button class="btn btn-destructive btn-sm ml-auto">Ban from channel</button></div>
+        </section>
+        <section class="panel" aria-labelledby="log-h"><div class="panel-h" id="log-h">Recent actions</div>
+          <ul class="list">
+            <li><span class="av av-xs acc-lime">V</span><span class="grow"><span class="strong">voltagecontrol</span> timed out <span class="strong">loudguy</span> · 10 min</span><span class="muted t-2xs">4 m</span></li>
+            <li><span class="av av-xs acc-violet">M</span><span class="grow"><span class="strong">mira</span> enabled slow mode · 3 s</span><span class="muted t-2xs">22 m</span></li>
+            <li><span class="av av-xs acc-lime">V</span><span class="grow"><span class="strong">voltagecontrol</span> deleted a message</span><span class="muted t-2xs">31 m</span></li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </div></main>
+</div>
+</div>
+</x-dc>

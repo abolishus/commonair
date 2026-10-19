@@ -1,0 +1,60 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board TrustSafety (structure only; icons shown as [i]). Sample data: data/TrustSafety.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Admin">
+    <a class="nav-item" href="#" aria-current="page">Report queue<span class="badge badge-destructive ml-auto">27</span></a>
+    <a class="nav-item" href="#">Appeals<span class="badge badge-secondary ml-auto">6</span></a>
+    <a class="nav-item" href="#">DMCA notices<span class="badge badge-secondary ml-auto">2</span></a>
+    <a class="nav-item" href="#">Integrity signals</a>
+    <a class="nav-item" href="#">Relays</a>
+    <a class="nav-item" href="#">Users &amp; channels</a>
+    <a class="nav-item" href="#">Legal documents</a>
+    <a class="nav-item" href="#">Audit log</a>
+  </nav>
+  <main class="shell-main">
+    <section class="col" aria-labelledby="q-h">
+      <div class="row"><h1 id="q-h" class="h-base">Report queue</h1><select class="select ml-auto" aria-label="Filter"><option>Highest severity</option><option>Oldest first</option></select></div>
+      <ul class="bordered col">
+        <sc-for list="{{reports}}" as="r" hint-placeholder-count="6">
+          <li><a class="row" href="#">
+            <span class="badge {{r.cls}}">{{r.sev}}</span>
+            <span class="col grow"><span class="strong">{{r.cat}}</span><span class="muted truncate">{{r.target}}</span></span>
+            <span class="col"><span class="muted t-2xs">{{r.age}}</span><span class="muted t-2xs num">{{r.n}} reports</span></span>
+          </a></li>
+        </sc-for>
+      </ul>
+    </section>
+    <section class="col" aria-labelledby="d-h">
+      <div class="row-wrap"><span class="badge badge-destructive">High</span><h2 id="d-h" class="h-base">Harassment in chat · channel rivertide</h2><span class="muted ml-auto">Opened 14 min ago · SLA 1 h</span></div>
+      <div class="g2">
+        <div class="panel"><div class="panel-h">Reported account</div><div class="panel-c"><div class="row acc-red"><span class="av av-sm">L</span><div class="col"><span class="strong">loudguy</span><span class="muted">Joined Jan 2025 · 2 prior warnings</span></div></div><div class="row-wrap"><span class="badge badge-outline">3 channel bans</span><span class="badge badge-outline">0 platform actions</span></div></div></div>
+        <div class="panel"><div class="panel-h">Reporters</div><div class="panel-c"><p class="muted">3 viewers + channel moderator <span class="strong">voltagecontrol</span>. Reporter identities are hidden from the reported user.</p></div></div>
+      </div>
+      <div class="panel"><div class="panel-h">Evidence · chat context<span class="muted ml-auto t-2xs">retained 90 days</span></div>
+        <div class="panel-c">
+          <p><span class="mono muted">19:01:10</span> <span class="strong c3">kettlebell_kai</span>: the VU meters on that thing are gorgeous</p>
+          <p><span class="mono muted">19:01:22</span> <span class="strong c1">loudguy</span>: [targeted insult toward a chatter, 1 message]</p>
+          <p><span class="mono muted">19:01:40</span> <span class="strong c1">loudguy</span>: [repeat, after timeout warning]</p>
+          <p><span class="mono muted">19:01:44</span> <span class="muted">voltagecontrol timed out loudguy · 10 min</span></p>
+        </div>
+      </div>
+      <section class="card" aria-labelledby="act-h">
+        <div class="card-h"><h3 id="act-h" class="card-t">Action</h3><span class="muted ml-auto">Policy: Community guidelines §2.1</span></div>
+        <div class="card-c col">
+          <div class="seg" role="group" aria-label="Decision"><button aria-pressed="false">No violation</button><button aria-pressed="false">Warning</button><button aria-pressed="true">Chat suspension</button><button aria-pressed="false">Account suspension</button><button aria-pressed="false">Permanent ban</button></div>
+          <div class="g2"><div class="field"><label class="label" for="dur">Duration</label><select id="dur" class="select"><option>7 days</option></select></div><div class="field"><label class="label" for="tpl">Message to user</label><select id="tpl" class="select"><option>Harassment — first suspension</option></select></div></div>
+          <div class="field"><label class="label" for="nt">Internal note (audit log; no personal data)</label><textarea id="nt" class="textarea" placeholder="Reason for the decision"></textarea></div>
+        </div>
+        <div class="card-f"><button class="btn btn-ghost btn-sm">Escalate</button><span class="muted">User can appeal for 30 days</span><button class="btn btn-sm ml-auto">Apply action</button></div>
+      </section>
+    </section>
+  </main>
+</div>
+</div>
+</x-dc>

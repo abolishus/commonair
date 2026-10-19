@@ -1,0 +1,72 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Support (structure only; icons shown as [i]). Sample data: data/Support.js
+-->
+<x-dc>
+<div class="ca acc-teal {{themeClass}}">
+<div inert="">
+  [HDR]
+  <div>
+    <div class="col"><div class="player"><div class="stage"><span class="av av-xl">R</span></div></div><div class="row"><span class="av av-lg av-live">R</span><span class="h-base">rivertide</span></div></div>
+    <div class="chat"></div>
+  </div>
+</div>
+<div class="scrim">
+  <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-h">
+    <div class="row">
+      <span class="av av-md">R</span>
+      <div class="col grow"><h1 id="dlg-h" class="h-base">Support rivertide</h1><p class="muted">Every option pays the creator directly through the co-op.</p></div>
+      <button class="btn btn-ghost btn-icon btn-sm" aria-label="Close">[i]</button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Support type">
+      <button class="tab" role="tab" aria-selected="{{subSel}}" onClick="{{toSub}}">Subscribe</button>
+      <button class="tab" role="tab" aria-selected="{{giftSel}}" onClick="{{toGift}}">Gift subs</button>
+      <button class="tab" role="tab" aria-selected="{{tipSel}}" onClick="{{toTip}}">Tip</button>
+    </div>
+    <sc-if value="{{showSub}}" hint-placeholder-val="{{true}}">
+      <fieldset class="col"><legend class="sr-only">Tier</legend>
+        <sc-for list="{{tiers}}" as="t" hint-placeholder-count="3">
+          <button class="opt {{t.on}}" onClick="{{t.pick}}">
+            <span class="radio {{t.on}}"></span>
+            <span class="col grow"><span class="row"><span class="strong">{{t.name}}</span><span class="ml-auto strong num">{{t.price}} / month</span></span><span class="muted">{{t.perks}}</span></span>
+          </button>
+        </sc-for>
+      </fieldset>
+    </sc-if>
+    <sc-if value="{{showGift}}" hint-placeholder-val="{{false}}">
+      <div class="col">
+        <div class="field"><span class="label">How many?</span><div class="seg" role="group" aria-label="Gift count"><button aria-pressed="false">1</button><button aria-pressed="true">5</button><button aria-pressed="false">10</button><button aria-pressed="false">25</button><button aria-pressed="false">Custom</button></div></div>
+        <div class="field"><label class="label" for="to">Recipient</label><select id="to" class="select"><option>Random active chatters</option><option>A specific viewer</option></select></div>
+        <div class="row bordered"><span>5 × Tier 1</span><span class="ml-auto strong num">$24.95</span></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{showTip}}" hint-placeholder-val="{{false}}">
+      <div class="col">
+        <div class="seg" role="group" aria-label="Amount"><button aria-pressed="false">$2</button><button aria-pressed="true">$5</button><button aria-pressed="false">$10</button><button aria-pressed="false">$20</button></div>
+        <div class="field"><label class="label" for="amt">Custom amount</label><div class="input-group"><span class="addon">$</span><input id="amt" value="5.00" inputmode="decimal"><span class="addon">USD</span></div></div>
+        <div class="field"><label class="label" for="msg">Message (shown on stream)</label><textarea id="msg" class="textarea" placeholder="Say something nice"></textarea><span class="hint">Messages go through the channel’s chat filters before the alert plays.</span></div>
+      </div>
+    </sc-if>
+    <details class="bordered" open="">
+      <summary class="row">[i]<span class="strong">Where your money goes</span><span class="muted ml-auto">per $5.00</span></summary>
+      <div class="col">
+        <div><span></span><span></span><span></span><span></span></div>
+        <ul class="col">
+          <li class="row"><span class="legend-sw"></span><span>Creator</span><span class="ml-auto num">$3.55</span></li>
+          <li class="row"><span class="legend-sw"></span><span>Co-op operations &amp; infrastructure</span><span class="ml-auto num">$0.70</span></li>
+          <li class="row"><span class="legend-sw"></span><span>Patronage pool (returned to members)</span><span class="ml-auto num">$0.45</span></li>
+          <li class="row"><span class="legend-sw"></span><span>Payment processing</span><span class="ml-auto num">$0.30</span></li>
+        </ul>
+        <a class="link muted" href="Transparency.dc.html">Split set by member vote, proposal #41</a>
+      </div>
+    </details>
+    <div class="col">
+      <div class="row"><span class="muted">Pay with</span><select class="select" aria-label="Payment method"><option>Card ending 4242</option><option>Add a payment method</option></select></div>
+      <button class="btn btn-lg btn-accent btn-block">{{cta}}</button>
+      <p class="muted t-2xs">Cancel any time from Settings › Subscriptions. Prices include tax where applicable.</p>
+    </div>
+  </section>
+</div>
+</div>
+</x-dc>

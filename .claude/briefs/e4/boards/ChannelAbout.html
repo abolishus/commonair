@@ -1,0 +1,72 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board ChannelAbout (structure only; icons shown as [i]). Sample data: data/ChannelAbout.js
+-->
+<x-dc>
+<div class="ca acc-pink {{themeClass}}">
+[HDR]
+<div>
+  <div></div>
+</div>
+<main class="wrap">
+  <section class="row-wrap">
+    <span class="av av-xl">S</span>
+    <div class="col">
+      <div class="row"><h1 class="h-xl">synthesist_ana</h1><span class="badge badge-secondary">Co-op member</span><span class="badge badge-outline">Offline</span></div>
+      <p class="muted">806 followers · Music · Last live 2 days ago</p>
+    </div>
+    <div class="row">
+      <button class="btn btn-secondary">[i]Following</button>
+      <button class="btn btn-ghost btn-icon" aria-label="Go-live notifications on">[i]</button>
+      <a class="btn btn-outline" href="Support.dc.html">Subscribe</a>
+      <button class="btn btn-ghost btn-icon" aria-label="More actions">[i]</button>
+    </div>
+  </section>
+  <div class="tabs-line" role="tablist" aria-label="Channel"><button class="tab" role="tab" aria-selected="true">Home</button><button class="tab" role="tab" aria-selected="false">About</button><button class="tab" role="tab" aria-selected="false">Schedule</button><button class="tab" role="tab" aria-selected="false">Videos</button><button class="tab" role="tab" aria-selected="false">Clips</button></div>
+  <div class="split">
+    <div class="main">
+      <div class="player">
+        <div class="stage"><div class="col"><span class="badge badge-overlay">Offline</span><p class="h-base">Next stream: tomorrow, 19:00 UTC</p><p>Patch-from-zero Thursdays · Music</p><a class="btn btn-sm" href="Vod.dc.html">Watch latest broadcast</a></div></div>
+      </div>
+      <section aria-labelledby="vh" class="col">
+        <div class="row"><h2 id="vh" class="h-base">Recent broadcasts</h2><a class="btn btn-ghost btn-xs ml-auto" href="#">All videos</a></div>
+        <div class="cards">
+          <sc-for list="{{vods}}" as="s" hint-placeholder-count="3">
+            <article class="sc"><a class="sc-link" href="Vod.dc.html">
+              <div class="thumb"><div class="thumb-ph scene"><span class="av av-md">S</span></div><span class="badge badge-overlay br num">{{s.len}}</span><span class="badge badge-overlay bl">{{s.ago}}</span></div>
+              <div class="col"><h3 class="sc-title clamp2">{{s.title}}</h3><span class="muted">{{s.views}} views</span></div>
+            </a></article>
+          </sc-for>
+        </div>
+      </section>
+      <section aria-labelledby="ch" class="col">
+        <div class="row"><h2 id="ch" class="h-base">Popular clips</h2><a class="btn btn-ghost btn-xs ml-auto" href="#">All clips</a></div>
+        <div class="cards">
+          <sc-for list="{{clips}}" as="s" hint-placeholder-count="3">
+            <article class="sc"><a class="sc-link" href="Clip.dc.html">
+              <div class="thumb"><div class="thumb-ph scene"><span class="av av-md">S</span></div><span class="badge badge-overlay br num">{{s.len}}</span><span class="badge badge-overlay tl">Clip</span></div>
+              <div class="col"><h3 class="sc-title clamp2">{{s.title}}</h3><span class="muted">clipped by {{s.by}} · {{s.views}} views</span></div>
+            </a></article>
+          </sc-for>
+        </div>
+      </section>
+    </div>
+    <aside class="aside">
+      <div class="panel"><div class="panel-h">[i]Schedule<span class="muted ml-auto t-2xs">UTC</span></div>
+        <ul class="list">
+          <li><span class="col"><span class="strong">Thu</span><span class="muted num">Oct 19</span></span><span class="col grow"><span>Patch-from-zero Thursdays</span><span class="muted num">19:00 – 22:00</span></span><span class="badge badge-accent">Next</span></li>
+          <li><span class="col"><span class="strong">Sat</span><span class="muted num">Oct 21</span></span><span class="col grow"><span>Listener tracks review</span><span class="muted num">16:00 – 18:00</span></span></li>
+          <li><span class="col"><span class="strong">Tue</span><span class="muted num">Oct 24</span></span><span class="col grow"><span>Sound design Q&amp;A</span><span class="muted num">19:00 – 21:00</span></span></li>
+        </ul>
+        <div class="panel-c"><button class="btn btn-outline btn-sm">[i]Add to calendar (.ics)</button></div>
+      </div>
+      <div class="panel"><div class="panel-h">About</div><div class="panel-c"><p>Sound designer teaching synthesis from first principles. Every Thursday we build a patch from a blank rack.</p><div class="row-wrap"><a class="badge badge-outline" href="#">Website</a><a class="badge badge-outline" href="#">Fediverse</a><a class="badge badge-outline" href="#">Bandcamp</a></div></div></div>
+      <div class="panel"><div class="panel-h">Chat rules</div><ol class="panel-c"><li>Be kind, especially to beginners.</li><li>No self-promo without asking.</li><li>English or Spanish please.</li></ol></div>
+      <div class="panel"><div class="panel-h">Supporters</div><div class="panel-c"><p class="muted">Monthly subscriptions fund the stream. 71% goes to the creator; the split is set by member vote.</p><a class="btn btn-sm btn-accent" href="Support.dc.html">Support synthesist_ana</a></div></div>
+    </aside>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

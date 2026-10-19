@@ -1,0 +1,57 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Following (structure only; icons shown as [i]). Sample data: data/Following.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <h1 class="h-2xl">Following</h1>
+  <div class="tabs-line" role="tablist" aria-label="Following">
+    <button class="tab" role="tab" aria-selected="true">Overview</button><button class="tab" role="tab" aria-selected="false">Live <span class="badge badge-secondary">5</span></button><button class="tab" role="tab" aria-selected="false">Videos</button><button class="tab" role="tab" aria-selected="false">Categories</button><button class="tab" role="tab" aria-selected="false">Channels</button>
+  </div>
+  <section aria-labelledby="live-h" class="col">
+    <h2 id="live-h" class="h-base">Live now</h2>
+    <div class="cards">
+      <sc-for list="{{live}}" as="s" hint-placeholder-count="5">
+        <article class="sc acc-{{s.acc}}">
+          <a class="sc-link" href="Channel.dc.html">
+            <div class="thumb"><div class="thumb-ph scene"><span class="av av-lg">{{s.i}}</span></div><span class="live live-sm tl">Live</span><span class="vc vc-overlay bl">[i]{{s.v}}</span><span class="badge badge-overlay br num">{{s.up}}</span></div>
+            <div class="sc-meta"><span class="av av-sm">{{s.i}}</span><div class="col"><h3 class="sc-title clamp2">{{s.title}}</h3><span class="muted truncate">{{s.name}}</span><span class="muted truncate">{{s.cat}}</span></div></div>
+          </a>
+        </article>
+      </sc-for>
+    </div>
+  </section>
+  <div class="split">
+    <section aria-labelledby="off-h" class="main">
+      <div class="row"><h2 id="off-h" class="h-base">Offline</h2><span class="muted">33 channels</span><select class="select ml-auto" aria-label="Sort offline channels"><option>Recently live</option><option>Next scheduled</option><option>A–Z</option></select></div>
+      <ul class="bordered list">
+        <sc-for list="{{offline}}" as="c" hint-placeholder-count="6">
+          <li class="acc-{{c.acc}}">
+            <span class="av av-sm">{{c.i}}</span>
+            <div class="col grow"><a class="strong" href="ChannelAbout.dc.html">{{c.name}}</a><span class="muted truncate">{{c.last}}</span></div>
+            <span class="row muted">[i]{{c.next}}</span>
+            <button class="btn btn-ghost btn-icon btn-sm" aria-label="Notifications for {{c.name}}">[i]</button>
+          </li>
+        </sc-for>
+      </ul>
+    </section>
+    <section aria-labelledby="cat-h" class="aside">
+      <h2 id="cat-h" class="h-base">Followed categories</h2>
+      <div class="g4">
+        <a class="col acc-indigo" href="Category.dc.html"><span class="boxart"><span class="glyph">M</span></span><span class="strong truncate">Music</span><span class="muted num">6.4K</span></a>
+        <a class="col acc-pink" href="Category.dc.html"><span class="boxart"><span class="glyph">A</span></span><span class="strong truncate">Art</span><span class="muted num">3.1K</span></a>
+        <a class="col acc-teal" href="Category.dc.html"><span class="boxart"><span class="glyph">ST</span></span><span class="strong truncate">Science &amp; Tech</span><span class="muted num">2.8K</span></a>
+      </div>
+      <div class="callout">
+        [i]
+        <div class="col"><p>Get go-live notifications by email or web push.</p><a class="btn btn-outline btn-xs" href="Settings.dc.html">Notification settings</a></div>
+      </div>
+    </section>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

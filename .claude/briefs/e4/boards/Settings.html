@@ -1,0 +1,71 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Settings (structure only; icons shown as [i]). Sample data: data/Settings.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <h1 class="h-2xl">Settings</h1>
+  <div class="shell">
+    <nav aria-label="Settings sections" class="col">
+      <a class="nav-item" href="#" aria-current="page">Profile</a>
+      <a class="nav-item" href="#">Account &amp; security</a>
+      <a class="nav-item" href="#">Notifications</a>
+      <a class="nav-item" href="#">Subscriptions &amp; payments</a>
+      <a class="nav-item" href="#">Co-op membership</a>
+      <a class="nav-item" href="#">Connections &amp; apps</a>
+      <a class="nav-item" href="#">Privacy &amp; data</a>
+      <a class="nav-item" href="#">Blocked users</a>
+      <a class="nav-item" href="#">Appearance &amp; language</a>
+    </nav>
+    <div class="col">
+      <section class="card" aria-labelledby="p-h">
+        <div class="card-h"><div class="col"><h2 id="p-h" class="card-t">Profile</h2><p class="card-d">Shown on your channel and in chat.</p></div></div>
+        <div class="card-c col">
+          <div class="row acc-violet"><span class="av av-xl">M</span><div class="col"><div class="row"><button class="btn btn-outline btn-sm">Upload picture</button><button class="btn btn-ghost btn-sm">Remove</button></div><span class="hint">PNG or JPEG, at least 256 × 256. Without one, your initial is shown.</span></div></div>
+          <div class="g2"><div class="field"><label class="label" for="dn">Display name</label><input id="dn" class="input" value="Mira"></div><div class="field"><label class="label" for="un">Username</label><div class="input-group"><span class="addon">/</span><input id="un" value="mira"></div></div></div>
+          <div class="field"><label class="label" for="bio">Bio</label><textarea id="bio" class="textarea">Ceramics, glazes and kiln disasters. Streaming Tue/Thu evenings.</textarea><span class="hint num">63 / 300</span></div>
+          <fieldset class="field"><legend class="label">Channel accent</legend>
+            <div class="row-wrap">
+              <sc-for list="{{accents}}" as="a" hint-placeholder-count="12"><button class="acc-{{a.k}}" aria-label="{{a.k}}" aria-pressed="{{a.on}}"></button></sc-for>
+            </div>
+            <span class="hint">Used for your avatar fallback, thumbnails and the player scrubber. All accents pass contrast checks.</span>
+          </fieldset>
+        </div>
+        <div class="card-f"><button class="btn btn-ghost btn-sm ml-auto">Cancel</button><button class="btn btn-sm">Save changes</button></div>
+      </section>
+      <section class="card" aria-labelledby="s-h">
+        <div class="card-h"><div class="col"><h2 id="s-h" class="card-t">Sign-in methods</h2><p class="card-d">Two-factor is required to stream or moderate.</p></div></div>
+        <ul class="card-c list bordered">
+          <li>[i]<div class="col grow"><span class="strong">Password</span><span class="muted">Changed 3 months ago</span></div><button class="btn btn-outline btn-sm">Change</button></li>
+          <li>[i]<div class="col grow"><span class="strong">Passkeys</span><span class="muted">2 registered · Laptop, Phone</span></div><button class="btn btn-outline btn-sm">Manage</button></li>
+          <li>[i]<div class="col grow"><span class="row strong">Authenticator app <span class="badge badge-ok">On</span></span><span class="muted">8 of 10 recovery codes left</span></div><button class="btn btn-outline btn-sm">Recovery codes</button></li>
+        </ul>
+      </section>
+      <section class="card" aria-labelledby="n-h">
+        <div class="card-h"><h2 id="n-h" class="card-t">Notifications</h2></div>
+        <div class="card-c tbl-box">
+          <table class="tbl"><thead><tr><th scope="col">Event</th><th scope="col">On site</th><th scope="col">Email</th><th scope="col">Web push</th></tr></thead>
+            <tbody>
+              <tr><td>A followed channel goes live</td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch" aria-label="Off"></span></td><td><span class="switch on" aria-label="On"></span></td></tr>
+              <tr><td>Someone gifts you a subscription</td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch" aria-label="Off"></span></td></tr>
+              <tr><td>New co-op proposal opens for voting</td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch" aria-label="Off"></span></td></tr>
+              <tr><td>Patronage statement ready</td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch on" aria-label="On"></span></td><td><span class="switch" aria-label="Off"></span></td></tr>
+            </tbody></table>
+        </div>
+      </section>
+      <section class="card" aria-labelledby="d-h">
+        <div class="card-h"><div class="col"><h2 id="d-h" class="card-t">Your data</h2><p class="card-d">Everything we hold about you, in a portable archive.</p></div></div>
+        <div class="card-c col">
+          <div class="row-wrap bordered"><div class="col grow"><span class="strong">Export my data</span><span class="muted">JSON + media, ready within 24 hours. Last export: never.</span></div><button class="btn btn-outline btn-sm">[i]Request export</button></div>
+          <div class="row-wrap bordered"><div class="col grow"><span class="strong">Delete account</span><span class="muted">Profile, messages and media are removed. Ledger and vote history stay, pseudonymized.</span></div><button class="btn btn-destructive btn-sm">Delete account…</button></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

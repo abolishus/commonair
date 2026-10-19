@@ -1,0 +1,71 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Coop (structure only; icons shown as [i]). Sample data: data/Coop.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="row-wrap">
+    <div class="col"><h1 class="h-2xl">The co-op</h1><p class="muted t-sm">CommonAir is owned by its members: the people who stream, watch and work here. Members elect the creator council, vote on proposals and share the surplus.</p></div>
+    <div class="tabs" role="tablist" aria-label="Co-op"><button class="tab" role="tab" aria-selected="true">Overview</button><a class="tab" role="tab" aria-selected="false" href="Proposal.dc.html">Proposals</a><button class="tab" role="tab" aria-selected="false">Council</button><a class="tab" role="tab" aria-selected="false" href="Transparency.dc.html">Transparency</a></div>
+  </div>
+  <div class="split">
+    <div class="main">
+      <section class="card acc-violet" aria-labelledby="me-h">
+        <div class="card-h"><span class="av av-md">M</span><div class="col grow"><h2 id="me-h" class="card-t">Your membership</h2><p class="card-d">Streamer member since March 2026 · member #1,204</p></div><span class="badge badge-ok">In good standing</span></div>
+        <div class="card-c g4">
+          <div class="stat"><span class="k">Class</span><span class="v">Streamer</span><span class="muted t-2xs">Also counts in all-member votes</span></div>
+          <div class="stat"><span class="k">Shares held</span><span class="v">1</span><span class="muted t-2xs">One member, one vote</span></div>
+          <div class="stat"><span class="k">Votes cast</span><span class="v">7 / 8</span><span class="muted t-2xs">this year</span></div>
+          <div class="stat"><span class="k">Patronage (est.)</span><span class="v">$96.40</span><span class="muted t-2xs">2026 allocation</span></div>
+        </div>
+      </section>
+      <section class="col" aria-labelledby="open-h">
+        <div class="row"><h2 id="open-h" class="h-base">Open for voting</h2><a class="btn btn-ghost btn-xs ml-auto" href="Proposal.dc.html">All proposals</a></div>
+        <sc-for list="{{props}}" as="p" hint-placeholder-count="3">
+          <a class="panel" href="Proposal.dc.html">
+            <div class="panel-c">
+              <div class="row-wrap"><span class="mono muted">#{{p.n}}</span><span class="strong t-sm">{{p.t}}</span><sc-if value="{{p.prot}}" hint-placeholder-val="{{false}}"><span class="badge badge-warn">[i]Protected</span></sc-if><span class="badge {{p.scls}} ml-auto">{{p.status}}</span></div>
+              <p class="muted">{{p.sum}}</p>
+              <div class="row-wrap muted"><span class="row">[i]{{p.ends}}</span><span>·</span><span class="num">{{p.turnout}} turnout</span><span>·</span><span class="num">{{p.comments}} comments</span><sc-if value="{{p.voted}}" hint-placeholder-val="{{false}}"><span class="badge badge-secondary ml-auto">You voted</span></sc-if></div>
+              <span class="progress"><span></span></span>
+            </div>
+          </a>
+        </sc-for>
+      </section>
+    </div>
+    <aside class="aside">
+      <section class="panel" aria-labelledby="cls-h"><div class="panel-h" id="cls-h">Members by class</div>
+        <div class="panel-c">
+          <div role="img" aria-label="Viewer 78%, Streamer 19%, Worker 3%"><span></span><span></span><span></span></div>
+          <ul class="col">
+            <li class="row"><span class="legend-sw"></span>Viewer members<span class="ml-auto num">4,512</span></li>
+            <li class="row"><span class="legend-sw"></span>Streamer members<span class="ml-auto num">1,108</span></li>
+            <li class="row"><span class="legend-sw"></span>Worker members<span class="ml-auto num">17</span></li>
+          </ul>
+          <p class="muted">Protected decisions (the revenue split, data policy, these rules) also need a majority of the streamer class.</p>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="cn-h"><div class="panel-h" id="cn-h">Creator council<span class="muted ml-auto t-2xs">term ends Mar 2027</span></div>
+        <ul class="list">
+          <li class="acc-teal"><span class="av av-sm">R</span><span class="col grow"><span class="strong">rivertide</span><span class="muted">Chair</span></span></li>
+          <li class="acc-amber"><span class="av av-sm">O</span><span class="col grow"><span class="strong">Okonkwo Plays</span><span class="muted">Seat 2</span></span></li>
+          <li class="acc-pink"><span class="av av-sm">S</span><span class="col grow"><span class="strong">synthesist_ana</span><span class="muted">Seat 3</span></span></li>
+          <li class="acc-green"><span class="av av-sm">L</span><span class="col grow"><span class="strong">Lumen Kitchen</span><span class="muted">Seat 4 · small-channel seat</span></span></li>
+          <li class="acc-sky"><span class="av av-sm">T</span><span class="col grow"><span class="strong">Tinwhistle</span><span class="muted">Seat 5 · small-channel seat</span></span></li>
+        </ul>
+      </section>
+      <section class="panel" aria-labelledby="ev-h"><div class="panel-h" id="ev-h">Coming up</div>
+        <ul class="list">
+          <li><span class="col"><span class="strong">Nov</span><span class="muted num">4</span></span><span class="grow">Council open session (streamed)</span></li>
+          <li><span class="col"><span class="strong">Dec</span><span class="muted num">2</span></span><span class="grow">Annual general meeting</span></li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

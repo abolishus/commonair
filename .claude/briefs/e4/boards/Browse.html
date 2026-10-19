@@ -1,0 +1,46 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Browse (structure only; icons shown as [i]). Sample data: data/Browse.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="col">
+    <h1 class="h-2xl">Browse</h1>
+    <p class="muted t-sm">Every live channel, every category. Counts are verified viewers only.</p>
+  </div>
+  <div class="tabs-line" role="tablist" aria-label="Browse by">
+    <button class="tab" role="tab" aria-selected="true">Categories</button>
+    <a class="tab" role="tab" aria-selected="false" href="Category.dc.html">Live channels</a>
+  </div>
+  <div class="row-wrap">
+    <div class="input-group"><span class="addon">[i]</span><input aria-label="Filter categories" placeholder="Filter categories"></div>
+    <label class="sr-only" for="lang">Language</label>
+    <select id="lang" class="select"><option>All languages</option><option>English</option><option>Español</option></select>
+    <ul class="row-wrap" aria-label="Popular tags">
+      <li><button class="badge badge-secondary" aria-pressed="true">All</button></li>
+      <li><button class="badge badge-outline" aria-pressed="false">Cozy</button></li>
+      <li><button class="badge badge-outline" aria-pressed="false">Competitive</button></li>
+      <li><button class="badge badge-outline" aria-pressed="false">Creative</button></li>
+      <li><button class="badge badge-outline" aria-pressed="false">IRL</button></li>
+      <li><button class="badge badge-outline" aria-pressed="false">Mature</button></li>
+    </ul>
+    <div class="row ml-auto"><span class="muted">Sort</span><select class="select" aria-label="Sort"><option>Viewers (high to low)</option><option>Channels live</option><option>A–Z</option></select></div>
+  </div>
+  <div class="cards-sm">
+    <sc-for list="{{cats}}" as="c" hint-placeholder-count="18">
+      <a class="col acc-{{c.acc}}" href="Category.dc.html">
+        <div class="boxart"><span class="glyph">{{c.g}}</span><span class="badge badge-overlay">{{c.ch}} live</span></div>
+        <span class="strong t-sm truncate">{{c.name}}</span>
+        <span class="muted num">{{c.v}} viewers</span>
+        <span class="row-wrap"><span class="badge badge-outline">{{c.tag}}</span></span>
+      </a>
+    </sc-for>
+  </div>
+  <button class="btn btn-outline">Load more categories</button>
+</main>
+[FTR]
+</div>
+</x-dc>

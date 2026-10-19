@@ -10,6 +10,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./components/*": "./src/components/*.tsx",
+    "./hooks/*": "./src/hooks/*.ts",
+    "./layouts": "./src/layouts/index.ts",
+    "./blocks/*": "./src/blocks/*/index.ts",
     "./globals.css": "./src/styles/globals.css",
     "./toast": "./src/toast.tsx",
     "./lib/utils": "./src/lib/utils.ts",

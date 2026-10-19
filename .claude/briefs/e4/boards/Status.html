@@ -1,0 +1,46 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Status (structure only; icons shown as [i]). Sample data: data/Status.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap wrap-md">
+  <section class="row-wrap bordered" aria-labelledby="sum-h">
+    <span></span>
+    <div class="col grow"><h1 id="sum-h" class="h-base">Partial degradation: chat in EU</h1><p class="muted">Some viewers see chat messages arrive late. Video is unaffected. Updated 6 min ago.</p></div>
+  </section>
+  <section class="col" aria-labelledby="cmp-h">
+    <div class="row"><h2 id="cmp-h" class="h-base">Components</h2><span class="muted ml-auto">90-day uptime</span></div>
+    <ul class="bordered list">
+      <sc-for list="{{comps}}" as="c" hint-placeholder-count="8">
+        <li>
+          <span class="col"><span class="strong">{{c.n}}</span><span class="muted t-2xs">{{c.d}}</span></span>
+          <span class="row grow" role="img" aria-label="{{c.n}} daily status, last 90 days"><sc-for list="{{c.days}}" as="d"><span></span></sc-for></span>
+          <span class="num">{{c.up}}</span>
+          <span class="badge {{c.cls}}">{{c.state}}</span>
+        </li>
+      </sc-for>
+    </ul>
+    <div class="row muted t-2xs"><span class="legend-sw"></span>Operational<span class="legend-sw"></span>Degraded<span class="legend-sw"></span>Outage</div>
+  </section>
+  <section class="col" aria-labelledby="inc-h">
+    <h2 id="inc-h" class="h-base">Incidents</h2>
+    <article class="panel">
+      <div class="panel-h"><span class="badge badge-warn">Monitoring</span><span>Chat delivery delays in EU</span><span class="muted ml-auto t-2xs">Oct 18</span></div>
+      <ol class="panel-c">
+        <li class="col"><span class="strong">Monitoring · 19:12 UTC</span><span class="muted">A Valkey replica was failed over. Delays are falling; we are watching for 30 minutes.</span></li>
+        <li class="col"><span class="strong">Identified · 18:54 UTC</span><span class="muted">Fan-out lag on one chat node in the EU region.</span></li>
+        <li class="col"><span class="strong">Investigating · 18:41 UTC</span><span class="muted">Reports of chat arriving 10–20 seconds late.</span></li>
+      </ol>
+    </article>
+    <article class="panel">
+      <div class="panel-h"><span class="badge badge-ok">Resolved</span><span>Origin outage, all regions (46 min)</span><span class="muted ml-auto t-2xs">Aug 22</span></div>
+      <div class="panel-c"><p class="muted">Storage quota exhausted on the origin cache. Relays kept 31% of viewers watching. <a class="link" href="#">Postmortem</a></p></div>
+    </article>
+  </section>
+</main>
+[FTR]
+</div>
+</x-dc>

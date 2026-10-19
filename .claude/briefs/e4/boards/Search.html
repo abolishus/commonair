@@ -1,0 +1,53 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Search (structure only; icons shown as [i]). Sample data: data/Search.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap wrap-md">
+  <div class="col"><h1 class="h-xl">Results for “synth”</h1><p class="muted">5 channels · 2 categories · 14 videos</p></div>
+  <div class="tabs" role="tablist" aria-label="Result type">
+    <button class="tab" role="tab" aria-selected="true">All</button><button class="tab" role="tab" aria-selected="false">Channels</button><button class="tab" role="tab" aria-selected="false">Categories</button><button class="tab" role="tab" aria-selected="false">Live</button><button class="tab" role="tab" aria-selected="false">Videos</button>
+  </div>
+  <section aria-labelledby="ch-h" class="col">
+    <h2 id="ch-h" class="h-base">Channels</h2>
+    <ul class="bordered list">
+      <sc-for list="{{channels}}" as="c" hint-placeholder-count="4">
+        <li class="acc-{{c.acc}}">
+          <span class="av av-md {{c.ring}}">{{c.i}}</span>
+          <div class="col grow">
+            <div class="row"><a class="strong t-sm" href="Channel.dc.html">{{c.name}}</a><sc-if value="{{c.live}}" hint-placeholder-val="{{false}}"><span class="live live-sm">Live</span></sc-if><sc-if value="{{c.member}}" hint-placeholder-val="{{false}}"><span class="badge badge-secondary">Co-op member</span></sc-if></div>
+            <span class="muted truncate">{{c.sub}}</span>
+          </div>
+          <span class="muted num">{{c.f}} followers</span>
+          <button class="btn btn-outline btn-sm">Follow</button>
+        </li>
+      </sc-for>
+    </ul>
+  </section>
+  <section aria-labelledby="cat-h" class="col">
+    <h2 id="cat-h" class="h-base">Categories</h2>
+    <div class="row-wrap">
+      <a class="row bordered acc-indigo" href="Category.dc.html"><span class="boxart"><span class="glyph">M</span></span><span class="col"><span class="strong">Music</span><span class="muted">6.4K viewers · tag “synth” on 14 streams</span></span></a>
+      <a class="row bordered acc-lime" href="Category.dc.html"><span class="boxart"><span class="glyph">SW</span></span><span class="col"><span class="strong">Synthwave Racer</span><span class="muted">88 viewers · 4 live</span></span></a>
+    </div>
+  </section>
+  <section aria-labelledby="vid-h" class="col">
+    <div class="row"><h2 id="vid-h" class="h-base">Videos</h2><a class="btn btn-ghost btn-xs ml-auto" href="#">All 14 videos</a></div>
+    <div class="cards">
+      <sc-for list="{{videos}}" as="s" hint-placeholder-count="3">
+        <article class="sc acc-{{s.acc}}">
+          <a class="sc-link" href="Vod.dc.html">
+            <div class="thumb"><div class="thumb-ph scene"><span class="av av-lg">{{s.i}}</span></div><span class="badge badge-overlay tl">{{s.kind}}</span><span class="badge badge-overlay br num">{{s.len}}</span><span class="badge badge-overlay bl">{{s.ago}}</span></div>
+            <div class="sc-meta"><span class="av av-sm">{{s.i}}</span><div class="col"><h3 class="sc-title clamp2">{{s.title}}</h3><span class="muted truncate">{{s.name}} · {{s.views}} views</span></div></div>
+          </a>
+        </article>
+      </sc-for>
+    </div>
+  </section>
+</main>
+[FTR]
+</div>
+</x-dc>

@@ -1,0 +1,36 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Mobile (structure only; icons shown as [i]). Sample data: data/Mobile.js
+-->
+<x-dc>
+<div class="ca acc-teal {{themeClass}}">
+<header class="hdr">
+  <a class="brand" href="Main.dc.html" aria-label="CommonAir home"><span class="brand-mark">C</span></a>
+  <span class="grow"></span>
+  <button class="btn btn-ghost btn-icon btn-lg" aria-label="Search">[i]</button>
+  <button class="btn btn-ghost btn-icon btn-lg" aria-label="Notifications">[i]</button>
+  <button class="btn btn-ghost btn-icon btn-lg acc-violet" aria-label="Account menu"><span class="av av-xs">M</span></button>
+</header>
+<div class="player">
+  <div class="stage"><span class="av av-lg">R</span></div>
+  <div class="ptop"><span class="live live-sm">Live</span><span class="vc vc-overlay">[i]2.4K</span></div>
+  <div class="ctrls"><div class="row"><button class="pbtn" aria-label="Pause">[i]</button><span class="grow"></span><button class="pbtn" aria-label="Settings">[i]</button><button class="pbtn" aria-label="Fullscreen">[i]</button></div></div>
+</div>
+<section class="col">
+  <div class="row"><span class="av av-sm av-live">R</span><div class="col grow"><h1 class="strong t-sm">rivertide</h1><span class="muted truncate">Rebuilding a 1970s tape deck</span></div><button class="btn btn-accent btn-lg">Follow</button></div>
+  <div class="row"><a class="btn btn-outline btn-lg grow" href="Support.dc.html">Subscribe</a><a class="btn btn-outline btn-lg grow" href="Support.dc.html">Tip</a><button class="btn btn-ghost btn-icon btn-lg" aria-label="Share">[i]</button></div>
+</section>
+<div class="tabs-line" role="tablist" aria-label="Below the player"><button class="tab" role="tab" aria-selected="true">Chat</button><button class="tab" role="tab" aria-selected="false">About</button><button class="tab" role="tab" aria-selected="false">Videos</button></div>
+<div class="chat-log">
+  <p><span class="bdg bdg-sub" aria-label="Subscriber">S</span><span class="n c8">ohmslaw</span><span class="muted">: </span>that pinch roller is GLAZED</p>
+  <p><span class="n c3">kettlebell_kai</span><span class="muted">: </span>isopropyl and a scotch pad, gently</p>
+  <p><span class="bdg bdg-host" aria-label="Broadcaster">B</span><span class="n c6">rivertide</span><span class="muted">: </span>trying rubber rejuvenator first</p>
+  <p class="hl"><span class="n c11">paperlantern</span> gifted 5 subs to the community!</p>
+  <p><span class="bdg bdg-mem" aria-label="Co-op member">C</span><span class="n c11">Fernsby</span><span class="muted">: </span>first time here, this is so calming</p>
+  <p><span class="bdg bdg-mod" aria-label="Moderator">M</span><span class="n c4">voltagecontrol</span><span class="muted">: </span>mark the azimuth screw before you touch it</p>
+  <p><span class="n c9">tapehead99</span><span class="muted">: </span>my dad had this exact deck</p>
+</div>
+<div class="chat-f"><div class="input-group grow"><input aria-label="Send a message" placeholder="Send a message"></div><button class="btn btn-icon btn-lg" aria-label="Send">[i]</button></div>
+</div>
+</x-dc>

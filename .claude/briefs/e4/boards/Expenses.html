@@ -1,0 +1,111 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Expenses (structure only; icons shown as [i]). Sample data: data/Expenses.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="row-wrap">
+    <div class="col">
+      <h1 class="h-2xl">Service expenses</h1>
+      <p class="muted t-sm">Every service we pay for, what it runs, how it bills and what it cost. Every invoice is attached. Wages are shown by role and pay band; names are never published.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Finance views"><a class="tab" role="tab" aria-selected="false" href="Finances.dc.html">Overview</a><button class="tab" role="tab" aria-selected="true">Service expenses</button><a class="tab" role="tab" aria-selected="false" href="Transparency.dc.html">Patronage</a></div>
+  </div>
+  <div class="g4">
+    <div class="stat"><span class="k">Monthly run rate</span><span class="v">$24,100</span><span class="muted t-2xs">trailing 30 days</span></div>
+    <div class="stat"><span class="k">Paid services</span><span class="v">17</span><span class="muted t-2xs">from 11 vendors</span></div>
+    <div class="stat"><span class="k">Software licenses</span><span class="v">$0</span><span class="muted t-2xs">the whole stack is FOSS</span></div>
+    <div class="stat"><span class="k">Saved by community relays</span><span class="v">$3,180</span><span class="delta-up t-2xs">per month, est. at our transit rate</span></div>
+  </div>
+  <section class="card" aria-labelledby="mix-h">
+    <div class="card-h"><div class="col"><h2 id="mix-h" class="card-t">Where the monthly run rate goes</h2></div></div>
+    <div class="card-c col">
+      <div role="img" aria-label="Wages 40%, compute 29%, bandwidth and storage 16%, trust and safety 6%, legal and accounting 5%, FOSS donations 2%, other 2%"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <ul class="row-wrap">
+        <li class="row"><span class="legend-sw"></span>Wages 40%</li>
+        <li class="row"><span class="legend-sw"></span>Compute 29%</li>
+        <li class="row"><span class="legend-sw"></span>Bandwidth &amp; storage 16%</li>
+        <li class="row"><span class="legend-sw"></span>Trust &amp; safety 6%</li>
+        <li class="row"><span class="legend-sw"></span>Legal &amp; accounting 5%</li>
+        <li class="row"><span class="legend-sw"></span>FOSS donations 2%</li>
+        <li class="row"><span class="legend-sw"></span>Other 2%</li>
+      </ul>
+    </div>
+  </section>
+  <section class="col" aria-labelledby="svc-h">
+    <div class="row-wrap"><h2 id="svc-h" class="h-base">Infrastructure services</h2>
+      <div class="seg ml-auto" role="group" aria-label="Show cost as"><button aria-pressed="{{bMonth}}" onClick="{{toMonth}}">Per month</button><button aria-pressed="{{bUnit}}" onClick="{{toUnit}}">Per 1,000 viewer-hours</button></div>
+    </div>
+    <div class="tbl-box"><table class="tbl">
+      <thead><tr><th scope="col">Service</th><th scope="col">Runs</th><th scope="col">Billed by</th><th scope="col" class="r">Usage (30 d)</th><th scope="col" class="r">Unit price</th><th scope="col" class="r">{{costHead}}</th><th scope="col" class="r">vs. last month</th><th scope="col"><span class="sr-only">Invoice</span></th></tr></thead>
+      <tbody><sc-for list="{{svcs}}" as="s" hint-placeholder-count="10"><tr>
+        <td><span class="row"><span class="legend-sw"></span><span class="strong">{{s.n}}</span></span></td>
+        <td class="muted">{{s.runs}}</td><td class="muted">{{s.basis}}</td><td class="r num">{{s.use}}</td><td class="r num muted">{{s.unit}}</td>
+        <td class="r num strong">{{s.cost}}</td><td class="r num {{s.dcls}}">{{s.delta}}</td>
+        <td><a class="btn btn-ghost btn-xs" href="#" aria-label="Invoice for {{s.n}}">[i]PDF</a></td>
+      </tr></sc-for></tbody>
+    </table></div>
+    <p class="muted">Payment processing is charged per transaction and shown on the <a class="link" href="Finances.dc.html">overview</a> as a pass-through: 2.9% + $0.30 per payment, or $0 on the manual adapter.</p>
+  </section>
+  <div class="split">
+    <section class="main" aria-labelledby="vh-h">
+      <div class="card">
+        <div class="card-h"><div class="col"><h2 id="vh-h" class="card-t">What one hour of watching costs us</h2><p class="card-d">Per verified viewer-hour, October average. Falls as relays carry more traffic.</p></div><span class="h-xl num ml-auto">$0.0061</span></div>
+        <ul class="card-c col">
+          <sc-for list="{{vh}}" as="v" hint-placeholder-count="5">
+            <li class="col"><div class="row"><span>{{v.k}}</span><span class="ml-auto num">{{v.v}}</span></div><span class="progress"><span></span></span></li>
+          </sc-for>
+        </ul>
+        <div class="card-f"><span class="muted">One streamed hour (ingest + 4 renditions + archive): <span class="num">$0.42</span></span></div>
+      </div>
+      <section class="col" aria-labelledby="inv-h">
+        <div class="row"><h2 id="inv-h" class="h-base">Latest invoices</h2><a class="btn btn-ghost btn-xs ml-auto" href="#">All 214 invoices</a></div>
+        <ul class="bordered list">
+          <sc-for list="{{inv}}" as="i" hint-placeholder-count="6">
+            <li><span class="mono muted">{{i.d}}</span><span class="col grow"><span class="strong">{{i.s}}</span><span class="muted t-2xs">Approved by {{i.by}}</span></span><span class="num strong">{{i.a}}</span><a class="btn btn-ghost btn-xs" href="#" aria-label="Invoice PDF for {{i.s}}">PDF</a></li>
+          </sc-for>
+        </ul>
+      </section>
+    </section>
+    <aside class="aside">
+      <section class="card" aria-labelledby="pay-h">
+        <div class="card-h"><div class="col"><h2 id="pay-h" class="card-t">Wages by role</h2><p class="card-d">Worker members set pay bands by vote. Highest-to-lowest pay ratio is capped at 2:1.</p></div></div>
+        <div class="card-c tbl-box"><table class="tbl">
+          <thead><tr><th scope="col">Role</th><th scope="col" class="r">FTE</th><th scope="col" class="r">Annual band</th></tr></thead>
+          <tbody>
+            <tr><td>Infrastructure engineer</td><td class="r num">1.5</td><td class="r num">$64K</td></tr>
+            <tr><td>Platform engineer</td><td class="r num">1.0</td><td class="r num">$64K</td></tr>
+            <tr><td>Trust &amp; safety lead</td><td class="r num">1.0</td><td class="r num">$58K</td></tr>
+            <tr><td>Treasurer &amp; operations</td><td class="r num">0.5</td><td class="r num">$58K</td></tr>
+            <tr><td>Community &amp; support</td><td class="r num">0.5</td><td class="r num">$48K</td></tr>
+            <tr><td class="strong">Total</td><td class="r num strong">4.5</td><td class="r num strong">$5,800/mo</td></tr>
+          </tbody></table></div>
+        <div class="card-f"><span class="muted">Current ratio <span class="num">1.33 : 1</span></span></div>
+      </section>
+      <section class="card" aria-labelledby="com-h">
+        <div class="card-h"><h2 id="com-h" class="card-t">Commitments</h2></div>
+        <ul class="card-c col">
+          <li class="row bordered"><span class="col grow"><span class="strong">Bare-metal servers, EU</span><span class="muted t-2xs">12-month term · renews Mar 1, 2027</span></span><span class="num">$1,840/mo</span></li>
+          <li class="row bordered"><span class="col grow"><span class="strong">Transit bandwidth</span><span class="muted t-2xs">committed 400 TB/mo · month to month</span></span><span class="num">$1,120/mo</span></li>
+          <li class="row bordered"><span class="col grow"><span class="strong">Annual audit</span><span class="muted t-2xs">engagement letter signed · due Feb 2027</span></span><span class="num">$4,800</span></li>
+        </ul>
+      </section>
+      <section class="card" aria-labelledby="foss-h">
+        <div class="card-h"><div class="col"><h2 id="foss-h" class="card-t">Upstream FOSS we fund</h2><p class="card-d">1.5% of platform income, split by how much of our stack each project carries.</p></div></div>
+        <ul class="card-c col">
+          <li class="row"><span>Video server</span><span class="ml-auto num">$90</span></li>
+          <li class="row"><span>Database</span><span class="ml-auto num">$70</span></li>
+          <li class="row"><span>JavaScript runtime</span><span class="ml-auto num">$60</span></li>
+          <li class="row"><span>Encoder libraries</span><span class="ml-auto num">$60</span></li>
+          <li class="row"><span class="muted">5 more projects</span><span class="ml-auto num muted">$70</span></li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

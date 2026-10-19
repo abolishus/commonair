@@ -1,0 +1,64 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board ChatBot (structure only; icons shown as [i]). Sample data: data/ChatBot.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html">[i]Moderation</a>
+    <a class="nav-item" href="ChatBot.dc.html" aria-current="page">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html">[i]Alerts &amp; overlays</a>
+  </nav>
+  <main class="shell-main"><div class="wrap">
+    <div class="row-wrap"><h1 class="h-xl">Chat &amp; bot</h1><span class="row muted ml-auto"><span class="livedot"></span>Channel bot connected as <span class="strong">mira_bot</span></span></div>
+    <div class="tabs-line" role="tablist" aria-label="Chat tools"><button class="tab" role="tab" aria-selected="true">Commands</button><button class="tab" role="tab" aria-selected="false">Timers</button><button class="tab" role="tab" aria-selected="false">Channel points</button><button class="tab" role="tab" aria-selected="false">Filters</button><button class="tab" role="tab" aria-selected="false">Emotes</button><button class="tab" role="tab" aria-selected="false">Chat settings</button></div>
+    <div class="split">
+      <section class="main" aria-labelledby="cmd-h">
+        <div class="row"><h2 id="cmd-h" class="h-base">Commands</h2><div class="input-group ml-auto"><span class="addon">[i]</span><input aria-label="Search commands" placeholder="Search"></div><button class="btn btn-sm">[i]New command</button></div>
+        <div class="tbl-box"><table class="tbl">
+          <thead><tr><th scope="col">Command</th><th scope="col">Response</th><th scope="col">Who</th><th scope="col" class="r">Cooldown</th><th scope="col" class="r">Uses</th><th scope="col"><span class="sr-only">Enabled</span></th></tr></thead>
+          <tbody><sc-for list="{{cmds}}" as="c" hint-placeholder-count="6"><tr><td class="mono strong">{{c.k}}</td><td class="muted">{{c.r}}</td><td><span class="badge badge-outline">{{c.who}}</span></td><td class="r num">{{c.cd}}</td><td class="r num">{{c.n}}</td><td><span class="switch {{c.on}}" aria-label="{{c.lbl}}"></span></td></tr></sc-for></tbody>
+        </table></div>
+        <div class="callout info">[i]<p class="muted">Variables: <code>${user}</code> <code>${uptime}</code> <code>${followage}</code> <code>${points}</code> <code>${count}</code>. Bots built on tmi.js work unchanged through the IRC gateway.</p></div>
+      </section>
+      <aside class="aside">
+        <section class="card" aria-labelledby="cs-h">
+          <div class="card-h"><h2 id="cs-h" class="card-t">Chat modes</h2></div>
+          <div class="card-c col">
+            <label class="row"><span class="switch on"></span><span class="grow">Slow mode</span><select class="select" aria-label="Slow mode delay"><option>3 s</option></select></label>
+            <label class="row"><span class="switch"></span><span class="grow">Followers only</span><select class="select" aria-label="Follow age"><option>10 min</option></select></label>
+            <label class="row"><span class="switch"></span><span class="grow">Subscribers only</span></label>
+            <label class="row"><span class="switch"></span><span class="grow">Emote only</span></label>
+            <label class="row"><span class="switch on"></span><span class="grow">Block links from new chatters</span></label>
+            <label class="row"><span class="switch on"></span><span class="grow">Verified email to chat</span></label>
+          </div>
+        </section>
+        <section class="card" aria-labelledby="rw-h">
+          <div class="card-h"><h2 id="rw-h" class="card-t">Channel point rewards</h2><button class="btn btn-ghost btn-xs ml-auto">Manage</button></div>
+          <ul class="card-c col">
+            <li class="row bordered"><span class="badge badge-accent num">500</span><span class="grow">Pick the next glaze</span><span class="muted t-2xs">needs approval</span></li>
+            <li class="row bordered"><span class="badge badge-accent num">1,000</span><span class="grow">Name a pot</span></li>
+            <li class="row bordered"><span class="badge badge-accent num">5,000</span><span class="grow">Song request (stub)</span><span class="badge badge-outline">Off</span></li>
+          </ul>
+        </section>
+        <section class="card" aria-labelledby="em-h">
+          <div class="card-h"><h2 id="em-h" class="card-t">Emotes</h2><span class="muted ml-auto num">6 / 25 slots</span></div>
+          <div class="card-c row-wrap">
+            <sc-for list="{{emotes}}" as="e" hint-placeholder-count="6"><span class="acc-{{e.acc}}" role="img" aria-label="Emote {{e.n}}">{{e.g}}</span></sc-for>
+            <button class="btn btn-outline btn-icon" aria-label="Upload emote">[i]</button>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div></main>
+</div>
+</div>
+</x-dc>

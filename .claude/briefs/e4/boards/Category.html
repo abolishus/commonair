@@ -1,0 +1,47 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Category (structure only; icons shown as [i]). Sample data: data/Category.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <nav aria-label="Breadcrumb" class="row muted"><a href="Browse.dc.html">Browse</a>[i]<span aria-current="page">Music</span></nav>
+  <section class="row-wrap acc-indigo">
+    <div class="boxart"><span class="glyph">M</span></div>
+    <div class="col">
+      <h1 class="h-2xl">Music</h1>
+      <p class="row-wrap muted"><span class="num"><strong>6,412</strong> viewers</span><span>·</span><span class="num"><strong>188</strong> live channels</span><span>·</span><span class="num">12.9K followers</span></p>
+      <ul class="row-wrap"><li><span class="badge badge-outline">Creative</span></li><li><span class="badge badge-outline">Performance</span></li><li><span class="badge badge-outline">DJ</span></li></ul>
+      <p class="muted">Live performance, production sessions and listening parties. Streams in this category must carry rights for the music they play.</p>
+      <div class="row"><button class="btn">[i]Follow category</button><button class="btn btn-outline btn-icon" aria-label="More">[i]</button></div>
+    </div>
+  </section>
+  <div class="tabs-line" role="tablist" aria-label="Category content">
+    <button class="tab" role="tab" aria-selected="true">Live channels</button>
+    <button class="tab" role="tab" aria-selected="false">Videos</button>
+    <button class="tab" role="tab" aria-selected="false">Clips</button>
+  </div>
+  <div class="row-wrap">
+    <div class="input-group"><span class="addon">[i]</span><input aria-label="Filter by tag" placeholder="Filter by tag"></div>
+    <select class="select" aria-label="Language"><option>All languages</option></select>
+    <label class="row"><span class="switch"></span><span>Hide mature</span></label>
+    <div class="seg ml-auto" role="group" aria-label="Sort"><button aria-pressed="true">Fair mix</button><button aria-pressed="false">Viewers (high)</button><button aria-pressed="false">Viewers (low)</button><button aria-pressed="false">Newest</button></div>
+  </div>
+  <div class="cards">
+    <sc-for list="{{live}}" as="s" hint-placeholder-count="12">
+      <article class="sc acc-{{s.acc}}">
+        <a class="sc-link" href="Channel.dc.html">
+          <div class="thumb"><div class="thumb-ph scene"><span class="av av-lg">{{s.i}}</span></div><span class="live live-sm tl">Live</span><sc-if value="{{s.mature}}" hint-placeholder-val="{{false}}"><span class="badge badge-overlay tr">Mature</span></sc-if><span class="vc vc-overlay bl">[i]{{s.v}}</span></div>
+          <div class="sc-meta"><span class="av av-sm">{{s.i}}</span><div class="col"><h2 class="sc-title clamp2">{{s.title}}</h2><span class="muted truncate">{{s.name}}</span><span class="muted truncate">Music</span></div></div>
+        </a>
+        <ul class="sc-chips"><li><span class="badge badge-accent">{{s.reason}}</span></li><sc-for list="{{s.tags}}" as="tag"><li><span class="badge badge-outline">{{tag}}</span></li></sc-for></ul>
+      </article>
+    </sc-for>
+  </div>
+  <button class="btn btn-outline">Show more</button>
+</main>
+[FTR]
+</div>
+</x-dc>

@@ -20,6 +20,13 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session five (2026-10-18): E4a design system (in progress)
+
+Application design only (PLAN.md E4a). Mockup canvas: <https://claude.ai/artifact/Ve5J5XjRZV42eRE2cdReVd>
+(29 boards). Units in `.claude/briefs/e4/`: U1 primitives (shadcn CLI 4.21.1, preset `b1ZhhFNpx`),
+U2 shells/headers, U3 data blocks, U4 form blocks, U5 media/player/chat blocks, U6 page stories +
+enforcement + apps/web migration. Status is updated here as units merge.
+
 ## Session four (2026-10-18): E3 slice built
 
 All merged and pushed to `main`; live testing is the user's (HANDOFF.md "For the user to run").

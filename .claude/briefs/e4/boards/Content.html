@@ -1,0 +1,46 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Content (structure only; icons shown as [i]). Sample data: data/Content.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html">[i]Moderation</a>
+    <a class="nav-item" href="ChatBot.dc.html">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html" aria-current="page">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html">[i]Alerts &amp; overlays</a>
+  </nav>
+  <main class="shell-main"><div class="wrap">
+    <div class="row-wrap"><h1 class="h-xl">Videos &amp; clips</h1><button class="btn btn-outline btn-sm ml-auto">[i]Upload video</button></div>
+    <div class="tabs-line" role="tablist" aria-label="Content type"><button class="tab" role="tab" aria-selected="true">Past broadcasts <span class="badge badge-secondary">23</span></button><button class="tab" role="tab" aria-selected="false">Highlights <span class="badge badge-secondary">6</span></button><button class="tab" role="tab" aria-selected="false">Uploads</button><button class="tab" role="tab" aria-selected="false">Clips <span class="badge badge-secondary">142</span></button></div>
+    <div class="row-wrap">
+      <div class="input-group"><span class="addon">[i]</span><input aria-label="Search videos" placeholder="Search videos"></div>
+      <select class="select" aria-label="Visibility"><option>All visibility</option><option>Public</option><option>Subscribers</option><option>Private</option></select>
+      <div class="row ml-auto muted"><span class="check"></span>2 selected<button class="btn btn-outline btn-sm">Highlight</button><button class="btn btn-destructive btn-sm">Delete</button></div>
+    </div>
+    <div class="tbl-box"><table class="tbl">
+      <thead><tr><th scope="col"><span class="sr-only">Select</span></th><th scope="col">Video</th><th scope="col">Visibility</th><th scope="col" class="r">Views</th><th scope="col">Expires</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody><sc-for list="{{vids}}" as="v" hint-placeholder-count="7"><tr>
+        <td><span class="check {{v.sel}}"><sc-if value="{{v.selected}}" hint-placeholder-val="{{false}}">[i]</sc-if></span></td>
+        <td><div class="row"><span class="thumb"><span class="thumb-ph scene"><span class="av av-xs">M</span></span><span class="badge badge-overlay br num">{{v.len}}</span></span><span class="col"><span class="strong">{{v.t}}</span><span class="muted">{{v.d}} · {{v.cat}}</span></span></div></td>
+        <td><span class="badge {{v.vcls}}">{{v.vis}}</span></td>
+        <td class="r num">{{v.views}}</td>
+        <td class="muted">{{v.exp}}</td>
+        <td><div class="row"><button class="btn btn-ghost btn-icon btn-sm" aria-label="Edit {{v.t}}">[i]</button><button class="btn btn-ghost btn-icon btn-sm" aria-label="More for {{v.t}}">[i]</button></div></td>
+      </tr></sc-for></tbody>
+    </table></div>
+    <div class="g2">
+      <div class="callout">[i]<p class="muted">Past broadcasts are kept 60 days. Highlights and uploads are kept until you delete them. Storage used: <span class="num">48.2 GB</span>.</p></div>
+      <div class="callout">[i]<p class="muted">1 video is muted for a copyright claim. <a class="link" href="#">Review or counter-notice</a>.</p></div>
+    </div>
+  </div></main>
+</div>
+</div>
+</x-dc>

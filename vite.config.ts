@@ -6,12 +6,24 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   fmt: {
     printWidth: 120,
-    ignorePatterns: ["**/drizzle/meta/**", "**/routeTree.gen.ts", "relay/**", "**/*.gen.*"],
+    ignorePatterns: [
+      "**/drizzle/meta/**",
+      "**/routeTree.gen.ts",
+      "relay/**",
+      "**/*.gen.*",
+      ".claude/briefs/e4/boards/**",
+    ],
   },
   lint: {
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
     plugins: ["typescript", "unicorn", "import", "promise"],
-    ignorePatterns: ["**/drizzle/meta/**", "**/routeTree.gen.ts", "relay/**", "**/*.gen.*"],
+    ignorePatterns: [
+      "**/drizzle/meta/**",
+      "**/routeTree.gen.ts",
+      "relay/**",
+      "**/*.gen.*",
+      ".claude/briefs/e4/boards/**",
+    ],
     rules: {
       "vite-plus/prefer-vite-plus-imports": "error",
       "typescript/no-explicit-any": "error",

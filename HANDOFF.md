@@ -15,6 +15,15 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
+## Session five in flight (E4a design system)
+
+The user's session-five prompt: E4 starts with an application-design-only track (no API, worker,
+DB or harness work). Briefs in `.claude/briefs/e4/`, canvas
+<https://claude.ai/artifact/Ve5J5XjRZV42eRE2cdReVd>. Full review process again: an independent
+reviewer before every merge, focused re-review of fix rounds for any HIGH. The user runs the gate,
+Storybook and all visual checks; units run only targeted checks (unit tests, `tsc`, `vp lint`/`vp
+fmt` on changed files, `vp build` for web, `build-storybook` for packages/ui).
+
 ## Process rules from the user (session three)
 
 - **The user runs the gate (`bun run verify`), image rebuilds, harness scenarios and all visual

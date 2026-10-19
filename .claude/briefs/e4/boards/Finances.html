@@ -1,0 +1,89 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Finances (structure only; icons shown as [i]). Sample data: data/Finances.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="row-wrap">
+    <div class="col">
+      <h1 class="h-2xl">Platform finances</h1>
+      <p class="muted t-sm">What it costs to run CommonAir and where the money to pay for it comes from. Rebuilt every night from the append-only ledger. Public, no sign-in needed. Every figure links to the journal entries behind it.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Finance views"><button class="tab" role="tab" aria-selected="true">Overview</button><a class="tab" role="tab" aria-selected="false" href="Expenses.dc.html">Service expenses</a><a class="tab" role="tab" aria-selected="false" href="Transparency.dc.html">Patronage</a></div>
+  </div>
+  <div class="row-wrap">
+    <div class="seg" role="group" aria-label="Period"><button aria-pressed="{{pMonth}}" onClick="{{toMonth}}">October (to date)</button><button aria-pressed="{{pQuarter}}" onClick="{{toQuarter}}">Q3 2026</button><button aria-pressed="{{pYear}}" onClick="{{toYear}}">Last 12 months</button></div>
+    <span class="muted">Ledger closed through Oct 17 · 23:59 UTC</span>
+    <div class="row ml-auto"><button class="btn btn-outline btn-sm">[i]CSV</button><button class="btn btn-outline btn-sm">[i]JSON API</button><button class="btn btn-outline btn-sm">[i]Audited statements</button></div>
+  </div>
+  <div class="g4">
+    <sc-for list="{{kpis}}" as="k" hint-placeholder-count="6">
+      <div class="stat"><span class="k">{{k.k}}</span><span class="v">{{k.v}}</span><span class="t-2xs {{k.dcls}}">{{k.d}}</span></div>
+    </sc-for>
+  </div>
+  <section class="card" aria-labelledby="trend-h">
+    <div class="card-h"><div class="col"><h2 id="trend-h" class="card-t">Platform income vs. operating expenses, by month</h2><p class="card-d">Income is what the co-op keeps after creator payouts and payment processing. Creator money passes through and is shown separately below.</p></div>
+      <div class="row ml-auto"><span class="row"><span class="legend-sw"></span>Income</span><span class="row"><span class="legend-sw"></span>Expenses</span></div></div>
+    <div class="card-c">
+      <div role="img" aria-label="Monthly income rose from 14 to 33 thousand dollars over 12 months; expenses rose from 17 to 24 thousand, crossing below income in March">
+        <sc-for list="{{months}}" as="m" hint-placeholder-count="12">
+          <div><span></span><span></span></div>
+        </sc-for>
+      </div>
+      <div><sc-for list="{{months}}" as="m"><span class="muted t-2xs">{{m.l}}</span></sc-for></div>
+    </div>
+  </section>
+  <div class="split">
+    <section class="main" aria-labelledby="is-h">
+      <div class="row"><h2 id="is-h" class="h-base">Income statement</h2><span class="muted">{{periodLabel}}</span></div>
+      <div class="tbl-box"><table class="tbl">
+        <thead><tr><th scope="col">Line</th><th scope="col" class="r">Amount</th><th scope="col" class="r">% of gross</th><th scope="col"><span class="sr-only">Source</span></th></tr></thead>
+        <tbody>
+          <tr><td colspan="4" class="muted strong t-2xs">Money in</td></tr>
+          <tr><td>Subscriptions (gross)</td><td class="r num">$58,940</td><td class="r num muted">70.0%</td><td><a class="link muted" href="#">212 entries</a></td></tr>
+          <tr><td>Gift subscriptions</td><td class="r num">$9,870</td><td class="r num muted">11.7%</td><td><a class="link muted" href="#">48 entries</a></td></tr>
+          <tr><td>Tips</td><td class="r num">$13,150</td><td class="r num muted">15.6%</td><td><a class="link muted" href="#">1,904 entries</a></td></tr>
+          <tr><td>Direct donations to the co-op</td><td class="r num">$2,250</td><td class="r num muted">2.7%</td><td><a class="link muted" href="#">31 entries</a></td></tr>
+          <tr><td class="strong">Gross receipts</td><td class="r num strong">$84,210</td><td class="r num muted">100%</td><td></td></tr>
+          <tr><td colspan="4" class="muted strong t-2xs">Passed through</td></tr>
+          <tr><td>Paid to creators</td><td class="r num">−$59,100</td><td class="r num muted">70.2%</td><td><a class="link muted" href="Revenue.dc.html">per channel</a></td></tr>
+          <tr><td>Payment processing fees</td><td class="r num">−$4,010</td><td class="r num muted">4.8%</td><td><a class="link muted" href="Expenses.dc.html">rates</a></td></tr>
+          <tr><td class="strong">Platform income</td><td class="r num strong">$21,100</td><td class="r num muted">25.1%</td><td></td></tr>
+          <tr><td colspan="4" class="muted strong t-2xs">Operating expenses</td></tr>
+          <sc-for list="{{opex}}" as="o" hint-placeholder-count="7"><tr><td><span class="row"><span class="legend-sw"></span>{{o.k}}</span></td><td class="r num">{{o.v}}</td><td class="r num muted">{{o.p}}</td><td><a class="link muted" href="Expenses.dc.html">{{o.n}}</a></td></tr></sc-for>
+          <tr><td class="strong">Total operating expenses</td><td class="r num strong">−$14,380</td><td class="r num muted">17.1%</td><td></td></tr>
+          <tr><td class="strong">Net surplus</td><td class="r num strong delta-up">$6,720</td><td class="r num muted">8.0%</td><td></td></tr>
+          <tr><td class="muted">→ to reserve (policy: 50% until 6 months of runway)</td><td class="r num muted">$3,360</td><td></td><td></td></tr>
+          <tr><td class="muted">→ to patronage pool</td><td class="r num muted">$3,360</td><td></td><td><a class="link muted" href="Transparency.dc.html">formula</a></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+    <aside class="aside">
+      <section class="card" aria-labelledby="bud-h">
+        <div class="card-h"><div class="col"><h2 id="bud-h" class="card-t">2026 budget vs. actual</h2><p class="card-d">Budget approved by members, proposal #38. Overspend over 10% on any line needs a council sign-off, logged here.</p></div></div>
+        <ul class="card-c col">
+          <sc-for list="{{budget}}" as="b" hint-placeholder-count="5">
+            <li class="col"><div class="row"><span>{{b.k}}</span><span class="ml-auto num muted">{{b.a}} of {{b.t}}</span></div><span class="progress"><span></span></span><span class="t-2xs {{b.ncls}}">{{b.note}}</span></li>
+          </sc-for>
+        </ul>
+      </section>
+      <section class="card" aria-labelledby="res-h">
+        <div class="card-h"><h2 id="res-h" class="card-t">Reserves</h2><span class="badge badge-warn ml-auto">Below target</span></div>
+        <div class="card-c col">
+          <div class="row"><span class="h-xl num">$101,300</span><span class="muted">4.2 months of operating cost</span></div>
+          <div class="progress"><span></span></div>
+          <div class="row muted t-2xs num"><span>0</span><span class="ml-auto">target 6 months · $144,600</span></div>
+          <p class="muted">Held in a member-controlled operating account and a short-term treasury fund. Two signers required for any transfer over $5,000.</p>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="ask-h"><div class="panel-h" id="ask-h">[i]Question a number</div>
+        <div class="panel-c"><p class="muted">Any member can open a query on any line. The treasurer answers in public within 7 days.</p><div class="row"><button class="btn btn-outline btn-sm">Open a query</button><span class="muted ml-auto num">14 open · 212 answered</span></div></div></section>
+    </aside>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

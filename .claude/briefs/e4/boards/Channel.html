@@ -1,0 +1,79 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Channel (structure only; icons shown as [i]). Sample data: data/Channel.js
+-->
+<x-dc>
+<div class="ca acc-teal {{themeClass}}">
+[HDR]
+<main>
+  <div class="col">
+    <div class="player">
+      <div class="stage"><span class="av av-xl">R</span></div>
+      <div class="ptop"><span class="badge badge-overlay">1080p60 · source</span><span class="grow"></span><span class="badge badge-overlay">CC</span></div>
+      <div class="ctrls">
+        <div class="row">
+          <button class="pbtn" aria-label="Pause">[i]</button>
+          <button class="pbtn" aria-label="Mute">[i]</button>
+          <span><span></span></span>
+          <span class="live"><span class="dot"></span>Live</span>
+          <span class="num t-xs">3:41:09 · 1.8 s behind</span>
+          <span class="grow"></span>
+          <button class="pbtn" aria-label="Create clip">[i]</button>
+          <button class="pbtn" aria-label="Settings">[i]</button>
+          <button class="pbtn" aria-label="Picture in picture">[i]</button>
+          <button class="pbtn" aria-label="Theatre mode">[i]</button>
+          <button class="pbtn" aria-label="Fullscreen">[i]</button>
+        </div>
+      </div>
+    </div>
+    <section class="row-wrap" aria-label="Stream info">
+      <span class="av av-lg av-live">R</span>
+      <div class="col">
+        <div class="row"><h1 class="h-base">rivertide</h1><span class="badge badge-secondary">Co-op member</span></div>
+        <p class="t-sm">Rebuilding a 1970s tape deck — belts, pinch roller, azimuth</p>
+        <div class="row-wrap"><a class="link" href="Category.dc.html">Science &amp; Technology</a><span class="badge badge-outline">English</span><span class="badge badge-outline">Repair</span><span class="badge badge-outline">Electronics</span></div>
+      </div>
+      <div class="col">
+        <div class="row">
+          <button class="btn btn-accent">[i]Follow</button>
+          <a class="btn btn-outline" href="Support.dc.html">[i]Subscribe</a>
+          <a class="btn btn-outline" href="Support.dc.html">[i]Tip</a>
+          <button class="btn btn-ghost btn-icon" aria-label="Share">[i]</button>
+          <button class="btn btn-ghost btn-icon" aria-label="More actions">[i]</button>
+        </div>
+        <div class="row muted"><span class="vc">[i]<span class="num strong">2,418</span></span><span>verified viewers</span><span>·</span><span class="num">18.4K followers</span></div>
+      </div>
+    </section>
+    <div class="tabs-line" role="tablist" aria-label="Channel"><a class="tab" role="tab" aria-selected="true" href="ChannelAbout.dc.html">About</a><a class="tab" role="tab" aria-selected="false" href="ChannelAbout.dc.html">Schedule</a><a class="tab" role="tab" aria-selected="false" href="ChannelAbout.dc.html">Videos</a><a class="tab" role="tab" aria-selected="false" href="ChannelAbout.dc.html">Clips</a></div>
+    <div class="g3">
+      <div class="panel"><div class="panel-h">About rivertide</div><div class="panel-c"><p class="muted">Electronics repair, restoration and the occasional scrap-bin build. Live most weekdays from 18:00 UTC.</p></div></div>
+      <div class="panel"><div class="panel-h">Sub goal</div><div class="panel-c"><div class="row"><span class="num strong">412 / 500</span><span class="muted ml-auto">New oscilloscope</span></div><span class="progress accent"><span></span></span></div></div>
+      <div class="panel"><div class="panel-h">Gear</div><div class="panel-c"><p class="muted">Hakko FX-888D · Rigol DS1054Z · a very old multimeter</p></div></div>
+    </div>
+  </div>
+  <aside class="chat" aria-label="Stream chat">
+    <div class="chat-h"><button class="btn btn-ghost btn-icon btn-xs" aria-label="Collapse chat">[i]</button><span>Stream chat</span><button class="btn btn-ghost btn-icon btn-xs" aria-label="Viewer list">[i]</button></div>
+    <div class="chat-pin">[i]<p class="grow"><span class="semibold">rivertide</span>: Parts list for the deck is in the About panel. Be kind to new folks!</p></div>
+    <div class="chat-pin">
+      <div class="row">[i]<span class="strong">Poll · 1:12 left</span><span class="muted ml-auto num">384 votes</span></div>
+      <p>Next restoration project?</p>
+      <div class="col">
+        <div class="col"><div class="row"><span>Reel-to-reel</span><span class="ml-auto num muted">58%</span></div><span class="progress accent"><span></span></span></div>
+        <div class="col"><div class="row"><span>Tube radio</span><span class="ml-auto num muted">31%</span></div><span class="progress accent"><span></span></span></div>
+        <div class="col"><div class="row"><span>Game Boy</span><span class="ml-auto num muted">11%</span></div><span class="progress accent"><span></span></span></div>
+      </div>
+    </div>
+    <div class="chat-log" aria-live="polite">
+      <sc-for list="{{msgs}}" as="m" hint-placeholder-count="14">
+        <p class="{{m.cls}}"><sc-for list="{{m.b}}" as="b"><span class="bdg {{b.c}}" aria-label="{{b.l}}">{{b.t}}</span></sc-for><span class="n {{m.c}}">{{m.n}}</span><span class="muted">{{m.sep}}</span>{{m.t}}</p>
+      </sc-for>
+    </div>
+    <div class="chat-f">
+      <div class="input-group"><input aria-label="Send a message" placeholder="Send a message"><button class="btn btn-ghost btn-icon btn-sm" aria-label="Emotes">[i]</button></div>
+      <div class="row"><button class="btn btn-ghost btn-xs" aria-label="Channel points: 1,240">[i]<span class="num">1,240</span></button><button class="btn btn-ghost btn-icon btn-xs" aria-label="Chat settings">[i]</button><span class="muted t-2xs">Slow mode 3s</span><button class="btn btn-sm ml-auto">Chat</button></div>
+    </div>
+  </aside>
+</main>
+</div>
+</x-dc>

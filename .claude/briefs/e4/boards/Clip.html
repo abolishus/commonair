@@ -1,0 +1,55 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Clip (structure only; icons shown as [i]). Sample data: data/Clip.js
+-->
+<x-dc>
+<div class="ca acc-teal {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <div class="split">
+    <div class="main">
+      <h1 class="sr-only">Create a clip</h1>
+      <div class="player">
+        <div class="stage"><span class="av av-xl">R</span></div>
+        <div class="ptop"><span class="badge badge-overlay">Previewing 0:30 of the last 90 seconds</span></div>
+        <div class="ctrls"><div class="row"><button class="pbtn" aria-label="Play preview">[i]</button><span class="num">0:12 / 0:30</span></div></div>
+      </div>
+      <section class="card" aria-labelledby="trim-h">
+        <div class="card-h"><div class="col"><h2 id="trim-h" class="card-t">Trim</h2><p class="card-d">Drag the handles. Clips are 5–60 seconds.</p></div><span class="badge badge-secondary ml-auto num">0:30</span></div>
+        <div class="card-c col">
+          <div>
+            <sc-for list="{{frames}}" as="f" hint-placeholder-count="18"><span></span></sc-for>
+            <span></span>
+            <button aria-label="Start handle, 0:27"></button>
+            <button aria-label="End handle, 0:57"></button>
+          </div>
+          <div class="row muted num"><span>−1:30</span><span class="ml-auto">now</span></div>
+          <div class="field"><label class="label" for="ct">Title</label><input id="ct" class="input" value="The azimuth reveal"><span class="hint num">18 / 100</span></div>
+        </div>
+        <div class="card-f"><button class="btn btn-ghost btn-sm">Discard</button><button class="btn btn-sm ml-auto">[i]Publish clip</button></div>
+      </section>
+    </div>
+    <aside class="aside">
+      <section class="card" aria-labelledby="pub-h">
+        <div class="card-h"><div class="col"><h2 id="pub-h" class="card-t row">[i]Clip published</h2><p class="card-d">“Tape deck finally sings” · 0:42 · from rivertide</p></div></div>
+        <div class="card-c col">
+          <div class="field"><span class="label">Link</span><div class="input-group"><input aria-label="Clip link" value="/rivertide/clip/tape-deck-finally-sings" readonly><button class="btn btn-ghost btn-sm">[i]Copy</button></div></div>
+          <div class="field"><span class="label">Embed</span><code class="block">&lt;iframe src="/embed/clip/tape-deck-finally-sings" allowfullscreen&gt;&lt;/iframe&gt;</code></div>
+          <div class="row"><button class="btn btn-outline btn-sm">Share to fediverse</button><button class="btn btn-outline btn-sm">[i]Download</button></div>
+        </div>
+      </section>
+      <section class="col" aria-labelledby="more-h">
+        <h2 id="more-h" class="h-base">More from rivertide</h2>
+        <sc-for list="{{more}}" as="c" hint-placeholder-count="4">
+          <a class="row" href="Clip.dc.html">
+            <span class="thumb"><span class="thumb-ph scene"><span class="av av-xs">R</span></span><span class="badge badge-overlay br num">{{c.len}}</span></span>
+            <span class="col"><span class="strong clamp2">{{c.t}}</span><span class="muted">{{c.views}} views · {{c.ago}}</span></span>
+          </a>
+        </sc-for>
+      </section>
+    </aside>
+  </div>
+</main>
+</div>
+</x-dc>

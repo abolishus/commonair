@@ -1,0 +1,65 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Revenue (structure only; icons shown as [i]). Sample data: data/Revenue.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html" aria-current="page">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html">[i]Moderation</a>
+    <a class="nav-item" href="ChatBot.dc.html">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html">[i]Alerts &amp; overlays</a>
+  </nav>
+  <main class="shell-main"><div class="wrap">
+    <div class="row-wrap"><h1 class="h-xl">Revenue</h1><select class="select ml-auto" aria-label="Month"><option>October 2026</option><option>September 2026</option></select></div>
+    <div class="g3">
+      <section class="card" aria-labelledby="bal-h"><div class="card-h"><h2 id="bal-h" class="card-d">Available balance</h2></div><div class="card-c col"><span class="h-2xl num">$1,284.60</span><span class="muted">Pays out Nov 1 · minimum $50.00</span><span class="progress"><span></span></span></div></section>
+      <section class="card" aria-labelledby="mtd-h"><div class="card-h"><h2 id="mtd-h" class="card-d">Earned this month</h2></div><div class="card-c col"><span class="h-2xl num">$842.10</span><span class="delta-up">+14% vs September</span></div></section>
+      <section class="card" aria-labelledby="pat-h"><div class="card-h"><h2 id="pat-h" class="card-d">Patronage (estimated)</h2></div><div class="card-c col"><span class="h-2xl num">$96.40</span><span class="muted">Paid yearly to members. <a class="link" href="Transparency.dc.html">How it’s calculated</a></span></div></section>
+    </div>
+    <div class="g2">
+      <section class="card" aria-labelledby="by-h">
+        <div class="card-h"><h2 id="by-h" class="card-t">By source</h2></div>
+        <div class="card-c col">
+          <div role="img" aria-label="Subscriptions 64%, tips 22%, gift subs 14%"><span></span><span></span><span></span></div>
+          <ul class="col">
+            <li class="row"><span class="legend-sw"></span>Subscriptions<span class="ml-auto num">$538.94</span></li>
+            <li class="row"><span class="legend-sw"></span>Tips<span class="ml-auto num">$185.26</span></li>
+            <li class="row"><span class="legend-sw"></span>Gift subscriptions<span class="ml-auto num">$117.90</span></li>
+          </ul>
+        </div>
+      </section>
+      <section class="card" aria-labelledby="subs-h">
+        <div class="card-h"><h2 id="subs-h" class="card-t">Active subscribers</h2><span class="h-base num ml-auto">152</span></div>
+        <div class="card-c tbl-box"><table class="tbl"><thead><tr><th scope="col">Tier</th><th scope="col" class="r">Subs</th><th scope="col" class="r">Your share / mo</th></tr></thead><tbody>
+          <tr><td>Tier 1</td><td class="r num">118</td><td class="r num">$418.06</td></tr>
+          <tr><td>Tier 2</td><td class="r num">27</td><td class="r num">$191.52</td></tr>
+          <tr><td>Tier 3</td><td class="r num">7</td><td class="r num">$124.21</td></tr>
+        </tbody></table></div>
+      </section>
+    </div>
+    <section class="col" aria-labelledby="tx-h">
+      <div class="row"><h2 id="tx-h" class="h-base">Ledger</h2><span class="muted">Append-only; every entry balances.</span><button class="btn btn-outline btn-sm ml-auto">[i]Statement (CSV)</button></div>
+      <div class="tbl-box"><table class="tbl">
+        <thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">From</th><th scope="col" class="r">Gross</th><th scope="col" class="r">Fees &amp; co-op</th><th scope="col" class="r">Net to you</th></tr></thead>
+        <tbody><sc-for list="{{tx}}" as="r" hint-placeholder-count="7"><tr><td class="num muted">{{r.d}}</td><td><span class="badge {{r.cls}}">{{r.k}}</span></td><td>{{r.who}}</td><td class="r num">{{r.g}}</td><td class="r num muted">{{r.f}}</td><td class="r num strong">{{r.n}}</td></tr></sc-for></tbody>
+      </table></div>
+    </section>
+    <section class="card" aria-labelledby="po-h">
+      <div class="card-h"><div class="col"><h2 id="po-h" class="card-t">Payout method</h2><p class="card-d">Paid monthly once your balance reaches the minimum.</p></div><button class="btn btn-outline btn-sm ml-auto">Change</button></div>
+      <div class="card-c row-wrap">
+        <div class="row bordered grow">[i]<span class="col"><span class="strong">Bank transfer ••••6021</span><span class="muted">Verified · USD</span></span></div>
+        <div class="row bordered grow">[i]<span class="col"><span class="strong">Tax information</span><span class="muted">W-9 on file · 2026</span></span></div>
+      </div>
+    </section>
+  </div></main>
+</div>
+</div>
+</x-dc>

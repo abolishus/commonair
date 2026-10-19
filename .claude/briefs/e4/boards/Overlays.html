@@ -1,0 +1,69 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Overlays (structure only; icons shown as [i]). Sample data: data/Overlays.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html">[i]Moderation</a>
+    <a class="nav-item" href="ChatBot.dc.html">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html" aria-current="page">[i]Alerts &amp; overlays</a>
+  </nav>
+  <main class="shell-main"><div class="wrap">
+    <div class="row-wrap"><h1 class="h-xl">Alerts &amp; overlays</h1><span class="muted">Add each one to OBS as a browser source.</span></div>
+    <div class="shell">
+      <ul class="col bordered" aria-label="Overlays">
+        <li><a class="nav-item" href="#" aria-current="page">Alert box<span class="badge badge-ok ml-auto">On</span></a></li>
+        <li><a class="nav-item" href="#">Sub goal<span class="badge badge-ok ml-auto">On</span></a></li>
+        <li><a class="nav-item" href="#">Tip goal<span class="badge badge-outline ml-auto">Off</span></a></li>
+        <li><a class="nav-item" href="#">Chat box<span class="badge badge-outline ml-auto">Off</span></a></li>
+        <li><a class="nav-item" href="#">Recent events<span class="badge badge-outline ml-auto">Off</span></a></li>
+        <li><a class="nav-item" href="#">Poll &amp; prediction<span class="badge badge-ok ml-auto">On</span></a></li>
+      </ul>
+      <div class="col">
+        <section class="panel" aria-labelledby="pv-h">
+          <div class="panel-h"><span id="pv-h">Preview</span><div class="seg ml-auto" role="group" aria-label="Alert to preview"><button aria-pressed="false">Follow</button><button aria-pressed="true">Tip</button><button aria-pressed="false">Sub</button><button aria-pressed="false">Raid</button></div></div>
+          <div>
+            <div class="col">
+              <span class="av av-lg acc-pink">F</span>
+              <p class="h-base"><span>Fernsby</span> tipped $5.00</p>
+              <p>that glaze!!</p>
+            </div>
+            <div>
+              <div class="row"><span class="strong">Sub goal: new kiln shelves</span><span class="ml-auto num">112 / 150</span></div>
+              <span class="progress accent"><span></span></span>
+            </div>
+          </div>
+        </section>
+        <section class="card" aria-labelledby="src-h">
+          <div class="card-h"><div class="col"><h2 id="src-h" class="card-t">Browser source URL</h2><p class="card-d">Anyone with this link can see your alerts. Keep it out of screenshots.</p></div></div>
+          <div class="card-c row-wrap"><div class="input-group grow"><input aria-label="Overlay URL" value="/overlay/alerts?token=••••••••••••" readonly class="mono"><button class="btn btn-ghost btn-sm">Copy</button></div><button class="btn btn-outline btn-sm">Regenerate</button><button class="btn btn-sm">Send test alert</button></div>
+        </section>
+      </div>
+      <section class="card" aria-labelledby="set-h">
+        <div class="card-h"><h2 id="set-h" class="card-t">Tip alert</h2></div>
+        <div class="card-c col">
+          <div class="field"><label class="label" for="msg">Message</label><input id="msg" class="input mono" value="{name} tipped {amount}"></div>
+          <div class="field"><label class="label" for="min">Minimum amount</label><div class="input-group"><span class="addon">$</span><input id="min" value="1.00"></div></div>
+          <div class="field"><label class="label" for="dur">Duration</label><select id="dur" class="select"><option>6 seconds</option></select></div>
+          <div class="field"><label class="label" for="snd">Sound</label><select id="snd" class="select"><option>Soft chime (bundled)</option><option>Upload…</option></select></div>
+          <label class="row"><span class="switch on"></span><span>Show viewer message</span></label>
+          <label class="row"><span class="switch on"></span><span>Run message through chat filters</span></label>
+          <label class="row"><span class="switch"></span><span>Read message aloud (TTS)</span></label>
+          <div class="field"><span class="label">Layout</span><div class="seg" role="group" aria-label="Layout"><button aria-pressed="true">Stacked</button><button aria-pressed="false">Side by side</button></div></div>
+        </div>
+        <div class="card-f"><button class="btn btn-sm ml-auto">Save</button></div>
+      </section>
+    </div>
+  </div></main>
+</div>
+</div>
+</x-dc>

@@ -1,0 +1,82 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board StreamManager (structure only; icons shown as [i]). Sample data: data/StreamManager.js
+-->
+<x-dc>
+<div class="ca acc-violet {{themeClass}}">
+[HDR]
+<div class="shell">
+  <nav class="side" aria-label="Creator studio">
+    <a class="nav-item" href="StreamManager.dc.html" aria-current="page">[i]Stream manager</a>
+    <a class="nav-item" href="StreamSetup.dc.html">[i]Stream setup</a>
+    <a class="nav-item" href="Analytics.dc.html">[i]Analytics</a>
+    <a class="nav-item" href="Revenue.dc.html">[i]Revenue</a>
+    <a class="nav-item" href="Community.dc.html">[i]Moderation<span class="badge badge-destructive ml-auto">3</span></a>
+    <a class="nav-item" href="ChatBot.dc.html">[i]Chat &amp; bot</a>
+    <a class="nav-item" href="Content.dc.html">[i]Videos &amp; clips</a>
+    <a class="nav-item" href="Overlays.dc.html">[i]Alerts &amp; overlays</a>
+    <hr class="sep">
+    <a class="nav-item" href="Developer.dc.html">[i]Developer</a>
+  </nav>
+  <main class="shell-main">
+    <h1 class="sr-only">Stream manager</h1>
+    <div class="col">
+      <div class="g4">
+        <div class="stat"><span class="k">Verified viewers</span><span class="v">412</span><span class="delta-up t-2xs">peak 468</span></div>
+        <div class="stat"><span class="k">New followers</span><span class="v">+37</span><span class="muted t-2xs">this stream</span></div>
+        <div class="stat"><span class="k">Subs &amp; gifts</span><span class="v">14</span><span class="muted t-2xs">5 gifted</span></div>
+        <div class="stat"><span class="k">Chatters</span><span class="v">96</span><span class="muted t-2xs">1,804 messages</span></div>
+      </div>
+      <div class="split">
+        <div class="col">
+          <div class="player"><div class="stage"><span class="av av-xl">M</span></div><div class="ptop"><span class="badge badge-overlay">Preview · muted</span></div></div>
+        </div>
+        <section class="panel" aria-labelledby="health-h">
+          <div class="panel-h" id="health-h">Stream health<span class="badge badge-ok ml-auto">Excellent</span></div>
+          <dl class="panel-c">
+            <div class="row"><dt class="muted">Ingest</dt><dd class="ml-auto num">RTMP · 6,012 kbps</dd></div>
+            <div class="row"><dt class="muted">Video</dt><dd class="ml-auto num">1080p60 · H.264</dd></div>
+            <div class="row"><dt class="muted">Dropped frames</dt><dd class="ml-auto num">0.02%</dd></div>
+            <div class="row"><dt class="muted">Viewer latency</dt><dd class="ml-auto num">2.1 s</dd></div>
+            <div class="row"><dt class="muted">Renditions</dt><dd class="ml-auto num">1080 · 720 · 480 · 360</dd></div>
+            <div class="row"><dt class="muted">Simulcast</dt><dd class="ml-auto"><span class="badge badge-ok">2 targets</span></dd></div>
+            <div class="row"><dt class="muted">Relays serving</dt><dd class="ml-auto num">3 · 38% of egress</dd></div>
+          </dl>
+          <div class="bars c2" aria-label="Bitrate, last 10 minutes" role="img"><sc-for list="{{br}}" as="b"><span></span></sc-for></div>
+        </section>
+      </div>
+      <section class="card" aria-labelledby="info-h">
+        <div class="card-h"><h2 id="info-h" class="card-t">Stream info</h2><span class="muted ml-auto">Changes apply live</span></div>
+        <div class="card-c col">
+          <div class="field"><label class="label" for="t">Title</label><input id="t" class="input" value="Glaze tests: copper reds, round 4"><span class="hint num">33 / 140</span></div>
+          <div class="g2"><div class="field"><label class="label" for="cat">Category</label><select id="cat" class="select"><option>Makers &amp; Crafting</option></select></div><div class="field"><label class="label" for="lg">Language</label><select id="lg" class="select"><option>English</option></select></div></div>
+          <div class="field"><span class="label">Tags</span><div class="row-wrap bordered"><span class="badge badge-secondary">Ceramics ×</span><span class="badge badge-secondary">Chill ×</span><span class="badge badge-secondary">Educational ×</span><input aria-label="Add tag" placeholder="Add tag"></div></div>
+          <label class="row"><span class="switch"></span><span>Mature content (18+)</span></label>
+        </div>
+        <div class="card-f"><button class="btn btn-sm ml-auto">Update</button></div>
+      </section>
+    </div>
+    <div class="col">
+      <section class="panel" aria-labelledby="qa-h"><div class="panel-h" id="qa-h">Quick actions</div>
+        <div class="panel-c g3">
+          <button class="btn btn-outline">[i]Poll</button>
+          <button class="btn btn-outline">[i]Prediction</button>
+          <button class="btn btn-outline">[i]Raid</button>
+          <button class="btn btn-outline">[i]Clip</button>
+          <button class="btn btn-outline">[i]Slow mode</button>
+          <button class="btn btn-outline">[i]Shield mode</button>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="feed-h"><div class="panel-h" id="feed-h">Activity<button class="btn btn-ghost btn-xs ml-auto">Filter</button></div>
+        <ul class="list">
+          <sc-for list="{{feed}}" as="e" hint-placeholder-count="7">
+            <li><span class="badge {{e.cls}}">{{e.kind}}</span><span class="col grow"><span><span class="strong">{{e.who}}</span> {{e.what}}</span><span class="muted t-2xs">{{e.ago}}</span></span><button class="btn btn-ghost btn-xs">Replay</button></li>
+          </sc-for>
+        </ul>
+      </section>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>

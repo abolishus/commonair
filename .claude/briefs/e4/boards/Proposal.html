@@ -1,0 +1,89 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Proposal (structure only; icons shown as [i]). Sample data: data/Proposal.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<main class="wrap">
+  <nav aria-label="Breadcrumb" class="row muted"><a href="Coop.dc.html">Co-op</a>[i]<a href="Coop.dc.html">Proposals</a>[i]<span aria-current="page">#47</span></nav>
+  <div class="split">
+    <article class="main">
+      <header class="col">
+        <div class="row-wrap"><span class="badge badge-info">Voting</span><span class="badge badge-warn">[i]Protected decision</span><span class="muted">Key: <code>revenue.creator_share</code></span></div>
+        <h1 class="h-2xl">Lower the creator share of subscriptions from 71% to 65%</h1>
+        <p class="row-wrap muted"><span class="row"><span class="av av-xs acc-zinc">T</span>Proposed by the treasury working group</span><span>·</span><span>Opened Oct 11</span><span>·</span><span>Closes Oct 21, 18:00 UTC</span></p>
+      </header>
+      <div class="col t-sm">
+        <h2 class="h-base">Summary</h2>
+        <p>Move six points of every subscription to infrastructure for twelve months to fund a second origin region, then revert automatically.</p>
+        <h2 class="h-base">Why</h2>
+        <p>Peak egress is above what one region carries comfortably. Relays now serve about a third of traffic, but the origin is still a single point of failure.</p>
+        <h2 class="h-base">What changes</h2>
+        <ul class="col">
+          <li>Creator share: 71% → 65% from Nov 1, 2026 to Oct 31, 2027.</li>
+          <li>The six points go to a ring-fenced infrastructure account, reported monthly.</li>
+          <li>Tips are unaffected.</li>
+        </ul>
+      </div>
+      <section class="callout info" aria-labelledby="cr-h">
+        [i]
+        <div class="col"><h2 id="cr-h" class="strong">Creator council review · advised against, 3–2</h2><p class="muted">“Supports the goal, not the mechanism. A temporary cut lands hardest on small channels. Prefer a tiered contribution.” <a class="link" href="#">Full review</a></p></div>
+      </section>
+      <section class="col" aria-labelledby="disc-h">
+        <div class="row"><h2 id="disc-h" class="h-base">Discussion</h2><span class="muted">214 comments</span><select class="select ml-auto" aria-label="Sort comments"><option>Most helpful</option><option>Newest</option></select></div>
+        <sc-for list="{{comments}}" as="c" hint-placeholder-count="3">
+          <div class="row acc-{{c.acc}}">
+            <span class="av av-sm">{{c.i}}</span>
+            <div class="col grow">
+              <div class="row"><span class="strong">{{c.n}}</span><span class="badge badge-outline">{{c.cls}}</span><span class="muted t-2xs">{{c.ago}}</span></div>
+              <p>{{c.t}}</p>
+              <div class="row"><button class="btn btn-ghost btn-xs">Helpful · {{c.h}}</button><button class="btn btn-ghost btn-xs">Reply</button></div>
+            </div>
+          </div>
+        </sc-for>
+        <div class="field"><label class="label" for="cm">Add to the discussion</label><textarea id="cm" class="textarea" placeholder="Members only. Be specific, be kind."></textarea><button class="btn btn-sm">Post comment</button></div>
+      </section>
+    </article>
+    <aside class="aside">
+      <section class="card" aria-labelledby="vote-h">
+        <div class="card-h"><div class="col"><h2 id="vote-h" class="card-t">Your vote</h2><p class="card-d">You can change it until voting closes.</p></div></div>
+        <fieldset class="card-c col">
+          <legend class="sr-only">Choose</legend>
+          <sc-for list="{{choices}}" as="o" hint-placeholder-count="3">
+            <button class="opt {{o.on}}" onClick="{{o.pick}}"><span class="radio {{o.on}}"></span><span class="strong">{{o.label}}</span></button>
+          </sc-for>
+        </fieldset>
+        <div class="card-f"><span class="muted">{{voteNote}}</span><button class="btn btn-sm ml-auto">Confirm vote</button></div>
+      </section>
+      <section class="card" aria-labelledby="tally-h">
+        <div class="card-h"><div class="col"><h2 id="tally-h" class="card-t">Live tally</h2><p class="card-d">Protected: needs both rows to pass.</p></div></div>
+        <div class="card-c col">
+          <div class="col">
+            <div class="row"><span class="strong">All members</span><span class="muted">quorum 25% · met</span><span class="badge badge-ok ml-auto">Passing</span></div>
+            <div role="img" aria-label="Yes 58%, No 37%, Abstain 5%"><span></span><span></span><span></span></div>
+            <div class="row muted num"><span>Yes 58%</span><span>No 37%</span><span class="ml-auto">2,141 votes</span></div>
+          </div>
+          <div class="col">
+            <div class="row"><span class="strong">Streamer class</span><span class="muted">quorum 33% · met</span><span class="badge badge-destructive ml-auto">Failing</span></div>
+            <div role="img" aria-label="Yes 41%, No 55%, Abstain 4%"><span></span><span></span><span></span></div>
+            <div class="row muted num"><span>Yes 41%</span><span>No 55%</span><span class="ml-auto">402 votes</span></div>
+          </div>
+          <p class="muted">If either row fails, the database rejects the change, whoever is asking.</p>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="tl-h"><div class="panel-h" id="tl-h">Timeline</div>
+        <ol class="list">
+          <li><span class="check on">[i]</span><span class="grow">Discussion</span><span class="muted num">Oct 1–10</span></li>
+          <li><span class="check on">[i]</span><span class="grow">Council review</span><span class="muted num">Oct 10</span></li>
+          <li><span class="radio on"></span><span class="grow strong">Voting</span><span class="muted num">Oct 11–21</span></li>
+          <li><span class="radio"></span><span class="grow muted">Result &amp; enactment</span><span class="muted num">Oct 21</span></li>
+        </ol>
+      </section>
+    </aside>
+  </div>
+</main>
+[FTR]
+</div>
+</x-dc>

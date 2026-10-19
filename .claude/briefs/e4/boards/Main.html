@@ -1,0 +1,106 @@
+<!--
+SPDX-FileCopyrightText: 2026 CommonAir contributors
+SPDX-License-Identifier: CC-BY-SA-4.0
+Condensed mockup board Main (structure only; icons shown as [i]). Sample data: data/Main.js
+-->
+<x-dc>
+<div class="ca {{themeClass}}">
+[HDR]
+<div class="shell">
+  <aside class="side" aria-label="Channels">
+    <div class="side-h"><span>Followed live</span><button class="btn btn-ghost btn-icon btn-xs" aria-label="Collapse sidebar">[i]</button></div>
+    <ul>
+      <sc-for list="{{followed}}" as="f" hint-placeholder-count="5">
+        <li><a class="side-item acc-{{f.acc}}" href="Channel.dc.html">
+          <span class="av av-sm">{{f.i}}</span>
+          <span class="col grow"><span class="strong truncate">{{f.name}}</span><span class="muted truncate">{{f.cat}}</span></span>
+          <span class="row num t-2xs muted"><span class="livedot"></span>{{f.v}}</span>
+        </a></li>
+      </sc-for>
+    </ul>
+    <a class="btn btn-ghost btn-xs" href="Following.dc.html">Show all 38 followed</a>
+    <hr class="sep">
+    <div class="side-h"><span>Spotlight</span></div>
+    <ul>
+      <sc-for list="{{spot}}" as="f" hint-placeholder-count="3">
+        <li><a class="side-item acc-{{f.acc}}" href="Channel.dc.html">
+          <span class="av av-sm">{{f.i}}</span>
+          <span class="col grow"><span class="strong truncate">{{f.name}}</span><span class="muted truncate">{{f.cat}}</span></span>
+          <span class="row num t-2xs muted"><span class="livedot"></span>{{f.v}}</span>
+        </a></li>
+      </sc-for>
+    </ul>
+    <div class="callout">
+      [i]
+      <p class="muted">Viewer counts are verified. Discovery rotates small channels into every page. <a class="link" href="Transparency.dc.html">How it works</a></p>
+    </div>
+  </aside>
+  <main class="shell-main">
+    <div class="wrap">
+      <section aria-labelledby="featured-h" class="split acc-teal">
+        <h2 id="featured-h" class="sr-only">Featured</h2>
+        <div class="main">
+          <div class="player">
+            <div class="stage"><span class="av av-xl">R</span></div>
+            <div class="ptop"><span class="live"><span class="dot"></span>Live</span><span class="vc vc-overlay">[i]2.4K</span></div>
+            <div class="ctrls"><div class="row"><button class="pbtn" aria-label="Unmute">[i]</button><span class="grow"></span><span class="badge badge-overlay">Muted preview</span></div></div>
+          </div>
+        </div>
+        <div class="aside">
+          <div class="row"><span class="av av-md av-live">R</span><div class="col"><a class="strong t-sm" href="Channel.dc.html">rivertide</a><span class="muted">Science &amp; Technology</span></div></div>
+          <h3 class="h-base">Building a weather station from scrap — day 3, soldering the anemometer</h3>
+          <ul class="row-wrap"><li><span class="badge badge-accent">Spotlight</span></li><li><span class="badge badge-outline">English</span></li><li><span class="badge badge-outline">Electronics</span></li><li><span class="badge badge-outline">Chill</span></li></ul>
+          <p class="muted">Spotlight picks rotate every 30 minutes among member channels under 50 average viewers.</p>
+          <div class="row"><a class="btn" href="Channel.dc.html">Watch</a><button class="btn btn-outline">[i]Follow</button></div>
+          <div class="row"><span class="progress"><span></span></span><span class="muted num">1 / 3</span></div>
+        </div>
+      </section>
+      <section aria-labelledby="new-h" class="col">
+        <div class="row"><h2 id="new-h" class="h-base">New and live</h2><a class="btn btn-ghost btn-xs ml-auto" href="Browse.dc.html">Show all</a></div>
+        <div class="cards">
+          <sc-for list="{{newLive}}" as="s" hint-placeholder-count="4">
+            <article class="sc acc-{{s.acc}}">
+              <a class="sc-link" href="Channel.dc.html">
+                <div class="thumb"><div class="thumb-ph scene"><span class="av av-lg">{{s.i}}</span></div><span class="live live-sm tl">Live</span><span class="vc vc-overlay bl">[i]{{s.v}}</span></div>
+                <div class="sc-meta"><span class="av av-sm">{{s.i}}</span><div class="col"><h3 class="sc-title clamp2">{{s.title}}</h3><span class="muted truncate">{{s.name}}</span><span class="muted truncate">{{s.cat}}</span></div></div>
+              </a>
+              <ul class="sc-chips"><li><span class="badge badge-accent">{{s.reason}}</span></li><sc-for list="{{s.tags}}" as="tag"><li><span class="badge badge-outline">{{tag}}</span></li></sc-for></ul>
+            </article>
+          </sc-for>
+        </div>
+      </section>
+      <section aria-labelledby="cat-h" class="col">
+        <div class="row"><h2 id="cat-h" class="h-base">Categories with live channels</h2><a class="btn btn-ghost btn-xs ml-auto" href="Browse.dc.html">Browse all</a></div>
+        <div class="cards-sm">
+          <sc-for list="{{cats}}" as="c" hint-placeholder-count="6">
+            <a class="col acc-{{c.acc}}" href="Category.dc.html">
+              <div class="boxart"><span class="glyph">{{c.g}}</span></div>
+              <span class="strong truncate">{{c.name}}</span>
+              <span class="muted num">{{c.v}} viewers</span>
+            </a>
+          </sc-for>
+        </div>
+      </section>
+      <section aria-labelledby="live-h" class="col">
+        <div class="row"><h2 id="live-h" class="h-base">Live now</h2>
+          <div class="seg ml-auto" role="group" aria-label="Sort"><button aria-pressed="true">Fair mix</button><button aria-pressed="false">Most viewers</button><button aria-pressed="false">Recently started</button></div>
+        </div>
+        <div class="cards">
+          <sc-for list="{{live}}" as="s" hint-placeholder-count="8">
+            <article class="sc acc-{{s.acc}}">
+              <a class="sc-link" href="Channel.dc.html">
+                <div class="thumb"><div class="thumb-ph scene"><span class="av av-lg">{{s.i}}</span></div><span class="live live-sm tl">Live</span><span class="vc vc-overlay bl">[i]{{s.v}}</span></div>
+                <div class="sc-meta"><span class="av av-sm">{{s.i}}</span><div class="col"><h3 class="sc-title clamp2">{{s.title}}</h3><span class="muted truncate">{{s.name}}</span><span class="muted truncate">{{s.cat}}</span></div></div>
+              </a>
+              <ul class="sc-chips"><li><span class="badge badge-accent">{{s.reason}}</span></li><sc-for list="{{s.tags}}" as="tag"><li><span class="badge badge-outline">{{tag}}</span></li></sc-for></ul>
+            </article>
+          </sc-for>
+        </div>
+        <button class="btn btn-outline">Show more</button>
+      </section>
+    </div>
+  </main>
+</div>
+[FTR]
+</div>
+</x-dc>
