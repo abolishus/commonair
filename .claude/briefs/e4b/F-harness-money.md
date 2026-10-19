@@ -30,7 +30,7 @@ README and the E2/E3 scenarios (`harness/scenarios/e2e-social.ts`, `e2e-relay.ts
 
 ## Build
 
-1. `e4b-money` scenario (`needs`: `api`, `web`, `chat`, `worker`; not `stripe`; `inFull: true`)
+1. `e4b-money` scenario (`needs`: `api`, `web`, `chat`, `worker`, `mail`, and `browser` for the web path; not `stripe`; `inFull: true`)
    with the spec's nine steps, a web path (Playwright, by test id only) and `--set via=api`
    (same steps through the API and the chat socket). Fail fast with a clear message when
    `DATABASE_URL` is missing or `money.support` reports `provider: "stripe"`.
