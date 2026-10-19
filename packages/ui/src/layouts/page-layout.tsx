@@ -5,10 +5,10 @@ import type * as React from "react";
 import { cn } from "@commonair/ui/lib/utils";
 
 export interface PageContainerProps extends React.ComponentProps<"div"> {
-  width?: "default" | "narrow" | "wide";
+  width?: "default" | "narrow" | "wide" | "form";
 }
 export function PageContainer({ width = "default", className, ...props }: PageContainerProps): React.JSX.Element {
-  const widths = { default: "max-w-6xl", narrow: "max-w-3xl", wide: "max-w-7xl" };
+  const widths = { default: "max-w-6xl", narrow: "max-w-3xl", wide: "max-w-7xl", form: "max-w-md" };
   return <div className={cn("mx-auto w-full px-4", widths[width], className)} {...props} />;
 }
 export interface SplitLayoutProps extends React.ComponentProps<"div"> {

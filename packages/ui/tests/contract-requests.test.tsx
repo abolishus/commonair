@@ -9,7 +9,7 @@ import { PasswordField } from "../src/blocks/forms/index.ts";
 import { ChannelHeader } from "../src/blocks/media/channel-header.tsx";
 import { PlayerChrome } from "../src/blocks/media/player-chrome.tsx";
 import { StreamGrid } from "../src/blocks/media/stream-grid.tsx";
-import { SiteFooter, SiteHeader, StudioShell } from "../src/layouts/index.ts";
+import { PageContainer, SiteFooter, SiteHeader, StudioShell, UserMenu } from "../src/layouts/index.ts";
 
 const stream: StreamCard = {
   channel: { id: "c1", slug: "fern", displayName: "Fernsby", avatarUrl: null, accent: "teal" },
@@ -73,11 +73,29 @@ describe("U6b contract requests", () => {
 
   test("StudioShell renders a footer", () => {
     render(
-      <StudioShell header={<div />} groups={[]} sidebarLabel="Studio" footer={<p>footer here</p>}>
+      <StudioShell
+        header={<div />}
+        groups={[]}
+        sidebarLabel="Studio"
+        skipLabel="Skip to content"
+        footer={<p>footer here</p>}
+      >
         <p>content</p>
       </StudioShell>,
     );
-    expect(screen.getByText("footer here")).toBeTruthy();
+    const footer = screen.getByText("footer here");
+    expect(footer.closest("main")).toBeNull();
+    expect(screen.getByRole("link", { name: "Skip to content" }).getAttribute("href")).toBe("#main-content");
+  });
+
+  test("PageContainer has a form width", () => {
+    render(<PageContainer width="form" data-testid="pc" />);
+    expect(screen.getByTestId("pc").className).toContain("max-w-md");
+  });
+
+  test("UserMenu hides the username on phones", () => {
+    render(<UserMenu username="averylongusername" menuLabel="Account" items={[]} />);
+    expect(screen.getByText("averylongusername").className).toContain("hidden");
   });
 
   test("SiteHeader renders the brand through a render element", () => {

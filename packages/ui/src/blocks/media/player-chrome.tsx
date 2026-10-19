@@ -78,7 +78,7 @@ export function PlayerChrome({
           </div>
         </div>
         {stage && <div className="absolute inset-0 z-20 grid place-items-center bg-background/80">{stage}</div>}
-        <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-1 bg-overlay/90 p-2 text-overlay-foreground opacity-0 transition-opacity group-hover/player:opacity-100 group-focus-within/player:opacity-100 motion-reduce:transition-none">
+        <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col gap-1 bg-overlay/90 p-2 text-overlay-foreground opacity-0 transition-opacity group-hover/player:opacity-100 group-focus-within/player:opacity-100 pointer-coarse:opacity-100 motion-reduce:transition-none">
           {scrubber}
           <div className="flex min-w-0 items-center gap-2">
             {controls}

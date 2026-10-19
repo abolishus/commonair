@@ -105,7 +105,9 @@ describe("house conventions", () => {
   });
 
   test("house primitives are square (base-lyra): only rounded-none, and rounded-full for avatars and dots", () => {
-    const houseCode = sources.filter((s) => /^src\/(primitives|layouts|blocks)\//.test(s.file) || s.file === "src/toast.tsx");
+    const houseCode = sources.filter(
+      (s) => /^src\/(primitives|layouts|blocks)\//.test(s.file) || s.file === "src/toast.tsx",
+    );
     const offenders = houseCode.flatMap((s) =>
       [...s.text.matchAll(/(?<![\w-])rounded(?:-[a-z]{1,2})?(?:-(?:xs|sm|md|lg|xl|2xl|3xl|4xl|\[[^\]]*\]))?(?![\w-])/g)]
         .map((m) => m[0])
@@ -120,7 +122,11 @@ describe("house conventions", () => {
     const hits = (text: string): string[] =>
       [...text.matchAll(re)].map((m) => m[0]).filter((cls) => !/-(none|full)$/.test(cls));
     expect(hits(`className="rounded-md p-2"`)).toEqual(["rounded-md"]);
-    expect(hits(`className="rounded rounded-t-lg rounded-[4px]"`)).toEqual(["rounded", "rounded-t-lg", "rounded-[4px]"]);
+    expect(hits(`className="rounded rounded-t-lg rounded-[4px]"`)).toEqual([
+      "rounded",
+      "rounded-t-lg",
+      "rounded-[4px]",
+    ]);
     expect(hits(`className="rounded-none rounded-full rounded-t-none"`)).toEqual([]);
   });
 

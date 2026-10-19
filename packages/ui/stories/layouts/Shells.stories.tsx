@@ -69,7 +69,7 @@ export const AppShellWithChannelSidebar: Story = {
 export const StudioShellStory: Story = {
   name: "StudioShell",
   render: () => (
-    <StudioShell header={header} groups={groups} sidebarLabel="Studio navigation">
+    <StudioShell header={header} groups={groups} sidebarLabel="Studio navigation" skipLabel="Skip to content">
       <p>Studio content</p>
     </StudioShell>
   ),
@@ -77,7 +77,7 @@ export const StudioShellStory: Story = {
 export const AdminShellStory: Story = {
   name: "AdminShell",
   render: () => (
-    <AdminShell header={header} groups={groups} sidebarLabel="Administration navigation">
+    <AdminShell header={header} groups={groups} sidebarLabel="Administration navigation" skipLabel="Skip to content">
       <p>Admin content</p>
     </AdminShell>
   ),

@@ -34,7 +34,7 @@ export function UserMenu({ username, avatar, menuLabel, items, ...props }: UserM
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label={menuLabel} />}>
           <ChannelAvatar name={username} src={avatar} size="sm" decorative />
-          <span className="max-w-32 truncate">{username}</span>
+          <span className="hidden max-w-32 truncate sm:inline">{username}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {items.map((item) => (

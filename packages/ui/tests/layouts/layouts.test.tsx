@@ -62,6 +62,7 @@ test("dashboard shell renders labeled navigation and main content", () => {
     <StudioShell
       header={<header>Studio header</header>}
       sidebarLabel="Studio navigation"
+      skipLabel="Skip to content"
       groups={[
         {
           id: "studio",

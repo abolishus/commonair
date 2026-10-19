@@ -2,36 +2,37 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type * as React from "react";
-import { Sidebar, SidebarContent, SidebarInset, SidebarProvider } from "@commonair/ui/components/sidebar";
+import { AppShell } from "./app-shell.tsx";
 import { NavGroups, type NavGroup } from "./nav.tsx";
 
 export interface DashboardShellProps {
   header: React.ReactNode;
   groups: NavGroup[];
   sidebarLabel: string;
+  /** Skip link text (every shell has one). */
+  skipLabel: string;
   children: React.ReactNode;
-  /** Site footer under the content (the AGPL source link must be on every page). */
+  /** Site footer, outside `main` (the AGPL source link must be on every page). */
   footer?: React.ReactNode;
 }
+
+/** Studio and admin chrome: the AppShell with a nav sidebar, so all shells share one structure. */
 export function DashboardShell({
   header,
   groups,
   sidebarLabel,
+  skipLabel,
   children,
   footer,
 }: DashboardShellProps): React.JSX.Element {
   return (
-    <SidebarProvider>
-      <Sidebar collapsible="icon">
-        <SidebarContent>
-          <NavGroups groups={groups} label={sidebarLabel} />
-        </SidebarContent>
-      </Sidebar>
-      <div className="flex min-h-svh min-w-0 flex-1 flex-col">
-        {header}
-        <SidebarInset className="min-w-0 flex-1">{children}</SidebarInset>
-        {footer}
-      </div>
-    </SidebarProvider>
+    <AppShell
+      header={header}
+      sidebar={<NavGroups groups={groups} label={sidebarLabel} />}
+      footer={footer}
+      skipLabel={skipLabel}
+    >
+      {children}
+    </AppShell>
   );
 }
