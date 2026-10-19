@@ -52,8 +52,8 @@ const session = async (heartbeatAgeMs = 0) => {
   await valkey.zadd(KEYS.viewers(CHANNEL), Date.now() - heartbeatAgeMs, sid);
   return sid;
 };
-const connect = async (sid: string, ip: string) => {
-  const p = await Peer.open(`${wsBase}/announce?t=${await token(sid)}`, { "x-forwarded-for": ip });
+const connect = async (sid: string, ip: string, iat?: number) => {
+  const p = await Peer.open(`${wsBase}/announce?t=${await token(sid, { iat })}`, { "x-forwarded-for": ip });
   peers.push(p);
   return p;
 };
@@ -91,7 +91,11 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const p of peers) p.close();
   await tracker.stop();
-  await valkey.del(KEYS.viewers(CHANNEL), KEYS.p2pSwarm(SWARM), ...sessions.map((s) => KEYS.p2pPeer(s)));
+  await valkey.del(
+    KEYS.viewers(CHANNEL),
+    KEYS.p2pSwarm(SWARM),
+    ...sessions.flatMap((s) => [KEYS.p2pPeer(s), KEYS.p2pLinks(s)]),
+  );
   valkey.disconnect();
 });
 
@@ -182,7 +186,13 @@ describe("signalling and evidence", () => {
       const members = await valkey.zrange(KEYS.p2pSwarm(SWARM), 0, -1);
       expect(members.sort()).toEqual([sidA, sidB].sort());
       expect(await valkey.ttl(KEYS.p2pSwarm(SWARM))).toBeGreaterThan(500);
+      // The completed exchange: each side holds the other's network.
+      expect(await valkey.zrange(KEYS.p2pLinks(sidA), 0, -1)).toEqual([hb.net]);
+      expect(await valkey.zrange(KEYS.p2pLinks(sidB), 0, -1)).toEqual([ha.net]);
+      expect(Number(await valkey.zscore(KEYS.p2pLinks(sidA), hb.net ?? ""))).toBeGreaterThan(Date.now() - 10_000);
+      expect(await valkey.ttl(KEYS.p2pLinks(sidB))).toBeGreaterThan(500);
     });
+    expect(tracker.stats().exchanges).toBeGreaterThanOrEqual(1);
     // The network is stored only as an HMAC.
     expect(JSON.stringify(await valkey.hgetall(KEYS.p2pPeer(sidA)))).not.toContain("198.51.100");
     const first = (await valkey.hget(KEYS.p2pPeer(sidA), "first")) ?? "";
@@ -209,6 +219,30 @@ describe("signalling and evidence", () => {
     p.send("{not json");
     expect(await p.next((m) => "failure reason" in m)).toEqual({ "failure reason": "invalid json" });
     expect(p.closed).toBeNull();
+  });
+
+  test("an answer to an offer the tracker never relayed writes no links", async () => {
+    const sidA = await session();
+    const sidB = await session();
+    const a = await connect(sidA, NET_A);
+    const b = await connect(sidB, NET_B);
+    const hash = binaryId(88);
+    a.send({ action: "announce", info_hash: hash, peer_id: binaryId(4) });
+    await a.next((m) => m.interval !== undefined);
+    b.send({ action: "announce", info_hash: hash, peer_id: binaryId(5) });
+    await b.next((m) => m.interval !== undefined);
+    b.send({
+      action: "announce",
+      info_hash: hash,
+      peer_id: binaryId(5),
+      to_peer_id: binaryId(4),
+      answer: answerSdp,
+      offer_id: binaryId(6),
+    });
+    // Still relayed (it is signalling), but not an exchange.
+    await a.next((m) => m.answer !== undefined);
+    await eventually(async () => expect(await valkey.hget(KEYS.p2pPeer(sidB), "announces")).toBe("2"));
+    expect(await valkey.exists(KEYS.p2pLinks(sidA), KEYS.p2pLinks(sidB))).toBe(0);
   });
 
   test("a peer id taken by another session in the swarm is refused", async () => {
@@ -250,10 +284,31 @@ describe("refusals", () => {
     expect(tracker.stats().refused.not_watching).toBeGreaterThanOrEqual(2);
   });
 
-  test("a second socket for one session", async () => {
+  test("a second socket for one session with the same or an older iat", async () => {
     const sid = await session();
-    await connect(sid, NET_A);
-    expect(await upgradeStatus(tracker.url, `/?t=${await token(sid)}`)).toBe(409);
+    const iat = nowS() - 60;
+    await connect(sid, NET_A, iat);
+    expect(await upgradeStatus(tracker.url, `/?t=${await token(sid, { iat })}`)).toBe(409);
+    expect(await upgradeStatus(tracker.url, `/?t=${await token(sid, { iat: iat - 1 })}`)).toBe(409);
+  });
+
+  test("a newer iat replaces the session's socket and reclaims its peer id", async () => {
+    const sid = await session();
+    const hash = binaryId(90);
+    const peerId = binaryId(91);
+    const old = await connect(sid, NET_A, nowS() - 60);
+    old.send({ action: "announce", info_hash: hash, peer_id: peerId });
+    await old.next((m) => m.interval !== undefined);
+    const replaced = tracker.stats().replaced;
+
+    const fresh = await connect(sid, NET_A, nowS());
+    expect((await old.waitClosed()).code).toBe(1008);
+    expect(tracker.stats().replaced).toBe(replaced + 1);
+    fresh.send({ action: "announce", info_hash: hash, peer_id: peerId });
+    expect(await fresh.next((m) => m.interval !== undefined)).toMatchObject({ incomplete: 1 });
+    const swarm = p2pSwarmId(CHANNEL, binaryToHex(hash));
+    await eventually(async () => expect(await valkey.zrange(KEYS.p2pSwarm(swarm), 0, -1)).toEqual([sid]));
+    await valkey.del(KEYS.p2pSwarm(swarm));
   });
 
   test("a plain HTTP request", async () => {

@@ -68,12 +68,13 @@ describe("verifyTrackerToken", async () => {
       error: "bad_signature",
     });
   });
-  test.each([null, "", "abc", "a.b.c", "!!!.xyz", `${b64url(new TextEncoder().encode('{"iat":"x"}'))}.AA`])(
-    "malformed %s",
-    async (t) => {
-      expect(await verifyTrackerToken(key.publicKey, t, NOW, MAX_AGE)).toEqual({ ok: false, error: "malformed" });
-    },
-  );
+  test("an unsigned body is a bad signature before its claims are read", async () => {
+    const t = `${b64url(new TextEncoder().encode('{"iat":"x"}'))}.AA`;
+    expect(await verifyTrackerToken(key.publicKey, t, NOW, MAX_AGE)).toEqual({ ok: false, error: "bad_signature" });
+  });
+  test.each([null, "", "abc", "a.b.c", "!!!.xyz", "x".repeat(4097)])("malformed %s", async (t) => {
+    expect(await verifyTrackerToken(key.publicKey, t, NOW, MAX_AGE)).toEqual({ ok: false, error: "malformed" });
+  });
 });
 
 describe("heartbeatFresh", () => {

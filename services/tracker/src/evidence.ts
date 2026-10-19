@@ -3,8 +3,9 @@
 
 /**
  * Server-side P2P evidence (ADR 0005): every accepted announce is recorded in Valkey under
- * `KEYS.p2pPeer(sid)` and `KEYS.p2pSwarm(swarm)` for integrity to read. The announcing network
- * is stored only as an HMAC of its /24 or /48 prefix, never the address.
+ * `KEYS.p2pPeer(sid)` and `KEYS.p2pSwarm(swarm)` for integrity to read, and every completed
+ * offer/answer exchange under `KEYS.p2pLinks` of both sessions. The announcing network is stored
+ * only as an HMAC of its /24 or /48 prefix, never the address.
  *
  * A session's `swarm` field is the swarm of its latest announce: one that announces to a second
  * info hash moves there (integrity judges one swarm per session). Its membership in the earlier
@@ -27,15 +28,13 @@ export class Evidence {
     ttlSeconds: number = P2P_EVIDENCE.peerTtlSeconds,
   ) {
     this.ttlSeconds = ttlSeconds;
-    this.key = crypto.subtle.importKey("raw", enc.encode(internalSecret), { name: "HMAC", hash: "SHA-256" }, false, [
-      "sign",
-    ]);
+    this.key = netKey(internalSecret);
   }
 
-  /** Hex HMAC-SHA256(INTERNAL_API_SECRET, "p2p-net:" + network prefix) of a canonical address. */
+  /** Hex HMAC-SHA256(netKey, network prefix) of a canonical address (`KEYS.p2pPeer` `net`). */
   async networkHash(ip: string): Promise<string> {
     const prefix = networkPrefix(ip) ?? ip;
-    return toHex(await crypto.subtle.sign("HMAC", await this.key, enc.encode(`p2p-net:${prefix}`)));
+    return toHex(await crypto.subtle.sign("HMAC", await this.key, enc.encode(prefix)));
   }
 
   /** Record one accepted announce. Throws on a Valkey error; the caller logs and carries on. */
@@ -55,6 +54,23 @@ export class Evidence {
     throwOnError(results);
   }
 
+  /**
+   * The tracker relayed an offer between sessions `a` and `b` and the matching answer came back:
+   * each session's `p2pLinks` gets the other's network. Same TTL and trimming as `p2pPeer`.
+   */
+  async link(a: { sid: string; net: string }, b: { sid: string; net: string }, nowMs: number): Promise<void> {
+    const cutoff = `(${nowMs - this.ttlSeconds * 1000}`;
+    const p = this.valkey.pipeline();
+    for (const [self, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      const key = KEYS.p2pLinks(self.sid);
+      p.zadd(key, nowMs, other.net).zremrangebyscore(key, "-inf", cutoff).expire(key, this.ttlSeconds);
+    }
+    throwOnError(await p.exec());
+  }
+
   /** The session left these swarms (stopped or disconnected). */
   async forget(sid: string, swarms: readonly string[]): Promise<void> {
     if (swarms.length === 0) return;
@@ -62,6 +78,17 @@ export class Evidence {
     for (const swarm of swarms) p.zrem(KEYS.p2pSwarm(swarm), sid);
     throwOnError(await p.exec());
   }
+}
+
+/**
+ * Purpose-bound subkey HMAC-SHA256(INTERNAL_API_SECRET, "p2p-net-v1") (contracts `KEYS.p2pPeer`),
+ * so network hashes never collide with other HMACs keyed by the same secret.
+ */
+async function netKey(secret: string): Promise<CryptoKey> {
+  const hmac = { name: "HMAC", hash: "SHA-256" } as const;
+  const root = await crypto.subtle.importKey("raw", enc.encode(secret), hmac, false, ["sign"]);
+  const sub = await crypto.subtle.sign("HMAC", root, enc.encode("p2p-net-v1"));
+  return crypto.subtle.importKey("raw", sub, hmac, false, ["sign"]);
 }
 
 function throwOnError(results: [Error | null, unknown][] | null): void {

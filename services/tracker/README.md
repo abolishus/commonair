@@ -46,11 +46,16 @@ At upgrade the tracker requires:
 | Ed25519 signature valid under the playback key (derived from `PLAYBACK_SIGNING_KEY`); `exp` is **not** enforced | 401     |
 | `iat` at most `TRACKER_TOKEN_MAX_AGE_SECONDS` old and not more than 30 s in the future                          | 401     |
 | the session is heartbeating: `ZSCORE KEYS.viewers(cid) sid` present and at most 30 s old                        | 401     |
-| no other open socket for the same session id                                                                    | 409     |
+| no other socket for the same session id with the same or a newer `iat` (a newer `iat` replaces it, see below)   | 409     |
 | `TRACKER_MAX_CONNECTIONS` / `TRACKER_MAX_CONNECTIONS_PER_IP`                                                    | 503/429 |
 
-The heartbeat is re-checked on announces, at most every 30 s; a lapsed session is closed with 1008. `@commonair/tokens` has no signature-only verify yet, so `src/auth.ts` holds a marked
-local workaround (see its comment).
+The heartbeat is re-checked on announces, at most every 30 s; a lapsed session is closed with 1008.
+The signature is checked with `verifyPlaybackTokenSignature` from `@commonair/tokens`.
+
+A socket whose token has a **newer** `iat` than the session's open socket replaces it: the old
+socket leaves its swarms at once (so the new one can reclaim the same peer ids) and is closed
+with 1008. A leaked token can therefore hold the session's slot only until the honest viewer's
+next refreshed token (ADR 0005).
 
 The client address is the socket peer, or the rightmost untrusted `X-Forwarded-For` hop when the
 peer is in `TRUSTED_PROXY_CIDRS` (same rules as the API). Logs never contain tokens, SDP,
@@ -75,10 +80,19 @@ On every accepted announce frame, offers and answers alike (each is a real signa
 in one pipeline:
 
 - `HSET KEYS.p2pPeer(sid)`: `swarm` = `p2pSwarmId(channelId, hex(info_hash))`, `net` = hex
-  HMAC-SHA256(`INTERNAL_API_SECRET`, `p2p-net:` + the canonical /24 (IPv4, including
+  HMAC-SHA256 keyed with the subkey HMAC-SHA256(`INTERNAL_API_SECRET`, `"p2p-net-v1"`) over the canonical /24 (IPv4, including
   IPv4-mapped IPv6) or /48 (IPv6) prefix), `last` (epoch ms); `HSETNX first`; `HINCRBY announces 1`;
   `EXPIRE` `P2P_EVIDENCE.peerTtlSeconds`.
 - `ZADD KEYS.p2pSwarm(swarm) <ms> sid`, trim members older than the TTL, `EXPIRE` the same TTL.
+
+On a **completed signalling exchange**, i.e. the tracker relayed session A's offer to session B and
+B's answer with the same `offer_id` came back in the same swarm within
+`P2P_EVIDENCE.exchangeTimeoutMs` (60 s), both sides are linked in one pipeline:
+`ZADD KEYS.p2pLinks(A) <ms> <B's net>` and `ZADD KEYS.p2pLinks(B) <ms> <A's net>`, each trimmed
+to the TTL and given the same `EXPIRE`. Answers to offers the tracker never relayed, from another
+session, or after the timeout are still relayed (they are signalling) but link nothing. Each
+socket remembers at most 100 relayed offers awaiting an answer (`src/exchanges.ts`), oldest
+evicted first. Integrity decides which links count (another network, the per-network cap).
 
 A session's `swarm` is the swarm of its **latest** announce: one that announces to a second info
 hash moves there. `stopped` and socket close `ZREM` the session from the swarms it left. Valkey
@@ -86,8 +100,8 @@ failures never drop signalling: they are logged and counted (`tracker.evidence.f
 
 Counters (`@commonair/observability` meter `tracker`): `tracker.connections.opened|closed`,
 `tracker.upgrades.refused{reason}`, `tracker.frames.refused{reason}`, `tracker.announces`,
-`tracker.offers.relayed`, `tracker.answers.relayed`, `tracker.swarms` (up/down),
-`tracker.evidence.failures`.
+`tracker.offers.relayed`, `tracker.answers.relayed`, `tracker.exchanges.completed`,
+`tracker.connections.replaced`, `tracker.swarms` (up/down), `tracker.evidence.failures`.
 
 ## Environment
 

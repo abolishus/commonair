@@ -7,7 +7,7 @@
  * (TRACKER_TOKEN_MAX_AGE_SECONDS), and the session must be heartbeating (KEYS.viewers).
  */
 import type { PlaybackClaims } from "@commonair/contracts";
-import { fromB64url, verifyPlaybackToken } from "@commonair/tokens";
+import { verifyPlaybackTokenSignature } from "@commonair/tokens";
 
 /** Clock skew tolerated for `iat` in the future. */
 export const IAT_SKEW_SECONDS = 30;
@@ -26,13 +26,7 @@ export type TrackerTokenResult =
   | { ok: true; claims: PlaybackClaims }
   | { ok: false; error: "malformed" | "bad_signature" | "too_old" | "future" };
 
-/**
- * LOCAL WORKAROUND (contract request: `verifyPlaybackTokenSignature` in @commonair/tokens).
- * `verifyPlaybackToken` always enforces `exp`. To check only the signature and claims schema we
- * evaluate it at the token's own `iat` (unverified, read from the body), where its time checks
- * pass for any well-formed token; the real time policy is `tokenAge` against the actual clock.
- * The signature still covers the exact body bytes, so reading `iat` first gains a forger nothing.
- */
+/** Signature and claims via `verifyPlaybackTokenSignature`; the time policy is `tokenAge`. */
 export async function verifyTrackerToken(
   publicKey: CryptoKey,
   token: string | null,
@@ -40,15 +34,7 @@ export async function verifyTrackerToken(
   maxAgeSeconds: number,
 ): Promise<TrackerTokenResult> {
   if (!token || token.length > 4096) return { ok: false, error: "malformed" };
-  const [body] = token.split(".");
-  let iat: unknown;
-  try {
-    iat = (JSON.parse(new TextDecoder().decode(fromB64url(body ?? ""))) as { iat?: unknown }).iat;
-  } catch {
-    return { ok: false, error: "malformed" };
-  }
-  if (typeof iat !== "number" || !Number.isInteger(iat)) return { ok: false, error: "malformed" };
-  const v = await verifyPlaybackToken(publicKey, token, iat);
+  const v = await verifyPlaybackTokenSignature(publicKey, token);
   if (!v.ok) return { ok: false, error: v.error === "bad_signature" ? "bad_signature" : "malformed" };
   const age = tokenAge(v.value.iat, nowSeconds, maxAgeSeconds);
   if (age !== "ok") return { ok: false, error: age };

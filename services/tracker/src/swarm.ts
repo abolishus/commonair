@@ -8,11 +8,16 @@
  * announce the same info hash.
  */
 import { p2pSwarmId } from "@commonair/contracts/internal";
+import { PendingExchanges } from "./exchanges.ts";
 import { binaryToHex, LIMITS, type AnnounceFrame, type Frame, type ScrapeFrame } from "./protocol.ts";
 
 /** What the registry needs from a socket. */
 export interface Conn {
+  /** Playback session id (one socket per session). */
+  readonly sid: string;
   readonly channelId: string;
+  /** Offers this socket sent that were relayed and await an answer. */
+  readonly pending: PendingExchanges;
   /** Swarm id → this socket's peer id in it. Maintained by the registry. */
   readonly swarms: Map<string, string>;
   send(msg: object): void;
@@ -42,7 +47,14 @@ export interface SwarmCounts {
 }
 
 export type Outcome =
-  | { kind: "announce"; swarm: string; offersRelayed: number; answerRelayed: boolean }
+  | {
+      kind: "announce";
+      swarm: string;
+      offersRelayed: number;
+      answerRelayed: boolean;
+      /** Set when this frame answered an offer the tracker relayed to it: the offering socket. */
+      exchange: Conn | null;
+    }
   | { kind: "stopped"; swarm: string }
   | { kind: "scrape" }
   | { kind: "refused"; reason: string };
@@ -51,6 +63,7 @@ export interface RegistryOptions {
   /** TRACKER_MAX_NUMWANT: most offers relayed per announce. */
   maxNumwant: number;
   random?: () => number;
+  now?: () => number;
   /** Called with +1 / -1 when a swarm is created or emptied. */
   onSwarmCount?: (delta: number) => void;
 }
@@ -60,9 +73,11 @@ const ZERO: SwarmCounts = { complete: 0, incomplete: 0, downloaded: 0 };
 export class SwarmRegistry {
   private readonly swarms = new Map<string, Swarm>();
   private readonly random: () => number;
+  private readonly now: () => number;
 
   constructor(private readonly opts: RegistryOptions) {
     this.random = opts.random ?? Math.random;
+    this.now = opts.now ?? Date.now;
   }
 
   get size(): number {
@@ -162,14 +177,18 @@ export class SwarmRegistry {
           peer_id: f.peerId,
           info_hash: f.infoHash,
         });
+        conn.pending.add(o.offerId, target.conn.sid, swarm, this.now());
         offersRelayed++;
       });
     }
 
     let answerRelayed = false;
+    let exchange: Conn | null = null;
     if (f.answer) {
       const target = sw.peers.get(f.answer.toPeerId);
       if (target && target.conn !== conn) {
+        // Only an answer to an offer the tracker relayed to this session completes an exchange.
+        if (target.conn.pending.complete(f.answer.offerId, conn.sid, swarm, this.now())) exchange = target.conn;
         target.conn.send({
           action: "announce",
           answer: f.answer.sdp,
@@ -180,7 +199,7 @@ export class SwarmRegistry {
         answerRelayed = true;
       }
     }
-    return { kind: "announce", swarm, offersRelayed, answerRelayed };
+    return { kind: "announce", swarm, offersRelayed, answerRelayed, exchange };
   }
 
   private scrape(conn: Conn, f: ScrapeFrame): Outcome {

@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { p2pSwarmId } from "@commonair/contracts/internal";
+import { PendingExchanges } from "../src/exchanges.ts";
 import { binaryToHex, LIMITS, parseFrame, type Frame } from "../src/protocol.ts";
 import { SwarmRegistry, type Conn } from "../src/swarm.ts";
 import { answerSdp, binaryId, id, offerSdp } from "./helpers.ts";
@@ -17,7 +18,14 @@ interface FakeConn extends Conn {
 }
 const conn = (channelId = CH): FakeConn => {
   const sent: Record<string, unknown>[] = [];
-  return { channelId, swarms: new Map(), sent, send: (m) => sent.push(m as Record<string, unknown>) };
+  return {
+    sid: crypto.randomUUID(),
+    channelId,
+    pending: new PendingExchanges(),
+    swarms: new Map(),
+    sent,
+    send: (m) => sent.push(m as Record<string, unknown>),
+  };
 };
 const frame = (o: Record<string, unknown>): Frame => {
   const r = parseFrame(JSON.stringify({ action: "announce", info_hash: HASH, ...o }));
@@ -36,7 +44,7 @@ describe("announce", () => {
     const { r, deltas } = registry();
     const a = conn();
     const out = r.handle(a, frame({ peer_id: id(1), left: 100 }));
-    expect(out).toEqual({ kind: "announce", swarm: SWARM, offersRelayed: 0, answerRelayed: false });
+    expect(out).toEqual({ kind: "announce", swarm: SWARM, offersRelayed: 0, answerRelayed: false, exchange: null });
     expect(a.sent).toEqual([
       { action: "announce", interval: LIMITS.announceInterval, info_hash: HASH, complete: 0, incomplete: 1 },
     ]);
@@ -170,7 +178,8 @@ describe("offer fan-out and answers", () => {
     r.handle(c, frame({ peer_id: id(3) }));
     for (const x of [a, b, c]) x.sent.length = 0;
     const out = r.handle(b, frame({ peer_id: id(2), answer: answerSdp, to_peer_id: id(1), offer_id: id(77) }));
-    expect(out).toMatchObject({ kind: "announce", answerRelayed: true });
+    // The tracker never relayed offer 77 from a to b: relayed, but no exchange.
+    expect(out).toMatchObject({ kind: "announce", answerRelayed: true, exchange: null });
     expect(a.sent).toEqual([
       { action: "announce", answer: answerSdp, offer_id: id(77), peer_id: id(2), info_hash: HASH },
     ]);
@@ -194,6 +203,47 @@ describe("offer fan-out and answers", () => {
       },
     );
     expect(a.sent).toEqual([]);
+  });
+});
+
+describe("completed exchanges", () => {
+  let t = 1_000_000;
+  const timed = () => {
+    const r = new SwarmRegistry({ maxNumwant: 20, now: () => t });
+    const a = conn();
+    const b = conn();
+    const c = conn();
+    r.handle(b, frame({ peer_id: id(2) }));
+    r.handle(c, frame({ peer_id: id(3) }));
+    // One offer from a: relayed to exactly one of b, c.
+    r.handle(a, frame({ peer_id: id(1), offers: offers(1) }));
+    const receiver = b.sent.some((m) => "offer" in m) ? b : c;
+    const bystander = receiver === b ? c : b;
+    const receiverPeer = receiver === b ? id(2) : id(3);
+    const bystanderPeer = receiver === b ? id(3) : id(2);
+    const answer = (from: FakeConn, peerId: string, offerId = id(100)) =>
+      r.handle(from, frame({ peer_id: peerId, answer: answerSdp, to_peer_id: id(1), offer_id: offerId }));
+    return { r, a, receiver, bystander, receiverPeer, bystanderPeer, answer };
+  };
+
+  test("the receiver's answer with the relayed offer_id completes it once, naming the offerer", () => {
+    const { a, receiver, receiverPeer, answer } = timed();
+    expect(a.pending.size).toBe(1);
+    expect(answer(receiver, receiverPeer)).toMatchObject({ answerRelayed: true, exchange: a });
+    expect(a.pending.size).toBe(0);
+    // Replaying the same answer relays it but completes nothing.
+    expect(answer(receiver, receiverPeer)).toMatchObject({ answerRelayed: true, exchange: null });
+  });
+
+  test("another session, a wrong offer_id, or a late answer completes nothing", () => {
+    const { a, receiver, bystander, receiverPeer, bystanderPeer, answer } = timed();
+    expect(answer(bystander, bystanderPeer)).toMatchObject({ answerRelayed: true, exchange: null });
+    expect(answer(receiver, receiverPeer, id(101))).toMatchObject({ exchange: null });
+    // The right answerer can still complete it after those.
+    expect(a.pending.size).toBe(1);
+    t += 60_001;
+    expect(answer(receiver, receiverPeer)).toMatchObject({ answerRelayed: true, exchange: null });
+    expect(a.pending.size).toBe(0);
   });
 });
 

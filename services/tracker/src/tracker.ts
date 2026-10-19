@@ -12,6 +12,7 @@ import { meter, type Logger } from "@commonair/observability";
 import { runService, valkeyCheck, type RunningService, type ValkeyClient } from "@commonair/service";
 import { heartbeatFresh, verifyTrackerToken } from "./auth.ts";
 import { Evidence } from "./evidence.ts";
+import { PendingExchanges } from "./exchanges.ts";
 import { canonicalIp, clientIp } from "./ip.ts";
 import { LIMITS, parseFrame } from "./protocol.ts";
 import { TokenBucket } from "./ratelimit.ts";
@@ -48,6 +49,8 @@ export interface TrackerOptions {
 interface SocketData extends Conn {
   sid: string;
   channelId: string;
+  /** The token's `iat`: a socket with a newer one for the same session replaces this one. */
+  iat: number;
   ip: string;
   net: Promise<string>;
   bucket: TokenBucket;
@@ -65,6 +68,8 @@ export interface TrackerStats {
   announces: number;
   offersRelayed: number;
   answersRelayed: number;
+  exchanges: number;
+  replaced: number;
   evidenceFailures: number;
   refused: Record<string, number>;
 }
@@ -94,6 +99,8 @@ export function startTracker(opts: TrackerOptions): Tracker {
     announces: m.createCounter("tracker.announces"),
     offers: m.createCounter("tracker.offers.relayed"),
     answers: m.createCounter("tracker.answers.relayed"),
+    exchanges: m.createCounter("tracker.exchanges.completed"),
+    replaced: m.createCounter("tracker.connections.replaced"),
     swarms: m.createUpDownCounter("tracker.swarms"),
     evidenceFailures: m.createCounter("tracker.evidence.failures"),
   };
@@ -103,6 +110,8 @@ export function startTracker(opts: TrackerOptions): Tracker {
     announces: 0,
     offersRelayed: 0,
     answersRelayed: 0,
+    exchanges: 0,
+    replaced: 0,
     evidenceFailures: 0,
     refused: {},
   };
@@ -110,6 +119,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
   const registry = new SwarmRegistry({
     maxNumwant: opts.limits.maxNumwant,
     random: opts.random,
+    now,
     onSwarmCount: (d) => {
       stats.swarms += d;
       metrics.swarms.add(d);
@@ -119,8 +129,10 @@ export function startTracker(opts: TrackerOptions): Tracker {
   /** Connection slots per canonical client address, held from upgrade start until close. */
   const perIp = new Map<string, number>();
   let slots = 0;
-  /** Session id → its socket (null while the upgrade is completing). */
-  const sessions = new Map<string, SocketData | null>();
+  /** Session id → its open socket. */
+  const sessions = new Map<string, SocketData>();
+  /** Session ids whose upgrade is between its checks and `open`. */
+  const upgrading = new Set<string>();
   const sockets = new Set<ServerWebSocket<SocketData>>();
 
   const release = (ip: string) => {
@@ -161,8 +173,11 @@ export function startTracker(opts: TrackerOptions): Tracker {
         opts.limits.tokenMaxAgeSeconds,
       );
       if (!v.ok) return refuse(401, `token_${v.error}`);
-      const { sid, cid } = v.claims;
-      if (sessions.has(sid)) return refuse(409, "duplicate_session");
+      const { sid, cid, iat } = v.claims;
+      // One socket per session; a newer token takes the slot over (ADR 0005), so a leaked
+      // token cannot lock the honest viewer out beyond its next refresh.
+      const taken = () => upgrading.has(sid) || (sessions.get(sid)?.iat ?? -Infinity) >= iat;
+      if (taken()) return refuse(409, "duplicate_session");
       let score: string | null;
       try {
         score = await valkey.zscore(KEYS.viewers(cid), sid);
@@ -171,11 +186,13 @@ export function startTracker(opts: TrackerOptions): Tracker {
         return refuse(503, "unavailable");
       }
       if (!heartbeatFresh(score, now())) return refuse(401, "not_watching");
-      if (sessions.has(sid)) return refuse(409, "duplicate_session");
+      if (taken()) return refuse(409, "duplicate_session");
 
       const data: SocketData = {
         sid,
         channelId: cid,
+        iat,
+        pending: new PendingExchanges(),
         ip,
         net: evidence.networkHash(ip),
         bucket: new TokenBucket(rate.burst, rate.perSecond, now()),
@@ -188,10 +205,10 @@ export function startTracker(opts: TrackerOptions): Tracker {
           if (!this.closed) this.ws?.send(JSON.stringify(msg));
         },
       };
-      sessions.set(sid, null);
+      upgrading.add(sid);
       upgraded = server.upgrade(req, { data });
       if (!upgraded) {
-        sessions.delete(sid);
+        upgrading.delete(sid);
         return refuse(400, "bad_upgrade");
       }
       return undefined;
@@ -250,6 +267,29 @@ export function startTracker(opts: TrackerOptions): Tracker {
     }
     const at = now();
     d.net.then((net) => evidence.record(d.sid, outcome.swarm, net, at)).catch(evidenceFailed);
+    const offerer = outcome.exchange as SocketData | null;
+    if (offerer) {
+      stats.exchanges++;
+      metrics.exchanges.add(1);
+      Promise.all([offerer.net, d.net])
+        .then(([offererNet, net]) => evidence.link({ sid: offerer.sid, net: offererNet }, { sid: d.sid, net }, at))
+        .catch(evidenceFailed);
+    }
+  }
+
+  /** Socket teardown, run once: on close, or at once when a newer socket replaces it. */
+  function teardown(d: SocketData): void {
+    if (d.closed) return;
+    d.closed = true;
+    if (d.ws) sockets.delete(d.ws);
+    stats.connections--;
+    metrics.closed.add(1);
+    if (sessions.get(d.sid) === d) sessions.delete(d.sid);
+    release(d.ip);
+    const left = registry.leaveAll(d);
+    // A replacing socket of the same session may already be in some of these swarms.
+    const current = sessions.get(d.sid);
+    evidence.forget(d.sid, current ? left.filter((s) => !current.swarms.has(s)) : left).catch(evidenceFailed);
   }
 
   const service = runService<SocketData>({
@@ -265,7 +305,16 @@ export function startTracker(opts: TrackerOptions): Tracker {
       perMessageDeflate: false,
       open(ws) {
         ws.data.ws = ws;
+        upgrading.delete(ws.data.sid);
+        const old = sessions.get(ws.data.sid);
         sessions.set(ws.data.sid, ws.data);
+        if (old) {
+          // Leave the swarms now so the new socket can reclaim the same peer ids.
+          teardown(old);
+          old.ws?.close(1008, "replaced by a newer connection");
+          stats.replaced++;
+          metrics.replaced.add(1);
+        }
         sockets.add(ws);
         stats.connections++;
         metrics.opened.add(1);
@@ -286,16 +335,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
           .catch((err: unknown) => logger.error("frame handling failed", { err }));
       },
       close(ws) {
-        const d = ws.data;
-        if (d.closed) return;
-        d.closed = true;
-        sockets.delete(ws);
-        stats.connections--;
-        metrics.closed.add(1);
-        sessions.delete(d.sid);
-        release(d.ip);
-        const left = registry.leaveAll(d);
-        evidence.forget(d.sid, left).catch(evidenceFailed);
+        teardown(ws.data);
       },
     },
     onShutdown: async () => {
