@@ -12,7 +12,14 @@ import { loadWebEnv } from "./env.ts";
 export async function loadDirectory(cookie: string | undefined): Promise<DirectoryHome | null> {
   try {
     const home = await serverApi(loadWebEnv().API_INTERNAL_URL, cookie ? { cookie } : {}).directory.home({});
-    return { spotlight: home.spotlight, newAndLive: home.newAndLive, live: home.live, following: home.following };
+    return {
+      spotlight: home.spotlight,
+      newAndLive: home.newAndLive,
+      live: home.live,
+      following: home.following,
+      recentlyLive: home.recentlyLive,
+      followingOffline: home.followingOffline,
+    };
   } catch {
     return null;
   }

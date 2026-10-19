@@ -99,6 +99,36 @@ describe("composition-rendered selectors", () => {
     seenAttrs.add("data-channel={card.channel.slug}");
   });
 
+  it("directory: offline sections render channel-card links after directory-empty", () => {
+    const doc = render(
+      <Directory
+        sections={[]}
+        offline={[
+          {
+            id: "recent",
+            cards: [
+              {
+                channel: { id: "c1", slug: "rivertide", displayName: "Rivertide", avatarUrl: null, accent: "teal" },
+                title: "Last show",
+                category: { id: "k1", slug: "music", name: "Music" },
+                lastLiveAt: "2026-10-18T12:00:00.000Z",
+                followerCount: 3,
+                mature: false,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+    expect(doc.querySelector('[data-testid="directory-empty"]')).not.toBeNull();
+    const card = doc.querySelector(
+      '[data-testid="directory-section"][data-section="recent"] [data-testid="channel-card"]',
+    );
+    expect(card?.getAttribute("data-channel")).toBe("rivertide");
+    expect(card?.getAttribute("href")).toBe("/rivertide");
+    expect(card?.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-18T12:00:00.000Z");
+  });
+
   it("relays: relay-row carries data-relay-id and data-status through DataTable rowProps", () => {
     const doc = render(
       <RelayTable

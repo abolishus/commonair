@@ -11,7 +11,7 @@ import { Directory } from "../../components/directory.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { getDirectory } from "../../lib/directory.ts";
-import { directorySections } from "../../lib/directory-sections.ts";
+import { directorySections, offlineSections } from "../../lib/directory-sections.ts";
 
 export const Route = createFileRoute("/_app/")({
   // Ranking and viewer counts change on an interval: always refetch when navigating here.
@@ -28,7 +28,10 @@ function Home(): React.JSX.Element {
   return (
     <PageContainer width="wide" className="flex flex-col gap-8 py-8">
       <Intro />
-      <Directory sections={home ? directorySections(home, me !== null) : null} />
+      <Directory
+        sections={home ? directorySections(home, me !== null) : null}
+        offline={home ? offlineSections(home, me !== null) : []}
+      />
     </PageContainer>
   );
 }

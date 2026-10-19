@@ -19,6 +19,7 @@ type CategoryRow = typeof categories.$inferSelect;
 export type UserPublic = z.infer<typeof dto.UserPublic>;
 export type BroadcastSummary = z.infer<typeof dto.BroadcastSummary>;
 export type StreamCard = z.infer<typeof dto.StreamCard>;
+export type ChannelCard = z.infer<typeof dto.ChannelCard>;
 
 export const iso = (d: Date) => d.toISOString();
 export const isoOrNull = (d: Date | null | undefined) => (d ? d.toISOString() : null);

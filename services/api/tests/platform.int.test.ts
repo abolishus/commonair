@@ -415,6 +415,62 @@ describe("live lifecycle, playback and discovery", () => {
   });
 });
 
+describe("offline channels on the front page", () => {
+  type Card = { channel: { slug: string }; title: string; lastLiveAt: string | null; mature: boolean };
+  type Home = { recentlyLive: Card[]; followingOffline: Card[] };
+  const slugs = (cards: Card[], only: string[]) => cards.map((c) => c.channel.slug).filter((s) => only.includes(s));
+
+  test("recentlyLive orders by last broadcast; followingOffline keeps never-live follows; mature hidden", async () => {
+    const carol = await signUpAndSignIn(api);
+    const dave = await signUpAndSignIn(api);
+    const erin = await signUpAndSignIn(api);
+    const mine = [carol.username, dave.username, erin.username, alice.username];
+    const now = Date.now();
+    const ended = async (slug: string, title: string, endedHoursAgo: number) => {
+      const c = await channelOf(slug);
+      await db()
+        .insert(schema.broadcasts)
+        .values({
+          channelId: c.id,
+          ingestProtocol: "rtmp",
+          path: mediaPath(slug),
+          title,
+          startedAt: new Date(now - (endedHoursAgo + 1) * 3_600_000),
+          endedAt: new Date(now - endedHoursAgo * 3_600_000),
+        });
+    };
+    await ended(carol.username, "older show", 5);
+    await ended(carol.username, "latest show", 1);
+    await ended(dave.username, "dave show", 2);
+    // alice is still live from the playback test (and has an ended broadcast from the lifecycle test).
+    expect((await channelOf(alice.username)).liveBroadcastId).not.toBeNull();
+
+    const anon = await client(api).call<Home>("GET", "/api/directory");
+    expect(anon.status).toBe(200);
+    // Live channels and channels that never broadcast are not "recently live".
+    expect(slugs(anon.body.recentlyLive, mine)).toEqual([carol.username, dave.username]);
+    const card = anon.body.recentlyLive.find((c) => c.channel.slug === carol.username);
+    expect(card?.title).toBe("latest show");
+    expect(card?.lastLiveAt).not.toBeNull();
+    expect(anon.body.followingOffline).toEqual([]);
+
+    await bob.client.call("PUT", `/api/channels/${erin.username}/follow`, {});
+    await bob.client.call("PUT", `/api/channels/${carol.username}/follow`, {});
+    await bob.client.call("PUT", `/api/channels/${alice.username}/follow`, {});
+    const bobs = await bob.client.call<Home>("GET", "/api/directory");
+    // Live alice is in `following`, not here; never-live erin sorts last.
+    expect(slugs(bobs.body.followingOffline, mine)).toEqual([carol.username, erin.username]);
+    expect(bobs.body.followingOffline.find((c) => c.channel.slug === erin.username)?.lastLiveAt).toBeNull();
+
+    await carol.client.call("PATCH", `/api/channels/${carol.username}`, { mature: true });
+    const hidden = await client(api).call<Home>("GET", "/api/directory?includeMature=true");
+    expect(slugs(hidden.body.recentlyLive, mine)).toEqual([dave.username]);
+    // bob confirmed adulthood in the mature test above.
+    const shown = await bob.client.call<Home>("GET", "/api/directory?includeMature=true");
+    expect(shown.body.recentlyLive.find((c) => c.channel.slug === carol.username)?.mature).toBe(true);
+  });
+});
+
 describe("chat moderation", () => {
   test("ban writes chat_bans, mod_actions, audit_log, outbox and publishes chatControl", async () => {
     const c = await channelOf(alice.username);

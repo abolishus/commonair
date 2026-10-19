@@ -13,7 +13,8 @@ by `data-testid` (never by visible text, which is translated).
 
 ## API used (already in the contract)
 
-- `directory.home` (sections `spotlight`, `newAndLive`, `live`, `following`), `directory.live`.
+- `directory.home` (sections `spotlight`, `newAndLive`, `live`, `following`, plus offline `recentlyLive` and
+  `followingOffline`), `directory.live`.
 - `channels.get` → `viewer.following` (null/absent when anonymous), `followerCount`.
 - `channels.follow` / `channels.unfollow` (both return the new `followerCount`), `me.follows`.
 - `chat.bans.ban` / `chat.bans.unban` / `chat.bans.list`; the chat socket's `joined.me.canModerate`
@@ -33,20 +34,21 @@ on an interval.
 
 ## Test ids
 
-| Test id                | Element / meaning                                                                                                                                                                 |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nav-directory`        | header link to `/`                                                                                                                                                                |
-| `directory`            | wrapper of the directory on `/`                                                                                                                                                   |
-| `directory-section`    | one section; `data-section` = `spotlight` \| `new` \| `live` \| `following`. Rendered only when it has cards (`following` only when signed in)                                    |
-| `stream-card`          | one live stream card (the house `<StreamCard>`); `data-channel` = channel slug; it contains a link to `/$channel`                                                                 |
-| `directory-empty`      | `<EmptyState>` shown when nothing is live                                                                                                                                         |
-| `follow-button`        | on `/$channel`, absent on your own channel. Signed in: toggles follow, `data-following` = `true` \| `false`, disabled while a request is in flight. Anonymous: links to `/signin` |
-| `follower-count`       | on `/$channel`; `data-count` = integer follower count (text is the formatted number)                                                                                              |
-| `chat-message`         | (E1) now also carries `data-id` = message id and `data-deleted="true"` once removed by a moderator, a timeout or a ban (the row stays, its text is replaced)                      |
-| `chat-message-actions` | per-message `<IconButton tooltip>` opening the moderation menu; rendered only when `joined.me.canModerate` and the author is not you                                              |
-| `chat-mod-timeout`     | menu item: time the author out for 600 s                                                                                                                                          |
-| `chat-mod-ban`         | menu item: ban the author (opens a `ConfirmDialog`; confirm with `confirm-dialog-confirm`)                                                                                        |
-| `chat-notice`          | a system notice line in chat; `data-code` = the server `notice` code (e.g. `msg_timedout`, `msg_banned`, `cmd_success`)                                                           |
+| Test id                | Element / meaning                                                                                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nav-directory`        | header link to `/`                                                                                                                                                                 |
+| `directory`            | wrapper of the directory on `/`                                                                                                                                                    |
+| `directory-section`    | one section; `data-section` = `spotlight` \| `new` \| `live` \| `following` \| `following-offline` \| `recent`. Rendered only when it has cards (`following*` only when signed in) |
+| `stream-card`          | one live stream card (the house `<StreamCard>`); `data-channel` = channel slug; it contains a link to `/$channel`                                                                  |
+| `directory-empty`      | `<EmptyState>` shown when nothing is live (offline sections may still follow it)                                                                                                   |
+| `channel-card`         | one offline channel in `following-offline`/`recent`; `data-channel` = channel slug; it is a link to `/$channel`                                                                    |
+| `follow-button`        | on `/$channel`, absent on your own channel. Signed in: toggles follow, `data-following` = `true` \| `false`, disabled while a request is in flight. Anonymous: links to `/signin`  |
+| `follower-count`       | on `/$channel`; `data-count` = integer follower count (text is the formatted number)                                                                                               |
+| `chat-message`         | (E1) now also carries `data-id` = message id and `data-deleted="true"` once removed by a moderator, a timeout or a ban (the row stays, its text is replaced)                       |
+| `chat-message-actions` | per-message `<IconButton tooltip>` opening the moderation menu; rendered only when `joined.me.canModerate` and the author is not you                                               |
+| `chat-mod-timeout`     | menu item: time the author out for 600 s                                                                                                                                           |
+| `chat-mod-ban`         | menu item: ban the author (opens a `ConfirmDialog`; confirm with `confirm-dialog-confirm`)                                                                                         |
+| `chat-notice`          | a system notice line in chat; `data-code` = the server `notice` code (e.g. `msg_timedout`, `msg_banned`, `cmd_success`)                                                            |
 
 `chat-mod-timeout` acts at once (no dialog; Twitch parity) and shows a toast. Both actions go
 through `chat.bans.ban` (timeout: `durationSeconds: 600`). The removed user's messages turn into

@@ -118,6 +118,19 @@ export const StreamCard = z.object({
 });
 export type StreamCard = z.infer<typeof StreamCard>;
 
+/** An offline channel on the front page ("recently live", followed channels that are offline). */
+export const ChannelCard = z.object({
+  channel: StreamCard.shape.channel,
+  /** The last broadcast's title, or the channel title if it never broadcast. */
+  title: z.string(),
+  category: Category.pick({ id: true, slug: true, name: true }).nullable(),
+  /** When the last broadcast ended; null if the channel never broadcast. */
+  lastLiveAt: Timestamp.nullable(),
+  followerCount: z.number().int().nonnegative(),
+  mature: z.boolean(),
+});
+export type ChannelCard = z.infer<typeof ChannelCard>;
+
 export const StreamKey = z.object({
   id: Id,
   prefix: z.string(),

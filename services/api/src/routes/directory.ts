@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** `directory.*` (fair discovery, see ../discovery/README.md) and `categories.*`. */
-import { and, desc, eq, gt, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, ilike, inArray, isNotNull, isNull, not, or, sql, type SQL } from "drizzle-orm";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import {
@@ -20,6 +20,7 @@ import {
   liveSummaries,
   mediaUrl,
   toBroadcastSummary,
+  type ChannelCard,
   type StreamCard,
 } from "../lib/dto.ts";
 import { decodeCursor, encodeCursor, isOffsetCursor } from "../lib/cursor.ts";
@@ -114,6 +115,74 @@ function cardsFor(rows: LiveRow[], ordered: LiveEntry[], reason: Reason, limit =
     .filter((c): c is StreamCard => c !== undefined);
 }
 
+/**
+ * Offline, unsuspended channels with their last ended broadcast, most recently live first.
+ * `followerId` restricts to that user's follows and keeps channels that never broadcast.
+ */
+async function loadOffline(
+  deps: Deps,
+  opts: { allowMature: boolean; language?: string | undefined; followerId?: string },
+): Promise<ChannelCard[]> {
+  const last = deps.db
+    .selectDistinctOn([broadcasts.channelId], {
+      channelId: broadcasts.channelId,
+      endedAt: broadcasts.endedAt,
+      title: broadcasts.title,
+      categoryId: broadcasts.categoryId,
+      mature: broadcasts.mature,
+    })
+    .from(broadcasts)
+    .where(isNotNull(broadcasts.endedAt))
+    .orderBy(broadcasts.channelId, desc(broadcasts.endedAt))
+    .as("last");
+  const followed = opts.followerId !== undefined;
+  const mature = sql<boolean>`(${channels.mature} or coalesce(${last.mature}, false) or coalesce(${categories.mature}, false))`;
+  const conditions: (SQL | undefined)[] = [
+    isNull(channels.liveBroadcastId),
+    isNull(channels.suspendedAt),
+    eq(users.banned, false),
+    followed ? undefined : isNotNull(last.channelId),
+    opts.allowMature ? undefined : not(mature),
+    opts.language ? eq(channels.language, opts.language) : undefined,
+  ];
+  let query = deps.db
+    .select({
+      c: channels,
+      ownerImage: users.image,
+      endedAt: last.endedAt,
+      lastTitle: last.title,
+      cat: { id: categories.id, slug: categories.slug, name: categories.name },
+      mature,
+    })
+    .from(channels)
+    .innerJoin(users, eq(users.id, channels.ownerId))
+    .leftJoin(last, eq(last.channelId, channels.id))
+    // The last broadcast's category, else the channel's.
+    .leftJoin(categories, eq(categories.id, sql`coalesce(${last.categoryId}, ${channels.categoryId})`))
+    .$dynamic();
+  if (opts.followerId !== undefined) {
+    query = query.innerJoin(follows, and(eq(follows.channelId, channels.id), eq(follows.followerId, opts.followerId)));
+  }
+  const rows = await query
+    .where(and(...conditions))
+    .orderBy(sql`${last.endedAt} desc nulls last`, channels.slug)
+    .limit(HOME_SECTION);
+  return rows.map(({ c, ownerImage, endedAt, lastTitle, cat, mature: isMature }) => ({
+    channel: {
+      id: c.id,
+      slug: c.slug,
+      displayName: c.displayName,
+      avatarUrl: channelAvatar(deps, c, ownerImage),
+      accent: channelTheme(c).accent,
+    },
+    title: lastTitle || c.title,
+    category: cat?.id ? cat : null,
+    lastLiveAt: endedAt ? endedAt.toISOString() : null,
+    followerCount: c.followerCount,
+    mature: isMature,
+  }));
+}
+
 const lowerTag = (tags: string[], tag: string) => tags.some((t) => t.toLowerCase() === tag.toLowerCase());
 
 export const directory = {
@@ -128,6 +197,13 @@ export const directory = {
     const rows = (await loadLive(deps)).filter(
       (r) => allowed(r.entry) && (!input.language || r.language === input.language),
     );
+    const allowMature = input.includeMature && adult;
+    const [recentlyLive, followingOffline] = await Promise.all([
+      loadOffline(deps, { allowMature, language: input.language }),
+      caller
+        ? loadOffline(deps, { allowMature, language: input.language, followerId: caller.user.id })
+        : Promise.resolve([]),
+    ]);
     const entries = rows.map((r) => r.entry);
     const ranked = rankLive(entries, config, now);
     let following: StreamCard[] = [];
@@ -157,6 +233,8 @@ export const directory = {
       newAndLive: cardsFor(rows, newAndLive(entries, config, now), "new", HOME_SECTION),
       live: cardsFor(rows, ranked, "popular", HOME_SECTION),
       following,
+      recentlyLive,
+      followingOffline,
       rankingVersion: version,
     };
   }),

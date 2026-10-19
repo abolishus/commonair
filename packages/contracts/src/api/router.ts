@@ -274,7 +274,7 @@ export const contract = {
       .route({
         method: "GET",
         path: "/directory",
-        summary: "Front-page live directory (fair-discovery ranking)",
+        summary: "Front-page directory: live (fair-discovery ranking) and recently live",
         ...tag("Directory"),
       })
       .input(z.object({ language: ShortText.optional(), includeMature: z.boolean().default(false) }))
@@ -284,6 +284,10 @@ export const contract = {
           newAndLive: z.array(D.StreamCard),
           live: z.array(D.StreamCard),
           following: z.array(D.StreamCard),
+          /** Offline channels by when they were last live, newest first; unranked. */
+          recentlyLive: z.array(D.ChannelCard),
+          /** The caller's followed channels that are offline; empty for anonymous callers. */
+          followingOffline: z.array(D.ChannelCard),
           rankingVersion: z.string(),
         }),
       ),
