@@ -194,3 +194,47 @@ func TestDrainBeforeRegistrationStopsRetrying(t *testing.T) {
 		t.Fatal("shutdown hung while registration was failing")
 	}
 }
+
+// A blackholed API must not delay the drain: the call in flight at SIGTERM
+// (a normal heartbeat, or a re-registration after offline) gives way, the
+// draining heartbeat goes out at once and shutdown keeps to drain+flush.
+func TestDrainNotDelayedByHangingAPICall(t *testing.T) {
+	for name, setup := range map[string]func(a *fakeAPI){
+		"heartbeat": func(a *fakeAPI) { a.hangPaths.Store("/api/relay/heartbeat", true) },
+		"re-registration": func(a *fakeAPI) {
+			a.hangPaths.Store("/api/relay/register", true)
+			a.status = "offline"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			rel := h.start(200)
+			h.api.set(setup)
+			h.eventually("API call hanging", func() bool { return h.api.hanging.Load() > 0 })
+			const drain, flush = 600 * time.Millisecond, 2 * time.Second
+			start := time.Now()
+			stopped := make(chan error, 1)
+			go func() { stopped <- rel.GracefulStop(h.relaySrv.Config, drain, flush) }()
+			deadline := start.Add(5 * time.Second)
+			for {
+				b := h.api.beats()
+				if len(b) > 0 && b[len(b)-1].Draining {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("no draining heartbeat")
+				}
+				time.Sleep(2 * time.Millisecond)
+			}
+			if took := time.Since(start); took > 100*time.Millisecond {
+				t.Fatalf("draining heartbeat after %v", took)
+			}
+			if err := <-stopped; err != nil {
+				t.Fatalf("graceful stop: %v", err)
+			}
+			if took := time.Since(start); took > drain+flush {
+				t.Fatalf("shutdown took %v", took)
+			}
+		})
+	}
+}

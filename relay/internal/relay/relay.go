@@ -81,12 +81,13 @@ type Relay struct {
 
 	// hbMu serializes registration and heartbeats with the draining
 	// heartbeat, so no normal heartbeat (or re-registration) lands after it.
+	// It is held across API calls; never take it just to read state.
 	hbMu     sync.Mutex
 	draining atomic.Bool
-	// hbCtx bounds registration and normal heartbeats; BeginDrain cancels it
-	// so a call in flight does not delay the draining heartbeat.
-	hbCtx    context.Context
-	hbCancel context.CancelFunc
+	// hbCancel ends the context bounding registration and normal heartbeats.
+	// BeginDrain calls it without hbMu, so a call in flight against a slow
+	// API gives way at once instead of delaying the draining heartbeat.
+	hbCancel atomic.Pointer[context.CancelFunc]
 }
 
 // Defaults when the API omits or sends out-of-range intervals.
@@ -202,9 +203,11 @@ func (r *Relay) PublicKey() string { return r.key.PublicB64 }
 func (r *Relay) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	hbCtx, hbCancel := context.WithCancel(ctx)
-	r.hbMu.Lock()
-	r.cancel, r.hbCtx, r.hbCancel = cancel, hbCtx, hbCancel
-	r.hbMu.Unlock()
+	r.cancel = cancel
+	r.hbCancel.Store(&hbCancel)
+	if r.draining.Load() {
+		hbCancel() // drained before Start: never register
+	}
 	r.wg.Add(2)
 	go func() { defer r.wg.Done(); r.sender.Run(ctx) }()
 	go func() { defer r.wg.Done(); r.control(ctx, hbCtx) }()
@@ -234,11 +237,8 @@ func (r *Relay) BeginDrain(timeout time.Duration) {
 		return
 	}
 	r.srv.Drain()
-	r.hbMu.Lock()
-	cancelHB := r.hbCancel
-	r.hbMu.Unlock()
-	if cancelHB != nil {
-		cancelHB() // a registration or heartbeat in flight gives way
+	if cancelHB := r.hbCancel.Load(); cancelHB != nil {
+		(*cancelHB)() // a registration or heartbeat in flight gives way
 	}
 	r.hbMu.Lock()
 	defer r.hbMu.Unlock()

@@ -135,6 +135,11 @@ type fakeAPI struct {
 	unknownOnce   bool
 	heartbeatFail int // non-zero: fail heartbeats with this status
 	allFail       int // non-zero: fail every call with this status
+
+	// hangPaths: requests to these paths (except draining heartbeats) hang
+	// until the client gives up, like a blackholed API. hanging counts them.
+	hangPaths sync.Map
+	hanging   atomic.Int32
 }
 
 func newFakeAPI(t *testing.T, originURL string, originKey ed25519.PublicKey) *fakeAPI {
@@ -148,6 +153,17 @@ func (a *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+relayToken {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "UNAUTHORIZED", "message": "bad token"})
 		return
+	}
+	if _, hang := a.hangPaths.Load(r.URL.Path); hang {
+		body, _ := io.ReadAll(r.Body)
+		var hb apiclient.HeartbeatRequest
+		if r.URL.Path != "/api/relay/heartbeat" || json.Unmarshal(body, &hb) != nil || !hb.Draining {
+			a.hanging.Add(1)
+			<-r.Context().Done()
+			a.hanging.Add(-1)
+			return
+		}
+		r.Body = io.NopCloser(strings.NewReader(string(body)))
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
