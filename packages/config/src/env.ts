@@ -261,6 +261,19 @@ export const ircEnv = z.object({
   IRC_CONNECT_PER_SECOND_PER_IP: z.coerce.number().positive().default(2),
 });
 
+/** WebTorrent tracker (services/tracker) limits. */
+export const trackerEnv = z.object({
+  TRACKER_MAX_CONNECTIONS: z.coerce.number().int().positive().default(20_000),
+  TRACKER_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().positive().default(20),
+  /** Most peers (offers) relayed per announce, whatever `numwant` asks for. */
+  TRACKER_MAX_NUMWANT: z.coerce.number().int().positive().default(20),
+  /**
+   * Oldest playback token (by `iat`) accepted at connect. Tokens live 120 s but a tracker socket
+   * outlives them; the tracker also requires the session to be heartbeating (KEYS.viewers).
+   */
+  TRACKER_TOKEN_MAX_AGE_SECONDS: z.coerce.number().int().positive().default(43_200),
+});
+
 export class EnvError extends Error {
   constructor(public readonly issues: z.core.$ZodIssue[]) {
     super(`Invalid environment:\n${issues.map((i) => `  ${i.path.join(".")}: ${i.message}`).join("\n")}`);
@@ -320,4 +333,5 @@ export const ALL_ENV_SCHEMAS = {
   infraEnv,
   servicePorts,
   ircEnv,
+  trackerEnv,
 } as const;

@@ -309,7 +309,7 @@ services:
     depends_on: *app-depends
     healthcheck: *app-healthcheck
 
-  # services/tracker is not built yet (P2P slice); opt in with `--profile p2p` once it is.
+  # WebTorrent tracker (ADR 0005); opt in with `--profile p2p`.
   tracker:
     profiles: [p2p]
     image: ${IMAGE_REGISTRY:-localhost/commonair}/tracker:${IMAGE_TAG:-dev}

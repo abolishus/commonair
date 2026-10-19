@@ -34,11 +34,12 @@ const sessionRow = async (id: string) => {
   return r;
 };
 async function startPlayback(viewer: Client, body: Record<string, unknown> = {}) {
-  const res = await viewer.call<{ sessionId: string; token: string; source: string; p2p: { enabled: boolean } }>(
-    "POST",
-    `/api/channels/${streamer.username}/playback`,
-    { deviceId: "device-0123456789abcdef", ...body },
-  );
+  const res = await viewer.call<{
+    sessionId: string;
+    token: string;
+    source: string;
+    p2p: { enabled: boolean; trackerUrls: string[] };
+  }>("POST", `/api/channels/${streamer.username}/playback`, { deviceId: "device-0123456789abcdef", ...body });
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body;
 }
@@ -145,6 +146,9 @@ describe("P2P sessions", () => {
     // Regression: `p2p` lowers integrity's expected origin share, and P2P is client input.
     const s = await startPlayback(client(api), { p2pCapable: true });
     expect(s.p2p.enabled).toBe(true);
+    // The tracker URL carries the playback token so announces count as server-side evidence.
+    expect(s.p2p.trackerUrls).toHaveLength(1);
+    expect(new URL(s.p2p.trackerUrls[0] ?? "").searchParams.get("t")).toBe(s.token);
     expect(s.source).toBe("origin");
     expect((await sessionRow(s.sessionId)).assignedSource).toBe("origin");
   });

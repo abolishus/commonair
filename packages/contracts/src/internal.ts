@@ -100,7 +100,34 @@ export const KEYS = {
   integrityFetches: (sessionId: string) => `integrity:fetch:${sessionId}`,
   /** Rate-limit buckets. */
   rateLimit: (bucket: string, subject: string) => `rl:${bucket}:${subject}`,
+  /**
+   * HASH of P2P evidence for one playback session, written by the tracker on every authenticated
+   * announce: `swarm` (a `p2pSwarm` id), `net` (hex HMAC-SHA256 under INTERNAL_API_SECRET of the
+   * announcing address's network prefix, /24 for IPv4 and /48 for IPv6, canonical form),
+   * `first` / `last` (epoch ms), `announces` (count). Expires P2P_EVIDENCE.peerTtlSeconds after the
+   * last announce. Integrity reads it; nothing else may write it.
+   */
+  p2pPeer: (sessionId: string) => `p2p:peer:${sessionId}`,
+  /** ZSET sessionId → last announce (epoch ms) for one swarm (`<channelId>:<infoHash hex>`). */
+  p2pSwarm: (swarm: string) => `p2p:swarm:${swarm}`,
 } as const;
+
+/**
+ * Server-side P2P evidence rule (HANDOFF open item; ADR 0005). Whether a client runs the P2P
+ * loader is client input, so integrity never trusts `p2pCapable` or heartbeat `bytesP2p`. A
+ * session is P2P-evidenced for a scoring window only if the tracker saw it announce within
+ * `windowMs` and its swarm had announcing sessions from at least `minSwarmNetworks` distinct
+ * networks in that window (itself included). Evidenced sessions are judged "too few fetches"
+ * against the reduced P2P HTTP share and "too many fetches" against share 1.
+ */
+export const P2P_EVIDENCE = {
+  windowMs: 120_000,
+  minSwarmNetworks: 2,
+  peerTtlSeconds: 600,
+} as const;
+
+/** Swarm id used in `KEYS.p2pSwarm` and `p2pPeer.swarm`. `infoHash` is 40 lowercase hex characters. */
+export const p2pSwarmId = (channelId: string, infoHash: string) => `${channelId}:${infoHash.toLowerCase()}`;
 
 /** Valkey streams (XADD) consumed by the worker. */
 export const STREAMS = {

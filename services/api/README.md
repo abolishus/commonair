@@ -116,5 +116,7 @@ streamer publishes again. Rate-limit buckets for those clients start over once.
   `assigned_source`, never `p2p`, even when the P2P loader is on. Whether P2P runs is client
   input (`p2pCapable`, `nativeHls`), and integrity expects only a 10% origin share from `p2p`
   sessions. A viewbot could claim P2P to slip past the fetch checks, and an honest lone peer that
-  fetches everything over HTTP would trip `too_many_segments`. Recording `p2p` needs server-side
-  swarm evidence first (integrity contract request pending).
+  fetches everything over HTTP would trip `too_many_segments`. Instead, `trackerUrls` carry the
+  playback token (`?t=`), the tracker records authenticated announces as swarm evidence
+  (`KEYS.p2pPeer`/`p2pSwarm`), and integrity applies the reduced share only to evidenced sessions
+  (`P2P_EVIDENCE`, ADR 0005).

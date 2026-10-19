@@ -48,7 +48,8 @@ the component map. This ADR records the choices that are not obvious from the co
    pluggable lookup interface. The harness ships a small sample list.
 9. **Backups with WAL-G** (Apache-2.0) in our own Postgres image, archiving to the S3 bucket
    (Garage by default). pgBackRest (MIT) is the documented alternative.
-10. **P2P tracker:** `bittorrent-tracker` (MIT) server-only import running under Bun.
+10. **P2P tracker:** ~~`bittorrent-tracker` (MIT) server-only import running under Bun.~~ Superseded
+    by [ADR 0005](0005-p2p-tracker.md): a native WebSocket tracker with server-side swarm evidence.
 11. **IDs are UUIDv7** minted by the application.
 
 ## Consequences

@@ -39,6 +39,16 @@ export async function activeRelays(deps: Deps) {
   return out;
 }
 
+/**
+ * The tracker authenticates the socket with the playback token (ADR 0005), so its announces
+ * become server-side swarm evidence for this session.
+ */
+function trackerUrl(deps: Deps, token: string): string {
+  const u = new URL(deps.env.P2P_TRACKER_URL);
+  u.searchParams.set("t", token);
+  return u.toString();
+}
+
 function playlistBase(deps: Deps, a: Assignment): string {
   const base =
     a.source === "relay"
@@ -137,8 +147,8 @@ export const playback = {
       asn: network.asn,
       datacenter: network.hosting ? (network.label ?? "hosting") : null,
       // Always the HTTP delivery source, never `p2p`: whether the P2P loader runs is client input
-      // (`p2pCapable`, `nativeHls`), and recording `p2p` lowers integrity's expected origin share.
-      // That needs server-side swarm evidence first (see README).
+      // (`p2pCapable`, `nativeHls`). Integrity lowers the expected HTTP share only on the
+      // tracker's server-side swarm evidence (P2P_EVIDENCE), never on this record.
       assignedSource: assignment.source,
       relayId: assignment.source === "relay" ? assignment.relayId : null,
       startedAt: deps.now(),
@@ -150,7 +160,7 @@ export const playback = {
       token,
       playlistUrl: playlistUrl(playlistBase(deps, assignment), path, token),
       source: assignment.source,
-      p2p: { enabled: p2pEnabled, trackerUrls: p2pEnabled ? [deps.env.P2P_TRACKER_URL] : [], swarmId: b.id },
+      p2p: { enabled: p2pEnabled, trackerUrls: p2pEnabled ? [trackerUrl(deps, token)] : [], swarmId: b.id },
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       expiresAt: iso(new Date(claims.exp * 1000)),
       renditions: await renditionsFor(deps, c.id),
