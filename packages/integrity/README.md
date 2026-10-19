@@ -168,28 +168,43 @@ The tracker (`services/tracker`) is the only writer of these keys; integrity onl
 
 - `KEYS.p2pPeer(session)` HASH: `swarm`, `net` (HMAC of the announcing /24 or /48, never the
   address), `first`, `last` (epoch ms), `announces`. Expires 600 s after the last announce.
-- `KEYS.p2pSwarm(swarm)` ZSET: session → last announce (ms). A swarm id is
-  `<channelId>:<infoHash>`.
+- `KEYS.p2pLinks(session)` ZSET: peer `net` → last completed offer/answer exchange (ms) the tracker
+  relayed between this session and a peer on that network.
+- `KEYS.p2pChannelNet(channel, net)` ZSET: session → last announce (ms) to any swarm of the
+  channel from that network. Leaving a swarm never removes a member.
 
-A session is evidenced at window end `t` (now, or when an ended session ended) when its peer hash
-shows an announce at or after `t − 120 s` (`P2P_EVIDENCE.windowMs`), its swarm id carries the
-session's own channel, and the swarm's members that announced at or after `t − 120 s` (itself
-included) span at least **2** distinct networks (`P2P_EVIDENCE.minSwarmNetworks`). Members whose
-peer hash names another channel's swarm, or has expired, are ignored. Per scoring batch that is
-three pipelined round trips: `HGETALL` of each session's peer hash, `ZREVRANGEBYSCORE … WITHSCORES
-LIMIT 0 500` per candidate swarm, `HMGET net swarm` per member. At most **500** members are read per
-swarm, the most recent announcers first (two networks are enough, so a sample suffices). Valkey
-errors never fail the run: those sessions are judged without the reduced share and the errors are
-returned (`ScoreSessionsResult.p2p.errors`) for the worker's metrics.
+Evidence is per session, never per swarm. A session is evidenced at window end `t` (now, or when an
+ended session ended), with `since = t − 120 s` (`P2P_EVIDENCE.windowMs`), when all hold:
 
-The explanation (`fetch_pattern` details) carries `p2pEvidenced` (0/1), `swarmNetworks` and, when
-evidenced, `httpShare`, so streamers and admins can see which bar a session was judged against.
+1. its peer hash shows an announce at or after `since`, to a swarm whose id carries the session's
+   own channel (`<channelId>:<infoHash>`);
+2. its links hold, at or after `since`, at least **1** network other than its own
+   (`minLinkedNetworks`); a link to its own network proves nothing;
+3. at most **16** sessions on its network announced to the channel at or after `since`
+   (`maxSessionsPerNetwork`, `ZCOUNT p2pChannelNet`, itself included). The cap is per channel
+   because clients choose info hashes: a farm could otherwise split into private swarms;
+4. at least one linked network from (2) is itself within that cap, so two farm networks over the
+   cap cannot vouch for each other.
 
-**Residual risk (ADR 0005):** a viewbot farm that spans two networks, holds valid playback tokens
-and keeps heartbeating can still earn the reduced share. The other signals (hosting ranges,
-headless fingerprints, concurrency) still apply to it. A farm that floods one swarm with more than
-500 fresh single-network sessions can push honest members out of the sample; that only withholds
-the reduced share from the honest viewers (they are then judged like any HTTP session).
+Announcing into a popular, diverse swarm therefore earns nothing on its own. The counts are not
+bounded above by an ended session's end: each member's score is its last announce, so excluding
+later scores would drop every peer that kept watching and undercount a farm. Per scoring batch
+that is three pipelined round trips at most: `HGETALL` of each session's peer hash; each
+candidate's `ZRANGEBYSCORE p2pLinks … WITHSCORES` plus the `ZCOUNT` of its own network; the
+`ZCOUNT` of linked networks of the candidates still in the running. Each channel/network count is
+read once per batch. Valkey errors never fail the run: a failed count is treated as over the cap,
+those sessions are judged without the reduced share and the errors are returned
+(`ScoreSessionsResult.p2p.errors`) for the worker's metrics.
+
+The explanation (`fetch_pattern` details) carries `p2pEvidenced` (0/1), `linkedNetworks`,
+`linkedWithinCap`, `sameNetworkPeers` and, when evidenced, `httpShare`, so streamers and admins can
+see which bar a session was judged against.
+
+**Residual risk (ADR 0005):** a viewbot farm with valid playback tokens and live heartbeats can
+still earn the reduced share if it answers offers from a second network, or gets honest clients
+to answer offers it sends (browsers answer automatically). The cap limits that to 16 sessions per
+network and channel; a farm spread across many prefixes is exposed to the hosting-range and
+headless signals. Honest viewers behind one large NAT above the cap lose only the P2P discount.
 
 | Check                        | Weight | Fires when                                                       |
 | ---------------------------- | ------ | ---------------------------------------------------------------- |

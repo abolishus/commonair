@@ -266,8 +266,8 @@ describe("fetch_pattern", () => {
     expect(fetchChecks({ ...base, watchSeconds: 5 }, { playlists: 5, segments: 0, parts: 0 }, ctx).checks).toEqual([]);
   });
 
-  const evidenced = { evidenced: true, swarmNetworks: 2, announces: 12 };
-  const lone = { evidenced: false, swarmNetworks: 1, announces: 12 };
+  const evidenced = { evidenced: true, linkedNetworks: 2, linkedWithinCap: 2, sameNetworkPeers: 1, announces: 12 };
+  const lone = { evidenced: false, linkedNetworks: 0, linkedWithinCap: 0, sameNetworkPeers: 0, announces: 12 };
 
   test("only server-side P2P evidence lowers the too-few bar", () => {
     const long = { ...base, watchSeconds: 200 };
@@ -275,7 +275,13 @@ describe("fetch_pattern", () => {
     const fetched = { playlists: 200, segments: 30, parts: 0 };
     const ok = fetchChecks(long, fetched, { ...ctx, p2p: evidenced });
     expect(ok).toMatchObject({ checks: [], mediaUnconfirmed: false });
-    expect(ok.measures).toMatchObject({ p2pEvidenced: 1, swarmNetworks: 2, httpShare: 0.1, expectedSegments: 20 });
+    expect(ok.measures).toMatchObject({
+      p2pEvidenced: 1,
+      linkedNetworks: 2,
+      sameNetworkPeers: 1,
+      httpShare: 0.1,
+      expectedSegments: 20,
+    });
     // Without evidence (no lookup, or a lone network) the same fetches are far too few.
     for (const p2p of [undefined, null, lone]) {
       const r = fetchChecks(long, fetched, { ...ctx, p2p });
@@ -284,7 +290,8 @@ describe("fetch_pattern", () => {
     }
     expect(fetchChecks(long, fetched, { ...ctx, p2p: lone }).measures).toMatchObject({
       p2pEvidenced: 0,
-      swarmNetworks: 1,
+      linkedNetworks: 0,
+      sameNetworkPeers: 0,
     });
     expect(fetchChecks(long, fetched, { ...ctx, p2p: lone }).measures.httpShare).toBeUndefined();
     // Even evidenced, fetching under 25 % of the reduced share is too few, and nothing is no media.

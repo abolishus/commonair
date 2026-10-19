@@ -473,22 +473,32 @@ describe("scoreActiveSessions", () => {
     });
   });
 
-  test("server-side P2P evidence: a swarm spanning two networks lowers the HTTP bar, nothing else does", async () => {
+  // As the tracker writes them: each authenticated announce, and each completed exchange.
+  async function announce(sid: string, channelId: string, sw: string, net: string, last = NOW.getTime() - 5_000) {
+    await valkey.hset(KEYS.p2pPeer(sid), {
+      swarm: sw,
+      net,
+      first: String(last - 60_000),
+      last: String(last),
+      announces: "9",
+    });
+    await valkey.expire(KEYS.p2pPeer(sid), P2P_EVIDENCE.peerTtlSeconds);
+    await valkey.zadd(KEYS.p2pSwarm(sw), last, sid);
+    await valkey.zadd(KEYS.p2pChannelNet(channelId, net), last, sid);
+    await valkey.expire(KEYS.p2pChannelNet(channelId, net), P2P_EVIDENCE.peerTtlSeconds);
+  }
+  async function exchange(
+    a: { sid: string; net: string },
+    b: { sid: string; net: string },
+    at = NOW.getTime() - 4_000,
+  ) {
+    await valkey.zadd(KEYS.p2pLinks(a.sid), at, b.net);
+    await valkey.zadd(KEYS.p2pLinks(b.sid), at, a.net);
+  }
+
+  test("server-side P2P evidence: a completed exchange with another network lowers the HTTP bar, nothing else does", async () => {
     const { channelId } = await channel();
     const swarm = `${channelId}:${"ab".repeat(20)}`;
-    const lonely = `${channelId}:${"cd".repeat(20)}`;
-    // As the tracker writes them on each authenticated announce.
-    async function announce(sid: string, sw: string, net: string, last = NOW.getTime() - 5_000) {
-      await valkey.hset(KEYS.p2pPeer(sid), {
-        swarm: sw,
-        net,
-        first: String(last - 60_000),
-        last: String(last),
-        announces: "9",
-      });
-      await valkey.expire(KEYS.p2pPeer(sid), P2P_EVIDENCE.peerTtlSeconds);
-      await valkey.zadd(KEYS.p2pSwarm(sw), last, sid);
-    }
     // 200 s claimed → 200 expected segments; each session fetched ~15 % of them over HTTP.
     async function viewer(o: Partial<typeof s.playbackSessions.$inferInsert> = {}) {
       const id = await session(channelId, { watchSeconds: 200, segmentsFetched: 30, ...o });
@@ -501,16 +511,22 @@ describe("scoreActiveSessions", () => {
     }
     const a = await viewer();
     const b = await viewer();
-    await announce(a, swarm, "net-a");
-    await announce(b, swarm, "net-b");
-    // The same session shape, but its swarm has only one network (two sessions behind it).
+    await announce(a, channelId, swarm, "net-a");
+    await announce(b, channelId, swarm, "net-b");
+    await exchange({ sid: a, net: "net-a" }, { sid: b, net: "net-b" });
+    // In the same diverse swarm, but never completed an exchange.
+    const lurker = await viewer();
+    await announce(lurker, channelId, swarm, "net-c");
+    // Exchanged only with a session on its own network.
     const c = await viewer();
     const d = await viewer();
-    await announce(c, lonely, "net-c");
-    await announce(d, lonely, "net-c");
-    // Announced in a two-network swarm, but too long ago.
+    await announce(c, channelId, swarm, "net-d");
+    await announce(d, channelId, swarm, "net-d");
+    await exchange({ sid: c, net: "net-d" }, { sid: d, net: "net-d" });
+    // Exchanged, but announced too long ago.
     const stale = await viewer();
-    await announce(stale, swarm, "net-z", NOW.getTime() - P2P_EVIDENCE.windowMs - 1_000);
+    await announce(stale, channelId, swarm, "net-z", NOW.getTime() - P2P_EVIDENCE.windowMs - 1_000);
+    await exchange({ sid: stale, net: "net-z" }, { sid: a, net: "net-a" });
     // Client-reported P2P bytes and a legacy `p2p` row without tracker evidence change nothing.
     const claims = await viewer({ bytesP2p: 50_000_000, bytesHttp: 1_000 });
     const legacy = await viewer({ assignedSource: "p2p" });
@@ -521,7 +537,7 @@ describe("scoreActiveSessions", () => {
     const r = await scoreActiveSessions(app, valkey, NOW);
 
     for (const id of [a, b]) expect(await sessionRow(id)).toMatchObject({ verdict: "verified", verdictReasons: [] });
-    for (const id of [c, d, stale, claims, legacy, broken]) {
+    for (const id of [lurker, c, d, stale, claims, legacy, broken]) {
       expect(await sessionRow(id)).toMatchObject({
         verdict: "pending",
         verdictReasons: ["fetch_pattern", "media_unconfirmed"],
@@ -530,27 +546,52 @@ describe("scoreActiveSessions", () => {
     expect(r.p2p).toEqual({ evidenced: 2, errors: 1 });
   });
 
+  test("P2P evidence: a farm behind one network is capped per channel, across swarms", async () => {
+    const { channelId } = await channel();
+    const honest = await session(channelId, { watchSeconds: 0, segmentsFetched: 0 });
+    await announce(honest, channelId, `${channelId}:${"99".repeat(20)}`, "net-h");
+    const farm: string[] = [];
+    for (let i = 0; i <= P2P_EVIDENCE.maxSessionsPerNetwork; i++) {
+      // ~15 % of the 200 expected segments over HTTP: enough only with the reduced share.
+      const id = await session(channelId, { watchSeconds: 200, segmentsFetched: 30 });
+      await humanHistory(id);
+      await recordFetches(valkey, [
+        ...Array.from({ length: 200 }, () => ({ sid: id, kind: "playlist" as const })),
+        ...Array.from({ length: 30 }, (_, j) => ({ sid: id, kind: "segment" as const, object: `src/seg${j}.mp4` })),
+      ]);
+      // Each in its own client-chosen swarm.
+      await announce(id, channelId, `${channelId}:${i.toString(16).padStart(40, "0")}`, "net-farm");
+      await exchange({ sid: id, net: "net-farm" }, { sid: honest, net: "net-h" });
+      farm.push(id);
+    }
+    await scoreActiveSessions(app, valkey, NOW);
+    for (const id of farm) {
+      expect(await sessionRow(id)).toMatchObject({
+        verdict: "pending",
+        verdictReasons: ["fetch_pattern", "media_unconfirmed"],
+      });
+    }
+  });
+
   test("P2P evidence explains itself in the exclusion flag", async () => {
     const { channelId } = await channel();
     const swarm = `${channelId}:${"ef".repeat(20)}`;
-    // A playlist poller in a real swarm: evidence lowers the bar, it does not excuse no media.
+    // A playlist poller with real evidence: it lowers the bar, it does not excuse no media.
     const id = await session(channelId, { watchSeconds: 200, segmentsFetched: 0 });
     await humanHistory(id);
     for (let i = 0; i < 5; i++) await recordFetch(valkey, { sid: id, kind: "playlist" });
     const other = await session(channelId, { watchSeconds: 0, segmentsFetched: 0 });
-    for (const [sid, net] of [
-      [id, "net-a"],
-      [other, "net-b"],
-    ] as const) {
-      await valkey.hset(KEYS.p2pPeer(sid), { swarm, net, first: String(NOW.getTime()), last: String(NOW.getTime()) });
-      await valkey.zadd(KEYS.p2pSwarm(swarm), NOW.getTime(), sid);
-    }
+    await announce(id, channelId, swarm, "net-a", NOW.getTime());
+    await announce(other, channelId, swarm, "net-b", NOW.getTime());
+    await exchange({ sid: id, net: "net-a" }, { sid: other, net: "net-b" }, NOW.getTime());
     await scoreActiveSessions(app, valkey, NOW);
     expect(await sessionRow(id)).toMatchObject({ verdict: "excluded", verdictReasons: ["fetch_pattern"] });
     expect((await flagsFor(id))[0]!.details).toMatchObject({
       checks: ["no_media_fetched"],
       p2pEvidenced: 1,
-      swarmNetworks: 2,
+      linkedNetworks: 1,
+      linkedWithinCap: 1,
+      sameNetworkPeers: 1,
       httpShare: 0.1,
       expectedSegments: 20,
     });

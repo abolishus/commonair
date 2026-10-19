@@ -26,9 +26,10 @@
  *
  * Only server-observed quantities are used. Client-reported bytes (HTTP or P2P), `p2pCapable` and
  * the assigned source never lower what is expected. Only a session with server-side P2P evidence
- * (`ScoringContext.p2p`, see `p2p.ts`: the tracker saw it announce in a swarm spanning at least two
- * networks within the window) is judged "too few" / "no media" against the reduced share
- * `P2P_HTTP_SHARE`. "Too many" is always judged against share 1, so an honest lone peer that falls
+ * (`ScoringContext.p2p`, see `p2p.ts`: within the window the tracker saw it announce to its own
+ * channel's swarm and complete a signalling exchange with a peer on another network, its network
+ * has at most `maxSessionsPerNetwork` announcers on the channel, and so does a linked network) is
+ * judged "too few" / "no media" against the reduced share `P2P_HTTP_SHARE`. "Too many" is always judged against share 1, so an honest lone peer that falls
  * back to HTTP never trips it. Legacy `p2p`-assigned rows are judged like origin sessions.
  */
 import {
@@ -88,7 +89,9 @@ export function httpShare(p2p: P2pEvidence | null | undefined): number {
 function p2pMeasures(measures: Record<string, number>, p2p: P2pEvidence | null | undefined): void {
   if (!p2p) return;
   measures.p2pEvidenced = p2p.evidenced ? 1 : 0;
-  measures.swarmNetworks = p2p.swarmNetworks;
+  measures.linkedNetworks = p2p.linkedNetworks;
+  measures.linkedWithinCap = p2p.linkedWithinCap;
+  measures.sameNetworkPeers = p2p.sameNetworkPeers;
   if (p2p.evidenced) measures.httpShare = P2P_HTTP_SHARE;
 }
 

@@ -308,17 +308,26 @@ describe("score-sessions and verify-receipts job runs", () => {
       });
       await v.expire(KEYS.p2pPeer(sid), P2P_EVIDENCE.peerTtlSeconds);
       await v.zadd(KEYS.p2pSwarm(swarm), now - 2_000, sid);
+      await v.zadd(KEYS.p2pChannelNet(channel.id, net), now - 2_000, sid);
+      await v.expire(KEYS.p2pChannelNet(channel.id, net), P2P_EVIDENCE.peerTtlSeconds);
+    };
+    // A completed offer/answer exchange: the tracker gives each side the other's network.
+    const exchange = async (x: { sid: string; net: string }, y: { sid: string; net: string }) => {
+      await v.zadd(KEYS.p2pLinks(x.sid), now - 1_000, y.net);
+      await v.zadd(KEYS.p2pLinks(y.sid), now - 1_000, x.net);
     };
     const swarm = `${channel.id}:${"12".repeat(20)}`;
-    const single = `${channel.id}:${"34".repeat(20)}`;
     const a = await viewer();
     const b = await viewer();
     const c = await viewer();
     const d = await viewer();
     await announce(a, swarm, "net-a");
     await announce(b, swarm, "net-b");
-    await announce(c, single, "net-c");
-    await announce(d, single, "net-c");
+    await exchange({ sid: a, net: "net-a" }, { sid: b, net: "net-b" });
+    // Same diverse swarm: c only exchanged within its own network, d never exchanged.
+    await announce(c, swarm, "net-c");
+    await announce(d, swarm, "net-c");
+    await exchange({ sid: c, net: "net-c" }, { sid: d, net: "net-c" });
 
     const counts = await runScoring(w.ctx);
     expect(counts).toMatchObject({ p2pEvidenced: 2, p2pErrors: 0 });
@@ -332,7 +341,8 @@ describe("score-sessions and verify-receipts job runs", () => {
     );
     expect(rows.get(a)!.verdict).toBe("verified");
     expect(rows.get(b)!.verdict).toBe("verified");
-    // The same fetches without a second network are too few, whatever the client says about P2P.
+    // The same fetches without an exchange with another network are too few, whatever the client
+    // says about P2P.
     for (const id of [c, d]) {
       expect(rows.get(id)!.verdict).toBe("pending");
       expect(rows.get(id)!.verdictReasons).toEqual(["fetch_pattern", "media_unconfirmed"]);
