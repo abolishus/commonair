@@ -35,7 +35,9 @@ export interface ChatEvents {
   onMessage: (message: ChatMessageFrame) => void;
   onDelete: (messageId: string) => void;
   onClear: () => void;
-  /** Server notice and error codes (slow mode, bans, rejected messages…), for a toast. */
+  /** A user was banned or timed out: their messages are removed for everyone in the room. */
+  onBan?: (userId: string, username: string) => void;
+  /** Server notice and error codes (slow mode, bans, rejected messages…). */
   onNotice: (code: string, kind: "notice" | "error") => void;
 }
 
@@ -160,6 +162,9 @@ export class ChatConnection {
         return;
       case "clear":
         if (f.channel === this.channel) this.events.onClear();
+        return;
+      case "ban":
+        if (f.channel === this.channel) this.events.onBan?.(f.userId, f.username);
         return;
       case "notice":
         if (f.channel === null || f.channel === this.channel) this.events.onNotice(f.code, "notice");

@@ -31,10 +31,21 @@ export function Header(): React.JSX.Element {
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-2">
         <Link
           to="/"
-          className="mr-auto font-display text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="font-display text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {instance.name}
         </Link>
+        <nav aria-label={t("nav.main")} className="mr-auto">
+          <Link
+            data-testid="nav-directory"
+            to="/"
+            activeOptions={{ exact: true }}
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+            activeProps={{ "aria-current": "page" }}
+          >
+            {t("nav.directory")}
+          </Link>
+        </nav>
         <ThemeToggle value={theme} onValueChange={setTheme} />
         {me ? (
           <div data-testid="nav-user" data-username={me.username} className="flex items-center gap-2">

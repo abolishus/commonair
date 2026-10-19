@@ -1,18 +1,20 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, IconButton } from "@commonair/ui";
+import { ConfirmDialog, EmptyState, IconButton } from "@commonair/ui";
 import { buttonVariants } from "@commonair/ui/components/button";
 import { Input } from "@commonair/ui/components/input";
 import { toast } from "@commonair/ui/toast";
 import { cn } from "@commonair/ui/lib/utils";
-import { Message01Icon, SentIcon } from "@hugeicons/core-free-icons";
+import { Message01Icon, SentIcon, UserBlock01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { api } from "../lib/api.ts";
-import { ChatConnection, appendMessage, type ChatMessageFrame, type ChatStatus } from "./connection.ts";
+import { ChatConnection, type ChatStatus } from "./connection.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
+import { ModMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
+import { chatReducer, type ChatRow } from "./state.ts";
 
 /** Chat name colors come from the AA-checked `--chat-N` tokens, picked by username. */
 const NAME_COLORS = [
@@ -45,16 +47,32 @@ function statusLabel(status: ChatStatus): string {
 export interface ChatPanelProps {
   channel: string;
   signedIn: boolean;
+  /** The signed-in viewer's username, so moderation controls skip their own messages. */
+  selfUsername?: string | null;
   className?: string;
 }
 
-export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): React.JSX.Element {
+interface ModTarget {
+  username: string;
+  displayName: string;
+}
+
+const EMPTY_ROWS: ChatRow[] = [];
+
+export function ChatPanel({ channel, signedIn, selfUsername = null, className }: ChatPanelProps): React.JSX.Element {
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
-  const [messages, setMessages] = React.useState<ChatMessageFrame[]>([]);
+  const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
   const [canChat, setCanChat] = React.useState(false);
+  const [canModerate, setCanModerate] = React.useState(false);
+  // The target outlives `open` so the dialog title keeps its name while it animates closed.
+  const [banDialog, setBanDialog] = React.useState<{ open: boolean; target: ModTarget | null }>({
+    open: false,
+    target: null,
+  });
   const [draft, setDraft] = React.useState("");
   const connection = React.useRef<ChatConnection | null>(null);
   const listRef = React.useRef<HTMLOListElement>(null);
+  const noticeSeq = React.useRef(0);
 
   React.useEffect(() => {
     const conn = new ChatConnection(
@@ -65,12 +83,19 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
       },
       {
         onStatus: setStatus,
-        onJoined: (me) => setCanChat(me.canChat),
-        onMessage: (m) => setMessages((list) => appendMessage(list, m)),
-        onDelete: (id) => setMessages((list) => list.filter((m) => m.id !== id)),
-        onClear: () => setMessages([]),
-        onNotice: (code, kind) =>
-          kind === "error" ? toast.error(errorMessage(code)) : toast.info(noticeMessage(code)),
+        onJoined: (me) => {
+          setCanChat(me.canChat);
+          setCanModerate(me.canModerate);
+        },
+        onMessage: (message) => dispatch({ type: "message", message }),
+        onDelete: (messageId) => dispatch({ type: "delete", messageId }),
+        onClear: () => dispatch({ type: "clear" }),
+        onBan: (userId, username) => dispatch({ type: "ban", userId, username }),
+        // Notices answer something the viewer did, so they belong inline; socket errors stay toasts.
+        onNotice: (code, kind) => {
+          if (kind === "error") toast.error(errorMessage(code));
+          else dispatch({ type: "notice", id: `notice-${++noticeSeq.current}`, code });
+        },
       },
     );
     connection.current = conn;
@@ -84,13 +109,30 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
   React.useEffect(() => {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+  }, [rows]);
 
   const send = () => {
     if (!draft.trim()) return;
     if (connection.current?.send(draft)) setDraft("");
     else toast.error(t("chat.notConnected"));
   };
+
+  // Timeouts act at once (Twitch parity); bans go through a ConfirmDialog.
+  const timeout = async (target: ModTarget) => {
+    try {
+      await api().chat.bans.ban({ channel, username: target.username, durationSeconds: TIMEOUT_SECONDS });
+      toast.success(t("chat.mod.timedOut", { name: target.displayName }));
+    } catch {
+      toast.error(t("chat.mod.failed"));
+    }
+  };
+
+  const ban = async (target: ModTarget) => {
+    await api().chat.bans.ban({ channel, username: target.username });
+    toast.success(t("chat.mod.banned", { name: target.displayName }));
+  };
+
+  const self = selfUsername?.toLowerCase() ?? null;
 
   return (
     <section
@@ -111,18 +153,53 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
         aria-live="polite"
         aria-relevant="additions"
       >
-        {messages.length === 0 ? (
+        {rows.length === 0 ? (
           <li>
             <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} />
           </li>
         ) : (
-          messages.map((m) => (
-            <li key={m.id} data-testid="chat-message" data-author={m.user.username} className="py-0.5 break-words">
-              <span className={cn("font-semibold", nameColor(m.user.username))}>{m.user.displayName}</span>
-              <span className="text-muted-foreground">{t("chat.nameSeparator")}</span>
-              <span className={m.isAction ? "italic" : undefined}>{m.body}</span>
-            </li>
-          ))
+          rows.map((row) => {
+            if (row.kind === "notice")
+              return (
+                <li
+                  key={row.id}
+                  data-testid="chat-notice"
+                  data-code={row.code}
+                  className="py-0.5 break-words text-muted-foreground italic"
+                >
+                  {noticeMessage(row.code)}
+                </li>
+              );
+            const { user } = row.message;
+            const target = { username: user.username, displayName: user.displayName };
+            return (
+              <li
+                key={row.id}
+                data-testid="chat-message"
+                data-id={row.id}
+                data-author={user.username}
+                data-deleted={row.deleted ? "true" : undefined}
+                className="flex items-start gap-1 py-0.5"
+              >
+                <p className="min-w-0 flex-1 break-words">
+                  <span className={cn("font-semibold", nameColor(user.username))}>{user.displayName}</span>
+                  <span className="text-muted-foreground">{t("chat.nameSeparator")}</span>
+                  {row.deleted ? (
+                    <span className="text-muted-foreground italic">{t("chat.messageDeleted")}</span>
+                  ) : (
+                    <span className={row.message.isAction ? "italic" : undefined}>{row.message.body}</span>
+                  )}
+                </p>
+                {canModerate && user.username.toLowerCase() !== self && (
+                  <ModMenu
+                    displayName={user.displayName}
+                    onTimeout={() => void timeout(target)}
+                    onBan={() => setBanDialog({ open: true, target })}
+                  />
+                )}
+              </li>
+            );
+          })
         )}
       </ol>
       <div className="border-t border-border p-2">
@@ -163,6 +240,19 @@ export function ChatPanel({ channel, signedIn, className }: ChatPanelProps): Rea
           </p>
         )}
       </div>
+      <ConfirmDialog
+        open={banDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setBanDialog((d) => ({ ...d, open: false }));
+        }}
+        variant="destructive"
+        icon={UserBlock01Icon}
+        title={t("chat.mod.banConfirmTitle", { name: banDialog.target?.displayName ?? "" })}
+        description={t("chat.mod.banConfirmBody")}
+        confirmLabel={t("chat.mod.ban")}
+        onConfirm={() => (banDialog.target ? ban(banDialog.target) : undefined)}
+        onError={() => toast.error(t("chat.mod.failed"))}
+      />
     </section>
   );
 }
