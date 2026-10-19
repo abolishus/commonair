@@ -3,9 +3,8 @@
 
 import { ConfirmDialog, SkeletonText } from "@commonair/ui";
 import { KeyValueList } from "@commonair/ui/blocks/data";
-import { CopyField } from "@commonair/ui/blocks/forms";
 import { PageHeader } from "@commonair/ui/blocks/headers";
-import { Button, buttonVariants } from "@commonair/ui/components/button";
+import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { FieldGroup } from "@commonair/ui/components/field";
 import { PageContainer } from "@commonair/ui/layouts";
@@ -13,6 +12,7 @@ import { toast } from "@commonair/ui/toast";
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
+import { IngestServerUrl, NewStreamKey } from "../../components/ingest-values.tsx";
 import { StreamHealthCard } from "../../components/stream-health-card.tsx";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
@@ -35,17 +35,24 @@ function DashboardPage(): React.JSX.Element {
         title={t("dashboard.title")}
         actions={
           <>
-            <Link data-testid="relays-link" to="/relays" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <Button
+              data-testid="relays-link"
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link to="/relays" />}
+            >
               {t("dashboard.relays")}
-            </Link>
-            <Link
+            </Button>
+            <Button
               data-testid="channel-link"
-              to="/$channel"
-              params={{ channel }}
-              className={buttonVariants({ variant: "outline", size: "sm" })}
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link to="/$channel" params={{ channel }} />}
             >
               {t("dashboard.viewChannel")}
-            </Link>
+            </Button>
           </>
         }
       />
@@ -110,14 +117,7 @@ function StreamSetup({ channel }: { channel: string }): React.JSX.Element {
       <CardContent>
         <FieldGroup>
           {loadError && <FormError>{t("dashboard.loadFailed")}</FormError>}
-          <CopyField
-            label={t("dashboard.serverUrl")}
-            value={serverUrl}
-            copyLabel={t("dashboard.copyServerUrl")}
-            copiedLabel={t("dashboard.serverUrlCopied")}
-            copyFailedLabel={t("dashboard.copyFailed")}
-            data-value-testid="stream-server-url"
-          />
+          <IngestServerUrl value={serverUrl} />
           {ingest ? (
             <KeyValueList
               rows={[
@@ -135,21 +135,7 @@ function StreamSetup({ channel }: { channel: string }): React.JSX.Element {
           ) : (
             <SkeletonText lines={1} />
           )}
-          {newKey && (
-            <div aria-live="polite">
-              {/* Shown in full: the API returns the key once, and OBS needs it verbatim. */}
-              <CopyField
-                label={t("dashboard.newKey")}
-                value={newKey}
-                copyLabel={t("dashboard.copyKey")}
-                copiedLabel={t("dashboard.keyCopied")}
-                copyFailedLabel={t("dashboard.copyFailed")}
-                hint={t("dashboard.newKeyOnce")}
-                data-value-testid="stream-key"
-                data-copy-testid="stream-key-copy"
-              />
-            </div>
-          )}
+          {newKey && <NewStreamKey value={newKey} />}
           <div>
             {ingest?.activeKeyPrefix ? (
               <ConfirmDialog

@@ -3,7 +3,7 @@
 
 import { ConfirmDialog, EmptyState, StatusBadge } from "@commonair/ui";
 import { ChatComposer, ChatMessage, ChatPanel as ChatPanelShell } from "@commonair/ui/blocks/media";
-import { buttonVariants } from "@commonair/ui/components/button";
+import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
 import { Message01Icon, UserBlock01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
@@ -142,9 +142,9 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
             signin={
               <>
                 {t("chat.signInPrompt")}
-                <Link to="/signin" className={buttonVariants({ variant: "outline", size: "xs" })}>
+                <Button variant="outline" size="xs" nativeButton={false} render={<Link to="/signin" />}>
                   {t("nav.signIn")}
-                </Link>
+                </Button>
               </>
             }
           />

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { LiveBadge } from "@commonair/ui";
 import { PlayerChrome, PlayerControl } from "@commonair/ui/blocks/media";
 import { cn } from "@commonair/ui/lib/utils";
 import { VolumeHighIcon, VolumeOffIcon } from "@hugeicons/core-free-icons";
@@ -92,18 +91,15 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
       data-testid="player"
       data-state={state}
       data-source={source}
-      // E4a gap: PlayerChrome's built-in live badge takes no props, and the e1 contract needs
-      // `live-badge` on it; until PlayerChrome forwards badge props, the badge comes in `topStart`
-      // and the non-badge "preview" variant keeps it from rendering twice.
-      variant={live ? "preview" : "offline"}
-      topStart={live ? <LiveBadge data-testid="live-badge" pulse /> : undefined}
+      variant={live ? "live" : "offline"}
+      liveBadgeProps={{ "data-testid": "live-badge" }}
       stage={stage}
       controls={
         state === "playing" ? (
+          // The label names the action (Mute / Unmute), so no `pressed` state on top of it.
           <PlayerControl
             label={muted ? t("player.unmute") : t("player.mute")}
             icon={muted ? VolumeOffIcon : VolumeHighIcon}
-            pressed={!muted}
             onClick={toggleMute}
           />
         ) : undefined

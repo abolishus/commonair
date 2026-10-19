@@ -77,25 +77,33 @@ Pages only compose `@commonair/ui`: shells from `@commonair/ui/layouts`, blocks 
 `@commonair/ui/blocks/<group>`, shadcn components and house primitives. Layout utilities (`flex`,
 `grid`, `gap-*`, `py-*`) are the only classes a page adds.
 
-| Route                | Layout (route file)                  | Compositions                                                                                                                       |
-| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                  | `AppShell` (`routes/_app.tsx`)       | `PageContainer`, `PageHeader` (calls to action), `Section` + `ResponsiveGrid` + `StreamCard`, `StreamGrid` (loading), `EmptyState` |
-| `/$channel`          | `AppShell`                           | `SplitLayout`, `PlayerChrome` (via `player/player.tsx`), `ChannelHeader`, `AccentButton`, `ChatPanel`/`ChatMessage`/`ChatComposer` |
-| `/signin`, `/signup` | `AppShell`                           | `PageHeader`, `Field*`, `PasswordField`, `Checkbox`, ALTCHA, `Alert` (`form-error`)                                                |
-| `/dashboard`         | `StudioShell` (`routes/_studio.tsx`) | `PageHeader`, `Card`, `CopyField`, `KeyValueList` + `StatusBadge` (health), `ConfirmDialog`                                        |
-| `/relays`            | `StudioShell`                        | `PageHeader`, `FormSection`, `CopyField`, `CodeBlock`, `DataTable` (`rowProps` → `relay-row`), `StatusBadge`, `ConfirmDialog`      |
-| `/embed/$channel`    | none (chromeless)                    | `PlayerChrome` only                                                                                                                |
+| Route                | Layout (route file)                  | Compositions                                                                                                                               |
+| -------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/`                  | `AppShell` (`routes/_app.tsx`)       | `PageContainer`, `PageHeader` (calls to action), `Section` + `StreamGrid` (`cardProps` → `stream-card`), `EmptyState`                      |
+| `/$channel`          | `AppShell`                           | `SplitLayout`, `PlayerChrome` (`liveBadgeProps` → `live-badge`), `ChannelHeader`, `AccentButton`, `ChatPanel`/`ChatMessage`/`ChatComposer` |
+| `/signin`, `/signup` | `AppShell`                           | `PageContainer width="form"`, `PageHeader`, `Field*`, `PasswordField`, `Checkbox`, ALTCHA, `Alert` (`form-error`)                          |
+| `/dashboard`         | `StudioShell` (`routes/_studio.tsx`) | `PageHeader`, `Card`, `CodeBlock` (server URL, new key), `KeyValueList` + `StatusBadge` (health), `ConfirmDialog`                          |
+| `/relays`            | `StudioShell`                        | `PageHeader`, `ListPanel`, `FormSection`, `CodeBlock`, `DataTable` (`rowProps` → `relay-row`), `StatusBadge`, `ConfirmDialog`              |
+| `/embed/$channel`    | none (chromeless)                    | `PlayerChrome` only                                                                                                                        |
 
 The header (`SiteHeader` + `UserMenu` + `ThemeToggle`) and footer (`SiteFooter` with the AGPL
 source link) live in `src/components/site-chrome.tsx`; what they link to is data in
-`src/lib/nav.ts` (only pages that exist). `tests/source-policy.test.ts` scans `src/**` (not
+`src/lib/nav.ts` (only pages that exist). Links styled as buttons are `Button` with
+`render={<Link …/>}`. `tests/source-policy.test.ts` scans `src/**` (`.ts`, `.tsx`, `.css`; not
 `src/server/**` or the generated route tree) and fails, with file and line, on raw interactive
-HTML, `role=` on div/span, arbitrary Tailwind values, color literals, `sonner`/`@base-ui/react`
-imports or shadcn modules that have a house replacement, native `title=`, `style=`,
-`alert/confirm/prompt`, and raw media or custom elements. Exceptions need an allowlist entry with
-a reason (today: the player's `<video>` and the ALTCHA web component). Where a composition cannot
-yet express a contract (a test id, a slot), the code keeps the previous markup with an
-`E4a gap:` comment naming what the composition needs.
+HTML, `role=` on div/span, arbitrary Tailwind syntax (values, properties, variants, `x-(--var)`),
+color literals, `sonner`/`@base-ui/react` imports or shadcn modules that have a house replacement,
+`buttonVariants` class strings, native `title=`, `style=`, `alert/confirm/prompt`, inline number
+formatting, and raw media or custom elements. Exceptions are allowlist entries keyed by a snippet
+with an exact count and a reason (today: the player's `<video>`, the ALTCHA web component and
+`formatBytes`'s `Intl.NumberFormat`). Where a composition cannot yet express something, an
+`E4a gap:` comment names what it needs.
+
+Selector contracts: `tests/selectors.test.ts` finds every e1–e3 test id in the source as
+`data-testid="…"`. The few that reach the DOM only through a composition prop (listed in
+`tests/composition-ids.ts`) are server-rendered from the app's components with fixture data in
+`tests/selectors-render.test.tsx`, which checks the DOM attributes and the text content of
+`stream-server-url`, `stream-key`, `relay-token` and `relay-run-command`.
 
 ## TanStack Start with vite-plus: notes
 

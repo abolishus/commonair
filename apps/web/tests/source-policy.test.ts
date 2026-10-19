@@ -3,11 +3,13 @@
 
 /**
  * apps/web composes `@commonair/ui`; it never builds its own controls or styling (AGENTS.md "Design
- * rules (web)", E4a). This scans `src/**` (except the generated route tree and `src/server/**`) and
- * fails, with file and line, on: raw interactive HTML, `role=` on div/span, arbitrary Tailwind
- * values/properties/variants, color literals, imports that bypass a house primitive, native
- * `title=` tooltips, `style=`, `alert/confirm/prompt`, and raw media or custom elements.
- * One-off exceptions go in ALLOWLIST with a reason; unused entries fail too.
+ * rules (web)", E4a). This scans `src/**` (`.ts`, `.tsx` and `.css`; not the generated route tree
+ * or `src/server/**`) and fails, with file and line, on: raw interactive HTML, `role=` on div/span,
+ * arbitrary Tailwind values/properties/variants/shorthands, color literals, imports that bypass a
+ * house primitive (or `buttonVariants` strings instead of `Button render`), native `title=`
+ * tooltips, `style=`, `alert/confirm/prompt`, inline number formatting, and raw media or custom
+ * elements. One-off exceptions go in ALLOWLIST, keyed by a snippet with an exact count and a
+ * reason; extra occurrences and unused entries fail too.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -22,9 +24,11 @@ export type Rule =
   | "arbitrary-value"
   | "color-literal"
   | "banned-import"
+  | "class-recipe"
   | "native-title"
   | "inline-style"
   | "native-dialog-fn"
+  | "inline-format"
   | "raw-media-element"
   | "custom-element";
 
@@ -38,6 +42,10 @@ export interface Violation {
 interface AllowEntry {
   file: string;
   rule: Rule;
+  /** Substring of the violation's snippet that identifies the allowed occurrence. */
+  match: string;
+  /** Exactly this many occurrences are allowed (and expected). */
+  count: number;
   reason: string;
 }
 
@@ -45,13 +53,24 @@ const ALLOWLIST: AllowEntry[] = [
   {
     file: "src/player/player.tsx",
     rule: "raw-media-element",
+    match: "<video",
+    count: 1,
     reason:
       "The live <video> is PlayerChrome's child; hls.js, the heartbeat stats and the harness probe need the element.",
   },
   {
     file: "src/components/altcha-field.tsx",
     rule: "custom-element",
+    match: 'createElement("altcha-widget"',
+    count: 1,
     reason: "The self-hosted ALTCHA proof-of-work widget is a web component; there is no React or shadcn equivalent.",
+  },
+  {
+    file: "src/lib/relays.ts",
+    rule: "inline-format",
+    match: "new Intl.NumberFormat",
+    count: 1,
+    reason: "formatBytes needs Intl unit formatting (kB, MB, …) with the locale; @commonair/ui has no byte formatter.",
   },
 ];
 
@@ -61,19 +80,85 @@ const RAW_MEDIA = new Set(["video", "audio", "iframe", "canvas", "object", "embe
 const HOUSE_REPLACED = {
   "alert-dialog": "ConfirmDialog",
   avatar: "ChannelAvatar",
+  badge: "StatusBadge / LiveBadge / OverlayBadge",
+  empty: "EmptyState",
   skeleton: "Skeleton* from @commonair/ui",
   sonner: "toast from @commonair/ui/toast",
   table: "DataTable from @commonair/ui/blocks/data",
   kbd: "Kbd/Shortcut from @commonair/ui",
 } as const;
 
-/** Blank out comments (keeping line breaks) so prose about a rule never trips it. */
-export function stripComments(text: string): string {
-  const keepLines = (m: string) => m.replace(/[^\n]/g, " ");
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, keepLines)
-    .replace(/(^|[^:\\"'`])\/\/[^\n]*/gm, (m, before: string) => before + keepLines(m.slice(before.length)));
+/**
+ * Blank out comments (and with `blankStrings`, string and template text too), keeping every line
+ * break so line numbers survive. String-aware: `//` or `/*` inside a string is not a comment.
+ * Quotes end at the closing quote or the end of the line; template `${…}` expressions stay code.
+ */
+export function lex(text: string, { blankStrings = false } = {}): string {
+  const blank = (s: string) => s.replace(/[^\n]/g, " ");
+  let out = "";
+  const modes: ("code" | "template")[] = ["code"];
+  const depths: number[] = [0];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i] ?? "";
+    const next = text[i + 1] ?? "";
+    if (modes[modes.length - 1] === "template") {
+      if (ch === "\\") {
+        out += blankStrings ? "  " : ch + next;
+        i += 2;
+      } else if (ch === "`") {
+        out += ch;
+        modes.pop();
+        i++;
+      } else if (ch === "$" && next === "{") {
+        out += "${";
+        modes.push("code");
+        depths.push(0);
+        i += 2;
+      } else {
+        out += blankStrings && ch !== "\n" ? " " : ch;
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && next === "/") {
+      const end = text.indexOf("\n", i);
+      const stop = end < 0 ? text.length : end;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (ch === "/" && next === "*") {
+      const end = text.indexOf("*/", i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== ch && text[j] !== "\n") j += text[j] === "\\" ? 2 : 1;
+      const closed = text[j] === ch;
+      const stop = closed ? j + 1 : j;
+      out += blankStrings ? ch + blank(text.slice(i + 1, j)) + (closed ? ch : "") : text.slice(i, stop);
+      i = stop;
+    } else if (ch === "`") {
+      out += ch;
+      modes.push("template");
+      i++;
+    } else {
+      const top = depths.length - 1;
+      if (ch === "{") depths[top] = (depths[top] ?? 0) + 1;
+      else if (ch === "}") {
+        if ((depths[top] ?? 0) === 0 && modes.length > 1) {
+          modes.pop();
+          depths.pop();
+        } else depths[top] = (depths[top] ?? 0) - 1;
+      }
+      out += ch;
+      i++;
+    }
+  }
+  return out;
 }
+
+export const stripComments = (text: string): string => lex(text);
 
 interface OpeningTag {
   name: string;
@@ -82,28 +167,24 @@ interface OpeningTag {
 }
 
 /**
- * JSX opening tags. A `<` directly after an identifier, `)` or `]` is a generic or a comparison,
- * not JSX. Attributes run to the first `>` outside braces and quotes.
+ * JSX opening tags, from text whose strings are blanked. A `<` directly after an identifier, `)`
+ * or `]` is a generic or a comparison, not JSX. Attributes run to the first `>` outside braces.
  */
-export function openingTags(text: string): OpeningTag[] {
+export function openingTags(code: string): OpeningTag[] {
   const tags: OpeningTag[] = [];
   const start = /<([A-Za-z][\w.-]*)/g;
-  for (let m = start.exec(text); m; m = start.exec(text)) {
-    const prev = m.index > 0 ? (text[m.index - 1] ?? "") : "";
+  for (let m = start.exec(code); m; m = start.exec(code)) {
+    const prev = m.index > 0 ? (code[m.index - 1] ?? "") : "";
     if (/[\w$)\].]/.test(prev)) continue;
     let depth = 0;
-    let quote: string | null = null;
     let i = start.lastIndex;
-    for (; i < text.length; i++) {
-      const ch = text[i];
-      if (quote) {
-        if (ch === quote && text[i - 1] !== "\\") quote = null;
-      } else if (ch === '"' || ch === "'" || ch === "`") quote = ch;
-      else if (ch === "{") depth++;
+    for (; i < code.length; i++) {
+      const ch = code[i];
+      if (ch === "{") depth++;
       else if (ch === "}") depth--;
       else if (ch === ">" && depth === 0) break;
     }
-    tags.push({ name: m[1] ?? "", attrs: text.slice(start.lastIndex, i), index: m.index });
+    tags.push({ name: m[1] ?? "", attrs: code.slice(start.lastIndex, i), index: m.index });
   }
   return tags;
 }
@@ -116,21 +197,45 @@ function stringLiterals(text: string): { value: string; index: number }[] {
   return out;
 }
 
-/** A Tailwind arbitrary value (`h-[3px]`), property (`[mask:x]`) or variant (`[&>svg]:x`, `min-[420px]:x`). */
+/**
+ * Tailwind arbitrary syntax: values (`h-[3px]`), properties (`[mask:x]`), variants (`[&>svg]:x`,
+ * `min-[420px]:x`) and v4 CSS-variable shorthands (`bg-(--brand)`, `w-(length:--x)`).
+ */
 export function isArbitraryClass(token: string): boolean {
-  return /-\[[^\]\s]+\]/.test(token) || /(^|:)!?\[[a-z-]+:[^\]\s]+\]/.test(token) || /(^|:)\[&[^\]\s]*\]:/.test(token);
+  return (
+    /-\[[^\]\s]+\]/.test(token) ||
+    /(^|:)!?\[[a-z-]+:[^\]\s]+\]/.test(token) ||
+    /(^|:)\[&[^\]\s]*\]:/.test(token) ||
+    /-\((?:[a-z-]+:)?--[\w-]+\)/.test(token)
+  );
 }
 
 const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
+const HEX = /(?<![\w/&-])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])/g;
+const COLOR_FN = /\b(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\(/g;
+
+function cssViolations(file: string, source: string): Violation[] {
+  const text = source.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
+  const out: Violation[] = [];
+  const add = (rule: Rule, index: number, snippet: string) =>
+    out.push({ file, line: lineOf(text, index), rule, snippet: snippet.trim().slice(0, 80) });
+  for (const m of text.matchAll(HEX)) add("color-literal", m.index ?? 0, m[0]);
+  for (const m of text.matchAll(COLOR_FN)) add("color-literal", m.index ?? 0, m[0]);
+  for (const m of text.matchAll(/@apply\s+([^;]+);/g))
+    for (const token of (m[1] ?? "").split(/\s+/))
+      if (token && isArbitraryClass(token)) add("arbitrary-value", m.index ?? 0, token);
+  return out;
+}
 
 export function findViolations(file: string, source: string): Violation[] {
-  const text = stripComments(source);
+  if (file.endsWith(".css")) return cssViolations(file, source);
+  const text = lex(source);
   const out: Violation[] = [];
   const add = (rule: Rule, index: number, snippet: string) =>
     out.push({ file, line: lineOf(text, index), rule, snippet: snippet.trim().slice(0, 80) });
 
   if (file.endsWith(".tsx"))
-    for (const tag of openingTags(text)) {
+    for (const tag of openingTags(lex(source, { blankStrings: true }))) {
       const lower = tag.name === tag.name.toLowerCase() && !tag.name.includes(".");
       const snippet = `<${tag.name}${tag.attrs.split("\n")[0] ?? ""}`;
       if (RAW_INTERACTIVE.has(tag.name)) add("raw-interactive-element", tag.index, snippet);
@@ -145,12 +250,11 @@ export function findViolations(file: string, source: string): Violation[] {
   for (const lit of stringLiterals(text)) {
     for (const token of lit.value.split(/\s+/))
       if (token && isArbitraryClass(token)) add("arbitrary-value", lit.index, token);
-    const hex = /(?<![\w/&])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})(?![\w-])/.exec(lit.value);
-    if (hex) add("color-literal", lit.index + hex.index, hex[0]);
+    for (const hex of lit.value.matchAll(HEX)) add("color-literal", lit.index + (hex.index ?? 0), hex[0]);
   }
 
   const patterns: [Rule, RegExp][] = [
-    ["color-literal", /\b(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\(/g],
+    ["color-literal", COLOR_FN],
     ["banned-import", /\b(?:from|import)\s*\(?\s*["'](?:@base-ui\/react(?:\/[^"']*)?|sonner)["']/g],
     [
       "banned-import",
@@ -159,7 +263,9 @@ export function findViolations(file: string, source: string): Violation[] {
         "g",
       ),
     ],
+    ["class-recipe", /\bbuttonVariants\b/g],
     ["native-dialog-fn", /(?<![\w$.])(?:window\.|globalThis\.)?(?:alert|confirm|prompt)\s*\(/g],
+    ["inline-format", /\.toLocaleString\(|\.toFixed\(|\bnew Intl\.\w+/g],
     ["custom-element", /\bcreateElement\(\s*["'][a-z][\w]*-[\w-]*["']/g],
   ];
   for (const [rule, re] of patterns) for (const m of text.matchAll(re)) add(rule, m.index ?? 0, m[0]);
@@ -170,32 +276,35 @@ function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) return full === join(SRC, "server") ? [] : sources(full);
-    return /\.(ts|tsx)$/.test(name) && name !== "routeTree.gen.ts" ? [full] : [];
+    return /\.(ts|tsx|css)$/.test(name) && name !== "routeTree.gen.ts" ? [full] : [];
   });
 }
 
-const allowed = (v: Violation) => ALLOWLIST.some((a) => a.file === v.file && a.rule === v.rule);
+const entryFor = (v: Violation) =>
+  ALLOWLIST.find((a) => a.file === v.file && a.rule === v.rule && v.snippet.includes(a.match));
 
 describe("apps/web source policy", () => {
   const all = sources(SRC).flatMap((full) => findViolations(relative(WEB, full), readFileSync(full, "utf8")));
 
-  it("scans the app (and not the server or the generated route tree)", () => {
+  it("scans the app, its CSS too (and not the server or the generated route tree)", () => {
     const files = sources(SRC).map((f) => relative(WEB, f));
     expect(files).toContain("src/routes/_app.tsx");
     expect(files).toContain("src/routes/_studio/relays.tsx");
+    expect(files).toContain("src/styles.css");
     expect(files.some((f) => f.startsWith("src/server/"))).toBe(false);
     expect(files).not.toContain("src/routeTree.gen.ts");
   });
 
   it("has no violations outside the allowlist", () => {
-    const report = all.filter((v) => !allowed(v)).map((v) => `${v.file}:${v.line} ${v.rule}: ${v.snippet}`);
+    const report = all.filter((v) => !entryFor(v)).map((v) => `${v.file}:${v.line} ${v.rule}: ${v.snippet}`);
     expect(report).toEqual([]);
   });
 
-  it.each(ALLOWLIST)("allowlist entry $file ($rule) is still needed and explained", (entry) => {
+  it.each(ALLOWLIST)("allowlist: $file ($rule, $match) occurs exactly $count time(s)", (entry) => {
     expect(existsSync(join(WEB, entry.file))).toBe(true);
     expect(entry.reason.length).toBeGreaterThan(20);
-    expect(all.some((v) => v.file === entry.file && v.rule === entry.rule)).toBe(true);
+    const hits = all.filter((v) => entryFor(v) === entry);
+    expect(hits.map((v) => `${v.file}:${v.line}`)).toHaveLength(entry.count);
   });
 });
 
@@ -216,6 +325,8 @@ describe("detectors", () => {
     ['<div className="min-[420px]:grid-cols-3" />', "arbitrary-value"],
     ['<div className="[mask-type:luminance]" />', "arbitrary-value"],
     ['<div className="[&>svg]:size-4" />', "arbitrary-value"],
+    ['<div className="bg-(--brand) p-2" />', "arbitrary-value"],
+    ['<div className="md:w-(length:--sidebar)" />', "arbitrary-value"],
     ["const c = cn(open && `w-[12rem]`);", "arbitrary-value"],
     ['<div className="text-[#ff0000]" />', "color-literal"],
     ['const c = "#1a2b3c";', "color-literal"],
@@ -227,6 +338,9 @@ describe("detectors", () => {
     ['import { AlertDialog } from "@commonair/ui/components/alert-dialog";', "banned-import"],
     ['import { Avatar } from "@commonair/ui/components/avatar";', "banned-import"],
     ['import { Table } from "@commonair/ui/components/table";', "banned-import"],
+    ['import { Badge } from "@commonair/ui/components/badge";', "banned-import"],
+    ['import { Empty } from "@commonair/ui/components/empty";', "banned-import"],
+    ['<Link className={buttonVariants({ size: "sm" })} to="/" />', "class-recipe"],
     ['<span title="Full name">x</span>', "native-title"],
     ["<a title={label} href={u}>x</a>", "native-title"],
     ["<div style={{ width: 3 }} />", "inline-style"],
@@ -234,10 +348,15 @@ describe("detectors", () => {
     ['if (confirm("Sure?")) go();', "native-dialog-fn"],
     ["window.alert(message);", "native-dialog-fn"],
     ["prompt(question)", "native-dialog-fn"],
+    ["const s = count.toLocaleString();", "inline-format"],
+    ["const s = share.toFixed(1);", "inline-format"],
+    ['const f = new Intl.NumberFormat("en");', "inline-format"],
     ['<video src="x" />', "raw-media-element"],
     ['<iframe src="x" />', "raw-media-element"],
     ["<altcha-widget auto />", "custom-element"],
     ['React.createElement("altcha-widget", props)', "custom-element"],
+    ['const u = "a // b"; <button />', "raw-interactive-element"],
+    ["const t = `x ${'/*'} y`; <div style={{}} />", "inline-style"],
   ] as const)("flags %s as %s", (source, rule) => {
     expect(rules(source)).toContain(rule);
   });
@@ -263,6 +382,9 @@ describe("detectors", () => {
     '/* <div role="x"> style={{}} */',
     "{/* <table> */}",
     'const url = "https://example.org/#abc";',
+    'const s = "<button> in a string";',
+    "const n = formatNumber(count, locale);",
+    "const d = (cells) => cells.map((c) => c.id);",
   ])("does not flag %s", (source) => {
     expect(rules(source)).toEqual([]);
   });
@@ -273,21 +395,38 @@ describe("detectors", () => {
   });
 
   it("leaves JSX rules to .tsx files", () => {
-    expect(rules('const s = "<button>";', "x.ts")).toEqual([]);
+    expect(rules("const s = 1; <button />", "x.ts")).toEqual([]);
   });
 
-  it("keeps line numbers when stripping comments", () => {
-    const stripped = stripComments("a /* x\ny */ b\n// c\nd");
+  it("strips comments, string-aware, keeping line numbers", () => {
+    const stripped = stripComments('a /* x\ny */ b\n// c\nd "e // f" `g /* h */ ${i /* j */}`');
     expect(stripped.split("\n")).toHaveLength(4);
-    expect(stripped).not.toContain("x");
-    expect(stripped.split("\n")[3]).toBe("d");
+    expect(stripped).not.toMatch(/[xycj]/);
+    expect(stripped).toContain('"e // f"');
+    expect(stripped).toContain("`g /* h */ ${i ");
+  });
+
+  it("blanks strings for the tag scan, keeping template expressions", () => {
+    const code = lex('x = "<a>"; y = `<b> ${<c />}`;', { blankStrings: true });
+    expect(code).not.toContain("<a>");
+    expect(code).not.toContain("<b>");
+    expect(code).toContain("<c />");
+  });
+
+  it("scans CSS for color literals and arbitrary @apply values", () => {
+    expect(rules("a { color: #fff; }", "x.css")).toEqual(["color-literal"]);
+    expect(rules("a { color: oklch(0.5 0 0); }", "x.css")).toEqual(["color-literal"]);
+    expect(rules("a { @apply h-[3px] p-2; }", "x.css")).toEqual(["arbitrary-value"]);
+    expect(rules("/* #fff */ a { color: var(--primary); --x: 0; }", "x.css")).toEqual([]);
   });
 
   it("recognizes Tailwind arbitrary syntax only", () => {
     expect(isArbitraryClass("w-[3px]")).toBe(true);
     expect(isArbitraryClass("hover:[&_a]:underline")).toBe(true);
     expect(isArbitraryClass("[&_a]:underline")).toBe(true);
+    expect(isArbitraryClass("fill-(--chart-1)")).toBe(true);
     expect(isArbitraryClass("w-64")).toBe(false);
     expect(isArbitraryClass("bg-destructive/10")).toBe(false);
+    expect(isArbitraryClass("size-(--x")).toBe(false);
   });
 });

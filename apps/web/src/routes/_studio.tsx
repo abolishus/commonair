@@ -37,10 +37,10 @@ function StudioLayout(): React.JSX.Element {
       header={<AppHeader studio />}
       groups={[{ id: "studio", items: studioNav(pathname).map(studioItem) }]}
       sidebarLabel={t("studio.nav")}
+      skipLabel={t("nav.skipToContent")}
+      footer={<AppFooter />}
     >
       <Outlet />
-      {/* E4a gap: StudioShell has no footer slot; the AGPL source link must stay on every page. */}
-      <AppFooter />
     </StudioShell>
   );
 }

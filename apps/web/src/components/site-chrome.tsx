@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { ThemeToggle } from "@commonair/ui";
-import { buttonVariants } from "@commonair/ui/components/button";
+import { Button } from "@commonair/ui/components/button";
 import { SidebarTrigger } from "@commonair/ui/components/sidebar";
 import { SiteFooter, SiteHeader, UserMenu, type NavItem, type UserMenuItem } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
@@ -18,7 +18,7 @@ import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { signOut } from "../lib/auth.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
-import { accountMenu, siteNav, type AccountEntry } from "../lib/nav.ts";
+import { accountMenu, siteNav, type AccountEntry, type SignedOutEntry } from "../lib/nav.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
 
@@ -56,9 +56,28 @@ function accountItem(entry: AccountEntry): UserMenuItem {
   }
 }
 
+function AccountLink({ entry }: { entry: SignedOutEntry }): React.JSX.Element {
+  return (
+    <Button
+      variant={entry.id === "signUp" ? "default" : "ghost"}
+      size="sm"
+      nativeButton={false}
+      render={<Link to={entry.to} aria-current={entry.current ? "page" : undefined} />}
+    >
+      {entry.id === "signIn" ? t("nav.signIn") : t("nav.signUp")}
+    </Button>
+  );
+}
+
 /**
  * The site header for every page with chrome. `studio` adds the sidebar toggle; it must then be
  * rendered inside the StudioShell (the toggle needs its SidebarProvider).
+ *
+ * Width at a 288 px content box (320 px minus the 16 px gutters), below md where the nav and the
+ * desktop group collapse into the sheet: menu button 32 + two 12 px gaps, plus
+ * - signed out: Sign in 65 → the brand keeps ~167 px;
+ * - signed in: avatar-only UserMenu ~36 → ~196 px;
+ * - studio: sidebar toggle 28 + 8 + UserMenu ~36 → ~160 px.
  */
 export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.Element {
   const { me, instance } = useBootstrap();
@@ -72,39 +91,17 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
     render: <Link data-testid="nav-directory" to="/" />,
   }));
 
-  const user = me ? (
-    <UserMenu
-      data-testid="nav-user"
-      data-username={me.username}
-      username={me.username}
-      menuLabel={t("nav.accountMenu", { name: me.displayName })}
-      items={accountMenu(true).map(accountItem)}
-    />
-  ) : (
-    <nav aria-label={t("nav.account")} className="flex items-center gap-2">
-      {accountMenu(false, pathname).map((entry) => (
-        <Link
-          key={entry.id}
-          to={entry.to}
-          aria-current={entry.current ? "page" : undefined}
-          // At 320 px only sign-in fits next to the brand; sign-up is one tap away from there.
-          className={buttonVariants({
-            variant: entry.id === "signUp" ? "default" : "ghost",
-            size: "sm",
-            className: entry.id === "signUp" ? "hidden sm:inline-flex" : undefined,
-          })}
-        >
-          {entry.id === "signIn" ? t("nav.signIn") : t("nav.signUp")}
-        </Link>
-      ))}
-    </nav>
-  );
+  const signedOut = me ? [] : accountMenu(false, pathname);
+  const signIn = signedOut.filter((entry) => entry.id === "signIn");
+  const signUp = signedOut.filter((entry) => entry.id === "signUp");
+  const themeToggle = <ThemeToggle value={theme} onValueChange={setTheme} />;
 
   return (
     <SiteHeader
       brand={{
         name: instance.name,
         href: "/",
+        render: <Link to="/" />,
         mark: <HugeiconsIcon icon={LiveStreaming02Icon} strokeWidth={2} aria-hidden />,
       }}
       nav={nav}
@@ -113,18 +110,47 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
       actions={
         <>
           {studio && <SidebarTrigger />}
-          {/* E4a gap: SiteHeader needs a slot in its mobile sheet for the theme switch; below sm it is hidden. */}
-          <ThemeToggle value={theme} onValueChange={setTheme} className="hidden sm:flex" />
+          {/* E4a gap: SiteHeader has a phone-only slot (`mobileActions`) but no desktop-only one. The
+              theme switch (84) and Sign up (65) do not fit next to the brand at 288 px, so below md
+              they live in the sheet and from md (SiteHeader's own breakpoint) here. Request: a
+              `desktopActions` slot, or `actions` hidden below md when `mobileActions` is set. */}
+          <div className="hidden items-center gap-2 md:flex">
+            {themeToggle}
+            {signUp.map((entry) => (
+              <AccountLink key={entry.id} entry={entry} />
+            ))}
+          </div>
         </>
       }
-      user={user}
+      user={
+        me ? (
+          <UserMenu
+            data-testid="nav-user"
+            data-username={me.username}
+            username={me.username}
+            menuLabel={t("nav.accountMenu", { name: me.displayName })}
+            items={accountMenu(true).map(accountItem)}
+          />
+        ) : (
+          signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
+        )
+      }
+      mobileActions={
+        <>
+          {themeToggle}
+          {signUp.map((entry) => (
+            <AccountLink key={entry.id} entry={entry} />
+          ))}
+        </>
+      }
     />
   );
 }
 
+export type Instance = ReturnType<typeof useBootstrap>["instance"];
+
 /** Instance name, license and the AGPL §13 source link (from `instance.info`). */
-export function AppFooter(): React.JSX.Element {
-  const { instance } = useBootstrap();
+export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.Element {
   const sourceUrl = safeHttpUrl(instance.sourceUrl);
   return (
     <SiteFooter
@@ -136,4 +162,9 @@ export function AppFooter(): React.JSX.Element {
       }
     />
   );
+}
+
+export function AppFooter(): React.JSX.Element {
+  const { instance } = useBootstrap();
+  return <InstanceFooter instance={instance} />;
 }
