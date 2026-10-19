@@ -36,6 +36,7 @@ export function SiteHeader({
   actions,
   user,
   menuLabel,
+  mobileMenuOpen,
   className,
   ...props
 }: SiteHeaderProps): React.JSX.Element {
@@ -64,7 +65,7 @@ export function SiteHeader({
         {actions}
         {user}
       </div>
-      <Sheet>
+      <Sheet open={mobileMenuOpen}>
         <SheetTrigger
           className={buttonVariants({ variant: "ghost", size: "icon", className: "md:hidden" })}
           aria-label={menuLabel}

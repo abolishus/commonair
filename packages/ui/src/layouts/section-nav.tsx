@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type * as React from "react";
-import { NavGroups, type NavItem } from "./nav.tsx";
+import { Sidebar, SidebarContent, SidebarProvider } from "@commonair/ui/components/sidebar";
+import { NavGroups, NavLink, type NavItem } from "./nav.tsx";
 
 export interface SectionNavProps extends React.ComponentProps<"aside"> {
   label: string;
@@ -17,20 +18,22 @@ export function SectionNav({ label, heading, items, action, ...props }: SectionN
         {heading ? <h2 className="text-sm font-medium">{heading}</h2> : null}
         {action}
       </div>
-      <div className="hidden md:block">
-        <NavGroups groups={[{ id: "sections", items }]} label={label} />
+      <div className="hidden min-w-0 md:block">
+        <SidebarProvider className="min-h-0 w-full bg-transparent">
+          <Sidebar collapsible="none">
+            <SidebarContent>
+              <NavGroups groups={[{ id: "sections", items }]} label={label} />
+            </SidebarContent>
+          </Sidebar>
+        </SidebarProvider>
       </div>
       <nav className="flex min-w-0 gap-2 overflow-x-auto pb-2 md:hidden" aria-label={label}>
         {items.map((item) => (
-          <a
+          <NavLink
             key={item.id}
-            href={item.href}
-            aria-current={item.current ? "page" : undefined}
+            item={item}
             className="shrink-0 whitespace-nowrap rounded-none border px-3 py-2 text-sm"
-          >
-            {item.label}
-            {item.badge ? ` ${item.badge.label}` : ""}
-          </a>
+          />
         ))}
       </nav>
     </aside>

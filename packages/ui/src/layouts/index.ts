@@ -11,7 +11,7 @@ export {
 } from "./channel-sidebar.tsx";
 export { DashboardShell, type DashboardShellProps } from "./dashboard-shell.tsx";
 export { HeaderSearch, type HeaderSearchProps } from "./header-search.tsx";
-export { NavGroups, NavLink, type NavGroup, type NavItem } from "./nav.tsx";
+export { NavGroups, NavLink, type NavGroup, type NavItem, type NavLinkProps } from "./nav.tsx";
 export {
   PageContainer,
   SplitLayout,

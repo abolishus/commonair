@@ -182,8 +182,8 @@ export const PageLayoutsStory: Story = {
   ),
 };
 export const Light: Story = { ...AppShellStory, globals: { theme: "light" } };
-export const Mobile320: Story = {
-  name: "SiteHeader mobile menu open",
+export const SiteHeaderMobileMenuOpen: Story = {
+  name: "SiteHeader Mobile320 menu open",
   render: () => (
     <SiteHeader
       brand={header.props.brand}
@@ -193,5 +193,94 @@ export const Mobile320: Story = {
       mobileMenuOpen
     />
   ),
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const AppShellLight: Story = { ...AppShellStory, name: "AppShell Light", globals: { theme: "light" } };
+export const AppShellMobile320: Story = {
+  ...AppShellStory,
+  name: "AppShell Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const AppShellWithChannelSidebarLight: Story = {
+  ...AppShellWithChannelSidebar,
+  name: "AppShellWithChannelSidebar Light",
+  globals: { theme: "light" },
+};
+export const AppShellWithChannelSidebarMobile320: Story = {
+  ...AppShellWithChannelSidebar,
+  name: "AppShellWithChannelSidebar Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const StudioShellLight: Story = { ...StudioShellStory, name: "StudioShell Light", globals: { theme: "light" } };
+export const StudioShellMobile320: Story = {
+  ...StudioShellStory,
+  name: "StudioShell Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const AdminShellLight: Story = { ...AdminShellStory, name: "AdminShell Light", globals: { theme: "light" } };
+export const AdminShellMobile320: Story = {
+  ...AdminShellStory,
+  name: "AdminShell Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const SiteHeaderLight: Story = { ...SiteHeaderStory, name: "SiteHeader Light", globals: { theme: "light" } };
+export const SiteHeaderMobile320: Story = {
+  ...SiteHeaderStory,
+  name: "SiteHeader Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const HeaderSearchLight: Story = {
+  ...HeaderSearchStory,
+  name: "HeaderSearch Light",
+  globals: { theme: "light" },
+};
+export const HeaderSearchMobile320: Story = {
+  ...HeaderSearchStory,
+  name: "HeaderSearch Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const UserMenuLight: Story = { ...UserMenuStory, name: "UserMenu Light", globals: { theme: "light" } };
+export const UserMenuMobile320: Story = {
+  ...UserMenuStory,
+  name: "UserMenu Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const SiteFooterLight: Story = { ...SiteFooterStory, name: "SiteFooter Light", globals: { theme: "light" } };
+export const SiteFooterMobile320: Story = {
+  ...SiteFooterStory,
+  name: "SiteFooter Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const ChannelSidebarLight: Story = {
+  ...ChannelSidebarStory,
+  name: "ChannelSidebar Light",
+  globals: { theme: "light" },
+};
+export const ChannelSidebarMobile320: Story = {
+  ...ChannelSidebarStory,
+  name: "ChannelSidebar Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const SectionNavLight: Story = { ...SectionNavStory, name: "SectionNav Light", globals: { theme: "light" } };
+export const SectionNavMobile320: Story = {
+  ...SectionNavStory,
+  name: "SectionNav Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const PageLayoutsLight: Story = { ...PageLayoutsStory, name: "PageLayouts Light", globals: { theme: "light" } };
+export const PageLayoutsMobile320: Story = {
+  ...PageLayoutsStory,
+  name: "PageLayouts Mobile320",
   globals: { viewport: { value: "mobile320" } },
 };

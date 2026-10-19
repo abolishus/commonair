@@ -64,3 +64,42 @@ export const BreadcrumbStory: Story = {
 export const PageTabsStory: Story = { name: "PageTabs", render: () => tabs };
 export const Light: Story = { ...PageHeaderStory, globals: { theme: "light" } };
 export const Mobile320: Story = { ...PageHeaderStory, globals: { viewport: { value: "mobile320" } } };
+
+export const PageHeaderLight: Story = { ...PageHeaderStory, name: "PageHeader Light", globals: { theme: "light" } };
+export const PageHeaderMobile320: Story = {
+  ...PageHeaderStory,
+  name: "PageHeader Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const CompactPageHeaderLight: Story = {
+  ...CompactPageHeader,
+  name: "CompactPageHeader Light",
+  globals: { theme: "light" },
+};
+export const CompactPageHeaderMobile320: Story = {
+  ...CompactPageHeader,
+  name: "CompactPageHeader Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const SectionLight: Story = { ...SectionStory, name: "Section Light", globals: { theme: "light" } };
+export const SectionMobile320: Story = {
+  ...SectionStory,
+  name: "Section Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const BreadcrumbLight: Story = { ...BreadcrumbStory, name: "Breadcrumb Light", globals: { theme: "light" } };
+export const BreadcrumbMobile320: Story = {
+  ...BreadcrumbStory,
+  name: "Breadcrumb Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
+
+export const PageTabsLight: Story = { ...PageTabsStory, name: "PageTabs Light", globals: { theme: "light" } };
+export const PageTabsMobile320: Story = {
+  ...PageTabsStory,
+  name: "PageTabs Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};

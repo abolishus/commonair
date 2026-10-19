@@ -5,6 +5,8 @@ import { userEvent } from "@testing-library/user-event";
 import { expect, test } from "vite-plus/test";
 import {
   AppShell,
+  NavLink,
+  SectionNav,
   PageContainer,
   ResponsiveGrid,
   SiteFooter,
@@ -134,4 +136,39 @@ test("UserMenu opens and supports arrow-key item navigation", async () => {
   expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy();
   await user.keyboard("{ArrowDown}");
   expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
+});
+
+test("NavLink honors router render elements and current-page state", () => {
+  render(
+    <NavLink
+      item={{
+        id: "settings",
+        label: "Settings",
+        render: (
+          <a href="/router-settings" data-router-link>
+            Router destination
+          </a>
+        ),
+        current: true,
+      }}
+      data-testid="route-link"
+    />,
+  );
+  const link = screen.getByTestId("route-link");
+  expect(link.getAttribute("href")).toBe("/router-settings");
+  expect(link.hasAttribute("data-router-link")).toBe(true);
+  expect(link.getAttribute("aria-current")).toBe("page");
+});
+
+test("disabled NavLinks and SectionNav items cannot navigate", () => {
+  const disabled = { id: "disabled", label: "Unavailable", href: "/unavailable", disabled: true };
+  render(
+    <>
+      <NavLink item={disabled} data-testid="disabled-link" />
+      <SectionNav label="Settings" items={[disabled]} data-testid="section-nav" />
+    </>,
+  );
+  expect(screen.getByTestId("disabled-link").tagName).toBe("SPAN");
+  expect(screen.getByTestId("disabled-link").getAttribute("aria-disabled")).toBe("true");
+  expect(screen.queryAllByRole("link", { name: "Unavailable" })).toHaveLength(0);
 });
