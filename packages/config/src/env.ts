@@ -106,7 +106,8 @@ export const authEnv = z.object({
   ALTCHA_HMAC_KEY: secret,
   /**
    * Allow demo fixture accounts (`DEMO_FIXTURES` in contracts: reserved `demo_` usernames on the
-   * `.invalid` fixture domain) to sign up. Local and staging only; refused in production.
+   * `.invalid` fixture domain) to sign up. For local and staging instances; never honoured on
+   * the flagship (`INSTANCE_IS_FLAGSHIP`).
    */
   DEMO_SEED_ENABLED: bool.default(false),
   OAUTH_DISCORD_CLIENT_ID: z.string().optional(),

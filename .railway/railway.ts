@@ -99,6 +99,8 @@ export default defineRailway((ctx) => {
     ...secrets,
     NODE_ENV: "production",
     LOG_LEVEL: "info",
+    // Staging accepts demo fixture accounts (demo_* on the .invalid fixture domain) for the seed.
+    DEMO_SEED_ENABLED: "true",
     INSTANCE_NAME: `CommonAir (${ctx.environmentName ?? "staging"})`,
     // Production mode requires instance contacts. Staging placeholders on the web domain (all
     // mail goes to Mailpit here); replace them with real mailboxes for a public instance.

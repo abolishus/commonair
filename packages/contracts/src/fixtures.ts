@@ -6,7 +6,7 @@
  * only if it matches every anchor: the reserved username prefix (real sign-ups are refused it),
  * the fixture email domain (`.invalid` is reserved by RFC 6761, so no real mailbox can verify it)
  * and, for cleanup, an id recorded in the seed manifest. Fixture sign-ups need
- * `DEMO_SEED_ENABLED=true` on the instance and are refused in production.
+ * `DEMO_SEED_ENABLED=true` on the instance and are never honoured on the flagship.
  */
 export const DEMO_FIXTURES = {
   usernamePrefix: "demo_",
