@@ -73,7 +73,8 @@ const SECRETS = [
 
 export default defineRailway((ctx) => {
   const db = postgres("postgres");
-  const media = bucket("media");
+  // Bucket regions cannot change after creation.
+  const media = bucket("media", { region: "iad" });
 
   // Valkey holds ephemeral state only (architecture.md): no volume, no persistence.
   const valkey = service("valkey", {
@@ -99,6 +100,14 @@ export default defineRailway((ctx) => {
     NODE_ENV: "production",
     LOG_LEVEL: "info",
     INSTANCE_NAME: `CommonAir (${ctx.environmentName ?? "staging"})`,
+    // Production mode requires instance contacts. Staging placeholders on the web domain (all
+    // mail goes to Mailpit here); replace them with real mailboxes for a public instance.
+    ...Object.fromEntries(
+      ["CONTACT", "SECURITY", "ABUSE", "DMCA", "PRIVACY"].map((k) => [
+        `${k}_EMAIL`,
+        `${k.toLowerCase()}@${ref("RAILWAY_PUBLIC_DOMAIN", "web")}`,
+      ]),
+    ),
     PUBLIC_URL: publicUrl("https", "web"),
     API_PUBLIC_URL: publicUrl("https", "api"),
     CHAT_PUBLIC_URL: `${publicUrl("wss", "chat")}/ws`,
@@ -145,15 +154,20 @@ export default defineRailway((ctx) => {
    * (Railway passes service variables to matching ARGs). `PORT` points Railway's healthcheck
    * at the service's own health port.
    */
-  const app = (name: string, svc: string, port: number, opts: { tcp?: number[] } = {}) =>
+  const app = (
+    name: string,
+    svc: string,
+    port: number,
+    opts: { tcp?: number[] } = {},
+    extra: Record<string, string> = {},
+  ) =>
     service(name, {
       ...opts,
       source: github(REPO, { branch: "main" }),
       build: { builder: "DOCKERFILE", dockerfilePath: SERVICE_DOCKERFILE },
       healthcheck: "/healthz",
       healthcheckTimeout: 120,
-      deploy: { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 10 },
-      env: { ...appEnv, SERVICE: svc, PORT: String(port), OTEL_SERVICE_NAME: svc },
+      env: { ...appEnv, SERVICE: svc, PORT: String(port), OTEL_SERVICE_NAME: svc, ...extra },
     });
 
   // Migrations as the database owner, then the least-privilege app role; exits when done.
@@ -161,7 +175,6 @@ export default defineRailway((ctx) => {
     source: github(REPO, { branch: "main" }),
     build: { builder: "DOCKERFILE", dockerfilePath: SERVICE_DOCKERFILE },
     start: "sh -c 'bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.ts'",
-    deploy: { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 5 },
     env: {
       SERVICE: "tools",
       DATABASE_URL: db.env.DATABASE_URL,
@@ -173,6 +186,7 @@ export default defineRailway((ctx) => {
     source: github(REPO, { branch: "main" }),
     build: { builder: "DOCKERFILE", dockerfilePath: "infra/mediamtx/Containerfile" },
     tcp: [PORTS.rtmp],
+    // Railway keeps this once set; restart MediaMTX whenever it exits.
     deploy: { restartPolicyType: "ALWAYS" },
     env: {
       INTERNAL_API_SECRET: preserve(),
@@ -187,7 +201,7 @@ export default defineRailway((ctx) => {
   const origin = app("origin", "origin", PORTS.origin);
   // IRC: plain TCP through Railway's TCP proxy; TLS clients use the WebSocket listener behind an
   // HTTPS domain (the TLS listener's certificate is self-signed on this host).
-  const irc = app("irc", "irc", PORTS.ircHealth, { tcp: [PORTS.irc] });
+  const irc = app("irc", "irc", PORTS.ircHealth, { tcp: [PORTS.irc] }, { IRC_TLS_ALLOW_SELF_SIGNED: "true" });
   // Scratch space is the container filesystem: Railway volumes mount as root and the images
   // run as `bun`, so recordings in progress do not survive a restart on this host.
   const mediaSvc = app("media", "media", PORTS.media);

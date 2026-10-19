@@ -130,19 +130,22 @@ export function generateSelfSignedCert(commonName = "localhost", days = 30, now 
 }
 
 /**
- * Cert/key files when configured; otherwise an ephemeral cert outside production.
- * Production without files is a configuration error.
+ * Cert/key files when configured; otherwise an ephemeral cert outside production, or in
+ * production when `allowSelfSigned` (the TLS port is not exposed). Production without either is
+ * a configuration error.
  */
 export async function loadTls(opts: {
   certFile?: string | undefined;
   keyFile?: string | undefined;
   production: boolean;
+  allowSelfSigned?: boolean;
 }): Promise<TlsMaterial> {
   if (opts.certFile && opts.keyFile) {
     const [cert, key] = await Promise.all([readFile(opts.certFile, "utf8"), readFile(opts.keyFile, "utf8")]);
     return { cert, key, ephemeral: false };
   }
   if (opts.certFile || opts.keyFile) throw new Error("IRC_TLS_CERT_FILE and IRC_TLS_KEY_FILE must be set together");
-  if (opts.production) throw new Error("IRC_TLS_CERT_FILE and IRC_TLS_KEY_FILE are required in production");
+  if (opts.production && !opts.allowSelfSigned)
+    throw new Error("IRC_TLS_CERT_FILE and IRC_TLS_KEY_FILE are required in production");
   return generateSelfSignedCert();
 }
