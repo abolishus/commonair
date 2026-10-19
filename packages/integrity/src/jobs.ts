@@ -613,10 +613,9 @@ export async function verifyReceipts(
     }
     await writeFlagsAndAudit(tx, flags, audits);
   });
-  // Race with a concurrent relay heartbeat: the API reads the relay row when the request arrives
-  // and HSETs `KEYS.relays` afterwards, so a heartbeat that read `active` before this commit can
-  // re-add the entry after this HDEL. It self-heals: the relay's next heartbeat (30 s) reads
-  // `suspended` and removes it. Closing the window needs the API to re-read the row after its HSET.
+  // A concurrent relay heartbeat that read `active` before this commit may HSET `KEYS.relays`
+  // after this HDEL; the API re-reads the row after its HSET and drops the entry again
+  // (services/api `publishRelay`), so the suspension sticks.
   if (opts.valkey && result.suspendedRelays.length > 0) {
     try {
       await opts.valkey.hdel(KEYS.relays, ...result.suspendedRelays);
