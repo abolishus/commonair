@@ -23,6 +23,7 @@ writeTimeout: 10s
 # user `internal` + password INTERNAL_API_SECRET in the JSON body, and streamers by the
 # stream key in the query (`?key=`) or the WHIP bearer token. Nothing is excluded: the control
 # API and metrics also go through the hook, so they need the internal credentials too.
+# Hosts other than compose's override this with MTX_AUTHHTTPADDRESS (e.g. Railway, .railway/).
 authMethod: http
 authHTTPAddress: http://api:3001/internal/media/auth
 authHTTPExclude: []
@@ -96,7 +97,7 @@ paths:
   # The hooks tell the API the stream went online/offline; the API owns the broadcast row and
   # publishes LiveEvent on the bus, which services/media consumes. No shell is involved:
   # MediaMTX expands $VARS itself (the $MTX_* hook variables, then its own environment for
-  # $INTERNAL_API_SECRET) and only then splits the command with shell quoting rules, so the
+  # $INTERNAL_API_SECRET and $API_INTERNAL_URL) and only then splits the command with shell quoting rules, so the
   # variables expand even inside the single-quoted JSON. MTX_QUERY is URL-encoded, so it
   # cannot break out of the JSON string.
   "~^live/[a-z0-9_]{3,25}$":
@@ -105,14 +106,14 @@ paths:
       --header "x-internal-secret: $INTERNAL_API_SECRET"
       --header "content-type: application/json"
       --post-data '{"path":"$MTX_PATH","sourceType":"$MTX_SOURCE_TYPE","sourceId":"$MTX_SOURCE_ID","query":"$MTX_QUERY"}'
-      http://api:3001/internal/media/ready
+      $API_INTERNAL_URL/internal/media/ready
     runOnOnlineRestart: false
     runOnOffline: >-
       wget -q -O- -T 10
       --header "x-internal-secret: $INTERNAL_API_SECRET"
       --header "content-type: application/json"
       --post-data '{"path":"$MTX_PATH","sourceType":"$MTX_SOURCE_TYPE","sourceId":"$MTX_SOURCE_ID","query":"$MTX_QUERY"}'
-      http://api:3001/internal/media/not-ready
+      $API_INTERNAL_URL/internal/media/not-ready
 
   # Transcoded renditions: live/<slug>/<rendition>, published over RTSP by services/media.
   # The API auth hook allows publishing here only to the internal user.
