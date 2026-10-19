@@ -9,6 +9,7 @@ import { Copy01Icon } from "@hugeicons/core-free-icons";
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
+import { StreamHealthCard } from "../../components/stream-health-card.tsx";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
@@ -37,6 +38,7 @@ function DashboardPage(): React.JSX.Element {
           {t("dashboard.viewChannel")}
         </Link>
       </div>
+      <StreamHealthCard key={channel} channel={channel} />
       <StreamSetup channel={channel} />
     </section>
   );

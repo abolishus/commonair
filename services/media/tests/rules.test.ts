@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
+import { HEALTH_WARNING_CODES } from "@commonair/contracts/enums";
 import type { ProbeResult } from "../src/ffmpeg/probe.ts";
 import {
   bitrateKbps,
@@ -121,5 +122,11 @@ describe("derived metrics", () => {
     expect(droppedFrames({ framesInErrorDelta: 40, probe, intervalSeconds: 5 })).toBe(40);
     expect(droppedFrames({ framesInErrorDelta: null, probe: null, intervalSeconds: 5 })).toBe(0);
     expect(droppedFrames({ framesInErrorDelta: -3, probe: null, intervalSeconds: 5 })).toBe(0);
+  });
+});
+
+describe("warning codes contract", () => {
+  test("WARNINGS emits exactly the codes in HEALTH_WARNING_CODES", () => {
+    expect(Object.values(WARNINGS).sort()).toEqual([...HEALTH_WARNING_CODES].sort());
   });
 });
