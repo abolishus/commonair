@@ -10,6 +10,10 @@
  * A session's `swarm` field is the swarm of its latest announce: one that announces to a second
  * info hash moves there (integrity judges one swarm per session). Its membership in the earlier
  * swarm's ZSET stays until it stops, disconnects, or ages out of the TTL.
+ *
+ * `p2pChannelNet(channelId, net)` counts the channel's announcers per network across all of its
+ * swarms (client-chosen info hashes make per-swarm counts meaningless) and is never pruned on
+ * leave.
  */
 import { KEYS, P2P_EVIDENCE } from "@commonair/contracts/internal";
 import type { ValkeyClient } from "@commonair/service";
@@ -38,9 +42,11 @@ export class Evidence {
   }
 
   /** Record one accepted announce. Throws on a Valkey error; the caller logs and carries on. */
-  async record(sid: string, swarm: string, net: string, nowMs: number): Promise<void> {
+  async record(sid: string, channelId: string, swarm: string, net: string, nowMs: number): Promise<void> {
     const peer = KEYS.p2pPeer(sid);
     const swarmKey = KEYS.p2pSwarm(swarm);
+    const chnet = KEYS.p2pChannelNet(channelId, net);
+    const cutoff = `(${nowMs - this.ttlSeconds * 1000}`;
     const results = await this.valkey
       .pipeline()
       .hset(peer, { swarm, net, last: String(nowMs) })
@@ -48,8 +54,11 @@ export class Evidence {
       .hincrby(peer, "announces", 1)
       .expire(peer, this.ttlSeconds)
       .zadd(swarmKey, nowMs, sid)
-      .zremrangebyscore(swarmKey, "-inf", `(${nowMs - this.ttlSeconds * 1000}`)
+      .zremrangebyscore(swarmKey, "-inf", cutoff)
       .expire(swarmKey, this.ttlSeconds)
+      .zadd(chnet, nowMs, sid)
+      .zremrangebyscore(chnet, "-inf", cutoff)
+      .expire(chnet, this.ttlSeconds)
       .exec();
     throwOnError(results);
   }
@@ -71,7 +80,10 @@ export class Evidence {
     throwOnError(await p.exec());
   }
 
-  /** The session left these swarms (stopped or disconnected). */
+  /**
+   * The session left these swarms (stopped or disconnected): live membership only. `p2pPeer`,
+   * `p2pLinks` and `p2pChannelNet` stay until the TTL, so leaving never dodges the per-network cap.
+   */
   async forget(sid: string, swarms: readonly string[]): Promise<void> {
     if (swarms.length === 0) return;
     const p = this.valkey.pipeline();

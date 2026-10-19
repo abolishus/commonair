@@ -136,6 +136,19 @@ export function canonicalIp(ip: string): string {
 }
 
 /**
+ * Subject of the per-address connection limit: the address for IPv4, its /64 for IPv6 (one
+ * subscriber usually holds a whole /64, so per-address limits would be trivially sidestepped).
+ * Unparseable input is returned canonicalised.
+ */
+export function connectionKey(ip: string): string {
+  const parsed = parseIp(ip.trim().replace(/^\[(.*)\]$/, "$1"));
+  if (!parsed) return canonicalIp(ip);
+  if (parsed.v === 4) return v4String(parsed.n);
+  const mask = ((1n << 64n) - 1n) << 64n;
+  return `${v6String(parsed.n & mask)}/64`;
+}
+
+/**
  * The network an address belongs to for P2P evidence: its /24 (IPv4) or /48 (IPv6) in canonical
  * form, e.g. `203.0.113.0/24`, `2001:db8:1::/48`. IPv4-mapped IPv6 counts as IPv4. Unparseable
  * input yields null.

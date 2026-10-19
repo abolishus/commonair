@@ -50,6 +50,7 @@ At upgrade the tracker requires:
 | `TRACKER_MAX_CONNECTIONS` / `TRACKER_MAX_CONNECTIONS_PER_IP`                                                    | 503/429 |
 
 The heartbeat is re-checked on announces, at most every 30 s; a lapsed session is closed with 1008.
+A re-check that fails on a Valkey error is not recorded, so the next announce tries again.
 The signature is checked with `verifyPlaybackTokenSignature` from `@commonair/tokens`.
 
 A socket whose token has a **newer** `iat` than the session's open socket replaces it: the old
@@ -73,6 +74,8 @@ addresses or peer ids.
 | Frames per socket   | token bucket, burst 20, 5/s; overflow closes with 1008 |
 | Idle timeout        | 150 s (Bun pings keep live sockets open)               |
 | Binary frames       | closed with 1003                                       |
+| Send backpressure   | 1 MiB queued to a socket that stops reading closes it  |
+| Per-address limit   | per IPv4 address, per IPv6 /64                         |
 
 ## Evidence (Valkey)
 
@@ -84,6 +87,9 @@ in one pipeline:
   IPv4-mapped IPv6) or /48 (IPv6) prefix), `last` (epoch ms); `HSETNX first`; `HINCRBY announces 1`;
   `EXPIRE` `P2P_EVIDENCE.peerTtlSeconds`.
 - `ZADD KEYS.p2pSwarm(swarm) <ms> sid`, trim members older than the TTL, `EXPIRE` the same TTL.
+- `ZADD KEYS.p2pChannelNet(channelId, net) <ms> sid`, trim to the TTL window, `EXPIRE` the same
+  TTL. This counts a network's announcers across **all** of the channel's swarms, because clients
+  choose info hashes and a farm could otherwise split into private swarms under the cap.
 
 On a **completed signalling exchange**, i.e. the tracker relayed session A's offer to session B and
 B's answer with the same `offer_id` came back in the same swarm within
@@ -95,7 +101,9 @@ socket remembers at most 100 relayed offers awaiting an answer (`src/exchanges.t
 evicted first. Integrity decides which links count (another network, the per-network cap).
 
 A session's `swarm` is the swarm of its **latest** announce: one that announces to a second info
-hash moves there. `stopped` and socket close `ZREM` the session from the swarms it left. Valkey
+hash moves there. `stopped` and socket close `ZREM` the session from the `p2pSwarm` ZSETs it left
+(that key is live membership). They never touch `p2pPeer`, `p2pLinks` or `p2pChannelNet`, which
+age out with the TTL, so leaving never dodges the per-network cap. Valkey
 failures never drop signalling: they are logged and counted (`tracker.evidence.failures`).
 
 Counters (`@commonair/observability` meter `tracker`): `tracker.connections.opened|closed`,

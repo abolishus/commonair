@@ -13,7 +13,7 @@ import { runService, valkeyCheck, type RunningService, type ValkeyClient } from 
 import { heartbeatFresh, verifyTrackerToken } from "./auth.ts";
 import { Evidence } from "./evidence.ts";
 import { PendingExchanges } from "./exchanges.ts";
-import { canonicalIp, clientIp } from "./ip.ts";
+import { canonicalIp, clientIp, connectionKey } from "./ip.ts";
 import { LIMITS, parseFrame } from "./protocol.ts";
 import { TokenBucket } from "./ratelimit.ts";
 import { SwarmRegistry, type Conn } from "./swarm.ts";
@@ -39,6 +39,8 @@ export interface TrackerOptions {
   limits: TrackerLimits;
   /** How often an announcing socket's heartbeat is re-checked (default 30 s). */
   heartbeatRecheckMs?: number;
+  /** Bytes queued to a slow socket before it is closed (default LIMITS.backpressureBytes). */
+  backpressureBytes?: number;
   /** Rate limit override (tests). */
   rate?: { burst: number; perSecond: number };
   now?: () => number;
@@ -52,6 +54,8 @@ interface SocketData extends Conn {
   /** The token's `iat`: a socket with a newer one for the same session replaces this one. */
   iat: number;
   ip: string;
+  /** Per-address connection-limit subject (`connectionKey`). */
+  ipKey: string;
   net: Promise<string>;
   bucket: TokenBucket;
   swarms: Map<string, string>;
@@ -135,11 +139,11 @@ export function startTracker(opts: TrackerOptions): Tracker {
   const upgrading = new Set<string>();
   const sockets = new Set<ServerWebSocket<SocketData>>();
 
-  const release = (ip: string) => {
+  const release = (key: string) => {
     slots--;
-    const n = (perIp.get(ip) ?? 1) - 1;
-    if (n <= 0) perIp.delete(ip);
-    else perIp.set(ip, n);
+    const n = (perIp.get(key) ?? 1) - 1;
+    if (n <= 0) perIp.delete(key);
+    else perIp.set(key, n);
   };
   const refuse = (status: number, reason: string) => {
     stats.refused[reason] = (stats.refused[reason] ?? 0) + 1;
@@ -159,10 +163,11 @@ export function startTracker(opts: TrackerOptions): Tracker {
     const socketIp = server.requestIP(req)?.address ?? "0.0.0.0";
     const ip = canonicalIp(clientIp(socketIp, req.headers.get("x-forwarded-for"), opts.trustedProxies));
     if (slots >= opts.limits.maxConnections) return refuse(503, "capacity");
-    if ((perIp.get(ip) ?? 0) >= opts.limits.maxConnectionsPerIp) return refuse(429, "ip_limit");
+    const ipKey = connectionKey(ip);
+    if ((perIp.get(ipKey) ?? 0) >= opts.limits.maxConnectionsPerIp) return refuse(429, "ip_limit");
     // Hold the slot through the async checks so concurrent upgrades cannot overshoot the limits.
     slots++;
-    perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
+    perIp.set(ipKey, (perIp.get(ipKey) ?? 0) + 1);
     let upgraded = false;
     try {
       const token = new URL(req.url).searchParams.get("t");
@@ -194,6 +199,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
         iat,
         pending: new PendingExchanges(),
         ip,
+        ipKey,
         net: evidence.networkHash(ip),
         bucket: new TokenBucket(rate.burst, rate.perSecond, now()),
         swarms: new Map(),
@@ -213,7 +219,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
       }
       return undefined;
     } finally {
-      if (!upgraded) release(ip);
+      if (!upgraded) release(ipKey);
     }
   }
 
@@ -230,18 +236,19 @@ export function startTracker(opts: TrackerOptions): Tracker {
     const frame = parsed.frame;
 
     if (frame.action === "announce" && frame.event !== "stopped" && now() - d.lastHeartbeatCheck >= recheckMs) {
-      let fresh = true;
+      let fresh: boolean | null = null;
       try {
         fresh = heartbeatFresh(await valkey.zscore(KEYS.viewers(d.channelId), d.sid), now());
       } catch (err) {
-        // Valkey trouble never drops signalling; the next announce re-checks.
+        // Valkey trouble never drops signalling; the check is not recorded, so the next announce
+        // re-checks.
         logger.warn("heartbeat re-check failed", { err: err instanceof Error ? err.message : String(err) });
       }
-      if (!fresh) {
+      if (fresh === false) {
         ws.close(1008, "session not watching");
         return;
       }
-      d.lastHeartbeatCheck = now();
+      if (fresh) d.lastHeartbeatCheck = now();
       if (d.closed) return;
     }
 
@@ -266,7 +273,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
       metrics.answers.add(1);
     }
     const at = now();
-    d.net.then((net) => evidence.record(d.sid, outcome.swarm, net, at)).catch(evidenceFailed);
+    d.net.then((net) => evidence.record(d.sid, d.channelId, outcome.swarm, net, at)).catch(evidenceFailed);
     const offerer = outcome.exchange as SocketData | null;
     if (offerer) {
       stats.exchanges++;
@@ -285,7 +292,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
     stats.connections--;
     metrics.closed.add(1);
     if (sessions.get(d.sid) === d) sessions.delete(d.sid);
-    release(d.ip);
+    release(d.ipKey);
     const left = registry.leaveAll(d);
     // A replacing socket of the same session may already be in some of these swarms.
     const current = sessions.get(d.sid);
@@ -303,6 +310,8 @@ export function startTracker(opts: TrackerOptions): Tracker {
       maxPayloadLength: LIMITS.maxFrameBytes,
       idleTimeout: LIMITS.idleTimeoutSeconds,
       perMessageDeflate: false,
+      backpressureLimit: opts.backpressureBytes ?? LIMITS.backpressureBytes,
+      closeOnBackpressureLimit: true,
       open(ws) {
         ws.data.ws = ws;
         upgrading.delete(ws.data.sid);

@@ -19,6 +19,11 @@ export const LIMITS = {
   ratePerSecond: 5,
   /** Seconds without traffic (Bun pings in between) before the socket is closed. */
   idleTimeoutSeconds: 150,
+  /**
+   * Bytes queued to a slow socket before it is closed: relayed offers are fan-out the receiver
+   * did not ask to pace, so a reader that stalls must not grow server memory without bound.
+   */
+  backpressureBytes: 1024 * 1024,
   /** Re-announce interval told to clients, seconds. */
   announceInterval: 120,
 } as const;

@@ -3,7 +3,21 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { trustedProxies } from "../src/env.ts";
-import { canonicalIp, clientIp, isValidCidr, networkPrefix } from "../src/ip.ts";
+import { canonicalIp, clientIp, connectionKey, isValidCidr, networkPrefix } from "../src/ip.ts";
+
+describe("connectionKey", () => {
+  test.each([
+    ["203.0.113.77", "203.0.113.77"],
+    ["::ffff:203.0.113.77", "203.0.113.77"],
+    ["2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"],
+    ["[2001:DB8:1:2:ffff:ffff:ffff:ffff]", "2001:db8:1:2::/64"],
+    ["2001:db8:1:3::1", "2001:db8:1:3::/64"],
+    ["::1", "::/64"],
+    ["garbage", "garbage"],
+  ])("%s -> %s", (ip, want) => {
+    expect(connectionKey(ip)).toBe(want);
+  });
+});
 
 describe("networkPrefix", () => {
   test.each([

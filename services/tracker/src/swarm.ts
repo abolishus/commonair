@@ -37,6 +37,8 @@ interface PeerEntry {
 interface Swarm {
   peers: Map<string, PeerEntry>;
   list: PeerEntry[];
+  /** Running count of entries with `complete` set. */
+  complete: number;
   downloaded: number;
 }
 
@@ -87,9 +89,7 @@ export class SwarmRegistry {
   counts(swarm: string): SwarmCounts {
     const s = this.swarms.get(swarm);
     if (!s) return { ...ZERO };
-    let complete = 0;
-    for (const p of s.list) if (p.complete) complete++;
-    return { complete, incomplete: s.list.length - complete, downloaded: s.downloaded };
+    return { complete: s.complete, incomplete: s.list.length - s.complete, downloaded: s.downloaded };
   }
 
   handle(conn: Conn, frame: Frame): Outcome {
@@ -111,6 +111,7 @@ export class SwarmRegistry {
     const entry = s?.peers.get(peerId);
     if (!s || !entry || entry.conn !== conn) return;
     s.peers.delete(peerId);
+    if (entry.complete) s.complete--;
     const last = s.list.pop();
     if (last && last !== entry) {
       s.list[entry.index] = last;
@@ -141,7 +142,7 @@ export class SwarmRegistry {
       else if (conn.swarms.size >= LIMITS.maxSwarmsPerSocket) return this.refuse(conn, "too many swarms", f.infoHash);
       s = this.swarms.get(swarm);
       if (!s) {
-        s = { peers: new Map(), list: [], downloaded: 0 };
+        s = { peers: new Map(), list: [], complete: 0, downloaded: 0 };
         this.swarms.set(swarm, s);
         this.opts.onSwarmCount?.(1);
       }
@@ -153,8 +154,10 @@ export class SwarmRegistry {
     // Invariant: the branch above created the swarm if it was missing.
     const sw = s as Swarm;
 
+    const wasComplete = entry.complete;
     if (f.left === 0 || f.event === "completed") entry.complete = true;
     else if (f.left !== undefined) entry.complete = false;
+    if (entry.complete !== wasComplete) sw.complete += entry.complete ? 1 : -1;
     if (f.event === "completed" && !entry.completed) {
       entry.completed = true;
       sw.downloaded++;

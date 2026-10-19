@@ -67,6 +67,25 @@ describe("announce", () => {
     expect(r.counts(SWARM)).toEqual({ complete: 1, incomplete: 1, downloaded: 1 });
   });
 
+  test("the running seeder count follows leaves and repeated announces", () => {
+    const { r } = registry();
+    const a = conn();
+    const b = conn();
+    r.handle(a, frame({ peer_id: id(1), left: 0 }));
+    r.handle(a, frame({ peer_id: id(1), left: 0 }));
+    r.handle(b, frame({ peer_id: id(2), event: "completed" }));
+    expect(r.counts(SWARM)).toMatchObject({ complete: 2, incomplete: 0 });
+    // A seeder that restarts with a new peer id is replaced, not double counted.
+    r.handle(a, frame({ peer_id: id(3), left: 9 }));
+    expect(r.counts(SWARM)).toMatchObject({ complete: 1, incomplete: 1 });
+    r.handle(b, frame({ peer_id: id(2), event: "stopped" }));
+    expect(r.counts(SWARM)).toMatchObject({ complete: 0, incomplete: 1 });
+    // The emptied swarm is dropped, so a new one starts from zero.
+    r.leaveAll(a);
+    r.handle(b, frame({ peer_id: id(2), left: 0 }));
+    expect(r.counts(SWARM)).toEqual({ complete: 1, incomplete: 0, downloaded: 0 });
+  });
+
   test("a peer id claimed by another socket is refused", () => {
     const { r } = registry();
     const a = conn();

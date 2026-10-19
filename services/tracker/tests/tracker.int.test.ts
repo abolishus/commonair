@@ -5,6 +5,7 @@
  * The tracker in-process on an ephemeral port against the real Valkey: authenticated sockets,
  * offer/answer relay between two sessions on two networks, evidence in Valkey, and refusals.
  */
+import { connect as tcpConnect, type Socket } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { KEYS, p2pSwarmId } from "@commonair/contracts/internal";
 import { createLogger } from "@commonair/observability";
@@ -210,6 +211,16 @@ describe("signalling and evidence", () => {
     b.close();
     await eventually(async () => expect(await valkey.zcard(KEYS.p2pSwarm(SWARM))).toBe(0));
     expect(tracker.stats().swarms).toBe(0);
+
+    // The per-channel network ZSETs keep both sessions after `stopped` and close: leaving never
+    // dodges the per-network cap. Each network holds only its own session.
+    const chA = KEYS.p2pChannelNet(CHANNEL, await evidence.networkHash(NET_A));
+    const chB = KEYS.p2pChannelNet(CHANNEL, await evidence.networkHash(NET_B));
+    expect(await valkey.zrange(chA, 0, -1)).toContain(sidA);
+    expect(await valkey.zrange(chA, 0, -1)).not.toContain(sidB);
+    expect(await valkey.zrange(chB, 0, -1)).toContain(sidB);
+    expect(Number(await valkey.zscore(chA, sidA))).toBeGreaterThan(Date.now() - 10_000);
+    expect(await valkey.ttl(chB)).toBeGreaterThan(500);
   });
 
   test("an invalid frame gets a failure reason, not a close", async () => {
@@ -219,6 +230,23 @@ describe("signalling and evidence", () => {
     p.send("{not json");
     expect(await p.next((m) => "failure reason" in m)).toEqual({ "failure reason": "invalid json" });
     expect(p.closed).toBeNull();
+  });
+
+  test("p2pChannelNet counts one network across all of the channel's swarms", async () => {
+    const net = "192.0.2.";
+    const sids = [await session(), await session(), await session()];
+    const ps = await Promise.all(sids.map((sid, i) => connect(sid, `${net}${10 + i}`)));
+    // Three private swarms (client-chosen hashes), one network.
+    for (const [i, p] of ps.entries()) {
+      p.send({ action: "announce", info_hash: binaryId(200 + i), peer_id: binaryId(210 + i) });
+      await p.next((m) => m.interval !== undefined);
+    }
+    const key = KEYS.p2pChannelNet(CHANNEL, await new Evidence(valkey, SECRET).networkHash(`${net}1`));
+    await eventually(async () => expect((await valkey.zrange(key, 0, -1)).sort()).toEqual([...sids].sort()));
+    for (const p of ps) p.close();
+    await Bun.sleep(100);
+    expect(await valkey.zcard(key)).toBe(3);
+    await valkey.del(key);
   });
 
   test("an answer to an offer the tracker never relayed writes no links", async () => {
@@ -336,5 +364,91 @@ describe("refusals", () => {
     await valkey.zadd(KEYS.viewers(CHANNEL), Date.now() - 60_000, sid);
     p.send({ action: "announce", info_hash: binaryId(60), peer_id: binaryId(61) });
     expect((await p.waitClosed()).code).toBe(1008);
+  });
+});
+
+/** A raw WebSocket client that upgrades, sends text frames, and can stop reading. */
+function rawSocket(base: URL, path: string): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const s = tcpConnect(Number(base.port), base.hostname, () => {
+      s.write(
+        `GET ${path} HTTP/1.1\r\nHost: tracker\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+          `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+      );
+    });
+    s.once("data", (d) => (String(d).startsWith("HTTP/1.1 101") ? resolve(s) : reject(new Error(String(d)))));
+    s.once("error", reject);
+  });
+}
+/** One masked client text frame (RFC 6455). */
+function textFrame(text: string): Buffer {
+  const payload = Buffer.from(text);
+  const mask = Buffer.from([1, 2, 3, 4]);
+  const len = payload.length;
+  const head = len < 126 ? Buffer.from([0x81, 0x80 | len]) : Buffer.from([0x81, 0x80 | 126, len >> 8, len & 0xff]);
+  const body = Buffer.from(payload.map((b, i) => b ^ (mask[i % 4] ?? 0)));
+  return Buffer.concat([head, mask, body]);
+}
+
+describe("limits", () => {
+  let small: Tracker;
+  let base: string;
+  beforeAll(() => {
+    small = startTracker({
+      port: 0,
+      hostname: "127.0.0.1",
+      logger: createLogger({ service: "tracker-int-limits", level: "fatal" }),
+      valkey,
+      publicKey: key.publicKey,
+      internalSecret: SECRET,
+      trustedProxies: ["127.0.0.0/8", "::1/128"],
+      limits: { maxConnections: 100, maxConnectionsPerIp: 2, maxNumwant: 20, tokenMaxAgeSeconds: MAX_AGE },
+      backpressureBytes: 64 * 1024,
+      rate: { burst: 10_000, perSecond: 10_000 },
+    });
+    base = `ws://127.0.0.1:${small.url.port}`;
+  });
+  afterAll(async () => {
+    await small.stop();
+  });
+
+  test("the per-address limit counts an IPv6 /64 as one address", async () => {
+    const open = async (ip: string) => {
+      const p = await Peer.open(`${base}/?t=${await token(await session())}`, { "x-forwarded-for": ip });
+      peers.push(p);
+      return p;
+    };
+    const opened = [await open("2001:db8:1:2::1"), await open("2001:db8:1:2:ffff::2")];
+    const status = async (ip: string) =>
+      upgradeStatus(small.url, `/?t=${await token(await session())}`, { "x-forwarded-for": ip });
+    expect(await status("2001:db8:1:2::3")).toBe(429);
+    expect(small.stats().refused.ip_limit).toBeGreaterThanOrEqual(1);
+    // Another /64 of the same /48 is a different subscriber.
+    expect(await status("2001:db8:1:3::1")).toBe(101);
+    for (const p of opened) p.close();
+  });
+
+  test("a socket that stops reading is closed at the backpressure limit", async () => {
+    const hash = binaryId(150);
+    const slow = await rawSocket(small.url, `/?t=${await token(await session())}`);
+    slow.write(textFrame(JSON.stringify({ action: "announce", info_hash: hash, peer_id: binaryId(151) })));
+    await eventually(async () => expect(small.stats().swarms).toBe(1));
+    slow.pause();
+    const before = small.stats().connections;
+
+    const sender = await Peer.open(`${base}/?t=${await token(await session())}`, { "x-forwarded-for": NET_B });
+    peers.push(sender);
+    const sdp = { type: "offer", sdp: `v=0\r\n${"a=x\r\n".repeat(2500)}` };
+    for (let i = 0; i < 400; i++)
+      sender.send({
+        action: "announce",
+        info_hash: hash,
+        peer_id: binaryId(152),
+        offers: [{ offer: sdp, offer_id: binaryId(i) }],
+      });
+    // The slow socket is dropped; the sender keeps its connection.
+    await eventually(async () => expect(small.stats().connections).toBe(before), 10_000);
+    expect(sender.closed).toBeNull();
+    slow.destroy();
   });
 });
