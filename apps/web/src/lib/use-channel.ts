@@ -16,7 +16,8 @@ export function useChannel(slug: string, initial: ChannelSummary): ChannelSummar
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       try {
-        const value = summarize(await api().channels.get({ channel: slug }));
+        const requestedAt = Date.now();
+        const value = { ...summarize(await api().channels.get({ channel: slug })), requestedAt };
         if (!cancelled) setPolled({ after: initial, value });
       } catch {
         // Keep the last known state; try again on the next tick.

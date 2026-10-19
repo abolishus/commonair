@@ -10,7 +10,10 @@ export const en = {
   "nav.signUp": "Sign up",
   "nav.signOut": "Sign out",
   "nav.dashboardFor": "Dashboard for {name}",
+  "nav.main": "Main",
+  "nav.directory": "Browse",
   "auth.signOutFailed": "Could not sign out. Try again.",
+  "auth.sessionExpired": "Your session has ended. Sign in again to continue.",
 
   "footer.source": "Source",
   "footer.license": "Free software under the AGPL-3.0",
@@ -18,6 +21,21 @@ export const en = {
   "home.title": "Welcome to {name}",
   "home.tagline": "A member-owned cooperative for live streaming.",
   "home.toDashboard": "Go to your dashboard",
+
+  "directory.section.spotlight": "Spotlight",
+  "directory.section.new": "New and live",
+  "directory.section.live": "Live now",
+  "directory.section.following": "Following",
+  "directory.empty": "Nobody is live right now",
+  "directory.emptyHint": "Check back soon, or start streaming yourself.",
+  "directory.loadFailed": "The directory could not be loaded. Reload to try again.",
+  "directory.loading": "Loading live channels…",
+
+  "follow.follow": "Follow",
+  "follow.following": "Following",
+  "follow.countOne": "{count} follower",
+  "follow.countOther": "{count} followers",
+  "follow.failed": "Could not update your follow. Try again.",
 
   "field.email": "Email",
   "field.username": "Username",
@@ -98,6 +116,17 @@ export const en = {
   "chat.notConnected": "Chat is not connected yet.",
   "chat.signInPrompt": "Sign in to chat.",
   "chat.nameSeparator": ": ",
+  "chat.messageDeleted": "Message deleted",
+
+  "chat.mod.actionsFor": "Moderate {name}",
+  "chat.mod.timeout": "Time out for 10 minutes",
+  "chat.mod.ban": "Ban",
+  "chat.mod.timedOut": "{name} is timed out for 10 minutes",
+  "chat.mod.banned": "{name} is banned",
+  "chat.mod.banConfirmTitle": "Ban {name}?",
+  "chat.mod.banConfirmBody":
+    "They can no longer chat here until a moderator lifts the ban. Their messages are removed.",
+  "chat.mod.failed": "Could not do that. Try again.",
 
   "chat.notice.generic": "Chat could not do that.",
   "chat.notice.banned": "You are banned from this chat.",
