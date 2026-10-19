@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web app ↔ harness contract from `docs/testing/e1-selectors.md` and
- * `docs/testing/e2-selectors.md`: routes and `data-testid` values. Scenarios select only by these
+ * The web app ↔ harness contract from `docs/testing/e1-selectors.md`, `e2-selectors.md` and
+ * `e3-selectors.md`: routes and `data-testid` values. Scenarios select only by these
  * ids (never by visible text, which is translated). A unit test parses the markdown tables and
- * fails when this module and either document disagree.
+ * fails when this module and any of the documents disagree.
  */
 
 /** E1 ids (docs/testing/e1-selectors.md). */
@@ -63,7 +63,31 @@ export const E2_TEST_IDS = {
 /** E1 ids that the E2 document re-lists because E2 changes them. */
 export const E2_CHANGED_E1_IDS = [E1_TEST_IDS.chatMessage] as const;
 
-export const TEST_IDS = { ...E1_TEST_IDS, ...E2_TEST_IDS } as const;
+/** Ids E3 adds (docs/testing/e3-selectors.md). */
+export const E3_TEST_IDS = {
+  relaysLink: "relays-link",
+  relays: "relays",
+  relaysEmpty: "relays-empty",
+  relayCreateName: "relay-create-name",
+  relayCreateSubmit: "relay-create-submit",
+  relayToken: "relay-token",
+  relayRunCommand: "relay-run-command",
+  relayRow: "relay-row",
+  relayStatus: "relay-status",
+  relayBytesVerified: "relay-bytes-verified",
+  relayReceipts: "relay-receipts",
+  relaySuspendedReason: "relay-suspended-reason",
+  relayRemove: "relay-remove",
+} as const;
+
+/** E1 ids the E3 document re-lists: `player` gains `data-source`. */
+export const E3_CHANGED_E1_IDS = [E1_TEST_IDS.player] as const;
+
+export const TEST_IDS = { ...E1_TEST_IDS, ...E2_TEST_IDS, ...E3_TEST_IDS } as const;
+
+/** `data-source` values of `player` (never `p2p`: that is a loader, not a playlist source). */
+export const PLAYER_SOURCES = ["origin", "relay", "cdn"] as const;
+export type PlayerSource = (typeof PLAYER_SOURCES)[number];
 
 /** `data-section` values of `directory-section`. */
 export const DIRECTORY_SECTIONS = ["spotlight", "new", "live", "following"] as const;
@@ -77,6 +101,9 @@ export const ROUTE_PATTERNS = ["/", "/signup", "/signin", "/dashboard", "/$chann
 /** Routes the E2 document changes (a subset of ROUTE_PATTERNS: `/` is the directory now). */
 export const E2_ROUTE_PATTERNS = ["/", "/$channel"] as const;
 
+/** Routes the E3 document adds or changes (`/relays` is new). */
+export const E3_ROUTE_PATTERNS = ["/relays", "/dashboard", "/$channel"] as const;
+
 export const ROUTES = {
   home: "/",
   /** E2: `/` is the directory. */
@@ -84,6 +111,8 @@ export const ROUTES = {
   signup: "/signup",
   signin: "/signin",
   dashboard: "/dashboard",
+  /** E3: your relays. */
+  relays: "/relays",
   channel: (slug: string) => `/${encodeURIComponent(slug)}`,
   embed: (slug: string) => `/embed/${encodeURIComponent(slug)}`,
 } as const;

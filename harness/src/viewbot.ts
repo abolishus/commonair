@@ -119,6 +119,11 @@ export class ViewbotSwarm {
   get sessionIds(): string[] {
     return this.viewers.flatMap((v) => (v.sessionId ? [v.sessionId] : []));
   }
+
+  /** The bots' viewers (e.g. to see which ones the API assigned to a relay). */
+  get members(): readonly HttpViewer[] {
+    return this.viewers;
+  }
 }
 
 export interface FollowBurstOptions {

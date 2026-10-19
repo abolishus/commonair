@@ -4,6 +4,7 @@
 /** The web ↔ harness contract (docs/testing/e1-selectors.md) and the pure helpers e2e-basic uses. */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { RELAY_STATUSES } from "@commonair/contracts";
 import { describe, expect, test } from "vite-plus/test";
 import { extractLinks, findTokenLink } from "../src/mailpit.ts";
 import { verificationHop } from "../src/users.ts";
@@ -13,6 +14,10 @@ import {
   E2_CHANGED_E1_IDS,
   E2_ROUTE_PATTERNS,
   E2_TEST_IDS,
+  E3_CHANGED_E1_IDS,
+  E3_ROUTE_PATTERNS,
+  E3_TEST_IDS,
+  PLAYER_SOURCES,
   ROUTES,
   ROUTE_PATTERNS,
   TEST_IDS,
@@ -23,6 +28,7 @@ import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/
 
 const DOC = fileURLToPath(new URL("../../docs/testing/e1-selectors.md", import.meta.url));
 const DOC_E2 = fileURLToPath(new URL("../../docs/testing/e2-selectors.md", import.meta.url));
+const DOC_E3 = fileURLToPath(new URL("../../docs/testing/e3-selectors.md", import.meta.url));
 
 /** First-column code spans of the markdown table under `## <heading>`. */
 function tableKeys(markdown: string, heading: string): string[] {
@@ -80,10 +86,9 @@ describe("selectors match docs/testing/e2-selectors.md", () => {
     expect([...ours].sort()).toEqual([...documented].sort());
   });
 
-  test("E2 ids do not collide with E1 ids; TEST_IDS is their union", () => {
+  test("E2 ids do not collide with E1 ids", () => {
     const e1 = new Set<string>(Object.values(E1_TEST_IDS));
     for (const id of Object.values(E2_TEST_IDS)) expect(e1.has(id)).toBe(false);
-    expect(Object.values(TEST_IDS)).toHaveLength(e1.size + Object.values(E2_TEST_IDS).length);
     for (const id of E2_CHANGED_E1_IDS) expect(e1.has(id)).toBe(true);
   });
 
@@ -97,6 +102,53 @@ describe("selectors match docs/testing/e2-selectors.md", () => {
     const row = doc.split("\n").find((l) => l.startsWith("| `directory-section`")) ?? "";
     const documented = new Set([...row.matchAll(/`([a-z]+)`/g)].map((m) => m[1] ?? ""));
     expect([...documented].sort()).toEqual([...DIRECTORY_SECTIONS].sort());
+  });
+});
+
+describe("selectors match docs/testing/e3-selectors.md", () => {
+  const doc = readFileSync(DOC_E3, "utf8");
+
+  test("data-testid values: E3 ids plus the E1 ids E3 changes, no duplicates", () => {
+    const documented = tableKeys(doc, "Test ids");
+    const ours = [...Object.values(E3_TEST_IDS), ...E3_CHANGED_E1_IDS];
+    expect(documented.length).toBeGreaterThan(10);
+    expect(new Set(documented).size).toBe(documented.length);
+    expect([...ours].sort()).toEqual([...documented].sort());
+  });
+
+  test("E3 ids collide with neither E1 nor E2; TEST_IDS is the union of all three", () => {
+    const earlier = new Set<string>([...Object.values(E1_TEST_IDS), ...Object.values(E2_TEST_IDS)]);
+    for (const id of Object.values(E3_TEST_IDS)) expect(earlier.has(id)).toBe(false);
+    for (const id of E3_CHANGED_E1_IDS) expect(Object.values(E1_TEST_IDS)).toContain(id);
+    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + Object.values(E3_TEST_IDS).length);
+  });
+
+  test("routes: same set; /relays is new, the others are E1 routes", () => {
+    expect([...E3_ROUTE_PATTERNS].sort()).toEqual(tableKeys(doc, "Routes").sort());
+    expect(ROUTES.relays).toBe("/relays");
+    for (const r of E3_ROUTE_PATTERNS.filter((r) => r !== ROUTES.relays)) expect(ROUTE_PATTERNS).toContain(r);
+  });
+
+  test("player data-source values are the documented ones (never p2p)", () => {
+    const row = doc.split("\n").find((l) => l.startsWith("| `player`")) ?? "";
+    // Lower-case code spans in the row: the test id itself, the sources and the excluded `p2p`.
+    const documented = new Set([...row.matchAll(/`([a-z0-9]+)`/g)].map((m) => m[1] ?? ""));
+    documented.delete("player");
+    documented.delete("p2p");
+    expect([...documented].sort()).toEqual([...PLAYER_SOURCES].sort());
+    expect(row).toContain("never `p2p`");
+  });
+
+  test("relay-row data-status values are RELAY_STATUSES", () => {
+    expect(doc).toContain("`data-status` is a `RELAY_STATUSES` value");
+    expect([...RELAY_STATUSES]).toEqual(["pending", "active", "degraded", "suspended", "offline"]);
+  });
+
+  test("tid builds the row and player selectors the scenario uses", () => {
+    expect(tid(E3_TEST_IDS.relayRow, { "relay-id": "r1" })).toBe('[data-testid="relay-row"][data-relay-id="r1"]');
+    expect(tid(TEST_IDS.player, { source: "origin", state: "playing" })).toBe(
+      '[data-testid="player"][data-source="origin"][data-state="playing"]',
+    );
   });
 });
 
