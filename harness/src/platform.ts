@@ -19,7 +19,7 @@ import { AddressPool, DATACENTER_CIDRS_FILE, RESIDENTIAL_CIDRS_FILE, loadCidrLis
 import type { HarnessEnv } from "./env.ts";
 import { probeFfmpeg } from "./ffmpeg.ts";
 import { HttpViewer } from "./http-viewer.ts";
-import { Mailpit } from "./mailpit.ts";
+import { Mailpit, mailpitEndpoint } from "./mailpit.ts";
 import { type PlayerServer, startPlayerServer } from "./player-server.ts";
 import { podmanAvailable } from "./testing/mediamtx.ts";
 import { type ForwardingProxy, startForwardingProxy } from "./proxy.ts";
@@ -84,11 +84,12 @@ export class Platform {
       loadCidrList(env.HARNESS_DATACENTER_CIDRS_FILE ?? DATACENTER_CIDRS_FILE),
       seededRandom(seed ^ 0x5bd1e995),
     );
-    this.mailpit = new Mailpit(env.HARNESS_MAILPIT_URL);
+    this.mailpit = new Mailpit(env.HARNESS_MAILPIT_URL, env.HARNESS_MAILPIT_AUTH);
     this.users = new UserFactory({
       apiUrl: env.HARNESS_API_URL,
       webOrigin: new URL(env.HARNESS_WEB_URL).origin,
       mailpitUrl: env.HARNESS_MAILPIT_URL,
+      mailpitAuth: env.HARNESS_MAILPIT_AUTH,
       emailDomain: env.HARNESS_EMAIL_DOMAIN,
       names: this.names,
       apiFactory: (o) => this.api({ clientIp: o.clientIp, jar: o.jar, bearer: o.bearer, userAgent: o.userAgent }),
@@ -288,7 +289,9 @@ export class Platform {
       case "relay":
         return existsSync(new URL("../../relay/go.mod", import.meta.url)) ? null : "relay sources not present";
       case "mail":
-        return (await this.mailpit.ping()) ? null : `Mailpit unreachable at ${e.HARNESS_MAILPIT_URL}`;
+        return (await this.mailpit.ping())
+          ? null
+          : `Mailpit unreachable at ${mailpitEndpoint(e.HARNESS_MAILPIT_URL).url} (protected? set HARNESS_MAILPIT_AUTH)`;
       case "stripe":
         return http(e.HARNESS_STRIPE_MOCK_URL, "stripe-mock");
       case "oauth": {

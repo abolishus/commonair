@@ -28,12 +28,27 @@ interface MessageResponse {
   HTML?: string;
 }
 
+/**
+ * Mailpit with optional HTTP basic auth (Mailpit's `MP_UI_AUTH`, which also guards the API, as on
+ * Railway staging). Credentials come from `auth` (`user:password`) or from the URL's userinfo;
+ * they are sent as a header, never left in the URL (fetch refuses URLs with credentials).
+ */
 export class Mailpit {
-  constructor(private readonly baseUrl: string) {}
+  private readonly baseUrl: string;
+  private readonly headers: Record<string, string>;
+
+  constructor(baseUrl: string, auth?: string) {
+    const { url, authorization } = mailpitEndpoint(baseUrl, auth);
+    this.baseUrl = url;
+    this.headers = authorization ? { authorization } : {};
+  }
+
+  private fetch(path: string, timeoutMs: number): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, { headers: this.headers, signal: AbortSignal.timeout(timeoutMs) });
+  }
 
   async search(query: string): Promise<MailSummary[]> {
-    const url = `${this.baseUrl.replace(/\/+$/, "")}/api/v1/search?query=${encodeURIComponent(query)}&limit=50`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const res = await this.fetch(`/api/v1/search?query=${encodeURIComponent(query)}&limit=50`, 5_000);
     if (!res.ok) throw new Error(`mailpit search failed: HTTP ${res.status}`);
     const body = (await res.json()) as SearchResponse;
     return (body.messages ?? []).map((m) => ({
@@ -45,9 +60,7 @@ export class Mailpit {
   }
 
   async get(id: string): Promise<MailMessage> {
-    const res = await fetch(`${this.baseUrl.replace(/\/+$/, "")}/api/v1/message/${encodeURIComponent(id)}`, {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const res = await this.fetch(`/api/v1/message/${encodeURIComponent(id)}`, 5_000);
     if (!res.ok) throw new Error(`mailpit message ${id} failed: HTTP ${res.status}`);
     const m = (await res.json()) as MessageResponse;
     return {
@@ -80,11 +93,27 @@ export class Mailpit {
   }
 
   async ping(): Promise<boolean> {
-    const res = await fetch(`${this.baseUrl.replace(/\/+$/, "")}/api/v1/info`, {
-      signal: AbortSignal.timeout(3_000),
-    }).catch(() => null);
+    const res = await this.fetch("/api/v1/info", 3_000).catch(() => null);
     return res?.ok === true;
   }
+}
+
+/**
+ * Base URL without credentials or trailing slash, plus the basic-auth header. An explicit `auth`
+ * (`user:password`, split at the first colon like Mailpit does) wins over URL userinfo.
+ */
+export function mailpitEndpoint(baseUrl: string, auth?: string): { url: string; authorization: string | null } {
+  const u = new URL(baseUrl);
+  const fromUrl = u.username ? `${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}` : null;
+  u.username = "";
+  u.password = "";
+  const creds = auth || fromUrl;
+  if (creds !== null && creds !== undefined && !creds.includes(":"))
+    throw new Error("HARNESS_MAILPIT_AUTH must be user:password");
+  return {
+    url: u.toString().replace(/\/+$/, ""),
+    authorization: creds ? `Basic ${Buffer.from(creds).toString("base64")}` : null,
+  };
 }
 
 /** Every http(s) URL in a mail body, in order, with HTML entities in hrefs decoded. */

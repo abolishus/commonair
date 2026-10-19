@@ -21,6 +21,8 @@ export const harnessEnvSchema = z.object({
   HARNESS_ORIGIN_URL: z.url().default("http://localhost:3003"),
   /** Mailpit HTTP API (verification emails). */
   HARNESS_MAILPIT_URL: z.url().default("http://localhost:8025"),
+  /** Mailpit basic auth as `user:password` (its `MP_UI_AUTH`), e.g. for Railway staging. */
+  HARNESS_MAILPIT_AUTH: z.string().optional(),
   /** MediaMTX RTMP ingest base (the harness appends `/live/<stream key>`). */
   HARNESS_RTMP_URL: z.string().default("rtmp://localhost:1935"),
   /** MediaMTX WebRTC base (the harness appends `/live/<slug>/whip`). */

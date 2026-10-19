@@ -75,6 +75,8 @@ export interface UserFactoryOptions {
   /** Web app origin, sent as Origin (better-auth's trusted origin). */
   webOrigin: string;
   mailpitUrl: string;
+  /** Mailpit basic auth (`user:password`), when its API is protected. */
+  mailpitAuth?: string;
   emailDomain: string;
   names?: UsernameFactory;
   /** Builds API clients; the platform passes one that routes through the forwarding proxy. */
@@ -102,7 +104,7 @@ export class UserFactory {
 
   constructor(private readonly opts: UserFactoryOptions) {
     this.names = opts.names ?? new UsernameFactory();
-    this.mailpit = new Mailpit(opts.mailpitUrl);
+    this.mailpit = new Mailpit(opts.mailpitUrl, opts.mailpitAuth);
   }
 
   private api(extra: Partial<ApiClientOptions> = {}): Api {

@@ -107,6 +107,13 @@ export HARNESS_IRC_WS_URL=wss://<irc domain>
 bun harness/src/cli.ts run smoke
 ```
 
-Scenarios that read verification emails need the Mailpit API (`HARNESS_MAILPIT_URL`); the harness
-does not yet send the Mailpit basic-auth credentials, so `smoke`/`e2e-basic` against staging need
-that small harness change first.
+Scenarios that read verification emails (`smoke`, `e2e-basic`) also need the Mailpit API, which
+`MP_UI_AUTH` protects on staging:
+
+```bash
+export HARNESS_MAILPIT_URL=https://<mailpit domain>
+export HARNESS_MAILPIT_AUTH="$(railway variables --service mailpit --kv | sed -n 's/^MP_UI_AUTH=//p')"
+```
+
+`HARNESS_MAILPIT_AUTH` is `user:password` (Mailpit's own format); credentials in the URL's
+userinfo work too. The harness sends them as a basic-auth header and never logs them.
