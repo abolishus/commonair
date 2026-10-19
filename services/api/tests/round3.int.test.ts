@@ -380,17 +380,23 @@ describe("appeals", () => {
   test("two concurrent resolves: one wins, the other is a CONFLICT", async () => {
     const other = await signUpAndSignIn(api);
     await db().update(schema.users).set({ role: "moderator" }).where(eq(schema.users.id, other.userId));
-    const created = await create(alice.client, { subjectType: "user", subjectId: alice.userId });
+    // A dedicated appellant: if `overturned` wins the race, the account-level allowance it
+    // creates must not leak into the other tests' sessions (it covered alice's, a flake).
+    const carol = await signUpAndSignIn(api);
+    const created = await create(carol.client, { subjectType: "user", subjectId: carol.userId });
     expect(created.status).toBe(200);
+    const statuses = ["upheld", "overturned"] as const;
     const results = await Promise.all(
       [mod, other].map((m, i) =>
         m.client.call("POST", `/api/admin/appeals/${created.body.id}`, {
-          status: i === 0 ? "upheld" : "overturned",
+          status: statuses[i],
           resolution: "Reviewed.",
         }),
       ),
     );
     expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([200, 409]);
+    const [row] = await db().select().from(schema.appeals).where(eq(schema.appeals.id, created.body.id));
+    expect(row?.status).toBe(statuses[results.findIndex((r) => r.status === 200)]);
     const audits = await db()
       .select()
       .from(schema.auditLog)
@@ -403,6 +409,7 @@ describe("appeals", () => {
       const r = await sessionRow(aliceSession);
       return [{ id: r.id, userId: r.userId, startedAt: r.startedAt }];
     };
+    // Precondition: no earlier test in this file may decide anything in alice's favour.
     expect((await loadAllowances(db(), await sessionFacts())).get(aliceSession)).toBeUndefined();
 
     const created = await create(alice.client, { subjectType: "integrity_flag", subjectId: flagOnAlice });
