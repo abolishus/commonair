@@ -121,6 +121,14 @@ export const KEYS = {
    * Trimmed to the TTL window and given the same TTL on every write.
    */
   p2pSwarm: (swarm: string) => `p2p:swarm:${swarm}`,
+  /**
+   * ZSET sessionId → last announce (epoch ms) of every session on network `net` that announced to
+   * any swarm of `channelId`. Unlike `p2pSwarm`, a `stopped` announce or a closed socket never
+   * removes a member (leaving must not dodge the cap); members are trimmed to the TTL window and
+   * the key gets the same TTL on every write. Client-chosen info hashes make per-swarm counts
+   * meaningless, so the per-network cap is counted here, per channel.
+   */
+  p2pChannelNet: (channelId: string, net: string) => `p2p:chnet:${channelId}:${net}`,
 } as const;
 
 /**
@@ -132,9 +140,13 @@ export const KEYS = {
  * 2. it completed a signalling exchange within `windowMs` with a peer on at least
  *    `minLinkedNetworks` network(s) other than its own `net` (`p2pLinks`), so merely announcing
  *    into a swarm that honest viewers populate earns nothing;
- * 3. its swarm has at most `maxSessionsPerNetwork` in-window announcers on its `net`; beyond that,
- *    no session on that network is evidenced (a farm behind one prefix cannot borrow an honest
- *    swarm's diversity; honest viewers behind one large NAT lose only the P2P discount).
+ * 3. its channel has at most `maxSessionsPerNetwork` in-window announcers on its `net`, counted
+ *    across all of the channel's swarms (`ZCOUNT p2pChannelNet(channelId, net) (t-windowMs) +inf`);
+ *    beyond that, no session on that network is evidenced (a farm behind one prefix cannot borrow
+ *    an honest swarm's diversity or split into private swarms; honest viewers behind one large NAT
+ *    lose only the P2P discount);
+ * 4. at least one linked network from (2) is itself within the cap in (3), so two farm networks
+ *    over the cap cannot vouch for each other.
  *
  * Evidenced sessions are judged "too few fetches" against the reduced P2P HTTP share and "too
  * many fetches" against share 1. Everyone else is judged as a plain HTTP session.
