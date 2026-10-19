@@ -47,8 +47,21 @@ re-reviewed clean. Head-agent packages/ui additions for it: StreamGrid `cardProp
 `liveBadgeProps`, PasswordField autocomplete/description, Studio/Admin shells built on AppShell
 (skip link, footer outside main), SiteHeader `brand.render`/`mobileActions`/`desktopActions`,
 avatar-only UserMenu on phones, `PageContainer width="form"`, coarse-pointer player controls. e1
-now says `signup-legal` is a `role="checkbox"` control. **Still running: U6a** (one page story per
-board + packages/ui source-policy test); it merges after its review.
+now says `signup-legal` is a `role="checkbox"` control. **U6a merged (`2a5c2c7`)**: `packages/ui/stories/pages/**`, one story per board
+(`Pages/<Group>/<Board>`, Default/Light/Mobile320, Mobile also Phone390; the four interactive
+boards keep their interaction), fixtures in integer cents (sub-cent unit costs stay strings until
+`formatMoney` gets a precision option), `tests/pages.test.tsx` renders every board,
+`tests/source-policy.test.ts` enforces the design rules in packages/ui (allowlist keyed by
+file + rule + snippet + count). Review: 1 HIGH + 3 MEDIUM fixed, re-reviewed clean.
+**Next: U7** (`.claude/briefs/e4/U7-ui-followups.md`) clears the allowlist's "contract request"
+entries (arbitrary grid widths, Progress tone selectors, UptimeStrip `role="img"` around focusable
+triggers, icon sizing, raw `<label>`, older stories) and adds the compositions the boards asked
+for (SelectField, AlertCallout tones, DataTable controlled selection, StatCard footer, TrendChart
+legend, value-less Legend, StreamCard uptime, ChannelSidebar "show all", QueueItemCard,
+ProposalCard, CommentItem, IncidentCard, SiteHeader context, sub-cent money formatting).
+
+**Storybook for the user:** `cd packages/ui && bun run storybook`, open `Pages/…` (start with
+Support, Proposal, Finances, Expenses; Mobile at Phone390; any board's Mobile320).
 
 **For the user (visual):** `/`, `/signin`, `/signup`, `/<channel>` (live and offline), `/embed/<channel>`,
 signed in: user menu, `/dashboard` (studio sidebar, copy server URL/key, rotate), `/relays` (create,

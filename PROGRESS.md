@@ -31,8 +31,9 @@ plus cataloged TanStack Table 8.21.3; U4 form/settings blocks; U5 media/player/c
 HIGHs were fixed and focused re-reviews passed. Targeted tests/typecheck/lint/format passed; UI
 Storybook builds passed for U1, U2, U4 and U5. The aggregate unit-test command also completed
 successfully during integration. U6b (apps/web migration + apps/web source-policy test) merged
-2026-10-19 after review and re-review (`6d31d95`). Remaining in E4a: U6a (board page stories +
-packages/ui source-policy test).
+2026-10-19 after review and re-review (`6d31d95`). U6a (board page stories + packages/ui
+source-policy test) merged after review and re-review (`2a5c2c7`). Remaining in E4a: U7 packages/ui
+follow-ups from the board stories.
 
 ## Session four (2026-10-18): E3 slice built
 
