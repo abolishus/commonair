@@ -25,12 +25,14 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 Application design only (PLAN.md E4a). Mockup canvas: <https://claude.ai/artifact/Ve5J5XjRZV42eRE2cdReVd>
 (29 boards). Units in `.claude/briefs/e4/`: U1 primitives (shadcn CLI 4.21.1, preset `b1ZhhFNpx`),
 U2 shells/headers, U3 data blocks, U4 form blocks, U5 media/player/chat blocks, U6 page stories +
-enforcement + apps/web migration. U1 is committed as `af745a6` and pushed to `main` after
-independent HIGH-only review. It provides all registered shadcn components and the three house
-primitives with tokens, deviations/snapshot guards, gallery, and SSR/a11y coverage. Targeted UI
-checks passed (600 tests, typecheck, strict lint, Storybook build, license check, diff-check). The
-user owns the repository gate and visual review. U2–U5 are next, and U6 follows their completion;
-status is updated here as units land.
+enforcement + apps/web migration. U1–U5 are now reviewed, merged and pushed to `main` at
+`3b882054`. U1 brought in the primitives and gallery; U2 shells/navigation/headers; U3 data blocks
+plus cataloged TanStack Table 8.21.3; U4 form/settings blocks; U5 media/player/chat blocks. Review
+HIGHs were fixed and focused re-reviews passed. Targeted tests/typecheck/lint/format passed; UI
+Storybook builds passed for U1, U2, U4 and U5. The aggregate unit-test command also completed
+successfully during integration. Remaining in E4a: U6 board stories, source drift-enforcement tests,
+and apps/web migration while preserving all selector contracts. The user owns the repository gate
+and visual/browser checks.
 
 ## Session four (2026-10-18): E3 slice built
 

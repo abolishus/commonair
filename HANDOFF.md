@@ -26,18 +26,21 @@ fmt` on changed files, `vp build` for web, `build-storybook` for packages/ui).
 
 ### Resume point (2026-10-19)
 
-U1 (E4a primitives) is committed as `af745a6` and pushed after independent HIGH-only review. It
-adds the pinned shadcn component set, token/contrast and deviations guards, three house primitives,
-and the full component gallery. Targeted checks: 600 UI tests, UI TypeScript, strict lint, Storybook
-build, license check and `git diff --check` passed. The user runs the repository gate and visual
-review. Recharts 3.8.0 is MIT; compatible older transitive versions are pinned in the lockfile, and
-Base UI 1.8.0 is used with its declared `use-sync-external-store` range.
+E4a U1–U5 are reviewed, merged locally, and pushed to `origin/main` at `3b882054`. U1
+(`af745a6`) brought in the pinned shadcn primitives/gallery and three house primitives. U2 adds
+shells, navigation and headers; U3 adds data blocks (and the root-cataloged TanStack Table 8.21.3);
+U4 adds form/settings blocks; U5 adds content cards, player chrome and chat compositions. U2's
+router-render/variant HIGHs, U3's accidental implicit pagination, U4's tag-limit/label HIGHs and
+U5's chat viewport HIGH were fixed and independently re-reviewed. Targeted UI tests, TypeScript,
+strict lint and formatting passed for the units; Storybook builds passed for U1, U2, U4 and U5.
+U3's tests also passed. The aggregate unit-test command completed successfully during integration.
+The user still runs the repository gate and visual/browser review.
 
-Next: start E4a U2–U5 only after U1 is on `main`. Read `.claude/briefs/e4/U2-shells.md`,
-`U3-data.md`, `U4-forms.md`, `U5-media.md` and `_common.md`, plus `.claude/` memory and current
-worktree history, before assigning disjoint ownership. U6 starts after U2–U5. Keep the user's scope
-and process rules: application design only, targeted checks only, and the user handles the
-repository gate and visual/browser checks.
+Next is E4a U6: board-level page stories, drift-enforcement tests in `packages/ui` and `apps/web`,
+and migration of the existing `apps/web` routes/components onto U2–U5 compositions without
+changing selectors or behavior. Keep this application-design-only; no API, worker, DB or harness
+work. Create disjoint briefs/ownership before parallelizing. User runs `bun run verify`, Storybook
+visual inspection and browser checks.
 
 ## Process rules from the user (session three)
 
