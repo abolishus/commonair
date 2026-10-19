@@ -3,7 +3,7 @@
 
 import type * as React from "react";
 import { ChannelAvatar, LiveBadge, StatusBadge, ViewerCount } from "@commonair/ui";
-import type { Accent } from "@commonair/ui";
+import type { Accent, LiveBadgeProps } from "@commonair/ui";
 import { cn } from "@commonair/ui/lib/utils";
 
 export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
@@ -23,6 +23,8 @@ export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
   variant?: "live" | "offline" | "vod" | "compact";
   meta?: React.ReactNode;
   offlineLabel?: string;
+  /** Forwarded to the live badge shown next to the name. */
+  liveBadgeProps?: Partial<LiveBadgeProps> & { [key: `data-${string}`]: string | undefined };
 }
 
 export function ChannelHeader({
@@ -42,6 +44,7 @@ export function ChannelHeader({
   variant = live ? "live" : "offline",
   meta,
   offlineLabel,
+  liveBadgeProps,
   className,
   ...props
 }: ChannelHeaderProps): React.JSX.Element {
@@ -53,7 +56,7 @@ export function ChannelHeader({
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Heading className="min-w-0 truncate text-base font-semibold">{name}</Heading>
-          {live && <LiveBadge pulse />}
+          {live && <LiveBadge pulse {...liveBadgeProps} />}
           {badges}
           {variant === "offline" && offlineLabel && <StatusBadge tone="neutral">{offlineLabel}</StatusBadge>}
         </div>

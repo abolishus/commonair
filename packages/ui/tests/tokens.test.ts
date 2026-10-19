@@ -191,9 +191,7 @@ describe.each(Object.entries(themes))("%s theme", (themeName, theme) => {
     const surfaces = RING_SURFACES[token];
     expect(surfaces, `unexpected ring token ${token}`).toBeDefined();
     for (const surface of surfaces ?? []) {
-      expect(contrast(value(theme, `--${token}`), value(theme, surface), bg), surface).toBeGreaterThanOrEqual(
-        NON_TEXT,
-      );
+      expect(contrast(value(theme, `--${token}`), value(theme, surface), bg), surface).toBeGreaterThanOrEqual(NON_TEXT);
     }
   });
 });

@@ -36,15 +36,26 @@ strict lint and formatting passed for the units; Storybook builds passed for U1,
 U3's tests also passed. The aggregate unit-test command completed successfully during integration.
 The user still runs the repository gate and visual/browser review.
 
-Next is E4a U6, split in two units with disjoint ownership (briefs in `.claude/briefs/e4/`):
-**U6a** one faithful page story per board (`packages/ui/stories/pages/**`) + the packages/ui
-source-policy test; **U6b** apps/web migration onto the shells/blocks + the apps/web
-source-policy test, every e1–e3 selector intact. A Codex session had started U6 in
-`~/.codex/worktrees/e4-u6-*` (uncommitted: a generic board template that did not reproduce the
-boards, and an apps/web policy test); it was not merged and U6a/U6b restart from `main`.
+**U6b merged (2026-10-19, `6d31d95`)**: apps/web now renders on the shells and compositions
+(AppShell/SiteHeader/UserMenu/SiteFooter; StudioShell for `/dashboard` and `/relays`; StreamGrid,
+ChannelHeader, PlayerChrome, ChatPanel, CodeBlock, DataTable, FormSection …). Every e1–e3 id kept:
+`tests/selectors.test.ts` keeps exact matching, ids that reach the DOM through composition props
+are listed in `tests/composition-ids.ts` and proven by the SSR test `tests/selectors-render.test.tsx`.
+`tests/source-policy.test.ts` enforces the design rules in apps/web (allowlist keyed by snippet +
+count: the `<video>`, the ALTCHA element, `formatBytes`). Review: 5 HIGH + 4 MEDIUM fixed,
+re-reviewed clean. Head-agent packages/ui additions for it: StreamGrid `cardProps`,
+`liveBadgeProps`, PasswordField autocomplete/description, Studio/Admin shells built on AppShell
+(skip link, footer outside main), SiteHeader `brand.render`/`mobileActions`/`desktopActions`,
+avatar-only UserMenu on phones, `PageContainer width="form"`, coarse-pointer player controls. e1
+now says `signup-legal` is a `role="checkbox"` control. **Still running: U6a** (one page story per
+board + packages/ui source-policy test); it merges after its review.
 
-**Why staging looked unchanged (2026-10-19):** Railway `web` is deployed at `97d4f37` (current
-`main`), but U1–U5 only added `packages/ui` compositions and Storybook stories; no route uses them
+**For the user (visual):** `/`, `/signin`, `/signup`, `/<channel>` (live and offline), `/embed/<channel>`,
+signed in: user menu, `/dashboard` (studio sidebar, copy server URL/key, rotate), `/relays` (create,
+token/command copy, table, retire). Both themes, 320 px, keyboard. Then `e2e-basic`, `e2e-social`,
+`e2e-relay` against the stack, since the markup under every selector moved.
+
+**Why staging looked unchanged before U6b (2026-10-19):** Railway `web` was deployed at `97d4f37`, but U1–U5 only added `packages/ui` compositions and Storybook stories; no route uses them
 until U6b lands. The demo seed did reach staging (`/demo_streamer1` renders "Aurora Pixel",
 offline), but `directory.home` lists **live** channels only and the seed creates past broadcasts,
 never live ones, so `/` says "Nobody is live" (the signed-in `bob` also follows no demo channel).

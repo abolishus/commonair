@@ -8,7 +8,9 @@ export interface AdminShellProps {
   header: React.ReactNode;
   groups: NavGroup[];
   sidebarLabel: string;
+  skipLabel: string;
   children: React.ReactNode;
+  footer?: React.ReactNode;
 }
 export function AdminShell(props: AdminShellProps): React.JSX.Element {
   return <DashboardShell {...props} />;

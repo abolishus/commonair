@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, LiveBadge } from "@commonair/ui";
+import { EmptyState } from "@commonair/ui";
 import { Tv01Icon } from "@hugeicons/core-free-icons";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import type * as React from "react";
@@ -10,7 +10,7 @@ import { getChannel } from "../lib/channel.ts";
 import { useChannel } from "../lib/use-channel.ts";
 import { Player } from "../player/player.tsx";
 
-/** Player only, no site chrome: for embedding (and the harness's `--player web`). */
+/** Player only (its `PlayerChrome`), no site chrome: for embedding (and the harness's `--player web`). */
 export const Route = createFileRoute("/embed/$channel")({
   loader: async ({ params }) => {
     const channel = await getChannel({ data: { channel: params.channel } });
@@ -29,19 +29,19 @@ function EmbedPage(): React.JSX.Element {
   const initial = Route.useLoaderData();
   const channel = useChannel(initial.slug, initial);
   return (
-    <div className="relative grid min-h-dvh place-items-center bg-background">
+    <div className="grid min-h-dvh place-items-center bg-background">
       <Player
         channel={channel.slug}
         live={channel.live !== null}
         embed
-        className="max-h-dvh"
         offline={
-          <div data-testid="offline-state">
-            <EmptyState icon={Tv01Icon} title={t("channel.offline", { name: channel.displayName })} />
-          </div>
+          <EmptyState
+            data-testid="offline-state"
+            icon={Tv01Icon}
+            title={t("channel.offline", { name: channel.displayName })}
+          />
         }
       />
-      {channel.live && <LiveBadge data-testid="live-badge" className="absolute top-2 left-2" />}
     </div>
   );
 }

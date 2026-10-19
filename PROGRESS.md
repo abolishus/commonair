@@ -30,10 +30,9 @@ enforcement + apps/web migration. U1–U5 are now reviewed, merged and pushed to
 plus cataloged TanStack Table 8.21.3; U4 form/settings blocks; U5 media/player/chat blocks. Review
 HIGHs were fixed and focused re-reviews passed. Targeted tests/typecheck/lint/format passed; UI
 Storybook builds passed for U1, U2, U4 and U5. The aggregate unit-test command also completed
-successfully during integration. Remaining in E4a: U6a (board page stories + packages/ui
-source-policy test) and U6b (apps/web migration + apps/web source-policy test), briefed
-2026-10-19; staging shows no new UI until U6b merges (HANDOFF.md). The user owns the repository gate
-and visual/browser checks.
+successfully during integration. U6b (apps/web migration + apps/web source-policy test) merged
+2026-10-19 after review and re-review (`6d31d95`). Remaining in E4a: U6a (board page stories +
+packages/ui source-policy test).
 
 ## Session four (2026-10-18): E3 slice built
 

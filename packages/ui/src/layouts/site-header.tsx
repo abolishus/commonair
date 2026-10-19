@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type * as React from "react";
+import * as React from "react";
 import { Button, buttonVariants } from "@commonair/ui/components/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@commonair/ui/components/sheet";
 import { Search01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
@@ -13,6 +13,8 @@ export interface Brand {
   mark: React.ReactNode;
   name: string;
   href: string;
+  /** Router link element (Base UI `render` convention); `href` stays the fallback. */
+  render?: React.ReactElement;
 }
 export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   brand: Brand;
@@ -25,6 +27,10 @@ export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   user?: React.ReactNode;
   menuLabel: string;
   mobileMenuOpen?: boolean;
+  /** Shown at the bottom of the mobile sheet (theme switch, account links). */
+  mobileActions?: React.ReactNode;
+  /** Shown in the bar from `md` up only; pair with `mobileActions` for the same controls on phones. */
+  desktopActions?: React.ReactNode;
 }
 export function SiteHeader({
   brand,
@@ -37,6 +43,8 @@ export function SiteHeader({
   user,
   menuLabel,
   mobileMenuOpen,
+  mobileActions,
+  desktopActions,
   className,
   ...props
 }: SiteHeaderProps): React.JSX.Element {
@@ -46,10 +54,7 @@ export function SiteHeader({
       className={cn("flex min-h-14 w-full items-center gap-3 border-b bg-background px-4", className)}
       {...props}
     >
-      <a href={brand.href} className="flex min-w-0 shrink-0 items-center gap-2 font-semibold">
-        {brand.mark}
-        <span className="truncate">{brand.name}</span>
-      </a>
+      <BrandLink brand={brand} />
       <nav aria-label={navLabel} className="hidden min-w-0 flex-1 items-center gap-1 md:flex">
         {nav.map((item) => (
           <NavLink key={item.id} item={item} className={buttonVariants({ variant: "ghost", size: "sm" })} />
@@ -62,6 +67,7 @@ export function SiteHeader({
         </Button>
       ) : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
         {actions}
         {user}
       </div>
@@ -82,8 +88,26 @@ export function SiteHeader({
             ))}
           </nav>
           {search ? <div className="p-4">{search}</div> : null}
+          {mobileActions ? <div className="flex flex-wrap items-center gap-2 p-4">{mobileActions}</div> : null}
         </SheetContent>
       </Sheet>
     </header>
+  );
+}
+
+function BrandLink({ brand }: { brand: Brand }): React.JSX.Element {
+  const className = "flex min-w-0 shrink items-center gap-2 font-semibold";
+  const content = (
+    <>
+      {brand.mark}
+      <span className="truncate">{brand.name}</span>
+    </>
+  );
+  if (brand.render)
+    return React.cloneElement(brand.render as React.ReactElement<{ className?: string }>, { className }, content);
+  return (
+    <a href={brand.href} className={className}>
+      {content}
+    </a>
   );
 }

@@ -8,7 +8,7 @@ import { cn } from "@commonair/ui/lib/utils";
 export interface AppShellProps extends React.ComponentProps<"div"> {
   header: React.ReactNode;
   sidebar?: React.ReactNode;
-  footer: React.ReactNode;
+  footer?: React.ReactNode;
   children: React.ReactNode;
   skipLabel: string;
   mainId?: string;
@@ -23,14 +23,17 @@ export function AppShell({
   className,
   ...props
 }: AppShellProps): React.JSX.Element {
+  const skip = (
+    <a
+      href={`#${mainId}`}
+      className="sr-only z-50 bg-background p-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+    >
+      {skipLabel}
+    </a>
+  );
   const inner = (
     <>
-      <a
-        href={`#${mainId}`}
-        className="sr-only z-50 bg-background p-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
-      >
-        {skipLabel}
-      </a>
+      {skip}
       <main id={mainId} tabIndex={-1} className="min-w-0 flex-1 outline-none">
         {children}
       </main>
@@ -44,6 +47,7 @@ export function AppShell({
           <SidebarContent>{sidebar}</SidebarContent>
         </Sidebar>
         <div className="flex min-h-svh min-w-0 flex-1 flex-col">
+          {skip}
           {header}
           <main id={mainId} tabIndex={-1} className="min-w-0 flex-1 outline-none">
             {children}
