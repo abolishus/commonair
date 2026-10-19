@@ -43,6 +43,11 @@ export const relayNodes = pgTable(
     consecutiveFailures: integer().notNull().default(0),
     suspendedAt: ts(),
     suspendedReason: text(),
+    /**
+     * Set when the owner retires the relay (its token hash is rotated so it never authenticates
+     * again). `offline` alone means drained or timed out: such a relay may register again.
+     */
+    retiredAt: ts(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

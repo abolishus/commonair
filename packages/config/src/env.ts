@@ -171,7 +171,8 @@ export const playbackEnv = z.object({
   /** Public origin of the HLS edge (origin service), no trailing slash. */
   PLAYBACK_PUBLIC_URL: z.url().default("http://localhost:3003"),
   P2P_ENABLED: bool.default(true),
-  P2P_TRACKER_URL: z.string().default("ws://localhost:8000"),
+  /** Tracker base URL handed to players (the API appends `?t=<playback token>`). */
+  P2P_TRACKER_URL: z.url({ protocol: /^wss?$/ }).default("ws://localhost:8000"),
   /** Optional burst CDN (origin-pull). Disabled by default. */
   CDN_PROVIDER: z.enum(["none", "origin-pull"]).default("none"),
   CDN_BASE_URL: z.url().optional(),

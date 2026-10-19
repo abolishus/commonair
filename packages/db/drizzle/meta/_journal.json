@@ -78,6 +78,13 @@
       "when": 1792376864271,
       "tag": "0010_vods_failed_reason_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792376974355,
+      "tag": "0011_relay_retired_at",
+      "breakpoints": true
     }
   ]
 }
