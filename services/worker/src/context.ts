@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { Database } from "@commonair/db";
+import type { NetworkClassifier } from "@commonair/integrity";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import type { ObjectStorage } from "@commonair/storage";
@@ -38,5 +39,7 @@ export interface WorkerContext {
   busChannel: string;
   /** Stream the segment consumer reads (STREAMS.segments outside tests); never key-prefixed. */
   segmentStream: string;
+  /** The operator's network list for integrity scoring (reloadable, hence a function). */
+  classifier(): NetworkClassifier | undefined;
   now(): Date;
 }

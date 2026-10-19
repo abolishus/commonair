@@ -6,6 +6,7 @@
  * `job = defineJob({ queue, name, description, data, schedule?, handler })` and
  * add it to this list.
  */
+import { integrityJobs } from "../integrity/jobs.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
 import { job as closeStaleSessions } from "./close-stale-sessions.ts";
 import { job as expireAuthRows } from "./expire-auth-rows.ts";
@@ -31,4 +32,5 @@ export const JOBS = [
   expireAuthRows,
   pruneWebhookDeliveries,
   vodRetention,
+  ...integrityJobs(),
 ] as readonly JobDefinition[];

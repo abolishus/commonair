@@ -9,6 +9,7 @@
 import { BUS } from "@commonair/contracts/events";
 import { STREAMS } from "@commonair/contracts/internal";
 import type { DbHandle } from "@commonair/db";
+import type { NetworkClassifier } from "@commonair/integrity";
 import type { Logger } from "@commonair/observability";
 import { createValkey, valkeyCheck, type ReadinessCheck, type ValkeyClient } from "@commonair/service";
 import type { ObjectStorage } from "@commonair/storage";
@@ -40,6 +41,8 @@ export interface CreateWorkerOptions {
   jobs?: readonly JobDefinition[];
   outbox?: boolean | { batchSize?: number };
   segments?: boolean | SegmentConsumerOptions;
+  /** Network list for integrity scoring; see `ClassifierHolder`. */
+  classifier?: () => NetworkClassifier | undefined;
   now?: () => Date;
 }
 
@@ -75,6 +78,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     mediaBucket: opts.mediaBucket ?? "commonair-media",
     busChannel: opts.busChannel ?? BUS.events,
     segmentStream: opts.segmentStream ?? STREAMS.segments,
+    classifier: opts.classifier ?? (() => undefined),
     now: opts.now ?? (() => new Date()),
   };
 

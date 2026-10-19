@@ -8,6 +8,7 @@ import { createLogger, initTelemetry } from "@commonair/observability";
 import { runService } from "@commonair/service";
 import { createS3Storage } from "@commonair/storage";
 import { parseConcurrency, workerEnv } from "./env.ts";
+import { ClassifierHolder } from "./integrity/classifier.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
 import { createWorker } from "./worker.ts";
 
@@ -27,6 +28,11 @@ const storage =
       })
     : undefined;
 
+// Loaded once here and on SIGHUP, never per scoring run.
+const networks = new ClassifierHolder(logger);
+networks.reload();
+const unwatchSighup = networks.watchSighup();
+
 const db = createDb({ url: env.DATABASE_URL, max: env.DATABASE_POOL_MAX, applicationName: "commonair-worker" });
 const worker = createWorker({
   db,
@@ -37,6 +43,7 @@ const worker = createWorker({
   concurrency: parseConcurrency(env.WORKER_CONCURRENCY),
   storage,
   mediaBucket: env.S3_BUCKET_MEDIA,
+  classifier: () => networks.classifier,
 });
 if (env.EVENTSUB_ALLOW_INSECURE_CALLBACKS)
   logger.warn("EVENTSUB_ALLOW_INSECURE_CALLBACKS is on: webhook callbacks may reach private networks");
@@ -51,6 +58,7 @@ runService({
   fetch: () => new Response("not found", { status: 404 }),
   shutdownTimeoutMs: SHUTDOWN_DEADLINE_MS + 3_000,
   onShutdown: async () => {
+    unwatchSighup();
     await worker.stop(SHUTDOWN_DEADLINE_MS);
     await db.close();
     await telemetry.shutdown();

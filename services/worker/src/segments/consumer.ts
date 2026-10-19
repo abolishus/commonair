@@ -5,12 +5,17 @@
  * Segment stream consumer: a consumer group on STREAMS.segments. Entries are
  * read in batches, folded per minute, written in one transaction and only then
  * acknowledged; entries left pending by a crashed consumer are reclaimed after
- * a minute. Processing is at-least-once: a crash between commit and XACK counts
- * that batch twice, which the per-minute granularity keeps negligible.
+ * a minute. Processing is at-least-once: within one process a committed batch is
+ * never applied again (a failed XACK is retried on its own and otherwise left
+ * pending), but anything still pending after a minute (a crash, or an XACK that
+ * kept failing) is reclaimed by XAUTOCLAIM and applied a second time. That
+ * double count is bounded to one batch and accepted at per-minute granularity.
  */
+import { recordFetches } from "@commonair/integrity";
 import type { ValkeyClient } from "@commonair/service";
 import { hostname } from "node:os";
 import type { WorkerContext } from "../context.ts";
+import { fetchEvidence } from "../integrity/fetches.ts";
 import { metrics } from "../metrics.ts";
 import { startLoop, type LoopHandle } from "../runtime/loop.ts";
 import { aggregate, parseEntry, type Aggregate } from "./aggregate.ts";
@@ -112,14 +117,56 @@ export async function writeAggregate(ctx: WorkerContext, agg: Aggregate): Promis
   });
 }
 
-/** Process one batch of entries end to end; returns how many entries were acknowledged. */
-export async function processEntries(
+/**
+ * Integrity fetch counters for the batch (origin and p2p entries). Written through the
+ * application connection, where the scorer reads them (the consumer's own connection is
+ * unprefixed and reserved for the stream). A failure here is logged, not thrown: the batch
+ * is already committed, and retrying it would count its egress twice to save a few
+ * counter increments (that batch's evidence is lost).
+ */
+async function recordEvidence(ctx: WorkerContext, fetches: Parameters<typeof fetchEvidence>[0]): Promise<void> {
+  const evidence = fetchEvidence(fetches);
+  if (evidence.length === 0) return;
+  try {
+    await recordFetches(ctx.valkey, evidence);
+    metrics.fetchEvidence.add(evidence.length, { outcome: "recorded" });
+  } catch (err) {
+    metrics.fetchEvidence.add(evidence.length, { outcome: "failed" });
+    ctx.logger.warn("recording integrity fetch evidence failed", { count: evidence.length, err });
+  }
+}
+
+/** XACK attempts after a batch is applied, and the pause before each retry. */
+export const ACK_ATTEMPTS = 3;
+const ACK_RETRY_MS = 50;
+
+/**
+ * Acknowledge applied entries, retrying the XACK alone. Returns false when every attempt
+ * failed: the entries stay pending and only XAUTOCLAIM (after `claimIdleMs`) can redeliver
+ * them, which counts them twice; re-running the batch here would do the same at once.
+ */
+export async function ackEntries(
   ctx: WorkerContext,
   client: ValkeyClient,
-  cache: BroadcastCache,
-  entries: readonly Entry[],
-): Promise<number> {
-  if (entries.length === 0) return 0;
+  ids: readonly string[],
+  retryMs = ACK_RETRY_MS,
+): Promise<boolean> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await client.xack(ctx.segmentStream, SEGMENT_GROUP, ...ids);
+      return true;
+    } catch (err) {
+      if (attempt >= ACK_ATTEMPTS) {
+        ctx.logger.warn("acknowledging applied segment entries failed; left pending", { count: ids.length, err });
+        return false;
+      }
+      await Bun.sleep(retryMs * attempt);
+    }
+  }
+}
+
+/** Aggregate a batch into Postgres and record its integrity evidence; throws if the write fails. */
+async function applyEntries(ctx: WorkerContext, cache: BroadcastCache, entries: readonly Entry[]): Promise<void> {
   const fetches = [];
   let malformed = 0;
   const nowMs = ctx.now().getTime();
@@ -138,14 +185,34 @@ export async function processEntries(
     ctx,
     aggregate(fetches, (sid) => cache.get(sid)),
   );
-  await client.xack(ctx.segmentStream, SEGMENT_GROUP, ...entries.map(([id]) => id));
-  metrics.segmentEntries.add(entries.length);
-  return entries.length;
+  await recordEvidence(ctx, fetches);
 }
 
 /**
- * Process a batch; if the batch as a whole fails, retry entry by entry so one bad
- * entry cannot hold back the rest. Entries that still fail stay pending and are
+ * Process one batch of entries end to end; returns how many entries were acknowledged.
+ * Throws only when applying the batch failed (nothing was committed); once it is applied
+ * an XACK failure is handled by `ackEntries` and never re-runs the batch.
+ */
+export async function processEntries(
+  ctx: WorkerContext,
+  client: ValkeyClient,
+  cache: BroadcastCache,
+  entries: readonly Entry[],
+): Promise<number> {
+  if (entries.length === 0) return 0;
+  await applyEntries(ctx, cache, entries);
+  metrics.segmentEntries.add(entries.length);
+  const acked = await ackEntries(
+    ctx,
+    client,
+    entries.map(([id]) => id),
+  );
+  return acked ? entries.length : 0;
+}
+
+/**
+ * Process a batch; if applying the batch as a whole fails, retry entry by entry so one
+ * bad entry cannot hold back the rest. Entries that still fail stay pending and are
  * reclaimed later (and dropped after MAX_DELIVERIES).
  */
 export async function processResilient(

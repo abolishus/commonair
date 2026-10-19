@@ -4,6 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import type { SegmentFetch } from "@commonair/contracts/internal";
 import { SegmentLog } from "../src/accounting.ts";
+import { fetchObjectId } from "../src/handler.ts";
 import type { OriginMetrics } from "../src/metrics.ts";
 import { noopMetrics } from "../src/metrics.ts";
 
@@ -83,6 +84,25 @@ describe("SegmentLog", () => {
     expect(v.calls[1]).toContain("rid");
     expect(log.written).toBe(2);
     expect(log.buffered).toBe(0);
+  });
+
+  test("carries the object id when given, and only then", async () => {
+    const v = fakeValkey();
+    const log = new SegmentLog({ valkey: v as never, stream: "s" });
+    log.record({ ...entry(1), obj: "720p/abc_seg42.mp4" });
+    log.record({ ...entry(2), kind: "playlist" });
+    await log.flush();
+    expect(v.calls[0]?.slice(-2)).toEqual(["obj", "720p/abc_seg42.mp4"]);
+    expect(v.calls[1]).not.toContain("obj");
+  });
+});
+
+describe("fetchObjectId", () => {
+  test("rendition dir and file; the source path is `source`", () => {
+    expect(fetchObjectId({ rendition: "720p", file: "abc_seg42.mp4" })).toBe("720p/abc_seg42.mp4");
+    expect(fetchObjectId({ file: "abc_part7.mp4" })).toBe("source/abc_part7.mp4");
+    // Same file name in two renditions is two objects.
+    expect(fetchObjectId({ rendition: "480p", file: "x_seg1.mp4" })).not.toBe(fetchObjectId({ file: "x_seg1.mp4" }));
   });
 
   test("a full batch triggers a flush without waiting for the timer", async () => {

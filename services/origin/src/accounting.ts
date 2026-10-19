@@ -128,6 +128,7 @@ function fields(e: SegmentFetch): string[] {
   const f = ["sid", e.sid, "cid", e.cid, "src", e.src];
   if (e.rid) f.push("rid", e.rid);
   f.push("kind", e.kind, "bytes", String(e.bytes), "at", String(e.at));
+  if (e.obj) f.push("obj", e.obj);
   return f;
 }
 

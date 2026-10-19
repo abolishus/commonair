@@ -26,6 +26,23 @@ export interface RuntimeOptions {
 const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_BACKOFF_MS = 5_000;
 
+/**
+ * Template for the jobs a scheduler enqueues. Scheduled runs retry with backoff like any
+ * other job (BullMQ's default for scheduler jobs is a single attempt).
+ */
+export function schedulerTemplate(def: JobDefinition) {
+  return {
+    name: def.name,
+    data: {},
+    opts: {
+      attempts: def.attempts ?? DEFAULT_ATTEMPTS,
+      backoff: { type: "exponential", delay: def.backoffMs ?? DEFAULT_BACKOFF_MS },
+      removeOnComplete: { age: 3600, count: 100 },
+      removeOnFail: { age: 24 * 3600, count: 100 },
+    },
+  };
+}
+
 export class JobRuntime {
   private readonly queues = new Map<QueueName, Queue>();
   private readonly workers: Worker[] = [];
@@ -120,11 +137,7 @@ export class JobRuntime {
       if (!def.schedule) continue;
       // Scheduler ids are per queue, so the job name is unique enough.
       wanted.add(`${def.queue}/${def.name}`);
-      await this.queue(def.queue).upsertJobScheduler(def.name, def.schedule, {
-        name: def.name,
-        data: {},
-        opts: { removeOnComplete: { age: 3600, count: 100 }, removeOnFail: { age: 24 * 3600, count: 100 } },
-      });
+      await this.queue(def.queue).upsertJobScheduler(def.name, def.schedule, schedulerTemplate(def));
     }
     for (const [queue] of registry) {
       for (const s of await this.queue(queue).getJobSchedulers()) {

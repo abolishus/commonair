@@ -29,8 +29,17 @@ export const workerEnv = z.object({
 });
 export type WorkerEnv = z.output<typeof workerEnv>;
 
+/**
+ * `integrity` runs seven recurring jobs: with eight slots a stuck run of one job never
+ * starves the others.
+ */
+const QUEUE_DEFAULTS: Partial<Record<QueueName, number>> = {
+  [QUEUES.webhooks]: 32,
+  [QUEUES.retention]: 1,
+  [QUEUES.integrity]: 8,
+};
 export const DEFAULT_CONCURRENCY: Record<QueueName, number> = Object.fromEntries(
-  QUEUE_NAMES.map((q) => [q, q === QUEUES.webhooks ? 32 : q === QUEUES.retention ? 1 : 4]),
+  QUEUE_NAMES.map((q) => [q, QUEUE_DEFAULTS[q] ?? 4]),
 ) as Record<QueueName, number>;
 
 /** Parse "queue=n,queue=n" over the defaults; unknown queues and bad numbers are rejected. */
