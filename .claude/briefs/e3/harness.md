@@ -44,11 +44,10 @@ Do not look outside the repository. You work in your own git worktree: run `git 
 3. **Liar relay** (TypeScript): a tiny Bun HTTP server answering `/healthz` on the LAN address, a
    generated Ed25519 key, registers through the API with its own token, heartbeats, and every
    receipt interval submits correctly signed receipts claiming 5× the bytes for the sessions the
-   harness knows are assigned to it (the harness opens HTTP viewer sessions until some land on the
-   liar; those viewers fetch through the **origin**? No — relay-assigned tokens are refused at the
-   origin, so the liar must also proxy the HLS requests it is assigned: implement a minimal
-   pass-through that pulls from the origin's `/relay-pull/` with its relay token and serves the
-   viewer, so issuance accrues honestly while receipts lie).
+   harness knows are assigned to it. Relay-assigned tokens are refused at the origin, so the liar
+   must also serve what it is assigned: a minimal pass-through that pulls from the origin's
+   `/relay-pull/` with its relay token and serves the viewer (HTTP viewers the harness opens until
+   some land on the liar), so issuance accrues honestly while the receipts lie.
 4. **Assertions and report**: per step, timings (relay active latency, time to first relay
    playback, time to receipts verified, time to suspension, switch-to-origin latency), counts
    (honest/relay-assigned/bots/verified/excluded), and the relay logs on failure.
