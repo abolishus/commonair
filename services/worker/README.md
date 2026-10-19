@@ -96,6 +96,43 @@ ADR 0003 §5) each run as their own job scheduler, so a slow pass of one never d
   the same directory and `mv` (rename) it over the old one, then send `SIGHUP`. Never edit it in
   place while the worker may reload.
 
+## Money jobs
+
+Three recurring jobs on the `payments` queue carry out the worker rows of
+`docs/testing/e4b-selectors.md` (Expiry, Renewal, Hold release). Each takes a Valkey run lock
+(`worker:lock:money:<job>`, same mechanics as the integrity locks above), so two replicas or a
+retry racing the next tick never run the same job at once; a tick that finds the lock held is
+skipped (`worker.money.runs{outcome:"skipped"}`). Runs that throw retry 3 times (backoff from 10 s).
+
+| Job                    | Schedule              | Max lock hold | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------- | --------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `money-expire-pending` | every 5 min           | 5 min         | `pending` payments with `expires_at <= now` → `failed` (CAS on status, rows locked `skip locked` so a confirm in flight wins). Their `incomplete` subscriptions (own or gifted via `gift_payment_id`) → `expired`; a `past_due` subscription whose renewal it was → `expired` with `channel.subscription.end`; the tip → `failed`. Nothing to reverse: nothing was posted.                                                                                                  |
+| `money-renew`          | every 5 min           | 5 min         | `active` subscriptions with `current_period_end <= now`: `cancel_at_period_end` → `canceled`, gifts → `expired` (any provider: gifts never renew), a channel without the tier → `expired`, each with `channel.subscription.end`. A manual self subscription gets one `pending` renewal payment (today's tier price, fresh `CA-` reference, `expires_at` = period end + `PAYMENT_PENDING_DAYS`) and turns `past_due`. Stripe self subscriptions are left to Stripe's events. |
+| `money-release-holds`  | hourly (`41 * * * *`) | 20 min        | `releaseDueHolds(asOf now)` with `holdDays` and currency from `payout.rules`, read per run: creator shares older than the hold move from `creator-hold` to `creator` (available).                                                                                                                                                                                                                                                                                           |
+
+- **Batches and budget.** Expiry handles at most 500 payments per transaction and renewal pages
+  through 500 subscriptions at a time (one transaction each, the row locked `for update`); both
+  loop until the work is done or 30 s have passed, and the rest waits for the next tick.
+- **Idempotency.** Every transition is compare-and-set on the expected status, so a second run
+  (or a racing treasurer confirm) changes nothing. A renewal checks for an open `pending`
+  renewal payment with the subscription row locked, so a subscription never gets two for one
+  period; a reference clash (`payments_provider_ref_uq`) retries with a fresh reference. Hold
+  releases are idempotent postings per payment (`hold-release:<payment id>`).
+- **Outbox and chat.** End events are written in the transaction that ends the subscription and
+  are published by the outbox relay. After commit the job publishes a chat `invalidate`
+  (`BUS.chatControl(channelId)`, `scope:"user"`) per ended subscriber so the badge goes; chat
+  keeps the badge while a subscription is `past_due`.
+- **What the treasurer sees.** Renewal payments appear in the treasury payment list as `pending`
+  with their reference, like any checkout, and are confirmed the same way (confirming continues
+  the period from the previous `current_period_end`). Unconfirmed ones turn `failed` once
+  expired. Released holds show as available creator balance in the next payout run.
+- **Configuration.** `CURRENCY` and `PAYMENT_PENDING_DAYS` (`paymentsEnv`, validated at startup);
+  the cut, minimum payout and hold period are governance settings, never env.
+- **Metrics.** `worker.money.runs{job,outcome}`, `worker.money.expired{kind}`,
+  `worker.money.renewed`, `worker.money.subscriptions_ended{reason}` (`canceled`, `gift`,
+  `no_tiers`, `renewal_unpaid`), `worker.money.released_cents{currency}`. Logs carry counts only,
+  never user ids.
+
 ## Webhooks
 
 - **Body** `{ subscription, event }` (Twitch EventSub shape) with `eventsub-*` headers from
