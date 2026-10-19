@@ -126,6 +126,26 @@ export interface Allowance {
   codes: readonly string[];
 }
 
+/**
+ * Server-side P2P evidence for a session (`p2p.ts`): whether, within the window, the tracker saw it
+ * announce to its own channel, complete a signalling exchange with a peer on another network, and
+ * share its network with few enough of the channel's announcers. Never derived from client input.
+ */
+export interface P2pEvidence {
+  evidenced: boolean;
+  /** Distinct other networks it completed an exchange with in the window; 0 when not a candidate. */
+  linkedNetworks: number;
+  /** Of those, networks within the per-channel cap themselves (rule 4). */
+  linkedWithinCap: number;
+  /**
+   * In-window announcers to its channel on its own network, itself included; 0 when not a
+   * candidate.
+   */
+  sameNetworkPeers: number;
+  /** Announces the tracker counted for the session. */
+  announces: number;
+}
+
 export interface Concurrency {
   /**
    * 1-based position among the concurrent sessions of the same device (or account), newest
@@ -147,6 +167,8 @@ export interface ScoringContext {
   partsPerSegment: number;
   /** Appeal / admin allowance covering this session, if any. */
   allowance?: Allowance | null;
+  /** Server-side P2P evidence; absent or not evidenced = judged as a plain HTTP session. */
+  p2p?: P2pEvidence | null;
 }
 
 export type Verdict = "verified" | "excluded" | "pending";

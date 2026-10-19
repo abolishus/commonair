@@ -36,7 +36,7 @@ bun run --filter @commonair/worker test:int   # integration (Postgres + Valkey)
 | `integrity` | `close-stale-sessions`     | every 60 s            | `{}`                                   | Ends playback sessions with no heartbeat for 2 min, at their last heartbeat.                                                                                                                             |
 | `integrity` | `relays-offline`           | every 60 s            | `{}`                                   | Active/degraded relays with no health check for 3 min → `offline`, `audit_log` row, removed from `KEYS.relays`.                                                                                          |
 | `integrity` | `score-sessions`           | every 15 s            | `{}`                                   | Scores active playback sessions (verified / pending / excluded), least recently scored first, at most 2000 per run; republishes viewer counts of channels whose sessions changed verdict. See Integrity. |
-| `integrity` | `verify-receipts`          | every 60 s            | `{}`                                   | Checks up to 1000 relay receipts per run against issuance; suspends over-reporting relays.                                                                                                               |
+| `integrity` | `verify-receipts`          | every 60 s            | `{}`                                   | Checks up to 1000 relay receipts per run against issuance; suspends over-reporting relays and removes them from `KEYS.relays` at once.                                                                   |
 | `integrity` | `follow-bursts`            | every 60 s            | `{}`                                   | Excludes low-quality follows that arrived in bursts.                                                                                                                                                     |
 | `integrity` | `stream-hours`             | every 5 min           | `{}`                                   | Recomputes streaming-hour eligibility from verified viewers.                                                                                                                                             |
 | `retention` | `expire-auth-rows`         | hourly (`7 * * * *`)  | `{}`                                   | Deletes expired `verifications` and `sessions`.                                                                                                                                                          |
@@ -71,6 +71,22 @@ ADR 0003 §5) each run as their own job scheduler, so a slow pass of one never d
 - **Retries.** A run that throws is retried by BullMQ with the attempts and backoff above; the
   next scheduled tick runs regardless of a pending retry (the lock keeps them from overlapping).
   Rows beyond a batch cap wait for the next tick.
+- **P2P evidence.** `score-sessions` reads the tracker's per-session evidence (`KEYS.p2pPeer`,
+  `KEYS.p2pLinks`, `KEYS.p2pChannelNet`) for each batch alongside heartbeat and fetch evidence. A
+  session is judged "too few fetches" against the reduced P2P HTTP share (10 %) only when, within
+  the last 120 s, the tracker saw it announce to a swarm of its own channel and complete a
+  signalling exchange with a peer on another network, at most 16 sessions on its network announced
+  to the channel, and so did at most 16 on a linked network. Announcing into a diverse swarm earns
+  nothing. "Too many" is always judged against share 1, and client `p2pCapable` / `bytesP2p` never
+  matter. Failed Valkey reads never fail the run: those sessions are judged without the reduced
+  share, logged as a warning and counted (`worker.integrity.evidence{source:"p2p",outcome:"error"}`).
+  Residual risk (ADR 0005): a farm that answers offers from a second network, or gets honest
+  clients to answer, can earn the reduced share for up to 16 sessions per network and channel; the
+  other signals still apply. Details: `packages/integrity/README.md`.
+- **Relay suspension.** A relay `verify-receipts` suspends is removed from `KEYS.relays` in the same
+  run, so assignment stops immediately; a failed removal is logged and counted
+  (`worker.integrity.actions{kind:"relay_deassign_failed"}`) and the API drops the relay on its
+  next heartbeat.
 - **Network list.** `INTEGRITY_DATACENTER_CIDRS_FILE` (CIDRs and ASNs of hosting networks) is
   loaded at startup and reloaded on `SIGHUP` (`kill -HUP <pid>`). A file that cannot be read
   keeps the previous list (at startup: scores without one, logged as an error). A reload that
@@ -157,5 +173,6 @@ jobs finish for up to 25 s, then force-closes.
 `worker.outbox.published`, `worker.outbox.invalid`, `worker.webhook.attempts` (by message type
 and outcome: the success rate), `worker.segments.entries`, `worker.segments.evidence` (by outcome:
 `recorded`, `failed`), `worker.integrity.runs` (by job and outcome: `ran`, `skipped`,
-`lock_lapsed`), `worker.integrity.sessions` (by verdict), `worker.integrity.actions` (by kind) and
+`lock_lapsed`), `worker.integrity.sessions` (by verdict), `worker.integrity.actions` (by kind),
+`worker.integrity.evidence` (by source and outcome: `p2p` `evidenced` / `error`) and
 `worker.integrity.stream_hours` (by eligibility).

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema as s, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey, type ValkeyClient } from "@commonair/service";
+import { KEYS, P2P_EVIDENCE } from "@commonair/contracts/internal";
 import { excludeFollowBursts, markEligibleStreamHours, scoreActiveSessions, verifyReceipts } from "../src/jobs.ts";
 import { recordFetch, recordFetches, recordHeartbeat } from "../src/store.ts";
 import type { HeartbeatSample } from "../src/types.ts";
@@ -472,6 +473,130 @@ describe("scoreActiveSessions", () => {
     });
   });
 
+  // As the tracker writes them: each authenticated announce, and each completed exchange.
+  async function announce(sid: string, channelId: string, sw: string, net: string, last = NOW.getTime() - 5_000) {
+    await valkey.hset(KEYS.p2pPeer(sid), {
+      swarm: sw,
+      net,
+      first: String(last - 60_000),
+      last: String(last),
+      announces: "9",
+    });
+    await valkey.expire(KEYS.p2pPeer(sid), P2P_EVIDENCE.peerTtlSeconds);
+    await valkey.zadd(KEYS.p2pSwarm(sw), last, sid);
+    await valkey.zadd(KEYS.p2pChannelNet(channelId, net), last, sid);
+    await valkey.expire(KEYS.p2pChannelNet(channelId, net), P2P_EVIDENCE.peerTtlSeconds);
+  }
+  async function exchange(
+    a: { sid: string; net: string },
+    b: { sid: string; net: string },
+    at = NOW.getTime() - 4_000,
+  ) {
+    await valkey.zadd(KEYS.p2pLinks(a.sid), at, b.net);
+    await valkey.zadd(KEYS.p2pLinks(b.sid), at, a.net);
+  }
+
+  test("server-side P2P evidence: a completed exchange with another network lowers the HTTP bar, nothing else does", async () => {
+    const { channelId } = await channel();
+    const swarm = `${channelId}:${"ab".repeat(20)}`;
+    // 200 s claimed → 200 expected segments; each session fetched ~15 % of them over HTTP.
+    async function viewer(o: Partial<typeof s.playbackSessions.$inferInsert> = {}) {
+      const id = await session(channelId, { watchSeconds: 200, segmentsFetched: 30, ...o });
+      await humanHistory(id);
+      await recordFetches(valkey, [
+        ...Array.from({ length: 200 }, () => ({ sid: id, kind: "playlist" as const })),
+        ...Array.from({ length: 30 }, (_, i) => ({ sid: id, kind: "segment" as const, object: `src/seg${i}.mp4` })),
+      ]);
+      return id;
+    }
+    const a = await viewer();
+    const b = await viewer();
+    await announce(a, channelId, swarm, "net-a");
+    await announce(b, channelId, swarm, "net-b");
+    await exchange({ sid: a, net: "net-a" }, { sid: b, net: "net-b" });
+    // In the same diverse swarm, but never completed an exchange.
+    const lurker = await viewer();
+    await announce(lurker, channelId, swarm, "net-c");
+    // Exchanged only with a session on its own network.
+    const c = await viewer();
+    const d = await viewer();
+    await announce(c, channelId, swarm, "net-d");
+    await announce(d, channelId, swarm, "net-d");
+    await exchange({ sid: c, net: "net-d" }, { sid: d, net: "net-d" });
+    // Exchanged, but announced too long ago.
+    const stale = await viewer();
+    await announce(stale, channelId, swarm, "net-z", NOW.getTime() - P2P_EVIDENCE.windowMs - 1_000);
+    await exchange({ sid: stale, net: "net-z" }, { sid: a, net: "net-a" });
+    // Client-reported P2P bytes and a legacy `p2p` row without tracker evidence change nothing.
+    const claims = await viewer({ bytesP2p: 50_000_000, bytesHttp: 1_000 });
+    const legacy = await viewer({ assignedSource: "p2p" });
+    // A corrupt peer key is an evidence error, not a failed run.
+    const broken = await viewer();
+    await valkey.set(KEYS.p2pPeer(broken), "not-a-hash");
+
+    const r = await scoreActiveSessions(app, valkey, NOW);
+
+    for (const id of [a, b]) expect(await sessionRow(id)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    for (const id of [lurker, c, d, stale, claims, legacy, broken]) {
+      expect(await sessionRow(id)).toMatchObject({
+        verdict: "pending",
+        verdictReasons: ["fetch_pattern", "media_unconfirmed"],
+      });
+    }
+    expect(r.p2p).toEqual({ evidenced: 2, errors: 1 });
+  });
+
+  test("P2P evidence: a farm behind one network is capped per channel, across swarms", async () => {
+    const { channelId } = await channel();
+    const honest = await session(channelId, { watchSeconds: 0, segmentsFetched: 0 });
+    await announce(honest, channelId, `${channelId}:${"99".repeat(20)}`, "net-h");
+    const farm: string[] = [];
+    for (let i = 0; i <= P2P_EVIDENCE.maxSessionsPerNetwork; i++) {
+      // ~15 % of the 200 expected segments over HTTP: enough only with the reduced share.
+      const id = await session(channelId, { watchSeconds: 200, segmentsFetched: 30 });
+      await humanHistory(id);
+      await recordFetches(valkey, [
+        ...Array.from({ length: 200 }, () => ({ sid: id, kind: "playlist" as const })),
+        ...Array.from({ length: 30 }, (_, j) => ({ sid: id, kind: "segment" as const, object: `src/seg${j}.mp4` })),
+      ]);
+      // Each in its own client-chosen swarm.
+      await announce(id, channelId, `${channelId}:${i.toString(16).padStart(40, "0")}`, "net-farm");
+      await exchange({ sid: id, net: "net-farm" }, { sid: honest, net: "net-h" });
+      farm.push(id);
+    }
+    await scoreActiveSessions(app, valkey, NOW);
+    for (const id of farm) {
+      expect(await sessionRow(id)).toMatchObject({
+        verdict: "pending",
+        verdictReasons: ["fetch_pattern", "media_unconfirmed"],
+      });
+    }
+  });
+
+  test("P2P evidence explains itself in the exclusion flag", async () => {
+    const { channelId } = await channel();
+    const swarm = `${channelId}:${"ef".repeat(20)}`;
+    // A playlist poller with real evidence: it lowers the bar, it does not excuse no media.
+    const id = await session(channelId, { watchSeconds: 200, segmentsFetched: 0 });
+    await humanHistory(id);
+    for (let i = 0; i < 5; i++) await recordFetch(valkey, { sid: id, kind: "playlist" });
+    const other = await session(channelId, { watchSeconds: 0, segmentsFetched: 0 });
+    await announce(id, channelId, swarm, "net-a", NOW.getTime());
+    await announce(other, channelId, swarm, "net-b", NOW.getTime());
+    await exchange({ sid: id, net: "net-a" }, { sid: other, net: "net-b" }, NOW.getTime());
+    await scoreActiveSessions(app, valkey, NOW);
+    expect(await sessionRow(id)).toMatchObject({ verdict: "excluded", verdictReasons: ["fetch_pattern"] });
+    expect((await flagsFor(id))[0]!.details).toMatchObject({
+      checks: ["no_media_fetched"],
+      p2pEvidenced: 1,
+      linkedNetworks: 1,
+      linkedWithinCap: 1,
+      sameNetworkPeers: 1,
+      httpShare: 0.1,
+      expectedSegments: 20,
+    });
+  });
+
   test("an excluded session that stays excluded still rotates (scored_at moves)", async () => {
     const { channelId } = await channel();
     const viewer = await user();
@@ -605,8 +730,10 @@ describe("verifyReceipts", () => {
     const gross = await relay();
     const g1 = await period(gross, 10, null, 5000); // bytes against no issuance
     const late = await period(honest, 1, 1000, 1000); // still inside the grace period
+    // All three are assignable before the run (as their heartbeats published them).
+    await valkey.hset(KEYS.relays, honest, "{}", repeat, "{}", gross, "{}");
 
-    const r = await verifyReceipts(app, NOW);
+    const r = await verifyReceipts(app, NOW, { valkey });
 
     expect(await receipt(h1)).toMatchObject({ status: "verified", bytesVerified: 1000 });
     expect(await receipt(h2)).toMatchObject({ status: "verified", bytesVerified: 1000 });
@@ -629,7 +756,11 @@ describe("verifyReceipts", () => {
       suspendedReason: "integrity:gross_over_report",
     });
     expect(r.suspendedRelays.sort()).toEqual([repeat, gross].sort());
-    expect(r).toMatchObject({ verified: 3, rejected: 4 });
+    expect(r).toMatchObject({ verified: 3, rejected: 4, deassignFailed: 0 });
+    // Suspended relays leave assignment at once, not on their next heartbeat.
+    expect(await valkey.hexists(KEYS.relays, repeat)).toBe(0);
+    expect(await valkey.hexists(KEYS.relays, gross)).toBe(0);
+    expect(await valkey.hexists(KEYS.relays, honest)).toBe(1);
 
     const suspFlags = await app
       .select()
@@ -641,7 +772,7 @@ describe("verifyReceipts", () => {
 
     // Idempotent: nothing pending → nothing changes, no second suspension.
     const again = await verifyReceipts(app, NOW);
-    expect(again).toEqual({ verified: 0, rejected: 0, unknown: 0, suspendedRelays: [] });
+    expect(again).toEqual({ verified: 0, rejected: 0, unknown: 0, suspendedRelays: [], deassignFailed: 0 });
     // Once the grace period passes, the late receipt is checked.
     const later = await verifyReceipts(app, new Date(NOW.getTime() + 5 * 60_000));
     expect(later.verified).toBeGreaterThanOrEqual(1);
@@ -693,7 +824,6 @@ describe("verifyReceipts", () => {
       startedAt: new Date(NOW.getTime() - 60 * 60_000),
       lastHeartbeatAt: new Date(NOW.getTime() - 5_000),
     });
-    // (Minutes no other test issues bytes in: a gap is a minute with no issuance for *any* relay.)
     // Origin restarted: no issuance rows at all for these minutes.
     const gap1 = await period(r, 45, null, 5000);
     const gap2 = await period(r, 44, null, 5000);
@@ -704,28 +834,41 @@ describe("verifyReceipts", () => {
     const lost = await period(r, 43, null, 5000);
     // Complete issuance is still checked as usual.
     const ok = await period(r, 42, 1000, 1050);
-    // Another relay was issued bytes in this minute, so the origin was up: nothing was issued to r.
+    // Regression: another relay was issued bytes in this minute (another broadcast's production).
+    // That is not coverage for r, whose own issuance for the minute is missing.
     const busy = await relay();
     await app
       .insert(s.relayIssuance)
       .values({ relayId: busy, bucketStart: minute(41), sessions: 1, segmentTokens: 10, bytesIssued: 1000 });
-    const real = await period(r, 41, null, 5000);
+    const other = await period(r, 41, null, 5000);
 
     const res = await verifyReceipts(app, NOW);
-    for (const id of [gap1, gap2, lost]) {
+    for (const id of [gap1, gap2, lost, other]) {
       expect(await receipt(id)).toMatchObject({ status: "verified", bytesVerified: 0, overReportRatio: null });
     }
     expect(await receipt(ok)).toMatchObject({ status: "verified", bytesVerified: 1000 });
-    expect(await receipt(real)).toMatchObject({ status: "rejected", rejectionReason: "no_issuance" });
-    // That real no-issuance rejection is a gross over-report: the relay is suspended for it alone.
-    expect(res.suspendedRelays).toContain(r);
-    expect(res.unknown).toBe(3);
+    expect(res.suspendedRelays).not.toContain(r);
+    expect(res.unknown).toBe(4);
     const unknownFlags = await app
       .select()
       .from(s.integrityFlags)
       .where(and(eq(s.integrityFlags.subjectId, r), eq(s.integrityFlags.signal, "relay_issuance_unknown")));
-    expect(unknownFlags).toHaveLength(3);
+    expect(unknownFlags).toHaveLength(4);
     expect(unknownFlags[0]).toMatchObject({ decision: "pending_review" });
+  });
+
+  test("bytes reported for a minute without live sessions on the relay and without issuance are real", async () => {
+    const r = await relay();
+    // Other relays had issuance in this minute, but r had no live session: nothing was issued to r.
+    const busy = await relay();
+    await app
+      .insert(s.relayIssuance)
+      .values({ relayId: busy, bucketStart: minute(39), sessions: 1, segmentTokens: 10, bytesIssued: 1000 });
+    const real = await period(r, 39, null, 5000);
+    const res = await verifyReceipts(app, NOW);
+    expect(await receipt(real)).toMatchObject({ status: "rejected", rejectionReason: "no_issuance" });
+    // A no-issuance rejection is a gross over-report: the relay is suspended for it alone.
+    expect(res.suspendedRelays).toContain(r);
   });
 });
 

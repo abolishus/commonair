@@ -6,6 +6,7 @@ export * from "./channel.ts";
 export * from "./concurrency.ts";
 export * from "./jobs.ts";
 export * from "./network.ts";
+export * from "./p2p.ts";
 export * from "./relay.ts";
 export * from "./score.ts";
 export * from "./signals/combine.ts";

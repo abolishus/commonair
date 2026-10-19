@@ -6,14 +6,14 @@
  * evidence, the scheduled scoring job turns it into verdicts, and the published viewer count
  * follows. Real Postgres and Valkey.
  */
-import { KEYS, QUEUES } from "@commonair/contracts/internal";
+import { KEYS, P2P_EVIDENCE, QUEUES } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
-import { recordHeartbeat } from "@commonair/integrity";
+import { recordFetches, recordHeartbeat } from "@commonair/integrity";
 import { createValkey } from "@commonair/service";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { integrityJobs, INTEGRITY_JOBS } from "../src/integrity/jobs.ts";
+import { integrityJobs, INTEGRITY_JOBS, runReceipts, runScoring } from "../src/integrity/jobs.ts";
 import { withRunLock } from "../src/integrity/lock.ts";
 import { startSegmentConsumer } from "../src/segments/consumer.ts";
 import { createWorker, type WorkerHandle } from "../src/worker.ts";
@@ -247,6 +247,157 @@ describe("scoring through the scheduled job", () => {
     expect(rows.get(ids.honest)!.verdict).toBe("verified");
     // Flags are written once, at the exclusion, not on every run.
     expect((await flagsFor()).length).toBe(flagsBefore);
+  });
+});
+
+describe("score-sessions and verify-receipts job runs", () => {
+  let t: TestDatabase;
+  let w: WorkerHandle;
+  beforeAll(async () => {
+    t = await testDb();
+    w = worker(t, crypto.randomUUID(), []);
+  });
+
+  test("P2P evidence from the tracker's keys lowers the HTTP bar only for a multi-network swarm", async () => {
+    const { channel } = await makeUser(t.db);
+    const now = Date.now();
+    const v = w.ctx.valkey;
+    const viewer = async () => {
+      const [row] = await t.db
+        .insert(schema.playbackSessions)
+        .values({
+          id: uuidv7(),
+          channelId: channel.id,
+          deviceHash: `dev-${crypto.randomUUID()}`,
+          ipHash: `ip-${crypto.randomUUID()}`,
+          userAgent: DESKTOP_UA,
+          fingerprint: DESKTOP_FP,
+          startedAt: new Date(now - 240_000),
+          lastHeartbeatAt: new Date(now - 5_000),
+          heartbeats: 20,
+          // 200 expected segments; ~15 % of them fetched over HTTP below.
+          watchSeconds: 200,
+          segmentsFetched: 30,
+        })
+        .returning();
+      const id = row!.id;
+      for (let i = 0; i < 6; i++)
+        await recordHeartbeat(v, id, {
+          at: now - (6 - i) * 10_000 + ((i * 7919) % 300),
+          playedSeconds: 10,
+          bufferSeconds: 2 + (i % 3),
+          visible: true,
+          muted: false,
+          stalls: 0,
+          bytesHttp: 0,
+          bytesP2p: 1_000_000,
+        });
+      await recordFetches(v, [
+        ...Array.from({ length: 200 }, () => ({ sid: id, kind: "playlist" as const })),
+        ...Array.from({ length: 30 }, (_, i) => ({ sid: id, kind: "segment" as const, object: `src/s${i}.mp4` })),
+      ]);
+      return id;
+    };
+    const announce = async (sid: string, swarm: string, net: string) => {
+      await v.hset(KEYS.p2pPeer(sid), {
+        swarm,
+        net,
+        first: String(now - 60_000),
+        last: String(now - 2_000),
+        announces: "4",
+      });
+      await v.expire(KEYS.p2pPeer(sid), P2P_EVIDENCE.peerTtlSeconds);
+      await v.zadd(KEYS.p2pSwarm(swarm), now - 2_000, sid);
+      await v.zadd(KEYS.p2pChannelNet(channel.id, net), now - 2_000, sid);
+      await v.expire(KEYS.p2pChannelNet(channel.id, net), P2P_EVIDENCE.peerTtlSeconds);
+    };
+    // A completed offer/answer exchange: the tracker gives each side the other's network.
+    const exchange = async (x: { sid: string; net: string }, y: { sid: string; net: string }) => {
+      await v.zadd(KEYS.p2pLinks(x.sid), now - 1_000, y.net);
+      await v.zadd(KEYS.p2pLinks(y.sid), now - 1_000, x.net);
+    };
+    const swarm = `${channel.id}:${"12".repeat(20)}`;
+    const a = await viewer();
+    const b = await viewer();
+    const c = await viewer();
+    const d = await viewer();
+    await announce(a, swarm, "net-a");
+    await announce(b, swarm, "net-b");
+    await exchange({ sid: a, net: "net-a" }, { sid: b, net: "net-b" });
+    // Same diverse swarm: c only exchanged within its own network, d never exchanged.
+    await announce(c, swarm, "net-c");
+    await announce(d, swarm, "net-c");
+    await exchange({ sid: c, net: "net-c" }, { sid: d, net: "net-c" });
+
+    const counts = await runScoring(w.ctx);
+    expect(counts).toMatchObject({ p2pEvidenced: 2, p2pErrors: 0 });
+    const rows = new Map(
+      (
+        await t.db
+          .select()
+          .from(schema.playbackSessions)
+          .where(inArray(schema.playbackSessions.id, [a, b, c, d]))
+      ).map((r) => [r.id, r]),
+    );
+    expect(rows.get(a)!.verdict).toBe("verified");
+    expect(rows.get(b)!.verdict).toBe("verified");
+    // The same fetches without an exchange with another network are too few, whatever the client
+    // says about P2P.
+    for (const id of [c, d]) {
+      expect(rows.get(id)!.verdict).toBe("pending");
+      expect(rows.get(id)!.verdictReasons).toEqual(["fetch_pattern", "media_unconfirmed"]);
+    }
+  });
+
+  test("a relay suspended by verify-receipts leaves relays:active in the same run", async () => {
+    const { user } = await makeUser(t.db);
+    const insertRelay = async () => {
+      const [r] = await t.db
+        .insert(schema.relayNodes)
+        .values({
+          ownerId: user.id,
+          name: `relay-${crypto.randomUUID().slice(0, 8)}`,
+          publicUrl: "http://127.0.0.1:9999",
+          declaredCapacityMbps: 100,
+          publicKey: "k",
+          tokenHash: crypto.randomUUID(),
+          status: "active",
+        })
+        .returning({ id: schema.relayNodes.id });
+      return r!.id;
+    };
+    const bad = await insertRelay();
+    const good = await insertRelay();
+    const start = new Date(Math.floor(Date.now() / 60_000) * 60_000 - 10 * 60_000);
+    const end = new Date(start.getTime() + 60_000);
+    const nonce = crypto.randomUUID();
+    // Bytes reported for a minute nothing was issued and no session was assigned: gross over-report.
+    await t.db.insert(schema.relayReceipts).values({
+      relayId: bad,
+      nonce,
+      periodStart: start,
+      periodEnd: end,
+      bytesReported: 5_000,
+      segmentsReported: 10,
+      tokensReported: 1,
+      payload: {
+        v: 1,
+        relayId: bad,
+        nonce,
+        periodStart: start.toISOString(),
+        periodEnd: end.toISOString(),
+        entries: [],
+      },
+      signature: "sig",
+    });
+    await w.ctx.valkey.hset(KEYS.relays, bad, "{}", good, "{}");
+
+    const counts = await runReceipts(w.ctx);
+    expect(counts).toMatchObject({ rejected: 1, suspendedRelays: 1, deassignFailed: 0 });
+    expect(await w.ctx.valkey.hexists(KEYS.relays, bad)).toBe(0);
+    expect(await w.ctx.valkey.hexists(KEYS.relays, good)).toBe(1);
+    const [row] = await t.db.select().from(schema.relayNodes).where(eq(schema.relayNodes.id, bad));
+    expect(row!.status).toBe("suspended");
   });
 });
 
