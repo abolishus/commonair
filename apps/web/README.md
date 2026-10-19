@@ -71,6 +71,32 @@ land signed in on `/dashboard`. Publish to `<server URL>/<stream key>` and open 
 - **i18n:** every visible string is `t("key")` from `src/i18n/en.ts`; `tests/i18n.test.ts` fails on
   a missing or dynamically built key.
 
+## Design system (E4a)
+
+Pages only compose `@commonair/ui`: shells from `@commonair/ui/layouts`, blocks from
+`@commonair/ui/blocks/<group>`, shadcn components and house primitives. Layout utilities (`flex`,
+`grid`, `gap-*`, `py-*`) are the only classes a page adds.
+
+| Route                | Layout (route file)                  | Compositions                                                                                                                       |
+| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                  | `AppShell` (`routes/_app.tsx`)       | `PageContainer`, `PageHeader` (calls to action), `Section` + `ResponsiveGrid` + `StreamCard`, `StreamGrid` (loading), `EmptyState` |
+| `/$channel`          | `AppShell`                           | `SplitLayout`, `PlayerChrome` (via `player/player.tsx`), `ChannelHeader`, `AccentButton`, `ChatPanel`/`ChatMessage`/`ChatComposer` |
+| `/signin`, `/signup` | `AppShell`                           | `PageHeader`, `Field*`, `PasswordField`, `Checkbox`, ALTCHA, `Alert` (`form-error`)                                                |
+| `/dashboard`         | `StudioShell` (`routes/_studio.tsx`) | `PageHeader`, `Card`, `CopyField`, `KeyValueList` + `StatusBadge` (health), `ConfirmDialog`                                        |
+| `/relays`            | `StudioShell`                        | `PageHeader`, `FormSection`, `CopyField`, `CodeBlock`, `DataTable` (`rowProps` → `relay-row`), `StatusBadge`, `ConfirmDialog`      |
+| `/embed/$channel`    | none (chromeless)                    | `PlayerChrome` only                                                                                                                |
+
+The header (`SiteHeader` + `UserMenu` + `ThemeToggle`) and footer (`SiteFooter` with the AGPL
+source link) live in `src/components/site-chrome.tsx`; what they link to is data in
+`src/lib/nav.ts` (only pages that exist). `tests/source-policy.test.ts` scans `src/**` (not
+`src/server/**` or the generated route tree) and fails, with file and line, on raw interactive
+HTML, `role=` on div/span, arbitrary Tailwind values, color literals, `sonner`/`@base-ui/react`
+imports or shadcn modules that have a house replacement, native `title=`, `style=`,
+`alert/confirm/prompt`, and raw media or custom elements. Exceptions need an allowlist entry with
+a reason (today: the player's `<video>` and the ALTCHA web component). Where a composition cannot
+yet express a contract (a test id, a slot), the code keeps the previous markup with an
+`E4a gap:` comment naming what the composition needs.
+
 ## TanStack Start with vite-plus: notes
 
 - Works unchanged with `vp build` / `vp dev` (vite-plus core is Vite with Rolldown). The Start

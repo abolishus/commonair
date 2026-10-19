@@ -36,7 +36,23 @@ function testIds(doc: string): string[] {
   return [...section.matchAll(/^\|\s*`([a-z0-9-]+)`\s*\|/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
 }
 
-const rendered = (id: string, text: string) => text.includes(`data-testid="${id}"`);
+/**
+ * Since E4a the app hands some test ids to `@commonair/ui` compositions instead of writing them on
+ * an element: as a prop object (`inputProps={{ "data-testid": "chat-input" }}`, `rowProps`) or as
+ * the composition's named test-id props (`data-value-testid=`, `data-copy-testid=`), which the
+ * composition renders as `data-testid` on the inner element. All three spell the id out literally.
+ */
+const rendered = (id: string, text: string) =>
+  text.includes(`data-testid="${id}"`) ||
+  text.includes(`"data-testid": "${id}"`) ||
+  text.includes(`data-value-testid="${id}"`) ||
+  text.includes(`data-copy-testid="${id}"`);
+
+/** `data-x={expr}` on an element, or `"data-x": expr` in a prop object passed to a composition. */
+const setsAttr = (attr: string, text: string) => {
+  const jsx = /^(data-[a-z-]+)=\{(.+)\}$/.exec(attr);
+  return text.includes(attr) || (jsx !== null && text.includes(`"${jsx[1]}": ${jsx[2]}`));
+};
 
 describe.each(["e1-selectors.md", "e2-selectors.md", "e3-selectors.md"])("%s", (doc) => {
   const ids = testIds(doc);
@@ -80,6 +96,13 @@ describe("E3 data attributes", () => {
     "data-rejected={rejected}",
     'to="/relays"',
   ])("app sets %s", (attr) => {
-    expect(appText).toContain(attr);
+    // relay-row's attributes go through DataTable's `rowProps` since E4a.
+    expect(setsAttr(attr, appText)).toBe(true);
+  });
+
+  it("relay-row is rendered through DataTable rowProps with its id and status", () => {
+    expect(appText).toMatch(
+      /rowProps=\{\(relay\) => \(\{\s*"data-testid": "relay-row",\s*"data-relay-id": relay\.id,\s*"data-status": relay\.status,/,
+    );
   });
 });

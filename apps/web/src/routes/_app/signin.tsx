@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { Button } from "@commonair/ui/components/button";
-import { Field, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
+import { PageHeader } from "@commonair/ui/blocks/headers";
+import { Button, buttonVariants } from "@commonair/ui/components/button";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
+import { PageContainer } from "@commonair/ui/layouts";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
@@ -36,8 +38,8 @@ function SignInPage(): React.JSX.Element {
   };
 
   return (
-    <section className="mx-auto flex max-w-md flex-col gap-6 px-4 py-12">
-      <h1 className="font-display text-xl font-semibold">{t("signin.title")}</h1>
+    <PageContainer width="narrow" className="flex max-w-md flex-col gap-6 py-12">
+      <PageHeader title={t("signin.title")} />
       <form onSubmit={(e) => void onSubmit(e)}>
         <FieldGroup>
           <Field>
@@ -51,6 +53,8 @@ function SignInPage(): React.JSX.Element {
               required
             />
           </Field>
+          {/* E4a gap: PasswordField forces autocomplete="new-password", which makes password managers
+              offer a new password on sign-in; it needs to pass `autoComplete` through first. */}
           <Field>
             <FieldLabel htmlFor="signin-password">{t("field.password")}</FieldLabel>
             <Input
@@ -72,14 +76,14 @@ function SignInPage(): React.JSX.Element {
           >
             {t("signin.submit")}
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <FieldDescription>
             {t("signin.noAccount")}{" "}
-            <Link to="/signup" className="underline underline-offset-4">
+            <Link to="/signup" className={buttonVariants({ variant: "link", className: "px-0" })}>
               {t("nav.signUp")}
             </Link>
-          </p>
+          </FieldDescription>
         </FieldGroup>
       </form>
-    </section>
+    </PageContainer>
   );
 }

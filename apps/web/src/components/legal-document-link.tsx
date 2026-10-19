@@ -37,7 +37,7 @@ export function LegalDocumentLink({ doc }: { doc: LegalDoc }): React.JSX.Element
               : t("legal.version", { version: doc.version })}
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[60vh]">
+        <ScrollArea className="max-h-96">
           <div className="pr-3 text-xs whitespace-pre-wrap">{doc.body}</div>
         </ScrollArea>
       </DialogContent>

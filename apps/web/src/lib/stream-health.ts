@@ -6,6 +6,7 @@
  * message for each warning code services/media emits.
  */
 import type { StreamHealth } from "@commonair/contracts/dto";
+import type { StatusTone } from "@commonair/ui";
 import { HEALTH_WARNING_CODES, type HealthWarningCode } from "@commonair/contracts/enums";
 import type { z } from "zod";
 import { t, type MessageKey } from "../i18n/index.ts";
@@ -61,6 +62,18 @@ export function latestWarnings(health: Pick<StreamHealthDto, "live" | "samples">
 export function healthState(health: Pick<StreamHealthDto, "live" | "samples">): HealthState {
   if (!health.live) return "offline";
   return latestWarnings(health).length > 0 ? "warning" : "healthy";
+}
+
+/** The state chip in the card header (a `StatusBadge`). */
+export function healthBadge(state: HealthState): { label: string; tone: StatusTone } {
+  switch (state) {
+    case "offline":
+      return { label: t("dashboard.health.badge.offline"), tone: "neutral" };
+    case "healthy":
+      return { label: t("dashboard.health.badge.healthy"), tone: "success" };
+    case "warning":
+      return { label: t("dashboard.health.badge.warning"), tone: "warning" };
+  }
 }
 
 export const HEALTH_POLL_MS = 10_000;

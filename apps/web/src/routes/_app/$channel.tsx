@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ChannelAvatar, EmptyState, LiveBadge, ViewerCount } from "@commonair/ui";
+import { EmptyState } from "@commonair/ui";
+import { ChannelHeader } from "@commonair/ui/blocks/media";
+import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { Tv01Icon } from "@hugeicons/core-free-icons";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import type * as React from "react";
@@ -37,49 +39,53 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
   const own = me !== null && (me.channelSlug ?? me.username) === channel.slug;
   const follow = useFollow(channel.slug, channel.following, channel.followerCount, channel.requestedAt ?? 0);
   return (
-    <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <div className="flex min-w-0 flex-col gap-3">
-        <Player
-          channel={channel.slug}
-          live={live}
-          offline={
-            <div data-testid="offline-state">
-              <EmptyState icon={Tv01Icon} title={t("channel.offline", { name: channel.displayName })} />
-            </div>
-          }
-        />
-        <div className="flex min-w-0 items-center gap-3">
-          <ChannelAvatar name={channel.displayName} src={channel.avatarUrl} size="md" live={live} decorative />
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <h1 className="truncate font-display text-base font-semibold">{channel.displayName}</h1>
-            <p className="truncate text-xs text-muted-foreground">{channel.live?.title || channel.title}</p>
-            <FollowerCount count={follow.state.count} />
+    <PageContainer width="wide" className="py-4">
+      <SplitLayout
+        asideWidth="lg"
+        main={
+          <div className="flex min-w-0 flex-col gap-4">
+            <Player
+              channel={channel.slug}
+              live={live}
+              offline={
+                <EmptyState
+                  data-testid="offline-state"
+                  icon={Tv01Icon}
+                  title={t("channel.offline", { name: channel.displayName })}
+                />
+              }
+            />
+            <ChannelHeader
+              name={channel.displayName}
+              avatarUrl={channel.avatarUrl}
+              live={live}
+              title={channel.live?.title || channel.title}
+              viewerCount={channel.live?.viewerCount}
+              followers={<FollowerCount count={follow.state.count} />}
+              actions={
+                own ? undefined : <FollowButton signedIn={me !== null} state={follow.state} onToggle={follow.toggle} />
+              }
+            />
           </div>
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-            {channel.live && (
-              <>
-                <LiveBadge data-testid="live-badge" pulse />
-                <ViewerCount count={channel.live.viewerCount} />
-              </>
-            )}
-            {!own && <FollowButton signedIn={me !== null} state={follow.state} onToggle={follow.toggle} />}
-          </div>
-        </div>
-      </div>
-      <ChatPanel
-        channel={channel.slug}
-        signedIn={me !== null}
-        selfUsername={me?.username ?? null}
-        className="h-[28rem] lg:h-[calc(100dvh-7rem)]"
+        }
+        aside={
+          <ChatPanel
+            channel={channel.slug}
+            signedIn={me !== null}
+            selfUsername={me?.username ?? null}
+            // Bounded so the log scrolls inside the panel: under the player on phones, beside it on desktop.
+            className="h-112 lg:h-160"
+          />
+        }
       />
-    </div>
+    </PageContainer>
   );
 }
 
 function ChannelNotFound(): React.JSX.Element {
   return (
-    <div className="mx-auto max-w-md px-4 py-16">
+    <PageContainer width="narrow" className="py-16">
       <EmptyState icon={Tv01Icon} title={t("channel.notFound")} />
-    </div>
+    </PageContainer>
   );
 }

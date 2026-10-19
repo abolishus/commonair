@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { IconButton } from "@commonair/ui";
+import { LiveBadge } from "@commonair/ui";
+import { PlayerChrome, PlayerControl } from "@commonair/ui/blocks/media";
 import { cn } from "@commonair/ui/lib/utils";
 import { VolumeHighIcon, VolumeOffIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
@@ -16,7 +17,7 @@ export interface PlayerProps {
   /** Whether the channel is live (from `channels.get`); playback starts and stops with it. */
   live: boolean;
   embed?: boolean;
-  /** Shown over the video while offline. */
+  /** Shown over the video (the player's stage) while offline. */
   offline?: React.ReactNode;
   className?: string;
 }
@@ -77,48 +78,47 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
     if (!video.muted) void video.play().catch(() => undefined);
   };
 
+  const stage =
+    state === "offline" ? (
+      offline
+    ) : state === "loading" ? (
+      <output>{t("player.loading")}</output>
+    ) : state === "error" ? (
+      <p role="alert">{t("player.error")}</p>
+    ) : undefined;
+
   return (
-    <div
+    <PlayerChrome
       data-testid="player"
       data-state={state}
       data-source={source}
-      className={cn("relative aspect-video w-full overflow-hidden bg-muted", className)}
+      // E4a gap: PlayerChrome's built-in live badge takes no props, and the e1 contract needs
+      // `live-badge` on it; until PlayerChrome forwards badge props, the badge comes in `topStart`
+      // and the non-badge "preview" variant keeps it from rendering twice.
+      variant={live ? "preview" : "offline"}
+      topStart={live ? <LiveBadge data-testid="live-badge" pulse /> : undefined}
+      stage={stage}
+      controls={
+        state === "playing" ? (
+          <PlayerControl
+            label={muted ? t("player.unmute") : t("player.mute")}
+            icon={muted ? VolumeOffIcon : VolumeHighIcon}
+            pressed={!muted}
+            onClick={toggleMute}
+          />
+        ) : undefined
+      }
+      className={cn("w-full", className)}
     >
       <video
         ref={videoRef}
         data-testid="player-video"
-        className="size-full"
         muted
         autoPlay
         playsInline
         crossOrigin="anonymous"
         onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
       />
-      {state === "offline" && offline && (
-        <div className="absolute inset-0 grid place-items-center bg-background">{offline}</div>
-      )}
-      {state === "loading" && (
-        <div
-          className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-overlay-foreground"
-          aria-live="polite"
-        >
-          {t("player.loading")}
-        </div>
-      )}
-      {state === "error" && (
-        <div className="absolute inset-0 grid place-items-center bg-background/80 text-xs" role="alert">
-          {t("player.error")}
-        </div>
-      )}
-      {state === "playing" && (
-        <IconButton
-          className="absolute right-2 bottom-2"
-          variant="secondary"
-          label={muted ? t("player.unmute") : t("player.mute")}
-          icon={muted ? VolumeOffIcon : VolumeHighIcon}
-          onClick={toggleMute}
-        />
-      )}
-    </div>
+    </PlayerChrome>
   );
 }

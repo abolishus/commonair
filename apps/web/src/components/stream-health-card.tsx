@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, SkeletonText } from "@commonair/ui";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
-import { Alert02Icon, CheckmarkCircle02Icon, Tv01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { EmptyState, SkeletonText, StatusBadge } from "@commonair/ui";
+import { KeyValueList } from "@commonair/ui/blocks/data";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
+import { CheckmarkCircle02Icon, Tv01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { api } from "../lib/api.ts";
@@ -15,6 +15,7 @@ import {
   latestWarnings,
   pollWhileVisible,
   warningMessage,
+  healthBadge,
   type StreamHealthDto,
 } from "../lib/stream-health.ts";
 import { FormError } from "./form-error.tsx";
@@ -58,13 +59,20 @@ export function StreamHealthCard({ channel }: { channel: string }): React.JSX.El
   const state = health ? healthState(health) : undefined;
   const warnings = health ? latestWarnings(health) : [];
 
+  const badge = state ? healthBadge(state) : undefined;
+
   return (
     <Card data-testid="stream-health" data-state={state} aria-busy={!health && !failed}>
       <CardHeader>
         <CardTitle>{t("dashboard.health.title")}</CardTitle>
         <CardDescription>{t("dashboard.health.hint")}</CardDescription>
+        {badge && (
+          <CardAction>
+            <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
+          </CardAction>
+        )}
       </CardHeader>
-      <CardContent className="flex flex-col gap-4 text-xs">
+      <CardContent className="flex flex-col gap-4">
         {failed && <FormError>{t("dashboard.health.loadFailed")}</FormError>}
         {!health && !failed && <SkeletonText lines={2} />}
         {state === "offline" && (
@@ -84,25 +92,23 @@ export function StreamHealthCard({ channel }: { channel: string }): React.JSX.El
           />
         )}
         {state === "warning" && (
-          <ul className="flex flex-col gap-3" aria-label={t("dashboard.health.warnings")} aria-live="polite">
-            {warnings.map((code) => {
+          <KeyValueList
+            aria-label={t("dashboard.health.warnings")}
+            aria-live="polite"
+            rows={warnings.map((code) => {
               const msg = warningMessage(code);
-              return (
-                <li key={code} data-testid="stream-health-warning" data-code={code} className="flex gap-2">
-                  <HugeiconsIcon
-                    icon={Alert02Icon}
-                    strokeWidth={2}
-                    aria-hidden
-                    className="mt-0.5 size-4 shrink-0 text-destructive"
-                  />
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="font-medium text-foreground">{msg.title}</span>
-                    <span className="text-muted-foreground">{msg.hint}</span>
-                  </div>
-                </li>
-              );
+              return {
+                // The fix hint is the useful part, so it sits under the title rather than in a tooltip.
+                term: (
+                  <span data-testid="stream-health-warning" data-code={code} className="flex flex-col gap-0.5">
+                    <span>{msg.title}</span>
+                    <span>{msg.hint}</span>
+                  </span>
+                ),
+                value: <StatusBadge tone="warning">{t("dashboard.health.warningBadge")}</StatusBadge>,
+              };
             })}
-          </ul>
+          />
         )}
       </CardContent>
     </Card>

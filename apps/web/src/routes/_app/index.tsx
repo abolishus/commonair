@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, SkeletonGroup, StreamCard, StreamCardSkeleton } from "@commonair/ui";
+import { EmptyState, StreamCard } from "@commonair/ui";
+import { PageHeader, Section } from "@commonair/ui/blocks/headers";
+import { StreamGrid } from "@commonair/ui/blocks/media";
 import { buttonVariants } from "@commonair/ui/components/button";
+import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { AlertCircleIcon, LiveStreaming02Icon } from "@hugeicons/core-free-icons";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
@@ -33,14 +36,12 @@ function sectionTitle(id: DirectorySectionId): string {
   }
 }
 
-const GRID = "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
-
 function Home(): React.JSX.Element {
   const home = Route.useLoaderData();
   const { me } = useBootstrap();
   const sections = home ? directorySections(home, me !== null) : [];
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-8">
+    <PageContainer width="wide" className="flex flex-col gap-8 py-8">
       <Intro />
       <div data-testid="directory" className="flex flex-col gap-8">
         {home === null ? (
@@ -54,17 +55,15 @@ function Home(): React.JSX.Element {
           />
         ) : (
           sections.map((section, index) => (
-            <section
+            <Section
               key={section.id}
               data-testid="directory-section"
               data-section={section.id}
-              aria-labelledby={`directory-${section.id}`}
-              className="flex flex-col gap-3"
+              heading={sectionTitle(section.id)}
             >
-              <h2 id={`directory-${section.id}`} className="font-display text-base font-semibold">
-                {sectionTitle(section.id)}
-              </h2>
-              <div className={GRID}>
+              {/* E4a gap: StreamGrid needs per-card props (data-testid, data-channel, showReason) for the
+                  e2 selector contract; until then the cards sit in the same ResponsiveGrid by hand. */}
+              <ResponsiveGrid cols={4}>
                 {section.cards.map((card) => (
                   <StreamCard
                     key={card.channel.id}
@@ -77,24 +76,24 @@ function Home(): React.JSX.Element {
                     lazy={index > 0}
                   />
                 ))}
-              </div>
-            </section>
+              </ResponsiveGrid>
+            </Section>
           ))
         )}
       </div>
-    </div>
+    </PageContainer>
   );
 }
 
-/** The E1 calls to action, kept above the directory. */
+/** The E1 calls to action, above the directory. */
 function Intro(): React.JSX.Element {
   const { me, instance } = useBootstrap();
   return (
-    <section className="flex flex-col gap-3">
-      <h1 className="font-display text-2xl font-semibold">{t("home.title", { name: instance.name })}</h1>
-      <p className="text-sm text-muted-foreground">{t("home.tagline")}</p>
-      <div className="flex flex-wrap gap-2">
-        {me ? (
+    <PageHeader
+      title={t("home.title", { name: instance.name })}
+      description={t("home.tagline")}
+      actions={
+        me ? (
           <Link to="/dashboard" className={buttonVariants({ size: "lg" })}>
             {t("home.toDashboard")}
           </Link>
@@ -107,21 +106,24 @@ function Intro(): React.JSX.Element {
               {t("nav.signIn")}
             </Link>
           </>
-        )}
-      </div>
-    </section>
+        )
+      }
+    />
   );
 }
 
 function DirectoryPending(): React.JSX.Element {
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-8 px-4 py-8">
+    <PageContainer width="wide" className="flex flex-col gap-8 py-8">
       <Intro />
-      <SkeletonGroup label={t("directory.loading")} className={GRID}>
-        {Array.from({ length: 8 }, (_, i) => (
-          <StreamCardSkeleton key={i} />
-        ))}
-      </SkeletonGroup>
-    </div>
+      <StreamGrid
+        streams={[]}
+        hrefFor={(stream) => `/${stream.channel.slug}`}
+        loading
+        loadingCount={8}
+        aria-busy
+        aria-label={t("directory.loading")}
+      />
+    </PageContainer>
   );
 }
