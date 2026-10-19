@@ -3,15 +3,16 @@
 
 import type * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { ChannelAvatar, ConfirmDialog, EmptyState, StatusBadge } from "@commonair/ui";
+import { ChannelAvatar, ConfirmDialog, EmptyState } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
-import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@commonair/ui/components/card";
+import { Card, CardContent, CardFooter, CardHeader } from "@commonair/ui/components/card";
 import { Field, FieldGroup, FieldLabel, FieldTitle } from "@commonair/ui/components/field";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs } from "@commonair/ui/blocks/headers";
 import { ListPanel, StatCard, StatGrid } from "@commonair/ui/blocks/data";
 import { ChannelHeader, ChatMessage } from "@commonair/ui/blocks/media";
+import { QueueItemCard } from "@commonair/ui/blocks/feedback";
 import { actions, queue, tabs, user } from "./fixtures/Community.ts";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
@@ -29,33 +30,22 @@ function CommunityPage(): React.JSX.Element {
           main={
             <section aria-label="Queue" className="flex flex-col gap-3">
               {queue.map((item) => (
-                <Card key={item.id} size="sm">
-                  <CardHeader>
-                    <CardTitle className="flex flex-wrap items-center gap-2">
-                      <StatusBadge tone={item.tone}>{item.kind}</StatusBadge>
-                      <span>{item.reason}</span>
-                    </CardTitle>
-                    <CardAction>{item.ago}</CardAction>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-3">
-                    <ChatMessage author={item.who} colorIndex={item.colorIndex} body={item.text} />
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm">{item.primary}</Button>
-                      <Button variant="outline" size="sm">
-                        {item.secondary}
-                      </Button>
-                      <Button variant="outline" size="sm">
-                        Timeout 10 min
-                      </Button>
-                      <Button variant="destructive" size="sm">
-                        Ban
-                      </Button>
-                      <Button variant="ghost" size="sm" className="ms-auto">
-                        Escalate to platform
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <QueueItemCard
+                  key={item.id}
+                  kind={item.kind}
+                  tone={item.tone}
+                  reason={item.reason}
+                  time={item.ago}
+                  actions={[
+                    { id: "primary", label: item.primary, variant: "default" },
+                    { id: "secondary", label: item.secondary },
+                    { id: "timeout", label: "Timeout 10 min" },
+                    { id: "ban", label: "Ban", variant: "destructive" },
+                  ]}
+                  trailingAction={{ id: "escalate", label: "Escalate to platform", variant: "ghost" }}
+                >
+                  <ChatMessage author={item.who} colorIndex={item.colorIndex} body={item.text} />
+                </QueueItemCard>
               ))}
               <EmptyState
                 title="That’s everything."

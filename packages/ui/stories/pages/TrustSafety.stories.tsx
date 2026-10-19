@@ -20,10 +20,9 @@ import { Textarea } from "@commonair/ui/components/textarea";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { FilterBar } from "@commonair/ui/blocks/data";
-import { ChoiceToggle, FormSection } from "@commonair/ui/blocks/forms";
+import { ChoiceToggle, FormSection, SelectField } from "@commonair/ui/blocks/forms";
 import { ChatMessage } from "@commonair/ui/blocks/media";
 import { decisions, detail, durations, filters, reports, templates } from "./fixtures/TrustSafety.ts";
-import { SelectField } from "./select-field.tsx";
 import { AdminPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Platform/TrustSafety", parameters: pageParameters } satisfies Meta;

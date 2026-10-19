@@ -57,6 +57,7 @@ export const sidebarGroups: ChannelNavGroup[] = [
         href: "#channel/grumblebee",
       },
     ],
+    moreLink: { label: "Show all 38 followed", href: "#following" },
   },
   {
     id: "spotlight",

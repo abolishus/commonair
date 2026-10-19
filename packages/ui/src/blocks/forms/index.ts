@@ -22,3 +22,4 @@ export { PasswordField, type PasswordFieldProps } from "./password-field.tsx";
 export { DateOfBirthField, type DateOfBirthFieldProps } from "./date-of-birth-field.tsx";
 export { SwitchMatrix, type SwitchMatrixProps, type SwitchMatrixRow } from "./switch-matrix.tsx";
 export { CommentComposer, type CommentComposerProps } from "./comment-composer.tsx";
+export { SelectField, type SelectFieldProps, type SelectFieldOption } from "./select-field.tsx";

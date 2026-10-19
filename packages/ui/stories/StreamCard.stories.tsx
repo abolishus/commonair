@@ -6,6 +6,7 @@ import { Tv01Icon } from "@hugeicons/core-free-icons";
 import { ACCENTS } from "@commonair/contracts/shapes";
 import { Button } from "../src/components/button.tsx";
 import { EmptyState, SkeletonGroup, StreamCard, StreamCardSkeleton } from "../src/index.ts";
+import { ResponsiveGrid } from "../src/layouts/page-layout.tsx";
 import { LONG_NAME, LONG_TITLE, makeStream } from "./fixtures.ts";
 
 const meta = {
@@ -71,6 +72,13 @@ export const BrokenThumbnail: Story = {
   args: { stream: makeStream({ thumbnail: "data:image/png;base64,broken", accent: "amber" }) },
 };
 
+/** `uptimeLabel`: time live over the thumbnail's bottom-end corner (Following board). */
+export const WithUptime: Story = { args: { uptimeLabel: "3:41:09" } };
+export const WithUptimeLight: Story = { args: { uptimeLabel: "3:41:09" }, globals: { theme: "light" } };
+export const WithUptimeMobile320: Story = {
+  args: { uptimeLabel: "3:41:09" },
+  globals: { viewport: { value: "mobile320" } },
+};
 export const Mature: Story = { args: { stream: makeStream({ mature: true, reason: "category" }) } };
 
 export const NoCategoryNoTags: Story = {
@@ -88,7 +96,7 @@ export const Loading: Story = {
 export const Grid: Story = {
   parameters: { fullWidth: true },
   render: () => (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-4">
+    <ResponsiveGrid cols={4}>
       {ACCENTS.map((accent, i) => (
         <StreamCard
           key={accent}
@@ -101,17 +109,19 @@ export const Grid: Story = {
           })}
         />
       ))}
-    </div>
+    </ResponsiveGrid>
   ),
 };
 
 export const GridLoading: Story = {
   parameters: { fullWidth: true },
   render: () => (
-    <SkeletonGroup className="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-4">
-      {Array.from({ length: 8 }, (_, i) => (
-        <StreamCardSkeleton key={i} />
-      ))}
+    <SkeletonGroup>
+      <ResponsiveGrid cols={4}>
+        {Array.from({ length: 8 }, (_, i) => (
+          <StreamCardSkeleton key={i} />
+        ))}
+      </ResponsiveGrid>
     </SkeletonGroup>
   ),
 };

@@ -17,7 +17,7 @@ import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, ResponsiveGrid, SplitLayout } from "@commonair/ui/layouts";
 import { KeyValueList, ListPanel, StatCard, StatGrid, TrendChart } from "@commonair/ui/blocks/data";
-import { CharacterCountField, FormSection, SwitchField, TagsField } from "@commonair/ui/blocks/forms";
+import { CharacterCountField, FormSection, SelectField, SwitchField, TagsField } from "@commonair/ui/blocks/forms";
 import { PlayerChrome } from "@commonair/ui/blocks/media";
 import {
   bitrate,
@@ -32,7 +32,6 @@ import {
   tagSuggestions,
 } from "./fixtures/StreamManager.ts";
 import { moneyText } from "./money.tsx";
-import { SelectField } from "./select-field.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/StreamManager", parameters: pageParameters } satisfies Meta;

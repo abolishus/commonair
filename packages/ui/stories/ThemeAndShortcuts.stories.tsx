@@ -37,7 +37,7 @@ export const ToggleTranslated: Story = {
 
 export const Shortcuts: Story = {
   render: () => (
-    <dl className="grid grid-cols-[auto_auto_auto] items-center gap-x-6 gap-y-2 text-sm">
+    <dl className="grid grid-cols-3 items-center gap-x-6 gap-y-2 text-sm">
       {[["mod", "k"], ["shift", "?"], ["alt", "arrowup"], ["mod", "shift", "enter"], ["escape"]].map((keys) => (
         <React.Fragment key={keys.join("+")}>
           <dt className="text-muted-foreground">{keys.join(" + ")}</dt>

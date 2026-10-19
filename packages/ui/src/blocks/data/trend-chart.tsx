@@ -6,6 +6,7 @@ import * as React from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
 import { ChartContainer, ChartTooltipContent, type ChartConfig } from "@commonair/ui/components/chart";
 import { cn } from "@commonair/ui/lib/utils";
+import { Legend } from "./breakdown.tsx";
 
 export interface TrendSeries {
   key: string;
@@ -20,6 +21,8 @@ export interface TrendChartProps extends Omit<React.ComponentProps<"div">, "chil
   type?: "bar" | "line";
   compact?: boolean;
   grouped?: boolean;
+  /** A key-only `Legend` of the series above or below the chart; the other props stay on the chart. */
+  legend?: "top" | "bottom";
 }
 export function TrendChart({
   data,
@@ -29,6 +32,7 @@ export function TrendChart({
   type = "line",
   compact = false,
   grouped = false,
+  legend,
   className,
   ...props
 }: TrendChartProps) {
@@ -40,7 +44,7 @@ export function TrendChart({
     accessibilityLayer: true,
     margin: compact ? { top: 2, right: 2, bottom: 2, left: 2 } : { top: 8, right: 8, bottom: 0, left: 0 },
   };
-  return (
+  const chart = (
     <ChartContainer
       config={config}
       role="img"
@@ -85,5 +89,16 @@ export function TrendChart({
         </LineChart>
       )}
     </ChartContainer>
+  );
+  if (!legend) return chart;
+  const key = (
+    <Legend layout="inline" items={series.map((item) => ({ id: item.key, label: item.label, color: item.color }))} />
+  );
+  return (
+    <div data-slot="trend-chart" className="flex min-w-0 flex-col gap-3">
+      {legend === "top" ? key : null}
+      {chart}
+      {legend === "bottom" ? key : null}
+    </div>
   );
 }

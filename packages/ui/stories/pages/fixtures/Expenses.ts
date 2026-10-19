@@ -4,10 +4,10 @@
 /**
  * Sample data from the Expenses board (service expenses). Money is integer cents, USD, rendered
  * with MoneyAmount/formatMoney. Sub-cent unit costs (per viewer-hour, per 1,000 viewer-hours) are
- * text because they cannot be expressed in cents (see `money.tsx`).
+ * integer micro-units rendered with formatUnitCost (see `money.tsx`).
  */
 import type { BreakdownSegment } from "@commonair/ui/blocks/data";
-import type { Money, MoneyNote, SubCent } from "../money.tsx";
+import type { Money, MoneyNote, UnitCost } from "../money.tsx";
 
 export const tabs = [
   { id: "overview", label: "Overview", href: "#finances" },
@@ -51,8 +51,8 @@ export interface Service {
   unitPrice: Money | null;
   monthlyCents: number;
   delta: string;
-  /** Cost per 1,000 verified viewer-hours (monthly cost / 3,950K viewer-hours): sub-cent, so text. */
-  unitCost: string;
+  /** Cost per 1,000 verified viewer-hours (monthly cost / 3,950K viewer-hours), in micro-units. */
+  unitCostMicros: number;
 }
 
 export const services: Service[] = (
@@ -65,7 +65,7 @@ export const services: Service[] = (
       30_667,
       184_000,
       "0%",
-      "$0.466",
+      466_000,
     ],
     [
       "Bare-metal servers (US)",
@@ -75,10 +75,10 @@ export const services: Service[] = (
       29_000,
       116_000,
       "0%",
-      "$0.294",
+      294_000,
     ],
-    ["GPU transcoding nodes", "adaptive renditions (NVENC)", "per hour used", "2,710 h", 30, 81_300, "+6%", "$0.206"],
-    ["Cloud burst compute", "overflow transcoding", "per hour used", "412 h", 74, 30_500, "−22%", "$0.077"],
+    ["GPU transcoding nodes", "adaptive renditions (NVENC)", "per hour used", "2,710 h", 30, 81_300, "+6%", 206_000],
+    ["Cloud burst compute", "overflow transcoding", "per hour used", "412 h", 74, 30_500, "−22%", 77_000],
     [
       "Transit bandwidth",
       "video egress not served by relays",
@@ -87,24 +87,15 @@ export const services: Service[] = (
       280,
       143_400,
       "−11%",
-      "$0.363",
+      363_000,
     ],
-    ["Object storage", "VODs, clips, thumbnails, backups", "per TB-month", "96 TB", 600, 57_600, "+4%", "$0.146"],
-    ["Backup storage (offsite)", "WAL archives, nightly dumps", "per TB-month", "18 TB", 500, 9_000, "+2%", "$0.023"],
-    [
-      "Transactional email",
-      "verification, go-live, statements",
-      "per 1,000 emails",
-      "214K",
-      65,
-      13_900,
-      "+9%",
-      "$0.035",
-    ],
-    ["DNS, domains & TLS", "name service, certificates", "flat", "—", null, 2_400, "0%", "$0.006"],
-    ["Status page host", "separate infra for status", "flat", "1 server", 1_200, 1_200, "0%", "$0.003"],
+    ["Object storage", "VODs, clips, thumbnails, backups", "per TB-month", "96 TB", 600, 57_600, "+4%", 146_000],
+    ["Backup storage (offsite)", "WAL archives, nightly dumps", "per TB-month", "18 TB", 500, 9_000, "+2%", 23_000],
+    ["Transactional email", "verification, go-live, statements", "per 1,000 emails", "214K", 65, 13_900, "+9%", 35_000],
+    ["DNS, domains & TLS", "name service, certificates", "flat", "—", null, 2_400, "0%", 6_000],
+    ["Status page host", "separate infra for status", "flat", "1 server", 1_200, 1_200, "0%", 3_000],
   ] as const
-).map(([name, runs, billing, usage, unitPrice, monthlyCents, delta, unitCost], index) => ({
+).map(([name, runs, billing, usage, unitPrice, monthlyCents, delta, unitCostMicros], index) => ({
   id: `s${index}`,
   name,
   runs,
@@ -113,7 +104,7 @@ export const services: Service[] = (
   unitPrice: unitPrice === null ? null : { cents: unitPrice },
   monthlyCents,
   delta,
-  unitCost,
+  unitCostMicros,
 }));
 
 export const servicesNote = {
@@ -125,15 +116,14 @@ export const servicesNote = {
 };
 
 export const viewerHour = {
-  // Sub-cent amounts: text until formatMoney supports sub-minor-unit precision.
-  total: { subCent: "$0.0061" } as SubCent,
-  // Per viewer-hour shares are sub-cent too.
+  // Sub-cent amounts in micro-units (formatUnitCost).
+  total: { micros: 6_100 } as UnitCost,
   parts: [
-    { label: "Video egress (origin + edge)", value: "$0.0029", percent: 48 },
-    { label: "Transcoding", value: "$0.0016", percent: 26 },
-    { label: "Storage (VOD, clips)", value: "$0.0007", percent: 11 },
-    { label: "Chat & API", value: "$0.0005", percent: 8 },
-    { label: "Trust & safety review", value: "$0.0004", percent: 7 },
+    { label: "Video egress (origin + edge)", value: { micros: 2_900 } as UnitCost, percent: 48 },
+    { label: "Transcoding", value: { micros: 1_600 } as UnitCost, percent: 26 },
+    { label: "Storage (VOD, clips)", value: { micros: 700 } as UnitCost, percent: 11 },
+    { label: "Chat & API", value: { micros: 500 } as UnitCost, percent: 8 },
+    { label: "Trust & safety review", value: { micros: 400 } as UnitCost, percent: 7 },
   ],
   streamedHour: { before: "One streamed hour (ingest + 4 renditions + archive): ", money: { cents: 42 } } as MoneyNote,
 };

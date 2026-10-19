@@ -14,8 +14,8 @@ export const tabs = [
   { id: "channels", label: "Channels", href: "#following/channels" },
 ];
 
-/** `uptime` is on the board's thumbnails; StreamCard has no uptime overlay yet (contract request). */
-export const live = [
+/** Live channels; `uptime` is shown over each thumbnail (StreamCard `uptimeLabel`). */
+const liveRows = [
   {
     title: "Rebuilding a 1970s tape deck",
     name: "rivertide",
@@ -56,7 +56,14 @@ export const live = [
     viewers: 42,
     uptime: "2:20:03",
   },
-].map(({ uptime: _uptime, accent, ...row }) => liveStream({ ...row, accent: accent as Accent, reason: "following" }));
+].map(({ uptime, accent, ...row }) => ({
+  uptime,
+  stream: liveStream({ ...row, accent: accent as Accent, reason: "following" }),
+}));
+
+export const live = liveRows.map((row) => row.stream);
+/** Time live per channel id, for the grid's `cardProps`. */
+export const uptimeByChannel = new Map(liveRows.map((row) => [row.stream.channel.id, row.uptime]));
 
 export const offline: { name: string; accent: Accent; last: string; next: string }[] = [
   { name: "synthesist_ana", accent: "pink", last: "Live 2 days ago · Music", next: "Tomorrow 19:00" },

@@ -9,10 +9,16 @@ import { Input } from "@commonair/ui/components/input";
 import { PageContainer, SectionNav, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { FilterBar, ProgressRow } from "@commonair/ui/blocks/data";
-import { AmountField, ChoiceToggle, CopyField, FormSection, SwitchField } from "@commonair/ui/blocks/forms";
+import {
+  AmountField,
+  ChoiceToggle,
+  CopyField,
+  FormSection,
+  SelectField,
+  SwitchField,
+} from "@commonair/ui/blocks/forms";
 import { AlertPreview } from "@commonair/ui/blocks/media";
 import { overlays, preview, previewKinds, sourceUrl, tipAlert } from "./fixtures/Overlays.ts";
-import { SelectField } from "./select-field.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/Overlays", parameters: pageParameters } satisfies Meta;

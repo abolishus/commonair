@@ -3,7 +3,7 @@
 
 /** Sample data from the Status board (90-day uptime, incidents). */
 import type { StatusTone } from "@commonair/ui";
-import type { TimelineUpdate, UptimeDay } from "@commonair/ui/blocks/data";
+import type { LegendItem, TimelineUpdate, UptimeDay } from "@commonair/ui/blocks/data";
 
 export const summary = {
   title: "Partial degradation: chat in EU",
@@ -113,6 +113,13 @@ export const statusLabels: Record<UptimeDay["status"], string> = {
   outage: "Outage",
   none: "No data",
 };
+
+/** Key-only legend under the uptime strips (swatch colors match UptimeStrip's day tones). */
+export const uptimeLegend: LegendItem[] = [
+  { id: "ok", label: statusLabels.ok, color: "--success" },
+  { id: "degraded", label: statusLabels.degraded, color: "--warning" },
+  { id: "outage", label: statusLabels.outage, color: "--destructive" },
+];
 
 export const incidents: {
   id: string;

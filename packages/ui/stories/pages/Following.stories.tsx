@@ -6,7 +6,6 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Clock01Icon, Notification01Icon } from "@hugeicons/core-free-icons";
 import { ChannelAvatar, IconButton } from "@commonair/ui";
-import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
 import {
   Item,
@@ -21,7 +20,8 @@ import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
 import { FilterBar } from "@commonair/ui/blocks/data";
 import { CategoryGrid, StreamGrid } from "@commonair/ui/blocks/media";
-import { followedCategories, live, offline, offlineSorts, tabs } from "./fixtures/Following.ts";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
+import { followedCategories, live, offline, offlineSorts, tabs, uptimeByChannel } from "./fixtures/Following.ts";
 import { channelHref } from "./fixtures/streams.ts";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
@@ -36,7 +36,11 @@ function FollowingPage(): React.JSX.Element {
       <PageContainer width="wide" className="flex flex-col gap-8 py-6">
         <PageHeader title="Following" tabs={<PageTabs items={tabs} />} />
         <Section heading="Live now">
-          <StreamGrid streams={live} hrefFor={channelHref} cardProps={() => ({ showReason: false })} />
+          <StreamGrid
+            streams={live}
+            hrefFor={channelHref}
+            cardProps={(stream) => ({ showReason: false, uptimeLabel: uptimeByChannel.get(stream.channel.id) })}
+          />
         </Section>
         <SplitLayout
           asideWidth="lg"
@@ -93,10 +97,10 @@ function FollowingPage(): React.JSX.Element {
                 liveLabel={(formatted) => `${formatted} live`}
                 viewerLabel={(formatted) => formatted}
               />
-              <Alert>
-                <HugeiconsIcon icon={Notification01Icon} aria-hidden="true" />
-                <AlertDescription className="flex flex-col items-start gap-2">
-                  <p>Get go-live notifications by email or web push.</p>
+              <AlertCallout
+                icon={Notification01Icon}
+                description="Get go-live notifications by email or web push."
+                action={
                   <Button
                     variant="outline"
                     size="xs"
@@ -105,8 +109,8 @@ function FollowingPage(): React.JSX.Element {
                   >
                     Notification settings
                   </Button>
-                </AlertDescription>
-              </Alert>
+                }
+              />
             </Section>
           }
         />

@@ -209,7 +209,8 @@ export function StudioHeader(): React.JSX.Element {
   return (
     <SiteHeader
       brand={brand}
-      nav={[{ id: "studio", label: "Creator studio", href: "#studio", current: true }]}
+      context={{ label: "Creator studio", href: "#studio" }}
+      nav={[]}
       navLabel="Creator studio"
       menuLabel="Open navigation"
       actions={
@@ -277,7 +278,8 @@ export function AdminPage({ children }: { children: React.ReactNode }): React.JS
       header={
         <SiteHeader
           brand={brand}
-          nav={[{ id: "admin", label: "Admin", href: "#admin", current: true }]}
+          context={{ label: "Admin", href: "#admin" }}
+          nav={[]}
           navLabel="Admin"
           menuLabel="Open navigation"
           actions={<StatusBadge tone="warning">Every action is audited</StatusBadge>}

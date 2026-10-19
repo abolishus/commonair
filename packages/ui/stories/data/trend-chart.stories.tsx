@@ -10,17 +10,18 @@ const meta = {
 } satisfies Meta<typeof TrendChart>;
 export default meta;
 type Story = StoryObj;
+const data = [
+  { month: "Jan", income: 12000, expenses: 8500 },
+  { month: "Feb", income: 14800, expenses: 9100 },
+  { month: "Mar", income: 13600, expenses: 8700 },
+];
 export const Default: Story = {
   render: () => (
     <TrendChart
       ariaLabel="Income and expenses by month"
       type="bar"
       grouped
-      data={[
-        { month: "Jan", income: 12000, expenses: 8500 },
-        { month: "Feb", income: 14800, expenses: 9100 },
-        { month: "Mar", income: 13600, expenses: 8700 },
-      ]}
+      data={data}
       xKey="month"
       series={[
         { key: "income", label: "Income", color: "--chart-1" },
@@ -31,3 +32,23 @@ export const Default: Story = {
 };
 export const Light: Story = { ...Default, globals: { theme: "light" } };
 export const Mobile320: Story = { ...Default, globals: { viewport: { value: "mobile320" } } };
+
+/** `legend="top"`: a key-only Legend of the series (Finances board). */
+export const WithLegend: Story = {
+  render: () => (
+    <TrendChart
+      ariaLabel="Income and expenses by month"
+      type="bar"
+      grouped
+      legend="top"
+      data={data}
+      xKey="month"
+      series={[
+        { key: "income", label: "Income", color: "--chart-2" },
+        { key: "expenses", label: "Expenses", color: "--chart-5" },
+      ]}
+    />
+  ),
+};
+export const WithLegendLight: Story = { ...WithLegend, globals: { theme: "light" } };
+export const WithLegendMobile320: Story = { ...WithLegend, globals: { viewport: { value: "mobile320" } } };

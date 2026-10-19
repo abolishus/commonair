@@ -7,7 +7,9 @@ import {
   formatMoney,
   formatNumber,
   formatRelativeTime,
+  formatUnitCost,
   getInitial,
+  MICROS_PER_UNIT,
   minorDigits,
 } from "../src/lib/format.ts";
 
@@ -72,6 +74,52 @@ describe("formatMoney", () => {
     expect(() => formatMoney(12.5, "USD", "en-US")).toThrow(RangeError);
     expect(() => formatMoney(Number.NaN, "USD", "en-US")).toThrow(RangeError);
     expect(() => formatMoney(2 ** 60, "USD", "en-US")).toThrow(RangeError);
+  });
+});
+
+describe("formatUnitCost", () => {
+  test("formats sub-cent micro-units with the currency's minor digits at least", () => {
+    expect(formatUnitCost(6_100, "USD", "en-US")).toBe("$0.0061");
+    expect(formatUnitCost(466_000, "USD", "en-US")).toBe("$0.466");
+    expect(formatUnitCost(420_000, "USD", "en-US")).toBe("$0.42");
+    expect(formatUnitCost(1_000_000, "USD", "en-US")).toBe("$1.00");
+    expect(formatUnitCost(0, "USD", "en-US")).toBe("$0.00");
+    expect(MICROS_PER_UNIT).toBe(1_000_000);
+  });
+
+  test("rounds half away from zero at maximumFractionDigits (default 4)", () => {
+    expect(formatUnitCost(6_150, "USD", "en-US")).toBe("$0.0062");
+    expect(formatUnitCost(6_149, "USD", "en-US")).toBe("$0.0061");
+    expect(formatUnitCost(1, "USD", "en-US")).toBe("$0.00");
+    expect(formatUnitCost(1, "USD", "en-US", { maximumFractionDigits: 6 })).toBe("$0.000001");
+    expect(formatUnitCost(-6_150, "USD", "en-US")).toBe("-$0.0062");
+  });
+
+  test("clamps maximumFractionDigits between the minor digits and six", () => {
+    expect(formatUnitCost(6_100, "USD", "en-US", { maximumFractionDigits: 0 })).toBe("$0.01");
+    expect(formatUnitCost(1, "USD", "en-US", { maximumFractionDigits: 99 })).toBe("$0.000001");
+    expect(plain(formatUnitCost(1_500, "KWD", "en-US", { maximumFractionDigits: 2 }))).toBe("KWD 0.002");
+  });
+
+  test("handles zero-decimal currencies, locales and sign display", () => {
+    expect(formatUnitCost(500_000, "JPY", "en-US")).toBe("¥0.5");
+    expect(formatUnitCost(2_000_000, "JPY", "en-US")).toBe("¥2");
+    expect(plain(formatUnitCost(6_100, "EUR", "de-DE"))).toBe("0,0061 €");
+    expect(formatUnitCost(6_100, "USD", "en-US", { signDisplay: "exceptZero" })).toBe("+$0.0061");
+    expect(formatUnitCost(6_100, "usd", "en-US")).toBe("$0.0061");
+  });
+
+  test("large amounts keep exact digits (string arithmetic, no float noise)", () => {
+    expect(formatUnitCost(9_007_199_254_740_991, "USD", "en-US", { maximumFractionDigits: 6 })).toBe(
+      "$9,007,199,254.740991",
+    );
+    expect(formatUnitCost(9_007_199_254_740_991, "USD", "en-US")).toBe("$9,007,199,254.741");
+  });
+
+  test("throws on non-integers and unsafe integers", () => {
+    expect(() => formatUnitCost(0.5, "USD", "en-US")).toThrow(RangeError);
+    expect(() => formatUnitCost(Number.NaN, "USD", "en-US")).toThrow(RangeError);
+    expect(() => formatUnitCost(2 ** 60, "USD", "en-US")).toThrow(RangeError);
   });
 });
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import * as React from "react";
+import type * as React from "react";
 import { cn } from "@commonair/ui/lib/utils";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
 
@@ -25,11 +25,13 @@ export interface TimelineProps extends React.ComponentProps<"ol"> {
 export function Timeline({ steps, updates, className, ...props }: TimelineProps) {
   if (updates)
     return (
-      <ol className={cn("grid gap-3", className)} {...props}>
+      <ol className={cn("flex flex-col gap-3", className)} {...props}>
         {updates.map((item) => (
-          <li key={item.id} className="grid grid-cols-[auto_1fr] gap-3 border-l pl-3">
-            <StatusBadge tone={item.tone}>{item.status}</StatusBadge>
-            <div className="grid gap-1">
+          <li key={item.id} className="flex min-w-0 items-start gap-3 border-l pl-3">
+            <StatusBadge tone={item.tone} className="shrink-0">
+              {item.status}
+            </StatusBadge>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
               <time className="text-xs text-muted-foreground">{item.time}</time>
               <p className="text-xs">{item.text}</p>
             </div>
@@ -38,20 +40,20 @@ export function Timeline({ steps, updates, className, ...props }: TimelineProps)
       </ol>
     );
   return (
-    <ol className={cn("grid gap-3", className)} {...props}>
+    <ol className={cn("flex flex-col gap-3", className)} {...props}>
       {(steps ?? []).map((step) => (
-        <li key={step.id} data-state={step.state} className="grid grid-cols-[auto_1fr] gap-3">
+        <li key={step.id} data-state={step.state} className="flex min-w-0 items-start gap-3">
           <span
             aria-hidden="true"
             className={cn(
-              "flex size-5 items-center justify-center border text-xs",
+              "flex size-5 shrink-0 items-center justify-center border text-xs",
               step.state === "done" && "bg-primary text-primary-foreground",
               step.state === "current" && "border-primary text-primary",
             )}
           >
             {step.state === "done" ? "✓" : step.state === "current" ? "•" : ""}
           </span>
-          <div className="grid gap-1">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="text-xs font-medium">{step.label}</span>
             {step.meta ? <span className="text-xs text-muted-foreground">{step.meta}</span> : null}
           </div>

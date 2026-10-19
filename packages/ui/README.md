@@ -87,6 +87,34 @@ that AGENTS.md requires ("use X, not Y").
 - `AccentButton` (every `Button` size, optional `accent`): Follow / Subscribe / Support in the
   channel accent; AA in every accent and theme, hover included.
 
+## E4a compositions
+
+Built only from the shadcn layer and the house primitives; strings are props, links take `href` or
+a router `render` element. Stories under `stories/<group>/`, one board story per mockup under
+`stories/pages/`.
+
+| Import                          | Compositions                                                                                                                                                                                                                                                                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@commonair/ui/layouts`         | `AppShell`, `StudioShell`, `AdminShell`, `DashboardShell`, `SiteHeader` (+ `context` segment), `HeaderSearch`, `UserMenu`, `SiteFooter`, `ChannelSidebar` (+ per-group `moreLink`), `SectionNav`, `NavGroups`, `PageContainer`, `SplitLayout`, `ResponsiveGrid`                                                                |
+| `@commonair/ui/blocks/headers`  | `PageHeader`, `PageTabs`, `Section`, `Breadcrumbs`                                                                                                                                                                                                                                                                             |
+| `@commonair/ui/blocks/data`     | `StatCard` (+ `footer`) / `StatGrid`, `BreakdownBar`, `BreakdownTally`, `Legend` (key-only items), `ProgressRow` / `ProgressList`, `PollCard`, `TrendChart` (+ `legend`), `DataTable` (+ controlled/default row selection), `Timeline`, `UptimeStrip`, `FilterBar`, `ListPanel`, `KeyValueList`, `MetricPanel`, `ProposalCard` |
+| `@commonair/ui/blocks/forms`    | `FormSection`, `SwitchField`, `OptionCard` / `OptionGroup`, `CopyField`, `CodeBlock`, `CharacterCountField`, `AmountField`, `ChoiceToggle`, `TagsField`, `AccentPicker`, `ActionRow`, `PasswordField`, `DateOfBirthField`, `SwitchMatrix`, `CommentComposer`, `SelectField`                                                    |
+| `@commonair/ui/blocks/media`    | `StreamGrid`, `CategoryTile` / `CategoryGrid`, `MediaCard` / `MediaGrid`, `ChannelHeader`, `CategoryHeader`, `PlayerChrome`, `ChatPanel` and parts, `ClipTrimmer`, `AlertPreview`, `EmoteGrid`, `CommentItem` / `CommentList`                                                                                                  |
+| `@commonair/ui/blocks/feedback` | `AlertCallout`, `QueueItemCard`, `IncidentCard`                                                                                                                                                                                                                                                                                |
+
+Added by the board follow-ups (U7):
+
+- `SelectField`: a labelled `Select` on `Field` (value or defaultValue, description, error, orientation).
+- `AlertCallout`: page callouts on `Alert` with `tone` `neutral | info | warning | danger`, an icon slot,
+  title, description and action; static notes are `role="note"`, `live` makes them `role="alert"`.
+- `QueueItemCard` (moderation queue), `ProposalCard` (open proposals), `CommentItem` / `CommentList`
+  (proposal discussion), `IncidentCard` (status incidents with a `Timeline` of updates).
+- `StreamCard` `uptimeLabel` (through `StreamGrid` `cardProps`), `ChannelSidebar` `moreLink`,
+  `SiteHeader` `context`, `DataTable` `rowSelection` / `defaultRowSelection` / `onRowSelectionChange`,
+  `StatCard` `footer`, `TrendChart` `legend`, `Legend` items without values.
+- `formatUnitCost(micros, currency, locale)`: sub-cent unit costs ("$0.0061 per viewer-hour") from
+  integer micro-units.
+
 ## How the shadcn layer was set up
 
 1. The CLI is pinned to `shadcn@4.21.1` (`SHADCN_VERSION` in `scripts/shadcn-add.ts`). A scratch

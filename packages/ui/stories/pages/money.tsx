@@ -4,11 +4,11 @@
 /**
  * Money helpers for the page stories. Fixtures store integer cents and a currency; the stories
  * render them only through `MoneyAmount` / `formatMoney`. Sub-cent unit costs (e.g. $0.0061 per
- * viewer-hour) cannot be cents, so fixtures carry those as strings (`SubCent`) until `formatMoney`
- * has a sub-minor-unit precision option (contract request).
+ * viewer-hour) are integer micro-units rendered with `formatUnitCost`.
  */
 import type * as React from "react";
 import { MoneyAmount, formatMoney } from "@commonair/ui";
+import { formatUnitCost } from "../../src/lib/format.ts";
 
 export const CURRENCY = "USD";
 export const LOCALE = "en-US";
@@ -19,12 +19,12 @@ export interface Money {
   signed?: boolean;
 }
 
-/** A sub-cent unit cost, pre-formatted because it cannot be expressed in integer cents. */
-export interface SubCent {
-  subCent: string;
+/** A sub-cent unit cost in integer micro-units (millionths of a dollar). */
+export interface UnitCost {
+  micros: number;
 }
 
-export type Figure = Money | SubCent;
+export type Figure = Money | UnitCost;
 
 /** Text with an optional amount inside it, e.g. "+$1,140 vs same days in Sep". */
 export interface MoneyNote {
@@ -35,6 +35,10 @@ export interface MoneyNote {
 
 export function moneyText({ cents, signed }: Money): string {
   return formatMoney(cents, CURRENCY, LOCALE, signed ? { signDisplay: "exceptZero" } : {});
+}
+
+export function unitCostText({ micros }: UnitCost): string {
+  return formatUnitCost(micros, CURRENCY, LOCALE);
 }
 
 export function Amount({ value }: { value: Money }): React.JSX.Element {
@@ -48,7 +52,7 @@ export function Amount({ value }: { value: Money }): React.JSX.Element {
 }
 
 export function FigureValue({ value }: { value: Figure }): React.JSX.Element {
-  return "subCent" in value ? <>{value.subCent}</> : <Amount value={value} />;
+  return "micros" in value ? <span className="tabular-nums">{unitCostText(value)}</span> : <Amount value={value} />;
 }
 
 export function noteText(note: string | MoneyNote): string {

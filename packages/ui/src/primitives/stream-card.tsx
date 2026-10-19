@@ -30,6 +30,8 @@ export interface StreamCardProps extends Omit<React.ComponentProps<"article">, "
   headingLevel?: 2 | 3 | 4;
   /** Lazy-load the thumbnail (default); set false for the first row above the fold. */
   lazy?: boolean;
+  /** Pre-formatted time live ("3:41:09"), shown over the thumbnail's bottom-end corner (Following). */
+  uptimeLabel?: string;
 }
 
 /** The live stream tile used by every directory, search and recommendation grid. */
@@ -43,6 +45,7 @@ export function StreamCard({
   maxTags = 3,
   headingLevel = 3,
   lazy = true,
+  uptimeLabel,
   className,
   ...props
 }: StreamCardProps): React.JSX.Element {
@@ -95,6 +98,11 @@ export function StreamCard({
               size="sm"
               className="absolute start-2 bottom-2"
             />
+            {uptimeLabel && (
+              <OverlayBadge size="sm" data-slot="stream-card-uptime" className="absolute end-2 bottom-2">
+                {uptimeLabel}
+              </OverlayBadge>
+            )}
           </div>
           <div className="flex min-w-0 gap-2">
             <ChannelAvatar

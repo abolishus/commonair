@@ -11,7 +11,9 @@ export {
   type BreakdownSegment,
   type BreakdownTallyProps,
   type ChartColor,
+  type LegendItem,
   type LegendProps,
+  type LegendStatusColor,
 } from "./breakdown.tsx";
 export {
   ProgressRow,
@@ -24,10 +26,11 @@ export {
   type PollOption,
 } from "./progress-row.tsx";
 export { TrendChart, type TrendChartProps, type TrendSeries } from "./trend-chart.tsx";
-export { DataTable, type DataTableProps, type DataTableColumn } from "./data-table.tsx";
+export { DataTable, type DataTableProps, type DataTableColumn, type DataTableRowSelection } from "./data-table.tsx";
 export { Timeline, type TimelineProps, type TimelineStep, type TimelineUpdate } from "./timeline.tsx";
 export { UptimeStrip, type UptimeStripProps, type UptimeDay } from "./uptime-strip.tsx";
 export { FilterBar, type FilterBarProps, type FilterSelect, type FilterOption } from "./filter-bar.tsx";
 export { ListPanel, type ListPanelProps, type ListPanelItem } from "./list-panel.tsx";
 export { KeyValueList, type KeyValueListProps, type KeyValueRow } from "./key-value-list.tsx";
 export { MetricPanel, type MetricPanelProps } from "./metric-panel.tsx";
+export { ProposalCard, type ProposalCardProps, type ProposalProgress } from "./proposal-card.tsx";

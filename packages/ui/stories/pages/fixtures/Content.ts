@@ -109,6 +109,11 @@ export const videos: VideoRow[] = (
   selected,
 }));
 
+/** The board's initial selection, as DataTable row ids. */
+export const initialSelection: Record<string, boolean> = Object.fromEntries(
+  videos.filter((video) => video.selected).map((video) => [video.id, true]),
+);
+
 export const notes = {
   retention:
     "Past broadcasts are kept 60 days. Highlights and uploads are kept until you delete them. Storage used: 48.2 GB.",

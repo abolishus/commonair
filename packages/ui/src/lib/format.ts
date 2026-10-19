@@ -81,6 +81,46 @@ function toMajorUnits(cents: number, digits: number): `${number}` {
   return negative ? (`-${major}` as `${number}`) : (major as `${number}`);
 }
 
+/** Micro-units per major unit: unit costs are integer millionths of a dollar/euro/…. */
+export const MICROS_PER_UNIT = 1_000_000;
+
+export interface FormatUnitCostOptions extends FormatMoneyOptions {
+  /** Most fraction digits shown (default 4; at least the currency's minor digits, at most 6). */
+  maximumFractionDigits?: number;
+}
+
+/**
+ * Formats a sub-minor-unit cost ("$0.0061 per viewer-hour", "$0.466 per 1,000 viewer-hours")
+ * from integer micro-units (millionths of the major unit), which cents cannot express. Shows at
+ * least the currency's minor digits and up to `maximumFractionDigits` (rounded half-expand by Intl).
+ * Throws on non-integers: unit costs are never floats either.
+ */
+export function formatUnitCost(
+  micros: number,
+  currency: string,
+  locale: string,
+  options: FormatUnitCostOptions = {},
+): string {
+  if (!Number.isSafeInteger(micros))
+    throw new RangeError(`formatUnitCost: micros must be a safe integer, got ${micros}`);
+  const code = currency.toUpperCase();
+  const digits = minorDigits(code);
+  const max = Math.min(6, Math.max(digits, Math.trunc(options.maximumFractionDigits ?? 4)));
+  const fmt = cached(
+    `unit|${locale}|${code}|${max}|${options.signDisplay ?? ""}|${options.currencyDisplay ?? ""}`,
+    () =>
+      new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: code,
+        signDisplay: options.signDisplay ?? "auto",
+        currencyDisplay: options.currencyDisplay ?? "symbol",
+        minimumFractionDigits: digits,
+        maximumFractionDigits: max,
+      }),
+  );
+  return fmt.format(toMajorUnits(micros, 6));
+}
+
 /** 1234 -> "1.2K" (en), "1234" -> "1234" below 1000, locale-aware. */
 export function formatCompactNumber(value: number, locale: string): string {
   const fmt = cached(

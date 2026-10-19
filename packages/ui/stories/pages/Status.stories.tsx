@@ -4,12 +4,12 @@
 import type * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { StatusBadge } from "@commonair/ui";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@commonair/ui/components/item";
 import { PageContainer } from "@commonair/ui/layouts";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
-import { Timeline, UptimeStrip } from "@commonair/ui/blocks/data";
-import { components, incidents, statusLabels, summary } from "./fixtures/Status.ts";
+import { Legend, UptimeStrip } from "@commonair/ui/blocks/data";
+import { IncidentCard } from "@commonair/ui/blocks/feedback";
+import { components, incidents, statusLabels, summary, uptimeLegend } from "./fixtures/Status.ts";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Platform/Status", parameters: pageParameters } satisfies Meta;
@@ -48,28 +48,20 @@ function StatusPage(): React.JSX.Element {
               </Item>
             ))}
           </ItemGroup>
+          <Legend layout="inline" items={uptimeLegend} aria-label="Legend" />
         </Section>
         <Section heading="Incidents">
           {incidents.map((incident) => (
-            <Card key={incident.id} size="sm">
-              <CardHeader>
-                <CardTitle className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone={incident.tone}>{incident.status}</StatusBadge>
-                  {incident.title}
-                </CardTitle>
-                {incident.note ? (
-                  <CardDescription>
-                    {incident.note} <a href="#postmortem">Postmortem</a>
-                  </CardDescription>
-                ) : null}
-                <CardAction>{incident.date}</CardAction>
-              </CardHeader>
-              {incident.updates ? (
-                <CardContent>
-                  <Timeline updates={incident.updates} />
-                </CardContent>
-              ) : null}
-            </Card>
+            <IncidentCard
+              key={incident.id}
+              status={incident.status}
+              tone={incident.tone}
+              title={incident.title}
+              date={incident.date}
+              note={incident.note}
+              link={incident.note ? { label: "Postmortem", href: "#postmortem" } : undefined}
+              updates={incident.updates}
+            />
           ))}
         </Section>
       </PageContainer>

@@ -218,42 +218,6 @@ const ALLOW: AllowEntry[] = [
     count: 1,
     reason: "Legend swatch paints the per-segment chart token variable set by the style above.",
   },
-  {
-    file: "src/blocks/data/key-value-list.tsx",
-    rule: "arbitrary-value",
-    match: "grid-cols-[minmax(0,1fr)_auto]",
-    count: 1,
-    reason: "contract request: use a flex row per entry (or a scale grid) instead of an arbitrary template.",
-  },
-  {
-    file: "src/blocks/data/timeline.tsx",
-    rule: "arbitrary-value",
-    match: "grid-cols-[auto_1fr]",
-    count: 2,
-    reason: "contract request: use flex rows (marker + content) instead of an arbitrary grid template.",
-  },
-  {
-    file: "src/blocks/data/progress-row.tsx",
-    rule: "arbitrary-value",
-    match: "[&_[data-slot=progress-indicator]]",
-    count: 5,
-    reason: "contract request: tone the indicator through a Progress variant/prop, not an arbitrary child selector.",
-  },
-  {
-    file: "src/blocks/data/uptime-strip.tsx",
-    rule: "role-on-div",
-    match: "<div",
-    count: 1,
-    reason:
-      "contract request: role=img makes its focusable tooltip triggers presentational; use a list/figure with labelled days.",
-  },
-  {
-    file: "src/blocks/forms/copy-field.tsx",
-    rule: "raw-element",
-    match: "<label",
-    count: 1,
-    reason: "contract request: use FieldLabel (Field + FieldLabel) instead of a raw label.",
-  },
   ...(
     [
       ["src/primitives/live-badge.tsx", 1],
@@ -267,22 +231,6 @@ const ALLOW: AllowEntry[] = [
     count,
     reason: "The upstream shadcn Badge convention (`[a]:hover:`) for the hover state of a badge rendered as a link.",
   })),
-  {
-    file: "src/primitives/overlay-badge.tsx",
-    rule: "arbitrary-value",
-    match: "[&>svg]",
-    count: 1,
-    reason:
-      "contract request: size the icon through the HugeiconsIcon size/className at the call site, not a child selector.",
-  },
-  {
-    file: "src/primitives/viewer-count.tsx",
-    rule: "arbitrary-value",
-    match: "[&_svg]",
-    count: 2,
-    reason:
-      "contract request: size the icon through the HugeiconsIcon className per size variant, not a child selector.",
-  },
   {
     file: "src/blocks/media/chat.tsx",
     rule: "role-on-div",
@@ -312,27 +260,6 @@ const ALLOW: AllowEntry[] = [
     match: "hsl(",
     count: 6,
     reason: "Inline SVG data-URI story images (thumbnails, avatars): image content, not UI color.",
-  },
-  {
-    file: "stories/Formatting.stories.tsx",
-    rule: "raw-element",
-    match: "<table",
-    count: 1,
-    reason: "contract request: render the formatting samples with Table (or DataTable).",
-  },
-  {
-    file: "stories/StreamCard.stories.tsx",
-    rule: "arbitrary-value",
-    match: "grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]",
-    count: 2,
-    reason: "contract request: use StreamGrid or scale grid columns.",
-  },
-  {
-    file: "stories/ThemeAndShortcuts.stories.tsx",
-    rule: "arbitrary-value",
-    match: "grid-cols-[auto_auto_auto]",
-    count: 1,
-    reason: "contract request: use grid-cols-3 or flex rows.",
   },
 ];
 

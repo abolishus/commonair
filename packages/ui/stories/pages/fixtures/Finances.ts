@@ -47,7 +47,7 @@ export const kpis: Record<Period, Kpi[]> = {
       up: true,
     },
     { label: "Reserve", value: { cents: 10_130_000 }, note: "4.2 months of runway" },
-    { label: "Cost per viewer-hour", value: { subCent: "$0.0061" }, note: "−9% since relays", up: true },
+    { label: "Cost per viewer-hour", value: { micros: 6_100 }, note: "−9% since relays", up: true },
     { label: "Cost per streamed hour", value: { cents: 42 }, note: "transcode + ingest" },
   ],
   quarter: [
@@ -55,7 +55,7 @@ export const kpis: Record<Period, Kpi[]> = {
     { label: "Operating expenses", value: { cents: 7_140_000 }, note: "Q3 2026" },
     { label: "Net surplus", value: { cents: 3_164_000, signed: true }, note: "+18% vs Q2", up: true },
     { label: "Reserve", value: { cents: 9_410_000 }, note: "at Sep 30" },
-    { label: "Cost per viewer-hour", value: { subCent: "$0.0067" }, note: "Q3 average" },
+    { label: "Cost per viewer-hour", value: { micros: 6_700 }, note: "Q3 average" },
     { label: "Cost per streamed hour", value: { cents: 44 }, note: "Q3 average" },
   ],
   year: [
@@ -68,7 +68,7 @@ export const kpis: Record<Period, Kpi[]> = {
       note: { before: "from ", money: { cents: 5_460_000 } },
       up: true,
     },
-    { label: "Cost per viewer-hour", value: { subCent: "$0.0081" }, note: "12-month average" },
+    { label: "Cost per viewer-hour", value: { micros: 8_100 }, note: "12-month average" },
     { label: "Cost per streamed hour", value: { cents: 51 }, note: "12-month average" },
   ],
 };

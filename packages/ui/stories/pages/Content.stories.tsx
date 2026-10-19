@@ -4,21 +4,15 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Alert01Icon,
-  Edit02Icon,
-  InformationCircleIcon,
-  MoreHorizontalIcon,
-  Upload01Icon,
-} from "@hugeicons/core-free-icons";
+import { Edit02Icon, MoreHorizontalIcon, Upload01Icon } from "@hugeicons/core-free-icons";
 import { IconButton, StatusBadge } from "@commonair/ui";
-import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs } from "@commonair/ui/blocks/headers";
 import { DataTable, FilterBar, type DataTableColumn } from "@commonair/ui/blocks/data";
 import { MediaCard } from "@commonair/ui/blocks/media";
-import { notes, tabs, videos, visibilities, type VideoRow } from "./fixtures/Content.ts";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
+import { initialSelection, notes, tabs, videos, visibilities, type VideoRow } from "./fixtures/Content.ts";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/Content", parameters: pageParameters } satisfies Meta;
@@ -98,6 +92,7 @@ function ContentPage(): React.JSX.Element {
           rows={shown}
           getRowId={(row) => row.id}
           selectable
+          defaultRowSelection={initialSelection}
           selectionLabel="Select video"
           selectionToolbar={(selected, clear) => (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -112,18 +107,15 @@ function ContentPage(): React.JSX.Element {
           )}
         />
         <ResponsiveGrid cols={2}>
-          <Alert>
-            <HugeiconsIcon icon={InformationCircleIcon} aria-hidden="true" />
-            <AlertDescription>{notes.retention}</AlertDescription>
-          </Alert>
-          <Alert>
-            <HugeiconsIcon icon={Alert01Icon} aria-hidden="true" />
-            <AlertDescription>
+          <AlertCallout description={notes.retention} />
+          <AlertCallout
+            tone="warning"
+            description={
               <p>
                 {notes.claim} <a href="#claims">Review or counter-notice</a>.
               </p>
-            </AlertDescription>
-          </Alert>
+            }
+          />
         </ResponsiveGrid>
       </PageContainer>
     </StudioPage>

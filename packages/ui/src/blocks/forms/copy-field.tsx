@@ -6,6 +6,7 @@ import { Copy01Icon, EyeIcon, EyeOffIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@commonair/ui/components/input-group";
 import { Button } from "@commonair/ui/components/button";
+import { FieldLabel } from "@commonair/ui/components/field";
 import { ConfirmDialog } from "../../primitives/confirm-dialog.tsx";
 import { toast } from "@commonair/ui/toast";
 import { Hint, FormError, type FormErrors } from "./shared.tsx";
@@ -67,9 +68,7 @@ export function CopyField({
   };
   return (
     <div className="flex w-full flex-col gap-1.5" data-testid={dataProps["data-testid"]}>
-      <label htmlFor={inputId} className="text-xs font-medium">
-        {label}
-      </label>
+      <FieldLabel htmlFor={inputId}>{label}</FieldLabel>
       <InputGroup>
         <InputGroupInput
           {...valueProps}

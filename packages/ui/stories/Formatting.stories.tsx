@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { Table, TableBody, TableCaption, TableCell, TableRow } from "../src/components/table.tsx";
 import { MoneyAmount, RelativeTime } from "../src/index.ts";
 
 const meta = {
@@ -57,21 +58,22 @@ const AMOUNTS: { cents: number; currency: string }[] = [
 
 export const Money: Story = {
   render: () => (
-    <table className="text-sm">
-      <tbody>
+    <Table className="w-auto">
+      <TableCaption className="sr-only">Money formatting samples</TableCaption>
+      <TableBody>
         {AMOUNTS.map((value, i) => (
-          <tr key={i}>
-            <td className="pe-6 text-muted-foreground">{value.currency}</td>
-            <td className="pe-6 text-end">
+          <TableRow key={i}>
+            <TableCell className="text-muted-foreground">{value.currency}</TableCell>
+            <TableCell className="text-end">
               <MoneyAmount value={value} />
-            </td>
-            <td className="text-end">
+            </TableCell>
+            <TableCell className="text-end">
               <MoneyAmount value={value} signDisplay="exceptZero" colorNegative />
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   ),
 };
 
