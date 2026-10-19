@@ -39,12 +39,15 @@ export function TagsField({
   addTagLabel,
   ...props
 }: TagsFieldProps): React.JSX.Element {
-  const [inner, setInner] = React.useState<string[]>([...defaultValues]);
+  const [inner, setInner] = React.useState<string[]>([...defaultValues].slice(0, Math.max(0, max)));
   const [query, setQuery] = React.useState("");
-  const current = values ?? inner;
+  const current = (values ?? inner).slice(0, Math.max(0, max));
   const set = (next: string[]): void => {
-    if (values === undefined) setInner(next);
-    onValuesChange?.(next);
+    const retained = current.filter((tag) => next.includes(tag));
+    const additions = next.filter((tag) => !current.includes(tag));
+    const limited = [...retained, ...additions.slice(0, Math.max(0, max - retained.length))];
+    if (values === undefined) setInner(limited);
+    onValuesChange?.(limited);
   };
   const id = React.useId();
   const candidates = options.filter(
@@ -86,19 +89,19 @@ export function TagsField({
                   set(current.slice(0, -1));
                 }
               }}
-              aria-disabled={current.length >= max || undefined}
+              data-at-max={current.length >= max || undefined}
             />
           </>
         </ComboboxChips>
         <ComboboxContent>
           <ComboboxList>
             {candidates.map((option) => (
-              <ComboboxItem key={option} value={option}>
+              <ComboboxItem key={option} value={option} disabled={current.length >= max}>
                 {option}
               </ComboboxItem>
             ))}
             {query && !options.includes(query) && addTagLabel && (
-              <ComboboxItem value={query} onClick={() => add(query)}>
+              <ComboboxItem value={query} disabled={current.length >= max} onClick={() => add(query)}>
                 {addTagLabel(query)}
               </ComboboxItem>
             )}

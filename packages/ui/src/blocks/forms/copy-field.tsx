@@ -52,6 +52,7 @@ export function CopyField({
   errors,
   ...dataProps
 }: CopyFieldProps): React.JSX.Element {
+  const inputId = React.useId();
   const [visible, setVisible] = React.useState(!secret);
   const [copyError, setCopyError] = React.useState(false);
   const copy = async (): Promise<void> => {
@@ -66,10 +67,13 @@ export function CopyField({
   };
   return (
     <div className="flex w-full flex-col gap-1.5" data-testid={dataProps["data-testid"]}>
-      <label className="text-xs font-medium">{label}</label>
+      <label htmlFor={inputId} className="text-xs font-medium">
+        {label}
+      </label>
       <InputGroup>
         <InputGroupInput
           {...valueProps}
+          id={inputId}
           value={visible ? value : "•".repeat(Math.max(8, Math.min(value.length, 32)))}
           readOnly
           data-testid={dataProps["data-value-testid"]}

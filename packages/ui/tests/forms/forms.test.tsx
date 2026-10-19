@@ -85,6 +85,7 @@ describe("forms blocks", () => {
         data-copy-testid="secret-copy"
       />,
     );
+    expect(screen.getByRole("textbox", { name: "Token" })).toBeTruthy();
     expect((screen.getByTestId("secret-value") as HTMLInputElement).value).not.toContain("secret-key");
     expect(screen.getByTestId("secret-copy")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show" }));
@@ -242,6 +243,27 @@ describe("forms blocks", () => {
     input.focus();
     fireEvent.keyDown(input, { key: "Backspace" });
     await waitFor(() => expect(screen.queryByText("speedrun")).toBeNull());
+  });
+
+  test("TagsField disables suggestions at max and caps Combobox value changes", async () => {
+    const onValuesChange = vi.fn<(values: string[]) => void>();
+    render(
+      <TagsField
+        label="Tags"
+        defaultValues={["retro", "speedrun"]}
+        options={["challenge"]}
+        max={2}
+        onValuesChange={onValuesChange}
+      />,
+    );
+    const input = screen.getByRole("combobox", { name: "Tags" });
+    fireEvent.change(input, { target: { value: "challenge" } });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const suggestion = await screen.findByRole("option", { name: "challenge" });
+    expect(suggestion.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(suggestion);
+    expect(document.querySelectorAll("[data-slot=combobox-chip]")).toHaveLength(2);
+    expect(onValuesChange).not.toHaveBeenCalledWith(["retro", "speedrun", "challenge"]);
   });
 
   test("AccentPicker exposes all contract accent names", () => {
