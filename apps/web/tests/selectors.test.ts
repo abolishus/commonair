@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-selectors.md, e2-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2- and e3-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -38,7 +38,7 @@ function testIds(doc: string): string[] {
 
 const rendered = (id: string, text: string) => text.includes(`data-testid="${id}"`);
 
-describe.each(["e1-selectors.md", "e2-selectors.md"])("%s", (doc) => {
+describe.each(["e1-selectors.md", "e2-selectors.md", "e3-selectors.md"])("%s", (doc) => {
   const ids = testIds(doc);
 
   it("lists test ids", () => {
@@ -66,5 +66,20 @@ describe("E2 data attributes", () => {
   it("directory sections use the contract's names", () => {
     const text = readFileSync(join(SRC, "lib/directory-sections.ts"), "utf8");
     for (const id of ["spotlight", "new", "live", "following"]) expect(text).toContain(`id: "${id}"`);
+  });
+});
+
+describe("E3 data attributes", () => {
+  it.each([
+    "data-source={source}",
+    "data-relay-id={relay.id}",
+    "data-status={relay.status}",
+    "data-bytes={relay.bytesVerified30d}",
+    "data-pending={pending}",
+    "data-verified={verified}",
+    "data-rejected={rejected}",
+    'to="/relays"',
+  ])("app sets %s", (attr) => {
+    expect(appText).toContain(attr);
   });
 });

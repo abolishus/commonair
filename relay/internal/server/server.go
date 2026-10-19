@@ -188,7 +188,8 @@ func (s *Server) SetState(st *State) { s.state.Store(st) }
 // State returns the current registration state (nil before registration).
 func (s *Server) State() *State { return s.state.Load() }
 
-// Drain makes the relay refuse new viewer requests (shutdown in progress).
+// Drain starts a shutdown: /healthz answers 503 and only sessions already
+// active keep being served.
 func (s *Server) Drain() { s.draining.Store(true) }
 
 // Close aborts outstanding origin fetches.
@@ -277,10 +278,6 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 	}
 	st := s.state.Load()
 	switch {
-	case s.draining.Load():
-		w.Header().Set("Retry-After", "5")
-		httpError(w, http.StatusServiceUnavailable, "relay is shutting down")
-		return
 	case st == nil:
 		w.Header().Set("Retry-After", "5")
 		httpError(w, http.StatusServiceUnavailable, "relay is not registered yet")
@@ -312,7 +309,15 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusForbidden, "token not valid for this relay or path")
 		return
 	}
-	if !s.cfg.Viewers.Admit(claims.SID, now) {
+	if s.draining.Load() {
+		// Viewers already here keep playing until the player follows switchTo
+		// to the origin; new sessions go elsewhere.
+		if !s.cfg.Viewers.Touch(claims.SID, now) {
+			w.Header().Set("Retry-After", "5")
+			httpError(w, http.StatusServiceUnavailable, "relay is shutting down")
+			return
+		}
+	} else if !s.cfg.Viewers.Admit(claims.SID, now) {
 		w.Header().Set("Retry-After", "10")
 		httpError(w, http.StatusServiceUnavailable, "relay at capacity")
 		return
@@ -338,7 +343,7 @@ func (s *Server) servePlaylist(w http.ResponseWriter, r *http.Request, st *State
 	}
 	var entry cache.Entry
 	if d.Query == "" {
-		entry, err = s.playlist(r.Context(), st, p, "", s.cfg.PlaylistTTL)
+		entry, err = s.playlist(r.Context(), st, p, "", "pl:", s.cfg.PlaylistTTL)
 	} else {
 		entry, err = s.blockingPlaylist(r.Context(), st, p, d)
 	}
@@ -364,14 +369,24 @@ func (s *Server) servePlaylist(w http.ResponseWriter, r *http.Request, st *State
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(body))
 }
 
+// freshPlaylistTTL bounds how often a bounds re-check refetches a playlist.
+const freshPlaylistTTL = 100 * time.Millisecond
+
+func checkLimits(plain []byte, d hls.Directives) error {
+	if limits, ok := hls.ParseLimits(plain); ok {
+		return limits.Check(d.MSN, d.Part)
+	}
+	return nil
+}
+
 // playlist returns the playlist at p (with optional directives query) from
-// cache or the origin.
-func (s *Server) playlist(ctx context.Context, st *State, p, query string, ttl time.Duration) (cache.Entry, error) {
+// the cache entry under keyPrefix or the origin.
+func (s *Server) playlist(ctx context.Context, st *State, p, query, keyPrefix string, ttl time.Duration) (cache.Entry, error) {
 	rel := p
 	if query != "" {
 		rel = p + "?" + query
 	}
-	return s.cfg.Store.Get(ctx, "pl:"+rel, func(callCtx context.Context) (cache.Entry, error) {
+	return s.cfg.Store.Get(ctx, keyPrefix+rel, func(callCtx context.Context) (cache.Entry, error) {
 		return s.limitedFetch(callCtx, s.cfg.PlaylistTimeout, func(fctx context.Context) (cache.Entry, error) {
 			e, err := s.fetchOrigin(fctx, st.PullBase, rel, maxPlaylistBytes)
 			if err == nil {
@@ -386,17 +401,25 @@ func (s *Server) playlist(ctx context.Context, st *State, p, query string, ttl t
 // playlist before asking the origin to hold a request open for it.
 func (s *Server) blockingPlaylist(ctx context.Context, st *State, p string, d hls.Directives) (cache.Entry, error) {
 	if d.MSN >= 0 {
-		plain, err := s.playlist(ctx, st, p, "", s.cfg.PlaylistTTL)
+		plain, err := s.playlist(ctx, st, p, "", "pl:", s.cfg.PlaylistTTL)
 		if err != nil {
 			return cache.Entry{}, err
 		}
-		if limits, ok := hls.ParseLimits(plain.Body); ok {
-			if err := limits.Check(d.MSN, d.Part); err != nil {
+		if err := checkLimits(plain.Body, d); err != nil {
+			// The cached plain playlist may be older than the blocking
+			// response the player just got (it asks for the next part of
+			// that). Re-check against a fresh copy, itself shared briefly so
+			// requests past the edge cannot make every request an origin fetch.
+			fresh, ferr := s.playlist(ctx, st, p, "", "pl-fresh:", freshPlaylistTTL)
+			if ferr != nil {
+				return cache.Entry{}, ferr
+			}
+			if err := checkLimits(fresh.Body, d); err != nil {
 				return cache.Entry{}, err
 			}
 		}
 	}
-	return s.playlist(ctx, st, p, d.Query, s.cfg.BlockingPlaylistTTL)
+	return s.playlist(ctx, st, p, d.Query, "pl:", s.cfg.BlockingPlaylistTTL)
 }
 
 func (s *Server) serveMedia(w http.ResponseWriter, r *http.Request, st *State, c tokens.PlaybackClaims, p string) {

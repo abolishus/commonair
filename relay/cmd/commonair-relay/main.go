@@ -62,7 +62,7 @@ func parseFlags(args []string, getenv func(string) string, stderr io.Writer) (co
 	fs.StringVar(&c.tlsKey, "tls-key", "", "TLS private key (PEM)")
 	fs.BoolVar(&c.behindProxy, "behind-proxy", false, "serve plain HTTP behind a TLS-terminating reverse proxy")
 	fs.StringVar(&c.logLevel, "log-level", "info", "debug, info, warn or error")
-	fs.DurationVar(&c.shutdownTimeout, "drain-timeout", 30*time.Second, fmt.Sprintf("on SIGTERM, time for in-flight requests to finish (at least %s); the final receipt gets %s more", relay.MinDrainWindow, finalReceiptWindow))
+	fs.DurationVar(&c.shutdownTimeout, "drain-timeout", 30*time.Second, fmt.Sprintf("on SIGTERM/SIGINT, time to keep serving current viewers (at least %s); the final receipt gets %s more", relay.MinDrainWindow, finalReceiptWindow))
 	fs.BoolVar(&c.showVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return c, err
@@ -194,7 +194,10 @@ func run(cfg config, logger *slog.Logger) error {
 			serveErr <- srv.Serve(ln)
 		}
 	}()
-	logger.Info("listening", "addr", ln.Addr().String(), "tls", srv.TLSConfig != nil, "dataDir", cfg.dataDir, "publicKey", rel.PublicKey())
+	// The one startup line operators look for (version comes from the logger).
+	// Never log the token.
+	logger.Info("listening", "addr", ln.Addr().String(), "publicUrl", cfg.publicURL, "region", cfg.region,
+		"capacityMbps", cfg.capacityMbps, "tls", srv.TLSConfig != nil, "dataDir", cfg.dataDir, "publicKey", rel.PublicKey())
 	if srv.TLSConfig == nil && !cfg.behindProxy {
 		logger.Warn("serving plain HTTP; browsers on https pages will refuse it. Use --tls-cert/--tls-key or --behind-proxy in production")
 	}
@@ -205,7 +208,9 @@ func run(cfg config, logger *slog.Logger) error {
 	var runErr error
 	select {
 	case <-ctx.Done():
-		logger.Info("shutting down")
+		// Restore default signal handling: a second SIGINT/SIGTERM exits at once.
+		stop()
+		logger.Info("draining: serving current viewers until --drain-timeout; signal again to exit now", "drainTimeout", cfg.shutdownTimeout.String())
 	case err := <-serveErr:
 		if !errors.Is(err, http.ErrServerClosed) {
 			runErr = err

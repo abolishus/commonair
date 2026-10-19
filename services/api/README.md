@@ -95,6 +95,55 @@ now hash as `a.b.c.d`). For a broadcast that is live across the deploy, integrit
 exclusion compares new viewer hashes with the old `stream_keys.last_used_ip_hash` until the
 streamer publishes again. Rate-limit buckets for those clients start over once.
 
+## Relay lifecycle
+
+`src/routes/relays.ts`. Postgres (`relay_nodes.status`) is the record; `KEYS.relays` in Valkey
+holds the assignable set and contains `active` relays only.
+
+```text
+create ──► pending ──health ok──► active ──health fail──► degraded ──health ok──► active
+             ▲                     │  │                       │
+             │      draining hb /  │  └── worker: over-report ┴──► suspended ──reinstate──► pending
+             │      worker timeout ▼                                  (admin)
+             └──── register ─── offline ──heartbeat + health ok──► active
+                                   │
+   relays.remove (any status) ──► retired (retired_at set, token rotated; terminal)
+```
+
+- **Token.** A relay authenticates with the bearer token from `relays.create` (stored as
+  `token_hash`). Any status authenticates except retired, so an offline relay can rejoin and a
+  suspended one learns it is suspended.
+- **Health.** `register` and every non-active heartbeat past the 60 s re-check window run
+  `GET <publicUrl>/healthz` (3 s timeout, vetted address). Only a passing check makes a relay
+  `active`; writes are compare-and-set on the status and token read, and `publishRelay` re-reads
+  the row after writing `KEYS.relays`, so a suspension or retirement committed in between is
+  never undone by a heartbeat.
+- **Drain.** A heartbeat with `draining: true` sets `offline` and removes the relay from
+  `KEYS.relays` at once (no audit row: operational). It never downgrades a suspension. It bumps
+  `updated_at`, and the health-check CAS also requires `updated_at` unchanged, so a rejoin check
+  already in flight cannot bring a drained relay back.
+- **Timeout.** The worker sets relays that stop heartbeating `offline` and removes them from
+  `KEYS.relays`.
+- **Rejoin.** An offline relay rejoins by heartbeating (active after a passing health check, else
+  it stays offline) or by registering again with the same token (`pending`, then `active` on a
+  passing check). Offline relays keep their slot in the per-member limit of 5.
+- **Suspension.** The worker suspends a relay whose receipts over-report and removes it from
+  `KEYS.relays`. The relay still heartbeats and sees `suspended`; neither `register` nor a
+  draining heartbeat lifts it. `relays.reinstate` (admin, audited) sets `pending` and runs a
+  health check: the relay is republished to `KEYS.relays` only if it passes, otherwise its own
+  heartbeats re-check it.
+- **Retire.** `relays.remove` sets `retired_at`, rotates `token_hash` to a fresh random value,
+  sets `offline`, removes it from `KEYS.relays` and audits `relay.retire` (idempotent). The row
+  stays (receipts reference it); `relays.mine` omits it and it frees a slot.
+- **Viewers.** `relays.mine` reads Postgres, so worker suspensions and drains show at once. A
+  playback session whose token names a relay that is not in `KEYS.relays` (drained, timed out,
+  suspended, retired) gets `switchTo` an origin playlist with a fresh origin token on its next
+  heartbeat, and the session is re-recorded as `assigned_source = 'origin'`, `relay_id = null`.
+  Integrity then judges it on origin fetches. That fails safe: an honest viewer's relay segments
+  are missing from the origin count (undercounted), but no watch time goes unproven.
+  A `relay_until` column (when the session left the relay) would let integrity judge each part
+  on its own evidence; that is a future contract change.
+
 ## Notes
 
 - Two-factor authentication turns on automatically once `two_factors` has the columns

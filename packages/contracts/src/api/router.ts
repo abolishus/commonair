@@ -2295,11 +2295,14 @@ export const contract = {
         summary: "Record cookie/storage consent choices",
         ...tag("Compliance"),
       })
+      .meta({ access: "public", rateLimit: "write" })
       .input(
         z.object({
           anonymousId: z.string().min(16).max(64).optional(),
-          choices: z.record(z.string(), z.boolean()),
-          policyVersion: z.string(),
+          choices: z
+            .record(z.string().min(1).max(32), z.boolean())
+            .refine((c) => Object.keys(c).length <= 16, "Too many consent categories"),
+          policyVersion: ShortText,
         }),
       )
       .output(Ok),

@@ -4,7 +4,7 @@
 /**
  * Heartbeat accounting for the playback contract (`playback.heartbeat`): the player keeps
  * cumulative counters; each heartbeat reports what happened since the last *acknowledged* one.
- * A failed heartbeat commits nothing, so its share rolls into the next report. Played time is
+ * A failed or throttled heartbeat commits nothing, so its share rolls into the next report. Played time is
  * capped at the contract's 120 s per heartbeat; the excess is carried, never dropped.
  */
 
@@ -67,6 +67,17 @@ export class HeartbeatAccountant {
       bytesHttp: c.bytesHttp,
       bytesP2p: c.bytesP2p,
     };
+  }
+
+  /**
+   * Apply the server's answer to a heartbeat built from `c`. A `throttled` beat came in under the
+   * server's floor and recorded nothing, so its deltas stay uncommitted and go out with the next
+   * beat. Returns whether the beat was committed.
+   */
+  settle(c: CumulativeStats, res: { throttled?: boolean | undefined }): boolean {
+    if (res.throttled) return false;
+    this.commit(c);
+    return true;
   }
 }
 

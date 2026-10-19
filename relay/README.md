@@ -36,6 +36,40 @@ Behind a TLS-terminating proxy, replace the two TLS flags with `--behind-proxy` 
 proxy at the listen address. `--token relay_xxx` works too, but the environment variable keeps
 the token out of `ps` output and shell history.
 
+### Run against a local stack
+
+For development against `podman compose up` on your machine (the `e2e-relay` harness scenario
+starts the relay the same way). The relay runs on the host, not in a container, and serves plain
+HTTP on the host's LAN address.
+
+1. Allow http and private-network relay URLs in the API: set
+   `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true` in the repository's `.env`, then restart the API
+   (`podman compose up -d api`). Without it, registration is refused.
+2. Create a relay at `http://localhost:3000/relays` and copy the token.
+3. Find the host's LAN IPv4 (`ipconfig getifaddr en0` on macOS, `hostname -I` on Linux).
+   `localhost` does not work: the API container health-checks the public URL, and inside the
+   container `localhost` is the container itself.
+4. Build and start:
+
+```sh
+cd relay
+go build ./cmd/commonair-relay
+COMMONAIR_RELAY_TOKEN=relay_xxx ./commonair-relay \
+  --api http://localhost:3000/ \
+  --public-url http://192.168.1.20:8443 \
+  --listen :8443 \
+  --data-dir "$(mktemp -d)" \
+  --capacity-mbps 1000 \
+  --log-level debug
+```
+
+The first log line (`"msg":"listening"`) shows the public URL, region, capacity and version,
+never the token; a warning follows that plain HTTP is for local use only. The relay pulls from
+the origin at the `originUrl` the API returns (`PLAYBACK_PUBLIC_URL`, `http://localhost:3003`
+locally). Within a minute the relay's row on `/relays` shows `active`. Ctrl-C drains (one
+`draining` heartbeat, current viewers keep playing until `--drain-timeout`, final receipt);
+press it again to exit at once.
+
 ### With Podman (or Docker)
 
 ```sh
@@ -69,7 +103,7 @@ kills it; set `TimeoutStopSec=50` likewise under systemd.
 | `--behind-proxy`     | `false`             | Serve plain HTTP for a TLS-terminating proxy.                              |
 | `--region`           |                     | Optional label such as `eu-west`.                                          |
 | `--log-level`        | `info`              | `debug`, `info`, `warn`, `error`. Logs are JSON on stderr.                 |
-| `--drain-timeout`    | `30s`               | On SIGTERM, time for in-flight requests (min 25 s); then 10 s for receipts. |
+| `--drain-timeout`    | `30s`               | On SIGTERM, time to keep serving current viewers (min 25 s); then 10 s for receipts. |
 | `--version`          |                     | Print the version.                                                         |
 
 ## What it does
@@ -97,11 +131,24 @@ kills it; set `TimeoutStopSec=50` likewise under systemd.
 - **Health.** `GET /healthz` returns `{"status","version","viewers"}`; the origin health-checks it.
   It reports `starting` until registration succeeds and `draining` (503) during shutdown.
 - **Heartbeats** report active viewers, egress (an exponentially weighted moving average, in
-  Mbps) and cache size at the interval the API sets.
-- **Shutdown.** On SIGTERM the relay reports `draining`, stops accepting connections and lets
-  in-flight requests finish for `--drain-timeout` (longer than a blocking playlist request can
-  be held). Connections still open after that are closed, the relay waits briefly for their
-  handlers to finish, and only then closes the final period and delivers queued receipts.
+  Mbps) and cache size at the interval the API sets. What the relay does with the answer:
+
+  | API answer                                          | Relay                                                                                                |
+  | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+  | `active`, `pending`, `degraded`                     | Adopts the status and origin key.                                                                    |
+  | `suspended`                                         | Logs an error, serves `410` to viewers, keeps heartbeating so a reinstatement applies at once.       |
+  | `offline` (timed out while paused, or drained)      | Registers again with the same token and key.                                                         |
+  | `401`, `404`, `412` (unknown or not registered)     | Registers again; a retired relay's token is refused there, and the log says to create a new relay.   |
+  | other `4xx`, `5xx`, network errors, timeouts        | Keeps its current state and tries at the next interval.                                              |
+
+- **Shutdown.** On SIGTERM or SIGINT the relay sends one heartbeat with `draining: true` (5 s
+  timeout, best effort; a failure is logged and the platform's health check takes the relay out
+  instead), sends no further heartbeats and does not register again. `/healthz` answers
+  `draining` (503). Viewers already being served keep playing until the player moves to the
+  origin or `--drain-timeout` is nearly over; new viewer sessions get `503`. The last few
+  seconds of the window let in-flight requests finish, then remaining connections are closed,
+  the relay waits briefly for their handlers, and only then closes the final period (covering
+  the drain) and delivers queued receipts. A second signal exits at once.
 - **Privacy.** Logs never contain viewer IP addresses or tokens; the HTTP server's own error log
   is redacted.
 

@@ -4,19 +4,24 @@
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { createDb } from "./client.ts";
-import { type GovernanceOverrides, seedGovernanceSettings } from "./seed.ts";
+import { type GovernanceOverrides, seedGovernanceSettings, seedLegalDocuments } from "./seed.ts";
 
 export const MIGRATIONS_DIR = fileURLToPath(new URL("../drizzle", import.meta.url));
 
-/** Apply all committed migrations, then upsert default governance settings. Idempotent. */
+/**
+ * Apply all committed migrations, then upsert default governance settings. Idempotent.
+ * `seedLegal` inserts the draft legal documents; only the migrate job sets it, because test
+ * databases sign users up without accepting documents.
+ */
 export async function runMigrations(
   url: string,
-  opts: { governanceOverrides?: GovernanceOverrides } = {},
+  opts: { governanceOverrides?: GovernanceOverrides; seedLegal?: boolean } = {},
 ): Promise<void> {
   const handle = createDb({ url, max: 1, applicationName: "commonair-migrate" });
   try {
     await migrate(handle.db, { migrationsFolder: MIGRATIONS_DIR });
     await seedGovernanceSettings(handle.db, opts.governanceOverrides);
+    if (opts.seedLegal) await seedLegalDocuments(handle.db);
   } finally {
     await handle.close();
   }
@@ -31,6 +36,7 @@ if (import.meta.main) {
   const raw = process.env.GOVERNANCE_BOOTSTRAP_JSON;
   await runMigrations(url, {
     governanceOverrides: raw ? (JSON.parse(raw) as GovernanceOverrides) : {},
+    seedLegal: true,
   });
   console.warn("migrations applied");
 }
