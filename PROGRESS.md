@@ -20,6 +20,11 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session six (2026-10-19): E4b money (in progress)
+
+Manual adapter first, then Stripe against stripe-mock (PLAN.md E4b). Plan and units in
+HANDOFF.md "Session six in flight" and `.claude/briefs/e4b/`.
+
 ## Session five (2026-10-18): E4a design system (in progress; resumed 2026-10-19)
 
 Application design only (PLAN.md E4a). Mockup canvas: <https://claude.ai/artifact/Ve5J5XjRZV42eRE2cdReVd>

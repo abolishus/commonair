@@ -15,6 +15,22 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
+## Session six in flight (E4b money)
+
+Started 2026-10-19 from `06cb6c9`. Prompt: build slice E4b (PLAN.md): the manual adapter first
+(subscriptions in 3 tiers, tips, gift subs, ledger postings, revenue dashboard, refunds,
+chargeback clawback, payout threshold), then the Stripe adapter against stripe-mock. Web UI only
+from `packages/ui` compositions (Support, Revenue and Transparency boards); missing pieces go into
+`packages/ui` as compositions with stories and tests. Contract: `docs/testing/e4b-selectors.md`
+plus a harness scenario. Briefs in `.claude/briefs/e4b/`. Same process: ≤ ~6 units in worktrees,
+contract changes by the head agent only, an independent reviewer before every merge (focused
+re-review for any HIGH), the user runs the gate, harness, Storybook, Railway and browser checks.
+
+Starting point found in the code: the money contract (`money.*`, `coop.transparency`), the payment
+tables and `@commonair/ledger` (rules, poster, holds, reversals, payout batch, aggregates) already
+exist; every `money.*` handler is a 501 stub; `packages/payments` (adapter interface) does not
+exist yet. The "offline/recent followed channels on /" open item landed in `28bd4aa`.
+
 ## Session five in flight (E4a design system)
 
 The user's session-five prompt: E4 starts with an application-design-only track (no API, worker,
