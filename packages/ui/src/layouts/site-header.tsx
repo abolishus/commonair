@@ -29,6 +29,8 @@ export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   mobileMenuOpen?: boolean;
   /** Shown at the bottom of the mobile sheet (theme switch, account links). */
   mobileActions?: React.ReactNode;
+  /** Shown in the bar from `md` up only; pair with `mobileActions` for the same controls on phones. */
+  desktopActions?: React.ReactNode;
 }
 export function SiteHeader({
   brand,
@@ -42,6 +44,7 @@ export function SiteHeader({
   menuLabel,
   mobileMenuOpen,
   mobileActions,
+  desktopActions,
   className,
   ...props
 }: SiteHeaderProps): React.JSX.Element {
@@ -64,6 +67,7 @@ export function SiteHeader({
         </Button>
       ) : null}
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
         {actions}
         {user}
       </div>

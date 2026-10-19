@@ -63,7 +63,8 @@ describe("U6b contract requests", () => {
       />,
     );
     expect(screen.getByLabelText("Password").getAttribute("autocomplete")).toBe("current-password");
-    expect(screen.getByText("At least 12 characters")).toBeTruthy();
+    const hint = screen.getByText("At least 12 characters");
+    expect(screen.getByLabelText("Password").getAttribute("aria-describedby")).toBe(hint.id);
   });
 
   test("PasswordField defaults to new-password", () => {
@@ -115,11 +116,13 @@ describe("U6b contract requests", () => {
         navLabel="Main"
         menuLabel="Menu"
         mobileActions={<span>theme</span>}
+        desktopActions={<span>desktop only</span>}
       />,
     );
     const link = screen.getByRole("link", { name: "CommonAir" });
     expect(link.getAttribute("href")).toBe("/home");
     expect(link.hasAttribute("data-router")).toBe(true);
+    expect(screen.getByText("desktop only").parentElement?.className).toContain("md:flex");
   });
 
   test("SiteFooter source link keeps its data attributes and does not leak label as an attribute", () => {

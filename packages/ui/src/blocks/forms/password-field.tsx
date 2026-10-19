@@ -36,11 +36,13 @@ export function PasswordField({
   const [visible, setVisible] = React.useState(false);
   const current = value ?? inner;
   const id = React.useId();
+  const descriptionId = `${id}-description`;
   return (
     <Field data-testid={props["data-testid"]}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <InputGroup>
         <InputGroupInput
+          aria-describedby={description ? descriptionId : undefined}
           {...inputProps}
           id={id}
           type={visible ? "text" : "password"}
@@ -56,7 +58,7 @@ export function PasswordField({
           <HugeiconsIcon icon={visible ? EyeOffIcon : EyeIcon} strokeWidth={2} aria-hidden />
         </InputGroupButton>
       </InputGroup>
-      {description && <FieldDescription>{description}</FieldDescription>}
+      {description && <FieldDescription id={descriptionId}>{description}</FieldDescription>}
       {strength && (
         <Progress value={strength.value} aria-label={strength.label}>
           <ProgressValue>{() => strength.label}</ProgressValue>
