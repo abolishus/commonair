@@ -4,7 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { SITE, type InstanceSite } from "@commonair/config/site";
 // Not exported from @commonair/db yet (contract request); read the shipped drafts directly.
-import { LEGAL_PLACEHOLDERS, legalSeedDocuments } from "../../../packages/db/src/legal/index.ts";
+import { LEGAL_PLACEHOLDERS, legalSeedDocuments } from "@commonair/db";
 import { legalVariables, normalizeConsentChoices, renderLegalText } from "../src/lib/legal.ts";
 
 const site: InstanceSite = {

@@ -3,7 +3,7 @@
 
 import { and, asc, desc, eq, inArray, lte } from "drizzle-orm";
 import { sourceLink, type InstanceSite } from "@commonair/config/site";
-import { schema, type Executor } from "@commonair/db";
+import { CONSENT_CATEGORIES, PLACEHOLDER_PATTERN, schema, type Executor } from "@commonair/db";
 
 const { legalDocuments, legalAcceptances } = schema;
 
@@ -103,9 +103,6 @@ export async function recordAcceptances(
   return { accepted, missing: current.filter((c) => !wanted.has(c.id)) };
 }
 
-// Duplicates PLACEHOLDER_PATTERN in @commonair/db (packages/db/src/legal); switch to that import once exported.
-const PLACEHOLDER = /\{\{\s*([A-Za-z][A-Za-z0-9.]*)\s*\}\}/g;
-
 /** Values for the `{{placeholders}}` legal texts may use, from this instance's identity. */
 export function legalVariables(site: InstanceSite, minAge: number): Record<string, string> {
   const vars: Record<string, string> = {
@@ -123,16 +120,11 @@ export function legalVariables(site: InstanceSite, minAge: number): Record<strin
  * document shows up instead of silently vanishing.
  */
 export function renderLegalText(text: string, vars: Record<string, string>): string {
-  return text.replace(PLACEHOLDER, (whole, key: string) => vars[key] ?? whole);
+  return text.replace(PLACEHOLDER_PATTERN, (whole, key: string) => vars[key] ?? whole);
 }
 
-// Duplicates CONSENT_CATEGORIES in @commonair/db (packages/db/src/legal); switch to that import once exported.
-/**
- * Storage categories the cookie policy names. `essential` is always on: a stored record says
- * so whatever the client sent.
- */
-export const CONSENT_CATEGORIES = ["essential", "preferences"] as const;
-
+// Storage categories the cookie policy names (CONSENT_CATEGORIES). `essential` is always on: a
+// stored record says so whatever the client sent.
 const MAX_ECHOED_KEY = 32;
 
 export type ConsentCheck = { ok: true; choices: Record<string, boolean> } | { ok: false; reason: string };

@@ -5,4 +5,11 @@ export * from "./client.ts";
 export * from "./ids.ts";
 export * as schema from "./schema/index.ts";
 export { runMigrations, MIGRATIONS_DIR } from "./migrate.ts";
-export { DEFAULT_GOVERNANCE_SETTINGS, seedGovernanceSettings } from "./seed.ts";
+export { DEFAULT_GOVERNANCE_SETTINGS, seedGovernanceSettings, seedLegalDocuments } from "./seed.ts";
+export {
+  CONSENT_CATEGORIES,
+  LEGAL_PLACEHOLDERS,
+  LEGAL_SEED_VERSION,
+  PLACEHOLDER_PATTERN,
+  legalSeedDocuments,
+} from "./legal/index.ts";

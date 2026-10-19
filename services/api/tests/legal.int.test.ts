@@ -7,8 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
 // Not exported from @commonair/db yet (contract request).
-import { LEGAL_SEED_VERSION } from "../../../packages/db/src/legal/index.ts";
-import { seedLegalDocuments } from "../../../packages/db/src/seed.ts";
+import { LEGAL_SEED_VERSION, seedLegalDocuments } from "@commonair/db";
 import {
   client,
   mailTo,
