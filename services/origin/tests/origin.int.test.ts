@@ -54,8 +54,10 @@ const ids = {
   viewerSession: uuidv7(),
 };
 
-function sh(args: string[]): string {
-  const p = Bun.spawnSync(args, { stderr: "pipe", stdout: "pipe" });
+// spawnSync blocks the event loop, so vitest's hook timeout cannot interrupt it (e.g. a stuck image pull).
+function sh(args: string[], timeoutMs = 300_000): string {
+  const p = Bun.spawnSync(args, { stderr: "pipe", stdout: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
+  if (p.exitedDueToTimeout) throw new Error(`${args.join(" ")} timed out after ${timeoutMs / 1000}s`);
   if (p.exitCode !== 0) throw new Error(`${args.join(" ")} failed: ${p.stderr.toString()}`);
   return p.stdout.toString().trim();
 }
@@ -254,7 +256,7 @@ afterAll(async () => {
   for (const p of publishers) p.kill();
   await server?.stop(true);
   await origin?.stop();
-  Bun.spawnSync(["podman", "rm", "-f", container], { stdout: "ignore", stderr: "ignore" });
+  Bun.spawnSync(["podman", "rm", "-f", "-t", "5", container], { stdout: "ignore", stderr: "ignore", timeout: 60_000 });
   await valkey?.del(stream);
   await valkey?.quit();
   await t?.drop();

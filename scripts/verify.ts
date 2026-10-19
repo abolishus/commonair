@@ -14,8 +14,12 @@
  *
  * Integration tests need Postgres, Valkey, Garage and Mailpit: verify starts
  * them with `podman compose` (scripts/infra.ts) unless VERIFY_INFRA=external.
+ *
+ * Every step has a hard timeout (minutes, scaled by VERIFY_TIMEOUT_SCALE, e.g. 2 on a slow
+ * machine): a hung step fails the gate with its name instead of leaving it running forever.
  */
 import { existsSync } from "node:fs";
+import { killCurrentStep, runStep } from "./run-step.ts";
 
 const args = process.argv.slice(2);
 const full = args.includes("--full");
@@ -26,36 +30,42 @@ interface Step {
   name: string;
   cmd: string[];
   cwd?: string;
+  /** Hard limit in minutes before the step's process tree is killed. */
+  timeoutMin: number;
   when?: () => boolean;
 }
 
 const steps: Step[] = [
-  { name: "format", cmd: ["vp", "fmt", "--check"] },
-  { name: "lint", cmd: ["vp", "lint", "--deny-warnings"] },
-  { name: "typecheck", cmd: ["vp", "run", "--no-cache", "-r", "typecheck"] },
-  { name: "unit tests", cmd: ["vp", "run", "--no-cache", "-r", "test"] },
+  { name: "format", timeoutMin: 5, cmd: ["vp", "fmt", "--check"] },
+  { name: "lint", timeoutMin: 10, cmd: ["vp", "lint", "--deny-warnings"] },
+  { name: "typecheck", timeoutMin: 10, cmd: ["vp", "run", "--no-cache", "-r", "typecheck"] },
+  { name: "unit tests", timeoutMin: 15, cmd: ["vp", "run", "--no-cache", "-r", "test"] },
   {
     name: "infra up",
+    timeoutMin: 10,
     cmd: ["bun", "scripts/infra.ts", "test"],
     when: () => !quick && process.env.VERIFY_INFRA !== "external",
   },
   {
     name: "migrations",
+    timeoutMin: 3,
     cmd: ["bun", "run", "--filter", "@commonair/db", "migrate"],
     when: () => !quick && existsSync("packages/db/package.json"),
   },
-  { name: "integration tests", cmd: ["vp", "run", "--no-cache", "-r", "test:int"], when: () => !quick },
-  { name: "licenses", cmd: ["bun", "scripts/check-licenses.ts"] },
-  { name: "stray domains", cmd: ["bun", "scripts/check-domains.ts"] },
-  { name: "reuse lint", cmd: ["reuse", "lint", "--quiet"] },
+  { name: "integration tests", timeoutMin: 30, cmd: ["vp", "run", "--no-cache", "-r", "test:int"], when: () => !quick },
+  { name: "licenses", timeoutMin: 5, cmd: ["bun", "scripts/check-licenses.ts"] },
+  { name: "stray domains", timeoutMin: 5, cmd: ["bun", "scripts/check-domains.ts"] },
+  { name: "reuse lint", timeoutMin: 5, cmd: ["reuse", "lint", "--quiet"] },
   {
     name: "relay: gofmt",
+    timeoutMin: 2,
     cmd: ["bash", "-c", 'test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)'],
     cwd: "relay",
     when: () => existsSync("relay/go.mod"),
   },
   {
     name: "relay: vet + test",
+    timeoutMin: 10,
     cmd: ["bash", "-c", "go vet ./... && go test -race ./..."],
     cwd: "relay",
     when: () => existsSync("relay/go.mod"),
@@ -63,49 +73,62 @@ const steps: Step[] = [
   {
     // Harness scenarios drive the whole platform in real browsers.
     name: "platform up",
+    timeoutMin: 25,
     cmd: ["bun", "scripts/infra.ts", "stack"],
     when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
   },
   {
     name: "harness: browsers",
+    timeoutMin: 10,
     cmd: ["bun", "run", "--filter", "@commonair/harness", "browsers"],
     when: () => full || scenarios.length > 0,
   },
   ...scenarios.map((s) => ({
     name: `harness: ${s}`,
+    timeoutMin: 30,
     cmd: ["bun", "harness/src/cli.ts", "run", s],
   })),
   {
     name: "harness: full scenario",
+    timeoutMin: 45,
     cmd: ["bun", "harness/src/cli.ts", "run", "full"],
     when: () => full,
   },
 ];
 
+const scale = Number(process.env.VERIFY_TIMEOUT_SCALE ?? "1") || 1;
+// Steps run in their own process group, so Ctrl-C has to be forwarded to it.
+for (const sig of ["SIGINT", "SIGTERM"] as const)
+  process.on(sig, () => {
+    killCurrentStep();
+    process.exit(130);
+  });
+
 const started = performance.now();
-const results: { name: string; ms: number; ok: boolean | "skipped" }[] = [];
+const results: { name: string; ms: number; ok: boolean | "skipped"; timedOut?: boolean }[] = [];
 for (const step of steps) {
   if (step.when && !step.when()) {
     results.push({ name: step.name, ms: 0, ok: "skipped" });
     continue;
   }
-  console.log(`\n\x1b[1m▶ ${step.name}\x1b[0m  ${step.cmd.join(" ")}`);
-  const t = performance.now();
-  let ok = false;
+  const timeoutMs = step.timeoutMin * scale * 60_000;
+  console.log(`\n\x1b[1m▶ ${step.name}\x1b[0m  ${step.cmd.join(" ")}  (limit ${step.timeoutMin * scale}m)`);
+  let r = { ok: false, timedOut: false, ms: 0 };
   try {
-    const proc = Bun.spawnSync(step.cmd, { cwd: step.cwd, stdio: ["inherit", "inherit", "inherit"], env: process.env });
-    ok = proc.exitCode === 0;
+    r = await runStep(step.cmd, { cwd: step.cwd, timeoutMs, heartbeatMs: 60_000 });
   } catch (e) {
     console.error(`could not run ${step.cmd[0]}: ${(e as Error).message} (is it installed and on PATH?)`);
   }
-  results.push({ name: step.name, ms: performance.now() - t, ok });
-  if (!ok) break;
+  results.push({ name: step.name, ms: r.ms, ok: r.ok, timedOut: r.timedOut });
+  if (!r.ok) break;
 }
 
 console.log("\n\x1b[1mverify summary\x1b[0m");
 for (const r of results) {
   const mark = r.ok === "skipped" ? "–" : r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-  console.log(`  ${mark} ${r.name.padEnd(28)} ${r.ok === "skipped" ? "skipped" : `${(r.ms / 1000).toFixed(1)}s`}`);
+  console.log(
+    `  ${mark} ${r.name.padEnd(28)} ${r.ok === "skipped" ? "skipped" : `${(r.ms / 1000).toFixed(1)}s`}${r.timedOut ? " (timed out)" : ""}`,
+  );
 }
 const failed = results.some((r) => r.ok === false);
 console.log(

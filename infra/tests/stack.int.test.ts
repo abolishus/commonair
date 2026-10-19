@@ -49,14 +49,26 @@ const env: Record<string, string> = {
   BIND_ADDRESS: "127.0.0.1",
 };
 
-function run(cmd: string[], opts: { allowFail?: boolean } = {}): { code: number; out: string } {
-  const p = Bun.spawnSync(cmd, { cwd: ROOT, env, stdout: "pipe", stderr: "pipe" });
+// spawnSync blocks the event loop, so vitest's hook timeouts cannot fire: every call needs its own.
+function run(cmd: string[], opts: { allowFail?: boolean; timeoutMs?: number } = {}): { code: number; out: string } {
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const p = Bun.spawnSync(cmd, {
+    cwd: ROOT,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+  });
   const out = `${p.stdout.toString()}${p.stderr.toString()}`;
+  if (p.exitedDueToTimeout)
+    throw new Error(`${cmd.join(" ")} timed out after ${timeoutMs / 1000}s:\n${out.slice(-4000)}`);
   if (p.exitCode !== 0 && !opts.allowFail)
     throw new Error(`${cmd.join(" ")} failed (${p.exitCode}):\n${out.slice(-4000)}`);
   return { code: p.exitCode ?? -1, out };
 }
-const compose = (...args: string[]) => run(["podman", "compose", "-p", PROJECT, ...args]);
+const compose = (args: string[], timeoutMs?: number) =>
+  run(["podman", "compose", "-p", PROJECT, ...args], { timeoutMs });
 
 function container(service: string): string {
   const id = run([
@@ -101,7 +113,7 @@ let s3: ObjectStorage;
 
 beforeAll(async () => {
   run(["bun", "scripts/init-env.ts", "--out", env.COMMONAIR_ENV_FILE!]);
-  compose("up", "-d", "--build", ...SERVICES);
+  compose(["up", "-d", "--build", ...SERVICES], 15 * 60_000);
   for (const svc of ["postgres", "valkey", "garage", "mailpit"])
     await until(`${svc} healthy`, () =>
       inspect(container(svc), "{{.State.Health.Status}}") === "healthy" ? true : undefined,
@@ -212,7 +224,7 @@ describe("compose data stack", () => {
 
   test("backup.sh pushes a base backup and restore.sh replays it with later WAL", async () => {
     const pg = container("postgres");
-    const backup = run(["podman", "exec", pg, "commonair-backup"], { allowFail: true });
+    const backup = run(["podman", "exec", pg, "commonair-backup"], { allowFail: true, timeoutMs: 240_000 });
     expect(backup.code, backup.out).toBe(0);
     const marker = `m${SUFFIX}`;
     // Written after the base backup: only WAL replay can bring it back.
@@ -260,7 +272,7 @@ describe("compose data stack", () => {
         "-c",
         script,
       ],
-      { allowFail: true },
+      { allowFail: true, timeoutMs: 240_000 },
     );
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain(`RESTORED=${marker}\n`);
