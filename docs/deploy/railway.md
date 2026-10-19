@@ -43,6 +43,22 @@ RTMP (`mediamtx` 1935) and plain IRC (`irc` 6667). Internal URLs use Railway's p
   (avatars, banners) do not until a public read path exists.
 - Postgres is managed; the WAL-G image and `infra/postgres/backup.sh` are not used here.
 
+## Status
+
+The `commonair` project (workspace "Josh Shevach's Projects", environment `staging`) was created
+and applied from this file on 2026-10-18; all twelve services deploy and pass their health checks,
+and `railway config plan --detailed-exit-code` reports no drift. Find the generated domains with
+`railway domain list --service <name>`; they are deliberately not recorded in the repository.
+Notes from bring-up:
+
+- Production mode requires the instance contact addresses; staging uses placeholders on the web
+  domain (`contact@…`, `security@…`, …). Replace them before inviting anyone.
+- IRC sets `IRC_TLS_ALLOW_SELF_SIGNED=true`: the TLS listener's port is not exposed on Railway,
+  plain IRC goes through the TCP proxy and secure clients use the WebSocket listener over HTTPS.
+- Restart policies equal to Railway's defaults are not stored and would show as drift forever, so
+  the file only sets one where it differs (MediaMTX `ALWAYS`).
+- The Mailpit UI login is the `MP_UI_AUTH` variable on the `mailpit` service.
+
 ## First-time setup
 
 Prerequisites: the Railway CLI (≥ 5.63), logged in (`railway login`), and Railway's GitHub app

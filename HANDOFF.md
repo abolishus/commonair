@@ -68,6 +68,16 @@ reasons from Postgres because `integrity.flags` is not implemented in the API ye
 host-side forwarding proxy is not in the trusted compose subnet, so simulated client addresses
 collapse to one at the API; decide whether the harness profile should trust the host gateway.
 
+## Railway staging (live)
+
+`.railway/railway.ts` (Railway TypeScript IaC; `railway.json/toml` are deprecated) describes a
+staging environment; the project `commonair` in the "Josh Shevach's Projects" workspace was
+created and applied from it, and all 12 services are healthy (2026-10-18). Guide, differences from
+compose and bring-up notes: [docs/deploy/railway.md](docs/deploy/railway.md). Change it only via
+`railway config plan` → review → `railway config apply`; secrets/bucket creds/domains come from
+`scripts/railway-bootstrap.ts`. Not yet done there: running the harness against staging (needs
+Mailpit basic-auth support in the harness), real contact mailboxes, public media reads.
+
 ## Open items (not done)
 
 - **API round 3** (from the final re-review; no HIGH left): (MED) safe-regex cost model treats an
