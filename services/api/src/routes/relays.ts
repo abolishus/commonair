@@ -6,7 +6,7 @@
  * heartbeat, receipts) and admin review. Receipts are stored `pending`; the
  * worker/integrity units cross-check them against the origin's issuance log.
  */
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, notLike, or, sql } from "drizzle-orm";
 import { KEYS } from "@commonair/contracts/internal";
 import { RECEIPT_INTERVAL_SECONDS } from "@commonair/contracts/tokens";
 import { schema } from "@commonair/db";
@@ -130,21 +130,52 @@ export async function healthCheck(deps: Deps, publicUrl: string): Promise<{ ok: 
   }
 }
 
-async function publishRelay(deps: Deps, r: RelayRow, loadMbps: number) {
-  if (r.status === "active") {
-    const entry: RelayEntry = {
-      url: r.publicUrl.replace(/\/+$/, ""),
-      capacityMbps: r.declaredCapacityMbps,
-      status: r.status,
-      load: loadMbps,
-    };
-    await deps.valkey.hset(KEYS.relays, r.id, JSON.stringify(entry));
-  } else await deps.valkey.hdel(KEYS.relays, r.id);
+/**
+ * Retired relays carry a token hash no SHA-256 hex digest can equal, so the old token can never
+ * authenticate again and the row stays recognisably retired (it no longer counts toward the
+ * member's relay limit). Rows are kept: receipts reference them.
+ */
+const RETIRED_PREFIX = "retired:";
+export const isRetired = (r: Pick<RelayRow, "tokenHash">) => r.tokenHash.startsWith(RETIRED_PREFIX);
+
+async function currentRow(deps: Deps, id: string): Promise<RelayRow | null> {
+  const [row] = await deps.db.select().from(relayNodes).where(eq(relayNodes.id, id)).limit(1);
+  return row ?? null;
 }
 
-/** Re-run the health check and update status; suspended/offline relays never become active here. */
-async function refreshHealth(deps: Deps, r: RelayRow): Promise<RelayRow> {
-  if (r.status === "suspended" || r.status === "offline" || r.publicUrl === UNREGISTERED_URL) return r;
+/**
+ * Keep KEYS.relays in step with Postgres: only `active` relays are assignable. After writing an
+ * entry we re-read the row, so a suspension or retirement committed meanwhile is not undone by a
+ * heartbeat that loaded the relay before it.
+ */
+async function publishRelay(deps: Deps, r: RelayRow, loadMbps: number): Promise<RelayRow> {
+  if (r.status !== "active") {
+    await deps.valkey.hdel(KEYS.relays, r.id);
+    return r;
+  }
+  const entry: RelayEntry = {
+    url: r.publicUrl.replace(/\/+$/, ""),
+    capacityMbps: r.declaredCapacityMbps,
+    status: r.status,
+    load: loadMbps,
+  };
+  await deps.valkey.hset(KEYS.relays, r.id, JSON.stringify(entry));
+  const now = await currentRow(deps, r.id);
+  if (!now || now.status !== "active" || now.tokenHash !== r.tokenHash) {
+    await deps.valkey.hdel(KEYS.relays, r.id);
+    return now ?? r;
+  }
+  return r;
+}
+
+/**
+ * Re-run the health check and update status, compare-and-set on the status and token we read.
+ * Suspended relays never change here. Offline relays only with `rejoin` (a heartbeat from a relay
+ * the worker timed out), and a failing check leaves them offline.
+ */
+async function refreshHealth(deps: Deps, r: RelayRow, opts: { rejoin?: boolean } = {}): Promise<RelayRow> {
+  if (r.status === "suspended" || r.publicUrl === UNREGISTERED_URL || isRetired(r)) return r;
+  if (r.status === "offline" && !opts.rejoin) return r;
   const h = await healthCheck(deps, r.publicUrl);
   const [row] = await deps.db
     .update(relayNodes)
@@ -154,16 +185,19 @@ async function refreshHealth(deps: Deps, r: RelayRow): Promise<RelayRow> {
       lastHealthLatencyMs: h.latencyMs,
       consecutiveFailures: h.ok ? 0 : sql`${relayNodes.consecutiveFailures} + 1`,
     })
-    .where(and(eq(relayNodes.id, r.id), sql`${relayNodes.status} not in ('suspended', 'offline')`))
+    .where(and(eq(relayNodes.id, r.id), eq(relayNodes.status, r.status), eq(relayNodes.tokenHash, r.tokenHash)))
     .returning();
-  return row ?? r;
+  return row ?? (await currentRow(deps, r.id)) ?? r;
 }
 
+/** Any relay whose token matches authenticates, whatever its status; a retired token never matches. */
 function requireRelay(ctx: { relay: RelayRow | null }): RelayRow {
   if (!ctx.relay) throw apiError("UNAUTHORIZED", "A valid relay token is required");
-  if (ctx.relay.status === "offline") throw apiError("UNAUTHORIZED", "This relay was retired");
   return ctx.relay;
 }
+
+const healthStale = (deps: Deps, r: RelayRow) =>
+  !r.lastHealthAt || deps.now().getTime() - r.lastHealthAt.getTime() > RECHECK_MS;
 
 export const relays = {
   mine: os.relays.mine.handler(async ({ context }) => {
@@ -187,7 +221,8 @@ export const relays = {
     const [{ n } = { n: 0 }] = await deps.db
       .select({ n: sql<number>`count(*)::int` })
       .from(relayNodes)
-      .where(and(eq(relayNodes.ownerId, caller.user.id), sql`${relayNodes.status} <> 'offline'`));
+      // Drained or timed-out relays may rejoin, so only retired ones free a slot.
+      .where(and(eq(relayNodes.ownerId, caller.user.id), notLike(relayNodes.tokenHash, `${RETIRED_PREFIX}%`)));
     if (Number(n) >= MAX_RELAYS_PER_MEMBER)
       throw precondition("relay_limit", `At most ${MAX_RELAYS_PER_MEMBER} relays per member`);
     const token = randomSecret("relay_");
@@ -209,14 +244,30 @@ export const relays = {
   remove: os.relays.remove.handler(async ({ context, input }) => {
     const { deps } = context;
     const caller = requireCaller(context);
-    // Retired, not deleted: receipts reference the relay. The token stops working at once.
-    const [row] = await deps.db
-      .update(relayNodes)
-      .set({ status: "offline", tokenHash: await sha256Hex(randomSecret("retired_")) })
-      .where(and(eq(relayNodes.id, input.id), eq(relayNodes.ownerId, caller.user.id)))
-      .returning({ id: relayNodes.id });
-    if (!row) throw notFound("Relay not found");
-    await deps.valkey.hdel(KEYS.relays, row.id);
+    // Retired, not deleted: receipts reference the relay. Rotating the token hash to a value no
+    // token hashes to kills the token at once; the relay can never register or heartbeat again.
+    const id = await deps.db.transaction(async (tx) => {
+      const [r] = await tx
+        .select({ id: relayNodes.id, tokenHash: relayNodes.tokenHash })
+        .from(relayNodes)
+        .where(and(eq(relayNodes.id, input.id), eq(relayNodes.ownerId, caller.user.id)))
+        .for("update");
+      if (!r) throw notFound("Relay not found");
+      if (isRetired(r)) return r.id; // idempotent: no second audit row
+      await tx
+        .update(relayNodes)
+        .set({ status: "offline", tokenHash: `${RETIRED_PREFIX}${randomSecret()}` })
+        .where(eq(relayNodes.id, r.id));
+      await audit(tx, {
+        actorType: "user",
+        actorId: caller.user.id,
+        action: "relay.retire",
+        subjectType: "relay",
+        subjectId: r.id,
+      });
+      return r.id;
+    });
+    await deps.valkey.hdel(KEYS.relays, id);
     return { ok: true as const };
   }),
 
@@ -230,6 +281,8 @@ export const relays = {
       deps.logger.info("relay registration refused", { relayId: relay.id, reason: target });
       throw badRequest("publicUrl: must be a publicly reachable https URL");
     }
+    // Any other status (including offline: drained or timed out) starts over at pending and
+    // becomes active only on a passing health check. Suspension survives re-registration.
     let [row] = await deps.db
       .update(relayNodes)
       .set({
@@ -238,13 +291,14 @@ export const relays = {
         publicKey: input.publicKey,
         version: input.version,
         region: input.region,
-        status: relay.status === "suspended" ? "suspended" : "pending",
+        status: sql`case when ${relayNodes.status} = 'suspended' then 'suspended'::relay_status else 'pending'::relay_status end`,
       })
-      .where(eq(relayNodes.id, relay.id))
+      // The token must still be current: a relay retired since authenticating stays retired.
+      .where(and(eq(relayNodes.id, relay.id), eq(relayNodes.tokenHash, relay.tokenHash)))
       .returning();
-    if (!row) throw notFound("Relay not found");
+    if (!row) throw apiError("UNAUTHORIZED", "A valid relay token is required");
     row = await refreshHealth(deps, row);
-    await publishRelay(deps, row, 0);
+    row = await publishRelay(deps, row, 0);
     return {
       relayId: row.id,
       originUrl: deps.env.PLAYBACK_PUBLIC_URL,
@@ -259,12 +313,42 @@ export const relays = {
     const { deps } = context;
     let relay = requireRelay(context);
     if (relay.publicUrl === UNREGISTERED_URL) throw precondition("registered", "Register the relay first");
-    const stale = !relay.lastHealthAt || deps.now().getTime() - relay.lastHealthAt.getTime() > RECHECK_MS;
-    if (relay.status !== "active" && stale) relay = await refreshHealth(deps, relay);
-    else if (relay.status === "active")
-      await deps.db.update(relayNodes).set({ lastHealthAt: deps.now() }).where(eq(relayNodes.id, relay.id));
-    await publishRelay(deps, relay, input.egressMbps);
-    return { status: relay.status, originPublicKey: deps.signingKey.publicKeyB64 };
+    const reply = (r: RelayRow) => ({ status: r.status, originPublicKey: deps.signingKey.publicKeyB64 });
+
+    if (input.draining) {
+      // Operational, not a moderation event: no audit row. Out of assignment at once; players
+      // move to the origin on their next playback heartbeat. Suspension is never downgraded to
+      // offline (offline relays may rejoin on their own; suspended ones only via reinstate).
+      const [row] = await deps.db
+        .update(relayNodes)
+        .set({ status: "offline" })
+        .where(
+          and(
+            eq(relayNodes.id, relay.id),
+            eq(relayNodes.tokenHash, relay.tokenHash),
+            sql`${relayNodes.status} <> 'suspended'`,
+          ),
+        )
+        .returning();
+      await deps.valkey.hdel(KEYS.relays, relay.id);
+      return reply(row ?? (await currentRow(deps, relay.id)) ?? relay);
+    }
+
+    if (relay.status === "active") {
+      const [row] = await deps.db
+        .update(relayNodes)
+        .set({ lastHealthAt: deps.now() })
+        .where(
+          and(eq(relayNodes.id, relay.id), eq(relayNodes.tokenHash, relay.tokenHash), eq(relayNodes.status, "active")),
+        )
+        .returning();
+      relay = row ?? (await currentRow(deps, relay.id)) ?? relay;
+    } else if (healthStale(deps, relay)) {
+      // An offline relay that heartbeats again (the worker timed it out, it came back) rejoins
+      // once its health check passes; until then it stays offline.
+      relay = await refreshHealth(deps, relay, { rejoin: relay.status === "offline" });
+    }
+    return reply(await publishRelay(deps, relay, input.egressMbps));
   }),
 
   receipt: os.relays.receipt.handler(async ({ context, input }) => {
@@ -367,8 +451,9 @@ export const relays = {
       });
       return r;
     });
-    const refreshed = await refreshHealth(deps, row);
-    await publishRelay(deps, refreshed, 0);
+    // Back into assignment only on a passing health check (publishRelay writes `active` only);
+    // otherwise it stays pending and the relay's own heartbeats re-check it.
+    const refreshed = await publishRelay(deps, await refreshHealth(deps, row), 0);
     return toRelayDto(refreshed, (await relayStats(deps, [refreshed.id])).get(refreshed.id));
   }),
 };

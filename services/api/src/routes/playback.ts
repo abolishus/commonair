@@ -257,17 +257,16 @@ export const playback = {
     if (promoted) tx.del(KEYS.viewerCount(s.channelId));
     await tx.exec();
 
-    // Move viewers off a relay that left the active set.
+    // Move viewers off a relay that left the active set (KEYS.relays holds active relays only:
+    // drained, timed-out, suspended and retired relays are all removed from it). The new token
+    // and playlist point at the origin. `assigned_source`/`relay_id` stay as recorded: the
+    // integrity scorer keeps judging the session as relay-delivered against that relay's
+    // verified receipts (its coverage ends when the relay stops reporting), and receipt checks
+    // keep seeing which sessions the relay served.
     let assignment: Assignment | null = null;
     if (claims.src === "relay" && claims.rid) {
       const relays = await activeRelays(deps);
-      if (!relays.some((r) => r.id === claims.rid && r.status === "active")) {
-        assignment = { source: "origin" };
-        await deps.db
-          .update(playbackSessions)
-          .set({ assignedSource: "origin", relayId: null })
-          .where(eq(playbackSessions.id, s.id));
-      }
+      if (!relays.some((r) => r.id === claims.rid && r.status === "active")) assignment = { source: "origin" };
     }
     const nowSeconds = Math.floor(now.getTime() / 1000);
     if (!assignment && claims.exp - nowSeconds > REFRESH_BEFORE_SECONDS) return { ok: true as const };
