@@ -40,9 +40,9 @@
     "vite-plus": "catalog:"
   },
   "overrides": {
-    "vite": "catalog:",
     "@reduxjs/toolkit": "2.10.1",
-    "use-sync-external-store": "1.6.0"
+    "use-sync-external-store": "1.6.0",
+    "vite": "catalog:"
   },
   "devEngines": {
     "packageManager": {
