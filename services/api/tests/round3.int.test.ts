@@ -115,11 +115,12 @@ describe("heartbeat floor", () => {
 });
 
 describe("P2P sessions", () => {
-  test("an origin session with the P2P loader on is recorded as p2p; the token stays origin", async () => {
-    const s = await startPlayback(client(api));
+  test("a client claiming p2pCapable on an origin assignment is still recorded as origin", async () => {
+    // Regression: `p2p` lowers integrity's expected origin share, and P2P is client input.
+    const s = await startPlayback(client(api), { p2pCapable: true });
     expect(s.p2p.enabled).toBe(true);
     expect(s.source).toBe("origin");
-    expect((await sessionRow(s.sessionId)).assignedSource).toBe("p2p");
+    expect((await sessionRow(s.sessionId)).assignedSource).toBe("origin");
   });
 
   test("no P2P (client opts out or native HLS) stays origin", async () => {
@@ -319,6 +320,54 @@ describe("appeals", () => {
     expect((await create(bob.client, body)).status).toBe(200);
   });
 
+  test("the moderator who took the action cannot resolve its appeal", async () => {
+    const [c] = await db().select().from(schema.channels).where(eq(schema.channels.slug, streamer.username));
+    const [m] = await db()
+      .insert(schema.modActions)
+      .values({
+        scope: "platform",
+        channelId: c?.id ?? null,
+        moderatorId: mod.userId,
+        targetUserId: alice.userId,
+        action: "timeout",
+      })
+      .returning();
+    const created = await create(alice.client, {
+      kind: "moderation",
+      subjectType: "moderation_action",
+      subjectId: m?.id ?? "",
+    });
+    expect(created.status).toBe(200);
+    const byActor = await mod.client.call("POST", `/api/admin/appeals/${created.body.id}`, {
+      status: "overturned",
+      resolution: "My own call.",
+    });
+    expect(byActor.status).toBe(403);
+    const [row] = await db().select().from(schema.appeals).where(eq(schema.appeals.id, created.body.id));
+    expect(row?.status).toBe("open");
+  });
+
+  test("two concurrent resolves: one wins, the other is a CONFLICT", async () => {
+    const other = await signUpAndSignIn(api);
+    await db().update(schema.users).set({ role: "moderator" }).where(eq(schema.users.id, other.userId));
+    const created = await create(alice.client, { subjectType: "user", subjectId: alice.userId });
+    expect(created.status).toBe(200);
+    const results = await Promise.all(
+      [mod, other].map((m, i) =>
+        m.client.call("POST", `/api/admin/appeals/${created.body.id}`, {
+          status: i === 0 ? "upheld" : "overturned",
+          resolution: "Reviewed.",
+        }),
+      ),
+    );
+    expect(results.map((r) => r.status).sort((a, b) => a - b)).toEqual([200, 409]);
+    const audits = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.subjectType, "appeal"), eq(schema.auditLog.subjectId, created.body.id)));
+    expect(audits).toHaveLength(1);
+  });
+
   test("create → queue → resolve overturned → the integrity allowance sees it", async () => {
     const sessionFacts = async () => {
       const r = await sessionRow(aliceSession);
@@ -403,17 +452,8 @@ describe("appeals", () => {
       status: "overturned",
     });
 
-    // Outbox row in the same transaction.
-    const events = await db().select().from(schema.events).where(eq(schema.events.type, "appeal.resolved"));
-    const ev = events.find((e) => e.payload.appeal_id === created.body.id);
-    expect(ev?.payload).toMatchObject({
-      appellant_user_id: alice.userId,
-      kind: "integrity",
-      subject_type: "integrity_flag",
-      subject_id: flagOnAlice,
-      status: "overturned",
-    });
-    expect(JSON.stringify(ev?.payload)).not.toContain("alice@example.test");
+    // No outbox row until `appeal.resolved` is in the event catalog (an unknown type would be lost).
+    expect(await db().select().from(schema.events).where(eq(schema.events.type, "appeal.resolved"))).toHaveLength(0);
 
     // The resolved appeal leaves the open queue and shows in the overturned one.
     const open = await mod.client.call<{ items: AppealDto[] }>("GET", "/api/admin/appeals?status=open&limit=100");

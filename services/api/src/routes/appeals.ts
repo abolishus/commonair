@@ -8,7 +8,9 @@
  *   - `integrity`: `session` (their own playback session), `user` (their own account) or
  *     `integrity_flag` (a flag on their session, their account or their channel). An overturned
  *     appeal on these is an integrity allowance (`packages/integrity/src/allowance.ts`).
- *   - `moderation`: `moderation_action` (a `mod_actions` row that targeted them).
+ *   - `moderation`: `moderation_action` (a `mod_actions` row that targeted them). The moderator
+ *     who took the action cannot resolve its appeal. Overturning records the decision only: it
+ *     does not lift the ban or timeout (a moderator does that with the usual unban procedure).
  *   - `dmca` (`dmca_notice`) and `account` (`account_action`): NOT_IMPLEMENTED. DMCA disputes go
  *     through counter-notices, and account actions have no table of their own yet.
  *
@@ -17,9 +19,8 @@
  */
 import { and, asc, desc, eq, gt, lt, or, sql, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
-import { z } from "zod";
 import type { APPEAL_KINDS, APPEAL_SUBJECTS } from "@commonair/contracts/enums";
-import { schema, uuidv7, type Executor } from "@commonair/db";
+import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
@@ -107,31 +108,6 @@ async function subjectConcerns(deps: Deps, type: Subject, id: string, userId: st
   }
 }
 
-/**
- * Outbox payload for a resolved appeal: ids and enums only (no body or resolution text).
- * `appeal.resolved` is not in the event catalog yet (contract request), so the row is written
- * directly; switch to `emit()` once the catalog has it.
- */
-const AppealResolvedPayload = z.object({
-  appeal_id: z.string(),
-  appellant_user_id: z.string(),
-  kind: z.string(),
-  subject_type: z.string(),
-  subject_id: z.string(),
-  status: z.enum(["upheld", "overturned"]),
-  resolved_at: z.string(),
-});
-async function emitAppealResolved(tx: Executor, payload: z.infer<typeof AppealResolvedPayload>, at: Date) {
-  await tx.insert(schema.events).values({
-    id: uuidv7(at.getTime()),
-    type: "appeal.resolved",
-    version: "1",
-    channelId: null,
-    payload: AppealResolvedPayload.parse(payload),
-    occurredAt: at,
-  });
-}
-
 export const appeals = {
   create: os.appeals.create.handler(async ({ context, input }) => {
     const { deps } = context;
@@ -206,6 +182,14 @@ export const appeals = {
       if (!a) throw notFound("Appeal not found");
       if (a.status !== "open") throw conflict("This appeal is already resolved");
       if (a.appellantId === caller.user.id) throw forbidden("You cannot resolve your own appeal");
+      // Nobody reviews their own decision.
+      if (a.subjectType === "moderation_action") {
+        const [m] = await tx
+          .select({ moderatorId: modActions.moderatorId })
+          .from(modActions)
+          .where(eq(modActions.id, a.subjectId));
+        if (m?.moderatorId === caller.user.id) throw forbidden("You cannot resolve an appeal of your own action");
+      }
       const [updated] = await tx
         .update(appealsT)
         .set({ status: input.status, resolution: input.resolution, resolverId: caller.user.id, resolvedAt: now })
@@ -228,19 +212,8 @@ export const appeals = {
           status: input.status,
         },
       });
-      await emitAppealResolved(
-        tx,
-        {
-          appeal_id: a.id,
-          appellant_user_id: a.appellantId,
-          kind: a.kind,
-          subject_type: a.subjectType,
-          subject_id: a.subjectId,
-          status: input.status,
-          resolved_at: iso(now),
-        },
-        now,
-      );
+      // No outbox row yet: `appeal.resolved` is not in the event catalog, and the worker would
+      // skip an unknown type for good. emit() it here once the catalog has it.
       return updated;
     });
     return toAppeal(row);

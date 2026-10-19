@@ -90,6 +90,11 @@ Client addresses are canonicalized before hashing (`canonicalIp` in `src/lib/net
 IPv4-mapped IPv6 unwrapped, IPv6 in RFC 5952 form, zone ids dropped), so one client gets one
 `ip_hash`, one rate-limit subject and one `stream_keys.last_used_ip_hash` whatever the spelling.
 
+Upgrade note: this changes the hashes of clients the socket reported as `::ffff:a.b.c.d` (they
+now hash as `a.b.c.d`). For a broadcast that is live across the deploy, integrity's owner-IP
+exclusion compares new viewer hashes with the old `stream_keys.last_used_ip_hash` until the
+streamer publishes again. Rate-limit buckets for those clients start over once.
+
 ## Notes
 
 - Two-factor authentication turns on automatically once `two_factors` has the columns
@@ -103,4 +108,14 @@ IPv4-mapped IPv6 unwrapped, IPv6 in RFC 5952 form, zone ids dropped), so one cli
   `integrity_flag` subjects and `moderation` appeals take `moderation_action`. Each must concern
   the appellant. `dmca_notice` and `account_action` return 501 until their tables are wired. An
   overturned integrity appeal is an integrity allowance (`packages/integrity/src/allowance.ts`).
-  Resolving writes an audit row (ids and enums only) and an `appeal.resolved` outbox row.
+  Nobody resolves their own appeal, and a moderator cannot resolve the appeal of their own mod
+  action. Overturning a moderation appeal records the decision only: it does not lift the ban or
+  timeout. Resolving writes an audit row (ids and enums only). The `appeal.resolved` outbox event
+  is pending: it is not in the event catalog yet, and the worker drops unknown types for good, so
+  nothing is written until the catalog has it.
+- Playback sessions record the HTTP delivery source (`origin`, `relay`, `cdn`) as
+  `assigned_source`, never `p2p`, even when the P2P loader is on. Whether P2P runs is client
+  input (`p2pCapable`, `nativeHls`), and integrity expects only a 10% origin share from `p2p`
+  sessions. A viewbot could claim P2P to slip past the fetch checks, and an honest lone peer that
+  fetches everything over HTTP would trip `too_many_segments`. Recording `p2p` needs server-side
+  swarm evidence first (integrity contract request pending).

@@ -115,6 +115,7 @@ export const pinnedGet: PinnedGet = (url, address, timeoutMs) =>
     );
     // The socket `timeout` above fires only after `timeoutMs` of silence; this one is absolute.
     const deadline = setTimeout(() => req.destroy(new Error("deadline exceeded")), timeoutMs);
+    deadline.unref();
     req.on("timeout", () => req.destroy(new Error("timeout")));
     req.on("error", (err) => {
       clearTimeout(deadline);

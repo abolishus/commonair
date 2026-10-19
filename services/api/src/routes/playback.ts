@@ -3,7 +3,7 @@
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { RENDITIONS, type DELIVERY_SOURCES } from "@commonair/contracts/enums";
+import { RENDITIONS } from "@commonair/contracts/enums";
 import { KEYS, mediaPath } from "@commonair/contracts/internal";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
@@ -96,16 +96,6 @@ async function inMatureCategory(deps: Deps, ids: (string | null)[]): Promise<boo
   return rows.length > 0;
 }
 
-/**
- * `playback_sessions.assigned_source`. An origin session with the P2P loader on is recorded as
- * `p2p`: it fetches only part of the media from the origin, and integrity's fetch checks expect
- * that smaller HTTP share instead of holding the viewer at pending. Relay and CDN sessions keep
- * their source (relay receipts and CDN rules apply to them whatever the peers carry); the token
- * and playlist still name the HTTP source.
- */
-export const recordedSource = (a: Assignment, p2pEnabled: boolean): (typeof DELIVERY_SOURCES)[number] =>
-  a.source === "origin" && p2pEnabled ? "p2p" : a.source;
-
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -146,7 +136,10 @@ export const playback = {
       userAgent: req.userAgent?.slice(0, 256) ?? null,
       asn: network.asn,
       datacenter: network.hosting ? (network.label ?? "hosting") : null,
-      assignedSource: recordedSource(assignment, p2pEnabled),
+      // Always the HTTP delivery source, never `p2p`: whether the P2P loader runs is client input
+      // (`p2pCapable`, `nativeHls`), and recording `p2p` lowers integrity's expected origin share.
+      // That needs server-side swarm evidence first (see README).
+      assignedSource: assignment.source,
       relayId: assignment.source === "relay" ? assignment.relayId : null,
       startedAt: deps.now(),
       fingerprint: { embed: input.embed, nativeHls: input.nativeHls },
