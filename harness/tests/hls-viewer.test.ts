@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { afterEach, describe, expect, test } from "vite-plus/test";
+import type { ApiClient } from "../src/api/client.ts";
+import { BOT_TIMING } from "../src/fingerprint.ts";
 import { BufferModel, HttpViewer } from "../src/http-viewer.ts";
 import { lowestVariant, parseAttributes, parsePlaylist, resolveUri, withToken } from "../src/hls.ts";
 import { aggregateReports, emptyReport } from "../src/viewer.ts";
@@ -198,6 +200,47 @@ describe("HTTP viewer against a fake origin", () => {
     const r = await v.stop();
     expect(r.ttffMs).toBeNull();
     expect(requests.every((p) => p.startsWith("/index.m3u8"))).toBe(true);
+  });
+
+  test("follows switchTo from a relay playlist to the origin, with the new token", async () => {
+    const { base, requests } = startOrigin();
+    const tok = (claims: object) => `${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
+    const relayTok = tok({ v: 1, src: "relay", rid: "relay-1" });
+    const originTok = tok({ v: 1, src: "origin" });
+    let beats = 0;
+    // A fake playback API: the second heartbeat moves the session off the relay.
+    const api = {
+      playback: {
+        start: async () => ({
+          sessionId: "s1",
+          token: relayTok,
+          playlistUrl: `${base}/index.m3u8?t=${relayTok}`,
+          source: "relay",
+          heartbeatIntervalMs: 300,
+        }),
+        heartbeat: async () =>
+          ++beats === 2 ? { ok: true, token: originTok, switchTo: `${base}/index.m3u8?t=${originTok}` } : { ok: true },
+        end: async () => ({ ok: true }),
+      },
+    } as unknown as ApiClient;
+    const v = new HttpViewer({ target: { channel: "al" }, api, timing: BOT_TIMING });
+    await v.start();
+    expect(v.assignment).toEqual({ source: "relay", relayId: "relay-1" });
+    await v.waitForFirstFrame(5_000);
+    const switchedAt = Date.now();
+    for (let i = 0; i < 40 && v.switchHistory.length === 0; i++) await Bun.sleep(100);
+    expect(v.switchHistory).toHaveLength(1);
+    expect(v.switchHistory[0]?.from).toEqual({ source: "relay", relayId: "relay-1" });
+    expect(v.assignment).toEqual({ source: "origin", relayId: null });
+    const after = requests.length;
+    for (let i = 0; i < 30 && (v.lastSegmentAt ?? 0) <= (v.switchHistory[0]?.at ?? Infinity); i++) await Bun.sleep(100);
+    expect(v.lastSegmentAt).toBeGreaterThan(v.switchHistory[0]?.at ?? Infinity);
+    const r = await v.stop();
+    expect(r.source).toBe("origin");
+    expect(r.errors).toEqual([]);
+    // Every request after the switch carries the origin token.
+    expect(requests.slice(after).every((q) => q.includes(`t=${originTok}`))).toBe(true);
+    expect(Date.now() - switchedAt).toBeLessThan(10_000);
   });
 
   test("channel targets need an API client", async () => {

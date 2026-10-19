@@ -21,6 +21,7 @@ import {
 } from "./fingerprint.ts";
 import { type MediaPlaylist, type Segment, lowestVariant, parsePlaylist, resolveUri, withToken } from "./hls.ts";
 import { decodeStrip, graySource } from "./timestamp-strip.ts";
+import { type PlaybackAssignment, assignmentOf, tokenOfUrl } from "./assignment.ts";
 import { type Viewer, type ViewerReport, type ViewerTarget, PlaybackSession, emptyReport } from "./viewer.ts";
 import { TimeoutError, sleep, waitFor } from "./wait.ts";
 
@@ -60,6 +61,8 @@ interface Track {
   map: string | null;
   mapFetched: boolean;
   isVideo: boolean;
+  /** Aborted when the viewer stops or switches to another playlist (`switchTo`). */
+  signal: AbortSignal;
 }
 
 /** Playback-buffer model shared by the HTTP viewer and its unit tests. */
@@ -128,9 +131,14 @@ export class HttpViewer implements Viewer {
   private readonly state: ViewerReport;
   private buffer: BufferModel | null = null;
   private abort = new AbortController();
+  /** Aborts the current playlist's track loops; replaced on every source switch. */
+  private trackAbort = new AbortController();
+  private currentAssignment: PlaybackAssignment | null = null;
+  private switches: { at: number; from: PlaybackAssignment | null; to: PlaybackAssignment }[] = [];
   private loops: Promise<void>[] = [];
   private firstFrame: { resolve: (ms: number) => void; reject: (e: Error) => void; promise: Promise<number> };
   private videoSegments = 0;
+  private lastVideoAt: number | null = null;
   private stopped = false;
   private latencyMethod: "strip" | "pdt" | null = null;
   private segmentFailures = 0;
@@ -155,6 +163,21 @@ export class HttpViewer implements Viewer {
     return this.state.sessionId;
   }
 
+  /** Where the playlist this viewer currently follows comes from (from the playback token). */
+  get assignment(): PlaybackAssignment | null {
+    return this.currentAssignment;
+  }
+
+  /** Epoch ms the last video segment arrived (null before the first). */
+  get lastSegmentAt(): number | null {
+    return this.lastVideoAt;
+  }
+
+  /** Source switches followed so far (`switchTo` from heartbeats). */
+  get switchHistory(): readonly { at: number; from: PlaybackAssignment | null; to: PlaybackAssignment }[] {
+    return this.switches;
+  }
+
   async start(): Promise<void> {
     const startedAt = Date.now();
     this.state.startedAt = startedAt;
@@ -171,16 +194,36 @@ export class HttpViewer implements Viewer {
       const started = await this.session.start();
       this.state.sessionId = started.sessionId;
       this.state.source = started.source;
+      this.currentAssignment = assignmentOf(started.token) ?? { source: started.source, relayId: null };
       playlistUrl = started.playlistUrl;
     } else {
       playlistUrl = this.opts.target.playlistUrl;
     }
     this.buffer = new BufferModel(this.opts.resumeBufferSeconds ?? 1, startedAt);
-    const tracks = await this.resolveTracks(playlistUrl);
-    for (const track of tracks) this.loops.push(this.follow(track).catch((err) => this.fail(err)));
+    await this.followPlaylist(playlistUrl);
     if (this.session && this.opts.heartbeats !== false) {
       this.loops.push(this.heartbeatLoop().catch((err) => this.fail(err)));
     }
+  }
+
+  private async followPlaylist(url: string): Promise<void> {
+    const signal = AbortSignal.any([this.abort.signal, this.trackAbort.signal]);
+    const tracks = await this.resolveTracks(url, signal);
+    for (const track of tracks)
+      this.loops.push(this.follow(track).catch((err) => (track.signal.aborted ? undefined : this.fail(err))));
+  }
+
+  /** Follow a `switchTo`: stop the current tracks and continue from the new playlist. */
+  private async switchTo(url: string): Promise<void> {
+    if (this.abort.signal.aborted) return;
+    this.trackAbort.abort(new Error("source switch"));
+    this.trackAbort = new AbortController();
+    const to = assignmentOf(tokenOfUrl(url) ?? "") ?? { source: "origin" as const, relayId: null };
+    this.switches.push({ at: Date.now(), from: this.currentAssignment, to });
+    this.currentAssignment = to;
+    this.state.source = to.source;
+    this.opts.log?.info("http viewer switched source", { viewer: this.id, source: to.source });
+    await this.followPlaylist(url);
   }
 
   private fail(err: unknown): void {
@@ -196,7 +239,7 @@ export class HttpViewer implements Viewer {
   }
 
   /** GET with this viewer's cookie jar, following redirects manually so cookies survive them. */
-  private async get(url: string, kind: "playlist" | "media"): Promise<Response> {
+  private async get(url: string, kind: "playlist" | "media", signal: AbortSignal): Promise<Response> {
     let current = this.currentUrl(url);
     for (let hop = 0; hop < 5; hop++) {
       const headers = new Headers(this.opts.headers);
@@ -205,7 +248,7 @@ export class HttpViewer implements Viewer {
       const res = await this.f(current, {
         headers,
         redirect: "manual",
-        signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(kind === "playlist" ? 15_000 : 30_000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(kind === "playlist" ? 15_000 : 30_000)]),
       });
       this.jar.storeFrom(res.headers);
       const location = res.headers.get("location");
@@ -218,8 +261,8 @@ export class HttpViewer implements Viewer {
     throw new Error(`too many redirects for ${new URL(url).pathname}`);
   }
 
-  private async fetchPlaylistText(url: string): Promise<string> {
-    const res = await this.get(url, "playlist");
+  private async fetchPlaylistText(url: string, signal: AbortSignal): Promise<string> {
+    const res = await this.get(url, "playlist", signal);
     const body = await res.text();
     this.state.bytesHttp += body.length;
     if (!res.ok) throw new Error(`playlist HTTP ${res.status}`);
@@ -227,51 +270,59 @@ export class HttpViewer implements Viewer {
   }
 
   /** Multivariant → lowest variant (+ its audio rendition); media playlist → itself. */
-  private async resolveTracks(url: string): Promise<Track[]> {
+  private async resolveTracks(url: string, signal: AbortSignal): Promise<Track[]> {
     // A fresh live stream 404s until the muxer has enough segments; players retry.
-    const body = await waitFor(`playlist for ${this.id}`, () => this.fetchPlaylistText(url), {
+    const body = await waitFor(`playlist for ${this.id}`, () => this.fetchPlaylistText(url, signal), {
       timeoutMs: 45_000,
       intervalMs: 1_000,
-      signal: this.abort.signal,
+      signal,
     });
     const playlist = parsePlaylist(body);
-    if (playlist.kind === "media") return [{ url, lastSequence: -1, map: null, mapFetched: false, isVideo: true }];
+    if (playlist.kind === "media")
+      return [{ url, lastSequence: -1, map: null, mapFetched: false, isVideo: true, signal }];
     const variant = lowestVariant(playlist);
     if (!variant) throw new Error("multivariant playlist has no variants");
     const tracks: Track[] = [
-      { url: resolveUri(variant.uri, url), lastSequence: -1, map: null, mapFetched: false, isVideo: true },
+      { url: resolveUri(variant.uri, url), lastSequence: -1, map: null, mapFetched: false, isVideo: true, signal },
     ];
     const audio = playlist.renditions.find((r) => r.type === "AUDIO" && r.groupId === variant.audioGroup && r.uri);
     if (audio?.uri) {
-      tracks.push({ url: resolveUri(audio.uri, url), lastSequence: -1, map: null, mapFetched: false, isVideo: false });
+      tracks.push({
+        url: resolveUri(audio.uri, url),
+        lastSequence: -1,
+        map: null,
+        mapFetched: false,
+        isVideo: false,
+        signal,
+      });
     }
     return tracks;
   }
 
   private async follow(track: Track): Promise<void> {
     let failures = 0;
-    while (!this.abort.signal.aborted) {
+    while (!track.signal.aborted) {
       let playlist: MediaPlaylist;
       try {
-        const parsed = parsePlaylist(await this.fetchPlaylistText(track.url));
+        const parsed = parsePlaylist(await this.fetchPlaylistText(track.url, track.signal));
         if (parsed.kind !== "media") throw new Error("expected a media playlist");
         playlist = parsed;
         failures = 0;
       } catch (err) {
-        if (this.abort.signal.aborted) return;
+        if (track.signal.aborted) return;
         // Transient playlist errors are retried like a player would; persistent ones are fatal.
         if (++failures >= MAX_CONSECUTIVE_FAILURES) throw err;
-        await sleep(1_000, this.abort.signal).catch(() => undefined);
+        await sleep(1_000, track.signal).catch(() => undefined);
         continue;
       }
       const fresh = this.newSegments(track, playlist);
       for (const segment of fresh) {
-        if (this.abort.signal.aborted) return;
+        if (track.signal.aborted) return;
         await this.download(track, segment);
       }
       if (playlist.ended) return;
       const waitSeconds = fresh.length > 0 ? playlist.targetDuration : playlist.targetDuration / 2;
-      await sleep(Math.max(250, waitSeconds * 1000), this.abort.signal).catch(() => undefined);
+      await sleep(Math.max(250, waitSeconds * 1000), track.signal).catch(() => undefined);
     }
   }
 
@@ -297,7 +348,7 @@ export class HttpViewer implements Viewer {
       fetched = await this.fetchSegment(track, segment);
       this.segmentFailures = 0;
     } catch (err) {
-      if (this.abort.signal.aborted) return;
+      if (track.signal.aborted) return;
       // Players skip a missing segment and carry on; only a run of failures is fatal.
       this.skippedSegments++;
       if (++this.segmentFailures >= MAX_CONSECUTIVE_FAILURES) throw err;
@@ -312,6 +363,7 @@ export class HttpViewer implements Viewer {
       this.firstFrame.resolve(this.state.ttffMs);
     }
     this.videoSegments++;
+    this.lastVideoAt = now;
     if (segment.programDateTime !== null && this.latencyMethod !== "strip") {
       this.latencyMethod = "pdt";
       this.pushLatency(now - (segment.programDateTime + segment.duration * 1000));
@@ -327,14 +379,14 @@ export class HttpViewer implements Viewer {
   private async fetchSegment(track: Track, segment: Segment): Promise<{ init: Uint8Array | null; bytes: Uint8Array }> {
     let init: Uint8Array | null = null;
     if (segment.map && (!track.mapFetched || track.map !== segment.map)) {
-      const res = await this.get(resolveUri(segment.map, track.url), "media");
+      const res = await this.get(resolveUri(segment.map, track.url), "media", track.signal);
       if (!res.ok) throw new Error(`init segment HTTP ${res.status}`);
       init = new Uint8Array(await res.arrayBuffer());
       this.state.bytesHttp += init.byteLength;
       track.map = segment.map;
       track.mapFetched = true;
     }
-    const res = await this.get(resolveUri(segment.uri, track.url), "media");
+    const res = await this.get(resolveUri(segment.uri, track.url), "media", track.signal);
     if (!res.ok) throw new Error(`segment HTTP ${res.status}: ${new URL(res.url || segment.uri, track.url).pathname}`);
     const bytes = new Uint8Array(await res.arrayBuffer());
     this.state.bytesHttp += bytes.byteLength;
@@ -420,7 +472,7 @@ export class HttpViewer implements Viewer {
         muted: false,
       });
       this.state.heartbeats++;
-      if (res.switchTo) this.opts.log?.info("http viewer switched source", { viewer: this.id });
+      if (res.switchTo) void this.switchTo(res.switchTo).catch((err) => this.fail(err));
     } catch (err) {
       this.state.heartbeatErrors++;
       this.opts.log?.warn("heartbeat failed", { viewer: this.id, error: (err as Error).message });

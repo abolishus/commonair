@@ -23,6 +23,7 @@ import { Mailpit, mailpitEndpoint } from "./mailpit.ts";
 import { type PlayerServer, startPlayerServer } from "./player-server.ts";
 import { podmanAvailable } from "./testing/mediamtx.ts";
 import { type ForwardingProxy, startForwardingProxy } from "./proxy.ts";
+import { relayReadiness } from "./relay.ts";
 import type { Need } from "./scenario.ts";
 import { type StreamerOptions, Streamer, rtmpPublishUrl, whipPublishTarget } from "./streamer.ts";
 import { type SignUpOptions, type SignedInUser, UserFactory, UsernameFactory } from "./users.ts";
@@ -287,7 +288,8 @@ export class Platform {
       case "worker":
         return http(e.HARNESS_WORKER_HEALTH_URL, "worker");
       case "relay":
-        return existsSync(new URL("../../relay/go.mod", import.meta.url)) ? null : "relay sources not present";
+        // Go to build relay/, and an API that accepts LAN (private, http) relay URLs.
+        return relayReadiness();
       case "mail":
         return (await this.mailpit.ping())
           ? null

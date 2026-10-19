@@ -15,6 +15,7 @@
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
     "@commonair/observability": "workspace:*",
+    "@commonair/tokens": "workspace:*",
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "altcha-lib": "2.6.0",

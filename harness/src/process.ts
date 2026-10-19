@@ -14,8 +14,12 @@ export interface SupervisedOptions {
   env?: Record<string, string | undefined>;
   /** Called with each complete stdout line. */
   onStdoutLine?: (line: string) => void;
+  /** Called with each complete stderr line. */
+  onStderrLine?: (line: string) => void;
   /** Lines of stderr kept for error reports. */
   stderrTail?: number;
+  /** Signal `stop()` sends first (default SIGINT, which lets ffmpeg flush). */
+  stopSignal?: "SIGINT" | "SIGTERM";
 }
 
 export interface Supervised {
@@ -26,7 +30,7 @@ export interface Supervised {
   readonly running: boolean;
   /** Last stderr lines (most recent last). */
   stderr(): string[];
-  /** SIGINT (lets ffmpeg flush and close the connection), then SIGKILL after `graceMs`. */
+  /** `stopSignal` (SIGINT by default: lets ffmpeg flush and close the connection), then SIGKILL after `graceMs`. */
   stop(graceMs?: number): Promise<number>;
 }
 
@@ -92,6 +96,7 @@ export function spawnSupervised(cmd: string[], opts: SupervisedOptions): Supervi
   void pumpLines(proc.stderr, (line) => {
     tail.push(line);
     if (tail.length > tailSize) tail.shift();
+    opts.onStderrLine?.(line);
   }).catch(() => undefined);
 
   const handle: Supervised = {
@@ -108,7 +113,7 @@ export function spawnSupervised(cmd: string[], opts: SupervisedOptions): Supervi
     stderr: () => [...tail],
     async stop(graceMs = 3_000) {
       if (!running) return handle.exited;
-      proc.kill("SIGINT");
+      proc.kill(opts.stopSignal ?? "SIGINT");
       const timer = setTimeout(() => {
         if (running) proc.kill("SIGKILL");
       }, graceMs);

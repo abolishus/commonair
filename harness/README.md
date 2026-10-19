@@ -22,7 +22,7 @@ bun harness/src/cli.ts run full --profile no-proprietary
 bun harness/src/cli.ts load --streamers 4 --viewers 200 --duration 120s
 ```
 
-Host requirements: Bun, `ffmpeg` on `PATH` (≥ 8 for WHIP; `geq`, `testsrc2`, `sine`, `libx264`,
+Host requirements: Bun, Go (for `e2e-relay`), `ffmpeg` on `PATH` (≥ 8 for WHIP; `geq`, `testsrc2`, `sine`, `libx264`,
 `aac`, `libopus`), Playwright browsers, and `podman` for the driver integration tests.
 
 ## CLI
@@ -206,6 +206,8 @@ The full breakdown is in the report under `scenarios[].data.load`.
 | `viewers`     | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.    |
 | `load-smoke`  | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                       |
 | `e2e-basic`   | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline. |
+| `e2e-social`  | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                      |
+| `e2e-relay`   | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).          |
 
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
@@ -224,6 +226,85 @@ the timeout is lifted, the fan unfollows, the stream stops. Chat waits are ≤ 1
 `moderation_to_irc` and `unban_to_chat`. `--set via=api` runs the same steps through the API and
 chat socket instead of Chromium, which separates backend failures from web ones. The `irc` need
 probes `HARNESS_IRC_HEALTH_URL` (default `http://localhost:6681/healthz`).
+
+### `e2e-relay` (milestone E3)
+
+[docs/testing/e3-selectors.md](../docs/testing/e3-selectors.md), every step of "The `e2e-relay`
+scenario":
+
+1. **Setup.** Streamer `S` (API sign-up) goes live over RTMP. Member `M` signs up in the web UI,
+   opens `/relays` from `relays-link`, creates `harness-relay` and reads `relay-token` (and checks
+   `relay-run-command`). The harness builds `relay/cmd/commonair-relay` (`go build` into
+   `$TMPDIR/commonair-harness-relay/<source hash>/`, reused until a `.go`, `go.mod` or `go.sum`
+   changes) and starts it on the host with the recipe's flags: `--api $HARNESS_API_URL
+   --public-url http://<LAN IPv4>:<port> --listen :<port> --data-dir <tmp> --capacity-mbps 1000`,
+   the token in `COMMONAIR_RELAY_TOKEN` (never on the command line). `relay-row` must reach
+   `data-status="active"` within 60 s.
+2. **Viewers on the relay.** Chromium players on `/$S` (signed in and anonymous; a player reloads
+   for a new session, up to `browserRelayAttempts` times, until one lands on the relay) and HTTP
+   viewers; new HTTP sessions are opened until at least 2 honest sessions are relay-assigned
+   (`player[data-source=relay]`, or the `src`/`rid` claims of the HTTP viewer's token). The relay's
+   `/healthz` must report `viewers ≥ 2`.
+3. **Viewbot swarm** (`src/viewbot.ts`): datacenter addresses, headless fingerprints, no media,
+   few device ids; some land on the relay.
+4. **Verification** within one 6-minute window: `relay-receipts[data-verified] ≥ 1`,
+   `data-rejected = 0`, `relay-bytes-verified[data-bytes] > 0`; `stream.health.viewers.verified`
+   equals the honest sessions still open and `excluded ≥ bots`; the public count never exceeds the
+   honest count. With `DATABASE_URL`, the relay-assigned honest sessions must be `verified`.
+5. **Over-reporting relay** (`liar=true`): `M` creates relay `liar`; `src/liar-relay.ts` (a Bun
+   server, not the Go relay) answers `/healthz`, registers with its own Ed25519 key and token,
+   heartbeats, and really serves what it is assigned (pass-through from the origin's
+   `/relay-pull/` with its relay token, playlists rewritten to carry the viewer token), so
+   issuance accrues honestly. HTTP viewers are opened until `liarViewers` land on it. Every
+   minute it submits a correctly signed receipt claiming 5× the media bytes it served (for those
+   sessions and any the harness knows are assigned to it). The worker rejects them and the row
+   turns `suspended` with `relay-suspended-reason`; the liar's viewers move to the origin on their
+   next heartbeat (`switchTo`) and keep playing. Afterwards the count bound is
+   `honest − liar-assigned ≤ verified ≤ honest`.
+6. **Drain** (`drain=true`): SIGTERM to the Go relay; `relay-row` shows `offline` within 15 s
+   (its draining heartbeat), relay-assigned Chromium players show `data-source="origin"` and keep
+   `playing` within 30 s (HTTP viewers are checked too). The relay restarts with the same token and
+   data dir and returns to `active`; `M` retires it with `relay-remove` → `confirm-dialog-confirm`,
+   the row disappears and `relays.mine` omits it. Then the stream stops.
+
+Report: per-step timings plus `relay.active_latency`, `relay.first_playback`,
+`relay.time_to_receipts_verified`, `liar.time_to_suspension`, `liar.switch_to_origin`,
+`drain.offline_latency`, `drain.switch_to_origin.<player>`, `relay.restart_active_latency`, the
+counts (`counts.honest`, `relay_assigned`, `bots`, `bots_relay_assigned`, `liar_assigned`,
+`verified`, `excluded`), `liar.receipts`, and the relay and liar logs (the last 50 lines, all of
+them when the scenario fails). The Go relay is always stopped (SIGTERM, then SIGKILL after 60 s).
+
+**Needs** (the `relay` need checks them up front and says what to fix): Go on `PATH`
+(`go version`), `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true` for the API (read from the harness
+process env, which Bun loads from the repo `.env`, else from the repo `.env` file), and a LAN IPv4
+on the host that the API container can reach (the first non-internal, non-link-local IPv4; override
+with `--set relayHost=<addr>`). The relay pulls from the origin at `PLAYBACK_PUBLIC_URL`
+(`http://localhost:3003` locally). Railway staging has no relay. It also needs the worker
+(receipts and integrity). Not part of `full` (`inFull: false`): it needs the private-network
+setting and takes about 15 minutes.
+
+| Knob                   | Default | Meaning                                                                       |
+| ---------------------- | ------- | ----------------------------------------------------------------------------- |
+| `relayHost`            | LAN IP  | Address in both relays' `--public-url`                                        |
+| `relayPort`            | free    | Go relay port                                                                 |
+| `httpViewers`          | 4       | Honest HTTP viewers opened first                                              |
+| `browserViewers`       | 2       | Honest Chromium players (alternating signed in / anonymous); 0 with `via=api` |
+| `bots`                 | 12      | Viewbots                                                                      |
+| `liar` / `drain`       | `true`  | Run step 5 / step 6                                                           |
+| `via`                  | `web`   | `api`: create/retire relays through the API, HTTP viewers only                |
+| `maxSessions`          | 30      | Honest sessions opened at most while looking for relay (and liar) assignment  |
+| `liarViewers`          | 2       | Sessions that must land on the liar                                           |
+| `liarFactor`           | 5       | Bytes multiplier the liar claims                                              |
+| `browserRelayAttempts` | 3       | Reloads per Chromium player to land on the relay                              |
+
+```sh
+# .env: OUTBOUND_ALLOW_PRIVATE_NETWORKS=true, then restart the stack
+bun scripts/infra.ts stack
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set via=api          # backend only
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set liar=false --set drain=false
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set relayHost=192.168.1.20
+```
 
 Until the API, origin and media units are running, these scenarios fail on unmet needs (and say
 which). The drivers themselves are verified against a throwaway MediaMTX by the integration tests.
@@ -267,7 +348,11 @@ export default defineScenario({
   parsing, registry and reports, runner semantics, cookie jar, forwarding proxy, ALTCHA solving
   against `altcha-lib`'s verifier, HLS parsing, the HTTP viewer against a fake origin, viewbot
   signals, the chat client and SDK bot against a fake chat service, and unmodified tmi.js against
-  a fake Twitch-dialect IRC-over-WebSocket server.
+  a fake Twitch-dialect IRC-over-WebSocket server. For E3: LAN address selection, the
+  private-network readiness check, relay source hashing and argv, the relay process lifecycle
+  with a stand-in binary, the `e2e-relay` plan from `--set` knobs, liar receipts (5× bytes, signed,
+  `verifyReceipt` passes), the liar relay against a fake API and origin, the HTTP viewer following
+  `switchTo`, and the E3 selectors parsed from the doc.
 - `bun run --filter @commonair/harness test:int`: starts a throwaway MediaMTX container
   (`docker.io/bluenviron/mediamtx:1.21.2`, permissive config, random ports, removed afterwards);
   the RTMP streamer publishes; the harness player plays MediaMTX's LL-HLS in Chromium and WebKit
