@@ -4,7 +4,7 @@
 import type * as React from "react";
 import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
-import { Item, ItemContent, ItemFooter, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
+import { Item, ItemContent, ItemFooter, ItemGroup, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
 import { cn } from "@commonair/ui/lib/utils";
 import { ChannelAvatar, type Accent } from "../../primitives/channel-avatar.tsx";
 
@@ -42,7 +42,8 @@ export function CommentItem({
   ...props
 }: CommentItemProps): React.JSX.Element {
   return (
-    <Item render={<li />} size="sm" className={cn("min-w-0", className)} {...props}>
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- ItemGroup is a `div role="list"`, and an `li` needs a `ul` parent.
+    <Item role="listitem" size="sm" className={cn("min-w-0", className)} {...props}>
       <ItemMedia>
         <ChannelAvatar name={author} src={avatarUrl} accent={accent} size="sm" decorative />
       </ItemMedia>
@@ -74,19 +75,12 @@ export function CommentItem({
   );
 }
 
-export interface CommentListProps extends React.ComponentProps<"ul"> {
+export interface CommentListProps extends React.ComponentProps<"div"> {
   /** Accessible name of the list ("Comments"). */
   label: string;
 }
 
-/** The list around `CommentItem`s (each one renders as an `li`); spacing matches `ItemGroup` with small items. */
-export function CommentList({ label, className, ...props }: CommentListProps): React.JSX.Element {
-  return (
-    <ul
-      aria-label={label}
-      data-slot="comment-list"
-      className={cn("group/item-group flex w-full flex-col gap-2.5", className)}
-      {...props}
-    />
-  );
+/** The list around `CommentItem`s: shadcn `ItemGroup` (`role="list"`) with an accessible name. */
+export function CommentList({ label, ...props }: CommentListProps): React.JSX.Element {
+  return <ItemGroup aria-label={label} {...props} />;
 }

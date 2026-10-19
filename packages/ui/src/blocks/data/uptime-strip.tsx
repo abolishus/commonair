@@ -24,7 +24,8 @@ export interface UptimeStripProps extends Omit<React.ComponentProps<"ul">, "chil
 export function UptimeStrip({ days, label, daysOnMobile = 30, statusLabels, className, ...props }: UptimeStripProps) {
   return (
     <TooltipProvider>
-      <ul aria-label={label} className={cn("flex gap-0.5", className)} {...props}>
+      {/* oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari/VoiceOver drops list semantics from list-style: none lists. */}
+      <ul role="list" aria-label={label} className={cn("flex gap-0.5", className)} {...props}>
         {days.map((day, index) => (
           <li
             key={day.id}

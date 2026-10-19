@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type * as React from "react";
+import type { LinkTarget } from "../lib/link.tsx";
 // A static note, not an announcement: AlertCallout is role="note" where a bare Alert is role="alert".
 import { AlertCallout } from "../blocks/feedback/alert-callout.tsx";
 import { ChannelAvatar } from "../primitives/channel-avatar.tsx";
@@ -24,11 +25,7 @@ export interface ChannelItem {
   accent?: React.ComponentProps<typeof ChannelAvatar>["accent"];
 }
 /** A "Show all 38 followed" link under a group: `href`, or a router `render` element. */
-export interface ChannelGroupLink {
-  label: string;
-  href?: string;
-  render?: React.ReactElement;
-}
+export type ChannelGroupLink = LinkTarget & { label: string };
 export interface ChannelNavGroup {
   id: string;
   label: string;
@@ -59,7 +56,9 @@ export function ChannelSidebar({ label, groups, callout, ...props }: ChannelSide
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
-            {group.moreLink ? (
+            {/* SidebarMenuButton merges its own props into `render` (Base UI), so TargetLink is not
+                needed here; without a target there is nothing to link to, so nothing renders. */}
+            {group.moreLink && (group.moreLink.render || group.moreLink.href) ? (
               <SidebarMenuItem>
                 <SidebarMenuButton
                   size="sm"

@@ -55,8 +55,10 @@ export function Legend({
 }: LegendProps) {
   // Key-only items count as zero, so shares are over the items that carry a value.
   const shares = getSegmentShares(items.map((item) => ({ id: item.id, label: item.label, value: item.value ?? 0 })));
+  const listClass = cn("flex gap-x-4 gap-y-2", layout === "list" ? "flex-col" : "flex-wrap", className);
   return (
-    <ul className={cn("flex gap-x-4 gap-y-2", layout === "list" ? "flex-col" : "flex-wrap", className)} {...props}>
+    // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari/VoiceOver drops list semantics from list-style: none lists.
+    <ul role="list" className={listClass} {...props}>
       {items.map((item, index) => (
         <li
           key={item.id}

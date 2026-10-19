@@ -6,7 +6,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { cn } from "@commonair/ui/lib/utils";
 import { StatusBadge, type StatusTone } from "../../primitives/status-badge.tsx";
 import { Timeline, type TimelineUpdate } from "../data/timeline.tsx";
-import { TargetLink, type LinkTarget } from "./link.tsx";
+import { TargetLink, type LinkTarget } from "../../lib/link.tsx";
 
 export interface IncidentCardProps extends Omit<React.ComponentProps<"div">, "title" | "children"> {
   /** Current state in words ("Monitoring", "Resolved"). */

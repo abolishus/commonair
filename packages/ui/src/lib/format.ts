@@ -112,7 +112,8 @@ export function formatUnitCost(
       new Intl.NumberFormat(locale, {
         style: "currency",
         currency: code,
-        signDisplay: options.signDisplay ?? "auto",
+        // "negative": a cost that rounds to zero never reads "-$0.00".
+        signDisplay: options.signDisplay ?? "negative",
         currencyDisplay: options.currencyDisplay ?? "symbol",
         minimumFractionDigits: digits,
         maximumFractionDigits: max,
