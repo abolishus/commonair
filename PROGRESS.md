@@ -34,7 +34,7 @@ successfully during integration. U6b (apps/web migration + apps/web source-polic
 2026-10-19 after review and re-review (`6d31d95`). U6a (board page stories + packages/ui
 source-policy test) merged after review and re-review (`2a5c2c7`). U7 packages/ui follow-ups (new compositions,
 allowlist cleared, `formatUnitCost`) merged ahead of its independent review at the user's request;
-review findings follow. E4a is then complete pending the user's gate, Storybook and browser checks.
+its review found no HIGH; the four MEDIUMs are fixed (`4c2829e`). E4a is complete pending the user's gate, Storybook and browser checks.
 
 ## Session four (2026-10-18): E3 slice built
 
