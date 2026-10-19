@@ -6,7 +6,7 @@
  * heartbeat, receipts) and admin review. Receipts are stored `pending`; the
  * worker/integrity units cross-check them against the origin's issuance log.
  */
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, or, sql } from "drizzle-orm";
 import { KEYS } from "@commonair/contracts/internal";
 import { RECEIPT_INTERVAL_SECONDS } from "@commonair/contracts/tokens";
 import { schema } from "@commonair/db";
@@ -69,22 +69,26 @@ type RelayStats = {
 };
 const NO_STATS: RelayStats = { bytes: 0, lastReceiptAt: null, receipts: { pending: 0, verified: 0, rejected: 0 } };
 
-/** Verified bytes and receipt counts over 30 days (by period start), plus the latest receipt. */
+/**
+ * Verified bytes, receipt counts and the latest receipt over the last 30 days (by period start),
+ * bounded by the `(relay_id, period_start)` index so a long-lived relay's history is never scanned.
+ */
 async function relayStats(deps: Deps, ids: string[]) {
   if (ids.length === 0) return new Map<string, RelayStats>();
-  // Bound as text: a Date inside a raw `sql` fragment is not serialized by the driver.
-  const since = sql`${new Date(deps.now().getTime() - 30 * 86_400_000).toISOString()}::timestamptz`;
+  const since = new Date(deps.now().getTime() - 30 * 86_400_000);
+  const count = (status: "pending" | "verified" | "rejected") =>
+    sql<number>`(count(*) filter (where ${relayReceipts.status} = ${status}))::int`;
   const rows = await deps.db
     .select({
       id: relayReceipts.relayId,
-      bytes: sql<string>`coalesce(sum(${relayReceipts.bytesVerified}) filter (where ${relayReceipts.status} = 'verified' and ${relayReceipts.periodStart} > ${since}), 0)::text`,
+      bytes: sql<string>`coalesce(sum(${relayReceipts.bytesVerified}) filter (where ${relayReceipts.status} = 'verified'), 0)::text`,
       last: sql<Date | string | null>`max(${relayReceipts.createdAt})`,
-      pending: sql<number>`(count(*) filter (where ${relayReceipts.status} = 'pending' and ${relayReceipts.periodStart} > ${since}))::int`,
-      verified: sql<number>`(count(*) filter (where ${relayReceipts.status} = 'verified' and ${relayReceipts.periodStart} > ${since}))::int`,
-      rejected: sql<number>`(count(*) filter (where ${relayReceipts.status} = 'rejected' and ${relayReceipts.periodStart} > ${since}))::int`,
+      pending: count("pending"),
+      verified: count("verified"),
+      rejected: count("rejected"),
     })
     .from(relayReceipts)
-    .where(inArray(relayReceipts.relayId, ids))
+    .where(and(inArray(relayReceipts.relayId, ids), gt(relayReceipts.periodStart, since)))
     .groupBy(relayReceipts.relayId);
   return new Map(
     rows.map((r) => [
@@ -108,6 +112,7 @@ const toRelayDto = (r: RelayRow, stats: RelayStats = NO_STATS) => ({
   status: r.status,
   lastHealthAt: isoOrNull(r.lastHealthAt),
   suspendedReason: r.suspendedReason,
+  retiredAt: isoOrNull(r.retiredAt),
   version: r.version,
   bytesVerified30d: stats.bytes,
   lastReceiptAt: isoOrNull(stats.lastReceiptAt),

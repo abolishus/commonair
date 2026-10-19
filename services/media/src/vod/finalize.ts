@@ -41,7 +41,7 @@ export interface FinalizeDeps {
   now?: () => Date;
 }
 
-/** `removedReason` of a VOD that recorded nothing. */
+/** `failedReason` of a VOD that recorded nothing (stable code, see README). */
 export const VOD_EMPTY_REASON = "no_segments";
 
 const DAY_MS = 86_400_000;
@@ -95,7 +95,7 @@ export async function finalizeVod(
     log.warn("VOD has no segments; marking failed");
     await db
       .update(schema.vods)
-      .set({ status: "failed", removedReason: VOD_EMPTY_REASON })
+      .set({ status: "failed", failedReason: VOD_EMPTY_REASON })
       .where(eq(schema.vods.id, vodId));
     return "failed";
   }
