@@ -257,7 +257,11 @@ export const playback = {
     if (promoted) tx.del(KEYS.viewerCount(s.channelId));
     await tx.exec();
 
-    // Move viewers off a relay that left the active set.
+    // Move viewers off a relay that left the active set (KEYS.relays holds active relays only:
+    // drained, timed-out, suspended and retired relays are all removed from it). The new token
+    // and playlist point at the origin, and the session is re-recorded as origin-delivered:
+    // integrity then judges it on origin fetches. That fails safe: an honest viewer's relay
+    // segments are missing from the origin count, but no watch time goes unproven.
     let assignment: Assignment | null = null;
     if (claims.src === "relay" && claims.rid) {
       const relays = await activeRelays(deps);
