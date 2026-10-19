@@ -4,9 +4,9 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, InformationCircleIcon, WebhookIcon } from "@hugeicons/core-free-icons";
+import { Add01Icon, WebhookIcon } from "@hugeicons/core-free-icons";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { ChannelAvatar, ConfirmDialog, IconButton, StatusBadge } from "@commonair/ui";
-import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
@@ -97,12 +97,7 @@ function DeveloperPage(): React.JSX.Element {
                   icon: <ChannelAvatar name={item.name} accent={item.accent} size="xs" decorative />,
                 }))}
               />
-              <Alert>
-                <HugeiconsIcon icon={InformationCircleIcon} aria-hidden="true" />
-                <AlertDescription>
-                  Every API route is in the OpenAPI spec. Existing Twitch IRC bots connect unchanged.
-                </AlertDescription>
-              </Alert>
+              <AlertCallout description="Every API route is in the OpenAPI spec. Existing Twitch IRC bots connect unchanged." />
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-6">
               <ChannelHeader

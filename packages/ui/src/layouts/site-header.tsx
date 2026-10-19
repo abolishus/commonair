@@ -3,6 +3,7 @@
 
 import * as React from "react";
 import { Button, buttonVariants } from "@commonair/ui/components/button";
+import { Separator } from "@commonair/ui/components/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@commonair/ui/components/sheet";
 import { Search01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -16,8 +17,16 @@ export interface Brand {
   /** Router link element (Base UI `render` convention); `href` stays the fallback. */
   render?: React.ReactElement;
 }
+/** The area of the site after the brand ("Creator studio", "Admin"): `href`, or a router `render` element. */
+export interface HeaderContext {
+  label: string;
+  href?: string;
+  render?: React.ReactElement;
+}
 export interface SiteHeaderProps extends React.ComponentProps<"header"> {
   brand: Brand;
+  /** Shown after the brand, separated by a rule; also heads the mobile sheet. */
+  context?: HeaderContext;
   nav: NavItem[];
   navLabel: string;
   search?: React.ReactNode;
@@ -34,6 +43,7 @@ export interface SiteHeaderProps extends React.ComponentProps<"header"> {
 }
 export function SiteHeader({
   brand,
+  context,
   nav,
   navLabel,
   search,
@@ -55,11 +65,19 @@ export function SiteHeader({
       {...props}
     >
       <BrandLink brand={brand} />
-      <nav aria-label={navLabel} className="hidden min-w-0 flex-1 items-center gap-1 md:flex">
-        {nav.map((item) => (
-          <NavLink key={item.id} item={item} className={buttonVariants({ variant: "ghost", size: "sm" })} />
-        ))}
-      </nav>
+      {context ? (
+        <>
+          <Separator orientation="vertical" className="hidden h-4 self-center sm:block" />
+          <ContextLink context={context} className="hidden min-w-0 truncate text-sm font-medium sm:block" />
+        </>
+      ) : null}
+      {nav.length ? (
+        <nav aria-label={navLabel} className="hidden min-w-0 flex-1 items-center gap-1 md:flex">
+          {nav.map((item) => (
+            <NavLink key={item.id} item={item} className={buttonVariants({ variant: "ghost", size: "sm" })} />
+          ))}
+        </nav>
+      ) : null}
       {search ? <div className="hidden min-w-0 md:block">{search}</div> : null}
       {onOpenPalette ? (
         <Button aria-label={searchLabel} variant="ghost" size="icon" className="md:hidden" onClick={onOpenPalette}>
@@ -82,16 +100,35 @@ export function SiteHeader({
           <SheetHeader>
             <SheetTitle>{brand.name}</SheetTitle>
           </SheetHeader>
-          <nav aria-label={navLabel} className="flex flex-col gap-2 px-4">
-            {nav.map((item) => (
-              <NavLink key={item.id} item={item} className="min-h-10 rounded-none px-2 py-2 hover:bg-muted" />
-            ))}
-          </nav>
+          {context ? (
+            <ContextLink
+              context={context}
+              className="mx-4 flex min-h-10 items-center px-2 py-2 text-sm font-medium hover:bg-muted"
+            />
+          ) : null}
+          {nav.length ? (
+            <nav aria-label={navLabel} className="flex flex-col gap-2 px-4">
+              {nav.map((item) => (
+                <NavLink key={item.id} item={item} className="min-h-10 rounded-none px-2 py-2 hover:bg-muted" />
+              ))}
+            </nav>
+          ) : null}
           {search ? <div className="p-4">{search}</div> : null}
           {mobileActions ? <div className="flex flex-wrap items-center gap-2 p-4">{mobileActions}</div> : null}
         </SheetContent>
       </Sheet>
     </header>
+  );
+}
+
+function ContextLink({ context, className }: { context: HeaderContext; className: string }): React.JSX.Element {
+  const props = { className, "data-slot": "site-header-context" };
+  if (context.render)
+    return React.cloneElement(context.render as React.ReactElement<{ className?: string }>, props, context.label);
+  return (
+    <a href={context.href} {...props}>
+      {context.label}
+    </a>
   );
 }
 

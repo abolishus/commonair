@@ -29,6 +29,8 @@ import { EmptyState } from "../../primitives/empty-state.tsx";
 import { cn } from "@commonair/ui/lib/utils";
 
 export type DataTableColumn<T> = ColumnDef<T, unknown> & { id: string; align?: "default" | "numeric" };
+/** Selected row ids (from `getRowId`, else the row index) mapped to `true`. */
+export type DataTableRowSelection = RowSelectionState;
 export interface DataTableProps<T> extends Omit<React.ComponentProps<"div">, "children"> {
   columns: DataTableColumn<T>[];
   rows: T[];
@@ -37,6 +39,11 @@ export interface DataTableProps<T> extends Omit<React.ComponentProps<"div">, "ch
   selectable?: boolean;
   selectionLabel?: string;
   selectionToolbar?: (selected: T[], clear: () => void) => React.ReactNode;
+  /** Controlled selection; pair with `onRowSelectionChange`. */
+  rowSelection?: DataTableRowSelection;
+  /** Initial selection when uncontrolled. */
+  defaultRowSelection?: DataTableRowSelection;
+  onRowSelectionChange?: (selection: DataTableRowSelection) => void;
   rowProps?: (
     row: T,
   ) => React.HTMLAttributes<HTMLTableRowElement> & Record<`data-${string}`, string | number | undefined>;
@@ -55,6 +62,9 @@ export function DataTable<T>({
   selectable = false,
   selectionLabel = caption,
   selectionToolbar,
+  rowSelection,
+  defaultRowSelection,
+  onRowSelectionChange,
   rowProps,
   empty,
   loading = false,
@@ -66,7 +76,13 @@ export function DataTable<T>({
   ...props
 }: DataTableProps<T>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [selection, setSelection] = React.useState<RowSelectionState>({});
+  const [innerSelection, setInnerSelection] = React.useState<RowSelectionState>(defaultRowSelection ?? {});
+  const selection = rowSelection ?? innerSelection;
+  const setSelection = (updater: RowSelectionState | ((old: RowSelectionState) => RowSelectionState)): void => {
+    const next = typeof updater === "function" ? updater(selection) : updater;
+    if (rowSelection === undefined) setInnerSelection(next);
+    onRowSelectionChange?.(next);
+  };
   const selectionColumn: DataTableColumn<T> = {
     id: "select",
     header: "",

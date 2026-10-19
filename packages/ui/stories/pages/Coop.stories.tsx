@@ -3,13 +3,12 @@
 
 import type * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { ChannelAvatar, StatusBadge, formatNumber } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
-import { BreakdownBar, ListPanel, ProgressRow, StatCard, StatGrid } from "@commonair/ui/blocks/data";
+import { BreakdownBar, ListPanel, ProposalCard, StatCard, StatGrid } from "@commonair/ui/blocks/data";
 import { council, events, intro, membersByClass, membership, proposals, protectedNote, tabs } from "./fixtures/Coop.ts";
 import { Amount } from "./money.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
@@ -67,32 +66,22 @@ function CoopPage(): React.JSX.Element {
               >
                 <div className="flex flex-col gap-3">
                   {proposals.map((proposal) => (
-                    <Card key={proposal.number} size="sm">
-                      <CardHeader>
-                        <CardTitle className="flex flex-wrap items-center gap-2">
-                          <a href={`#proposal/${proposal.number}`}>
-                            #{proposal.number} {proposal.title}
-                          </a>
-                          {proposal.protected ? (
-                            <StatusBadge tone="warning" icon={SquareLock01Icon}>
-                              Protected
-                            </StatusBadge>
-                          ) : null}
-                        </CardTitle>
-                        <CardDescription>{proposal.summary}</CardDescription>
-                        <CardAction>
-                          <StatusBadge tone={proposal.tone}>{proposal.status}</StatusBadge>
-                        </CardAction>
-                      </CardHeader>
-                      <CardContent>
-                        <ProgressRow
-                          label={`${proposal.ends} · ${proposal.comments} comments`}
-                          value={proposal.turnout ?? 0}
-                          valueText={proposal.turnout === null ? "— turnout" : `${proposal.turnout}% turnout`}
-                          note={proposal.voted ? "You voted" : undefined}
-                        />
-                      </CardContent>
-                    </Card>
+                    <ProposalCard
+                      key={proposal.number}
+                      reference={`#${proposal.number}`}
+                      title={proposal.title}
+                      link={{ href: `#proposal/${proposal.number}` }}
+                      summary={proposal.summary}
+                      status={proposal.status}
+                      statusTone={proposal.tone}
+                      protectedLabel={proposal.protected ? "Protected" : undefined}
+                      progress={{
+                        label: `${proposal.ends} · ${proposal.comments} comments`,
+                        value: proposal.turnout ?? 0,
+                        valueText: proposal.turnout === null ? "— turnout" : `${proposal.turnout}% turnout`,
+                        note: proposal.voted ? "You voted" : undefined,
+                      }}
+                    />
                   ))}
                 </div>
               </Section>

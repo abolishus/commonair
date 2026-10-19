@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as React from "react";
-import { Progress } from "@commonair/ui/components/progress";
+import { Progress, ProgressIndicator, ProgressTrack } from "@commonair/ui/components/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { cn } from "@commonair/ui/lib/utils";
 
@@ -31,11 +31,11 @@ export function ProgressRow({
 }: ProgressRowProps) {
   const clamped = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   const indicatorClass = {
-    default: "[&_[data-slot=progress-indicator]]:bg-primary",
-    accent: "[&_[data-slot=progress-indicator]]:bg-accent-foreground",
-    success: "[&_[data-slot=progress-indicator]]:bg-success",
-    warning: "[&_[data-slot=progress-indicator]]:bg-warning",
-    danger: "[&_[data-slot=progress-indicator]]:bg-destructive",
+    default: "bg-primary",
+    accent: "bg-accent-foreground",
+    success: "bg-success",
+    warning: "bg-warning",
+    danger: "bg-destructive",
   }[tone];
   const noteColor = {
     default: "text-muted-foreground",
@@ -50,7 +50,20 @@ export function ProgressRow({
         <span className="text-xs font-medium">{label}</span>
         <span className="text-xs tabular-nums">{valueText}</span>
       </div>
-      <Progress aria-label={label} value={clamped} className={cn("gap-0", indicatorClass)} />
+      <Progress
+        aria-label={label}
+        value={clamped}
+        className="gap-0"
+        // shadcn Progress always draws a default track; the render function swaps in the same parts
+        // with the tone on the indicator (they read the root's context, which still wraps them).
+        render={(rootProps) => (
+          <div {...rootProps}>
+            <ProgressTrack>
+              <ProgressIndicator className={indicatorClass} />
+            </ProgressTrack>
+          </div>
+        )}
+      />
       {minLabel || maxLabel ? (
         <div className="flex justify-between text-xs text-muted-foreground">
           <span>{minLabel}</span>

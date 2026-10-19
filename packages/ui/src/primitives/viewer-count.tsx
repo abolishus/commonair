@@ -17,10 +17,13 @@ const viewerCountVariants = cva("inline-flex items-center gap-1 tabular-nums", {
       // Drawn by OverlayBadge; only layout is added here.
       overlay: "",
     },
-    size: { sm: "text-2xs [&_svg]:size-3", md: "text-xs [&_svg]:size-3.5" },
+    size: { sm: "text-2xs", md: "text-xs" },
   },
   defaultVariants: { variant: "default", size: "md" },
 });
+
+/** The icon is sized on the element itself (OverlayBadge's Badge sizes it in the overlay variant). */
+const iconSize = { sm: "size-3", md: "size-3.5" } as const;
 
 export interface ViewerCountProps
   extends Omit<React.ComponentProps<"span">, "children">, VariantProps<typeof viewerCountVariants> {
@@ -49,7 +52,7 @@ export function ViewerCount({
   const accessible = (label ?? messages.viewerCount)(formatNumber(safe, resolved), safe);
   const content = (
     <>
-      {icon && <HugeiconsIcon icon={ViewIcon} strokeWidth={2} aria-hidden />}
+      {icon && <HugeiconsIcon icon={ViewIcon} strokeWidth={2} aria-hidden className={iconSize[size ?? "md"]} />}
       <span aria-hidden>{formatCompactNumber(safe, resolved)}</span>
       <span className="sr-only">{accessible}</span>
     </>

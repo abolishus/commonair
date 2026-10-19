@@ -7,6 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { BankIcon, Download01Icon, Invoice01Icon } from "@hugeicons/core-free-icons";
 import { MoneyAmount, StatusBadge, formatMoney } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
+import { Progress } from "@commonair/ui/components/progress";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
@@ -75,6 +76,12 @@ function RevenuePage(): React.JSX.Element {
             label="Available balance"
             value={usd(balances.available.cents)}
             hint={`${balances.available.payout} · minimum ${formatMoney(balances.available.minimum, "USD", "en-US")}`}
+            footer={
+              <Progress
+                aria-label="Balance toward the payout minimum"
+                value={Math.min(100, (balances.available.cents / balances.available.minimum) * 100)}
+              />
+            }
           />
           <StatCard
             label="Earned this month"

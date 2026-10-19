@@ -23,7 +23,7 @@ import { Textarea } from "@commonair/ui/components/textarea";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageTabs } from "@commonair/ui/blocks/headers";
 import { BreakdownBar, KeyValueList } from "@commonair/ui/blocks/data";
-import { AmountField, ChoiceToggle, OptionGroup } from "@commonair/ui/blocks/forms";
+import { AmountField, ChoiceToggle, OptionGroup, SelectField } from "@commonair/ui/blocks/forms";
 import { ChannelHeader, ChatPanel, PlayerChrome } from "@commonair/ui/blocks/media";
 import {
   channel,
@@ -38,7 +38,6 @@ import {
   tipPresetCents,
   type SupportTab,
 } from "./fixtures/Support.ts";
-import { SelectField } from "./select-field.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Channel/Support", parameters: pageParameters } satisfies Meta;

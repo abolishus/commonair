@@ -145,6 +145,7 @@ export const ChannelSidebarStory: Story = {
               accent: "red",
             },
           ],
+          moreLink: { label: "Show all 38 followed", href: "#following" },
         },
       ]}
       callout="Counts show verified viewers."
@@ -193,6 +194,30 @@ export const SiteHeaderMobileMenuOpen: Story = {
       mobileMenuOpen
     />
   ),
+  globals: { viewport: { value: "mobile320" } },
+};
+
+/** `context` after the brand: the studio and admin headers ("Creator studio", "Admin"). */
+export const SiteHeaderWithContext: Story = {
+  name: "SiteHeader with context",
+  render: () => (
+    <SiteHeader
+      brand={header.props.brand}
+      context={{ label: "Creator studio", href: "#studio" }}
+      nav={[]}
+      navLabel="Creator studio"
+      menuLabel="Open navigation"
+    />
+  ),
+};
+export const SiteHeaderWithContextLight: Story = {
+  ...SiteHeaderWithContext,
+  name: "SiteHeader with context Light",
+  globals: { theme: "light" },
+};
+export const SiteHeaderWithContextMobile320: Story = {
+  ...SiteHeaderWithContext,
+  name: "SiteHeader with context Mobile320",
   globals: { viewport: { value: "mobile320" } },
 };
 

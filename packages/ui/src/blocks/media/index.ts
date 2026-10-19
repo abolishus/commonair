@@ -33,4 +33,11 @@ export {
 } from "./chat.tsx";
 export { ClipTrimmer, type ClipTrimmerProps } from "./clip-trimmer.tsx";
 export { AlertPreview, type AlertPreviewProps } from "./alert-preview.tsx";
+export {
+  CommentItem,
+  CommentList,
+  type CommentItemProps,
+  type CommentListProps,
+  type CommentAction,
+} from "./comment-item.tsx";
 export { EmoteGrid, EmoteTile, type EmoteGridProps, type EmoteTileProps, type EmoteTileData } from "./emote-grid.tsx";

@@ -57,7 +57,7 @@ test("timeline presents each state accessibly", () => {
   );
   expect(container.querySelectorAll("li[data-state]")).toHaveLength(3);
 });
-test("uptime strip exposes a summary label and narrows day count on small screens", () => {
+test("uptime strip is a labelled list and narrows day count on small screens", () => {
   const days = Array.from({ length: 90 }, (_, i) => ({ id: String(i), date: `Day ${i}`, status: "ok" as const }));
   const { container } = render(
     <UptimeStrip
@@ -67,8 +67,9 @@ test("uptime strip exposes a summary label and narrows day count on small screen
       statusLabels={{ ok: "Operational", degraded: "Degraded", outage: "Outage", none: "No data" }}
     />,
   );
-  expect(screen.getByRole("img", { name: "90 days uptime" })).toBeTruthy();
+  expect(screen.getByRole("list", { name: "90 days uptime" })).toBeTruthy();
   expect(container.querySelectorAll("[data-status]")).toHaveLength(90);
+  expect(container.querySelectorAll("li.hidden")).toHaveLength(60);
 });
 test("data table keeps table headers scoped, row selector data, sort and selection", async () => {
   const columns = [

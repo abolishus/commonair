@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type * as React from "react";
-import { Alert, AlertDescription } from "@commonair/ui/components/alert";
+// A static note, not an announcement: AlertCallout is role="note" where a bare Alert is role="alert".
+import { AlertCallout } from "../blocks/feedback/alert-callout.tsx";
 import { ChannelAvatar } from "../primitives/channel-avatar.tsx";
 import { ViewerCount } from "../primitives/viewer-count.tsx";
 import {
@@ -22,10 +23,17 @@ export interface ChannelItem {
   live?: boolean;
   accent?: React.ComponentProps<typeof ChannelAvatar>["accent"];
 }
+/** A "Show all 38 followed" link under a group: `href`, or a router `render` element. */
+export interface ChannelGroupLink {
+  label: string;
+  href?: string;
+  render?: React.ReactElement;
+}
 export interface ChannelNavGroup {
   id: string;
   label: string;
   channels: ChannelItem[];
+  moreLink?: ChannelGroupLink;
 }
 export interface ChannelSidebarProps extends React.ComponentProps<"nav"> {
   label: string;
@@ -51,14 +59,22 @@ export function ChannelSidebar({ label, groups, callout, ...props }: ChannelSide
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
+            {group.moreLink ? (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  size="sm"
+                  data-more-link=""
+                  tooltip={group.moreLink.label}
+                  render={group.moreLink.render ?? <a href={group.moreLink.href}>{group.moreLink.label}</a>}
+                >
+                  <span>{group.moreLink.label}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
           </SidebarMenu>
         </SidebarGroup>
       ))}
-      {callout ? (
-        <Alert>
-          <AlertDescription>{callout}</AlertDescription>
-        </Alert>
-      ) : null}
+      {callout ? <AlertCallout icon={null} description={callout} /> : null}
     </nav>
   );
 }

@@ -75,8 +75,13 @@ function serviceColumns(basis: CostBasis): DataTableColumn<Service>[] {
       id: "cost",
       header: basis === "unit" ? "Cost / 1K viewer-h" : "Cost / month",
       align: "numeric",
-      // Per-unit costs are fractions of a cent, so the fixture carries them pre-formatted.
-      cell: ({ row }) => (basis === "unit" ? row.original.unitCost : usd(row.original.monthlyCents)),
+      // Per-unit costs are fractions of a cent: micro-units through formatUnitCost.
+      cell: ({ row }) =>
+        basis === "unit" ? (
+          <FigureValue value={{ micros: row.original.unitCostMicros }} />
+        ) : (
+          usd(row.original.monthlyCents)
+        ),
     },
     {
       id: "delta",
@@ -192,7 +197,7 @@ function ExpensesPage(): React.JSX.Element {
                     rows={viewerHour.parts.map((part) => ({
                       label: part.label,
                       value: part.percent,
-                      valueText: part.value,
+                      valueText: <FigureValue value={part.value} />,
                     }))}
                   />
                 </CardContent>

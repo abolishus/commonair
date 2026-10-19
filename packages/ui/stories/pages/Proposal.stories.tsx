@@ -3,14 +3,12 @@
 
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { InformationCircleIcon, SquareLock01Icon } from "@hugeicons/core-free-icons";
+import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { ChannelAvatar, StatusBadge } from "@commonair/ui";
-import { Alert, AlertDescription, AlertTitle } from "@commonair/ui/components/alert";
-import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@commonair/ui/components/card";
-import { Item, ItemContent, ItemFooter, ItemGroup, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
+import { CommentItem, CommentList } from "@commonair/ui/blocks/media";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { Breadcrumbs, PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { BreakdownTally, FilterBar, Timeline } from "@commonair/ui/blocks/data";
@@ -79,15 +77,15 @@ function ProposalPage(): React.JSX.Element {
                   ))}
                 </ul>
               </Section>
-              <Alert>
-                <HugeiconsIcon icon={InformationCircleIcon} aria-hidden="true" />
-                <AlertTitle>{review.title}</AlertTitle>
-                <AlertDescription>
+              <AlertCallout
+                tone="info"
+                title={review.title}
+                description={
                   <p>
                     {review.quote} <a href="#review">Full review</a>
                   </p>
-                </AlertDescription>
-              </Alert>
+                }
+              />
               <Section
                 heading="Discussion"
                 description="214 comments"
@@ -105,31 +103,23 @@ function ProposalPage(): React.JSX.Element {
                   />
                 }
               >
-                <ItemGroup>
+                <CommentList label="Comments">
                   {comments.map((comment) => (
-                    <Item key={comment.name} size="sm">
-                      <ItemMedia>
-                        <ChannelAvatar name={comment.name} accent={comment.accent} size="sm" decorative />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>
-                          {comment.name}
-                          <Badge variant="outline">{comment.memberClass}</Badge>
-                          <span>{comment.ago}</span>
-                        </ItemTitle>
-                        <p>{comment.text}</p>
-                      </ItemContent>
-                      <ItemFooter className="justify-start gap-1">
-                        <Button variant="ghost" size="xs">
-                          Helpful · {comment.helpful}
-                        </Button>
-                        <Button variant="ghost" size="xs">
-                          Reply
-                        </Button>
-                      </ItemFooter>
-                    </Item>
+                    <CommentItem
+                      key={comment.name}
+                      author={comment.name}
+                      accent={comment.accent}
+                      badge={comment.memberClass}
+                      time={comment.ago}
+                      actions={[
+                        { id: "helpful", label: `Helpful · ${comment.helpful}`, pressed: false },
+                        { id: "reply", label: "Reply" },
+                      ]}
+                    >
+                      <p>{comment.text}</p>
+                    </CommentItem>
                   ))}
-                </ItemGroup>
+                </CommentList>
                 <CommentComposer
                   label="Add to the discussion"
                   placeholder="Members only. Be specific, be kind."

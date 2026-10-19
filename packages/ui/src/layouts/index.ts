@@ -5,6 +5,7 @@ export { AppShell, type AppShellProps } from "./app-shell.tsx";
 export { AdminShell, type AdminShellProps } from "./admin-shell.tsx";
 export {
   ChannelSidebar,
+  type ChannelGroupLink,
   type ChannelItem,
   type ChannelNavGroup,
   type ChannelSidebarProps,
@@ -22,6 +23,6 @@ export {
 } from "./page-layout.tsx";
 export { SectionNav, type SectionNavProps } from "./section-nav.tsx";
 export { SiteFooter, type FooterLink, type SourceLink, type SiteFooterProps } from "./site-footer.tsx";
-export { SiteHeader, type Brand, type SiteHeaderProps } from "./site-header.tsx";
+export { SiteHeader, type Brand, type HeaderContext, type SiteHeaderProps } from "./site-header.tsx";
 export { StudioShell, type StudioShellProps } from "./studio-shell.tsx";
 export { UserMenu, type UserMenuItem, type UserMenuProps } from "./user-menu.tsx";

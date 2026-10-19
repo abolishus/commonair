@@ -4,9 +4,9 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Alert01Icon, Add01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon } from "@hugeicons/core-free-icons";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { ChannelAvatar, StatusBadge } from "@commonair/ui";
-import { Alert, AlertDescription, AlertTitle } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
@@ -16,7 +16,7 @@ import { Switch } from "@commonair/ui/components/switch";
 import { PageContainer } from "@commonair/ui/layouts";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { DataTable, type DataTableColumn } from "@commonair/ui/blocks/data";
-import { ActionRow, ChoiceToggle, CopyField, SwitchField } from "@commonair/ui/blocks/forms";
+import { ActionRow, ChoiceToggle, CopyField, SelectField, SwitchField } from "@commonair/ui/blocks/forms";
 import {
   captions,
   ingest,
@@ -27,7 +27,6 @@ import {
   simulcastTargets,
   type Rendition,
 } from "./fixtures/StreamSetup.ts";
-import { SelectField } from "./select-field.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/StreamSetup", parameters: pageParameters } satisfies Meta;
@@ -63,14 +62,12 @@ function StreamSetupPage(): React.JSX.Element {
     <StudioPage current="setup">
       <PageContainer className="flex flex-col gap-6 py-6">
         <PageHeader title="Stream setup" description="Point OBS or any RTMP/WHIP encoder here. Nothing to install." />
-        <Alert>
-          <HugeiconsIcon icon={Alert01Icon} aria-hidden="true" />
-          <AlertTitle>Your old key showed up in a public paste.</AlertTitle>
-          <AlertDescription>
-            <p>We revoked it automatically on Oct 14. The key below is new.</p>
-            <a href="#leak-scanner">What the leak scanner checks</a>
-          </AlertDescription>
-        </Alert>
+        <AlertCallout
+          tone="warning"
+          title="Your old key showed up in a public paste."
+          description="We revoked it automatically on Oct 14. The key below is new."
+          action={<a href="#leak-scanner">What the leak scanner checks</a>}
+        />
         <Card>
           <CardHeader>
             <CardTitle>Ingest</CardTitle>

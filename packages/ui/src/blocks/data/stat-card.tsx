@@ -12,6 +12,8 @@ export interface StatCardProps extends Omit<React.ComponentProps<"div">, "title"
   delta?: StatDelta;
   hint?: React.ReactNode;
   icon?: React.ReactNode;
+  /** Under the value and hint, inside the card: a progress bar, a link, a small breakdown. */
+  footer?: React.ReactNode;
   size?: "default" | "sm";
   tone?: "default" | "accent" | "success" | "warning";
 }
@@ -22,6 +24,7 @@ export function StatCard({
   delta,
   hint,
   icon,
+  footer,
   size = "default",
   tone = "default",
   className,
@@ -53,6 +56,11 @@ export function StatCard({
         <div className="break-words text-lg font-semibold tabular-nums">{value}</div>
         {delta ? <p className={cn("text-xs", sentimentClass)}>{delta.label}</p> : null}
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+        {footer ? (
+          <div data-slot="stat-card-footer" className="mt-1 flex flex-col gap-2">
+            {footer}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );

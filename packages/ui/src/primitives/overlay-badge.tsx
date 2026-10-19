@@ -10,7 +10,8 @@ import { cn } from "../lib/utils.ts";
 export const overlayBadgeVariants = cva("bg-overlay text-overlay-foreground tabular-nums [a]:hover:bg-overlay", {
   variants: {
     size: {
-      sm: "h-4 gap-0.5 px-1 text-2xs [&>svg]:size-3!",
+      // Badge already sizes direct svg children to size-3.
+      sm: "h-4 gap-0.5 px-1 text-2xs",
       md: "h-5 px-1.5 text-xs",
     },
   },

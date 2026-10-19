@@ -126,6 +126,7 @@ function FinancesPage(): React.JSX.Element {
             <TrendChart
               type="bar"
               grouped
+              legend="top"
               data={monthly}
               xKey="month"
               series={[

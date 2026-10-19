@@ -4,9 +4,9 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon, InformationCircleIcon, Upload01Icon } from "@hugeicons/core-free-icons";
+import { Add01Icon, Upload01Icon } from "@hugeicons/core-free-icons";
+import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { IconButton, StatusBadge } from "@commonair/ui";
-import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
@@ -80,9 +80,9 @@ function ChatBotPage(): React.JSX.Element {
               }
             >
               <DataTable caption="Commands" columns={columns} rows={shown} getRowId={(row) => row.id} />
-              <Alert>
-                <HugeiconsIcon icon={InformationCircleIcon} aria-hidden="true" />
-                <AlertDescription>
+              <AlertCallout
+                tone="info"
+                description={
                   <p>
                     Variables:{" "}
                     {variables.map((variable) => (
@@ -92,8 +92,8 @@ function ChatBotPage(): React.JSX.Element {
                     ))}
                     . Bots built on tmi.js work unchanged through the IRC gateway.
                   </p>
-                </AlertDescription>
-              </Alert>
+                }
+              />
             </Section>
           }
           aside={
