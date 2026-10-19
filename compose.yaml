@@ -251,6 +251,8 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${IRC_PORT:-6667}:6667"
       - "${BIND_ADDRESS:-127.0.0.1}:${IRC_TLS_PORT:-6697}:6697"
       - "${BIND_ADDRESS:-127.0.0.1}:${IRC_WS_PORT:-6680}:6680"
+      # Health endpoint, so the harness can check the gateway from the host.
+      - "${BIND_ADDRESS:-127.0.0.1}:${IRC_HEALTH_PORT:-6681}:6681"
     depends_on:
       <<: *app-depends
       chat:

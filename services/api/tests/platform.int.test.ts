@@ -100,6 +100,17 @@ describe("follows", () => {
     expect((await channelOf(alice.username)).followerCount).toBe(0);
   });
 
+  test("channels.get reports the caller's follow state (null when anonymous)", async () => {
+    type Ch = { viewer?: { following: boolean } | null };
+    const get = (c: ReturnType<typeof client>) => c.call<Ch>("GET", `/api/channels/${alice.username}`);
+    expect((await get(client(api))).body.viewer).toBeNull();
+    expect((await get(bob.client)).body.viewer).toEqual({ following: false });
+    await bob.client.call("PUT", `/api/channels/${alice.username}/follow`, {});
+    expect((await get(bob.client)).body.viewer).toEqual({ following: true });
+    await bob.client.call("DELETE", `/api/channels/${alice.username}/follow`);
+    expect((await get(bob.client)).body.viewer).toEqual({ following: false });
+  });
+
   test("cannot follow yourself; anonymous cannot follow", async () => {
     expect((await alice.client.call("PUT", `/api/channels/${alice.username}/follow`, {})).status).toBe(400);
     expect((await client(api).call("PUT", `/api/channels/${alice.username}/follow`, {})).status).toBe(401);

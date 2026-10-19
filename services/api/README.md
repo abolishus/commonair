@@ -110,9 +110,8 @@ streamer publishes again. Rate-limit buckets for those clients start over once.
   overturned integrity appeal is an integrity allowance (`packages/integrity/src/allowance.ts`).
   Nobody resolves their own appeal, and a moderator cannot resolve the appeal of their own mod
   action. Overturning a moderation appeal records the decision only: it does not lift the ban or
-  timeout. Resolving writes an audit row (ids and enums only). The `appeal.resolved` outbox event
-  is pending: it is not in the event catalog yet, and the worker drops unknown types for good, so
-  nothing is written until the catalog has it.
+  timeout. Resolving writes an audit row (ids and enums only) and no outbox event: the event catalog
+  is EventSub's public surface, and appeal outcomes are private to the appellant and staff.
 - Playback sessions record the HTTP delivery source (`origin`, `relay`, `cdn`) as
   `assigned_source`, never `p2p`, even when the P2P loader is on. Whether P2P runs is client
   input (`p2pCapable`, `nativeHls`), and integrity expects only a 10% origin share from `p2p`
