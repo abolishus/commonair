@@ -43,6 +43,7 @@ import {
   type Period,
   type StatementRow,
 } from "./fixtures/Finances.ts";
+import { FigureValue, moneyText, noteText } from "./money.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Platform/Finances", parameters: pageParameters } satisfies Meta;
@@ -107,9 +108,9 @@ function FinancesPage(): React.JSX.Element {
             <StatCard
               key={kpi.label}
               label={kpi.label}
-              value={kpi.value}
-              hint={kpi.up ? undefined : kpi.note}
-              delta={kpi.up ? { direction: "up", label: kpi.note, sentiment: "positive" } : undefined}
+              value={<FigureValue value={kpi.value} />}
+              hint={kpi.up ? undefined : noteText(kpi.note)}
+              delta={kpi.up ? { direction: "up", label: noteText(kpi.note), sentiment: "positive" } : undefined}
             />
           ))}
         </StatGrid>
@@ -163,9 +164,9 @@ function FinancesPage(): React.JSX.Element {
                     rows={budget.map((line) => ({
                       label: line.label,
                       value: line.percent,
-                      valueText: `${line.actual} of ${line.target}`,
+                      valueText: `${moneyText(line.actual)} of ${moneyText(line.target)}`,
                       tone: line.tone,
-                      note: line.note,
+                      note: noteText(line.note),
                       noteTone: line.tone,
                     }))}
                   />
@@ -182,12 +183,12 @@ function FinancesPage(): React.JSX.Element {
                   <ProgressRow
                     label={reserves.months}
                     value={reserves.percent}
-                    valueText={reserves.amount}
+                    valueText={moneyText(reserves.amount)}
                     tone="warning"
                     minLabel="0"
-                    maxLabel={reserves.target}
+                    maxLabel={noteText(reserves.target)}
                   />
-                  <p>{reserves.note}</p>
+                  <p>{noteText(reserves.note)}</p>
                 </CardContent>
               </Card>
               <Card size="sm">

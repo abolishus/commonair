@@ -47,6 +47,7 @@ import {
   type CostBasis,
   type Service,
 } from "./fixtures/Expenses.ts";
+import { Amount, FigureValue, moneyText, noteText } from "./money.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Platform/Expenses", parameters: pageParameters } satisfies Meta;
@@ -64,7 +65,12 @@ function serviceColumns(basis: CostBasis): DataTableColumn<Service>[] {
     { id: "runs", header: "Runs", accessorKey: "runs" },
     { id: "billing", header: "Billed by", accessorKey: "billing" },
     { id: "usage", header: "Usage (30 d)", accessorKey: "usage", align: "numeric" },
-    { id: "unit", header: "Unit price", accessorKey: "unitPrice", align: "numeric" },
+    {
+      id: "unit",
+      header: "Unit price",
+      align: "numeric",
+      cell: ({ row }) => (row.original.unitPrice ? <Amount value={row.original.unitPrice} /> : "—"),
+    },
     {
       id: "cost",
       header: basis === "unit" ? "Cost / 1K viewer-h" : "Cost / month",
@@ -99,7 +105,12 @@ function serviceColumns(basis: CostBasis): DataTableColumn<Service>[] {
 const wageColumns: DataTableColumn<(typeof wages)[number]>[] = [
   { id: "role", header: "Role", accessorKey: "role" },
   { id: "fte", header: "FTE", accessorKey: "fte", align: "numeric" },
-  { id: "band", header: "Annual band", accessorKey: "band", align: "numeric" },
+  {
+    id: "band",
+    header: "Annual band",
+    align: "numeric",
+    cell: ({ row }) => `${moneyText(row.original.band)}${row.original.perMonth ? " / mo" : ""}`,
+  },
 ];
 
 function ExpensesPage(): React.JSX.Element {
@@ -113,7 +124,7 @@ function ExpensesPage(): React.JSX.Element {
             <StatCard
               key={stat.label}
               label={stat.label}
-              value={stat.value}
+              value={"count" in stat.value ? stat.value.count : <Amount value={stat.value} />}
               hint={stat.hint}
               delta={stat.delta ? { direction: "up", label: stat.delta, sentiment: "positive" } : undefined}
             />
@@ -153,7 +164,11 @@ function ExpensesPage(): React.JSX.Element {
             getRowId={(row) => row.id}
           />
           <p>
-            {servicesNote} <a href="#finances">Overview</a>
+            {servicesNote.before}
+            {moneyText(servicesNote.fee)}
+            {servicesNote.middle}
+            {moneyText(servicesNote.manual)}
+            {servicesNote.after} <a href="#finances">Overview</a>
           </p>
         </Section>
         <SplitLayout
@@ -167,7 +182,9 @@ function ExpensesPage(): React.JSX.Element {
                     Per verified viewer-hour, October average. Falls as relays carry more traffic.
                   </CardDescription>
                   <CardAction>
-                    <StatusBadge tone="neutral">{viewerHour.total}</StatusBadge>
+                    <StatusBadge tone="neutral">
+                      <FigureValue value={viewerHour.total} />
+                    </StatusBadge>
                   </CardAction>
                 </CardHeader>
                 <CardContent>
@@ -179,7 +196,7 @@ function ExpensesPage(): React.JSX.Element {
                     }))}
                   />
                 </CardContent>
-                <CardFooter>{viewerHour.streamedHour}</CardFooter>
+                <CardFooter>{noteText(viewerHour.streamedHour)}</CardFooter>
               </Card>
               <ListPanel
                 variant="bare"
@@ -243,7 +260,10 @@ function ExpensesPage(): React.JSX.Element {
                           <ItemDescription>{commitment.detail}</ItemDescription>
                         </ItemContent>
                         <ItemActions>
-                          <span className="tabular-nums">{commitment.amount}</span>
+                          <span className="tabular-nums">
+                            {moneyText(commitment.amount)}
+                            {commitment.perMonth ? " / mo" : ""}
+                          </span>
                         </ItemActions>
                       </Item>
                     ))}

@@ -24,12 +24,14 @@ export const recipients = [
   { value: "random", label: "Random active chatters" },
   { value: "viewer", label: "A specific viewer" },
 ];
-export const gift = { count: "5", label: "5 × Tier 1", cents: 2495 };
+/** Gifts are Tier 1 subs; the line label and total derive from the chosen count. */
+export const gift = { defaultCount: "5", tier: "Tier 1", tierCents: 499, customDefault: 3, customMax: 100 };
 
-export const tipPresets = [200, 500, 1000, 2000].map((value) => ({ value, label: `$${value / 100}` }));
+/** Tip presets in cents; the story labels them with formatMoney. */
+export const tipPresetCents = [200, 500, 1000, 2000];
 export const tip = { cents: 500 };
 
-/** Where $5.00 goes; split set by member vote (proposal #41). */
+/** Where one $5.00 payment goes (500 cents); split set by member vote (proposal #41). */
 export const split: BreakdownSegment[] = [
   { id: "creator", label: "Creator", value: 355, color: "--chart-1" },
   { id: "ops", label: "Co-op operations & infrastructure", value: 70, color: "--chart-2" },

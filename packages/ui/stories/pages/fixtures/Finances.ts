@@ -1,8 +1,13 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Sample data from the Finances board (platform finances). Money is integer cents, USD. */
+/**
+ * Sample data from the Finances board (platform finances). Money is integer cents, USD, rendered
+ * with MoneyAmount/formatMoney; only sub-cent unit costs are text. The monthly chart is in whole
+ * thousands of dollars (axis values, not amounts).
+ */
 import type { ProgressTone } from "@commonair/ui/blocks/data";
+import type { Figure, Money, MoneyNote } from "../money.tsx";
 
 export const tabs = [
   { id: "overview", label: "Overview", href: "#finances", current: true },
@@ -25,35 +30,46 @@ export const ledgerClosed = "Ledger closed through Oct 17 · 23:59 UTC";
 
 export interface Kpi {
   label: string;
-  value: string;
-  note: string;
+  value: Figure;
+  note: string | MoneyNote;
   up?: boolean;
 }
 
+// Cost per viewer-hour is a fraction of a cent: kept as text (see `money.tsx`).
 export const kpis: Record<Period, Kpi[]> = {
   month: [
-    { label: "Platform income", value: "$21,100", note: "Oct 1–17" },
-    { label: "Operating expenses", value: "$14,380", note: "Oct 1–17" },
-    { label: "Net surplus", value: "+$6,720", note: "+$1,140 vs same days in Sep", up: true },
-    { label: "Reserve", value: "$101,300", note: "4.2 months of runway" },
-    { label: "Cost per viewer-hour", value: "$0.0061", note: "−9% since relays", up: true },
-    { label: "Cost per streamed hour", value: "$0.42", note: "transcode + ingest" },
+    { label: "Platform income", value: { cents: 2_110_000 }, note: "Oct 1–17" },
+    { label: "Operating expenses", value: { cents: 1_438_000 }, note: "Oct 1–17" },
+    {
+      label: "Net surplus",
+      value: { cents: 672_000, signed: true },
+      note: { money: { cents: 114_000, signed: true }, after: " vs same days in Sep" },
+      up: true,
+    },
+    { label: "Reserve", value: { cents: 10_130_000 }, note: "4.2 months of runway" },
+    { label: "Cost per viewer-hour", value: { subCent: "$0.0061" }, note: "−9% since relays", up: true },
+    { label: "Cost per streamed hour", value: { cents: 42 }, note: "transcode + ingest" },
   ],
   quarter: [
-    { label: "Platform income", value: "$103,040", note: "Q3 2026" },
-    { label: "Operating expenses", value: "$71,400", note: "Q3 2026" },
-    { label: "Net surplus", value: "+$31,640", note: "+18% vs Q2", up: true },
-    { label: "Reserve", value: "$94,100", note: "at Sep 30" },
-    { label: "Cost per viewer-hour", value: "$0.0067", note: "Q3 average" },
-    { label: "Cost per streamed hour", value: "$0.44", note: "Q3 average" },
+    { label: "Platform income", value: { cents: 10_304_000 }, note: "Q3 2026" },
+    { label: "Operating expenses", value: { cents: 7_140_000 }, note: "Q3 2026" },
+    { label: "Net surplus", value: { cents: 3_164_000, signed: true }, note: "+18% vs Q2", up: true },
+    { label: "Reserve", value: { cents: 9_410_000 }, note: "at Sep 30" },
+    { label: "Cost per viewer-hour", value: { subCent: "$0.0067" }, note: "Q3 average" },
+    { label: "Cost per streamed hour", value: { cents: 44 }, note: "Q3 average" },
   ],
   year: [
-    { label: "Platform income", value: "$298,600", note: "Nov 2025 – Oct 2026" },
-    { label: "Operating expenses", value: "$251,900", note: "Nov 2025 – Oct 2026" },
-    { label: "Net surplus", value: "+$46,700", note: "first surplus year", up: true },
-    { label: "Reserve", value: "$101,300", note: "from $54,600", up: true },
-    { label: "Cost per viewer-hour", value: "$0.0081", note: "12-month average" },
-    { label: "Cost per streamed hour", value: "$0.51", note: "12-month average" },
+    { label: "Platform income", value: { cents: 29_860_000 }, note: "Nov 2025 – Oct 2026" },
+    { label: "Operating expenses", value: { cents: 25_190_000 }, note: "Nov 2025 – Oct 2026" },
+    { label: "Net surplus", value: { cents: 4_670_000, signed: true }, note: "first surplus year", up: true },
+    {
+      label: "Reserve",
+      value: { cents: 10_130_000 },
+      note: { before: "from ", money: { cents: 5_460_000 } },
+      up: true,
+    },
+    { label: "Cost per viewer-hour", value: { subCent: "$0.0081" }, note: "12-month average" },
+    { label: "Cost per streamed hour", value: { cents: 51 }, note: "12-month average" },
   ],
 };
 
@@ -136,46 +152,65 @@ export const statement: StatementRow[] = [
 
 export const budget: {
   label: string;
-  actual: string;
-  target: string;
+  actual: Money;
+  target: Money;
   percent: number;
-  note: string;
+  note: string | MoneyNote;
   tone: ProgressTone;
 }[] = [
   {
     label: "Infrastructure",
-    actual: "$61.2K",
-    target: "$80K",
+    actual: { cents: 6_120_000 },
+    target: { cents: 8_000_000 },
     percent: 77,
     note: "On track (83% of year elapsed)",
     tone: "default",
   },
-  { label: "Wages", actual: "$58.0K", target: "$72K", percent: 81, note: "On track", tone: "default" },
+  {
+    label: "Wages",
+    actual: { cents: 5_800_000 },
+    target: { cents: 7_200_000 },
+    percent: 81,
+    note: "On track",
+    tone: "default",
+  },
   {
     label: "Trust & safety",
-    actual: "$11.6K",
-    target: "$12K",
+    actual: { cents: 1_160_000 },
+    target: { cents: 1_200_000 },
     percent: 97,
-    note: "Over pace — council approved +$2K on Sep 9",
+    note: { before: "Over pace — council approved ", money: { cents: 200_000, signed: true }, after: " on Sep 9" },
     tone: "danger",
   },
   {
     label: "Legal & accounting",
-    actual: "$7.1K",
-    target: "$10K",
+    actual: { cents: 710_000 },
+    target: { cents: 1_000_000 },
     percent: 71,
     note: "Annual audit still to come",
     tone: "default",
   },
-  { label: "FOSS donations", actual: "$3.5K", target: "$4.2K", percent: 83, note: "On track", tone: "default" },
+  {
+    label: "FOSS donations",
+    actual: { cents: 350_000 },
+    target: { cents: 420_000 },
+    percent: 83,
+    note: "On track",
+    tone: "default",
+  },
 ];
 
 export const reserves = {
-  amount: "$101,300",
+  amount: { cents: 10_130_000 } as Money,
   months: "4.2 months of operating cost",
   percent: 70,
-  target: "target 6 months · $144,600",
-  note: "Held in a member-controlled operating account and a short-term treasury fund. Two signers required for any transfer over $5,000.",
+  target: { before: "target 6 months · ", money: { cents: 14_460_000 } } as MoneyNote,
+  note: {
+    before:
+      "Held in a member-controlled operating account and a short-term treasury fund. Two signers required for any transfer over ",
+    money: { cents: 500_000 },
+    after: ".",
+  } as MoneyNote,
 };
 
 export const queries = {

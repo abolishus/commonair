@@ -3,6 +3,7 @@
 
 /** Sample data from the StreamManager board (live dashboard). */
 import type { StatusTone } from "@commonair/ui";
+import type { Money } from "../money.tsx";
 
 export const stats = [
   { label: "Verified viewers", value: "412", delta: "peak 468" },
@@ -42,8 +43,26 @@ export const tagSuggestions = ["Ceramics", "Chill", "Educational", "Pottery", "G
 
 export const quickActions = ["Poll", "Prediction", "Raid", "Clip", "Slow mode", "Shield mode"] as const;
 
-export const feed: { id: string; kind: string; tone: StatusTone; who: string; what: string; ago: string }[] = [
-  { id: "f1", kind: "Tip", tone: "success", who: "Fernsby", what: "tipped $5.00 — “that glaze!!”", ago: "12 s ago" },
+export const feed: {
+  id: string;
+  kind: string;
+  tone: StatusTone;
+  who: string;
+  what: string;
+  amount?: Money;
+  message?: string;
+  ago: string;
+}[] = [
+  {
+    id: "f1",
+    kind: "Tip",
+    tone: "success",
+    who: "Fernsby",
+    what: "tipped",
+    amount: { cents: 500 },
+    message: "“that glaze!!”",
+    ago: "12 s ago",
+  },
   { id: "f2", kind: "Gift", tone: "accent", who: "paperlantern", what: "gifted 5 Tier 1 subs", ago: "2 min ago" },
   { id: "f3", kind: "Raid", tone: "info", who: "Lumen Kitchen", what: "raided with 34 viewers", ago: "6 min ago" },
   { id: "f4", kind: "Sub", tone: "accent", who: "ohmslaw", what: "subscribed at Tier 2 · 8 months", ago: "9 min ago" },

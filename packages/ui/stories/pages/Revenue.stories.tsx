@@ -71,7 +71,11 @@ function RevenuePage(): React.JSX.Element {
           }
         />
         <StatGrid cols={3}>
-          <StatCard label="Available balance" value={usd(balances.available.cents)} hint={balances.available.hint} />
+          <StatCard
+            label="Available balance"
+            value={usd(balances.available.cents)}
+            hint={`${balances.available.payout} · minimum ${formatMoney(balances.available.minimum, "USD", "en-US")}`}
+          />
           <StatCard
             label="Earned this month"
             value={usd(balances.earned.cents)}

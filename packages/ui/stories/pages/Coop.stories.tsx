@@ -11,6 +11,7 @@ import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
 import { BreakdownBar, ListPanel, ProgressRow, StatCard, StatGrid } from "@commonair/ui/blocks/data";
 import { council, events, intro, membersByClass, membership, proposals, protectedNote, tabs } from "./fixtures/Coop.ts";
+import { Amount } from "./money.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Co-op/Coop", parameters: pageParameters } satisfies Meta;
@@ -40,7 +41,13 @@ function CoopPage(): React.JSX.Element {
                 <CardContent>
                   <StatGrid cols={4}>
                     {membership.stats.map((stat) => (
-                      <StatCard key={stat.label} size="sm" label={stat.label} value={stat.value} hint={stat.hint} />
+                      <StatCard
+                        key={stat.label}
+                        size="sm"
+                        label={stat.label}
+                        value={typeof stat.value === "string" ? stat.value : <Amount value={stat.value} />}
+                        hint={stat.hint}
+                      />
                     ))}
                   </StatGrid>
                 </CardContent>

@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@commonair/ui/components/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
+import { Input } from "@commonair/ui/components/input";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageTabs } from "@commonair/ui/blocks/headers";
@@ -34,7 +35,7 @@ import {
   split,
   tiers,
   tip as tipDefaults,
-  tipPresets,
+  tipPresetCents,
   type SupportTab,
 } from "./fixtures/Support.ts";
 import { SelectField } from "./select-field.tsx";
@@ -49,16 +50,22 @@ const usd = (cents: number): string => formatMoney(cents, "USD", "en-US");
 function SupportPage(): React.JSX.Element {
   const [tab, setTab] = React.useState<SupportTab>("sub");
   const [tier, setTier] = React.useState("1");
-  const [giftCount, setGiftCount] = React.useState(gift.count);
+  const [giftCount, setGiftCount] = React.useState(gift.defaultCount);
+  const [customCount, setCustomCount] = React.useState(gift.customDefault);
   const [recipient, setRecipient] = React.useState("random");
   const [tipCents, setTipCents] = React.useState(tipDefaults.cents);
   const [method, setMethod] = React.useState("card");
   const chosen = tiers.find((option) => option.value === tier) ?? tiers[0];
+  const giftQuantity = giftCount === "Custom" ? customCount : Number(giftCount);
+  const giftValid = Number.isSafeInteger(giftQuantity) && giftQuantity >= 1 && giftQuantity <= gift.customMax;
+  const giftCents = giftValid ? giftQuantity * gift.tierCents : 0;
   const cta =
     tab === "sub"
       ? `Subscribe for ${usd(chosen?.cents ?? 0)} / month`
       : tab === "gift"
-        ? `Gift ${gift.count} subs · ${usd(gift.cents)}`
+        ? giftValid
+          ? `Gift ${giftQuantity} ${giftQuantity === 1 ? "sub" : "subs"} · ${usd(giftCents)}`
+          : "Choose how many subs to gift"
         : `Send ${usd(tipCents)} tip`;
   return (
     <div data-accent={channel.accent}>
@@ -135,6 +142,22 @@ function SupportPage(): React.JSX.Element {
                       value={giftCount}
                       onValueChange={setGiftCount}
                     />
+                    {giftCount === "Custom" ? (
+                      <Field>
+                        <FieldLabel htmlFor="support-gift-count">Number of subs</FieldLabel>
+                        <Input
+                          id="support-gift-count"
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={gift.customMax}
+                          value={Number.isNaN(customCount) ? "" : customCount}
+                          onChange={(event) => setCustomCount(Number.parseInt(event.currentTarget.value, 10))}
+                          aria-invalid={!giftValid || undefined}
+                        />
+                        <FieldDescription>Between 1 and {gift.customMax}.</FieldDescription>
+                      </Field>
+                    ) : null}
                     <SelectField
                       id="support-recipient"
                       label="Recipient"
@@ -145,8 +168,12 @@ function SupportPage(): React.JSX.Element {
                     <KeyValueList
                       rows={[
                         {
-                          term: gift.label,
-                          value: <MoneyAmount value={{ cents: gift.cents, currency: "USD" }} locale="en-US" />,
+                          term: giftValid ? `${giftQuantity} × ${gift.tier}` : gift.tier,
+                          value: giftValid ? (
+                            <MoneyAmount value={{ cents: giftCents, currency: "USD" }} locale="en-US" />
+                          ) : (
+                            "—"
+                          ),
                         },
                       ]}
                     />
@@ -163,7 +190,7 @@ function SupportPage(): React.JSX.Element {
                       currency="USD"
                       value={tipCents}
                       onValueChange={setTipCents}
-                      presets={tipPresets}
+                      presets={tipPresetCents.map((value) => ({ value, label: usd(value) }))}
                       min={100}
                       rangeError="Tips start at $1.00."
                     />
@@ -211,7 +238,7 @@ function SupportPage(): React.JSX.Element {
               options={paymentMethods}
               onValueChange={setMethod}
             />
-            <AccentButton accent={channel.accent} size="lg" className="w-full">
+            <AccentButton accent={channel.accent} size="lg" className="w-full" disabled={tab === "gift" && !giftValid}>
               {cta}
             </AccentButton>
             <p>{smallPrint}</p>

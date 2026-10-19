@@ -31,6 +31,7 @@ import {
   streamInfo,
   tagSuggestions,
 } from "./fixtures/StreamManager.ts";
+import { moneyText } from "./money.tsx";
 import { SelectField } from "./select-field.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
@@ -169,6 +170,8 @@ function StreamManagerPage(): React.JSX.Element {
                   title: (
                     <span>
                       <strong>{event.who}</strong> {event.what}
+                      {event.amount ? <> {moneyText(event.amount)}</> : null}
+                      {event.message ? <> — {event.message}</> : null}
                     </span>
                   ),
                   meta: event.ago,

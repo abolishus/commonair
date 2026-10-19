@@ -11,7 +11,7 @@ export const months = [
 ];
 
 export const balances = {
-  available: { cents: 128_460, hint: "Pays out Nov 1 · minimum $50.00" },
+  available: { cents: 128_460, payout: "Pays out Nov 1", minimum: 5_000 },
   earned: { cents: 84_210, delta: "+14% vs September" },
   patronage: { cents: 9_640, hint: "Paid yearly to members." },
 };

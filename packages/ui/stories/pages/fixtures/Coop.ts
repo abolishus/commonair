@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Sample data from the Coop board (co-op overview & governance). */
+/** Sample data from the Coop board (co-op overview & governance). Money is integer cents, USD. */
 import type { Accent, StatusTone } from "@commonair/ui";
 import type { BreakdownSegment } from "@commonair/ui/blocks/data";
+import type { Money } from "../money.tsx";
 
 export const tabs = [
   { id: "overview", label: "Overview", href: "#coop", current: true },
@@ -24,8 +25,8 @@ export const membership = {
     { label: "Class", value: "Streamer", hint: "Also counts in all-member votes" },
     { label: "Shares held", value: "1", hint: "One member, one vote" },
     { label: "Votes cast", value: "7 / 8", hint: "this year" },
-    { label: "Patronage (est.)", value: "$96.40", hint: "2026 allocation" },
-  ],
+    { label: "Patronage (est.)", value: { cents: 9_640 }, hint: "2026 allocation" },
+  ] as { label: string; value: string | Money; hint: string }[],
 };
 
 export const proposals: {

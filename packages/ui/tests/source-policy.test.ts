@@ -139,14 +139,18 @@ function stringLiterals(text: string): { value: string; index: number }[] {
 
 /**
  * Tailwind arbitrary syntax in a class token: values (`w-[3px]`, `md:grid-cols-[…]`), properties
- * (`[--x:…]`), the v4 variable shorthand (`bg-(--x)`), arbitrary selector variants (`[&_svg]:…`)
- * and arbitrary breakpoints (`min-[420px]:…`). State variants on data/aria attributes
- * (`data-[state=open]:`, `group-data-[size=sm]/item:`) are selectors, not values, and are allowed.
+ * (`[--x:…]`), the v4 variable shorthand (`bg-(--x)`) and any arbitrary variant (`[&_svg]:…`,
+ * `min-[420px]:`, `has-[…]:`, `supports-[…]:`, `group-[.x]:`, `nth-[…]:`, `not-[…]:`, `peer-[…]:`).
+ * Only state variants on data/aria attributes (`data-[state=open]:`, `aria-[sort=x]:`,
+ * `group-data-[size=sm]/item:`, `peer-aria-[…]:`) are allowed: they are state selectors, not values.
  */
 export function isArbitraryClass(token: string): boolean {
   const parts = token.split(/:(?![^[]*\])/);
   const utility = parts.pop() ?? "";
-  const variantHit = parts.some((variant) => variant.startsWith("[&") || /^(?:min|max)-\[/.test(variant));
+  const variantHit = parts.some(
+    (variant) =>
+      variant.startsWith("[") || (/-[[(]/.test(variant) && !/^(?:group-|peer-)?(?:data|aria)-\[/.test(variant)),
+  );
   const utilityHit =
     /-\[[^\]\s]+\]/.test(utility) ||
     /^!?\[[a-z-]+:[^\]\s]+\]$/.test(utility) ||
@@ -167,7 +171,8 @@ export function scan(source: string, file = "x.tsx"): Violation[] {
   if (file.endsWith(".tsx"))
     for (const tag of openingTags(lex(source, { blankStrings: true }))) {
       const snippet = `<${tag.name}${tag.attrs.split("\n")[0] ?? ""}`;
-      if (/^(?:button|input|select|textarea|table|dialog)$/.test(tag.name)) add("raw-element", tag.index, snippet);
+      if (/^(?:button|input|select|textarea|table|dialog|details|summary|option|label)$/.test(tag.name))
+        add("raw-element", tag.index, snippet);
       if ((tag.name === "div" || tag.name === "span") && /(^|\s)role=/.test(tag.attrs))
         add("role-on-div", tag.index, snippet);
       if (nativeTitleAttributes(`<${tag.name}${tag.attrs}`).length > 0) add("native-title", tag.index, snippet);
@@ -242,6 +247,26 @@ const ALLOW: AllowEntry[] = [
     reason:
       "contract request: role=img makes its focusable tooltip triggers presentational; use a list/figure with labelled days.",
   },
+  {
+    file: "src/blocks/forms/copy-field.tsx",
+    rule: "raw-element",
+    match: "<label",
+    count: 1,
+    reason: "contract request: use FieldLabel (Field + FieldLabel) instead of a raw label.",
+  },
+  ...(
+    [
+      ["src/primitives/live-badge.tsx", 1],
+      ["src/primitives/overlay-badge.tsx", 1],
+      ["src/primitives/status-badge.tsx", 6],
+    ] as const
+  ).map(([file, count]): AllowEntry => ({
+    file,
+    rule: "arbitrary-value",
+    match: "[a]:hover:",
+    count,
+    reason: "The upstream shadcn Badge convention (`[a]:hover:`) for the hover state of a badge rendered as a link.",
+  })),
   {
     file: "src/primitives/overlay-badge.tsx",
     rule: "arbitrary-value",
@@ -341,6 +366,10 @@ describe("detectors", () => {
     ["<textarea />", "raw-element"],
     ["<table>", "raw-element"],
     ["<dialog open>", "raw-element"],
+    ["<details open>", "raw-element"],
+    ["<summary>More</summary>", "raw-element"],
+    ['<option value="a">A</option>', "raw-element"],
+    ['<label htmlFor="x">X</label>', "raw-element"],
     ['<div className="x" role="group">', "role-on-div"],
     ['<span\n  onClick={() => go()}\n  role="img">', "role-on-div"],
     ['<div className="w-[12px] p-4" />', "arbitrary-value"],
@@ -349,6 +378,12 @@ describe("detectors", () => {
     ['<div className="[--card-spacing:--spacing(4)]" />', "arbitrary-value"],
     ['<div className="[&_svg]:size-4" />', "arbitrary-value"],
     ['<div className="min-[420px]:grid-cols-3" />', "arbitrary-value"],
+    ['<div className="has-[>svg]:pl-2" />', "arbitrary-value"],
+    ['<div className="supports-[display:grid]:grid" />', "arbitrary-value"],
+    ['<div className="group-[.open]:flex" />', "arbitrary-value"],
+    ['<div className="nth-[3n]:hidden" />', "arbitrary-value"],
+    ['<div className="not-[.x]:flex" />', "arbitrary-value"],
+    ['<div className="peer-[.x]:flex" />', "arbitrary-value"],
     ["const c = cn(open && `w-[12rem]`);", "arbitrary-value"],
     ['const c = "#a1b2c3";', "color-literal"],
     ['<path fill="#fff" />', "color-literal"],
@@ -374,6 +409,8 @@ describe("detectors", () => {
     '<section role="region"> <ChartContainer role="img">',
     '<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:w-56" />',
     '<div className="data-[state=open]:flex group-data-[size=sm]/item:gap-2" />',
+    '<div className="aria-[sort=ascending]:font-medium peer-data-[checked]:flex peer-aria-[invalid=true]:flex" />',
+    '<Label htmlFor="x">X</Label> <FieldLabel>Y</FieldLabel> <Collapsible> <SelectItem>',
     '<EmptyState icon={X} title="ok" /> <PageHeader title={t("a")} />',
     'const link = "#main-content"; const s = "#settings";',
     'const v = "var(--chart-1)";',
@@ -410,6 +447,9 @@ describe("detectors", () => {
     expect(isArbitraryClass("hover:[&_a]:underline")).toBe(true);
     expect(isArbitraryClass("fill-(--chart-1)")).toBe(true);
     expect(isArbitraryClass("data-[state=open]:bg-muted")).toBe(false);
+    expect(isArbitraryClass("group-aria-[expanded=true]:rotate-180")).toBe(false);
+    expect(isArbitraryClass("has-[[data-slot=x]]:gap-2")).toBe(true);
+    expect(isArbitraryClass("group-[.dark]:block")).toBe(true);
     expect(isArbitraryClass("w-64")).toBe(false);
     expect(isArbitraryClass("bg-destructive/10")).toBe(false);
   });
