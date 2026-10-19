@@ -622,10 +622,11 @@ describe("tokens, bots and the API surface", () => {
     const r = await client(api).call<{ code: string }>("GET", `/api/channels/${alice.username}/vods`);
     expect(r.status).toBe(501);
     expect(r.body.code).toBe("NOT_IMPLEMENTED");
-    const rpc = await fetch(`${api.url}/rpc/legal/current`, {
+    // Same procedure over the RPC transport (oRPC wraps the input in `json`).
+    const rpc = await fetch(`${api.url}/rpc/vods/list`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({ json: { channel: alice.username } }),
     });
     expect(rpc.status).toBe(501);
   });
