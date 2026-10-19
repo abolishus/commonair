@@ -735,6 +735,10 @@ export const RelayNode = z.object({
   suspendedReason: z.string().nullable(),
   version: z.string().nullable(),
   bytesVerified30d: z.number().int(),
+  /** When the relay last submitted a receipt (any status), else null. */
+  lastReceiptAt: Timestamp.nullable(),
+  /** Receipts by status over the last 30 days (by period start). */
+  receipts30d: z.object({ pending: z.number().int(), verified: z.number().int(), rejected: z.number().int() }),
 });
 export const EgressReport = z.object({
   from: Timestamp,

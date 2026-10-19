@@ -124,7 +124,15 @@ test("relay lifecycle: create → register (health-checked) → heartbeat → re
   expect(relayUrls.every((u) => u.startsWith("http://relay-test.invalid:8080/hls/"))).toBe(true);
 
   const mine = await member.client.call<{ id: string; status: string }[]>("GET", "/api/relays");
-  expect(mine.body).toEqual([expect.objectContaining({ id: created.body.relayId, status: "active" })]);
+  expect(mine.body).toEqual([
+    expect.objectContaining({
+      id: created.body.relayId,
+      status: "active",
+      bytesVerified30d: 0,
+      lastReceiptAt: expect.any(String),
+      receipts30d: { pending: 1, verified: 0, rejected: 0 },
+    }),
+  ]);
 
   // Retiring the relay kills its token and removes it from assignment.
   expect((await member.client.call("DELETE", `/api/relays/${created.body.relayId}`)).status).toBe(200);
