@@ -11,7 +11,7 @@ import type { ServerWebSocket } from "bun";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { formatUptime, replyTo } from "../src/bots/commands.ts";
 import { type BotChatConnection, type BotSdk, SdkBot } from "../src/bots/sdk-bot.ts";
-import { TmiBot, tmiConnection } from "../src/bots/tmi-bot.ts";
+import { TmiBot, TmiEventLog, tmiConnection, twitchTagProblems } from "../src/bots/tmi-bot.ts";
 import { ChatClient, ChatProtocolError } from "../src/chat-client.ts";
 import { waitFor } from "../src/wait.ts";
 
@@ -274,8 +274,11 @@ function startFakeIrc(expectedToken: string) {
     fromBot,
     say(channel: string, user: string, text: string) {
       socket?.send(
-        `@badge-info=;badges=;color=#1E90FF;display-name=${user};emotes=;id=${crypto.randomUUID()};mod=0;room-id=1;subscriber=0;tmi-sent-ts=${Date.now()};turbo=0;user-id=2;user-type= :${user}!${user}@${user}.tmi.twitch.tv PRIVMSG #${channel} :${text}`,
+        `@badge-info=;badges=;color=#1E90FF;display-name=${user};emotes=;id=${crypto.randomUUID()};mod=0;room-id=12345;subscriber=0;tmi-sent-ts=${Date.now()};turbo=0;user-id=2;user-type= :${user}!${user}@${user}.tmi.twitch.tv PRIVMSG #${channel} :${text}`,
       );
+    },
+    raw(line: string) {
+      socket?.send(line);
     },
   };
 }
@@ -309,4 +312,99 @@ describe("tmi.js bot", () => {
     expect(privmsgs.some((l) => /^PRIVMSG #chan :live for 2m \ds$/.test(l))).toBe(true);
     expect(privmsgs).toHaveLength(2);
   }, 20_000);
+});
+
+describe("tmi.js bot event recording", () => {
+  test("records chat with tags, CLEARCHAT timeout/ban/clear, CLEARMSG and NOTICE from real tmi.js", async () => {
+    const irc = startFakeIrc("bot-token");
+    const bot = new TmiBot({ url: irc.url, username: "Harness_Bot", token: "bot-token", channels: ["chan"] });
+    await bot.connect();
+    stops.push(() => bot.disconnect());
+    expect(bot.username).toBe("harness_bot");
+    await bot.events.waitForJoin("#chan", { timeoutMs: 5_000 });
+
+    irc.say("chan", "viewer", "hello there");
+    const seen = await bot.events.waitForMessage((m) => m.username === "viewer", "viewer line", { timeoutMs: 5_000 });
+    expect(seen).toMatchObject({ channel: "chan", text: "hello there", self: false });
+    // (tmi.js turns a tag value of "1" into `true`, so the fake uses a multi-digit room id.)
+    expect(twitchTagProblems(seen, "viewer")).toEqual([]);
+
+    const ts = Date.now();
+    irc.raw(`@ban-duration=600;room-id=1;target-user-id=3;tmi-sent-ts=${ts} :tmi.twitch.tv CLEARCHAT #chan :troll`);
+    irc.raw(`@room-id=1;target-user-id=4;tmi-sent-ts=${ts} :tmi.twitch.tv CLEARCHAT #chan :worse`);
+    irc.raw(`@room-id=1;tmi-sent-ts=${ts} :tmi.twitch.tv CLEARCHAT #chan`);
+    irc.raw(`@login=troll;room-id=1;target-msg-id=abc-123;tmi-sent-ts=${ts} :tmi.twitch.tv CLEARMSG #chan :bad words`);
+    irc.raw("@msg-id=msg_timedout :tmi.twitch.tv NOTICE #chan :You are timed out for 600 more seconds.");
+
+    const timeout = await bot.events.waitForModeration((e) => e.kind === "timeout", "timeout", { timeoutMs: 5_000 });
+    expect(timeout).toMatchObject({ channel: "chan", username: "troll", durationSeconds: 600 });
+    expect(timeout.tags["target-user-id"]).toBe("3");
+    const ban = await bot.events.waitForModeration((e) => e.kind === "ban", "ban", { timeoutMs: 5_000 });
+    expect(ban).toMatchObject({ username: "worse", durationSeconds: null });
+    const clear = await bot.events.waitForModeration((e) => e.kind === "clearchat", "clear", { timeoutMs: 5_000 });
+    expect(clear.username).toBeNull();
+    const deleted = await bot.events.waitForModeration((e) => e.kind === "messagedeleted", "delete", {
+      timeoutMs: 5_000,
+    });
+    expect(deleted).toMatchObject({ username: "troll", messageId: "abc-123" });
+    await waitFor("notice", () => bot.events.notices.length > 0, { timeoutMs: 5_000, intervalMs: 20 });
+    expect(bot.events.notices[0]).toMatchObject({ channel: "chan", msgId: "msg_timedout" });
+
+    irc.say("chan", "viewer", "!ping");
+    await waitFor("reply", () => bot.replies.length > 0, { timeoutMs: 5_000, intervalMs: 20 });
+    const reply = bot.replies[0];
+    expect(reply?.receivedAt).toBeTypeOf("number");
+    expect((reply?.at ?? 0) >= (reply?.receivedAt ?? Infinity)).toBe(true);
+  }, 20_000);
+
+  test("event log handlers and waiters without a client", async () => {
+    let now = 1_000;
+    const log = new TmiEventLog(() => now);
+    log.onMessage("#Chan", { username: "Alice", id: "1" }, "hi", false);
+    now = 2_000;
+    log.onTimeout("#chan", "Troll", 599, { "ban-duration": "599" });
+    log.onMessageDeleted("#chan", "troll", { "target-msg-id": 7 });
+    expect(log.messages[0]).toMatchObject({ channel: "chan", username: "alice", at: 1_000 });
+    expect(log.moderation[0]).toMatchObject({ kind: "timeout", username: "troll", durationSeconds: 599, at: 2_000 });
+    // A non-string target-msg-id is not trusted as an id.
+    expect(log.moderation[1]?.messageId).toBeNull();
+    expect((await log.waitForMessage((m) => m.text === "hi")).username).toBe("alice");
+    const later = log.waitForModeration((e) => e.kind === "ban", "ban of x", { timeoutMs: 2_000 });
+    log.onBan("#chan", "x");
+    expect((await later).username).toBe("x");
+    await expect(log.waitForJoin("chan", { timeoutMs: 50 })).rejects.toThrow(/join #chan/);
+    await expect(log.waitForModeration(() => false, "nothing", { timeoutMs: 50 })).rejects.toThrow(/nothing/);
+  });
+
+  test("twitchTagProblems names what a Twitch bot would miss", () => {
+    const good = {
+      username: "fan",
+      tags: {
+        id: "m1",
+        "user-id": "u1",
+        "room-id": "r1",
+        "display-name": "Fan",
+        "tmi-sent-ts": "1700000000000",
+        "message-type": "chat",
+        badges: null,
+        emotes: null,
+        mod: false,
+        subscriber: false,
+        turbo: false,
+        color: null,
+        "user-type": null,
+      },
+    };
+    expect(twitchTagProblems(good, "FAN")).toEqual([]);
+    expect(twitchTagProblems(good, "other")).toEqual(["username is fan, expected other"]);
+    const { id: _id, emotes: _e, ...rest } = good.tags;
+    expect(
+      twitchTagProblems({ username: "fan", tags: { ...rest, "tmi-sent-ts": "soon", "message-type": "action" } }),
+    ).toEqual([
+      "id missing",
+      "tmi-sent-ts missing or not numeric",
+      "message-type is action, expected chat",
+      "emotes missing",
+    ]);
+  });
 });

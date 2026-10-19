@@ -30,6 +30,17 @@ declare module "tmi.js" {
     on(event: "connected", listener: (address: string, port: number) => void): this;
     on(event: "disconnected", listener: (reason: string) => void): this;
     on(event: "join", listener: (channel: string, username: string, self: boolean) => void): this;
+    on(
+      event: "timeout",
+      listener: (channel: string, username: string, reason: null, duration: number, tags: ChatUserstate) => void,
+    ): this;
+    on(event: "ban", listener: (channel: string, username: string, reason: null, tags: ChatUserstate) => void): this;
+    on(event: "clearchat", listener: (channel: string) => void): this;
+    on(
+      event: "messagedeleted",
+      listener: (channel: string, username: string, deletedMessage: string, tags: ChatUserstate) => void,
+    ): this;
+    on(event: "notice", listener: (channel: string, msgId: string, message: string) => void): this;
     on(event: string, listener: (...args: unknown[]) => void): this;
     readyState(): "CONNECTING" | "OPEN" | "CLOSING" | "CLOSED";
   }
