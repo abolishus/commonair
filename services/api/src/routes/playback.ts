@@ -259,14 +259,19 @@ export const playback = {
 
     // Move viewers off a relay that left the active set (KEYS.relays holds active relays only:
     // drained, timed-out, suspended and retired relays are all removed from it). The new token
-    // and playlist point at the origin. `assigned_source`/`relay_id` stay as recorded: the
-    // integrity scorer keeps judging the session as relay-delivered against that relay's
-    // verified receipts (its coverage ends when the relay stops reporting), and receipt checks
-    // keep seeing which sessions the relay served.
+    // and playlist point at the origin, and the session is re-recorded as origin-delivered:
+    // integrity then judges it on origin fetches. That fails safe: an honest viewer's relay
+    // segments are missing from the origin count, but no watch time goes unproven.
     let assignment: Assignment | null = null;
     if (claims.src === "relay" && claims.rid) {
       const relays = await activeRelays(deps);
-      if (!relays.some((r) => r.id === claims.rid && r.status === "active")) assignment = { source: "origin" };
+      if (!relays.some((r) => r.id === claims.rid && r.status === "active")) {
+        assignment = { source: "origin" };
+        await deps.db
+          .update(playbackSessions)
+          .set({ assignedSource: "origin", relayId: null })
+          .where(eq(playbackSessions.id, s.id));
+      }
     }
     const nowSeconds = Math.floor(now.getTime() / 1000);
     if (!assignment && claims.exp - nowSeconds > REFRESH_BEFORE_SECONDS) return { ok: true as const };

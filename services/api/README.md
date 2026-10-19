@@ -119,7 +119,9 @@ create ──► pending ──health ok──► active ──health fail──
   the row after writing `KEYS.relays`, so a suspension or retirement committed in between is
   never undone by a heartbeat.
 - **Drain.** A heartbeat with `draining: true` sets `offline` and removes the relay from
-  `KEYS.relays` at once (no audit row: operational). It never downgrades a suspension.
+  `KEYS.relays` at once (no audit row: operational). It never downgrades a suspension. It bumps
+  `updated_at`, and the health-check CAS also requires `updated_at` unchanged, so a rejoin check
+  already in flight cannot bring a drained relay back.
 - **Timeout.** The worker sets relays that stop heartbeating `offline` and removes them from
   `KEYS.relays`.
 - **Rejoin.** An offline relay rejoins by heartbeating (active after a passing health check, else
@@ -136,9 +138,11 @@ create ──► pending ──health ok──► active ──health fail──
 - **Viewers.** `relays.mine` reads Postgres, so worker suspensions and drains show at once. A
   playback session whose token names a relay that is not in `KEYS.relays` (drained, timed out,
   suspended, retired) gets `switchTo` an origin playlist with a fresh origin token on its next
-  heartbeat. `assigned_source`/`relay_id` stay as recorded: integrity keeps judging the session
-  as relay-delivered against that relay's verified receipts, whose coverage ends when the relay
-  stops reporting.
+  heartbeat, and the session is re-recorded as `assigned_source = 'origin'`, `relay_id = null`.
+  Integrity then judges it on origin fetches. That fails safe: an honest viewer's relay segments
+  are missing from the origin count (undercounted), but no watch time goes unproven.
+  A `relay_until` column (when the session left the relay) would let integrity judge each part
+  on its own evidence; that is a future contract change.
 
 ## Notes
 

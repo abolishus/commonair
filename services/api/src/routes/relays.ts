@@ -191,6 +191,9 @@ async function refreshHealth(deps: Deps, r: RelayRow, opts: { rejoin?: boolean }
         eq(relayNodes.status, r.status),
         eq(relayNodes.tokenHash, r.tokenHash),
         isNull(relayNodes.retiredAt),
+        // Unchanged since we read it: a drain that landed during the health check wins. `<`
+        // read + 1 ms because the driver reads `updated_at` at millisecond precision.
+        lt(relayNodes.updatedAt, new Date(r.updatedAt.getTime() + 1)),
       ),
     )
     .returning();
@@ -332,7 +335,8 @@ export const relays = {
       // offline (offline relays may rejoin on their own; suspended ones only via reinstate).
       const [row] = await deps.db
         .update(relayNodes)
-        .set({ status: "offline" })
+        // At least 1 ms past the previous value, so an in-flight health check's CAS fails.
+        .set({ status: "offline", updatedAt: sql`greatest(now(), ${relayNodes.updatedAt} + interval '1 millisecond')` })
         .where(
           and(
             eq(relayNodes.id, relay.id),

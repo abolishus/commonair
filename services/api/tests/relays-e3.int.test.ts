@@ -14,11 +14,18 @@ let member: Awaited<ReturnType<typeof signUpAndSignIn>>;
 let admin: Awaited<ReturnType<typeof signUpAndSignIn>>;
 /** Relay hosts whose /healthz fails. */
 const unhealthy = new Set<string>();
+/** Relay hosts whose /healthz waits until the promise settles. */
+const held = new Map<string, Promise<void>>();
 /** Added to the API clock (playback heartbeat floor, health re-check window). */
 let offset = 0;
 
 beforeAll(async () => {
-  api = await startApi({ pinnedGet: async (url) => (unhealthy.has(url.host) ? 503 : 200) });
+  api = await startApi({
+    pinnedGet: async (url) => {
+      await held.get(url.host);
+      return unhealthy.has(url.host) ? 503 : 200;
+    },
+  });
   api.deps.now = () => new Date(Date.now() + offset);
   member = await signUpAndSignIn(api);
   admin = await signUpAndSignIn(api);
@@ -214,12 +221,12 @@ test("draining removes the relay at once; its viewers get switchTo the origin; i
   expect(moved.body.switchTo?.startsWith(`${origin}/hls/${mediaPath(member.username)}/index.m3u8?t=`)).toBe(true);
   expect(moved.body.token).toBeTruthy();
   expect(moved.body.switchTo).toContain(encodeURIComponent(moved.body.token ?? ""));
-  // The recorded delivery source is history: integrity keeps judging it against the relay.
+  // Re-recorded as origin-delivered: integrity judges it on origin fetches from now on.
   const [after] = await api.db.db
     .select()
     .from(schema.playbackSessions)
     .where(eq(schema.playbackSessions.id, s.sessionId));
-  expect(after).toMatchObject({ assignedSource: "relay", relayId: r.id });
+  expect(after).toMatchObject({ assignedSource: "origin", relayId: null });
   // With the origin token there is nothing more to move.
   offset += 11_000;
   expect((await beat(s, moved.body.token ?? "")).body.switchTo).toBeUndefined();
@@ -279,6 +286,29 @@ test("a suspended relay heartbeats and sees suspended, is not assigned, and rein
   expect(active.body.status).toBe("active");
   expect(await inAssignment(r.id)).toBe(true);
   expect(await auditRows(r.id, "relay.reinstate")).toHaveLength(2);
+});
+
+test("a drain during an offline relay's health check wins over the check", async () => {
+  const r = await makeRelay("drainrace");
+  expect((await r.register()).body.status).toBe("active");
+  await workerTimesOut(r.id);
+  let release = () => {};
+  held.set(
+    r.host,
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  // A plain heartbeat starts a rejoin health check and waits on it...
+  const rejoin = r.heartbeat();
+  await Bun.sleep(50); // let it reach the health check
+  // ...while the relay drains.
+  expect((await r.heartbeat({ draining: true })).body.status).toBe("offline");
+  held.delete(r.host);
+  release();
+  expect((await rejoin).body.status).toBe("offline");
+  expect((await row(r.id))?.status).toBe("offline");
+  expect(await inAssignment(r.id)).toBe(false);
 });
 
 test("a suspension seen only in Postgres takes the relay out of assignment on its next heartbeat", async () => {
