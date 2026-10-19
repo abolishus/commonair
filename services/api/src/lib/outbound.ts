@@ -85,6 +85,9 @@ export async function outboundUrlProblem(raw: string, policy: OutboundPolicy): P
  * GET `url`, connecting to `address` instead of resolving the host again. The Host header and
  * TLS server name stay the URL's host, so virtual hosting and certificate checks work. With a
  * null address the host is resolved normally (private networks allowed). Resolves to the status.
+ *
+ * `timeoutMs` bounds the whole exchange up to the response headers (connect, TLS, request,
+ * headers), not just socket idleness: a server that trickles bytes cannot hold the request open.
  */
 export type PinnedGet = (url: URL, address: string | null, timeoutMs: number) => Promise<number>;
 
@@ -103,11 +106,19 @@ export const pinnedGet: PinnedGet = (url, address, timeoutMs) =>
       url,
       { method: "GET", timeout: timeoutMs, ...(address ? { lookup: pinTo(address) } : {}) },
       (res) => {
-        res.resume();
+        clearTimeout(deadline);
+        // Only the status matters: drop the body rather than let a trickling one hold the socket.
+        res.on("error", () => {});
+        res.destroy();
         resolve(res.statusCode ?? 0);
       },
     );
+    // The socket `timeout` above fires only after `timeoutMs` of silence; this one is absolute.
+    const deadline = setTimeout(() => req.destroy(new Error("deadline exceeded")), timeoutMs);
     req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", reject);
+    req.on("error", (err) => {
+      clearTimeout(deadline);
+      reject(err);
+    });
     req.end();
   });

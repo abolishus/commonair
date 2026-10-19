@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { createServer, type AddressInfo, type Socket } from "node:net";
 import { describe, expect, test } from "vite-plus/test";
 import type { Deps } from "../src/deps.ts";
 import { outboundUrlProblem, pinnedGet, type OutboundPolicy } from "../src/lib/outbound.ts";
@@ -144,6 +145,71 @@ describe("relay health checks connect to the vetted address", () => {
       expect(seen).toEqual([`relay.example.invalid:${server.port}`]);
     } finally {
       await server.stop(true);
+    }
+  });
+
+  /** A raw TCP server that dribbles `chunks`, one every `everyMs`, to each connection. */
+  async function trickler(chunks: string[], everyMs: number) {
+    const sockets = new Set<Socket>();
+    const server = createServer((sock) => {
+      sockets.add(sock);
+      sock.on("error", () => {});
+      sock.on("close", () => sockets.delete(sock));
+      let i = 0;
+      const timer = setInterval(() => {
+        const c = chunks[i++];
+        if (c === undefined || sock.destroyed) return clearInterval(timer);
+        sock.write(c);
+      }, everyMs);
+      sock.on("close", () => clearInterval(timer));
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as AddressInfo).port;
+    return {
+      port,
+      async close() {
+        for (const s of sockets) s.destroy();
+        await new Promise<void>((r) => server.close(() => r()));
+      },
+    };
+  }
+
+  test("pinnedGet gives up at the total deadline even while bytes keep trickling", async () => {
+    // One byte every 40 ms never trips a 300 ms idle timeout; the headers take ~2 s to finish.
+    const head = "HTTP/1.1 200 OK\r\nX-Pad: " + "a".repeat(40) + "\r\nContent-Length: 0\r\n\r\n";
+    const srv = await trickler(head.split(""), 40);
+    try {
+      const started = Date.now();
+      const url = new URL(`http://relay.example.invalid:${srv.port}/healthz`);
+      await expect(pinnedGet(url, "127.0.0.1", 300)).rejects.toThrow(/deadline/);
+      const took = Date.now() - started;
+      expect(took).toBeGreaterThanOrEqual(250);
+      expect(took).toBeLessThan(1000);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  test("pinnedGet still answers a server that sends headers in time, then trickles the body", async () => {
+    const srv = await trickler(
+      ["HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n", ...Array<string>(50).fill("x")],
+      40,
+    );
+    try {
+      const url = new URL(`http://relay.example.invalid:${srv.port}/healthz`);
+      expect(await pinnedGet(url, "127.0.0.1", 1000)).toBe(204);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  test("pinnedGet times out on a silent server", async () => {
+    const srv = await trickler([], 1000);
+    try {
+      const url = new URL(`http://relay.example.invalid:${srv.port}/healthz`);
+      await expect(pinnedGet(url, "127.0.0.1", 200)).rejects.toThrow(/timeout|deadline/);
+    } finally {
+      await srv.close();
     }
   });
 });

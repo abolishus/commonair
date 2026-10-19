@@ -354,14 +354,15 @@ describe("playback heartbeats", () => {
     clock += 1000;
     expect((await s.beat(1)).status).toBe(200);
     let r = await s.row();
-    expect(r).toMatchObject({ heartbeats: 1, watchSeconds: 0, lastHeartbeatAt: null });
+    expect(r).toMatchObject({ heartbeats: 0, watchSeconds: 0, lastHeartbeatAt: null });
     clock += 1000;
     expect((await s.beat(1)).status).toBe(200);
     r = await s.row();
-    expect(r).toMatchObject({ heartbeats: 2, watchSeconds: 0, lastHeartbeatAt: null });
+    expect(r).toMatchObject({ heartbeats: 0, watchSeconds: 0, lastHeartbeatAt: null });
     clock += 8000; // 10 s since start
     expect((await s.beat(10)).status).toBe(200);
     r = await s.row();
+    expect(r.heartbeats).toBe(1);
     expect(r.watchSeconds).toBe(10);
     expect(r.lastHeartbeatAt?.getTime()).toBe(clock);
   });

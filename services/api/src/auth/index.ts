@@ -14,6 +14,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, twoFactor, username } from "better-auth/plugins";
 import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { eq } from "drizzle-orm";
+import { ALTCHA_FIELD, AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { publishUserControl } from "../lib/control.ts";
@@ -57,6 +58,8 @@ const IMMUTABLE_USER_FIELDS = new Set(["birthDate", "accountType", "botOwnerId",
 /** All a member may change about themselves through `/update-user` (the rest has its own flows). */
 const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
 
+/** better-auth sees paths relative to its base path. */
+const SIGN_UP_PATH = AUTH_ROUTES.signUp.slice(AUTH_BASE_PATH.length);
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
 export function createAuth(deps: Deps) {
@@ -90,7 +93,7 @@ export function createAuth(deps: Deps) {
   return betterAuth({
     appName: site.name,
     baseURL: env.API_PUBLIC_URL,
-    basePath: "/api/auth",
+    basePath: AUTH_BASE_PATH,
     secret: env.AUTH_SECRET,
     trustedOrigins: [site.publicUrl, ...env.AUTH_TRUSTED_ORIGINS],
     telemetry: { enabled: false },
@@ -184,9 +187,9 @@ export function createAuth(deps: Deps) {
         // (ban, set-role, impersonate, remove-user, …) skip our audit log and safeguards such as
         // "never remove the last administrator". Staff use the audited /api/admin procedures.
         if (ctx.path.startsWith("/admin/")) throw new APIError("NOT_FOUND", { message: "Not found" });
-        if (ctx.path !== "/sign-up/email") return;
+        if (ctx.path !== SIGN_UP_PATH) return;
         const body = bodyOf(ctx);
-        const altcha = await verifyAltcha(body.altcha, { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });
+        const altcha = await verifyAltcha(body[ALTCHA_FIELD], { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });
         if (altcha) throw bad("ALTCHA_FAILED", `Proof-of-work check failed (${altcha})`);
         const nameProblem = usernameProblem(typeof body.username === "string" ? body.username : "");
         if (nameProblem)

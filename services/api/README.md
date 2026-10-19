@@ -64,6 +64,32 @@ see the service logs.
 - `src/lib/leaks.ts`: stream-key leak scanning and revocation (`findLeakedKeys`,
   `revokeLeakedKey`; also exported from the package for the chat service).
 
+## Rate limits
+
+Sliding-window buckets in Valkey (`src/lib/ratelimit.ts`, `DEFAULT_RATE_LIMITS`). Procedures pick
+a bucket in their contract meta; signed-in callers are limited per user, anonymous callers per
+client address (IPv4 per address, IPv6 per /64, HMAC'd). `/api/auth/*` writes use `auth` per address.
+
+| Bucket      | Limit           | Subject                                                        |
+| ----------- | --------------- | -------------------------------------------------------------- |
+| `default`   | 120 / minute    | user, relay or address                                         |
+| `write`     | 30 / minute     | user, relay or address                                         |
+| `auth`      | 10 / minute     | address (better-auth writes)                                   |
+| `chat`      | 20 / 30 seconds | user                                                           |
+| `expensive` | 5 / hour        | user, relay or address                                         |
+| `mail`      | 10 / hour       | per template per recipient mailbox, across all senders and IPs |
+
+The `mail` bucket (`recipientLimitedMailer` in `src/mail.ts`) keys on
+`<template>:HMAC(AUTH_SECRET, "mail:" + mailbox)`, where the mailbox is the address lower-cased
+with any `+tag` dropped (and, for Gmail, dots dropped and googlemail.com folded into gmail.com).
+The address itself never reaches Valkey or the logs. Each template has its own cap, so a flood of
+magic links cannot block a password reset. Over the cap the mail is dropped silently: the caller
+sees the usual success, so the endpoint does not reveal whether an account exists.
+
+Client addresses are canonicalized before hashing (`canonicalIp` in `src/lib/netrange.ts`:
+IPv4-mapped IPv6 unwrapped, IPv6 in RFC 5952 form, zone ids dropped), so one client gets one
+`ip_hash`, one rate-limit subject and one `stream_keys.last_used_ip_hash` whatever the spelling.
+
 ## Notes
 
 - Two-factor authentication turns on automatically once `two_factors` has the columns
@@ -73,3 +99,8 @@ see the service logs.
 - MediaMTX's auth requests cannot carry headers, so `/internal/media/auth` authenticates
   internal readers by the `internal` user and `INTERNAL_API_SECRET` password in the body;
   the ready/not-ready hooks require the `x-internal-secret` header.
+- Appeals (`src/routes/appeals.ts`): `integrity` appeals take `session`, `user` or
+  `integrity_flag` subjects and `moderation` appeals take `moderation_action`. Each must concern
+  the appellant. `dmca_notice` and `account_action` return 501 until their tables are wired. An
+  overturned integrity appeal is an integrity allowance (`packages/integrity/src/allowance.ts`).
+  Resolving writes an audit row (ids and enums only) and an `appeal.resolved` outbox row.

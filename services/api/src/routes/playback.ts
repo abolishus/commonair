@@ -3,7 +3,7 @@
 
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { RENDITIONS } from "@commonair/contracts/enums";
+import { RENDITIONS, type DELIVERY_SOURCES } from "@commonair/contracts/enums";
 import { KEYS, mediaPath } from "@commonair/contracts/internal";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
@@ -96,6 +96,16 @@ async function inMatureCategory(deps: Deps, ids: (string | null)[]): Promise<boo
   return rows.length > 0;
 }
 
+/**
+ * `playback_sessions.assigned_source`. An origin session with the P2P loader on is recorded as
+ * `p2p`: it fetches only part of the media from the origin, and integrity's fetch checks expect
+ * that smaller HTTP share instead of holding the viewer at pending. Relay and CDN sessions keep
+ * their source (relay receipts and CDN rules apply to them whatever the peers carry); the token
+ * and playlist still name the HTTP source.
+ */
+export const recordedSource = (a: Assignment, p2pEnabled: boolean): (typeof DELIVERY_SOURCES)[number] =>
+  a.source === "origin" && p2pEnabled ? "p2p" : a.source;
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -124,6 +134,8 @@ export const playback = {
       channelVerifiedViewers: await viewerCount(deps, c.id),
     });
     const network = deps.classifier.classify(req.ip);
+    // Native HLS (WebKit) cannot run the P2P loader.
+    const p2pEnabled = deps.env.P2P_ENABLED && input.p2pCapable && !input.nativeHls;
     await deps.db.insert(playbackSessions).values({
       id: sid,
       channelId: c.id,
@@ -134,14 +146,12 @@ export const playback = {
       userAgent: req.userAgent?.slice(0, 256) ?? null,
       asn: network.asn,
       datacenter: network.hosting ? (network.label ?? "hosting") : null,
-      assignedSource: assignment.source,
+      assignedSource: recordedSource(assignment, p2pEnabled),
       relayId: assignment.source === "relay" ? assignment.relayId : null,
       startedAt: deps.now(),
       fingerprint: { embed: input.embed, nativeHls: input.nativeHls },
     });
     const { token, claims } = await signFor(deps, sid, c.id, path, assignment);
-    // Native HLS (WebKit) cannot run the P2P loader.
-    const p2pEnabled = deps.env.P2P_ENABLED && input.p2pCapable && !input.nativeHls;
     return {
       sessionId: sid,
       token,
@@ -163,6 +173,10 @@ export const playback = {
     if (s.endedAt) throw conflict("This playback session has ended");
     const now = deps.now();
     const wallSeconds = (now.getTime() - (s.lastHeartbeatAt ?? s.startedAt).getTime()) / 1000;
+    // A beat sooner than the floor is ignored outright: no counters, no clock, no verification
+    // evidence. Flooding cannot mint watch time, inflate heartbeat counts or feed the scorer.
+    // Token refresh and relay moves wait for the next beat at the normal interval.
+    if (wallSeconds < MIN_HEARTBEAT_WALL_SECONDS) return { ok: true as const };
 
     const raw = await deps.valkey.hgetall(verifyKey(s.id));
     const state: VerifyState = { consistent: Number(raw.consistent ?? 0) || 0, engaged: raw.engaged === "1" };
@@ -172,10 +186,8 @@ export const playback = {
       visible: input.visible,
       muted: input.muted,
     });
-    // A beat sooner than the floor earns nothing and does not move the clock, so flooding cannot
-    // mint watch time or verification. Watch time never exceeds wall-clock time (plus jitter).
-    const tooSoon = wallSeconds < MIN_HEARTBEAT_WALL_SECONDS;
-    const watched = tooSoon ? 0 : Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
+    // Watch time never exceeds wall-clock time (plus jitter).
+    const watched = Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
     const updated = await deps.db
       .update(playbackSessions)
       .set({
@@ -186,7 +198,7 @@ export const playback = {
         stalls: sql`${playbackSessions.stalls} + ${input.stalls}`,
         latencyMs: input.latencySeconds === null ? s.latencyMs : input.latencySeconds * 1000,
         ttffMs: s.ttffMs ?? input.ttffMs,
-        ...(tooSoon ? {} : { lastHeartbeatAt: now }),
+        lastHeartbeatAt: now,
         ...(input.fingerprint ? { fingerprint: { ...s.fingerprint, ...input.fingerprint } } : {}),
       })
       // Compare-and-set on the clock we read: of two concurrent beats only one is credited.
