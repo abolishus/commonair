@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { formatNumber, useLocale } from "@commonair/ui";
-import { Button, buttonVariants } from "@commonair/ui/components/button";
+import { AccentButton, formatNumber, useLocale } from "@commonair/ui";
 import { FavouriteIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
@@ -38,11 +37,12 @@ export function useFollow(
   return { state, toggle };
 }
 
+/** Follower count for `ChannelHeader`'s `followers` slot (which sets its type and color). */
 export function FollowerCount({ count }: { count: number }): React.JSX.Element {
   const { locale } = useLocale();
   const n = formatNumber(count, locale);
   return (
-    <span data-testid="follower-count" data-count={count} className="text-xs text-muted-foreground">
+    <span data-testid="follower-count" data-count={count}>
       {count === 1 ? t("follow.countOne", { count: n }) : t("follow.countOther", { count: n })}
     </span>
   );
@@ -54,20 +54,23 @@ export interface FollowButtonProps {
   onToggle: () => void;
 }
 
+/**
+ * Follow is the channel's call to action, so it is an `AccentButton` in both states (one element,
+ * so keyboard focus survives the toggle); `aria-pressed` and the label carry the state.
+ */
 export function FollowButton({ signedIn, state, onToggle }: FollowButtonProps): React.JSX.Element {
   if (!signedIn)
     return (
-      <Link data-testid="follow-button" to="/signin" className={buttonVariants({ variant: "outline", size: "sm" })}>
+      <AccentButton data-testid="follow-button" size="sm" nativeButton={false} render={<Link to="/signin" />}>
         <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
         {t("follow.follow")}
-      </Link>
+      </AccentButton>
     );
   const following = state.following === true;
   return (
-    <Button
+    <AccentButton
       data-testid="follow-button"
       data-following={following ? "true" : "false"}
-      variant={following ? "outline" : "default"}
       size="sm"
       aria-pressed={following}
       aria-busy={state.pending || undefined}
@@ -76,6 +79,6 @@ export function FollowButton({ signedIn, state, onToggle }: FollowButtonProps): 
     >
       <HugeiconsIcon icon={FavouriteIcon} strokeWidth={2} aria-hidden />
       {following ? t("follow.following") : t("follow.follow")}
-    </Button>
+    </AccentButton>
   );
 }

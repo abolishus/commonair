@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
-import { Field, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
+import { PageContainer } from "@commonair/ui/layouts";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
+import { SignInPasswordField } from "../../components/password-fields.tsx";
 import { t } from "../../i18n/index.ts";
 import { signIn } from "../../lib/auth.ts";
 import { authErrorMessage } from "../../lib/form-errors.ts";
@@ -36,8 +39,8 @@ function SignInPage(): React.JSX.Element {
   };
 
   return (
-    <section className="mx-auto flex max-w-md flex-col gap-6 px-4 py-12">
-      <h1 className="font-display text-xl font-semibold">{t("signin.title")}</h1>
+    <PageContainer width="form" className="flex flex-col gap-6 py-12">
+      <PageHeader title={t("signin.title")} />
       <form onSubmit={(e) => void onSubmit(e)}>
         <FieldGroup>
           <Field>
@@ -51,17 +54,7 @@ function SignInPage(): React.JSX.Element {
               required
             />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="signin-password">{t("field.password")}</FieldLabel>
-            <Input
-              id="signin-password"
-              data-testid="signin-password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-            />
-          </Field>
+          <SignInPasswordField />
           {error && <FormError>{error}</FormError>}
           <Button
             data-testid="signin-submit"
@@ -72,14 +65,14 @@ function SignInPage(): React.JSX.Element {
           >
             {t("signin.submit")}
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <FieldDescription>
             {t("signin.noAccount")}{" "}
-            <Link to="/signup" className="underline underline-offset-4">
+            <Button variant="link" nativeButton={false} render={<Link to="/signup" />}>
               {t("nav.signUp")}
-            </Link>
-          </p>
+            </Button>
+          </FieldDescription>
         </FieldGroup>
       </form>
-    </section>
+    </PageContainer>
   );
 }

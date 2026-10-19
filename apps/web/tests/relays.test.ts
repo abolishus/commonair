@@ -28,11 +28,12 @@ describe("relay status badges", () => {
     expect(view.hint).toBe(en[badge.hintKey]);
   });
 
-  it("marks suspension as destructive and active as the primary badge", () => {
-    expect(relayStatusView("suspended").variant).toBe("destructive");
-    expect(relayStatusView("active").variant).toBe("default");
-    for (const s of RELAY_STATUSES.filter((x) => x !== "suspended"))
-      expect(relayStatusView(s).variant).not.toBe("destructive");
+  // The badge moved from `Badge` variants to `StatusBadge` tones (E4a); the rule is the same.
+  it("marks suspension as danger and active as the success badge", () => {
+    expect(relayStatusView("suspended").tone).toBe("danger");
+    expect(relayStatusView("active").tone).toBe("success");
+    for (const s of RELAY_STATUSES.filter((x) => x !== "suspended")) expect(relayStatusView(s).tone).not.toBe("danger");
+    for (const s of RELAY_STATUSES.filter((x) => x !== "active")) expect(relayStatusView(s).tone).not.toBe("success");
   });
 
   it("gives every status a distinct label", () => {

@@ -4,6 +4,7 @@
 /** Pure helpers for the `/relays` page: status badges, byte sizes, the run command, links. */
 import type { RelayNode } from "@commonair/contracts/dto";
 import { RELAY_STATUSES } from "@commonair/contracts/enums";
+import type { StatusTone } from "@commonair/ui";
 import type { z } from "zod";
 import { t, type MessageKey } from "../i18n/index.ts";
 
@@ -14,32 +15,33 @@ export { RELAY_STATUSES };
 export const RELAYS_POLL_MS = 10_000;
 export const RELAY_NAME_MAX = 50;
 
-type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+// `StatusBadge` tones: suspension is the only danger state, active the only success state.
+type RelayTone = Extract<StatusTone, "neutral" | "success" | "warning" | "danger">;
 
 export interface RelayStatusBadge {
   key: MessageKey;
   hintKey: MessageKey;
-  variant: BadgeVariant;
+  tone: RelayTone;
 }
 
 /** One badge per `RELAY_STATUSES` value; the record type makes a new status a compile error here. */
 export const RELAY_STATUS_BADGES: Record<RelayStatus, RelayStatusBadge> = {
-  pending: { key: "relays.status.pending", hintKey: "relays.status.pendingHint", variant: "secondary" },
-  active: { key: "relays.status.active", hintKey: "relays.status.activeHint", variant: "default" },
-  degraded: { key: "relays.status.degraded", hintKey: "relays.status.degradedHint", variant: "outline" },
-  suspended: { key: "relays.status.suspended", hintKey: "relays.status.suspendedHint", variant: "destructive" },
-  offline: { key: "relays.status.offline", hintKey: "relays.status.offlineHint", variant: "secondary" },
+  pending: { key: "relays.status.pending", hintKey: "relays.status.pendingHint", tone: "neutral" },
+  active: { key: "relays.status.active", hintKey: "relays.status.activeHint", tone: "success" },
+  degraded: { key: "relays.status.degraded", hintKey: "relays.status.degradedHint", tone: "warning" },
+  suspended: { key: "relays.status.suspended", hintKey: "relays.status.suspendedHint", tone: "danger" },
+  offline: { key: "relays.status.offline", hintKey: "relays.status.offlineHint", tone: "neutral" },
 };
 
 export interface RelayStatusView {
   label: string;
   hint: string;
-  variant: BadgeVariant;
+  tone: RelayTone;
 }
 
 export function relayStatusView(status: RelayStatus): RelayStatusView {
   const b = RELAY_STATUS_BADGES[status];
-  return { label: t(b.key), hint: t(b.hintKey), variant: b.variant };
+  return { label: t(b.key), hint: t(b.hintKey), tone: b.tone };
 }
 
 const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte", "petabyte"] as const;

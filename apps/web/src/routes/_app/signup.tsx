@@ -1,14 +1,18 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { PageHeader } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
+import { Checkbox } from "@commonair/ui/components/checkbox";
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
+import { PageContainer } from "@commonair/ui/layouts";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { AltchaField, type AltchaFieldHandle } from "../../components/altcha-field.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../../components/legal-document-link.tsx";
+import { SignUpPasswordField } from "../../components/password-fields.tsx";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { signUp } from "../../lib/auth.ts";
@@ -60,19 +64,17 @@ function SignUpPage(): React.JSX.Element {
 
   if (doneEmail)
     return (
-      <section
-        data-testid="signup-check-email"
-        className="mx-auto flex max-w-md flex-col gap-3 px-4 py-12"
-        aria-live="polite"
-      >
-        <h1 className="font-display text-xl font-semibold">{t("signup.checkEmailTitle")}</h1>
-        <p className="text-sm text-muted-foreground">{t("signup.checkEmailBody", { email: doneEmail })}</p>
-      </section>
+      <PageContainer data-testid="signup-check-email" width="form" className="py-12" aria-live="polite">
+        <PageHeader
+          title={t("signup.checkEmailTitle")}
+          description={t("signup.checkEmailBody", { email: doneEmail })}
+        />
+      </PageContainer>
     );
 
   return (
-    <section className="mx-auto flex max-w-md flex-col gap-6 px-4 py-12">
-      <h1 className="font-display text-xl font-semibold">{t("signup.title")}</h1>
+    <PageContainer width="form" className="flex flex-col gap-6 py-12">
+      <PageHeader title={t("signup.title")} />
       <form onSubmit={(e) => void onSubmit(e)}>
         <FieldGroup>
           <Field>
@@ -101,38 +103,20 @@ function SignUpPage(): React.JSX.Element {
             />
             <FieldDescription id="signup-username-hint">{t("signup.usernameHint")}</FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel htmlFor="signup-password">{t("field.password")}</FieldLabel>
-            <Input
-              id="signup-password"
-              data-testid="signup-password"
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={10}
-              maxLength={256}
-              aria-describedby="signup-password-hint"
-            />
-            <FieldDescription id="signup-password-hint">{t("signup.passwordHint")}</FieldDescription>
-          </Field>
+          <SignUpPasswordField />
+          {/* A native date input (shadcn `Input type="date"`), not DateOfBirthField's three Selects:
+              the e1 contract fills `signup-birthdate` with one YYYY-MM-DD value, and the browser's
+              date picker is accessible and localized on every platform. */}
           <Field>
             <FieldLabel htmlFor="signup-birthdate">{t("field.birthDate")}</FieldLabel>
             <Input id="signup-birthdate" data-testid="signup-birthdate" name="birthDate" type="date" required />
           </Field>
-          <div className="flex items-start gap-2 text-xs">
-            <input
-              id="signup-legal"
-              data-testid="signup-legal"
-              name="legal"
-              type="checkbox"
-              required
-              className="mt-0.5 size-4 shrink-0 accent-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            <span>
-              <label htmlFor="signup-legal">{t("signup.legalAccept")}</label>{" "}
+          <Field orientation="horizontal">
+            <Checkbox id="signup-legal" data-testid="signup-legal" name="legal" required />
+            <FieldContent>
+              <FieldLabel htmlFor="signup-legal">{t("signup.legalAccept")}</FieldLabel>
               {docs && docs.length > 0 && (
-                <span className="text-muted-foreground">
+                <FieldDescription>
                   {t("common.openParen")}
                   {docs.map((d, i) => (
                     <React.Fragment key={d.id}>
@@ -141,10 +125,10 @@ function SignUpPage(): React.JSX.Element {
                     </React.Fragment>
                   ))}
                   {t("common.closeParen")}
-                </span>
+                </FieldDescription>
               )}
-            </span>
-          </div>
+            </FieldContent>
+          </Field>
           <AltchaField ref={altchaRef} onChange={setAltcha} />
           {error && <FormError>{error}</FormError>}
           <Button
@@ -156,14 +140,14 @@ function SignUpPage(): React.JSX.Element {
           >
             {t("signup.submit")}
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <FieldDescription>
             {t("signup.haveAccount")}{" "}
-            <Link to="/signin" className="underline underline-offset-4">
+            <Button variant="link" nativeButton={false} render={<Link to="/signin" />}>
               {t("nav.signIn")}
-            </Link>
-          </p>
+            </Button>
+          </FieldDescription>
         </FieldGroup>
       </form>
-    </section>
+    </PageContainer>
   );
 }

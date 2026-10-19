@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ConfirmDialog, EmptyState, IconButton } from "@commonair/ui";
-import { buttonVariants } from "@commonair/ui/components/button";
-import { Input } from "@commonair/ui/components/input";
+import { ConfirmDialog, EmptyState, StatusBadge } from "@commonair/ui";
+import { ChatComposer, ChatMessage, ChatPanel as ChatPanelShell } from "@commonair/ui/blocks/media";
+import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
-import { cn } from "@commonair/ui/lib/utils";
-import { Message01Icon, SentIcon, UserBlock01Icon } from "@hugeicons/core-free-icons";
+import { Message01Icon, UserBlock01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
@@ -16,34 +15,7 @@ import { ChatConnection, type ChatStatus } from "./connection.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
 import { ModMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
 import { chatReducer, type ChatRow } from "./state.ts";
-
-/** Chat name colors come from the AA-checked `--chat-N` tokens, picked by username. */
-const NAME_COLORS = [
-  "text-chat-1",
-  "text-chat-2",
-  "text-chat-3",
-  "text-chat-4",
-  "text-chat-5",
-  "text-chat-6",
-  "text-chat-7",
-  "text-chat-8",
-  "text-chat-9",
-  "text-chat-10",
-  "text-chat-11",
-  "text-chat-12",
-] as const;
-
-export function nameColor(username: string): string {
-  let h = 0;
-  for (const ch of username) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return NAME_COLORS[h % NAME_COLORS.length] ?? NAME_COLORS[0];
-}
-
-function statusLabel(status: ChatStatus): string {
-  if (status === "open") return t("chat.status.open");
-  if (status === "connecting") return t("chat.status.connecting");
-  return t("chat.status.closed");
-}
+import { chatStatusView, nameColorIndex } from "./view.ts";
 
 export interface ChatPanelProps {
   channel: string;
@@ -59,6 +31,7 @@ interface ModTarget {
 }
 
 const EMPTY_ROWS: ChatRow[] = [];
+const noop = () => {};
 
 export function ChatPanel({ channel, signedIn, selfUsername = null, className }: ChatPanelProps): React.JSX.Element {
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
@@ -72,7 +45,6 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
   });
   const [draft, setDraft] = React.useState("");
   const connection = React.useRef<ChatConnection | null>(null);
-  const listRef = React.useRef<HTMLOListElement>(null);
   const noticeSeq = React.useRef(0);
 
   React.useEffect(() => {
@@ -107,11 +79,6 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
     };
   }, [channel, signedIn]);
 
-  React.useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [rows]);
-
   const send = () => {
     if (!draft.trim()) return;
     if (connection.current?.send(draft)) setDraft("");
@@ -134,113 +101,100 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
   };
 
   const self = selfUsername?.toLowerCase() ?? null;
+  const statusView = chatStatusView(status);
+  const inputDisabled = status !== "open" || !canChat;
 
   return (
-    <section
+    <ChatPanelShell
       data-testid="chat"
       data-state={status}
       aria-label={t("chat.title")}
-      className={cn("flex min-h-0 flex-col border border-border", className)}
-    >
-      <header className="flex items-center justify-between border-b border-border px-3 py-2 text-xs font-medium">
-        <span>{t("chat.title")}</span>
-        <span className="text-muted-foreground" aria-live="polite">
-          {statusLabel(status)}
-        </span>
-      </header>
-      <ol
-        ref={listRef}
-        className="min-h-48 flex-1 overflow-y-auto px-3 py-2 text-xs"
-        aria-live="polite"
-        aria-relevant="additions"
-      >
-        {rows.length === 0 ? (
-          <li>
-            <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} />
-          </li>
+      title={t("chat.title")}
+      logLabel={t("chat.log")}
+      newMessagesLabel={t("chat.newMessages")}
+      viewersAction={
+        <StatusBadge tone={statusView.tone} aria-live="polite">
+          {statusView.label}
+        </StatusBadge>
+      }
+      className={className}
+      footer={
+        signedIn ? (
+          <ChatComposer
+            value={draft}
+            onValueChange={setDraft}
+            onSubmit={send}
+            maxLength={500}
+            placeholder={t("chat.placeholder")}
+            sendLabel={t("chat.send")}
+            disabled={inputDisabled}
+            inputProps={{ "data-testid": "chat-input" }}
+            sendProps={{ "data-testid": "chat-send" }}
+          />
         ) : (
-          rows.map((row) => {
-            if (row.kind === "notice")
-              return (
-                <li
-                  key={row.id}
-                  data-testid="chat-notice"
-                  data-code={row.code}
-                  className="py-0.5 break-words text-muted-foreground italic"
-                >
-                  {noticeMessage(row.code)}
-                </li>
-              );
-            const { user } = row.message;
-            const target = { username: user.username, displayName: user.displayName };
+          <ChatComposer
+            data-testid="chat-signin-prompt"
+            value=""
+            onValueChange={noop}
+            onSubmit={noop}
+            placeholder={t("chat.placeholder")}
+            sendLabel={t("chat.send")}
+            signin={
+              <>
+                {t("chat.signInPrompt")}
+                <Button variant="outline" size="xs" nativeButton={false} render={<Link to="/signin" />}>
+                  {t("nav.signIn")}
+                </Button>
+              </>
+            }
+          />
+        )
+      }
+    >
+      {rows.length === 0 ? (
+        <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} />
+      ) : (
+        rows.map((row) => {
+          if (row.kind === "notice")
             return (
-              <li
+              <ChatMessage
                 key={row.id}
-                data-testid="chat-message"
-                data-id={row.id}
-                data-author={user.username}
-                data-deleted={row.deleted ? "true" : undefined}
-                className="flex items-start gap-1 py-0.5"
-              >
-                <p className="min-w-0 flex-1 break-words">
-                  <span className={cn("font-semibold", nameColor(user.username))}>{user.displayName}</span>
-                  <span className="text-muted-foreground">{t("chat.nameSeparator")}</span>
-                  {row.deleted ? (
-                    <span className="text-muted-foreground italic">{t("chat.messageDeleted")}</span>
-                  ) : (
-                    <span className={row.message.isAction ? "italic" : undefined}>{row.message.body}</span>
-                  )}
-                </p>
-                {canModerate && !row.deleted && user.username.toLowerCase() !== self && (
+                notice
+                data-testid="chat-notice"
+                data-code={row.code}
+                author=""
+                colorIndex={1}
+                body={noticeMessage(row.code)}
+              />
+            );
+          const { user } = row.message;
+          const target = { username: user.username, displayName: user.displayName };
+          return (
+            <ChatMessage
+              key={row.id}
+              data-testid="chat-message"
+              data-id={row.id}
+              data-author={user.username}
+              data-deleted={row.deleted ? "true" : undefined}
+              author={user.displayName}
+              colorIndex={nameColorIndex(user.username)}
+              body={row.message.body}
+              action={row.message.isAction}
+              deleted={row.deleted}
+              deletedLabel={t("chat.messageDeleted")}
+              actions={
+                canModerate && !row.deleted && user.username.toLowerCase() !== self ? (
                   <ModMenu
                     displayName={user.displayName}
                     onTimeout={() => void timeout(target)}
                     onBan={() => setBanDialog({ open: true, target })}
                   />
-                )}
-              </li>
-            );
-          })
-        )}
-      </ol>
-      <div className="border-t border-border p-2">
-        {signedIn ? (
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send();
-            }}
-          >
-            <Input
-              data-testid="chat-input"
-              value={draft}
-              onChange={(e) => setDraft(e.currentTarget.value)}
-              maxLength={500}
-              placeholder={t("chat.placeholder")}
-              aria-label={t("chat.placeholder")}
-              disabled={status !== "open" || !canChat}
+                ) : undefined
+              }
             />
-            <IconButton
-              data-testid="chat-send"
-              type="submit"
-              label={t("chat.send")}
-              icon={SentIcon}
-              disabled={status !== "open" || !canChat || !draft.trim()}
-            />
-          </form>
-        ) : (
-          <p
-            data-testid="chat-signin-prompt"
-            className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-          >
-            {t("chat.signInPrompt")}
-            <Link to="/signin" className={buttonVariants({ variant: "outline", size: "xs" })}>
-              {t("nav.signIn")}
-            </Link>
-          </p>
-        )}
-      </div>
+          );
+        })
+      )}
       <ConfirmDialog
         open={banDialog.open}
         onOpenChange={(open) => {
@@ -254,6 +208,6 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
         onConfirm={() => (banDialog.target ? ban(banDialog.target) : undefined)}
         onError={(err) => toastActionError(err, t("chat.mod.failed"))}
       />
-    </section>
+    </ChatPanelShell>
   );
 }
