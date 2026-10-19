@@ -62,10 +62,16 @@ const CATASTROPHIC = [
   ".*.{0,20}!",
   alt(".*.{0,20}!", 18),
   ".{0,20}.*!",
-  "\\w+a?!",
+  // Nested alternations inside a repeated group (exponential: each iteration matches two ways).
+  "(?:(?:a|\\w))+x",
+  "(?:(?:a|\\w)|!)+x",
+  "(?:(?:a|[ab])(?:a|[ab])|c)+!",
+  "(?:(?:ab|a)b)+x",
+  "(?:(?:a|\\w)){1,20}x",
+  "(?:x(?:a|\\w))+!",
   "\\w+a?a?a?a?a?!",
   "[a-z]+[a-z]{0,5}!",
-  "\\w+(?:a|ab)!",
+  "\\w+(?:a|ab)(?:a|ab)(?:a|ab)!",
   "(?:x\\w+)?\\w+",
   "(?:https?://)?\\S+",
   alt(".*!", 5),
@@ -156,6 +162,9 @@ const REALISTIC = [
   "(?:.|\\n)+z",
   "(?:https?|ftp)://\\S+",
   "f+u+c+k+e+r+",
+  "f.{0,3}u.{0,3}c.{0,3}k",
+  "\\w+a?!",
+  "(?:(?:a|b)c|d)+!",
   "\\bfoo\\w*|\\bbar\\w*|\\bbaz\\w*",
   "\\b(?:crypto|nft)\\b.*\\b(?:giveaway|airdrop)\\b",
   "buy.*followers|cheap.*viewers|free.*nitro|join.*discord|visit.*site",
@@ -205,7 +214,10 @@ describe("unsafeFilterRegexReason", () => {
     expect(unsafeFilterRegexReason("a?a?a?a?a?a?a?a?a?a?aaaaa")).toBeNull(); // 2^10
     expect(unsafeFilterRegexReason("a?a?a?a?a?a?a?a?a?a?a?aaaaa")).not.toBeNull(); // 2^11
     expect(unsafeFilterRegexReason("\\d+\\s\\w?\\w?!")).toBeNull(); // the \\s separates the chains
-    expect(unsafeFilterRegexReason("\\w+a?!")).toMatch(/unbounded repeat cannot sit next/);
+    expect(unsafeFilterRegexReason("\\w+a?!")).toBeNull(); // O(n) × 2
+    expect(unsafeFilterRegexReason("\\w+a?a?a?!")).toMatch(/unbounded repeat is followed by optional/);
+    expect(unsafeFilterRegexReason("(?:https?://)?(?:www\\.)?\\w+\\.(?:ru|xyz|tk)\\b")).toMatch(/unbounded repeat/);
+    expect(unsafeFilterRegexReason("(?:(?:a|\\w))+x")).toMatch(/different characters/);
   });
 
   test("alternatives add up unless their prefixes tell them apart", () => {

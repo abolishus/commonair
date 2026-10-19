@@ -82,8 +82,10 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   const subscriber = createValkey(opts.valkeyUrl, { name: "chat-sub" });
   const bus = new Bus(valkey, subscriber, opts.busPrefix ?? "", logger);
   const directory = new Directory(opts.db, {
-    onInvalidFilter: (channelId, filterId, reason) =>
-      logger.warn("word filter skipped", { channelId, filterId, reason }),
+    onInvalidFilter: (channelId, filterId, reason) => {
+      metrics.filterSkipped(reason);
+      logger.warn("word filter skipped", { channelId, filterId, reason });
+    },
     ...opts.directory,
   });
   const writer = new MessageWriter(opts.db, logger, metrics, opts.writer);
@@ -97,7 +99,11 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       : new WorkerFilterRunner({
           workers: opts.filterWorkers,
           logger,
-          onTimeout: (reason) => metrics.filterTimeout(reason),
+          hooks: {
+            held: (reason) => metrics.filterHeld(reason),
+            quarantined: () => metrics.filterQuarantined(),
+            zombies: (delta) => metrics.filterZombies(delta),
+          },
         });
 
   /** BUS.userControl: platform-wide suspension, deletion, token revocation, role/profile changes. */

@@ -8,19 +8,21 @@
  * Grammar: literals, escaped metacharacters, character classes, `.`, `\d\w\s` (and negations),
  * `\p{…}`, `\b\B^$`, non-capturing/capturing groups and `|`. Quantifiers `? * + {m} {m,} {m,n}`
  * (lazy allowed) apply to one atom or to a group that contains no quantifier itself.
- * Refused: backreferences, lookaround, named groups, nested quantifiers, repeated groups whose
- * alternatives can start with the same character, bounded repeats above MAX_BOUNDED_REPEAT, and
- * patterns that can match the empty string.
+ * Refused: backreferences, lookaround, named groups, nested quantifiers, repeated groups with an
+ * alternation (at any depth) whose alternatives can start with the same character, bounded
+ * repeats above MAX_BOUNDED_REPEAT, and patterns that can match the empty string.
  *
  * Cost model: the estimated backtracking steps per start position, which must stay under
  * MAX_COST. Variable-length elements of one sequence whose characters overlap (with only
  * overlapping or optional elements between them) form an ambiguity chain: they can split the same
  * text in many ways, so their repeat choices multiply. An unbounded repeat (`*`, `+`, `{m,}`) scans
  * to the end of the message and backtracks over it, so it costs O(n) per start position (counted
- * as UNBOUNDED_COST, half the longest message; steps over repeated groups and non-ASCII
- * classes are weighted SLOW_STEP times). A chain may hold one unbounded repeat and nothing
- * else that adds choices: `.*.{0,20}!` is O(n·21) per start and refused, while
- * `[^\s]+\.(?:ru|xyz)` (the group is decided by its first character) is fine. Chains separated
+ * as UNBOUNDED_COST, half the longest message). A chain may hold one unbounded repeat, whose
+ * O(n) scan multiplies with the choices of everything else in the chain: `.*.{0,20}!` is
+ * O(n·21) per start and refused, `\w+a?!` (O(n·2)) and `[^\s]+\.(?:ru|xyz)` (the group is
+ * decided by its first character) are fine. Steps over repeated groups and non-ASCII classes are
+ * slower, so a chain containing one is weighted SLOW_STEP times (once per chain; in an unbounded
+ * chain only when the scan itself is slow). Chains separated
  * by a required element the earlier chain cannot match consume disjoint stretches of the input,
  * so bounded chains add up and the unbounded scans together cover the message at most once.
  * Alternatives (top level and inside groups) add up unless their fixed prefixes tell them apart,
@@ -196,7 +198,7 @@ class Parser {
         this.fail("nested quantifiers are not allowed");
       if (node.alts.some((seq) => seq.every((e) => e.node.kind === "assert")))
         this.fail("a repeated group cannot have an empty alternative");
-      if (branchesOverlap(node.alts))
+      if (branchesOverlap(node.alts) || (q.max > 1 && !nestedAltsDisjoint(node.alts)))
         this.fail("alternatives in a repeated group must start with different characters");
     }
     return { node, min: q.min, max: q.max, quantified: true };
@@ -428,6 +430,8 @@ interface Info {
   variable: boolean;
   cost: number;
   unbounded: number;
+  /** Its repeat choices step over a group or a class that can match non-ASCII (slow steps). */
+  slow: boolean;
 }
 
 interface Cost {
@@ -440,10 +444,10 @@ function elemInfo(e: Elem): Info {
   const min = minLength([e]);
   const max = maxLength([e]);
   if (e.quantified) {
-    // Repeated groups hold no quantifier and their alternatives are disjoint, so the only
-    // choice is how many times the repeat runs. An optional group adds its own contents' choices.
+    // Repeated groups hold no quantifier and every alternation in them is decided by its first
+    // character, so the only choice is how many times the repeat runs. An optional group adds
+    // its own contents' choices.
     const span = Number.isFinite(e.max) ? e.max - e.min + 1 : UNBOUNDED_COST;
-    const choices = span > 1 && (e.node.kind === "group" || set.nonAscii) ? span * SLOW_STEP : span;
     const inner: Cost =
       e.node.kind === "group" && e.max <= 1
         ? altsCost(e.node.alts, e.node.alts.map(analyzeSeq))
@@ -452,15 +456,16 @@ function elemInfo(e: Elem): Info {
       set,
       min,
       variable: min !== max,
-      cost: choices * inner.cost,
+      cost: span * inner.cost,
       unbounded: (Number.isFinite(e.max) ? 0 : 1) + inner.unbounded,
+      slow: span > 1 && (e.node.kind === "group" || set.nonAscii),
     };
   }
   if (e.node.kind === "group") {
     const { cost, unbounded } = altsCost(e.node.alts, e.node.alts.map(analyzeSeq));
-    return { set, min, variable: min !== max, cost, unbounded };
+    return { set, min, variable: min !== max, cost, unbounded, slow: false };
   }
-  return { set, min, variable: false, cost: 1, unbounded: 0 };
+  return { set, min, variable: false, cost: 1, unbounded: 0, slow: false };
 }
 
 /**
@@ -473,6 +478,20 @@ function altsCost(alts: Elem[][], parts: Cost[]): Cost {
   const unbounded = Math.max(0, ...parts.map((p) => p.unbounded));
   if (cost > MAX_COST) throw new Refusal(TOO_COSTLY);
   return { cost, unbounded };
+}
+
+/**
+ * Inside a repeated group every alternation, at every depth, must be decided by its first
+ * character: `(?:(?:a|\w))+` would otherwise match each iteration in two ways (exponential).
+ */
+function nestedAltsDisjoint(alts: Elem[][]): boolean {
+  for (const seq of alts)
+    for (const e of seq) {
+      if (e.node.kind !== "group") continue;
+      if (e.node.alts.length > 1 && branchesOverlap(e.node.alts)) return false;
+      if (!nestedAltsDisjoint(e.node.alts)) return false;
+    }
+  return true;
 }
 
 /** Repeated groups: alternatives must differ in their very first character. */
@@ -551,7 +570,13 @@ function analyzeSeq(seq: Elem[]): Cost {
   }
   // Ambiguous fixed-length alternations re-run everything after them for each alternative, so
   // they multiply. Within a chain the repeat choices multiply.
-  const chains = new Map<number, { cost: number; unbounded: number; ambiguous: number }>();
+  interface Chain {
+    cost: number;
+    unbounded: number;
+    slow: boolean;
+    unboundedSlow: boolean;
+  }
+  const chains = new Map<number, Chain>();
   let fixedProduct = 1;
   infos.forEach((info, i) => {
     if (!info.variable) {
@@ -559,15 +584,17 @@ function analyzeSeq(seq: Elem[]): Cost {
       return;
     }
     const root = find(i);
-    const chain = chains.get(root) ?? { cost: 1, unbounded: 0, ambiguous: 0 };
+    const chain = chains.get(root) ?? { cost: 1, unbounded: 0, slow: false, unboundedSlow: false };
     chain.cost *= info.cost;
     chain.unbounded += info.unbounded;
-    if (info.cost > 1) chain.ambiguous++;
+    chain.slow ||= info.slow;
+    if (info.unbounded > 0) chain.unboundedSlow ||= info.slow;
     chains.set(root, chain);
   });
   // Chains are separated by characters only one side can take, so they consume disjoint
   // stretches of the input: bounded chains add up, and the unbounded scans together cover the
-  // message at most once (the costliest one dominates).
+  // message at most once (the costliest one dominates). Slow steps weigh a chain once: in an
+  // unbounded chain the scan dominates, so only a slow scan counts.
   let bounded = 0;
   let scan = 0;
   let unbounded = 0;
@@ -577,14 +604,14 @@ function analyzeSeq(seq: Elem[]): Cost {
         "two unbounded repeats can match the same text: merge them (l+l+ → l{2,}) or bound one (.{0,20} instead of .*)",
       );
     if (chain.unbounded === 1) {
-      // O(n) per start already; any further choice in the chain would multiply it.
-      if (chain.ambiguous > 1)
+      const cost = chain.cost * (chain.unboundedSlow ? SLOW_STEP : 1);
+      if (cost > MAX_COST)
         throw new Refusal(
-          "an unbounded repeat cannot sit next to optional or repeated parts that match the same characters: put a required character it cannot match between them, or bound it (.{0,20} instead of .*)",
+          "an unbounded repeat is followed by optional or repeated parts that can match the same characters, so every position it backs off to is tried several ways: put a required character it cannot match between them, or bound it (.{0,20} instead of .*)",
         );
-      scan = Math.max(scan, chain.cost);
+      scan = Math.max(scan, cost);
       unbounded = 1;
-    } else bounded += chain.cost;
+    } else bounded += chain.cost * (chain.slow ? SLOW_STEP : 1);
   }
   const cost = fixedProduct * Math.max(1, bounded + scan);
   if (cost > MAX_COST) throw new Refusal(TOO_COSTLY);

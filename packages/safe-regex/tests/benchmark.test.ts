@@ -40,6 +40,13 @@ const ATOMS = [
   "(?:ab|ac)",
   "(?:a|a)",
   "(?:a|ab)",
+  // Nested groups, also inside repeats.
+  "(?:(?:a|\\w))",
+  "(?:(?:ab|a)b)",
+  "(?:(?:a|b)c|d)",
+  "(?:(?:a|[ab])(?:a|[ab])|c)",
+  "(?:x(?:a|\\w)|!)",
+  "(?:a\\w?|b)",
   "\\u212A",
   "ſ",
   "k",
@@ -66,6 +73,7 @@ function corpus(): string[] {
     "[^\\s]+\\.(?:ru|xyz)\\b",
     "\\w+\\s+\\w+\\s+\\w+!",
     "f+u+c+k+e+r+",
+    "f.{0,3}u.{0,3}c.{0,3}k",
     "(?:a|a)(?:a|a)(?:a|a)(?:a|a)(?:a|a)(?:a|a)(?:a|a)(?:a|a)(?:a|a)(?:a|a)!",
   ]);
   for (let i = 0; i < 1500; i++) {

@@ -90,25 +90,43 @@ before any channel lookup. Unknown channel slugs are remembered for only 5 s.
    60 s, dropped on `invalidate`). Literal patterns are regex-escaped and matched
    case-insensitively. Regex patterns are re-validated with `unsafeFilterRegexReason` from
    `@commonair/safe-regex`, the same check the API runs on save, so a pattern saved before a
-   stricter rule shipped is skipped and logged (`word filter skipped`) instead of run.
-2. **Validator.** A whitelist grammar (no backreferences, lookaround or nested quantifiers) plus
-   a cost model: estimated backtracking steps per start position over a 500-character message,
-   capped at 1024. An unbounded repeat counts as O(n) and may not share an ambiguity chain with
-   any other optional or repeated part (`.*.{0,20}!` is refused), and alternatives add up unless
+   stricter rule shipped is skipped instead of run: logged as `word filter skipped` and counted
+   in `chat.filter.skipped{reason}`. **Open item:** a skipped `block` filter means those
+   messages now pass, and the channel owner is not told; the API should surface invalid filters
+   in its filter list (requested from the API unit).
+2. **Validator.** A whitelist grammar (no backreferences, lookaround or nested quantifiers;
+   every alternation inside a repeated group, at any depth, decided by its first character)
+   plus a cost model: estimated backtracking steps per start position over a 500-character
+   message, capped at 1024. An unbounded repeat counts as O(n) and multiplies with the choices of
+   anything in its ambiguity chain (`.*.{0,20}!` is refused), and alternatives add up unless
    their fixed prefixes tell them apart. See the header of `packages/safe-regex/src/index.ts`.
-   Its benchmark test runs about 1 500 generated adversarial patterns: every accepted one runs in
-   under 5 ms on every worst-case 500-character input (slowest measured ≈ 2 ms).
+   Its benchmark test runs about 1 500 generated adversarial patterns, nested groups included:
+   every accepted one runs in under 5 ms on every worst-case 500-character input (slowest
+   measured ≈ 2 ms).
 3. **Run.** Block filters run first, then replacements, then hold filters (block beats hold beats
    replace). All filters together get a 25 ms budget per message, checked between filters; past
    it the message is held for moderators rather than passed.
 4. **Hard timeout.** The budget cannot interrupt one `RegExp` call, so filter sets containing a
-   regex run in a pool of Bun workers (`filterWorkers`, default 2; `src/filter-runner.ts`). A
-   worker that has not answered 50 ms after a message was dispatched to it is terminated and
-   replaced, and the message is **held**, never passed (metric `chat.filter.timeouts`). A dead
-   worker or a queue over 10 000 messages also holds. Literal-only and empty filter sets run
-   inline. JavaScriptCore stops a terminated worker once its current regex call returns, so a
-   stuck thread may keep a core busy briefly, but chat never waits on it. Measured round trip
-   for a typical eight-filter set: p50 ≈ 0.03 ms, p99 ≈ 0.5 ms (Apple M-series, Bun 1.4).
+   regex run in a pool of Bun workers (`filterWorkers`, default 2; `src/filter-runner.ts`).
+   Literal-only and empty filter sets run inline. Every case below **holds** the message, never
+   passes it (`chat.filter.held{reason}`):
+   - `timeout`: a worker has not answered 50 ms after the message was dispatched to it. It is
+     terminated, and its filter set (content-addressed, so a channel reload does not reset it) is
+     **quarantined** for 5 minutes: its messages are held without running (`quarantined`; logged
+     once, `chat.filter.quarantined`).
+   - JavaScriptCore stops a terminated worker only when its current regex call returns (it caps
+     one call at roughly a second), so the terminated thread keeps a core busy until then
+     (`chat.filter.zombies`). Live plus terminated threads are capped at workers + 2 (a
+     terminated thread stops counting after it exits, or after 3 s), and respawns come from a
+     token bucket (4, then one per 10 s).
+   - `queue_wait`: no worker was free within 250 ms of the message arriving. `queue_full`: more
+     than 50 messages of one filter set, or 10 000 in all, are waiting. So one channel's filters
+     cannot stall the others for long.
+   - `crash`: the worker died; `closed`: the service is shutting down.
+
+   Messages are filtered concurrently on several workers, so verdicts for two messages (even from
+   the same socket) can complete out of order. Measured round trip for a typical eight-filter
+   set: p50 ≈ 0.04 ms, p99 ≈ 0.4–0.5 ms (Apple M-series, Bun 1.4).
 
 ### Credentials and moderation after connect
 
@@ -177,4 +195,6 @@ one transaction.
 
 `chat.connections` (up/down, by `via`), `chat.messages.in`, `chat.messages.out`,
 `chat.dropped` (by `reason`: `slow_consumer`, `rejected` + `code`, `persist_failed`,
-`persist_overflow`, `bad_frame`, `idle`, `send_failed`), `chat.fanout.latency` (ms histogram).
+`persist_overflow`, `bad_frame`, `idle`, `send_failed`), `chat.fanout.latency` (ms histogram),
+`chat.filter.held` (by `reason`), `chat.filter.quarantined`, `chat.filter.zombies` (up/down),
+`chat.filter.skipped` (by `reason`).

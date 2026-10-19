@@ -20,8 +20,17 @@ export function createMetrics() {
   const messagesIn = m.createCounter("chat.messages.in", { description: "Chat messages received from clients" });
   const messagesOut = m.createCounter("chat.messages.out", { description: "Frames delivered to local sockets" });
   const dropped = m.createCounter("chat.dropped", { description: "Messages, frames or sockets dropped, by reason" });
-  const filterTimeouts = m.createCounter("chat.filter.timeouts", {
-    description: "Messages held because word filters hit the hard timeout, crashed or queued too long",
+  const filterHeld = m.createCounter("chat.filter.held", {
+    description: "Messages held without a filter verdict (timeout, crash, queue, quarantine), by reason",
+  });
+  const filterQuarantined = m.createCounter("chat.filter.quarantined", {
+    description: "Filter sets quarantined after a hard timeout",
+  });
+  const filterZombies = m.createUpDownCounter("chat.filter.zombies", {
+    description: "Terminated filter workers still finishing their last regex call",
+  });
+  const filterSkipped = m.createCounter("chat.filter.skipped", {
+    description: "Stored word filters skipped on load because the validator refuses them, by reason",
   });
   const fanout = m.createHistogram("chat.fanout.latency", {
     description: "Time from publish on one instance to local delivery on another",
@@ -33,7 +42,11 @@ export function createMetrics() {
     messageIn: () => messagesIn.add(1),
     framesOut: (n: number) => messagesOut.add(n),
     dropped: (reason: DropReason, extra: Record<string, string> = {}) => dropped.add(1, { reason, ...extra }),
-    filterTimeout: (reason: string) => filterTimeouts.add(1, { reason }),
+    filterHeld: (reason: string) => filterHeld.add(1, { reason }),
+    filterQuarantined: () => filterQuarantined.add(1),
+    filterZombies: (delta: number) => filterZombies.add(delta),
+    /** Reasons are fixed validator messages (low cardinality); the first clause is enough. */
+    filterSkipped: (reason: string) => filterSkipped.add(1, { reason: reason.split(":")[0] ?? reason }),
     fanoutLatency: (ms: number) => fanout.record(Math.max(0, ms)),
   };
 }
