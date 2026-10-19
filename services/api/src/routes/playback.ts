@@ -124,6 +124,8 @@ export const playback = {
       channelVerifiedViewers: await viewerCount(deps, c.id),
     });
     const network = deps.classifier.classify(req.ip);
+    // Native HLS (WebKit) cannot run the P2P loader.
+    const p2pEnabled = deps.env.P2P_ENABLED && input.p2pCapable && !input.nativeHls;
     await deps.db.insert(playbackSessions).values({
       id: sid,
       channelId: c.id,
@@ -134,14 +136,15 @@ export const playback = {
       userAgent: req.userAgent?.slice(0, 256) ?? null,
       asn: network.asn,
       datacenter: network.hosting ? (network.label ?? "hosting") : null,
+      // Always the HTTP delivery source, never `p2p`: whether the P2P loader runs is client input
+      // (`p2pCapable`, `nativeHls`), and recording `p2p` lowers integrity's expected origin share.
+      // That needs server-side swarm evidence first (see README).
       assignedSource: assignment.source,
       relayId: assignment.source === "relay" ? assignment.relayId : null,
       startedAt: deps.now(),
       fingerprint: { embed: input.embed, nativeHls: input.nativeHls },
     });
     const { token, claims } = await signFor(deps, sid, c.id, path, assignment);
-    // Native HLS (WebKit) cannot run the P2P loader.
-    const p2pEnabled = deps.env.P2P_ENABLED && input.p2pCapable && !input.nativeHls;
     return {
       sessionId: sid,
       token,
@@ -163,6 +166,10 @@ export const playback = {
     if (s.endedAt) throw conflict("This playback session has ended");
     const now = deps.now();
     const wallSeconds = (now.getTime() - (s.lastHeartbeatAt ?? s.startedAt).getTime()) / 1000;
+    // A beat sooner than the floor is ignored outright: no counters, no clock, no verification
+    // evidence. Flooding cannot mint watch time, inflate heartbeat counts or feed the scorer.
+    // Token refresh and relay moves wait for the next beat at the normal interval.
+    if (wallSeconds < MIN_HEARTBEAT_WALL_SECONDS) return { ok: true as const };
 
     const raw = await deps.valkey.hgetall(verifyKey(s.id));
     const state: VerifyState = { consistent: Number(raw.consistent ?? 0) || 0, engaged: raw.engaged === "1" };
@@ -172,10 +179,8 @@ export const playback = {
       visible: input.visible,
       muted: input.muted,
     });
-    // A beat sooner than the floor earns nothing and does not move the clock, so flooding cannot
-    // mint watch time or verification. Watch time never exceeds wall-clock time (plus jitter).
-    const tooSoon = wallSeconds < MIN_HEARTBEAT_WALL_SECONDS;
-    const watched = tooSoon ? 0 : Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
+    // Watch time never exceeds wall-clock time (plus jitter).
+    const watched = Math.round(Math.min(input.playedSeconds, wallSeconds + 5));
     const updated = await deps.db
       .update(playbackSessions)
       .set({
@@ -186,7 +191,7 @@ export const playback = {
         stalls: sql`${playbackSessions.stalls} + ${input.stalls}`,
         latencyMs: input.latencySeconds === null ? s.latencyMs : input.latencySeconds * 1000,
         ttffMs: s.ttffMs ?? input.ttffMs,
-        ...(tooSoon ? {} : { lastHeartbeatAt: now }),
+        lastHeartbeatAt: now,
         ...(input.fingerprint ? { fingerprint: { ...s.fingerprint, ...input.fingerprint } } : {}),
       })
       // Compare-and-set on the clock we read: of two concurrent beats only one is credited.

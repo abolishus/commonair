@@ -17,6 +17,7 @@ import type { Deps } from "../deps.ts";
 import { broadcasterFields, emit } from "../events/outbox.ts";
 import { isSuspended } from "../lib/caller.ts";
 import { publishLive } from "../lib/control.ts";
+import { canonicalIp } from "../lib/netrange.ts";
 import { decidePublish, internalCredentialsOk, planMediaAuth } from "./auth.ts";
 
 const { channels, users, streamKeys, broadcasts, playbackSessions } = schema;
@@ -72,11 +73,11 @@ export async function mediaAuth(deps: Deps, body: unknown): Promise<number> {
   });
   if (ok && key) {
     await deps.valkey.set(publishKey(plan.slug), key.id, "EX", MARKER_TTL_SECONDS);
-    // Same scheme as playback_sessions.ip_hash, so integrity can exclude the streamer's own
+    // Same scheme (and canonical address form) as playback_sessions.ip_hash, so integrity can exclude the streamer's own
     // address from their viewer counts.
     await deps.db
       .update(streamKeys)
-      .set({ lastUsedIpHash: await hmacHex(deps.env.AUTH_SECRET, `ip:${req.ip}`) })
+      .set({ lastUsedIpHash: await hmacHex(deps.env.AUTH_SECRET, `ip:${canonicalIp(req.ip)}`) })
       .where(eq(streamKeys.id, key.id));
   }
   if (!ok) deps.logger.info("media publish refused", { channelId: row.channel.id, keyMatched: key !== undefined });

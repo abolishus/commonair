@@ -10,6 +10,7 @@ import { ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { experimental_ZodSmartCoercionPlugin as ZodSmartCoercionPlugin } from "@orpc/zod/zod4";
 import type { Server } from "bun";
+import { AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER } from "@commonair/contracts/internal";
 import { generateOpenApi } from "@commonair/contracts/openapi";
 import { sourceLink } from "@commonair/config/site";
@@ -19,7 +20,7 @@ import { createAuth, type Auth } from "./auth/index.ts";
 import type { Deps } from "./deps.ts";
 import { toClientError } from "./lib/errors.ts";
 import { clientIp, looksProxied } from "./lib/ip.ts";
-import { rateLimitSubjectIp } from "./lib/netrange.ts";
+import { canonicalIp, rateLimitSubjectIp } from "./lib/netrange.ts";
 import type { BaseContext, RequestInfo } from "./lib/orpc.ts";
 import { rateLimitKey } from "./lib/ratelimit.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
@@ -121,7 +122,8 @@ export function createApp(deps: Deps): ApiApp {
   ): Promise<RequestInfo> {
     const socketIp = server?.requestIP(req as Request)?.address ?? "0.0.0.0";
     const forwardedFor = req.headers.get("x-forwarded-for");
-    const ip = clientIp(socketIp, forwardedFor, deps.env.TRUSTED_PROXY_CIDRS);
+    // Canonical form, so every spelling of one client hashes alike here and in media/hooks.ts.
+    const ip = canonicalIp(clientIp(socketIp, forwardedFor, deps.env.TRUSTED_PROXY_CIDRS));
     if (!warnedUntrustedProxy && looksProxied(socketIp, forwardedFor, deps.env.TRUSTED_PROXY_CIDRS)) {
       warnedUntrustedProxy = true;
       deps.logger.warn(
@@ -173,12 +175,12 @@ export function createApp(deps: Deps): ApiApp {
     if (path === "/api/openapi.json" && raw.method === "GET")
       return withCors(json(await openApiDocument(), 200, { "cache-control": "public, max-age=300" }));
 
-    if (path.startsWith("/api/auth/")) {
+    if (path.startsWith(`${AUTH_BASE_PATH}/`)) {
       const origin = raw.headers.get("origin");
       // Auth is first-party only: no CORS for other origins.
       const authCors = origin && allowedOrigins.has(origin) ? cors : {};
       const info = await requestInfo(raw, url, server);
-      if (path === "/api/auth/altcha-challenge" && raw.method === "GET") {
+      if (path === AUTH_ROUTES.altchaChallenge && raw.method === "GET") {
         const challenge = await newChallenge({ hmacKey: deps.env.ALTCHA_HMAC_KEY, now: () => deps.now().getTime() });
         return json(challenge, 200, authCors);
       }

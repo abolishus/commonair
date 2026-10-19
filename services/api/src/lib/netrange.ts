@@ -50,6 +50,44 @@ export function isPublicAddress(ip: string): boolean {
   return !list.some((cidr) => inCidr(ip, cidr));
 }
 
+const v4String = (n: bigint) => {
+  const x = Number(n);
+  return [x >>> 24, (x >>> 16) & 255, (x >>> 8) & 255, x & 255].join(".");
+};
+
+/** RFC 5952 text form: lower-case, no leading zeros, the longest run (2+) of zero groups as "::". */
+function v6String(n: bigint): string {
+  const groups = [112n, 96n, 80n, 64n, 48n, 32n, 16n, 0n].map((s) => Number((n >> s) & 0xffffn));
+  let best = { at: -1, len: 0 };
+  for (let i = 0; i < 8;) {
+    if (groups[i] !== 0) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < 8 && groups[j] === 0) j++;
+    // Strictly longer wins, so the first of equal runs is the one compressed.
+    if (j - i > best.len) best = { at: i, len: j - i };
+    i = j;
+  }
+  const hex = (gs: number[]) => gs.map((g) => g.toString(16)).join(":");
+  if (best.len < 2) return hex(groups);
+  return `${hex(groups.slice(0, best.at))}::${hex(groups.slice(best.at + best.len))}`;
+}
+
+/**
+ * One spelling per address, so the same client hashes the same way on every path (playback
+ * `ip_hash`, rate limits, `stream_keys.last_used_ip_hash`; integrity compares them): IPv4-mapped
+ * IPv6 becomes IPv4, IPv6 is RFC 5952 (lower-case, compressed), zone ids and brackets are
+ * dropped. Unparseable input is returned trimmed and lower-cased.
+ */
+export function canonicalIp(ip: string): string {
+  const raw = ip.trim().replace(/^\[(.*)\]$/, "$1");
+  const parsed = parseIp(raw);
+  if (!parsed) return raw.toLowerCase();
+  return parsed.v === 4 ? v4String(parsed.n) : v6String(parsed.n);
+}
+
 /**
  * The rate-limit subject for an address: IPv4 as is, IPv6 by its /64 (one subscriber usually
  * holds a whole /64, so per-address limits are trivially bypassed). Unparseable input is
@@ -58,10 +96,7 @@ export function isPublicAddress(ip: string): boolean {
 export function rateLimitSubjectIp(ip: string): string {
   const parsed = parseIp(ip);
   if (!parsed) return ip;
-  if (parsed.v === 4) {
-    const n = Number(parsed.n);
-    return [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
-  }
+  if (parsed.v === 4) return v4String(parsed.n);
   const prefix = parsed.n >> 64n;
   const groups = [48n, 32n, 16n, 0n].map((s) => ((prefix >> s) & 0xffffn).toString(16));
   return `${groups.join(":")}::/64`;
