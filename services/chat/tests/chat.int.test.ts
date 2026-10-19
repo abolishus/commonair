@@ -223,6 +223,21 @@ describe("rules across instances", () => {
     expect(row?.heldAt).not.toBeNull();
   });
 
+  test("regex filters run in the filter worker; stored patterns the validator refuses are skipped", async () => {
+    const { viewer, ch } = await room();
+    await t.db.insert(schema.wordFilters).values([
+      { channelId: ch.id, pattern: "\\bspam\\d+\\b", isRegex: true, action: "block" },
+      // Saved before the API's stricter check: would block every message ending in "!" if it ran.
+      { channelId: ch.id, pattern: ".*.{0,20}!", isRegex: true, action: "block" },
+    ]);
+    const sender = await connect(a, viewer.id);
+    await sender.join(ch.slug);
+    expect((await sender.say(ch.slug, "buy spam42 now")).notice?.code).toBe("msg_rejected");
+    const ok = await sender.say(ch.slug, "hello!");
+    expect(ok.notice).toBeNull();
+    expect(ok.ack.id).toBeTruthy();
+  });
+
   test("followers-only and subscribers-only read live database state", async () => {
     const { viewer, ch } = await room({ followersOnlyMinutes: 0 });
     const c = await connect(a, viewer.id);

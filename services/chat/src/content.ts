@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Content rules: link detection and channel word filters. */
+import { unsafeFilterRegexReason } from "@commonair/safe-regex";
 import type { WordFilterDef } from "./types.ts";
 
 /**
@@ -20,99 +21,26 @@ export interface CompiledFilter {
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const MAX_REPEAT = 1000;
-
 /**
- * Reject regex shapes that can backtrack catastrophically: backreferences, and a quantified
- * group that itself contains a quantifier or an alternation (`(a+)+`, `(a|aa)*`, `(\w?)+`).
- * Returns the reason, or null when the pattern is safe to run. Linear-ish patterns that slip
- * through are still bounded by the per-message time budget in `applyFilters`.
+ * Compile filters once per channel load. Regex patterns are re-validated with the same checker
+ * the API uses on save, so patterns stored before a stricter rule shipped are skipped (and
+ * reported) rather than run. Literal patterns are escaped and always linear.
  */
-export function unsafeRegexReason(pattern: string): string | null {
-  type Frame = { quantified: boolean; alternation: boolean };
-  const stack: Frame[] = [{ quantified: false, alternation: false }];
-  const top = () => stack[stack.length - 1] ?? { quantified: false, alternation: false };
-  /** Length of the quantifier at `i` (0 if none) and whether it repeats more than once. */
-  const quantifierAt = (i: number): { len: number; repeats: boolean; tooBig: boolean } => {
-    const c = pattern[i];
-    let len = 0;
-    let repeats = false;
-    let tooBig = false;
-    if (c === "*" || c === "+") [len, repeats] = [1, true];
-    else if (c === "?") len = 1;
-    else if (c === "{") {
-      const m = /^\{(\d+)(,(\d*))?\}/.exec(pattern.slice(i));
-      if (m) {
-        len = m[0].length;
-        const max = m[2] === undefined ? Number(m[1]) : m[3] === "" ? Infinity : Number(m[3]);
-        repeats = max > 1;
-        tooBig = Number(m[1]) > MAX_REPEAT || (Number.isFinite(max) && max > MAX_REPEAT);
-      }
-    }
-    // A trailing "?" makes the quantifier lazy; it does not change the shape.
-    if (len > 0 && pattern[i + len] === "?") len++;
-    return { len, repeats, tooBig };
-  };
-  let i = 0;
-  while (i < pattern.length) {
-    const c = pattern[i];
-    if (c === "\\") {
-      const next = pattern[i + 1] ?? "";
-      if (/[1-9]/.test(next) || next === "k") return "backreferences are not allowed";
-      i += 2;
-    } else if (c === "[") {
-      i++;
-      while (i < pattern.length && pattern[i] !== "]") i += pattern[i] === "\\" ? 2 : 1;
-      i++;
-    } else if (c === "(") {
-      stack.push({ quantified: false, alternation: false });
-      i++;
-      continue;
-    } else if (c === ")") {
-      const frame = stack.pop();
-      if (!frame || stack.length === 0) return "unbalanced parentheses";
-      const q = quantifierAt(i + 1);
-      if (q.tooBig) return `repetition counts above ${MAX_REPEAT} are not allowed`;
-      if (q.repeats && (frame.quantified || frame.alternation))
-        return "nested quantifiers or quantified alternations are not allowed";
-      top().quantified ||= frame.quantified || q.len > 0;
-      i += 1 + q.len;
-      continue;
-    } else if (c === "|") {
-      top().alternation = true;
-      i++;
-      continue;
-    } else i++;
-    // After an atom: an optional quantifier.
-    const q = quantifierAt(i);
-    if (q.tooBig) return `repetition counts above ${MAX_REPEAT} are not allowed`;
-    if (q.len > 0) top().quantified = true;
-    i += q.len;
-  }
-  return stack.length === 1 ? null : "unbalanced parentheses";
-}
-
-/** Compile filters once per channel load; invalid or unsafe regexes are skipped (and reported). */
 export function compileFilters(
   defs: readonly WordFilterDef[],
   onInvalid: (def: WordFilterDef, reason: string) => void = () => {},
 ): CompiledFilter[] {
   const out: CompiledFilter[] = [];
   for (const def of defs) {
-    const unsafe = def.isRegex ? unsafeRegexReason(def.pattern) : null;
+    const unsafe = def.isRegex ? unsafeFilterRegexReason(def.pattern) : null;
     if (unsafe) {
       onInvalid(def, unsafe);
       continue;
     }
-    const source = def.isRegex ? def.pattern : escapeRegex(def.pattern);
     try {
-      out.push({ def, re: new RegExp(source, "giu") });
+      out.push({ def, re: new RegExp(def.isRegex ? def.pattern : escapeRegex(def.pattern), "giu") });
     } catch {
-      try {
-        out.push({ def, re: new RegExp(source, "gi") });
-      } catch {
-        onInvalid(def, "invalid regular expression");
-      }
+      onInvalid(def, "invalid regular expression");
     }
   }
   return out;

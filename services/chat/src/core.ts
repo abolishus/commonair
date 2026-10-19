@@ -17,6 +17,7 @@ import { ChatControlMessage, type ChatFanout, parseJson } from "./control.ts";
 import type { Directory } from "./directory.ts";
 import { chatMessageEvent, isInlineEvent } from "./events.ts";
 import type { Limiter } from "./limiter.ts";
+import type { FilterRunner } from "./filter-runner.ts";
 import type { Metrics } from "./metrics.ts";
 import { MODERATE_SCOPE, type Moderation } from "./moderation.ts";
 import { canModerate, rankOf } from "./permissions.ts";
@@ -61,6 +62,7 @@ export interface CoreDeps {
   logger: Logger;
   frameWriter: Writer;
   maxRoomsPerConnection: number;
+  filterRunner?: FilterRunner;
 }
 
 const noChannel: Rejection = { code: "msg_rejected", text: "No such channel." };
@@ -83,7 +85,11 @@ export class ChatCore {
     const user = identity.userId ? await this.d.directory.profile(identity.userId) : null;
     const standing = user ? await this.d.directory.standing(channel, user.id) : NO_STANDING;
     const result = await runSendPipeline(
-      { limiter: this.d.limiter, middlewares: opts.skipMiddleware ? [] : this.d.middlewares },
+      {
+        limiter: this.d.limiter,
+        middlewares: opts.skipMiddleware ? [] : this.d.middlewares,
+        filterRunner: this.d.filterRunner,
+      },
       {
         messageId,
         receivedAt,

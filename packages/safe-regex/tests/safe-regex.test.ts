@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { MAX_PATTERN_LENGTH, unsafeFilterRegexReason } from "../src/index.ts";
+import { MAX_INPUT_LENGTH, MAX_PATTERN_LENGTH, unsafeFilterRegexReason } from "../src/index.ts";
+
+const alt = (p: string, n: number) => Array<string>(n).fill(p).join("|");
 
 /** Known-catastrophic or exponential/polynomial shapes: every one must be refused. */
 const CATASTROPHIC = [
@@ -55,6 +57,30 @@ const CATASTROPHIC = [
   "a{0,20}a{0,20}a{0,20}",
   "(?:ab|ac)+",
   "(?:a|)+",
+  // Cost model: an unbounded repeat is O(n) per start, so nothing next to it may add choices,
+  // and alternatives that cannot be told apart add up.
+  ".*.{0,20}!",
+  alt(".*.{0,20}!", 18),
+  ".{0,20}.*!",
+  // Nested alternations inside a repeated group (exponential: each iteration matches two ways).
+  "(?:(?:a|\\w))+x",
+  "(?:(?:a|\\w)|!)+x",
+  "(?:(?:a|[ab])(?:a|[ab])|c)+!",
+  "(?:(?:ab|a)b)+x",
+  "(?:(?:a|\\w)){1,20}x",
+  "(?:x(?:a|\\w))+!",
+  "\\w+a?a?a?a?a?!",
+  "[a-z]+[a-z]{0,5}!",
+  "\\w+(?:a|ab)(?:a|ab)(?:a|ab)!",
+  "(?:x\\w+)?\\w+",
+  "(?:https?://)?\\S+",
+  alt(".*!", 5),
+  alt("\\w+!", 18),
+  alt("a.*b", 5),
+  alt("\\bfoo\\w*", 5),
+  alt("a{0,20}a{0,20}!", 3),
+  "(?:a.*|a.*|a.*|a.*|a.*)!",
+  alt("a?a?a?a?a?a?a?a?a?a?!", 2),
 ];
 
 /** Features outside the grammar. */
@@ -135,6 +161,16 @@ const REALISTIC = [
   "(foo|bar)baz",
   "(?:.|\\n)+z",
   "(?:https?|ftp)://\\S+",
+  "f+u+c+k+e+r+",
+  "f.{0,3}u.{0,3}c.{0,3}k",
+  "\\w+a?!",
+  "(?:(?:a|b)c|d)+!",
+  "\\bfoo\\w*|\\bbar\\w*|\\bbaz\\w*",
+  "\\b(?:crypto|nft)\\b.*\\b(?:giveaway|airdrop)\\b",
+  "buy.*followers|cheap.*viewers|free.*nitro|join.*discord|visit.*site",
+  "\\w+\\s+\\w+\\s+\\w+!",
+  alt("\\w+!", 4),
+  "[^\\s]+\\.(?:ru|xyz|top|click)\\b",
 ];
 
 describe("unsafeFilterRegexReason", () => {
@@ -177,8 +213,23 @@ describe("unsafeFilterRegexReason", () => {
   test("ambiguity budget: a few optional parts pass, many fail", () => {
     expect(unsafeFilterRegexReason("a?a?a?a?a?a?a?a?a?a?aaaaa")).toBeNull(); // 2^10
     expect(unsafeFilterRegexReason("a?a?a?a?a?a?a?a?a?a?a?aaaaa")).not.toBeNull(); // 2^11
-    expect(unsafeFilterRegexReason("\\w+a?a?a?a?a?!")).toBeNull(); // 32 * 2^5
-    expect(unsafeFilterRegexReason("\\w+a?a?a?a?a?a?!")).not.toBeNull();
+    expect(unsafeFilterRegexReason("\\d+\\s\\w?\\w?!")).toBeNull(); // the \\s separates the chains
+    expect(unsafeFilterRegexReason("\\w+a?!")).toBeNull(); // O(n) × 2
+    expect(unsafeFilterRegexReason("\\w+a?a?a?!")).toMatch(/unbounded repeat is followed by optional/);
+    expect(unsafeFilterRegexReason("(?:https?://)?(?:www\\.)?\\w+\\.(?:ru|xyz|tk)\\b")).toMatch(/unbounded repeat/);
+    expect(unsafeFilterRegexReason("(?:(?:a|\\w))+x")).toMatch(/different characters/);
+  });
+
+  test("alternatives add up unless their prefixes tell them apart", () => {
+    expect(unsafeFilterRegexReason(alt("a\\w*b", 4))).toBeNull(); // 4 × 250
+    expect(unsafeFilterRegexReason(alt("a\\w*b", 5))).toMatch(/too many/);
+    expect(unsafeFilterRegexReason("ab.*|ac.*|ad.*|ae.*|af.*|ag.*")).toBeNull(); // second character differs
+    expect(unsafeFilterRegexReason("(?:ab.*|ac.*|ad.*|ae.*|af.*)!")).toBeNull();
+    expect(unsafeFilterRegexReason("(?:a.*|a.*|a.*|a.*|a.*)!")).not.toBeNull();
+  });
+
+  test("the cost model is sized for the longest chat message", () => {
+    expect(MAX_INPUT_LENGTH).toBe(500);
   });
 
   test("case-insensitive overlap: A+ and a+ count as the same characters", () => {
@@ -194,15 +245,7 @@ describe("unsafeFilterRegexReason", () => {
 
   test("accepted patterns stay fast on hostile input built from their own and folding characters", () => {
     const FOLDING = ["k", "K", "\u212A", "s", "S", "\u017F"];
-    const extra = [
-      "\\w+a?a?a?a?a?!",
-      "a?a?a?a?a?a?a?a?a?a?aaaaa!",
-      "\\d+\\s+\\d+!",
-      "(?:a|b)+c",
-      "[^x]+!",
-      "k+s+x",
-      "\\w+!",
-    ];
+    const extra = ["a?a?a?a?a?a?a?a?a?a?aaaaa!", "\\d+\\s+\\d+!", "(?:a|b)+c", "[^x]+!", "k+s+x", "\\w+!"];
     for (const p of [...REALISTIC, ...extra]) {
       expect(unsafeFilterRegexReason(p), p).toBeNull();
       // Every character the pattern names, plus the case-fold partners, a digit, a space and a letter.

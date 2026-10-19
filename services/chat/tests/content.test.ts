@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { applyFilters, compileFilters, containsLink, unsafeRegexReason } from "../src/content.ts";
+import { CHAT_LIMITS } from "@commonair/contracts";
+import { MAX_INPUT_LENGTH } from "@commonair/safe-regex";
+import { applyFilters, compileFilters, containsLink } from "../src/content.ts";
 import type { WordFilterDef } from "../src/types.ts";
 
 describe("containsLink", () => {
@@ -74,18 +76,23 @@ describe("word filters", () => {
 });
 
 describe("regex safety", () => {
+  const compiles = (pattern: string) => compileFilters([f({ pattern, isRegex: true })]).length === 1;
+
   test.each([
     "(a+)+",
     "(a*)*b",
     "(\\w?)+",
     "(a|aa)*",
-    "(?:x|y){2,}",
     "((ab)*c)+",
     "(a)\\1",
     "(?<n>a)\\k<n>",
     "a{1,5000}",
     "(a",
-  ])("%s is rejected", (pattern) => expect(unsafeRegexReason(pattern)).not.toBeNull());
+    // Passed chat's old screen; refused by the shared cost model.
+    ".*.{0,20}!",
+    Array<string>(18).fill(".*.{0,20}!").join("|"),
+    "\\w+\\w+",
+  ])("%s is skipped", (pattern) => expect(compiles(pattern)).toBe(false));
 
   test.each([
     "^spam\\d+$",
@@ -93,11 +100,32 @@ describe("regex safety", () => {
     "(foo|bar)",
     "[a-z]+ing",
     "(?:ab)+",
+    "(?:x|y){2,}",
     "a{2,10}",
     "\\(a+\\)+",
     "[(]a+[)]+",
     "x+?y",
-  ])("%s is allowed", (pattern) => expect(unsafeRegexReason(pattern)).toBeNull());
+  ])("%s compiles", (pattern) => expect(compiles(pattern)).toBe(true));
+
+  test("the validator is sized for the longest chat message", () => {
+    expect(MAX_INPUT_LENGTH).toBe(CHAT_LIMITS.maxBodyLength);
+  });
+
+  test("stored patterns the shared validator refuses are skipped and reported on load", () => {
+    const invalid: [string, string][] = [];
+    const filters = compileFilters(
+      [
+        f({ id: "old", pattern: ".*.{0,20}!", isRegex: true }),
+        f({ id: "ok", pattern: "\\bspam\\b", isRegex: true }),
+        f({ id: "lit", pattern: ".*.{0,20}!" }),
+      ],
+      (d, r) => invalid.push([d.id, r]),
+    );
+    expect(filters.map((x) => x.def.id)).toEqual(["ok", "lit"]);
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.[0]).toBe("old");
+    expect(invalid[0]?.[1]).toMatch(/unbounded repeat/);
+  });
 
   test("unsafe regex filters are skipped with a reason", () => {
     const reasons: string[] = [];
