@@ -21,41 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  storybook_build:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.3
-      - run: bun install --frozen-lockfile
-      - name: Build Storybook
-        run: bun run --filter @commonair/ui build-storybook
-      - uses: actions/upload-pages-artifact@v4
-        if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-        with:
-          path: packages/ui/storybook-static
-
-  storybook_deploy:
-    needs: storybook_build
-    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/configure-pages@v5
-      - name: Deploy Storybook to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
   verify:
-    needs: [storybook_build, storybook_deploy]
-    if: ${{ !cancelled() && needs.storybook_build.result == 'success' && (needs.storybook_deploy.result == 'success' || needs.storybook_deploy.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
