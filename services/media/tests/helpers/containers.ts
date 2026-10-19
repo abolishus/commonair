@@ -66,8 +66,8 @@ const unique = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}
 const scratch = mkdtempSync(join(tmpdir(), "media-int-"));
 
 /**
- * MediaMTX with infra/mediamtx/mediamtx.yml. The only change is the API base URL: `api:3001`
- * becomes `apiBase` (a fake API on the test host), since the hook targets are literal in the file.
+ * MediaMTX with infra/mediamtx/mediamtx.yml, pointed at `apiBase` (a fake API on the test host):
+ * the auth hook address is literal in the file, the online/offline hooks read API_INTERNAL_URL.
  */
 export function startMediaMtx(opts: { apiBase: string; internalSecret: string }): Container {
   const config = readFileSync(MEDIAMTX_CONFIG, "utf8").replaceAll("http://api:3001", opts.apiBase);
@@ -82,6 +82,8 @@ export function startMediaMtx(opts: { apiBase: string; internalSecret: string })
     "127.0.0.1::9997",
     "-e",
     `INTERNAL_API_SECRET=${opts.internalSecret}`,
+    "-e",
+    `API_INTERNAL_URL=${opts.apiBase}`,
     "-v",
     `${file}:/mediamtx.yml:ro`,
     MEDIAMTX_IMAGE,

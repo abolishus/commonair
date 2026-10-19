@@ -5,6 +5,7 @@ import {
   authEnv,
   coreEnv,
   databaseEnv,
+  developerEnv,
   internalEnv,
   loadEnv,
   mailEnv,
@@ -30,6 +31,7 @@ const SCHEMAS = [
   mediaEnv,
   playbackEnv,
   servicePorts,
+  developerEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -42,7 +44,8 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof paymentsEnv> &
   z.output<typeof mediaEnv> &
   z.output<typeof playbackEnv> &
-  z.output<typeof servicePorts>;
+  z.output<typeof servicePorts> &
+  z.output<typeof developerEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

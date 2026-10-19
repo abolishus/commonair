@@ -4,8 +4,13 @@
 /**
  * Simulcast: restream the source unchanged (`-c copy`) to each enabled target of the channel.
  * Status lives in `simulcast_sessions` (durable) and `KEYS.simulcastStatus` (live dashboard):
- * connecting → live (ffmpeg reports output) → error (with the last ffmpeg line, key redacted)
- * → connecting again after backoff (capped at 60 s) … → stopped when the broadcast ends.
+ * connecting → live (ffmpeg reports output) → error → connecting again after backoff (capped at
+ * 60 s) … → stopped when the broadcast ends.
+ *
+ * Targets are user-supplied URLs: only `rtmp:`/`rtmps:` to public addresses, vetted right before
+ * each spawn (net/ssrf.ts). The stream key is in ffmpeg's argv; the media container's own PID
+ * namespace keeps it from other local users (README "Secrets"), and every log line is redacted.
+ * `lastError` (shown to the streamer) is one of the generic SIMULCAST_ERRORS codes.
  */
 import { and, eq, isNull } from "drizzle-orm";
 import type { SIMULCAST_STATUSES } from "@commonair/contracts/enums";
@@ -13,12 +18,21 @@ import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { decryptSecret } from "@commonair/tokens";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
-import { internalRtspUrl, simulcastArgs, simulcastTargetUrl } from "./ffmpeg/args.ts";
+import { internalRtspUrl, simulcastArgs, simulcastOutput } from "./ffmpeg/args.ts";
 import { Supervisor } from "./ffmpeg/supervisor.ts";
+import { parseTargetUrl, resolveTarget, TargetNotAllowedError, type ParsedTarget } from "./net/ssrf.ts";
 import { SIMULCAST_MAX_BACKOFF_MS, SIMULCAST_SECRET_PURPOSE } from "./settings.ts";
 
 export type SimulcastStatus = (typeof SIMULCAST_STATUSES)[number];
 const STATUS_TTL_SECONDS = 24 * 3600;
+
+/** Generic, stable `lastError` codes (the web app translates them); never ffmpeg output. */
+export const SIMULCAST_ERRORS = {
+  keyUnreadable: "stream_key_unreadable",
+  targetNotAllowed: "target_not_allowed",
+  connectionFailed: "connection_failed",
+} as const;
+export type SimulcastError = (typeof SIMULCAST_ERRORS)[keyof typeof SIMULCAST_ERRORS];
 
 interface Target {
   id: string;
@@ -44,23 +58,60 @@ class SimulcastRunner {
   }
 
   async start(): Promise<void> {
+    let target: ParsedTarget;
+    try {
+      target = parseTargetUrl(this.target.rtmpUrl);
+    } catch (err) {
+      this.log.warn("simulcast target refused", {
+        reason: err instanceof TargetNotAllowedError ? err.reason : "invalid",
+      });
+      await this.setStatus("error", SIMULCAST_ERRORS.targetNotAllowed);
+      return;
+    }
     let key: string;
     try {
       key = await decryptSecret(this.ctx.authSecret, SIMULCAST_SECRET_PURPOSE, this.target.streamKeyCiphertext);
     } catch {
       // Rotating AUTH_SECRET invalidates stored keys; the streamer must re-enter the key.
-      await this.setStatus("error", "stream key could not be decrypted; re-enter it in the dashboard");
+      this.log.warn("simulcast stream key could not be decrypted");
+      await this.setStatus("error", SIMULCAST_ERRORS.keyUnreadable);
       return;
     }
+    if (key.length === 0) {
+      await this.setStatus("error", SIMULCAST_ERRORS.keyUnreadable);
+      return;
+    }
+    if (this.stopping) return;
     const { rtspBase, internalSecret } = this.ctx;
     const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
-    const output = simulcastTargetUrl(this.target.rtmpUrl, key);
+    // The whole target URL is secret (keys hide in paths and query strings too). The list is
+    // shared with the supervisor, so each spawn's actual output URL joins it before any logging.
+    const secrets: string[] = [key, internalSecret, this.target.rtmpUrl];
+    if (target.search.length > 1) secrets.push(target.search);
+    let refused = false;
     await this.setStatus("connecting", null);
     this.supervisor = new Supervisor({
       name: `simulcast:${this.target.id}`,
       binary: this.ctx.ffmpeg,
-      args: () => simulcastArgs(input, output),
-      secrets: [key, internalSecret],
+      // Resolve and vet right before every spawn: a target that later resolves to an internal
+      // address is refused (the supervisor treats the throw as a failed run and backs off).
+      args: async () => {
+        let address: string;
+        try {
+          ({ address } = await resolveTarget(target, { allowPrivate: this.ctx.simulcastAllowPrivate }));
+        } catch (err) {
+          refused = err instanceof TargetNotAllowedError;
+          this.log.warn("simulcast target refused", {
+            reason: refused ? (err as TargetNotAllowedError).reason : "dns",
+          });
+          throw new Error("simulcast target not allowed");
+        }
+        refused = false;
+        const out = simulcastOutput(target, key, address);
+        if (!secrets.includes(out.url)) secrets.push(out.url);
+        return simulcastArgs(input, out);
+      },
+      secrets,
       logger: this.log,
       backoff: { initialMs: 1_000, maxMs: SIMULCAST_MAX_BACKOFF_MS, stableAfterMs: 30_000 },
       onSpawn: () => {
@@ -73,7 +124,9 @@ class SimulcastRunner {
       },
       onExit: (info) => {
         if (this.stopping) return;
-        void this.setStatus("error", info.lastError ?? `ffmpeg exited with code ${info.code ?? "unknown"}`);
+        // The supervisor already logged the (redacted) ffmpeg line; the streamer sees a code.
+        this.log.warn("simulcast ffmpeg exited", { code: info.code, refused });
+        void this.setStatus("error", refused ? SIMULCAST_ERRORS.targetNotAllowed : SIMULCAST_ERRORS.connectionFailed);
       },
     });
     this.supervisor.start();

@@ -4,10 +4,12 @@
 /**
  * A 640×360 frame of each live broadcast every 60 s: hash-checked first, then stored as
  * `thumbnails/<broadcastId>/latest.<ext>` (stable URL) and a timestamped copy (cache-busting key
- * written to `broadcasts.thumbnailKey`, and history for moderation review).
+ * written to `broadcasts.thumbnailKey`, and history for moderation review). Only the newest
+ * `timings.thumbnailHistory` stamped copies are kept; older ones are deleted after each capture.
  */
 import { eq } from "drizzle-orm";
 import { schema } from "@commonair/db";
+import type { ObjectStorage } from "@commonair/storage";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
 import { internalRtspUrl, thumbnailArgs } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
@@ -74,6 +76,41 @@ export class Thumbnailer {
       .update(schema.broadcasts)
       .set({ thumbnailKey: stamped })
       .where(eq(schema.broadcasts.id, this.b.broadcastId));
+    try {
+      await pruneThumbnails(storage, bucket, this.b.broadcastId, this.ctx.timings.thumbnailHistory);
+    } catch (err) {
+      // History grows by one per minute; the next capture tries again.
+      this.log.warn("thumbnail history cleanup failed", { err });
+    }
     return true;
   }
+}
+
+const STAMPED = /\/(\d+)\.(webp|jpg)$/;
+
+/**
+ * Pure: timestamped history keys beyond the newest `keep` (at least one is always kept, since
+ * `broadcasts.thumbnailKey` points at the newest). `latest.<ext>` and foreign keys are ignored.
+ */
+export function thumbnailsToDelete(keys: readonly string[], keep: number): string[] {
+  const stamped = keys
+    .map((k) => ({ k, m: STAMPED.exec(k) }))
+    .filter((x): x is { k: string; m: RegExpExecArray } => x.m !== null)
+    .map(({ k, m }) => ({ k, t: Number(m[1]) }))
+    .sort((a, b) => b.t - a.t || b.k.localeCompare(a.k));
+  return stamped.slice(Math.max(1, keep)).map((x) => x.k);
+}
+
+/** Delete a broadcast's thumbnail history beyond the newest `keep`. Returns how many went. */
+export async function pruneThumbnails(
+  storage: ObjectStorage,
+  bucket: string,
+  broadcastId: string,
+  keep: number,
+): Promise<number> {
+  const keys: string[] = [];
+  for await (const o of storage.list(bucket, thumbnailPrefix(broadcastId))) keys.push(o.key);
+  const doomed = thumbnailsToDelete(keys, keep);
+  for (const k of doomed) await storage.delete(bucket, k);
+  return doomed.length;
 }

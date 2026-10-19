@@ -6,6 +6,7 @@ import {
   ALL_ENV_SCHEMAS,
   authEnv,
   databaseEnv,
+  developerEnv,
   internalEnv,
   mediaEnv,
   servicePorts,
@@ -23,5 +24,7 @@ export const mediaServiceEnv = z.object({
   ...internalEnv.shape,
   AUTH_SECRET: authEnv.shape.AUTH_SECRET,
   MEDIA_PORT: servicePorts.shape.MEDIA_PORT,
+  /** Dev/harness only: simulcast targets on loopback/private networks are allowed. */
+  OUTBOUND_ALLOW_PRIVATE_NETWORKS: developerEnv.shape.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
 });
 export type MediaServiceEnv = z.output<typeof mediaServiceEnv>;

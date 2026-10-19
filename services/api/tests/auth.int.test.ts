@@ -96,3 +96,64 @@ test("signing in before verifying the email is refused", async () => {
   const res = await client(api).call("POST", "/api/auth/sign-in/email", { email: b.email, password: b.password });
   expect(res.status).toBe(403);
 });
+
+describe("update-user cannot change identity or privileged fields", () => {
+  test("a minor cannot rewrite their birth date to unlock mature content", async () => {
+    const minorYear = new Date().getUTCFullYear() - 15;
+    const s = await signUpAndSignIn(api, { birthDate: `${minorYear}-01-01` });
+    for (const body of [{ birthDate: "1990-01-01" }, { name: "ok", birthDate: "1990-01-01" }, { birthDate: null }]) {
+      const res = await s.client.call("POST", "/api/auth/update-user", body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+    }
+    // Aliases are not columns: they change nothing.
+    await s.client.call("POST", "/api/auth/update-user", { dateOfBirth: "1990-01-01", dob: "1990-01-01" });
+    const [u] = await api.db.db.select().from(schema.users).where(eq(schema.users.id, s.userId));
+    expect(u?.birthDate).toBe(`${minorYear}-01-01`);
+    expect(u?.name).toBe(s.username);
+    const me = await s.client.call<{ isAdult: boolean }>("GET", "/api/me");
+    expect(me.body.isAdult).toBe(false);
+  });
+
+  test("role, ban, verification, 2FA and account fields are not self-writable", async () => {
+    const s = await signUpAndSignIn(api);
+    const attempts: Record<string, unknown>[] = [
+      { role: "admin" },
+      { banned: true },
+      { banReason: "x" },
+      { emailVerified: false },
+      { twoFactorEnabled: true },
+      { accountType: "bot" },
+      { botVerified: true },
+      { locale: "de" },
+      { username: "someoneelse" },
+      { email: "other@test.invalid" },
+      { matureConfirmedAt: new Date().toISOString() },
+      { deletedAt: new Date().toISOString() },
+    ];
+    // Each is either refused outright or silently dropped; the row is what matters.
+    for (const body of attempts) await s.client.call("POST", "/api/auth/update-user", { name: "renamed", ...body });
+    const [u] = await api.db.db.select().from(schema.users).where(eq(schema.users.id, s.userId));
+    expect(u).toMatchObject({
+      role: "user",
+      banned: false,
+      banReason: null,
+      emailVerified: true,
+      twoFactorEnabled: false,
+      accountType: "human",
+      botVerified: false,
+      locale: "en",
+      username: s.username,
+      email: s.email,
+      matureConfirmedAt: null,
+      deletedAt: null,
+    });
+  });
+
+  test("the display name is still editable", async () => {
+    const s = await signUpAndSignIn(api);
+    const res = await s.client.call("POST", "/api/auth/update-user", { name: "New Name" });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const [u] = await api.db.db.select().from(schema.users).where(eq(schema.users.id, s.userId));
+    expect(u?.name).toBe("New Name");
+  });
+});

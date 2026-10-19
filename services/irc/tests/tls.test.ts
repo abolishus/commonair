@@ -54,6 +54,8 @@ describe("loadTls", () => {
   test("generates an ephemeral cert outside production, refuses in production or with half a config", async () => {
     expect((await loadTls({ production: false })).ephemeral).toBe(true);
     await expect(loadTls({ production: true })).rejects.toThrow(/required in production/);
+    await expect(loadTls({ production: true, allowSelfSigned: false })).rejects.toThrow(/required in production/);
+    expect((await loadTls({ production: true, allowSelfSigned: true })).ephemeral).toBe(true);
     await expect(loadTls({ certFile: "/x", production: false })).rejects.toThrow(/set together/);
   });
 });

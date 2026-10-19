@@ -221,6 +221,8 @@ export const infraEnv = z.object({
   IMAGE_REGISTRY: z.string().optional(),
   IMAGE_TAG: z.string().optional(),
   WALG_RETAIN_FULL: z.coerce.number().int().positive().optional(),
+  /** Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own. */
+  COMPOSE_SUBNET: z.string().optional(),
   COMMONAIR_ENV_FILE: z.string().optional(),
 });
 
@@ -238,6 +240,14 @@ export const servicePorts = z.object({
   TRACKER_PORT: port.default(8000),
   IRC_TLS_CERT_FILE: z.string().optional(),
   IRC_TLS_KEY_FILE: z.string().optional(),
+  /**
+   * Let a production instance run the IRC TLS listener on an ephemeral self-signed certificate
+   * when no files are configured. For hosts that do not expose the TLS port (e.g. Railway).
+   */
+  IRC_TLS_ALLOW_SELF_SIGNED: z
+    .enum(["true", "false", "1", "0", ""])
+    .transform((v) => v === "true" || v === "1")
+    .default(false),
 });
 
 export class EnvError extends Error {

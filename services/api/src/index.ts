@@ -12,8 +12,9 @@ import { importSigningKey } from "@commonair/tokens";
 import pkg from "../package.json" with { type: "json" };
 import type { Deps, StatusProbe } from "./deps.ts";
 import type { ApiEnv } from "./env.ts";
-import { createApiMailer } from "./mail.ts";
+import { createApiMailer, recipientLimitedMailer } from "./mail.ts";
 import { DEFAULT_RATE_LIMITS, valkeyRateLimitStore } from "./lib/ratelimit.ts";
+import { pinnedGet, resolveHost } from "./lib/outbound.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
 export { loadApiEnv, type ApiEnv } from "./env.ts";
@@ -71,7 +72,8 @@ export async function buildDeps(
     mailer,
     logger,
     signingKey: await importSigningKey(env.PLAYBACK_SIGNING_KEY),
-    fetch,
+    pinnedGet,
+    resolveHost,
     rateLimits: DEFAULT_RATE_LIMITS,
     rateLimitStore: valkeyRateLimitStore(valkey),
     probes: statusProbes(env),
@@ -79,6 +81,14 @@ export async function buildDeps(
     now: () => new Date(),
     ...opts.overrides,
   };
+  if (!opts.overrides?.mailer)
+    deps.mailer = recipientLimitedMailer(mailer, {
+      secret: env.AUTH_SECRET,
+      store: () => deps.rateLimitStore,
+      rule: () => deps.rateLimits.mail,
+      now: () => deps.now(),
+      logger,
+    });
   return {
     deps,
     db,

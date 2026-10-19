@@ -16,6 +16,8 @@ import { adminAc, userAc } from "better-auth/plugins/admin/access";
 import { eq } from "drizzle-orm";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { publishUserControl } from "../lib/control.ts";
+import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
@@ -50,6 +52,11 @@ const bodyOf = (ctx: { body?: unknown } | null | undefined): Record<string, unkn
 
 const localeOf = (u: Record<string, unknown>) => (typeof u.locale === "string" ? u.locale : undefined);
 
+/** Never written through better-auth after the row exists. */
+const IMMUTABLE_USER_FIELDS = new Set(["birthDate", "accountType", "botOwnerId", "botVerified", "username"]);
+/** All a member may change about themselves through `/update-user` (the rest has its own flows). */
+const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
+
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
 export function createAuth(deps: Deps) {
@@ -68,6 +75,14 @@ export function createAuth(deps: Deps) {
     if (clientId && clientSecret) social[id] = { clientId, clientSecret, disableImplicitSignUp: true };
 
   const publicUrl = new URL(site.publicUrl);
+  const mediaBase = instanceMediaBase(env);
+  /** One of the member's own channel avatar uploads (key or media-bucket URL). */
+  const ownAvatarRef = async (ref: string, userId: string | undefined) => {
+    const [c] = userId
+      ? await db.select({ id: schema.channels.id }).from(schema.channels).where(eq(schema.channels.ownerId, userId))
+      : [];
+    return c ? isInstanceMediaRef(ref, mediaBase, `channels/${c.id}/avatar/`) : false;
+  };
   const VERIFY_MINUTES = 60;
   const RESET_MINUTES = 60;
   const MAGIC_MINUTES = 10;
@@ -165,6 +180,10 @@ export function createAuth(deps: Deps) {
     ],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        // The admin plugin stays for its schema and banned-user sign-in checks, but its endpoints
+        // (ban, set-role, impersonate, remove-user, …) skip our audit log and safeguards such as
+        // "never remove the last administrator". Staff use the audited /api/admin procedures.
+        if (ctx.path.startsWith("/admin/")) throw new APIError("NOT_FOUND", { message: "Not found" });
         if (ctx.path !== "/sign-up/email") return;
         const body = bodyOf(ctx);
         const altcha = await verifyAltcha(body.altcha, { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });
@@ -197,7 +216,10 @@ export function createAuth(deps: Deps) {
             const age = ageProblem(user.birthDate, minAge, deps.now());
             if (age === "too_young") throw bad("TOO_YOUNG", `You must be at least ${minAge} to join`);
             if (age) throw bad("INVALID_BIRTH_DATE", "A valid birth date is required");
-            return { data: { ...user, username: name.toLowerCase(), accountType: "human", role: "user" } };
+            // A new account has no uploads yet, and provider profile pictures are third-party URLs.
+            return {
+              data: { ...user, image: null, username: name.toLowerCase(), accountType: "human", role: "user" },
+            };
           },
           after: async (user) => {
             // Normally done inside the transaction (account.create.before); this is the safety net.
@@ -206,9 +228,25 @@ export function createAuth(deps: Deps) {
         },
         update: {
           before: async (data, ctx) => {
+            // Identity fields are fixed after signup: a birth date edit would let a minor unlock
+            // mature content. No better-auth path may change it; staff corrections go through
+            // our own audited procedures.
+            if (Object.keys(data).some((k) => IMMUTABLE_USER_FIELDS.has(k)))
+              throw bad("FIELD_NOT_ALLOWED", "This field cannot be changed");
+            if (ctx?.path === "/update-user") {
+              const refused = Object.keys(data).filter(
+                (k) => data[k] !== undefined && !SELF_WRITABLE_USER_FIELDS.has(k),
+              );
+              if (refused.length > 0) throw bad("FIELD_NOT_ALLOWED", "This field cannot be changed");
+            }
+            if (typeof data.image === "string" && !(await ownAvatarRef(data.image, ctx?.context.session?.user.id)))
+              throw bad("INVALID_IMAGE", "The profile image must be one of your uploads");
             if (data.twoFactorEnabled === true && ctx) twoFactorEnabling.add(ctx);
           },
           after: async (user, ctx) => {
+            // Chat and IRC cache display names and avatars.
+            if (ctx?.path === "/update-user")
+              await publishUserControl(deps, { op: "invalidate", userId: user.id, reason: "profile_changed" });
             if (!ctx || !twoFactorEnabling.has(ctx) || user.twoFactorEnabled !== true) return;
             twoFactorEnabling.delete(ctx);
             await sendNotice(logger, "twoFactorEnabled", () =>

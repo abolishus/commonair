@@ -37,6 +37,7 @@ export class TranscodeController {
   private state: HysteresisState = initialHysteresis();
   private ladder: Supervisor | null = null;
   private advertised: Rendition[] | null = null;
+  private waiting = false;
   private readonly log;
 
   constructor(
@@ -62,10 +63,17 @@ export class TranscodeController {
     });
   }
 
+  /** True while the ladder should run but every transcode slot on this host is taken. */
+  get waitingForSlot(): boolean {
+    return this.waiting;
+  }
+
   async stop(): Promise<void> {
     await this.loop?.stop();
     this.loop = null;
+    this.waiting = false;
     await this.stopLadder();
+    this.ctx.transcodeSlots.release(this.b.broadcastId);
   }
 
   async tick(now = Date.now()): Promise<void> {
@@ -77,12 +85,31 @@ export class TranscodeController {
       stopFraction: TRANSCODE_STOP_FRACTION,
     });
     this.state = state;
-    if (action === "start") {
-      this.log.info("viewer threshold crossed, starting ladder", { viewers });
-      if (!(await this.startLadder())) this.state = initialHysteresis();
-    } else if (action === "stop") {
+    if (action === "stop") {
       this.log.info("viewers below hysteresis floor, stopping ladder", { viewers });
+      this.waiting = false;
       await this.stopLadder();
+      // Also leaves the queue when the ladder never got a slot.
+      this.ctx.transcodeSlots.release(this.b.broadcastId);
+    } else if (action === "start" || (this.waiting && state.active && !this.ladder)) {
+      const slots = this.ctx.transcodeSlots;
+      if (!slots.tryAcquire(this.b.broadcastId)) {
+        // Queued: retried every poll while viewers stay high; the streamer sees a warning.
+        if (!this.waiting)
+          this.log.warn("transcode slots exhausted; ladder queued", {
+            viewers,
+            capacity: slots.capacity,
+            position: slots.queuePosition(this.b.broadcastId),
+          });
+        this.waiting = true;
+        return;
+      }
+      this.waiting = false;
+      this.log.info("viewer threshold crossed, starting ladder", { viewers });
+      if (!(await this.startLadder())) {
+        slots.release(this.b.broadcastId);
+        this.state = initialHysteresis();
+      }
     } else if (this.advertised) {
       await this.ctx.valkey.expire(KEYS.renditions(this.b.channelId), RENDITIONS_TTL_SECONDS);
     }
@@ -128,6 +155,7 @@ export class TranscodeController {
     this.ladder = null;
     if (!ladder) return;
     await ladder.stop();
+    this.ctx.transcodeSlots.release(this.b.broadcastId);
     await this.withdraw(false);
   }
 

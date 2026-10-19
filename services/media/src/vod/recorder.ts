@@ -49,6 +49,8 @@ export class SegmentRecorder {
   private readonly dir: string;
   private readonly log;
   private polling: Promise<void> = Promise.resolve();
+  private refused = false;
+  private stopping = false;
 
   constructor(
     private readonly ctx: MediaContext,
@@ -59,9 +61,33 @@ export class SegmentRecorder {
     this.log = ctx.logger.child({ broadcastId: b.broadcastId, vodId, worker: "recorder" });
   }
 
+  /** True while recording is refused because the work dir is over its disk budget. */
+  get diskRefused(): boolean {
+    return this.refused;
+  }
+
   async start(): Promise<void> {
     await mkdir(this.dir, { recursive: true });
     if (this.vodId) await this.resumePublished(this.vodId);
+    await this.startRecording();
+    this.loop = every(this.ctx.timings.recorderPollMs, () => this.poll(), { logger: this.log, name: "recorder-poll" });
+  }
+
+  /**
+   * Start ffmpeg unless the disk budget refuses it; the poll loop retries, so recording begins
+   * (late, with a gap in the VOD) once space is available again.
+   */
+  private async startRecording(): Promise<void> {
+    if (this.supervisor || this.stopping) return;
+    const verdict = await this.ctx.diskBudget.check("recording");
+    if (!verdict.ok) {
+      if (!this.refused)
+        this.log.warn("recording refused: media work dir over disk budget", { reason: verdict.reason });
+      this.refused = true;
+      return;
+    }
+    if (this.refused) this.log.info("disk budget available again; recording starts");
+    this.refused = false;
     const { rtspBase, internalSecret, timings } = this.ctx;
     const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
     this.supervisor = new Supervisor({
@@ -78,7 +104,6 @@ export class SegmentRecorder {
       stopGraceMs: 10_000,
     });
     this.supervisor.start();
-    this.loop = every(timings.recorderPollMs, () => this.poll(), { logger: this.log, name: "recorder-poll" });
   }
 
   /**
@@ -87,6 +112,7 @@ export class SegmentRecorder {
    * process resumes it.
    */
   async stop(final: boolean): Promise<void> {
+    this.stopping = true;
     await this.loop?.stop();
     this.loop = null;
     await this.supervisor?.stop();
@@ -122,6 +148,7 @@ export class SegmentRecorder {
   }
 
   private async pollOnce(): Promise<void> {
+    if (this.refused) await this.startRecording();
     for (const runId of this.runs) {
       const file = Bun.file(join(this.dir, recorderPlaylist(runId)));
       if (!(await file.exists())) continue;

@@ -3,6 +3,7 @@
 
 /** All media work for one live broadcast, started on `online` and stopped on `offline`. */
 import type { BroadcastInfo, MediaContext } from "./context.ts";
+import { WARNINGS, type Warning } from "./health/rules.ts";
 import { HealthSampler } from "./health/sampler.ts";
 import { SimulcastManager } from "./simulcast.ts";
 import { Thumbnailer } from "./thumbnails.ts";
@@ -24,7 +25,7 @@ export class BroadcastSession {
     readonly vodId: string | null,
   ) {
     this.log = ctx.logger.child({ broadcastId: info.broadcastId, channelId: info.channelId });
-    this.sampler = new HealthSampler(ctx, info);
+    this.sampler = new HealthSampler(ctx, info, () => this.serverWarnings());
     this.transcode = new TranscodeController(ctx, info, () => this.sampler.latestProbe?.height ?? null);
     this.simulcast = new SimulcastManager(ctx, info);
     this.recorder = new SegmentRecorder(ctx, info, vodId);
@@ -60,6 +61,13 @@ export class BroadcastSession {
       this.log.info("broadcast session stopped", { final });
     })();
     return this.stopped;
+  }
+
+  serverWarnings(): Warning[] {
+    const w: Warning[] = [];
+    if (this.transcode.waitingForSlot) w.push(WARNINGS.transcodeCapacity);
+    if (this.recorder.diskRefused) w.push(WARNINGS.recordingDiskBudget);
+    return w;
   }
 
   liveWindow(start: Date, durationSeconds: number): LocalWindow | null {

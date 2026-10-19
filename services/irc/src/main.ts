@@ -23,6 +23,7 @@ const tls = await loadTls({
   certFile: ports.IRC_TLS_CERT_FILE,
   keyFile: ports.IRC_TLS_KEY_FILE,
   production: core.NODE_ENV === "production",
+  allowSelfSigned: ports.IRC_TLS_ALLOW_SELF_SIGNED,
 });
 if (tls.ephemeral)
   logger.warn("IRC TLS uses an ephemeral self-signed certificate; set IRC_TLS_CERT_FILE and IRC_TLS_KEY_FILE");

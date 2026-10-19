@@ -9,7 +9,7 @@
 import { KEYS } from "@commonair/contracts/internal";
 import type { ValkeyClient } from "@commonair/service";
 
-export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive";
+export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive" | "mail";
 export interface RateLimitRule {
   max: number;
   windowMs: number;
@@ -21,6 +21,8 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitBucket, RateLimitRule> = {
   auth: { max: 10, windowMs: 60_000 },
   chat: { max: 20, windowMs: 30_000 },
   expensive: { max: 5, windowMs: 3_600_000 },
+  /** Per recipient address, across every sender (see recipientLimitedMailer). */
+  mail: { max: 10, windowMs: 3_600_000 },
 };
 
 export interface RateLimitResult {

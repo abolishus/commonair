@@ -11,6 +11,8 @@ ContainerName=commonair-mediamtx
 Network=commonair.network
 NetworkAlias=mediamtx
 EnvironmentFile=%h/.config/commonair/commonair.env
+# The online/offline hooks in mediamtx.yml post to $API_INTERNAL_URL.
+Environment=API_INTERNAL_URL=http://api:3001
 PublishPort=127.0.0.1:1935:1935
 PublishPort=127.0.0.1:8889:8889
 PublishPort=127.0.0.1:8189:8189/udp
