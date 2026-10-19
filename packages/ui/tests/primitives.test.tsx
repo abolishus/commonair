@@ -26,6 +26,9 @@ import {
   keyLabel,
 } from "../src/index.ts";
 import { Toaster, toast } from "../src/toast.tsx";
+import { AccentButton } from "../src/primitives/accent-button.tsx";
+import { OverlayBadge } from "../src/primitives/overlay-badge.tsx";
+import { StatusBadge } from "../src/primitives/status-badge.tsx";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -112,6 +115,30 @@ describe("LiveBadge", () => {
     );
     expect(screen.getByText("Live")).toBeTruthy();
     expect(screen.getByText("En direct")).toBeTruthy();
+  });
+});
+
+describe("design-system status primitives", () => {
+  test("StatusBadge exposes tone and keeps its meaning in text", () => {
+    const { container } = render(<StatusBadge tone="success">Approved</StatusBadge>);
+    expect(container.querySelector('[data-tone="success"]')?.textContent).toBe("Approved");
+  });
+
+  test("OverlayBadge marks video overlay content and forwards data attributes", () => {
+    render(
+      <OverlayBadge data-testid="duration" size="sm">
+        2:34
+      </OverlayBadge>,
+    );
+    expect(screen.getByTestId("duration").getAttribute("data-overlay")).toBe("");
+    expect(screen.getByText("2:34").className).toContain("text-2xs");
+  });
+
+  test("AccentButton keeps the channel accent", () => {
+    render(<AccentButton accent="teal">Follow</AccentButton>);
+    const button = screen.getByRole("button", { name: "Follow" });
+    expect(button.getAttribute("data-accent")).toBe("teal");
+    expect(button.className).toContain("bg-channel-accent");
   });
 });
 

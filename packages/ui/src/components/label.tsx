@@ -5,6 +5,8 @@
 // CommonAir: a generic Label primitive; callers pass htmlFor or wrap the control.
 /* oxlint-disable jsx-a11y/label-has-associated-control */
 
+"use client";
+
 import * as React from "react";
 import { cn } from "@commonair/ui/lib/utils";
 

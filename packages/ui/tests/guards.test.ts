@@ -97,9 +97,31 @@ describe("house conventions", () => {
   test("no hex colors in components or primitives (tokens live in globals.css)", () => {
     const offenders = sources
       .filter((s) => s.file.startsWith("src/"))
+      // `chart.tsx` targets recharts' default strokes with attribute selectors (`[stroke='#ccc']`); those match, never paint.
+      .map((s) => ({ ...s, text: s.text.replace(/\[(?:stroke|fill)='#[0-9a-fA-F]{3,8}'\]/g, "") }))
       .filter((s) => /["'\s(]#[0-9a-fA-F]{3,8}\b/.test(s.text))
       .map((s) => s.file);
     expect(offenders).toEqual([]);
+  });
+
+  test("house primitives are square (base-lyra): only rounded-none, and rounded-full for avatars and dots", () => {
+    const houseCode = sources.filter((s) => /^src\/(primitives|layouts|blocks)\//.test(s.file) || s.file === "src/toast.tsx");
+    const offenders = houseCode.flatMap((s) =>
+      [...s.text.matchAll(/(?<![\w-])rounded(?:-[a-z]{1,2})?(?:-(?:xs|sm|md|lg|xl|2xl|3xl|4xl|\[[^\]]*\]))?(?![\w-])/g)]
+        .map((m) => m[0])
+        .filter((cls) => !/-(none|full)$/.test(cls))
+        .map((cls) => `${s.file}: ${cls}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  test("the radius guard catches rounded corners", () => {
+    const re = /(?<![\w-])rounded(?:-[a-z]{1,2})?(?:-(?:xs|sm|md|lg|xl|2xl|3xl|4xl|\[[^\]]*\]))?(?![\w-])/g;
+    const hits = (text: string): string[] =>
+      [...text.matchAll(re)].map((m) => m[0]).filter((cls) => !/-(none|full)$/.test(cls));
+    expect(hits(`className="rounded-md p-2"`)).toEqual(["rounded-md"]);
+    expect(hits(`className="rounded rounded-t-lg rounded-[4px]"`)).toEqual(["rounded", "rounded-t-lg", "rounded-[4px]"]);
+    expect(hits(`className="rounded-none rounded-full rounded-t-none"`)).toEqual([]);
   });
 
   test("every file carries an SPDX header", () => {

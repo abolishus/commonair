@@ -3,7 +3,7 @@
  * SPDX-FileCopyrightText: 2026 CommonAir contributors
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Vendored from shadcn@4.22.1 dist/tailwind.css (what `shadcn eject` inlines), so the
+ * Vendored from shadcn@4.21.1 dist/tailwind.css (what `shadcn eject` inlines; unchanged in 4.22.1), so the
  * package does not depend on the shadcn CLI at runtime. Re-copy when upgrading the CLI.
  */
 @theme inline {

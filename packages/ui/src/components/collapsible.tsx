@@ -2,8 +2,6 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-"use client";
-
 import { Collapsible as CollapsiblePrimitive } from "@base-ui/react/collapsible";
 
 function Collapsible({ ...props }: CollapsiblePrimitive.Root.Props) {

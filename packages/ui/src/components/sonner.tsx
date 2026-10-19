@@ -2,8 +2,6 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-"use client";
-
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {

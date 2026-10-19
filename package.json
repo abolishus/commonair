@@ -40,7 +40,9 @@
     "vite-plus": "catalog:"
   },
   "overrides": {
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "@reduxjs/toolkit": "2.10.1",
+    "use-sync-external-store": "1.6.0"
   },
   "devEngines": {
     "packageManager": {
@@ -70,6 +72,7 @@
     "@orpc/zod": "1.15.7",
     "@orpc/tanstack-query": "1.15.7",
     "iovalkey": "0.4.0",
-    "@opentelemetry/api": "1.9.1"
+    "@opentelemetry/api": "1.9.1",
+    "recharts": "3.8.0"
   }
 }

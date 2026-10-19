@@ -13,7 +13,13 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import type { StreamCard as StreamCardData } from "@commonair/contracts/dto";
 import { InboxIcon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { Line, LineChart } from "recharts";
 import { Button } from "../src/components/button.tsx";
+import { ChartContainer } from "../src/components/chart.tsx";
+import { AccentButton } from "../src/primitives/accent-button.tsx";
+import { OverlayBadge } from "../src/primitives/overlay-badge.tsx";
+import { StatusBadge } from "../src/primitives/status-badge.tsx";
+import { Gallery } from "../stories/Components.stories.tsx";
 import {
   ChannelAvatar,
   CommandPalette,
@@ -59,6 +65,7 @@ const stream: StreamCardData = {
 };
 
 const CASES: [string, React.ReactElement][] = [
+  ["all shadcn components in the gallery", <Gallery key="gallery" />],
   ["StreamCard", <StreamCard key="x" stream={stream} href="/pp" />],
   ["StreamCardSkeleton", <StreamCardSkeleton key="x" />],
   ["ChannelAvatar", <ChannelAvatar key="x" name="émile" accent="violet" live />],
@@ -82,6 +89,27 @@ const CASES: [string, React.ReactElement][] = [
   ["Shortcut", <Shortcut key="x" keys={["mod", "k"]} />],
   ["CommandPalette", <CommandPalette key="x" open={false} onOpenChange={() => {}} groups={[]} />],
   ["ThemeToggle", <ThemeToggle key="x" value="system" onValueChange={() => {}} />],
+  [
+    "AccentButton",
+    <AccentButton key="x" accent="teal">
+      Follow
+    </AccentButton>,
+  ],
+  ["OverlayBadge", <OverlayBadge key="x">2:34</OverlayBadge>],
+  [
+    "StatusBadge",
+    <StatusBadge key="x" tone="success">
+      Approved
+    </StatusBadge>,
+  ],
+  [
+    "ChartContainer with Recharts ResponsiveContainer",
+    <ChartContainer key="x" config={{ viewers: { label: "Viewers", color: "var(--chart-1)" } }}>
+      <LineChart data={[{ month: "Jan", viewers: 12 }]}>
+        <Line dataKey="viewers" type="monotone" />
+      </LineChart>
+    </ChartContainer>,
+  ],
 ];
 
 function wrap(node: React.ReactElement): React.ReactElement {

@@ -10,6 +10,10 @@
  * prefers light. Colors live only here, as CSS variables; components use the
  * Tailwind color utilities generated from them (bg-primary, text-live, ...).
  * Accent and chat-name pairs are AA-checked by tests/tokens.test.ts.
+ *
+ * `.dark` re-applies the dark tokens to a subtree: the preset's inverted menus
+ * (components.json `menuColor: "inverted"`) put it on dropdown, context-menu,
+ * select and combobox popups, so menus stay dark in the light theme.
  */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -24,6 +28,9 @@
   &:where(html:not(.light, [data-theme="light"], [data-theme="system"]) *) {
     @slot;
   }
+  &:where(.dark, .dark *) {
+    @slot;
+  }
   @media (prefers-color-scheme: dark) {
     &:where(html[data-theme="system"] *) {
       @slot;
@@ -34,6 +41,11 @@
 @theme {
   --font-sans: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
+  /* Rubik is the only face: codes, IDs and timestamps use `tabular-nums`, not a monospace font. */
+  --font-mono: "Rubik Variable", ui-sans-serif, system-ui, sans-serif;
+  /* The one step below text-xs (overlay badges, compact counters); the mockups' `t-2xs`. */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: calc(0.875 / 0.625);
 }
 
 @theme inline {
@@ -61,12 +73,28 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-chart-7: var(--chart-7);
+  --color-chart-8: var(--chart-8);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
   --color-live: var(--live);
   --color-live-foreground: var(--live-foreground);
   --color-overlay: var(--overlay);
   --color-overlay-foreground: var(--overlay-foreground);
   --color-channel-accent: var(--channel-accent);
   --color-channel-accent-foreground: var(--channel-accent-foreground);
+  /* Hover/pressed surface: 12 % toward --foreground, i.e. away from the accent foreground, so contrast only grows. */
+  --color-channel-accent-hover: color-mix(in oklab, var(--channel-accent) 88%, var(--foreground));
   --color-chat-1: var(--chat-1);
   --color-chat-2: var(--chat-2);
   --color-chat-3: var(--chat-3);
@@ -88,8 +116,9 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Dark theme (default). */
-:root {
+/* Dark theme (default; `.dark` re-applies it to a subtree, e.g. inverted menus). */
+:root,
+.dark {
   color-scheme: dark;
   --radius: 0.625rem;
   --background: oklch(0.141 0.005 285.823);
@@ -115,6 +144,22 @@
   --chart-3: #fbbf24;
   --chart-4: #a78bfa;
   --chart-5: #f472b6;
+  /* Chart series: each is >= 3:1 on --background and --card (graphics); in the dark theme all eight are also >= 4.5:1 (text-safe). */
+  --chart-6: #2dd4bf;
+  --chart-7: #fb923c;
+  --chart-8: #a1a1aa;
+  /* Status tones (StatusBadge, stat deltas): AA as text on --background, --card and their own 15 % tint over --card. */
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --info: #60a5fa;
+  --sidebar: oklch(0.21 0.006 285.885);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.92 0.004 286.32);
+  --sidebar-primary-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-accent: oklch(0.274 0.006 286.033);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.705 0.015 286.067);
   --live: #dc2626;
   --live-foreground: #ffffff;
   /* Text and badges drawn over video thumbnails, identical in both themes. */
@@ -188,6 +233,21 @@
   --chart-3: #b45309;
   --chart-4: #6d28d9;
   --chart-5: #be185d;
+  /* Text-safe (>= 4.5:1) in the light theme: chart-1..6 and chart-8; chart-7 is graphics-only (3:1). */
+  --chart-6: #0f766e;
+  --chart-7: #ea580c;
+  --chart-8: #71717a;
+  --success: #166534;
+  --warning: #92400e;
+  --info: #1d4ed8;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  --sidebar-primary: oklch(0.21 0.006 285.885);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.967 0.001 286.375);
+  --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-border: oklch(0.92 0.004 286.32);
+  --sidebar-ring: oklch(0.552 0.016 285.938);
   --live: #dc2626;
   --live-foreground: #ffffff;
 
@@ -257,6 +317,21 @@
     --chart-3: #b45309;
     --chart-4: #6d28d9;
     --chart-5: #be185d;
+    /* Text-safe (>= 4.5:1) in the light theme: chart-1..6 and chart-8; chart-7 is graphics-only (3:1). */
+    --chart-6: #0f766e;
+    --chart-7: #ea580c;
+    --chart-8: #71717a;
+    --success: #166534;
+    --warning: #92400e;
+    --info: #1d4ed8;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.141 0.005 285.823);
+    --sidebar-primary: oklch(0.21 0.006 285.885);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.967 0.001 286.375);
+    --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
+    --sidebar-border: oklch(0.92 0.004 286.32);
+    --sidebar-ring: oklch(0.552 0.016 285.938);
     --live: #dc2626;
     --live-foreground: #ffffff;
 

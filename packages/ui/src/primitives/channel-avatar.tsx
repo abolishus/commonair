@@ -12,7 +12,7 @@ import { avatarSizes, type AvatarSize } from "./skeletons.tsx";
 export type Accent = (typeof ACCENTS)[number];
 
 const initialSizes: Record<AvatarSize, string> = {
-  xs: "text-[0.625rem]",
+  xs: "text-2xs",
   sm: "text-xs",
   md: "text-sm",
   lg: "text-xl",

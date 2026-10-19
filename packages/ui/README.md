@@ -46,11 +46,21 @@ that AGENTS.md requires ("use X, not Y").
   `text-channel-accent-foreground`. Each pair is WCAG AA in both themes (`tests/tokens.test.ts`
   computes the ratios from the CSS).
 - **Other tokens.** `--live` / `--live-foreground` (live badges), `--chat-1`…`--chat-12` (chat
-  name colors, AA on background and card), `--chart-1`…`--chart-5`, `--overlay` (text over video).
+  name colors, AA on background and card), `--overlay` (text over video), `--success` /
+  `--warning` / `--info` (status tones, AA as text on background, card and their own 10–15 % tint),
+  `--chart-1`…`--chart-8` (3:1 graphics on background and card; all text-safe except light
+  `--chart-7`), `--sidebar*` (the `sidebar` component), `--color-channel-accent-hover` (accent
+  hover surface), `--text-2xs` (the one size below `text-xs`), `--font-mono` (Rubik: use
+  `tabular-nums` for codes and timestamps). `.dark` re-applies the dark tokens to a subtree; the
+  preset's inverted menus (dropdown, context menu, select, combobox) use it.
+- **Radius.** base-lyra is square: `--radius` stays because CLI files reference the scale, but house
+  code uses only `rounded-none`, and `rounded-full` for avatars and dots (`tests/guards.test.ts`).
+- **Charts.** `chart` (`ChartContainer`, recharts 3.8.0): give each series `color: "var(--chart-N)"`,
+  never the `theme` key (its `.dark` selector does not match CommonAir's dark-by-default `:root`).
 - **Strings.** Components never inline English. Visible text comes from props; the few strings
   the design system itself needs (screen-reader labels, Cancel/Confirm defaults, discovery-reason
-  chips) come from `UiMessages` via `LocaleProvider`. `enMessages` is only the fallback; the app
-  passes its translated catalog.
+  chips, the sidebar toggle) come from `UiMessages` via `LocaleProvider`. `enMessages` is only the
+  fallback; the app passes its translated catalog.
 - **Formatting.** Every number, date and amount goes through `Intl` with the provider's locale
   (or a `locale` prop): `formatMoney(cents, currency, locale)`, `formatCompactNumber`,
   `formatRelativeTime`, `getInitial`. Money minor units come from ISO 4217
@@ -59,7 +69,7 @@ that AGENTS.md requires ("use X, not Y").
 - **SSR.** Wrap the app in `<NowProvider now={requestTime}>` (same value on server and client) so
   `<RelativeTime>` renders identical markup on the server and the first client render; it switches
   to the live clock after mount. `tests/ssr.test.tsx` server-renders and hydrates every primitive
-  and fails on any hydration warning.
+  and every shadcn component and fails on any hydration warning.
 
 ## House primitives
 
@@ -67,49 +77,48 @@ that AGENTS.md requires ("use X, not Y").
 `MoneyAmount` / `formatMoney`, `EmptyState`, `Skeleton`, `SkeletonGroup`, `SkeletonText`,
 `SkeletonAvatar`, `SkeletonThumbnail`, `SkeletonButton`, `IconButton` (required `label`, Tooltip,
 `aria-label`), `ConfirmDialog` (AlertDialog, destructive variant, async confirm), `toast`,
-`Kbd` / `Shortcut`, `CommandPalette`, `ThemeToggle`, `LocaleProvider`.
+`Kbd` / `Shortcut`, `CommandPalette`, `ThemeToggle`, `LocaleProvider`, and on top of `Badge` /
+`Button`:
+
+- `StatusBadge` (`tone`: `neutral | success | warning | info | danger | accent`, optional `icon`):
+  state chips (the mockups' `badge-ok/warn/info/accent`).
+- `OverlayBadge` (`size`: `sm | md`, optional `icon`): text over video and thumbnails (durations,
+  "Mature", `ViewerCount variant="overlay"`).
+- `AccentButton` (every `Button` size, optional `accent`): Follow / Subscribe / Support in the
+  channel accent; AA in every accent and theme, hover included.
 
 ## How the shadcn layer was set up
 
-1. Checked the CLI (`bunx shadcn@4.22.1 init --help`): `-b base` picks the Base UI primitive layer
-   (`@base-ui/react`, not Radix) and `-p lyra` the Lyra preset, which writes `"style": "base-lyra"`.
-   A throwaway `init -t vite -b base -p lyra` project confirmed the generated `components.json`.
-2. Wrote `components.json` here with `style: base-lyra`, `baseColor: zinc`, `cssVariables: true`,
-   `iconLibrary: hugeicons` and every alias pointing inside the package (`@commonair/ui/...`,
-   resolved by the `paths` entry in `tsconfig.json` and by the package `exports`).
-3. Added components with `bunx shadcn@4.22.1 add …`, then applied `scripts/shadcn-add.ts`'s
-   post-processing (below).
-
-To add or upgrade components, always use the wrapper:
+1. The CLI is pinned to `shadcn@4.21.1` (`SHADCN_VERSION` in `scripts/shadcn-add.ts`). A scratch
+   project outside the repository, `bunx shadcn@4.21.1 init -t vite -b base -p b1ZhhFNpx -n probe
+   --no-monorepo -y`, shows what the preset writes: `style: base-lyra` (Base UI, not Radix),
+   `baseColor: zinc`, `menuColor: inverted`, `menuAccent: bold`, Lucide, Instrument Sans and a blue
+   primary.
+2. `components.json` here keeps the style, base color and menu settings, and uses
+   `iconLibrary: hugeicons` with every alias inside the package (`@commonair/ui/...`, resolved by
+   the `paths` entry in `tsconfig.json` and by the package `exports`). Fonts and colors stay
+   CommonAir's.
+3. Components are added with the wrapper, which runs the pinned CLI and post-processes the output.
 
 ```sh
 bun scripts/shadcn-add.ts accordion            # add
-bun scripts/shadcn-add.ts dialog --overwrite   # upgrade; review the diff and re-apply local patches
+bun scripts/shadcn-add.ts dialog --overwrite   # upgrade; review the diff and re-apply DEVIATIONS.md
+bun scripts/shadcn-add.ts --snapshot           # regenerate upstream/ from a scratch preset project
 ```
 
-It runs the pinned CLI and then: rewrites `import { cn } from "cn"` to our `@commonair/ui/lib/utils`,
-adds SPDX headers (shadcn code is MIT; the notice is kept, see below), removes registry
-dependencies we replace (`cn`, `next-themes`, `cmdk`, `shadcn`) and fails on any unpinned new
-dependency.
+The wrapper rewrites `import { cn } from "cn"` to our `@commonair/ui/lib/utils`, adds SPDX headers
+to `src/components` and `src/hooks` (shadcn code is MIT; the notice is kept, see below), removes
+registry dependencies we replace (`cn`, `next-themes`, `cmdk`, `shadcn`) and fails on any unpinned
+new dependency.
 
-### Deliberate deviations (re-apply after `--overwrite`)
+### Deliberate deviations
 
-- **`command.tsx` is not the registry version.** The registry `command` uses `cmdk`, which depends
-  on `@radix-ui/react-dialog`, `-id`, `-primitive` and `-compose-refs`. This package has no Radix
-  in its tree (enforced by `tests/guards.test.ts`), so `command.tsx` keeps the shadcn API and
-  base-lyra classes but is built on Base UI's inline `Autocomplete` (the pattern Base UI documents
-  for command palettes). `CommandDialog` requires `title`/`description` instead of English defaults.
-- **`shadcn/tailwind.css` is vendored** as `src/styles/shadcn.css` (what `shadcn eject` inlines), so
-  the CLI is not a runtime dependency. Re-copy it when bumping the CLI version.
-- **Strings.** `dialog`, `sheet`, `pagination`, `breadcrumb` and `sonner` read their screen-reader
-  labels from `useUiMessages()` instead of hard-coded English.
-- **`button.tsx`** focus rings are full-opacity `ring-ring` / `ring-destructive` (3:1 on
-  background, card and popover; checked per variant in `tests/tokens.test.ts`).
-- **`sonner.tsx`** takes the theme as a prop instead of `next-themes`.
-- **`field.tsx`** `FieldError` also accepts plain-string errors (TanStack Form validators can return
-  either) and uses `===`.
-- Lint exceptions (file-level `oxlint-disable` with a reason): `field`, `input-group`,
-  `breadcrumb`, `label`.
+[DEVIATIONS.md](DEVIATIONS.md) lists every difference from the upstream reference (file, what, why,
+the guarding test). `upstream/` holds that reference (the preset project's output, normalized and
+formatted, stored as `.txt`); `tests/deviations.test.ts` fails when a component file differs from
+it without a row. The big ones: `command.tsx` is built on Base UI's `Autocomplete` instead of
+`cmdk` (no Radix in the tree), `sonner.tsx` takes `theme` as a prop instead of `next-themes`,
+focus rings are full-opacity tokens (3:1), and design-system strings come from `UiMessages`.
 
 ## Storybook
 

@@ -34,6 +34,8 @@ export interface UiMessages {
   discoveryReason: Record<DiscoveryReason, string>;
   theme: { label: string; dark: string; light: string; system: string };
   commandPalette: { title: string; description: string; placeholder: string; empty: string };
+  /** `sidebar` component: the toggle button/rail label and the mobile sheet's hidden title. */
+  sidebar: { toggle: string; title: string; description: string };
 }
 
 export const enMessages: UiMessages = {
@@ -70,4 +72,5 @@ export const enMessages: UiMessages = {
     placeholder: "Type a command or search…",
     empty: "No results found.",
   },
+  sidebar: { toggle: "Toggle sidebar", title: "Sidebar", description: "Site navigation" },
 };

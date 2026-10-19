@@ -88,3 +88,57 @@ export function contrast(fg: string, bg: string, backdrop = "#000000"): number {
   const [hi, lo] = [luminance(f), luminance(b)].sort((x, y) => y - x) as [number, number];
   return (hi + 0.05) / (lo + 0.05);
 }
+
+function toHex({ r, g, b }: Rgba): string {
+  const h = (v: number): string =>
+    Math.round(Math.min(1, Math.max(0, v)) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+/** `color` at `alpha` over an opaque `backdrop`, as Tailwind's `bg-x/10` renders it; returned as hex. */
+export function tint(color: string, alpha: number, backdrop: string): string {
+  return toHex(over({ ...parseColor(color), a: alpha }, over(parseColor(backdrop), parseColor("#000000"))));
+}
+
+function oklab({ r, g, b }: Rgba): [number, number, number] {
+  const [lr, lg, lb] = [toLinear(r), toLinear(g), toLinear(b)];
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+function fromOklab([L, A, B]: [number, number, number]): Rgba {
+  const l_ = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m_ = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s_ = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return {
+    r: toGamma(4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_),
+    g: toGamma(-1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_),
+    b: toGamma(-0.0041960863 * l_ - 0.7034186147 * m_ + 1.707614701 * s_),
+    a: 1,
+  };
+}
+
+/** CSS `color-mix(in oklab, a <weight>, b)` for opaque colors; returned as hex. */
+export function mixOklab(a: string, b: string, weight: number): string {
+  const [x, y] = [oklab(parseColor(a)), oklab(parseColor(b))];
+  const mixed: [number, number, number] = [
+    x[0] * weight + y[0] * (1 - weight),
+    x[1] * weight + y[1] * (1 - weight),
+    x[2] * weight + y[2] * (1 - weight),
+  ];
+  return toHex(fromOklab(mixed));
+}
+
+/** Euclidean distance in OKLab (about 0.02 is one just-noticeable difference). */
+export function deltaE(a: string, b: string): number {
+  const [x, y] = [oklab(parseColor(a)), oklab(parseColor(b))];
+  return Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+}

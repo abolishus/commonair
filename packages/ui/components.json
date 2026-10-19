@@ -19,7 +19,7 @@
     "lib": "@commonair/ui/lib",
     "hooks": "@commonair/ui/hooks"
   },
-  "menuColor": "default",
-  "menuAccent": "subtle",
+  "menuColor": "inverted",
+  "menuAccent": "bold",
   "registries": {}
 }

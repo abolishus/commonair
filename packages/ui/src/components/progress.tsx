@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+"use client";
+
 import { Progress as ProgressPrimitive } from "@base-ui/react/progress";
 import { cn } from "@commonair/ui/lib/utils";
 

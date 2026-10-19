@@ -9,6 +9,8 @@ import { useUiMessages } from "../lib/locale.tsx";
 import { cn } from "../lib/utils.ts";
 import { ChannelAvatar } from "./channel-avatar.tsx";
 import { LiveBadge } from "./live-badge.tsx";
+import { OverlayBadge } from "./overlay-badge.tsx";
+import { StatusBadge } from "./status-badge.tsx";
 import { ViewerCount } from "./viewer-count.tsx";
 
 export type { StreamCardData };
@@ -85,11 +87,7 @@ export function StreamCard({
               </div>
             )}
             <LiveBadge size="sm" className="absolute start-2 top-2" />
-            {broadcast.mature && (
-              <Badge variant="secondary" className="absolute end-2 top-2 bg-overlay text-overlay-foreground">
-                {messages.mature}
-              </Badge>
-            )}
+            {broadcast.mature && <OverlayBadge className="absolute end-2 top-2">{messages.mature}</OverlayBadge>}
             <ViewerCount
               count={broadcast.viewerCount}
               locale={locale}
@@ -144,13 +142,9 @@ export function StreamCard({
         <ul className="flex min-w-0 flex-wrap gap-1 ps-10">
           {showReason && (
             <li className="min-w-0">
-              <Badge
-                variant="secondary"
-                data-reason={stream.reason}
-                className="max-w-full bg-channel-accent text-channel-accent-foreground"
-              >
+              <StatusBadge tone="accent" data-reason={stream.reason} className="max-w-full">
                 <span className="truncate">{reasonLabel ?? messages.discoveryReason[stream.reason]}</span>
-              </Badge>
+              </StatusBadge>
             </li>
           )}
           {tags.map((tag) => (

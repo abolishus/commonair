@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+"use client";
+
 import { Separator as SeparatorPrimitive } from "@base-ui/react/separator";
 import { cn } from "@commonair/ui/lib/utils";
 
