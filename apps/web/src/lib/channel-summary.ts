@@ -14,6 +14,8 @@ export interface ChannelSummary {
   followerCount: number;
   /** The caller's follow state; null when anonymous (or the API did not say). */
   following: boolean | null;
+  /** When the browser poll that produced this started (ms); absent for the SSR snapshot. */
+  requestedAt?: number;
 }
 
 export function summarize(c: ChannelDto): ChannelSummary {

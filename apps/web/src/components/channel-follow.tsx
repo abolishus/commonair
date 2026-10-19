@@ -3,12 +3,12 @@
 
 import { formatNumber, useLocale } from "@commonair/ui";
 import { Button, buttonVariants } from "@commonair/ui/components/button";
-import { toast } from "@commonair/ui/toast";
 import { FavouriteIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
+import { toastActionError } from "../lib/action-error.ts";
 import { api } from "../lib/api.ts";
 import { followReducer, initialFollowState, toggleFollow, type FollowState } from "../lib/follow.ts";
 
@@ -17,16 +17,24 @@ export function useFollow(
   channel: string,
   following: boolean | null,
   count: number,
+  requestedAt: number,
 ): { state: FollowState; toggle: () => void } {
   const [state, dispatch] = React.useReducer(followReducer, initialFollowState(following, count));
-  React.useEffect(() => dispatch({ type: "sync", following, count }), [following, count]);
-  const toggle = () =>
+  React.useEffect(() => dispatch({ type: "sync", following, count, requestedAt }), [following, count, requestedAt]);
+  // `state.pending` only updates on the next render; a double click in one frame must not send twice.
+  const inFlight = React.useRef(false);
+  const toggle = () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     void toggleFollow(
       state,
       (follow) => (follow ? api().channels.follow({ channel }) : api().channels.unfollow({ channel })),
       dispatch,
-      () => toast.error(t("follow.failed")),
-    );
+      (err) => toastActionError(err, t("follow.failed")),
+    ).finally(() => {
+      inFlight.current = false;
+    });
+  };
   return { state, toggle };
 }
 

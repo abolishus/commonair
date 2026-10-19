@@ -10,6 +10,7 @@ import { Message01Icon, SentIcon, UserBlock01Icon } from "@hugeicons/core-free-i
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../i18n/index.ts";
+import { toastActionError } from "../lib/action-error.ts";
 import { api } from "../lib/api.ts";
 import { ChatConnection, type ChatStatus } from "./connection.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
@@ -122,8 +123,8 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
     try {
       await api().chat.bans.ban({ channel, username: target.username, durationSeconds: TIMEOUT_SECONDS });
       toast.success(t("chat.mod.timedOut", { name: target.displayName }));
-    } catch {
-      toast.error(t("chat.mod.failed"));
+    } catch (err) {
+      toastActionError(err, t("chat.mod.failed"));
     }
   };
 
@@ -190,7 +191,7 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
                     <span className={row.message.isAction ? "italic" : undefined}>{row.message.body}</span>
                   )}
                 </p>
-                {canModerate && user.username.toLowerCase() !== self && (
+                {canModerate && !row.deleted && user.username.toLowerCase() !== self && (
                   <ModMenu
                     displayName={user.displayName}
                     onTimeout={() => void timeout(target)}
@@ -251,7 +252,7 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
         description={t("chat.mod.banConfirmBody")}
         confirmLabel={t("chat.mod.ban")}
         onConfirm={() => (banDialog.target ? ban(banDialog.target) : undefined)}
-        onError={() => toast.error(t("chat.mod.failed"))}
+        onError={(err) => toastActionError(err, t("chat.mod.failed"))}
       />
     </section>
   );

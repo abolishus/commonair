@@ -13,6 +13,7 @@ export const en = {
   "nav.main": "Main",
   "nav.directory": "Browse",
   "auth.signOutFailed": "Could not sign out. Try again.",
+  "auth.sessionExpired": "Your session has ended. Sign in again to continue.",
 
   "footer.source": "Source",
   "footer.license": "Free software under the AGPL-3.0",

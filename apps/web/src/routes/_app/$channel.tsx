@@ -35,7 +35,7 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
   const channel = useChannel(initial.slug, initial);
   const live = channel.live !== null;
   const own = me !== null && (me.channelSlug ?? me.username) === channel.slug;
-  const follow = useFollow(channel.slug, channel.following, channel.followerCount);
+  const follow = useFollow(channel.slug, channel.following, channel.followerCount, channel.requestedAt ?? 0);
   return (
     <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <div className="flex min-w-0 flex-col gap-3">
