@@ -51,6 +51,7 @@ export const E2_TEST_IDS = {
   directory: "directory",
   directorySection: "directory-section",
   streamCard: "stream-card",
+  channelCard: "channel-card",
   directoryEmpty: "directory-empty",
   followButton: "follow-button",
   followerCount: "follower-count",
@@ -89,8 +90,13 @@ export const TEST_IDS = { ...E1_TEST_IDS, ...E2_TEST_IDS, ...E3_TEST_IDS } as co
 export const PLAYER_SOURCES = ["origin", "relay", "cdn"] as const;
 export type PlayerSource = (typeof PLAYER_SOURCES)[number];
 
-/** `data-section` values of `directory-section`. */
-export const DIRECTORY_SECTIONS = ["spotlight", "new", "live", "following"] as const;
+/** `data-section` values of `directory-section` whose cards are live `stream-card`s. */
+export const LIVE_DIRECTORY_SECTIONS = ["spotlight", "new", "live", "following"] as const;
+export type LiveDirectorySection = (typeof LIVE_DIRECTORY_SECTIONS)[number];
+/** Sections of offline channels; their cards are `channel-card` links. */
+export const OFFLINE_DIRECTORY_SECTIONS = ["following-offline", "recent"] as const;
+/** Every `data-section` value of `directory-section`. */
+export const DIRECTORY_SECTIONS = [...LIVE_DIRECTORY_SECTIONS, ...OFFLINE_DIRECTORY_SECTIONS] as const;
 export type DirectorySection = (typeof DIRECTORY_SECTIONS)[number];
 
 export type TestId = (typeof TEST_IDS)[keyof typeof TEST_IDS];

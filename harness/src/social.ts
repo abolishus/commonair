@@ -12,14 +12,14 @@ import type { Page } from "playwright";
 import type { ApiClient } from "./api/client.ts";
 import type { ChatClient } from "./chat-client.ts";
 import { TimeoutError, waitFor } from "./wait.ts";
-import { DIRECTORY_SECTIONS, type DirectorySection, ROUTES, TEST_IDS as T, tid } from "./web/selectors.ts";
+import { LIVE_DIRECTORY_SECTIONS, type LiveDirectorySection, ROUTES, TEST_IDS as T, tid } from "./web/selectors.ts";
 import { byTestId } from "./web/session.ts";
 
 /** Timeout the moderation menu applies (e2-selectors: `chat-mod-timeout` = 600 s). */
 export const TIMEOUT_SECONDS = 600;
 
 /** Sections where a just-started stream may show up (anything but `following`). */
-export const DISCOVERY_SECTIONS: readonly DirectorySection[] = ["live", "spotlight", "new"];
+export const DISCOVERY_SECTIONS: readonly LiveDirectorySection[] = ["live", "spotlight", "new"];
 
 export interface FollowState {
   following: boolean;
@@ -35,7 +35,7 @@ export interface DirectoryHome {
 }
 
 /** Web `data-section` values for the API's section keys. */
-const SECTION_KEYS: Record<DirectorySection, keyof DirectoryHome> = {
+const SECTION_KEYS: Record<LiveDirectorySection, keyof DirectoryHome> = {
   spotlight: "spotlight",
   new: "newAndLive",
   live: "live",
@@ -43,8 +43,8 @@ const SECTION_KEYS: Record<DirectorySection, keyof DirectoryHome> = {
 };
 
 /** The sections (in web naming) whose cards include `slug`. */
-export function sectionsWith(home: DirectoryHome, slug: string): DirectorySection[] {
-  return DIRECTORY_SECTIONS.filter((s) => home[SECTION_KEYS[s]].some((c) => c.channel.slug === slug));
+export function sectionsWith(home: DirectoryHome, slug: string): LiveDirectorySection[] {
+  return LIVE_DIRECTORY_SECTIONS.filter((s) => home[SECTION_KEYS[s]].some((c) => c.channel.slug === slug));
 }
 
 /**
@@ -79,7 +79,7 @@ export interface SocialActor {
   /** Open the channel page / join its chat and wait until chat is usable. */
   openChannel(channel: string, b: WaitBudget): Promise<void>;
   /** Find the channel in a discovery section of the directory and open it from there. */
-  discover(channel: string, b: WaitBudget): Promise<DirectorySection>;
+  discover(channel: string, b: WaitBudget): Promise<LiveDirectorySection>;
   /** Wait until the channel is in the viewer's `following` section. */
   waitFollowingSection(channel: string, b: WaitBudget): Promise<void>;
   followState(b: WaitBudget): Promise<FollowState>;
@@ -122,7 +122,7 @@ export class WebActor implements SocialActor {
     await byTestId(this.current, T.chat, { state: "open" }).waitFor({ timeout: b.timeoutMs });
   }
 
-  async discover(channel: string, b: WaitBudget): Promise<DirectorySection> {
+  async discover(channel: string, b: WaitBudget): Promise<LiveDirectorySection> {
     const page = await this.open(ROUTES.directory);
     this.current = page;
     // Ranking runs on an interval: reload until the card shows up in a discovery section.
@@ -240,7 +240,7 @@ export class WebActor implements SocialActor {
   close(): void {}
 }
 
-function cardIn(section: DirectorySection, channel: string): string {
+function cardIn(section: LiveDirectorySection, channel: string): string {
   return `${tid(T.directorySection, { section })} ${tid(T.streamCard, { channel })}`;
 }
 
@@ -270,7 +270,7 @@ export class ApiActor implements SocialActor {
     await this.chat.join(channel);
   }
 
-  async discover(channel: string, b: WaitBudget): Promise<DirectorySection> {
+  async discover(channel: string, b: WaitBudget): Promise<LiveDirectorySection> {
     const section = await waitFor(
       `${channel} in a ${DISCOVERY_SECTIONS.join("/")} section of directory.home`,
       async () => {

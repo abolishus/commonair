@@ -100,7 +100,9 @@ describe("selectors match docs/testing/e2-selectors.md", () => {
 
   test("directory sections are the documented data-section values", () => {
     const row = doc.split("\n").find((l) => l.startsWith("| `directory-section`")) ?? "";
-    const documented = new Set([...row.matchAll(/`([a-z]+)`/g)].map((m) => m[1] ?? ""));
+    // Only the values after "`data-section` =", which may be hyphenated (`following-offline`).
+    const values = row.split("`data-section` =")[1]?.split(".")[0] ?? "";
+    const documented = new Set([...values.matchAll(/`([a-z-]+)`/g)].map((m) => m[1] ?? ""));
     expect([...documented].sort()).toEqual([...DIRECTORY_SECTIONS].sort());
   });
 });
