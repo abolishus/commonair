@@ -11,7 +11,7 @@
 import type { Page } from "playwright";
 import type { ApiClient } from "./api/client.ts";
 import type { ChatClient } from "./chat-client.ts";
-import { waitFor } from "./wait.ts";
+import { TimeoutError, waitFor } from "./wait.ts";
 import { DIRECTORY_SECTIONS, type DirectorySection, ROUTES, TEST_IDS as T, tid } from "./web/selectors.ts";
 import { byTestId } from "./web/session.ts";
 
@@ -65,6 +65,14 @@ export interface WaitBudget {
   signal: AbortSignal;
 }
 
+/**
+ * Time left until `deadline` (ms epoch), capped at `capMs`, never below 1 ms, so inner waits of a
+ * polling loop cannot run past the loop's overall bound.
+ */
+export function remainingMs(deadline: number, capMs = Number.POSITIVE_INFINITY, now = Date.now()): number {
+  return Math.max(1, Math.min(capMs, deadline - now));
+}
+
 export interface SocialActor {
   readonly who: string;
   readonly username: string;
@@ -89,6 +97,8 @@ export interface SocialActor {
   moderationControls(): Promise<number>;
   /** Moderator action: time out the author of a message for TIMEOUT_SECONDS. */
   timeoutAuthor(author: string, text: string, b: WaitBudget): Promise<void>;
+  /** Release what the actor holds (chat sockets). Browser sessions are closed by the scenario. */
+  close(): void;
 }
 
 // ---------------------------------------------------------------- web
@@ -116,15 +126,16 @@ export class WebActor implements SocialActor {
     const page = await this.open(ROUTES.directory);
     this.current = page;
     // Ranking runs on an interval: reload until the card shows up in a discovery section.
+    const deadline = Date.now() + b.timeoutMs;
     const section = await waitFor(
       `stream-card[data-channel=${channel}] in a ${DISCOVERY_SECTIONS.join("/")} section of /`,
       async () => {
         for (const s of DISCOVERY_SECTIONS) {
           if (await page.locator(cardIn(s, channel)).count()) return s;
         }
-        await page.waitForTimeout(1_000);
-        await page.reload({ waitUntil: "domcontentloaded" });
-        await byTestId(page, T.directory).waitFor({ timeout: 10_000 });
+        await page.waitForTimeout(remainingMs(deadline, 1_000));
+        await page.reload({ waitUntil: "domcontentloaded", timeout: remainingMs(deadline) });
+        await byTestId(page, T.directory).waitFor({ timeout: remainingMs(deadline, 10_000) });
         return null;
       },
       { timeoutMs: b.timeoutMs, intervalMs: 0, signal: b.signal },
@@ -139,12 +150,13 @@ export class WebActor implements SocialActor {
 
   async waitFollowingSection(channel: string, b: WaitBudget): Promise<void> {
     const page = await this.open(ROUTES.directory);
+    const deadline = Date.now() + b.timeoutMs;
     await waitFor(
       `stream-card[data-channel=${channel}] in directory-section[data-section=following]`,
       async () => {
         if (await page.locator(cardIn("following", channel)).count()) return true;
-        await page.waitForTimeout(1_000);
-        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForTimeout(remainingMs(deadline, 1_000));
+        await page.reload({ waitUntil: "domcontentloaded", timeout: remainingMs(deadline) });
         return null;
       },
       { timeoutMs: b.timeoutMs, intervalMs: 0, signal: b.signal },
@@ -224,6 +236,8 @@ export class WebActor implements SocialActor {
     await row.locator(tid(T.chatMessageActions)).first().click({ timeout: b.timeoutMs });
     await byTestId(this.page, T.chatModTimeout).first().click({ timeout: b.timeoutMs });
   }
+
+  close(): void {}
 }
 
 function cardIn(section: DirectorySection, channel: string): string {
@@ -239,6 +253,7 @@ export class ApiActor implements SocialActor {
   constructor(
     readonly who: string,
     readonly username: string,
+    private readonly userId: string,
     private readonly api: ApiClient,
     private readonly connect: () => Promise<ChatClient>,
   ) {}
@@ -290,8 +305,10 @@ export class ApiActor implements SocialActor {
   }
 
   async hasFollowControl(): Promise<boolean> {
+    // `viewer` is set for every signed-in caller, the owner included; the web hides the button
+    // on your own channel, so compare with the owner.
     const c = await this.api.channels.get({ channel: this.channel });
-    return c.viewer !== null && c.viewer !== undefined;
+    return c.viewer !== null && c.viewer !== undefined && c.owner.id !== this.userId;
   }
 
   async send(text: string): Promise<void> {
@@ -309,16 +326,31 @@ export class ApiActor implements SocialActor {
   }
 
   async waitDeleted(messageId: string, author: string, _text: string, b: WaitBudget): Promise<void> {
-    const original = this.socket.messages(this.channel).find((m) => m.message.id === messageId);
+    const socket = this.socket;
+    const original = socket.messages(this.channel).find((m) => m.message.id === messageId);
     const userId = original?.message.user.id;
-    await Promise.race([
-      this.socket.waitFor(
-        "ban",
-        (f) => f.channel === this.channel && (f.userId === userId || f.username === author),
+    const channel = this.channel;
+    const removes = (f: ChatClient["frames"][number]) =>
+      (f.op === "ban" && f.channel === channel && (f.userId === userId || f.username === author)) ||
+      (f.op === "delete" && f.channel === channel && f.messageId === messageId) ||
+      (f.op === "clear" && f.channel === channel);
+    if (socket.frames.some(removes)) return;
+    // One listener and one timer for both frame kinds, both released whichever way it ends.
+    await new Promise<void>((resolve, reject) => {
+      const done = (err?: Error) => {
+        clearTimeout(timer);
+        off();
+        if (err) reject(err);
+        else resolve();
+      };
+      const timer = setTimeout(
+        () => done(new TimeoutError(`ban/delete of ${author}'s message ${messageId}`, b.timeoutMs)),
         b.timeoutMs,
-      ),
-      this.socket.waitFor("delete", (f) => f.channel === this.channel && f.messageId === messageId, b.timeoutMs),
-    ]);
+      );
+      const off = socket.onFrame((f) => {
+        if (removes(f)) done();
+      });
+    });
   }
 
   async waitNotice(code: string, b: WaitBudget): Promise<void> {
@@ -332,5 +364,10 @@ export class ApiActor implements SocialActor {
 
   async timeoutAuthor(author: string): Promise<void> {
     await this.api.chat.bans.ban({ channel: this.channel, username: author, durationSeconds: TIMEOUT_SECONDS });
+  }
+
+  close(): void {
+    this.chat?.close();
+    this.chat = null;
   }
 }

@@ -23,6 +23,7 @@ import {
   type WaitBudget,
   WebActor,
   isActiveTimeout,
+  remainingMs,
   timeoutDurationOk,
 } from "../src/social.ts";
 import type { SignedInUser } from "../src/users.ts";
@@ -116,7 +117,11 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
 
   const { probe } = via === "web" ? await playerBundles() : { probe: "" };
   const actor = async (who: string, user: SignedInUser): Promise<SocialActor> => {
-    if (via === "api") return new ApiActor(who, user.username, user.api.client, () => p.chat(user));
+    if (via === "api") {
+      const a = new ApiActor(who, user.username, user.id, user.api.client, () => p.chat(user));
+      ctx.defer(() => a.close());
+      return a;
+    }
     const session = await WebSession.open({
       fleet: p.fleet,
       engine: "chromium",
@@ -234,14 +239,19 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
     streamer.api.client.chat.bans.unban({ channel, username: troll.username }),
   );
   const unbanned = performance.now();
+  const unbanDeadline = Date.now() + CHAT_TIMEOUT_MS;
   await ctx.step("troll: can chat again (fan sees it)", () =>
-    // The unban reaches chat asynchronously: resend (distinct text) until it lands.
+    // The unban reaches chat asynchronously: resend (distinct text) until it lands, never past
+    // the overall chat bound.
     waitFor(
       "the troll's message after the unban",
       async () => {
         const text = `back again ${ctx.runId} ${Math.round(performance.now() - unbanned)}`;
-        await Tr.send(text, chat);
-        return F.waitMessage(troll.username, text, { timeoutMs: 2_500, signal }).catch(() => null);
+        await Tr.send(text, { timeoutMs: remainingMs(unbanDeadline), signal });
+        return F.waitMessage(troll.username, text, {
+          timeoutMs: remainingMs(unbanDeadline, 2_500),
+          signal,
+        }).catch(() => null);
       },
       { timeoutMs: CHAT_TIMEOUT_MS, intervalMs: 0, signal },
     ),

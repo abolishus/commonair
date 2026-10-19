@@ -4,10 +4,14 @@
 /** Pure parts of the E2 social scenario (docs/testing/e2-selectors.md). */
 import { describe, expect, test } from "vite-plus/test";
 import { VIA, parseVia } from "../scenarios/e2e-social.ts";
+import type { ApiClient } from "../src/api/client.ts";
+import type { ChatClient } from "../src/chat-client.ts";
 import {
+  ApiActor,
   DISCOVERY_SECTIONS,
   TIMEOUT_SECONDS,
   isActiveTimeout,
+  remainingMs,
   sectionsWith,
   timeoutDurationOk,
 } from "../src/social.ts";
@@ -62,5 +66,95 @@ describe("--set via", () => {
     expect(parseVia("web")).toBe("web");
     expect(parseVia("api")).toBe("api");
     expect(() => parseVia("tui")).toThrow(/via=tui/);
+  });
+});
+
+describe("remainingMs", () => {
+  test("time to the deadline, capped, never below 1 ms", () => {
+    expect(remainingMs(10_000, Infinity, 4_000)).toBe(6_000);
+    expect(remainingMs(10_000, 2_500, 4_000)).toBe(2_500);
+    expect(remainingMs(10_000, 2_500, 9_000)).toBe(1_000);
+    expect(remainingMs(10_000, 2_500, 12_000)).toBe(1);
+  });
+});
+
+type Frame = ChatClient["frames"][number];
+
+/** Just enough of ChatClient for ApiActor: frames, listeners, join, close. */
+function fakeChat() {
+  const frames: Frame[] = [];
+  const listeners = new Set<(f: Frame) => void>();
+  let closed = false;
+  const chat = {
+    frames,
+    get isOpen() {
+      return !closed;
+    },
+    onFrame(l: (f: Frame) => void) {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    messages: () => frames.filter((f) => f.op === "message"),
+    join: async () => undefined,
+    close: () => {
+      closed = true;
+    },
+  };
+  return {
+    chat: chat as unknown as ChatClient,
+    emit(f: Frame) {
+      frames.push(f);
+      for (const l of listeners) l(f);
+    },
+    listeners,
+    get closed() {
+      return closed;
+    },
+  };
+}
+
+const OWNER = "0193a1b2-0000-7000-8000-000000000001";
+const FAN = "0193a1b2-0000-7000-8000-000000000002";
+const fakeApi = (viewer: { following: boolean } | null) =>
+  ({
+    channels: { get: async () => ({ owner: { id: OWNER }, viewer, followerCount: 0 }) },
+  }) as unknown as ApiClient;
+
+describe("ApiActor", () => {
+  test("hasFollowControl: signed in and not the owner", async () => {
+    const chat = fakeChat();
+    const owner = new ApiActor("streamer", "st", OWNER, fakeApi({ following: false }), async () => chat.chat);
+    const fan = new ApiActor("fan", "fan", FAN, fakeApi({ following: false }), async () => chat.chat);
+    const anon = new ApiActor("anon", "anon", FAN, fakeApi(null), async () => chat.chat);
+    for (const a of [owner, fan, anon]) await a.openChannel("st");
+    expect(await owner.hasFollowControl()).toBe(false);
+    expect(await fan.hasFollowControl()).toBe(true);
+    expect(await anon.hasFollowControl()).toBe(false);
+  });
+
+  test("close() closes the chat socket", async () => {
+    const chat = fakeChat();
+    const a = new ApiActor("fan", "fan", FAN, fakeApi(null), async () => chat.chat);
+    a.close();
+    await a.openChannel("st");
+    a.close();
+    expect(chat.closed).toBe(true);
+  });
+
+  test("waitDeleted resolves on a ban frame and releases its listener; times out otherwise", async () => {
+    const chat = fakeChat();
+    const a = new ApiActor("fan", "fan", FAN, fakeApi(null), async () => chat.chat);
+    await a.openChannel("st");
+    const signal = new AbortController().signal;
+    const waiting = a.waitDeleted("m1", "troll", "", { timeoutMs: 2_000, signal });
+    expect(chat.listeners.size).toBe(1);
+    chat.emit({ op: "ban", channel: "other", userId: OWNER, username: "troll", expiresAt: null, reason: "" });
+    chat.emit({ op: "ban", channel: "st", userId: OWNER, username: "troll", expiresAt: null, reason: "" });
+    await waiting;
+    expect(chat.listeners.size).toBe(0);
+    // Already seen: resolves at once.
+    await a.waitDeleted("m1", "troll", "", { timeoutMs: 50, signal });
+    await expect(a.waitDeleted("m2", "nobody", "", { timeoutMs: 30, signal })).rejects.toThrow(/nobody/);
+    expect(chat.listeners.size).toBe(0);
   });
 });

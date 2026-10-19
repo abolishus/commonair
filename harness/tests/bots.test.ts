@@ -11,7 +11,7 @@ import type { ServerWebSocket } from "bun";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { formatUptime, replyTo } from "../src/bots/commands.ts";
 import { type BotChatConnection, type BotSdk, SdkBot } from "../src/bots/sdk-bot.ts";
-import { TmiBot, TmiEventLog, tmiConnection, twitchTagProblems } from "../src/bots/tmi-bot.ts";
+import { EVENT_LOG_LIMIT, TmiBot, TmiEventLog, tmiConnection, twitchTagProblems } from "../src/bots/tmi-bot.ts";
 import { ChatClient, ChatProtocolError } from "../src/chat-client.ts";
 import { waitFor } from "../src/wait.ts";
 
@@ -374,6 +374,19 @@ describe("tmi.js bot event recording", () => {
     expect((await later).username).toBe("x");
     await expect(log.waitForJoin("chan", { timeoutMs: 50 })).rejects.toThrow(/join #chan/);
     await expect(log.waitForModeration(() => false, "nothing", { timeoutMs: 50 })).rejects.toThrow(/nothing/);
+  });
+
+  test("event log lists are capped, keeping the newest", () => {
+    expect(EVENT_LOG_LIMIT).toBe(500);
+    const log = new TmiEventLog(Date.now, 3);
+    for (let i = 0; i < 5; i++) {
+      log.onMessage("#c", { username: "u" }, `m${i}`, false);
+      log.onTimeout("#c", `t${i}`, 600);
+      log.onNotice("#c", "msg_timedout", `n${i}`);
+    }
+    expect(log.messages.map((m) => m.text)).toEqual(["m2", "m3", "m4"]);
+    expect(log.moderation.map((e) => e.username)).toEqual(["t2", "t3", "t4"]);
+    expect(log.notices.map((n) => n.text)).toEqual(["n2", "n3", "n4"]);
   });
 
   test("twitchTagProblems names what a Twitch bot would miss", () => {

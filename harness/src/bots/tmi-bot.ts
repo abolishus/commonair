@@ -74,6 +74,14 @@ export interface WaitOpts {
 
 const bare = (channel: string) => channel.replace(/^#/, "").toLowerCase();
 
+/** Records kept per list (like ChatClient's frame history), so a long run cannot grow unbounded. */
+export const EVENT_LOG_LIMIT = 500;
+
+function pushCapped<T>(list: T[], item: T, limit: number): void {
+  list.push(item);
+  if (list.length > limit) list.splice(0, list.length - limit);
+}
+
 /** The subset of a tmi.js client the event log listens to. */
 export type TmiEventSource = Pick<Client, "on">;
 
@@ -87,7 +95,10 @@ export class TmiEventLog {
   readonly notices: ObservedNotice[] = [];
   readonly joined = new Set<string>();
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly limit = EVENT_LOG_LIMIT,
+  ) {}
 
   attach(client: TmiEventSource): this {
     client.on("message", (channel: string, tags: ChatUserstate, message: string, self: boolean) =>
@@ -119,7 +130,7 @@ export class TmiEventLog {
       self,
       at: this.now(),
     };
-    this.messages.push(m);
+    pushCapped(this.messages, m, this.limit);
     return m;
   }
 
@@ -141,7 +152,7 @@ export class TmiEventLog {
   }
 
   onNotice(channel: string, msgId: string, text: string): void {
-    this.notices.push({ channel: bare(channel), msgId, text, at: this.now() });
+    pushCapped(this.notices, { channel: bare(channel), msgId, text, at: this.now() }, this.limit);
   }
 
   private push(
@@ -150,15 +161,19 @@ export class TmiEventLog {
     username: string | null,
     extra: { durationSeconds?: number; messageId?: string | null; tags?: Record<string, unknown> },
   ): void {
-    this.moderation.push({
-      kind,
-      channel: bare(channel),
-      username: username === null ? null : username.toLowerCase(),
-      durationSeconds: extra.durationSeconds ?? null,
-      messageId: extra.messageId ?? null,
-      tags: extra.tags ?? {},
-      at: this.now(),
-    });
+    pushCapped(
+      this.moderation,
+      {
+        kind,
+        channel: bare(channel),
+        username: username === null ? null : username.toLowerCase(),
+        durationSeconds: extra.durationSeconds ?? null,
+        messageId: extra.messageId ?? null,
+        tags: extra.tags ?? {},
+        at: this.now(),
+      },
+      this.limit,
+    );
   }
 
   /** Wait until a recorded (past or future) chat line matches. */
