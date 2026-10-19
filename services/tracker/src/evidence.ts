@@ -1,0 +1,70 @@
+// SPDX-FileCopyrightText: 2026 CommonAir contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * Server-side P2P evidence (ADR 0005): every accepted announce is recorded in Valkey under
+ * `KEYS.p2pPeer(sid)` and `KEYS.p2pSwarm(swarm)` for integrity to read. The announcing network
+ * is stored only as an HMAC of its /24 or /48 prefix, never the address.
+ *
+ * A session's `swarm` field is the swarm of its latest announce: one that announces to a second
+ * info hash moves there (integrity judges one swarm per session). Its membership in the earlier
+ * swarm's ZSET stays until it stops, disconnects, or ages out of the TTL.
+ */
+import { KEYS, P2P_EVIDENCE } from "@commonair/contracts/internal";
+import type { ValkeyClient } from "@commonair/service";
+import { networkPrefix } from "./ip.ts";
+
+const enc = new TextEncoder();
+const toHex = (b: ArrayBuffer) => Buffer.from(b).toString("hex");
+
+export class Evidence {
+  private readonly key: Promise<CryptoKey>;
+  private readonly ttlSeconds: number;
+
+  constructor(
+    private readonly valkey: ValkeyClient,
+    internalSecret: string,
+    ttlSeconds: number = P2P_EVIDENCE.peerTtlSeconds,
+  ) {
+    this.ttlSeconds = ttlSeconds;
+    this.key = crypto.subtle.importKey("raw", enc.encode(internalSecret), { name: "HMAC", hash: "SHA-256" }, false, [
+      "sign",
+    ]);
+  }
+
+  /** Hex HMAC-SHA256(INTERNAL_API_SECRET, "p2p-net:" + network prefix) of a canonical address. */
+  async networkHash(ip: string): Promise<string> {
+    const prefix = networkPrefix(ip) ?? ip;
+    return toHex(await crypto.subtle.sign("HMAC", await this.key, enc.encode(`p2p-net:${prefix}`)));
+  }
+
+  /** Record one accepted announce. Throws on a Valkey error; the caller logs and carries on. */
+  async record(sid: string, swarm: string, net: string, nowMs: number): Promise<void> {
+    const peer = KEYS.p2pPeer(sid);
+    const swarmKey = KEYS.p2pSwarm(swarm);
+    const results = await this.valkey
+      .pipeline()
+      .hset(peer, { swarm, net, last: String(nowMs) })
+      .hsetnx(peer, "first", String(nowMs))
+      .hincrby(peer, "announces", 1)
+      .expire(peer, this.ttlSeconds)
+      .zadd(swarmKey, nowMs, sid)
+      .zremrangebyscore(swarmKey, "-inf", `(${nowMs - this.ttlSeconds * 1000}`)
+      .expire(swarmKey, this.ttlSeconds)
+      .exec();
+    throwOnError(results);
+  }
+
+  /** The session left these swarms (stopped or disconnected). */
+  async forget(sid: string, swarms: readonly string[]): Promise<void> {
+    if (swarms.length === 0) return;
+    const p = this.valkey.pipeline();
+    for (const swarm of swarms) p.zrem(KEYS.p2pSwarm(swarm), sid);
+    throwOnError(await p.exec());
+  }
+}
+
+function throwOnError(results: [Error | null, unknown][] | null): void {
+  if (!results) throw new Error("pipeline aborted");
+  for (const [err] of results) if (err) throw err;
+}
