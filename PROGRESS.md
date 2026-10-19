@@ -20,6 +20,23 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session three (2026-10-18): E2 slice built, review-gated
+
+All merged after independent review (HIGH findings re-reviewed), pushed to `main`; live testing is
+the user's (see HANDOFF.md "For the user to run").
+
+- Worker integrity wiring merged (jobs, run locks, fetch evidence, viewer-count republish).
+- API round 3: appeals, heartbeat floor, canonical IP hashes, `pinnedGet` deadline,
+  `channels.get.viewer.following`. P2P source recording deferred until the tracker gives
+  server-side swarm evidence.
+- Shared `@commonair/safe-regex` with a sound cost model; chat filters re-validated on load and run
+  in a worker pool with a hard timeout and quarantine.
+- **E2 built**: directory home, follow button, chat moderation (web) + `e2e-social` scenario with a
+  tmi.js bot through the IRC gateway (harness). Contract: `docs/testing/e2-selectors.md`.
+  Milestone E2 is reached when the user's live `e2e-social` run passes.
+- Contracts/config: auth routes, appeal subjects, `ircEnv`, `ORIGIN_ISSUANCE_ENABLED`; harness
+  Mailpit basic auth for Railway staging; IRC health port published.
+
 ## Session two (2026-10-18): end-to-end first
 
 **Milestone E1 reached locally:** `bun scripts/infra.ts stack && bun harness/src/cli.ts run e2e-basic`

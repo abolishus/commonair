@@ -5,126 +5,105 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # HANDOFF — for the next head agent
 
-Written 2026-10-18 at the end of orchestration session two. Read this, then
-[AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) (see "Milestones — end-to-end vertical slices"),
+Written 2026-10-18 at the end of orchestration session three. Read this, then
+[AGENTS.md](AGENTS.md), [PLAN.md](PLAN.md) ("Milestones — end-to-end vertical slices"),
 [PROGRESS.md](PROGRESS.md), [docs/architecture.md](docs/architecture.md), ADRs 0001–0004 in
-`docs/decisions/`, and [docs/testing/e1-selectors.md](docs/testing/e1-selectors.md). The original
-product brief's constraints still apply in full: FOSS-first, Podman, local-first on `main`, DCO
-sign-off, the verify gate, subagent pods with disjoint ownership (≤ ~6 at once), and an
-independent reviewer **before** every merge.
+`docs/decisions/`, [docs/testing/e1-selectors.md](docs/testing/e1-selectors.md),
+[docs/testing/e2-selectors.md](docs/testing/e2-selectors.md) and
+[docs/deploy/railway.md](docs/deploy/railway.md). The original constraints still apply: FOSS-first,
+Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
+an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
+
+## Process rules from the user (session three)
+
+- **The user runs the gate (`bun run verify`), image rebuilds, harness scenarios and all visual
+  checks.** Agents and units do not. Run only targeted checks: the touched packages' unit tests and
+  `test:int`, `bunx tsc -p <pkg>`, `vp lint`/`vp fmt` on changed files (and `vp build` for web).
+- Focus on development; after review, merge and push `main` so the user can test. Ask before
+  pushing unless the user has said to push. Gate failures are fixed "in post".
+- Briefs must tell units the same (no verify, no dev servers/browsers, no live scenario runs).
 
 ## Where things stand
 
-**Milestone E1 is reached locally.** With the platform up, `e2e-basic` passes: web sign-up with
-ALTCHA and email verification, stream key rotation, ffmpeg RTMP publish, playback in Chromium
-(signed in) and WebKit (anonymous, native HLS), chat in both directions, offline detection. First
-run: TTFF 1.0 s / 1.8 s, glass-to-glass 2.1 s / 3.9 s (Chromium / WebKit).
-
-```
-bun scripts/infra.ts stack                       # build + start everything (+ harness profile), wait healthy
-HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-basic
-VERIFY_INFRA=external bun run verify             # the gate, reusing the running data services
-```
-
-`main` (last merge `5400a83`, plus this handoff commit) has every unit from this session merged
-after review. The last full gate run on the final merge (API round two) was interrupted by a hung
-`podman compose up` (see "Known issues") and handed to the user to re-run; every earlier merge this
-session was verified GREEN with the full gate. **Not pushed yet** — push `main` once the gate is
-confirmed green.
+`main` is pushed (last merge `61c6e2f`, plus this handoff commit). Everything below was reviewed
+before merge; every HIGH had a fix round and a focused re-review. **Not yet tested live by the
+user**: the E2 slice end to end (`e2e-social`), the rebuilt worker/origin integrity wiring, and the
+harness against Railway staging.
 
 ### Merged this session
 
-| Area                  | What landed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Reviewed           |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| Infra (2I)            | full compose stack; WAL-G push under `timeout 20` (fixed the DROP DATABASE hang); Garage + garage-init + migrate in `infra.ts test`; new `infra.ts stack`; `init-env --merge`; tracker behind `--profile p2p` (not built); fixed compose subnet `10.89.42.0/24` trusted for `x-forwarded-for` (Quadlet mirrors it)                                                                                                                                                                                                  | session one + here |
-| Web (3A-e1)           | `apps/web`: TanStack Start on Bun; server proxies `/api` + `/rpc`; sign-up/in, dashboard, `/$channel` (hls.js or native HLS, heartbeats, bfcache-safe), chat, `/embed/$channel`; security headers, server-side dashboard guard, i18n catalog                                                                                                                                                                                                                                                                        | 2 rounds           |
-| Harness               | `e2e-basic` (+ failure screenshots with the key redacted); API-path sign-ups follow web-origin verification links; `verify --full/--scenario` start the platform and install browsers; CI installs browser deps                                                                                                                                                                                                                                                                                                     | 2 rounds           |
-| API (2A)              | all HANDOFF HIGH/MED items: linear-time regex subset for word filters (incl. Unicode case folding), birthDate etc. immutable via better-auth hook, category mature gate, instance-only media refs, admin plugin endpoints 404, /64 rate-limit buckets, SSRF-safe relay/simulcast URLs with pinned dialing, per-template per-mailbox mail cap, heartbeat floor + CAS, no verdict promotion once scored, `developer.tokens.list/revoke`, `UserControlMessage` publishing, TOTP tests, `stream_keys.last_used_ip_hash` | 3 passes           |
-| Integrity (2H2)       | all HANDOFF items + review: fetch-less bots held/excluded, time-bounded allowances, relay coverage required, distinct-segment counting (HLL), owner-IP exclusion time-aligned, reload supersede, datacenter 0.6 + privacy-relay class, relay reinstatement/unknown issuance                                                                                                                                                                                                                                         | 2 rounds           |
-| Media (2E)            | stale VOD reconcile, crash recovery + safe sweeps, disk budget, transcode slots, simulcast SSRF; simulcast key isolation by container PID namespace (a key-swapping proxy was built, reviewed as unsafe, removed)                                                                                                                                                                                                                                                                                                   | 2 rounds           |
-| DB / config / storage | migrations 0006 integrity scan indexes, 0007 users identity immutability trigger, 0008 appeals subject index; `MEDIA_WORK_DIR_*`, `TRANSCODE_MAX_LADDERS`, `OUTBOUND_ALLOW_PRIVATE_NETWORKS`; presigned PUT signs content type + length; `SegmentFetch.obj`; ConfirmDialog test ids                                                                                                                                                                                                                                 | orchestrator       |
+| Area                    | What landed                                                                                                                                                                                                                                                                                                                                                           | Review                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| Worker integrity (2L)   | four integrity jobs on the `integrity` queue (schedulers + Valkey run locks, lapses logged/counted), consumer fetch evidence with ack isolated from apply, origin `SegmentFetch.obj`, viewer-count republish, scheduled jobs retry with backoff, SIGHUP CIDR reload keeps a good list, `integrity-basic` scenario, worker README                                      | no HIGH; fixes applied      |
+| API round 3             | appeals (create/mine/queue/resolve: CAS + audit, no outbox event by decision), heartbeat floor returns before any write, canonical IP hashing (RFC 5952, `::ffff:` unwrap) on both hash paths, `pinnedGet` hard deadline, auth paths from contracts, README rate-limit table. P2P `assignedSource` **reverted** (see open items). `channels.get` → `viewer.following` | 2 HIGH → fixed, re-reviewed |
+| Safe-regex + chat (2B)  | `packages/safe-regex` (moved from the API) with a sound cost model (nested alternations in repeated groups refused, sums across alternatives, O(n) unbounded repeats); chat re-validates stored filters on load and runs regex filter sets in a Bun worker pool with a hard timeout, quarantine, capped zombie threads, token-bucket respawns, queue-wait deadline    | 2 HIGH → fixed, re-reviewed |
+| E2 web (3A)             | `/` is the directory (spotlight/new/live/following, `StreamCard`, empty/skeleton states), follow button (optimistic, stale-poll safe) + follower count, chat moderation menu (timeout 600 s / ban with `ConfirmDialog`), deleted rows, inline notices, sign-in-again toast                                                                                            | no HIGH; fixes applied      |
+| E2 harness (2J)         | `e2e-social` (five steps of `e2-selectors.md`, `--set via=api` backend-only mode), E2 selectors parsed from both docs, tmi.js event recording (CLEARCHAT/timeout/ban/messagedeleted/notices)                                                                                                                                                                          | no HIGH; fixes applied      |
+| Head (contracts/config) | `@commonair/contracts/auth` (`AUTH_ROUTES`, `ALTCHA_FIELD`), `E.APPEAL_SUBJECTS`, `ircEnv` + `ORIGIN_ISSUANCE_ENABLED` in config, `Channel.viewer`, harness Mailpit basic auth (`HARNESS_MAILPIT_AUTH`), IRC health port 6681 published in compose                                                                                                                    | orchestrator                |
 
-## In flight: worker integrity wiring — built, needs review + merge (do this first)
+## For the user to run (agents: don't, unless asked)
 
-Brief: `.claude/briefs/e1/2L-worker-integrity.md`. Branch `worktree-agent-a07b926d662d5d4bd`
-(worktree `.claude/worktrees/agent-a07b926d662d5d4bd`), commit `a9c7291`
-`wip(worker): run the integrity pipeline in the worker` — the commit body lists everything.
-Summary: the four integrity jobs are scheduled on the `integrity` queue (own schedulers + Valkey
-run locks, capped batches, metrics); the segment consumer calls `recordFetches` (origin/p2p,
-`obj` → object id); origin sets `SegmentFetch.obj`; viewer counts republish after scoring;
-scheduled jobs in the shared runtime now retry with backoff (affects existing scheduled jobs);
-new `harness/scenarios/integrity-basic.ts`. Reported: verify --quick green, worker 174 unit +
-43 int, origin 152; `viewers` and `integrity-basic` pass against the stack. **Not reviewed yet.**
+```
+bun scripts/infra.ts stack                                   # rebuild + start everything
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-social
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-social --set via=api   # backend only
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-basic
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run viewers
+HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run integrity-basic
+VERIFY_INFRA=external bun run verify
+```
 
-To land it: `git merge main` on the branch (it predates the API round-two merge), independent
-review (focus: runtime retry change, run-lock expiry, consumer double-count safety), merge, run
-`viewers integrity-basic e2e-basic`, and add `services/worker/README.md` docs for the jobs. The
-unit rebuilt the `worker` and `origin` images **from its worktree** and restarted them in the
-running stack; after merging, rebuild from `main`
-(`podman compose build worker origin && podman compose up -d --no-deps worker origin`).
-Its "API still promotes while verdict = pending" note is already fixed on `main` (API round two:
-promotion only while `scored_at is null` and not `media_unconfirmed`). `integrity-basic` reads bot
-reasons from Postgres because `integrity.flags` is not implemented in the API yet. The harness's
-host-side forwarding proxy is not in the trusted compose subnet, so simulated client addresses
-collapse to one at the API; decide whether the harness profile should trust the host gateway.
-
-## Railway staging (live)
-
-`.railway/railway.ts` (Railway TypeScript IaC; `railway.json/toml` are deprecated) describes a
-staging environment; the project `commonair` in the "Josh Shevach's Projects" workspace was
-created and applied from it, and all 12 services are healthy (2026-10-18). Guide, differences from
-compose and bring-up notes: [docs/deploy/railway.md](docs/deploy/railway.md). Change it only via
-`railway config plan` → review → `railway config apply`; secrets/bucket creds/domains come from
-`scripts/railway-bootstrap.ts`. Not yet done there: running the harness against staging (needs
-Mailpit basic-auth support in the harness), real contact mailboxes, public media reads.
+Test the web app from `PUBLIC_URL` (3100 here): the API strips cookies from untrusted origins, so a
+dev server on another port makes every browser `/rpc` call anonymous (follows "roll back").
+Staging: set `HARNESS_*` URLs from `railway domain list` and `HARNESS_MAILPIT_AUTH` from the
+`mailpit` service's `MP_UI_AUTH` (docs/deploy/railway.md), then `smoke` and `e2e-basic`.
 
 ## Open items (not done)
 
-- **API round 3** (from the final re-review; no HIGH left): (MED) safe-regex cost model treats an
-  unbounded repeat as 32 instead of the input length and does not cap total cost across top-level
-  alternatives (`.*.{0,20}!|…` ×18 ≈ 40–120 ms per message) — fix the model and/or run chat filters
-  in a Worker with a hard timeout; (LOW) heartbeats under the 5 s floor still increment counters
-  and record evidence — return early; canonicalize IPs before hashing (`::ffff:` unwrap, IPv6
-  compression) in both `media/hooks.ts` and `http.ts`; `pinnedGet` needs a total timeout.
-- **Contract requests still open**: move `services/api/src/lib/safe-regex.ts` into a shared package
-  and use it in chat's `compileFilters` (re-validate saved patterns on load); export better-auth
-  paths + ALTCHA field name from `packages/contracts` (web and harness keep copies); API should
-  record P2P-enabled sessions as `assignedSource: "p2p"` (integrity otherwise holds heavy-P2P
-  viewers at pending); appeals resolver (still a 501 stub) must set `resolved_at` and use subject
-  types `session|user|integrity_flag`; ingest auth should set `stream_keys.last_used_at` per
-  broadcast; optional `vods.failed_reason` column; document the `mail` rate-limit bucket;
-  `IRC_*` env vars into config; `ORIGIN_ISSUANCE_ENABLED`/`ISSUANCE_KEYS` into config.
-- Media: internal RTSP password still in ffmpeg argv (isolation-protected, documented).
-- Integrity: CDN-delivered sessions are not fetch-judged (README "known limitations").
-- `legal.current` returns nothing locally (no seed docs) — sign-up shows no document links.
-- UI web: ALTCHA widget tick colour is not a token; one large chunk warning in `vp build`;
-  web strings for new media health codes (`transcode_capacity`, `recording_disk_budget`,
-  simulcast `lastError` codes, VOD failure reasons).
-- Governance: `subscriptionQualifies` and `closeElection` tests.
+- **Contract requests (head agent):**
+  - integrity: judge P2P only with server-side swarm evidence (tracker announces / swarm size ≥ 2);
+    for `p2p` sessions judge "too few" against the reduced share but "too many" against share 1.
+    Until then the API records `origin` even for P2P viewers (client `p2pCapable` must not lower
+    the fetch bar). Needs `services/tracker`, which is still not built.
+  - `CidrClassifier` public `size` getter (worker reads private fields via `Reflect.get`).
+  - API surfaces stored word filters the new validator refuses: `WordFilter` DTO
+    `invalid: boolean`, `invalidReason: string | null` (chat skips them on load and only counts
+    `chat.filter.skipped`; a skipped `block` filter now passes messages — owner is not told).
+  - `appeals.create` on the `write` rate-limit bucket; heartbeat response `throttled` hint so
+    clients don't commit sub-floor deltas.
+  - optional `vods.failed_reason`; `ISSUANCE_KEYS` into contracts once the worker owns issuance.
+- Overturning a moderation appeal records the decision only (does not lift the ban); a relay leaving
+  moves viewers to `origin` (P2P-ness not stored server-side).
+- IP canonicalization changed `ip_hash` for clients Bun reported as `::ffff:a.b.c.d`: owner-IP
+  exclusion for broadcasts live across that deploy compares the old `last_used_ip_hash` until the
+  streamer re-publishes (services/api README).
+- Some regex filters the old API check accepted are now refused (e.g. `(?:https?://)?\S+`,
+  `(?:a(?:bc|bd))+`; safe rewrites are suggested in the error text).
+- Chat: test for OAuth revocation on an open socket. Media: internal RTSP password in ffmpeg argv.
+  Integrity: CDN-delivered sessions not fetch-judged. `legal.current` has no seed docs locally.
+  Web: ALTCHA tick colour token, large chunk warning, strings for media health codes; LOW: the
+  moderation `IconButton`-inside-`DropdownMenuTrigger` pattern needs a keyboard check in a browser.
+  Governance: `subscriptionQualifies` / `closeElection` tests.
 
-## Next slices (PLAN.md "Milestones")
+## Next slices
 
-E2 follows + directory/discovery page + a moderation action (ban/timeout) + tmi.js bot via the IRC
-gateway; E3 relay joins and serves viewers + viewbot swarm excluded (needs the worker wiring above;
-local relays need `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true` in `.env`); E4 money (manual adapter, then
-Stripe against stripe-mock); E5 co-op; E6 the rest. Each slice: a `docs/testing/<slice>-selectors.md`
-contract, briefs in `.claude/briefs/<slice>/`, API + worker + web + harness scenario together.
+E3 relay joins and serves viewers + viewbot swarm excluded (local relays need
+`OUTBOUND_ALLOW_PRIVATE_NETWORKS=true`); the P2P tracker + swarm evidence pairs naturally with it
+(both are bandwidth levers). E4 money (manual adapter, then Stripe against stripe-mock); E5 co-op;
+E6 the rest. Each slice: a `docs/testing/<slice>-selectors.md` contract, briefs in
+`.claude/briefs/<slice>/`, API + worker + web + harness scenario together.
 
-## Known issues and process lessons (session two)
+## Known issues and process lessons
 
-- **Check exit codes, and gate commits on them**: `cmd; echo EXIT $?; git commit` commits even when
-  red (happened once this session; amended before push). Use `rc=$?; [ $rc = 0 ] && git commit …`.
-- `podman compose up -d` can hang when another process (e.g. a unit rebuilding images) runs
-  compose concurrently. Kill it and use `VERIFY_INFRA=external` when the services are already up;
-  avoid parallel compose commands from several agents.
-- Changing the compose subnet needs `podman compose --profile harness down` and
-  `podman network rm commonair_default` once.
-- Worktrees may be created from an older commit than `main`: tell every unit to `git merge main`
-  first, and format/SPDX-header briefs before committing them (both bit this session).
-- Local machine: an unrelated Vite dev server holds `[::1]:3000`, so the local `.env` here uses
-  `WEB_PORT=3100`, `PUBLIC_URL=http://localhost:3100`, `AUTH_TRUSTED_ORIGINS=http://localhost:3100`;
-  pass `HARNESS_WEB_URL=http://localhost:3100` to the harness. CI uses the defaults (3000).
-- The local `.env` has `NODE_ENV=development`, which overrides the images' `NODE_ENV=production`
-  via `env_file`; fine for local runs, not for production.
-- Review before merge paid off: every unit's first review found real HIGHs (regex folding,
-  botting whitelist, key-substituting proxy). Keep doing focused re-reviews of fix rounds for HIGHs.
+- A chat integration test ("a timeout issued on A is enforced on B …", 5 s) times out under
+  parallel test load; it passes alone. Avoid running several packages' `test:int` concurrently.
+- Stale `commonair-it-*` compose stacks from old integration runs may be lying around; remove them
+  if they get in the way. `podman compose up` can hang when another process runs compose: kill it
+  and use `VERIFY_INFRA=external`.
+- Worktrees: tell every unit to `git merge main` first; resume a finished unit with SendMessage for
+  its fix round (it keeps context). Old worktrees under `.claude/worktrees/` can be cleaned up.
+- Local machine: an unrelated Vite dev server holds `[::1]:3000`; the local `.env` uses
+  `WEB_PORT=3100`, `PUBLIC_URL`/`AUTH_TRUSTED_ORIGINS` on 3100. The local `.env` has
+  `NODE_ENV=development` (overrides the images' production mode; fine locally).
+- Review before merge keeps paying off: this session's reviews caught a client flag that would have
+  let viewbots bypass fetch checks, an exponential regex bypass, and unbounded worker respawns.
