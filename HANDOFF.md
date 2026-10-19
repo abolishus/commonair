@@ -36,11 +36,21 @@ strict lint and formatting passed for the units; Storybook builds passed for U1,
 U3's tests also passed. The aggregate unit-test command completed successfully during integration.
 The user still runs the repository gate and visual/browser review.
 
-Next is E4a U6: board-level page stories, drift-enforcement tests in `packages/ui` and `apps/web`,
-and migration of the existing `apps/web` routes/components onto U2–U5 compositions without
-changing selectors or behavior. Keep this application-design-only; no API, worker, DB or harness
-work. Create disjoint briefs/ownership before parallelizing. User runs `bun run verify`, Storybook
-visual inspection and browser checks.
+Next is E4a U6, split in two units with disjoint ownership (briefs in `.claude/briefs/e4/`):
+**U6a** one faithful page story per board (`packages/ui/stories/pages/**`) + the packages/ui
+source-policy test; **U6b** apps/web migration onto the shells/blocks + the apps/web
+source-policy test, every e1–e3 selector intact. A Codex session had started U6 in
+`~/.codex/worktrees/e4-u6-*` (uncommitted: a generic board template that did not reproduce the
+boards, and an apps/web policy test); it was not merged and U6a/U6b restart from `main`.
+
+**Why staging looked unchanged (2026-10-19):** Railway `web` is deployed at `97d4f37` (current
+`main`), but U1–U5 only added `packages/ui` compositions and Storybook stories; no route uses them
+until U6b lands. The demo seed did reach staging (`/demo_streamer1` renders "Aurora Pixel",
+offline), but `directory.home` lists **live** channels only and the seed creates past broadcasts,
+never live ones, so `/` says "Nobody is live" (the signed-in `bob` also follows no demo channel).
+To see a live card, sign in as a demo streamer, copy the stream key from `/dashboard` and publish a
+test pattern to the mediamtx TCP proxy (see "For the user to run"). Showing offline/recent
+followed channels on `/` needs an API change (E4b or later; Main board's sidebar has the design).
 
 ## Process rules from the user (session three)
 
@@ -98,6 +108,10 @@ HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-basic
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run viewers
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run integrity-basic
 VERIFY_INFRA=external bun run verify
+# Staging: make a demo channel live. Sign in as demo_streamer1, then on /dashboard copy the
+# server URL (rtmp://<mediamtx proxy>/live) and the stream key (`<slug>?key=<secret>`).
+ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i sine=frequency=440 \
+  -c:v libx264 -preset veryfast -b:v 2500k -g 60 -c:a aac -f flv "<server URL>/<stream key>"
 ```
 
 Test the web app from `PUBLIC_URL` (3100 here): the API strips cookies from untrusted origins, so a
