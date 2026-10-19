@@ -121,6 +121,19 @@ export async function eligibleVoters(db: Executor, electionClass: MemberClass): 
   return new Set(rows.map((r) => r.userId));
 }
 
+/**
+ * `at` plus `months` calendar months in UTC, clamped to the last day of a shorter target month
+ * (31 Jan + 1 month is 28/29 Feb, not 2/3 Mar).
+ */
+export function addUtcMonths(at: Date, months: number): Date {
+  const out = new Date(at);
+  out.setUTCDate(1);
+  out.setUTCMonth(out.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(out.getUTCFullYear(), out.getUTCMonth() + 1, 0)).getUTCDate();
+  out.setUTCDate(Math.min(at.getUTCDate(), lastDay));
+  return out;
+}
+
 export class ElectionError extends Error {
   constructor(
     public readonly code: "not_found" | "still_open",
@@ -202,8 +215,7 @@ export async function closeElection(db: Database, electionId: string, now: Date)
         );
     }
     await tx.update(schema.elections).set({ status: "closed" }).where(eq(schema.elections.id, electionId));
-    const termEnd = new Date(now);
-    termEnd.setUTCMonth(termEnd.getUTCMonth() + election.termMonths);
+    const termEnd = addUtcMonths(now, election.termMonths);
     const winners = result.results.filter((r) => r.elected);
     if (winners.length) {
       await tx

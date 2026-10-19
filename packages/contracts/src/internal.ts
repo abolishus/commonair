@@ -102,28 +102,50 @@ export const KEYS = {
   rateLimit: (bucket: string, subject: string) => `rl:${bucket}:${subject}`,
   /**
    * HASH of P2P evidence for one playback session, written by the tracker on every authenticated
-   * announce: `swarm` (a `p2pSwarm` id), `net` (hex HMAC-SHA256 under INTERNAL_API_SECRET of the
-   * announcing address's network prefix, /24 for IPv4 and /48 for IPv6, canonical form),
-   * `first` / `last` (epoch ms), `announces` (count). Expires P2P_EVIDENCE.peerTtlSeconds after the
-   * last announce. Integrity reads it; nothing else may write it.
+   * announce: `swarm` (a `p2pSwarm` id), `net` (the session's network: hex HMAC-SHA256 of the
+   * announcing address's canonical /24 (IPv4) or /48 (IPv6) prefix, keyed with
+   * `HMAC-SHA256(INTERNAL_API_SECRET, "p2p-net-v1")`), `first` / `last` (epoch ms), `announces`
+   * (count). Expires P2P_EVIDENCE.peerTtlSeconds after the last write. Integrity reads it; only
+   * the tracker writes it.
    */
   p2pPeer: (sessionId: string) => `p2p:peer:${sessionId}`,
-  /** ZSET sessionId → last announce (epoch ms) for one swarm (`<channelId>:<infoHash hex>`). */
+  /**
+   * ZSET peer `net` → epoch ms of the last **completed signalling exchange** this session took part
+   * in with a peer on that network: the tracker relayed an offer between the two sessions and the
+   * receiver's answer with the matching `offer_id` came back within 60 s. Both sides get the
+   * other's `net`. Same TTL as `p2pPeer`; members older than the TTL are trimmed on write.
+   */
+  p2pLinks: (sessionId: string) => `p2p:links:${sessionId}`,
+  /**
+   * ZSET sessionId → last announce (epoch ms) for one swarm (`<channelId>:<infoHash hex>`).
+   * Trimmed to the TTL window and given the same TTL on every write.
+   */
   p2pSwarm: (swarm: string) => `p2p:swarm:${swarm}`,
 } as const;
 
 /**
- * Server-side P2P evidence rule (HANDOFF open item; ADR 0005). Whether a client runs the P2P
- * loader is client input, so integrity never trusts `p2pCapable` or heartbeat `bytesP2p`. A
- * session is P2P-evidenced for a scoring window only if the tracker saw it announce within
- * `windowMs` and its swarm had announcing sessions from at least `minSwarmNetworks` distinct
- * networks in that window (itself included). Evidenced sessions are judged "too few fetches"
- * against the reduced P2P HTTP share and "too many fetches" against share 1.
+ * Server-side P2P evidence rule (ADR 0005). Whether a client runs the P2P loader is client input,
+ * so integrity never trusts `p2pCapable` or heartbeat `bytesP2p`. A session is P2P-evidenced for a
+ * scoring window ending at `t` only if all hold:
+ *
+ * 1. it announced within `windowMs` (`p2pPeer.last >= t - windowMs`) to a swarm of its own channel;
+ * 2. it completed a signalling exchange within `windowMs` with a peer on at least
+ *    `minLinkedNetworks` network(s) other than its own `net` (`p2pLinks`), so merely announcing
+ *    into a swarm that honest viewers populate earns nothing;
+ * 3. its swarm has at most `maxSessionsPerNetwork` in-window announcers on its `net`; beyond that,
+ *    no session on that network is evidenced (a farm behind one prefix cannot borrow an honest
+ *    swarm's diversity; honest viewers behind one large NAT lose only the P2P discount).
+ *
+ * Evidenced sessions are judged "too few fetches" against the reduced P2P HTTP share and "too
+ * many fetches" against share 1. Everyone else is judged as a plain HTTP session.
  */
 export const P2P_EVIDENCE = {
   windowMs: 120_000,
-  minSwarmNetworks: 2,
+  minLinkedNetworks: 1,
+  maxSessionsPerNetwork: 16,
   peerTtlSeconds: 600,
+  /** An offer relayed by the tracker must be answered within this to count as an exchange. */
+  exchangeTimeoutMs: 60_000,
 } as const;
 
 /** Swarm id used in `KEYS.p2pSwarm` and `p2pPeer.swarm`. `infoHash` is 40 lowercase hex characters. */

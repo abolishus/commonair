@@ -40,10 +40,19 @@ changed when the P2P slice was designed:
    identified by the token's channel and the `info_hash`. The announcing network is stored as an
    HMAC of its /24 (IPv4) or /48 (IPv6) prefix, never the address.
 4. **Integrity applies the reduced HTTP share only to evidenced sessions** (`P2P_EVIDENCE` in
-   `@commonair/contracts/internal`). An evidenced session announced within the window, and its
-   swarm had announcers from at least two distinct networks. "Too few fetches" is judged against
-   the reduced share. "Too many fetches" is still judged against share 1, so an honest lone peer
-   is never penalised. Playback sessions keep recording the HTTP delivery source and never `p2p`.
+   `@commonair/contracts/internal`). Evidence is per session, not per swarm. Merely announcing
+   into a swarm that honest viewers populate earns nothing. A session is evidenced when all three
+   hold:
+   - It announced within the window.
+   - It **completed a signalling exchange** with a peer on another network within the window.
+     The tracker relayed an offer between the two sessions, and the matching answer came back.
+     The tracker records the peer's network for both sides in `KEYS.p2pLinks`.
+   - Its swarm has at most `maxSessionsPerNetwork` announcers on its own network. Beyond that,
+     no session on that network is evidenced.
+
+   "Too few fetches" is judged against the reduced share. "Too many fetches" is still judged
+   against share 1, so an honest lone peer is never penalised. Playback sessions keep recording
+   the HTTP delivery source, never `p2p`.
 
 ## Consequences
 
@@ -51,6 +60,15 @@ changed when the P2P slice was designed:
 - We own protocol compatibility. The tracker's tests pin the frames that browser WebTorrent and
   p2p-media-loader clients send, and an interop test with a real client is a follow-up once the
   web player ships a P2P loader.
-- A viewbot farm that spans two networks, holds valid playback tokens and keeps heartbeating can
-  still earn the reduced share. The other integrity signals (datacenter ranges, headless
-  fingerprints, concurrency) still apply to it.
+- **Residual risk.** A farm can still earn the reduced share for some of its sessions. It needs
+  valid playback tokens and live heartbeats. It also needs to answer offers on a second network,
+  or to have honest peers' clients answer offers it sends (browsers answer automatically). The
+  per-network cap limits a farm behind one prefix to `maxSessionsPerNetwork` evidenced sessions
+  per swarm, and a farm spread across many prefixes is exposed to the datacenter-range and
+  headless signals. Honest viewers behind one large NAT above the cap lose only the P2P discount.
+  They are judged as plain HTTP sessions, which can flag a pure-P2P viewer as `too_few_segments`
+  (held pending, not banned).
+- **The tracker accepts a token for up to `TRACKER_TOKEN_MAX_AGE_SECONDS`.** A leaked playback
+  token can occupy that session's tracker slot. A socket presenting a newer `iat` for the same
+  session replaces the older socket, so the honest viewer reclaims it with its next refreshed
+  token.

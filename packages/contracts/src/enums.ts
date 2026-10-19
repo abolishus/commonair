@@ -18,6 +18,26 @@ export const DELIVERY_SOURCES = ["origin", "relay", "p2p", "cdn"] as const;
 export const RENDITIONS = ["source", "1080p", "720p", "480p", "audio"] as const;
 
 export const VOD_STATUSES = ["recording", "processing", "ready", "failed", "deleted"] as const;
+/** Stable `vods.failed_reason` codes (services/media/README.md "VOD failure codes"). */
+export const VOD_FAILED_REASONS = ["no_segments", "finalize_stalled"] as const;
+/**
+ * Stream-health warning codes services/media puts in `HealthSample.warnings`; the web catalog
+ * has a title and fix hint for each.
+ */
+export const HEALTH_WARNING_CODES = [
+  "bitrate_high",
+  "bitrate_low",
+  "keyframe_interval",
+  "fps_drop",
+  "b_frames_webrtc",
+  "audio_missing",
+  "video_missing",
+  "video_codec_unsupported",
+  "audio_codec_unsupported",
+  "transcode_capacity",
+  "recording_disk_budget",
+] as const;
+export type HealthWarningCode = (typeof HEALTH_WARNING_CODES)[number];
 export const VISIBILITIES = ["public", "subscribers", "private"] as const;
 export const CLIP_STATUSES = ["processing", "ready", "failed", "deleted"] as const;
 export const SIMULCAST_PLATFORMS = ["twitch", "youtube", "custom"] as const;

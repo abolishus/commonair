@@ -192,8 +192,8 @@ export const Vod = z.object({
   playlistUrl: z.string().nullable(),
   createdAt: Timestamp,
   expiresAt: Timestamp.nullable(),
-  /** Why processing failed (status `failed`), as a stable code, else null. */
-  failedReason: z.string().nullable(),
+  /** Why processing failed (status `failed`), else null. */
+  failedReason: z.enum(E.VOD_FAILED_REASONS).nullable(),
 });
 export const Clip = z.object({
   id: Id,
@@ -223,6 +223,11 @@ export const PlaybackStart = z.object({
   token: z.string(),
   playlistUrl: z.string(),
   source: z.enum(E.DELIVERY_SOURCES),
+  /**
+   * `trackerUrls` carry the playback token as `?t=`. The tracker accepts a token up to
+   * TRACKER_TOKEN_MAX_AGE_SECONDS old, so on a tracker reconnect clients replace `t` with the latest
+   * token from `playback.heartbeat`.
+   */
   p2p: z.object({ enabled: z.boolean(), trackerUrls: z.array(z.string()), swarmId: z.string() }),
   heartbeatIntervalMs: z.number().int(),
   expiresAt: Timestamp,
@@ -733,8 +738,14 @@ export const RelayNode = z.object({
   status: z.enum(E.RELAY_STATUSES),
   lastHealthAt: Timestamp.nullable(),
   suspendedReason: z.string().nullable(),
+  /** Retired by its owner (never authenticates again); `relays.mine` omits retired relays. */
+  retiredAt: Timestamp.nullable(),
   version: z.string().nullable(),
   bytesVerified30d: z.number().int(),
+  /** When the relay last submitted a receipt (any status) within the last 30 days, else null. */
+  lastReceiptAt: Timestamp.nullable(),
+  /** Receipts by status over the last 30 days (by period start). */
+  receipts30d: z.object({ pending: z.number().int(), verified: z.number().int(), rejected: z.number().int() }),
 });
 export const EgressReport = z.object({
   from: Timestamp,

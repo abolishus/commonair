@@ -49,7 +49,7 @@ finalizing; the next process resumes the same VOD (with a discontinuity).
   `processing` VODs. The finalize job id is the VOD id, so its BullMQ state tells whether a worker
   owns the VOD. Unowned VODs are re-queued (finalize is idempotent; a job that used up its retries
   is retried after 10 min). A VOD still unfinished 24 h after its broadcast ended is marked
-  `failed` with `removedReason = finalize_stalled` (`no_segments` when nothing was recorded).
+  `failed` with `failedReason = finalize_stalled` (see "VOD failure codes").
 - **Crash recovery.** On startup, before any session or job runs, every `broadcasts/<id>/` in
   `MEDIA_WORK_DIR` is examined: completed segments of a still-open VOD that the dead process never
   uploaded are uploaded and appended to the VOD playlist, partial `.tmp` segments are dropped, and
@@ -68,6 +68,20 @@ finalizing; the next process resumes the same VOD (with a discontinuity).
   one per four CPU cores with libx264). Further broadcasts queue in
   arrival order, retry every poll and show `transcode_capacity` in stream health meanwhile.
 - **Thumbnail history.** Only the newest 10 timestamped thumbnails per broadcast are kept.
+
+### VOD failure codes
+
+A VOD in status `failed` carries a stable code in `vods.failed_reason` (never free text or personal
+data; the web app maps codes to messages). `removed_reason` is only for removals (`deleted`, e.g.
+`csam_hash_match`).
+
+| Code               | Written by                         | Meaning                                                                |
+| ------------------ | ---------------------------------- | ---------------------------------------------------------------------- |
+| `no_segments`      | finalize (`src/vod/finalize.ts`)   | The broadcast ended without a single uploaded segment: nothing to keep |
+| `finalize_stalled` | reconcile (`src/vod/reconcile.ts`) | Still `recording`/`processing` 24 h after the broadcast ended          |
+
+Crash recovery never fails a VOD: it uploads what the dead process left and hands the VOD back to
+finalize, which ends in `ready` or one of the codes above.
 
 ## Health warning codes
 
