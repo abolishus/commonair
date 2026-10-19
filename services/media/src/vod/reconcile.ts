@@ -6,13 +6,14 @@
  * `processing` VODs whose finalize job is gone (removed, exhausted its retries, or lost with a
  * crashed process). A BullMQ job id equals the VOD id, so the job's state tells whether a worker
  * owns the VOD. Unowned VODs are re-queued (finalize is idempotent and resumes), but a VOD that
- * still is not finished `failAfterMs` after its broadcast ended is marked `failed` with a reason.
+ * still is not finished `failAfterMs` after its broadcast ended is marked `failed` with a
+ * `failedReason`.
  */
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 
-/** `removedReason` of a VOD that never finished processing. */
+/** `failedReason` of a VOD that never finished processing (stable code, see README). */
 export const VOD_STALLED_REASON = "finalize_stalled";
 
 export type FinalizeJobState =
@@ -105,7 +106,7 @@ export async function reconcileVods(deps: VodReconcileDeps, live: ReadonlySet<st
       // Conditional on the status so a finalize finishing right now is not overwritten.
       const done = await deps.db
         .update(v)
-        .set({ status: "failed", removedReason: VOD_STALLED_REASON })
+        .set({ status: "failed", failedReason: VOD_STALLED_REASON })
         .where(and(eq(v.id, row.id), inArray(v.status, ["recording", "processing"])))
         .returning({ id: v.id });
       if (done.length > 0) result.failed.push(row.id);
