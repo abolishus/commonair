@@ -3,6 +3,7 @@
 
 /** Signup identity rules: username (= channel slug) and the age gate. Pure, unit-tested. */
 import { Slug } from "@commonair/contracts";
+import { DEMO_FIXTURES } from "@commonair/contracts/fixtures";
 
 /**
  * Names that would collide with routes, impersonate staff or confuse users.
@@ -77,7 +78,11 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "vods",
   "www",
 ]);
-const RESERVED_PREFIXES = ["admin_", "staff_", "mod_", "official_", "support_"];
+/**
+ * `demo_` belongs to the demo seed (`packages/db` `demo:seed`, which writes rows directly): no
+ * sign-up or bot may take it, so `demo:clear` can never match a real account by that anchor.
+ */
+const RESERVED_PREFIXES = ["admin_", "staff_", "mod_", "official_", "support_", DEMO_FIXTURES.usernamePrefix];
 
 export type UsernameProblem = "format" | "reserved";
 
