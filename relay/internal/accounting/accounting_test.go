@@ -99,6 +99,28 @@ func TestViewersAdmission(t *testing.T) {
 	}
 }
 
+func TestViewersTouchOnlyKnownSessions(t *testing.T) {
+	now := time.Unix(1000, 0)
+	v := NewViewers(10)
+	if v.Touch("a", now) {
+		t.Fatal("unknown session touched")
+	}
+	v.Admit("a", now)
+	if !v.Touch("a", now.Add(ViewerWindow)) {
+		t.Fatal("known session refused")
+	}
+	// Touch refreshes the window.
+	if !v.Touch("a", now.Add(2*ViewerWindow)) {
+		t.Fatal("refreshed session refused")
+	}
+	if v.Touch("a", now.Add(3*ViewerWindow+time.Second)) {
+		t.Fatal("idle session touched after its window")
+	}
+	if v.Count(now.Add(2*ViewerWindow)) != 1 {
+		t.Fatal("touch must not add sessions")
+	}
+}
+
 func TestMaxViewers(t *testing.T) {
 	cases := []struct {
 		cap  int

@@ -121,6 +121,46 @@ func TestRewriteMultivariant(t *testing.T) {
 	}
 }
 
+// The origin's /relay-pull/ output for a MediaMTX 1.21 LL-HLS rendition
+// (services/origin/tests/fixtures.ts MEDIA after rewritePlaylist: relative
+// URIs, session= removed, no token).
+func TestRewriteOriginRelayPullShape(t *testing.T) {
+	rw := rewriter(t, "http://localhost:3003/relay-pull/")
+	in := "#EXTM3U\n#EXT-X-VERSION:10\n#EXT-X-TARGETDURATION:1\n" +
+		"#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=0.50000,CAN-SKIP-UNTIL=6.00000\n" +
+		"#EXT-X-PART-INF:PART-TARGET=0.20000\n#EXT-X-MEDIA-SEQUENCE:33\n" +
+		"#EXT-X-MAP:URI=\"54dd20fd99ec_video1_init.mp4\"\n" +
+		"#EXTINF:1.00000,\n54dd20fd99ec_video1_seg33.mp4\n" +
+		"#EXT-X-PROGRAM-DATE-TIME:2026-10-18T21:21:42.825Z\n" +
+		"#EXT-X-PART:DURATION=0.20000,URI=\"54dd20fd99ec_video1_part155.mp4\",INDEPENDENT=YES\n" +
+		"#EXTINF:1.00000,\n54dd20fd99ec_video1_seg34.mp4\n" +
+		"#EXT-X-PRELOAD-HINT:TYPE=PART,URI=\"54dd20fd99ec_video1_part157.mp4\"\n" +
+		"#EXT-X-RENDITION-REPORT:URI=\"audio2_stream.m3u8\",LAST-MSN=34,LAST-PART=1\n"
+	out, err := rw.Rewrite([]byte(in), "live/alice/720p/video1_stream.m3u8", "live/alice", tok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`#EXT-X-MAP:URI="54dd20fd99ec_video1_init.mp4?t=` + tok + `"`,
+		"\n54dd20fd99ec_video1_seg33.mp4?t=" + tok + "\n",
+		`#EXT-X-PART:DURATION=0.20000,URI="54dd20fd99ec_video1_part155.mp4?t=` + tok + `",INDEPENDENT=YES`,
+		`#EXT-X-PRELOAD-HINT:TYPE=PART,URI="54dd20fd99ec_video1_part157.mp4?t=` + tok + `"`,
+		`#EXT-X-RENDITION-REPORT:URI="audio2_stream.m3u8?t=` + tok + `",LAST-MSN=34,LAST-PART=1`,
+		"#EXT-X-SERVER-CONTROL:CAN-BLOCK-RELOAD=YES,PART-HOLD-BACK=0.50000,CAN-SKIP-UNTIL=6.00000\n",
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(string(out), "localhost") || strings.Contains(string(out), "relay-pull") {
+		t.Fatalf("origin address leaked to viewers:\n%s", out)
+	}
+	l, ok := ParseLimits([]byte(in))
+	if !ok || l.LastMSN != 34 || l.PartsPerSegment != 5 {
+		t.Fatalf("limits %+v", l)
+	}
+}
+
 func TestRewriteRejectsEscapes(t *testing.T) {
 	rw := rewriter(t, "https://origin.test/relay-pull/")
 	cases := map[string]string{

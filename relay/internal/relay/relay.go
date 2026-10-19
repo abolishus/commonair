@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/abolishus/commonair/relay/internal/accounting"
@@ -77,6 +78,16 @@ type Relay struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	stopped bool
+
+	// hbMu serializes registration and heartbeats with the draining
+	// heartbeat, so no normal heartbeat (or re-registration) lands after it.
+	// It is held across API calls; never take it just to read state.
+	hbMu     sync.Mutex
+	draining atomic.Bool
+	// hbCancel ends the context bounding registration and normal heartbeats.
+	// BeginDrain calls it without hbMu, so a call in flight against a slow
+	// API gives way at once instead of delaying the draining heartbeat.
+	hbCancel atomic.Pointer[context.CancelFunc]
 }
 
 // Defaults when the API omits or sends out-of-range intervals.
@@ -191,30 +202,72 @@ func (r *Relay) PublicKey() string { return r.key.PublicB64 }
 // /healthz during registration.
 func (r *Relay) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
+	hbCtx, hbCancel := context.WithCancel(ctx)
 	r.cancel = cancel
+	r.hbCancel.Store(&hbCancel)
+	if r.draining.Load() {
+		hbCancel() // drained before Start: never register
+	}
 	r.wg.Add(2)
 	go func() { defer r.wg.Done(); r.sender.Run(ctx) }()
-	go func() { defer r.wg.Done(); r.control(ctx) }()
+	go func() { defer r.wg.Done(); r.control(ctx, hbCtx) }()
 }
 
-// Drain makes /healthz report draining and refuses new viewer requests.
-func (r *Relay) Drain() { r.srv.Drain() }
-
-// MinDrainWindow is the shortest HTTP drain GracefulStop accepts: longer than
-// the origin hold time of a blocking playlist request, so a reload in flight
-// at SIGTERM can finish instead of being cut.
+// MinDrainWindow is the shortest drain GracefulStop accepts: players move to
+// the origin on their next playback heartbeat (10 s), and a blocking playlist
+// reload in flight when the window closes gets time to finish.
 const MinDrainWindow = server.DefaultPlaylistTimeout + 5*time.Second
 
 // handlerGrace bounds the wait for handlers after the HTTP server is closed.
 const handlerGrace = 3 * time.Second
 
-// GracefulStop is the SIGTERM sequence: report draining, let in-flight
-// requests finish within drain (forcing the connections closed after it),
-// then cut the final period and deliver receipts within flush.
+// drainHeartbeatTimeout bounds the one draining heartbeat.
+const drainHeartbeatTimeout = 5 * time.Second
+
+// maxCloseGrace is the end of the drain window reserved for closing the HTTP
+// server: in-flight requests finish, idle connections close.
+const maxCloseGrace = 5 * time.Second
+
+// BeginDrain takes the relay out of assignment: /healthz reports draining,
+// normal heartbeats stop, only viewers already here keep being served, and one
+// heartbeat with draining: true tells the API (best effort, bounded by
+// timeout). Receipts keep being cut until Shutdown.
+func (r *Relay) BeginDrain(timeout time.Duration) {
+	if r.draining.Swap(true) {
+		return
+	}
+	r.srv.Drain()
+	if cancelHB := r.hbCancel.Load(); cancelHB != nil {
+		(*cancelHB)() // a registration or heartbeat in flight gives way
+	}
+	r.hbMu.Lock()
+	defer r.hbMu.Unlock()
+	if r.srv.State() == nil {
+		r.log.Info("draining before registration; nothing to report")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	resp, err := r.api.Heartbeat(ctx, r.load(true))
+	if err != nil {
+		r.log.Warn("draining heartbeat failed; the platform takes the relay out when its health check fails", "err", err.Error())
+		return
+	}
+	r.log.Info("draining: out of assignment, serving current viewers", "status", resp.Status, "viewers", r.viewers.Count(time.Now()))
+}
+
+// GracefulStop is the SIGTERM sequence. It reports draining, keeps serving
+// current viewers until they leave or the drain window is nearly over, then
+// closes the HTTP server (in-flight requests get the rest of the window, then
+// connections are cut), and finally cuts the last period and delivers
+// receipts within flush.
 func (r *Relay) GracefulStop(httpSrv *http.Server, drain, flush time.Duration) error {
-	r.Drain()
-	drainCtx, cancel := context.WithTimeout(context.Background(), drain)
-	err := httpSrv.Shutdown(drainCtx)
+	start := time.Now()
+	r.BeginDrain(min(drainHeartbeatTimeout, drain))
+	closeGrace := min(maxCloseGrace, drain/2)
+	r.waitViewersGone(start.Add(drain - closeGrace))
+	closeCtx, cancel := context.WithDeadline(context.Background(), start.Add(drain))
+	err := httpSrv.Shutdown(closeCtx)
 	cancel()
 	if err != nil {
 		r.log.Warn("drain window over; closing remaining connections", "err", err.Error())
@@ -223,6 +276,15 @@ func (r *Relay) GracefulStop(httpSrv *http.Server, drain, flush time.Duration) e
 	flushCtx, cancelFlush := context.WithTimeout(context.Background(), flush+handlerGrace)
 	defer cancelFlush()
 	return r.Shutdown(flushCtx)
+}
+
+// waitViewersGone returns once no viewer session is active or at deadline.
+func (r *Relay) waitViewersGone(deadline time.Time) {
+	t := time.NewTicker(100 * time.Millisecond)
+	defer t.Stop()
+	for time.Now().Before(deadline) && r.viewers.Count(time.Now()) > 0 {
+		<-t.C
+	}
 }
 
 // Shutdown stops background work, closes the final period and tries to
@@ -237,6 +299,7 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 	}
 	r.stopped = true
 	r.mu.Unlock()
+	r.draining.Store(true)
 	r.srv.Drain()
 	if r.cancel != nil {
 		r.cancel()
@@ -259,11 +322,14 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 	return err
 }
 
-func (r *Relay) control(ctx context.Context) {
-	if !r.registerUntilDone(ctx) {
+// control registers, then heartbeats and cuts receipt periods until ctx
+// ends. hbCtx (a child of ctx) ends earlier when the relay starts draining:
+// heartbeats stop, receipt periods continue.
+func (r *Relay) control(ctx, hbCtx context.Context) {
+	if !r.registerUntilDone(hbCtx) {
 		return
 	}
-	r.heartbeat(ctx)
+	r.heartbeat(hbCtx)
 	r.mu.Lock()
 	hb, rc := r.heartbeatInterval, r.receiptInterval
 	r.mu.Unlock()
@@ -281,7 +347,7 @@ func (r *Relay) control(ctx context.Context) {
 		case now := <-rcT.C:
 			r.closePeriod(now)
 		case <-hbT.C:
-			if r.heartbeat(ctx) {
+			if r.heartbeat(hbCtx) {
 				// Re-registered: intervals may have changed.
 				r.mu.Lock()
 				hbT.Reset(r.heartbeatInterval)
@@ -295,15 +361,15 @@ func (r *Relay) control(ctx context.Context) {
 func (r *Relay) registerUntilDone(ctx context.Context) bool {
 	backoff := r.opts.RetryMin
 	for {
-		err := r.register(ctx)
+		err := r.lockedRegister(ctx)
 		if err == nil {
 			return true
 		}
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || r.draining.Load() {
 			return false
 		}
 		wait := time.Duration(float64(backoff) * (0.8 + 0.4*rand.Float64()))
-		r.log.Error("registration failed; retrying", "err", err.Error(), "retryIn", wait.String())
+		r.logRegisterError("registration failed; retrying", err, "retryIn", wait.String())
 		select {
 		case <-ctx.Done():
 			return false
@@ -368,33 +434,113 @@ func pickInterval(override time.Duration, apiSeconds int, def, lo, hi time.Durat
 	return min(max(time.Duration(apiSeconds)*time.Second, lo), hi)
 }
 
-// heartbeat reports load and applies the returned status and key. It returns
-// true if the API did not know the relay and it registered again.
-func (r *Relay) heartbeat(ctx context.Context) bool {
-	hctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	resp, err := r.api.Heartbeat(hctx, apiclient.HeartbeatRequest{
+// errDraining stops registration once the relay is draining.
+var errDraining = errors.New("relay is draining")
+
+// lockedRegister registers unless the relay is draining.
+func (r *Relay) lockedRegister(ctx context.Context) error {
+	r.hbMu.Lock()
+	defer r.hbMu.Unlock()
+	if r.draining.Load() {
+		return errDraining
+	}
+	return r.register(ctx)
+}
+
+// logRegisterError logs a failed registration; a refused token is spelled
+// out because retrying cannot fix it.
+func (r *Relay) logRegisterError(msg string, err error, args ...any) {
+	if apiErr, ok := apiclient.AsError(err); ok && apiErr.Status == http.StatusUnauthorized {
+		r.log.Error(msg+": the API refused the relay token (the relay was retired, or the token is wrong); create a new relay to get a new token", append(args, "status", apiErr.Status)...)
+		return
+	}
+	r.log.Error(msg, append(args, "err", err.Error())...)
+}
+
+// load is the heartbeat body.
+func (r *Relay) load(draining bool) apiclient.HeartbeatRequest {
+	return apiclient.HeartbeatRequest{
 		ActiveViewers: r.viewers.Count(time.Now()),
 		EgressMbps:    math.Round(r.meter.Mbps()*1000) / 1000,
 		CacheBytes:    r.store.LRU.Bytes(),
-	})
+		Draining:      draining,
+	}
+}
+
+// hbAction is what the relay does with a heartbeat result.
+type hbAction int
+
+const (
+	// hbApply: the API knows the relay; adopt its status and origin key.
+	// Suspended is applied too: the relay keeps heartbeating and serves 410
+	// so a reinstatement takes effect at the next heartbeat.
+	hbApply hbAction = iota
+	// hbReregister: the API took the relay offline (drained, or timed out
+	// while the relay was paused or cut off), no longer recognizes it
+	// (401/404) or has no registration for it (412). Register again with the
+	// same token and key; a retired relay's token is refused there (401).
+	hbReregister
+	// hbRetry: a transient failure (network, 5xx, rate limit, other 4xx).
+	// Keep the current state and try at the next interval.
+	hbRetry
+)
+
+// statusOffline is the RELAY_STATUSES value for a relay out of assignment.
+const statusOffline = "offline"
+
+func classifyHeartbeat(resp apiclient.HeartbeatResponse, err error) hbAction {
 	if err != nil {
-		if apiErr, ok := apiclient.AsError(err); ok && apiErr.Unknown() {
-			r.log.Warn("api does not recognize this relay; registering again", "status", apiErr.Status)
-			if err := r.register(ctx); err != nil {
-				r.log.Error("re-registration failed", "err", err.Error())
-				return false
-			}
-			return true
+		if apiErr, ok := apiclient.AsError(err); ok && (apiErr.Unknown() || apiErr.Status == http.StatusPreconditionFailed) {
+			return hbReregister
 		}
+		return hbRetry
+	}
+	if resp.Status == statusOffline {
+		return hbReregister
+	}
+	return hbApply
+}
+
+// heartbeat reports load and acts on the answer (see hbAction). It returns
+// true if the relay registered again, so intervals may have changed.
+func (r *Relay) heartbeat(ctx context.Context) bool {
+	r.hbMu.Lock()
+	defer r.hbMu.Unlock()
+	if r.draining.Load() {
+		return false
+	}
+	hctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	resp, err := r.api.Heartbeat(hctx, r.load(false))
+	switch classifyHeartbeat(resp, err) {
+	case hbReregister:
+		if apiErr, ok := apiclient.AsError(err); ok {
+			r.log.Warn("api does not recognize this relay; registering again", "status", apiErr.Status)
+		} else {
+			r.log.Warn("api reports this relay offline; registering again")
+		}
+		if err := r.register(ctx); err != nil {
+			if ctx.Err() == nil {
+				r.logRegisterError("re-registration failed; retrying at the next heartbeat", err)
+			}
+			return false
+		}
+		return true
+	case hbRetry:
 		if ctx.Err() == nil {
 			r.log.Warn("heartbeat failed", "err", err.Error())
 		}
 		return false
 	}
+	r.apply(resp)
+	return false
+}
+
+// apply installs the status and origin key a heartbeat returned.
+func (r *Relay) apply(resp apiclient.HeartbeatResponse) {
 	st := r.srv.State()
 	if st == nil {
-		return false
+		return
 	}
 	next := *st
 	next.Status = resp.Status
@@ -406,10 +552,13 @@ func (r *Relay) heartbeat(ctx context.Context) bool {
 		}
 	}
 	if next.Status != st.Status {
-		r.log.Info("relay status changed", "from", st.Status, "to", next.Status)
+		if next.Status == server.StatusSuspended {
+			r.log.Error("relay SUSPENDED by the platform: viewers get 410 until an admin reinstates it; the reason is on your relay page", "from", st.Status)
+		} else {
+			r.log.Info("relay status changed", "from", st.Status, "to", next.Status)
+		}
 	}
 	r.srv.SetState(&next)
-	return false
 }
 
 // closePeriod cuts the accounting period, signs and queues its receipts.

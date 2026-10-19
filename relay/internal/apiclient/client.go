@@ -68,6 +68,8 @@ type HeartbeatRequest struct {
 	ActiveViewers int     `json:"activeViewers"`
 	EgressMbps    float64 `json:"egressMbps"`
 	CacheBytes    int64   `json:"cacheBytes"`
+	// Draining takes the relay out of assignment at once (status offline).
+	Draining bool `json:"draining"`
 }
 
 // HeartbeatResponse is the relays.heartbeat output.
