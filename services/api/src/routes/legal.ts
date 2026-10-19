@@ -58,7 +58,9 @@ export const legal = {
     if (!checked.ok) throw badRequest(checked.reason);
     await deps.db.insert(schema.consentRecords).values({
       userId: caller?.user.id ?? null,
-      anonymousId: input.anonymousId ?? null,
+      // A signed-in record never stores the cookie id: keeping both would link a visitor's
+      // pre-sign-in browsing identity to their account.
+      anonymousId: caller ? null : (input.anonymousId ?? null),
       choices: checked.choices,
       policyVersion: policy.version,
       createdAt: deps.now(),

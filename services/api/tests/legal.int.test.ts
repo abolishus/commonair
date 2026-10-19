@@ -92,6 +92,36 @@ describe("legal.get", () => {
     expect((await client(api).call("GET", "/api/legal/terms?version=1999-01-01")).status).toBe(404);
     expect((await client(api).call("GET", "/api/legal/not_a_kind")).status).toBe(400);
   });
+  test("on a publishedAt tie a final text beats a draft, whatever the version label", async () => {
+    const publishedAt = new Date(Date.now() - 1000);
+    const [, final] = await db()
+      .insert(schema.legalDocuments)
+      .values([
+        {
+          kind: "dmca_policy",
+          version: "zzz-draft",
+          title: "Draft",
+          body: "Draft",
+          isDraft: true,
+          requiresAcceptance: false,
+          publishedAt,
+        },
+        {
+          kind: "dmca_policy",
+          version: "aaa-final",
+          title: "Final",
+          body: "Final",
+          isDraft: false,
+          requiresAcceptance: false,
+          publishedAt,
+        },
+      ])
+      .returning();
+    const cur = await client(api).call<Doc>("GET", "/api/legal/dmca_policy");
+    expect(cur.body).toMatchObject({ id: final?.id, version: "aaa-final", isDraft: false });
+    const all = await client(api).call<Doc[]>("GET", "/api/legal");
+    expect(all.body.find((d) => d.kind === "dmca_policy")?.version).toBe("aaa-final");
+  });
 });
 
 describe("legal.consent", () => {
@@ -141,6 +171,23 @@ describe("legal.consent", () => {
       .from(schema.consentRecords)
       .where(eq(schema.consentRecords.anonymousId, anonymousId));
     expect(rows).toHaveLength(0);
+  });
+
+  test("a signed-in caller's anonymousId is not stored with their account", async () => {
+    const anonymousId = crypto.randomUUID().replace(/-/g, "");
+    const r = await consent(alice.client, {
+      anonymousId,
+      choices: { preferences: false },
+      policyVersion: LEGAL_SEED_VERSION,
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const linked = await db()
+      .select()
+      .from(schema.consentRecords)
+      .where(eq(schema.consentRecords.anonymousId, anonymousId));
+    expect(linked).toHaveLength(0);
+    const mine = await db().select().from(schema.consentRecords).where(eq(schema.consentRecords.userId, alice.userId));
+    expect(mine.map((m) => m.anonymousId)).toEqual([null, null]);
   });
 });
 

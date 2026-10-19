@@ -17,6 +17,16 @@ export interface CurrentDocument {
 }
 
 /**
+ * "Newest" for legal documents: latest `publishedAt`; on a tie a final text beats a draft
+ * (false sorts first); only then the version label, compared as text.
+ */
+const NEWEST_FIRST = [
+  desc(legalDocuments.publishedAt),
+  asc(legalDocuments.isDraft),
+  desc(legalDocuments.version),
+] as const;
+
+/**
  * The newest published version of every kind (`publishedAt <= now`). A version scheduled for
  * the future stays invisible until its date, so acceptance never targets unpublished text.
  */
@@ -25,7 +35,7 @@ export async function latestDocuments(db: Executor, now: Date): Promise<LegalRow
     .selectDistinctOn([legalDocuments.kind])
     .from(legalDocuments)
     .where(lte(legalDocuments.publishedAt, now))
-    .orderBy(asc(legalDocuments.kind), desc(legalDocuments.publishedAt), desc(legalDocuments.version));
+    .orderBy(asc(legalDocuments.kind), ...NEWEST_FIRST);
 }
 
 /** The current document of one kind, or a specific published version of it. */
@@ -45,7 +55,7 @@ export async function findDocument(
         version === undefined ? undefined : eq(legalDocuments.version, version),
       ),
     )
-    .orderBy(desc(legalDocuments.publishedAt), desc(legalDocuments.version))
+    .orderBy(...NEWEST_FIRST)
     .limit(1);
   return row ?? null;
 }
@@ -93,6 +103,7 @@ export async function recordAcceptances(
   return { accepted, missing: current.filter((c) => !wanted.has(c.id)) };
 }
 
+// Duplicates PLACEHOLDER_PATTERN in @commonair/db (packages/db/src/legal); switch to that import once exported.
 const PLACEHOLDER = /\{\{\s*([A-Za-z][A-Za-z0-9.]*)\s*\}\}/g;
 
 /** Values for the `{{placeholders}}` legal texts may use, from this instance's identity. */
@@ -115,18 +126,29 @@ export function renderLegalText(text: string, vars: Record<string, string>): str
   return text.replace(PLACEHOLDER, (whole, key: string) => vars[key] ?? whole);
 }
 
+// Duplicates CONSENT_CATEGORIES in @commonair/db (packages/db/src/legal); switch to that import once exported.
 /**
  * Storage categories the cookie policy names. `essential` is always on: a stored record says
  * so whatever the client sent.
  */
 export const CONSENT_CATEGORIES = ["essential", "preferences"] as const;
 
+const MAX_ECHOED_KEY = 32;
+
 export type ConsentCheck = { ok: true; choices: Record<string, boolean> } | { ok: false; reason: string };
 
 export function normalizeConsentChoices(choices: Record<string, boolean>): ConsentCheck {
   const known = new Set<string>(CONSENT_CATEGORIES);
   const unknown = Object.keys(choices).filter((k) => !known.has(k));
-  if (unknown.length > 0) return { ok: false, reason: `Unknown consent categories: ${unknown.slice(0, 5).join(", ")}` };
+  // Keys are client-supplied: echo at most a few, each truncated, so the error stays small.
+  if (unknown.length > 0)
+    return {
+      ok: false,
+      reason: `Unknown consent categories: ${unknown
+        .slice(0, 5)
+        .map((k) => k.slice(0, MAX_ECHOED_KEY))
+        .join(", ")}`,
+    };
   const out: Record<string, boolean> = {};
   for (const c of CONSENT_CATEGORIES) out[c] = c === "essential" ? true : choices[c] === true;
   return { ok: true, choices: out };

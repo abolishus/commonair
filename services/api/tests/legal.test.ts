@@ -72,4 +72,12 @@ describe("normalizeConsentChoices", () => {
       reason: "Unknown consent categories: analytics",
     });
   });
+
+  test("the refusal echoes at most five unknown keys, each truncated to 32 characters", () => {
+    const long = "x".repeat(500);
+    const r = normalizeConsentChoices({ [long]: true, a: true, b: true, c: true, d: true, e: true });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe(`Unknown consent categories: ${"x".repeat(32)}, a, b, c, d`);
+  });
 });
