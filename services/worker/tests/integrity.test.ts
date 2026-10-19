@@ -4,10 +4,11 @@
 import type { SegmentFetch } from "@commonair/contracts/internal";
 import { QUEUES } from "@commonair/contracts/internal";
 import { parseNetworkList } from "@commonair/integrity";
-import { createLogger } from "@commonair/observability";
-import { describe, expect, test } from "vite-plus/test";
+import { createLogger, type Logger } from "@commonair/observability";
+import type { ValkeyClient } from "@commonair/service";
+import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import { DEFAULT_CONCURRENCY } from "../src/env.ts";
-import { ClassifierHolder } from "../src/integrity/classifier.ts";
+import { ClassifierHolder, entryCount } from "../src/integrity/classifier.ts";
 import { fetchEvidence } from "../src/integrity/fetches.ts";
 import {
   INTEGRITY_BATCH,
@@ -16,11 +17,23 @@ import {
   integrityJobs,
   runLockKey,
 } from "../src/integrity/jobs.ts";
+import { withRunLock } from "../src/integrity/lock.ts";
 import { JOBS } from "../src/jobs/index.ts";
+import { metrics } from "../src/metrics.ts";
 import { buildRegistry, scheduledJobs } from "../src/runtime/registry.ts";
 import { schedulerTemplate } from "../src/runtime/runtime.ts";
 
 const logger = createLogger({ service: "worker-test", level: "fatal" });
+
+function recordingLogger() {
+  const warnings: { msg: string; fields?: Record<string, unknown> }[] = [];
+  const rec: Logger = { ...logger, warn: (msg, fields) => void warnings.push({ msg, fields }), child: () => rec };
+  return { logger: rec, warnings };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("integrity scheduling", () => {
   test("the shipped registry schedules the four jobs on the integrity queue at their intervals", () => {
@@ -153,5 +166,116 @@ describe("ClassifierHolder", () => {
     expect(loads).toBe(1);
     off();
     expect(process.listenerCount("SIGHUP")).toBe(before);
+  });
+});
+
+describe("run lock lapses", () => {
+  /** A Valkey stand-in: SET NX always succeeds, renewals answer `renew`, release succeeds. */
+  function lockValkey(renew: () => Promise<unknown>) {
+    const evals: string[] = [];
+    const valkey = {
+      set: async () => "OK",
+      eval: (script: string) => {
+        const kind = script.includes("pexpire") ? "renew" : "release";
+        evals.push(kind);
+        return kind === "renew" ? renew() : Promise.resolve(1);
+      },
+    } as unknown as ValkeyClient;
+    return { valkey, evals };
+  }
+  const hold = (ms: number) => () => Bun.sleep(ms).then(() => "done");
+
+  test("a failed renewal warns once with the job name and counts lock_lapsed; the run completes", async () => {
+    const runs = vi.spyOn(metrics.integrityRuns, "add");
+    const { logger: log, warnings } = recordingLogger();
+    const { valkey, evals } = lockValkey(() => Promise.reject(new Error("connection lost")));
+    const r = await withRunLock(
+      valkey,
+      "k",
+      { ttlMs: 300, maxHoldMs: 60_000, job: "score-sessions", logger: log },
+      hold(450),
+    );
+    expect(r).toEqual({ acquired: true, value: "done" });
+    expect(evals.filter((e) => e === "renew").length).toBeGreaterThanOrEqual(2);
+    expect(runs).toHaveBeenCalledTimes(1);
+    expect(runs).toHaveBeenCalledWith(1, { job: "score-sessions", outcome: "lock_lapsed" });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.fields).toEqual({ job: "score-sessions", reason: "renew_failed" });
+  });
+
+  test("a renewal that finds the lock taken over counts as a lapse", async () => {
+    const runs = vi.spyOn(metrics.integrityRuns, "add");
+    const { logger: log, warnings } = recordingLogger();
+    const { valkey } = lockValkey(() => Promise.resolve(0));
+    await withRunLock(valkey, "k", { ttlMs: 300, maxHoldMs: 60_000, job: "stream-hours", logger: log }, hold(250));
+    expect(runs).toHaveBeenCalledWith(1, { job: "stream-hours", outcome: "lock_lapsed" });
+    expect(warnings[0]?.fields).toEqual({ job: "stream-hours", reason: "lock_lost" });
+  });
+
+  test("reaching maxHoldMs stops renewing and counts a lapse", async () => {
+    const runs = vi.spyOn(metrics.integrityRuns, "add");
+    const { logger: log, warnings } = recordingLogger();
+    const { valkey, evals } = lockValkey(() => Promise.resolve(1));
+    await withRunLock(valkey, "k", { ttlMs: 300, maxHoldMs: 0, job: "follow-bursts", logger: log }, hold(350));
+    expect(evals).toEqual(["release"]);
+    expect(runs).toHaveBeenCalledTimes(1);
+    expect(runs).toHaveBeenCalledWith(1, { job: "follow-bursts", outcome: "lock_lapsed" });
+    expect(warnings[0]?.fields).toEqual({ job: "follow-bursts", reason: "max_hold" });
+  });
+
+  test("healthy renewals and a quick run report nothing", async () => {
+    const runs = vi.spyOn(metrics.integrityRuns, "add");
+    const { logger: log, warnings } = recordingLogger();
+    const { valkey, evals } = lockValkey(() => Promise.resolve(1));
+    await withRunLock(valkey, "k", { ttlMs: 300, maxHoldMs: 60_000, job: "verify-receipts", logger: log }, hold(250));
+    expect(evals.filter((e) => e === "renew").length).toBeGreaterThanOrEqual(1);
+    expect(runs).not.toHaveBeenCalled();
+    expect(warnings).toEqual([]);
+  });
+
+  test("a run that finishes while a renewal is in flight is not reported", async () => {
+    const runs = vi.spyOn(metrics.integrityRuns, "add");
+    const { logger: log, warnings } = recordingLogger();
+    // The renewal resolves only after the run has released the lock (and finds it gone).
+    const { valkey } = lockValkey(() => Bun.sleep(200).then(() => 0));
+    await withRunLock(valkey, "k", { ttlMs: 300, maxHoldMs: 60_000, job: "score-sessions", logger: log }, hold(150));
+    await Bun.sleep(300);
+    expect(runs).not.toHaveBeenCalled();
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe("ClassifierHolder: empty reloads", () => {
+  test("entryCount counts ranges and ASNs", () => {
+    expect(entryCount(parseNetworkList("").classifier)).toBe(0);
+    expect(entryCount(parseNetworkList("# only a comment\n\nnot-a-cidr\n").classifier)).toBe(0);
+    expect(entryCount(parseNetworkList("203.0.113.0/24 a\n2001:db8::/32 b\nAS64500 c\n").classifier)).toBe(3);
+  });
+
+  test("a reload that parses to no entries keeps the previous list and warns", () => {
+    let text = "203.0.113.0/24 hosting-a\n";
+    const { logger: log, warnings } = recordingLogger();
+    const h = new ClassifierHolder(log, {}, () => parseNetworkList(text));
+    expect(h.reload()).toBe(true);
+    const good = h.classifier;
+    text = ""; // truncated, e.g. caught mid-write
+    expect(h.reload()).toBe(false);
+    expect(h.classifier).toBe(good);
+    expect(h.classifier?.classify("203.0.113.9", null).hosting).toBe(true);
+    expect(warnings.map((w) => w.msg)).toEqual(["network list reload parsed to no entries; keeping the previous list"]);
+    expect(warnings[0]?.fields).toMatchObject({ previous: 1 });
+    text = "garbage only\n";
+    expect(h.reload()).toBe(false);
+    expect(h.classifier).toBe(good);
+    text = "198.51.100.0/24 hosting-b\n";
+    expect(h.reload()).toBe(true);
+    expect(h.classifier?.classify("198.51.100.1", null)?.label).toBe("hosting-b");
+  });
+
+  test("an empty list is accepted when there was none before", () => {
+    const h = new ClassifierHolder(logger, {}, () => parseNetworkList(""));
+    expect(h.reload()).toBe(true);
+    expect(h.reload()).toBe(true);
+    expect(h.classifier?.classify("203.0.113.9", null).hosting).toBe(false);
   });
 });

@@ -24,7 +24,8 @@ export const metrics = {
     description: "Segment fetches recorded as integrity evidence (origin and p2p only), by outcome",
   }),
   integrityRuns: m.createCounter("worker.integrity.runs", {
-    description: "Integrity job runs by job and outcome (ran, skipped: another run held the lock)",
+    description:
+      "Integrity job runs by job and outcome (ran; skipped: another run held the lock; lock_lapsed: a run lost its lock)",
   }),
   integritySessions: m.createCounter("worker.integrity.sessions", {
     description: "Sessions scored, by resulting verdict",

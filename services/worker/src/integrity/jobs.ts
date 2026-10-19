@@ -78,7 +78,7 @@ function integrityJob(
       const r = await withRunLock(
         ctx.valkey,
         runLockKey(name),
-        { ttlMs: RUN_LOCK_TTL_MS, maxHoldMs: spec.maxRunMs },
+        { ttlMs: RUN_LOCK_TTL_MS, maxHoldMs: spec.maxRunMs, job: name, logger: ctx.logger },
         () => run(ctx),
       );
       metrics.integrityRuns.add(1, { job: name, outcome: r.acquired ? "ran" : "skipped" });

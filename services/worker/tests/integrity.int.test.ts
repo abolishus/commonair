@@ -300,22 +300,26 @@ describe("scheduling across replicas", () => {
   }, 60_000);
 });
 
+const lockLog = { job: "test", logger: quietLogger };
+
 describe("run lock", () => {
   test("a second run is skipped while the first holds the lock, and runs after release", async () => {
     const key = `test:lock:${crypto.randomUUID()}`;
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const first = withRunLock(raw, key, { ttlMs: 1_000, maxHoldMs: 10_000 }, () => gate.then(() => "first"));
+    const first = withRunLock(raw, key, { ttlMs: 1_000, maxHoldMs: 10_000, ...lockLog }, () =>
+      gate.then(() => "first"),
+    );
     await waitFor(async () => (await raw.exists(key)) === 1, { label: "lock taken" });
     // Held past its TTL: renewal keeps it.
     await Bun.sleep(1_300);
-    expect(await withRunLock(raw, key, { ttlMs: 1_000, maxHoldMs: 10_000 }, async () => "second")).toEqual({
+    expect(await withRunLock(raw, key, { ttlMs: 1_000, maxHoldMs: 10_000, ...lockLog }, async () => "second")).toEqual({
       acquired: false,
     });
     release();
     expect(await first).toEqual({ acquired: true, value: "first" });
     expect(await raw.exists(key)).toBe(0);
-    expect(await withRunLock(raw, key, { ttlMs: 1_000, maxHoldMs: 10_000 }, async () => "third")).toEqual({
+    expect(await withRunLock(raw, key, { ttlMs: 1_000, maxHoldMs: 10_000, ...lockLog }, async () => "third")).toEqual({
       acquired: true,
       value: "third",
     });
@@ -325,9 +329,9 @@ describe("run lock", () => {
     const key = `test:lock:${crypto.randomUUID()}`;
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    const stuck = withRunLock(raw, key, { ttlMs: 300, maxHoldMs: 0 }, () => gate);
+    const stuck = withRunLock(raw, key, { ttlMs: 300, maxHoldMs: 0, ...lockLog }, () => gate);
     await waitFor(async () => (await raw.exists(key)) === 0, { label: "lock lapsed", timeoutMs: 3_000 });
-    const next = await withRunLock(raw, key, { ttlMs: 300, maxHoldMs: 0 }, async () => "next");
+    const next = await withRunLock(raw, key, { ttlMs: 300, maxHoldMs: 0, ...lockLog }, async () => "next");
     expect(next).toEqual({ acquired: true, value: "next" });
     release();
     await stuck;

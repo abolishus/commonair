@@ -115,6 +115,12 @@ export default defineScenario({
           await sql.close();
         }
       });
+      // Zero (or too few) rows would make the checks below pass vacuously.
+      ctx.assert(
+        "every bot session is in Postgres (DATABASE_URL does not point at the stack under test?)",
+        rows.length === bots,
+        { found: rows.length, bots },
+      );
       const excluded = rows.filter((r) => r.verdict === "excluded");
       ctx.assert("every bot session is excluded", excluded.length === bots, {
         verdicts: rows.map((r) => r.verdict),
