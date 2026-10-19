@@ -104,6 +104,11 @@ export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_B
   if (r.newlyExcluded.length) metrics.integrityActions.add(r.newlyExcluded.length, { kind: "session_excluded" });
   if (r.restored.length) metrics.integrityActions.add(r.restored.length, { kind: "session_restored" });
   if (r.superseded.length) metrics.integrityActions.add(r.superseded.length, { kind: "session_superseded" });
+  if (r.p2p.evidenced) metrics.integrityEvidence.add(r.p2p.evidenced, { source: "p2p", outcome: "evidenced" });
+  if (r.p2p.errors) {
+    metrics.integrityEvidence.add(r.p2p.errors, { source: "p2p", outcome: "error" });
+    ctx.logger.warn("p2p evidence reads failed; affected sessions judged without it", { errors: r.p2p.errors });
+  }
   // An exclusion, restore or supersede changes who counts: republish those channels' counts now.
   const changed = [...r.newlyExcluded, ...r.restored, ...r.superseded];
   const channels = await refreshViewerCounts(ctx, await channelsOf(ctx, changed));
@@ -115,6 +120,8 @@ export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_B
     newlyExcluded: r.newlyExcluded.length,
     restored: r.restored.length,
     superseded: r.superseded.length,
+    p2pEvidenced: r.p2p.evidenced,
+    p2pErrors: r.p2p.errors,
     channelsRecounted: channels,
   };
   if (changed.length > 0) ctx.logger.info("integrity scoring", counts);
@@ -123,16 +130,24 @@ export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_B
 }
 
 export async function runReceipts(ctx: WorkerContext, limit: number = INTEGRITY_BATCH.receipts): Promise<Counts> {
-  const r = await verifyReceipts(ctx.db, ctx.now(), { limit });
+  // With Valkey, suspended relays leave `KEYS.relays` at once (assignment stops immediately).
+  const r = await verifyReceipts(ctx.db, ctx.now(), { limit, valkey: ctx.valkey });
   if (r.verified) metrics.integrityActions.add(r.verified, { kind: "receipt_verified" });
   if (r.rejected) metrics.integrityActions.add(r.rejected, { kind: "receipt_rejected" });
   if (r.unknown) metrics.integrityActions.add(r.unknown, { kind: "receipt_issuance_unknown" });
   if (r.suspendedRelays.length) metrics.integrityActions.add(r.suspendedRelays.length, { kind: "relay_suspended" });
+  if (r.deassignFailed) {
+    metrics.integrityActions.add(r.deassignFailed, { kind: "relay_deassign_failed" });
+    ctx.logger.warn("suspended relays not removed from assignment; they leave on their next heartbeat", {
+      relays: r.deassignFailed,
+    });
+  }
   const counts = {
     verified: r.verified,
     rejected: r.rejected,
     unknown: r.unknown,
     suspendedRelays: r.suspendedRelays.length,
+    deassignFailed: r.deassignFailed,
   };
   if (r.verified + r.rejected + r.unknown > 0) ctx.logger.info("relay receipts checked", counts);
   return counts;

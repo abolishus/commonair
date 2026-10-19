@@ -17,6 +17,7 @@ import { HAS_ALLOWANCE, loadAllowances } from "./allowance.ts";
 import { followBurst, type FollowFact } from "./channel.ts";
 import { findSuperseded, type LiveSession, rankConcurrency, SUPERSEDE_DEFAULTS } from "./concurrency.ts";
 import type { NetworkClassifier } from "./network.ts";
+import { NOT_EVIDENCED, readP2pEvidence } from "./p2p.ts";
 import { checkReceipt, relayStanding, type ReceiptHistoryEntry } from "./relay.ts";
 import { scoreSession } from "./score.ts";
 import { claimedSecondsUntil } from "./signals/fetch.ts";
@@ -66,6 +67,11 @@ export interface ScoreSessionsResult {
   restored: string[];
   /** Stale sessions replaced by a newer session of the same device and channel, now ended. */
   superseded: string[];
+  /**
+   * Server-side P2P evidence for this run (`p2p.ts`): sessions evidenced, and Valkey reads that
+   * failed (those sessions were judged without the reduced share).
+   */
+  p2p: { evidenced: number; errors: number };
 }
 
 async function liveSessions(db: Executor, stale: Date): Promise<LiveSession[]> {
@@ -175,6 +181,7 @@ export async function scoreActiveSessions(
     newlyExcluded: [],
     restored: [],
     superseded: [],
+    p2p: { evidenced: 0, errors: 0 },
   };
 
   // `(ended_at is null or verdict = 'pending')` and the order match `playback_sessions_scoring_idx`.
@@ -207,27 +214,30 @@ export async function scoreActiveSessions(
   const concurrency = rankConcurrency(live, quiet);
 
   if (candidates.length > 0) {
-    const facts: (SessionFacts & { relayId: string | null; previous: string })[] = candidates.map((c) => ({
-      id: String(c.id),
-      channelId: String(c.channel_id),
-      userId: textOrNull(c.user_id),
-      deviceHash: String(c.device_hash),
-      asn: c.asn === null ? null : Number(c.asn),
-      datacenter: textOrNull(c.datacenter),
-      userAgent: textOrNull(c.user_agent),
-      fingerprint: (c.fingerprint as Record<string, unknown> | null) ?? {},
-      assignedSource: c.assigned_source as SessionFacts["assignedSource"],
-      relayId: textOrNull(c.relay_id),
-      startedAt: date(c.started_at),
-      lastHeartbeatAt: dateOrNull(c.last_heartbeat_at),
-      heartbeats: num(c.heartbeats),
-      watchSeconds: num(c.watch_seconds),
-      segmentsFetched: num(c.segments_fetched),
-      bytesHttp: num(c.bytes_http),
-      bytesP2p: num(c.bytes_p_2p),
-      previous: String(c.verdict),
-    }));
-    const [evidence, allowances, relay] = await Promise.all([
+    const facts: (SessionFacts & { relayId: string | null; endedAt: Date | null; previous: string })[] = candidates.map(
+      (c) => ({
+        id: String(c.id),
+        channelId: String(c.channel_id),
+        userId: textOrNull(c.user_id),
+        deviceHash: String(c.device_hash),
+        asn: c.asn === null ? null : Number(c.asn),
+        datacenter: textOrNull(c.datacenter),
+        userAgent: textOrNull(c.user_agent),
+        fingerprint: (c.fingerprint as Record<string, unknown> | null) ?? {},
+        assignedSource: c.assigned_source as SessionFacts["assignedSource"],
+        relayId: textOrNull(c.relay_id),
+        endedAt: dateOrNull(c.ended_at),
+        startedAt: date(c.started_at),
+        lastHeartbeatAt: dateOrNull(c.last_heartbeat_at),
+        heartbeats: num(c.heartbeats),
+        watchSeconds: num(c.watch_seconds),
+        segmentsFetched: num(c.segments_fetched),
+        bytesHttp: num(c.bytes_http),
+        bytesP2p: num(c.bytes_p_2p),
+        previous: String(c.verdict),
+      }),
+    );
+    const [evidence, allowances, relay, p2p] = await Promise.all([
       readEvidence(
         valkey,
         facts.map((f) => f.id),
@@ -239,7 +249,18 @@ export async function scoreActiveSessions(
           f.assignedSource === "relay" && f.relayId ? [{ id: f.id, relayId: f.relayId, startedAt: f.startedAt }] : [],
         ),
       ),
+      // CDN sessions are not fetch-judged, so their P2P evidence would change nothing.
+      readP2pEvidence(
+        valkey,
+        facts.flatMap((f) =>
+          f.assignedSource === "cdn"
+            ? []
+            : [{ id: f.id, channelId: f.channelId, at: Math.min(now.getTime(), (f.endedAt ?? now).getTime()) }],
+        ),
+      ),
     ]);
+    result.p2p.errors = p2p.errors;
+    for (const e of p2p.evidence.values()) if (e.evidenced) result.p2p.evidenced++;
 
     const scored: { facts: (typeof facts)[number]; score: SessionScore; allowed: boolean }[] = facts.map((f) => {
       const ev = evidence.get(f.id);
@@ -275,6 +296,7 @@ export async function scoreActiveSessions(
           segmentDurationSeconds: opts.segmentDurationSeconds ?? 1,
           partsPerSegment: opts.partsPerSegment ?? 5,
           allowance,
+          p2p: p2p.evidence.get(f.id) ?? NOT_EVIDENCED,
         },
         opts.classifier,
       );
@@ -403,6 +425,11 @@ export interface VerifyReceiptsOptions {
   /** Wait this long after a receipt's period ends, so the issuance log for it is complete. */
   graceSeconds?: number;
   limit?: number;
+  /**
+   * When given, relays suspended by this run are removed from `KEYS.relays` right after the
+   * suspension commits, so assignment stops at once rather than on the relay's next heartbeat.
+   */
+  valkey?: ValkeyClient;
 }
 
 export interface VerifyReceiptsResult {
@@ -411,6 +438,8 @@ export interface VerifyReceiptsResult {
   /** Verified for issued bytes only because the issuance record had gaps (not counted against the relay). */
   unknown: number;
   suspendedRelays: string[];
+  /** Suspended relays whose removal from `KEYS.relays` failed (they leave on their next heartbeat). */
+  deassignFailed: number;
 }
 
 /**
@@ -418,10 +447,12 @@ export interface VerifyReceiptsResult {
  * suspend relays whose recent history shows repeated or gross over-reporting.
  *
  * Issuance is incomplete for a receipt when some minute of its period had live sessions
- * assigned to the relay but the origin issued nothing to **any** relay in that minute (no
- * issuance row with bytes at all: the origin was down or lost its production record). A
- * minute where other relays were issued bytes but this one was not is real: nothing was
- * issued to it. Incomplete receipts are "unknown", never over-reports. Standing only
+ * assigned to the relay but the origin issued this relay nothing in that minute (no issuance
+ * row with bytes for it: the origin was down, or lost the production record of the broadcast
+ * those sessions watched). Issuance is computed for every relay with live sessions, so such a
+ * minute is missing data, not proof; another relay's issuance (another broadcast's production)
+ * says nothing about it. A minute without live sessions on the relay and without issuance is
+ * real: nothing was issued to it. Incomplete receipts are "unknown", never over-reports. Standing only
  * looks at periods that started at or after the relay's latest reinstatement
  * (`relay.reinstate` audit row).
  */
@@ -433,7 +464,13 @@ export async function verifyReceipts(
   const thresholds = await loadThresholds(db);
   const tolerance = thresholds.relayOverReportTolerance;
   const cutoff = new Date(now.getTime() - (opts.graceSeconds ?? 120) * 1000);
-  const result: VerifyReceiptsResult = { verified: 0, rejected: 0, unknown: 0, suspendedRelays: [] };
+  const result: VerifyReceiptsResult = {
+    verified: 0,
+    rejected: 0,
+    unknown: 0,
+    suspendedRelays: [],
+    deassignFailed: 0,
+  };
 
   await db.transaction(async (tx) => {
     const pending = rows(
@@ -450,7 +487,8 @@ export async function verifyReceipts(
                                   and ps.started_at < m + interval '1 minute' and ps.last_heartbeat_at >= m
                                   and (ps.ended_at is null or ps.ended_at >= m))
                    and not exists (select 1 from relay_issuance i
-                                    where i.bucket_start = m and i.bytes_issued > 0)
+                                    where i.relay_id = r.relay_id and i.bucket_start = m
+                                      and i.bytes_issued > 0)
                ) as gap_minutes
           from relay_receipts r
          where r.status = 'pending' and r.period_end <= ${tsz(cutoff)}
@@ -575,6 +613,14 @@ export async function verifyReceipts(
     }
     await writeFlagsAndAudit(tx, flags, audits);
   });
+  if (opts.valkey && result.suspendedRelays.length > 0) {
+    try {
+      await opts.valkey.hdel(KEYS.relays, ...result.suspendedRelays);
+    } catch {
+      // The suspension is committed; the API drops a non-active relay on its next heartbeat.
+      result.deassignFailed = result.suspendedRelays.length;
+    }
+  }
   return result;
 }
 

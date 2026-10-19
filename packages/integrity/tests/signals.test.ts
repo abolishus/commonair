@@ -266,11 +266,73 @@ describe("fetch_pattern", () => {
     expect(fetchChecks({ ...base, watchSeconds: 5 }, { playlists: 5, segments: 0, parts: 0 }, ctx).checks).toEqual([]);
   });
 
-  test("a p2p-assigned session is expected to fetch only a minimum HTTP share", () => {
-    const p2p = { ...base, assignedSource: "p2p" as const };
-    expect(fetchChecks(p2p, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual([]);
-    // The same fetches from an origin-assigned session are far too few.
-    expect(fetchChecks(base, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
+  const evidenced = { evidenced: true, swarmNetworks: 2, announces: 12 };
+  const lone = { evidenced: false, swarmNetworks: 1, announces: 12 };
+
+  test("only server-side P2P evidence lowers the too-few bar", () => {
+    const long = { ...base, watchSeconds: 200 };
+    // 200 expected segments; 15 % fetched over HTTP.
+    const fetched = { playlists: 200, segments: 30, parts: 0 };
+    const ok = fetchChecks(long, fetched, { ...ctx, p2p: evidenced });
+    expect(ok).toMatchObject({ checks: [], mediaUnconfirmed: false });
+    expect(ok.measures).toMatchObject({ p2pEvidenced: 1, swarmNetworks: 2, httpShare: 0.1, expectedSegments: 20 });
+    // Without evidence (no lookup, or a lone network) the same fetches are far too few.
+    for (const p2p of [undefined, null, lone]) {
+      const r = fetchChecks(long, fetched, { ...ctx, p2p });
+      expect(r).toMatchObject({ checks: ["too_few_segments"], mediaUnconfirmed: true });
+      expect(r.measures.expectedSegments).toBe(200);
+    }
+    expect(fetchChecks(long, fetched, { ...ctx, p2p: lone }).measures).toMatchObject({
+      p2pEvidenced: 0,
+      swarmNetworks: 1,
+    });
+    expect(fetchChecks(long, fetched, { ...ctx, p2p: lone }).measures.httpShare).toBeUndefined();
+    // Even evidenced, fetching under 25 % of the reduced share is too few, and nothing is no media.
+    expect(fetchChecks(long, { playlists: 200, segments: 4, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual([
+      "too_few_segments",
+    ]);
+    expect(fetchChecks(long, { playlists: 0, segments: 0, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual([
+      "no_media_fetched",
+    ]);
+    // The reduced bar is below the judging minimum for short watches (60 s × 0.1 = 6 segments).
+    expect(fetchChecks(base, { playlists: 5, segments: 0, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual([]);
+  });
+
+  test("too many is always judged against share 1 (an honest lone peer falling back to HTTP)", () => {
+    const all = { playlists: 60, segments: 60, parts: 0 };
+    expect(fetchChecks(base, all, { ...ctx, p2p: evidenced }).checks).toEqual([]);
+    expect(fetchChecks(base, all, { ...ctx, p2p: lone }).checks).toEqual([]);
+    expect(fetchChecks(base, { playlists: 60, segments: 241, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual([
+      "too_many_segments",
+    ]);
+    expect(fetchChecks(base, { playlists: 60, segments: 240, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual(
+      [],
+    );
+  });
+
+  test("legacy p2p-assigned rows are judged like origin sessions unless evidenced", () => {
+    const legacy = { ...base, assignedSource: "p2p" as const };
+    const few = { playlists: 60, segments: 6, parts: 0 };
+    expect(fetchChecks(legacy, few, ctx).checks).toEqual(["too_few_segments"]);
+    expect(fetchChecks(legacy, few, { ...ctx, p2p: lone }).checks).toEqual(["too_few_segments"]);
+    const long = { ...legacy, watchSeconds: 200 };
+    expect(fetchChecks(long, { playlists: 200, segments: 30, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual(
+      [],
+    );
+    expect(fetchChecks(long, { playlists: 200, segments: 30, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
+  });
+
+  test("evidenced relay sessions get the reduced too-few bar on receipts", () => {
+    const relay = { ...base, assignedSource: "relay" as const };
+    const r = { relayObjects: 30, claimedSeconds: 200 };
+    expect(fetchChecks(relay, r, ctx).checks).toEqual(["too_few_segments"]);
+    expect(fetchChecks(relay, r, { ...ctx, p2p: lone }).checks).toEqual(["too_few_segments"]);
+    const ok = fetchChecks(relay, r, { ...ctx, p2p: evidenced });
+    expect(ok).toMatchObject({ checks: [], mediaUnconfirmed: false });
+    expect(ok.measures).toMatchObject({ p2pEvidenced: 1, expectedSegments: 20 });
+    expect(fetchChecks(relay, { relayObjects: 0, claimedSeconds: 200 }, { ...ctx, p2p: evidenced }).checks).toEqual([
+      "no_media_fetched",
+    ]);
   });
 
   test("relay-assigned sessions are not judged by origin fetches, and are held without receipts", () => {
@@ -362,14 +424,22 @@ describe("fetch_pattern", () => {
   });
 
   test("client-reported bytes never lower what is expected", () => {
-    expect(httpShare({ assignedSource: "origin" })).toBe(1);
-    expect(httpShare({ assignedSource: "p2p" })).toBe(0.1);
-    // An origin session claiming all its bytes came over P2P is still expected to fetch over HTTP.
+    expect(httpShare(null)).toBe(1);
+    expect(httpShare(undefined)).toBe(1);
+    expect(httpShare(lone)).toBe(1);
+    expect(httpShare(evidenced)).toBe(0.1);
+    // A session claiming all its bytes came over P2P is still expected to fetch over HTTP.
     const claimsP2p = { ...base, bytesHttp: 0, bytesP2p: 10_000 };
     expect(fetchChecks(claimsP2p, { playlists: 60, segments: 6, parts: 0 }, ctx).checks).toEqual(["too_few_segments"]);
-    // A p2p session claiming 100 s still expects 10 HTTP segments.
-    const p2p = { ...base, assignedSource: "p2p" as const, watchSeconds: 100 };
-    expect(fetchChecks(p2p, { playlists: 0, segments: 0, parts: 0 }, ctx).checks).toEqual(["no_media_fetched"]);
+    expect(
+      fetchChecks({ ...claimsP2p, assignedSource: "p2p" }, { playlists: 60, segments: 6, parts: 0 }, ctx).checks,
+    ).toEqual(["too_few_segments"]);
+    // Client bytes never matter either way: an evidenced session is judged the same with or without them.
+    const long = { ...base, watchSeconds: 200 };
+    const f = { playlists: 200, segments: 30, parts: 0 };
+    const quiet = { ...long, bytesP2p: 0 };
+    const loud = { ...long, bytesP2p: 10_000_000 };
+    expect(fetchChecks(quiet, f, { ...ctx, p2p: evidenced })).toEqual(fetchChecks(loud, f, { ...ctx, p2p: evidenced }));
   });
 });
 

@@ -137,8 +137,8 @@ the API with `recordHeartbeat`. Without it, sessions are still scored from the d
 ### `fetch_pattern` — sub-checks, noisy-OR, and the `media_unconfirmed` hold
 
 Heartbeats are the client's claim; delivery accounting is what the server side saw. Only
-server-observed quantities are used: client-reported bytes (HTTP or P2P) never lower what is
-expected.
+server-observed quantities are used: client-reported bytes (HTTP or P2P), `p2pCapable` and the
+assigned source never lower what is expected. Only server-side P2P evidence does (see below).
 
 - **origin / p2p**: the origin's per-session counters from `stream:segments` in Valkey
   (`integrity:fetch:<session>`: playlists, segments and LL-HLS parts, counted as **distinct
@@ -154,9 +154,42 @@ expected.
   fetches (the other signals still apply). Closing this needs CDN log ingestion keyed by playback
   token, or a token-bearing edge.
 
-Expected segments = claimed watch seconds / segment duration (1 s), judged only when at least 10
-are expected. A `p2p`-assigned session is expected to fetch 10 % of that over HTTP; every other
-session 100 %. LL-HLS parts count as 1/5 segment.
+Expected segments = claimed watch seconds / segment duration (1 s) × the HTTP share, judged only
+when at least 10 are expected. The HTTP share is 10 % (`P2P_HTTP_SHARE`) for a **P2P-evidenced**
+session and 100 % for every other session. It applies to `no_media_fetched` and
+`too_few_segments` (origin counters and relay receipts alike). `too_many_segments` is always judged
+against share 1, so an honest lone peer that falls back to HTTP never trips it. LL-HLS parts count
+as 1/5 segment. Legacy rows with `assigned_source = 'p2p'` (the API records the HTTP source for new
+sessions) are judged like origin sessions, with the reduced share only when evidenced.
+
+#### Server-side P2P evidence (`readP2pEvidence`, `p2pEvidenceFor`; ADR 0005)
+
+The tracker (`services/tracker`) is the only writer of these keys; integrity only reads them:
+
+- `KEYS.p2pPeer(session)` HASH: `swarm`, `net` (HMAC of the announcing /24 or /48, never the
+  address), `first`, `last` (epoch ms), `announces`. Expires 600 s after the last announce.
+- `KEYS.p2pSwarm(swarm)` ZSET: session → last announce (ms). A swarm id is
+  `<channelId>:<infoHash>`.
+
+A session is evidenced at window end `t` (now, or when an ended session ended) when its peer hash
+shows an announce at or after `t − 120 s` (`P2P_EVIDENCE.windowMs`), its swarm id carries the
+session's own channel, and the swarm's members that announced at or after `t − 120 s` (itself
+included) span at least **2** distinct networks (`P2P_EVIDENCE.minSwarmNetworks`). Members whose
+peer hash names another channel's swarm, or has expired, are ignored. Per scoring batch that is
+three pipelined round trips: `HGETALL` of each session's peer hash, `ZREVRANGEBYSCORE … WITHSCORES
+LIMIT 0 500` per candidate swarm, `HMGET net swarm` per member. At most **500** members are read per
+swarm, the most recent announcers first (two networks are enough, so a sample suffices). Valkey
+errors never fail the run: those sessions are judged without the reduced share and the errors are
+returned (`ScoreSessionsResult.p2p.errors`) for the worker's metrics.
+
+The explanation (`fetch_pattern` details) carries `p2pEvidenced` (0/1), `swarmNetworks` and, when
+evidenced, `httpShare`, so streamers and admins can see which bar a session was judged against.
+
+**Residual risk (ADR 0005):** a viewbot farm that spans two networks, holds valid playback tokens
+and keeps heartbeating can still earn the reduced share. The other signals (hosting ranges,
+headless fingerprints, concurrency) still apply to it. A farm that floods one swarm with more than
+500 fresh single-network sessions can push honest members out of the sample; that only withholds
+the reduced share from the honest viewers (they are then judged like any HTTP session).
 
 | Check                        | Weight | Fires when                                                       |
 | ---------------------------- | ------ | ---------------------------------------------------------------- |
@@ -208,15 +241,20 @@ ends:
 - beyond tolerance → **rejected** (`over_report`, ratio stored);
 - bytes reported with nothing issued → **rejected** (`no_issuance`);
 - **issuance unknown**: some minute of the period had live sessions assigned to the relay while the
-  origin issued nothing to **any** relay (no issuance row with bytes at all: origin restart, lost
-  production record). Beyond tolerance, the receipt is **verified for the issued bytes only**
-  (never more), ratio left empty, flag `relay_issuance_unknown` (`pending_review`). It never
-  counts as over-reporting. A minute where other relays were issued bytes but this one was not is
-  real: nothing was issued to it.
+  origin issued **this relay** nothing (no issuance row with bytes for it: origin restart, lost
+  production record of the broadcast its sessions watched). The origin computes issuance for every
+  relay with live sessions, so this is missing data; another relay's issuance in that minute
+  (another broadcast's production) is not coverage. Beyond tolerance, the receipt is **verified
+  for the issued bytes only** (never more), ratio left empty, flag `relay_issuance_unknown`
+  (`pending_review`). It never counts as over-reporting. A minute without live sessions on the
+  relay and without issuance is real: nothing was issued to it.
 
 A relay is **suspended** (status `suspended`, flag `relay_suspended`, audit row) when it
 over-reported beyond tolerance in **≥ 2 of its last 5** checked periods, or in any single period by
-more than **3 × tolerance** (a `no_issuance` rejection counts as unbounded). Only verified bytes
+more than **3 × tolerance** (a `no_issuance` rejection counts as unbounded). With
+`opts.valkey`, a suspended relay is removed from `KEYS.relays` (`relays:active`) right after the
+suspension commits, so assignment stops at once instead of on its next heartbeat; a failed removal
+is counted (`deassignFailed`), not thrown. Only verified bytes
 count toward patronage. Reinstatement is an admin decision (`relays.reinstate`, audit
 `relay.reinstate`); it starts a fresh record: only periods that **started at or after** the latest
 reinstatement count toward standing.
@@ -252,9 +290,9 @@ retry, and never delete rows):
 - `scoreActiveSessions` options: `classifier` (pass `classifierFromEnv().classifier`),
   `segmentDurationSeconds` (1), `partsPerSegment` (5), `limit` (5000), `staleSeconds` (120),
   `finalizeSeconds` (3600), `supersedeGraceSeconds` (90). Returns
-  `{ scored, counts, newlyExcluded, restored, superseded }`.
-- `verifyReceipts` options: `graceSeconds` (120), `limit` (1000). Returns
-  `{ verified, rejected, unknown, suspendedRelays }`.
+  `{ scored, counts, newlyExcluded, restored, superseded, p2p: { evidenced, errors } }`.
+- `verifyReceipts` options: `graceSeconds` (120), `limit` (1000), `valkey` (remove suspended relays
+  from `KEYS.relays`). Returns `{ verified, rejected, unknown, suspendedRelays, deassignFailed }`.
 - `recordFetches(valkey, FetchRecord[])`: call once per `stream:segments` batch with the entries
   whose `src` is `origin` or `p2p`. `FetchRecord = { sid, kind, object? }`; pass `object` (the
   media object's path, e.g. `<rendition>/<file>`) so segments and parts count as distinct objects.

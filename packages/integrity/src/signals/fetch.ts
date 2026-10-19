@@ -24,14 +24,18 @@
  * never verifies: it stays pending with reason `media_unconfirmed`. That covers the database
  * counter alone showing far too few full segments, and relay sessions without receipt coverage.
  *
- * Only server-observed quantities are used. Client-reported bytes (HTTP or P2P) never lower
- * what is expected; a `p2p`-assigned session is expected to fetch a fixed minimum share over
- * HTTP (`P2P_HTTP_SHARE`).
+ * Only server-observed quantities are used. Client-reported bytes (HTTP or P2P), `p2pCapable` and
+ * the assigned source never lower what is expected. Only a session with server-side P2P evidence
+ * (`ScoringContext.p2p`, see `p2p.ts`: the tracker saw it announce in a swarm spanning at least two
+ * networks within the window) is judged "too few" / "no media" against the reduced share
+ * `P2P_HTTP_SHARE`. "Too many" is always judged against share 1, so an honest lone peer that falls
+ * back to HTTP never trips it. Legacy `p2p`-assigned rows are judged like origin sessions.
  */
 import {
   type FetchEvidence,
   type HeartbeatSample,
   isRelayFetch,
+  type P2pEvidence,
   type ScoringContext,
   type SessionFacts,
   type Signal,
@@ -57,11 +61,11 @@ export const TOO_MANY_RATIO = 4;
  * tolerant: at least this share of watched seconds / segment duration, and at least one.
  */
 export const DB_ONLY_MIN_RATIO = 0.1;
-/** HTTP share a `p2p`-assigned session must still fetch from the origin (the live edge). */
+/** HTTP share a P2P-evidenced session must still fetch over HTTP (the live edge). */
 export const P2P_HTTP_SHARE = 0.1;
 
 type FetchSession = Pick<SessionFacts, "assignedSource" | "watchSeconds">;
-type FetchCtx = Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment">;
+type FetchCtx = Pick<ScoringContext, "segmentDurationSeconds" | "partsPerSegment" | "p2p">;
 
 export interface FetchFindings {
   checks: FetchCheck[];
@@ -72,9 +76,20 @@ export interface FetchFindings {
   skipped: "cdn" | "no_accounting" | null;
 }
 
-/** Share of media expected over HTTP from the origin; never derived from client-reported bytes. */
-export function httpShare(session: Pick<SessionFacts, "assignedSource">): number {
-  return session.assignedSource === "p2p" ? P2P_HTTP_SHARE : 1;
+/**
+ * Share of media the "too few" bar expects over HTTP: reduced only for server-side P2P evidence,
+ * never for client-reported bytes, `p2pCapable` or the assigned source.
+ */
+export function httpShare(p2p: P2pEvidence | null | undefined): number {
+  return p2p?.evidenced ? P2P_HTTP_SHARE : 1;
+}
+
+/** Explanation fields for the P2P decision (only when evidence was looked up). */
+function p2pMeasures(measures: Record<string, number>, p2p: P2pEvidence | null | undefined): void {
+  if (!p2p) return;
+  measures.p2pEvidenced = p2p.evidenced ? 1 : 0;
+  measures.swarmNetworks = p2p.swarmNetworks;
+  if (p2p.evidenced) measures.httpShare = P2P_HTTP_SHARE;
 }
 
 export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: FetchCtx): FetchFindings {
@@ -88,15 +103,17 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
   });
   if (session.assignedSource === "cdn") return none("cdn");
   const segDur = Math.max(0.1, ctx.segmentDurationSeconds);
+  const share = httpShare(ctx.p2p);
 
   if (session.assignedSource === "relay") {
     // A relay session verifies only on its relay's receipts; without coverage it stays pending.
     if (fetches === null || !isRelayFetch(fetches) || fetches.relayObjects === null) return none("no_accounting", true);
     // Relays count every media object (a part counts as one), so only "too few" is meaningful.
-    const expected = Math.max(0, fetches.claimedSeconds) / segDur;
+    const expected = (Math.max(0, fetches.claimedSeconds) / segDur) * share;
     measures.relayObjects = round(fetches.relayObjects);
     measures.claimedSeconds = round(fetches.claimedSeconds);
     measures.expectedSegments = round(expected);
+    p2pMeasures(measures, ctx.p2p);
     if (expected >= MIN_EXPECTED_SEGMENTS) {
       const ratio = fetches.relayObjects / expected;
       measures.segmentRatio = round(ratio);
@@ -117,26 +134,37 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
       checks.push("playlists_without_segments");
     if (fetches.playlists === 0 && fetches.segments >= FETCH_MIN_REQUESTS) checks.push("segments_without_playlists");
   }
-  const expected = (Math.max(0, session.watchSeconds) / segDur) * httpShare(session);
+  // "Too few" uses the (possibly reduced) HTTP share; "too many" always the full expectation.
+  const full = Math.max(0, session.watchSeconds) / segDur;
+  const expected = full * share;
   measures.expectedSegments = round(expected);
+  p2pMeasures(measures, ctx.p2p);
   let mediaUnconfirmed = checks.includes("playlists_without_segments");
-  if (expected >= MIN_EXPECTED_SEGMENTS && !mediaUnconfirmed) {
+  if (!mediaUnconfirmed) {
     if (!partsKnown) {
       // Database counter only (full segments): cannot be told apart from a part-heavy
       // low-latency player well enough to score, so a shortfall only holds the session.
-      const ratio = fetches.segments / expected;
-      measures.segmentRatio = round(ratio);
-      if (fetches.segments < Math.max(1, expected * DB_ONLY_MIN_RATIO)) mediaUnconfirmed = true;
+      if (expected >= MIN_EXPECTED_SEGMENTS) {
+        measures.segmentRatio = round(fetches.segments / expected);
+        if (fetches.segments < Math.max(1, expected * DB_ONLY_MIN_RATIO)) mediaUnconfirmed = true;
+      }
     } else if (effectiveSegments === 0) {
-      checks.push("no_media_fetched");
-      mediaUnconfirmed = true;
-    } else {
-      const ratio = effectiveSegments / expected;
-      measures.segmentRatio = round(ratio);
-      if (ratio < TOO_FEW_RATIO) {
-        checks.push("too_few_segments");
+      if (expected >= MIN_EXPECTED_SEGMENTS) {
+        checks.push("no_media_fetched");
         mediaUnconfirmed = true;
-      } else if (ratio > TOO_MANY_RATIO) checks.push("too_many_segments");
+      }
+    } else {
+      if (expected >= MIN_EXPECTED_SEGMENTS) {
+        const ratio = effectiveSegments / expected;
+        measures.segmentRatio = round(ratio);
+        if (ratio < TOO_FEW_RATIO) {
+          checks.push("too_few_segments");
+          mediaUnconfirmed = true;
+        }
+      }
+      if (!mediaUnconfirmed && full >= MIN_EXPECTED_SEGMENTS && effectiveSegments / full > TOO_MANY_RATIO) {
+        checks.push("too_many_segments");
+      }
     }
   }
   return { checks, measures, mediaUnconfirmed, skipped: null };

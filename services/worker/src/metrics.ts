@@ -34,6 +34,10 @@ export const metrics = {
     description:
       "Integrity decisions by kind (session_excluded, session_restored, session_superseded, receipt_*, relay_suspended, follow_excluded)",
   }),
+  integrityEvidence: m.createCounter("worker.integrity.evidence", {
+    description:
+      "Evidence lookups during scoring by source and outcome (p2p: evidenced sessions; error: Valkey reads that failed, judged without that evidence)",
+  }),
   streamHoursEligible: m.createCounter("worker.integrity.stream_hours", {
     description: "Stream hours recomputed, by eligibility",
   }),

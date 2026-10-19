@@ -126,6 +126,18 @@ export interface Allowance {
   codes: readonly string[];
 }
 
+/**
+ * Server-side P2P evidence for a session (`p2p.ts`): whether the tracker saw it announce in a
+ * swarm spanning enough distinct networks within the window. Never derived from client input.
+ */
+export interface P2pEvidence {
+  evidenced: boolean;
+  /** Distinct networks among the swarm's in-window announcers (itself included); 0 when not a candidate. */
+  swarmNetworks: number;
+  /** Announces the tracker counted for the session. */
+  announces: number;
+}
+
 export interface Concurrency {
   /**
    * 1-based position among the concurrent sessions of the same device (or account), newest
@@ -147,6 +159,8 @@ export interface ScoringContext {
   partsPerSegment: number;
   /** Appeal / admin allowance covering this session, if any. */
   allowance?: Allowance | null;
+  /** Server-side P2P evidence; absent or not evidenced = judged as a plain HTTP session. */
+  p2p?: P2pEvidence | null;
 }
 
 export type Verdict = "verified" | "excluded" | "pending";
