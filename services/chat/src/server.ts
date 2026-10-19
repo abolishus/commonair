@@ -19,6 +19,7 @@ import { Directory, type DirectoryOptions } from "./directory.ts";
 import { type Limiter, ValkeyLimiter } from "./limiter.ts";
 import { createMetrics } from "./metrics.ts";
 import { MODERATE_SCOPE, Moderation } from "./moderation.ts";
+import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "./filter-runner.ts";
 import { MessageWriter, type WriterOptions } from "./persistence.ts";
 import { errorFields } from "./errors.ts";
 import { BUS, UserControlMessage } from "@commonair/contracts";
@@ -51,6 +52,11 @@ export interface ChatServiceOptions {
   deleteRetryMs?: number;
   /** How long an OAuth token's validity is cached between re-checks (≤ 30 s). */
   oauthRevalidateMs?: number;
+  /**
+   * Word-filter worker threads (default 2). 0 runs filters inline, without the hard timeout on a
+   * single regex call.
+   */
+  filterWorkers?: number;
   /** Runs last during shutdown (close the DB pool, flush telemetry). */
   onShutdown?: () => Promise<void>;
 }
@@ -85,6 +91,14 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   const middlewares = opts.middlewares ?? plugins;
   const sockets = new Set<ChatSocket>();
   const auth = new Authenticator(opts.db, opts.internalSecret, opts.oauthRevalidateMs);
+  const filterRunner: FilterRunner =
+    opts.filterWorkers === 0
+      ? inlineFilterRunner
+      : new WorkerFilterRunner({
+          workers: opts.filterWorkers,
+          logger,
+          onTimeout: (reason) => metrics.filterTimeout(reason),
+        });
 
   /** BUS.userControl: platform-wide suspension, deletion, token revocation, role/profile changes. */
   const onUserControl = (raw: string): void => {
@@ -133,6 +147,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     logger,
     frameWriter,
     maxRoomsPerConnection: opts.maxRoomsPerConnection ?? 100,
+    filterRunner,
   });
   core = chat;
 
@@ -350,6 +365,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
         await mw
           .close?.()
           .catch((err: unknown) => logger.warn("plugin close failed", { ...errorFields(err), plugin: mw.name }));
+      await filterRunner.close();
       await Promise.allSettled([subscriber.quit(), valkey.quit()]);
       await opts.onShutdown?.();
     },

@@ -14,7 +14,8 @@
  */
 import { CHAT_LIMITS, type dto, type EmoteRange, type NoticeCode } from "@commonair/contracts";
 import type { Logger } from "@commonair/observability";
-import { applyFilters, type CompiledFilter, containsLink } from "./content.ts";
+import { type CompiledFilter, containsLink } from "./content.ts";
+import { type FilterRunner, inlineFilterRunner } from "./filter-runner.ts";
 import { emoteTierFor, parseEmotes } from "./emotes.ts";
 import type { Limiter, Reservation } from "./limiter.ts";
 import { errorFields } from "./errors.ts";
@@ -87,6 +88,8 @@ export type PipelineResult =
 export interface PipelineDeps {
   limiter: Limiter;
   middlewares: readonly MessageMiddleware[];
+  /** Where word filters run (default: inline, bounded only between filters). */
+  filterRunner?: FilterRunner;
 }
 
 const reject = (code: NoticeCode, text: string): PipelineResult => ({ ok: false, rejection: { code, text } });
@@ -141,7 +144,7 @@ export async function runSendPipeline(deps: PipelineDeps, input: PipelineInput):
   let body = input.body;
   let held = false;
   if (!privileged) {
-    const outcome = applyFilters(body, input.filters);
+    const outcome = await (deps.filterRunner ?? inlineFilterRunner).run(body, input.filters);
     if (outcome.action === "block")
       return fail("msg_rejected", "Your message was not sent because it matched a channel filter.");
     if (outcome.timedOut)

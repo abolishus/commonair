@@ -20,6 +20,9 @@ export function createMetrics() {
   const messagesIn = m.createCounter("chat.messages.in", { description: "Chat messages received from clients" });
   const messagesOut = m.createCounter("chat.messages.out", { description: "Frames delivered to local sockets" });
   const dropped = m.createCounter("chat.dropped", { description: "Messages, frames or sockets dropped, by reason" });
+  const filterTimeouts = m.createCounter("chat.filter.timeouts", {
+    description: "Messages held because word filters hit the hard timeout, crashed or queued too long",
+  });
   const fanout = m.createHistogram("chat.fanout.latency", {
     description: "Time from publish on one instance to local delivery on another",
     unit: "ms",
@@ -30,6 +33,7 @@ export function createMetrics() {
     messageIn: () => messagesIn.add(1),
     framesOut: (n: number) => messagesOut.add(n),
     dropped: (reason: DropReason, extra: Record<string, string> = {}) => dropped.add(1, { reason, ...extra }),
+    filterTimeout: (reason: string) => filterTimeouts.add(1, { reason }),
     fanoutLatency: (ms: number) => fanout.record(Math.max(0, ms)),
   };
 }

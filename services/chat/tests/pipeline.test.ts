@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { CHAT_LIMITS, type NoticeCode } from "@commonair/contracts";
+import { WorkerFilterRunner } from "../src/filter-runner.ts";
 import { MemoryLimiter } from "../src/limiter.ts";
 import { ALL_CHANNELS, rateLimitFor } from "../src/rules.ts";
 import { type MessageMiddleware, runSendPipeline } from "../src/pipeline.ts";
@@ -313,6 +314,25 @@ describe("filters and middleware", () => {
       }),
     );
     expect(r2.ok && r2.body).toBe("heck it");
+  });
+
+  test("a filter that hits the worker's hard timeout holds the message", async () => {
+    const runner = new WorkerFilterRunner({ workers: 1, hardTimeoutMs: 50 });
+    try {
+      const body = `${"a".repeat(34)}!`;
+      // Stands in for a pattern that slipped past the validator: exponential on this body.
+      const stuck = [
+        {
+          def: { id: "evil", pattern: "(a+)+$", isRegex: true, action: "block" as const, replacement: null },
+          re: /(a+)+$/giu,
+        },
+      ];
+      const r = await runSendPipeline({ ...deps(), filterRunner: runner }, { ...input({ body }), filters: stuck });
+      expect(r.ok && r.held).toBe(true);
+      expect(r.ok && r.body).toBe(body);
+    } finally {
+      await runner.close();
+    }
   });
 
   test("middlewares run in order and can transform or drop", async () => {
