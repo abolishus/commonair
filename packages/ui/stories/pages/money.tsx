@@ -7,8 +7,7 @@
  * viewer-hour) are integer micro-units rendered with `formatUnitCost`.
  */
 import type * as React from "react";
-import { MoneyAmount, formatMoney } from "@commonair/ui";
-import { formatUnitCost } from "../../src/lib/format.ts";
+import { MoneyAmount, formatMoney, formatUnitCost } from "@commonair/ui";
 
 export const CURRENCY = "USD";
 export const LOCALE = "en-US";

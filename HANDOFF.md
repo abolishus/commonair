@@ -53,7 +53,7 @@ boards keep their interaction), fixtures in integer cents (sub-cent unit costs s
 `formatMoney` gets a precision option), `tests/pages.test.tsx` renders every board,
 `tests/source-policy.test.ts` enforces the design rules in packages/ui (allowlist keyed by
 file + rule + snippet + count). Review: 1 HIGH + 3 MEDIUM fixed, re-reviewed clean.
-**Next: U7** (`.claude/briefs/e4/U7-ui-followups.md`) clears the allowlist's "contract request"
+**U7 merged ahead of its review at the user's request** (`.claude/briefs/e4/U7-ui-followups.md`; review findings follow as separate commits). It cleared the allowlist's "contract request"
 entries (arbitrary grid widths, Progress tone selectors, UptimeStrip `role="img"` around focusable
 triggers, icon sizing, raw `<label>`, older stories) and adds the compositions the boards asked
 for (SelectField, AlertCallout tones, DataTable controlled selection, StatCard footer, TrendChart
