@@ -47,10 +47,17 @@ const ROLE_ACTIONS = {
 } as const;
 
 export const channelsRoutes = {
-  get: os.channels.get.handler(async ({ context: { deps }, input }) => {
+  get: os.channels.get.handler(async ({ context: { deps, caller }, input }) => {
     const c = await channelBySlug(deps, input.channel);
     if (!c) throw notFound("Channel not found");
-    return toChannelDto(deps, c);
+    const dto = await toChannelDto(deps, c);
+    if (!caller) return { ...dto, viewer: null };
+    // A follow the integrity system excluded still reads as followed to its owner.
+    const [f] = await deps.db
+      .select({ followerId: follows.followerId })
+      .from(follows)
+      .where(and(eq(follows.followerId, caller.user.id), eq(follows.channelId, c.id)));
+    return { ...dto, viewer: { following: f !== undefined } };
   }),
 
   update: os.channels.update.handler(async ({ context, input }) => {

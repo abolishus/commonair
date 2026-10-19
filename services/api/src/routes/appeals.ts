@@ -212,8 +212,8 @@ export const appeals = {
           status: input.status,
         },
       });
-      // No outbox row yet: `appeal.resolved` is not in the event catalog, and the worker would
-      // skip an unknown type for good. emit() it here once the catalog has it.
+      // No outbox row: the event catalog is EventSub's public surface and appeal outcomes are
+      // private to the appellant and staff. The audit row is the record.
       return updated;
     });
     return toAppeal(row);
