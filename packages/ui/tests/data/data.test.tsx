@@ -118,6 +118,18 @@ test("data table renders grouped rows, footer, empty state and loading skeletons
   rerender(<DataTable caption="Loading table" columns={columns} rows={[]} loading loadingRows={3} />);
   expect(container.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3);
 });
+test("sortable data tables do not hide rows behind implicit pagination", () => {
+  const rows = Array.from({ length: 12 }, (_, index) => ({ name: `Stream ${index + 1}` }));
+  render(
+    <DataTable
+      caption="All streams"
+      columns={[{ id: "name", accessorKey: "name", header: "Name", enableSorting: true }]}
+      rows={rows}
+      sortable
+    />,
+  );
+  expect(screen.getByText("Stream 12")).toBeTruthy();
+});
 test("filter callbacks, list links and charts render with accessible labels", () => {
   const change = vi.fn<(value: string | string[]) => void>();
   render(

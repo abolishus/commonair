@@ -7,7 +7,6 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   getFilteredRowModel,
-  getPaginationRowModel,
   useReactTable,
   type ColumnDef,
   type RowSelectionState,
@@ -95,7 +94,6 @@ export function DataTable<T>({
       ? {
           getSortedRowModel: getSortedRowModel(),
           getFilteredRowModel: getFilteredRowModel(),
-          getPaginationRowModel: getPaginationRowModel(),
         }
       : {}),
   });
