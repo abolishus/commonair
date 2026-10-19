@@ -10,8 +10,16 @@ export interface DashboardShellProps {
   groups: NavGroup[];
   sidebarLabel: string;
   children: React.ReactNode;
+  /** Site footer under the content (the AGPL source link must be on every page). */
+  footer?: React.ReactNode;
 }
-export function DashboardShell({ header, groups, sidebarLabel, children }: DashboardShellProps): React.JSX.Element {
+export function DashboardShell({
+  header,
+  groups,
+  sidebarLabel,
+  children,
+  footer,
+}: DashboardShellProps): React.JSX.Element {
   return (
     <SidebarProvider>
       <Sidebar collapsible="icon">
@@ -22,6 +30,7 @@ export function DashboardShell({ header, groups, sidebarLabel, children }: Dashb
       <div className="flex min-h-svh min-w-0 flex-1 flex-col">
         {header}
         <SidebarInset className="min-w-0 flex-1">{children}</SidebarInset>
+        {footer}
       </div>
     </SidebarProvider>
   );

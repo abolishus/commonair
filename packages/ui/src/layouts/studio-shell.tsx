@@ -9,6 +9,7 @@ export interface StudioShellProps {
   groups: NavGroup[];
   sidebarLabel: string;
   children: React.ReactNode;
+  footer?: React.ReactNode;
 }
 export function StudioShell(props: StudioShellProps): React.JSX.Element {
   return <DashboardShell {...props} />;

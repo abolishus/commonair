@@ -39,11 +39,15 @@ export function SiteFooter({ instanceName, links, sourceLink, license, ...props 
         ))}
       </nav>
       <span>{license}</span>
-      {sourceLink ? (
-        <a {...sourceLink} rel="noopener">
-          {sourceLink.label}
-        </a>
-      ) : null}
+      {sourceLink ? <SourceAnchor {...sourceLink} /> : null}
     </footer>
+  );
+}
+
+function SourceAnchor({ label, className, ...props }: SourceLink): React.JSX.Element {
+  return (
+    <a {...props} rel="noopener" className={className ?? "underline underline-offset-4 hover:text-foreground"}>
+      {label}
+    </a>
   );
 }

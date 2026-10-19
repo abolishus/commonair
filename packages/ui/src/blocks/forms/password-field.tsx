@@ -4,7 +4,7 @@
 import * as React from "react";
 import { EyeIcon, EyeOffIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Field, FieldLabel } from "@commonair/ui/components/field";
+import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
 import { InputGroup, InputGroupButton, InputGroupInput } from "@commonair/ui/components/input-group";
 import { Progress, ProgressValue } from "@commonair/ui/components/progress";
 
@@ -16,6 +16,7 @@ export interface PasswordFieldProps {
   showLabel: string;
   hideLabel: string;
   strength?: { value: number; label: string };
+  description?: React.ReactNode;
   "data-testid"?: string;
   inputProps?: React.ComponentProps<typeof InputGroupInput>;
 }
@@ -27,6 +28,7 @@ export function PasswordField({
   showLabel,
   hideLabel,
   strength,
+  description,
   inputProps,
   ...props
 }: PasswordFieldProps): React.JSX.Element {
@@ -42,7 +44,8 @@ export function PasswordField({
           {...inputProps}
           id={id}
           type={visible ? "text" : "password"}
-          autoComplete="new-password"
+          // Sign-up default; sign-in passes inputProps.autoComplete="current-password".
+          autoComplete={inputProps?.autoComplete ?? "new-password"}
           value={current}
           onChange={(event) => {
             if (value === undefined) setInner(event.currentTarget.value);
@@ -53,6 +56,7 @@ export function PasswordField({
           <HugeiconsIcon icon={visible ? EyeOffIcon : EyeIcon} strokeWidth={2} aria-hidden />
         </InputGroupButton>
       </InputGroup>
+      {description && <FieldDescription>{description}</FieldDescription>}
       {strength && (
         <Progress value={strength.value} aria-label={strength.label}>
           <ProgressValue>{() => strength.label}</ProgressValue>

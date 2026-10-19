@@ -5,7 +5,7 @@ import type * as React from "react";
 import { AspectRatio } from "@commonair/ui/components/aspect-ratio";
 import { Slider } from "@commonair/ui/components/slider";
 import { cn } from "@commonair/ui/lib/utils";
-import { IconButton, LiveBadge, OverlayBadge, ViewerCount } from "@commonair/ui";
+import { IconButton, LiveBadge, OverlayBadge, ViewerCount, type LiveBadgeProps } from "@commonair/ui";
 
 export interface PlayerControlProps {
   label: string;
@@ -37,6 +37,8 @@ export interface PlayerChromeProps extends React.ComponentProps<"section"> {
   scrubber?: React.ReactNode;
   stage?: React.ReactNode;
   liveLabel?: string;
+  /** Forwarded to the built-in live badge (e.g. `data-testid`). */
+  liveBadgeProps?: Partial<LiveBadgeProps> & { [key: `data-${string}`]: string | undefined };
   viewerCount?: number;
   timeLabel?: string;
 }
@@ -50,6 +52,7 @@ export function PlayerChrome({
   scrubber,
   stage,
   liveLabel,
+  liveBadgeProps,
   viewerCount,
   timeLabel,
   className,
@@ -67,7 +70,7 @@ export function PlayerChrome({
         <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2">
           <div className="flex flex-wrap gap-1">
             {topStart}
-            {variant === "live" && <LiveBadge label={liveLabel} pulse />}
+            {variant === "live" && <LiveBadge label={liveLabel} pulse {...liveBadgeProps} />}
           </div>
           <div className="flex flex-wrap justify-end gap-1">
             {topEnd}
