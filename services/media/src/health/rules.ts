@@ -5,6 +5,7 @@
  * Stream-health warnings shown to the streamer (dashboard "stream health"). Codes are stable
  * identifiers; the web app maps them to translated messages.
  */
+import type { HealthWarningCode } from "@commonair/contracts/enums";
 import type { ProbeResult } from "../ffmpeg/probe.ts";
 
 export const WARNINGS = {
@@ -21,7 +22,7 @@ export const WARNINGS = {
   transcodeCapacity: "transcode_capacity",
   /** Server-side: VOD recording/clip buffer paused, the media work dir is over its disk budget. */
   recordingDiskBudget: "recording_disk_budget",
-} as const;
+} as const satisfies Record<string, HealthWarningCode>;
 export type Warning = (typeof WARNINGS)[keyof typeof WARNINGS];
 
 export const MAX_BITRATE_KBPS = 8000;

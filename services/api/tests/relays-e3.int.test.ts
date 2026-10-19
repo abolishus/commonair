@@ -30,7 +30,7 @@ beforeAll(async () => {
     headers: { "content-type": "application/json", "x-internal-secret": api.internalSecret },
     body: JSON.stringify({ path: mediaPath(member.username), sourceType: "rtmpConn" }),
   });
-  expect(ready.status).toBeLessThan(300);
+  if (ready.status >= 300) throw new Error(`media ready hook answered ${ready.status}`);
 }, 120_000);
 afterAll(async () => {
   await api?.stop();
@@ -130,6 +130,7 @@ async function workerSuspends(id: string) {
 test("retire kills the token: register and heartbeat answer 401, audited once", async () => {
   const r = await makeRelay("retire");
   expect((await r.register()).body.status).toBe("active");
+  const tokenHash = (await row(r.id))?.tokenHash;
   expect(await inAssignment(r.id)).toBe(true);
 
   expect((await member.client.call("DELETE", `/api/relays/${r.id}`)).status).toBe(200);
@@ -137,8 +138,11 @@ test("retire kills the token: register and heartbeat answer 401, audited once", 
   expect((await r.register()).status).toBe(401);
   expect((await r.heartbeat()).status).toBe(401);
   expect((await r.heartbeat({ draining: true })).status).toBe(401);
-  expect((await mine(r.id))?.status).toBe("offline");
-  expect((await row(r.id))?.tokenHash.startsWith("retired:")).toBe(true);
+  expect(await mine(r.id)).toBeUndefined(); // relays.mine omits retired relays
+  const retired = await row(r.id);
+  expect(retired).toMatchObject({ status: "offline" });
+  expect(retired?.retiredAt).toBeInstanceOf(Date);
+  expect(retired?.tokenHash).not.toBe(tokenHash);
 
   // Idempotent, one audit row; someone else's relay is not found.
   expect((await member.client.call("DELETE", `/api/relays/${r.id}`)).status).toBe(200);

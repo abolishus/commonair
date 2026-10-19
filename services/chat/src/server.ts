@@ -196,6 +196,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     }
     if (!(await auth.stillValid(id))) {
       replyNotice(ws, to, { code: "msg_requires_login", text: "Your credentials expired or were revoked." });
+      // Every send is answered by an ack, so a client waiting on it does not hang until the close.
+      if (frame.op === "send") sendFrame(ws, { op: "ack", nonce: frame.nonce, id: null, held: false }, frameWriter);
       expire(ws, "credentials expired");
       return false;
     }

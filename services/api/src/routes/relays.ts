@@ -6,7 +6,7 @@
  * heartbeat, receipts) and admin review. Receipts are stored `pending`; the
  * worker/integrity units cross-check them against the origin's issuance log.
  */
-import { and, desc, eq, inArray, lt, notLike, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { KEYS } from "@commonair/contracts/internal";
 import { RECEIPT_INTERVAL_SECONDS } from "@commonair/contracts/tokens";
 import { schema } from "@commonair/db";
@@ -69,22 +69,26 @@ type RelayStats = {
 };
 const NO_STATS: RelayStats = { bytes: 0, lastReceiptAt: null, receipts: { pending: 0, verified: 0, rejected: 0 } };
 
-/** Verified bytes and receipt counts over 30 days (by period start), plus the latest receipt. */
+/**
+ * Verified bytes, receipt counts and the latest receipt over the last 30 days (by period start),
+ * bounded by the `(relay_id, period_start)` index so a long-lived relay's history is never scanned.
+ */
 async function relayStats(deps: Deps, ids: string[]) {
   if (ids.length === 0) return new Map<string, RelayStats>();
-  // Bound as text: a Date inside a raw `sql` fragment is not serialized by the driver.
-  const since = sql`${new Date(deps.now().getTime() - 30 * 86_400_000).toISOString()}::timestamptz`;
+  const since = new Date(deps.now().getTime() - 30 * 86_400_000);
+  const count = (status: "pending" | "verified" | "rejected") =>
+    sql<number>`(count(*) filter (where ${relayReceipts.status} = ${status}))::int`;
   const rows = await deps.db
     .select({
       id: relayReceipts.relayId,
-      bytes: sql<string>`coalesce(sum(${relayReceipts.bytesVerified}) filter (where ${relayReceipts.status} = 'verified' and ${relayReceipts.periodStart} > ${since}), 0)::text`,
+      bytes: sql<string>`coalesce(sum(${relayReceipts.bytesVerified}) filter (where ${relayReceipts.status} = 'verified'), 0)::text`,
       last: sql<Date | string | null>`max(${relayReceipts.createdAt})`,
-      pending: sql<number>`(count(*) filter (where ${relayReceipts.status} = 'pending' and ${relayReceipts.periodStart} > ${since}))::int`,
-      verified: sql<number>`(count(*) filter (where ${relayReceipts.status} = 'verified' and ${relayReceipts.periodStart} > ${since}))::int`,
-      rejected: sql<number>`(count(*) filter (where ${relayReceipts.status} = 'rejected' and ${relayReceipts.periodStart} > ${since}))::int`,
+      pending: count("pending"),
+      verified: count("verified"),
+      rejected: count("rejected"),
     })
     .from(relayReceipts)
-    .where(inArray(relayReceipts.relayId, ids))
+    .where(and(inArray(relayReceipts.relayId, ids), gt(relayReceipts.periodStart, since)))
     .groupBy(relayReceipts.relayId);
   return new Map(
     rows.map((r) => [
@@ -108,6 +112,7 @@ const toRelayDto = (r: RelayRow, stats: RelayStats = NO_STATS) => ({
   status: r.status,
   lastHealthAt: isoOrNull(r.lastHealthAt),
   suspendedReason: r.suspendedReason,
+  retiredAt: isoOrNull(r.retiredAt),
   version: r.version,
   bytesVerified30d: stats.bytes,
   lastReceiptAt: isoOrNull(stats.lastReceiptAt),
@@ -130,13 +135,8 @@ export async function healthCheck(deps: Deps, publicUrl: string): Promise<{ ok: 
   }
 }
 
-/**
- * Retired relays carry a token hash no SHA-256 hex digest can equal, so the old token can never
- * authenticate again and the row stays recognisably retired (it no longer counts toward the
- * member's relay limit). Rows are kept: receipts reference them.
- */
-const RETIRED_PREFIX = "retired:";
-export const isRetired = (r: Pick<RelayRow, "tokenHash">) => r.tokenHash.startsWith(RETIRED_PREFIX);
+/** Retired by the owner (`retired_at`): never authenticates again. Rows are kept: receipts reference them. */
+export const isRetired = (r: Pick<RelayRow, "retiredAt">) => r.retiredAt !== null;
 
 async function currentRow(deps: Deps, id: string): Promise<RelayRow | null> {
   const [row] = await deps.db.select().from(relayNodes).where(eq(relayNodes.id, id)).limit(1);
@@ -161,7 +161,7 @@ async function publishRelay(deps: Deps, r: RelayRow, loadMbps: number): Promise<
   };
   await deps.valkey.hset(KEYS.relays, r.id, JSON.stringify(entry));
   const now = await currentRow(deps, r.id);
-  if (!now || now.status !== "active" || now.tokenHash !== r.tokenHash) {
+  if (!now || now.status !== "active" || isRetired(now) || now.tokenHash !== r.tokenHash) {
     await deps.valkey.hdel(KEYS.relays, r.id);
     return now ?? r;
   }
@@ -185,14 +185,25 @@ async function refreshHealth(deps: Deps, r: RelayRow, opts: { rejoin?: boolean }
       lastHealthLatencyMs: h.latencyMs,
       consecutiveFailures: h.ok ? 0 : sql`${relayNodes.consecutiveFailures} + 1`,
     })
-    .where(and(eq(relayNodes.id, r.id), eq(relayNodes.status, r.status), eq(relayNodes.tokenHash, r.tokenHash)))
+    .where(
+      and(
+        eq(relayNodes.id, r.id),
+        eq(relayNodes.status, r.status),
+        eq(relayNodes.tokenHash, r.tokenHash),
+        isNull(relayNodes.retiredAt),
+      ),
+    )
     .returning();
   return row ?? (await currentRow(deps, r.id)) ?? r;
 }
 
-/** Any relay whose token matches authenticates, whatever its status; a retired token never matches. */
+/**
+ * A relay whose token matches authenticates whatever its status (offline relays may rejoin,
+ * suspended ones learn they are suspended); only retirement refuses it.
+ */
 function requireRelay(ctx: { relay: RelayRow | null }): RelayRow {
   if (!ctx.relay) throw apiError("UNAUTHORIZED", "A valid relay token is required");
+  if (isRetired(ctx.relay)) throw apiError("UNAUTHORIZED", "This relay was retired");
   return ctx.relay;
 }
 
@@ -205,7 +216,7 @@ export const relays = {
     const rows = await context.deps.db
       .select()
       .from(relayNodes)
-      .where(eq(relayNodes.ownerId, caller.user.id))
+      .where(and(eq(relayNodes.ownerId, caller.user.id), isNull(relayNodes.retiredAt)))
       .orderBy(desc(relayNodes.createdAt));
     const stats = await relayStats(
       context.deps,
@@ -222,7 +233,7 @@ export const relays = {
       .select({ n: sql<number>`count(*)::int` })
       .from(relayNodes)
       // Drained or timed-out relays may rejoin, so only retired ones free a slot.
-      .where(and(eq(relayNodes.ownerId, caller.user.id), notLike(relayNodes.tokenHash, `${RETIRED_PREFIX}%`)));
+      .where(and(eq(relayNodes.ownerId, caller.user.id), isNull(relayNodes.retiredAt)));
     if (Number(n) >= MAX_RELAYS_PER_MEMBER)
       throw precondition("relay_limit", `At most ${MAX_RELAYS_PER_MEMBER} relays per member`);
     const token = randomSecret("relay_");
@@ -244,11 +255,11 @@ export const relays = {
   remove: os.relays.remove.handler(async ({ context, input }) => {
     const { deps } = context;
     const caller = requireCaller(context);
-    // Retired, not deleted: receipts reference the relay. Rotating the token hash to a value no
-    // token hashes to kills the token at once; the relay can never register or heartbeat again.
+    // Retired, not deleted: receipts reference the relay. `retired_at` plus a rotated token hash:
+    // the old token never authenticates again (register and heartbeat answer 401).
     const id = await deps.db.transaction(async (tx) => {
       const [r] = await tx
-        .select({ id: relayNodes.id, tokenHash: relayNodes.tokenHash })
+        .select({ id: relayNodes.id, retiredAt: relayNodes.retiredAt })
         .from(relayNodes)
         .where(and(eq(relayNodes.id, input.id), eq(relayNodes.ownerId, caller.user.id)))
         .for("update");
@@ -256,7 +267,7 @@ export const relays = {
       if (isRetired(r)) return r.id; // idempotent: no second audit row
       await tx
         .update(relayNodes)
-        .set({ status: "offline", tokenHash: `${RETIRED_PREFIX}${randomSecret()}` })
+        .set({ status: "offline", retiredAt: deps.now(), tokenHash: await sha256Hex(randomSecret("retired_")) })
         .where(eq(relayNodes.id, r.id));
       await audit(tx, {
         actorType: "user",

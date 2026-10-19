@@ -18,7 +18,7 @@ Changing anything here is a contract change: update this file, `apps/web`, the r
 - `relays.create`: the member gets `registrationToken`, which is shown once.
 - `relays.mine` returns `RelayNode`, which includes `status`, `bytesVerified30d`,
   `lastReceiptAt` and `receipts30d`.
-- `relays.remove` retires the relay. Its token then never authenticates again.
+- `relays.remove` retires the relay (`retiredAt` set). Its token then never authenticates again, and `relays.mine` no longer lists it.
 - The relay protocol: `relays.register`, `relays.heartbeat` and `relays.receipt`.
   - A heartbeat with `draining: true` takes the relay out of assignment at once (status
     `offline`), and players move to the origin on their next heartbeat (`switchTo`).
@@ -42,7 +42,7 @@ Changing anything here is a contract change: update this file, `apps/web`, the r
 
 | Test id                  | Element / meaning                                                                                                                                                                                                                 |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `player`                 | (E1) It now also carries `data-source` = `origin` \| `relay` \| `cdn`: the delivery source of the playlist it is currently playing. This is `PlaybackStart.source`, updated after a `switchTo`.                                   |
+| `player`                 | (E1) It now also carries `data-source` = `origin` \| `relay` \| `cdn` (never `p2p`): the delivery source of the playlist it is currently playing. This is `PlaybackStart.source`, updated after a `switchTo`.                     |
 | `relays-link`            | On `/dashboard`, a link to `/relays`                                                                                                                                                                                              |
 | `relays`                 | Wrapper of the `/relays` page                                                                                                                                                                                                     |
 | `relays-empty`           | An `<EmptyState>` shown when you have no relays                                                                                                                                                                                   |
@@ -120,4 +120,4 @@ commonair-relay --api <PUBLIC_URL> --token <token> \
    - Relay-assigned Chromium players switch to `data-source="origin"` and keep `playing` within
      30 s.
    - Restarting the relay with the same token brings it back to `active`.
-   - `M` retires it with `relay-remove`. The stream stops.
+   - `M` retires it with `relay-remove`; the row disappears (`relays.mine` omits retired relays). Then the harness stops the stream.
