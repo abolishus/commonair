@@ -124,7 +124,15 @@ test("relay lifecycle: create → register (health-checked) → heartbeat → re
   expect(relayUrls.every((u) => u.startsWith("http://relay-test.invalid:8080/hls/"))).toBe(true);
 
   const mine = await member.client.call<{ id: string; status: string }[]>("GET", "/api/relays");
-  expect(mine.body).toEqual([expect.objectContaining({ id: created.body.relayId, status: "active" })]);
+  expect(mine.body).toEqual([
+    expect.objectContaining({
+      id: created.body.relayId,
+      status: "active",
+      bytesVerified30d: 0,
+      lastReceiptAt: expect.any(String),
+      receipts30d: { pending: 1, verified: 0, rejected: 0 },
+    }),
+  ]);
 
   // Retiring the relay kills its token and removes it from assignment.
   expect((await member.client.call("DELETE", `/api/relays/${created.body.relayId}`)).status).toBe(200);
@@ -163,4 +171,57 @@ test("admin endpoints: relays list, reinstate, categories, roles", async () => {
   ).toBe(400);
   const audits = await api.db.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, "user.set_role"));
   expect(audits).toHaveLength(1);
+});
+
+test("relay stats: 30-day receipt counts and verified bytes per relay, older periods excluded", async () => {
+  const mk = async (name: string) => {
+    const r = await member.client.call<{ relayId: string }>("POST", "/api/relays", { name });
+    expect(r.status).toBe(200);
+    return r.body.relayId;
+  };
+  const a = await mk("stats-a");
+  const b = await mk("stats-b");
+  const now = Date.now();
+  const receipt = (
+    relayId: string,
+    status: "pending" | "verified" | "rejected",
+    bytesVerified: number,
+    ageMs: number,
+  ) => ({
+    relayId,
+    nonce: crypto.randomUUID(),
+    periodStart: new Date(now - ageMs - 60_000),
+    periodEnd: new Date(now - ageMs),
+    bytesReported: bytesVerified,
+    segmentsReported: 1,
+    tokensReported: 1,
+    payload: { v: 1, relayId, nonce: "n", periodStart: "", periodEnd: "", entries: [] } as never,
+    signature: "x".repeat(86),
+    status,
+    bytesVerified,
+    createdAt: new Date(now - ageMs),
+  });
+  await api.db.db.insert(schema.relayReceipts).values([
+    receipt(a, "verified", 1000, 60_000),
+    receipt(a, "verified", 500, 120_000),
+    receipt(a, "rejected", 0, 180_000),
+    receipt(a, "pending", 0, 30_000),
+    receipt(a, "verified", 99_999, 31 * 86_400_000), // outside the 30-day window
+    receipt(b, "rejected", 0, 60_000),
+  ]);
+  const mine = await member.client.call<
+    {
+      id: string;
+      bytesVerified30d: number;
+      lastReceiptAt: string | null;
+      receipts30d: { pending: number; verified: number; rejected: number };
+    }[]
+  >("GET", "/api/relays");
+  const byId = new Map(mine.body.map((r) => [r.id, r]));
+  expect(byId.get(a)).toMatchObject({
+    bytesVerified30d: 1500,
+    receipts30d: { pending: 1, verified: 2, rejected: 1 },
+  });
+  expect(new Date(byId.get(a)?.lastReceiptAt ?? 0).getTime()).toBe(now - 30_000);
+  expect(byId.get(b)).toMatchObject({ bytesVerified30d: 0, receipts30d: { pending: 0, verified: 0, rejected: 1 } });
 });

@@ -15,7 +15,9 @@
     "typecheck": "tsc -p .",
     "generate": "drizzle-kit generate",
     "migrate": "bun src/migrate.ts",
-    "studio": "drizzle-kit studio"
+    "studio": "drizzle-kit studio",
+    "demo:seed": "bun src/demo/cli.ts seed",
+    "demo:clear": "bun src/demo/cli.ts clear"
   },
   "dependencies": {
     "@commonair/config": "workspace:*",

@@ -76,12 +76,14 @@ export async function signPlaybackToken(key: SigningKey, claims: PlaybackClaims)
 export type TokenError = "malformed" | "bad_signature" | "expired" | "not_yet_valid";
 export type VerifyResult<T> = { ok: true; value: T } | { ok: false; error: TokenError };
 
-/** Verify signature and expiry. `skewSeconds` tolerates small clock differences between hosts. */
-export async function verifyPlaybackToken(
+/**
+ * Verify signature and claims shape only, with no time checks. For long-lived connections that
+ * apply their own age policy to `iat` (the P2P tracker, ADR 0005); everything else uses
+ * `verifyPlaybackToken`.
+ */
+export async function verifyPlaybackTokenSignature(
   publicKey: CryptoKey,
   token: string,
-  nowSeconds = Math.floor(Date.now() / 1000),
-  skewSeconds = 30,
 ): Promise<VerifyResult<PlaybackClaims>> {
   const [body, sig, extra] = token.split(".");
   if (!body || !sig || extra !== undefined) return { ok: false, error: "malformed" };
@@ -94,16 +96,26 @@ export async function verifyPlaybackToken(
     return { ok: false, error: "malformed" };
   }
   if (!(await verify(publicKey, sigBytes, bytes))) return { ok: false, error: "bad_signature" };
-  let parsed;
   try {
-    parsed = PlaybackClaims.safeParse(JSON.parse(dec.decode(bytes)));
+    const parsed = PlaybackClaims.safeParse(JSON.parse(dec.decode(bytes)));
+    return parsed.success ? { ok: true, value: parsed.data } : { ok: false, error: "malformed" };
   } catch {
     return { ok: false, error: "malformed" };
   }
-  if (!parsed.success) return { ok: false, error: "malformed" };
-  if (parsed.data.exp + skewSeconds < nowSeconds) return { ok: false, error: "expired" };
-  if (parsed.data.iat - skewSeconds > nowSeconds) return { ok: false, error: "not_yet_valid" };
-  return { ok: true, value: parsed.data };
+}
+
+/** Verify signature and expiry. `skewSeconds` tolerates small clock differences between hosts. */
+export async function verifyPlaybackToken(
+  publicKey: CryptoKey,
+  token: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  skewSeconds = 30,
+): Promise<VerifyResult<PlaybackClaims>> {
+  const r = await verifyPlaybackTokenSignature(publicKey, token);
+  if (!r.ok) return r;
+  if (r.value.exp + skewSeconds < nowSeconds) return { ok: false, error: "expired" };
+  if (r.value.iat - skewSeconds > nowSeconds) return { ok: false, error: "not_yet_valid" };
+  return r;
 }
 
 export interface SignedReceipt {

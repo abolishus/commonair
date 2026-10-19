@@ -2373,6 +2373,12 @@ export const contract = {
           activeViewers: z.number().int().min(0),
           egressMbps: z.number().min(0),
           cacheBytes: z.number().int().min(0),
+          /**
+           * The relay is shutting down: the API takes it out of assignment at once (status
+           * `offline`) so players move to the origin on their next heartbeat; the relay keeps
+           * serving its current viewers until its drain timeout. It re-registers on restart.
+           */
+          draining: z.boolean().default(false),
         }),
       )
       .output(z.object({ status: z.enum(E.RELAY_STATUSES), originPublicKey: z.string() })),

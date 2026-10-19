@@ -69,3 +69,10 @@ through `chat.bans.ban` (timeout: `durationSeconds: 600`). The removed user's me
    `chat-notice[data-code=msg_timedout]`; `chat.bans.list` shows `T` with an expiry.
 5. `S` lifts it (`chat.bans.unban`), `T` can chat again; `F` clicks `follow-button` again →
    `data-following="false"`. The stream stops.
+
+## Dashboard stream health (added after E2)
+
+| Test id                 | Element / meaning                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `stream-health`         | card on `/dashboard`; `data-state` = `offline` \| `healthy` \| `warning`, absent while loading or after a failure with no data |
+| `stream-health-warning` | one warning row of the latest sample; `data-code` = a `HEALTH_WARNING_CODES` value                                             |

@@ -13,6 +13,7 @@ import {
   signReceipt,
   timingSafeEqual,
   verifyPlaybackToken,
+  verifyPlaybackTokenSignature,
   verifyReceipt,
 } from "../src/index.ts";
 
@@ -47,6 +48,21 @@ describe("playback tokens", () => {
       ok: false,
       error: "not_yet_valid",
     });
+  });
+
+  test("signature-only verification ignores time but not the signature", async () => {
+    const key = await importSigningKey(vectors.privateKeyPkcs8);
+    const other = (await generateSigningKey()).key;
+    // Long after expiry the signature still verifies (callers apply their own `iat` age policy).
+    expect(await verifyPlaybackTokenSignature(key.publicKey, vectors.playback.token)).toEqual({
+      ok: true,
+      value: claims,
+    });
+    expect(await verifyPlaybackTokenSignature(other.publicKey, vectors.playback.token)).toEqual({
+      ok: false,
+      error: "bad_signature",
+    });
+    expect(await verifyPlaybackTokenSignature(key.publicKey, "a.b.c")).toEqual({ ok: false, error: "malformed" });
   });
 
   test("reject tampering, foreign keys and garbage", async () => {
