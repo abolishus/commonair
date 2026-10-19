@@ -12,8 +12,8 @@
  * Railway is an optional host (AGENTS.md rule 3): the platform's FOSS default stays
  * `podman compose` / Quadlet. Differences from compose, all documented in docs/deploy/railway.md:
  * managed Postgres (no WAL-G; Railway backups), a Railway bucket instead of Garage, no
- * observability stack, RTMP ingest only (Railway has no UDP, so no WebRTC/WHIP), no media
- * work-dir volume, and no P2P tracker.
+ * observability stack, WebRTC/WHIP over ICE-TCP only (Railway has no public UDP; see `webrtcTcp`),
+ * no media work-dir volume, and no P2P tracker.
  *
  * Never put secrets, Railway UUIDs or generated *.up.railway.app domains in this file.
  * Secrets are `preserve()`d here and set by scripts/railway-bootstrap.ts.
@@ -42,6 +42,8 @@ const PORTS = {
   ircWs: 6680,
   ircHealth: 6681,
   rtmp: 1935,
+  iceTcp: 8189,
+  mtxWebrtc: 8889,
   mtxRtsp: 8554,
   mtxHls: 8888,
   mtxApi: 9997,
@@ -115,8 +117,8 @@ export default defineRailway((ctx) => {
     AUTH_TRUSTED_ORIGINS: publicUrl("https", "web"),
     IRC_PUBLIC_HOST: ref("RAILWAY_TCP_PROXY_DOMAIN", "irc"),
     INGEST_RTMP_PUBLIC_URL: `rtmp://${ref("RAILWAY_TCP_PROXY_DOMAIN", "mediamtx")}:${ref("RAILWAY_TCP_PROXY_PORT", "mediamtx")}/live`,
-    // No public WHIP: WebRTC needs UDP, which Railway does not offer.
-    INGEST_WHIP_PUBLIC_URL: `${publicUrl("https", "web")}/whip-unavailable`,
+    // WHIP signaling over MediaMTX's HTTPS domain; media over ICE-TCP through `webrtc-tcp`.
+    INGEST_WHIP_PUBLIC_URL: `${publicUrl("https", "mediamtx")}/live`,
     // The services connect as the least-privilege role (ADR 0004); the owner URL stays on `migrate`.
     DATABASE_URL: `postgres://commonair_app:${ref("POSTGRES_APP_PASSWORD")}@${ref("PGHOST", "postgres")}:${ref("PGPORT", "postgres")}/${ref("PGDATABASE", "postgres")}`,
     VALKEY_URL: privateUrl("redis", "valkey", PORTS.valkey),
@@ -192,6 +194,28 @@ export default defineRailway((ctx) => {
       INTERNAL_API_SECRET: preserve(),
       API_INTERNAL_URL: privateUrl("http", "api", PORTS.api),
       MTX_AUTHHTTPADDRESS: `${privateUrl("http", "api", PORTS.api)}/internal/media/auth`,
+      // WebRTC without public UDP: listen for ICE-TCP on webrtc-tcp's *public* proxy port, since
+      // MediaMTX advertises the port it listens on, and advertise only the proxy's address (the
+      // interface addresses are private). The UDP candidate this leaves is unreachable and harmless.
+      MTX_WEBRTCLOCALTCPADDRESS: `:${ref("RAILWAY_TCP_PROXY_PORT", "webrtc-tcp")}`,
+      MTX_WEBRTCADDITIONALHOSTS: ref("RAILWAY_TCP_PROXY_DOMAIN", "webrtc-tcp"),
+      MTX_WEBRTCIPSFROMINTERFACES: "false",
+    },
+  });
+
+  // Owns the ICE-TCP TCP proxy (public port P → :8189) and forwards to MediaMTX on P over the
+  // private network (infra/railway/tcp-forward.ts). A separate service so that
+  // RAILWAY_TCP_PROXY_PORT names this proxy unambiguously; MediaMTX's own proxy carries RTMP.
+  const webrtcTcp = service("webrtc-tcp", {
+    source: github(REPO, { branch: "main" }),
+    build: { builder: "DOCKERFILE", dockerfilePath: SERVICE_DOCKERFILE },
+    start: "bun infra/railway/tcp-forward.ts",
+    tcp: [PORTS.iceTcp],
+    env: {
+      SERVICE: "tools",
+      LISTEN_PORT: String(PORTS.iceTcp),
+      TARGET_HOST: ref("RAILWAY_PRIVATE_DOMAIN", "mediamtx"),
+      TARGET_PORT: ref("RAILWAY_TCP_PROXY_PORT"),
     },
   });
 
@@ -210,7 +234,7 @@ export default defineRailway((ctx) => {
   return project("commonair", {
     resources: [
       group("Data", [db, valkey, media, mailpit, migrate]),
-      group("Media", [mediamtx, mediaSvc, origin]),
+      group("Media", [mediamtx, webrtcTcp, mediaSvc, origin]),
       group("App", [web, api, chat, irc, worker]),
     ],
   });

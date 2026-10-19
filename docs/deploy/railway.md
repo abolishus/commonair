@@ -22,18 +22,20 @@ root `package.json`.
 | `valkey`                                                 | `valkey/valkey` image                                          | ephemeral by design, private only                                                                                               |
 | `mailpit`                                                | `axllent/mailpit` image                                        | staging email sink; UI behind basic auth (`MP_UI_AUTH`)                                                                         |
 | `migrate`                                                | tools image                                                    | runs migrations + app role on each deploy, then exits                                                                           |
-| `mediamtx`                                               | `infra/mediamtx/Containerfile`                                 | RTMP ingest through a Railway TCP proxy; HLS/RTSP/API private                                                                   |
+| `mediamtx`                                               | `infra/mediamtx/Containerfile`                                 | RTMP ingest through a Railway TCP proxy; WHIP signaling on an HTTPS domain; HLS/RTSP/API private                                |
+| `webrtc-tcp`                                             | tools image, `infra/railway/tcp-forward.ts`                    | owns the ICE-TCP TCP proxy and forwards it to MediaMTX (see [WebRTC on Railway](#webrtc-on-railway))                            |
 | `web`, `api`, `chat`, `origin`, `irc`, `media`, `worker` | `infra/containers/service.Containerfile` (`SERVICE` build arg) | health checks on `/healthz` of each service's own port (`PORT`)                                                                 |
 
 Public endpoints: generated HTTPS domains for `web` (3000), `api` (3001), `chat` (3002, WebSocket
-`/ws`), `origin` (3003), `irc` (WebSocket listener, 6680) and `mailpit` (UI, 8025); TCP proxies for
-RTMP (`mediamtx` 1935) and plain IRC (`irc` 6667). Internal URLs use Railway's private network
+`/ws`), `origin` (3003), `irc` (WebSocket listener, 6680), `mailpit` (UI, 8025) and `mediamtx` (WHIP,
+8889); TCP proxies for RTMP (`mediamtx` 1935), ICE-TCP (`webrtc-tcp` 8189) and plain IRC (`irc` 6667). Internal URLs use Railway's private network
 (`<service>.railway.internal`); new Railway environments are dual-stack, so the services' default
 `0.0.0.0` binding works.
 
 ### Differences from compose (accepted for staging)
 
-- **No WebRTC/WHIP ingest**: Railway has no UDP. RTMP only.
+- **WebRTC/WHIP over ICE-TCP only**: Railway has no public UDP. Encoders that can only do
+  WebRTC over UDP (ffmpeg's `whip` muxer, OBS up to 33.0) must use RTMP here; see below.
 - **No media work-dir volume**: Railway volumes mount as root and the images run as `bun`; a
   recording in progress does not survive a restart of `media`.
 - **No observability stack** (OTel collector, Prometheus, Loki, Tempo, Grafana). Logs are in
@@ -42,6 +44,33 @@ RTMP (`mediamtx` 1935) and plain IRC (`irc` 6667). Internal URLs use Railway's p
 - **Bucket objects are private**: presigned uploads and downloads work; public media URLs
   (avatars, banners) do not until a public read path exists.
 - Postgres is managed; the WAL-G image and `infra/postgres/backup.sh` are not used here.
+
+## WebRTC on Railway
+
+Railway exposes TCP (HTTP domains and TCP proxies) but no public UDP, so WHIP works here only
+with ICE over TCP (RFC 6544, passive server candidates), which browsers support:
+
+- **Signaling** (the WHIP `POST`/`PATCH`/`DELETE`) goes to MediaMTX's HTTPS domain, port 8889.
+  `INGEST_WHIP_PUBLIC_URL` points there.
+- **Media** goes to a TCP proxy owned by the `webrtc-tcp` service. MediaMTX writes the port it
+  _listens_ on into its ICE-TCP candidate, but a Railway TCP proxy's public port is assigned by
+  Railway and differs from the container port it targets. So MediaMTX listens on the proxy's
+  public port (`MTX_WEBRTCLOCALTCPADDRESS=:${{webrtc-tcp.RAILWAY_TCP_PROXY_PORT}}`) and advertises
+  the proxy host (`MTX_WEBRTCADDITIONALHOSTS`), while `webrtc-tcp` takes the proxy's traffic on 8189
+  and forwards it byte for byte to MediaMTX on that port over the private network. A separate
+  service keeps `RAILWAY_TCP_PROXY_PORT` unambiguous (MediaMTX's own proxy carries RTMP).
+
+Who can publish over WHIP here:
+
+| Client                               | Works on Railway | Why                                                                        |
+| ------------------------------------ | ---------------- | -------------------------------------------------------------------------- |
+| Browsers (Chromium, Firefox, Safari) | yes              | gather active TCP candidates                                               |
+| OBS ≤ 33.0                           | no               | libjuice ICE is UDP-only; ICE-TCP is in obs-studio PR 12848 (33.1 tracker) |
+| ffmpeg `whip` muxer                  | no               | picks the first UDP candidate only                                         |
+
+So the `ingest-whip` harness scenario (ffmpeg) cannot run against staging; `ingest-rtmp` can. To
+try WHIP on staging, publish from a browser to `https://<mediamtx domain>/live/<slug>/whip` with
+the stream key as the bearer token. Compose keeps ICE over UDP 8189 and is unaffected.
 
 ## Status
 
