@@ -214,6 +214,17 @@ The full breakdown is in the report under `scenarios[].data.load`.
 reachable from the harness. TTFF (< 15 s) and glass-to-glass (< 20 s) are soft checks for now. On
 failure every open page is screenshotted into `<report dir>/<run id>-e2e-basic/`.
 
+`e2e-social` is milestone E2 ([docs/testing/e2-selectors.md](../docs/testing/e2-selectors.md)): an
+API-signed-up streamer goes live over RTMP; a fan finds the stream in the directory (≤ 60 s),
+follows it and sees it under `following`; an unmodified tmi.js bot owned by the streamer joins
+through the IRC gateway's WebSocket listener and answers `!ping`; the streamer times a troll out
+from the chat menu, and the fan (web) and the bot (`CLEARCHAT` with `ban-duration`) both see it;
+the timeout is lifted, the fan unfollows, the stream stops. Chat waits are ≤ 10 s. It records
+`follow_round_trip`, `bot_reply_round_trip`, `bot_reply_latency`, `moderation_to_web`,
+`moderation_to_irc` and `unban_to_chat`. `--set via=api` runs the same steps through the API and
+chat socket instead of Chromium, which separates backend failures from web ones. The `irc` need
+probes `HARNESS_IRC_HEALTH_URL` (default `http://localhost:6681/healthz`).
+
 Until the API, origin and media units are running, these scenarios fail on unmet needs (and say
 which). The drivers themselves are verified against a throwaway MediaMTX by the integration tests.
 

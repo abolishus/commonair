@@ -118,6 +118,15 @@ describe("scenario registry", () => {
     expect(r.get("ingest-whip")?.needs).toContain("whip");
   });
 
+  test("e2e-social is registered, in full, and needs the web app, IRC and a browser", async () => {
+    const r = await loadRegistry();
+    const social = r.get("e2e-social");
+    expect(social).toBeDefined();
+    for (const n of ["api", "web", "chat", "irc", "media", "ffmpeg", "browser"] as const)
+      expect(social?.needs).toContain(n);
+    expect(r.full.map((s) => s.name)).toContain("e2e-social");
+  });
+
   test("discovers scenarios dropped into a directory", async () => {
     const dir = mkdtempSync(join(tmpdir(), "harness-reg-"));
     try {

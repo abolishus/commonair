@@ -7,10 +7,22 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 import { extractLinks, findTokenLink } from "../src/mailpit.ts";
 import { verificationHop } from "../src/users.ts";
-import { ROUTES, ROUTE_PATTERNS, TEST_IDS, tid, webEmbedUrl } from "../src/web/selectors.ts";
+import {
+  DIRECTORY_SECTIONS,
+  E1_TEST_IDS,
+  E2_CHANGED_E1_IDS,
+  E2_ROUTE_PATTERNS,
+  E2_TEST_IDS,
+  ROUTES,
+  ROUTE_PATTERNS,
+  TEST_IDS,
+  tid,
+  webEmbedUrl,
+} from "../src/web/selectors.ts";
 import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/urls.ts";
 
 const DOC = fileURLToPath(new URL("../../docs/testing/e1-selectors.md", import.meta.url));
+const DOC_E2 = fileURLToPath(new URL("../../docs/testing/e2-selectors.md", import.meta.url));
 
 /** First-column code spans of the markdown table under `## <heading>`. */
 function tableKeys(markdown: string, heading: string): string[] {
@@ -31,7 +43,7 @@ describe("selectors match docs/testing/e1-selectors.md", () => {
 
   test("data-testid values: same set, no duplicates", () => {
     const documented = tableKeys(doc, "Test ids");
-    const ours = Object.values(TEST_IDS);
+    const ours = Object.values(E1_TEST_IDS);
     expect(documented.length).toBeGreaterThan(20);
     expect(new Set(documented).size).toBe(documented.length);
     expect(new Set(ours).size).toBe(ours.length);
@@ -54,6 +66,37 @@ describe("selectors match docs/testing/e1-selectors.md", () => {
     expect(tableKeys(md, "A")).toEqual(["a1"]);
     expect(tableKeys(md, "B")).toEqual(["b1"]);
     expect(() => tableKeys(md, "C")).toThrow(/no "## C"/);
+  });
+});
+
+describe("selectors match docs/testing/e2-selectors.md", () => {
+  const doc = readFileSync(DOC_E2, "utf8");
+
+  test("data-testid values: E2 ids plus the E1 ids E2 changes, no duplicates", () => {
+    const documented = tableKeys(doc, "Test ids");
+    const ours = [...Object.values(E2_TEST_IDS), ...E2_CHANGED_E1_IDS];
+    expect(documented.length).toBeGreaterThan(10);
+    expect(new Set(documented).size).toBe(documented.length);
+    expect([...ours].sort()).toEqual([...documented].sort());
+  });
+
+  test("E2 ids do not collide with E1 ids; TEST_IDS is their union", () => {
+    const e1 = new Set<string>(Object.values(E1_TEST_IDS));
+    for (const id of Object.values(E2_TEST_IDS)) expect(e1.has(id)).toBe(false);
+    expect(Object.values(TEST_IDS)).toHaveLength(e1.size + Object.values(E2_TEST_IDS).length);
+    for (const id of E2_CHANGED_E1_IDS) expect(e1.has(id)).toBe(true);
+  });
+
+  test("routes: same set, all already E1 routes", () => {
+    expect([...E2_ROUTE_PATTERNS].sort()).toEqual(tableKeys(doc, "Routes").sort());
+    for (const r of E2_ROUTE_PATTERNS) expect(ROUTE_PATTERNS).toContain(r);
+    expect(ROUTES.directory).toBe("/");
+  });
+
+  test("directory sections are the documented data-section values", () => {
+    const row = doc.split("\n").find((l) => l.startsWith("| `directory-section`")) ?? "";
+    const documented = new Set([...row.matchAll(/`([a-z]+)`/g)].map((m) => m[1] ?? ""));
+    expect([...documented].sort()).toEqual([...DIRECTORY_SECTIONS].sort());
   });
 });
 
