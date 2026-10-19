@@ -96,6 +96,8 @@ export const Channel = z.object({
   vodEnabled: z.boolean(),
   subTiers: z.array(z.object({ tier: z.number().int(), name: z.string(), price: Money, benefits: z.string() })),
   suspended: z.boolean(),
+  /** The signed-in caller's relation to the channel; null or absent for anonymous callers. */
+  viewer: z.object({ following: z.boolean() }).nullable().optional(),
 });
 export type Channel = z.infer<typeof Channel>;
 
