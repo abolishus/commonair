@@ -25,6 +25,7 @@ import { ActiveScratch, BROADCASTS_DIR, recoverWorkDir, sweepWorkDir } from "../
 import { HashMatchEnforcer } from "../src/safety/enforce.ts";
 import { NoopHashMatcher } from "../src/safety/hashmatch.ts";
 import { pruneThumbnails, thumbnailPrefix } from "../src/thumbnails.ts";
+import { VOD_EMPTY_REASON } from "../src/vod/finalize.ts";
 import { parsePlaylist, renderPlaylist, totalDuration } from "../src/vod/playlist.ts";
 import { VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
 import { reconcileVods, VOD_STALLED_REASON } from "../src/vod/reconcile.ts";
@@ -252,7 +253,11 @@ describe("crash recovery and stale VODs", () => {
     );
     expect(result.failed).toEqual([stalled]);
     expect(result.requeued.sort()).toEqual([crashedVod, orphanRecording].sort());
-    expect(await vodRow(stalled)).toMatchObject({ status: "failed", removedReason: VOD_STALLED_REASON });
+    expect(await vodRow(stalled)).toMatchObject({
+      status: "failed",
+      failedReason: VOD_STALLED_REASON,
+      removedReason: null,
+    });
     for (const id of [crashedVod, orphanRecording, owned])
       expect((await jobs.vodFinalize.info(id)).state, id).toBe("waiting");
     for (const id of [liveVod, stillLive]) {
@@ -291,7 +296,7 @@ describe("crash recovery and stale VODs", () => {
     await tdb.db.update(schema.vods).set({ status: "processing" }).where(eq(schema.vods.id, id));
     await jobs.vodFinalize.requeue(id);
     await waitFor("re-run finished", async () => (await vodRow(id))?.status === "failed");
-    expect((await vodRow(id))?.removedReason).toBe("no_segments");
+    expect(await vodRow(id)).toMatchObject({ failedReason: VOD_EMPTY_REASON, removedReason: null });
   }, 60_000);
 });
 
