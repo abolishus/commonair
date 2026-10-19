@@ -29,14 +29,19 @@ function DashboardPage(): React.JSX.Element {
     <section className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-10">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="font-display text-xl font-semibold">{t("dashboard.title")}</h1>
-        <Link
-          data-testid="channel-link"
-          to="/$channel"
-          params={{ channel }}
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
-          {t("dashboard.viewChannel")}
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link data-testid="relays-link" to="/relays" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            {t("dashboard.relays")}
+          </Link>
+          <Link
+            data-testid="channel-link"
+            to="/$channel"
+            params={{ channel }}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            {t("dashboard.viewChannel")}
+          </Link>
+        </div>
       </div>
       <StreamHealthCard key={channel} channel={channel} />
       <StreamSetup channel={channel} />

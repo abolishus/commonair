@@ -16,6 +16,7 @@ import {
   withToken,
   type CumulativeStats,
 } from "./heartbeat.ts";
+import { heartbeatSwitch, playerSource, type PlayerSource } from "./source.ts";
 import { VideoStats, collectFingerprint, sessionDeviceId } from "./stats.ts";
 
 export type PlayerState = "offline" | "loading" | "playing" | "error";
@@ -28,6 +29,8 @@ export interface PlayerControllerOptions {
   endApi?: Api;
   embed?: boolean;
   onState: (state: PlayerState) => void;
+  /** The delivery source of the playlist being played: on start and after every `switchTo`. */
+  onSource?: (source: PlayerSource) => void;
 }
 
 const PLAYLIST_WAIT_MS = 45_000;
@@ -83,6 +86,7 @@ export class PlayerController {
         return;
       }
       this.session = { id: started.sessionId, token: started.token, intervalMs: started.heartbeatIntervalMs };
+      this.opts.onSource?.(playerSource(started.source));
       this.stats = new VideoStats(video, () => this.setState("playing"));
       video.addEventListener("playing", this.onPlaying);
       video.addEventListener("error", this.onVideoError);
@@ -197,17 +201,27 @@ export class PlayerController {
         fingerprint: collectFingerprint(this.native),
         ...this.accountant.delta(totals),
       });
-      this.accountant.commit(totals);
+      // Throttled: the server recorded nothing, so the deltas ride along with the next beat.
+      if (!this.accountant.settle(totals, res)) return;
       if (res.token) session.token = res.token;
-      if (res.switchTo) this.switchTo(res.switchTo);
+      const move = heartbeatSwitch(res);
+      if (move && !this.stopped) this.switchTo(move.url, move.source);
     } catch {
       // Not committed: this heartbeat's share is reported with the next one.
     }
   }
 
-  private switchTo(url: string): void {
+  /**
+   * Move to another playlist of the same stream without leaving `playing`: the state only changes
+   * on a fatal error, as for the first playlist. A new source reloads the media element, which
+   * pauses it, and `autoplay` no longer applies once `play()` was called, so play again.
+   */
+  private switchTo(url: string, source: PlayerSource): void {
+    const { video } = this.opts;
     if (this.hls) this.hls.loadSource(url);
-    else this.opts.video.src = url;
+    else video.src = url;
+    void video.play().catch(() => undefined);
+    this.opts.onSource?.(source);
   }
 
   private async endSession(id: string, token: string): Promise<void> {

@@ -96,6 +96,45 @@ describe("HeartbeatAccountant", () => {
       ttffMs: null,
     });
   });
+
+  describe("settle (throttled hint)", () => {
+    it("commits an accepted beat", () => {
+      const acc = new HeartbeatAccountant();
+      const t1 = totals({ playedSeconds: 10, stalls: 1, bytesHttp: 1000, bytesP2p: 50 });
+      expect(acc.settle(t1, { throttled: false })).toBe(true);
+      expect(acc.delta(t1)).toMatchObject({ playedSeconds: 0, stalls: 0, bytesHttp: 0, bytesP2p: 0 });
+      expect(acc.settle(t1, {})).toBe(true);
+    });
+
+    it("carries a throttled beat's deltas into the next beat", () => {
+      const acc = new HeartbeatAccountant();
+      acc.commit(totals({ playedSeconds: 10, stalls: 1, bytesHttp: 1000, bytesP2p: 10 }));
+      const throttledAt = totals({ playedSeconds: 12, stalls: 2, bytesHttp: 1400, bytesP2p: 30 });
+      expect(acc.delta(throttledAt)).toMatchObject({ playedSeconds: 2, stalls: 1, bytesHttp: 400, bytesP2p: 20 });
+      expect(acc.settle(throttledAt, { throttled: true })).toBe(false);
+      // The server recorded nothing: the next beat reports everything since the last accepted one.
+      const next = totals({ playedSeconds: 30, stalls: 3, bytesHttp: 5000, bytesP2p: 40 });
+      expect(acc.delta(next)).toMatchObject({ playedSeconds: 20, stalls: 2, bytesHttp: 4000, bytesP2p: 30 });
+      expect(acc.settle(next, {})).toBe(true);
+      expect(acc.delta(next)).toMatchObject({ playedSeconds: 0, stalls: 0, bytesHttp: 0, bytesP2p: 0 });
+    });
+
+    it("keeps carrying across several throttled beats", () => {
+      const acc = new HeartbeatAccountant();
+      for (const played of [1, 2, 3])
+        expect(acc.settle(totals({ playedSeconds: played }), { throttled: true })).toBe(false);
+      expect(acc.delta(totals({ playedSeconds: 4 })).playedSeconds).toBe(4);
+    });
+
+    it("still caps a carried backlog at the per-beat maximum", () => {
+      const acc = new HeartbeatAccountant();
+      acc.settle(totals({ playedSeconds: 100 }), { throttled: true });
+      const big = totals({ playedSeconds: 200 });
+      expect(acc.delta(big).playedSeconds).toBe(MAX_PLAYED_PER_HEARTBEAT);
+      acc.settle(big, {});
+      expect(acc.delta(big).playedSeconds).toBe(80);
+    });
+  });
 });
 
 describe("nextHeartbeatDelay", () => {

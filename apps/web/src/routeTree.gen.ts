@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppRelaysRouteImport } from './routes/_app/relays'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
@@ -36,6 +37,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppRelaysRoute = AppRelaysRouteImport.update({
+  id: '/relays',
+  path: '/relays',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSigninRoute = AppSigninRouteImport.update({
   id: '/signin',
   path: '/signin',
@@ -56,6 +62,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/$channel': typeof AppChannelRoute
   '/dashboard': typeof AppDashboardRoute
+  '/relays': typeof AppRelaysRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/embed/$channel': typeof EmbedChannelRoute
@@ -63,6 +70,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/$channel': typeof AppChannelRoute
   '/dashboard': typeof AppDashboardRoute
+  '/relays': typeof AppRelaysRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/embed/$channel': typeof EmbedChannelRoute
@@ -73,6 +81,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/$channel': typeof AppChannelRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/relays': typeof AppRelaysRoute
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
   '/embed/$channel': typeof EmbedChannelRoute
@@ -81,15 +90,28 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/$channel' | '/dashboard' | '/signin' | '/signup' | '/embed/$channel'
+    | '/'
+    | '/$channel'
+    | '/dashboard'
+    | '/relays'
+    | '/signin'
+    | '/signup'
+    | '/embed/$channel'
   fileRoutesByTo: FileRoutesByTo
   to:
-    '/$channel' | '/dashboard' | '/signin' | '/signup' | '/embed/$channel' | '/'
+    | '/$channel'
+    | '/dashboard'
+    | '/relays'
+    | '/signin'
+    | '/signup'
+    | '/embed/$channel'
+    | '/'
   id:
     | '__root__'
     | '/_app'
     | '/_app/$channel'
     | '/_app/dashboard'
+    | '/_app/relays'
     | '/_app/signin'
     | '/_app/signup'
     | '/embed/$channel'
@@ -131,6 +153,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/relays': {
+      id: '/_app/relays'
+      path: '/relays'
+      fullPath: '/relays'
+      preLoaderRoute: typeof AppRelaysRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/signin': {
       id: '/_app/signin'
       path: '/signin'
@@ -158,6 +187,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppRelaysRoute: typeof AppRelaysRoute
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -166,6 +196,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppRelaysRoute: AppRelaysRoute,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
   AppIndexRoute: AppIndexRoute,

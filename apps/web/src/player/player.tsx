@@ -9,6 +9,7 @@ import { t } from "../i18n/index.ts";
 import { api, apiKeepalive } from "../lib/api.ts";
 import { PlayerController, type PlayerState } from "./controller.ts";
 import { pageLifecycle } from "./lifecycle.ts";
+import type { PlayerSource } from "./source.ts";
 
 export interface PlayerProps {
   channel: string;
@@ -27,6 +28,8 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const [state, setState] = React.useState<PlayerState>(live ? "loading" : "offline");
   const [muted, setMuted] = React.useState(true);
+  // Unknown until `playback.start` answers; each new session reports its own.
+  const [source, setSource] = React.useState<PlayerSource | undefined>(undefined);
   // Bumped to start a fresh session after a failure (e.g. the stream is not ready yet).
   const [attempt, setAttempt] = React.useState(0);
 
@@ -43,6 +46,7 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
       api: api(),
       endApi: apiKeepalive(),
       embed,
+      onSource: setSource,
       onState: (s) => {
         setState(s);
         if (s === "error") retry = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS);
@@ -61,6 +65,7 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
       window.removeEventListener("pagehide", lifecycle.pagehide);
       window.removeEventListener("pageshow", lifecycle.pageshow);
       void controller.stop();
+      setSource(undefined);
     };
   }, [channel, live, embed, attempt]);
 
@@ -76,6 +81,7 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
     <div
       data-testid="player"
       data-state={state}
+      data-source={source}
       className={cn("relative aspect-video w-full overflow-hidden bg-muted", className)}
     >
       <video

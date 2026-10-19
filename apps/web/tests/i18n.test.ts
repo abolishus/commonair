@@ -35,6 +35,7 @@ describe("message catalog", () => {
       join(SRC, "lib/form-errors.ts"),
       join(SRC, "chat/messages.ts"),
       join(SRC, "lib/stream-health.ts"),
+      join(SRC, "lib/relays.ts"),
     ];
     const dynamic = files
       .filter(([f, text]) => !allowed.includes(f) && /\bt\(\s*[`'a-zA-Z_]/.test(text))
