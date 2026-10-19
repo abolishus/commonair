@@ -18,6 +18,13 @@ test("usernames follow slug rules and avoid reserved names", () => {
   expect(usernameProblem("admin_bob")).toBe("reserved");
 });
 
+test("the demo fixture prefix is reserved for every sign-up and bot", () => {
+  for (const name of ["demo_streamer1", "DEMO_viewer2", "demo_bot", "demo_x"])
+    expect(usernameProblem(name)).toBe("reserved");
+  // Only the exact prefix: names that merely contain "demo" stay available.
+  for (const name of ["demo", "demos", "demox_1", "my_demo_1", "demo1"]) expect(usernameProblem(name)).toBeNull();
+});
+
 test("birth dates must be real calendar dates", () => {
   expect(parseBirthDate("2000-02-29")).toEqual({ y: 2000, m: 2, d: 29 });
   expect(parseBirthDate("2001-02-29")).toBeNull();
