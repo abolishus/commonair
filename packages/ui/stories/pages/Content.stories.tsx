@@ -42,7 +42,11 @@ const columns: DataTableColumn<VideoRow>[] = [
       />
     ),
   },
-  { id: "visibility", header: "Visibility", cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.visibility}</StatusBadge> },
+  {
+    id: "visibility",
+    header: "Visibility",
+    cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.visibility}</StatusBadge>,
+  },
   { id: "views", header: "Views", accessorKey: "views", align: "numeric" },
   { id: "expires", header: "Expires", accessorKey: "expires" },
   {
@@ -78,7 +82,15 @@ function ContentPage(): React.JSX.Element {
           searchLabel="Search videos"
           searchValue={query}
           onSearchChange={setQuery}
-          filters={[{ id: "content-visibility", label: "Visibility", value: visibility, options: visibilities, onValueChange: setVisibility }]}
+          filters={[
+            {
+              id: "content-visibility",
+              label: "Visibility",
+              value: visibility,
+              options: visibilities,
+              onValueChange: setVisibility,
+            },
+          ]}
         />
         <DataTable
           caption="Videos"

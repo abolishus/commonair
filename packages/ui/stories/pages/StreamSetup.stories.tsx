@@ -8,14 +8,7 @@ import { Alert01Icon, Add01Icon } from "@hugeicons/core-free-icons";
 import { ChannelAvatar, StatusBadge } from "@commonair/ui";
 import { Alert, AlertDescription, AlertTitle } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import { ItemGroup } from "@commonair/ui/components/item";
@@ -114,7 +107,13 @@ function StreamSetupPage(): React.JSX.Element {
                 ]}
               />
               <div className="grid gap-4 sm:grid-cols-2">
-                <SelectField id="setup-latency" label="Latency" value={latency} options={latencies} onValueChange={setLatency} />
+                <SelectField
+                  id="setup-latency"
+                  label="Latency"
+                  value={latency}
+                  options={latencies}
+                  onValueChange={setLatency}
+                />
                 <Field>
                   <FieldLabel htmlFor="setup-encoder">Recommended encoder</FieldLabel>
                   <Input id="setup-encoder" value={ingest.encoder} readOnly />
@@ -138,7 +137,9 @@ function StreamSetupPage(): React.JSX.Element {
         <Card>
           <CardHeader>
             <CardTitle>Simulcast</CardTitle>
-            <CardDescription>Restream to other platforms from our servers, so your upload stays the same.</CardDescription>
+            <CardDescription>
+              Restream to other platforms from our servers, so your upload stays the same.
+            </CardDescription>
             <CardAction>
               <Button variant="outline" size="sm">
                 <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
@@ -172,7 +173,12 @@ function StreamSetupPage(): React.JSX.Element {
           <CardContent>
             <FieldGroup>
               {recording.map((option) => (
-                <SwitchField key={option.id} label={option.label} description={option.description} defaultChecked={option.checked} />
+                <SwitchField
+                  key={option.id}
+                  label={option.label}
+                  description={option.description}
+                  defaultChecked={option.checked}
+                />
               ))}
               <SwitchField label={captions.label} comingLater={captions.later} />
             </FieldGroup>

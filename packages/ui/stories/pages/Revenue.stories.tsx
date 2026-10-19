@@ -7,14 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { BankIcon, Download01Icon, Invoice01Icon } from "@hugeicons/core-free-icons";
 import { MoneyAmount, StatusBadge, formatMoney } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
@@ -38,7 +31,11 @@ const optionalUsd = (cents: number | null): React.ReactNode => (cents === null ?
 
 const ledgerColumns: DataTableColumn<LedgerRow>[] = [
   { id: "date", header: "Date", accessorKey: "date" },
-  { id: "type", header: "Type", cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.type}</StatusBadge> },
+  {
+    id: "type",
+    header: "Type",
+    cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.type}</StatusBadge>,
+  },
   { id: "from", header: "From", accessorKey: "from" },
   { id: "gross", header: "Gross", align: "numeric", cell: ({ row }) => optionalUsd(row.original.gross) },
   { id: "fees", header: "Fees & co-op", align: "numeric", cell: ({ row }) => optionalUsd(row.original.fees) },
@@ -46,7 +43,9 @@ const ledgerColumns: DataTableColumn<LedgerRow>[] = [
     id: "net",
     header: "Net to you",
     align: "numeric",
-    cell: ({ row }) => <MoneyAmount value={{ cents: row.original.net, currency: "USD" }} locale="en-US" colorNegative />,
+    cell: ({ row }) => (
+      <MoneyAmount value={{ cents: row.original.net, currency: "USD" }} locale="en-US" colorNegative />
+    ),
   },
 ];
 
@@ -64,7 +63,11 @@ function RevenuePage(): React.JSX.Element {
         <PageHeader
           title="Revenue"
           actions={
-            <FilterBar filters={[{ id: "revenue-month", label: "Month", value: month, options: months, onValueChange: setMonth }]} />
+            <FilterBar
+              filters={[
+                { id: "revenue-month", label: "Month", value: month, options: months, onValueChange: setMonth },
+              ]}
+            />
           }
         />
         <StatGrid cols={3}>

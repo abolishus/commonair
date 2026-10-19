@@ -24,9 +24,42 @@ export const queue: {
   primary: string;
   secondary: string;
 }[] = [
-  { id: "q1", kind: "Held by filter", tone: "warning", reason: "Link from a new account", ago: "12 s ago", who: "spamcannon_77", colorIndex: 2, text: "cheap followers at [link]", primary: "Allow", secondary: "Deny" },
-  { id: "q2", kind: "User report", tone: "danger", reason: "Harassment · reported by 3 viewers", ago: "2 min ago", who: "loudguy", colorIndex: 1, text: "[message hidden until reviewed]", primary: "Show message", secondary: "Dismiss report" },
-  { id: "q3", kind: "Held by filter", tone: "warning", reason: "Blocked term list", ago: "4 min ago", who: "gremlin_420", colorIndex: 7, text: "[1 blocked term]", primary: "Allow", secondary: "Deny" },
+  {
+    id: "q1",
+    kind: "Held by filter",
+    tone: "warning",
+    reason: "Link from a new account",
+    ago: "12 s ago",
+    who: "spamcannon_77",
+    colorIndex: 2,
+    text: "cheap followers at [link]",
+    primary: "Allow",
+    secondary: "Deny",
+  },
+  {
+    id: "q2",
+    kind: "User report",
+    tone: "danger",
+    reason: "Harassment · reported by 3 viewers",
+    ago: "2 min ago",
+    who: "loudguy",
+    colorIndex: 1,
+    text: "[message hidden until reviewed]",
+    primary: "Show message",
+    secondary: "Dismiss report",
+  },
+  {
+    id: "q3",
+    kind: "Held by filter",
+    tone: "warning",
+    reason: "Blocked term list",
+    ago: "4 min ago",
+    who: "gremlin_420",
+    colorIndex: 7,
+    text: "[1 blocked term]",
+    primary: "Allow",
+    secondary: "Deny",
+  },
 ];
 
 export const user = {

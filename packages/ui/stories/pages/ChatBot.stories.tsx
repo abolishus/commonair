@@ -118,7 +118,8 @@ function ChatBotPage(): React.JSX.Element {
                                   label: mode.select.label,
                                   value: modeValues[mode.id] ?? mode.select.value,
                                   options: mode.select.options,
-                                  onValueChange: (value) => setModeValues((current) => ({ ...current, [mode.id]: value })),
+                                  onValueChange: (value) =>
+                                    setModeValues((current) => ({ ...current, [mode.id]: value })),
                                 },
                               ]}
                             />

@@ -79,7 +79,13 @@ export interface StatementRow {
 }
 
 let row = 0;
-const line = (group: string, label: string, cents: number | null, share: string, source?: StatementRow["source"]): StatementRow => ({
+const line = (
+  group: string,
+  label: string,
+  cents: number | null,
+  share: string,
+  source?: StatementRow["source"],
+): StatementRow => ({
   id: `l${++row}`,
   group,
   line: label,
@@ -92,17 +98,35 @@ export const statement: StatementRow[] = [
   line("Money in", "Subscriptions (gross)", 5_894_000, "70.0%", { label: "212 entries", href: "#ledger/subs" }),
   line("Money in", "Gift subscriptions", 987_000, "11.7%", { label: "48 entries", href: "#ledger/gifts" }),
   line("Money in", "Tips", 1_315_000, "15.6%", { label: "1,904 entries", href: "#ledger/tips" }),
-  line("Money in", "Direct donations to the co-op", 225_000, "2.7%", { label: "31 entries", href: "#ledger/donations" }),
+  line("Money in", "Direct donations to the co-op", 225_000, "2.7%", {
+    label: "31 entries",
+    href: "#ledger/donations",
+  }),
   line("Money in", "Gross receipts", 8_421_000, "100%"),
   line("Passed through", "Paid to creators", -5_910_000, "70.2%", { label: "per channel", href: "#revenue" }),
   line("Passed through", "Payment processing fees", -401_000, "4.8%", { label: "rates", href: "#finances/expenses" }),
   line("Passed through", "Platform income", 2_110_000, "25.1%"),
-  line("Operating expenses", "Compute & servers", -412_000, "4.9%", { label: "6 services", href: "#finances/expenses" }),
-  line("Operating expenses", "Bandwidth & storage", -224_000, "2.7%", { label: "4 services", href: "#finances/expenses" }),
+  line("Operating expenses", "Compute & servers", -412_000, "4.9%", {
+    label: "6 services",
+    href: "#finances/expenses",
+  }),
+  line("Operating expenses", "Bandwidth & storage", -224_000, "2.7%", {
+    label: "4 services",
+    href: "#finances/expenses",
+  }),
   line("Operating expenses", "Worker-member wages", -580_000, "6.9%", { label: "4.5 FTE", href: "#finances/expenses" }),
-  line("Operating expenses", "Trust & safety contractors", -91_000, "1.1%", { label: "2 contracts", href: "#finances/expenses" }),
-  line("Operating expenses", "Legal, accounting & insurance", -76_000, "0.9%", { label: "3 firms", href: "#finances/expenses" }),
-  line("Operating expenses", "Upstream FOSS donations", -35_000, "0.4%", { label: "9 projects", href: "#finances/expenses" }),
+  line("Operating expenses", "Trust & safety contractors", -91_000, "1.1%", {
+    label: "2 contracts",
+    href: "#finances/expenses",
+  }),
+  line("Operating expenses", "Legal, accounting & insurance", -76_000, "0.9%", {
+    label: "3 firms",
+    href: "#finances/expenses",
+  }),
+  line("Operating expenses", "Upstream FOSS donations", -35_000, "0.4%", {
+    label: "9 projects",
+    href: "#finances/expenses",
+  }),
   line("Operating expenses", "Everything else", -20_000, "0.2%", { label: "5 lines", href: "#finances/expenses" }),
   line("Operating expenses", "Total operating expenses", -1_438_000, "17.1%"),
   line("Result", "Net surplus", 672_000, "8.0%"),
@@ -110,11 +134,39 @@ export const statement: StatementRow[] = [
   line("Result", "→ to patronage pool", 336_000, "", { label: "formula", href: "#transparency" }),
 ];
 
-export const budget: { label: string; actual: string; target: string; percent: number; note: string; tone: ProgressTone }[] = [
-  { label: "Infrastructure", actual: "$61.2K", target: "$80K", percent: 77, note: "On track (83% of year elapsed)", tone: "default" },
+export const budget: {
+  label: string;
+  actual: string;
+  target: string;
+  percent: number;
+  note: string;
+  tone: ProgressTone;
+}[] = [
+  {
+    label: "Infrastructure",
+    actual: "$61.2K",
+    target: "$80K",
+    percent: 77,
+    note: "On track (83% of year elapsed)",
+    tone: "default",
+  },
   { label: "Wages", actual: "$58.0K", target: "$72K", percent: 81, note: "On track", tone: "default" },
-  { label: "Trust & safety", actual: "$11.6K", target: "$12K", percent: 97, note: "Over pace — council approved +$2K on Sep 9", tone: "danger" },
-  { label: "Legal & accounting", actual: "$7.1K", target: "$10K", percent: 71, note: "Annual audit still to come", tone: "default" },
+  {
+    label: "Trust & safety",
+    actual: "$11.6K",
+    target: "$12K",
+    percent: 97,
+    note: "Over pace — council approved +$2K on Sep 9",
+    tone: "danger",
+  },
+  {
+    label: "Legal & accounting",
+    actual: "$7.1K",
+    target: "$10K",
+    percent: 71,
+    note: "Annual audit still to come",
+    tone: "default",
+  },
   { label: "FOSS donations", actual: "$3.5K", target: "$4.2K", percent: 83, note: "On track", tone: "default" },
 ];
 

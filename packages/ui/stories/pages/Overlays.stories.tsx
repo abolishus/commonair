@@ -69,7 +69,9 @@ function OverlaysPage(): React.JSX.Element {
                 <Card>
                   <CardHeader>
                     <CardTitle>Browser source URL</CardTitle>
-                    <CardDescription>Anyone with this link can see your alerts. Keep it out of screenshots.</CardDescription>
+                    <CardDescription>
+                      Anyone with this link can see your alerts. Keep it out of screenshots.
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <CopyField
@@ -113,8 +115,20 @@ function OverlaysPage(): React.JSX.Element {
                   min={100}
                   rangeError="The minimum is $1.00."
                 />
-                <SelectField id="tip-duration" label="Duration" value={duration} options={tipAlert.durations} onValueChange={setDuration} />
-                <SelectField id="tip-sound" label="Sound" value={sound} options={tipAlert.sounds} onValueChange={setSound} />
+                <SelectField
+                  id="tip-duration"
+                  label="Duration"
+                  value={duration}
+                  options={tipAlert.durations}
+                  onValueChange={setDuration}
+                />
+                <SelectField
+                  id="tip-sound"
+                  label="Sound"
+                  value={sound}
+                  options={tipAlert.sounds}
+                  onValueChange={setSound}
+                />
                 {tipAlert.switches.map((option) => (
                   <SwitchField key={option.id} label={option.label} defaultChecked={option.checked} />
                 ))}

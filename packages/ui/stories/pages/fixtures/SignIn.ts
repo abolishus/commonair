@@ -12,7 +12,8 @@ export const form = {
   usernameHint: "Your channel lives at /mothwing. 3–25 letters, numbers or underscores.",
   emailPlaceholder: "you@example.org",
   password: "correct-horse-battery",
-  strength: { value: 100, label: "Strong. At least 12 characters." },
+  strength: { value: 100, label: "Strong" },
+  passwordHint: "Strong. At least 12 characters.",
   dobHint: "You must be 13 or older. Mature streams need 18+.",
   years: Array.from({ length: 100 }, (_, index) => 2026 - index),
 };

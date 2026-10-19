@@ -57,14 +57,23 @@ function CommunityPage(): React.JSX.Element {
                   </CardContent>
                 </Card>
               ))}
-              <EmptyState title="That’s everything." description="Held messages expire after 5 minutes if nobody acts." />
+              <EmptyState
+                title="That’s everything."
+                description="Held messages expire after 5 minutes if nobody acts."
+              />
             </section>
           }
           aside={
             <div className="flex flex-col gap-4">
               <Card data-accent={user.accent}>
                 <CardHeader>
-                  <ChannelHeader variant="compact" headingLevel={2} name={user.name} accent={user.accent} meta={user.meta} />
+                  <ChannelHeader
+                    variant="compact"
+                    headingLevel={2}
+                    name={user.name}
+                    accent={user.accent}
+                    meta={user.meta}
+                  />
                 </CardHeader>
                 <CardContent>
                   <FieldGroup>

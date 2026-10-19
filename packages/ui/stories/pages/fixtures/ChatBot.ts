@@ -24,19 +24,97 @@ export interface Command {
 }
 
 export const commands: Command[] = [
-  { id: "schedule", command: "!schedule", response: "Tue/Thu 19:00 UTC — full schedule on the channel page", who: "Everyone", cooldown: "30 s", uses: "412", enabled: true },
-  { id: "kiln", command: "!kiln", response: "Cone 6 electric, controller is a Bartlett Genesis", who: "Everyone", cooldown: "30 s", uses: "188", enabled: true },
-  { id: "uptime", command: "!uptime", response: "Live for ${uptime}", who: "Everyone", cooldown: "10 s", uses: "902", enabled: true },
-  { id: "points", command: "!points", response: "${user}, you have ${points} glaze points", who: "Everyone", cooldown: "5 s", uses: "1,610", enabled: true },
-  { id: "so", command: "!so", response: "Go follow ${1} — they were last live in ${1.category}", who: "Mods", cooldown: "0 s", uses: "57", enabled: true },
-  { id: "discord", command: "!discord", response: "Community server link (members only)", who: "Subscribers", cooldown: "60 s", uses: "33", enabled: false },
+  {
+    id: "schedule",
+    command: "!schedule",
+    response: "Tue/Thu 19:00 UTC — full schedule on the channel page",
+    who: "Everyone",
+    cooldown: "30 s",
+    uses: "412",
+    enabled: true,
+  },
+  {
+    id: "kiln",
+    command: "!kiln",
+    response: "Cone 6 electric, controller is a Bartlett Genesis",
+    who: "Everyone",
+    cooldown: "30 s",
+    uses: "188",
+    enabled: true,
+  },
+  {
+    id: "uptime",
+    command: "!uptime",
+    response: "Live for ${uptime}",
+    who: "Everyone",
+    cooldown: "10 s",
+    uses: "902",
+    enabled: true,
+  },
+  {
+    id: "points",
+    command: "!points",
+    response: "${user}, you have ${points} glaze points",
+    who: "Everyone",
+    cooldown: "5 s",
+    uses: "1,610",
+    enabled: true,
+  },
+  {
+    id: "so",
+    command: "!so",
+    response: "Go follow ${1} — they were last live in ${1.category}",
+    who: "Mods",
+    cooldown: "0 s",
+    uses: "57",
+    enabled: true,
+  },
+  {
+    id: "discord",
+    command: "!discord",
+    response: "Community server link (members only)",
+    who: "Subscribers",
+    cooldown: "60 s",
+    uses: "33",
+    enabled: false,
+  },
 ];
 
 export const variables = ["${user}", "${uptime}", "${followage}", "${points}", "${count}"];
 
-export const modes: { id: string; label: string; checked: boolean; select?: { label: string; value: string; options: { value: string; label: string }[] } }[] = [
-  { id: "slow", label: "Slow mode", checked: true, select: { label: "Slow mode delay", value: "3", options: [{ value: "3", label: "3 s" }, { value: "10", label: "10 s" }, { value: "30", label: "30 s" }] } },
-  { id: "followers", label: "Followers only", checked: false, select: { label: "Follow age", value: "10", options: [{ value: "10", label: "10 min" }, { value: "60", label: "1 hour" }] } },
+export const modes: {
+  id: string;
+  label: string;
+  checked: boolean;
+  select?: { label: string; value: string; options: { value: string; label: string }[] };
+}[] = [
+  {
+    id: "slow",
+    label: "Slow mode",
+    checked: true,
+    select: {
+      label: "Slow mode delay",
+      value: "3",
+      options: [
+        { value: "3", label: "3 s" },
+        { value: "10", label: "10 s" },
+        { value: "30", label: "30 s" },
+      ],
+    },
+  },
+  {
+    id: "followers",
+    label: "Followers only",
+    checked: false,
+    select: {
+      label: "Follow age",
+      value: "10",
+      options: [
+        { value: "10", label: "10 min" },
+        { value: "60", label: "1 hour" },
+      ],
+    },
+  },
   { id: "subs", label: "Subscribers only", checked: false },
   { id: "emote", label: "Emote only", checked: false },
   { id: "links", label: "Block links from new chatters", checked: true },

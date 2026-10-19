@@ -75,7 +75,7 @@ function MainPage(): React.JSX.Element {
                 />
                 <p>{featured.note}</p>
                 <div className="flex flex-wrap gap-2">
-                  <Button render={<a href="#channel/rivertide" />} nativeButton={false}>
+                  <Button render={<a href="#channel/rivertide" aria-label="Watch" />} nativeButton={false}>
                     Watch
                   </Button>
                   <Button variant="outline">
@@ -95,7 +95,7 @@ function MainPage(): React.JSX.Element {
         <Section
           heading="New and live"
           action={
-            <Button variant="ghost" size="xs" render={<a href="#browse" />} nativeButton={false}>
+            <Button variant="ghost" size="xs" render={<a href="#browse" aria-label="Show all" />} nativeButton={false}>
               Show all
             </Button>
           }
@@ -105,7 +105,12 @@ function MainPage(): React.JSX.Element {
         <Section
           heading="Categories with live channels"
           action={
-            <Button variant="ghost" size="xs" render={<a href="#browse" />} nativeButton={false}>
+            <Button
+              variant="ghost"
+              size="xs"
+              render={<a href="#browse" aria-label="Browse all" />}
+              nativeButton={false}
+            >
               Browse all
             </Button>
           }

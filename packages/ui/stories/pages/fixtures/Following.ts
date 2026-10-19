@@ -16,11 +16,46 @@ export const tabs = [
 
 /** `uptime` is on the board's thumbnails; StreamCard has no uptime overlay yet (contract request). */
 export const live = [
-  { title: "Rebuilding a 1970s tape deck", name: "rivertide", accent: "teal", category: "Science & Technology", viewers: 2400, uptime: "3:41:09" },
-  { title: "Friday house set from the balcony", name: "DJ Halcyon", accent: "indigo", category: "Music", viewers: 1100, uptime: "1:12:55" },
-  { title: "Ranked grind to Diamond — chat picks my loadout", name: "Okonkwo Plays", accent: "amber", category: "Hollow Depths", viewers: 318, uptime: "5:02:17" },
-  { title: "Watercolor landscapes, slow and quiet", name: "paperlantern", accent: "pink", category: "Art", viewers: 87, uptime: "0:48:30" },
-  { title: "Any% WR attempts, reset counter on screen", name: "grumblebee", accent: "lime", category: "Speedrunning", viewers: 42, uptime: "2:20:03" },
+  {
+    title: "Rebuilding a 1970s tape deck",
+    name: "rivertide",
+    accent: "teal",
+    category: "Science & Technology",
+    viewers: 2400,
+    uptime: "3:41:09",
+  },
+  {
+    title: "Friday house set from the balcony",
+    name: "DJ Halcyon",
+    accent: "indigo",
+    category: "Music",
+    viewers: 1100,
+    uptime: "1:12:55",
+  },
+  {
+    title: "Ranked grind to Diamond — chat picks my loadout",
+    name: "Okonkwo Plays",
+    accent: "amber",
+    category: "Hollow Depths",
+    viewers: 318,
+    uptime: "5:02:17",
+  },
+  {
+    title: "Watercolor landscapes, slow and quiet",
+    name: "paperlantern",
+    accent: "pink",
+    category: "Art",
+    viewers: 87,
+    uptime: "0:48:30",
+  },
+  {
+    title: "Any% WR attempts, reset counter on screen",
+    name: "grumblebee",
+    accent: "lime",
+    category: "Speedrunning",
+    viewers: 42,
+    uptime: "2:20:03",
+  },
 ].map(({ uptime: _uptime, accent, ...row }) => liveStream({ ...row, accent: accent as Accent, reason: "following" }));
 
 export const offline: { name: string; accent: Accent; last: string; next: string }[] = [

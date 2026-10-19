@@ -44,7 +44,13 @@ export const accentLabels: Record<Accent, string> = {
 export const signInMethods = [
   { id: "password", title: "Password", description: "Changed 3 months ago", action: "Change" },
   { id: "passkeys", title: "Passkeys", description: "2 registered · Laptop, Phone", action: "Manage" },
-  { id: "totp", title: "Authenticator app", description: "8 of 10 recovery codes left", action: "Recovery codes", status: "On" },
+  {
+    id: "totp",
+    title: "Authenticator app",
+    description: "8 of 10 recovery codes left",
+    action: "Recovery codes",
+    status: "On",
+  },
 ];
 
 export const notificationColumns = [

@@ -100,7 +100,9 @@ function SettingsPage(): React.JSX.Element {
                   {signInMethods.map((method) => (
                     <ActionRow
                       key={method.id}
-                      icon={<HugeiconsIcon icon={methodIcons[method.id as keyof typeof methodIcons]} aria-hidden="true" />}
+                      icon={
+                        <HugeiconsIcon icon={methodIcons[method.id as keyof typeof methodIcons]} aria-hidden="true" />
+                      }
                       title={method.title}
                       description={method.description}
                       status={method.status ? { label: method.status, tone: "success" } : undefined}
@@ -121,7 +123,9 @@ function SettingsPage(): React.JSX.Element {
                   rows={rows}
                   onValueChange={(rowId, columnId, checked) =>
                     setRows((current) =>
-                      current.map((row) => (row.id === rowId ? { ...row, values: { ...row.values, [columnId]: checked } } : row)),
+                      current.map((row) =>
+                        row.id === rowId ? { ...row, values: { ...row.values, [columnId]: checked } } : row,
+                      ),
                     )
                   }
                 />

@@ -9,13 +9,7 @@ import { StatusBadge } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Checkbox } from "@commonair/ui/components/checkbox";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldSeparator,
-} from "@commonair/ui/components/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSeparator } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import { Item, ItemActions, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
@@ -69,6 +63,7 @@ function SignInPage(): React.JSX.Element {
                     showLabel="Show password"
                     hideLabel="Hide password"
                     strength={form.strength}
+                    description={form.passwordHint}
                   />
                   <Field>
                     <DateOfBirthField

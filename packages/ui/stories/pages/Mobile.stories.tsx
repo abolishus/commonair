@@ -8,7 +8,15 @@ import { AccentButton, ChannelAvatar, IconButton } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { AppShell, PageContainer } from "@commonair/ui/layouts";
 import { PageTabs } from "@commonair/ui/blocks/headers";
-import { ChannelHeader, ChatComposer, ChatMessage, ChatPanel, MediaGrid, PlayerChrome, PlayerControl } from "@commonair/ui/blocks/media";
+import {
+  ChannelHeader,
+  ChatComposer,
+  ChatMessage,
+  ChatPanel,
+  MediaGrid,
+  PlayerChrome,
+  PlayerControl,
+} from "@commonair/ui/blocks/media";
 import { phoneMessages } from "./fixtures/Channel.ts";
 import { channel, videos } from "./fixtures/Mobile.ts";
 import { PhoneHeader, light, mobile320, pageParameters, phone390 } from "./shell.tsx";
@@ -51,10 +59,22 @@ function MobilePage(): React.JSX.Element {
             }
           />
           <div className="flex gap-2">
-            <Button variant="outline" size="lg" className="grow" render={<a href="#support" />} nativeButton={false}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="grow"
+              render={<a href="#support" aria-label="Subscribe" />}
+              nativeButton={false}
+            >
               Subscribe
             </Button>
-            <Button variant="outline" size="lg" className="grow" render={<a href="#support" />} nativeButton={false}>
+            <Button
+              variant="outline"
+              size="lg"
+              className="grow"
+              render={<a href="#support" aria-label="Tip" />}
+              nativeButton={false}
+            >
               Tip
             </Button>
             <IconButton label="Share" icon={Share08Icon} size="icon-lg" />
@@ -96,7 +116,11 @@ function MobilePage(): React.JSX.Element {
                 ),
               },
               { id: "about", label: "About", content: <p>{channel.about}</p> },
-              { id: "videos", label: "Videos", content: <MediaGrid media={videos} hrefFor={(video) => `#clip/${video.id}`} /> },
+              {
+                id: "videos",
+                label: "Videos",
+                content: <MediaGrid media={videos} hrefFor={(video) => `#clip/${video.id}`} />,
+              },
             ]}
           />
         </PageContainer>

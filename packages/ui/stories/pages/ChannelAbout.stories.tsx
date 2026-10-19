@@ -4,12 +4,7 @@
 import type * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
-import {
-  Calendar01Icon,
-  MoreHorizontalIcon,
-  Notification01Icon,
-  Tick01Icon,
-} from "@hugeicons/core-free-icons";
+import { Calendar01Icon, MoreHorizontalIcon, Notification01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { AccentButton, IconButton, OverlayBadge, StatusBadge } from "@commonair/ui";
 import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
@@ -26,7 +21,7 @@ export default meta;
 type Story = StoryObj;
 
 const allLink = (label: string, href: string): React.JSX.Element => (
-  <Button variant="ghost" size="xs" render={<a href={href} />} nativeButton={false}>
+  <Button variant="ghost" size="xs" render={<a href={href} aria-label={label} />} nativeButton={false}>
     {label}
   </Button>
 );
@@ -50,7 +45,7 @@ function ChannelAboutPage(): React.JSX.Element {
                   Following
                 </Button>
                 <IconButton label="Go-live notifications on" icon={Notification01Icon} />
-                <Button variant="outline" render={<a href="#support" />} nativeButton={false}>
+                <Button variant="outline" render={<a href="#support" aria-label="Subscribe" />} nativeButton={false}>
                   Subscribe
                 </Button>
                 <IconButton label="More actions" icon={MoreHorizontalIcon} />
@@ -69,7 +64,11 @@ function ChannelAboutPage(): React.JSX.Element {
                       <OverlayBadge>Offline</OverlayBadge>
                       <p>{offline.next}</p>
                       <p>{offline.show}</p>
-                      <Button size="sm" render={<a href="#vod" />} nativeButton={false}>
+                      <Button
+                        size="sm"
+                        render={<a href="#vod" aria-label="Watch latest broadcast" />}
+                        nativeButton={false}
+                      >
                         Watch latest broadcast
                       </Button>
                     </div>
@@ -121,7 +120,11 @@ function ChannelAboutPage(): React.JSX.Element {
                   </CardHeader>
                   <CardContent className="flex flex-wrap gap-2">
                     {about.links.map((link) => (
-                      <Badge key={link} variant="outline" render={<a href={`#${link.toLowerCase()}`} />}>
+                      <Badge
+                        key={link}
+                        variant="outline"
+                        render={<a href={`#${link.toLowerCase()}`} aria-label={link} />}
+                      >
                         {link}
                       </Badge>
                     ))}
@@ -147,7 +150,12 @@ function ChannelAboutPage(): React.JSX.Element {
                     <CardDescription>{supporters}</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <AccentButton accent={channel.accent} size="sm" render={<a href="#support" />} nativeButton={false}>
+                    <AccentButton
+                      accent={channel.accent}
+                      size="sm"
+                      render={<a href="#support" aria-label={`Support ${channel.name}`} />}
+                      nativeButton={false}
+                    >
                       Support {channel.name}
                     </AccentButton>
                   </CardContent>

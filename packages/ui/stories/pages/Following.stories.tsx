@@ -36,7 +36,7 @@ function FollowingPage(): React.JSX.Element {
       <PageContainer width="wide" className="flex flex-col gap-8 py-6">
         <PageHeader title="Following" tabs={<PageTabs items={tabs} />} />
         <Section heading="Live now">
-          <StreamGrid streams={live} hrefFor={channelHref} />
+          <StreamGrid streams={live} hrefFor={channelHref} cardProps={() => ({ showReason: false })} />
         </Section>
         <SplitLayout
           asideWidth="lg"
@@ -47,7 +47,13 @@ function FollowingPage(): React.JSX.Element {
               action={
                 <FilterBar
                   filters={[
-                    { id: "offline-sort", label: "Sort offline channels", value: sort, options: offlineSorts, onValueChange: setSort },
+                    {
+                      id: "offline-sort",
+                      label: "Sort offline channels",
+                      value: sort,
+                      options: offlineSorts,
+                      onValueChange: setSort,
+                    },
                   ]}
                 />
               }
@@ -67,7 +73,11 @@ function FollowingPage(): React.JSX.Element {
                     <ItemActions>
                       <HugeiconsIcon icon={Clock01Icon} aria-hidden="true" />
                       <span>{channel.next}</span>
-                      <IconButton label={`Notifications for ${channel.name}`} icon={Notification01Icon} size="icon-sm" />
+                      <IconButton
+                        label={`Notifications for ${channel.name}`}
+                        icon={Notification01Icon}
+                        size="icon-sm"
+                      />
                     </ItemActions>
                   </Item>
                 ))}
@@ -87,7 +97,12 @@ function FollowingPage(): React.JSX.Element {
                 <HugeiconsIcon icon={Notification01Icon} aria-hidden="true" />
                 <AlertDescription className="flex flex-col items-start gap-2">
                   <p>Get go-live notifications by email or web push.</p>
-                  <Button variant="outline" size="xs" render={<a href="#settings" />} nativeButton={false}>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    render={<a href="#settings" aria-label="Notification settings" />}
+                    nativeButton={false}
+                  >
                     Notification settings
                   </Button>
                 </AlertDescription>

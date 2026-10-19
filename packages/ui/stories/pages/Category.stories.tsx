@@ -59,7 +59,13 @@ function CategoryPage(): React.JSX.Element {
           searchValue={tag}
           onSearchChange={setTag}
           filters={[
-            { id: "category-language", label: "Language", value: language, options: languages, onValueChange: setLanguage },
+            {
+              id: "category-language",
+              label: "Language",
+              value: language,
+              options: languages,
+              onValueChange: setLanguage,
+            },
           ]}
           switchLabel="Hide mature"
           switchChecked={hideMature}

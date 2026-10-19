@@ -47,13 +47,47 @@ export const simulcastTargets: {
   healthy: boolean;
   enabled: boolean;
 }[] = [
-  { id: "a", name: "Video platform A", initial: "Y", accent: "red", detail: "rtmp://a.example/live2 · key ••••3d", healthy: true, enabled: true },
-  { id: "peertube", name: "Fediverse video (PeerTube)", initial: "P", accent: "blue", detail: "rtmp://tube.example/live · key ••••9a", healthy: true, enabled: true },
-  { id: "custom", name: "Custom RTMP", initial: "+", accent: "zinc", detail: "Not configured", healthy: false, enabled: false },
+  {
+    id: "a",
+    name: "Video platform A",
+    initial: "Y",
+    accent: "red",
+    detail: "rtmp://a.example/live2 · key ••••3d",
+    healthy: true,
+    enabled: true,
+  },
+  {
+    id: "peertube",
+    name: "Fediverse video (PeerTube)",
+    initial: "P",
+    accent: "blue",
+    detail: "rtmp://tube.example/live · key ••••9a",
+    healthy: true,
+    enabled: true,
+  },
+  {
+    id: "custom",
+    name: "Custom RTMP",
+    initial: "+",
+    accent: "zinc",
+    detail: "Not configured",
+    healthy: false,
+    enabled: false,
+  },
 ];
 
 export const recording = [
-  { id: "vods", label: "Save past broadcasts", description: "Kept for 60 days, then deleted unless you highlight them.", checked: true },
-  { id: "clips", label: "Let viewers create clips", description: "Followers only during the first 10 minutes of a stream.", checked: true },
+  {
+    id: "vods",
+    label: "Save past broadcasts",
+    description: "Kept for 60 days, then deleted unless you highlight them.",
+    checked: true,
+  },
+  {
+    id: "clips",
+    label: "Let viewers create clips",
+    description: "Followers only during the first 10 minutes of a stream.",
+    checked: true,
+  },
 ];
 export const captions = { label: "Live captions (speech to text)", later: "Coming in a later release." };

@@ -24,15 +24,57 @@ export const offline = {
 };
 
 export const vods: MediaCardData[] = [
-  { id: "v1", title: "Patch from zero: FM bells on a 4-op", accent: "pink", duration: "2:58:12", ago: "2 days ago", views: "1.1K views" },
-  { id: "v2", title: "Listener tracks review #14", accent: "pink", duration: "1:47:30", ago: "5 days ago", views: "640 views" },
-  { id: "v3", title: "Patch from zero: West-coast plucks", accent: "pink", duration: "3:05:44", ago: "1 week ago", views: "1.4K views" },
+  {
+    id: "v1",
+    title: "Patch from zero: FM bells on a 4-op",
+    accent: "pink",
+    duration: "2:58:12",
+    ago: "2 days ago",
+    views: "1.1K views",
+  },
+  {
+    id: "v2",
+    title: "Listener tracks review #14",
+    accent: "pink",
+    duration: "1:47:30",
+    ago: "5 days ago",
+    views: "640 views",
+  },
+  {
+    id: "v3",
+    title: "Patch from zero: West-coast plucks",
+    accent: "pink",
+    duration: "3:05:44",
+    ago: "1 week ago",
+    views: "1.4K views",
+  },
 ];
 
 export const clips: MediaCardData[] = [
-  { id: "c1", title: "The accidental drone that ate the stream", accent: "pink", kind: "Clip", duration: "0:38", clippedBy: "clipped by ohmslaw · 6.1K views" },
-  { id: "c2", title: "Explaining wavefolding with a slinky", accent: "pink", kind: "Clip", duration: "1:02", clippedBy: "clipped by nightcap · 3.3K views" },
-  { id: "c3", title: "Chat finally gets the filter joke", accent: "pink", kind: "Clip", duration: "0:21", clippedBy: "clipped by Fernsby · 980 views" },
+  {
+    id: "c1",
+    title: "The accidental drone that ate the stream",
+    accent: "pink",
+    kind: "Clip",
+    duration: "0:38",
+    clippedBy: "clipped by ohmslaw · 6.1K views",
+  },
+  {
+    id: "c2",
+    title: "Explaining wavefolding with a slinky",
+    accent: "pink",
+    kind: "Clip",
+    duration: "1:02",
+    clippedBy: "clipped by nightcap · 3.3K views",
+  },
+  {
+    id: "c3",
+    title: "Chat finally gets the filter joke",
+    accent: "pink",
+    kind: "Clip",
+    duration: "0:21",
+    clippedBy: "clipped by Fernsby · 980 views",
+  },
 ];
 
 export const schedule = [
@@ -46,7 +88,11 @@ export const about = {
   links: ["Website", "Fediverse", "Bandcamp"],
 };
 
-export const rules = ["Be kind, especially to beginners.", "No self-promo without asking.", "English or Spanish please."];
+export const rules = [
+  "Be kind, especially to beginners.",
+  "No self-promo without asking.",
+  "English or Spanish please.",
+];
 
 export const supporters =
   "Monthly subscriptions fund the stream. 71% goes to the creator; the split is set by member vote.";

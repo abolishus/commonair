@@ -44,12 +44,39 @@ export interface LedgerRow {
 
 export const ledger: LedgerRow[] = [
   { id: "l1", date: "Oct 17", type: "Tip", tone: "success", from: "Fernsby", gross: 500, fees: -75, net: 425 },
-  { id: "l2", date: "Oct 17", type: "Gift ×5", tone: "accent", from: "paperlantern", gross: 2495, fees: -725, net: 1770 },
+  {
+    id: "l2",
+    date: "Oct 17",
+    type: "Gift ×5",
+    tone: "accent",
+    from: "paperlantern",
+    gross: 2495,
+    fees: -725,
+    net: 1770,
+  },
   { id: "l3", date: "Oct 17", type: "Sub T2", tone: "accent", from: "ohmslaw", gross: 999, fees: -290, net: 709 },
   { id: "l4", date: "Oct 16", type: "Refund", tone: "warning", from: "tapehead99", gross: -499, fees: 145, net: -354 },
-  { id: "l5", date: "Oct 15", type: "Chargeback", tone: "danger", from: "payment dispute #8812", gross: -999, fees: 290, net: -709 },
+  {
+    id: "l5",
+    date: "Oct 15",
+    type: "Chargeback",
+    tone: "danger",
+    from: "payment dispute 8812",
+    gross: -999,
+    fees: 290,
+    net: -709,
+  },
   { id: "l6", date: "Oct 15", type: "Sub T1", tone: "accent", from: "quietfox", gross: 499, fees: -145, net: 354 },
-  { id: "l7", date: "Oct 1", type: "Payout", tone: "neutral", from: "Bank ••••6021", gross: null, fees: null, net: -110_233 },
+  {
+    id: "l7",
+    date: "Oct 1",
+    type: "Payout",
+    tone: "neutral",
+    from: "Bank ••••6021",
+    gross: null,
+    fees: null,
+    net: -110_233,
+  },
 ];
 
 export const payout = [

@@ -13,6 +13,20 @@ export const channel = {
 };
 
 export const videos: MediaCardData[] = [
-  { id: "v1", title: "Capacitor goes pop, chat goes wild", accent: "teal", kind: "Clip", duration: "0:19", views: "12K views" },
-  { id: "v2", title: "How to read a schematic in 60 seconds", accent: "teal", kind: "Clip", duration: "0:58", views: "4.4K views" },
+  {
+    id: "v1",
+    title: "Capacitor goes pop, chat goes wild",
+    accent: "teal",
+    kind: "Clip",
+    duration: "0:19",
+    views: "12K views",
+  },
+  {
+    id: "v2",
+    title: "How to read a schematic in 60 seconds",
+    accent: "teal",
+    kind: "Clip",
+    duration: "0:58",
+    views: "4.4K views",
+  },
 ];

@@ -36,10 +36,31 @@ export interface Subscription {
 }
 
 export const subscriptions: Subscription[] = [
-  { id: "follow", event: "channel.follow", transport: "https://glaze.example/hook", status: "Enabled", tone: "success", success: "100%" },
-  { id: "subscribe", event: "channel.subscribe", transport: "https://glaze.example/hook", status: "Enabled", tone: "success", success: "99.2%" },
+  {
+    id: "follow",
+    event: "channel.follow",
+    transport: "https://glaze.example/hook",
+    status: "Enabled",
+    tone: "success",
+    success: "100%",
+  },
+  {
+    id: "subscribe",
+    event: "channel.subscribe",
+    transport: "https://glaze.example/hook",
+    status: "Enabled",
+    tone: "success",
+    success: "99.2%",
+  },
   { id: "tip", event: "channel.tip", transport: "websocket", status: "Enabled", tone: "success", success: "100%" },
-  { id: "online", event: "stream.online", transport: "https://glaze.example/hook", status: "Failing", tone: "warning", success: "61%" },
+  {
+    id: "online",
+    event: "stream.online",
+    transport: "https://glaze.example/hook",
+    status: "Failing",
+    tone: "warning",
+    success: "61%",
+  },
 ];
 
 export interface Delivery {

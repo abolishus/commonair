@@ -40,9 +40,42 @@ export const proposals: {
   comments: number;
   voted: boolean;
 }[] = [
-  { number: 47, title: "Lower the creator share of subscriptions from 71% to 65%", protected: true, status: "Voting", tone: "info", summary: "Fund a second origin region by moving 6 points of every subscription to infrastructure for 12 months.", ends: "Closes in 3 days", turnout: 38, comments: 214, voted: true },
-  { number: 48, title: "Add a small-channel seat to the creator council", protected: false, status: "Voting", tone: "info", summary: "Reserve one more council seat for channels averaging under 50 verified viewers.", ends: "Closes in 6 days", turnout: 21, comments: 88, voted: false },
-  { number: 49, title: "Adopt a clearer mature-content labelling policy", protected: false, status: "Council review", tone: "warning", summary: "Replaces the single mature flag with three labels and an 18+ gate for the strongest.", ends: "Voting opens Oct 25", turnout: null, comments: 41, voted: false },
+  {
+    number: 47,
+    title: "Lower the creator share of subscriptions from 71% to 65%",
+    protected: true,
+    status: "Voting",
+    tone: "info",
+    summary: "Fund a second origin region by moving 6 points of every subscription to infrastructure for 12 months.",
+    ends: "Closes in 3 days",
+    turnout: 38,
+    comments: 214,
+    voted: true,
+  },
+  {
+    number: 48,
+    title: "Add a small-channel seat to the creator council",
+    protected: false,
+    status: "Voting",
+    tone: "info",
+    summary: "Reserve one more council seat for channels averaging under 50 verified viewers.",
+    ends: "Closes in 6 days",
+    turnout: 21,
+    comments: 88,
+    voted: false,
+  },
+  {
+    number: 49,
+    title: "Adopt a clearer mature-content labelling policy",
+    protected: false,
+    status: "Council review",
+    tone: "warning",
+    summary: "Replaces the single mature flag with three labels and an 18+ gate for the strongest.",
+    ends: "Voting opens Oct 25",
+    turnout: null,
+    comments: 41,
+    voted: false,
+  },
 ];
 
 export const membersByClass: BreakdownSegment[] = [

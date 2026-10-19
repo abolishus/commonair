@@ -38,10 +38,38 @@ export const commentSorts = [
   { value: "newest", label: "Newest" },
 ];
 
-export const comments: { name: string; accent: Accent; memberClass: string; ago: string; helpful: number; text: string }[] = [
-  { name: "Lumen Kitchen", accent: "green", memberClass: "Streamer", ago: "2 days ago", helpful: 96, text: "Six points is most of my grocery money from this. I would support a tiered version where bigger channels give more." },
-  { name: "ohmslaw", accent: "blue", memberClass: "Viewer", ago: "2 days ago", helpful: 61, text: "The outage in August cost everyone. A second region is worth it, and the automatic revert is a good safeguard." },
-  { name: "treasury-wg", accent: "zinc", memberClass: "Worker", ago: "1 day ago", helpful: 44, text: "Monthly reports of the ring-fenced account will be on the Transparency page, line by line." },
+export const comments: {
+  name: string;
+  accent: Accent;
+  memberClass: string;
+  ago: string;
+  helpful: number;
+  text: string;
+}[] = [
+  {
+    name: "Lumen Kitchen",
+    accent: "green",
+    memberClass: "Streamer",
+    ago: "2 days ago",
+    helpful: 96,
+    text: "Six points is most of my grocery money from this. I would support a tiered version where bigger channels give more.",
+  },
+  {
+    name: "ohmslaw",
+    accent: "blue",
+    memberClass: "Viewer",
+    ago: "2 days ago",
+    helpful: 61,
+    text: "The outage in August cost everyone. A second region is worth it, and the automatic revert is a good safeguard.",
+  },
+  {
+    name: "treasury-wg",
+    accent: "zinc",
+    memberClass: "Worker",
+    ago: "1 day ago",
+    helpful: 44,
+    text: "Monthly reports of the ring-fenced account will be on the Transparency page, line by line.",
+  },
 ];
 
 export const choices = [
@@ -58,8 +86,22 @@ const tally = (yes: number, no: number, abstain: number): BreakdownSegment[] => 
 ];
 
 export const tallies = [
-  { label: "All members", note: "quorum 25% · met", status: "Passing", passed: true, segments: tally(58, 37, 5), votes: 2141 },
-  { label: "Streamer class", note: "quorum 33% · met", status: "Failing", passed: false, segments: tally(41, 55, 4), votes: 402 },
+  {
+    label: "All members",
+    note: "quorum 25% · met",
+    status: "Passing",
+    passed: true,
+    segments: tally(58, 37, 5),
+    votes: 2141,
+  },
+  {
+    label: "Streamer class",
+    note: "quorum 33% · met",
+    status: "Failing",
+    passed: false,
+    segments: tally(41, 55, 4),
+    votes: 402,
+  },
 ];
 export const tallyNote = "If either row fails, the database rejects the change, whoever is asking.";
 

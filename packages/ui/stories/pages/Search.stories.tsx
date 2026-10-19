@@ -32,7 +32,9 @@ function SearchPage(): React.JSX.Element {
           title="Channels"
           items={channels.map((channel) => ({
             id: channel.name,
-            media: <ChannelAvatar name={channel.name} accent={channel.accent} size="md" live={channel.live} decorative />,
+            media: (
+              <ChannelAvatar name={channel.name} accent={channel.accent} size="md" live={channel.live} decorative />
+            ),
             title: (
               <span className="flex flex-wrap items-center gap-2">
                 <a href={`#channel/${channel.name}`}>{channel.name}</a>
@@ -68,7 +70,12 @@ function SearchPage(): React.JSX.Element {
         <Section
           heading="Videos"
           action={
-            <Button variant="ghost" size="xs" render={<a href="#search?q=synth&type=videos" />} nativeButton={false}>
+            <Button
+              variant="ghost"
+              size="xs"
+              render={<a href="#search?q=synth&type=videos" aria-label="All 14 videos" />}
+              nativeButton={false}
+            >
               All 14 videos
             </Button>
           }

@@ -93,11 +93,15 @@ function ChannelPage(): React.JSX.Element {
                         <HugeiconsIcon icon={FavouriteIcon} aria-hidden="true" />
                         Follow
                       </AccentButton>
-                      <Button variant="outline" render={<a href="#support" />} nativeButton={false}>
+                      <Button
+                        variant="outline"
+                        render={<a href="#support" aria-label="Subscribe" />}
+                        nativeButton={false}
+                      >
                         <HugeiconsIcon icon={StarIcon} aria-hidden="true" />
                         Subscribe
                       </Button>
-                      <Button variant="outline" render={<a href="#support" />} nativeButton={false}>
+                      <Button variant="outline" render={<a href="#support" aria-label="Tip" />} nativeButton={false}>
                         <HugeiconsIcon icon={Dollar01Icon} aria-hidden="true" />
                         Tip
                       </Button>

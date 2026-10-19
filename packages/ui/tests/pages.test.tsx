@@ -25,18 +25,47 @@ const pagesDir = join(import.meta.dirname, "..", "stories", "pages");
 const boards = await Promise.all(
   readdirSync(pagesDir)
     .filter((file) => file.endsWith(".stories.tsx"))
-    .map(async (file) => [file.replace(".stories.tsx", ""), (await import(join(pagesDir, file))) as BoardModule] as const),
+    .map(
+      async (file) => [file.replace(".stories.tsx", ""), (await import(join(pagesDir, file))) as BoardModule] as const,
+    ),
 );
 
 /** happy-dom does not know the HTML `<search>` landmark (HeaderSearch); real browsers do. */
-const isHappyDomGap = (args: unknown[]): boolean => args[0] === "The tag <%s> is unrecognized in this browser. If you meant to render a React component, start its name with an uppercase letter." && args[1] === "search";
+const isHappyDomGap = (args: unknown[]): boolean =>
+  args[0] ===
+    "The tag <%s> is unrecognized in this browser. If you meant to render a React component, start its name with an uppercase letter." &&
+  args[1] === "search";
 
 const BOARDS = [
-  "Main", "Browse", "Category", "Search", "Following", "SignIn", "Settings",
-  "Channel", "ChannelAbout", "Vod", "Clip", "Support", "Mobile",
-  "StreamManager", "StreamSetup", "Analytics", "Revenue", "Community", "ChatBot", "Content", "Overlays",
-  "Coop", "Proposal", "Transparency",
-  "Developer", "TrustSafety", "Status", "Finances", "Expenses",
+  "Main",
+  "Browse",
+  "Category",
+  "Search",
+  "Following",
+  "SignIn",
+  "Settings",
+  "Channel",
+  "ChannelAbout",
+  "Vod",
+  "Clip",
+  "Support",
+  "Mobile",
+  "StreamManager",
+  "StreamSetup",
+  "Analytics",
+  "Revenue",
+  "Community",
+  "ChatBot",
+  "Content",
+  "Overlays",
+  "Coop",
+  "Proposal",
+  "Transparency",
+  "Developer",
+  "TrustSafety",
+  "Status",
+  "Finances",
+  "Expenses",
 ];
 
 beforeAll(() => {
@@ -73,8 +102,8 @@ describe("page stories", () => {
         <TooltipProvider>{mod.Default.render()}</TooltipProvider>
       </LocaleProvider>,
     );
-    if (name === "Support") expect(screen.getByRole("dialog")).toBeTruthy();
-    else expect(screen.getAllByRole("main").length).toBeGreaterThan(0);
+    const landmarks = name === "Support" ? screen.getAllByRole("dialog") : screen.getAllByRole("main");
+    expect(landmarks.length).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
 });

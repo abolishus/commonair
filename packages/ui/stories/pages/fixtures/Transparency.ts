@@ -47,7 +47,25 @@ export const statement = [
 ];
 
 export const metrics = [
-  { id: "integrity", title: "Viewer integrity", value: "4.6%", caption: "of sessions excluded", body: "Datacenter ranges, headless browsers, concurrency abuse. 212 appeals, 31 upheld." },
-  { id: "relays", title: "Community relays", value: "38%", caption: "of video egress", body: "142 volunteer relays. Signed receipts are cross-checked against the origin; 2 relays removed for over-reporting." },
-  { id: "safety", title: "Trust & safety", value: "1,904", caption: "reports handled", body: "Median first response 41 min. 12 DMCA notices, 3 counter-notices. 0 government data requests." },
+  {
+    id: "integrity",
+    title: "Viewer integrity",
+    value: "4.6%",
+    caption: "of sessions excluded",
+    body: "Datacenter ranges, headless browsers, concurrency abuse. 212 appeals, 31 upheld.",
+  },
+  {
+    id: "relays",
+    title: "Community relays",
+    value: "38%",
+    caption: "of video egress",
+    body: "142 volunteer relays. Signed receipts are cross-checked against the origin; 2 relays removed for over-reporting.",
+  },
+  {
+    id: "safety",
+    title: "Trust & safety",
+    value: "1,904",
+    caption: "reports handled",
+    body: "Median first response 41 min. 12 DMCA notices, 3 counter-notices. 0 government data requests.",
+  },
 ];

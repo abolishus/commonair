@@ -6,14 +6,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { ChannelAvatar, StatusBadge, formatNumber } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
 import { BreakdownBar, ListPanel, ProgressRow, StatCard, StatGrid } from "@commonair/ui/blocks/data";
@@ -55,7 +48,12 @@ function CoopPage(): React.JSX.Element {
               <Section
                 heading="Open for voting"
                 action={
-                  <Button variant="ghost" size="xs" render={<a href="#coop/proposals" />} nativeButton={false}>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    render={<a href="#coop/proposals" aria-label="All proposals" />}
+                    nativeButton={false}
+                  >
                     All proposals
                   </Button>
                 }

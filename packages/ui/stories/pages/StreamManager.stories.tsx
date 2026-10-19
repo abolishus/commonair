@@ -114,8 +114,20 @@ function StreamManagerPage(): React.JSX.Element {
               >
                 <CharacterCountField label="Title" maxLength={140} value={title} onValueChange={setTitle} />
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <SelectField id="sm-category" label="Category" value={category} options={categoryOptions} onValueChange={setCategory} />
-                  <SelectField id="sm-language" label="Language" value={language} options={languageOptions} onValueChange={setLanguage} />
+                  <SelectField
+                    id="sm-category"
+                    label="Category"
+                    value={category}
+                    options={categoryOptions}
+                    onValueChange={setCategory}
+                  />
+                  <SelectField
+                    id="sm-language"
+                    label="Language"
+                    value={language}
+                    options={languageOptions}
+                    onValueChange={setLanguage}
+                  />
                 </div>
                 <TagsField
                   label="Tags"

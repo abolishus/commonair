@@ -10,7 +10,12 @@ export type SupportTab = "sub" | "gift" | "tip";
 
 export const tiers = [
   { value: "1", title: "Tier 1", cents: 499, perks: "Sub badge, emotes, ad-free forever (there are no ads anyway)" },
-  { value: "2", title: "Tier 2", cents: 999, perks: "Everything in Tier 1, bonus emotes, supporter role in the Discord" },
+  {
+    value: "2",
+    title: "Tier 2",
+    cents: 999,
+    perks: "Everything in Tier 1, bonus emotes, supporter role in the Discord",
+  },
   { value: "3", title: "Tier 3", cents: 2499, perks: "Everything in Tier 2, name in the credits, monthly patch file" },
 ];
 

@@ -23,10 +23,34 @@ export const published = {
 };
 
 export const more: MediaCardData[] = [
-  { id: "m1", title: "Capacitor goes pop, chat goes wild", accent: "teal", duration: "0:19", views: "12K views · 3 days ago" },
-  { id: "m2", title: "How to read a schematic in 60 seconds", accent: "teal", duration: "0:58", views: "4.4K views · 1 week ago" },
-  { id: "m3", title: "The world’s slowest desolder", accent: "teal", duration: "0:33", views: "2.1K views · 2 weeks ago" },
-  { id: "m4", title: "VU meters dancing for the first time", accent: "teal", duration: "0:25", views: "1.7K views · 3 weeks ago" },
+  {
+    id: "m1",
+    title: "Capacitor goes pop, chat goes wild",
+    accent: "teal",
+    duration: "0:19",
+    views: "12K views · 3 days ago",
+  },
+  {
+    id: "m2",
+    title: "How to read a schematic in 60 seconds",
+    accent: "teal",
+    duration: "0:58",
+    views: "4.4K views · 1 week ago",
+  },
+  {
+    id: "m3",
+    title: "The world’s slowest desolder",
+    accent: "teal",
+    duration: "0:33",
+    views: "2.1K views · 2 weeks ago",
+  },
+  {
+    id: "m4",
+    title: "VU meters dancing for the first time",
+    accent: "teal",
+    duration: "0:25",
+    views: "1.7K views · 3 weeks ago",
+  },
 ];
 
 /** Seconds relative to "now", as the board's axis reads them (−1:30 … now). */

@@ -34,7 +34,13 @@ function BrowsePage(): React.JSX.Element {
           searchValue={query}
           onSearchChange={setQuery}
           filters={[
-            { id: "browse-language", label: "Language", value: language, options: languages, onValueChange: setLanguage },
+            {
+              id: "browse-language",
+              label: "Language",
+              value: language,
+              options: languages,
+              onValueChange: setLanguage,
+            },
             { id: "browse-sort", label: "Sort", value: sort, options: sorts, onValueChange: setSort },
           ]}
           toggleLabel="Popular tags"

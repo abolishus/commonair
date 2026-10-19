@@ -44,7 +44,11 @@ export const mobile320 = { globals: { viewport: { value: "mobile320", isRotated:
 export const phone390 = { globals: { viewport: { value: "mobile390", isRotated: false } } };
 export const pageParameters = { layout: "fullscreen" } as const;
 
-const brand: Brand = { mark: <HugeiconsIcon icon={Radio02Icon} aria-hidden="true" />, name: "CommonAir", href: "#home" };
+const brand: Brand = {
+  mark: <HugeiconsIcon icon={Radio02Icon} aria-hidden="true" />,
+  name: "CommonAir",
+  href: "#home",
+};
 
 export type ViewerSection = "home" | "following" | "browse" | "coop" | undefined;
 
@@ -70,8 +74,21 @@ const accountMenu = (
   />
 );
 
+const goLiveButton = (
+  <Button variant="outline" size="sm" render={<a href="#studio" aria-label="Go live" />} nativeButton={false}>
+    <HugeiconsIcon icon={Video01Icon} aria-hidden="true" />
+    Go live
+  </Button>
+);
+
 /** The viewer header: brand, main navigation, search, notifications, Go live and the account menu. */
-export function ViewerHeader({ current, goLive = true }: { current?: ViewerSection; goLive?: boolean }): React.JSX.Element {
+export function ViewerHeader({
+  current,
+  goLive = true,
+}: {
+  current?: ViewerSection;
+  goLive?: boolean;
+}): React.JSX.Element {
   return (
     <SiteHeader
       brand={brand}
@@ -81,17 +98,9 @@ export function ViewerHeader({ current, goLive = true }: { current?: ViewerSecti
       searchLabel="Search"
       onOpenPalette={() => undefined}
       search={<HeaderSearch label="Search" placeholder="Search channels, categories, tags" shortcut="⌘K" />}
-      actions={
-        <>
-          <IconButton label="Notifications" icon={Notification01Icon} />
-          {goLive ? (
-            <Button variant="outline" size="sm" render={<a href="#studio" />} nativeButton={false}>
-              <HugeiconsIcon icon={Video01Icon} aria-hidden="true" />
-              Go live
-            </Button>
-          ) : null}
-        </>
-      }
+      actions={<IconButton label="Notifications" icon={Notification01Icon} />}
+      desktopActions={goLive ? goLiveButton : undefined}
+      mobileActions={goLive ? goLiveButton : undefined}
       user={accountMenu}
     />
   );
@@ -184,6 +193,17 @@ function studioGroups(current: StudioSection): NavGroup[] {
   ];
 }
 
+const studioActions = (
+  <>
+    <Button variant="destructive" size="sm">
+      End stream
+    </Button>
+    <Button variant="ghost" size="sm" render={<a href="#channel" aria-label="View channel" />} nativeButton={false}>
+      View channel
+    </Button>
+  </>
+);
+
 /** The studio header: brand, "Creator studio", live state, End stream and View channel. */
 export function StudioHeader(): React.JSX.Element {
   return (
@@ -196,24 +216,32 @@ export function StudioHeader(): React.JSX.Element {
         <>
           <LiveBadge />
           <StatusBadge tone="neutral">1:12:08</StatusBadge>
-          <Button variant="destructive" size="sm">
-            End stream
-          </Button>
-          <Button variant="ghost" size="sm" render={<a href="#channel" />} nativeButton={false}>
-            View channel
-          </Button>
         </>
       }
+      desktopActions={studioActions}
+      mobileActions={studioActions}
       user={accountMenu}
     />
   );
 }
 
 /** StudioShell for the eight creator studio boards. */
-export function StudioPage({ current, children }: { current: StudioSection; children: React.ReactNode }): React.JSX.Element {
+export function StudioPage({
+  current,
+  children,
+}: {
+  current: StudioSection;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
     <div data-accent="violet">
-      <StudioShell header={<StudioHeader />} groups={studioGroups(current)} sidebarLabel="Creator studio">
+      <StudioShell
+        header={<StudioHeader />}
+        groups={studioGroups(current)}
+        sidebarLabel="Creator studio"
+        skipLabel="Skip to content"
+        footer={<Footer />}
+      >
         {children}
       </StudioShell>
     </div>
@@ -224,7 +252,13 @@ const adminGroups: NavGroup[] = [
   {
     id: "admin",
     items: [
-      { id: "reports", label: "Report queue", href: "#reports", current: true, badge: { label: "27", tone: "destructive" } },
+      {
+        id: "reports",
+        label: "Report queue",
+        href: "#reports",
+        current: true,
+        badge: { label: "27", tone: "destructive" },
+      },
       { id: "appeals", label: "Appeals", href: "#appeals", badge: { label: "6" } },
       { id: "dmca", label: "DMCA notices", href: "#dmca", badge: { label: "2" } },
       { id: "integrity", label: "Integrity signals", href: "#integrity" },
@@ -258,6 +292,8 @@ export function AdminPage({ children }: { children: React.ReactNode }): React.JS
       }
       groups={adminGroups}
       sidebarLabel="Admin"
+      skipLabel="Skip to content"
+      footer={<Footer />}
     >
       {children}
     </AdminShell>

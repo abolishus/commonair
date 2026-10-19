@@ -6,14 +6,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Download01Icon, Shield01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
 import {
@@ -25,7 +18,16 @@ import {
   TrendChart,
   type DataTableColumn,
 } from "@commonair/ui/blocks/data";
-import { integrity, metrics, ranges, sources, stats, streams, viewersByDay, type StreamRow } from "./fixtures/Analytics.ts";
+import {
+  integrity,
+  metrics,
+  ranges,
+  sources,
+  stats,
+  streams,
+  viewersByDay,
+  type StreamRow,
+} from "./fixtures/Analytics.ts";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/Analytics", parameters: pageParameters } satisfies Meta;
@@ -74,7 +76,11 @@ function AnalyticsPage(): React.JSX.Element {
               hint={stat.hint}
               delta={
                 stat.delta
-                  ? { direction: stat.down ? "down" : "up", label: stat.delta, sentiment: stat.down ? "negative" : "positive" }
+                  ? {
+                      direction: stat.down ? "down" : "up",
+                      label: stat.delta,
+                      sentiment: stat.down ? "negative" : "positive",
+                    }
                   : undefined
               }
             />
@@ -86,7 +92,15 @@ function AnalyticsPage(): React.JSX.Element {
             <CardDescription>Traffic flagged by integrity checks is never counted.</CardDescription>
             <CardAction>
               <FilterBar
-                filters={[{ id: "analytics-metric", label: "Metric", value: metric, options: metrics, onValueChange: setMetric }]}
+                filters={[
+                  {
+                    id: "analytics-metric",
+                    label: "Metric",
+                    value: metric,
+                    options: metrics,
+                    onValueChange: setMetric,
+                  },
+                ]}
               />
             </CardAction>
           </CardHeader>
@@ -107,7 +121,11 @@ function AnalyticsPage(): React.JSX.Element {
             </CardHeader>
             <CardContent>
               <ProgressList
-                rows={sources.map((source) => ({ label: source.label, value: source.percent, valueText: `${source.percent}%` }))}
+                rows={sources.map((source) => ({
+                  label: source.label,
+                  value: source.percent,
+                  valueText: `${source.percent}%`,
+                }))}
               />
             </CardContent>
           </Card>

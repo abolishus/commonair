@@ -129,7 +129,12 @@ function SupportPage(): React.JSX.Element {
                 label: "Gift subs",
                 content: (
                   <FieldGroup>
-                    <ChoiceToggle label="How many?" options={giftCounts} value={giftCount} onValueChange={setGiftCount} />
+                    <ChoiceToggle
+                      label="How many?"
+                      options={giftCounts}
+                      value={giftCount}
+                      onValueChange={setGiftCount}
+                    />
                     <SelectField
                       id="support-recipient"
                       label="Recipient"
@@ -138,7 +143,12 @@ function SupportPage(): React.JSX.Element {
                       onValueChange={setRecipient}
                     />
                     <KeyValueList
-                      rows={[{ term: gift.label, value: <MoneyAmount value={{ cents: gift.cents, currency: "USD" }} locale="en-US" /> }]}
+                      rows={[
+                        {
+                          term: gift.label,
+                          value: <MoneyAmount value={{ cents: gift.cents, currency: "USD" }} locale="en-US" />,
+                        },
+                      ]}
                     />
                   </FieldGroup>
                 ),

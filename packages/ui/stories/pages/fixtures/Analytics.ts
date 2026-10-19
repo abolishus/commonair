@@ -26,7 +26,9 @@ export const metrics = [
 
 const start = Date.UTC(2026, 8, 18);
 const day = (i: number): string =>
-  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(start + i * 86_400_000));
+  new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(
+    new Date(start + i * 86_400_000),
+  );
 
 /** Average verified viewers per day (days off stream are near zero), Sep 18 – Oct 17. */
 export const viewersByDay = Array.from({ length: 30 }, (_, i) => {
@@ -64,9 +66,54 @@ export interface StreamRow {
 }
 
 export const streams: StreamRow[] = [
-  { id: "s1", date: "Oct 17", title: "Glaze tests: copper reds, round 4", duration: "3:12", avg: "341", peak: "468", followers: "+37", messages: "1,804" },
-  { id: "s2", date: "Oct 15", title: "Throwing big bowls, viewer challenges", duration: "2:48", avg: "322", peak: "512", followers: "+52", messages: "2,130" },
-  { id: "s3", date: "Oct 12", title: "Kiln unloading — the moment of truth", duration: "1:55", avg: "398", peak: "612", followers: "+118", messages: "3,402" },
-  { id: "s4", date: "Oct 10", title: "Trimming and Q&A", duration: "2:30", avg: "254", peak: "310", followers: "+21", messages: "1,066" },
-  { id: "s5", date: "Oct 8", title: "Glaze tests: copper reds, round 3", duration: "3:05", avg: "271", peak: "355", followers: "+30", messages: "1,511" },
+  {
+    id: "s1",
+    date: "Oct 17",
+    title: "Glaze tests: copper reds, round 4",
+    duration: "3:12",
+    avg: "341",
+    peak: "468",
+    followers: "+37",
+    messages: "1,804",
+  },
+  {
+    id: "s2",
+    date: "Oct 15",
+    title: "Throwing big bowls, viewer challenges",
+    duration: "2:48",
+    avg: "322",
+    peak: "512",
+    followers: "+52",
+    messages: "2,130",
+  },
+  {
+    id: "s3",
+    date: "Oct 12",
+    title: "Kiln unloading — the moment of truth",
+    duration: "1:55",
+    avg: "398",
+    peak: "612",
+    followers: "+118",
+    messages: "3,402",
+  },
+  {
+    id: "s4",
+    date: "Oct 10",
+    title: "Trimming and Q&A",
+    duration: "2:30",
+    avg: "254",
+    peak: "310",
+    followers: "+21",
+    messages: "1,066",
+  },
+  {
+    id: "s5",
+    date: "Oct 8",
+    title: "Glaze tests: copper reds, round 3",
+    duration: "3:05",
+    avg: "271",
+    peak: "355",
+    followers: "+30",
+    messages: "1,511",
+  },
 ];

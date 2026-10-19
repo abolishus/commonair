@@ -56,13 +56,18 @@ const statementColumns: DataTableColumn<StatementRow>[] = [
     header: "Amount",
     align: "numeric",
     cell: ({ row }) =>
-      row.original.cents === null ? "—" : <MoneyAmount value={{ cents: row.original.cents, currency: "USD" }} locale="en-US" />,
+      row.original.cents === null ? (
+        "—"
+      ) : (
+        <MoneyAmount value={{ cents: row.original.cents, currency: "USD" }} locale="en-US" />
+      ),
   },
   { id: "share", header: "% of gross", accessorKey: "share", align: "numeric" },
   {
     id: "source",
     header: () => <span className="sr-only">Source</span>,
-    cell: ({ row }) => (row.original.source ? <a href={row.original.source.href}>{row.original.source.label}</a> : null),
+    cell: ({ row }) =>
+      row.original.source ? <a href={row.original.source.href}>{row.original.source.label}</a> : null,
   },
 ];
 
@@ -112,8 +117,8 @@ function FinancesPage(): React.JSX.Element {
           <CardHeader>
             <CardTitle>Platform income vs. operating expenses, by month</CardTitle>
             <CardDescription>
-              Income is what the co-op keeps after creator payouts and payment processing. Creator money passes through and
-              is shown separately below.
+              Income is what the co-op keeps after creator payouts and payment processing. Creator money passes through
+              and is shown separately below.
             </CardDescription>
           </CardHeader>
           <CardContent>

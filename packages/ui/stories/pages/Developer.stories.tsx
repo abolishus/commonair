@@ -9,14 +9,7 @@ import { ChannelAvatar, ConfirmDialog, IconButton, StatusBadge } from "@commonai
 import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldTitle } from "@commonair/ui/components/field";
 import { PageContainer, SectionNav } from "@commonair/ui/layouts";
 import { PageTabs, Section } from "@commonair/ui/blocks/headers";
@@ -42,7 +35,11 @@ type Story = StoryObj;
 const subscriptionColumns: DataTableColumn<Subscription>[] = [
   { id: "event", header: "Event", cell: ({ row }) => <code>{row.original.event}</code> },
   { id: "transport", header: "Transport", cell: ({ row }) => <code>{row.original.transport}</code> },
-  { id: "status", header: "Status", cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.status}</StatusBadge> },
+  {
+    id: "status",
+    header: "Status",
+    cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.status}</StatusBadge>,
+  },
   { id: "success", header: "Success (24 h)", accessorKey: "success", align: "numeric" },
   {
     id: "actions",
@@ -187,18 +184,36 @@ function DeveloperPage(): React.JSX.Element {
                   </CardAction>
                 </CardHeader>
                 <CardContent>
-                  <DataTable caption="Event subscriptions" columns={subscriptionColumns} rows={subscriptions} getRowId={(row) => row.id} />
+                  <DataTable
+                    caption="Event subscriptions"
+                    columns={subscriptionColumns}
+                    rows={subscriptions}
+                    getRowId={(row) => row.id}
+                  />
                 </CardContent>
               </Card>
               <Section
                 heading="Recent deliveries"
                 action={
                   <FilterBar
-                    filters={[{ id: "delivery-status", label: "Filter status", value: status, options: statusFilters, onValueChange: setStatus }]}
+                    filters={[
+                      {
+                        id: "delivery-status",
+                        label: "Filter status",
+                        value: status,
+                        options: statusFilters,
+                        onValueChange: setStatus,
+                      },
+                    ]}
                   />
                 }
               >
-                <DataTable caption="Recent deliveries" columns={deliveryColumns} rows={shown} getRowId={(row) => row.id} />
+                <DataTable
+                  caption="Recent deliveries"
+                  columns={deliveryColumns}
+                  rows={shown}
+                  getRowId={(row) => row.id}
+                />
               </Section>
             </div>
           </div>

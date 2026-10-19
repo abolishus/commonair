@@ -42,7 +42,13 @@ function TrustSafetyPage(): React.JSX.Element {
           <PageHeader
             size="compact"
             title="Report queue"
-            actions={<FilterBar filters={[{ id: "report-filter", label: "Filter", value: filter, options: filters, onValueChange: setFilter }]} />}
+            actions={
+              <FilterBar
+                filters={[
+                  { id: "report-filter", label: "Filter", value: filter, options: filters, onValueChange: setFilter },
+                ]}
+              />
+            }
           />
           <ItemGroup>
             {reports.map((report) => (
@@ -50,7 +56,13 @@ function TrustSafetyPage(): React.JSX.Element {
                 key={report.id}
                 variant={report.selected ? "muted" : "outline"}
                 size="sm"
-                render={<a href={`#reports/${report.id}`} aria-current={report.selected ? "page" : undefined} />}
+                render={
+                  <a
+                    href={`#reports/${report.id}`}
+                    aria-current={report.selected ? "page" : undefined}
+                    aria-label={`${report.severity}: ${report.category}, ${report.target}`}
+                  />
+                }
               >
                 <ItemMedia>
                   <StatusBadge tone={report.tone}>{report.severity}</StatusBadge>
@@ -129,8 +141,20 @@ function TrustSafetyPage(): React.JSX.Element {
           >
             <ChoiceToggle label="Decision" options={decisions} value={decision} onValueChange={setDecision} />
             <div className="grid gap-4 sm:grid-cols-2">
-              <SelectField id="ts-duration" label="Duration" value={duration} options={durations} onValueChange={setDuration} />
-              <SelectField id="ts-template" label="Message to user" value={template} options={templates} onValueChange={setTemplate} />
+              <SelectField
+                id="ts-duration"
+                label="Duration"
+                value={duration}
+                options={durations}
+                onValueChange={setDuration}
+              />
+              <SelectField
+                id="ts-template"
+                label="Message to user"
+                value={template}
+                options={templates}
+                onValueChange={setTemplate}
+              />
             </div>
             <Field>
               <FieldLabel htmlFor="ts-note">Internal note (audit log; no personal data)</FieldLabel>

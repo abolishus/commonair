@@ -9,22 +9,8 @@ import { ChannelAvatar, StatusBadge } from "@commonair/ui";
 import { Alert, AlertDescription, AlertTitle } from "@commonair/ui/components/alert";
 import { Badge } from "@commonair/ui/components/badge";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
-import {
-  Item,
-  ItemContent,
-  ItemFooter,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@commonair/ui/components/item";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@commonair/ui/components/card";
+import { Item, ItemContent, ItemFooter, ItemGroup, ItemMedia, ItemTitle } from "@commonair/ui/components/item";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { Breadcrumbs, PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { BreakdownTally, FilterBar, Timeline } from "@commonair/ui/blocks/data";
@@ -107,7 +93,15 @@ function ProposalPage(): React.JSX.Element {
                 description="214 comments"
                 action={
                   <FilterBar
-                    filters={[{ id: "comment-sort", label: "Sort comments", value: sort, options: commentSorts, onValueChange: setSort }]}
+                    filters={[
+                      {
+                        id: "comment-sort",
+                        label: "Sort comments",
+                        value: sort,
+                        options: commentSorts,
+                        onValueChange: setSort,
+                      },
+                    ]}
                   />
                 }
               >

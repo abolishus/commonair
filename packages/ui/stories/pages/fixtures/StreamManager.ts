@@ -49,5 +49,12 @@ export const feed: { id: string; kind: string; tone: StatusTone; who: string; wh
   { id: "f4", kind: "Sub", tone: "accent", who: "ohmslaw", what: "subscribed at Tier 2 · 8 months", ago: "9 min ago" },
   { id: "f5", kind: "Follow", tone: "neutral", who: "tapehead99", what: "followed", ago: "11 min ago" },
   { id: "f6", kind: "Follow", tone: "neutral", who: "quietfox", what: "followed", ago: "14 min ago" },
-  { id: "f7", kind: "Points", tone: "neutral", who: "nightcap", what: "redeemed “Pick the next glaze”", ago: "18 min ago" },
+  {
+    id: "f7",
+    kind: "Points",
+    tone: "neutral",
+    who: "nightcap",
+    what: "redeemed “Pick the next glaze”",
+    ago: "18 min ago",
+  },
 ];

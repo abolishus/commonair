@@ -33,16 +33,67 @@ export interface VideoRow {
 }
 
 const tone = (visibility: string): StatusTone =>
-  visibility === "Public" ? "success" : visibility === "Highlight" ? "accent" : visibility.startsWith("Muted") ? "warning" : "neutral";
+  visibility === "Public"
+    ? "success"
+    : visibility === "Highlight"
+      ? "accent"
+      : visibility.startsWith("Muted")
+        ? "warning"
+        : "neutral";
 
 export const videos: VideoRow[] = (
   [
-    ["Glaze tests: copper reds, round 4", "Oct 17", "Makers & Crafting", "3:12:04", "Public", "412", "in 60 days", true],
-    ["Throwing big bowls, viewer challenges", "Oct 15", "Makers & Crafting", "2:48:51", "Public", "1,208", "in 58 days", true],
-    ["Kiln unloading — the moment of truth", "Oct 12", "Makers & Crafting", "1:55:10", "Highlight", "4,981", "never", false],
+    [
+      "Glaze tests: copper reds, round 4",
+      "Oct 17",
+      "Makers & Crafting",
+      "3:12:04",
+      "Public",
+      "412",
+      "in 60 days",
+      true,
+    ],
+    [
+      "Throwing big bowls, viewer challenges",
+      "Oct 15",
+      "Makers & Crafting",
+      "2:48:51",
+      "Public",
+      "1,208",
+      "in 58 days",
+      true,
+    ],
+    [
+      "Kiln unloading — the moment of truth",
+      "Oct 12",
+      "Makers & Crafting",
+      "1:55:10",
+      "Highlight",
+      "4,981",
+      "never",
+      false,
+    ],
     ["Trimming and Q&A", "Oct 10", "Makers & Crafting", "2:30:22", "Subscribers", "366", "in 53 days", false],
-    ["Glaze tests: copper reds, round 3", "Oct 8", "Makers & Crafting", "3:05:39", "Public", "702", "in 51 days", false],
-    ["Studio tour + music (muted segments)", "Oct 5", "Just Chatting", "1:12:48", "Muted 0:12", "230", "in 48 days", false],
+    [
+      "Glaze tests: copper reds, round 3",
+      "Oct 8",
+      "Makers & Crafting",
+      "3:05:39",
+      "Public",
+      "702",
+      "in 51 days",
+      false,
+    ],
+    [
+      "Studio tour + music (muted segments)",
+      "Oct 5",
+      "Just Chatting",
+      "1:12:48",
+      "Muted 0:12",
+      "230",
+      "in 48 days",
+      false,
+    ],
     ["Glaze chemistry for beginners", "Oct 3", "Makers & Crafting", "0:48:15", "Private", "0", "in 46 days", false],
   ] as const
 ).map(([title, date, category, duration, visibility, views, expires, selected], index) => ({
@@ -59,6 +110,7 @@ export const videos: VideoRow[] = (
 }));
 
 export const notes = {
-  retention: "Past broadcasts are kept 60 days. Highlights and uploads are kept until you delete them. Storage used: 48.2 GB.",
+  retention:
+    "Past broadcasts are kept 60 days. Highlights and uploads are kept until you delete them. Storage used: 48.2 GB.",
   claim: "1 video is muted for a copyright claim.",
 };

@@ -7,14 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { Download01Icon, Radio02Icon, Shield01Icon, Tick01Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { MoneyAmount, formatMoney } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@commonair/ui/components/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia } from "@commonair/ui/components/item";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { PageHeader } from "@commonair/ui/blocks/headers";
@@ -35,9 +28,7 @@ const meta = { title: "Pages/Co-op/Transparency", parameters: pageParameters } s
 export default meta;
 type Story = StoryObj;
 
-const usd = (cents: number): React.JSX.Element => (
-  <MoneyAmount value={{ cents, currency: "USD" }} locale="en-US" />
-);
+const usd = (cents: number): React.JSX.Element => <MoneyAmount value={{ cents, currency: "USD" }} locale="en-US" />;
 
 const statementColumns: DataTableColumn<(typeof statement)[number]>[] = [
   { id: "line", header: "Line", accessorKey: "line" },
@@ -62,7 +53,17 @@ function TransparencyPage(): React.JSX.Element {
           description={intro}
           actions={
             <>
-              <FilterBar filters={[{ id: "transparency-period", label: "Period", value: period, options: periods, onValueChange: setPeriod }]} />
+              <FilterBar
+                filters={[
+                  {
+                    id: "transparency-period",
+                    label: "Period",
+                    value: period,
+                    options: periods,
+                    onValueChange: setPeriod,
+                  },
+                ]}
+              />
               <Button variant="outline" size="sm">
                 <HugeiconsIcon icon={Download01Icon} aria-hidden="true" />
                 Download ledger
@@ -130,7 +131,12 @@ function TransparencyPage(): React.JSX.Element {
               </CardAction>
             </CardHeader>
             <CardContent>
-              <DataTable caption="Your patronage statement" columns={statementColumns} rows={statement} getRowId={(row) => row.id} />
+              <DataTable
+                caption="Your patronage statement"
+                columns={statementColumns}
+                rows={statement}
+                getRowId={(row) => row.id}
+              />
             </CardContent>
           </Card>
         </ResponsiveGrid>
