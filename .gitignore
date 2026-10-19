@@ -25,6 +25,8 @@ coverage
 # Harness and local runtime output
 harness/reports/
 harness/.artifacts/
+# Demo seed manifests hold fixture passwords.
+harness/.demo-seed/
 test-results/
 playwright-report/
 .data/

@@ -17,7 +17,8 @@
     "./openapi": "./src/openapi.ts",
     "./internal": "./src/internal.ts",
     "./currency": "./src/currency.ts",
-    "./auth": "./src/auth.ts"
+    "./auth": "./src/auth.ts",
+    "./fixtures": "./src/fixtures.ts"
   },
   "scripts": {
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",

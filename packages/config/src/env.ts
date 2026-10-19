@@ -104,6 +104,11 @@ export const authEnv = z.object({
   AUTH_TRUSTED_ORIGINS: csv.default([]),
   AUTH_MIN_AGE: z.coerce.number().int().min(13).default(13),
   ALTCHA_HMAC_KEY: secret,
+  /**
+   * Allow demo fixture accounts (`DEMO_FIXTURES` in contracts: reserved `demo_` usernames on the
+   * `.invalid` fixture domain) to sign up. Local and staging only; refused in production.
+   */
+  DEMO_SEED_ENABLED: bool.default(false),
   OAUTH_DISCORD_CLIENT_ID: z.string().optional(),
   OAUTH_DISCORD_CLIENT_SECRET: z.string().optional(),
   OAUTH_TWITCH_CLIENT_ID: z.string().optional(),
