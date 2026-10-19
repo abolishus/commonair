@@ -107,19 +107,15 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
       nav={nav}
       navLabel={t("nav.main")}
       menuLabel={t("nav.menu")}
-      actions={
+      actions={studio ? <SidebarTrigger /> : undefined}
+      // The theme switch (84) and Sign up (65) do not fit next to the brand at 288 px: from md they
+      // sit in the bar, below md in the phone sheet.
+      desktopActions={
         <>
-          {studio && <SidebarTrigger />}
-          {/* E4a gap: SiteHeader has a phone-only slot (`mobileActions`) but no desktop-only one. The
-              theme switch (84) and Sign up (65) do not fit next to the brand at 288 px, so below md
-              they live in the sheet and from md (SiteHeader's own breakpoint) here. Request: a
-              `desktopActions` slot, or `actions` hidden below md when `mobileActions` is set. */}
-          <div className="hidden items-center gap-2 md:flex">
-            {themeToggle}
-            {signUp.map((entry) => (
-              <AccountLink key={entry.id} entry={entry} />
-            ))}
-          </div>
+          {themeToggle}
+          {signUp.map((entry) => (
+            <AccountLink key={entry.id} entry={entry} />
+          ))}
         </>
       }
       user={
