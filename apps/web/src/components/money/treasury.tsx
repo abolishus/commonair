@@ -1,7 +1,15 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { ConfirmDialog, EmptyState, MoneyAmount, RelativeTime, StatusBadge, formatMoney, useLocale } from "@commonair/ui";
+import {
+  ConfirmDialog,
+  EmptyState,
+  MoneyAmount,
+  RelativeTime,
+  StatusBadge,
+  formatMoney,
+  useLocale,
+} from "@commonair/ui";
 import { DataTable, FilterBar, type DataTableColumn } from "@commonair/ui/blocks/data";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { AmountField, FormSection, SwitchField } from "@commonair/ui/blocks/forms";
@@ -68,27 +76,22 @@ const isTab = (value: unknown): value is TreasuryTab => TABS.some((tab) => tab =
  * PageTabs does not forward yet (contract request to the head agent).
  */
 export function TreasuryTabs({ value, onValueChange, ...panels }: TreasuryTabsProps): React.JSX.Element {
-  const labels: Record<TreasuryTab, string> = {
-    payments: t("treasury.tab.payments"),
-    payouts: t("treasury.tab.payouts"),
-    accounts: t("treasury.tab.accounts"),
-    costs: t("treasury.tab.costs"),
-  };
-  const ids: Record<TreasuryTab, string> = {
-    payments: "treasury-tab-payments",
-    payouts: "treasury-tab-payouts",
-    accounts: "treasury-tab-accounts",
-    costs: "treasury-tab-costs",
-  };
   return (
     <Tabs value={value} onValueChange={(next) => isTab(next) && onValueChange(next)}>
       <div className="min-w-0 overflow-x-auto">
         <TabsList variant="line" className="min-w-max">
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab} value={tab} data-testid={ids[tab]}>
-              {labels[tab]}
-            </TabsTrigger>
-          ))}
+          <TabsTrigger value="payments" data-testid="treasury-tab-payments">
+            {t("treasury.tab.payments")}
+          </TabsTrigger>
+          <TabsTrigger value="payouts" data-testid="treasury-tab-payouts">
+            {t("treasury.tab.payouts")}
+          </TabsTrigger>
+          <TabsTrigger value="accounts" data-testid="treasury-tab-accounts">
+            {t("treasury.tab.accounts")}
+          </TabsTrigger>
+          <TabsTrigger value="costs" data-testid="treasury-tab-costs">
+            {t("treasury.tab.costs")}
+          </TabsTrigger>
         </TabsList>
       </div>
       {TABS.map((tab) => (
@@ -142,7 +145,10 @@ export function PaymentsPanel({
       id: "who",
       header: t("treasury.payments.who"),
       cell: ({ row: { original: p } }) =>
-        [p.user?.username ?? t("treasury.payments.noUser"), p.channelSlug ? t("treasury.payments.to", { channel: p.channelSlug }) : ""]
+        [
+          p.user?.username ?? t("treasury.payments.noUser"),
+          p.channelSlug ? t("treasury.payments.to", { channel: p.channelSlug }) : "",
+        ]
           .filter((s) => s !== "")
           .join(t("money.detailSeparator")),
     },
@@ -264,32 +270,82 @@ export function DisputeDialog({
   payment,
   kind,
   onSubmit,
-  defaultOpen = false,
 }: {
   payment: TreasurerPaymentDto;
   kind: DisputeKind;
   onSubmit: PaymentsPanelProps["onDispute"];
-  defaultOpen?: boolean;
+}): React.JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  // A fresh form (amount = the refundable rest, empty reason) every time the dialog opens.
+  const [generation, setGeneration] = React.useState(0);
+  const refund = kind === "refund";
+  const trigger = refund ? (
+    <Button
+      data-testid="treasury-refund"
+      variant="outline"
+      size="sm"
+      aria-label={t("treasury.refund.label", { reference: payment.reference })}
+    />
+  ) : (
+    <Button
+      data-testid="treasury-chargeback"
+      variant="destructive"
+      size="sm"
+      aria-label={t("treasury.chargeback.label", { reference: payment.reference })}
+    />
+  );
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (pending) return;
+        setOpen(next);
+        if (next) setGeneration((g) => g + 1);
+      }}
+    >
+      <DialogTrigger render={trigger}>{refund ? t("treasury.refund") : t("treasury.chargeback")}</DialogTrigger>
+      <DialogContent>
+        <DisputeForm
+          key={generation}
+          payment={payment}
+          kind={kind}
+          onPendingChange={setPending}
+          onSubmit={async (amountCents, reason) => {
+            await onSubmit(payment, kind, amountCents, reason);
+            setOpen(false);
+          }}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** The refund / chargeback form inside its dialog. */
+export function DisputeForm({
+  payment,
+  kind,
+  onSubmit,
+  onPendingChange,
+}: {
+  payment: TreasurerPaymentDto;
+  kind: DisputeKind;
+  onSubmit: (amountCents: number, reason: string) => Promise<void>;
+  onPendingChange?: (pending: boolean) => void;
 }): React.JSX.Element {
   const { locale } = useLocale();
   const refundable = refundableCents(payment);
-  const [open, setOpen] = React.useState(defaultOpen);
   const [amount, setAmount] = React.useState(refundable);
   const [reason, setReason] = React.useState("");
-  const [pending, setPending] = React.useState(false);
+  const [pending, setPendingState] = React.useState(false);
   const amountError = disputeAmountError(amount, refundable);
   const reasonId = React.useId();
   const refund = kind === "refund";
   // A variable, not an inline literal: a `data-testid` key in a literal is an excess property.
   const amountInput = { "data-testid": "treasury-dispute-amount", name: "amount" };
-
-  const onOpenChange = (next: boolean) => {
-    if (pending) return;
-    setOpen(next);
-    if (next) {
-      setAmount(refundable);
-      setReason("");
-    }
+  const setPending = (next: boolean) => {
+    setPendingState(next);
+    onPendingChange?.(next);
   };
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -297,9 +353,8 @@ export function DisputeDialog({
     if (amountError || pending) return;
     setPending(true);
     try {
-      await onSubmit(payment, kind, amount, reason.trim());
+      await onSubmit(amount, reason.trim());
       toast.success(refund ? t("treasury.refund.done") : t("treasury.chargeback.done"));
-      setOpen(false);
     } catch (err) {
       toastActionError(err, refund ? t("treasury.refund.failed") : t("treasury.chargeback.failed"));
     } finally {
@@ -308,73 +363,53 @@ export function DisputeDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger
-        render={
-          <Button
-            data-testid={refund ? "treasury-refund" : "treasury-chargeback"}
-            variant={refund ? "outline" : "destructive"}
-            size="sm"
-            aria-label={
-              refund
-                ? t("treasury.refund.label", { reference: payment.reference })
-                : t("treasury.chargeback.label", { reference: payment.reference })
-            }
-          />
-        }
-      >
-        {refund ? t("treasury.refund") : t("treasury.chargeback")}
-      </DialogTrigger>
-      <DialogContent>
-        <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)} noValidate>
-          <DialogHeader>
-            <DialogTitle>
-              {refund
-                ? t("treasury.refund.title", { reference: payment.reference })
-                : t("treasury.chargeback.title", { reference: payment.reference })}
-            </DialogTitle>
-            <DialogDescription>{refund ? t("treasury.refund.body") : t("treasury.chargeback.body")}</DialogDescription>
-          </DialogHeader>
-          <AmountField
-            label={t("treasury.dispute.amount")}
-            currency={payment.amount.currency}
-            locale={locale}
-            value={amount}
-            min={1}
-            max={refundable}
-            rangeError={amountError}
-            hint={t("treasury.dispute.amountHint", {
-              amount: formatMoney(refundable, payment.amount.currency, locale),
-            })}
-            inputProps={amountInput}
-            onValueChange={setAmount}
-          />
-          <Field>
-            <FieldLabel htmlFor={reasonId}>{t("treasury.dispute.reason")}</FieldLabel>
-            <Textarea
-              id={reasonId}
-              data-testid="treasury-dispute-reason"
-              value={reason}
-              maxLength={DISPUTE_REASON_MAX}
-              rows={3}
-              onChange={(e) => setReason(e.currentTarget.value)}
-            />
-            <FieldDescription>{t("treasury.dispute.reasonHint")}</FieldDescription>
-          </Field>
-          <DialogFooter>
-            <Button
-              data-testid="treasury-dispute-submit"
-              type="submit"
-              variant={refund ? "default" : "destructive"}
-              disabled={amountError !== null || pending}
-              aria-busy={pending || undefined}
-            >
-              {refund ? t("treasury.refund.submit") : t("treasury.chargeback.submit")}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)} noValidate>
+      <DialogHeader>
+        <DialogTitle>
+          {refund
+            ? t("treasury.refund.title", { reference: payment.reference })
+            : t("treasury.chargeback.title", { reference: payment.reference })}
+        </DialogTitle>
+        <DialogDescription>{refund ? t("treasury.refund.body") : t("treasury.chargeback.body")}</DialogDescription>
+      </DialogHeader>
+      <AmountField
+        label={t("treasury.dispute.amount")}
+        currency={payment.amount.currency}
+        locale={locale}
+        value={amount}
+        min={1}
+        max={refundable}
+        rangeError={amountError}
+        hint={t("treasury.dispute.amountHint", {
+          amount: formatMoney(refundable, payment.amount.currency, locale),
+        })}
+        inputProps={amountInput}
+        onValueChange={setAmount}
+      />
+      <Field>
+        <FieldLabel htmlFor={reasonId}>{t("treasury.dispute.reason")}</FieldLabel>
+        <Textarea
+          id={reasonId}
+          data-testid="treasury-dispute-reason"
+          value={reason}
+          maxLength={DISPUTE_REASON_MAX}
+          rows={3}
+          onChange={(e) => setReason(e.currentTarget.value)}
+        />
+        <FieldDescription>{t("treasury.dispute.reasonHint")}</FieldDescription>
+      </Field>
+      <DialogFooter>
+        <Button
+          data-testid="treasury-dispute-submit"
+          type="submit"
+          variant={refund ? "default" : "destructive"}
+          disabled={amountError !== null || pending}
+          aria-busy={pending || undefined}
+        >
+          {refund ? t("treasury.refund.submit") : t("treasury.chargeback.submit")}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 
@@ -499,41 +534,20 @@ export function PayoutResult({ result }: { result: PayoutRunResult }): React.JSX
 export function MarkPaidDialog({
   payout,
   onSubmit,
-  defaultOpen = false,
 }: {
   payout: TreasurerPayoutDto;
   onSubmit: PayoutsPanelProps["onMarkPaid"];
-  defaultOpen?: boolean;
 }): React.JSX.Element {
-  const { locale } = useLocale();
-  const [open, setOpen] = React.useState(defaultOpen);
-  const [reference, setReference] = React.useState("");
+  const [open, setOpen] = React.useState(false);
   const [pending, setPending] = React.useState(false);
-  const referenceId = React.useId();
-  const valid = reference.trim() !== "";
-
-  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!valid || pending) return;
-    setPending(true);
-    try {
-      await onSubmit(payout, reference.trim());
-      toast.success(t("treasury.markPaid.done"));
-      setOpen(false);
-    } catch (err) {
-      toastActionError(err, t("treasury.markPaid.failed"));
-    } finally {
-      setPending(false);
-    }
-  };
-
+  const [generation, setGeneration] = React.useState(0);
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
         if (pending) return;
         setOpen(next);
-        if (next) setReference("");
+        if (next) setGeneration((g) => g + 1);
       }}
     >
       <DialogTrigger
@@ -549,40 +563,87 @@ export function MarkPaidDialog({
         {t("treasury.markPaid")}
       </DialogTrigger>
       <DialogContent>
-        <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)} noValidate>
-          <DialogHeader>
-            <DialogTitle>{t("treasury.markPaid.title", { username: payout.user.username })}</DialogTitle>
-            <DialogDescription>
-              {t("treasury.markPaid.body", {
-                amount: formatMoney(payout.amount.cents, payout.amount.currency, locale),
-              })}
-            </DialogDescription>
-          </DialogHeader>
-          <Field>
-            <FieldLabel htmlFor={referenceId}>{t("treasury.markPaid.reference")}</FieldLabel>
-            <Input
-              id={referenceId}
-              data-testid="treasury-mark-paid-reference"
-              value={reference}
-              maxLength={PAYOUT_REFERENCE_MAX}
-              autoComplete="off"
-              onChange={(e) => setReference(e.currentTarget.value)}
-            />
-            <FieldDescription>{t("treasury.markPaid.referenceHint")}</FieldDescription>
-          </Field>
-          <DialogFooter>
-            <Button
-              data-testid="treasury-mark-paid-submit"
-              type="submit"
-              disabled={!valid || pending}
-              aria-busy={pending || undefined}
-            >
-              {t("treasury.markPaid.submit")}
-            </Button>
-          </DialogFooter>
-        </form>
+        <MarkPaidForm
+          key={generation}
+          payout={payout}
+          onPendingChange={setPending}
+          onSubmit={async (reference) => {
+            await onSubmit(payout, reference);
+            setOpen(false);
+          }}
+        />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The mark-paid form inside its dialog. */
+export function MarkPaidForm({
+  payout,
+  onSubmit,
+  onPendingChange,
+}: {
+  payout: TreasurerPayoutDto;
+  onSubmit: (reference: string) => Promise<void>;
+  onPendingChange?: (pending: boolean) => void;
+}): React.JSX.Element {
+  const { locale } = useLocale();
+  const [reference, setReference] = React.useState("");
+  const [pending, setPendingState] = React.useState(false);
+  const referenceId = React.useId();
+  const valid = reference.trim() !== "";
+  const setPending = (next: boolean) => {
+    setPendingState(next);
+    onPendingChange?.(next);
+  };
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!valid || pending) return;
+    setPending(true);
+    try {
+      await onSubmit(reference.trim());
+      toast.success(t("treasury.markPaid.done"));
+    } catch (err) {
+      toastActionError(err, t("treasury.markPaid.failed"));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)} noValidate>
+      <DialogHeader>
+        <DialogTitle>{t("treasury.markPaid.title", { username: payout.user.username })}</DialogTitle>
+        <DialogDescription>
+          {t("treasury.markPaid.body", {
+            amount: formatMoney(payout.amount.cents, payout.amount.currency, locale),
+          })}
+        </DialogDescription>
+      </DialogHeader>
+      <Field>
+        <FieldLabel htmlFor={referenceId}>{t("treasury.markPaid.reference")}</FieldLabel>
+        <Input
+          id={referenceId}
+          data-testid="treasury-mark-paid-reference"
+          value={reference}
+          maxLength={PAYOUT_REFERENCE_MAX}
+          autoComplete="off"
+          onChange={(e) => setReference(e.currentTarget.value)}
+        />
+        <FieldDescription>{t("treasury.markPaid.referenceHint")}</FieldDescription>
+      </Field>
+      <DialogFooter>
+        <Button
+          data-testid="treasury-mark-paid-submit"
+          type="submit"
+          disabled={!valid || pending}
+          aria-busy={pending || undefined}
+        >
+          {t("treasury.markPaid.submit")}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
 
@@ -596,7 +657,11 @@ export interface PayoutAccountInput {
 
 const enabledSwitch = { "data-testid": "treasury-account-enabled" };
 
-export function PayoutAccountForm({ onSubmit }: { onSubmit: (input: PayoutAccountInput) => Promise<void> }): React.JSX.Element {
+export function PayoutAccountForm({
+  onSubmit,
+}: {
+  onSubmit: (input: PayoutAccountInput) => Promise<void>;
+}): React.JSX.Element {
   const [username, setUsername] = React.useState("");
   const [reference, setReference] = React.useState("");
   const [enabled, setEnabled] = React.useState(true);
@@ -659,7 +724,12 @@ export function PayoutAccountForm({ onSubmit }: { onSubmit: (input: PayoutAccoun
         switchProps={enabledSwitch}
       />
       <div>
-        <Button data-testid="treasury-account-submit" type="submit" disabled={!valid || pending} aria-busy={pending || undefined}>
+        <Button
+          data-testid="treasury-account-submit"
+          type="submit"
+          disabled={!valid || pending}
+          aria-busy={pending || undefined}
+        >
           {t("treasury.account.submit")}
         </Button>
       </div>
@@ -709,7 +779,12 @@ export function CostForm({
   };
 
   return (
-    <FormSection title={t("treasury.cost.title")} description={t("treasury.cost.hint")} onSubmit={(e) => void submit(e)} noValidate>
+    <FormSection
+      title={t("treasury.cost.title")}
+      description={t("treasury.cost.hint")}
+      onSubmit={(e) => void submit(e)}
+      noValidate
+    >
       <Field data-invalid={category !== "" && !categoryValid ? true : undefined}>
         <FieldLabel htmlFor="treasury-cost-category">{t("treasury.cost.category")}</FieldLabel>
         <Input

@@ -2,8 +2,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { MONEY_LIMITS } from "@commonair/contracts/currency";
-import { EmptyState, MoneyAmount, RelativeTime, Skeleton, SkeletonGroup, StatusBadge, formatMoney, useLocale } from "@commonair/ui";
-import { BreakdownBar, DataTable, StatCard, StatGrid, type DataTableColumn } from "@commonair/ui/blocks/data";
+import {
+  EmptyState,
+  MoneyAmount,
+  RelativeTime,
+  Skeleton,
+  SkeletonGroup,
+  StatusBadge,
+  formatMoney,
+  useLocale,
+} from "@commonair/ui";
+import {
+  BreakdownBar,
+  DataTable,
+  FilterBar,
+  StatCard,
+  StatGrid,
+  type DataTableColumn,
+} from "@commonair/ui/blocks/data";
 import { AmountField, FormSection } from "@commonair/ui/blocks/forms";
 import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
@@ -22,13 +38,13 @@ import { toastActionError } from "../../lib/action-error.ts";
 import {
   TIER_BENEFITS_MAX,
   TIER_NAME_MAX,
-  TIERS,
   earnedDelta,
   payoutProgress,
   revenueLineBadge,
   tierDrafts,
   tiersInput,
   validateTiers,
+  type MonthOption,
   type PayoutAccountDto,
   type RevenueLineDto,
   type RevenueSummaryDto,
@@ -41,6 +57,30 @@ import { safeHttpUrl } from "../../lib/url.ts";
  * `/revenue` pieces (Revenue board). Each takes its data as props, so tests/selectors-render.test.tsx
  * can server-render them with fixtures; the route file loads the data.
  */
+
+export interface RevenueMonthFilterProps {
+  value: string;
+  options: MonthOption[];
+  onValueChange: (month: string) => void;
+}
+
+/** The month picker (`revenue-month`); option values are `YYYY-MM`. */
+export function RevenueMonthFilter({ value, options, onValueChange }: RevenueMonthFilterProps): React.JSX.Element {
+  return (
+    <FilterBar
+      filters={[
+        {
+          id: "revenue-month-filter",
+          label: t("revenue.month"),
+          value,
+          options,
+          onValueChange,
+          "data-testid": "revenue-month",
+        },
+      ]}
+    />
+  );
+}
 
 export function RevenueStatsSkeleton(): React.JSX.Element {
   return (
@@ -147,7 +187,11 @@ type TierRow = RevenueSummaryDto["tiers"][number];
 export function RevenueTiers({ summary }: { summary: RevenueSummaryDto }): React.JSX.Element {
   const total = summary.tiers.reduce((sum, row) => sum + row.active, 0);
   const columns: DataTableColumn<TierRow>[] = [
-    { id: "tier", header: t("revenue.tierColumn"), cell: ({ row }) => t("money.tierName", { tier: row.original.tier }) },
+    {
+      id: "tier",
+      header: t("revenue.tierColumn"),
+      cell: ({ row }) => t("money.tierName", { tier: row.original.tier }),
+    },
     { id: "active", header: t("revenue.activeColumn"), align: "numeric", cell: ({ row }) => row.original.active },
     {
       id: "share",
@@ -193,7 +237,8 @@ export interface RevenueLedgerProps {
   onDownload: () => void;
 }
 
-const signed = (cents: number | null | undefined): string => (cents === null || cents === undefined ? "" : String(cents));
+const signed = (cents: number | null | undefined): string =>
+  cents === null || cents === undefined ? "" : String(cents);
 
 export function RevenueLedger({
   lines,
@@ -204,7 +249,11 @@ export function RevenueLedger({
   onDownload,
 }: RevenueLedgerProps): React.JSX.Element {
   const columns: DataTableColumn<RevenueLineDto>[] = [
-    { id: "date", header: t("revenue.ledger.date"), cell: ({ row }) => <RelativeTime date={row.original.occurredAt} /> },
+    {
+      id: "date",
+      header: t("revenue.ledger.date"),
+      cell: ({ row }) => <RelativeTime date={row.original.occurredAt} />,
+    },
     {
       id: "type",
       header: t("revenue.ledger.type"),
@@ -314,7 +363,11 @@ function ledgerDetail(line: RevenueLineDto): string {
 export function PayoutAccountCard({ account }: { account: PayoutAccountDto }): React.JSX.Element {
   const onboarding = safeHttpUrl(account.onboardingUrl);
   return (
-    <Card data-testid="revenue-payout-account" data-provider={account.provider} data-enabled={String(account.payoutsEnabled)}>
+    <Card
+      data-testid="revenue-payout-account"
+      data-provider={account.provider}
+      data-enabled={String(account.payoutsEnabled)}
+    >
       <CardHeader>
         <CardTitle>{t("revenue.payout.title")}</CardTitle>
         <CardDescription>{t("revenue.payout.hint")}</CardDescription>
@@ -397,13 +450,25 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
       </ResponsiveGrid>
       {/* FormSection's own submit takes no test id, so the button is ours. */}
       <div>
-        <Button data-testid="revenue-tiers-save" type="submit" disabled={!valid || pending} aria-busy={pending || undefined}>
+        <Button
+          data-testid="revenue-tiers-save"
+          type="submit"
+          disabled={!valid || pending}
+          aria-busy={pending || undefined}
+        >
           {t("revenue.tiers.save")}
         </Button>
       </div>
     </FormSection>
   );
 }
+
+// Variables, not inline literals: a `data-testid` key in a literal is an excess property.
+const PRICE_INPUTS: Record<TierDraft["tier"], { "data-testid": string; name: string }> = {
+  1: { "data-testid": "revenue-tier-price-1", name: "tier-1-price" },
+  2: { "data-testid": "revenue-tier-price-2", name: "tier-2-price" },
+  3: { "data-testid": "revenue-tier-price-3", name: "tier-3-price" },
+};
 
 function TierFields({
   draft,
@@ -420,8 +485,7 @@ function TierFields({
   const n = draft.tier;
   const nameId = `revenue-tier-name-${n}`;
   const benefitsId = `revenue-tier-benefits-${n}`;
-  // A variable, not an inline literal: a `data-testid` key in a literal is an excess property.
-  const priceInput = { "data-testid": `revenue-tier-price-${n}`, name: `tier-${n}-price` };
+  const priceInput = PRICE_INPUTS[n];
   return (
     <FieldSet>
       <FieldLegend>{t("money.tierName", { tier: n })}</FieldLegend>

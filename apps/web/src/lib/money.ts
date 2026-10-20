@@ -17,6 +17,7 @@ import type {
 import { MONEY_LIMITS } from "@commonair/contracts/currency";
 import type { PAYMENT_KINDS, PAYMENT_STATUSES, PAYOUT_STATUSES, REVENUE_LINE_TYPES } from "@commonair/contracts/enums";
 import { formatMoney, type StatusTone } from "@commonair/ui";
+import { notFound } from "@tanstack/react-router";
 import type { z } from "zod";
 import { t, type MessageKey } from "../i18n/index.ts";
 
@@ -49,6 +50,16 @@ export interface PayoutAccountDto {
  */
 export function isTreasurer(me: object | null | undefined): boolean {
   return me !== null && me !== undefined && "role" in me && me.role === "treasurer";
+}
+
+/**
+ * Route guard for the platform tools: resolves the session (on the server during SSR) and answers
+ * anyone but a treasurer, signed out included, with the not-found page, so nothing renders for them.
+ */
+export async function requireTreasurer<T extends object>(load: () => Promise<T | null>): Promise<{ me: T }> {
+  const me = await load();
+  if (me === null || !isTreasurer(me)) throw notFound();
+  return { me };
 }
 
 // ── Months (UTC) ──────────────────────────────────────────────────────────────────────────────
@@ -125,7 +136,8 @@ export function earnedDelta(net: MoneyDto, previous: MoneyDto, locale: string): 
   const cents = net.cents - previous.cents;
   const amount = formatMoney(Math.abs(cents), net.currency, locale);
   if (cents > 0) return { direction: "up", sentiment: "positive", cents, label: t("revenue.earned.up", { amount }) };
-  if (cents < 0) return { direction: "down", sentiment: "negative", cents, label: t("revenue.earned.down", { amount }) };
+  if (cents < 0)
+    return { direction: "down", sentiment: "negative", cents, label: t("revenue.earned.down", { amount }) };
   return { direction: "flat", cents, label: t("revenue.earned.flat") };
 }
 
@@ -246,7 +258,8 @@ export function validateTiers(drafts: readonly TierDraft[]): Partial<Record<Tier
     }
     const name = draft.name.trim();
     if (name === "") add(tier, "name", t("revenue.tiers.error.nameRequired"));
-    else if (name.length > TIER_NAME_MAX) add(tier, "name", t("revenue.tiers.error.nameTooLong", { max: TIER_NAME_MAX }));
+    else if (name.length > TIER_NAME_MAX)
+      add(tier, "name", t("revenue.tiers.error.nameTooLong", { max: TIER_NAME_MAX }));
     if (draft.benefits.length > TIER_BENEFITS_MAX)
       add(tier, "benefits", t("revenue.tiers.error.benefitsTooLong", { max: TIER_BENEFITS_MAX }));
     if (
@@ -281,9 +294,7 @@ export function refundableCents(payment: Pick<TreasurerPaymentDto, "amount" | "r
 }
 
 export function canDispute(payment: Pick<TreasurerPaymentDto, "status" | "amount" | "refunded">): boolean {
-  return (
-    (payment.status === "succeeded" || payment.status === "partially_refunded") && refundableCents(payment) > 0
-  );
+  return (payment.status === "succeeded" || payment.status === "partially_refunded") && refundableCents(payment) > 0;
 }
 
 export const DISPUTE_REASON_MAX = 500;
@@ -417,7 +428,10 @@ export interface TransparencyTotals {
   surplus: number;
 }
 
-export function transparencyTotals(months: readonly TransparencyMonthDto[], fallbackCurrency: string): TransparencyTotals {
+export function transparencyTotals(
+  months: readonly TransparencyMonthDto[],
+  fallbackCurrency: string,
+): TransparencyTotals {
   return months.reduce<TransparencyTotals>(
     (acc, m) => ({
       currency: acc.currency,

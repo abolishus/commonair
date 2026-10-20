@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { EmptyState, MoneyAmount, formatMoney, useLocale } from "@commonair/ui";
-import { BreakdownBar, DataTable, MetricPanel, StatCard, StatGrid, type DataTableColumn } from "@commonair/ui/blocks/data";
+import {
+  BreakdownBar,
+  DataTable,
+  MetricPanel,
+  StatCard,
+  StatGrid,
+  type DataTableColumn,
+} from "@commonair/ui/blocks/data";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { ResponsiveGrid } from "@commonair/ui/layouts";
 import { PieChartIcon, Radio02Icon } from "@hugeicons/core-free-icons";
@@ -42,23 +49,53 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
   const totals = transparencyTotals(months, first.revenue.currency);
   const money = (cents: number) => <MoneyAmount value={{ cents, currency: totals.currency }} colorNegative />;
   const stats = [
-    { id: "revenue", label: t("transparency.stat.revenue"), hint: t("transparency.stat.revenueHint"), cents: totals.revenue },
-    { id: "payouts", label: t("transparency.stat.payouts"), hint: t("transparency.stat.payoutsHint"), cents: totals.payouts },
+    {
+      id: "revenue",
+      label: t("transparency.stat.revenue"),
+      hint: t("transparency.stat.revenueHint"),
+      cents: totals.revenue,
+    },
+    {
+      id: "payouts",
+      label: t("transparency.stat.payouts"),
+      hint: t("transparency.stat.payoutsHint"),
+      cents: totals.payouts,
+    },
     { id: "costs", label: t("transparency.stat.costs"), hint: t("transparency.stat.costsHint"), cents: totals.costs },
-    { id: "surplus", label: t("transparency.stat.surplus"), hint: t("transparency.stat.surplusHint"), cents: totals.surplus },
+    {
+      id: "surplus",
+      label: t("transparency.stat.surplus"),
+      hint: t("transparency.stat.surplusHint"),
+      cents: totals.surplus,
+    },
   ];
   const egress = egressShare(months);
   const columns: DataTableColumn<TransparencyMonthDto>[] = [
     { id: "month", header: t("transparency.month"), cell: ({ row }) => monthLabel(row.original.month) },
-    { id: "revenue", header: t("transparency.stat.revenue"), align: "numeric", cell: ({ row }) => money(row.original.revenue.cents) },
+    {
+      id: "revenue",
+      header: t("transparency.stat.revenue"),
+      align: "numeric",
+      cell: ({ row }) => money(row.original.revenue.cents),
+    },
     {
       id: "payouts",
       header: t("transparency.stat.payouts"),
       align: "numeric",
       cell: ({ row }) => money(row.original.streamerPayouts.cents),
     },
-    { id: "costs", header: t("transparency.stat.costs"), align: "numeric", cell: ({ row }) => money(monthCosts(row.original)) },
-    { id: "surplus", header: t("transparency.stat.surplus"), align: "numeric", cell: ({ row }) => money(row.original.surplus.cents) },
+    {
+      id: "costs",
+      header: t("transparency.stat.costs"),
+      align: "numeric",
+      cell: ({ row }) => money(monthCosts(row.original)),
+    },
+    {
+      id: "surplus",
+      header: t("transparency.stat.surplus"),
+      align: "numeric",
+      cell: ({ row }) => money(row.original.surplus.cents),
+    },
     {
       id: "patronage",
       header: t("transparency.patronage"),

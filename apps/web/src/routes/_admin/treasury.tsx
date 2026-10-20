@@ -3,6 +3,7 @@
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer } from "@commonair/ui/layouts";
+import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
@@ -47,6 +48,7 @@ function TreasuryPage(): React.JSX.Element {
     setRunning(true);
     try {
       setResult(await api().money.treasurer.runPayouts({ periodEnd: new Date().toISOString() }));
+      toast.success(t("treasury.payouts.ran"));
       payouts.reload();
     } catch (err) {
       toastActionError(err, t("treasury.payouts.runFailed"));
@@ -69,7 +71,11 @@ function TreasuryPage(): React.JSX.Element {
               search={search}
               onSearchChange={setSearch}
               onConfirm={async (p) => {
-                await api().money.treasurer.confirm({ paymentId: p.paymentId, receivedAt: new Date().toISOString(), note: "" });
+                await api().money.treasurer.confirm({
+                  paymentId: p.paymentId,
+                  receivedAt: new Date().toISOString(),
+                  note: "",
+                });
                 payments.reload();
               }}
               onDispute={async (p, kind, amountCents, reason) => {

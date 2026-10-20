@@ -89,7 +89,9 @@ describe("FilterBar select and search props", () => {
   test("options carry their value in data-value and picking one reports it", async () => {
     const change = vi.fn<(value: string) => void>();
     render(
-      <FilterBar filters={[{ id: "month", label: "Month", value: "2026-10", options: months, onValueChange: change }]} />,
+      <FilterBar
+        filters={[{ id: "month", label: "Month", value: "2026-10", options: months, onValueChange: change }]}
+      />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("combobox", { name: "Month" }));
@@ -103,7 +105,12 @@ describe("FilterBar select and search props", () => {
     const change = vi.fn<(value: string) => void>();
     const searchInputProps = { "data-testid": "search", name: "reference", maxLength: 64 };
     render(
-      <FilterBar searchLabel="Reference" searchValue="CA-" onSearchChange={change} searchInputProps={searchInputProps} />,
+      <FilterBar
+        searchLabel="Reference"
+        searchValue="CA-"
+        onSearchChange={change}
+        searchInputProps={searchInputProps}
+      />,
     );
     const input = screen.getByRole("textbox", { name: "Reference" });
     expect([input.getAttribute("data-testid"), input.getAttribute("name"), input.getAttribute("maxlength")]).toEqual([
@@ -119,7 +126,10 @@ describe("FilterBar select and search props", () => {
 
 describe("SSR and hydration", () => {
   const cases: [string, React.ReactElement][] = [
-    ["BreakdownBar with attributes", <BreakdownBar key="b" segments={sources} label="Share" formatLabel={() => "Share"} />],
+    [
+      "BreakdownBar with attributes",
+      <BreakdownBar key="b" segments={sources} label="Share" formatLabel={() => "Share"} />,
+    ],
     [
       "FilterBar with a select and search props",
       <FilterBar

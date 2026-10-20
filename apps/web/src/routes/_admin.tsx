@@ -4,13 +4,13 @@
 import { AppShell, AdminShell, type NavItem } from "@commonair/ui/layouts";
 import { BankIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Link, Outlet, createFileRoute, notFound, useLocation } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
 import type * as React from "react";
 import { NotFoundState } from "../components/money/not-found.tsx";
 import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../lib/bootstrap.ts";
-import { isTreasurer } from "../lib/money.ts";
+import { isTreasurer, requireTreasurer } from "../lib/money.ts";
 
 /**
  * Platform tools (today: the treasury, for treasurers only). Anyone else, signed out included,
@@ -18,11 +18,7 @@ import { isTreasurer } from "../lib/money.ts";
  * tools nor their sidebar ever render for them.
  */
 export const Route = createFileRoute("/_admin")({
-  beforeLoad: async () => {
-    const me = await getSessionUser();
-    if (!isTreasurer(me)) throw notFound();
-    return { me };
-  },
+  beforeLoad: () => requireTreasurer(() => getSessionUser()),
   component: AdminLayout,
   notFoundComponent: AdminNotFound,
 });

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { Skeleton, SkeletonGroup, useLocale } from "@commonair/ui";
-import { FilterBar } from "@commonair/ui/blocks/data";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
@@ -12,6 +11,7 @@ import { downloadText } from "../../components/money/download.ts";
 import {
   PayoutAccountCard,
   RevenueLedger,
+  RevenueMonthFilter,
   RevenueSources,
   RevenueStats,
   RevenueStatsSkeleton,
@@ -60,27 +60,15 @@ function RevenueView({ channel, now }: { channel: string; now: number }): React.
   const account = useLoad(channel, () => api().money.payoutAccount());
   const tiers = useLoad(`tiers|${channel}`, () => api().money.tiers({ channel }));
   const ledger = useLedger(channel, month);
-  const currency = summary.data?.net.currency;
+  // Stored tiers carry the channel's currency; a channel without tiers yet uses its revenue's.
+  const currency = tiers.data?.[0]?.price.currency ?? summary.data?.net.currency;
 
   return (
     <PageContainer data-testid="revenue" className="flex flex-col gap-6 py-8">
       <PageHeader
         title={t("revenue.title")}
         description={t("revenue.intro")}
-        actions={
-          <FilterBar
-            filters={[
-              {
-                id: "revenue-month-filter",
-                label: t("revenue.month"),
-                value: month,
-                options: months,
-                onValueChange: setMonth,
-                "data-testid": "revenue-month",
-              },
-            ]}
-          />
-        }
+        actions={<RevenueMonthFilter value={month} options={months} onValueChange={setMonth} />}
       />
       {summary.failed && <FormError>{t("revenue.loadFailed")}</FormError>}
       {summary.data ? (
@@ -95,11 +83,7 @@ function RevenueView({ channel, now }: { channel: string; now: number }): React.
         !summary.failed && <RevenueStatsSkeleton />
       )}
       <RevenueLedger {...ledger} />
-      {account.data ? (
-        <PayoutAccountCard account={account.data} />
-      ) : (
-        !account.failed && <CardSkeleton />
-      )}
+      {account.data ? <PayoutAccountCard account={account.data} /> : !account.failed && <CardSkeleton />}
       {account.failed && <FormError>{t("revenue.payout.loadFailed")}</FormError>}
       {tiers.data && currency ? (
         <TierEditor
@@ -144,8 +128,8 @@ function useLedger(channel: string, month: string) {
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [downloading, setDownloading] = React.useState(false);
   React.useEffect(() => {
+    // A new key shows the loading state on its own: `current` below ignores another key's lines.
     let live = true;
-    setState({ key, lines: null, cursor: null });
     api()
       .money.revenueLedger({ channel, ...periodOf(month), limit: LEDGER_PAGE })
       .then((page) => {

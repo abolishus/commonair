@@ -42,9 +42,11 @@ export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> {
 
   React.useEffect(() => {
     run();
+    // The counter object itself, not a DOM ref: bumping it is how in-flight answers get dropped.
+    const counter = seq;
     return () => {
       // Unmount or key change: drop whatever is still in flight.
-      seq.current++;
+      counter.current++;
     };
   }, [run]);
 
