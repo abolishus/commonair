@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { en } from "../src/i18n/en.ts";
 import { t } from "../src/i18n/index.ts";
+import { moneyMessages } from "../src/i18n/money.ts";
+import { supportMessages } from "../src/i18n/support.ts";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 
@@ -43,6 +45,16 @@ describe("message catalog", () => {
       .filter(([f, text]) => !allowed.includes(f) && /\bt\(\s*[`'a-zA-Z_]/.test(text))
       .map(([f]) => f);
     expect(dynamic).toEqual([]);
+  });
+
+  it("keeps the E4b unit catalogs disjoint from each other and from the inline keys", () => {
+    // `en` spreads the unit catalogs, so a repeated key would silently override another's text.
+    const inline = [...readFileSync(join(SRC, "i18n/en.ts"), "utf8").matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]);
+    const support = Object.keys(supportMessages);
+    const money = Object.keys(moneyMessages);
+    expect(support.filter((k) => k in moneyMessages)).toEqual([]);
+    expect(inline.filter((k) => k !== undefined && (k in supportMessages || k in moneyMessages))).toEqual([]);
+    expect(support.length + money.length).toBeGreaterThan(100);
   });
 
   it("maps every auth error code to a catalog key", () => {
