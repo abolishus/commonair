@@ -20,6 +20,14 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session eight (2026-10-20): E4c trust & safety (in progress)
+
+ADR 0006's open questions resolved (native TypeScript PDQ/vPDQ, default classifier
+`AdamCodd/vit-base-nsfw-detector` on ONNX Runtime for sexual content only, NCMEC drafted by the
+platform and filed by a `legal` user, evidence sealed in append-only Postgres because Garage
+cannot deny delete) and the license judgments recorded in ADR 0008. Waiting for the user to accept
+both. E4b validations are deferred at the user's request.
+
 ## Session six (2026-10-19): E4b money (in progress)
 
 Manual adapter first, then Stripe against stripe-mock (PLAN.md E4b). Plan and units in

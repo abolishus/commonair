@@ -15,6 +15,29 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
+## Session eight in flight (E4c trust & safety)
+
+Started 2026-10-20 from `468f4f0`. Prompt: slice E4c (PLAN.md row E4c, ADR 0006): T0 hash match,
+T1/T2 classifier tiers, legal holds, NCMEC drafts, NCII 48-hour clock, upload scanning, mod
+queue/appeals/NCII UI, harness `trust-safety`. Reviews are **harder than E4b**: an independent
+reviewer before every merge, a focused re-review after any HIGH fix, and a second,
+security-focused reviewer for the T0 path, holds, deletion, evidence storage and the NCII clock,
+even when the first finds no HIGH. Losing evidence, skipping a T0 action, showing T0 material
+outside the `legal` role, or switching the pipeline off counts as HIGH. The user said to **skip
+the E4b validations for now** and finish E4c first. Safety rules (every brief repeats them): never
+obtain, generate, describe or handle real CSAM/NCII; synthetic geometric fixtures only;
+no industry hash lists; logs carry ids, categories and scores only.
+
+Step 1 (done, awaiting the user): ADR 0006 "Resolution of the open questions" and ADR 0008
+(licenses). Found in the code: the hash matcher is a no-op by default (SHA-256 `stub` only),
+quarantine moves evidence inside the media bucket with media's own credentials, `legal_holds` has
+no triggers and no users, uploads are presigned straight to public keys. Garage v2.4.1 cannot
+deny delete to a writing key (no versioning, policies or object lock), so evidence images go into
+an append-only, sealed Postgres table and large media into an evidence bucket only the worker can
+reach, with a daily hash audit (ADR 0006 Q4). Next: the user accepts ADR 0006/0008 and answers the
+open policy questions, then the head-agent contract step (`schema-change` skill), the spec
+`docs/testing/e4c-selectors.md` and briefs in `.claude/briefs/e4c/`.
+
 ## Session six in flight (E4b money)
 
 Started 2026-10-19 from `06cb6c9`. Prompt: build slice E4b (PLAN.md): the manual adapter first
