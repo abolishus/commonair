@@ -26,7 +26,11 @@ ADR 0006's open questions resolved (native TypeScript PDQ/vPDQ, default classifi
 `AdamCodd/vit-base-nsfw-detector` on ONNX Runtime for sexual content only, NCMEC drafted by the
 platform and filed by a `legal` user, evidence sealed in append-only Postgres because Garage
 cannot deny delete) and the license judgments recorded in ADR 0008. Waiting for the user to accept
-both. E4b validations are deferred at the user's request.
+both; **both accepted 2026-10-20**. E4b validations are deferred at the user's request.
+Contract step in progress: spec `docs/testing/e4c-selectors.md`, enums, migrations 0015/0016
+with DB-enforced protections (tested), hold CLI committed (`3d51fbc`). Remaining contract work
+(contracts, config, `packages/moderation` scaffold, Garage evidence bucket, briefs) is listed in
+HANDOFF.md "Step 2". Units not started.
 
 ## Session six (2026-10-19): E4b money (in progress)
 

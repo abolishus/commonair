@@ -28,15 +28,115 @@ the E4b validations for now** and finish E4c first. Safety rules (every brief re
 obtain, generate, describe or handle real CSAM/NCII; synthetic geometric fixtures only;
 no industry hash lists; logs carry ids, categories and scores only.
 
-Step 1 (done; ADR 0006 and 0008 accepted 2026-10-20): ADR 0006 "Resolution of the open questions" and ADR 0008
-(licenses). Found in the code: the hash matcher is a no-op by default (SHA-256 `stub` only),
-quarantine moves evidence inside the media bucket with media's own credentials, `legal_holds` has
-no triggers and no users, uploads are presigned straight to public keys. Garage v2.4.1 cannot
-deny delete to a writing key (no versioning, policies or object lock), so evidence images go into
-an append-only, sealed Postgres table and large media into an evidence bucket only the worker can
-reach, with a daily hash audit (ADR 0006 Q4). Next: the user accepts ADR 0006/0008 and answers the
-open policy questions, then the head-agent contract step (`schema-change` skill), the spec
-`docs/testing/e4c-selectors.md` and briefs in `.claude/briefs/e4c/`.
+Step 1 (done): ADR 0006 "Resolution of the open questions" and ADR 0008 (licenses), both
+**accepted 2026-10-20**, with the user's four policy decisions recorded in ADR 0006. Found in the
+code: the hash matcher is a no-op by default (SHA-256 `stub` only), quarantine moves evidence
+inside the media bucket with media's own credentials, `legal_holds` had no triggers and no users,
+uploads are presigned straight to public keys. Also: **reports, the mod queue, suspension, the
+audit log, data export and account deletion are 501 stubs** in the API (only schema exists), and
+there is **no 18+ gate on the channel page or playback** (only the directory filters mature).
+E4c builds account deletion (the scenario needs it) and the playback/page gate. Garage v2.4.1
+cannot deny delete to a writing key, so evidence images go into an append-only, sealed Postgres
+table and large media into an evidence bucket only the worker can reach (ADR 0006 Q4).
+
+### Step 2, head-agent contract step (in progress; resume here)
+
+Done and committed (`3d51fbc`, all on local `main`, **not pushed**):
+
+- `docs/testing/e4c-selectors.md`: **the spec** (safety rules, tiers/thresholds, flow table,
+  routes, test ids, `trust-safety` scenario steps, test hooks). Read it in full first.
+- Enums (`packages/contracts/src/enums.ts`): `legal` platform role, `MODERATION_*`,
+  `HASH_LIST_CATEGORIES`, `CONTENT_LABELS`, `LEGAL_HOLD_REASONS`, `EVIDENCE_*`,
+  `NCMEC_REPORT_STATUSES`, `NCII_*`; appeal subjects `content_label`/`moderation_case`; report
+  reason `ncii`; mod actions `end_stream`/`warn`.
+- DB: `packages/db/src/schema/moderation.ts` (+ `legal_holds` columns in `safety.ts`,
+  `broadcasts.restricted_at/restricted_case_id`), migrations `0015_trust_safety.sql` and
+  `0016_trust_safety_protections.sql` (all triggers; header comment lists them; it also
+  `CREATE OR REPLACE`s `commonair_settings_guard` and `commonair_configure_app_role` from 0002 with
+  additions only). `moderation.thresholds` governance seed. Tests:
+  `packages/db/tests/trust-safety.int.test.ts` (32) + `holds.test.ts` (5); all db tests pass
+  (int 84, unit 22), tsc clean.
+- Operator hold CLI: `bun run --filter @commonair/db hold -- list | release <id> --reason <text>`
+  (owner `DATABASE_URL` only; the trigger refuses the app role).
+- Stopgap in `services/api/src/routes/appeals.ts`: the two new appeal subjects are refused
+  (`UNWIRED_SUBJECTS`) until the API unit wires them.
+- tsc clean in contracts, api, worker, chat, media, web, ui, harness after these changes.
+
+Still to do in the contract step (head agent only), in this order:
+
+1. **Contracts** (`packages/contracts`):
+   - `events.ts`: add an `internal?: true` flag to `EventDef`; internal events
+     `moderation.flagged`, `moderation.case.resolved`, `moderation.restriction`,
+     `ncii.request.received`, `ncii.request.decided`, `legal.hold.placed`,
+     `ncmec.draft.created` (payloads ids/enums only, no PII); export `PUBLIC_EVENT_TYPES` and use
+     it for EventSub subscription input in `router.ts`, so apps can never subscribe to internal
+     events (the worker's outbox fan-out must skip internal types: worker unit).
+   - `internal.ts`: `QUEUES.moderation`; `KEYS.moderationFrame(frameId)` (60 s TTL) and
+     `KEYS.moderationScript(channelId)`; Zod job payloads `ModerationScanJob`,
+     `ModerationT0Job` (sealed frame bytes base64, list category, distance, quality, list
+     version), `ModerationT0MediaJob`; internal route paths `/internal/moderation/script` and
+     `/internal/moderation/ncii-tick`.
+   - `api/entities.ts`: `ModerationCase`, `ModerationFlag` (no frame URL for T0), `CaseHistoryRow`,
+     `LegalCase`, `EvidenceObject` (metadata), `NcmecReport` (+ decrypted snapshot shape),
+     `LegalHold`, `NciiRequest`, `ContentLabel`; `BroadcastSummary.restricted` (`"under_review" |
+     null`); `Me.role` already follows the enum.
+   - `api/router.ts`: access level `legal` (add to the API access middleware list:
+     `services/api/src/lib/access.ts`, a stopgap so it compiles, real check by the API unit);
+     `moderation.{queue,case,frame,review,t0Queue,t0Confirm,t0Dismiss,evidence,ncmecReports,
+     ncmecReport,ncmecFile,holds}`; `ncii.{submit (public, ALTCHA, write limit),queue,decide}`;
+     `channels.commitUpload {channel,key} → {key,url}` with `upload_rejected`;
+     `admin.expediteDeletion {username,reason}`; `admin.legalHold` becomes legal-only and
+     place-only (`hold: true` literal); `FORBIDDEN` code `mature_gate` on playback. Add 501
+     stubs in services/api for every new procedure so the API compiles.
+2. **Config** (`packages/config/src/env.ts` + `.env.example`, the sync test enforces both):
+   `moderationEnv`: `MODERATION_SAMPLE_SECONDS` (2–60, default 10),
+   `MODERATION_HASHLIST_CSAM`, `MODERATION_HASHLIST_NCII` (paths, empty default),
+   `MODERATION_CLASSIFIER` (`onnx` default | `scripted`), `MODERATION_CLASSIFIER_MODEL` (path),
+   `MODERATION_TEST_HOOKS` (default false; `scripted` refused without it),
+   `EVIDENCE_PUBLIC_KEY` (required for media/worker/api), `EVIDENCE_PRIVATE_KEY` (api only);
+   `storageEnv`: `S3_BUCKET_EVIDENCE`, `S3_EVIDENCE_ACCESS_KEY_ID`,
+   `S3_EVIDENCE_SECRET_ACCESS_KEY` (worker only). Keep `HASH_MATCH_*` marked deprecated until the
+   media unit merges, then delete. `scripts/init-env.ts`: generate an X25519 evidence keypair
+   (raw 32-byte keys, base64) and the second Garage key pair (`GK`+24 hex / 64 hex).
+3. **`packages/moderation` scaffold**: `package.json` (AGPL, exact `onnxruntime-node` 1.30.0 /
+   `onnxruntime-common` 1.30.0, never in `trustedDependencies`), `src/index.ts` with the
+   `HashMatcher`, `Classifier` (scores per `MODERATION_CATEGORIES`, unscored = absent),
+   `HashList`, `MODERATION_CONSTANTS` (`PDQ_MATCH_DISTANCE` 31, `PDQ_MIN_QUALITY` 50,
+   NCII 24/36/48 h, frame TTL 60 s), the seal format (X25519 ECDH + HKDF-SHA256 + AES-256-GCM via
+   WebCrypto; header: version, key id = sha256(pubkey)[0..16] hex, ephemeral pubkey, nonce) as
+   types and docs; `LICENSES/BSD-3-Clause.txt`. `bun install`, add to the license check run.
+   `scripts/fetch-model.ts` (pinned HF revision `8587de998f441aac03fdd57a85d2e4cb808c7d64`,
+   `onnx/model_int8.onnx`, sha256 recorded after the first download).
+4. **Infra**: `infra/garage/bootstrap.ts` creates `S3_BUCKET_EVIDENCE`, imports the evidence key
+   with read+write only on that bucket, gives the main key nothing on it; a test proving the main
+   key cannot list/get/put there. Compose: evidence key env to the worker only; mount
+   `MODERATION_HASHLIST_*` files. Document the S3 Object Lock policy in the operator guide.
+5. **Briefs** `.claude/briefs/e4c/`: `_common.md` (copy the e4b one's shape; repeat the SAFETY
+   RULES from the spec verbatim; harder review rules) + units, ≤ 6 in parallel, each in its own
+   worktree: **A** `packages/moderation` (PDQ port + reference vectors, list loading/reload, seal,
+   scripted + ONNX classifier, synthetic fixtures + fixture `.pdq` lists); **B** services/media
+   (sampling, PDQ in media, kick-first T0 enqueue, VOD/clip pre-publish scan, thumbnails, replace
+   `safety/`); **C** services/worker (scan job, T0/T1/T2 transactions, T0 media copy, NCII clock,
+   holds eligibility, evidence audit, NCMEC unfiled alerts, deletion job, outbox skip internal);
+   **D** services/api (mod queue/review, T0 confirm/dismiss, evidence view, NCMEC filing, NCII
+   submit/decide, reports, suspension, audit log, appeals on labels/cases, commitUpload,
+   deletion + expedite, mature gate on playback, directory restriction, test-hook routes);
+   **E** apps/web (+ packages/ui compositions as contract requests) from the TrustSafety board;
+   **F** harness `trust-safety`. A must land (or its interfaces must be final) before B/C/D
+   integrate; F can be written against the spec. Then: e4c doc into
+   `apps/web/tests/selectors.test.ts`/`i18n.test.ts`; `docs/operators/trust-safety.md`
+   (ADR 0006 Q5, "not legal advice" header).
+6. Reviews (harder than E4b): independent reviewer before every merge, focused re-review after
+   any HIGH fix, plus a second security-focused reviewer for B, C, D (T0 path, holds, deletion,
+   evidence, NCII clock) even with no HIGH. Losing evidence, skipping a T0 action, showing T0
+   material outside `legal`, or switching the pipeline off is HIGH.
+
+Decisions taken in the spec that go slightly beyond ADR 0006 (tell the user if asked): T0 removal
+of VOD/clip media is **not restored** after a two-reviewer dismissal (copies exist only as sealed
+evidence; account and channel are restored); T1-restricted streams offer "show anyway" only to
+signed-in, 18+-confirmed viewers; uploads above T2 `sexual` are rejected (avatars etc. show
+outside the 18+ gate); human escalation of a report/case to legal runs the full T0 actions on
+confirm; `admin.expediteDeletion` exists so the scenario (and support) can delete now.
 
 ## Session six in flight (E4b money)
 
