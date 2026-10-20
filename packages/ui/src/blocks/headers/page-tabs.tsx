@@ -45,8 +45,12 @@ export function PageTabs({
   const current = value ?? items.find((item) => item.current)?.id ?? items[0]?.id;
   return (
     <Tabs value={panelMode ? current : undefined} onValueChange={onValueChange} className={cn("min-w-0", className)}>
-      {/* Only the list scrolls sideways at 320 px; the panels keep the page width. */}
-      <div className="min-w-0 overflow-x-auto">
+      {/*
+        Only the list scrolls sideways at 320 px; the panels keep the page width. A scroller clips
+        vertically too, so the line variant's underline (below the list) gets bottom padding,
+        cancelled by a matching negative margin so the layout does not move.
+      */}
+      <div className={cn("min-w-0 overflow-x-auto", variant === "line" && "-mb-1.5 pb-1.5")}>
         <TabsList variant={variant} aria-label={props["aria-label"]} className={cn("min-w-max", fullWidth && "w-full")}>
           {items.map((item) => (
             <TabsTrigger
