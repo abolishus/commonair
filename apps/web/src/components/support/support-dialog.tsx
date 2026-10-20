@@ -245,7 +245,7 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
     setDraft((d) => ({ ...d, ...next }));
     setError(null);
   };
-  // The amount field reports value and validity in one event: merge into the latest tip, not this render's.
+  // Merge into the latest tip, not this render's: the amount field reports value and validity separately.
   const updateTip = (next: Partial<TipDraft>) => {
     setDraft((d) => ({ ...d, tip: { ...d.tip, ...next } }));
     setError(null);
@@ -463,7 +463,12 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
               locale={locale}
               value={draft.tip.cents}
               onValueChange={(cents) => updateTip({ cents })}
-              onValidityChange={(valid) => updateTip({ unparsed: !valid })}
+              // Not `updateTip`: the field reports validity on mount, which must not clear a checkout error.
+              onValidityChange={(valid) =>
+                setDraft((d) =>
+                  (d.tip.unparsed ?? false) === !valid ? d : { ...d, tip: { ...d.tip, unparsed: !valid } },
+                )
+              }
               presets={tipPresets(info.tip).map((cents) => ({ value: cents, label: money(cents) }))}
               min={info.tip.minCents}
               max={info.tip.maxCents}

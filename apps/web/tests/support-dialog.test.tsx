@@ -187,6 +187,43 @@ describe("Support dialog", () => {
     expect((id("support-submit") as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it("tips: an unparsed amount left on another tab does not block checkout on return", async () => {
+    const c = client(supportInfo(), async () => instructions);
+    await open(c);
+    const submitDisabled = () => (id("support-submit") as HTMLButtonElement).disabled;
+    const clearThenLeave = async () => {
+      fireEvent.click(id("support-tab-tip"));
+      await waitFor(() => expect(screen.queryByTestId("support-tip-amount")).not.toBeNull());
+      fireEvent.change(id("support-tip-amount"), { target: { value: "" } });
+      expect(submitDisabled()).toBe(true);
+      fireEvent.click(id("support-tab-gift"));
+      // The tip panel unmounts once it has left (Base UI panels are not kept mounted).
+      await waitFor(() => expect(screen.queryByTestId("support-tip-amount")).toBeNull());
+      fireEvent.click(id("support-tab-tip"));
+      await waitFor(() => expect(screen.queryByTestId("support-tip-amount")).not.toBeNull());
+    };
+    await clearThenLeave();
+    // The remounted field shows the last parsed amount, and checkout agrees.
+    expect(submitDisabled()).toBe(false);
+    fireEvent.change(id("support-tip-amount"), { target: { value: "7" } });
+    expect(id("support-total").getAttribute("data-cents")).toBe("700");
+    expect(submitDisabled()).toBe(false);
+    await clearThenLeave();
+    fireEvent.click(screen.getByText("$10.00"));
+    expect(id("support-total").getAttribute("data-cents")).toBe("1000");
+    expect(submitDisabled()).toBe(false);
+  });
+
+  it("gift: clearing the count leaves no preset pressed", async () => {
+    await open(client(supportInfo(), async () => instructions));
+    fireEvent.click(id("support-tab-gift"));
+    await waitFor(() => expect(screen.queryByTestId("support-gift-count")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    expect(screen.getByRole("button", { name: "5" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.change(id("support-gift-count"), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "5" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("no tiers: sub and gift disabled with the reason, opens on tip", async () => {
     await open(client(supportInfo({ tiers: [] }), async () => instructions));
     expect(

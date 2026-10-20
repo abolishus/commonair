@@ -166,19 +166,63 @@ describe("forms blocks", () => {
       expect(screen.getByText("Enter an amount")).toBeTruthy();
     }
     expect(change).not.toHaveBeenCalled();
-    // Reported once per transition, not on every keystroke.
-    expect(validity.mock.calls).toEqual([[false]]);
+    // Reported on mount, then once per transition, not on every keystroke.
+    expect(validity.mock.calls).toEqual([[true], [false]]);
     fireEvent.blur(input);
     expect(input.value).toBe("abc");
     fireEvent.change(input, { target: { value: "6" } });
     expect(change).toHaveBeenLastCalledWith(600);
-    expect(validity.mock.calls).toEqual([[false], [true]]);
+    expect(validity.mock.calls).toEqual([[true], [false], [true]]);
     expect(screen.queryByText("Enter an amount")).toBeNull();
     fireEvent.change(input, { target: { value: "" } });
     fireEvent.click(screen.getByText("$10"));
     expect(change).toHaveBeenLastCalledWith(1000);
-    expect(validity.mock.calls).toEqual([[false], [true], [false], [true]]);
+    expect(validity.mock.calls).toEqual([[true], [false], [true], [false], [true]]);
     expect(input.getAttribute("data-cents")).toBe("500");
+  });
+
+  test("AmountField reports valid on unmount while unparsed, so a remount cannot desync its parent", () => {
+    const validity = vi.fn<(valid: boolean) => void>();
+    const { unmount } = render(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={500}
+        onValueChange={() => undefined}
+        onValidityChange={validity}
+        rangeError="Out of range"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("support-tip-amount"), { target: { value: "" } });
+    unmount();
+    expect(validity.mock.calls).toEqual([[true], [false], [true]]);
+  });
+
+  test("ChoiceToggle stays controlled when the value matches no option", () => {
+    const { rerender } = render(
+      <ChoiceToggle
+        label="Count"
+        value="5"
+        options={[
+          { value: "1", label: "1" },
+          { value: "5", label: "5" },
+        ]}
+      />,
+    );
+    const pressed = () => screen.getAllByRole("button").filter((b) => b.getAttribute("aria-pressed") === "true");
+    expect(pressed().map((b) => b.textContent)).toEqual(["5"]);
+    rerender(
+      <ChoiceToggle
+        label="Count"
+        value=""
+        options={[
+          { value: "1", label: "1" },
+          { value: "5", label: "5" },
+        ]}
+      />,
+    );
+    expect(pressed()).toEqual([]);
   });
 
   test("CopyField copies and reports success; secrets can be revealed", async () => {
