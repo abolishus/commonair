@@ -348,7 +348,8 @@ integer millionths, reversals as split(cumulative) − split(already)), in `src/
 report has per-step timings, `*.confirm_to_chat_event` metrics, and `money.plan`,
 `money.expected`, `money.observed.step5|6|7`, `money.payoutRun`, `transparency.*` and `ledger.*`
 data. The web path selects only by test id; the subscriber badge is read from an anonymous chat
-socket on both paths (the web contract has no badge id). On failure every open page is
+socket on both paths, and on the web path A's message row must also render in the streamer's
+chat as `chat-message` with `data-badges~="subscriber"`. On failure every open page is
 screenshotted into `<report dir>/<run id>-e4b-money/`.
 
 **Needs:** `api`, `web`, `chat`, `worker`, `mail`, `browser`; `PAYMENTS_PROVIDER=manual` (the

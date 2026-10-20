@@ -88,8 +88,11 @@ export interface PayoutView {
 }
 
 export interface Treasurer {
-  /** The payment with this reference (any status), or null while it is not listed. */
-  find(reference: string, b: WaitBudget): Promise<TreasuryPaymentView | null>;
+  /**
+   * The payment with this reference (any status), or null while it is not listed. `reload` asks
+   * a web treasurer to reload the page first (a retry after the list was fetched too early).
+   */
+  find(reference: string, b: WaitBudget, reload?: boolean): Promise<TreasuryPaymentView | null>;
   confirm(reference: string, b: WaitBudget): Promise<void>;
   refund(reference: string, cents: number, reason: string, b: WaitBudget): Promise<void>;
   chargeback(reference: string, cents: number, reason: string, b: WaitBudget): Promise<void>;
@@ -284,8 +287,8 @@ export class WebTreasurer implements Treasurer {
     return byTestId(page, T.treasuryPaymentRow, { reference }).first();
   }
 
-  async find(reference: string, b: WaitBudget): Promise<TreasuryPaymentView | null> {
-    const row = await this.searchRow(reference, b, false);
+  async find(reference: string, b: WaitBudget, reload = false): Promise<TreasuryPaymentView | null> {
+    const row = await this.searchRow(reference, b, reload);
     const found = await row
       .waitFor({ timeout: b.timeoutMs })
       .then(() => true)
@@ -370,7 +373,21 @@ export class WebTreasurer implements Treasurer {
     const page = await this.treasury(b, true);
     await byTestId(page, T.treasuryTabPayouts).click({ timeout: b.timeoutMs });
     await byTestId(page, T.treasuryRunPayouts).waitFor({ timeout: b.timeoutMs });
-    return (await datasets(byTestId(page, T.treasuryPayoutRow))).map((d) => ({
+    // The list may still be loading when the tab renders: wait until two reads a second apart
+    // agree on the row count before reading the rows.
+    const rows = byTestId(page, T.treasuryPayoutRow);
+    let previous = -1;
+    await waitFor(
+      "treasury-payout-row count to settle",
+      async () => {
+        const n = await rows.count();
+        const stable = n === previous;
+        previous = n;
+        return stable || null;
+      },
+      { timeoutMs: b.timeoutMs, intervalMs: 1_000, signal: b.signal },
+    );
+    return (await datasets(rows)).map((d) => ({
       id: d.payoutId ?? "",
       username: d.username ?? "",
       status: d.status ?? "",

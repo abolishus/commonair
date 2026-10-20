@@ -17,6 +17,7 @@ import {
   E3_CHANGED_E1_IDS,
   E3_ROUTE_PATTERNS,
   E3_TEST_IDS,
+  E4B_CHANGED_E1_IDS,
   E4B_NESTED_TEST_IDS,
   E4B_ROUTE_PATTERNS,
   E4B_TEST_IDS,
@@ -181,13 +182,20 @@ describe("selectors match docs/testing/e4b-selectors.md", () => {
   const doc = readFileSync(DOC_E4B, "utf8");
   const tierTemplates = REVENUE_TIER_FIELDS.map((f) => `revenue-tier-${f}-<n>`);
 
-  test("data-testid values: the first-column ids plus the per-tier inputs, no duplicates", () => {
+  test("data-testid values: the first-column ids, the E1 ids E4b changes and the per-tier inputs", () => {
     const documented = firstColumnSpans(doc, "Test ids");
     expect(documented.length).toBeGreaterThan(60);
     expect(new Set(documented).size).toBe(documented.length);
-    const ours = [...Object.values(E4B_TEST_IDS), ...tierTemplates];
+    const ours = [...Object.values(E4B_TEST_IDS), ...E4B_CHANGED_E1_IDS, ...tierTemplates];
     expect(new Set(ours).size).toBe(ours.length);
     expect([...ours].sort()).toEqual([...documented].sort());
+  });
+
+  test("the changed ids are E1 ids, and chat-message documents data-badges", () => {
+    for (const id of E4B_CHANGED_E1_IDS) expect(Object.values(E1_TEST_IDS)).toContain(id);
+    const row = doc.split("\n").find((l) => l.startsWith("| `chat-message`")) ?? "";
+    expect(row).toContain("`data-badges`");
+    expect(row).toContain("`subscriber`");
   });
 
   test("ids named inside descriptions are documented there", () => {

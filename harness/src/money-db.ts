@@ -63,22 +63,30 @@ export async function ledgerSums(databaseUrl: string, paymentIds: readonly strin
       select d.id::text as id, d.payment_id::text as payment_id, d.kind::text as kind
         from disputes d
        where d.payment_id::text in ${sql(ids)}`;
-    const refs = [...ids, ...disputes.map((d) => d.id)];
+    // Dispute reversals also reference the payment (their dispute id is in the idempotency key).
     const rows = await sql<
-      { transaction_id: string; ref_id: string | null; kind: string; currency: string; sum: string }[]
+      {
+        transaction_id: string;
+        ref_id: string | null;
+        kind: string;
+        idempotency_key: string;
+        currency: string;
+        sum: string;
+      }[]
     >`
-      select t.id::text as transaction_id, t.ref_id::text as ref_id, t.kind, e.currency,
-             sum(e.amount_cents)::text as sum
+      select t.id::text as transaction_id, t.ref_id::text as ref_id, t.kind,
+             t.idempotency_key, e.currency, sum(e.amount_cents)::text as sum
         from ledger_transactions t
         join ledger_entries e on e.transaction_id = t.id
-       where t.ref_id::text in ${sql(refs)}
-       group by t.id, t.ref_id, t.kind, e.currency
+       where t.ref_id::text in ${sql(ids)}
+       group by t.id, t.ref_id, t.kind, t.idempotency_key, e.currency
        order by t.id`;
     return {
       rows: rows.map((r) => ({
         transactionId: r.transaction_id,
         refId: r.ref_id,
         kind: r.kind,
+        idempotencyKey: r.idempotency_key,
         currency: r.currency,
         sum: r.sum,
       })),

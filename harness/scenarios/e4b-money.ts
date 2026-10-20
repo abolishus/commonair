@@ -14,6 +14,7 @@
  * drives the same steps through the API and the chat socket instead of the web app.
  */
 import { join } from "node:path";
+import type { Page } from "playwright";
 import type { ChatClient } from "../src/chat-client.ts";
 import {
   ApiCreator,
@@ -39,6 +40,8 @@ import {
   type RevenueExpectation,
   type ScenarioPlan,
   type Tier,
+  disputePostingKey,
+  disputeReachedLedger,
   expectedFigures,
   inconsistentLedgerRows,
   missingLedgerRows,
@@ -58,13 +61,15 @@ import { ApiActor, type SocialActor, type WaitBudget, WebActor, remainingMs } fr
 import type { SignedInUser } from "../src/users.ts";
 import { waitFor } from "../src/wait.ts";
 import { signInViaUi } from "../src/web/flows.ts";
-import { ROUTES, TEST_IDS as T } from "../src/web/selectors.ts";
+import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
 import { WebSession, byTestId } from "../src/web/session.ts";
 
 const UI_TIMEOUT_MS = 20_000;
 /** Chat is near real time; the badge needs the API's post-commit invalidate to land first. */
 const CHAT_TIMEOUT_MS = 10_000;
 const BADGE_TIMEOUT_MS = 20_000;
+/** One treasurer search attempt; the step retries (with a reload) until UI_TIMEOUT_MS. */
+const FIND_TRY_MS = 5_000;
 /** Ledger reads are synchronous with the confirm; this covers page loads and one retry. */
 const SETTLE_TIMEOUT_MS = 20_000;
 const ROLE_CLI_TIMEOUT_MS = 30_000;
@@ -238,6 +243,8 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   let treasurer: Treasurer;
   let publicReader: PublicReader;
   let events: ChatEventObserver;
+  // Web path: the streamer's channel page, where chat events and A's badged message render.
+  let chatPage: Page | null = null;
   // An anonymous socket in the channel sees every message frame with its badges, on both paths.
   const observer: ChatClient = await ctx.step("anonymous chat observer joins the channel", async () => {
     const o = await p.chat();
@@ -254,12 +261,13 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     const s = await webSession("streamer", streamer);
     creator = new WebCreator((path) => s.goto(path));
     publicReader = new WebPublic((path) => s.goto(path, "public"));
-    const chatPage = await ctx.step("streamer: open the own channel page (chat events)", async () => {
-      const page = await s.goto(ROUTES.channel(channel), "chat");
-      await byTestId(page, T.chat, { state: "open" }).waitFor({ timeout: UI_TIMEOUT_MS });
-      return page;
+    const page = await ctx.step("streamer: open the own channel page (chat events)", async () => {
+      const opened = await s.goto(ROUTES.channel(channel), "chat");
+      await byTestId(opened, T.chat, { state: "open" }).waitFor({ timeout: UI_TIMEOUT_MS });
+      return opened;
     });
-    events = new WebChatEvents(() => chatPage);
+    chatPage = page;
+    events = new WebChatEvents(() => page);
     const ts = await webSession("treasurer", treasurerUser);
     treasurer = new WebTreasurer((path) => ts.goto(path), currency);
     await ctx.step("treasurer: /treasury renders for a treasurer", async () => {
@@ -320,13 +328,15 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     eventWhat: string,
     match: Parameters<ChatEventObserver["waitEvent"]>[1],
   ) => {
-    const found = await ctx.step(`treasurer: find ${label} by reference`, () =>
-      waitFor(`treasurer finds ${reference}`, () => treasurer.find(reference, ui), {
-        timeoutMs: UI_TIMEOUT_MS,
-        intervalMs: 500,
-        signal,
-      }),
-    );
+    // Short tries, reloading the page after the first, like the treasurer's status waits.
+    const found = await ctx.step(`treasurer: find ${label} by reference`, () => {
+      let tries = 0;
+      return waitFor(
+        `treasurer finds ${reference}`,
+        () => treasurer.find(reference, { ...ui, timeoutMs: FIND_TRY_MS }, tries++ > 0),
+        { timeoutMs: UI_TIMEOUT_MS, intervalMs: 500, signal },
+      );
+    });
     ctx.assert(`${label} is pending before confirmation`, found.status === "pending", found);
     const confirmed = performance.now();
     await ctx.step(`treasurer: confirm ${label}`, () => treasurer.confirm(reference, ui));
@@ -385,6 +395,7 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   );
 
   await ctx.step("A: open the channel chat", () => A.social.openChannel(channel, ui));
+  let badgedText = "";
   const badges = await ctx.step("A's next message carries the subscriber badge", () => {
     const deadline = Date.now() + BADGE_TIMEOUT_MS;
     let n = 0;
@@ -392,6 +403,7 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
       "A's message with a subscriber badge",
       async () => {
         const text = `subscribed ${ctx.runId} ${n++}`;
+        badgedText = text;
         await A.social.send(text, { timeoutMs: remainingMs(deadline), signal });
         const f = await observer
           .waitFor(
@@ -411,6 +423,16 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     badges.some((x) => x.type === "subscriber" && (x.tier === undefined || x.tier === plan.subTier)),
     badges,
   );
+  if (chatPage) {
+    const page = chatPage;
+    await ctx.step("chat renders A's message with data-badges~=subscriber", () =>
+      page
+        .locator(`${tid(T.chatMessage)}[data-badges~="subscriber"]`)
+        .filter({ hasText: badgedText })
+        .first()
+        .waitFor({ timeout: UI_TIMEOUT_MS }),
+    );
+  }
 
   // ------------------------------------------------------------ 3. gift
   const gift = await ctx.step(`A: Support → gift ${GIFT_COUNT} tier-${plan.giftTier} subs to random viewers`, () =>
@@ -631,11 +653,10 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   }
   ctx.assert("both disputes are recorded", ledger.disputes.length === 2, ledger.disputes);
   for (const d of ledger.disputes) {
-    ctx.assert(
-      `dispute ${d.kind} reached the ledger`,
-      ledger.rows.some((r) => r.refId === d.id),
-      d,
-    );
+    ctx.assert(`dispute ${d.kind} reached the ledger`, disputeReachedLedger(ledger.rows, d), {
+      ...d,
+      idempotencyKey: disputePostingKey(d),
+    });
   }
   const unbalanced = unbalancedTransactions(ledger.rows);
   ctx.assert("every transaction sums to zero per currency", unbalanced.length === 0, { unbalanced });

@@ -325,8 +325,27 @@ export interface LedgerSumRow {
   transactionId: string;
   refId: string | null;
   kind: string;
+  /** Unique per posting; reversals carry `${kind}:${disputeId}` (packages/ledger rules). */
+  idempotencyKey: string;
   currency: string;
   sum: string | number | bigint;
+}
+
+/**
+ * A refund/chargeback posts against the payment (ref_type "payment", ref_id = payment id), so
+ * the dispute id appears only in the posting's idempotency key, `${kind}:${disputeId}`.
+ */
+export function disputePostingKey(d: { id: string; kind: string }): string {
+  return `${d.kind}:${d.id}`;
+}
+
+/** Whether the dispute's reversal posting is among the rows (exact idempotency-key match). */
+export function disputeReachedLedger(
+  rows: readonly LedgerSumRow[],
+  d: { id: string; paymentId: string; kind: string },
+): boolean {
+  const key = disputePostingKey(d);
+  return rows.some((r) => r.idempotencyKey === key && r.refId === d.paymentId);
 }
 
 /** Transactions that do not sum to zero in some currency. */

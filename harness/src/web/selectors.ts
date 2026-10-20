@@ -84,6 +84,9 @@ export const E3_TEST_IDS = {
 /** E1 ids the E3 document re-lists: `player` gains `data-source`. */
 export const E3_CHANGED_E1_IDS = [E1_TEST_IDS.player] as const;
 
+/** E1 ids the E4b document re-lists: `chat-message` gains `data-badges`. */
+export const E4B_CHANGED_E1_IDS = [E1_TEST_IDS.chatMessage] as const;
+
 /**
  * Ids E4b adds (docs/testing/e4b-selectors.md), as listed in the first column of its tables. The
  * per-tier inputs `revenue-tier-<field>-<n>` are built by `revenueTierInput`.

@@ -9,10 +9,13 @@ import { describe, expect, test } from "vite-plus/test";
 import { REPO_ROOT, ROLE_CLI, roleCliCommand } from "../src/money-db.ts";
 import {
   type Cut,
+  type LedgerSumRow,
   type ScenarioPlan,
   centsToInput,
   chatEventFromAttributes,
   chatEventFromFrame,
+  disputePostingKey,
+  disputeReachedLedger,
   expectedFigures,
   inconsistentLedgerRows,
   missingLedgerRows,
@@ -213,6 +216,7 @@ describe("ledger row checks", () => {
       transactionId: "t",
       refId: "r",
       kind: "payment",
+      idempotencyKey: "payment:r",
       currency: "usd",
       sum,
     });
@@ -221,6 +225,60 @@ describe("ledger row checks", () => {
       row("-1"),
       row("9007199254740993"),
     ]);
+  });
+});
+
+describe("dispute ledger matching", () => {
+  const pay = "0190a000-0000-7000-8000-000000000001";
+  const disp = "0190a000-0000-7000-8000-0000000000d1";
+  const row = (over: Partial<LedgerSumRow>): LedgerSumRow => ({
+    transactionId: "t",
+    refId: pay,
+    kind: "payment",
+    idempotencyKey: `payment:${pay}`,
+    currency: "usd",
+    sum: "0",
+    ...over,
+  });
+  const dispute = { id: disp, paymentId: pay, kind: "refund" };
+
+  test("posting key is kind:disputeId", () => {
+    expect(disputePostingKey(dispute)).toBe(`refund:${disp}`);
+    expect(disputePostingKey({ id: disp, kind: "chargeback" })).toBe(`chargeback:${disp}`);
+  });
+
+  test("matches the reversal posted against the payment", () => {
+    const rows = [row({}), row({ kind: "refund", idempotencyKey: `refund:${disp}` })];
+    expect(disputeReachedLedger(rows, dispute)).toBe(true);
+  });
+
+  test("a row whose refId is the dispute id does not count (reversals reference the payment)", () => {
+    expect(disputeReachedLedger([row({ refId: disp, kind: "refund", idempotencyKey: "x" })], dispute)).toBe(false);
+  });
+
+  test("the payment's own posting, another kind, or another dispute do not count", () => {
+    expect(disputeReachedLedger([row({})], dispute)).toBe(false);
+    expect(disputeReachedLedger([row({ kind: "chargeback", idempotencyKey: `chargeback:${disp}` })], dispute)).toBe(
+      false,
+    );
+    expect(
+      disputeReachedLedger(
+        [row({ kind: "refund", idempotencyKey: "refund:0190a000-0000-7000-8000-0000000000d2" })],
+        dispute,
+      ),
+    ).toBe(false);
+    expect(
+      disputeReachedLedger(
+        [row({ refId: "0190a000-0000-7000-8000-000000000002", idempotencyKey: `refund:${disp}` })],
+        dispute,
+      ),
+    ).toBe(false);
+    expect(disputeReachedLedger([], dispute)).toBe(false);
+  });
+
+  test("chargeback-reversal of the same dispute is not the chargeback itself", () => {
+    const cb = { ...dispute, kind: "chargeback" };
+    expect(disputeReachedLedger([row({ idempotencyKey: `chargeback-reversal:${disp}` })], cb)).toBe(false);
   });
 });
 
