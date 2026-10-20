@@ -46,6 +46,12 @@ worker-money, D web-support (+ `ChatEvent`, OptionGroup/AmountField props), E we
 the e4b doc to `apps/web/tests/selectors.test.ts`/`i18n.test.ts`, then unit G (Stripe adapter
 against stripe-mock, webhook route, Connect onboarding, harness `--set provider=stripe`).
 
+### Session seven (2026-10-20, in progress)
+
+Resumed from `e64e007`. Round: finish B's fix round and E (fresh agents in the same worktrees),
+rerun the reviews of A, D and F, fix every HIGH (focused re-review), merge A–F, then the head adds
+the e4b doc to the web selector/i18n tests and pushes; then unit G (Stripe), then the open items.
+
 ### Resume point (2026-10-20, stopped at the user's request)
 
 The user asked to stop the units and push `main`. On `main` (pushed): the contract step, migration
