@@ -218,6 +218,7 @@ export const me = {
     return { ok: true as const };
   }),
 
+  labels: os.me.labels.handler(notImplemented),
   exports: {
     create: os.me.exports.create.handler(notImplemented),
     list: os.me.exports.list.handler(notImplemented),

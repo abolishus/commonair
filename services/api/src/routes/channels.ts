@@ -9,7 +9,7 @@ import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
 import { channelBySlug, iso, loadUsersPublic, toChannelDto, toPanelDto, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, forbidden, notFound } from "../lib/errors.ts";
+import { badRequest, forbidden, notFound, notImplemented } from "../lib/errors.ts";
 import { redactKeys, scanAndRevoke, type LeakSource } from "../lib/leaks.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
@@ -162,6 +162,8 @@ export const channelsRoutes = {
       expiresAt: iso(new Date(deps.now().getTime() + UPLOAD_TTL_SECONDS * 1000)),
     };
   }),
+
+  commitUpload: os.channels.commitUpload.handler(notImplemented),
 
   follow: os.channels.follow.handler(async ({ context, input }) => {
     const { deps } = context;

@@ -5,7 +5,17 @@ import { isContractProcedure, type AnyContractProcedure } from "@orpc/contract";
 import { describe, expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { contract } from "../src/api/router.ts";
-import { EVENTS, EVENT_TYPES, signWebhook, verifyWebhook } from "../src/events.ts";
+import {
+  BusEvent,
+  EVENTS,
+  EVENT_TYPES,
+  INTERNAL_EVENT_TYPES,
+  PUBLIC_EVENT_TYPES,
+  isInternalEvent,
+  signWebhook,
+  verifyWebhook,
+} from "../src/events.ts";
+import { ModerationT0Job, ModerationScores } from "../src/internal.ts";
 import { SCOPES } from "../src/scopes.ts";
 import { generateOpenApi } from "../src/openapi.ts";
 import { BotConfig, PatronageWeights } from "../src/shapes.ts";
@@ -72,6 +82,40 @@ describe("events", () => {
       for (const s of e.scopes) expect(SCOPES).toHaveProperty(s);
       expect(e.payload).toBeInstanceOf(z.ZodObject);
     }
+  });
+
+  test("internal trust & safety events are never offered to apps or put on the bus", () => {
+    expect(INTERNAL_EVENT_TYPES.toSorted()).toEqual([
+      "legal.hold.placed",
+      "moderation.case.resolved",
+      "moderation.flagged",
+      "moderation.restriction",
+      "ncii.request.decided",
+      "ncii.request.received",
+      "ncmec.draft.created",
+    ]);
+    for (const t of INTERNAL_EVENT_TYPES) {
+      expect(PUBLIC_EVENT_TYPES).not.toContain(t);
+      expect(isInternalEvent(t)).toBe(true);
+      // Ids and enums only: no field that could carry personal data, URLs or evidence keys.
+      for (const k of Object.keys(EVENTS[t].payload.shape))
+        expect(k).not.toMatch(/email|name|url|key|ip|login|frame|bytes|hash|pdq|note|reason$/);
+    }
+    expect(PUBLIC_EVENT_TYPES.length + INTERNAL_EVENT_TYPES.length).toBe(EVENT_TYPES.length);
+    expect(isInternalEvent("stream.online")).toBe(false);
+    expect(isInternalEvent("toString")).toBe(false);
+    const ev = { id: "e", version: "1", channelId: null, payload: {}, occurredAt: "t" };
+    expect(BusEvent.safeParse({ ...ev, type: "moderation.flagged" }).success).toBe(false);
+    expect(BusEvent.safeParse({ ...ev, type: "stream.online" }).success).toBe(true);
+    const subscribe = contract.developer.events.subscribe["~orpc"].inputSchema as z.ZodObject;
+    expect(subscribe.shape.type.safeParse("moderation.flagged").success).toBe(false);
+  });
+
+  test("classifier scores leave unscored categories absent and stay in [0, 1]", () => {
+    expect(ModerationScores.parse({ sexual: 0.5 })).toEqual({ sexual: 0.5 });
+    expect(ModerationScores.safeParse({ sexual: 1.2 }).success).toBe(false);
+    expect(ModerationScores.safeParse({ nudity: 0.2 }).success).toBe(false);
+    expect(ModerationT0Job.safeParse({ evidence: [] }).success).toBe(false);
   });
 
   test("webhook signatures verify, and tampering, wrong secrets and stale timestamps fail", async () => {

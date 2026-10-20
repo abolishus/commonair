@@ -73,4 +73,5 @@ export const admin = {
 
   incidents: os.admin.incidents.handler(notImplemented),
   legalHold: os.admin.legalHold.handler(notImplemented),
+  expediteDeletion: os.admin.expediteDeletion.handler(notImplemented),
 };

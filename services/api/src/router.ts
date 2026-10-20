@@ -17,7 +17,9 @@ import { integrity } from "./routes/integrity.ts";
 import { interact } from "./routes/interact.ts";
 import { legal } from "./routes/legal.ts";
 import { me } from "./routes/me.ts";
+import { moderation } from "./routes/moderation.ts";
 import { money } from "./routes/money.ts";
+import { ncii } from "./routes/ncii.ts";
 import { playback } from "./routes/playback.ts";
 import { relays } from "./routes/relays.ts";
 import { safety } from "./routes/safety.ts";
@@ -48,6 +50,8 @@ export const router = base.router({
   legal,
   relays,
   admin,
+  moderation,
+  ncii,
 });
 
 export type Router = typeof router;

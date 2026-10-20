@@ -8,7 +8,14 @@
  * and are served on the API under `/internal/*`, which Caddy never exposes.
  */
 import { z } from "zod";
-import { DELIVERY_SOURCES, RENDITIONS } from "./enums.ts";
+import {
+  DELIVERY_SOURCES,
+  EVIDENCE_KINDS,
+  HASH_LIST_CATEGORIES,
+  MODERATION_CATEGORIES,
+  MODERATION_SUBJECTS,
+  RENDITIONS,
+} from "./enums.ts";
 
 export const INTERNAL_SECRET_HEADER = "x-internal-secret";
 
@@ -51,6 +58,13 @@ export const INTERNAL_ROUTES = {
   mediaAuth: "/internal/media/auth",
   mediaReady: "/internal/media/ready",
   mediaNotReady: "/internal/media/not-ready",
+  /**
+   * Trust & safety test hooks (served by the API only while `MODERATION_TEST_HOOKS=true`,
+   * otherwise 404). `PUT` a `ModerationScriptBody`: the scripted classifier's scores for a channel.
+   */
+  moderationScript: "/internal/moderation/script",
+  /** `POST` a `NciiTickBody`: run the NCII clock job once as of that time (test hooks only). */
+  nciiTick: "/internal/moderation/ncii-tick",
 } as const;
 
 /** Published on BUS.live by the API when a broadcast starts/ends, and by media on transcode changes. */
@@ -129,6 +143,14 @@ export const KEYS = {
    * meaningless, so the per-network cap is counted here, per channel.
    */
   p2pChannelNet: (channelId: string, net: string) => `p2p:chnet:${channelId}:${net}`,
+  /**
+   * Raw RGB 384×384 bytes of one sampled live frame for the classifier (media writes, the
+   * worker's `moderation.scan` reads). TTL `MODERATION_FRAME_TTL_SECONDS`; never written anywhere
+   * else unless the frame is flagged.
+   */
+  moderationFrame: (frameId: string) => `moderation:frame:${frameId}`,
+  /** JSON `ModerationScores` for the scripted classifier (test hooks only). */
+  moderationScript: (channelId: string) => `moderation:script:${channelId}`,
 } as const;
 
 /**
@@ -202,7 +224,125 @@ export const QUEUES = {
   backups: "backups",
   /** Money housekeeping: pending-payment expiry, manual renewals, hold release (E4b). */
   payments: "payments",
+  /** Trust & safety (E4c): `MODERATION_JOBS`. */
+  moderation: "moderation",
 } as const;
+
+// Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
+
+/** A sampled frame lives in Valkey this long, then it is gone (unflagged frames are never stored). */
+export const MODERATION_FRAME_TTL_SECONDS = 60;
+
+/**
+ * Job names on `QUEUES.moderation`. Producers: media (`scan`, `t0`), API (`t0` for uploads,
+ * `t0Escalated`, `nciiClock` on the test hook), worker (`t0Media` and its schedules). The worker
+ * owns every T0 transaction, so there is exactly one implementation of the T0 actions.
+ */
+export const MODERATION_JOBS = {
+  scan: "scan",
+  t0: "t0",
+  t0Media: "t0-media",
+  t0Escalated: "t0-escalated",
+  nciiClock: "ncii-clock",
+  evidenceAudit: "evidence-audit",
+  ncmecUnfiled: "ncmec-unfiled",
+  holdEligibility: "hold-eligibility",
+  frameRetention: "frame-retention",
+  incomingCleanup: "incoming-cleanup",
+} as const;
+
+/** 64 hex characters (a PDQ hash or a sha256). */
+const Hex256 = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** Per-category classifier scores in [0, 1]. A category the provider does not score is absent (never 0). */
+export const ModerationScores = z.partialRecord(z.enum(MODERATION_CATEGORIES), z.number().min(0).max(1));
+export type ModerationScores = z.infer<typeof ModerationScores>;
+
+/** `MODERATION_JOBS.scan`: one sampled live frame; the RGB bytes are at `KEYS.moderationFrame(frameId)`. */
+export const ModerationScanJob = z.object({
+  frameId: z.uuid(),
+  broadcastId: z.uuid(),
+  channelId: z.uuid(),
+  capturedAt: z.iso.datetime({ offset: true }),
+  /** PDQ of the frame (media already matched it); null when the frame was below quality. */
+  pdq: Hex256.nullable(),
+  quality: z.number().int().min(0).max(100),
+});
+export type ModerationScanJob = z.infer<typeof ModerationScanJob>;
+
+/**
+ * One sealed evidence image travelling with a T0 job (seal format: `@commonair/moderation`
+ * `seal`). `sha256` is of the plaintext. At most 1 MiB sealed, so it fits `evidence_objects`.
+ */
+export const SealedEvidence = z.object({
+  kind: z.enum(EVIDENCE_KINDS),
+  contentType: z.enum(["image/webp", "image/jpeg", "image/png", "image/gif", "application/octet-stream"]),
+  sealedBase64: z.base64().max(1_400_000),
+  sha256: Hex256,
+  sizeBytes: z.number().int().positive(),
+  keyId: z.string().regex(/^[0-9a-f]{32}$/),
+  pdq: Hex256.nullable(),
+  pdqQuality: z.number().int().min(0).max(100).nullable(),
+  capturedAt: z.iso.datetime({ offset: true }),
+});
+export type SealedEvidence = z.infer<typeof SealedEvidence>;
+
+/**
+ * `MODERATION_JOBS.t0`: a hash-list match. Media kicks the publisher before enqueueing; the API
+ * rejects the upload before enqueueing. Enqueue with `jobId = t0JobId(subjectType, subjectId)` so
+ * retries collapse; the worker retries the transaction until it lands.
+ */
+export const ModerationT0Job = z.object({
+  subjectType: z.enum(MODERATION_SUBJECTS),
+  /** Broadcast, VOD or clip id; for uploads the id the API minted for the rejected upload. */
+  subjectId: z.uuid(),
+  channelId: z.uuid(),
+  /** The uploader for `upload`; otherwise resolved by the worker from the channel owner. */
+  userId: z.uuid().nullable(),
+  listCategory: z.enum(HASH_LIST_CATEGORIES),
+  /** `pdq:operator-list` or `pdq:local` (the database block list). */
+  provider: z.string().min(1).max(64),
+  /** sha256 of the list file + entry count, or `local:<max id>` for the block list. */
+  listVersion: z.string().min(1).max(200),
+  distance: z.number().int().min(0).max(256),
+  quality: z.number().int().min(0).max(100),
+  capturedAt: z.iso.datetime({ offset: true }),
+  /** The matched frame or upload (and for live, the frames around it), sealed. 1–8 objects. */
+  evidence: z.array(SealedEvidence).min(1).max(8),
+  /** For `upload`: which purpose was rejected (so support can explain), never the key. */
+  uploadPurpose: z.enum(["avatar", "banner", "panel", "emote", "alert_image"]).optional(),
+});
+export type ModerationT0Job = z.infer<typeof ModerationT0Job>;
+export const t0JobId = (subjectType: string, subjectId: string) => `t0:${subjectType}:${subjectId}`;
+
+/** `MODERATION_JOBS.t0Media`: copy a T0 subject's VOD/clip/thumbnail objects to evidence, then delete the public copies. Idempotent. */
+export const ModerationT0MediaJob = z.object({
+  caseId: z.uuid(),
+  holdId: z.uuid(),
+  channelId: z.uuid(),
+  /** The broadcast whose VODs, clips and thumbnails are copied; null for upload subjects. */
+  broadcastId: z.uuid().nullable(),
+});
+export type ModerationT0MediaJob = z.infer<typeof ModerationT0MediaJob>;
+
+/** `MODERATION_JOBS.t0Escalated`: a `legal` user confirmed a human-escalated case; run the full T0 actions. */
+export const ModerationT0EscalatedJob = z.object({ caseId: z.uuid(), confirmedById: z.uuid() });
+export type ModerationT0EscalatedJob = z.infer<typeof ModerationT0EscalatedJob>;
+
+/** `MODERATION_JOBS.nciiClock`: scheduled every minute with no `asOf`; the test hook passes one. */
+export const NciiClockJob = z.object({ asOf: z.iso.datetime({ offset: true }).optional() });
+export type NciiClockJob = z.infer<typeof NciiClockJob>;
+export const NciiClockResult = z.object({
+  escalated24: z.number().int(),
+  escalated36: z.number().int(),
+  autoHidden: z.number().int(),
+});
+export type NciiClockResult = z.infer<typeof NciiClockResult>;
+
+/** Body of `INTERNAL_ROUTES.moderationScript`. */
+export const ModerationScriptBody = z.object({ channelId: z.uuid(), scores: ModerationScores });
+/** Body of `INTERNAL_ROUTES.nciiTick`; the response is `NciiClockResult`. */
+export const NciiTickBody = z.object({ asOf: z.iso.datetime({ offset: true }) });
 
 /**
  * Chat connection token, issued by the API (`chat.connectToken`) and verified by the

@@ -10,9 +10,23 @@ import { z } from "zod";
 import * as E from "../enums.ts";
 import { AlertTemplate, BotConfig, ChannelChatSettings, ChannelTheme, GovernanceChange } from "../shapes.ts";
 import { SCOPE_NAMES } from "../scopes.ts";
-import { EVENT_TYPES } from "../events.ts";
+import { PUBLIC_EVENT_TYPES } from "../events.ts";
 import { MONEY_LIMITS } from "../currency.ts";
-import { ChannelRef, Id, Money, Ok, PageInput, ReturnPath, ShortText, Slug, Timestamp, base, page } from "./common.ts";
+import {
+  ChannelRef,
+  Id,
+  MATURE_GATE,
+  Money,
+  Ok,
+  PageInput,
+  ReturnPath,
+  ShortText,
+  Slug,
+  Timestamp,
+  UPLOAD_REJECTED,
+  base,
+  page,
+} from "./common.ts";
 import * as D from "./entities.ts";
 
 const tag = (t: string) => ({ tags: [t] });
@@ -22,6 +36,11 @@ const mod = base.meta({ access: "moderator" });
 const admin = base.meta({ access: "admin" });
 const treasurer = base.meta({ access: "treasurer" });
 const platformMod = base.meta({ access: "platform-moderator" });
+const legal = base.meta({ access: "legal" });
+const safetyStaff = base.meta({ access: "safety-staff" });
+
+/** Image upload purposes that are scanned on commit (audio is not an image and is not scanned). */
+const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;
 
 const ChannelUpdate = z.object({
   title: z.string().max(140).optional(),
@@ -153,6 +172,14 @@ export const contract = {
       })
       .input(z.object({ ids: z.array(Id).optional() }))
       .output(Ok),
+    labels: user
+      .route({
+        method: "GET",
+        path: "/me/moderation-labels",
+        summary: "Active moderation labels on channels you own (each can be appealed)",
+        ...tag("Moderation"),
+      })
+      .output(z.array(D.ContentLabel)),
     exports: {
       create: user
         .meta({ access: "user", rateLimit: "expensive" })
@@ -413,7 +440,7 @@ export const contract = {
       })
       .input(
         ChannelRef.extend({
-          purpose: z.enum(["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"]),
+          purpose: z.enum(UPLOAD_PURPOSES),
           contentType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif", "audio/mpeg", "audio/ogg"]),
           sizeBytes: z.number().int().positive().max(10_000_000),
         }),
@@ -426,6 +453,18 @@ export const contract = {
           expiresAt: Timestamp,
         }),
       ),
+    commitUpload: owner
+      .route({
+        method: "POST",
+        path: "/channels/{channel}/uploads/commit",
+        summary: "Scan an uploaded file and publish it (required before the key can be used)",
+        description:
+          "The presigned PUT lands in an unpublished incoming prefix. Commit runs the hash matcher and the classifier on images, then copies the object to its public key. Every rejection has the same response.",
+        ...tag("Channels"),
+      })
+      .errors(UPLOAD_REJECTED)
+      .input(ChannelRef.extend({ key: z.string().min(1).max(300) }))
+      .output(z.object({ key: z.string(), url: z.string() })),
     follow: user
       .meta({ access: "user", scopes: ["user:manage:follows"] })
       .route({
@@ -590,6 +629,7 @@ export const contract = {
 
   playback: {
     start: base
+      .errors(MATURE_GATE)
       .route({
         method: "POST",
         path: "/channels/{channel}/playback",
@@ -1317,7 +1357,7 @@ export const contract = {
         .output(
           z.array(
             z.object({
-              type: z.enum(EVENT_TYPES),
+              type: z.enum(PUBLIC_EVENT_TYPES),
               version: z.string(),
               condition: z.array(z.string()),
               scopes: z.array(z.string()),
@@ -1334,7 +1374,7 @@ export const contract = {
         })
         .input(
           z.object({
-            type: z.enum(EVENT_TYPES),
+            type: z.enum(PUBLIC_EVENT_TYPES),
             version: z.string().default("1"),
             condition: z
               .record(z.string().max(64), z.string().max(128))
@@ -1359,7 +1399,7 @@ export const contract = {
         })
         .input(
           PageInput.extend({
-            type: z.enum(EVENT_TYPES).optional(),
+            type: z.enum(PUBLIC_EVENT_TYPES).optional(),
             status: z.enum(E.SUBSCRIPTION_STATES).optional(),
           }),
         )
@@ -2521,15 +2561,184 @@ export const contract = {
         }),
       )
       .output(z.object({ id: Id })),
-    legalHold: admin
+    legalHold: legal
       .route({
         method: "POST",
         path: "/admin/users/{username}/legal-hold",
-        summary: "Place or release a legal hold",
+        summary: "Place a manual legal hold (release needs the operator CLI)",
+        ...tag("Legal"),
+      })
+      .input(
+        z.object({
+          username: Slug,
+          hold: z.literal(true),
+          reasonCode: z.enum(["law_enforcement", "litigation"]),
+          reason: z.string().min(1).max(2000),
+        }),
+      )
+      .output(D.LegalHold),
+    expediteDeletion: admin
+      .route({
+        method: "POST",
+        path: "/admin/users/{username}/deletion",
+        summary: "Delete an account now (creates the request if needed; held data is retained)",
         ...tag("Admin"),
       })
-      .input(z.object({ username: Slug, hold: z.boolean(), reason: z.string().min(1).max(2000) }))
-      .output(Ok),
+      .input(z.object({ username: Slug, reason: z.string().min(1).max(2000) }))
+      .output(D.DeletionRequest),
+  },
+
+  moderation: {
+    queue: safetyStaff
+      .route({
+        method: "GET",
+        path: "/admin/moderation/cases",
+        summary: "T1 and T2 moderation cases (T0 cases are only in the legal queue)",
+        ...tag("Moderation"),
+      })
+      .input(
+        PageInput.extend({
+          tier: z.enum(["t1", "t2"]).optional(),
+          status: z.enum(E.MODERATION_CASE_STATUSES).optional(),
+        }),
+      )
+      .output(page(D.ModerationCase)),
+    case: safetyStaff
+      .route({
+        method: "GET",
+        path: "/admin/moderation/cases/{id}",
+        summary: "A T1/T2 case with its flags and audit trail (T0 cases are NOT_FOUND here)",
+        ...tag("Moderation"),
+      })
+      .input(z.object({ id: Id }))
+      .output(D.ModerationCaseDetail),
+    frame: safetyStaff
+      .route({
+        method: "GET",
+        path: "/admin/moderation/flags/{id}/frame",
+        summary: "The stored review frame of a T1/T2 flag (never T0)",
+        ...tag("Moderation"),
+      })
+      .input(z.object({ id: Id }))
+      .output(z.object({ contentType: z.string(), dataBase64: z.string() })),
+    review: safetyStaff
+      .route({
+        method: "POST",
+        path: "/admin/moderation/cases/{id}/review",
+        summary: "Decide an open T1 or report-derived case (logged)",
+        ...tag("Moderation"),
+      })
+      .input(
+        z.object({
+          id: Id,
+          decision: z.enum(E.MODERATION_REVIEW_DECISIONS),
+          note: z.string().min(1).max(2000),
+          /** `suspend` only: what to suspend and for how long (absent = indefinite). */
+          suspendTarget: z.enum(["channel", "user", "both"]).default("channel"),
+          durationSeconds: z.number().int().positive().optional(),
+        }),
+      )
+      .output(D.ModerationCase),
+    t0Queue: legal
+      .route({ method: "GET", path: "/admin/legal/cases", summary: "T0 cases", ...tag("Legal") })
+      .input(PageInput.extend({ status: z.enum(E.MODERATION_CASE_STATUSES).optional() }))
+      .output(page(D.LegalCase)),
+    t0Confirm: legal
+      .route({
+        method: "POST",
+        path: "/admin/legal/cases/{id}/confirm",
+        summary: "Confirm a T0 case: hashes to the local block list, NCMEC draft if needed",
+        ...tag("Legal"),
+      })
+      .input(z.object({ id: Id, note: z.string().min(1).max(2000) }))
+      .output(D.LegalCase),
+    t0Dismiss: legal
+      .route({
+        method: "POST",
+        path: "/admin/legal/cases/{id}/dismiss",
+        summary: "Dismiss a T0 case (two different legal reviewers; the hold stays)",
+        ...tag("Legal"),
+      })
+      .input(z.object({ id: Id, note: z.string().min(1).max(2000) }))
+      .output(
+        z.object({
+          case: D.LegalCase,
+          /** Removed VOD/clip media is never restored: it exists only as sealed evidence. */
+          mediaRestored: z.literal(false),
+        }),
+      ),
+    evidence: legal
+      .route({
+        method: "GET",
+        path: "/admin/legal/evidence/{id}",
+        summary: "View one inline evidence object (decrypted, never cached, audited)",
+        ...tag("Legal"),
+      })
+      .input(z.object({ id: Id }))
+      .output(D.EvidenceView),
+    ncmecReports: legal
+      .route({ method: "GET", path: "/admin/legal/ncmec", summary: "NCMEC report drafts", ...tag("Legal") })
+      .input(PageInput.extend({ status: z.enum(E.NCMEC_REPORT_STATUSES).optional() }))
+      .output(page(D.NcmecReport)),
+    ncmecReport: legal
+      .route({
+        method: "GET",
+        path: "/admin/legal/ncmec/{id}",
+        summary: "One draft with its decrypted snapshot (audited)",
+        ...tag("Legal"),
+      })
+      .input(z.object({ id: Id }))
+      .output(D.NcmecReportDetail),
+    ncmecFile: legal
+      .route({
+        method: "POST",
+        path: "/admin/legal/ncmec/{id}/filing",
+        summary: "Record the CyberTipline filing (starts the one-year preservation clock)",
+        ...tag("Legal"),
+      })
+      .input(z.object({ id: Id, externalReportId: z.string().min(1).max(100), filedAt: Timestamp }))
+      .output(D.NcmecReport),
+    holds: legal
+      .route({ method: "GET", path: "/admin/legal/holds", summary: "Legal holds", ...tag("Legal") })
+      .input(PageInput.extend({ active: z.boolean().default(true) }))
+      .output(page(D.LegalHold)),
+  },
+
+  ncii: {
+    submit: base
+      .meta({ access: "public", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/takedown/requests",
+        summary: "Request removal of non-consensual intimate imagery (48-hour clock)",
+        ...tag("Safety"),
+      })
+      .input(
+        z.object({
+          requesterName: z.string().min(1).max(200),
+          requesterEmail: z.email(),
+          relationship: z.enum(E.NCII_RELATIONSHIPS),
+          contentUrls: z.array(z.url()).min(1).max(20),
+          description: z.string().min(1).max(5000),
+          goodFaith: z.literal(true),
+          signature: z.string().min(1).max(200),
+          altcha: z.string(),
+        }),
+      )
+      .output(z.object({ id: Id, deadlineAt: Timestamp })),
+    queue: safetyStaff
+      .route({ method: "GET", path: "/admin/ncii", summary: "NCII takedown requests", ...tag("Safety") })
+      .input(PageInput.extend({ status: z.enum(E.NCII_STATUSES).optional() }))
+      .output(page(D.NciiRequest)),
+    decide: safetyStaff
+      .route({
+        method: "POST",
+        path: "/admin/ncii/{id}",
+        summary: "Remove or reject an NCII request (logged)",
+        ...tag("Safety"),
+      })
+      .input(z.object({ id: Id, decision: z.enum(E.NCII_DECISIONS), note: z.string().min(1).max(2000) }))
+      .output(D.NciiRequest),
   },
 };
 

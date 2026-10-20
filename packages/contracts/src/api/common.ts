@@ -12,6 +12,8 @@ import type { Scope } from "../scopes.ts";
  * - owner: the channel owner (or an editor) of the channel named in the input
  * - moderator: owner, editor, or moderator of the channel in the input
  * - admin / treasurer / platform-moderator: platform roles
+ * - legal: the `legal` platform role only (T0 cases, evidence, NCMEC drafts, holds)
+ * - safety-staff: platform moderators, admins and `legal` (mod queue, NCII requests)
  * - relay: a registered relay node's token
  * - overlay: an overlay token for one channel
  */
@@ -23,6 +25,8 @@ export type Access =
   | "admin"
   | "treasurer"
   | "platform-moderator"
+  | "legal"
+  | "safety-staff"
   | "relay"
   | "overlay";
 
@@ -80,3 +84,22 @@ export const BoundedJson = (maxBytes: number) =>
     .refine((v) => JSON.stringify(v ?? null).length <= maxBytes, `must serialize to at most ${maxBytes} bytes`);
 export const ShortText = z.string().max(64);
 export const Ok = z.object({ ok: z.literal(true) });
+
+/**
+ * Upload rejections (`channels.commitUpload`). The same response for every reason, so a caller
+ * cannot learn whether content matched a hash list.
+ */
+export const UPLOAD_REJECTED = {
+  UNPROCESSABLE_CONTENT: {
+    status: 422,
+    message: "This file cannot be used",
+    data: z.object({ reason: z.literal("upload_rejected") }),
+  },
+} as const;
+/** Playback of a mature broadcast without a signed-in, 18+-confirmed viewer. */
+export const MATURE_GATE = {
+  FORBIDDEN: {
+    message: "You do not have permission to do this",
+    data: z.object({ reason: z.literal("mature_gate") }).optional(),
+  },
+} as const;

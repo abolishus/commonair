@@ -63,6 +63,11 @@ export const BroadcastSummary = z.object({
   /** Verified viewers only; excluded traffic never appears in public counts. */
   viewerCount: z.number().int().nonnegative(),
   thumbnailUrl: z.string().nullable(),
+  /**
+   * `under_review` while a T1 moderation case restricts the broadcast (the thumbnail is then
+   * null and the stream is left out of every list). Absent or null otherwise.
+   */
+  restricted: z.enum(["under_review"]).nullable().optional(),
 });
 export type BroadcastSummary = z.infer<typeof BroadcastSummary>;
 
@@ -891,3 +896,205 @@ export const InstanceInfo = z.object({
   }),
   minAge: z.number().int(),
 });
+
+// Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
+// Logs never carry these; T0 material (evidence bytes) is returned only by
+// `moderation.evidence` to the `legal` role.
+
+const UserRef = z.object({ id: Id, username: z.string() });
+const ChannelRefView = z.object({ id: Id, slug: z.string(), displayName: z.string() });
+
+export const ContentLabel = z.object({
+  id: Id,
+  channelId: Id,
+  label: z.enum(E.CONTENT_LABELS),
+  caseId: Id,
+  appliedAt: Timestamp,
+  removedAt: Timestamp.nullable(),
+});
+export type ContentLabel = z.infer<typeof ContentLabel>;
+
+/** One signal that crossed a threshold. T1/T2 frames are fetched with `moderation.frame`; T0 flags never have one. */
+export const ModerationFlag = z.object({
+  id: Id,
+  tier: z.enum(E.MODERATION_TIERS),
+  origin: z.enum(E.MODERATION_CASE_ORIGINS),
+  category: z.enum(E.MODERATION_CATEGORIES).nullable(),
+  score: z.number().nullable(),
+  listCategory: z.enum(E.HASH_LIST_CATEGORIES).nullable(),
+  distance: z.number().int().nullable(),
+  provider: z.string(),
+  providerVersion: z.string(),
+  hasFrame: z.boolean(),
+  capturedAt: Timestamp,
+});
+export type ModerationFlag = z.infer<typeof ModerationFlag>;
+
+/** One audit_log row about a case (automated and human steps). */
+export const CaseHistoryRow = z.object({
+  id: Id,
+  action: z.string(),
+  actorType: z.enum(E.ACTOR_TYPES),
+  actor: UserRef.nullable(),
+  reason: z.string(),
+  createdAt: Timestamp,
+});
+export type CaseHistoryRow = z.infer<typeof CaseHistoryRow>;
+
+export const ModerationCase = z.object({
+  id: Id,
+  tier: z.enum(E.MODERATION_TIERS),
+  status: z.enum(E.MODERATION_CASE_STATUSES),
+  origin: z.enum(E.MODERATION_CASE_ORIGINS),
+  subjectType: z.enum(E.MODERATION_SUBJECTS),
+  subjectId: Id,
+  channel: ChannelRefView.nullable(),
+  user: UserRef.nullable(),
+  category: z.enum(E.MODERATION_CATEGORIES).nullable(),
+  priority: z.number().int(),
+  /** T1: the response SLA. */
+  slaDueAt: Timestamp.nullable(),
+  createdAt: Timestamp,
+  resolvedAt: Timestamp.nullable(),
+  resolution: z.string().nullable(),
+  resolutionNote: z.string().nullable(),
+});
+export type ModerationCase = z.infer<typeof ModerationCase>;
+
+export const ModerationCaseDetail = ModerationCase.extend({
+  flags: z.array(ModerationFlag),
+  history: z.array(CaseHistoryRow),
+  /** Categories the configured classifier does not score (shown as `modq-not-scored`). */
+  notScored: z.array(z.enum(E.MODERATION_CATEGORIES)),
+  label: ContentLabel.nullable(),
+});
+export type ModerationCaseDetail = z.infer<typeof ModerationCaseDetail>;
+
+/** Metadata of one sealed evidence object. Never a storage key or URL. */
+export const EvidenceObject = z.object({
+  id: Id,
+  caseId: Id,
+  kind: z.enum(E.EVIDENCE_KINDS),
+  storage: z.enum(E.EVIDENCE_STORAGE),
+  contentType: z.string(),
+  sizeBytes: z.number().int(),
+  sha256: z.string(),
+  sourceSubjectType: z.enum(E.MODERATION_SUBJECTS),
+  sourceSubjectId: Id,
+  capturedAt: Timestamp,
+});
+export type EvidenceObject = z.infer<typeof EvidenceObject>;
+
+/** `moderation.evidence`: one decrypted inline object (legal role only, audited, never cached). */
+export const EvidenceView = z.object({ id: Id, contentType: z.string(), dataBase64: z.string() });
+
+export const LegalHold = z.object({
+  id: Id,
+  userId: Id,
+  reasonCode: z.enum(E.LEGAL_HOLD_REASONS),
+  /** Staff's words for manual holds; empty for automatic ones. */
+  reason: z.string(),
+  caseId: Id.nullable(),
+  createdAt: Timestamp,
+  filedAt: Timestamp.nullable(),
+  /** One year after filing; release still needs the operator CLI. */
+  eligibleForReleaseAt: Timestamp.nullable(),
+  releasedAt: Timestamp.nullable(),
+});
+export type LegalHold = z.infer<typeof LegalHold>;
+
+export const NcmecReport = z.object({
+  id: Id,
+  caseId: Id,
+  holdId: Id,
+  userId: Id.nullable(),
+  status: z.enum(E.NCMEC_REPORT_STATUSES),
+  incidentAt: Timestamp,
+  listCategory: z.enum(E.HASH_LIST_CATEGORIES).nullable(),
+  target: z.string(),
+  evidenceIds: z.array(Id),
+  externalReportId: z.string().nullable(),
+  filedAt: Timestamp.nullable(),
+  createdAt: Timestamp,
+});
+export type NcmecReport = z.infer<typeof NcmecReport>;
+
+/**
+ * The plaintext of `ncmec_reports.snapshot_sealed` (JSON, sealed to the evidence key): what the
+ * CyberTipline asks for, captured when the draft is made so account deletion cannot erase it.
+ */
+export const NcmecSnapshot = z.object({
+  v: z.literal(1),
+  incidentAt: Timestamp,
+  incidentType: z.enum(["csam_hash_match", "csam_confirmed"]),
+  account: z.object({
+    id: Id,
+    username: z.string(),
+    displayName: z.string(),
+    email: z.string(),
+    createdAt: Timestamp,
+    /** IP hashes and raw IPs the platform still holds for the account (sessions, auth log). */
+    ipHashes: z.array(z.string()),
+    ips: z.array(z.string()),
+  }),
+  subject: z.object({
+    type: z.enum(E.MODERATION_SUBJECTS),
+    id: Id,
+    channelId: Id.nullable(),
+    channelSlug: z.string().nullable(),
+  }),
+  match: z
+    .object({
+      listCategory: z.enum(E.HASH_LIST_CATEGORIES),
+      provider: z.string(),
+      listVersion: z.string(),
+      distance: z.number().int(),
+      pdq: z.string(),
+    })
+    .nullable(),
+  evidenceIds: z.array(Id),
+});
+export type NcmecSnapshot = z.infer<typeof NcmecSnapshot>;
+export const NcmecReportDetail = NcmecReport.extend({ snapshot: NcmecSnapshot });
+
+/** A T0 case as the `legal` role sees it. `list` is the hash list that fired, or `human` for escalations. */
+export const LegalCase = ModerationCase.extend({
+  list: z.enum([...E.HASH_LIST_CATEGORIES, "human"]),
+  firstReviewer: UserRef.nullable(),
+  firstReviewedAt: Timestamp.nullable(),
+  firstReviewNote: z.string().nullable(),
+  evidence: z.array(EvidenceObject),
+  holdId: Id.nullable(),
+  ncmecReportId: Id.nullable(),
+  flags: z.array(ModerationFlag),
+  history: z.array(CaseHistoryRow),
+});
+export type LegalCase = z.infer<typeof LegalCase>;
+
+export const NciiRequestItem = z.object({
+  id: Id,
+  url: z.string(),
+  subjectType: z.enum(E.MODERATION_SUBJECTS).nullable(),
+  subjectId: Id.nullable(),
+  hiddenAt: Timestamp.nullable(),
+  removedAt: Timestamp.nullable(),
+});
+/** Staff view of a takedown request (moderators and `legal` only). */
+export const NciiRequest = z.object({
+  id: Id,
+  status: z.enum(E.NCII_STATUSES),
+  requesterName: z.string(),
+  requesterEmail: z.string(),
+  relationship: z.enum(E.NCII_RELATIONSHIPS),
+  description: z.string(),
+  signature: z.string(),
+  items: z.array(NciiRequestItem),
+  receivedAt: Timestamp,
+  deadlineAt: Timestamp,
+  escalated24At: Timestamp.nullable(),
+  escalated36At: Timestamp.nullable(),
+  autoHiddenAt: Timestamp.nullable(),
+  decidedAt: Timestamp.nullable(),
+  decisionNote: z.string().nullable(),
+});
+export type NciiRequest = z.infer<typeof NciiRequest>;

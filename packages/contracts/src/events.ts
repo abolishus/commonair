@@ -9,6 +9,15 @@
  */
 import { z } from "zod";
 import type { Scope } from "./scopes.ts";
+import {
+  HASH_LIST_CATEGORIES,
+  LEGAL_HOLD_REASONS,
+  MODERATION_CASE_ORIGINS,
+  MODERATION_CASE_STATUSES,
+  MODERATION_CATEGORIES,
+  MODERATION_SUBJECTS,
+  MODERATION_TIERS,
+} from "./enums.ts";
 
 const id = z.string();
 const ts = z.string();
@@ -37,9 +46,18 @@ interface EventDef {
   scopes: readonly Scope[];
   description: string;
   payload: z.ZodObject;
+  /**
+   * Internal events (trust & safety) live in the outbox for audit and service fan-out only:
+   * they are never offered to apps (`PUBLIC_EVENT_TYPES`), never fanned out to webhooks or
+   * the EventSub WebSocket, and never published on `BUS.events`. Payloads carry ids and enums.
+   */
+  internal?: true;
 }
-const def = <P extends z.ZodRawShape>(d: Omit<EventDef, "payload"> & { payload: P }) => ({
+const def = <P extends z.ZodRawShape, I extends true | undefined = undefined>(
+  d: Omit<EventDef, "payload" | "internal"> & { payload: P; internal?: I },
+) => ({
   ...d,
+  internal: d.internal as I,
   payload: z.object(d.payload),
 });
 
@@ -433,11 +451,99 @@ export const EVENTS = {
       reason: z.string().nullable(),
     },
   }),
+  // Internal (trust & safety, ADR 0006). Ids and enums only: never frames, URLs, keys or PII.
+  "moderation.flagged": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a moderation signal crossed a threshold and a flag was recorded",
+    payload: {
+      case_id: id,
+      flag_id: id,
+      tier: z.enum(MODERATION_TIERS),
+      origin: z.enum(MODERATION_CASE_ORIGINS),
+      subject_type: z.enum(MODERATION_SUBJECTS),
+      subject_id: id,
+      channel_id: id.nullable(),
+      category: z.enum(MODERATION_CATEGORIES).nullable(),
+      list_category: z.enum(HASH_LIST_CATEGORIES).nullable(),
+      provider: z.string(),
+      provider_version: z.string(),
+    },
+  }),
+  "moderation.case.resolved": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a moderation case reached a decision",
+    payload: {
+      case_id: id,
+      tier: z.enum(MODERATION_TIERS),
+      status: z.enum(MODERATION_CASE_STATUSES),
+      resolution: z.string(),
+      actor_type: z.enum(["system", "moderator", "legal"]),
+    },
+  }),
+  "moderation.restriction": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a live broadcast was restricted (T1) or the restriction was lifted",
+    payload: { broadcast_id: id, channel_id: id, case_id: id, restricted: z.boolean() },
+  }),
+  "ncii.request.received": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an NCII takedown request arrived (the 48-hour clock started)",
+    payload: { request_id: id, deadline_at: ts, items: z.number().int(), resolved_items: z.number().int() },
+  }),
+  "ncii.request.decided": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an NCII request was decided, or auto-hidden at its deadline",
+    payload: { request_id: id, decision: z.enum(["removed", "rejected", "auto_hidden"]) },
+  }),
+  "legal.hold.placed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a legal hold was placed on a user's data",
+    payload: { hold_id: id, user_id: id, reason_code: z.enum(LEGAL_HOLD_REASONS), case_id: id.nullable() },
+  }),
+  "ncmec.draft.created": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an NCMEC CyberTipline report draft awaits filing by the legal role",
+    payload: { report_id: id, case_id: id, hold_id: id },
+  }),
 } as const;
 
 export type EventType = keyof typeof EVENTS;
 export const EVENT_TYPES = Object.keys(EVENTS) as [EventType, ...EventType[]];
 export type EventPayload<T extends EventType> = z.infer<(typeof EVENTS)[T]["payload"]>;
+/** Internal event types (see `EventDef.internal`). */
+export type InternalEventType = {
+  [K in EventType]: (typeof EVENTS)[K] extends { internal: true } ? K : never;
+}[EventType];
+/** Event types apps may see and subscribe to. */
+export type PublicEventType = Exclude<EventType, InternalEventType>;
+export const isInternalEvent = (type: string): boolean =>
+  Object.hasOwn(EVENTS, type) && (EVENTS[type as EventType] as EventDef).internal === true;
+export const PUBLIC_EVENT_TYPES = EVENT_TYPES.filter((t) => !isInternalEvent(t)) as [
+  PublicEventType,
+  ...PublicEventType[],
+];
+export const INTERNAL_EVENT_TYPES = EVENT_TYPES.filter(isInternalEvent) as InternalEventType[];
 
 /** Header names for signed webhooks (Twitch-style, vendor-neutral prefix). */
 export const WEBHOOK_HEADERS = {
@@ -483,7 +589,7 @@ export async function verifyWebhook(
 
 export const SubscriptionEnvelope = z.object({
   id,
-  type: z.enum(EVENT_TYPES),
+  type: z.enum(PUBLIC_EVENT_TYPES),
   version: z.string(),
   status: z.string(),
   condition: z.record(z.string(), z.string()),
@@ -500,7 +606,7 @@ export const WsMetadata = z.object({
   message_id: id,
   message_type: z.enum(["session_welcome", "session_keepalive", "notification", "session_reconnect", "revocation"]),
   message_timestamp: ts,
-  subscription_type: z.enum(EVENT_TYPES).optional(),
+  subscription_type: z.enum(PUBLIC_EVENT_TYPES).optional(),
   subscription_version: z.string().optional(),
 });
 export const WsMessage = z.object({
@@ -535,9 +641,10 @@ export const BUS = {
   userControl: "bus:user-control",
 } as const;
 
+/** Only public events are published on `BUS.events`. */
 export const BusEvent = z.object({
   id,
-  type: z.enum(EVENT_TYPES),
+  type: z.enum(PUBLIC_EVENT_TYPES),
   version: z.string(),
   channelId: id.nullable(),
   payload: z.record(z.string(), z.unknown()),
