@@ -130,12 +130,12 @@ the Stripe unit's brief; the test ids below do not change.
 
 ### `/settings/subscriptions`
 
-| Test id               | Element / meaning                                                                                                                       |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `subscriptions`       | Page wrapper                                                                                                                            |
-| `subscriptions-empty` | `<EmptyState>` when you have none                                                                                                       |
-| `subscription-row`    | One subscription: `data-subscription-id`, `data-channel` (slug), `data-tier`, `data-status`, `data-gifted`, `data-cancel-at-period-end` |
-| `subscription-cancel` | Inside an `active` row not already cancelling: cancel at period end through a `ConfirmDialog` (`confirm-dialog-confirm`)                |
+| Test id               | Element / meaning                                                                                                                                                             |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `subscriptions`       | Page wrapper                                                                                                                                                                  |
+| `subscriptions-empty` | `<EmptyState>` when you have none                                                                                                                                             |
+| `subscription-row`    | One subscription: `data-subscription-id`, `data-channel` (slug), `data-tier`, `data-status`, `data-gifted`, `data-cancel-at-period-end`                                       |
+| `subscription-cancel` | Inside an `active`, non-gifted row not already cancelling (gifts cannot be cancelled; they expire): cancel at period end through a `ConfirmDialog` (`confirm-dialog-confirm`) |
 
 ### `/revenue`
 
