@@ -95,6 +95,19 @@ now hash as `a.b.c.d`). For a broadcast that is live across the deploy, integrit
 exclusion compares new viewer hashes with the old `stream_keys.last_used_ip_hash` until the
 streamer publishes again. Rate-limit buckets for those clients start over once.
 
+## Money
+
+`money.*` lives in `src/money/`: checkout, subscriptions, tips and the treasurer's payment actions
+in `checkout*.ts`, reports in `reports.ts`. The manual adapter (`PAYMENTS_PROVIDER=manual`, the
+default) needs no vendor: checkout returns a `CA-XXXXXXXX` reference and the treasurer confirms
+receipt. Every movement is posted to the ledger (`@commonair/ledger`) in the same transaction as
+the state change, with its outbox events and audit row. State machines, what posts what, the lock
+order and the gift-pool rule: [src/money/README.md](src/money/README.md).
+
+Reports (`money/reports.ts`) read every figure from the ledger; `payments` only classifies a
+posting (tier, gift, tip, payer). The revenue ledger omits hold releases and shows only CSV-safe
+reference tokens. `runPayouts` treats `periodEnd` as an exclusive end.
+
 ## Relay lifecycle
 
 `src/routes/relays.ts`. Postgres (`relay_nodes.status`) is the record; `KEYS.relays` in Valkey
