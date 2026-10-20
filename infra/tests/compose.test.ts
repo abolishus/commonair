@@ -231,6 +231,22 @@ describe("compose.yaml: configuration and secrets", () => {
     expect(url).toMatch(/@postgres:5432\/commonair$/);
   });
 
+  test("evidence secrets reach only the services ADR 0006 Q4 allows", () => {
+    for (const name of ["api", "chat", "irc", "origin", "media", "worker", "tracker", "web"]) {
+      const env = compose.services[name]!.environment!;
+      const bucketKey = name === "worker" ? "${S3_EVIDENCE_ACCESS_KEY_ID:-}" : "";
+      expect(env.S3_EVIDENCE_ACCESS_KEY_ID, name).toBe(bucketKey);
+      expect(env.S3_EVIDENCE_SECRET_ACCESS_KEY, name).toBe(
+        name === "worker" ? "${S3_EVIDENCE_SECRET_ACCESS_KEY:-}" : "",
+      );
+      expect(env.EVIDENCE_PRIVATE_KEY, name).toBe(name === "api" ? "${EVIDENCE_PRIVATE_KEY:-}" : "");
+      expect(env.ONNXRUNTIME_NODE_INSTALL, name).toBe("skip");
+      const quadlet = read(`infra/quadlet/commonair-${name}.container`);
+      expect(quadlet.includes("Environment=S3_EVIDENCE_ACCESS_KEY_ID=\n"), name).toBe(name !== "worker");
+      expect(quadlet.includes("Environment=EVIDENCE_PRIVATE_KEY=\n"), name).toBe(name !== "api");
+    }
+  });
+
   test("every app service gets the app-role URL and in-network endpoints", () => {
     for (const name of ["api", "chat", "irc", "origin", "media", "worker", "tracker", "web"]) {
       const env = compose.services[name]!.environment!;
@@ -360,6 +376,8 @@ describe("Quadlet mirror", () => {
       );
       for (const [k, v] of Object.entries(appEnv)) {
         if (k === "DATABASE_URL" || k.startsWith("SMTP_") || k === "OTEL_SERVICE_NAME") continue;
+        // Per-service evidence scoping is checked by its own test above.
+        if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY") continue;
         const expected = k === "TRUSTED_PROXY_CIDRS" ? "10.89.42.0/24" : v;
         expect(env[k], `${name}: ${k}`).toBe(expected);
       }

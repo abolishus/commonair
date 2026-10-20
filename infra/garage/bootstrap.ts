@@ -9,6 +9,9 @@
  *   3. wait until the cluster reports healthy
  *   4. import the S3 key pair from S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY
  *   5. create the media, exports and backups buckets and grant the key read/write/owner
+ *   6. import the evidence key, create the evidence bucket, grant the evidence key read/write
+ *      (not owner) on it alone, and make sure the main key has no permission there at all
+ *      (ADR 0006 Q4: the API and media hold the main key and must not even list evidence)
  *
  * An existing key with a different secret is a hard error: Garage never lets a deleted
  * key id be reused, so rotation is an operator action (see infra/README.md).
@@ -21,6 +24,8 @@ export interface GarageBootstrapOptions {
   secretAccessKey: string;
   keyName: string;
   buckets: string[];
+  /** The sealed-evidence bucket and the worker's own key for it. */
+  evidence: { accessKeyId: string; secretAccessKey: string; keyName: string; bucket: string };
   zone: string;
   capacityBytes: number;
   /** How long to wait for the admin API and for cluster health. */
@@ -34,6 +39,9 @@ export interface BootstrapResult {
   layoutApplied: boolean;
   keyImported: boolean;
   bucketsCreated: string[];
+  evidenceKeyImported: boolean;
+  /** Grants removed because they would let the wrong key reach the wrong bucket. */
+  revoked: string[];
 }
 
 export class GarageError extends Error {
@@ -84,10 +92,18 @@ interface KeyInfo {
   accessKeyId: string;
   secretAccessKey?: string;
 }
+interface Permissions {
+  read: boolean;
+  write: boolean;
+  owner: boolean;
+}
 interface BucketInfo {
   id: string;
-  keys: { accessKeyId: string; permissions: { read: boolean; write: boolean; owner: boolean } }[];
+  keys: { accessKeyId: string; permissions: Permissions }[];
 }
+const FULL: Permissions = { read: true, write: true, owner: true };
+const EVIDENCE: Permissions = { read: true, write: true, owner: false };
+const DENY_ALL: Permissions = { read: true, write: true, owner: true };
 
 export function createAdminClient(opts: Pick<GarageBootstrapOptions, "adminUrl" | "adminToken" | "fetch">) {
   const doFetch = opts.fetch ?? fetch;
@@ -128,12 +144,11 @@ export function createAdminClient(opts: Pick<GarageBootstrapOptions, "adminUrl" 
     bucketInfo: (alias: string) =>
       call<BucketInfo>("GET", `GetBucketInfo?globalAlias=${encodeURIComponent(alias)}`).catch(notFoundAsNull),
     createBucket: (alias: string) => call<BucketInfo>("POST", "CreateBucket", { globalAlias: alias }),
-    allow: (bucketId: string, accessKeyId: string) =>
-      call<BucketInfo>("POST", "AllowBucketKey", {
-        bucketId,
-        accessKeyId,
-        permissions: { read: true, write: true, owner: true },
-      }),
+    allow: (bucketId: string, accessKeyId: string, permissions: Permissions = FULL) =>
+      call<BucketInfo>("POST", "AllowBucketKey", { bucketId, accessKeyId, permissions }),
+    /** Garage's DenyBucketKey removes every permission flagged `true` in the body. */
+    deny: (bucketId: string, accessKeyId: string, permissions: Permissions) =>
+      call<BucketInfo>("POST", "DenyBucketKey", { bucketId, accessKeyId, permissions }),
   };
 }
 
@@ -165,12 +180,23 @@ async function retry<T>(
 
 export async function bootstrapGarage(opts: GarageBootstrapOptions): Promise<BootstrapResult> {
   validateKeyPair(opts.accessKeyId, opts.secretAccessKey);
+  const ev = opts.evidence;
+  validateKeyPair(ev.accessKeyId, ev.secretAccessKey);
+  if (ev.accessKeyId === opts.accessKeyId) throw new Error("the evidence key must differ from the main S3 key");
   for (const b of opts.buckets) validateBucketName(b);
+  validateBucketName(ev.bucket);
+  if (opts.buckets.includes(ev.bucket)) throw new Error("the evidence bucket must be its own bucket");
   const log = opts.log ?? (() => {});
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
   const admin = createAdminClient(opts);
   const retryOpts = { timeoutMs: opts.timeoutMs, sleep, log };
-  const result: BootstrapResult = { layoutApplied: false, keyImported: false, bucketsCreated: [] };
+  const result: BootstrapResult = {
+    layoutApplied: false,
+    keyImported: false,
+    bucketsCreated: [],
+    evidenceKeyImported: false,
+    revoked: [],
+  };
 
   const status = await retry("admin API", () => admin.status(), retryOpts);
   const layout = await admin.layout();
@@ -193,18 +219,20 @@ export async function bootstrapGarage(opts: GarageBootstrapOptions): Promise<Boo
     retryOpts,
   );
 
-  const existing = await admin.keyInfo(opts.accessKeyId);
-  if (!existing) {
-    await admin.importKey(opts.accessKeyId, opts.secretAccessKey, opts.keyName);
-    result.keyImported = true;
-    log(`imported key ${opts.accessKeyId}`);
-  } else if (existing.secretAccessKey !== undefined && existing.secretAccessKey !== opts.secretAccessKey) {
-    throw new Error(
-      `key ${opts.accessKeyId} already exists in Garage with a different secret; rotate it by hand (infra/README.md)`,
-    );
-  }
-
-  for (const alias of opts.buckets) {
+  const importKey = async (accessKeyId: string, secretAccessKey: string, name: string): Promise<boolean> => {
+    const existing = await admin.keyInfo(accessKeyId);
+    if (!existing) {
+      await admin.importKey(accessKeyId, secretAccessKey, name);
+      log(`imported key ${accessKeyId}`);
+      return true;
+    }
+    if (existing.secretAccessKey !== undefined && existing.secretAccessKey !== secretAccessKey)
+      throw new Error(
+        `key ${accessKeyId} already exists in Garage with a different secret; rotate it by hand (infra/README.md)`,
+      );
+    return false;
+  };
+  const ensureBucket = async (alias: string): Promise<BucketInfo> => {
     let bucket = await admin.bucketInfo(alias);
     if (!bucket) {
       try {
@@ -218,11 +246,36 @@ export async function bootstrapGarage(opts: GarageBootstrapOptions): Promise<Boo
         if (!bucket) throw e;
       }
     }
-    const granted = bucket.keys?.some(
-      (k) => k.accessKeyId === opts.accessKeyId && k.permissions.read && k.permissions.write && k.permissions.owner,
-    );
-    if (!granted) await admin.allow(bucket.id, opts.accessKeyId);
+    return bucket;
+  };
+  const grantOf = (bucket: BucketInfo, key: string) => bucket.keys?.find((k) => k.accessKeyId === key)?.permissions;
+  const revokeAll = async (bucket: BucketInfo, alias: string, key: string) => {
+    const p = grantOf(bucket, key);
+    if (p && (p.read || p.write || p.owner)) {
+      await admin.deny(bucket.id, key, DENY_ALL);
+      result.revoked.push(`${key}@${alias}`);
+      log(`revoked ${key} on ${alias}`);
+    }
+  };
+
+  result.keyImported = await importKey(opts.accessKeyId, opts.secretAccessKey, opts.keyName);
+  for (const alias of opts.buckets) {
+    const bucket = await ensureBucket(alias);
+    const p = grantOf(bucket, opts.accessKeyId);
+    if (!(p?.read && p.write && p.owner)) await admin.allow(bucket.id, opts.accessKeyId);
+    await revokeAll(bucket, alias, ev.accessKeyId);
   }
+
+  result.evidenceKeyImported = await importKey(ev.accessKeyId, ev.secretAccessKey, ev.keyName);
+  const evidence = await ensureBucket(ev.bucket);
+  await revokeAll(evidence, ev.bucket, opts.accessKeyId);
+  const p = grantOf(evidence, ev.accessKeyId);
+  if (p?.owner) {
+    // Owner could re-grant other keys; the evidence key gets read and write only.
+    await admin.deny(evidence.id, ev.accessKeyId, { read: false, write: false, owner: true });
+    result.revoked.push(`${ev.accessKeyId}@${ev.bucket}:owner`);
+  }
+  if (!(p?.read && p.write)) await admin.allow(evidence.id, ev.accessKeyId, EVIDENCE);
   return result;
 }
 
@@ -249,6 +302,12 @@ export function optionsFromEnv(env: Record<string, string | undefined>): GarageB
       env.S3_BUCKET_EXPORTS || "commonair-exports",
       env.S3_BUCKET_BACKUPS || "commonair-backups",
     ],
+    evidence: {
+      accessKeyId: need("S3_EVIDENCE_ACCESS_KEY_ID"),
+      secretAccessKey: need("S3_EVIDENCE_SECRET_ACCESS_KEY"),
+      keyName: env.GARAGE_EVIDENCE_KEY_NAME || "commonair-evidence",
+      bucket: env.S3_BUCKET_EVIDENCE || "commonair-evidence",
+    },
     zone: env.GARAGE_ZONE || "dc1",
     capacityBytes: positive("GARAGE_CAPACITY_BYTES", 100_000_000_000),
     timeoutMs: positive("GARAGE_INIT_TIMEOUT_MS", 120_000),
@@ -261,7 +320,8 @@ if (import.meta.main) {
     const r = await bootstrapGarage({ ...opts, log: (m) => console.warn(`garage-init: ${m}`) });
     console.warn(
       `garage-init: done (layout ${r.layoutApplied ? "applied" : "unchanged"}, key ${r.keyImported ? "imported" : "present"}, ` +
-        `buckets created: ${r.bucketsCreated.join(", ") || "none"})`,
+        `buckets created: ${r.bucketsCreated.join(", ") || "none"}, evidence key ${r.evidenceKeyImported ? "imported" : "present"}, ` +
+        `revoked: ${r.revoked.join(", ") || "none"})`,
     );
   } catch (e) {
     console.error(`garage-init: ${(e as Error).message}`);

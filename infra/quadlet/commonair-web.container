@@ -39,6 +39,10 @@ Environment=IRC_WS_PORT=6680
 Environment=IRC_HEALTH_PORT=6681
 Environment=OTEL_SERVICE_NAME=web
 Environment=HEALTHCHECK_PATH=/healthz
+Environment=S3_EVIDENCE_ACCESS_KEY_ID=
+Environment=S3_EVIDENCE_SECRET_ACCESS_KEY=
+Environment=EVIDENCE_PRIVATE_KEY=
+Environment=ONNXRUNTIME_NODE_INSTALL=skip
 Secret=commonair-database-url,type=env,target=DATABASE_URL
 PublishPort=127.0.0.1:3000:3000
 HealthCmd=bun /opt/commonair/healthcheck.ts

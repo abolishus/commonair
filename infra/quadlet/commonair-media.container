@@ -47,6 +47,10 @@ Environment=IRC_WS_PORT=6680
 Environment=IRC_HEALTH_PORT=6681
 Environment=OTEL_SERVICE_NAME=media
 Environment=MEDIA_WORK_DIR=/var/lib/commonair/media
+Environment=S3_EVIDENCE_ACCESS_KEY_ID=
+Environment=S3_EVIDENCE_SECRET_ACCESS_KEY=
+Environment=EVIDENCE_PRIVATE_KEY=
+Environment=ONNXRUNTIME_NODE_INSTALL=skip
 Secret=commonair-database-url,type=env,target=DATABASE_URL
 Volume=commonair-media-work.volume:/var/lib/commonair/media
 HealthCmd=bun /opt/commonair/healthcheck.ts

@@ -36,6 +36,8 @@ const secrets = {
   GARAGE_ADMIN_TOKEN: hex(24),
   S3_ACCESS_KEY_ID: `GK${hex(12)}`,
   S3_SECRET_ACCESS_KEY: hex(32),
+  S3_EVIDENCE_ACCESS_KEY_ID: `GK${hex(12)}`,
+  S3_EVIDENCE_SECRET_ACCESS_KEY: hex(32),
 };
 const envDir = mkdtempSync(join(tmpdir(), "commonair-it-"));
 const env: Record<string, string> = {
@@ -160,6 +162,38 @@ describe("compose data stack", () => {
       await s3.delete(bucket, key);
       expect(await s3.head(bucket, key)).toBeNull();
     }
+  });
+
+  test("only the evidence key reaches the evidence bucket, and it reaches nothing else (ADR 0006 Q4)", async () => {
+    const evidence = createS3Storage({
+      endpoint: `http://127.0.0.1:${ports.GARAGE_S3_PORT}`,
+      region: "garage",
+      accessKeyId: secrets.S3_EVIDENCE_ACCESS_KEY_ID,
+      secretAccessKey: secrets.S3_EVIDENCE_SECRET_ACCESS_KEY,
+      forcePathStyle: true,
+    });
+    const bucket = "commonair-evidence";
+    const key = `it/${crypto.randomUUID()}.bin`;
+    await evidence.put(bucket, key, "sealed", { contentType: "application/octet-stream" });
+    expect(await (await evidence.get(bucket, key))?.text()).toBe("sealed");
+    // The main key (api, media) can neither list, read nor write evidence.
+    const denied = async (p: Promise<unknown>) =>
+      expect(
+        await p.then(
+          () => "ok",
+          () => "denied",
+        ),
+      ).toBe("denied");
+    await denied(
+      (async () => {
+        for await (const _ of s3.list(bucket, "")) return;
+      })(),
+    );
+    await denied(s3.get(bucket, key).then((r) => (r === null ? Promise.reject(new Error("hidden")) : r)));
+    await denied(s3.put(bucket, `it/${crypto.randomUUID()}.bin`, "x", { contentType: "text/plain" }));
+    // The evidence key cannot touch the ordinary buckets.
+    for (const other of ["commonair-media", "commonair-exports", "commonair-backups"])
+      await denied(evidence.put(other, `it/${crypto.randomUUID()}.txt`, "x", { contentType: "text/plain" }));
   });
 
   test("garage-init is idempotent", () => {
