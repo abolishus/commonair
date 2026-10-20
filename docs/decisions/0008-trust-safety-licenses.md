@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0008: Trust & safety dependency licenses
 
-- Status: proposed (with ADR 0006's resolution)
+- Status: accepted (2026-10-20)
 - Date: 2026-10-20 (all licenses verified on this date)
 
 ## Context

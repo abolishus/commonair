@@ -28,7 +28,7 @@ the E4b validations for now** and finish E4c first. Safety rules (every brief re
 obtain, generate, describe or handle real CSAM/NCII; synthetic geometric fixtures only;
 no industry hash lists; logs carry ids, categories and scores only.
 
-Step 1 (done, awaiting the user): ADR 0006 "Resolution of the open questions" and ADR 0008
+Step 1 (done; ADR 0006 and 0008 accepted 2026-10-20): ADR 0006 "Resolution of the open questions" and ADR 0008
 (licenses). Found in the code: the hash matcher is a no-op by default (SHA-256 `stub` only),
 quarantine moves evidence inside the media bucket with media's own credentials, `legal_holds` has
 no triggers and no users, uploads are presigned straight to public keys. Garage v2.4.1 cannot

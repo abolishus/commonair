@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0006: Automated content moderation
 
-- Status: proposed (open questions resolved 2026-10-20, awaiting the user's acceptance)
+- Status: accepted (2026-10-20)
 - Date: 2026-10-19, resolution 2026-10-20
 
 ## Context
