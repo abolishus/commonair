@@ -5,7 +5,8 @@ import { describe, expect, it } from "vite-plus/test";
 import { chatStatusView, nameColorIndex } from "../src/chat/view.ts";
 import { en } from "../src/i18n/en.ts";
 import { healthBadge } from "../src/lib/stream-health.ts";
-import { accountMenu, siteNav, studioNav } from "../src/lib/nav.ts";
+import { isTreasurer } from "../src/lib/money.ts";
+import { accountMenu, footerNav, siteNav, studioNav } from "../src/lib/nav.ts";
 
 describe("site nav", () => {
   it("links the directory and marks it current only on /", () => {
@@ -20,12 +21,30 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, then sign out after a separator", () => {
     const items = accountMenu(true);
-    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "signOut"]);
-    expect(items.map((i) => i.to)).toEqual(["/dashboard", "/relays", undefined]);
-    expect(items[2]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 2).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "signOut"]);
+    expect(items.map((i) => i.to)).toEqual(["/dashboard", "/relays", "/settings/subscriptions", undefined]);
+    expect(items[3]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 3).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+  });
+
+  it("adds the treasury for treasurers only, before sign out", () => {
+    expect(accountMenu(true, { treasurer: false }).some((i) => i.id === "treasury")).toBe(false);
+    const items = accountMenu(true, { treasurer: true });
+    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "treasury", "signOut"]);
+    expect(items.find((i) => i.id === "treasury")?.to).toBe("/treasury");
+  });
+
+  it("treasurer visibility follows the session role", () => {
+    const me = { id: "u", username: "a", displayName: "A", channelSlug: null };
+    expect(isTreasurer(null)).toBe(false);
+    expect(isTreasurer(undefined)).toBe(false);
+    expect(isTreasurer(me)).toBe(false);
+    expect(isTreasurer({ ...me, role: "user" })).toBe(false);
+    expect(isTreasurer({ ...me, role: "admin" })).toBe(false);
+    expect(isTreasurer({ ...me, role: "treasurer" })).toBe(true);
+    expect(accountMenu(true, { treasurer: isTreasurer({ ...me, role: "treasurer" }) }).at(-2)?.id).toBe("treasury");
   });
 
   it("signed out: sign in and sign up, the current page marked", () => {
@@ -38,21 +57,28 @@ describe("account menu", () => {
   });
 
   it("only links pages that exist", () => {
-    const targets = [...accountMenu(true), ...accountMenu(false, "/")].flatMap((i) => (i.to ? [i.to] : []));
-    expect(new Set(targets)).toEqual(new Set(["/dashboard", "/relays", "/signin", "/signup"]));
+    const targets = [...accountMenu(true, { treasurer: true }), ...accountMenu(false, "/")].flatMap((i) =>
+      i.to ? [i.to] : [],
+    );
+    expect(new Set(targets)).toEqual(
+      new Set(["/dashboard", "/relays", "/settings/subscriptions", "/treasury", "/signin", "/signup"]),
+    );
   });
 });
 
 describe("studio nav", () => {
-  it("lists stream manager and relays, nothing else", () => {
+  it("lists stream manager, revenue and relays, nothing else", () => {
     expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
+      ["revenue", "/revenue"],
       ["relays", "/relays"],
     ]);
   });
 
   it.each([
     ["/dashboard", "streamManager"],
+    ["/revenue", "revenue"],
+    ["/revenue/", "revenue"],
     ["/relays", "relays"],
     ["/relays/", "relays"],
   ])("on %s marks %s current (and only it)", (path, id) => {
@@ -63,6 +89,12 @@ describe("studio nav", () => {
   it("marks nothing current elsewhere", () => {
     expect(studioNav("/").some((i) => i.current)).toBe(false);
     expect(studioNav("/dashboards").some((i) => i.current)).toBe(false);
+  });
+});
+
+describe("footer nav", () => {
+  it("links the public transparency page", () => {
+    expect(footerNav()).toEqual([{ id: "transparency", to: "/transparency" }]);
   });
 });
 

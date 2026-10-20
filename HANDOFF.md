@@ -48,11 +48,27 @@ against stripe-mock, webhook route, Connect onboarding, harness `--set provider=
 
 ### Session seven (2026-10-20, in progress)
 
-Resumed from `e64e007`. Round: finish B's fix round and E (fresh agents in the same worktrees),
-rerun the reviews of A, D and F, fix every HIGH (focused re-review), merge A–F, then the head adds
-the e4b doc to the web selector/i18n tests and pushes; then unit G (Stripe), then the open items.
+Resumed from `e64e007`. **A–F are reviewed and merged on `main`** (A `8dc5f20`, B `e4e586a`,
+D `561c8bf`, E `55a0461`, F `0b34b44`; C was already in). Reviews: A no HIGH (6 fixes: tip
+`decimal_places`, confirm date floor with 60 s skew, gift price kept, owner-only `setTiers`,
+payout account rules, race tests); B no HIGH (the nine head decisions); D 1 HIGH (cancel on
+gifts) then a new HIGH in its fix (tip validity after a tab switch), both fixed and re-reviewed
+clean; E no HIGH (8 fixes: tier limits from `MONEY_LIMITS`, treasury paging, instance currency,
+category rules, CSV truncation); F 1 HIGH (step 9 dispute match by idempotency key) fixed and
+re-reviewed clean. Head: spec clarifications (`ea277d0`), `SessionUser.role` (`7fad717`),
+`MONEY_LIMITS.tierNameMaxLength`/`tierBenefitsMaxLength` + `PublicConfig.currency` (`e897ba4`),
+e4b doc in `apps/web/tests/selectors.test.ts` (multi-id cells, `<n>` templates) and a catalog
+disjointness check in `i18n.test.ts`. Targeted checks on merged main: tsc + unit tests in web,
+ui, api, harness, worker, ledger, payments, contracts; api `test:int`; `vp build`.
 
-### Resume point (2026-10-20, stopped at the user's request)
+In flight: unit **G** (Stripe, `.claude/briefs/e4b/G-stripe.md`) and unit **H** (payout
+reservation as of `periodEnd`, optional `WorkerContext.money`), each in its own worktree.
+Still open: PageTabs/ChoiceToggle per-item `disabled`/`data-testid` (+ `ChoiceToggle wrap`), then
+switch the Support dialog and treasury tabs to them; channel accent in `ChannelSummary`; Support
+board fixture; spec decision on unpaid gifts holding recipients' slots for `PAYMENT_PENDING_DAYS`
+(A review M3: let a self-subscribe or paid gift take over, or cap open unpaid gifts per gifter).
+
+### Resume point (2026-10-20, stopped at the user's request) — superseded by session seven
 
 The user asked to stop the units and push `main`. On `main` (pushed): the contract step, migration
 `0013` + `0014` (partial indexes for the worker scans), unit **C worker-money** merged after

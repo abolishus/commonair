@@ -7,6 +7,8 @@ import { SidebarTrigger } from "@commonair/ui/components/sidebar";
 import { SiteFooter, SiteHeader, UserMenu, type NavItem, type UserMenuItem } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import {
+  BankIcon,
+  CreditCardIcon,
   DashboardSquare01Icon,
   LiveStreaming02Icon,
   Logout03Icon,
@@ -18,7 +20,8 @@ import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { signOut } from "../lib/auth.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
-import { accountMenu, siteNav, type AccountEntry, type SignedOutEntry } from "../lib/nav.ts";
+import { isTreasurer } from "../lib/money.ts";
+import { accountMenu, footerNav, siteNav, type AccountEntry, type SignedOutEntry } from "../lib/nav.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
 
@@ -44,6 +47,20 @@ function accountItem(entry: AccountEntry): UserMenuItem {
       };
     case "relays":
       return { id: entry.id, label: t("nav.relays"), icon: icon(ServerStack01Icon), render: <Link to="/relays" /> };
+    case "subscriptions":
+      return {
+        id: entry.id,
+        label: t("nav.subscriptions"),
+        icon: icon(CreditCardIcon),
+        render: <Link data-testid="account-subscriptions-link" to="/settings/subscriptions" />,
+      };
+    case "treasury":
+      return {
+        id: entry.id,
+        label: t("nav.treasury"),
+        icon: icon(BankIcon),
+        render: <Link data-testid="account-treasury-link" to="/treasury" />,
+      };
     case "signOut":
       return {
         id: entry.id,
@@ -125,7 +142,7 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
             data-username={me.username}
             username={me.username}
             menuLabel={t("nav.accountMenu", { name: me.displayName })}
-            items={accountMenu(true).map(accountItem)}
+            items={accountMenu(true, { treasurer: isTreasurer(me) }).map(accountItem)}
           />
         ) : (
           signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
@@ -145,13 +162,16 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
 
 export type Instance = ReturnType<typeof useBootstrap>["instance"];
 
-/** Instance name, license and the AGPL §13 source link (from `instance.info`). */
+/** Instance name, the public pages, license and the AGPL §13 source link (from `instance.info`). */
 export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.Element {
   const sourceUrl = safeHttpUrl(instance.sourceUrl);
   return (
     <SiteFooter
       instanceName={instance.name}
-      links={[]}
+      links={footerNav().map((entry) => ({
+        label: t("footer.transparency"),
+        render: <Link data-testid="footer-transparency-link" to={entry.to} />,
+      }))}
       license={t("footer.license")}
       sourceLink={
         sourceUrl ? { label: t("footer.source"), href: sourceUrl, "data-testid": "footer-source-link" } : undefined

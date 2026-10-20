@@ -469,7 +469,7 @@ describe("refunds", () => {
 describe("payout accounts and chargebacks", () => {
   test("setPayoutAccount re-pends held payouts; a chargeback after payout leaves a receivable", async () => {
     // Release every hold, then run a batch with no payout account: the creator's payout is held.
-    await releaseDueHolds(db(), { asOf: new Date(Date.now() + 30 * DAY), holdDays: 7, currency: "usd" });
+    await releaseDueHolds(db(), { asOf: new Date(), holdDays: 0, currency: "usd" });
     const mid = await creatorBalances(db(), streamer.userId, "usd");
     expect(mid.holdCents).toBe(0);
     expect(mid.liabilityCents).toBe((await creatorShare(500)) + (await creatorShare(300)));

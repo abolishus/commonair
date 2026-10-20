@@ -131,6 +131,8 @@ export const paymentsEnv = z.object({
     .refine((k) => !k.startsWith("sk_live_") && !k.startsWith("rk_live_"), "live Stripe keys are refused")
     .optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  /** Signing secret of the Connect webhook endpoint (connected accounts' `account.updated`). */
+  STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
   /** Override the Stripe API base, e.g. a local stripe-mock in the harness. */
   STRIPE_API_BASE: z.url().optional(),
   /**

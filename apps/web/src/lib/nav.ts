@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * What the site chrome links to, as data: the header nav, the account menu and the creator studio
- * sidebar. Only pages that exist are listed (no dead UI); `current` is derived from the pathname
- * here so the components stay router-agnostic.
+ * What the site chrome links to, as data: the header nav, the account menu, the creator studio
+ * sidebar and the footer. Only pages that exist are listed (no dead UI); `current` is derived from
+ * the pathname here so the components stay router-agnostic.
  */
 
 export interface SiteNavEntry {
@@ -14,9 +14,9 @@ export interface SiteNavEntry {
 }
 
 export interface AccountEntry {
-  id: "dashboard" | "relays" | "signOut";
+  id: "dashboard" | "relays" | "subscriptions" | "treasury" | "signOut";
   /** Absent for actions (sign out). */
-  to?: "/dashboard" | "/relays";
+  to?: "/dashboard" | "/relays" | "/settings/subscriptions" | "/treasury";
   separatorBefore?: boolean;
   destructive?: boolean;
 }
@@ -28,9 +28,19 @@ export interface SignedOutEntry {
 }
 
 export interface StudioEntry {
-  id: "streamManager" | "relays";
-  to: "/dashboard" | "/relays";
+  id: "streamManager" | "revenue" | "relays";
+  to: "/dashboard" | "/revenue" | "/relays";
   current: boolean;
+}
+
+export interface FooterEntry {
+  id: "transparency";
+  to: "/transparency";
+}
+
+export interface AccountMenuOptions {
+  /** Platform treasurers also get the treasury. */
+  treasurer?: boolean;
 }
 
 /** Trailing slashes do not change the page (`/relays/` is `/relays`). */
@@ -44,16 +54,24 @@ export function siteNav(pathname: string): SiteNavEntry[] {
 }
 
 /** Signed in: the account menu. Signed out: sign-in / sign-up links. */
-export function accountMenu(signedIn: true): AccountEntry[];
+export function accountMenu(signedIn: true, options?: AccountMenuOptions): AccountEntry[];
 export function accountMenu(signedIn: false, pathname: string): SignedOutEntry[];
-export function accountMenu(signedIn: boolean, pathname = "/"): AccountEntry[] | SignedOutEntry[] {
-  if (signedIn)
+export function accountMenu(
+  signedIn: boolean,
+  arg: string | AccountMenuOptions = {},
+): AccountEntry[] | SignedOutEntry[] {
+  if (signedIn) {
+    const treasurer = typeof arg !== "string" && arg.treasurer === true;
+    const treasury: AccountEntry[] = treasurer ? [{ id: "treasury", to: "/treasury" }] : [];
     return [
       { id: "dashboard", to: "/dashboard" },
       { id: "relays", to: "/relays" },
+      { id: "subscriptions", to: "/settings/subscriptions" },
+      ...treasury,
       { id: "signOut", separatorBefore: true, destructive: true },
     ];
-  const path = normalize(pathname);
+  }
+  const path = normalize(typeof arg === "string" ? arg : "/");
   return [
     { id: "signIn", to: "/signin", current: path === "/signin" },
     { id: "signUp", to: "/signup", current: path === "/signup" },
@@ -64,6 +82,12 @@ export function studioNav(pathname: string): StudioEntry[] {
   const path = normalize(pathname);
   return [
     { id: "streamManager", to: "/dashboard", current: path === "/dashboard" },
+    { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "relays", to: "/relays", current: path === "/relays" },
   ];
+}
+
+/** Public pages linked from every footer. */
+export function footerNav(): FooterEntry[] {
+  return [{ id: "transparency", to: "/transparency" }];
 }

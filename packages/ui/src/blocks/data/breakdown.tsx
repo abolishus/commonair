@@ -9,11 +9,15 @@ import { StatusBadge } from "../../primitives/status-badge.tsx";
 import { cn } from "@commonair/ui/lib/utils";
 
 export type ChartColor = `--chart-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
+/** `data-*` attributes for one legend row (test ids, raw values the visible text formats). */
+export type LegendItemAttributes = Record<`data-${string}`, string | number | undefined>;
 export interface BreakdownSegment {
   id: string;
   label: string;
   value: number;
   color?: ChartColor;
+  /** Set on the segment's legend row. */
+  attributes?: LegendItemAttributes;
 }
 /** Status tokens a key-only legend may use (e.g. an uptime strip's operational / degraded / outage). */
 export type LegendStatusColor = "--success" | "--warning" | "--destructive" | "--info" | "--muted";
@@ -23,6 +27,8 @@ export interface LegendItem {
   label: string;
   value?: number;
   color?: ChartColor | LegendStatusColor;
+  /** Set on the item's `<li>`. */
+  attributes?: LegendItemAttributes;
 }
 export interface LegendProps extends React.ComponentProps<"ul"> {
   items: LegendItem[];
@@ -61,6 +67,7 @@ export function Legend({
     <ul role="list" className={listClass} {...props}>
       {items.map((item, index) => (
         <li
+          {...item.attributes}
           key={item.id}
           data-key-only={item.value === undefined || undefined}
           className="flex min-w-0 items-center gap-2 text-xs"

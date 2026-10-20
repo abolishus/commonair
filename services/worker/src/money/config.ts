@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { loadEnv, paymentsEnv } from "@commonair/config";
+import type { WorkerContext } from "../context.ts";
 
 /** Tunables of the money jobs. Cut and payout rules are not here: they come from governance per run. */
 export interface MoneyJobConfig {
@@ -23,7 +24,7 @@ let cached: MoneyJobConfig | undefined;
 
 /**
  * The worker's payment env (validated at startup as part of `workerEnv`), read once per process.
- * The context does not carry env, so the jobs read it here.
+ * `createWorker` puts it on the context; this is the fallback for a context built without it.
  */
 export function moneyConfigFromEnv(source?: Record<string, string | undefined>): MoneyJobConfig {
   if (!source && cached) return cached;
@@ -36,4 +37,9 @@ export function moneyConfigFromEnv(source?: Record<string, string | undefined>):
   };
   if (!source) cached = cfg;
   return cfg;
+}
+
+/** The config a money job runs with: the context's (injectable in tests), else the env's. */
+export function moneyConfig(ctx: Pick<WorkerContext, "money">): MoneyJobConfig {
+  return ctx.money ?? moneyConfigFromEnv();
 }

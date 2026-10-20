@@ -134,7 +134,14 @@ skipped (`worker.money.runs{outcome:"skipped"}`). Runs that throw retry 3 times 
   the period from the previous `current_period_end`). Unconfirmed ones turn `failed` once
   expired. Released holds show as available creator balance in the next payout run.
 - **Configuration.** `CURRENCY` and `PAYMENT_PENDING_DAYS` (`paymentsEnv`, validated at startup);
-  the cut, minimum payout and hold period are governance settings, never env.
+  the cut, minimum payout and hold period are governance settings, never env. `createWorker`
+  reads them once into `ctx.money` (`MoneyJobConfig`: currency, pending days, batch size, time
+  budget); pass `money` to `createWorker` (or set `ctx.money`) to inject config in tests. Jobs
+  read it through `moneyConfig(ctx)`, which falls back to the env for a context without it.
+- **Release dating.** Each hold release is dated when it fell due (payment time + `holdDays`,
+  capped at the run's `now`), not when the job ran, so an outage does not push earnings into
+  the next month's payout run (`runPayoutBatch` counts only postings dated at or before the
+  period end).
 - **Metrics.** `worker.money.runs{job,outcome}`, `worker.money.expired{kind}`,
   `worker.money.renewed`, `worker.money.subscriptions_ended{reason}` (`canceled`, `gift`,
   `no_tiers`, `renewal_unpaid`), `worker.money.released_cents{currency}`. Logs carry counts only,

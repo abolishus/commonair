@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2- and e3-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3- and e4b-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -66,6 +66,43 @@ describe.each(["e1-selectors.md", "e2-selectors.md", "e3-selectors.md"])("%s", (
 
   it.each(ids)("renders %s", (id) => {
     expect(rendered(id, appText) || rendered(id, uiText)).toBe(true);
+  });
+});
+
+/**
+ * E4b: the doc's tables list several ids per cell (`a`, `b`) and per-tier templates (`x-<n>`,
+ * tiers 1–3), so every backticked id in the first column counts.
+ */
+function e4bTestIds(): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing/e4b-selectors.md"), "utf8");
+  const section = text.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  const cells = [...section.matchAll(/^\|([^|]*)\|/gm)].map((m) => m[1] ?? "");
+  return cells.flatMap((cell) =>
+    [...cell.matchAll(/`([a-z0-9-]+(?:-<n>)?)`/g)].flatMap((m) => {
+      const id = m[1] ?? "";
+      return id.endsWith("-<n>") ? [1, 2, 3].map((n) => id.replace("<n>", String(n))) : [id];
+    }),
+  );
+}
+
+/** A per-tier id built from a template literal (`x-${n}`) and set as `data-testid={…}`. */
+const viaTierTemplate = (id: string, text: string) => {
+  const m = /^(.+-)[123]$/.exec(id);
+  return m !== null && text.includes(`\`${m[1]}\${n}\``) && text.includes("data-testid={");
+};
+
+describe("e4b-selectors.md", () => {
+  const ids = e4bTestIds();
+
+  it("lists test ids, including the expanded tier templates", () => {
+    expect(ids.length).toBeGreaterThan(50);
+    expect(ids).toContain("support-tab-gift");
+    expect(ids).toContain("revenue-tier-benefits-3");
+    expect(ids).not.toContain("revenue-tier-name-<n>");
+  });
+
+  it.each(ids)("renders %s", (id) => {
+    expect(rendered(id, appText) || rendered(id, uiText) || viaTierTemplate(id, appText)).toBe(true);
   });
 });
 

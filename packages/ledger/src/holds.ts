@@ -7,7 +7,16 @@ import { assertCurrency } from "./accounts.ts";
 import { lockCreator } from "./locks.ts";
 import { post } from "./poster.ts";
 import { paymentHoldRemaining } from "./queries.ts";
-import { holdRelease } from "./rules.ts";
+import { holdRelease, holdReleaseDueAt } from "./rules.ts";
+
+/** Clock skew tolerated between the caller's `asOf` and this process. */
+const MAX_ASOF_SKEW_MS = 60_000;
+
+/** When a release is dated: the moment it fell due, capped at the run's `asOf`. */
+function dueAt(succeededAt: Date, holdDays: number, asOf: Date): Date {
+  const due = holdReleaseDueAt(succeededAt, holdDays);
+  return due < asOf ? due : asOf;
+}
 
 export interface ReleaseResult {
   released: number;
@@ -19,6 +28,10 @@ export interface ReleaseResult {
  * positive remainder are due, and each releases exactly what is still attributed to it, so
  * a lot drained by reversals is never revisited and can never block the batch. Each release
  * is its own idempotent posting, so a crash mid-batch is safe to re-run.
+ *
+ * A release is dated when it fell due (payment time + `holdDays`, never after `asOf`), not when
+ * the job happened to run: a payout run for a month counts exactly the holds due by its end,
+ * however late the release job or the run itself.
  */
 export async function releaseDueHolds(
   db: Executor,
@@ -26,14 +39,17 @@ export async function releaseDueHolds(
 ): Promise<ReleaseResult> {
   assertCurrency(opts.currency);
   if (!Number.isFinite(opts.holdDays) || opts.holdDays < 0) throw new RangeError("holdDays must be non-negative");
+  // Releases are dated up to `asOf`; a future date would release early and post future-dated
+  // lines that every payout run would read as already available.
+  if (opts.asOf.getTime() > Date.now() + MAX_ASOF_SKEW_MS) throw new RangeError("asOf must not be in the future");
   const cutoff = new Date(opts.asOf.getTime() - opts.holdDays * 86_400_000);
-  const due = await db.execute<{ payment_id: string; creator: string }>(sql`
+  const due = await db.execute<{ payment_id: string; creator: string; occurred_at: string | Date }>(sql`
     with lots as (
       select e.memo from ledger_entries e join ledger_accounts a on a.id = e.account_id
       where a.currency = ${opts.currency} and a.code like 'liability:creator-hold:%' and e.memo like 'hold:%'
       group by e.memo having sum(e.amount_cents) < 0
     )
-    select t.ref_id as payment_id, t.metadata->>'creatorUserId' as creator
+    select t.ref_id as payment_id, t.metadata->>'creatorUserId' as creator, t.occurred_at
     from lots join ledger_transactions t on t.idempotency_key = 'payment:' || substr(lots.memo, 6)
     where t.occurred_at <= ${cutoff.toISOString()}::timestamptz
       and not exists (select 1 from ledger_transactions r where r.idempotency_key = 'hold-release:' || t.ref_id::text)
@@ -54,7 +70,7 @@ export async function releaseDueHolds(
           creatorUserId: row.creator,
           amountCents: cents,
           currency: opts.currency,
-          occurredAt: opts.asOf,
+          occurredAt: dueAt(new Date(row.occurred_at), opts.holdDays, opts.asOf),
         }),
       );
       return r.created ? cents : 0;
