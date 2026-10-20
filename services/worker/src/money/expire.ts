@@ -27,18 +27,41 @@ export interface ExpireResult {
 const p = schema.payments;
 const s = schema.subscriptions;
 
+/** Subscription rows one expiry transaction may touch (a gift payment carries up to 100). */
+export const EXPIRY_SUBSCRIPTION_CAP = 500;
+
+/**
+ * Take due payments in order while the subscriptions they carry stay under `cap` (a payment's
+ * `quantity` bounds its subscriptions: 1 for a self sub or tip, n for n gifts). The first one is
+ * always taken, so a batch never stalls.
+ */
+export function takeWithinCap<T extends { quantity: number }>(rows: readonly T[], cap: number): T[] {
+  const out: T[] = [];
+  let weight = 0;
+  for (const r of rows) {
+    if (out.length > 0 && weight + r.quantity > cap) break;
+    out.push(r);
+    weight += r.quantity;
+  }
+  return out;
+}
+
 /** One transaction: up to `limit` due payments, everything hanging off them, and the end events. */
-async function expireBatch(ctx: WorkerContext, now: Date, limit: number) {
+async function expireBatch(ctx: WorkerContext, now: Date, limit: number, subscriptionCap: number) {
   return ctx.db.transaction(async (tx) => {
     // Lock the due rows (skipping any a confirm holds right now), then flip them by CAS.
-    const due = await tx
-      .select({ id: p.id })
+    const locked = await tx
+      .select({ id: p.id, quantity: p.quantity })
       .from(p)
       .where(and(eq(p.status, "pending"), isNotNull(p.expiresAt), lte(p.expiresAt, now)))
       .orderBy(p.expiresAt, p.id)
       .limit(limit)
       .for("update", { skipLocked: true });
-    if (due.length === 0) return { payments: [], subscriptions: 0, ended: [] as EndedSubscription[], tips: 0 };
+    // Rows past the cap are unlocked again at commit and taken by the next batch.
+    const due = takeWithinCap(locked, subscriptionCap);
+    const more = locked.length >= limit || due.length < locked.length;
+    if (due.length === 0)
+      return { payments: [], subscriptions: 0, ended: [] as EndedSubscription[], tips: 0, more: false };
     const failed = await tx
       .update(p)
       .set({ status: "failed", updatedAt: now })
@@ -55,7 +78,7 @@ async function expireBatch(ctx: WorkerContext, now: Date, limit: number) {
     const paymentIds = failed.map((f) => f.id);
     const subIds = failed.flatMap((f) => (f.subscriptionId ? [f.subscriptionId] : []));
     const tipIds = failed.flatMap((f) => (f.tipId ? [f.tipId] : []));
-    if (paymentIds.length === 0) return { payments: [], subscriptions: 0, ended: [], tips: 0 };
+    if (paymentIds.length === 0) return { payments: [], subscriptions: 0, ended: [], tips: 0, more };
 
     const byPayment = or(inArray(s.giftPaymentId, paymentIds), subIds.length > 0 ? inArray(s.id, subIds) : undefined);
     const incomplete = await tx
@@ -101,19 +124,21 @@ async function expireBatch(ctx: WorkerContext, now: Date, limit: number) {
         ),
       )
       .returning({ id: schema.tips.id });
-    return { payments: failed, subscriptions: incomplete.length + lapsed.length, ended, tips: tips.length };
+    return { payments: failed, subscriptions: incomplete.length + lapsed.length, ended, tips: tips.length, more };
   });
 }
 
 export async function expirePendingPayments(
   ctx: WorkerContext,
   cfg: Pick<MoneyJobConfig, "batchSize" | "budgetMs">,
-  clock?: () => number,
+  opts: { clock?: () => number; subscriptionCap?: number } = {},
 ): Promise<ExpireResult> {
+  const clock = opts.clock;
+  const cap = opts.subscriptionCap ?? EXPIRY_SUBSCRIPTION_CAP;
   const now = ctx.now();
   const totals = { payments: 0, subscriptions: 0, ended: 0, tips: 0 };
   const loop = await runBatches({ batchSize: cfg.batchSize, budgetMs: cfg.budgetMs, clock }, async (limit) => {
-    const r = await expireBatch(ctx, now, limit);
+    const r = await expireBatch(ctx, now, limit, cap);
     totals.payments += r.payments.length;
     totals.subscriptions += r.subscriptions;
     totals.ended += r.ended.length;
@@ -121,7 +146,7 @@ export async function expirePendingPayments(
     for (const f of r.payments) moneyMetrics.expired.add(1, { kind: f.kind });
     if (r.ended.length) moneyMetrics.ended.add(r.ended.length, { reason: "renewal_unpaid" });
     await publishBadgeInvalidations(ctx, r.ended);
-    return r.payments.length;
+    return { rows: r.payments.length, more: r.more };
   });
   if (totals.payments > 0 || loop.exhausted) ctx.logger.info("expired pending payments", { ...totals, ...loop });
   return { ...totals, batches: loop.batches, exhausted: loop.exhausted };
