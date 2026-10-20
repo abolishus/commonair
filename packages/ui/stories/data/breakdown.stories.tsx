@@ -25,5 +25,21 @@ export const Default: Story = {
     />
   ),
 };
+/** Per-segment `attributes` land on each legend row (the Revenue page's `revenue-source` rows). */
+export const WithSegmentAttributes: Story = {
+  render: () => (
+    <BreakdownBar
+      label="Revenue by source"
+      segments={[
+        { id: "subscriptions", label: "Subscriptions", value: 8200, attributes: { "data-source": "subscriptions" } },
+        { id: "gifts", label: "Gifted subs", value: 1450, attributes: { "data-source": "gifts" } },
+        { id: "tips", label: "Tips", value: 2800, attributes: { "data-source": "tips" } },
+      ]}
+      formatLabel={(items, shares) =>
+        `Revenue sources: ${items.map((item, index) => `${item.label} ${shares[index]}%`).join(", ")}`
+      }
+    />
+  ),
+};
 export const Light: Story = { ...Default, globals: { theme: "light" } };
 export const Mobile320: Story = { ...Default, globals: { viewport: { value: "mobile320" } } };

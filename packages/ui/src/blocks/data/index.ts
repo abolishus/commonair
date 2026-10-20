@@ -12,6 +12,7 @@ export {
   type BreakdownTallyProps,
   type ChartColor,
   type LegendItem,
+  type LegendItemAttributes,
   type LegendProps,
   type LegendStatusColor,
 } from "./breakdown.tsx";

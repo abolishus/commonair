@@ -22,11 +22,15 @@ export interface FilterSelect {
   value: string;
   options: FilterOption[];
   onValueChange: (value: string) => void;
+  /** On the select trigger. Each option carries `data-value` (its value). */
+  "data-testid"?: string;
 }
 export interface FilterBarProps extends React.ComponentProps<"div"> {
   searchLabel?: string;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
+  /** Extra props for the search input (name, maxLength, `data-testid`, …). */
+  searchInputProps?: Omit<React.ComponentProps<typeof Input>, "value" | "onChange"> & { "data-testid"?: string };
   filters?: FilterSelect[];
   toggleLabel?: string;
   toggleValue?: string;
@@ -44,6 +48,7 @@ export function FilterBar({
   searchLabel,
   searchValue,
   onSearchChange,
+  searchInputProps,
   filters = [],
   toggleLabel,
   toggleValue,
@@ -67,6 +72,7 @@ export function FilterBar({
             <HugeiconsIcon icon={Search01Icon} aria-hidden />
           </InputGroupAddon>
           <Input
+            {...searchInputProps}
             aria-label={searchLabel}
             value={searchValue ?? ""}
             onChange={(event) => onSearchChange(event.currentTarget.value)}
@@ -80,17 +86,18 @@ export function FilterBar({
             {filter.label}
           </Label>
           <Select
+            items={filter.options}
             value={filter.value}
             onValueChange={(value) => {
               if (value !== null) filter.onValueChange(value);
             }}
           >
-            <SelectTrigger id={filter.id} aria-label={filter.label}>
+            <SelectTrigger id={filter.id} aria-label={filter.label} data-testid={filter["data-testid"]}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {filter.options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
+                <SelectItem key={option.value} value={option.value} data-value={option.value}>
                   {option.label}
                 </SelectItem>
               ))}
