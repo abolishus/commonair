@@ -33,7 +33,8 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import {
-  COST_CATEGORY,
+  costCategoryError,
+  payoutAccountValid,
   COST_CATEGORY_MAX,
   COST_DESCRIPTION_MAX,
   DISPUTE_REASON_MAX,
@@ -113,6 +114,7 @@ export interface PaymentsPanelProps {
   onConfirm: (payment: TreasurerPaymentDto) => Promise<void>;
   onDispute: (payment: TreasurerPaymentDto, kind: DisputeKind, amountCents: number, reason: string) => Promise<void>;
   hasMore?: boolean;
+  loadingMore?: boolean;
   onLoadMore?: () => void;
 }
 
@@ -132,6 +134,7 @@ export function PaymentsPanel({
   onConfirm,
   onDispute,
   hasMore = false,
+  loadingMore = false,
   onLoadMore,
 }: PaymentsPanelProps): React.JSX.Element {
   const columns: DataTableColumn<TreasurerPaymentDto>[] = [
@@ -209,15 +212,15 @@ export function PaymentsPanel({
             headingLevel={3}
           />
         }
-        footer={hasMore && onLoadMore ? <LoadMore onClick={onLoadMore} /> : undefined}
+        footer={hasMore && onLoadMore ? <LoadMore onClick={onLoadMore} loading={loadingMore} /> : undefined}
       />
     </>
   );
 }
 
-function LoadMore({ onClick }: { onClick: () => void }): React.JSX.Element {
+function LoadMore({ onClick, loading }: { onClick: () => void; loading: boolean }): React.JSX.Element {
   return (
-    <Button variant="ghost" size="sm" onClick={onClick}>
+    <Button variant="ghost" size="sm" disabled={loading} aria-busy={loading || undefined} onClick={onClick}>
       {t("treasury.loadMore")}
     </Button>
   );
@@ -338,7 +341,10 @@ export function DisputeForm({
   const [amount, setAmount] = React.useState(refundable);
   const [reason, setReason] = React.useState("");
   const [pending, setPendingState] = React.useState(false);
+  // False while the typed amount does not parse (then `amount` is stale).
+  const [amountParsed, setAmountParsed] = React.useState(true);
   const amountError = disputeAmountError(amount, refundable);
+  const canSubmit = amountParsed && amountError === null;
   const reasonId = React.useId();
   const refund = kind === "refund";
   // A variable, not an inline literal: a `data-testid` key in a literal is an excess property.
@@ -350,7 +356,7 @@ export function DisputeForm({
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (amountError || pending) return;
+    if (!canSubmit || pending) return;
     setPending(true);
     try {
       await onSubmit(amount, reason.trim());
@@ -380,6 +386,8 @@ export function DisputeForm({
         min={1}
         max={refundable}
         rangeError={amountError}
+        formatError={t("money.amountFormat")}
+        onValidityChange={setAmountParsed}
         hint={t("treasury.dispute.amountHint", {
           amount: formatMoney(refundable, payment.amount.currency, locale),
         })}
@@ -403,7 +411,7 @@ export function DisputeForm({
           data-testid="treasury-dispute-submit"
           type="submit"
           variant={refund ? "default" : "destructive"}
-          disabled={amountError !== null || pending}
+          disabled={!canSubmit || pending}
           aria-busy={pending || undefined}
         >
           {refund ? t("treasury.refund.submit") : t("treasury.chargeback.submit")}
@@ -428,6 +436,7 @@ export interface PayoutsPanelProps {
   onRun: () => void;
   onMarkPaid: (payout: TreasurerPayoutDto, reference: string) => Promise<void>;
   hasMore?: boolean;
+  loadingMore?: boolean;
   onLoadMore?: () => void;
 }
 
@@ -438,6 +447,7 @@ export function PayoutsPanel({
   onRun,
   onMarkPaid,
   hasMore = false,
+  loadingMore = false,
   onLoadMore,
 }: PayoutsPanelProps): React.JSX.Element {
   const columns: DataTableColumn<TreasurerPayoutDto>[] = [
@@ -505,7 +515,7 @@ export function PayoutsPanel({
             headingLevel={3}
           />
         }
-        footer={hasMore && onLoadMore ? <LoadMore onClick={onLoadMore} /> : undefined}
+        footer={hasMore && onLoadMore ? <LoadMore onClick={onLoadMore} loading={loadingMore} /> : undefined}
       />
     </>
   );
@@ -667,7 +677,8 @@ export function PayoutAccountForm({
   const [enabled, setEnabled] = React.useState(true);
   const [pending, setPending] = React.useState(false);
   const name = username.trim().toLowerCase();
-  const valid = /^[a-z0-9_]{3,25}$/.test(name);
+  const valid = payoutAccountValid({ username: name, reference, payoutsEnabled: enabled });
+  const referenceMissing = enabled && reference.trim() === "";
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -714,7 +725,9 @@ export function PayoutAccountForm({
           autoComplete="off"
           onChange={(e) => setReference(e.currentTarget.value)}
         />
-        <FieldDescription>{t("treasury.account.referenceHint")}</FieldDescription>
+        <FieldDescription>
+          {referenceMissing ? t("treasury.account.referenceRequired") : t("treasury.account.referenceHint")}
+        </FieldDescription>
       </Field>
       <SwitchField
         label={t("treasury.account.enabled")}
@@ -754,10 +767,14 @@ export function CostForm({
   const [category, setCategory] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [amount, setAmount] = React.useState(0);
+  const [amountParsed, setAmountParsed] = React.useState(true);
+  // Bumped after a save, so the amount input drops its typed text along with the value.
+  const [generation, setGeneration] = React.useState(0);
   const [pending, setPending] = React.useState(false);
   const slug = category.trim().toLowerCase();
-  const categoryValid = COST_CATEGORY.test(slug);
-  const amountValid = Number.isSafeInteger(amount) && amount > 0;
+  const categoryError = costCategoryError(slug);
+  const categoryValid = categoryError === null;
+  const amountValid = amountParsed && Number.isSafeInteger(amount) && amount > 0;
   // A variable, not an inline literal: a `data-testid` key in a literal is an excess property.
   const amountInput = { "data-testid": "treasury-cost-amount", name: "amount" };
 
@@ -771,6 +788,7 @@ export function CostForm({
       setCategory("");
       setDescription("");
       setAmount(0);
+      setGeneration((g) => g + 1);
     } catch (err) {
       toastActionError(err, t("treasury.cost.failed"));
     } finally {
@@ -798,7 +816,7 @@ export function CostForm({
           onChange={(e) => setCategory(e.currentTarget.value)}
         />
         <FieldDescription>{t("treasury.cost.categoryHint")}</FieldDescription>
-        {category !== "" && !categoryValid && <FieldError>{t("treasury.cost.categoryInvalid")}</FieldError>}
+        {category !== "" && categoryError && <FieldError>{categoryError}</FieldError>}
       </Field>
       <Field>
         <FieldLabel htmlFor="treasury-cost-description">{t("treasury.cost.description")}</FieldLabel>
@@ -812,11 +830,14 @@ export function CostForm({
         />
       </Field>
       <AmountField
+        key={generation}
         label={t("treasury.cost.amount")}
         currency={currency}
         locale={locale}
         value={amount}
         rangeError={null}
+        formatError={t("money.amountFormat")}
+        onValidityChange={setAmountParsed}
         hint={t("treasury.cost.amountHint")}
         inputProps={amountInput}
         onValueChange={setAmount}

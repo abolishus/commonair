@@ -16,7 +16,8 @@ import {
   type PayoutRunResult,
   type TreasuryTab,
 } from "../../components/money/treasury.tsx";
-import { useLoad } from "../../components/money/use-load.ts";
+import { usePaged } from "../../components/money/use-load.ts";
+import { useBootstrap } from "../../lib/bootstrap.ts";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { api } from "../../lib/api.ts";
@@ -33,15 +34,19 @@ function TreasuryPage(): React.JSX.Element {
   const [search, setSearch] = React.useState("");
   const reference = useDebounced(normalizeReference(search), SEARCH_DEBOUNCE_MS);
 
-  const payments = useLoad(`payments|${reference}`, () =>
-    api().money.treasurer.payments(reference ? { reference, limit: PAGE } : { status: "pending", limit: PAGE }),
+  const { config } = useBootstrap();
+  const moreFailed = (err: unknown) => toastActionError(err, t("treasury.loadMoreFailed"));
+  const payments = usePaged(
+    `payments|${reference}`,
+    (cursor) =>
+      api().money.treasurer.payments(
+        reference ? { reference, limit: PAGE, cursor } : { status: "pending", limit: PAGE, cursor },
+      ),
+    moreFailed,
   );
-  const payouts = useLoad("payouts", () => api().money.treasurer.payouts({ limit: PAGE }));
+  const payouts = usePaged("payouts", (cursor) => api().money.treasurer.payouts({ limit: PAGE, cursor }), moreFailed);
   const [result, setResult] = React.useState<PayoutRunResult | null>(null);
   const [running, setRunning] = React.useState(false);
-  // Only the amount field's display needs it (recordCost takes cents in the instance currency).
-  // The lists carry the instance currency; the bootstrap does not yet (contract request).
-  const currency = payments.data?.items[0]?.amount.currency ?? payouts.data?.items[0]?.amount.currency ?? "usd";
 
   const runPayouts = async () => {
     if (running) return;
@@ -67,7 +72,10 @@ function TreasuryPage(): React.JSX.Element {
           <>
             {payments.failed && <FormError>{t("treasury.payments.loadFailed")}</FormError>}
             <PaymentsPanel
-              payments={payments.data?.items ?? (payments.failed ? [] : null)}
+              payments={payments.items ?? (payments.failed ? [] : null)}
+              hasMore={payments.hasMore}
+              loadingMore={payments.loadingMore}
+              onLoadMore={payments.loadMore}
               search={search}
               onSearchChange={setSearch}
               onConfirm={async (p) => {
@@ -91,7 +99,10 @@ function TreasuryPage(): React.JSX.Element {
           <>
             {payouts.failed && <FormError>{t("treasury.payouts.loadFailed")}</FormError>}
             <PayoutsPanel
-              payouts={payouts.data?.items ?? (payouts.failed ? [] : null)}
+              payouts={payouts.items ?? (payouts.failed ? [] : null)}
+              hasMore={payouts.hasMore}
+              loadingMore={payouts.loadingMore}
+              onLoadMore={payouts.loadMore}
               result={result}
               running={running}
               onRun={() => void runPayouts()}
@@ -112,7 +123,8 @@ function TreasuryPage(): React.JSX.Element {
         }
         costs={
           <CostForm
-            currency={currency}
+            // recordCost takes cents in the instance currency.
+            currency={config.currency}
             onSubmit={async (input) => {
               await api().money.treasurer.recordCost({ ...currentMonthPeriod(Date.now()), ...input });
             }}

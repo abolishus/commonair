@@ -204,6 +204,30 @@ export function statementCsv(lines: readonly RevenueLineDto[], locale: string): 
   return [STATEMENT_COLUMNS.join(","), ...rows].join("\r\n") + "\r\n";
 }
 
+export interface StatementPage {
+  items: RevenueLineDto[];
+  nextCursor: string | null;
+}
+
+/**
+ * Every ledger line of the period, page by page, up to `maxPages`. `complete` is false when the
+ * cap stopped it with pages left, so the caller never hands out a silently truncated statement.
+ */
+export async function collectStatement(
+  load: (cursor: string | undefined) => Promise<StatementPage>,
+  maxPages: number,
+): Promise<{ lines: RevenueLineDto[]; complete: boolean }> {
+  const lines: RevenueLineDto[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const page = await load(cursor);
+    lines.push(...page.items);
+    if (!page.nextCursor) return { lines, complete: true };
+    cursor = page.nextCursor;
+  }
+  return { lines, complete: false };
+}
+
 export function statementFilename(channel: string, month: string): string {
   return `revenue-${channel.replace(/[^a-z0-9_]/gi, "")}-${MONTH.test(month) ? month : "period"}.csv`;
 }
@@ -212,8 +236,6 @@ export function statementFilename(channel: string, month: string): string {
 
 export const TIERS = [1, 2, 3] as const;
 export type TierNumber = (typeof TIERS)[number];
-export const TIER_NAME_MAX = 40;
-export const TIER_BENEFITS_MAX = 300;
 /** Starting prices for a channel without tiers (cents): within MONEY_LIMITS and increasing. */
 export const DEFAULT_TIER_PRICES: Record<TierNumber, number> = { 1: 500, 2: 1000, 3: 2500 };
 
@@ -231,6 +253,14 @@ export function tierDrafts(tiers: readonly SubTierDto[]): TierDraft[] {
       ? { tier, name: found.name, priceCents: found.price.cents, benefits: found.benefits }
       : { tier, name: "", priceCents: DEFAULT_TIER_PRICES[tier], benefits: "" };
   });
+}
+
+/**
+ * The tier editor's currency: the stored tiers' own, else the instance's. Never waits on
+ * `money.revenue`, so the editor shows even when the summary fails to load.
+ */
+export function tierEditorCurrency(tiers: readonly SubTierDto[], instanceCurrency: string): string {
+  return tiers[0]?.price.currency ?? instanceCurrency;
 }
 
 export interface TierFieldErrors {
@@ -258,10 +288,10 @@ export function validateTiers(drafts: readonly TierDraft[]): Partial<Record<Tier
     }
     const name = draft.name.trim();
     if (name === "") add(tier, "name", t("revenue.tiers.error.nameRequired"));
-    else if (name.length > TIER_NAME_MAX)
-      add(tier, "name", t("revenue.tiers.error.nameTooLong", { max: TIER_NAME_MAX }));
-    if (draft.benefits.length > TIER_BENEFITS_MAX)
-      add(tier, "benefits", t("revenue.tiers.error.benefitsTooLong", { max: TIER_BENEFITS_MAX }));
+    else if (name.length > MONEY_LIMITS.tierNameMaxLength)
+      add(tier, "name", t("revenue.tiers.error.nameTooLong", { max: MONEY_LIMITS.tierNameMaxLength }));
+    if (draft.benefits.length > MONEY_LIMITS.tierBenefitsMaxLength)
+      add(tier, "benefits", t("revenue.tiers.error.benefitsTooLong", { max: MONEY_LIMITS.tierBenefitsMaxLength }));
     if (
       !Number.isSafeInteger(draft.priceCents) ||
       draft.priceCents < MONEY_LIMITS.tierMinCents ||
@@ -310,8 +340,24 @@ export function disputeAmountError(amountCents: number, refundable: number): str
   return null;
 }
 
-/** Cost categories are short slugs (`hosting`, `bandwidth`); the API validates them too. */
-export const COST_CATEGORY = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+/** Cost categories become ledger account codes: the API's lowercase slug. */
+export const COST_CATEGORY = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** Expense categories outside infrastructure (the API refuses them for `recordCost`). */
+export const RESERVED_COST_CATEGORIES: readonly string[] = ["payment-fees"];
+
+/** An error for a typed cost category (already trimmed and lowercased), or null when it is usable. */
+export function costCategoryError(slug: string): string | null {
+  if (!COST_CATEGORY.test(slug)) return t("treasury.cost.categoryInvalid");
+  if (RESERVED_COST_CATEGORIES.includes(slug)) return t("treasury.cost.categoryReserved");
+  return null;
+}
+
+export const USERNAME = /^[a-z0-9_]{3,25}$/;
+
+/** The payout account form's rule (as the API's): a username, and a reference once payouts are enabled. */
+export function payoutAccountValid(input: { username: string; reference: string; payoutsEnabled: boolean }): boolean {
+  return USERNAME.test(input.username) && (!input.payoutsEnabled || input.reference.trim() !== "");
+}
 
 /** The UTC month containing `now`, for `treasurer.recordCost`. */
 export function currentMonthPeriod(now: number): { periodStart: string; periodEnd: string } {

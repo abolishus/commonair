@@ -36,8 +36,6 @@ import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import {
-  TIER_BENEFITS_MAX,
-  TIER_NAME_MAX,
   earnedDelta,
   payoutProgress,
   revenueLineBadge,
@@ -409,8 +407,20 @@ export interface TierEditorProps {
 export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.JSX.Element {
   const [drafts, setDrafts] = React.useState<TierDraft[]>(() => tierDrafts(tiers));
   const [pending, setPending] = React.useState(false);
+  // Price inputs whose typed text does not parse yet (their cents are stale until it does).
+  const [unparsed, setUnparsed] = React.useState<ReadonlySet<TierDraft["tier"]>>(() => new Set());
+  // Bumped after a save, so the price inputs drop any typed text and show the stored prices.
+  const [generation, setGeneration] = React.useState(0);
   const errors = validateTiers(drafts);
-  const valid = Object.keys(errors).length === 0;
+  const valid = Object.keys(errors).length === 0 && unparsed.size === 0;
+  const onPriceValidity = (tier: TierDraft["tier"], ok: boolean) =>
+    setUnparsed((prev) => {
+      if (prev.has(tier) !== ok) return prev;
+      const next = new Set(prev);
+      if (ok) next.delete(tier);
+      else next.add(tier);
+      return next;
+    });
   const update = (tier: TierDraft["tier"], patch: Partial<TierDraft>) =>
     setDrafts((prev) => prev.map((d) => (d.tier === tier ? { ...d, ...patch } : d)));
 
@@ -421,6 +431,7 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
     try {
       const saved = await onSave(tiersInput(drafts, currency));
       setDrafts(tierDrafts(saved));
+      setGeneration((g) => g + 1);
       toast.success(t("revenue.tiers.saved"));
     } catch (err) {
       toastActionError(err, t("revenue.tiers.saveFailed"));
@@ -440,11 +451,12 @@ export function TierEditor({ tiers, currency, onSave }: TierEditorProps): React.
       <ResponsiveGrid cols={3}>
         {drafts.map((draft) => (
           <TierFields
-            key={draft.tier}
+            key={`${draft.tier}-${generation}`}
             draft={draft}
             currency={currency}
             errors={errors[draft.tier] ?? {}}
             onChange={(patch) => update(draft.tier, patch)}
+            onPriceValidity={(ok) => onPriceValidity(draft.tier, ok)}
           />
         ))}
       </ResponsiveGrid>
@@ -475,11 +487,13 @@ function TierFields({
   currency,
   errors,
   onChange,
+  onPriceValidity,
 }: {
   draft: TierDraft;
   currency: string;
   errors: { name?: string; price?: string; benefits?: string };
   onChange: (patch: Partial<TierDraft>) => void;
+  onPriceValidity: (valid: boolean) => void;
 }): React.JSX.Element {
   const { locale } = useLocale();
   const n = draft.tier;
@@ -495,7 +509,7 @@ function TierFields({
           id={nameId}
           data-testid={nameId}
           value={draft.name}
-          maxLength={TIER_NAME_MAX}
+          maxLength={MONEY_LIMITS.tierNameMaxLength}
           autoComplete="off"
           aria-invalid={errors.name ? true : undefined}
           onChange={(e) => onChange({ name: e.currentTarget.value })}
@@ -510,6 +524,8 @@ function TierFields({
         min={MONEY_LIMITS.tierMinCents}
         max={MONEY_LIMITS.tierMaxCents}
         rangeError={null}
+        formatError={t("money.amountFormat")}
+        onValidityChange={onPriceValidity}
         errors={errors.price}
         hint={t("revenue.tiers.priceHint", {
           min: formatMoney(MONEY_LIMITS.tierMinCents, currency, locale),
@@ -524,7 +540,7 @@ function TierFields({
           id={benefitsId}
           data-testid={benefitsId}
           value={draft.benefits}
-          maxLength={TIER_BENEFITS_MAX}
+          maxLength={MONEY_LIMITS.tierBenefitsMaxLength}
           rows={3}
           onChange={(e) => onChange({ benefits: e.currentTarget.value })}
         />

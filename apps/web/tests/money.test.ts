@@ -8,10 +8,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { en } from "../src/i18n/en.ts";
 import {
   COST_CATEGORY,
+  collectStatement,
+  costCategoryError,
+  payoutAccountValid,
+  tierEditorCurrency,
   DEFAULT_TIER_PRICES,
   STATEMENT_COLUMNS,
-  TIER_BENEFITS_MAX,
-  TIER_NAME_MAX,
   canDispute,
   csvInteger,
   csvText,
@@ -224,6 +226,32 @@ describe("CSV statement", () => {
     expect(csv).not.toContain("Fan");
   });
 
+  it("collects every page, and reports a statement cut short by the page cap", async () => {
+    const pages = [
+      { items: [line({ id: "a" })], nextCursor: "c1" },
+      { items: [line({ id: "b" })], nextCursor: "c2" },
+      { items: [line({ id: "c" })], nextCursor: null },
+    ];
+    const cursors: (string | undefined)[] = [];
+    const load = async (cursor: string | undefined) => {
+      cursors.push(cursor);
+      return pages[cursors.length - 1] ?? { items: [], nextCursor: null };
+    };
+    const all = await collectStatement(load, 10);
+    expect([all.complete, all.lines.map((l) => l.id), cursors]).toEqual([
+      true,
+      ["a", "b", "c"],
+      [undefined, "c1", "c2"],
+    ]);
+    cursors.length = 0;
+    const capped = await collectStatement(load, 2);
+    expect([capped.complete, capped.lines.map((l) => l.id)]).toEqual([false, ["a", "b"]]);
+    cursors.length = 0;
+    const exact = await collectStatement(load, 3);
+    expect(exact.complete).toBe(true);
+    await expect(collectStatement(async () => Promise.reject(new Error("down")), 3)).rejects.toThrow("down");
+  });
+
   it("an empty month is just the header", () => {
     expect(statementCsv([], "en")).toBe(`${STATEMENT_COLUMNS.join(",")}\r\n`);
   });
@@ -267,17 +295,33 @@ describe("tier editor", () => {
   it("names are required and capped", () => {
     const d = drafts(500, 1000, 2500);
     d[0] = { ...d[0]!, name: "   " };
-    d[1] = { ...d[1]!, name: "x".repeat(TIER_NAME_MAX + 1) };
+    d[1] = { ...d[1]!, name: "x".repeat(MONEY_LIMITS.tierNameMaxLength + 1) };
     const errors = validateTiers(d);
     expect(errors[1]?.name).toBe(en["revenue.tiers.error.nameRequired"]);
-    expect(errors[2]?.name).toContain(String(TIER_NAME_MAX));
+    expect(errors[2]?.name).toContain(String(MONEY_LIMITS.tierNameMaxLength));
     expect(errors[3]).toBeUndefined();
   });
 
   it("benefits are capped", () => {
     const d = drafts(500, 1000, 2500);
-    d[2] = { ...d[2]!, benefits: "b".repeat(TIER_BENEFITS_MAX + 1) };
-    expect(validateTiers(d)[3]?.benefits).toContain(String(TIER_BENEFITS_MAX));
+    d[2] = { ...d[2]!, benefits: "b".repeat(MONEY_LIMITS.tierBenefitsMaxLength + 1) };
+    expect(validateTiers(d)[3]?.benefits).toContain(String(MONEY_LIMITS.tierBenefitsMaxLength));
+  });
+
+  it("limits are the contract's (MONEY_LIMITS), inclusive", () => {
+    const d = drafts(500, 1000, 2500).map((x) => ({
+      ...x,
+      name: "n".repeat(MONEY_LIMITS.tierNameMaxLength),
+      benefits: "b".repeat(MONEY_LIMITS.tierBenefitsMaxLength),
+    }));
+    expect(validateTiers(d)).toEqual({});
+  });
+
+  it("editor currency: the stored tiers', else the instance's (never the revenue summary's)", () => {
+    expect(tierEditorCurrency([], "eur")).toBe("eur");
+    expect(
+      tierEditorCurrency([{ tier: 1, name: "a", price: { cents: 500, currency: "gbp" }, benefits: "" }], "eur"),
+    ).toBe("gbp");
   });
 
   it.each([
@@ -343,7 +387,8 @@ describe("treasury", () => {
 
   it.each([
     ["hosting", true],
-    ["bandwidth_eu-1", true],
+    ["bandwidth-eu-1", true],
+    ["bandwidth_eu", false],
     ["9", true],
     ["", false],
     ["Hosting", false],
@@ -352,6 +397,21 @@ describe("treasury", () => {
     ["x".repeat(41), false],
   ])("cost category %j valid: %s", (value, valid) => {
     expect(COST_CATEGORY.test(value)).toBe(valid);
+  });
+
+  it("refuses reserved and malformed cost categories", () => {
+    expect(costCategoryError("hosting")).toBeNull();
+    expect(costCategoryError("payment-fees")).toBe(en["treasury.cost.categoryReserved"]);
+    expect(costCategoryError("payment_fees")).toBe(en["treasury.cost.categoryInvalid"]);
+    expect(costCategoryError("")).toBe(en["treasury.cost.categoryInvalid"]);
+  });
+
+  it("payout account: valid username, and a reference once payouts are enabled", () => {
+    expect(payoutAccountValid({ username: "rivertide", reference: "", payoutsEnabled: false })).toBe(true);
+    expect(payoutAccountValid({ username: "rivertide", reference: "  ", payoutsEnabled: true })).toBe(false);
+    expect(payoutAccountValid({ username: "rivertide", reference: "ledger-7", payoutsEnabled: true })).toBe(true);
+    expect(payoutAccountValid({ username: "ab", reference: "x", payoutsEnabled: true })).toBe(false);
+    expect(payoutAccountValid({ username: "River", reference: "x", payoutsEnabled: true })).toBe(false);
   });
 
   it("describes payments", () => {

@@ -4,6 +4,7 @@
 import { Skeleton, SkeletonGroup, useLocale } from "@commonair/ui";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
+import { toast } from "@commonair/ui/toast";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
@@ -25,10 +26,12 @@ import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 import {
+  collectStatement,
   monthOptions,
   monthRange,
   statementCsv,
   statementFilename,
+  tierEditorCurrency,
   type RevenueLineDto,
   type SubTierDto,
 } from "../../lib/money.ts";
@@ -45,12 +48,20 @@ const STATEMENT_PAGE = 100;
 const STATEMENT_MAX_PAGES = 100;
 
 function RevenuePage(): React.JSX.Element {
-  const { me, now } = useBootstrap();
+  const { me, now, config } = useBootstrap();
   if (!me) return <Navigate to="/signin" replace />;
-  return <RevenueView channel={me.channelSlug ?? me.username} now={now} />;
+  return <RevenueView channel={me.channelSlug ?? me.username} now={now} instanceCurrency={config.currency} />;
 }
 
-function RevenueView({ channel, now }: { channel: string; now: number }): React.JSX.Element {
+function RevenueView({
+  channel,
+  now,
+  instanceCurrency,
+}: {
+  channel: string;
+  now: number;
+  instanceCurrency: string;
+}): React.JSX.Element {
   // From the request time, so the server render and hydration agree on "this month".
   const months = React.useMemo(() => monthOptions(now), [now]);
   const [month, setMonth] = React.useState(months[0]?.value ?? "");
@@ -60,8 +71,6 @@ function RevenueView({ channel, now }: { channel: string; now: number }): React.
   const account = useLoad(channel, () => api().money.payoutAccount());
   const tiers = useLoad(`tiers|${channel}`, () => api().money.tiers({ channel }));
   const ledger = useLedger(channel, month);
-  // Stored tiers carry the channel's currency; a channel without tiers yet uses its revenue's.
-  const currency = tiers.data?.[0]?.price.currency ?? summary.data?.net.currency;
 
   return (
     <PageContainer data-testid="revenue" className="flex flex-col gap-6 py-8">
@@ -85,10 +94,10 @@ function RevenueView({ channel, now }: { channel: string; now: number }): React.
       <RevenueLedger {...ledger} />
       {account.data ? <PayoutAccountCard account={account.data} /> : !account.failed && <CardSkeleton />}
       {account.failed && <FormError>{t("revenue.payout.loadFailed")}</FormError>}
-      {tiers.data && currency ? (
+      {tiers.data ? (
         <TierEditor
           tiers={tiers.data}
-          currency={currency}
+          currency={tierEditorCurrency(tiers.data, instanceCurrency)}
           onSave={(next: SubTierDto[]) => api().money.setTiers({ channel, tiers: next })}
         />
       ) : (
@@ -166,13 +175,13 @@ function useLedger(channel: string, month: string) {
     if (downloading) return;
     setDownloading(true);
     try {
-      const lines: RevenueLineDto[] = [];
-      let cursor: string | undefined;
-      for (let i = 0; i < STATEMENT_MAX_PAGES; i++) {
-        const page = await api().money.revenueLedger({ channel, ...period, limit: STATEMENT_PAGE, cursor });
-        lines.push(...page.items);
-        if (!page.nextCursor) break;
-        cursor = page.nextCursor;
+      const { lines, complete } = await collectStatement(
+        (cursor) => api().money.revenueLedger({ channel, ...period, limit: STATEMENT_PAGE, cursor }),
+        STATEMENT_MAX_PAGES,
+      );
+      if (!complete) {
+        toast.error(t("revenue.ledger.csvTruncated"));
+        return;
       }
       downloadText(statementFilename(channel, month), statementCsv(lines, locale));
     } catch (err) {
