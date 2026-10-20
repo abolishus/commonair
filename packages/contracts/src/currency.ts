@@ -48,6 +48,8 @@ export const MONEY_LIMITS = {
   tipMaxCents: 1_000_000,
   tipMessageMaxLength: 300,
   giftMaxCount: 100,
+  tierNameMaxLength: 50,
+  tierBenefitsMaxLength: 500,
 } as const;
 
 /**

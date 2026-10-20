@@ -29,6 +29,7 @@ describe("web env", () => {
       chatUrl: "wss://chat.example.org/ws",
       ingestRtmpUrl: "rtmp://ingest.example.org/live",
       playbackUrl: "https://edge.example.org",
+      currency: "usd",
     });
     expect(JSON.stringify(config)).not.toContain("api:3001");
   });
