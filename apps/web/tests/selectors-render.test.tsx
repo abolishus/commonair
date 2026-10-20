@@ -356,7 +356,44 @@ describe("composition-rendered selectors", () => {
     expect([ref.textContent, ref.getAttribute("data-reference")]).toEqual(["CA-7K2M9QXA", "CA-7K2M9QXA"]);
     expect(one(done, '[data-testid="support-amount"]').getAttribute("data-cents")).toBe("999");
     seenIds.add("support-tier").add("support-tip-amount");
+    seenIds.add("support-tab-sub").add("support-tab-gift").add("support-tab-tip");
     seenAttrs.add("data-tier={tier.tier}").add("data-cents={tier.price.cents}");
+  });
+
+  it("support: PageTabs carries the tab ids, disabled state and the reasons they point at", () => {
+    const checkout = async () => {
+      throw new Error("unused");
+    };
+    const held = render(
+      <SupportForm
+        channel="rivertide"
+        info={supportInfo({ viewer: { isOwner: false, subscription: subscription({ status: "active" }) } })}
+        checkout={checkout}
+        onInstructions={noop}
+      />,
+    );
+    const sub = one(held, '[data-testid="support-tab-sub"]');
+    expect([
+      sub.getAttribute("role"),
+      sub.hasAttribute("disabled") || sub.getAttribute("aria-disabled") === "true",
+    ]).toEqual(["tab", true]);
+    const described = (sub.getAttribute("aria-describedby") ?? "").split(" ");
+    expect(described).toHaveLength(2);
+    const current = one(held, '[data-testid="support-current"]');
+    expect(described).toContain(current.id);
+    // The current subscription sits outside every panel, so it shows whichever tab is open.
+    expect(current.closest('[role="tabpanel"]')).toBeNull();
+    expect(one(held, '[data-reason="support.reason.subscribed"]').closest('[role="tabpanel"]')).toBeNull();
+    expect(one(held, '[data-testid="support-tab-gift"]').getAttribute("aria-describedby")).toBeNull();
+
+    const noTiers = render(
+      <SupportForm channel="rivertide" info={supportInfo({ tiers: [] })} checkout={checkout} onInstructions={noop} />,
+    );
+    const reason = one(noTiers, '[data-reason="support.reason.noTiers"]');
+    for (const id of ["support-tab-sub", "support-tab-gift"])
+      expect(one(noTiers, `[data-testid="${id}"]`).getAttribute("aria-describedby")).toBe(reason.id);
+    const tip = one(noTiers, '[data-testid="support-tab-tip"]');
+    expect([tip.getAttribute("aria-selected"), tip.getAttribute("aria-describedby")]).toEqual(["true", null]);
   });
 
   it("chat: chat-event rows carry type, user, tier, cents and total", () => {
@@ -634,6 +671,10 @@ describe("composition-rendered selectors", () => {
       />,
     );
     for (const id of ["payments", "payouts", "accounts", "costs"]) one(tabs, `[data-testid="treasury-tab-${id}"]`);
+    for (const id of ["payments", "payouts", "accounts", "costs"]) {
+      expect(one(tabs, `[data-testid="treasury-tab-${id}"]`).getAttribute("role")).toBe("tab");
+      seenIds.add(`treasury-tab-${id}`);
+    }
 
     const doc = render(
       <PaymentsPanel

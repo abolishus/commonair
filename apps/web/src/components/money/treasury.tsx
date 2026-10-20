@@ -13,6 +13,7 @@ import {
 import { DataTable, FilterBar, type DataTableColumn } from "@commonair/ui/blocks/data";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { AmountField, FormSection, SwitchField } from "@commonair/ui/blocks/forms";
+import { PageTabs } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import {
   Dialog,
@@ -25,7 +26,6 @@ import {
 } from "@commonair/ui/components/dialog";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@commonair/ui/components/tabs";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { toast } from "@commonair/ui/toast";
 import { Invoice01Icon, MoneyReceive01Icon } from "@hugeicons/core-free-icons";
@@ -72,35 +72,34 @@ export interface TreasuryTabsProps {
 const TABS: readonly TreasuryTab[] = ["payments", "payouts", "accounts", "costs"];
 const isTab = (value: unknown): value is TreasuryTab => TABS.some((tab) => tab === value);
 
-/*
- * Tabs parts rather than PageTabs: the tabs need the spec's `treasury-tab-*` test ids, which
- * PageTabs does not forward yet (contract request to the head agent).
- */
 export function TreasuryTabs({ value, onValueChange, ...panels }: TreasuryTabsProps): React.JSX.Element {
+  const panel = (tab: TreasuryTab) => <div className="flex flex-col gap-4 pt-4">{panels[tab]}</div>;
   return (
-    <Tabs value={value} onValueChange={(next) => isTab(next) && onValueChange(next)}>
-      <div className="min-w-0 overflow-x-auto">
-        <TabsList variant="line" className="min-w-max">
-          <TabsTrigger value="payments" data-testid="treasury-tab-payments">
-            {t("treasury.tab.payments")}
-          </TabsTrigger>
-          <TabsTrigger value="payouts" data-testid="treasury-tab-payouts">
-            {t("treasury.tab.payouts")}
-          </TabsTrigger>
-          <TabsTrigger value="accounts" data-testid="treasury-tab-accounts">
-            {t("treasury.tab.accounts")}
-          </TabsTrigger>
-          <TabsTrigger value="costs" data-testid="treasury-tab-costs">
-            {t("treasury.tab.costs")}
-          </TabsTrigger>
-        </TabsList>
-      </div>
-      {TABS.map((tab) => (
-        <TabsContent key={tab} value={tab} className="flex flex-col gap-4 pt-4">
-          {panels[tab]}
-        </TabsContent>
-      ))}
-    </Tabs>
+    <PageTabs
+      value={value}
+      onValueChange={(next) => isTab(next) && onValueChange(next)}
+      items={[
+        {
+          id: "payments",
+          label: t("treasury.tab.payments"),
+          "data-testid": "treasury-tab-payments",
+          content: panel("payments"),
+        },
+        {
+          id: "payouts",
+          label: t("treasury.tab.payouts"),
+          "data-testid": "treasury-tab-payouts",
+          content: panel("payouts"),
+        },
+        {
+          id: "accounts",
+          label: t("treasury.tab.accounts"),
+          "data-testid": "treasury-tab-accounts",
+          content: panel("accounts"),
+        },
+        { id: "costs", label: t("treasury.tab.costs"), "data-testid": "treasury-tab-costs", content: panel("costs") },
+      ]}
+    />
   );
 }
 

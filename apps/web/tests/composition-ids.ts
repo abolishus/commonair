@@ -3,7 +3,7 @@
 
 /**
  * Selector-contract ids and attributes that reach the DOM only through a `@commonair/ui`
- * composition prop (`rowProps`, `cardProps`, `inputProps`, `sourceLink`, `liveBadgeProps`,
+ * composition prop (`rowProps`, `cardProps`, `inputProps`, `sourceLink`, `liveBadgeProps`, PageTabs `items`,
  * `data-copy-testid`), so the source spells them as a prop, not as `data-testid="…"` on an element.
  * tests/selectors-render.test.tsx renders every one of them and checks the DOM; only these may use
  * the prop form in tests/selectors.test.ts.
@@ -35,6 +35,14 @@ export const COMPOSITION_TEST_IDS = [
   "treasury-account-enabled",
   "treasury-cost-amount",
   "transparency-month-row",
+  // E4b ui follow-ups: tabs through PageTabs items
+  "support-tab-sub",
+  "support-tab-gift",
+  "support-tab-tip",
+  "treasury-tab-payments",
+  "treasury-tab-payouts",
+  "treasury-tab-accounts",
+  "treasury-tab-costs",
 ] as const;
 
 /** `data-x={expr}` attributes written as `"data-x": expr` in a composition's prop callback. */

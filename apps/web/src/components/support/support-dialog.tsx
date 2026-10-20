@@ -11,9 +11,11 @@ import {
   StatusBadge,
   formatMoney,
   useLocale,
+  type Accent,
 } from "@commonair/ui";
 import { BreakdownBar, KeyValueList } from "@commonair/ui/blocks/data";
 import { AmountField, ChoiceToggle, OptionGroup } from "@commonair/ui/blocks/forms";
+import { PageTabs } from "@commonair/ui/blocks/headers";
 import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
 import { Checkbox } from "@commonair/ui/components/checkbox";
@@ -28,7 +30,6 @@ import {
 } from "@commonair/ui/components/dialog";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@commonair/ui/components/tabs";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@commonair/ui/components/toggle-group";
 import { toast } from "@commonair/ui/toast";
@@ -79,6 +80,8 @@ export const apiSupportClient: SupportClient = {
 export interface SupportButtonProps {
   channel: string;
   channelName: string;
+  /** The channel's accent token; the dialog renders in a portal, outside the header that scopes it. */
+  accent?: Accent | null;
   signedIn: boolean;
   client?: SupportClient;
 }
@@ -90,6 +93,7 @@ export interface SupportButtonProps {
 export function SupportButton({
   channel,
   channelName,
+  accent = null,
   signedIn,
   client = apiSupportClient,
 }: SupportButtonProps): React.JSX.Element {
@@ -111,6 +115,7 @@ export function SupportButton({
         <SupportDialogContent
           channel={channel}
           channelName={channelName}
+          accent={accent}
           client={client}
           onClose={() => setOpen(false)}
         />
@@ -122,6 +127,7 @@ export function SupportButton({
 interface SupportDialogContentProps {
   channel: string;
   channelName: string;
+  accent?: Accent | null;
   client: SupportClient;
   onClose: () => void;
 }
@@ -130,6 +136,7 @@ interface SupportDialogContentProps {
 export function SupportDialogContent({
   channel,
   channelName,
+  accent = null,
   client,
   onClose,
 }: SupportDialogContentProps): React.JSX.Element {
@@ -158,10 +165,11 @@ export function SupportDialogContent({
     <DialogContent
       data-testid="support-dialog"
       data-provider={info?.provider}
+      data-accent={accent ?? undefined}
       className="max-h-svh overflow-y-auto sm:max-w-lg"
     >
       <DialogHeader className="flex-row items-start gap-3">
-        <ChannelAvatar name={channelName} size="md" decorative />
+        <ChannelAvatar name={channelName} accent={accent} size="md" decorative />
         <div className="flex min-w-0 flex-col gap-1">
           <DialogTitle>{t("support.title", { name: channelName })}</DialogTitle>
           <DialogDescription>{t("support.description")}</DialogDescription>
@@ -319,195 +327,205 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
         void submit();
       }}
     >
-      {/* Raw Tabs until PageTabs takes per-item `disabled` and test ids (head-agent follow-up). */}
-      <Tabs value={draft.tab} onValueChange={(value) => update({ tab: value as SupportTab })}>
-        <TabsList aria-label={t("support.tabs")} className="w-full">
-          <TabsTrigger
-            data-testid="support-tab-sub"
-            value="sub"
-            disabled={!available.sub.enabled}
-            aria-describedby={
-              [reasonId("sub"), held ? `${ids}-current` : undefined].filter(Boolean).join(" ") || undefined
-            }
-          >
-            {t("support.tab.sub")}
-          </TabsTrigger>
-          <TabsTrigger
-            data-testid="support-tab-gift"
-            value="gift"
-            disabled={!available.gift.enabled}
-            aria-describedby={reasonId("gift")}
-          >
-            {t("support.tab.gift")}
-          </TabsTrigger>
-          <TabsTrigger
-            data-testid="support-tab-tip"
-            value="tip"
-            disabled={!available.tip.enabled}
-            aria-describedby={reasonId("tip")}
-          >
-            {t("support.tab.tip")}
-          </TabsTrigger>
-        </TabsList>
-        {reasons.map((reason, index) => (
-          <p key={reason} id={`${ids}-reason-${index}`} data-reason={reason} className="pt-2 text-muted-foreground">
-            {supportText(reason)}
-          </p>
-        ))}
-        {/* About the sub tab, but outside its panel: holding a subscription disables that tab. */}
-        {held && (
-          <div
-            id={`${ids}-current`}
-            data-testid="support-current"
-            data-status={held.status}
-            data-tier={held.tier}
-            className="flex flex-wrap items-center gap-2 pt-2"
-          >
-            <StatusBadge tone={SUBSCRIPTION_STATUS_VIEW[held.status].tone}>
-              {supportText(SUBSCRIPTION_STATUS_VIEW[held.status].key)}
-            </StatusBadge>
-            <span>{t("support.current", { tier: held.tier })}</span>
-            {held.status === "incomplete" && (
-              <span className="text-muted-foreground">{t("support.current.incomplete")}</span>
-            )}
-          </div>
-        )}
-        <TabsContent value="sub" className="pt-2">
-          {tierGroup}
-        </TabsContent>
-        <TabsContent value="gift" className="flex flex-col gap-4 pt-2">
-          {tierGroup}
-          <FieldGroup>
-            <Field>
-              <FieldLabel id={`${ids}-recipient`}>{t("support.gift.recipient")}</FieldLabel>
-              <ToggleGroup
-                data-testid="support-gift-recipient"
-                aria-labelledby={`${ids}-recipient`}
-                variant="outline"
-                multiple={false}
-                value={[draft.gift.mode]}
-                onValueChange={(values) => {
-                  const mode = values.at(-1) as RecipientMode | undefined;
-                  if (mode) update({ gift: { ...draft.gift, mode } });
-                }}
-                className="flex-wrap"
+      <PageTabs
+        aria-label={t("support.tabs")}
+        variant="default"
+        fullWidth
+        value={draft.tab}
+        onValueChange={(value) => {
+          const tab = SUPPORT_TABS.find((candidate) => candidate === value);
+          if (tab) update({ tab });
+        }}
+        afterList={
+          <>
+            {reasons.map((reason, index) => (
+              <p key={reason} id={`${ids}-reason-${index}`} data-reason={reason} className="pt-2 text-muted-foreground">
+                {supportText(reason)}
+              </p>
+            ))}
+            {/* About the sub tab, but outside its panel: holding a subscription disables that tab. */}
+            {held && (
+              <div
+                id={`${ids}-current`}
+                data-testid="support-current"
+                data-status={held.status}
+                data-tier={held.tier}
+                className="flex flex-wrap items-center gap-2 pt-2"
               >
-                <ToggleGroupItem data-testid="support-gift-recipient-random" value="random">
-                  {t("support.gift.random")}
-                </ToggleGroupItem>
-                <ToggleGroupItem data-testid="support-gift-recipient-viewer" value="viewer">
-                  {t("support.gift.viewer")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-            </Field>
-            {draft.gift.mode === "random" ? (
-              <>
-                <ChoiceToggle
-                  label={t("support.gift.count")}
-                  value={draft.gift.count}
-                  onValueChange={(count) => update({ gift: { ...draft.gift, count } })}
-                  options={giftPresets(info.gift.maxCount).map((count) => ({
-                    value: String(count),
-                    label: count,
-                  }))}
-                />
-                <Field data-invalid={giftProblem ? true : undefined}>
-                  <FieldLabel htmlFor={`${ids}-count`}>{t("support.gift.countInput")}</FieldLabel>
-                  <Input
-                    id={`${ids}-count`}
-                    data-testid="support-gift-count"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={info.gift.maxCount}
-                    value={draft.gift.count}
-                    aria-invalid={giftProblem ? true : undefined}
-                    aria-describedby={`${ids}-count-hint`}
-                    onChange={(event) => update({ gift: { ...draft.gift, count: event.currentTarget.value } })}
+                <StatusBadge tone={SUBSCRIPTION_STATUS_VIEW[held.status].tone}>
+                  {supportText(SUBSCRIPTION_STATUS_VIEW[held.status].key)}
+                </StatusBadge>
+                <span>{t("support.current", { tier: held.tier })}</span>
+                {held.status === "incomplete" && (
+                  <span className="text-muted-foreground">{t("support.current.incomplete")}</span>
+                )}
+              </div>
+            )}
+          </>
+        }
+        items={[
+          {
+            id: "sub",
+            label: t("support.tab.sub"),
+            "data-testid": "support-tab-sub",
+            disabled: !available.sub.enabled,
+            "aria-describedby":
+              [reasonId("sub"), held ? `${ids}-current` : undefined].filter(Boolean).join(" ") || undefined,
+            content: <div className="pt-2">{tierGroup}</div>,
+          },
+          {
+            id: "gift",
+            label: t("support.tab.gift"),
+            "data-testid": "support-tab-gift",
+            disabled: !available.gift.enabled,
+            "aria-describedby": reasonId("gift"),
+            content: (
+              <div className="flex flex-col gap-4 pt-2">
+                {tierGroup}
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel id={`${ids}-recipient`}>{t("support.gift.recipient")}</FieldLabel>
+                    <ToggleGroup
+                      data-testid="support-gift-recipient"
+                      aria-labelledby={`${ids}-recipient`}
+                      variant="outline"
+                      multiple={false}
+                      value={[draft.gift.mode]}
+                      onValueChange={(values) => {
+                        const mode = values.at(-1) as RecipientMode | undefined;
+                        if (mode) update({ gift: { ...draft.gift, mode } });
+                      }}
+                      className="flex-wrap"
+                    >
+                      <ToggleGroupItem data-testid="support-gift-recipient-random" value="random">
+                        {t("support.gift.random")}
+                      </ToggleGroupItem>
+                      <ToggleGroupItem data-testid="support-gift-recipient-viewer" value="viewer">
+                        {t("support.gift.viewer")}
+                      </ToggleGroupItem>
+                    </ToggleGroup>
+                  </Field>
+                  {draft.gift.mode === "random" ? (
+                    <>
+                      <ChoiceToggle
+                        label={t("support.gift.count")}
+                        wrap
+                        value={draft.gift.count}
+                        onValueChange={(count) => update({ gift: { ...draft.gift, count } })}
+                        options={giftPresets(info.gift.maxCount).map((count) => ({
+                          value: String(count),
+                          label: count,
+                        }))}
+                      />
+                      <Field data-invalid={giftProblem ? true : undefined}>
+                        <FieldLabel htmlFor={`${ids}-count`}>{t("support.gift.countInput")}</FieldLabel>
+                        <Input
+                          id={`${ids}-count`}
+                          data-testid="support-gift-count"
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={info.gift.maxCount}
+                          value={draft.gift.count}
+                          aria-invalid={giftProblem ? true : undefined}
+                          aria-describedby={`${ids}-count-hint`}
+                          onChange={(event) => update({ gift: { ...draft.gift, count: event.currentTarget.value } })}
+                        />
+                        <FieldDescription id={`${ids}-count-hint`}>
+                          {giftProblem
+                            ? supportText(giftProblem, { max: info.gift.maxCount })
+                            : t("support.gift.countHint", { max: info.gift.maxCount })}
+                        </FieldDescription>
+                      </Field>
+                      <FieldDescription>{t("support.gift.randomHint")}</FieldDescription>
+                    </>
+                  ) : (
+                    <Field data-invalid={giftProblem && draft.gift.to ? true : undefined}>
+                      <FieldLabel htmlFor={`${ids}-to`}>{t("support.gift.to")}</FieldLabel>
+                      <Input
+                        id={`${ids}-to`}
+                        data-testid="support-gift-to"
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck={false}
+                        maxLength={26}
+                        value={draft.gift.to}
+                        aria-invalid={giftProblem && draft.gift.to ? true : undefined}
+                        aria-describedby={`${ids}-to-hint`}
+                        onChange={(event) => update({ gift: { ...draft.gift, to: event.currentTarget.value } })}
+                      />
+                      <FieldDescription id={`${ids}-to-hint`}>
+                        {giftProblem && draft.gift.to ? supportText(giftProblem) : t("support.gift.toHint")}
+                      </FieldDescription>
+                    </Field>
+                  )}
+                </FieldGroup>
+              </div>
+            ),
+          },
+          {
+            id: "tip",
+            label: t("support.tab.tip"),
+            "data-testid": "support-tab-tip",
+            disabled: !available.tip.enabled,
+            "aria-describedby": reasonId("tip"),
+            content: (
+              <div className="pt-2">
+                <FieldGroup>
+                  <AmountField
+                    label={t("support.tip.amount")}
+                    currency={info.currency}
+                    locale={locale}
+                    value={draft.tip.cents}
+                    onValueChange={(cents) => updateTip({ cents })}
+                    // Not `updateTip`: the field reports validity on mount, which must not clear a checkout error.
+                    onValidityChange={(valid) =>
+                      setDraft((d) =>
+                        (d.tip.unparsed ?? false) === !valid ? d : { ...d, tip: { ...d.tip, unparsed: !valid } },
+                      )
+                    }
+                    presets={tipPresets(info.tip).map((cents) => ({ value: cents, label: money(cents) }))}
+                    min={info.tip.minCents}
+                    max={info.tip.maxCents}
+                    rangeError={t("support.tip.invalidAmount", {
+                      min: money(info.tip.minCents),
+                      max: money(info.tip.maxCents),
+                    })}
+                    formatError={t("support.tip.unparsed", { example: money(info.tip.minCents) })}
+                    inputProps={{ "data-testid": "support-tip-amount" }}
                   />
-                  <FieldDescription id={`${ids}-count-hint`}>
-                    {giftProblem
-                      ? supportText(giftProblem, { max: info.gift.maxCount })
-                      : t("support.gift.countHint", { max: info.gift.maxCount })}
-                  </FieldDescription>
-                </Field>
-                <FieldDescription>{t("support.gift.randomHint")}</FieldDescription>
-              </>
-            ) : (
-              <Field data-invalid={giftProblem && draft.gift.to ? true : undefined}>
-                <FieldLabel htmlFor={`${ids}-to`}>{t("support.gift.to")}</FieldLabel>
-                <Input
-                  id={`${ids}-to`}
-                  data-testid="support-gift-to"
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  maxLength={26}
-                  value={draft.gift.to}
-                  aria-invalid={giftProblem && draft.gift.to ? true : undefined}
-                  aria-describedby={`${ids}-to-hint`}
-                  onChange={(event) => update({ gift: { ...draft.gift, to: event.currentTarget.value } })}
-                />
-                <FieldDescription id={`${ids}-to-hint`}>
-                  {giftProblem && draft.gift.to ? supportText(giftProblem) : t("support.gift.toHint")}
-                </FieldDescription>
-              </Field>
-            )}
-          </FieldGroup>
-        </TabsContent>
-        <TabsContent value="tip" className="pt-2">
-          <FieldGroup>
-            <AmountField
-              label={t("support.tip.amount")}
-              currency={info.currency}
-              locale={locale}
-              value={draft.tip.cents}
-              onValueChange={(cents) => updateTip({ cents })}
-              // Not `updateTip`: the field reports validity on mount, which must not clear a checkout error.
-              onValidityChange={(valid) =>
-                setDraft((d) =>
-                  (d.tip.unparsed ?? false) === !valid ? d : { ...d, tip: { ...d.tip, unparsed: !valid } },
-                )
-              }
-              presets={tipPresets(info.tip).map((cents) => ({ value: cents, label: money(cents) }))}
-              min={info.tip.minCents}
-              max={info.tip.maxCents}
-              rangeError={t("support.tip.invalidAmount", {
-                min: money(info.tip.minCents),
-                max: money(info.tip.maxCents),
-              })}
-              formatError={t("support.tip.unparsed", { example: money(info.tip.minCents) })}
-              inputProps={{ "data-testid": "support-tip-amount" }}
-            />
-            <Field>
-              <FieldLabel htmlFor={`${ids}-message`}>{t("support.tip.message")}</FieldLabel>
-              <Textarea
-                id={`${ids}-message`}
-                data-testid="support-tip-message"
-                maxLength={info.tip.messageMaxLength}
-                value={draft.tip.message}
-                aria-describedby={`${ids}-message-count`}
-                onChange={(event) => update({ tip: { ...draft.tip, message: event.currentTarget.value } })}
-              />
-              <FieldDescription
-                id={`${ids}-message-count`}
-                aria-live={info.tip.messageMaxLength - draft.tip.message.length <= 20 ? "polite" : undefined}
-              >
-                {t("support.tip.count", { count: draft.tip.message.length, max: info.tip.messageMaxLength })}
-              </FieldDescription>
-            </Field>
-            <Field orientation="horizontal">
-              <Checkbox
-                id={`${ids}-anonymous`}
-                data-testid="support-tip-anonymous"
-                checked={draft.tip.anonymous}
-                onCheckedChange={(checked) => update({ tip: { ...draft.tip, anonymous: checked === true } })}
-              />
-              <FieldLabel htmlFor={`${ids}-anonymous`}>{t("support.tip.anonymous")}</FieldLabel>
-            </Field>
-          </FieldGroup>
-        </TabsContent>
-      </Tabs>
+                  <Field>
+                    <FieldLabel htmlFor={`${ids}-message`}>{t("support.tip.message")}</FieldLabel>
+                    <Textarea
+                      id={`${ids}-message`}
+                      data-testid="support-tip-message"
+                      maxLength={info.tip.messageMaxLength}
+                      value={draft.tip.message}
+                      aria-describedby={`${ids}-message-count`}
+                      onChange={(event) => update({ tip: { ...draft.tip, message: event.currentTarget.value } })}
+                    />
+                    <FieldDescription
+                      id={`${ids}-message-count`}
+                      aria-live={info.tip.messageMaxLength - draft.tip.message.length <= 20 ? "polite" : undefined}
+                    >
+                      {t("support.tip.count", { count: draft.tip.message.length, max: info.tip.messageMaxLength })}
+                    </FieldDescription>
+                  </Field>
+                  <Field orientation="horizontal">
+                    <Checkbox
+                      id={`${ids}-anonymous`}
+                      data-testid="support-tip-anonymous"
+                      checked={draft.tip.anonymous}
+                      onCheckedChange={(checked) => update({ tip: { ...draft.tip, anonymous: checked === true } })}
+                    />
+                    <FieldLabel htmlFor={`${ids}-anonymous`}>{t("support.tip.anonymous")}</FieldLabel>
+                  </Field>
+                </FieldGroup>
+              </div>
+            ),
+          },
+        ]}
+      />
       <BreakdownBar
         data-testid="support-split"
         data-streamer-share={info.split.streamerShare}

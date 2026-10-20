@@ -59,6 +59,7 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
             <ChannelHeader
               name={channel.displayName}
               avatarUrl={channel.avatarUrl}
+              accent={channel.accent}
               live={live}
               title={channel.live?.title || channel.title}
               viewerCount={channel.live?.viewerCount}
@@ -67,7 +68,12 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
                 own ? undefined : (
                   <>
                     <FollowButton signedIn={me !== null} state={follow.state} onToggle={follow.toggle} />
-                    <SupportButton channel={channel.slug} channelName={channel.displayName} signedIn={me !== null} />
+                    <SupportButton
+                      channel={channel.slug}
+                      channelName={channel.displayName}
+                      accent={channel.accent}
+                      signedIn={me !== null}
+                    />
                   </>
                 )
               }
