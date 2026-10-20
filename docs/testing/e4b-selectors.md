@@ -123,9 +123,10 @@ the Stripe unit's brief; the test ids below do not change.
 
 ### Chat (`/$channel`)
 
-| Test id      | Element / meaning                                                                                                                                                                                                                                  |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat-event` | One inline platform event in the chat log: `data-type` = the event type (`channel.subscribe`, `channel.subscription.gift`, `channel.tip`); `data-user` = the login or empty when anonymous; `data-tier`; `data-cents` (tips); `data-total` (gifts) |
+| Test id        | Element / meaning                                                                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat-message` | (E1) It now also carries `data-badges`: the sender's badge types, space-separated (`broadcaster`, `moderator`, `subscriber`, …; empty when none)                                                                                                   |
+| `chat-event`   | One inline platform event in the chat log: `data-type` = the event type (`channel.subscribe`, `channel.subscription.gift`, `channel.tip`); `data-user` = the login or empty when anonymous; `data-tier`; `data-cents` (tips); `data-total` (gifts) |
 
 ### `/settings/subscriptions`
 
@@ -166,7 +167,7 @@ the Stripe unit's brief; the test ids below do not change.
 | `treasury-payment-row`                                                                                           | `data-payment-id`, `data-reference`, `data-status`, `data-kind`, `data-cents`, `data-refunded`                                                                                                 |
 | `treasury-confirm`                                                                                               | In a `pending` row: confirm receipt through a `ConfirmDialog` (received now)                                                                                                                   |
 | `treasury-refund`, `treasury-chargeback`                                                                         | In a succeeded or partly refunded row: open a dialog with `treasury-dispute-amount` (currency units, defaults to the refundable rest), `treasury-dispute-reason` and `treasury-dispute-submit` |
-| `treasury-run-payouts`                                                                                           | Runs the payout batch for this month (`periodEnd` = now)                                                                                                                                       |
+| `treasury-run-payouts`                                                                                           | Runs the payout batch for this month (`periodEnd` = now) at once, no confirmation (a run is idempotent per creator and month)                                                                  |
 | `treasury-payouts-result`                                                                                        | After a run: `data-created`, `data-held`, `data-cents`                                                                                                                                         |
 | `treasury-payout-row`                                                                                            | `data-payout-id`, `data-username`, `data-status`, `data-cents`, `data-hold-reason`                                                                                                             |
 | `treasury-mark-paid`                                                                                             | In a `pending` payout row: a dialog with `treasury-mark-paid-reference` and `treasury-mark-paid-submit`                                                                                        |
@@ -207,9 +208,9 @@ treasurer role with the operator CLI.
    payment. The ledger gains `refund` and `chargeback` rows with negative `data-net`; A's
    subscription is `canceled`; `revenue-held` drops by exactly the reversed creator shares.
 7. **Payout threshold.** `treasury-run-payouts`: with every creator share still inside the hold,
-   the streamer gets no payout (below the minimum: `data-created="0"`), and nothing is lost: held
-   - available + owed is unchanged. Integration tests cover release, clawback netting and paid
-     payouts, which need the hold period to pass.
+   the streamer gets no payout (below the minimum: `data-created="0"`), and nothing is lost: the
+   sum of held, available and owed is unchanged. Integration tests cover release, clawback
+   netting and paid payouts, which need the hold period to pass.
 8. **Transparency.** `/transparency` shows this month with `data-revenue` equal to the creator
    plus co-op shares net of the reversals.
 9. **Ledger integrity.** With `DATABASE_URL`, every ledger transaction referencing the scenario's
