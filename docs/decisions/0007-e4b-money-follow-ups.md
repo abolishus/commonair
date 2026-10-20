@@ -5,14 +5,14 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0007: E4b money follow-ups
 
-- Status: accepted (decisions 1, 2 and 4 are not implemented yet)
+- Status: accepted (decisions 1–3 are not implemented yet)
 - Date: 2026-10-20
 
 ## Context
 
 The E4b reviews (session seven, units A, B, G and H) raised questions the spec in
 `docs/testing/e4b-selectors.md` did not settle. The user decided them on 2026-10-20 and asked for
-them to be recorded, not built yet. Until a unit implements 1, 2 and 4, the code and the spec
+them to be recorded, not built yet. Until a unit implements 1–3, the code and the spec
 still describe the current behaviour given under each item.
 
 ## Decisions
@@ -42,13 +42,13 @@ still describe the current behaviour given under each item.
 
 ### Recorded as is
 
-3. **Revenue and tiers are owner-only.** `money.revenue`, `money.revenueLedger` (it shows payer
+4. **Revenue and tiers are owner-only.** `money.revenue`, `money.revenueLedger` (it shows payer
    usernames) and `money.setTiers` refuse channel editors, although the contract's `owner`
    access admits them.
-4. **Hold releases are dated when they fell due** (payment time + hold days, capped at the run
+5. **Hold releases are dated when they fell due** (payment time + hold days, capped at the run
    time). They touch only creator liability and hold accounts, so period close, monthly
    aggregates and transparency figures never change; a creator statement can gain a line in an
    earlier month (documented in `packages/ledger/README.md`).
-5. **Stripe Connect transfers are out of scope for E4b.** Payout runs record `provider: stripe`
+6. **Stripe Connect transfers are out of scope for E4b.** Payout runs record `provider: stripe`
    payouts for Stripe creators, but no money is moved to their connected accounts. Tracked in
    PLAN.md as later work.
