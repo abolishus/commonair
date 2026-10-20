@@ -7,6 +7,7 @@
  * state changes are compare-and-set or row-locked so a repeat or a race cannot double-apply.
  */
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { minorUnits } from "@commonair/contracts/currency";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
   PAYOUT_ACCOUNT_NOT_READY,
@@ -35,6 +36,9 @@ type ChannelRow = typeof channels.$inferSelect;
 /** The treasurer is platform staff; audit rows name them by id. */
 const ACTOR = "admin" as const;
 
+/** created_at is stamped by Postgres and receivedAt by the treasurer's clock; allow them to disagree a little. */
+const CLOCK_SKEW_MS = 60_000;
+
 async function lockedPayment(tx: Executor, paymentId: string): Promise<PaymentRow> {
   const [p] = await tx.select().from(payments).where(eq(payments.id, paymentId)).for("update");
   if (!p) throw notFound("Payment not found");
@@ -45,6 +49,18 @@ async function paymentChannel(tx: Executor, p: PaymentRow): Promise<ChannelRow> 
   const [c] = p.channelId ? await tx.select().from(channels).where(eq(channels.id, p.channelId)) : [];
   if (!c) throw conflict("This payment has no channel to credit");
   return c;
+}
+
+/**
+ * The price a confirmed subscription carries. A gift keeps the price it was created with; a
+ * self subscription or renewal (quantity 1) is charged at today's price, which becomes its price.
+ */
+function confirmedPrice(p: PaymentRow, s: typeof subscriptions.$inferSelect): number {
+  if (p.subscriptionId === null) return s.priceCents;
+  if (p.quantity === 1) return p.amountCents;
+  // Integer cents only: an uneven split would mean the payment was not quantity × price.
+  if (p.amountCents % p.quantity !== 0) throw conflict("This payment does not divide evenly per subscription");
+  return p.amountCents / p.quantity;
 }
 
 /** The subscriptions a payment paid for: its own (self or renewal) or the gifts it bought. */
@@ -161,6 +177,9 @@ export const treasurerCheckoutHandlers = {
       const p = await lockedPayment(tx, input.paymentId);
       if (p.status !== "pending") throw conflict(`This payment is ${p.status}, not pending`);
       if (p.kind === "membership_share") throw conflict("Member shares are not confirmed here");
+      // Backdating before checkout would skip the creator hold and could start an already-ended period.
+      if (receivedAt.getTime() < p.createdAt.getTime() - CLOCK_SKEW_MS)
+        throw badRequest("The payment cannot be received before its checkout was created");
       const c = await paymentChannel(tx, p);
       const [updated] = await tx
         .update(payments)
@@ -218,8 +237,7 @@ export const treasurerCheckoutHandlers = {
               status: "active",
               currentPeriodStart: period.start,
               currentPeriodEnd: period.end,
-              // A renewal is charged at today's price; that becomes the subscription's price.
-              priceCents: p.amountCents / p.quantity,
+              priceCents: confirmedPrice(p, s),
               currency: p.currency,
               updatedAt: now,
             })
@@ -254,8 +272,7 @@ export const treasurerCheckoutHandlers = {
               ...broadcasterFields(c),
               ...(from ?? { user_id: null, user_login: null, user_name: null }),
               is_anonymous: tip.anonymous || from === null,
-              // decimal_places is fixed at 2 by the contract; the instance currency default (usd) has 2.
-              amount: { value: tip.amountCents, decimal_places: 2, currency: tip.currency },
+              amount: { value: tip.amountCents, decimal_places: minorUnits(tip.currency), currency: tip.currency },
               message: tip.message,
             },
             now,
@@ -286,6 +303,7 @@ export const treasurerCheckoutHandlers = {
     const { deps } = context;
     const caller = requireCaller(context);
     const reference = input.reference.trim();
+    if (input.payoutsEnabled && !reference) throw badRequest("Enabling payouts needs an account reference");
     const now = deps.now();
     await deps.db.transaction(async (tx) => {
       const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.username, input.username));
@@ -293,7 +311,7 @@ export const treasurerCheckoutHandlers = {
       const { payoutRules } = await loadMoneySettings(tx);
       // A payout batch running now would otherwise read the old account and hold a fresh payout.
       await lockPayoutBatch(tx, payoutRules.currency);
-      await tx
+      const [written] = await tx
         .insert(payoutAccounts)
         .values({
           userId: u.id,
@@ -309,7 +327,11 @@ export const treasurerCheckoutHandlers = {
             payoutsEnabled: input.payoutsEnabled,
             updatedAt: now,
           },
-        });
+          // A provider-managed account (e.g. Stripe Connect) is owned by its adapter, not typed in here.
+          setWhere: eq(payoutAccounts.provider, "manual"),
+        })
+        .returning({ userId: payoutAccounts.userId });
+      if (!written) throw conflict("This creator's payout account is managed by a payment provider");
       const released = input.payoutsEnabled
         ? await tx
             .update(payouts)

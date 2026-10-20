@@ -176,7 +176,10 @@ export const checkoutHandlers = {
 
   setTiers: os.money.setTiers.handler(async ({ context, input }) => {
     const { deps } = context;
+    const caller = requireCaller(context);
     const c = requireChannel(context);
+    // Prices are the owner's income; editors manage the channel but do not set what it charges.
+    if (c.ownerId !== caller.user.id) throw forbidden("Only the channel owner can set subscription prices");
     const checked = validateTiers(input.tiers, deps.env.CURRENCY);
     if (!checked.ok) throw badRequest(checked.reason);
     const now = deps.now();

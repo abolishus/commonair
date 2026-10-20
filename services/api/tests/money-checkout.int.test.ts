@@ -8,10 +8,10 @@
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { MANUAL_REFERENCE_PATTERN } from "@commonair/contracts/currency";
+import { MANUAL_REFERENCE_PATTERN, minorUnits } from "@commonair/contracts/currency";
 import { BUS } from "@commonair/contracts/events";
 import { schema, uuidv7 } from "@commonair/db";
-import { creatorBalances, postPayout, releaseDueHolds, runPayoutBatch } from "@commonair/ledger";
+import { creatorBalances, loadMoneySettings, postPayout, releaseDueHolds, runPayoutBatch } from "@commonair/ledger";
 import { addOneMonthUtc } from "../src/money/checkout-rules.ts";
 import { violatesConstraint } from "../src/money/checkout-shared.ts";
 import { signUpAndSignIn, startApi, subscriber, uniqueName, waitFor, type TestApi } from "./harness.ts";
@@ -107,6 +107,13 @@ const subscribe = (as: Account, channel: string, body: Record<string, unknown>) 
 const tip = (as: Account, channel: string, body: Record<string, unknown>) =>
   as.client.call<Instructions>("POST", `/api/channels/${channel}/tips`, { returnPath: `/${channel}`, ...body });
 
+/** The creator's share of a gross amount under the seeded cut, in integer millionths (no float rounding). */
+async function creatorShare(grossCents: number): Promise<number> {
+  const { cut } = await loadMoneySettings(db());
+  const millionths = BigInt(Math.round(cut.streamerShare * 1_000_000));
+  return Number((BigInt(grossCents) * millionths) / 1_000_000n);
+}
+
 async function expectLedgerBalanced() {
   const off = await db().execute<{ transaction_id: string }>(sql`
     select transaction_id from ledger_entries group by transaction_id, currency having sum(amount_cents) <> 0`);
@@ -167,8 +174,26 @@ describe("tiers and support info", () => {
       "GET",
       `/api/channels/${streamer.username}/support`,
     );
-    expect(info.body.split.streamerShare).toBe(0.9);
+    expect(info.body.split.streamerShare).toBe((await loadMoneySettings(db())).cut.streamerShare);
     expect(info.body.viewer.isOwner).toBe(true);
+  });
+
+  test("an editor manages the channel but cannot set its prices", async () => {
+    const c = await channelOf(streamer.username);
+    await db()
+      .insert(schema.channelRoles)
+      .values({ channelId: c.id, userId: bob.userId, role: "editor", grantedBy: streamer.userId });
+    try {
+      const path = `/api/channels/${streamer.username}/subscription-tiers`;
+      const cheap = TIERS.map((t) => ({ ...t, price: { ...t.price, cents: t.price.cents - 100 } }));
+      expect((await bob.client.call("PUT", path, { tiers: cheap })).status).toBe(403);
+      const tiers = await bob.client.call<{ price: { cents: number } }[]>("GET", path);
+      expect(tiers.body.map((t) => t.price.cents)).toEqual([499, 999, 2499]);
+    } finally {
+      await db()
+        .delete(schema.channelRoles)
+        .where(and(eq(schema.channelRoles.channelId, c.id), eq(schema.channelRoles.userId, bob.userId)));
+    }
   });
 
   test("the owner cannot subscribe to or tip their own channel", async () => {
@@ -217,6 +242,11 @@ describe("self subscription", () => {
     expect((await confirm(selfPayment.paymentId, alice)).status).toBe(403);
     const future = new Date(Date.now() + 3_600_000);
     expect((await confirm(selfPayment.paymentId, treasurer, future)).status).toBe(400);
+    // Backdating before the checkout existed would skip the creator hold.
+    const created = (await paymentRow(selfPayment.paymentId)).createdAt;
+    expect((await confirm(selfPayment.paymentId, treasurer, new Date(created.getTime() - DAY))).status).toBe(400);
+    expect((await paymentRow(selfPayment.paymentId)).status).toBe("pending");
+    expect(await ledgerTxFor(selfPayment.paymentId)).toHaveLength(0);
   });
 
   test("confirm activates the subscription, posts the split, writes events, audit and a chat invalidate", async () => {
@@ -226,7 +256,7 @@ describe("self subscription", () => {
     await sub.subscribe(BUS.chatControl(c.id));
     sub.on("message", (_ch, msg) => frames.push(JSON.parse(msg) as Record<string, unknown>));
     try {
-      const receivedAt = new Date(Date.now() - 60_000);
+      const receivedAt = new Date(Date.now() - 1_000);
       const r = await confirm(selfPayment.paymentId, treasurer, receivedAt);
       expect(r.status).toBe(200);
 
@@ -244,7 +274,7 @@ describe("self subscription", () => {
       const txs = await ledgerTxFor(p.id);
       expect(txs).toHaveLength(1);
       const b = await creatorBalances(db(), streamer.userId, "usd");
-      expect(b.holdCents).toBe(Math.floor(999 * 0.9));
+      expect(b.holdCents).toBe(await creatorShare(999));
       expect(b.liabilityCents).toBe(0);
       await expectLedgerBalanced();
 
@@ -306,7 +336,7 @@ describe("tips", () => {
       user_login: null,
       user_name: null,
       is_anonymous: true,
-      amount: { value: 500, decimal_places: 2, currency: "usd" },
+      amount: { value: 500, decimal_places: minorUnits("usd"), currency: "usd" },
       message: "great stream",
     });
     expect(JSON.stringify(evs[0]?.payload)).not.toContain(alice.userId);
@@ -396,7 +426,7 @@ describe("refunds", () => {
     expect((await treasurer.client.call("POST", path, { amountCents: 1, reason: "again" })).status).toBe(409);
 
     const after = await creatorBalances(db(), streamer.userId, "usd");
-    expect(before.holdCents - after.holdCents).toBe(Math.floor(999 * 0.9));
+    expect(before.holdCents - after.holdCents).toBe(await creatorShare(999));
     const reversals = (await ledgerTxFor(selfPayment.paymentId)).filter((t) => t.kind === "refund");
     expect(reversals).toHaveLength(2);
     const sum = reversals.reduce(
@@ -442,7 +472,7 @@ describe("payout accounts and chargebacks", () => {
     await releaseDueHolds(db(), { asOf: new Date(Date.now() + 30 * DAY), holdDays: 7, currency: "usd" });
     const mid = await creatorBalances(db(), streamer.userId, "usd");
     expect(mid.holdCents).toBe(0);
-    expect(mid.liabilityCents).toBe(Math.floor(500 * 0.9) + Math.floor(300 * 0.9));
+    expect(mid.liabilityCents).toBe((await creatorShare(500)) + (await creatorShare(300)));
     const now = new Date();
     const periodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     await runPayoutBatch(db(), { periodStart, periodEnd: now, currency: "usd", minimumCents: 0 });
@@ -466,6 +496,7 @@ describe("payout accounts and chargebacks", () => {
       .from(schema.payouts)
       .where(eq(schema.payouts.id, held?.id ?? ""));
     expect(row?.status).toBe("held");
+    expect((await treasurer.client.call("PUT", path, { payoutsEnabled: true, reference: "   " })).status).toBe(400);
     const enabled = await treasurer.client.call("PUT", path, { payoutsEnabled: true, reference: "Bank transfer A" });
     expect(enabled.status).toBe(200);
     [row] = await db()
@@ -497,7 +528,7 @@ describe("payout accounts and chargebacks", () => {
       .where(eq(schema.tips.id, p.tipId ?? ""));
     expect(t?.status).toBe("charged_back");
     const end = await creatorBalances(db(), streamer.userId, "usd");
-    expect(end.receivableCents).toBe(Math.floor(500 * 0.9));
+    expect(end.receivableCents).toBe(await creatorShare(500));
     await expectLedgerBalanced();
     const [d] = await db().select().from(schema.disputes).where(eq(schema.disputes.paymentId, p.id));
     expect(d).toMatchObject({ kind: "chargeback", status: "lost", reason: "Bank chargeback" });
@@ -507,6 +538,23 @@ describe("payout accounts and chargebacks", () => {
       .where(and(eq(schema.auditLog.action, "payment.chargeback"), eq(schema.auditLog.subjectId, p.id)));
     expect(a?.reason).toBe("Bank chargeback");
     expect((await treasurer.client.call("POST", cb, { amountCents: 1, reason: "again" })).status).toBe(409);
+  });
+
+  test("a provider-managed payout account is not overwritten by hand", async () => {
+    const u = await plainUser();
+    await db()
+      .insert(schema.payoutAccounts)
+      .values({ userId: u.id, provider: "stripe", providerAccountId: "acct_test", payoutsEnabled: true });
+    const path = `/api/treasurer/payout-accounts/${u.username}`;
+    const r = await treasurer.client.call("PUT", path, { payoutsEnabled: true, reference: "Bank transfer B" });
+    expect(r.status).toBe(409);
+    const [acct] = await db().select().from(schema.payoutAccounts).where(eq(schema.payoutAccounts.userId, u.id));
+    expect(acct).toMatchObject({ provider: "stripe", providerAccountId: "acct_test", payoutsEnabled: true });
+    const audits = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.action, "payout_account.set"), eq(schema.auditLog.subjectId, u.id)));
+    expect(audits).toHaveLength(0);
   });
 });
 
@@ -614,7 +662,9 @@ describe("gift subscriptions", () => {
     expect(subEvents).toHaveLength(2);
     expect(subEvents.every((e) => (e.payload as { is_gift: boolean }).is_gift)).toBe(true);
     const b = await creatorBalances(db(), gifts.userId, "usd");
-    expect(b.holdCents).toBe(Math.floor(998 * 0.9));
+    expect(b.holdCents).toBe(await creatorShare(998));
+    // Each gift keeps the tier price it was bought at; the payment is never divided in floats.
+    expect(subs.map((s) => s.priceCents)).toEqual([499, 499]);
     await expectLedgerBalanced();
   });
 
@@ -820,5 +870,43 @@ describe("reference collisions", () => {
       );
     expect(violatesConstraint(err, "payments_provider_ref_uq")).toBe(true);
     expect(violatesConstraint(err, "subscriptions_active_uq")).toBe(false);
+  });
+});
+
+describe("races", () => {
+  test("a refund racing a chargeback never reverses more than was paid", async () => {
+    const t = await tip(bob, streamer.username, { amountCents: 1000 });
+    expect((await confirm(t.body.paymentId)).status).toBe(200);
+    const base = `/api/treasurer/payments/${t.body.paymentId}`;
+    const results = await Promise.all([
+      treasurer.client.call("POST", `${base}/refund`, { amountCents: 700, reason: "Refund" }),
+      treasurer.client.call("POST", `${base}/chargeback`, { amountCents: 700, reason: "Chargeback" }),
+    ]);
+    const statuses = results.map((r) => r.status);
+    expect(statuses.filter((x) => x === 200)).toHaveLength(1);
+    expect(statuses.filter((x) => x === 400 || x === 409)).toHaveLength(1);
+    const p = await paymentRow(t.body.paymentId);
+    expect(p.refundedCents).toBe(700);
+    const ds = await db().select().from(schema.disputes).where(eq(schema.disputes.paymentId, p.id));
+    expect(ds.reduce((sum, d) => sum + Number(d.amountCents), 0)).toBe(700);
+    const reversals = (await ledgerTxFor(p.id)).filter((x) => x.kind === "refund" || x.kind === "chargeback");
+    expect(reversals).toHaveLength(1);
+    await expectLedgerBalanced();
+  });
+
+  test("two concurrent self subscribes share one pending checkout", async () => {
+    const viewer = await signUpAndSignIn(api);
+    const [a, b] = await Promise.all([
+      subscribe(viewer, streamer.username, { tier: 1 }),
+      subscribe(viewer, streamer.username, { tier: 1 }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(a.body.paymentId).toBe(b.body.paymentId);
+    expect(a.body.reference).toBe(b.body.reference);
+    const ps = await db()
+      .select()
+      .from(schema.payments)
+      .where(and(eq(schema.payments.userId, viewer.userId), eq(schema.payments.status, "pending")));
+    expect(ps).toHaveLength(1);
   });
 });
