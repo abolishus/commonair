@@ -1,0 +1,2 @@
+CREATE INDEX "payments_expires_pending_idx" ON "payments" USING btree ("expires_at") WHERE "payments"."status" = 'pending';--> statement-breakpoint
+CREATE INDEX "subscriptions_period_end_active_idx" ON "subscriptions" USING btree ("current_period_end") WHERE "subscriptions"."status" = 'active';

@@ -33,7 +33,16 @@ const SUBSETS: Record<string, readonly string[]> = {
   mediamtx: ["INTERNAL_API_SECRET"],
 };
 /** Service → container port its generated public domain targets. */
-const DOMAINS: Record<string, number> = { web: 3000, api: 3001, chat: 3002, origin: 3003, irc: 6680, mailpit: 8025 };
+const DOMAINS: Record<string, number> = {
+  web: 3000,
+  api: 3001,
+  chat: 3002,
+  origin: 3003,
+  irc: 6680,
+  mailpit: 8025,
+  // WHIP signaling (WebRTC HTTP); the media itself goes through the webrtc-tcp TCP proxy.
+  mediamtx: 8889,
+};
 const BUCKET = "media";
 
 const args = process.argv.slice(2);

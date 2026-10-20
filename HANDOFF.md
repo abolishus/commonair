@@ -31,6 +31,21 @@ tables and `@commonair/ledger` (rules, poster, holds, reversals, payout batch, a
 exist; every `money.*` handler is a 501 stub; `packages/payments` (adapter interface) does not
 exist yet. The "offline/recent followed channels on /" open item landed in `28bd4aa`.
 
+Head-agent contract step (`9f371ae`, `41ac078`): `money.support`, gift subs on `subscribe`,
+`RevenueSummary` balances/sources/tiers, `money.revenueLedger`, `treasurer.payments|payouts|
+setPayoutAccount`, `MONEY_LIMITS`, `QUEUES.payments`; migration `0013` (payment tier/quantity/
+expiry, `subscriptions.gift_payment_id`); `bun run --filter @commonair/db role -- <user> <role>`
+(operator role CLI, audited); `packages/payments` scaffold; config `MANUAL_PAYMENT_INSTRUCTIONS`,
+`MANUAL_PAYOUT_INSTRUCTIONS`, `PAYMENT_PENDING_DAYS` (`PAYOUT_MINIMUM_CENTS` removed: the minimum
+is the protected `payout.rules`); API money handlers split into `money/checkout.ts` and
+`money/reports.ts`; web route stubs and per-unit catalogs; `docs/testing/e4b-selectors.md`.
+
+Units in flight (manual adapter, `.claude/briefs/e4b/`): A api-checkout, B api-reports, C
+worker-money, D web-support (+ `ChatEvent`, OptionGroup/AmountField props), E web-money
+(`/revenue`, `/treasury`, `/transparency`, nav), F harness `e4b-money`. After A–F: the head adds
+the e4b doc to `apps/web/tests/selectors.test.ts`/`i18n.test.ts`, then unit G (Stripe adapter
+against stripe-mock, webhook route, Connect onboarding, harness `--set provider=stripe`).
+
 ## Session five in flight (E4a design system)
 
 The user's session-five prompt: E4 starts with an application-design-only track (no API, worker,

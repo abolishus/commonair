@@ -68,7 +68,8 @@ hlsSegmentMaxSize: 50M
 hlsMuxerCloseAfter: 60s
 
 ###############################################
-# WebRTC: WHIP ingest. ICE over a single UDP port (>= 1024, rootless).
+# WebRTC: WHIP ingest. ICE over a single UDP port (>= 1024, rootless). Railway has no public UDP
+# and overrides the ICE settings for ICE-TCP through a TCP proxy (.railway/railway.ts, webrtc-tcp).
 webrtc: true
 webrtcAddress: :8889
 webrtcEncryption: false

@@ -42,6 +42,9 @@ bun run --filter @commonair/worker test:int   # integration (Postgres + Valkey)
 | `retention` | `expire-auth-rows`         | hourly (`7 * * * *`)  | `{}`                                   | Deletes expired `verifications` and `sessions`.                                                                                                                                                          |
 | `retention` | `prune-webhook-deliveries` | daily (`17 3 * * *`)  | `{}`                                   | Deletes `webhook_deliveries` older than 30 days.                                                                                                                                                         |
 | `retention` | `vod-retention`            | hourly (`27 * * * *`) | `{}`                                   | Deletes expired VODs' objects (`deletePrefix` of exactly `vods/<vod id>/` on the media bucket; any other stored prefix is refused and logged), then marks them `deleted`; failures are retried next run. |
+| `payments`  | `money-expire-pending`     | every 5 min           | `{}`                                   | Pending payments past `expires_at` → `failed`, with their incomplete subscriptions, unpaid renewals (end event) and tips. See Money jobs.                                                                |
+| `payments`  | `money-renew`              | every 5 min           | `{}`                                   | Ends canceled, gift and tierless subscriptions at period end; opens one pending manual renewal (`past_due`). See Money jobs.                                                                             |
+| `payments`  | `money-release-holds`      | hourly (`41 * * * *`) | `{}`                                   | Moves creator shares past the `payout.rules` hold to available, draining any backlog within 30 s. See Money jobs.                                                                                        |
 
 Producers in other services import the job names and payload schemas from
 `@commonair/worker` (`WEBHOOK_JOBS`, `VerifyCallbackJob`, …) until they move into
@@ -95,6 +98,47 @@ ADR 0003 §5) each run as their own job scheduler, so a slow pass of one never d
   variable and restart. Replace the file atomically: write the new list to a temporary file in
   the same directory and `mv` (rename) it over the old one, then send `SIGHUP`. Never edit it in
   place while the worker may reload.
+
+## Money jobs
+
+Three recurring jobs on the `payments` queue carry out the worker rows of
+`docs/testing/e4b-selectors.md` (Expiry, Renewal, Hold release). Each takes a Valkey run lock
+(`worker:lock:money:<job>`, same mechanics as the integrity locks above), so two replicas or a
+retry racing the next tick never run the same job at once; a tick that finds the lock held is
+skipped (`worker.money.runs{outcome:"skipped"}`). Runs that throw retry 3 times (backoff from 10 s).
+
+| Job                    | Schedule              | Max lock hold | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------- | --------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `money-expire-pending` | every 5 min           | 5 min         | `pending` payments with `expires_at <= now` → `failed` (CAS on status, rows locked `skip locked` so a confirm in flight wins). Their `incomplete` subscriptions (own or gifted via `gift_payment_id`) → `expired`; a `past_due` subscription whose renewal it was → `expired` with `channel.subscription.end`; the tip → `failed`. Nothing to reverse: nothing was posted.                                                                                                                                                                                                   |
+| `money-renew`          | every 5 min           | 5 min         | `active` subscriptions with `current_period_end <= now`: `cancel_at_period_end` → `canceled`, gifts → `expired` (any provider: gifts never renew), a channel without the tier → `expired`, each with `channel.subscription.end`. A manual self subscription gets one `pending` renewal payment (today's tier price, fresh `CA-` reference, `expires_at` = the later of period end + `PAYMENT_PENDING_DAYS` and now + 1 day, so a renewal opened late after an outage still leaves a day to pay) and turns `past_due`. Stripe self subscriptions are left to Stripe's events. |
+| `money-release-holds`  | hourly (`41 * * * *`) | 20 min        | `releaseDueHolds(asOf now)` with `holdDays` and currency from `payout.rules`, read per run: creator shares older than the hold move from `creator-hold` to `creator` (available). Calls repeat (500 payments each) while one releases its full limit, within the 30 s budget, so a backlog drains in one run.                                                                                                                                                                                                                                                                |
+
+- **Batches and budget.** Expiry handles at most 500 payments per transaction, and stops adding
+  payments once their subscriptions would pass 500 (a gift payment carries up to 100; the first
+  payment is always taken so a batch never stalls). Renewal pages
+  through 500 subscriptions at a time (one transaction each, the row locked `for update`); both
+  loop until the work is done or 30 s have passed, and the rest waits for the next tick.
+- **Idempotency.** Every transition is compare-and-set on the expected status, so a second run
+  (or a racing treasurer confirm) changes nothing. Lock order is payment before subscription, as
+  in the API's confirm; expiry skips a payment a confirm has locked, and the confirm wins. A renewal checks for an open `pending`
+  renewal payment with the subscription row locked, so a subscription never gets two for one
+  period (the normal flow never reaches that check, since renewal moves the row to `past_due` in
+  the same transaction; it guards a subscription put back to `active` by hand); a reference clash (`payments_provider_ref_uq`) retries with a fresh reference. Hold
+  releases are idempotent postings per payment (`hold-release:<payment id>`).
+- **Outbox and chat.** End events are written in the transaction that ends the subscription and
+  are published by the outbox relay. After commit the job publishes a chat `invalidate`
+  (`BUS.chatControl(channelId)`, `scope:"user"`) per ended subscriber so the badge goes; chat
+  keeps the badge while a subscription is `past_due`.
+- **What the treasurer sees.** Renewal payments appear in the treasury payment list as `pending`
+  with their reference, like any checkout, and are confirmed the same way (confirming continues
+  the period from the previous `current_period_end`). Unconfirmed ones turn `failed` once
+  expired. Released holds show as available creator balance in the next payout run.
+- **Configuration.** `CURRENCY` and `PAYMENT_PENDING_DAYS` (`paymentsEnv`, validated at startup);
+  the cut, minimum payout and hold period are governance settings, never env.
+- **Metrics.** `worker.money.runs{job,outcome}`, `worker.money.expired{kind}`,
+  `worker.money.renewed`, `worker.money.subscriptions_ended{reason}` (`canceled`, `gift`,
+  `no_tiers`, `renewal_unpaid`), `worker.money.released_cents{currency}`. Logs carry counts only,
+  never user ids.
 
 ## Webhooks
 
