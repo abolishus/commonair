@@ -27,10 +27,15 @@ ADR 0006's open questions resolved (native TypeScript PDQ/vPDQ, default classifi
 platform and filed by a `legal` user, evidence sealed in append-only Postgres because Garage
 cannot deny delete) and the license judgments recorded in ADR 0008. Waiting for the user to accept
 both; **both accepted 2026-10-20**. E4b validations are deferred at the user's request.
-Contract step in progress: spec `docs/testing/e4c-selectors.md`, enums, migrations 0015/0016
-with DB-enforced protections (tested), hold CLI committed (`3d51fbc`). Remaining contract work
-(contracts, config, `packages/moderation` scaffold, Garage evidence bucket, briefs) is listed in
-HANDOFF.md "Step 2". Units not started.
+**Contract step done** (head agent, all on local `main`, not pushed): spec, enums, migrations
+0015/0016 with DB-enforced protections, hold CLI (`3d51fbc`); contracts with internal events,
+moderation jobs and payloads, T&S entities, `moderation.*`/`ncii.*` procedures and 501 stubs,
+`legal`/`safety-staff` access (`7501bb9`, `0e948da`); `moderationEnv` and the evidence keypair in
+init-env (`f038c0e`); `packages/moderation` scaffold with the evidence seal implemented and
+tested (`2813f99`); the worker-only Garage evidence bucket and key, evidence secrets scoped per
+service in compose/Quadlet (`6377f0c`); `scripts/fetch-model.ts` with the pinned digest
+(`5658eef`); unit briefs A–F (`738532e`). **Units not started**: next session fires them
+(HANDOFF.md "Step 3").
 
 ## Session six (2026-10-19): E4b money (in progress)
 

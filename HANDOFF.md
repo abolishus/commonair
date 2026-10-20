@@ -39,7 +39,7 @@ E4c builds account deletion (the scenario needs it) and the playback/page gate. 
 cannot deny delete to a writing key, so evidence images go into an append-only, sealed Postgres
 table and large media into an evidence bucket only the worker can reach (ADR 0006 Q4).
 
-### Step 2, head-agent contract step (in progress; resume here)
+### Step 2, head-agent contract step (done)
 
 Done and committed (`3d51fbc`, all on local `main`, **not pushed**):
 
@@ -62,74 +62,95 @@ Done and committed (`3d51fbc`, all on local `main`, **not pushed**):
   (`UNWIRED_SUBJECTS`) until the API unit wires them.
 - tsc clean in contracts, api, worker, chat, media, web, ui, harness after these changes.
 
-Still to do in the contract step (head agent only), in this order:
+Done in the second sitting (2026-10-20, all on local `main`, **not pushed**; each commit had its
+targeted checks pass: tsc, unit tests, lint/fmt of the touched files):
 
-1. **Contracts** (`packages/contracts`):
-   - `events.ts`: add an `internal?: true` flag to `EventDef`; internal events
-     `moderation.flagged`, `moderation.case.resolved`, `moderation.restriction`,
-     `ncii.request.received`, `ncii.request.decided`, `legal.hold.placed`,
-     `ncmec.draft.created` (payloads ids/enums only, no PII); export `PUBLIC_EVENT_TYPES` and use
-     it for EventSub subscription input in `router.ts`, so apps can never subscribe to internal
-     events (the worker's outbox fan-out must skip internal types: worker unit).
-   - `internal.ts`: `QUEUES.moderation`; `KEYS.moderationFrame(frameId)` (60 s TTL) and
-     `KEYS.moderationScript(channelId)`; Zod job payloads `ModerationScanJob`,
-     `ModerationT0Job` (sealed frame bytes base64, list category, distance, quality, list
-     version), `ModerationT0MediaJob`; internal route paths `/internal/moderation/script` and
-     `/internal/moderation/ncii-tick`.
-   - `api/entities.ts`: `ModerationCase`, `ModerationFlag` (no frame URL for T0), `CaseHistoryRow`,
-     `LegalCase`, `EvidenceObject` (metadata), `NcmecReport` (+ decrypted snapshot shape),
-     `LegalHold`, `NciiRequest`, `ContentLabel`; `BroadcastSummary.restricted` (`"under_review" |
-     null`); `Me.role` already follows the enum.
-   - `api/router.ts`: access level `legal` (add to the API access middleware list:
-     `services/api/src/lib/access.ts`, a stopgap so it compiles, real check by the API unit);
-     `moderation.{queue,case,frame,review,t0Queue,t0Confirm,t0Dismiss,evidence,ncmecReports,
-     ncmecReport,ncmecFile,holds}`; `ncii.{submit (public, ALTCHA, write limit),queue,decide}`;
-     `channels.commitUpload {channel,key} → {key,url}` with `upload_rejected`;
-     `admin.expediteDeletion {username,reason}`; `admin.legalHold` becomes legal-only and
-     place-only (`hold: true` literal); `FORBIDDEN` code `mature_gate` on playback. Add 501
-     stubs in services/api for every new procedure so the API compiles.
-2. **Config** (`packages/config/src/env.ts` + `.env.example`, the sync test enforces both):
-   `moderationEnv`: `MODERATION_SAMPLE_SECONDS` (2–60, default 10),
-   `MODERATION_HASHLIST_CSAM`, `MODERATION_HASHLIST_NCII` (paths, empty default),
-   `MODERATION_CLASSIFIER` (`onnx` default | `scripted`), `MODERATION_CLASSIFIER_MODEL` (path),
-   `MODERATION_TEST_HOOKS` (default false; `scripted` refused without it),
-   `EVIDENCE_PUBLIC_KEY` (required for media/worker/api), `EVIDENCE_PRIVATE_KEY` (api only);
-   `storageEnv`: `S3_BUCKET_EVIDENCE`, `S3_EVIDENCE_ACCESS_KEY_ID`,
-   `S3_EVIDENCE_SECRET_ACCESS_KEY` (worker only). Keep `HASH_MATCH_*` marked deprecated until the
-   media unit merges, then delete. `scripts/init-env.ts`: generate an X25519 evidence keypair
-   (raw 32-byte keys, base64) and the second Garage key pair (`GK`+24 hex / 64 hex).
-3. **`packages/moderation` scaffold**: `package.json` (AGPL, exact `onnxruntime-node` 1.30.0 /
-   `onnxruntime-common` 1.30.0, never in `trustedDependencies`), `src/index.ts` with the
-   `HashMatcher`, `Classifier` (scores per `MODERATION_CATEGORIES`, unscored = absent),
-   `HashList`, `MODERATION_CONSTANTS` (`PDQ_MATCH_DISTANCE` 31, `PDQ_MIN_QUALITY` 50,
-   NCII 24/36/48 h, frame TTL 60 s), the seal format (X25519 ECDH + HKDF-SHA256 + AES-256-GCM via
-   WebCrypto; header: version, key id = sha256(pubkey)[0..16] hex, ephemeral pubkey, nonce) as
-   types and docs; `LICENSES/BSD-3-Clause.txt`. `bun install`, add to the license check run.
-   `scripts/fetch-model.ts` (pinned HF revision `8587de998f441aac03fdd57a85d2e4cb808c7d64`,
-   `onnx/model_int8.onnx`, sha256 recorded after the first download).
-4. **Infra**: `infra/garage/bootstrap.ts` creates `S3_BUCKET_EVIDENCE`, imports the evidence key
-   with read+write only on that bucket, gives the main key nothing on it; a test proving the main
-   key cannot list/get/put there. Compose: evidence key env to the worker only; mount
-   `MODERATION_HASHLIST_*` files. Document the S3 Object Lock policy in the operator guide.
-5. **Briefs** `.claude/briefs/e4c/`: `_common.md` (copy the e4b one's shape; repeat the SAFETY
-   RULES from the spec verbatim; harder review rules) + units, ≤ 6 in parallel, each in its own
-   worktree: **A** `packages/moderation` (PDQ port + reference vectors, list loading/reload, seal,
-   scripted + ONNX classifier, synthetic fixtures + fixture `.pdq` lists); **B** services/media
-   (sampling, PDQ in media, kick-first T0 enqueue, VOD/clip pre-publish scan, thumbnails, replace
-   `safety/`); **C** services/worker (scan job, T0/T1/T2 transactions, T0 media copy, NCII clock,
-   holds eligibility, evidence audit, NCMEC unfiled alerts, deletion job, outbox skip internal);
-   **D** services/api (mod queue/review, T0 confirm/dismiss, evidence view, NCMEC filing, NCII
-   submit/decide, reports, suspension, audit log, appeals on labels/cases, commitUpload,
-   deletion + expedite, mature gate on playback, directory restriction, test-hook routes);
-   **E** apps/web (+ packages/ui compositions as contract requests) from the TrustSafety board;
-   **F** harness `trust-safety`. A must land (or its interfaces must be final) before B/C/D
-   integrate; F can be written against the spec. Then: e4c doc into
-   `apps/web/tests/selectors.test.ts`/`i18n.test.ts`; `docs/operators/trust-safety.md`
-   (ADR 0006 Q5, "not legal advice" header).
-6. Reviews (harder than E4b): independent reviewer before every merge, focused re-review after
-   any HIGH fix, plus a second security-focused reviewer for B, C, D (T0 path, holds, deletion,
-   evidence, NCII clock) even with no HIGH. Losing evidence, skipping a T0 action, showing T0
-   material outside `legal`, or switching the pipeline off is HIGH.
+- `7501bb9` **contracts**: `EventDef.internal`; internal events `moderation.flagged`,
+  `moderation.case.resolved`, `moderation.restriction`, `ncii.request.received`,
+  `ncii.request.decided`, `legal.hold.placed`, `ncmec.draft.created` (ids/enums only);
+  `PUBLIC_EVENT_TYPES`/`isInternalEvent`; `SubscriptionEnvelope`, `WsMetadata`, `BusEvent` and the
+  EventSub router inputs accept public types only. `internal.ts`: `QUEUES.moderation`,
+  `MODERATION_JOBS`, `MODERATION_FRAME_TTL_SECONDS`, `KEYS.moderationFrame/moderationScript`,
+  `ModerationScores` (unscored = absent), `ModerationScanJob`, `SealedEvidence`, `ModerationT0Job`
+  (+ `t0JobId`), `ModerationT0MediaJob`, `ModerationT0EscalatedJob`, `NciiClockJob/Result`,
+  `INTERNAL_ROUTES.moderationScript/nciiTick` with bodies. Entities: `ContentLabel`,
+  `ModerationFlag` (no frame URL; `hasFrame`), `CaseHistoryRow`, `ModerationCase(+Detail)`,
+  `EvidenceObject`, `EvidenceView`, `LegalHold`, `NcmecReport(+Detail)`, `NcmecSnapshot` (the
+  sealed snapshot's plaintext), `LegalCase`, `NciiRequest(+Item)`, `BroadcastSummary.restricted`
+  (optional). Router: `moderation.*` (12), `ncii.{submit,queue,decide}`, `channels.commitUpload`
+  (`UPLOAD_REJECTED`: 422 `data.reason = "upload_rejected"`), `admin.expediteDeletion`,
+  `admin.legalHold` (legal-only, place-only, returns `LegalHold`), `me.labels`, `playback.start`
+  with `MATURE_GATE` (`FORBIDDEN` `data.reason = "mature_gate"`). Access levels `legal` and
+  `safety-staff` (moderator, admin, legal), real checks in `services/api/src/lib/access.ts` with
+  tests. 501 stubs: `routes/moderation.ts`, `routes/ncii.ts`, `commitUpload`, `expediteDeletion`,
+  `me.labels`.
+- `0e948da` `MODERATION_JOBS.nciiHash` + `NciiHashJob`: NCII `removed` unpublishes in the API
+  transaction and the worker hashes then deletes (hashing whole VODs does not belong in a request).
+- Spec edits (same commits): the API **enqueues** `t0` for uploads and `t0-escalated` for
+  human-escalated confirms, so the **worker owns the only implementation of the T0 actions**;
+  `ncii-tick` is served by the API, which enqueues `ncii-clock` and awaits it; error data uses
+  `data.reason`. Evidence frames are sealed as **PNG** (lossless), not WebP.
+- `f038c0e` **config**: `moderationEnv` (sample 2–60, lists, `onnx|scripted`, model path,
+  test hooks; `scripted` refused without hooks; no on/off switch exists), `evidenceSealEnv`
+  (raw 32-byte X25519 public, base64), `evidenceOpenEnv` (X25519 **PKCS#8** private, base64; the
+  handoff said raw, PKCS#8 is what WebCrypto imports), `evidenceStorageEnv`,
+  `S3_BUCKET_EVIDENCE`. `HASH_MATCH_*` marked deprecated. `init-env` generates the keypair and the
+  `GK…` evidence key, refuses a merge that would pair half a kept keypair with a new half.
+  **The user must run `bun scripts/init-env.ts --merge`** before the next stack start
+  (garage-init now requires `S3_EVIDENCE_*`).
+- `2813f99` **`packages/moderation`**: `MODERATION_CONSTANTS`, `INCOMING_PREFIX`,
+  `reviewFrameKey`, `parseThresholds`/`validThresholds`/`tierFor`/`effectiveSampleSeconds`
+  (implemented, 10 tests), **the seal implemented** (format v1 in `seal.ts` header: magic, version,
+  key id, ephemeral key, nonce, AES-GCM with the header as AAD; 5 tests), `types.ts` interfaces,
+  and final signatures for PDQ, lists/matcher/watcher, scripted classifier, ffmpeg helpers and
+  `./onnx` (bodies throw until unit A). `onnxruntime-node`/`-common` 1.30.0 pinned;
+  `check-licenses` passes. `LICENSES/BSD-3-Clause.txt` is added by unit A with the first BSD file
+  (reuse lint fails on an unused license).
+- `6377f0c` **Garage**: `garage-init` imports the evidence key, grants it read+write (not owner)
+  on the evidence bucket only, revokes any main-key grant there and any evidence-key grant
+  elsewhere (unit tests with the fake admin API). Compose/Quadlet blank `S3_EVIDENCE_*` and
+  `EVIDENCE_PRIVATE_KEY` for every app service and hand them back only to the worker and the API;
+  `ONNXRUNTIME_NODE_INSTALL=skip` everywhere. A real-Garage proof (main key cannot list/get/put
+  evidence; evidence key cannot touch other buckets) is in `infra/tests/stack.int.test.ts`,
+  **not run** (it starts its own compose project; the user's gate runs it).
+- `5658eef` `scripts/fetch-model.ts`; `MODEL.sha256 = d25aa73f…35fa` (equals the Hugging Face LFS
+  oid of `onnx/model_int8.onnx` at the pinned revision, 88,500,985 bytes). The file is in
+  `.cache/models/` (gitignored) in the main checkout.
+- `738532e` **briefs** `.claude/briefs/e4c/`: `_common.md` (safety rules verbatim, HIGH list,
+  database-first, process, review) and units **A** moderation, **B** media, **C** worker, **D** API,
+  **E** web + ui, **F** harness. Decided in the briefs: bucket evidence keys are
+  `evidence/<caseId>/<evidenceId>.<sha256 of sealed bytes>` so the daily audit can verify without
+  the private key; VOD evidence is sealed per HLS object.
+
+Open items from the contract step:
+
+- **onnxruntime-node postinstall**: Bun's `pm untrusted` reports nothing blocked, which may mean
+  Bun's built-in default trust list lets the script run. It is a no-op on macOS; on Linux x64 it
+  could fetch CUDA from NuGet. Mitigated by `ONNXRUNTIME_NODE_INSTALL=skip` in compose/Quadlet, but
+  the **image build** (`infra/containers/service.Containerfile`, `bun install`) must also set it:
+  add `ENV ONNXRUNTIME_NODE_INSTALL=skip` before the install step and confirm in a Linux build that
+  no `.nuget`/CUDA files appear. Adding `"trustedDependencies": []` to the root was tried and
+  reverted (unclear effect on other packages' scripts).
+- Hash-list file mounts for media/api/worker and the model volume for the worker in compose are
+  not done (unit F writes `harness/compose.trust-safety.yaml` for the scenario; production mounts
+  are a head-agent integration task).
+- `docs/operators/trust-safety.md` (ADR 0006 Q5, "not legal advice" header, S3 Object Lock policy
+  for stores that support it): head agent, at integration.
+- Remove `HASH_MATCH_*` from config and `.env.example` once unit B merges.
+
+### Step 3, fire and merge the units (resume here)
+
+Fire **A, B, C, D, E, F** (six, the maximum), each with the Agent tool in its own git worktree
+(`isolation: "worktree"`), prompt = "Read `.claude/briefs/e4c/_common.md` and
+`.claude/briefs/e4c/<X>.md` and do what they say. First run `git merge main --no-edit`." Merge **A
+first** after its review; then tell B, C and D (SendMessage) to `git merge main --no-edit` and run
+their integration tests for real. Review rules (harder than E4b): an independent reviewer before
+every merge (diff vs `_common.md`, the spec, AGENTS.md), a focused re-review after any HIGH fix,
+and a **second, security-focused reviewer for B, C and D** even with no HIGH. Losing evidence,
+skipping a T0 action, showing T0 material outside `legal`, or switching the pipeline off is HIGH.
+Apply contract requests yourself on `main` between merges. After all merge: the open items above,
+e4c doc wiring check, then hand the user the gate, `bun run verify --scenario trust-safety` and
+the browser checks.
 
 Decisions taken in the spec that go slightly beyond ADR 0006 (tell the user if asked): T0 removal
 of VOD/clip media is **not restored** after a two-reviewer dismissal (copies exist only as sealed
