@@ -38,7 +38,7 @@ export async function loadSessionUser(cookie: string | undefined): Promise<Sessi
   if (!cookie) return null;
   try {
     const m = await serverApi(webEnv().API_INTERNAL_URL, { cookie }).me.get();
-    return { id: m.id, username: m.username, displayName: m.displayName, channelSlug: m.channelSlug };
+    return { id: m.id, username: m.username, displayName: m.displayName, channelSlug: m.channelSlug, role: m.role };
   } catch {
     return null;
   }
