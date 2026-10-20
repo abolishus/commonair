@@ -9,7 +9,11 @@ import { cn } from "@commonair/ui/lib/utils";
 export interface ChannelHeaderProps extends React.ComponentProps<"section"> {
   name: string;
   avatarUrl?: string | null;
-  accent?: Accent;
+  /**
+   * The channel's accent token. Scopes `--channel-accent` to the header (`data-accent`), so the
+   * avatar fallback and any `AccentButton` in `actions` take the channel's color.
+   */
+  accent?: Accent | null;
   live?: boolean;
   headingLevel?: 1 | 2;
   title?: string;
@@ -51,7 +55,11 @@ export function ChannelHeader({
   const Heading = `h${headingLevel}` as const;
   const compact = variant === "compact";
   return (
-    <section className={cn("flex min-w-0 flex-wrap items-center gap-3", compact && "gap-2", className)} {...props}>
+    <section
+      data-accent={accent ?? undefined}
+      className={cn("flex min-w-0 flex-wrap items-center gap-3", compact && "gap-2", className)}
+      {...props}
+    >
       <ChannelAvatar name={name} src={avatarUrl} accent={accent} size={compact ? "md" : "lg"} live={live} decorative />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">

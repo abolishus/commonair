@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { render, screen } from "@testing-library/react";
-import { expect, test } from "vite-plus/test";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { expect, test, vi } from "vite-plus/test";
 import { Breadcrumbs, PageHeader, PageTabs, Section } from "../../src/blocks/headers/index.ts";
 test("PageHeader renders title, description, meta, actions, and slots", () => {
   render(
@@ -65,4 +65,42 @@ test("PageTabs panel mode renders panel content", () => {
   );
   expect(screen.getByText("Account panel")).toBeTruthy();
   expect(screen.queryByText("Security panel")).toBeNull();
+});
+
+test("PageTabs forwards per-tab disabled, test ids and descriptions to the triggers", () => {
+  const change = vi.fn<(value: string) => void>();
+  render(
+    <PageTabs
+      aria-label="Support options"
+      variant="default"
+      fullWidth
+      value="tip"
+      onValueChange={change}
+      afterList={<p id="why">Add a tier first.</p>}
+      items={[
+        { id: "sub", label: "Subscribe", disabled: true, "data-testid": "tab-sub", "aria-describedby": "why" },
+        { id: "tip", label: "Tip", "data-testid": "tab-tip", content: <p>Tip panel</p> },
+      ]}
+    />,
+  );
+  const list = screen.getByRole("tablist", { name: "Support options" });
+  expect(list.className).toContain("w-full");
+  const sub = screen.getByTestId("tab-sub");
+  expect(sub).toBe(screen.getByRole("tab", { name: "Subscribe" }));
+  expect(sub.getAttribute("aria-describedby")).toBe("why");
+  expect(sub.hasAttribute("disabled") || sub.getAttribute("aria-disabled") === "true").toBe(true);
+  expect(screen.getByTestId("tab-tip").getAttribute("aria-describedby")).toBeNull();
+  fireEvent.click(sub);
+  expect(change).not.toHaveBeenCalled();
+  // The note sits between the list and the panels, outside any panel.
+  const note = screen.getByText("Add a tier first.");
+  expect(note.closest('[role="tabpanel"]')).toBeNull();
+  expect(list.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText("Tip panel")).toBeTruthy();
+});
+test("PageTabs keeps the tab list in its own horizontal scroller", () => {
+  render(<PageTabs items={[{ id: "a", label: "A", href: "/a", current: true }]} />);
+  const scroller = screen.getByRole("tablist").parentElement;
+  expect(scroller?.className).toContain("overflow-x-auto");
+  expect(screen.getByRole("tablist").className).not.toContain("w-full");
 });

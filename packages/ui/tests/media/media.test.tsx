@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import type { StreamCard } from "@commonair/contracts/dto";
 import { PlayIcon } from "@hugeicons/core-free-icons";
 import { LocaleProvider } from "../../src/lib/locale.tsx";
+import { AccentButton } from "../../src/primitives/accent-button.tsx";
 import { AlertPreview } from "../../src/blocks/media/alert-preview.tsx";
 import { CategoryGrid, CategoryTile } from "../../src/blocks/media/category-tile.tsx";
 import { ChannelHeader } from "../../src/blocks/media/channel-header.tsx";
@@ -153,6 +154,24 @@ describe("media block behavior", () => {
     expect(container.querySelector("h2")?.textContent).toBe("Fern");
     expect(screen.getByText("Offline")).toBeTruthy();
     expect(screen.getByTestId("channel")).toBeTruthy();
+  });
+
+  test("ChannelHeader scopes the channel accent to the header so actions inherit it", () => {
+    const { rerender } = render(
+      <ChannelHeader
+        name="Fern"
+        accent="teal"
+        data-testid="channel"
+        actions={<AccentButton data-testid="cta">Support</AccentButton>}
+      />,
+    );
+    const header = screen.getByTestId("channel");
+    expect(header.getAttribute("data-accent")).toBe("teal");
+    // The button sets no accent of its own: it inherits the header's tokens.
+    expect(screen.getByTestId("cta").hasAttribute("data-accent")).toBe(false);
+    expect(screen.getByTestId("cta").closest("[data-accent]")).toBe(header);
+    rerender(<ChannelHeader name="Fern" accent={null} data-testid="channel" />);
+    expect(screen.getByTestId("channel").hasAttribute("data-accent")).toBe(false);
   });
 
   test("player controls retain labels and pressed state and scrubber exposes value text", () => {

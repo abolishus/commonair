@@ -9,6 +9,7 @@ export interface ChoiceToggleOption {
   value: string;
   label: React.ReactNode;
   disabled?: boolean;
+  "data-testid"?: string;
 }
 export interface ChoiceToggleProps {
   label: React.ReactNode;
@@ -17,6 +18,8 @@ export interface ChoiceToggleProps {
   defaultValue?: string;
   onValueChange?: (value: string) => void;
   orientation?: "horizontal" | "vertical";
+  /** Wrap the options onto more rows instead of overflowing (many presets at 320 px). */
+  wrap?: boolean;
   "data-testid"?: string;
 }
 export function ChoiceToggle({
@@ -26,6 +29,7 @@ export function ChoiceToggle({
   defaultValue,
   onValueChange,
   orientation = "horizontal",
+  wrap = false,
   ...props
 }: ChoiceToggleProps): React.JSX.Element {
   const id = React.useId();
@@ -44,9 +48,15 @@ export function ChoiceToggle({
         }}
         orientation={orientation}
         variant="outline"
+        className={wrap ? "flex-wrap" : undefined}
       >
         {options.map((option) => (
-          <ToggleGroupItem key={option.value} value={option.value} disabled={option.disabled}>
+          <ToggleGroupItem
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+            data-testid={option["data-testid"]}
+          >
             {option.label}
           </ToggleGroupItem>
         ))}

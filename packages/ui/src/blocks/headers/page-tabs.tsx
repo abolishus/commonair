@@ -4,6 +4,7 @@
 import type * as React from "react";
 import { Badge } from "@commonair/ui/components/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@commonair/ui/components/tabs";
+import { cn } from "@commonair/ui/lib/utils";
 export interface PageTab {
   id: string;
   label: string;
@@ -12,6 +13,10 @@ export interface PageTab {
   current?: boolean;
   count?: string | number;
   content?: React.ReactNode;
+  /** Disables this tab; say why with `aria-describedby` pointing at visible text. */
+  disabled?: boolean;
+  "data-testid"?: string;
+  "aria-describedby"?: string;
 }
 export interface PageTabsProps {
   items: PageTab[];
@@ -19,6 +24,12 @@ export interface PageTabsProps {
   value?: string;
   onValueChange?: (value: string) => void;
   className?: string;
+  /** Accessible name of the tab list. */
+  "aria-label"?: string;
+  /** Stretch the tab list to the full width (the triggers share it). */
+  fullWidth?: boolean;
+  /** Rendered between the tab list and the panels, e.g. why a tab is disabled. */
+  afterList?: React.ReactNode;
 }
 export function PageTabs({
   items,
@@ -26,17 +37,24 @@ export function PageTabs({
   value,
   onValueChange,
   className,
+  fullWidth = false,
+  afterList,
+  ...props
 }: PageTabsProps): React.JSX.Element {
   const panelMode = onValueChange !== undefined || value !== undefined;
   const current = value ?? items.find((item) => item.current)?.id ?? items[0]?.id;
   return (
-    <div className="min-w-0 overflow-x-auto">
-      <Tabs value={panelMode ? current : undefined} onValueChange={onValueChange} className={className}>
-        <TabsList variant={variant} className="min-w-max">
+    <Tabs value={panelMode ? current : undefined} onValueChange={onValueChange} className={cn("min-w-0", className)}>
+      {/* Only the list scrolls sideways at 320 px; the panels keep the page width. */}
+      <div className="min-w-0 overflow-x-auto">
+        <TabsList variant={variant} aria-label={props["aria-label"]} className={cn("min-w-max", fullWidth && "w-full")}>
           {items.map((item) => (
             <TabsTrigger
               key={item.id}
               value={item.id}
+              disabled={item.disabled}
+              data-testid={item["data-testid"]}
+              aria-describedby={item["aria-describedby"]}
               nativeButton={panelMode}
               render={
                 panelMode
@@ -56,14 +74,15 @@ export function PageTabs({
             </TabsTrigger>
           ))}
         </TabsList>
-        {panelMode
-          ? items.map((item) => (
-              <TabsContent key={item.id} value={item.id}>
-                {item.content}
-              </TabsContent>
-            ))
-          : null}
-      </Tabs>
-    </div>
+      </div>
+      {afterList}
+      {panelMode
+        ? items.map((item) => (
+            <TabsContent key={item.id} value={item.id}>
+              {item.content}
+            </TabsContent>
+          ))
+        : null}
+    </Tabs>
   );
 }
