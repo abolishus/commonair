@@ -75,12 +75,11 @@ stripe-mock fixture without a fee stalls confirms), Storybook (Support, PageTabs
 ChannelHeader accents) and the browser pass on `/revenue`, `/treasury`, `/transparency`, the
 Support dialog and `/settings/subscriptions`.
 
-Open decisions for the user: unpaid gifts hold recipients' slots for `PAYMENT_PENDING_DAYS` (A
-review M3); money Stripe collects after we ended a subscription is booked `paid_after_end` (the
-treasurer refunds it) rather than refused. Smaller: the webhook rate limit is a local constant in
-`stripe-webhook.ts` (could move to `DEFAULT_RATE_LIMITS`); a Stripe refund that times out is
-marked failed though Stripe may have taken it (a same-amount retry reuses the idempotency key);
-Stripe Connect transfers are out of scope; `packages/ui/README.md` doesn't list the new props.
+Decided 2026-10-20 and recorded in ADR 0007, **not to be built until the user asks**: one open
+unpaid gift per gifter per channel + 24-hour gift window; auto-refund `paid_after_end` money;
+Stripe refund "outcome unknown" keeps blocking. Recorded as is: owner-only revenue/tiers, hold
+releases dated when due, Connect transfers later. Smaller: the webhook rate limit is a local constant in
+`stripe-webhook.ts` (could move to `DEFAULT_RATE_LIMITS`); Stripe Connect transfers are out of scope; `packages/ui/README.md` doesn't list the new props.
 
 ### Resume point (2026-10-20, stopped at the user's request) — superseded by session seven
 

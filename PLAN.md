@@ -72,6 +72,12 @@ merged only with `bun run verify` green and its scenario passing against `podman
 | E5    | co-op: memberships, a governance vote incl. the protected-decision rejection, council review, patronage run with statement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | E6    | the rest of Phase 4: simulcast to the mock target, overlays, VOD/clips, data export, account deletion, backup restore, load test, `--no-proprietary` profile                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
+E4b follow-ups, decided but not built ([ADR 0007](docs/decisions/0007-e4b-money-follow-ups.md)):
+one open unpaid gift per gifter per channel with a 24-hour gift window, automatic refund of money
+Stripe collects for an ended subscription, and an "outcome unknown" state for Stripe refund calls.
+Stripe Connect transfers to creators' connected accounts are later work (payout runs record
+Stripe payouts but move no money).
+
 The web/harness contract for each slice is a `docs/testing/<slice>-selectors.md` file (E1:
 [docs/testing/e1-selectors.md](docs/testing/e1-selectors.md)); briefs live in `.claude/briefs/<slice>/`.
 
