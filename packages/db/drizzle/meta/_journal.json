@@ -99,6 +99,13 @@
       "when": 1792451726515,
       "tag": "0013_money_gifts_and_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792453039794,
+      "tag": "0014_money_scan_indexes",
+      "breakpoints": true
     }
   ]
 }
