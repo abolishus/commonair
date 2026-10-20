@@ -244,6 +244,7 @@ export const MODERATION_JOBS = {
   t0Media: "t0-media",
   t0Escalated: "t0-escalated",
   nciiClock: "ncii-clock",
+  nciiHash: "ncii-hash",
   evidenceAudit: "evidence-audit",
   ncmecUnfiled: "ncmec-unfiled",
   holdEligibility: "hold-eligibility",
@@ -338,6 +339,14 @@ export const NciiClockResult = z.object({
   autoHidden: z.number().int(),
 });
 export type NciiClockResult = z.infer<typeof NciiClockResult>;
+
+/**
+ * `MODERATION_JOBS.nciiHash`: after `ncii.decide` → `removed` (the API already unpublished every
+ * resolved subject in its transaction), hash the removed content (frames every sample interval,
+ * quality ≥ 50) into `local_hash_list` as `ncii`, then delete the objects. Idempotent.
+ */
+export const NciiHashJob = z.object({ requestId: z.uuid() });
+export type NciiHashJob = z.infer<typeof NciiHashJob>;
 
 /** Body of `INTERNAL_ROUTES.moderationScript`. */
 export const ModerationScriptBody = z.object({ channelId: z.uuid(), scores: ModerationScores });
