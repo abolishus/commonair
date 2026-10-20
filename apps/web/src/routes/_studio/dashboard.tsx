@@ -36,6 +36,15 @@ function DashboardPage(): React.JSX.Element {
         actions={
           <>
             <Button
+              data-testid="revenue-link"
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link to="/revenue" />}
+            >
+              {t("dashboard.revenue")}
+            </Button>
+            <Button
               data-testid="relays-link"
               variant="outline"
               size="sm"

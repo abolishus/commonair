@@ -37,5 +37,29 @@ export const Default: Story = {
     />
   ),
 };
+/** A month select with a trigger test id (options carry `data-value`), and search input props. */
+export const MonthAndReference: Story = {
+  render: () => (
+    <FilterBar
+      searchLabel="Payment reference"
+      onSearchChange={() => {}}
+      searchInputProps={{ name: "reference", maxLength: 64, autoComplete: "off" }}
+      filters={[
+        {
+          id: "month",
+          label: "Month",
+          value: "2026-10",
+          options: [
+            { value: "2026-10", label: "October 2026" },
+            { value: "2026-09", label: "September 2026" },
+            { value: "2026-08", label: "August 2026" },
+          ],
+          onValueChange: () => {},
+          "data-testid": "revenue-month",
+        },
+      ]}
+    />
+  ),
+};
 export const Light: Story = { ...Default, globals: { theme: "light" } };
 export const Mobile320: Story = { ...Default, globals: { viewport: { value: "mobile320" } } };
