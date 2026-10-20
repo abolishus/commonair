@@ -11,7 +11,13 @@ import {
   stripeClient,
   stripeKeyProblem,
 } from "../src/stripe-client.ts";
-import { type StripeEventEnvelope, StripeEventError, stripeAction, stripeEnvelope } from "../src/stripe-events.ts";
+import {
+  type StripeEventEnvelope,
+  StripeEventError,
+  redactStripeEvent,
+  stripeAction,
+  stripeEnvelope,
+} from "../src/stripe-events.ts";
 import { encodeForm, formPairs } from "../src/stripe-form.ts";
 import {
   constantTimeEqual,
@@ -473,5 +479,120 @@ describe("event → action mapping", () => {
   test("unknown types are ignored", () => {
     expect(stripeAction(envelope("customer.created", { id: "cus_1" }))).toEqual({ type: "ignored" });
     expect(stripeAction(envelope("checkout.session.completed", { mode: "setup" }))).toEqual({ type: "ignored" });
+  });
+});
+
+describe("stored payload redaction", () => {
+  const raw = (type: string, object: Record<string, unknown>) => ({
+    id: "evt_r",
+    object: "event",
+    type,
+    created: NOW,
+    livemode: false,
+    api_version: "2024-06-20",
+    request: { id: "req_1", idempotency_key: "k" },
+    data: { object, previous_attributes: { email: "old@example.test" } },
+  });
+  let compared = 0;
+  const sameAction = (body: Record<string, unknown>) => {
+    compared++;
+    const original = stripeEnvelope(body);
+    const redacted = stripeEnvelope(redactStripeEvent(body));
+    if (!original || !redacted) throw new Error("not an event");
+    expect(stripeAction(redacted)).toEqual(stripeAction(original));
+  };
+
+  test("payer details are dropped; the processor's fields survive", () => {
+    const body = raw("checkout.session.completed", {
+      id: "cs_1",
+      object: "checkout.session",
+      mode: "payment",
+      payment_status: "paid",
+      client_reference_id: "pid",
+      metadata: { payment_id: "pid", reference: "CA-1", note: "free text" },
+      payment_intent: { id: "pi_1", receipt_email: "payer@example.test" },
+      amount_total: 500,
+      currency: "usd",
+      total_details: { amount_tax: 0, breakdown: { taxes: [] } },
+      customer_email: "payer@example.test",
+      customer_details: { email: "payer@example.test", name: "Pat", address: { line1: "1 Main" } },
+      shipping_details: { name: "Pat" },
+    });
+    const stored = redactStripeEvent(body);
+    const text = JSON.stringify(stored);
+    for (const leak of ["payer@example.test", "Pat", "1 Main", "free text", "customer_details", "req_1", "old@"])
+      expect(text).not.toContain(leak);
+    expect(stored).toMatchObject({
+      id: "evt_r",
+      type: "checkout.session.completed",
+      api_version: "2024-06-20",
+      data: { object: { payment_intent: "pi_1", metadata: { payment_id: "pid", reference: "CA-1" } } },
+    });
+    sameAction(body);
+  });
+
+  test("every handled type parses the same from the stored payload", () => {
+    sameAction(
+      raw("invoice.paid", {
+        id: "in_1",
+        billing_reason: "subscription_cycle",
+        customer_email: "x@example.test",
+        customer_name: "X",
+        parent: { subscription_details: { subscription: "sub_1", metadata: { payment_id: "pid" } } },
+        payment_intent: "pi_2",
+        amount_paid: 999,
+        tax: 10,
+        currency: "usd",
+        status_transitions: { paid_at: NOW },
+        lines: { data: [{ period: { start: NOW, end: NOW + 100 }, description: "x" }] },
+      }),
+    );
+    sameAction(
+      raw("charge.refunded", {
+        id: "ch_1",
+        payment_intent: "pi_1",
+        amount_refunded: 300,
+        currency: "usd",
+        billing_details: { email: "x@example.test", name: "X" },
+        refunds: {
+          data: [
+            { id: "re_1", amount: 300, status: "succeeded" },
+            { id: "re_2", amount: 1 },
+          ],
+        },
+      }),
+    );
+    sameAction(raw("charge.refunded", { id: "ch_1", amount_refunded: 300, currency: "usd" }));
+    sameAction(
+      raw("charge.dispute.created", {
+        id: "dp_1",
+        charge: { id: "ch_1", billing_details: { name: "X" } },
+        payment_intent: "pi_1",
+        amount: 999,
+        currency: "usd",
+        status: "needs_response",
+        evidence: { customer_name: "X" },
+        balance_transactions: [{ fee: 1500, description: "x" }],
+      }),
+    );
+    sameAction(raw("account.updated", { id: "acct_1", payouts_enabled: true, email: "x@example.test" }));
+    sameAction(raw("customer.subscription.deleted", { id: "sub_1", customer: "cus_1" }));
+    sameAction(raw("checkout.session.expired", { metadata: { payment_id: "pid" } }));
+    expect(compared).toBeGreaterThanOrEqual(8);
+  });
+
+  test("non-events stay non-events", () => {
+    expect(stripeEnvelope(redactStripeEvent({ id: "x", type: "y", created: 1, data: { object: {} } }))).toBeNull();
+    expect(stripeEnvelope(redactStripeEvent({ id: "x", object: "event", type: "y", created: 1 }))).toBeNull();
+  });
+});
+
+describe("Connect account status", () => {
+  test("reads payouts_enabled from the account", async () => {
+    const { f, calls } = fakeFetch(() => Response.json({ id: "acct_1", payouts_enabled: true }));
+    const a = stripeAdapter({ client: { secretKey: "sk_test_x", fetch: f, apiBase: "http://m.test" } });
+    expect(await a.payoutAccountStatus?.("acct_1")).toEqual({ payoutsEnabled: true });
+    expect(calls[0]?.url.pathname).toBe("/v1/accounts/acct_1");
+    expect(calls[0]?.init.method).toBe("GET");
   });
 });

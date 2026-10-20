@@ -36,9 +36,20 @@ carries our payment id (`client_reference_id`, `metadata.payment_id`, and on the
 the PaymentIntent), plus the `CA-…` reference the payment keeps while pending. The idempotency key
 is `checkout-<paymentId>`, so showing a pending checkout again returns the same session.
 
-Operators: create the webhook endpoint at `/api/webhooks/stripe` with API version 2024-06-20 and
-the events `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
-`checkout.session.async_payment_failed`, `checkout.session.expired`, `invoice.paid`,
-`invoice.payment_failed`, `customer.subscription.deleted`, `charge.refunded`,
-`charge.dispute.created`, `charge.dispute.closed` and `account.updated`. Settle Stripe in the
-instance `CURRENCY` (fees in another currency cannot be posted and are refused).
+Operators create **two** webhook endpoints in Stripe, both at `/api/webhooks/stripe` with API
+version 2024-06-20 (the route accepts a signature from either secret):
+
+1. **Account endpoint** (events on the platform account), secret `STRIPE_WEBHOOK_SECRET`:
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`, `checkout.session.expired`, `invoice.paid`,
+   `invoice.payment_failed`, `customer.subscription.deleted`, `charge.refunded`,
+   `charge.dispute.created`, `charge.dispute.closed`.
+2. **Connect endpoint** ("events on connected accounts"), secret `STRIPE_CONNECT_WEBHOOK_SECRET`:
+   `account.updated`. Each visit to a creator's payout card also reads the account's
+   `payouts_enabled` from Stripe, so a missed event heals.
+
+Settle Stripe in the instance `CURRENCY` (fees in another currency cannot be posted and are
+refused). A fee is never booked as 0 for a charge: until Stripe attaches the balance transaction
+the event answers 500 and Stripe retries. `payment_events.payload` keeps a redacted copy of each
+event (`redactStripeEvent`: the envelope and the ids, amounts, statuses and our metadata keys the
+processor reads), never payer details.

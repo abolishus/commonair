@@ -76,6 +76,11 @@ export interface PaymentAdapter {
   refund?(request: RefundRequest): Promise<{ providerRef: string }>;
   /** Create the creator's payout account if needed and return an onboarding link. */
   payoutOnboarding?(request: PayoutOnboardingRequest): Promise<{ accountId: string; url: string }>;
-  /** The processor fee of a succeeded payment (Stripe: its charge's balance transaction). */
+  /** Whether the creator's provider account can receive payouts now. */
+  payoutAccountStatus?(accountId: string): Promise<{ payoutsEnabled: boolean }>;
+  /**
+   * The processor fee of a succeeded payment (Stripe: its charge's balance transaction), or null
+   * while the provider has not attached it yet (callers retry; they never book a fee of 0).
+   */
   paymentFee?(providerPaymentRef: string): Promise<{ feeCents: number; currency: string } | null>;
 }

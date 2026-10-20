@@ -169,7 +169,7 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     ctx.assert("provider=stripe runs with --set via=api (Checkout redirects are not followed)", via === "api", {
       via,
     });
-    const secret = stripeWebhookSecret();
+    const secret = stripeWebhookSecret(ctx.env);
     ctx.assert(
       "the instance's webhook secret is set (HARNESS_STRIPE_WEBHOOK_SECRET or STRIPE_WEBHOOK_SECRET in .env)",
       secret !== undefined,
@@ -590,12 +590,25 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     ctx.data("money.fees", fees);
     for (const row of fees) {
       const pi = paymentIntents.get(row.paymentId) ?? "";
-      const reported = (await stripeMockFee(ctx.env.HARNESS_STRIPE_MOCK_URL, pi).catch(() => null)) ?? 0;
       check(`payment ${row.paymentId}: provider_ref is its PaymentIntent`, row.providerRef === pi, row);
-      check(`payment ${row.paymentId}: fee ${row.feeCents} = stripe-mock's ${reported}`, row.feeCents === reported, {
-        ...row,
-        reported,
-      });
+      // The API never books a fee of 0 for a charge: a failed or empty lookup fails the check.
+      let reported: number | null = null;
+      let lookupError: string | null = null;
+      try {
+        reported = await stripeMockFee(ctx.env.HARNESS_STRIPE_MOCK_URL, pi);
+      } catch (err) {
+        lookupError = err instanceof Error ? err.message : String(err);
+      }
+      check(
+        `payment ${row.paymentId}: stripe-mock reports a positive fee for its PaymentIntent`,
+        reported !== null && reported > 0,
+        { pi, reported, lookupError },
+      );
+      check(
+        `payment ${row.paymentId}: fee ${row.feeCents} = stripe-mock's ${String(reported)}`,
+        reported !== null && row.feeCents === reported,
+        { ...row, reported },
+      );
     }
   }
 

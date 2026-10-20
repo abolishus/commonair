@@ -63,6 +63,8 @@ export interface StripeClient {
   createRefund(params: FormObject, idempotencyKey: string): Promise<{ id: string; status: string | null }>;
   createExpressAccount(params: FormObject, idempotencyKey: string): Promise<{ id: string }>;
   createAccountLink(params: FormObject, idempotencyKey: string): Promise<{ url: string }>;
+  /** A Connect account's payout readiness. */
+  retrieveAccount(accountId: string): Promise<{ id: string; payoutsEnabled: boolean }>;
   retrieveBalanceTransaction(id: string): Promise<{ feeCents: number; currency: string }>;
   /** Fee of a PaymentIntent's charge (its balance transaction), or null before it has one. */
   paymentIntentFee(paymentIntentId: string): Promise<{ feeCents: number; currency: string } | null>;
@@ -169,6 +171,10 @@ export function stripeClient(opts: StripeClientOptions): StripeClient {
       const url = str(r.url);
       if (!url) throw new StripeApiError("Stripe returned an account link without a url", 502, null, null);
       return { url };
+    },
+    async retrieveAccount(accountId) {
+      const r = await request("GET", `/v1/accounts/${pathId(accountId)}`);
+      return { id: str(r.id) ?? accountId, payoutsEnabled: r.payouts_enabled === true };
     },
     async retrieveBalanceTransaction(id) {
       return feeOf(await request("GET", `/v1/balance_transactions/${pathId(id)}`));

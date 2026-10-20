@@ -39,9 +39,9 @@ describe("signing", () => {
   });
 
   test("the secret comes from HARNESS_STRIPE_WEBHOOK_SECRET, else the instance's", () => {
-    expect(stripeWebhookSecret({ HARNESS_STRIPE_WEBHOOK_SECRET: "a", STRIPE_WEBHOOK_SECRET: "b" })).toBe("a");
-    expect(stripeWebhookSecret({ STRIPE_WEBHOOK_SECRET: "b" })).toBe("b");
-    expect(stripeWebhookSecret({ HARNESS_STRIPE_WEBHOOK_SECRET: " " })).toBeUndefined();
+    expect(stripeWebhookSecret({ HARNESS_STRIPE_WEBHOOK_SECRET: "a" }, { STRIPE_WEBHOOK_SECRET: "b" })).toBe("a");
+    expect(stripeWebhookSecret({}, { STRIPE_WEBHOOK_SECRET: "b" })).toBe("b");
+    expect(stripeWebhookSecret({ HARNESS_STRIPE_WEBHOOK_SECRET: " " }, {})).toBeUndefined();
   });
 });
 

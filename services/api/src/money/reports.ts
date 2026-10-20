@@ -31,7 +31,7 @@ import { decodeCursor, encodeCursor, pageOf } from "../lib/cursor.ts";
 import { isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { type ResolvedContext, os, requireCaller, requireChannel } from "../lib/orpc.ts";
-import { stripeOnboarding } from "./stripe-connect.ts";
+import { stripePayoutAccount } from "./stripe-connect.ts";
 import {
   type PaymentFacts,
   type Period,
@@ -415,11 +415,11 @@ export const reportHandlers = {
       .where(eq(payoutAccounts.userId, caller.user.id));
     const provider = row?.provider ?? deps.env.PAYMENTS_PROVIDER;
     const enabled = row?.enabled === true;
-    if (provider === "stripe" && !enabled && deps.env.PAYMENTS_PROVIDER === "stripe") {
-      // Connect Express: create the account on first visit, then hand out a fresh onboarding link
-      // (links are single-use and short-lived). `account.updated` enables payouts later.
-      const onboardingUrl = await stripeOnboarding(deps, caller.user.id, row?.accountId ?? null);
-      return { provider, payoutsEnabled: false, onboardingUrl, instructions: null };
+    if (provider === "stripe" && deps.env.PAYMENTS_PROVIDER === "stripe") {
+      // Connect Express: create the account on first visit, sync payouts_enabled from Stripe, and
+      // hand out a fresh onboarding link while it is not enabled (links are single-use).
+      const status = await stripePayoutAccount(deps, caller.user.id, row?.accountId ?? null);
+      return { provider, ...status, instructions: null };
     }
     return {
       provider,

@@ -237,3 +237,102 @@ export function stripeAction(e: StripeEventEnvelope): StripeAction {
       return { type: "ignored" };
   }
 }
+
+// ------------------------------------------------------------------------------- redaction
+
+/** Our own metadata keys; anything else an account sets is not ours to keep. */
+const METADATA_KEYS = ["payment_id", "reference", "kind", "subscription_id", "user_id"] as const;
+/** Scalar fields of `data.object` the processor reads (ids, amounts, statuses, enums). */
+const SCALAR_KEYS = [
+  "id",
+  "object",
+  "mode",
+  "payment_status",
+  "status",
+  "client_reference_id",
+  "amount",
+  "amount_total",
+  "amount_paid",
+  "amount_refunded",
+  "currency",
+  "tax",
+  "billing_reason",
+  "payouts_enabled",
+] as const;
+/** Expandable references, kept as ids only. */
+const REF_KEYS = ["payment_intent", "subscription", "invoice", "charge"] as const;
+
+function pickMetadata(v: unknown): Record<string, string> | undefined {
+  if (!isObj(v)) return undefined;
+  const out: Record<string, string> = {};
+  for (const k of METADATA_KEYS) {
+    const s = str(v[k]);
+    if (s) out[k] = s;
+  }
+  return out;
+}
+
+function pickSubscriptionDetails(v: unknown): Obj | undefined {
+  if (!isObj(v)) return undefined;
+  const out: Obj = {};
+  const sub = ref(v.subscription);
+  if (sub) out.subscription = sub;
+  const metadata = pickMetadata(v.metadata);
+  if (metadata) out.metadata = metadata;
+  return out;
+}
+
+function redactObject(o: Obj): Obj {
+  const out: Obj = {};
+  for (const k of SCALAR_KEYS) {
+    const v = o[k];
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean" || v === null) out[k] = v;
+  }
+  for (const k of REF_KEYS) if (k in o) out[k] = ref(o[k]);
+  const metadata = pickMetadata(o.metadata);
+  if (metadata) out.metadata = metadata;
+  if (isObj(o.total_details)) out.total_details = { amount_tax: int(o.total_details.amount_tax) };
+  if (isObj(o.status_transitions)) out.status_transitions = { paid_at: int(o.status_transitions.paid_at) };
+  const details = pickSubscriptionDetails(o.subscription_details);
+  if (details) out.subscription_details = details;
+  if (isObj(o.parent)) {
+    const parentDetails = pickSubscriptionDetails(o.parent.subscription_details);
+    out.parent = parentDetails ? { subscription_details: parentDetails } : {};
+  }
+  if (isObj(o.lines) && Array.isArray(o.lines.data))
+    out.lines = {
+      data: o.lines.data.map((l) =>
+        isObj(l) && isObj(l.period) ? { period: { start: int(l.period.start), end: int(l.period.end) } } : {},
+      ),
+    };
+  if (isObj(o.refunds) && Array.isArray(o.refunds.data))
+    out.refunds = {
+      data: o.refunds.data.map((r) =>
+        isObj(r)
+          ? { id: str(r.id), amount: int(r.amount), ...(r.status !== undefined ? { status: str(r.status) } : {}) }
+          : {},
+      ),
+    };
+  if (Array.isArray(o.balance_transactions))
+    out.balance_transactions = o.balance_transactions.map((t) => (isObj(t) ? { fee: int(t.fee) } : {}));
+  return out;
+}
+
+/**
+ * What `payment_events.payload` keeps: the envelope and only the fields the processor reads, so
+ * replaying it gives the same action. Payer details Stripe includes (customer_details,
+ * billing_details, emails, names, addresses, card data) are never stored (ADR 0004).
+ */
+export function redactStripeEvent(body: unknown): Obj {
+  const e = isObj(body) ? body : {};
+  const object = isObj(e.data) && isObj(e.data.object) ? e.data.object : null;
+  return {
+    id: str(e.id),
+    object: str(e.object),
+    type: str(e.type),
+    created: int(e.created),
+    livemode: e.livemode === true,
+    api_version: str(e.api_version),
+    data: object ? { object: redactObject(object) } : {},
+  };
+}

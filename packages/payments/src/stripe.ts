@@ -108,6 +108,9 @@ export function stripeAdapter(opts: StripeAdapterOptions): PaymentAdapter {
       );
       return { accountId, url: link.url };
     },
+    async payoutAccountStatus(accountId) {
+      return { payoutsEnabled: (await client.retrieveAccount(accountId)).payoutsEnabled };
+    },
     async paymentFee(ref) {
       if (!ref.startsWith("pi_")) return null;
       return client.paymentIntentFee(ref);

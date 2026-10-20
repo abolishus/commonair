@@ -23,6 +23,7 @@ interface Redirect {
 }
 
 const SECRET = "whsec_int_test";
+const CONNECT_SECRET = "whsec_int_connect";
 const FEE = 59;
 const TIERS = [
   { tier: 1, name: "Fan", price: { cents: 499, currency: "usd" }, benefits: "" },
@@ -38,6 +39,10 @@ let alice: Account;
 let bob: Account;
 let treasurer: Account;
 
+/** PaymentIntents the fake reports without a balance transaction yet. */
+const feeless = new Set<string>();
+/** Connect accounts' payouts_enabled as the fake Stripe reports it. */
+const accountsEnabled = new Map<string, boolean>();
 const rand = () => crypto.randomUUID().replace(/-/g, "").slice(0, 14);
 const db = () => api.db.db;
 
@@ -55,8 +60,16 @@ function startFakeStripe() {
         const id = `cs_test_${rand()}`;
         return Response.json({ id, url: `https://checkout.stripe.test/c/pay/${id}` });
       }
-      if (url.pathname.startsWith("/v1/payment_intents/"))
+      if (url.pathname.startsWith("/v1/payment_intents/")) {
+        // A charge whose balance transaction Stripe has not attached yet.
+        if (feeless.has(url.pathname.split("/").pop() ?? ""))
+          return Response.json({ latest_charge: { balance_transaction: null } });
         return Response.json({ latest_charge: { balance_transaction: { fee: FEE, currency: "usd" } } });
+      }
+      if (req.method === "GET" && url.pathname.startsWith("/v1/accounts/")) {
+        const id = url.pathname.split("/").pop() ?? "";
+        return Response.json({ id, payouts_enabled: accountsEnabled.get(id) === true });
+      }
       if (url.pathname === "/v1/refunds") return Response.json({ id: `re_${rand()}`, status: "succeeded" });
       if (url.pathname.startsWith("/v1/subscriptions/")) return Response.json({ id: url.pathname.split("/").pop() });
       if (url.pathname === "/v1/accounts") return Response.json({ id: `acct_${rand()}` });
@@ -228,6 +241,21 @@ describe("webhook security", () => {
   });
 });
 
+/** A renewal invoice as Stripe sends it: the subscription's metadata (our first payment id) included. */
+const renewalInvoice = (pi: string, sub: string, firstPaymentId: string, amount: number) =>
+  event("invoice.paid", {
+    id: `in_${rand()}`,
+    billing_reason: "subscription_cycle",
+    subscription: sub,
+    subscription_details: { metadata: { payment_id: firstPaymentId } },
+    payment_intent: pi,
+    amount_paid: amount,
+    tax: 0,
+    currency: "usd",
+    status_transitions: { paid_at: nowS() },
+    lines: { data: [] },
+  });
+
 const firstInvoice = () =>
   event("invoice.paid", {
     id: `in_${rand()}`,
@@ -292,18 +320,7 @@ describe("subscriptions", () => {
     expect(rows[0]?.attempts).toBe(1);
   });
 
-  const renewal = (pi: string) =>
-    event("invoice.paid", {
-      id: `in_${rand()}`,
-      billing_reason: "subscription_cycle",
-      subscription: SUB_A,
-      payment_intent: pi,
-      amount_paid: 999,
-      tax: 0,
-      currency: "usd",
-      status_transitions: { paid_at: nowS() },
-      lines: { data: [] },
-    });
+  const renewal = (pi: string) => renewalInvoice(pi, SUB_A, subPay.paymentId, 999);
 
   test("a renewal invoice creates and posts the period's payment without channel.subscribe", async () => {
     const [before] = await subscriptionOf(alice.userId);
@@ -593,7 +610,12 @@ describe("Connect payout accounts", () => {
         holdReason: PAYOUT_ACCOUNT_NOT_READY,
       })
       .returning();
-    const r = await deliver(event("account.updated", { id: acct?.providerAccountId, payouts_enabled: true }));
+    // Connected accounts' events come from the Connect endpoint, signed with its own secret.
+    api.deps.env.STRIPE_CONNECT_WEBHOOK_SECRET = CONNECT_SECRET;
+    accountsEnabled.set(acct?.providerAccountId ?? "", true);
+    const evt = event("account.updated", { id: acct?.providerAccountId, payouts_enabled: true });
+    expect((await deliver(evt, { secret: "whsec_neither" })).status).toBe(400);
+    const r = await deliver(evt, { secret: CONNECT_SECRET });
     expect(r.body.outcome).toBe("payout_account_updated");
     const [after] = await db()
       .select()
@@ -610,6 +632,207 @@ describe("Connect payout accounts", () => {
       "/api/me/payout-account",
     );
     expect(info.body).toMatchObject({ payoutsEnabled: true, onboardingUrl: null });
+  });
+
+  test("each payout-card visit syncs payouts_enabled from Stripe (a missed event heals)", async () => {
+    const [acct] = await db()
+      .select()
+      .from(schema.payoutAccounts)
+      .where(eq(schema.payoutAccounts.userId, streamer.userId));
+    const id = acct?.providerAccountId ?? "";
+    accountsEnabled.set(id, false);
+    const off = await streamer.client.call<{ payoutsEnabled: boolean; onboardingUrl: string | null }>(
+      "GET",
+      "/api/me/payout-account",
+    );
+    expect(off.body).toMatchObject({ payoutsEnabled: false, onboardingUrl: "https://connect.stripe.test/setup/x" });
+    expect(stripeCalls.findLast((c) => c.method === "GET" && c.path === `/v1/accounts/${id}`)).toBeDefined();
+    const [disabled] = await db()
+      .select()
+      .from(schema.payoutAccounts)
+      .where(eq(schema.payoutAccounts.userId, streamer.userId));
+    expect(disabled?.payoutsEnabled).toBe(false);
+
+    const [held] = await db()
+      .insert(schema.payouts)
+      .values({
+        userId: streamer.userId,
+        periodStart: new Date("2020-03-01T00:00:00Z"),
+        periodEnd: new Date("2020-04-01T00:00:00Z"),
+        amountCents: 1000,
+        currency: "usd",
+        status: "held",
+        provider: "stripe",
+        holdReason: PAYOUT_ACCOUNT_NOT_READY,
+      })
+      .returning();
+    accountsEnabled.set(id, true);
+    const on = await streamer.client.call<{ payoutsEnabled: boolean; onboardingUrl: string | null }>(
+      "GET",
+      "/api/me/payout-account",
+    );
+    expect(on.body).toMatchObject({ payoutsEnabled: true, onboardingUrl: null });
+    const [p] = await db()
+      .select()
+      .from(schema.payouts)
+      .where(eq(schema.payouts.id, held?.id ?? ""));
+    expect(p).toMatchObject({ status: "pending", holdReason: null });
+  });
+});
+
+describe("review fixes", () => {
+  test("a renewal after the first payment was charged back is booked, keeps the subscription ended and stops Stripe", async () => {
+    // alice's first payment (PI_A) went through a won dispute; her subscription stayed canceled.
+    expect((await subscriptionOf(alice.userId))[0]?.status).toBe("canceled");
+    const pi = `pi_${rand()}`;
+    const before = stripeCalls.length;
+    const r = await deliver(renewalInvoice(pi, SUB_A, subPay.paymentId, 999));
+    expect(r).toMatchObject({ status: 200, body: { outcome: "paid_after_end" } });
+    const [booked] = await db()
+      .select()
+      .from(schema.payments)
+      .where(and(eq(schema.payments.provider, "stripe"), eq(schema.payments.providerRef, pi)));
+    expect(booked).toMatchObject({ status: "succeeded", amountCents: 999, feeCents: FEE });
+    expect(await ledgerKinds(booked?.id ?? "")).toEqual(["payment"]);
+    expect((await subscriptionOf(alice.userId))[0]?.status).toBe("canceled");
+    expect(
+      stripeCalls.slice(before).some((c) => c.method === "DELETE" && c.path === `/v1/subscriptions/${SUB_A}`),
+    ).toBe(true);
+  });
+
+  test("first payment refunded in full: a renewal is booked, not dropped and not a 500 loop", async () => {
+    const carol = await signUpAndSignIn(api);
+    const s = await subscribe(carol, { tier: 1 });
+    const sub = `sub_${rand()}`;
+    const pi = `pi_${rand()}`;
+    const first = event("invoice.paid", {
+      id: `in_${rand()}`,
+      billing_reason: "subscription_create",
+      subscription: sub,
+      subscription_details: { metadata: { payment_id: s.body.paymentId } },
+      payment_intent: pi,
+      amount_paid: 499,
+      currency: "usd",
+      status_transitions: { paid_at: nowS() },
+    });
+    expect((await deliver(first)).body.outcome).toBe("confirmed");
+    const refundAll = event("charge.refunded", {
+      id: `ch_${rand()}`,
+      payment_intent: pi,
+      amount_refunded: 499,
+      currency: "usd",
+      refunds: { data: [{ id: `re_${rand()}`, amount: 499 }] },
+    });
+    expect((await deliver(refundAll)).body.outcome).toBe("refunded");
+    expect((await subscriptionOf(carol.userId))[0]?.status).toBe("canceled");
+    const r = await deliver(renewalInvoice(`pi_${rand()}`, sub, s.body.paymentId, 499));
+    expect(r).toMatchObject({ status: 200, body: { outcome: "paid_after_end" } });
+  });
+
+  test("first payment expired (failed): its paid first invoice and renewals are booked, never a 500 loop", async () => {
+    const dave = await signUpAndSignIn(api);
+    const s = await subscribe(dave, { tier: 1 });
+    expect(
+      (await deliver(event("checkout.session.expired", { metadata: { payment_id: s.body.paymentId } }))).body.outcome,
+    ).toBe("checkout_failed");
+    const sub = `sub_${rand()}`;
+    const first = event("invoice.paid", {
+      id: `in_${rand()}`,
+      billing_reason: "subscription_create",
+      subscription: sub,
+      subscription_details: { metadata: { payment_id: s.body.paymentId } },
+      payment_intent: `pi_${rand()}`,
+      amount_paid: 499,
+      currency: "usd",
+      status_transitions: { paid_at: nowS() },
+    });
+    expect(await deliver(first)).toMatchObject({ status: 200, body: { outcome: "paid_after_end" } });
+    expect((await paymentRow(s.body.paymentId)).status).toBe("failed");
+    expect((await subscriptionOf(dave.userId))[0]?.status).toBe("expired");
+    const r = await deliver(renewalInvoice(`pi_${rand()}`, sub, s.body.paymentId, 499));
+    expect(r).toMatchObject({ status: 200, body: { outcome: "paid_after_end" } });
+  });
+
+  test("a charge without its balance transaction yet answers 500 (never a fee of 0); the retry books the fee", async () => {
+    const p = (await tip(alice, 800)).body;
+    const pi = `pi_${rand()}`;
+    feeless.add(pi);
+    const evt = event("checkout.session.completed", {
+      mode: "payment",
+      payment_status: "paid",
+      metadata: { payment_id: p.paymentId },
+      payment_intent: pi,
+      amount_total: 800,
+      currency: "usd",
+    });
+    const first = await deliver(evt);
+    expect(first.status).toBe(500);
+    expect((await paymentRow(p.paymentId)).status).toBe("pending");
+    const [row] = await db()
+      .select()
+      .from(schema.paymentEvents)
+      .where(eq(schema.paymentEvents.providerEventId, evt.id));
+    expect(row?.error).toMatch(/balance transaction/);
+    feeless.delete(pi);
+    expect((await deliver(evt)).body.outcome).toBe("confirmed");
+    expect(await paymentRow(p.paymentId)).toMatchObject({ status: "succeeded", feeCents: FEE });
+  });
+
+  test("payment_events keeps no payer details (customer_details, emails, names, addresses)", async () => {
+    const p = (await tip(alice, 900)).body;
+    const evt = event("checkout.session.completed", {
+      mode: "payment",
+      payment_status: "paid",
+      metadata: { payment_id: p.paymentId, note: "free text" },
+      payment_intent: `pi_${rand()}`,
+      amount_total: 900,
+      currency: "usd",
+      customer_email: "payer@example.test",
+      customer_details: { email: "payer@example.test", name: "Pat Payer", address: { line1: "1 Main St" } },
+    });
+    expect((await deliver(evt)).body.outcome).toBe("confirmed");
+    const [row] = await db()
+      .select()
+      .from(schema.paymentEvents)
+      .where(eq(schema.paymentEvents.providerEventId, evt.id));
+    const stored = JSON.stringify(row?.payload);
+    expect(stored).not.toContain("customer_details");
+    expect(stored).not.toContain("payer@example.test");
+    expect(stored).not.toContain("Pat Payer");
+    expect(stored).not.toContain("free text");
+    expect(stored).toContain(p.paymentId);
+  });
+
+  test("a second treasurer refund is refused while the first awaits Stripe's charge.refunded", async () => {
+    const p = (await tip(alice, 1000)).body;
+    const pi = `pi_${rand()}`;
+    await deliver(
+      event("checkout.session.completed", {
+        mode: "payment",
+        payment_status: "paid",
+        metadata: { payment_id: p.paymentId },
+        payment_intent: pi,
+        amount_total: 1000,
+        currency: "usd",
+      }),
+    );
+    const path = `/api/treasurer/payments/${p.paymentId}/refund`;
+    expect((await treasurer.client.call("POST", path, { amountCents: 200, reason: "one" })).status).toBe(200);
+    expect((await treasurer.client.call("POST", path, { amountCents: 300, reason: "two" })).status).toBe(409);
+
+    // charge.refunded without a `refunds` list (API 2024-06-20): the cumulative amount says what is new.
+    const cumulative = (total: number) =>
+      event("charge.refunded", { id: "ch_cumulative", payment_intent: pi, amount_refunded: total, currency: "usd" });
+    expect((await deliver(cumulative(200))).body.outcome).toBe("refunded");
+    expect((await deliver(cumulative(200))).body.outcome).toBe("no_new_refund");
+    expect(await paymentRow(p.paymentId)).toMatchObject({ status: "partially_refunded", refundedCents: 200 });
+
+    // Posted: the next request goes through, and its event adds only the difference.
+    expect((await treasurer.client.call("POST", path, { amountCents: 800, reason: "rest" })).status).toBe(200);
+    expect((await deliver(cumulative(1000))).body.outcome).toBe("refunded");
+    expect(await paymentRow(p.paymentId)).toMatchObject({ status: "refunded", refundedCents: 1000 });
+    const ds = await db().select().from(schema.disputes).where(eq(schema.disputes.paymentId, p.paymentId));
+    expect(ds.map((d) => d.amountCents).sort((a, b) => a - b)).toEqual([200, 800]);
   });
 });
 

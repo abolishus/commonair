@@ -64,8 +64,12 @@ const message = (err: unknown) =>
   (err instanceof Error ? `${err.name}: ${err.message}` : String(err)).slice(0, ERROR_MAX);
 
 export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSubject: string): Promise<Response> {
-  const secret = deps.env.STRIPE_WEBHOOK_SECRET;
-  if (deps.env.PAYMENTS_PROVIDER !== "stripe" || !secret)
+  // Platform events (checkout, invoices, charges) and Connect events (connected accounts'
+  // `account.updated`) come from two Stripe endpoints with their own secrets; either may sign.
+  const secrets = [deps.env.STRIPE_WEBHOOK_SECRET, deps.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  );
+  if (deps.env.PAYMENTS_PROVIDER !== "stripe" || secrets.length === 0)
     return reply(404, { code: "NOT_FOUND", message: "Not found" });
   if (req.method !== "POST") return reply(405, { code: "METHOD_NOT_ALLOWED", message: "POST only" });
 
@@ -85,26 +89,31 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
   const raw = await readCapped(req);
   if (raw === null) return reply(413, { code: "PAYLOAD_TOO_LARGE", message: "Body too large" });
   const { verifyStripeSignature } = await loadStripeSignature();
-  const check = await verifyStripeSignature(raw, req.headers.get("stripe-signature"), secret, {
-    nowS: Math.floor(nowMs / 1000),
-  });
+  const header = req.headers.get("stripe-signature");
+  let check: Awaited<ReturnType<typeof verifyStripeSignature>> = { ok: false, reason: "missing" };
+  for (const secret of secrets) {
+    check = await verifyStripeSignature(raw, header, secret, { nowS: Math.floor(nowMs / 1000) });
+    if (check.ok) break;
+  }
   if (!check.ok) return reply(400, { code: "BAD_SIGNATURE", message: `Signature ${check.reason}` });
 
-  const { stripeAction, stripeEnvelope } = await loadStripeEvents();
+  const { redactStripeEvent, stripeAction, stripeEnvelope } = await loadStripeEvents();
   let body: unknown;
   try {
     body = JSON.parse(new TextDecoder().decode(raw));
   } catch {
     return reply(400, { code: "BAD_REQUEST", message: "Body is not JSON" });
   }
-  const envelope = stripeEnvelope(body);
+  // Only what the processor reads is kept and processed (no payer details), so a replay of the row acts alike.
+  const stored = redactStripeEvent(body);
+  const envelope = stripeEnvelope(stored);
   if (!envelope) return reply(400, { code: "BAD_REQUEST", message: "Not a Stripe event" });
   // This build runs Stripe in test mode only (config refuses live keys); refuse live events too.
   if (envelope.livemode) return reply(400, { code: "BAD_REQUEST", message: "Live-mode events are refused" });
 
   const [inserted] = await deps.db
     .insert(paymentEvents)
-    .values({ provider: "stripe", providerEventId: envelope.id, type: envelope.type, payload: body })
+    .values({ provider: "stripe", providerEventId: envelope.id, type: envelope.type, payload: stored })
     .onConflictDoNothing({ target: [paymentEvents.provider, paymentEvents.providerEventId] })
     .returning({ id: paymentEvents.id });
   let rowId = inserted?.id;

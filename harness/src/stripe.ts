@@ -13,12 +13,14 @@ export const STRIPE_WEBHOOK_PATH = "/api/webhooks/stripe";
 export const STRIPE_EVENT_API_VERSION = "2024-06-20";
 
 /**
- * The instance's `STRIPE_WEBHOOK_SECRET`. Read from the process env until the harness env schema
- * carries `HARNESS_STRIPE_WEBHOOK_SECRET` (contract request); Bun loads the repo `.env`, so the
- * instance's own `STRIPE_WEBHOOK_SECRET` is the fallback.
+ * The instance's webhook secret: `HARNESS_STRIPE_WEBHOOK_SECRET` from the harness env, else the
+ * instance's own `STRIPE_WEBHOOK_SECRET` (Bun loads the repo `.env` into the process env).
  */
-export function stripeWebhookSecret(env: Record<string, string | undefined> = process.env): string | undefined {
-  const v = env.HARNESS_STRIPE_WEBHOOK_SECRET?.trim() || env.STRIPE_WEBHOOK_SECRET?.trim();
+export function stripeWebhookSecret(
+  harness: { HARNESS_STRIPE_WEBHOOK_SECRET?: string | undefined },
+  instance: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const v = harness.HARNESS_STRIPE_WEBHOOK_SECRET?.trim() || instance.STRIPE_WEBHOOK_SECRET?.trim();
   return v || undefined;
 }
 

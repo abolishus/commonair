@@ -6,7 +6,7 @@
  * accounts. Each runs in one transaction with its ledger posting, outbox events and audit row;
  * state changes are compare-and-set or row-locked so a repeat or a race cannot double-apply.
  */
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import { minorUnits } from "@commonair/contracts/currency";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
@@ -29,7 +29,7 @@ import { os, requireCaller } from "../lib/orpc.ts";
 import { confirmedPeriod, disputeOutcome, tierCode } from "./checkout-rules.ts";
 import { endSubscriptions, invalidateSubscribers, userEventFields } from "./checkout-shared.ts";
 
-const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts, users } = schema;
+const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts, users, auditLog } = schema;
 type PaymentRow = typeof payments.$inferSelect;
 type ChannelRow = typeof channels.$inferSelect;
 
@@ -275,27 +275,49 @@ function dispute(kind: "refund" | "chargeback") {
       // Card payments: disputes come from the provider; a refund is asked of it and posted when
       // its refund event arrives (stripe-events.ts), so the ledger follows what the provider did.
       if (kind === "chargeback") throw conflict("Chargebacks on card payments arrive from the payment provider");
-      const outcome = disputeOutcome(kind, current, input.amountCents);
-      if (!outcome.ok) throw outcome.code === "CONFLICT" ? conflict(outcome.reason) : badRequest(outcome.reason);
       const adapter = createAdapter(deps.env);
       if (adapter.provider !== current.provider || !adapter.refund)
         throw precondition("payment_provider", "This instance cannot refund through that payment provider");
-      const requested = await adapter.refund({
-        paymentId: current.id,
-        providerRef: current.providerRef,
-        amountCents: input.amountCents,
-        // A double click is one refund; a later refund of the same amount is another.
-        idempotencyKey: `refund-${current.id}-${current.refundedCents}-${input.amountCents}`,
-      });
-      await audit(deps.db, {
-        actorType: ACTOR,
-        actorId: caller.user.id,
-        action: "payment.refund_requested",
-        subjectType: "payment",
-        subjectId: current.id,
-        channelId: current.channelId,
-        reason,
-        details: { amountCents: input.amountCents, provider: current.provider, refundRef: requested.providerRef },
+      const refund = adapter.refund.bind(adapter);
+      await deps.db.transaction(async (tx) => {
+        // Row lock: two treasurers (or a double click) cannot both pass the pending check.
+        const p = await lockedPayment(tx, input.paymentId);
+        const outcome = disputeOutcome(kind, p, input.amountCents);
+        if (!outcome.ok) throw outcome.code === "CONFLICT" ? conflict(outcome.reason) : badRequest(outcome.reason);
+        // One request at a time: until Stripe's charge.refunded posts the last one, refunded_cents
+        // (and so the rest and the idempotency key) would be stale.
+        const [asked] = await tx
+          .select({ n: count() })
+          .from(auditLog)
+          .where(
+            and(
+              eq(auditLog.action, "payment.refund_requested"),
+              eq(auditLog.subjectType, "payment"),
+              eq(auditLog.subjectId, p.id),
+            ),
+          );
+        const [posted] = await tx
+          .select({ n: count() })
+          .from(disputes)
+          .where(and(eq(disputes.paymentId, p.id), eq(disputes.kind, "refund")));
+        if ((asked?.n ?? 0) > (posted?.n ?? 0))
+          throw conflict("An earlier refund of this payment is still waiting for the payment provider");
+        const requested = await refund({
+          paymentId: p.id,
+          providerRef: p.providerRef,
+          amountCents: input.amountCents,
+          idempotencyKey: `refund-${p.id}-${p.refundedCents}-${input.amountCents}`,
+        });
+        await audit(tx, {
+          actorType: ACTOR,
+          actorId: caller.user.id,
+          action: "payment.refund_requested",
+          subjectType: "payment",
+          subjectId: p.id,
+          channelId: p.channelId,
+          reason,
+          details: { amountCents: input.amountCents, provider: p.provider, refundRef: requested.providerRef },
+        });
       });
       return { ok: true as const };
     }

@@ -31,6 +31,7 @@ import { confirmPaymentTx, reversePaymentTx } from "./checkout-treasurer.ts";
 const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts } = schema;
 type PaymentRow = typeof payments.$inferSelect;
 type DisputeAction = Extract<StripeAction, { chargeId: string | null; status: string }>;
+type InvoicePaid = Extract<StripeAction, { invoiceId: string }>;
 
 export class StripeProcessingError extends Error {
   override name = "StripeProcessingError";
@@ -38,6 +39,8 @@ export class StripeProcessingError extends Error {
 
 /** The Stripe-side facts fetched before the transaction opens. */
 export interface PreparedAction {
+  /** The PaymentIntent whose fee the action posts, or null when it posts none. */
+  feeRef: string | null;
   fee: { feeCents: number; currency: string } | null;
 }
 
@@ -65,12 +68,16 @@ export function feeLookupRef(a: StripeAction): string | null {
 
 export async function prepareStripeAction(adapter: PaymentAdapter, a: StripeAction): Promise<PreparedAction> {
   const ref = feeLookupRef(a);
-  if (!ref || !adapter.paymentFee) return { fee: null };
-  return { fee: await adapter.paymentFee(ref) };
+  if (!ref || !adapter.paymentFee) return { feeRef: null, fee: null };
+  return { feeRef: ref, fee: await adapter.paymentFee(ref) };
 }
 
 function feeFor(prepared: PreparedAction, currency: string): number {
-  if (!prepared.fee) return 0;
+  if (prepared.feeRef === null) return 0;
+  // Stripe attaches the balance transaction shortly after the charge; never book a fee of 0 for
+  // a charge that has one. Failing here answers 500, and Stripe's retry finds it attached.
+  if (!prepared.fee)
+    throw new StripeProcessingError("Stripe has not attached the charge's balance transaction yet; retry");
   // The ledger posts in the payment's currency; a settlement in another currency cannot be booked.
   if (prepared.fee.currency !== currency)
     throw new StripeProcessingError(
@@ -224,93 +231,113 @@ async function checkoutFailed(tx: Executor, paymentId: string, now: Date): Promi
   return noop("checkout_failed");
 }
 
-async function invoicePaid(
+/** Book money Stripe collected for a subscription period: a `succeeded` payment and its posting. */
+async function bookSubscriptionPayment(
   tx: Executor,
-  a: Extract<StripeAction, { type: "invoice.paid" }>,
+  sub: typeof subscriptions.$inferSelect,
+  c: typeof channels.$inferSelect,
+  a: InvoicePaid,
+  moneyRef: string,
   prepared: PreparedAction,
   now: Date,
-): Promise<AppliedAction> {
+): Promise<void> {
+  if (a.amountPaid <= 0) return;
+  if (a.taxCents < 0 || a.taxCents > a.amountPaid) throw new StripeProcessingError("tax out of range");
+  const feeCents = feeFor(prepared, a.currency);
+  const paymentId = uuidv7();
+  const receivedAt = new Date(Math.min(a.paidAt.getTime(), now.getTime()));
+  // Lock order: the new payment row is ours alone until commit, so it precedes the subscription row.
+  await tx.insert(payments).values({
+    id: paymentId,
+    provider: "stripe",
+    providerRef: moneyRef,
+    kind: "subscription",
+    status: "succeeded",
+    userId: sub.subscriberId,
+    channelId: c.id,
+    subscriptionId: sub.id,
+    amountCents: a.amountPaid,
+    taxCents: a.taxCents,
+    feeCents,
+    currency: a.currency,
+    tier: sub.tier,
+    quantity: 1,
+    succeededAt: receivedAt,
+  });
+  const { cut } = await loadMoneySettings(tx);
+  await post(
+    tx,
+    paymentSucceeded({
+      paymentId,
+      paymentKind: "subscription",
+      provider: "stripe",
+      settlement: "cash",
+      creatorUserId: c.ownerId,
+      grossCents: a.amountPaid,
+      taxCents: a.taxCents,
+      feeCents,
+      currency: a.currency,
+      cut,
+      occurredAt: receivedAt,
+    }),
+  );
+}
+
+async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedAction, now: Date): Promise<AppliedAction> {
   const moneyRef = a.paymentIntent ?? a.invoiceId;
   // A redelivered or second event for this invoice: the payment already carries its ref.
   const known = await lockPaymentByRef(tx, moneyRef);
   if (known) return noop("already_processed");
 
-  // The first invoice of a checkout: its payment is ours already, waiting.
-  const first = await lockPaymentById(tx, a.paymentId);
-  if (first && first.provider === "stripe" && first.subscriptionId) {
+  // Stripe copies the subscription's metadata (our first payment id) onto every invoice, so only
+  // `subscription_create` (or a first payment still waiting) makes this the checkout's invoice.
+  const named = await lockPaymentById(tx, a.paymentId);
+  const first = named && named.provider === "stripe" && named.subscriptionId ? named : null;
+  if (first && (a.billingReason === "subscription_create" || first.status === "pending")) {
     await linkSubscription(tx, first, a.subscription, now);
-    if (first.status !== "pending") return refuseFinished(first);
-    checkAmount(first, a.amountPaid, a.currency);
-    return confirmPending(tx, first, {
-      at: a.paidAt,
-      now,
-      feeCents: feeFor(prepared, first.currency),
-      taxCents: a.taxCents,
-      providerRef: moneyRef,
-      periodEnd: a.periodEnd,
-    });
+    if (first.status === "pending") {
+      checkAmount(first, a.amountPaid, a.currency);
+      return confirmPending(tx, first, {
+        at: a.paidAt,
+        now,
+        feeCents: feeFor(prepared, first.currency),
+        taxCents: a.taxCents,
+        providerRef: moneyRef,
+        periodEnd: a.periodEnd,
+      });
+    }
+    // Paid after we gave up on it (expired): book the money below, keep it ended, stop Stripe.
+    if (first.status !== "failed") return noop("already_processed");
   }
 
-  // A renewal: find the subscription by Stripe's id.
-  const [sub] = await tx
+  // A renewal (or money for an ended subscription): find the subscription by Stripe's id, or by
+  // the first payment when the first invoice never linked it.
+  let [sub] = await tx
     .select()
     .from(subscriptions)
-    .where(and(eq(subscriptions.provider, "stripe"), eq(subscriptions.providerRef, a.subscription)));
-  if (!sub) {
-    if (a.billingReason === "subscription_create")
-      throw new StripeProcessingError("the first invoice names no payment of ours yet");
-    throw new StripeProcessingError("no subscription of ours has this Stripe subscription id");
+    .where(and(eq(subscriptions.provider, "stripe"), eq(subscriptions.providerRef, a.subscription)))
+    .for("update");
+  if (!sub && first?.subscriptionId) {
+    await linkSubscription(tx, first, a.subscription, now);
+    [sub] = await tx.select().from(subscriptions).where(eq(subscriptions.id, first.subscriptionId)).for("update");
   }
-  if (sub.status !== "active" && sub.status !== "past_due")
-    throw new StripeProcessingError(`Stripe renewed a ${sub.status} subscription; cancel or refund it in Stripe`);
+  if (!sub) {
+    // Stripe may deliver a renewal before the first invoice reached us: retry later.
+    throw new StripeProcessingError("no subscription of ours has this Stripe subscription id yet");
+  }
   const [c] = await tx.select().from(channels).where(eq(channels.id, sub.channelId));
   if (!c) throw new StripeProcessingError("the subscription's channel is gone");
   if (a.currency !== sub.currency)
     throw new StripeProcessingError(`Stripe charged ${a.currency}, the subscription is in ${sub.currency}`);
+  await bookSubscriptionPayment(tx, sub, c, a, moneyRef, prepared, now);
+
+  if (sub.status !== "active" && sub.status !== "past_due") {
+    // Ended here (refund, chargeback, expiry) but Stripe still billed: the money is booked (the
+    // treasurer can refund it), the subscription stays ended and Stripe is told to stop.
+    return { outcome: "paid_after_end", invalidate: [], cancelProviderSubscriptions: [a.subscription] };
+  }
   const start = sub.currentPeriodEnd ?? a.paidAt;
   const end = a.periodEnd && a.periodEnd > start ? a.periodEnd : addOneMonthUtc(start);
-
-  // Lock order: payment row before subscription rows. The new payment is ours alone until commit.
-  if (a.amountPaid > 0) {
-    if (a.taxCents < 0 || a.taxCents > a.amountPaid) throw new StripeProcessingError("tax out of range");
-    const feeCents = feeFor(prepared, a.currency);
-    const paymentId = uuidv7();
-    const receivedAt = new Date(Math.min(a.paidAt.getTime(), now.getTime()));
-    await tx.insert(payments).values({
-      id: paymentId,
-      provider: "stripe",
-      providerRef: moneyRef,
-      kind: "subscription",
-      status: "succeeded",
-      userId: sub.subscriberId,
-      channelId: c.id,
-      subscriptionId: sub.id,
-      amountCents: a.amountPaid,
-      taxCents: a.taxCents,
-      feeCents,
-      currency: a.currency,
-      tier: sub.tier,
-      quantity: 1,
-      succeededAt: receivedAt,
-    });
-    const { cut } = await loadMoneySettings(tx);
-    await post(
-      tx,
-      paymentSucceeded({
-        paymentId,
-        paymentKind: "subscription",
-        provider: "stripe",
-        settlement: "cash",
-        creatorUserId: c.ownerId,
-        grossCents: a.amountPaid,
-        taxCents: a.taxCents,
-        feeCents,
-        currency: a.currency,
-        cut,
-        occurredAt: receivedAt,
-      }),
-    );
-  }
   // Renewals emit no channel.subscribe (as the manual adapter).
   const [renewed] = await tx
     .update(subscriptions)
@@ -488,6 +515,20 @@ async function accountUpdated(
   a: Extract<StripeAction, { type: "account.updated" }>,
   now: Date,
 ): Promise<AppliedAction> {
+  const changed = await syncStripePayoutAccount(tx, a, now);
+  return noop(changed > 0 ? "payout_account_updated" : "payout_account_unchanged");
+}
+
+/**
+ * Make `payout_accounts.payouts_enabled` follow Stripe for a Connect account (the
+ * `account.updated` event, or a status read on the creator's payout card). Enabling re-pends the
+ * creator's `held` payouts. Returns how many accounts changed.
+ */
+export async function syncStripePayoutAccount(
+  tx: Executor,
+  a: { accountId: string; payoutsEnabled: boolean },
+  now: Date,
+): Promise<number> {
   const { payoutRules } = await loadMoneySettings(tx);
   // Lock order: payout batch first, as setPayoutAccount (a run must not read a half-updated account).
   await lockPayoutBatch(tx, payoutRules.currency);
@@ -525,7 +566,7 @@ async function accountUpdated(
       details: { provider: "stripe", payoutsEnabled: a.payoutsEnabled, payoutsReleased: released.length },
     });
   }
-  return noop(changed.length > 0 ? "payout_account_updated" : "payout_account_unchanged");
+  return changed.length;
 }
 
 /** Apply one normalized action in the caller's transaction. */

@@ -50,6 +50,11 @@ function lazyStripeAdapter(env: PaymentsEnvLike): PaymentAdapter {
       if (!a.payoutOnboarding) throw new AdapterUnavailableError("payout onboarding is not supported");
       return a.payoutOnboarding(r);
     },
+    payoutAccountStatus: async (accountId) => {
+      const a = await get();
+      if (!a.payoutAccountStatus) throw new AdapterUnavailableError("payout accounts are not supported");
+      return a.payoutAccountStatus(accountId);
+    },
     paymentFee: async (ref) => (await get()).paymentFee?.(ref) ?? null,
   };
 }
