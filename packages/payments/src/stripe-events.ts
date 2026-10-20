@@ -79,6 +79,7 @@ export type StripeAction =
       /** Dispute fees Stripe gave back (a won dispute's reinstatement). */
       feeRefundCents: number;
     }
+  | { type: "refund.failed"; refundId: string; paymentIntent: string | null }
   | { type: "account.updated"; accountId: string; payoutsEnabled: boolean }
   | { type: "ignored" };
 
@@ -227,6 +228,11 @@ export function stripeAction(e: StripeEventEnvelope): StripeAction {
         status: need(str(o.status), "status"),
         ...disputeFees(o),
       };
+    case "refund.failed":
+    case "charge.refund.updated":
+      // Only a failure matters here: success is posted from charge.refunded.
+      if (o.status !== "failed") return { type: "ignored" };
+      return { type: "refund.failed", refundId: need(str(o.id), "refund id"), paymentIntent: ref(o.payment_intent) };
     case "account.updated":
       return {
         type: "account.updated",

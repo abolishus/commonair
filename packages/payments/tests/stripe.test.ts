@@ -305,8 +305,16 @@ describe("client", () => {
   });
 });
 
+const envelopeBody = (type: string, object: Record<string, unknown>) => ({
+  id: "evt_1",
+  object: "event",
+  type,
+  created: NOW,
+  livemode: false,
+  data: { object },
+});
 const envelope = (type: string, object: Record<string, unknown>): StripeEventEnvelope => {
-  const e = stripeEnvelope({ id: "evt_1", object: "event", type, created: NOW, livemode: false, data: { object } });
+  const e = stripeEnvelope(envelopeBody(type, object));
   if (!e) throw new Error("bad envelope");
   return e;
 };
@@ -474,6 +482,21 @@ describe("event → action mapping", () => {
       feeCents: 1500,
       feeRefundCents: 1500,
     });
+  });
+
+  test("refund failures (refund.failed, charge.refund.updated failed); other refund updates are ignored", () => {
+    const failed = { id: "re_1", object: "refund", payment_intent: "pi_1", amount: 100, status: "failed" };
+    expect(stripeAction(envelope("refund.failed", failed))).toEqual({
+      type: "refund.failed",
+      refundId: "re_1",
+      paymentIntent: "pi_1",
+    });
+    expect(stripeAction(envelope("charge.refund.updated", failed))).toMatchObject({ type: "refund.failed" });
+    expect(stripeAction(envelope("charge.refund.updated", { ...failed, status: "succeeded" }))).toEqual({
+      type: "ignored",
+    });
+    const redacted = stripeEnvelope(redactStripeEvent({ ...envelopeBody("refund.failed", failed) }));
+    expect(redacted && stripeAction(redacted)).toMatchObject({ type: "refund.failed", refundId: "re_1" });
   });
 
   test("unknown types are ignored", () => {

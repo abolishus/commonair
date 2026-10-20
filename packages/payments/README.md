@@ -43,9 +43,9 @@ version 2024-06-20 (the route accepts a signature from either secret):
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `checkout.session.async_payment_failed`, `checkout.session.expired`, `invoice.paid`,
    `invoice.payment_failed`, `customer.subscription.deleted`, `charge.refunded`,
-   `charge.dispute.created`, `charge.dispute.closed`.
+   `charge.dispute.created`, `charge.dispute.closed`, `refund.failed`.
 2. **Connect endpoint** ("events on connected accounts"), secret `STRIPE_CONNECT_WEBHOOK_SECRET`:
-   `account.updated`. Each visit to a creator's payout card also reads the account's
+   `account.updated` (only this type is acted on when this secret signs). Each visit to a creator's payout card also reads the account's
    `payouts_enabled` from Stripe, so a missed event heals.
 
 Settle Stripe in the instance `CURRENCY` (fees in another currency cannot be posted and are
