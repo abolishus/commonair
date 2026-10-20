@@ -18,6 +18,8 @@ export const COMPOSITION_TEST_IDS = [
   "footer-source-link",
   "live-badge",
   "stream-key-copy",
+  "support-tier",
+  "support-tip-amount",
   // E4b web-money
   "revenue-month",
   "revenue-source",
@@ -40,6 +42,8 @@ export const COMPOSITION_ATTRS = [
   "data-channel={card.channel.slug}",
   "data-relay-id={relay.id}",
   "data-status={relay.status}",
+  "data-tier={tier.tier}",
+  "data-cents={tier.price.cents}",
   // E4b web-money
   "data-source={source}",
   "data-cents={summary.bySource[source]}",

@@ -52,6 +52,10 @@ import type {
   TreasurerPayoutDto,
 } from "../src/lib/money.ts";
 import { COMPOSITION_ATTRS, COMPOSITION_TEST_IDS } from "./composition-ids.ts";
+import { ChatEventRow } from "../src/chat/chat-event-row.tsx";
+import { chatEventView } from "../src/chat/events.ts";
+import { SupportForm, SupportInstructions } from "../src/components/support/support-dialog.tsx";
+import { subscription, supportInfo } from "./support-fixtures.ts";
 
 const router = createRouter({
   routeTree: createRootRoute(),
@@ -257,6 +261,140 @@ describe("composition-rendered selectors", () => {
     expect(one(doc, '[data-testid="relay-run-command"]').textContent).toBe(
       "commonair-relay --api https://air.example.org --token relay_TOKEN --public-url https://<your-host>",
     );
+  });
+
+  it("support: every form id on each tab, support-tier/support-tip-amount through composition props", () => {
+    const checkout = async () => {
+      throw new Error("unused");
+    };
+    const info = supportInfo({ viewer: { isOwner: false, subscription: subscription({ status: "incomplete" }) } });
+    const sub = render(<SupportForm channel="rivertide" info={info} checkout={checkout} onInstructions={noop} />);
+    for (const id of [
+      "support-tab-sub",
+      "support-tab-gift",
+      "support-tab-tip",
+      "support-split",
+      "support-total",
+      "support-submit",
+    ])
+      one(sub, `[data-testid="${id}"]`);
+    const current = one(sub, '[data-testid="support-current"]');
+    expect([current.getAttribute("data-status"), current.getAttribute("data-tier")]).toEqual(["incomplete", "2"]);
+    const tiers = [...sub.querySelectorAll('[data-testid="support-tier"]')];
+    expect(
+      tiers.map((t) => [t.getAttribute("role"), t.getAttribute("data-tier"), t.getAttribute("data-cents")]),
+    ).toEqual([
+      ["radio", "1", "499"],
+      ["radio", "2", "999"],
+      ["radio", "3", "2499"],
+    ]);
+    expect(tiers[0]?.getAttribute("aria-checked")).toBe("true");
+    const split = one(sub, '[data-testid="support-split"]');
+    expect([split.getAttribute("data-streamer-share"), split.getAttribute("data-coop-share")]).toEqual(["0.9", "0.1"]);
+    expect(one(sub, '[data-testid="support-total"]').getAttribute("data-cents")).toBe("499");
+    expect(one(sub, '[data-testid="support-submit"]').tagName).toBe("BUTTON");
+    expect(sub.querySelector('[data-testid="support-error"]')).toBeNull();
+
+    const gift = render(
+      <SupportForm
+        channel="rivertide"
+        info={info}
+        checkout={checkout}
+        onInstructions={noop}
+        initial={{ tab: "gift", gift: { count: "5", mode: "random", to: "" } }}
+      />,
+    );
+    expect(gift.querySelectorAll('[data-testid="support-tier"]')).toHaveLength(3);
+    one(gift, '[data-testid="support-gift-recipient"]');
+    one(gift, '[data-testid="support-gift-recipient-random"]');
+    one(gift, '[data-testid="support-gift-recipient-viewer"]');
+    expect(one(gift, '[data-testid="support-gift-count"]').tagName).toBe("INPUT");
+    expect(one(gift, '[data-testid="support-total"]').getAttribute("data-cents")).toBe("2495");
+    const giftTo = render(
+      <SupportForm
+        channel="rivertide"
+        info={info}
+        checkout={checkout}
+        onInstructions={noop}
+        initial={{ tab: "gift", gift: { count: "1", mode: "viewer", to: "mothwing" } }}
+      />,
+    );
+    expect(one(giftTo, '[data-testid="support-gift-to"]').tagName).toBe("INPUT");
+
+    const tip = render(
+      <SupportForm
+        channel="rivertide"
+        info={info}
+        checkout={checkout}
+        onInstructions={noop}
+        initial={{ tab: "tip", tip: { cents: 500, message: "", anonymous: false } }}
+      />,
+    );
+    const amount = one(tip, '[data-testid="support-tip-amount"]');
+    expect([amount.tagName, amount.getAttribute("data-cents"), amount.getAttribute("value")]).toEqual([
+      "INPUT",
+      "500",
+      "5.00",
+    ]);
+    expect(one(tip, '[data-testid="support-tip-message"]').tagName).toBe("TEXTAREA");
+    one(tip, '[data-testid="support-tip-anonymous"]');
+
+    const done = render(
+      <SupportInstructions
+        result={{
+          kind: "instructions",
+          paymentId: "p1",
+          reference: "CA-7K2M9QXA",
+          instructions: "Pay by transfer.",
+          amount: { cents: 999, currency: "usd" },
+        }}
+        onDone={noop}
+      />,
+    );
+    expect(one(done, '[data-testid="support-instructions"]').getAttribute("data-payment-id")).toBe("p1");
+    const ref = one(done, '[data-testid="support-reference"]');
+    expect([ref.textContent, ref.getAttribute("data-reference")]).toEqual(["CA-7K2M9QXA", "CA-7K2M9QXA"]);
+    expect(one(done, '[data-testid="support-amount"]').getAttribute("data-cents")).toBe("999");
+    seenIds.add("support-tier").add("support-tip-amount");
+    seenAttrs.add("data-tier={tier.tier}").add("data-cents={tier.price.cents}");
+  });
+
+  it("chat: chat-event rows carry type, user, tier, cents and total", () => {
+    const tip = chatEventView("channel.tip", {
+      broadcaster_user_id: "b",
+      broadcaster_user_login: "rivertide",
+      broadcaster_user_name: "Rivertide",
+      user_id: null,
+      user_login: null,
+      user_name: null,
+      is_anonymous: true,
+      amount: { value: 500, decimal_places: 2, currency: "usd" },
+      message: "hi",
+    });
+    const gift = chatEventView("channel.subscription.gift", {
+      broadcaster_user_id: "b",
+      broadcaster_user_login: "rivertide",
+      broadcaster_user_name: "Rivertide",
+      user_id: "u",
+      user_login: "kanjikat",
+      user_name: "KanjiKat",
+      total: 2,
+      tier: "1000",
+      is_anonymous: false,
+    });
+    if (!tip || !gift) throw new Error("fixture did not parse");
+    const t = one(render(<ChatEventRow event={tip} />), '[data-testid="chat-event"]');
+    expect([t.tagName, t.getAttribute("data-type"), t.getAttribute("data-user"), t.getAttribute("data-cents")]).toEqual(
+      ["ARTICLE", "channel.tip", "", "500"],
+    );
+    const g = one(render(<ChatEventRow event={gift} />), '[data-testid="chat-event"]');
+    expect(["data-type", "data-user", "data-tier", "data-total"].map((a) => g.getAttribute(a))).toEqual([
+      "channel.subscription.gift",
+      "kanjikat",
+      "1",
+      "2",
+    ]);
+    expect(g.hasAttribute("data-cents")).toBe(false);
   });
 
   // ── E4b web-money ──────────────────────────────────────────────────────────────────────────

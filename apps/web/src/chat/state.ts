@@ -3,21 +3,26 @@
 
 /**
  * Rows of the chat list: messages (which moderation marks deleted instead of removing, so the
- * room sees that something was removed) and inline server notices. Pure, for unit tests.
+ * room sees that something was removed), inline server notices and platform events (subs, gift
+ * subs, tips). Events carry a local id, never a message id: moderation, dedupe and the
+ * message-only logic skip them; they share the log cap. Pure, for unit tests.
  */
 import type { ChatMessageFrame } from "./connection.ts";
 import { MAX_MESSAGES } from "./connection.ts";
+import type { ChatEventView } from "./events.ts";
 
 export type ChatRow =
   | { kind: "message"; id: string; message: ChatMessageFrame; deleted: boolean }
-  | { kind: "notice"; id: string; code: string };
+  | { kind: "notice"; id: string; code: string }
+  | { kind: "event"; id: string; event: ChatEventView };
 
 export type ChatAction =
   | { type: "message"; message: ChatMessageFrame }
   | { type: "delete"; messageId: string }
   | { type: "ban"; userId: string; username: string }
   | { type: "clear" }
-  | { type: "notice"; id: string; code: string };
+  | { type: "notice"; id: string; code: string }
+  | { type: "event"; id: string; event: ChatEventView };
 
 function cap(rows: ChatRow[]): ChatRow[] {
   return rows.length > MAX_MESSAGES ? rows.slice(rows.length - MAX_MESSAGES) : rows;
@@ -47,5 +52,7 @@ export function chatReducer(rows: ChatRow[], action: ChatAction): ChatRow[] {
       return markDeleted(rows, () => true);
     case "notice":
       return cap([...rows, { kind: "notice", id: action.id, code: action.code }]);
+    case "event":
+      return cap([...rows, { kind: "event", id: action.id, event: action.event }]);
   }
 }

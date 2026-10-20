@@ -67,6 +67,164 @@ describe("forms blocks", () => {
     await waitFor(() => expect(change).toHaveBeenCalledWith("plus"));
   });
 
+  test("OptionGroup forwards per-item controlProps to the radio that carries aria-checked", () => {
+    const change = vi.fn<(value: string) => void>();
+    render(
+      <OptionGroup
+        aria-label="Tier"
+        items={[1, 2, 3].map((tier) => ({
+          value: String(tier),
+          title: `Tier ${tier}`,
+          controlProps: { "data-testid": "support-tier", "data-tier": tier, "data-cents": tier * 500 },
+        }))}
+        value="2"
+        onValueChange={change}
+      />,
+    );
+    const radios = screen.getAllByTestId("support-tier");
+    expect(
+      radios.map((r) => [r.getAttribute("role"), r.getAttribute("data-tier"), r.getAttribute("data-cents")]),
+    ).toEqual([
+      ["radio", "1", "500"],
+      ["radio", "2", "1000"],
+      ["radio", "3", "1500"],
+    ]);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+    fireEvent.click(radios[2] as HTMLElement);
+    expect(change).toHaveBeenCalledWith("3");
+  });
+
+  test("OptionGroup multiple forwards controlProps to each checkbox", () => {
+    render(
+      <OptionGroup
+        multiple
+        aria-label="Extras"
+        items={[{ value: "a", title: "A", controlProps: { "data-testid": "extra", "data-extra": "a" } }]}
+        values={["a"]}
+      />,
+    );
+    const box = screen.getByTestId("extra");
+    expect([box.getAttribute("role"), box.getAttribute("data-extra"), box.getAttribute("aria-checked")]).toEqual([
+      "checkbox",
+      "a",
+      "true",
+    ]);
+  });
+
+  test("AmountField puts the input test id and data-cents (the parsed value) on the input", () => {
+    const change = vi.fn<(value: number) => void>();
+    const { rerender } = render(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={500}
+        onValueChange={change}
+        rangeError="Out of range"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    const input = screen.getByTestId("support-tip-amount") as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    expect([input.value, input.getAttribute("data-cents")]).toEqual(["5.00", "500"]);
+    fireEvent.change(input, { target: { value: "7.5" } });
+    expect(change).toHaveBeenCalledWith(750);
+    rerender(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={750}
+        onValueChange={change}
+        rangeError="Out of range"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    expect(input.getAttribute("data-cents")).toBe("750");
+    expect(input.value).toBe("7.5");
+  });
+
+  test("AmountField reports unparsed text: empty data-cents, the format error, and validity changes", () => {
+    const change = vi.fn<(value: number) => void>();
+    const validity = vi.fn<(valid: boolean) => void>();
+    render(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={500}
+        onValueChange={change}
+        onValidityChange={validity}
+        presets={[{ label: "$10", value: 1000 }]}
+        rangeError="Out of range"
+        formatError="Enter an amount"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    const input = screen.getByTestId("support-tip-amount") as HTMLInputElement;
+    for (const text of ["", "5.001", "abc"]) {
+      fireEvent.change(input, { target: { value: text } });
+      expect(input.getAttribute("data-cents")).toBe("");
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText("Enter an amount")).toBeTruthy();
+    }
+    expect(change).not.toHaveBeenCalled();
+    // Reported on mount, then once per transition, not on every keystroke.
+    expect(validity.mock.calls).toEqual([[true], [false]]);
+    fireEvent.blur(input);
+    expect(input.value).toBe("abc");
+    fireEvent.change(input, { target: { value: "6" } });
+    expect(change).toHaveBeenLastCalledWith(600);
+    expect(validity.mock.calls).toEqual([[true], [false], [true]]);
+    expect(screen.queryByText("Enter an amount")).toBeNull();
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(screen.getByText("$10"));
+    expect(change).toHaveBeenLastCalledWith(1000);
+    expect(validity.mock.calls).toEqual([[true], [false], [true], [false], [true]]);
+    expect(input.getAttribute("data-cents")).toBe("500");
+  });
+
+  test("AmountField reports valid on unmount while unparsed, so a remount cannot desync its parent", () => {
+    const validity = vi.fn<(valid: boolean) => void>();
+    const { unmount } = render(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={500}
+        onValueChange={() => undefined}
+        onValidityChange={validity}
+        rangeError="Out of range"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("support-tip-amount"), { target: { value: "" } });
+    unmount();
+    expect(validity.mock.calls).toEqual([[true], [false], [true]]);
+  });
+
+  test("ChoiceToggle stays controlled when the value matches no option", () => {
+    const { rerender } = render(
+      <ChoiceToggle
+        label="Count"
+        value="5"
+        options={[
+          { value: "1", label: "1" },
+          { value: "5", label: "5" },
+        ]}
+      />,
+    );
+    const pressed = () => screen.getAllByRole("button").filter((b) => b.getAttribute("aria-pressed") === "true");
+    expect(pressed().map((b) => b.textContent)).toEqual(["5"]);
+    rerender(
+      <ChoiceToggle
+        label="Count"
+        value=""
+        options={[
+          { value: "1", label: "1" },
+          { value: "5", label: "5" },
+        ]}
+      />,
+    );
+    expect(pressed()).toEqual([]);
+  });
+
   test("CopyField copies and reports success; secrets can be revealed", async () => {
     const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

@@ -3,13 +3,14 @@
 
 /** Pure rules behind checkout and the treasurer's payment actions (see README.md). */
 import type { PAYMENT_STATUSES, SUBSCRIPTION_STATUSES } from "@commonair/contracts/enums";
+import { MONEY_LIMITS } from "@commonair/contracts/currency";
 
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 export type TierNumber = 1 | 2 | 3;
 
-export const TIER_NAME_MAX = 50;
-export const TIER_BENEFITS_MAX = 500;
+export const TIER_NAME_MAX = MONEY_LIMITS.tierNameMaxLength;
+export const TIER_BENEFITS_MAX = MONEY_LIMITS.tierBenefitsMaxLength;
 /** How far back a chat message counts toward a channel's gift community. */
 export const GIFT_POOL_CHAT_DAYS = 30;
 

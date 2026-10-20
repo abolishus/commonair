@@ -36,7 +36,7 @@ describe("requireSession", () => {
   });
 
   it("passes the session through", async () => {
-    const me = { id: "u1", username: "alice_1", displayName: "Alice", channelSlug: "alice_1" };
+    const me = { id: "u1", username: "alice_1", displayName: "Alice", channelSlug: "alice_1", role: "user" as const };
     expect(await requireSession(async () => me)).toEqual({ me });
   });
 });

@@ -12,6 +12,7 @@ import {
   internalEnv,
   loadEnv,
   mediaEnv,
+  paymentsEnv,
   playbackEnv,
   servicePorts,
 } from "@commonair/config";
@@ -21,6 +22,7 @@ export const webEnvSchema = ALL_ENV_SCHEMAS.coreEnv.extend({
   INGEST_RTMP_PUBLIC_URL: mediaEnv.shape.INGEST_RTMP_PUBLIC_URL,
   PLAYBACK_PUBLIC_URL: playbackEnv.shape.PLAYBACK_PUBLIC_URL,
   WEB_PORT: servicePorts.shape.WEB_PORT,
+  CURRENCY: paymentsEnv.shape.CURRENCY,
 });
 
 export type WebEnv = ReturnType<typeof loadWebEnv>;
@@ -36,6 +38,8 @@ export interface PublicConfig {
   chatUrl: string;
   ingestRtmpUrl: string;
   playbackUrl: string;
+  /** Instance currency (ISO 4217, lowercase) for amount inputs before any money data loads. */
+  currency: string;
 }
 
 const noSlash = (u: string) => u.replace(/\/+$/, "");
@@ -48,5 +52,6 @@ export function publicConfig(env: WebEnv): PublicConfig {
     chatUrl: env.CHAT_PUBLIC_URL,
     ingestRtmpUrl: noSlash(env.INGEST_RTMP_PUBLIC_URL),
     playbackUrl: noSlash(env.PLAYBACK_PUBLIC_URL),
+    currency: env.CURRENCY,
   };
 }
