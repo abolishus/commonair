@@ -58,6 +58,14 @@ describe("reservableAt", () => {
     expect(reservableAt(b(4500, 0), b(4500, 300))).toEqual({ amountCents: 4200, nettedCents: 0, balances: b(4200, 0) });
   });
 
+  test("the lowest running balance after period end caps the amount", () => {
+    expect(reservableAt(b(4500, 0), b(900, 0), 0).amountCents).toBe(0);
+    expect(reservableAt(b(1800, 0), b(1800, 0), 0).amountCents).toBe(0);
+    expect(reservableAt(b(1800, 0), b(1800, 0), 700).amountCents).toBe(700);
+    expect(reservableAt(b(1800, 0), b(1800, 0), 5000).amountCents).toBe(1800);
+    expect(reservableAt(b(1800, 0), b(1800, 0), null).amountCents).toBe(1800);
+  });
+
   test("never nets more than is still owed now", () => {
     expect(reservableAt(b(5000, 300), b(5000, 100))).toMatchObject({ amountCents: 4700, nettedCents: 100 });
   });

@@ -346,7 +346,7 @@ describe("hold lots", () => {
     expect(await holdLots(db, creator, "usd")).toEqual([]);
 
     // Later, the fresh payment's release has nothing left to release: no early release.
-    const r = await releaseDueHolds(db, { asOf: new Date(Date.now() + 30 * DAY), holdDays: 7, currency: "usd" });
+    const r = await releaseDueHolds(db, { asOf: new Date(), holdDays: 0, currency: "usd" });
     expect(await creatorBalances(db, creator, "usd")).toMatchObject({ liabilityCents: 0, holdCents: 0 });
     expect(r.totalCents).toBeGreaterThanOrEqual(0);
   });
@@ -713,6 +713,81 @@ describe("payouts count only what was available at period end", () => {
       receivableCents: 0,
       reservedCents: 4200 + 900,
     });
+  });
+
+  /** The creator's running available balance (liability − receivable) at every posting date. */
+  async function runningAvailable(creator: string, cur: string): Promise<{ at: string; cents: number }[]> {
+    const rows = await db.execute<{ at: Date | string; running: string }>(sql`
+      with d as (
+        select t.occurred_at as at, -sum(e.amount_cents) as delta
+        from ledger_entries e
+        join ledger_accounts a on a.id = e.account_id
+        join ledger_transactions t on t.id = e.transaction_id
+        where a.code in (${storedCode(accounts.creator(creator), cur)}, ${storedCode(accounts.creatorReceivable(creator), cur)})
+        group by t.occurred_at
+      )
+      select at, (sum(delta) over (order by at))::text as running from d order by at`);
+    return [...rows].map((r) => ({ at: new Date(r.at).toISOString(), cents: Number(r.running) }));
+  }
+  async function expectNeverOverdrawn(creator: string, cur: string) {
+    const points = await runningAvailable(creator, cur);
+    expect(points.length).toBeGreaterThan(0);
+    expect(points.filter((p) => p.cents < 0)).toEqual([]);
+  }
+
+  test("a late run for January after February's run reserves only what stayed available since", async () => {
+    const cur = "ron";
+    const creator = await makeUser();
+    await earnAt(creator, 5000, cur, "2026-01-10T00:00:00Z"); // 4500, due Jan 17
+    await release(cur, "2026-01-20T00:00:00Z");
+    expect((await runPayoutBatch(db, { ...FEB, currency: cur, minimumCents: 100 })).totalCents).toBe(4500);
+    // Another lot released after February's end (due Mar 5).
+    await earnAt(creator, 1000, cur, "2026-02-26T00:00:00Z");
+    await release(cur, "2026-03-06T00:00:00Z");
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ availableCents: 900 });
+
+    // January ended with 4500 available, but February took all of it on Mar 1: nothing is left
+    // for January, even though 900 is available today.
+    const r = await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    expect(r.totalCents).toBe(0);
+    expect(r.carriedOver).toContainEqual({ userId: creator, availableCents: 0 });
+    expect(await payoutsOf(creator)).toHaveLength(1);
+    await expectNeverOverdrawn(creator, cur);
+  });
+
+  test("a chargeback after periodEnd drains the balance before a later release refills it: reserves 0", async () => {
+    const cur = "bgn";
+    const creator = await makeUser();
+    const first = await earnAt(creator, 2000, cur, "2026-01-10T00:00:00Z"); // 1800, due Jan 17
+    await earnAt(creator, 2000, cur, "2026-01-30T00:00:00Z"); // 1800, due Feb 6
+    await release(cur, "2026-01-20T00:00:00Z");
+    // Feb 3: charged back; the 1800 comes out of released earnings.
+    await postReversal(db, {
+      kind: "chargeback",
+      disputeId: uuidv7(),
+      paymentId: first,
+      amountCents: 2000,
+      occurredAt: at("2026-02-03T00:00:00Z"),
+      disputeFeeCents: 0,
+    });
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ liabilityCents: 0, holdCents: 1800 });
+    await release(cur, "2026-02-07T00:00:00Z");
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ availableCents: 1800 });
+
+    // 1800 at Jan's end and 1800 today, but 0 on Feb 3: January reserves nothing.
+    const r = await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    expect(r.totalCents).toBe(0);
+    expect(await payoutsOf(creator)).toHaveLength(0);
+    await expectNeverOverdrawn(creator, cur);
+    // February gets it.
+    expect((await runPayoutBatch(db, { ...FEB, currency: cur, minimumCents: 100 })).totalCents).toBe(1800);
+    await expectNeverOverdrawn(creator, cur);
+  });
+
+  test("releaseDueHolds refuses an asOf in the future", async () => {
+    await expect(
+      releaseDueHolds(db, { asOf: new Date(Date.now() + 2 * 60_000), holdDays: 7, currency: "usd" }),
+    ).rejects.toThrow(RangeError);
   });
 
   test("a later month's reservation caps an earlier month run afterwards", async () => {

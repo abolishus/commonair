@@ -16,7 +16,7 @@ import { lockCreator, lockPayoutBatch } from "./locks.ts";
 import { assertCents, negate } from "./math.ts";
 import { type PostResult, post } from "./poster.ts";
 import { creatorBalances } from "./queries.ts";
-import { payoutCancel, payoutReserve, payoutSent } from "./rules.ts";
+import { InsufficientBalanceError, payoutCancel, payoutReserve, payoutSent } from "./rules.ts";
 
 export interface CreatorAvailable {
   userId: string;
@@ -97,19 +97,52 @@ async function payableAsOf(
 }
 
 /**
+ * The lowest running available balance (liability − receivable) of one creator at any posting
+ * date after `asOf`, counting every posting whatever its date (later reservations, cancels,
+ * reversals, releases, and anything dated in the future); null when nothing is dated after it.
+ * Postings sharing a timestamp count together.
+ */
+async function lowestAvailableAfter(
+  tx: Executor,
+  userId: string,
+  currency: string,
+  asOf: Date,
+): Promise<number | null> {
+  const rows = await tx.execute<{ lowest: string | null }>(sql`
+    with d as (
+      select t.occurred_at as at, -sum(e.amount_cents) as delta
+      from ledger_entries e
+      join ledger_accounts a on a.id = e.account_id
+      join ledger_transactions t on t.id = e.transaction_id
+      where a.code in (${storedCode(accounts.creator(userId), currency)}, ${storedCode(accounts.creatorReceivable(userId), currency)})
+      group by t.occurred_at
+    ), r as (
+      select at, sum(delta) over (order by at) as running from d
+    )
+    select min(running)::text as lowest from r where at > ${asOf.toISOString()}::timestamptz`);
+  const v = rows[0]?.lowest;
+  return v === null || v === undefined ? null : Number(v);
+}
+
+/**
  * What a payout for the period ending at `periodEnd` may reserve: the available balance as of
- * `periodEnd`, capped by what is available now (a later reversal, or a later period's
- * reservation, may already have drawn on it), with only the receivable owed by `periodEnd`
- * netted. Returns the balances to hand `payoutReserve`, shaped so that it reserves exactly
- * `amountCents` and nets exactly `nettedCents`.
+ * `periodEnd`, capped by what is available now and by the lowest running available balance at
+ * any posting date after `periodEnd` (`lowestAfterCents`). The reservation is dated
+ * `periodEnd`, so it lowers every later running balance too; the cap keeps all of them from
+ * going below zero (a later reversal, or a later period's reservation, may already have drawn
+ * on the money). Only the receivable owed by `periodEnd` is netted. Returns the balances to
+ * hand `payoutReserve`, shaped so that it reserves exactly `amountCents` and nets exactly
+ * `nettedCents`.
  */
 export function reservableAt(
   atPeriodEnd: PayableBalances,
   now: PayableBalances,
+  lowestAfterCents: number | null = null,
 ): { amountCents: number; nettedCents: number; balances: PayableBalances } {
   const amountCents = Math.min(
     atPeriodEnd.liabilityCents - atPeriodEnd.receivableCents,
     now.liabilityCents - now.receivableCents,
+    lowestAfterCents ?? Number.POSITIVE_INFINITY,
   );
   // Never net more than is owed now (a later netting may have settled part of it).
   const nettedCents = Math.max(0, Math.min(atPeriodEnd.receivableCents, now.receivableCents));
@@ -125,7 +158,9 @@ export function reservableAt(
  * `periodEnd` reaches the minimum gets a `payouts` row and a ledger reservation of that amount,
  * atomically, dated `periodEnd`. Only postings dated at or before `periodEnd` count, so holds
  * released (or clawbacks owed) after it fall into the next period's run and the period's
- * statement never shows more paid out than was available at its end. Idempotent per
+ * statement never shows more paid out than was available at its end. Nor more than stayed
+ * available at every posting date since (see `reservableAt`), so a late run never drives a
+ * creator's running balance below zero at any date. Idempotent per
  * (user, periodStart). Each creator's balance is re-read under the creator lock right before
  * reserving, so concurrent reversals and releases are accounted for.
  */
@@ -169,10 +204,17 @@ export async function runPayoutBatch(
       await lockCreator(tx, c.userId);
       const then = (await payableAsOf(tx, opts.currency, opts.periodEnd, c.userId)).get(c.userId);
       const now = await creatorBalances(tx, c.userId, opts.currency);
-      const r = then ? reservableAt(then, now) : null;
+      const lowest = await lowestAvailableAfter(tx, c.userId, opts.currency, opts.periodEnd);
+      const r = then ? reservableAt(then, now, lowest) : null;
       if (!r || r.amountCents <= 0 || r.amountCents < opts.minimumCents) {
         result.carriedOver.push({ userId: c.userId, availableCents: r?.amountCents ?? 0 });
         continue;
+      }
+      // payoutReserve checks only the shaped balances; check against today's real ones too.
+      if (r.amountCents > now.availableCents || r.amountCents + r.nettedCents > now.liabilityCents) {
+        throw new InsufficientBalanceError(
+          `payout of ${r.amountCents} (+${r.nettedCents} netted) exceeds the available ${now.availableCents} cents`,
+        );
       }
       const acct = accountsByUser.get(c.userId);
       const ready = acct?.enabled === true;

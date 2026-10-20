@@ -9,6 +9,9 @@ import { post } from "./poster.ts";
 import { paymentHoldRemaining } from "./queries.ts";
 import { holdRelease, holdReleaseDueAt } from "./rules.ts";
 
+/** Clock skew tolerated between the caller's `asOf` and this process. */
+const MAX_ASOF_SKEW_MS = 60_000;
+
 /** When a release is dated: the moment it fell due, capped at the run's `asOf`. */
 function dueAt(succeededAt: Date, holdDays: number, asOf: Date): Date {
   const due = holdReleaseDueAt(succeededAt, holdDays);
@@ -36,6 +39,9 @@ export async function releaseDueHolds(
 ): Promise<ReleaseResult> {
   assertCurrency(opts.currency);
   if (!Number.isFinite(opts.holdDays) || opts.holdDays < 0) throw new RangeError("holdDays must be non-negative");
+  // Releases are dated up to `asOf`; a future date would release early and post future-dated
+  // lines that every payout run would read as already available.
+  if (opts.asOf.getTime() > Date.now() + MAX_ASOF_SKEW_MS) throw new RangeError("asOf must not be in the future");
   const cutoff = new Date(opts.asOf.getTime() - opts.holdDays * 86_400_000);
   const due = await db.execute<{ payment_id: string; creator: string; occurred_at: string | Date }>(sql`
     with lots as (
