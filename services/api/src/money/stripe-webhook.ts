@@ -66,9 +66,10 @@ const message = (err: unknown) =>
 export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSubject: string): Promise<Response> {
   // Platform events (checkout, invoices, charges) and Connect events (connected accounts'
   // `account.updated`) come from two Stripe endpoints with their own secrets; either may sign.
-  const secrets = [deps.env.STRIPE_WEBHOOK_SECRET, deps.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
-    (s): s is string => typeof s === "string" && s.length > 0,
-  );
+  const secrets = [
+    { secret: deps.env.STRIPE_WEBHOOK_SECRET, connect: false },
+    { secret: deps.env.STRIPE_CONNECT_WEBHOOK_SECRET, connect: true },
+  ].filter((s): s is { secret: string; connect: boolean } => typeof s.secret === "string" && s.secret.length > 0);
   if (deps.env.PAYMENTS_PROVIDER !== "stripe" || secrets.length === 0)
     return reply(404, { code: "NOT_FOUND", message: "Not found" });
   if (req.method !== "POST") return reply(405, { code: "METHOD_NOT_ALLOWED", message: "POST only" });
@@ -91,9 +92,13 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
   const { verifyStripeSignature } = await loadStripeSignature();
   const header = req.headers.get("stripe-signature");
   let check: Awaited<ReturnType<typeof verifyStripeSignature>> = { ok: false, reason: "missing" };
-  for (const secret of secrets) {
-    check = await verifyStripeSignature(raw, header, secret, { nowS: Math.floor(nowMs / 1000) });
-    if (check.ok) break;
+  let viaConnect = false;
+  for (const s of secrets) {
+    check = await verifyStripeSignature(raw, header, s.secret, { nowS: Math.floor(nowMs / 1000) });
+    if (check.ok) {
+      viaConnect = s.connect;
+      break;
+    }
   }
   if (!check.ok) return reply(400, { code: "BAD_SIGNATURE", message: `Signature ${check.reason}` });
 
@@ -130,7 +135,10 @@ export async function handleStripeWebhook(deps: Deps, req: Request, rateLimitSub
 
   let applied: AppliedAction | null;
   try {
-    const action = stripeAction(envelope);
+    // The Connect endpoint's secret vouches for connected-account events only: anything else it
+    // signs is stored but never moves money.
+    const action =
+      viaConnect && envelope.type !== "account.updated" ? ({ type: "ignored" } as const) : stripeAction(envelope);
     const prepared = await prepareStripeAction(createAdapter(deps.env), action);
     applied = await deps.db.transaction(async (tx) => {
       // A concurrent redelivery waits here and then finds the event processed.

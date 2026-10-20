@@ -43,6 +43,8 @@ let treasurer: Account;
 const feeless = new Set<string>();
 /** Connect accounts' payouts_enabled as the fake Stripe reports it. */
 const accountsEnabled = new Map<string, boolean>();
+/** Answer the next N refund creates with 500 (the client retries twice per call). */
+const refundFailures = { left: 0 };
 const rand = () => crypto.randomUUID().replace(/-/g, "").slice(0, 14);
 const db = () => api.db.db;
 
@@ -70,7 +72,13 @@ function startFakeStripe() {
         const id = url.pathname.split("/").pop() ?? "";
         return Response.json({ id, payouts_enabled: accountsEnabled.get(id) === true });
       }
-      if (url.pathname === "/v1/refunds") return Response.json({ id: `re_${rand()}`, status: "succeeded" });
+      if (url.pathname === "/v1/refunds") {
+        if (refundFailures.left > 0) {
+          refundFailures.left--;
+          return Response.json({ error: { message: "stripe down" } }, { status: 500 });
+        }
+        return Response.json({ id: `re_${rand()}`, status: "succeeded" });
+      }
       if (url.pathname.startsWith("/v1/subscriptions/")) return Response.json({ id: url.pathname.split("/").pop() });
       if (url.pathname === "/v1/accounts") return Response.json({ id: `acct_${rand()}` });
       if (url.pathname === "/v1/account_links") return Response.json({ url: "https://connect.stripe.test/setup/x" });
@@ -833,6 +841,133 @@ describe("review fixes", () => {
     expect(await paymentRow(p.paymentId)).toMatchObject({ status: "refunded", refundedCents: 1000 });
     const ds = await db().select().from(schema.disputes).where(eq(schema.disputes.paymentId, p.paymentId));
     expect(ds.map((d) => d.amountCents).sort((a, b) => a - b)).toEqual([200, 800]);
+  });
+});
+
+describe("follow-up fixes", () => {
+  const paidTip = async (cents: number) => {
+    const p = (await tip(alice, cents)).body;
+    const pi = `pi_${rand()}`;
+    const done = await deliver(
+      event("checkout.session.completed", {
+        mode: "payment",
+        payment_status: "paid",
+        metadata: { payment_id: p.paymentId },
+        payment_intent: pi,
+        amount_total: cents,
+        currency: "usd",
+      }),
+    );
+    expect(done.body.outcome).toBe("confirmed");
+    return { paymentId: p.paymentId, pi };
+  };
+  const markers = async (paymentId: string) =>
+    db()
+      .select({ action: schema.auditLog.action, details: schema.auditLog.details })
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.subjectType, "payment"), eq(schema.auditLog.subjectId, paymentId)))
+      .orderBy(schema.auditLog.createdAt, schema.auditLog.id);
+
+  test("Stripe failing the refund call leaves no lockout; the retry goes through", async () => {
+    const { paymentId } = await paidTip(1100);
+    const path = `/api/treasurer/payments/${paymentId}/refund`;
+    refundFailures.left = 3; // one call = the first try + two retries
+    const failed = await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" });
+    expect(failed.status).toBe(412);
+    expect((await markers(paymentId)).map((m) => m.action)).toEqual([
+      "payment.refund_requested",
+      "payment.refund_request_failed",
+    ]);
+    const retry = await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" });
+    expect(retry.status).toBe(200);
+    expect((await markers(paymentId)).map((m) => m.action).slice(2)).toEqual([
+      "payment.refund_requested",
+      "payment.refund_submitted",
+    ]);
+    // The same state gives the same idempotency key: a retry after an ambiguous failure is one refund.
+    const keys = stripeCalls
+      .filter((c) => c.path === "/v1/refunds")
+      .slice(-2)
+      .map((c) => c.key);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  test("Stripe's refund.failed releases the request", async () => {
+    const { paymentId, pi } = await paidTip(1200);
+    const path = `/api/treasurer/payments/${paymentId}/refund`;
+    expect((await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" })).status).toBe(200);
+    expect((await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" })).status).toBe(409);
+    const submitted = (await markers(paymentId)).find((m) => m.action === "payment.refund_submitted");
+    const refundRef = submitted?.details.refundRef;
+    expect(typeof refundRef).toBe("string");
+    const r = await deliver(
+      event("refund.failed", { id: refundRef, object: "refund", payment_intent: pi, amount: 100, status: "failed" }),
+    );
+    expect(r.body.outcome).toBe("refund_failed");
+    expect((await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" })).status).toBe(200);
+  });
+
+  test("a dashboard refund of another amount does not release an outstanding request", async () => {
+    const { paymentId, pi } = await paidTip(1300);
+    const path = `/api/treasurer/payments/${paymentId}/refund`;
+    expect((await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" })).status).toBe(200);
+    const dashboard = await deliver(
+      event("charge.refunded", {
+        id: `ch_${rand()}`,
+        payment_intent: pi,
+        amount_refunded: 50,
+        currency: "usd",
+        refunds: { data: [{ id: `re_dash_${rand()}`, amount: 50 }] },
+      }),
+    );
+    expect(dashboard.body.outcome).toBe("refunded");
+    expect((await treasurer.client.call("POST", path, { amountCents: 100, reason: "x" })).status).toBe(409);
+  });
+
+  test("an event signed with the Connect secret moves no money unless it is account.updated", async () => {
+    api.deps.env.STRIPE_CONNECT_WEBHOOK_SECRET = CONNECT_SECRET;
+    const p = (await tip(alice, 1400)).body;
+    const evt = event("checkout.session.completed", {
+      mode: "payment",
+      payment_status: "paid",
+      metadata: { payment_id: p.paymentId },
+      payment_intent: `pi_${rand()}`,
+      amount_total: 1400,
+      currency: "usd",
+    });
+    const r = await deliver(evt, { secret: CONNECT_SECRET });
+    expect(r).toMatchObject({ status: 200, body: { outcome: "ignored" } });
+    expect((await paymentRow(p.paymentId)).status).toBe("pending");
+    const [row] = await db()
+      .select()
+      .from(schema.paymentEvents)
+      .where(eq(schema.paymentEvents.providerEventId, evt.id));
+    expect(row?.processedAt).not.toBeNull();
+  });
+
+  test("a cycle invoice never confirms a pending first payment; an invoice without a reason may", async () => {
+    const erin = await signUpAndSignIn(api);
+    const s = await subscribe(erin, { tier: 1 });
+    const sub = `sub_${rand()}`;
+    const cycle = await deliver(renewalInvoice(`pi_${rand()}`, sub, s.body.paymentId, 499));
+    expect(cycle.body.outcome).not.toBe("confirmed");
+    expect((await paymentRow(s.body.paymentId)).status).toBe("pending");
+
+    const frank = await signUpAndSignIn(api);
+    const t = await subscribe(frank, { tier: 1 });
+    const noReason = await deliver(
+      event("invoice.paid", {
+        id: `in_${rand()}`,
+        subscription: `sub_${rand()}`,
+        subscription_details: { metadata: { payment_id: t.body.paymentId } },
+        payment_intent: `pi_${rand()}`,
+        amount_paid: 499,
+        currency: "usd",
+        status_transitions: { paid_at: nowS() },
+      }),
+    );
+    expect(noReason.body.outcome).toBe("confirmed");
+    expect((await paymentRow(t.body.paymentId)).status).toBe("succeeded");
   });
 });
 

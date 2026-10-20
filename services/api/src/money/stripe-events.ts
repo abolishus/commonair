@@ -27,6 +27,7 @@ import { audit } from "../events/audit.ts";
 import { addOneMonthUtc } from "./checkout-rules.ts";
 import { endSubscriptions } from "./checkout-shared.ts";
 import { confirmPaymentTx, reversePaymentTx } from "./checkout-treasurer.ts";
+import { recordProviderRefundFailed } from "./stripe-refunds.ts";
 
 const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts } = schema;
 type PaymentRow = typeof payments.$inferSelect;
@@ -290,10 +291,13 @@ async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedActio
   if (known) return noop("already_processed");
 
   // Stripe copies the subscription's metadata (our first payment id) onto every invoice, so only
-  // `subscription_create` (or a first payment still waiting) makes this the checkout's invoice.
+  // `subscription_create` makes this the checkout's invoice; only an invoice with no billing reason
+  // at all falls back to "the first payment is still waiting" (never a cycle or update invoice).
   const named = await lockPaymentById(tx, a.paymentId);
   const first = named && named.provider === "stripe" && named.subscriptionId ? named : null;
-  if (first && (a.billingReason === "subscription_create" || first.status === "pending")) {
+  const isFirst =
+    a.billingReason === "subscription_create" || (a.billingReason === null && first?.status === "pending");
+  if (first && isFirst) {
     await linkSubscription(tx, first, a.subscription, now);
     if (first.status === "pending") {
       checkAmount(first, a.amountPaid, a.currency);
@@ -595,6 +599,13 @@ export async function applyStripeAction(
       return disputeClosed(tx, a, now);
     case "account.updated":
       return accountUpdated(tx, a, now);
+    case "refund.failed": {
+      const p = await lockPaymentByRef(tx, a.paymentIntent);
+      if (!p) return noop("unknown_payment");
+      // The treasurer's request behind it stops blocking a new one (stripe-refunds.ts).
+      await recordProviderRefundFailed(tx, p, a.refundId);
+      return noop("refund_failed");
+    }
     case "ignored":
       return noop("ignored");
   }
