@@ -208,6 +208,7 @@ The full breakdown is in the report under `scenarios[].data.load`.
 | `e2e-basic`   | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline. |
 | `e2e-social`  | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                      |
 | `e2e-relay`   | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).          |
+| `e4b-money`   | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                     |
 
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
@@ -308,6 +309,61 @@ HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set
 
 Until the API, origin and media units are running, these scenarios fail on unmet needs (and say
 which). The drivers themselves are verified against a throwaway MediaMTX by the integration tests.
+
+### `e4b-money` (milestone E4b)
+
+[docs/testing/e4b-selectors.md](../docs/testing/e4b-selectors.md), the nine steps of "The
+`e4b-money` scenario", on the manual payments adapter:
+
+1. **Setup.** API sign-ups for a streamer, a treasurer and viewers A, B, C. The treasurer role is
+   granted with the operator CLI (`bun packages/db/src/roles/cli.ts <username> treasurer`, run
+   from the repo root with `DATABASE_URL`), then the treasurer signs in again. The streamer sets
+   tiers of 4.99 / 9.99 / 24.99 on `/revenue` (odd cents, so the cut's floor matters); B and C
+   follow the channel and chat once (the gift pool).
+2. **Subscribe.** A picks tier 2 in the Support dialog and gets a `CA-…` reference; the treasurer
+   finds it with `treasury-search` and confirms. A's `/settings/subscriptions` row is `active`
+   tier 2, chat shows `channel.subscribe`, and A's next message carries the `subscriber` badge.
+3. **Gift.** A gifts 2 tier-1 subs at random; confirmed; B and C each hold an active gifted
+   subscription; one `channel.subscription.gift` with total 2.
+4. **Tip.** A tips 5.00 anonymously with a message; confirmed; `channel.tip` with an empty user
+   and 500 cents.
+5. **Dashboard.** `/revenue`: held = the creator shares, available = 0, owed = 0, the source
+   split, tier counts (2 / 1 / 0) and monthly shares, one ledger row per payment, and the rows'
+   `data-net` sum to `revenue-earned`; every row satisfies gross + deductions = net.
+6. **Refund and chargeback.** The tip is refunded in full and the tier-2 payment charged back;
+   A's subscription turns `canceled`; held drops by exactly the reversed shares; `refund` and
+   `chargeback` rows appear with negative net.
+7. **Payout threshold.** A payout run pays the streamer nothing (no payout row for them;
+   `data-created=0` is a soft check because the run is instance-wide); held + available + owed is
+   unchanged.
+8. **Transparency.** This UTC month's `data-revenue` rose by the creator + co-op shares net of the
+   reversals, against a baseline read before the first confirmation (so a long-lived stack is
+   fine); payouts unchanged.
+9. **Ledger integrity.** Read-only, with `DATABASE_URL`: every `ledger_transactions` row whose
+   `ref_id` is one of the scenario's payments or their disputes sums to zero per currency.
+
+Every expected figure comes from the tier prices above and the `platform.cut` that
+`money.support` reports, using the ledger's rule (creator = `floor(net × streamerShare)` in
+integer millionths, reversals as split(cumulative) − split(already)), in `src/money.ts`. The
+report has per-step timings, `*.confirm_to_chat_event` metrics, and `money.plan`,
+`money.expected`, `money.observed.step5|6|7`, `money.payoutRun`, `transparency.*` and `ledger.*`
+data. The web path selects only by test id; the subscriber badge is read from an anonymous chat
+socket on both paths (the web contract has no badge id). On failure every open page is
+screenshotted into `<report dir>/<run id>-e4b-money/`.
+
+**Needs:** `api`, `web`, `chat`, `worker`, `mail`, `browser`; `PAYMENTS_PROVIDER=manual` (the
+default; the scenario stops if `money.support` reports `stripe`) and `DATABASE_URL` pointing at
+the stack's Postgres (Bun loads it from the repo `.env` when run from the repo root). Part of
+`full`.
+
+| Knob  | Default | Meaning                                                   |
+| ----- | ------- | --------------------------------------------------------- |
+| `via` | `web`   | `api`: the same steps through the API and the chat socket |
+
+```sh
+bun harness/src/cli.ts run e4b-money
+bun harness/src/cli.ts run e4b-money --set via=api   # backend only
+```
 
 ### Adding a scenario
 

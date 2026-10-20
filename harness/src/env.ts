@@ -54,6 +54,14 @@ export const harnessEnvSchema = z.object({
     .enum(["true", "false", "1", "0", ""])
     .default("false")
     .transform((v) => v === "true" || v === "1"),
+  /**
+   * Postgres of the stack under test (Bun loads it from the repo `.env`). Optional: only the
+   * scenario steps that use the operator role CLI or read the ledger need it; empty = unset.
+   */
+  DATABASE_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v?.trim() ? v.trim() : undefined)),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 

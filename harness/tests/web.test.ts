@@ -17,10 +17,15 @@ import {
   E3_CHANGED_E1_IDS,
   E3_ROUTE_PATTERNS,
   E3_TEST_IDS,
+  E4B_NESTED_TEST_IDS,
+  E4B_ROUTE_PATTERNS,
+  E4B_TEST_IDS,
   PLAYER_SOURCES,
+  REVENUE_TIER_FIELDS,
   ROUTES,
   ROUTE_PATTERNS,
   TEST_IDS,
+  revenueTierInput,
   tid,
   webEmbedUrl,
 } from "../src/web/selectors.ts";
@@ -29,6 +34,25 @@ import { browserVerificationUrl, obsPublishUrl, rebaseOrigin } from "../src/web/
 const DOC = fileURLToPath(new URL("../../docs/testing/e1-selectors.md", import.meta.url));
 const DOC_E2 = fileURLToPath(new URL("../../docs/testing/e2-selectors.md", import.meta.url));
 const DOC_E3 = fileURLToPath(new URL("../../docs/testing/e3-selectors.md", import.meta.url));
+const DOC_E4B = fileURLToPath(new URL("../../docs/testing/e4b-selectors.md", import.meta.url));
+
+/** The lines of the `## <heading>` section (up to the next `## `; `###` subsections included). */
+function section(markdown: string, heading: string): string[] {
+  const lines = markdown.split("\n");
+  const start = lines.findIndex((l) => l.trim() === `## ${heading}`);
+  if (start < 0) throw new Error(`no "## ${heading}" section`);
+  const end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  return lines.slice(start + 1, end < 0 ? undefined : end);
+}
+
+/** Every code span in the first column of the tables under `## <heading>` (cells may list several ids). */
+function firstColumnSpans(markdown: string, heading: string): string[] {
+  return section(markdown, heading).flatMap((line) => {
+    if (!line.startsWith("|")) return [];
+    const cell = line.split("|")[1] ?? "";
+    return [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
+  });
+}
 
 /** First-column code spans of the markdown table under `## <heading>`. */
 function tableKeys(markdown: string, heading: string): string[] {
@@ -118,11 +142,10 @@ describe("selectors match docs/testing/e3-selectors.md", () => {
     expect([...ours].sort()).toEqual([...documented].sort());
   });
 
-  test("E3 ids collide with neither E1 nor E2; TEST_IDS is the union of all three", () => {
+  test("E3 ids collide with neither E1 nor E2", () => {
     const earlier = new Set<string>([...Object.values(E1_TEST_IDS), ...Object.values(E2_TEST_IDS)]);
     for (const id of Object.values(E3_TEST_IDS)) expect(earlier.has(id)).toBe(false);
     for (const id of E3_CHANGED_E1_IDS) expect(Object.values(E1_TEST_IDS)).toContain(id);
-    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + Object.values(E3_TEST_IDS).length);
   });
 
   test("routes: same set; /relays is new, the others are E1 routes", () => {
@@ -151,6 +174,66 @@ describe("selectors match docs/testing/e3-selectors.md", () => {
     expect(tid(TEST_IDS.player, { source: "origin", state: "playing" })).toBe(
       '[data-testid="player"][data-source="origin"][data-state="playing"]',
     );
+  });
+});
+
+describe("selectors match docs/testing/e4b-selectors.md", () => {
+  const doc = readFileSync(DOC_E4B, "utf8");
+  const tierTemplates = REVENUE_TIER_FIELDS.map((f) => `revenue-tier-${f}-<n>`);
+
+  test("data-testid values: the first-column ids plus the per-tier inputs, no duplicates", () => {
+    const documented = firstColumnSpans(doc, "Test ids");
+    expect(documented.length).toBeGreaterThan(60);
+    expect(new Set(documented).size).toBe(documented.length);
+    const ours = [...Object.values(E4B_TEST_IDS), ...tierTemplates];
+    expect(new Set(ours).size).toBe(ours.length);
+    expect([...ours].sort()).toEqual([...documented].sort());
+  });
+
+  test("ids named inside descriptions are documented there", () => {
+    const spans = new Set(
+      section(doc, "Test ids").flatMap((l) => [...l.matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1] ?? "")),
+    );
+    for (const id of Object.values(E4B_NESTED_TEST_IDS)) expect(spans.has(id)).toBe(true);
+    // The destructive confirmations reuse E1's dialog.
+    expect(spans.has(E1_TEST_IDS.confirmDialogConfirm)).toBe(true);
+  });
+
+  test("tier inputs build the documented ids", () => {
+    expect(revenueTierInput("price", 2)).toBe("revenue-tier-price-2");
+    expect(revenueTierInput("benefits", 3)).toBe("revenue-tier-benefits-3");
+    for (const f of REVENUE_TIER_FIELDS) expect(doc).toContain(`\`revenue-tier-${f}-<n>\``);
+  });
+
+  test("E4b ids collide with no earlier id; TEST_IDS is the union of every milestone", () => {
+    const earlier = new Set<string>([
+      ...Object.values(E1_TEST_IDS),
+      ...Object.values(E2_TEST_IDS),
+      ...Object.values(E3_TEST_IDS),
+    ]);
+    const e4b = [...Object.values(E4B_TEST_IDS), ...Object.values(E4B_NESTED_TEST_IDS)];
+    expect(new Set(e4b).size).toBe(e4b.length);
+    for (const id of e4b) expect(earlier.has(id)).toBe(false);
+    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4b.length);
+  });
+
+  test("routes: same set; the new ones are built by ROUTES", () => {
+    expect([...E4B_ROUTE_PATTERNS].sort()).toEqual(tableKeys(doc, "Routes").sort());
+    const added = [ROUTES.subscriptions, ROUTES.revenue, ROUTES.treasury, ROUTES.transparency];
+    expect(added).toEqual(["/settings/subscriptions", "/revenue", "/treasury", "/transparency"]);
+    for (const r of added) expect(E4B_ROUTE_PATTERNS).toContain(r);
+    for (const r of E4B_ROUTE_PATTERNS.filter((r) => !(added as string[]).includes(r)))
+      expect(ROUTE_PATTERNS).toContain(r);
+  });
+
+  test("the scenario section lists nine steps", () => {
+    const steps = section(doc, "The `e4b-money` scenario").filter((l) => /^\d+\. \*\*/.test(l));
+    expect(steps).toHaveLength(9);
+  });
+
+  test("firstColumnSpans reads every span of the first cell only", () => {
+    const md = "## A\n\n| Id | Meaning |\n| - | - |\n| `a`, `b` | has `c` |\n### Sub\n| `d` | x |\n## B\n| `e` | y |\n";
+    expect(firstColumnSpans(md, "A")).toEqual(["a", "b", "d"]);
   });
 });
 
