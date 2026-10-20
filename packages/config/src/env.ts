@@ -97,6 +97,11 @@ export const storageEnv = z.object({
   S3_BUCKET_MEDIA: z.string().default("commonair-media"),
   S3_BUCKET_EXPORTS: z.string().default("commonair-exports"),
   S3_BUCKET_BACKUPS: z.string().default("commonair-backups"),
+  /**
+   * Sealed T0 evidence too large for Postgres (VOD and clip objects). Only the worker holds a
+   * key for it (`evidenceStorageEnv`); the main key has no access at all (ADR 0006 Q4).
+   */
+  S3_BUCKET_EVIDENCE: z.string().default("commonair-evidence"),
 });
 
 export const authEnv = z.object({
@@ -177,7 +182,10 @@ export const mediaEnv = z.object({
   INGEST_WHIP_PUBLIC_URL: z.url().default("http://localhost:8889/live"),
   TRANSCODE_VIEWER_THRESHOLD: z.coerce.number().int().nonnegative().default(50),
   TRANSCODE_HWACCEL: z.enum(["auto", "nvenc", "none"]).default("auto"),
-  /** CSAM hash-match hook: `none` (default) or `stub` (matches SHA-256s listed in HASH_MATCH_LIST_FILE; harness only). */
+  /**
+   * Deprecated (E4c): replaced by `moderationEnv`, which always runs the matcher. Removed once
+   * services/media moves to `@commonair/moderation`.
+   */
   HASH_MATCH_PROVIDER: z.enum(["none", "stub"]).default("none"),
   HASH_MATCH_LIST_FILE: z.string().optional(),
   /** Scratch space for recordings, clip cuts and thumbnails (defaults to <tmpdir>/commonair-media). */
@@ -188,6 +196,70 @@ export const mediaEnv = z.object({
   MEDIA_WORK_DIR_MIN_FREE_BYTES: z.coerce.number().int().nonnegative().default(2_147_483_648),
   /** Concurrent adaptive ladders per host; unset picks 2 with NVENC or one per 4 CPU cores. */
   TRANSCODE_MAX_LADDERS: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional()),
+});
+
+/** X25519 PKCS#8 DER prefix: SEQUENCE, version 0, AlgorithmIdentifier 1.3.101.110, OCTET STRING(OCTET STRING(32)). */
+const X25519_PKCS8_PREFIX = "302e020100300506032b656e04220420";
+const base64Bytes = (v: string): Uint8Array | null => {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(v)) return null;
+  try {
+    return Uint8Array.from(atob(v), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+};
+const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+/**
+ * Trust & safety (ADR 0006, docs/testing/e4c-selectors.md). Read by media, the worker and the API.
+ * Nothing here can switch the pipeline off: only providers and the sample interval are chosen,
+ * and an invalid value makes the service refuse to start.
+ */
+const moderationShape = z.object({
+  /** Seconds between sampled live frames; the effective interval is the smaller of this and the governance setting. */
+  MODERATION_SAMPLE_SECONDS: z.coerce.number().int().min(2).max(60).default(10),
+  /** Operator CSAM hash list (one PDQ hex per line); empty = none (the database block list always loads). */
+  MODERATION_HASHLIST_CSAM: z.string().default(""),
+  /** Operator NCII hash list (StopNCII or similar), same format. */
+  MODERATION_HASHLIST_NCII: z.string().default(""),
+  /** `onnx` (the default open-weight model) or `scripted` (test hooks only). */
+  MODERATION_CLASSIFIER: z.enum(["onnx", "scripted"]).default("onnx"),
+  /** Path to the ONNX model; empty = the path `bun scripts/fetch-model.ts` writes. Checked by sha256 on load. */
+  MODERATION_CLASSIFIER_MODEL: z.string().default(""),
+  /**
+   * Harness only, never on a public instance: allows the scripted classifier and the
+   * `/internal/moderation/*` hooks. Services log a warning at every start while it is on.
+   */
+  MODERATION_TEST_HOOKS: bool.default(false),
+});
+export const moderationEnv = moderationShape.superRefine((env, ctx) => {
+  if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
+    ctx.addIssue({
+      code: "custom",
+      path: ["MODERATION_CLASSIFIER"],
+      message: "the scripted classifier needs MODERATION_TEST_HOOKS=true (harness only)",
+    });
+});
+
+/** The evidence public key, raw 32-byte X25519, base64. Media, the worker and the API seal with it; none can open. */
+export const evidenceSealEnv = z.object({
+  EVIDENCE_PUBLIC_KEY: z
+    .string()
+    .refine((v) => base64Bytes(v)?.length === 32, "must be a base64 raw 32-byte X25519 public key"),
+});
+
+/** The evidence private key (X25519 PKCS#8 DER, base64). Only the API's legal-view handlers use it. */
+export const evidenceOpenEnv = z.object({
+  EVIDENCE_PRIVATE_KEY: z.string().refine((v) => {
+    const b = base64Bytes(v);
+    return b?.length === 48 && hexOf(b.subarray(0, 16)) === X25519_PKCS8_PREFIX;
+  }, "must be a base64 X25519 PKCS#8 private key"),
+});
+
+/** The evidence bucket's own Garage key, read and write on that bucket only. Worker only. */
+export const evidenceStorageEnv = z.object({
+  S3_EVIDENCE_ACCESS_KEY_ID: z.string().min(1),
+  S3_EVIDENCE_SECRET_ACCESS_KEY: z.string().min(1),
 });
 
 export const playbackEnv = z.object({
@@ -352,6 +424,10 @@ export const ALL_ENV_SCHEMAS = {
   mailEnv,
   paymentsEnv,
   mediaEnv,
+  moderationEnv: moderationShape,
+  evidenceSealEnv,
+  evidenceOpenEnv,
+  evidenceStorageEnv,
   playbackEnv,
   integrityEnv,
   developerEnv,

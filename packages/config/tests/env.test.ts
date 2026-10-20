@@ -4,7 +4,17 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
-import { ALL_ENV_SCHEMAS, EnvError, coreEnv, instanceSite, loadEnv, paymentsEnv } from "../src/env.ts";
+import {
+  ALL_ENV_SCHEMAS,
+  EnvError,
+  coreEnv,
+  evidenceOpenEnv,
+  evidenceSealEnv,
+  instanceSite,
+  loadEnv,
+  moderationEnv,
+  paymentsEnv,
+} from "../src/env.ts";
 import { SITE, sourceLink } from "../src/site.ts";
 
 const examplePath = fileURLToPath(new URL("../../../.env.example", import.meta.url));
@@ -47,6 +57,46 @@ describe("env", () => {
       "NODE_ENV",
       "PUBLIC_URL",
     ]);
+  });
+
+  test("moderation config fails closed and cannot switch the pipeline off", () => {
+    const d = loadEnv(moderationEnv, {});
+    expect(d).toMatchObject({
+      MODERATION_SAMPLE_SECONDS: 10,
+      MODERATION_CLASSIFIER: "onnx",
+      MODERATION_TEST_HOOKS: false,
+    });
+    expect(Object.keys(moderationEnv.shape).some((k) => /ENABLED|DISABLE|OFF/.test(k))).toBe(false);
+    for (const v of ["0", "1", "61", "abc"])
+      expect(() => loadEnv(moderationEnv, { MODERATION_SAMPLE_SECONDS: v })).toThrow(EnvError);
+    expect(loadEnv(moderationEnv, { MODERATION_SAMPLE_SECONDS: "2" }).MODERATION_SAMPLE_SECONDS).toBe(2);
+    expect(() => loadEnv(moderationEnv, { MODERATION_CLASSIFIER: "none" })).toThrow(EnvError);
+    expect(() => loadEnv(moderationEnv, { MODERATION_CLASSIFIER: "scripted" })).toThrow(/MODERATION_TEST_HOOKS/);
+    expect(
+      loadEnv(moderationEnv, { MODERATION_CLASSIFIER: "scripted", MODERATION_TEST_HOOKS: "true" })
+        .MODERATION_CLASSIFIER,
+    ).toBe("scripted");
+  });
+
+  test("evidence keys must be a real X25519 keypair encoding", async () => {
+    const pair = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as unknown as {
+      publicKey: CryptoKey;
+      privateKey: CryptoKey;
+    };
+    const pub = Buffer.from(await crypto.subtle.exportKey("raw", pair.publicKey)).toString("base64");
+    const priv = Buffer.from(await crypto.subtle.exportKey("pkcs8", pair.privateKey)).toString("base64");
+    expect(loadEnv(evidenceSealEnv, { EVIDENCE_PUBLIC_KEY: pub }).EVIDENCE_PUBLIC_KEY).toBe(pub);
+    expect(loadEnv(evidenceOpenEnv, { EVIDENCE_PRIVATE_KEY: priv }).EVIDENCE_PRIVATE_KEY).toBe(priv);
+    expect(() => loadEnv(evidenceSealEnv, {})).toThrow(EnvError);
+    expect(() => loadEnv(evidenceSealEnv, { EVIDENCE_PUBLIC_KEY: priv })).toThrow(EnvError);
+    expect(() => loadEnv(evidenceSealEnv, { EVIDENCE_PUBLIC_KEY: "not base64!" })).toThrow(EnvError);
+    expect(() => loadEnv(evidenceOpenEnv, { EVIDENCE_PRIVATE_KEY: pub })).toThrow(EnvError);
+    const ed = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"])) as unknown as {
+      publicKey: CryptoKey;
+      privateKey: CryptoKey;
+    };
+    const edPriv = Buffer.from(await crypto.subtle.exportKey("pkcs8", ed.privateKey)).toString("base64");
+    expect(() => loadEnv(evidenceOpenEnv, { EVIDENCE_PRIVATE_KEY: edPriv })).toThrow(EnvError);
   });
 
   test("refuses live Stripe keys", () => {

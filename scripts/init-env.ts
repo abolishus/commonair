@@ -33,6 +33,16 @@ if (existsSync(target) && !merge && !process.argv.includes("--force")) {
 const hex = (bytes: number) =>
   Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 const { pkcs8B64 } = await generateSigningKey();
+// Evidence keypair (ADR 0006 Q4): raw 32-byte public key and PKCS#8 private key, base64.
+const b64 = (b: ArrayBuffer) => Buffer.from(b).toString("base64");
+const evidence = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
+const evidencePublic = b64(await crypto.subtle.exportKey("raw", evidence.publicKey));
+const evidencePrivate = b64(await crypto.subtle.exportKey("pkcs8", evidence.privateKey));
+// A merge must never pair a kept half of the keypair with a fresh other half.
+if (existing.has("EVIDENCE_PUBLIC_KEY") !== existing.has("EVIDENCE_PRIVATE_KEY")) {
+  console.error(`${target} has only one half of the evidence keypair; restore the other half or remove both`);
+  process.exit(1);
+}
 
 const out = readFileSync(".env.example", "utf8")
   .replace(/\r\n/g, "\n")
@@ -42,10 +52,12 @@ const out = readFileSync(".env.example", "utf8")
     if (key !== undefined && existing.has(key)) return `${key}=${existing.get(key)}`;
     if (line.endsWith("=__generate_ed25519__")) return `${key}=${pkcs8B64}`;
     if (line.endsWith("=__generate_hex64__")) return `${key}=${hex(32)}`;
+    if (line.endsWith("=__generate_x25519_public__")) return `${key}=${evidencePublic}`;
+    if (line.endsWith("=__generate_x25519_private__")) return `${key}=${evidencePrivate}`;
     if (!line.endsWith("=__generate__")) return line;
     // Garage requires its own key formats: GK + 24 hex for ids, 64 hex for secrets.
-    if (key === "S3_ACCESS_KEY_ID") return `${key}=GK${hex(12)}`;
-    if (key === "S3_SECRET_ACCESS_KEY") return `${key}=${hex(32)}`;
+    if (key === "S3_ACCESS_KEY_ID" || key === "S3_EVIDENCE_ACCESS_KEY_ID") return `${key}=GK${hex(12)}`;
+    if (key === "S3_SECRET_ACCESS_KEY" || key === "S3_EVIDENCE_SECRET_ACCESS_KEY") return `${key}=${hex(32)}`;
     return `${key}=${randomSecret("", 32)}`;
   })
   .join("\n");
