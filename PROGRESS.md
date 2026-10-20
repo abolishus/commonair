@@ -25,6 +25,12 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 Manual adapter first, then Stripe against stripe-mock (PLAN.md E4b). Plan and units in
 HANDOFF.md "Session six in flight" and `.claude/briefs/e4b/`.
 
+Paused 2026-10-20 at the user's request. On `main`: the contract step, migrations 0013–0014, the
+operator role CLI, `packages/payments` scaffold, the spec `docs/testing/e4b-selectors.md`, and
+the worker money jobs (expiry, renewal, hold release; reviewed, fix round merged). Built but not
+merged (branches listed in HANDOFF.md "Resume point"): API checkout, API reports, web Support
+dialog, harness `e4b-money`; web money pages unfinished. Not run live by the user yet.
+
 ## Session five (2026-10-18): E4a design system (in progress; resumed 2026-10-19)
 
 Application design only (PLAN.md E4a). Mockup canvas: <https://claude.ai/artifact/Ve5J5XjRZV42eRE2cdReVd>
