@@ -61,12 +61,26 @@ e4b doc in `apps/web/tests/selectors.test.ts` (multi-id cells, `<n>` templates) 
 disjointness check in `i18n.test.ts`. Targeted checks on merged main: tsc + unit tests in web,
 ui, api, harness, worker, ledger, payments, contracts; api `test:int`; `vp build`.
 
-In flight: unit **G** (Stripe, `.claude/briefs/e4b/G-stripe.md`) and unit **H** (payout
-reservation as of `periodEnd`, optional `WorkerContext.money`), each in its own worktree.
-Still open: PageTabs/ChoiceToggle per-item `disabled`/`data-testid` (+ `ChoiceToggle wrap`), then
-switch the Support dialog and treasury tabs to them; channel accent in `ChannelSummary`; Support
-board fixture; spec decision on unpaid gifts holding recipients' slots for `PAYMENT_PENDING_DAYS`
-(A review M3: let a self-subscribe or paid gift take over, or cap open unpaid gifts per gifter).
+Then **G** (Stripe: fetch client, webhook with redacted `payment_events`, Connect onboarding +
+visit sync, `STRIPE_CONNECT_WEBHOOK_SECRET`, harness `--set provider=stripe`; review 1 HIGH —
+renewals dropped — fixed and re-reviewed; follow-up moved the refund call outside the row lock),
+**H** (payouts reserve the running-minimum balance from `periodEnd` to now; hold releases dated
+when due; `releaseDueHolds` refuses `asOf` > 60 s ahead; optional `WorkerContext.money`; no HIGH)
+and **I** (PageTabs per-tab `disabled`/`data-testid`/`aria-describedby`/`afterList`, ChoiceToggle
+`wrap`, Support dialog + treasury tabs on PageTabs, channel accent on ChannelHeader and the Support
+dialog, Support board as shipped; no HIGH) are merged. **E4b is code-complete; nothing is run
+live yet.** The user runs: `bun run verify`, `e4b-money` (manual, web and `via=api`), `e4b-money
+--set provider=stripe --set via=api` against stripe-mock (the API refuses a zero Stripe fee, so a
+stripe-mock fixture without a fee stalls confirms), Storybook (Support, PageTabs, ChoiceToggle,
+ChannelHeader accents) and the browser pass on `/revenue`, `/treasury`, `/transparency`, the
+Support dialog and `/settings/subscriptions`.
+
+Open decisions for the user: unpaid gifts hold recipients' slots for `PAYMENT_PENDING_DAYS` (A
+review M3); money Stripe collects after we ended a subscription is booked `paid_after_end` (the
+treasurer refunds it) rather than refused. Smaller: the webhook rate limit is a local constant in
+`stripe-webhook.ts` (could move to `DEFAULT_RATE_LIMITS`); a Stripe refund that times out is
+marked failed though Stripe may have taken it (a same-amount retry reuses the idempotency key);
+Stripe Connect transfers are out of scope; `packages/ui/README.md` doesn't list the new props.
 
 ### Resume point (2026-10-20, stopped at the user's request) — superseded by session seven
 

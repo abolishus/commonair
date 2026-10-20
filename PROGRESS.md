@@ -24,7 +24,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 Manual adapter first, then Stripe against stripe-mock (PLAN.md E4b). Plan and units in
 HANDOFF.md "Session six in flight" and `.claude/briefs/e4b/`.
-Session seven (2026-10-20): A–F reviewed and merged (manual adapter, web pages, harness `e4b-money`); G (Stripe) and H (ledger/worker follow-ups) in flight. Not yet run by the user: verify, e4b-money.
+Session seven (2026-10-20): all nine units (A–I) reviewed and merged — manual adapter, Stripe adapter, web pages, harness `e4b-money` (manual and `provider=stripe`), ledger/worker and ui follow-ups. E4b is code-complete; not yet run by the user: verify, e4b-money, Storybook, browser.
 
 Paused 2026-10-20 at the user's request. On `main`: the contract step, migrations 0013–0014, the
 operator role CLI, `packages/payments` scaffold, the spec `docs/testing/e4b-selectors.md`, and
