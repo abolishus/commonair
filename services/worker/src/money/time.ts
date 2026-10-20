@@ -5,10 +5,16 @@
 
 export const DAY_MS = 86_400_000;
 
-/** When a renewal payment opened at `periodEnd` expires unpaid: the period end plus the pending window. */
-export function renewalExpiresAt(periodEnd: Date, pendingDays: number): Date {
+/** The least time a subscriber gets to pay a renewal, even one opened late (after an outage). */
+export const MIN_RENEWAL_WINDOW_MS = DAY_MS;
+
+/**
+ * When a renewal payment opened at `now` for a period that ended at `periodEnd` expires unpaid:
+ * the period end plus the pending window, but never less than a day from now.
+ */
+export function renewalExpiresAt(periodEnd: Date, pendingDays: number, now: Date = periodEnd): Date {
   if (!Number.isInteger(pendingDays) || pendingDays < 1) throw new RangeError("pendingDays must be a positive integer");
-  return new Date(periodEnd.getTime() + pendingDays * DAY_MS);
+  return new Date(Math.max(periodEnd.getTime() + pendingDays * DAY_MS, now.getTime() + MIN_RENEWAL_WINDOW_MS));
 }
 
 /** A pending payment is expired once `expiresAt` is at or before `now`; no expiry means it never expires. */
@@ -36,12 +42,15 @@ export interface BatchLoopResult {
 }
 
 /**
- * Run `step(limit)` until it returns fewer rows than the batch (done) or the time budget is spent.
- * `step` returns how many rows it consumed; a full batch means there may be more.
+ * What one step did: rows consumed, and whether more may be waiting. A bare number means
+ * "more" exactly when it filled the batch.
  */
+export type BatchStep = number | { rows: number; more: boolean };
+
+/** Run `step(limit)` until it reports no more work or the time budget is spent. */
 export async function runBatches(
   opts: BatchLoopOptions,
-  step: (limit: number) => Promise<number>,
+  step: (limit: number) => Promise<BatchStep>,
 ): Promise<BatchLoopResult> {
   if (!Number.isInteger(opts.batchSize) || opts.batchSize < 1) throw new RangeError("batchSize must be positive");
   const clock = opts.clock ?? Date.now;
@@ -50,9 +59,11 @@ export async function runBatches(
   let rows = 0;
   for (;;) {
     if (clock() - started >= opts.budgetMs) return { batches, rows, exhausted: true };
-    const n = await step(opts.batchSize);
+    const r = await step(opts.batchSize);
+    const n = typeof r === "number" ? r : r.rows;
+    const more = typeof r === "number" ? r >= opts.batchSize : r.more;
     batches += 1;
     rows += n;
-    if (n < opts.batchSize) return { batches, rows, exhausted: false };
+    if (!more) return { batches, rows, exhausted: false };
   }
 }

@@ -19,10 +19,12 @@ import { renewalExpiresAt, runBatches } from "./time.ts";
 
 const s = schema.subscriptions;
 
-export type RenewOutcome = "renewed" | "canceled" | "gift" | "no_tiers" | "skipped";
+/** `reused`: an open renewal already existed (defence in depth), so none was added. */
+export type RenewOutcome = "renewed" | "reused" | "canceled" | "gift" | "no_tiers" | "skipped";
 
 export interface RenewResult {
   renewed: number;
+  reused: number;
   canceled: number;
   giftsEnded: number;
   noTiers: number;
@@ -91,7 +93,10 @@ export async function renewOne(
       .where(and(eq(schema.channelSubTiers.channelId, sub.channelId), eq(schema.channelSubTiers.tier, sub.tier)));
     if (!tier) return end("expired", "no_tiers");
 
-    // Never a second open renewal for this subscription (the lock above serialises the check).
+    // Never a second open renewal for this subscription (the lock above serialises the check). The
+    // normal flow cannot get here with one open (renewal moves the row to past_due in the same
+    // transaction), but a subscription put back to `active` by hand or by a future code path while
+    // its renewal is still pending must not be billed twice.
     const [open] = await tx
       .select({ id: schema.payments.id })
       .from(schema.payments)
@@ -118,7 +123,7 @@ export async function renewOne(
           currency: cfg.currency,
           tier: sub.tier,
           quantity: 1,
-          expiresAt: renewalExpiresAt(sub.currentPeriodEnd, cfg.pendingDays),
+          expiresAt: renewalExpiresAt(sub.currentPeriodEnd, cfg.pendingDays, now),
           createdAt: now,
           updatedAt: now,
         },
@@ -130,7 +135,7 @@ export async function renewOne(
       .update(s)
       .set({ status: "past_due", updatedAt: now })
       .where(and(eq(s.id, sub.id), eq(s.status, "active")));
-    return { outcome: open ? ("skipped" as const) : ("renewed" as const) };
+    return { outcome: open ? ("reused" as const) : ("renewed" as const) };
   });
 }
 
@@ -140,7 +145,7 @@ export async function renewDueSubscriptions(
   opts: { clock?: () => number; reference?: () => string } = {},
 ): Promise<RenewResult> {
   const now = ctx.now();
-  const totals = { renewed: 0, canceled: 0, giftsEnded: 0, noTiers: 0, skipped: 0 };
+  const totals = { renewed: 0, reused: 0, canceled: 0, giftsEnded: 0, noTiers: 0, skipped: 0 };
   // Keyset cursor, so a row that is skipped (Stripe) or fails is never revisited this run.
   let cursor: { end: Date; id: string } | undefined;
   const loop = await runBatches(
@@ -168,6 +173,7 @@ export async function renewDueSubscriptions(
         try {
           const r = await renewOne(ctx, row.id, now, cfg, opts.reference);
           if (r.outcome === "renewed") totals.renewed += 1;
+          else if (r.outcome === "reused") totals.reused += 1;
           else if (r.outcome === "canceled") totals.canceled += 1;
           else if (r.outcome === "gift") totals.giftsEnded += 1;
           else if (r.outcome === "no_tiers") totals.noTiers += 1;
