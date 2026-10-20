@@ -27,6 +27,8 @@ import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
 import { router } from "./router.ts";
 
 const MAX_INTERNAL_BODY = 64 * 1024;
+/** Same as `STRIPE_WEBHOOK_PATH` in money/stripe-webhook.ts (not imported: that module loads lazily). */
+const STRIPE_WEBHOOK_ROUTE = "/api/webhooks/stripe";
 
 export interface ApiApp {
   fetch(req: Request, server?: Pick<Server<undefined>, "requestIP">): Promise<Response>;
@@ -164,6 +166,14 @@ export function createApp(deps: Deps): ApiApp {
       return new Response(null, { status });
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
+
+    // Stripe webhooks: server to server, signature-authenticated, no cookies or CORS. The module
+    // (and with it every Stripe module) loads only when the Stripe adapter is configured.
+    if (path === STRIPE_WEBHOOK_ROUTE && deps.env.PAYMENTS_PROVIDER === "stripe") {
+      const { handleStripeWebhook } = await import("./money/stripe-webhook.ts");
+      const info = await requestInfo(raw, url, server);
+      return handleStripeWebhook(deps, raw, info.rateLimitHash);
+    }
 
     if (raw.method === "OPTIONS" && (path.startsWith("/api/") || path.startsWith("/rpc/"))) return preflight(raw);
     const cors = corsHeaders(raw);

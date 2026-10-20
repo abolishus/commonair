@@ -22,6 +22,16 @@ export function parseVia(value: string): Via {
   throw new Error(`--set via=${value}: expected one of ${VIA.join(", ")}`);
 }
 
+export const PROVIDERS = ["manual", "stripe"] as const;
+export type Provider = (typeof PROVIDERS)[number];
+
+/** `--set provider=<manual|stripe>`: which payment adapter the stack under test runs. */
+export function parseProvider(value: string): Provider {
+  const v = value.trim().toLowerCase();
+  if ((PROVIDERS as readonly string[]).includes(v)) return v as Provider;
+  throw new Error(`--set provider=${value}: expected one of ${PROVIDERS.join(", ")}`);
+}
+
 // ---------------------------------------------------------------- split rules
 
 /** The `platform.cut` setting (as `money.support` reports it). */

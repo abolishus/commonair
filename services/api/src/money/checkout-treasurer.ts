@@ -6,7 +6,7 @@
  * accounts. Each runs in one transaction with its ledger posting, outbox events and audit row;
  * state changes are compare-and-set or row-locked so a repeat or a race cannot double-apply.
  */
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, count, desc, eq, inArray, lt } from "drizzle-orm";
 import { minorUnits } from "@commonair/contracts/currency";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
@@ -19,17 +19,17 @@ import {
   post,
   postReversal,
 } from "@commonair/ledger";
-import { normalizeManualReference } from "@commonair/payments";
+import { createAdapter, normalizeManualReference } from "@commonair/payments";
 import { audit } from "../events/audit.ts";
 import { broadcasterFields, emit } from "../events/outbox.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso, isoOrNull, loadUsersPublic } from "../lib/dto.ts";
-import { badRequest, conflict, notFound } from "../lib/errors.ts";
+import { badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { confirmedPeriod, disputeOutcome, tierCode } from "./checkout-rules.ts";
 import { endSubscriptions, invalidateSubscribers, userEventFields } from "./checkout-shared.ts";
 
-const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts, users } = schema;
+const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts, users, auditLog } = schema;
 type PaymentRow = typeof payments.$inferSelect;
 type ChannelRow = typeof channels.$inferSelect;
 
@@ -67,6 +67,201 @@ function confirmedPrice(p: PaymentRow, s: typeof subscriptions.$inferSelect): nu
 const paidSubscriptions = (p: PaymentRow) =>
   p.subscriptionId ? eq(subscriptions.id, p.subscriptionId) : eq(subscriptions.giftPaymentId, p.id);
 
+export interface ConfirmOptions {
+  /** When the money arrived (the subscription period starts here). */
+  receivedAt: Date;
+  now: Date;
+  feeCents: number;
+  taxCents: number;
+  /** Replace the pending reference with the provider's payment id (Stripe: the PaymentIntent). */
+  providerRef?: string;
+  /** The provider's own period end for subscriptions (Stripe's invoice line), when it has one. */
+  periodEnd?: Date | null;
+}
+
+/**
+ * Confirm a locked `pending` payment in the caller's transaction: status `succeeded`, the
+ * `paymentSucceeded` posting (with fee and tax), subscriptions `active` (a renewal continues its
+ * period and emits no `channel.subscribe`), the tip, and their events. Manual and provider paths
+ * share it; the caller writes its own audit row.
+ */
+export async function confirmPaymentTx(
+  tx: Executor,
+  p: PaymentRow,
+  o: ConfirmOptions,
+): Promise<{ channelId: string; subscribers: string[] }> {
+  const { receivedAt, now } = o;
+  const c = await paymentChannel(tx, p);
+  const [updated] = await tx
+    .update(payments)
+    .set({
+      status: "succeeded",
+      succeededAt: receivedAt,
+      feeCents: o.feeCents,
+      taxCents: o.taxCents,
+      ...(o.providerRef ? { providerRef: o.providerRef } : {}),
+      updatedAt: now,
+    })
+    .where(and(eq(payments.id, p.id), eq(payments.status, "pending")))
+    .returning({ id: payments.id });
+  if (!updated) throw conflict("This payment is no longer pending");
+
+  const { cut } = await loadMoneySettings(tx);
+  await post(
+    tx,
+    paymentSucceeded({
+      paymentId: p.id,
+      paymentKind: p.kind === "tip" ? "tip" : "subscription",
+      provider: p.provider,
+      settlement: "cash",
+      creatorUserId: c.ownerId,
+      grossCents: p.amountCents,
+      taxCents: o.taxCents,
+      feeCents: o.feeCents,
+      currency: p.currency,
+      cut,
+      occurredAt: receivedAt,
+    }),
+  );
+
+  const subscribers: string[] = [];
+  if (p.kind === "subscription") {
+    const gift = p.subscriptionId === null;
+    if (gift && p.tier !== null) {
+      await emit(
+        tx,
+        "channel.subscription.gift",
+        c.id,
+        {
+          ...broadcasterFields(c),
+          ...((await userEventFields(tx, p.userId)) ?? { user_id: null, user_login: null, user_name: null }),
+          total: p.quantity,
+          tier: tierCode(p.tier),
+          is_anonymous: false,
+        },
+        now,
+      );
+    }
+    const subs = await tx
+      .select()
+      .from(subscriptions)
+      .where(and(paidSubscriptions(p), inArray(subscriptions.status, ["incomplete", "past_due"])))
+      .for("update");
+    for (const s of subs) {
+      const period = confirmedPeriod(s, receivedAt);
+      const [activated] = await tx
+        .update(subscriptions)
+        .set({
+          status: "active",
+          currentPeriodStart: period.start,
+          currentPeriodEnd: o.periodEnd && o.periodEnd > period.start ? o.periodEnd : period.end,
+          priceCents: confirmedPrice(p, s),
+          currency: p.currency,
+          updatedAt: now,
+        })
+        .where(and(eq(subscriptions.id, s.id), eq(subscriptions.status, s.status)))
+        .returning();
+      if (!activated) continue;
+      subscribers.push(activated.subscriberId);
+      if (period.renewal) continue;
+      const user = await userEventFields(tx, activated.subscriberId);
+      if (user)
+        await emit(
+          tx,
+          "channel.subscribe",
+          c.id,
+          { ...broadcasterFields(c), ...user, tier: tierCode(activated.tier), is_gift: gift },
+          now,
+        );
+    }
+  } else if (p.tipId) {
+    const [tip] = await tx
+      .update(tips)
+      .set({ status: "succeeded" })
+      .where(and(eq(tips.id, p.tipId), eq(tips.status, "pending")))
+      .returning();
+    if (tip) {
+      const from = tip.anonymous ? null : await userEventFields(tx, tip.fromUserId);
+      await emit(
+        tx,
+        "channel.tip",
+        c.id,
+        {
+          ...broadcasterFields(c),
+          ...(from ?? { user_id: null, user_login: null, user_name: null }),
+          is_anonymous: tip.anonymous || from === null,
+          amount: { value: tip.amountCents, decimal_places: minorUnits(tip.currency), currency: tip.currency },
+          message: tip.message,
+        },
+        now,
+      );
+    }
+  }
+
+  return { channelId: c.id, subscribers };
+}
+
+export interface ReverseOptions {
+  kind: "refund" | "chargeback";
+  amountCents: number;
+  /** Treasurer's words (manual) or null (provider events). Never goes to the ledger. */
+  reason: string | null;
+  /** The provider's refund or dispute id (Stripe); null for manual. */
+  providerRef: string | null;
+  /** Chargebacks: `lost` (manual, clawed back for good) or `open` (Stripe, still contested). */
+  disputeStatus: "closed" | "lost" | "open";
+  disputeFeeCents?: number;
+  now: Date;
+}
+
+/**
+ * Refund or charge back a locked payment in the caller's transaction: `disputes` row,
+ * `postReversal`, payment and tip status, and the subscriptions it paid for end when the outcome
+ * says so. Returns the dispute id and the subscribers whose chat badge must be refreshed.
+ */
+export async function reversePaymentTx(
+  tx: Executor,
+  p: PaymentRow,
+  o: ReverseOptions,
+): Promise<{ disputeId: string; channelId: string; ended: string[]; status: PaymentRow["status"] }> {
+  const outcome = disputeOutcome(o.kind, p, o.amountCents);
+  if (!outcome.ok) throw outcome.code === "CONFLICT" ? conflict(outcome.reason) : badRequest(outcome.reason);
+  const c = await paymentChannel(tx, p);
+  const disputeId = uuidv7();
+  await tx.insert(disputes).values({
+    id: disputeId,
+    paymentId: p.id,
+    kind: o.kind,
+    status: o.kind === "refund" ? "closed" : o.disputeStatus,
+    amountCents: o.amountCents,
+    providerRef: o.providerRef,
+    reason: o.reason,
+    resolvedAt: o.disputeStatus === "open" ? null : o.now,
+  });
+  try {
+    // The ledger reverses with the cut recorded on the original posting, not today's.
+    await postReversal(tx, {
+      kind: o.kind,
+      disputeId,
+      paymentId: p.id,
+      amountCents: o.amountCents,
+      occurredAt: o.now,
+      ...(o.kind === "chargeback" && o.disputeFeeCents ? { disputeFeeCents: o.disputeFeeCents } : {}),
+    });
+  } catch (err) {
+    if (err instanceof ReversalExceedsPaymentError) throw badRequest("That is more than is left to reverse");
+    if (err instanceof PaymentNotFoundError) throw conflict("This payment was never posted to the ledger");
+    throw err;
+  }
+  await tx
+    .update(payments)
+    .set({ status: outcome.status, refundedCents: outcome.refundedCents, updatedAt: o.now })
+    .where(eq(payments.id, p.id));
+  if (p.tipId) await tx.update(tips).set({ status: outcome.status }).where(eq(tips.id, p.tipId));
+  const ended = outcome.endsSubscriptions ? await endSubscriptions(tx, c, paidSubscriptions(p), o.now) : [];
+  return { disputeId, channelId: c.id, ended, status: outcome.status };
+}
+
 function dispute(kind: "refund" | "chargeback") {
   const procedure = kind === "refund" ? os.money.treasurer.refund : os.money.treasurer.chargeback;
   return procedure.handler(async ({ context, input }) => {
@@ -74,47 +269,80 @@ function dispute(kind: "refund" | "chargeback") {
     const caller = requireCaller(context);
     const reason = input.reason.trim();
     const now = deps.now();
+    const [current] = await deps.db.select().from(payments).where(eq(payments.id, input.paymentId));
+    if (!current) throw notFound("Payment not found");
+    if (current.provider !== "manual") {
+      // Card payments: disputes come from the provider; a refund is asked of it and posted when
+      // its refund event arrives (stripe-events.ts), so the ledger follows what the provider did.
+      if (kind === "chargeback") throw conflict("Chargebacks on card payments arrive from the payment provider");
+      const adapter = createAdapter(deps.env);
+      if (adapter.provider !== current.provider || !adapter.refund)
+        throw precondition("payment_provider", "This instance cannot refund through that payment provider");
+      const refund = adapter.refund.bind(adapter);
+      await deps.db.transaction(async (tx) => {
+        // Row lock: two treasurers (or a double click) cannot both pass the pending check.
+        const p = await lockedPayment(tx, input.paymentId);
+        const outcome = disputeOutcome(kind, p, input.amountCents);
+        if (!outcome.ok) throw outcome.code === "CONFLICT" ? conflict(outcome.reason) : badRequest(outcome.reason);
+        // One request at a time: until Stripe's charge.refunded posts the last one, refunded_cents
+        // (and so the rest and the idempotency key) would be stale.
+        const [asked] = await tx
+          .select({ n: count() })
+          .from(auditLog)
+          .where(
+            and(
+              eq(auditLog.action, "payment.refund_requested"),
+              eq(auditLog.subjectType, "payment"),
+              eq(auditLog.subjectId, p.id),
+            ),
+          );
+        const [posted] = await tx
+          .select({ n: count() })
+          .from(disputes)
+          .where(and(eq(disputes.paymentId, p.id), eq(disputes.kind, "refund")));
+        if ((asked?.n ?? 0) > (posted?.n ?? 0))
+          throw conflict("An earlier refund of this payment is still waiting for the payment provider");
+        const requested = await refund({
+          paymentId: p.id,
+          providerRef: p.providerRef,
+          amountCents: input.amountCents,
+          idempotencyKey: `refund-${p.id}-${p.refundedCents}-${input.amountCents}`,
+        });
+        await audit(tx, {
+          actorType: ACTOR,
+          actorId: caller.user.id,
+          action: "payment.refund_requested",
+          subjectType: "payment",
+          subjectId: p.id,
+          channelId: p.channelId,
+          reason,
+          details: { amountCents: input.amountCents, provider: p.provider, refundRef: requested.providerRef },
+        });
+      });
+      return { ok: true as const };
+    }
     const done = await deps.db.transaction(async (tx) => {
       // Row lock: a refund racing a chargeback (or itself) waits here and re-reads the rest.
       const p = await lockedPayment(tx, input.paymentId);
-      const outcome = disputeOutcome(kind, p, input.amountCents);
-      if (!outcome.ok) throw outcome.code === "CONFLICT" ? conflict(outcome.reason) : badRequest(outcome.reason);
-      const c = await paymentChannel(tx, p);
-      const disputeId = uuidv7();
-      await tx.insert(disputes).values({
-        id: disputeId,
-        paymentId: p.id,
+      const r = await reversePaymentTx(tx, p, {
         kind,
-        status: kind === "refund" ? "closed" : "lost",
         amountCents: input.amountCents,
         reason,
-        resolvedAt: now,
+        providerRef: null,
+        disputeStatus: kind === "refund" ? "closed" : "lost",
+        now,
       });
-      try {
-        // The ledger reverses with the cut recorded on the original posting, not today's.
-        await postReversal(tx, { kind, disputeId, paymentId: p.id, amountCents: input.amountCents, occurredAt: now });
-      } catch (err) {
-        if (err instanceof ReversalExceedsPaymentError) throw badRequest("That is more than is left to reverse");
-        if (err instanceof PaymentNotFoundError) throw conflict("This payment was never posted to the ledger");
-        throw err;
-      }
-      await tx
-        .update(payments)
-        .set({ status: outcome.status, refundedCents: outcome.refundedCents, updatedAt: now })
-        .where(eq(payments.id, p.id));
-      if (p.tipId) await tx.update(tips).set({ status: outcome.status }).where(eq(tips.id, p.tipId));
-      const ended = outcome.endsSubscriptions ? await endSubscriptions(tx, c, paidSubscriptions(p), now) : [];
       await audit(tx, {
         actorType: ACTOR,
         actorId: caller.user.id,
         action: kind === "refund" ? "payment.refund" : "payment.chargeback",
         subjectType: "payment",
         subjectId: p.id,
-        channelId: c.id,
+        channelId: r.channelId,
         reason,
-        details: { disputeId, amountCents: input.amountCents, status: outcome.status, kind: p.kind },
+        details: { disputeId: r.disputeId, amountCents: input.amountCents, status: r.status, kind: p.kind },
       });
-      return { channelId: c.id, ended };
+      return { channelId: r.channelId, ended: r.ended };
     });
     await invalidateSubscribers(deps, done.channelId, done.ended);
     return { ok: true as const };
@@ -177,120 +405,22 @@ export const treasurerCheckoutHandlers = {
       const p = await lockedPayment(tx, input.paymentId);
       if (p.status !== "pending") throw conflict(`This payment is ${p.status}, not pending`);
       if (p.kind === "membership_share") throw conflict("Member shares are not confirmed here");
+      if (p.provider !== "manual") throw conflict("Card payments are confirmed by the payment provider");
       // Backdating before checkout would skip the creator hold and could start an already-ended period.
       if (receivedAt.getTime() < p.createdAt.getTime() - CLOCK_SKEW_MS)
         throw badRequest("The payment cannot be received before its checkout was created");
-      const c = await paymentChannel(tx, p);
-      const [updated] = await tx
-        .update(payments)
-        .set({ status: "succeeded", succeededAt: receivedAt, updatedAt: now })
-        .where(and(eq(payments.id, p.id), eq(payments.status, "pending")))
-        .returning({ id: payments.id });
-      if (!updated) throw conflict("This payment is no longer pending");
-
-      const { cut } = await loadMoneySettings(tx);
-      await post(
-        tx,
-        paymentSucceeded({
-          paymentId: p.id,
-          paymentKind: p.kind === "tip" ? "tip" : "subscription",
-          provider: p.provider,
-          settlement: "cash",
-          creatorUserId: c.ownerId,
-          grossCents: p.amountCents,
-          taxCents: 0,
-          feeCents: 0,
-          currency: p.currency,
-          cut,
-          occurredAt: receivedAt,
-        }),
-      );
-
-      const subscribers: string[] = [];
-      if (p.kind === "subscription") {
-        const gift = p.subscriptionId === null;
-        if (gift && p.tier !== null) {
-          await emit(
-            tx,
-            "channel.subscription.gift",
-            c.id,
-            {
-              ...broadcasterFields(c),
-              ...((await userEventFields(tx, p.userId)) ?? { user_id: null, user_login: null, user_name: null }),
-              total: p.quantity,
-              tier: tierCode(p.tier),
-              is_anonymous: false,
-            },
-            now,
-          );
-        }
-        const subs = await tx
-          .select()
-          .from(subscriptions)
-          .where(and(paidSubscriptions(p), inArray(subscriptions.status, ["incomplete", "past_due"])))
-          .for("update");
-        for (const s of subs) {
-          const period = confirmedPeriod(s, receivedAt);
-          const [activated] = await tx
-            .update(subscriptions)
-            .set({
-              status: "active",
-              currentPeriodStart: period.start,
-              currentPeriodEnd: period.end,
-              priceCents: confirmedPrice(p, s),
-              currency: p.currency,
-              updatedAt: now,
-            })
-            .where(and(eq(subscriptions.id, s.id), eq(subscriptions.status, s.status)))
-            .returning();
-          if (!activated) continue;
-          subscribers.push(activated.subscriberId);
-          if (period.renewal) continue;
-          const user = await userEventFields(tx, activated.subscriberId);
-          if (user)
-            await emit(
-              tx,
-              "channel.subscribe",
-              c.id,
-              { ...broadcasterFields(c), ...user, tier: tierCode(activated.tier), is_gift: gift },
-              now,
-            );
-        }
-      } else if (p.tipId) {
-        const [tip] = await tx
-          .update(tips)
-          .set({ status: "succeeded" })
-          .where(and(eq(tips.id, p.tipId), eq(tips.status, "pending")))
-          .returning();
-        if (tip) {
-          const from = tip.anonymous ? null : await userEventFields(tx, tip.fromUserId);
-          await emit(
-            tx,
-            "channel.tip",
-            c.id,
-            {
-              ...broadcasterFields(c),
-              ...(from ?? { user_id: null, user_login: null, user_name: null }),
-              is_anonymous: tip.anonymous || from === null,
-              amount: { value: tip.amountCents, decimal_places: minorUnits(tip.currency), currency: tip.currency },
-              message: tip.message,
-            },
-            now,
-          );
-        }
-      }
-
+      const r = await confirmPaymentTx(tx, p, { receivedAt, now, feeCents: 0, taxCents: 0 });
       await audit(tx, {
         actorType: ACTOR,
         actorId: caller.user.id,
         action: "payment.confirm",
         subjectType: "payment",
         subjectId: p.id,
-        channelId: c.id,
+        channelId: r.channelId,
         reason: note,
         details: { kind: p.kind, amountCents: p.amountCents, quantity: p.quantity, receivedAt: iso(receivedAt) },
       });
-      return { channelId: c.id, subscribers };
+      return r;
     });
     await invalidateSubscribers(deps, done.channelId, done.subscribers);
     return { ok: true as const };
