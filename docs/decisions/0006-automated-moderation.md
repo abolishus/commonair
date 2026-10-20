@@ -100,6 +100,12 @@ Researched at the start of slice E4c. Dependency license judgments are recorded 
 are what the flows are designed against. Counsel reviews the flows, the request forms and the
 operator guide before any public instance launches.
 
+**Decided by the user on 2026-10-20:** evidence in sealed append-only Postgres plus a
+worker-only evidence bucket with a daily hash audit (Q4); explicit sexual content is prohibited
+even behind the 18+ gate, suggestive content gets the mature label (Q2); unresolved NCII requests
+are hidden automatically at 48 hours (Q6); the default classifier ships for sexual content only
+(Q2). The rest of this section is the head agent's proposal, accepted with the ADR.
+
 ### What exists today (found in the code)
 
 - `services/media/src/safety/` has a `HashMatcher` interface, but the default provider is
@@ -188,7 +194,7 @@ of TMK+PDQF. **Not** Hasher-Matcher-Actioner as a container.
 `sexual ≥ T2` (default 0.80, range 0.50–0.95) on a stream not labelled mature → T2 mature label.
 `sexual ≥ T1` (default 0.97, range 0.85–0.995) → T1 blur, delist and queue, whether or not the
 stream is mature, because explicit sexual content is prohibited even behind the 18+ gate
-(question 2 for the user). Other categories → T1 at their own T1 threshold once an adapter
+(decided by the user). Other categories → T1 at their own T1 threshold once an adapter
 scores them.
 
 ### Q3. NCMEC and other reporting bodies
@@ -304,7 +310,7 @@ review these flows and your own duties before launching a public instance."** It
   non-consensual, contact details and an electronic signature) starts the clock at receipt. The
   worker alerts the queue at 24 hours and escalates at 36 hours. **At 48 hours, if staff have not
   decided, the content is hidden automatically** (fail closed on the legal floor; audited; the
-  uploader can appeal), as question 3 for the user. Removed content is hashed into the local
+  uploader can appeal), as the user decided. Removed content is hashed into the local
   block list as NCII, so re-uploads match T0. The 48 hours and the escalation points are code
   and database constants.
 - **Sample interval.** `MODERATION_SAMPLE_SECONDS` (env, 2–60, default 10) and governance
