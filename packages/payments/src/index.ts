@@ -3,4 +3,7 @@
 
 /** Payment-provider adapters: `manual` (default) and the optional `stripe`. See README.md. */
 export * from "./adapter.ts";
+export * from "./factory.ts";
+export * from "./format.ts";
+export * from "./manual.ts";
 export * from "./reference.ts";
