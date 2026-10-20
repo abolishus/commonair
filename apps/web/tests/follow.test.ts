@@ -236,6 +236,7 @@ describe("summarize follow fields", () => {
     avatarUrl: null,
     live: null,
     followerCount: 12,
+    theme: {},
   };
   it("maps viewer.following and treats null/absent viewer as unknown", () => {
     const s = (viewer: unknown) => summarize({ ...base, viewer } as unknown as Parameters<typeof summarize>[0]);
@@ -243,5 +244,10 @@ describe("summarize follow fields", () => {
     expect(s({ following: false }).following).toBe(false);
     expect(s(null).following).toBeNull();
     expect(s(undefined).following).toBeNull();
+  });
+  it("carries the channel accent token, null when none was picked", () => {
+    const s = (theme: unknown) => summarize({ ...base, theme } as unknown as Parameters<typeof summarize>[0]);
+    expect(s({ accent: "teal" }).accent).toBe("teal");
+    expect(s({}).accent).toBeNull();
   });
 });

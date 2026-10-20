@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: CC-BY-SA-4.0
+import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Button } from "@commonair/ui/components/button";
 import { Breadcrumbs, PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
@@ -62,6 +63,35 @@ export const BreadcrumbStory: Story = {
   ),
 };
 export const PageTabsStory: Story = { name: "PageTabs", render: () => tabs };
+function PanelTabs(): React.JSX.Element {
+  const [tab, setTab] = React.useState("tip");
+  return (
+    <PageTabs
+      aria-label="Support options"
+      variant="default"
+      fullWidth
+      value={tab}
+      onValueChange={setTab}
+      afterList={
+        <p id="tabs-reason" className="text-muted-foreground">
+          This channel has no subscription tiers yet.
+        </p>
+      }
+      items={[
+        { id: "sub", label: "Subscribe", disabled: true, "aria-describedby": "tabs-reason" },
+        { id: "gift", label: "Gift subs", disabled: true, "aria-describedby": "tabs-reason" },
+        { id: "tip", label: "Tip", content: <p>Tip panel</p> },
+      ]}
+    />
+  );
+}
+/** Panel mode with disabled tabs: the reason sits between the list and the panels and describes the tabs. */
+export const PageTabsDisabled: Story = { name: "PageTabs disabled tabs", render: () => <PanelTabs /> };
+export const PageTabsDisabledMobile320: Story = {
+  ...PageTabsDisabled,
+  name: "PageTabs disabled tabs Mobile320",
+  globals: { viewport: { value: "mobile320" } },
+};
 export const Light: Story = { ...PageHeaderStory, globals: { theme: "light" } };
 export const Mobile320: Story = { ...PageHeaderStory, globals: { viewport: { value: "mobile320" } } };
 

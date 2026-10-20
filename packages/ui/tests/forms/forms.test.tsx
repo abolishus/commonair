@@ -225,6 +225,41 @@ describe("forms blocks", () => {
     expect(pressed()).toEqual([]);
   });
 
+  test("ChoiceToggle forwards per-option test ids and disabled, and wraps on request", () => {
+    const change = vi.fn<(value: string) => void>();
+    const { rerender } = render(
+      <ChoiceToggle
+        label="Count"
+        value="1"
+        onValueChange={change}
+        options={[
+          { value: "1", label: "1", "data-testid": "count-1" },
+          { value: "50", label: "50", "data-testid": "count-50", disabled: true },
+        ]}
+      />,
+    );
+    const group = () => screen.getByRole("group", { name: "Count" });
+    expect(group().className).not.toContain("flex-wrap");
+    expect(screen.getByTestId("count-1").textContent).toBe("1");
+    const fifty = screen.getByTestId("count-50");
+    expect(fifty.hasAttribute("disabled") || fifty.getAttribute("aria-disabled") === "true").toBe(true);
+    fireEvent.click(fifty);
+    expect(change).not.toHaveBeenCalled();
+    rerender(
+      <ChoiceToggle
+        label="Count"
+        value="1"
+        wrap
+        onValueChange={change}
+        options={[
+          { value: "1", label: "1" },
+          { value: "50", label: "50" },
+        ]}
+      />,
+    );
+    expect(group().className).toContain("flex-wrap");
+  });
+
   test("CopyField copies and reports success; secrets can be revealed", async () => {
     const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

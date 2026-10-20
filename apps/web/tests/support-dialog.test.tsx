@@ -93,6 +93,20 @@ describe("Support dialog", () => {
     expect(screen.queryByTestId("support-submit")).toBeNull();
   });
 
+  it("scopes the channel accent to the dialog, which renders outside the channel header", async () => {
+    const c = client(supportInfo(), async () => instructions);
+    wrap(<SupportButton channel="rivertide" channelName="Rivertide" accent="teal" signedIn client={c} />);
+    fireEvent.click(id("support-open"));
+    await waitFor(() => expect(screen.queryByTestId("support-submit")).not.toBeNull());
+    expect(id("support-dialog").getAttribute("data-accent")).toBe("teal");
+    expect(id("support-submit").closest("[data-accent]")).toBe(id("support-dialog"));
+  });
+
+  it("without an accent the dialog inherits the default accent tokens", async () => {
+    await open(client(supportInfo(), async () => instructions));
+    expect(id("support-dialog").hasAttribute("data-accent")).toBe(false);
+  });
+
   it("disables the submit while in flight and checks out once", async () => {
     let resolve: (r: CheckoutResult) => void = () => {};
     const c = client(supportInfo(), () => new Promise((r) => (resolve = r)));

@@ -107,3 +107,46 @@ describe("page stories", () => {
     expect(errors).toEqual([]);
   });
 });
+
+describe("Support board matches the shipped dialog (manual adapter)", () => {
+  const support = boards.find(([name]) => name === "Support")?.[1] as unknown as Record<
+    string,
+    { render: () => React.ReactElement } | undefined
+  >;
+  const show = (story: string) =>
+    render(
+      <LocaleProvider locale="en">
+        <TooltipProvider>{support[story]?.render()}</TooltipProvider>
+      </LocaleProvider>,
+    );
+
+  test("the form splits between creator and co-op only and has no card picker", () => {
+    show("Default");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.getAttribute("data-accent")).toBe("teal");
+    expect(screen.getByRole("tablist", { name: "Ways to support" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "90% to the creator, 10% to the co-op" })).toBeTruthy();
+    expect(dialog.textContent).toContain("Creator$4.50 · 90%Co-op$0.49 · 10%");
+    expect(dialog.textContent).not.toMatch(/processing|Pay with|Card ending/i);
+    expect(screen.getByRole("button", { name: "Subscribe for $4.99 / month" })).toBeTruthy();
+  });
+
+  test("the instructions step shows the CA- reference and amount instead of the form", () => {
+    show("Instructions");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toMatch(/CA-[0-9A-HJKMNP-TV-Z]{8}/);
+    expect(screen.getByRole("button", { name: "Copy reference" })).toBeTruthy();
+    expect(screen.queryByRole("tablist")).toBeNull();
+  });
+
+  test("without tiers, sub and gift are disabled and described by the reason", () => {
+    show("NoTiers");
+    const reason = screen.getByText(/has not set up subscriptions/);
+    for (const name of ["Subscribe", "Gift subs"]) {
+      const tab = screen.getByRole("tab", { name });
+      expect(tab.getAttribute("aria-describedby")).toBe(reason.id);
+      expect(tab.hasAttribute("disabled") || tab.getAttribute("aria-disabled") === "true").toBe(true);
+    }
+    expect(screen.getByRole("tab", { name: "Tip" }).getAttribute("aria-selected")).toBe("true");
+  });
+});

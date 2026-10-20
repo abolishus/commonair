@@ -37,3 +37,15 @@ export const ErrorState: Story = {
     </div>
   ),
 };
+/** Many presets wrap onto more rows at 320 px; an option can be disabled on its own. */
+export const WrapAndDisabledOption: Story = {
+  render: () => (
+    <ChoiceToggle
+      label="How many subs?"
+      defaultValue="5"
+      wrap
+      options={["1", "5", "10", "20", "50", "100"].map((value) => ({ value, label: value, disabled: value === "100" }))}
+    />
+  ),
+};
+export const WrapMobile320: Story = { ...WrapAndDisabledOption, globals: { viewport: { value: "mobile320" } } };

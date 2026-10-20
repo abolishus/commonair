@@ -22,3 +22,20 @@ export const Dark: Story = {};
 export const Light: Story = { globals: { theme: "light" } };
 export const Mobile320: Story = { globals: { viewport: { value: "mobile320" } } };
 export const Offline: Story = { args: { live: false, variant: "offline", title: "Usually live evenings" } };
+/** The header scopes the channel's accent: the avatar fallback and an un-accented AccentButton follow it. */
+export const Accents: Story = {
+  render: (args) => (
+    <div className="flex flex-col gap-4">
+      {(["teal", "orange", "violet", "zinc"] as const).map((accent) => (
+        <ChannelHeader
+          key={accent}
+          {...args}
+          name={`Fernsby (${accent})`}
+          accent={accent}
+          actions={<AccentButton>Support</AccentButton>}
+        />
+      ))}
+    </div>
+  ),
+};
+export const AccentsLight: Story = { ...Accents, globals: { theme: "light" } };
