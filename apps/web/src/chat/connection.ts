@@ -39,6 +39,8 @@ export interface ChatEvents {
   onBan?: (userId: string, username: string) => void;
   /** Server notice and error codes (slow mode, bans, rejected messages…). */
   onNotice: (code: string, kind: "notice" | "error") => void;
+  /** A platform event for this channel (`op: "event"`): its catalog type and raw payload. */
+  onEvent?: (type: string, data: Record<string, unknown>) => void;
 }
 
 const OPEN = 1;
@@ -171,6 +173,9 @@ export class ChatConnection {
         return;
       case "error":
         this.events.onNotice(f.code, "error");
+        return;
+      case "event":
+        if (f.channel === this.channel) this.events.onEvent?.(f.type, f.data);
         return;
       default:
         return;

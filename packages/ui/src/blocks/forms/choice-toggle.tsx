@@ -35,7 +35,8 @@ export function ChoiceToggle({
       <ToggleGroup
         aria-labelledby={id}
         multiple={false}
-        value={value ? [value] : undefined}
+        // Controlled whenever `value` is passed: "" (nothing chosen) presses no item.
+        value={value === undefined ? undefined : value ? [value] : []}
         defaultValue={defaultValue ? [defaultValue] : undefined}
         onValueChange={(next) => {
           const chosen = next.at(-1);

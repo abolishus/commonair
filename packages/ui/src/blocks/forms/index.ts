@@ -9,6 +9,7 @@ export {
   type OptionCardProps,
   type OptionCardItem,
   type OptionGroupProps,
+  type DataAttributes,
 } from "./option-card.tsx";
 export { CopyField, type CopyFieldProps, type CopyAction } from "./copy-field.tsx";
 export { CodeBlock, type CodeBlockProps } from "./code-block.tsx";

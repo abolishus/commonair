@@ -9,6 +9,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import type * as React from "react";
 import { ChatPanel } from "../../chat/chat-panel.tsx";
 import { FollowButton, FollowerCount, useFollow } from "../../components/channel-follow.tsx";
+import { SupportButton } from "../../components/support/support-dialog.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { getChannel } from "../../lib/channel.ts";
@@ -63,7 +64,12 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
               viewerCount={channel.live?.viewerCount}
               followers={<FollowerCount count={follow.state.count} />}
               actions={
-                own ? undefined : <FollowButton signedIn={me !== null} state={follow.state} onToggle={follow.toggle} />
+                own ? undefined : (
+                  <>
+                    <FollowButton signedIn={me !== null} state={follow.state} onToggle={follow.toggle} />
+                    <SupportButton channel={channel.slug} channelName={channel.displayName} signedIn={me !== null} />
+                  </>
+                )
               }
             />
           </div>

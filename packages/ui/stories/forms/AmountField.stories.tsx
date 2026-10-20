@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { FieldError } from "../../src/components/field.tsx";
 import { AmountField } from "../../src/blocks/forms/index.ts";
@@ -34,6 +35,47 @@ export const Disabled: Story = {
       <Example />
     </fieldset>
   ),
+};
+/** `inputProps` reach the `<input>`, which also carries `data-cents` (the parsed value). */
+export const WithInputTestId: Story = {
+  render: function Render() {
+    const [cents, setCents] = React.useState(500);
+    return (
+      <AmountField
+        label="Tip amount"
+        currency="USD"
+        value={cents}
+        onValueChange={setCents}
+        min={100}
+        rangeError="Tips start at $1.00."
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />
+    );
+  },
+};
+/** Unparsed text (try clearing the field): `data-cents` empties and the format error shows. */
+export const UnparsedText: StoryObj<{ formatError?: string }> = {
+  args: { formatError: "Enter an amount, like 5.00." },
+  render: function Render(args: { formatError?: string }) {
+    const [cents, setCents] = React.useState(500);
+    const [valid, setValid] = React.useState(true);
+    return (
+      <div className="flex flex-col gap-2">
+        <AmountField
+          label="Tip amount"
+          currency="USD"
+          value={cents}
+          onValueChange={setCents}
+          onValidityChange={setValid}
+          min={100}
+          rangeError="Tips start at $1.00."
+          formatError={args.formatError}
+          inputProps={{ "data-testid": "support-tip-amount" }}
+        />
+        <p className="text-muted-foreground">{valid ? "Valid" : "Invalid"}</p>
+      </div>
+    );
+  },
 };
 export const ErrorState: Story = {
   render: () => (
