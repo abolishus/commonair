@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { fireEvent, render, screen } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
 import { expect, test, vi } from "vite-plus/test";
 import { Breadcrumbs, PageHeader, PageTabs, Section } from "../../src/blocks/headers/index.ts";
 test("PageHeader renders title, description, meta, actions, and slots", () => {
@@ -103,4 +104,39 @@ test("PageTabs keeps the tab list in its own horizontal scroller", () => {
   const scroller = screen.getByRole("tablist").parentElement;
   expect(scroller?.className).toContain("overflow-x-auto");
   expect(screen.getByRole("tablist").className).not.toContain("w-full");
+});
+test("PageTabs line variant pads its scroller so the active underline is not clipped", () => {
+  const { rerender } = render(<PageTabs items={[{ id: "a", label: "A", href: "/a", current: true }]} />);
+  expect(screen.getByRole("tablist").parentElement?.className).toContain("pb-1.5");
+  rerender(<PageTabs variant="default" items={[{ id: "a", label: "A", href: "/a", current: true }]} />);
+  expect(screen.getByRole("tablist").parentElement?.className).not.toContain("pb-1.5");
+});
+test("PageTabs arrow keys never select a disabled tab", async () => {
+  const user = userEvent.setup();
+  const change = vi.fn<(value: string) => void>();
+  render(
+    <PageTabs
+      value="a"
+      onValueChange={change}
+      items={[
+        { id: "a", label: "A", content: <p>A panel</p> },
+        { id: "b", label: "B", disabled: true, content: <p>B panel</p> },
+        { id: "c", label: "C", content: <p>C panel</p> },
+      ]}
+    />,
+  );
+  const tab = (name: string) => screen.getByRole("tab", { name });
+  await user.click(tab("A"));
+  await user.keyboard("{ArrowRight}");
+  // Base UI keeps disabled tabs focusable (screen readers can reach them and hear the reason).
+  expect(document.activeElement).toBe(tab("B"));
+  await user.keyboard("{Enter}");
+  await user.keyboard(" ");
+  // Focus is on B, but B is never selected or shown.
+  expect(tab("B").getAttribute("aria-selected")).toBe("false");
+  expect(tab("A").getAttribute("aria-selected")).toBe("true");
+  expect(change.mock.calls.map(([value]) => value)).not.toContain("b");
+  expect(screen.queryByText("B panel")).toBeNull();
+  await user.keyboard("{ArrowRight}");
+  expect(document.activeElement).toBe(tab("C"));
 });
