@@ -31,6 +31,7 @@ import {
   integritySubject,
   jobStatus,
   legalDocumentKind,
+  legalHoldReason,
   modAction,
   modScope,
   reportReason,
@@ -277,14 +278,39 @@ export const accountDeletions = pgTable(
   (t) => [index("account_deletions_due_idx").on(t.status, t.scheduledFor)],
 );
 
-export const legalHolds = pgTable("legal_holds", {
-  id: id(),
-  userId: uuid().notNull(),
-  reason: text().notNull(),
-  createdById: uuid(),
-  createdAt: createdAt(),
-  releasedAt: ts(),
-});
+/**
+ * Legal holds (ADR 0006 decision 6). Rows are never deleted, and only the database owner can
+ * release one (`bun run --filter @commonair/db hold -- release`); triggers in
+ * `0015_trust_safety_protections.sql` enforce both for every other role. A hold keeps its
+ * evidence, flags, cases and NCMEC drafts through account deletion. `userId` has no foreign key
+ * on purpose: deleting or pseudonymizing the user must never reach the hold.
+ */
+export const legalHolds = pgTable(
+  "legal_holds",
+  {
+    id: id(),
+    userId: uuid().notNull(),
+    reasonCode: legalHoldReason().notNull().default("law_enforcement"),
+    /** Staff's own words for manual holds; never personal data of the subject. */
+    reason: text().notNull(),
+    caseId: uuid(),
+    createdById: uuid(),
+    createdAt: createdAt(),
+    /** When the NCMEC report (if any) was filed: the one-year preservation clock starts here. */
+    filedAt: ts(),
+    /** Set by the worker one year after `filedAt`; release still needs the owner CLI. */
+    eligibleForReleaseAt: ts(),
+    releasedAt: ts(),
+    releaseReason: text(),
+  },
+  (t) => [
+    index("legal_holds_user_idx").on(t.userId),
+    index("legal_holds_case_idx").on(t.caseId),
+    index("legal_holds_active_idx")
+      .on(t.createdAt)
+      .where(sql`${t.releasedAt} is null`),
+  ],
+);
 
 export const incidents = pgTable("incidents", {
   id: id(),

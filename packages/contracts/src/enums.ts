@@ -8,7 +8,11 @@
  */
 
 export const ACCOUNT_TYPES = ["human", "bot"] as const;
-export const PLATFORM_ROLES = ["user", "moderator", "admin", "treasurer"] as const;
+/**
+ * `legal`: staff with a legal need to see T0 material (ADR 0006): T0 cases, evidence, NCMEC
+ * drafts and holds. It is the only role that can view them; it does not imply `moderator`.
+ */
+export const PLATFORM_ROLES = ["user", "moderator", "admin", "treasurer", "legal"] as const;
 export const CHANNEL_ROLES = ["moderator", "vip", "editor"] as const;
 /** Chat permission levels, lowest to highest. */
 export const USER_LEVELS = ["everyone", "follower", "subscriber", "vip", "moderator", "broadcaster"] as const;
@@ -105,6 +109,10 @@ export const APPEAL_SUBJECTS = [
   "moderation_action",
   "dmca_notice",
   "account_action",
+  /** A moderation label (T2 mature label, ADR 0006); overturning removes it. */
+  "content_label",
+  /** A T1 moderation case decided by a moderator. */
+  "moderation_case",
 ] as const;
 export const APPEAL_STATUSES = ["open", "upheld", "overturned"] as const;
 export const ACTOR_TYPES = ["user", "moderator", "admin", "system", "bot", "app"] as const;
@@ -122,6 +130,8 @@ export const REPORT_REASONS = [
   "impersonation",
   "copyright",
   "unlabeled_mature",
+  /** Non-consensual intimate imagery (the public takedown form is `ncii.submit`). */
+  "ncii",
   "other",
 ] as const;
 export const REPORT_STATUSES = ["open", "actioned", "dismissed"] as const;
@@ -146,6 +156,8 @@ export const MOD_ACTIONS = [
   "unsuspend_user",
   "remove_content",
   "restore_content",
+  "end_stream",
+  "warn",
 ] as const;
 export const MOD_SCOPES = ["channel", "platform"] as const;
 export const DMCA_STATUSES = ["received", "actioned", "rejected", "countered", "restored"] as const;
@@ -178,3 +190,38 @@ export const NOTIFICATION_TYPES = [
 ] as const;
 export const INCIDENT_STATUSES = ["investigating", "identified", "monitoring", "resolved"] as const;
 export const COMPONENT_STATUSES = ["operational", "degraded", "outage"] as const;
+
+// Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
+
+/** Classifier categories. A provider may leave any of them unscored (never reported as 0). */
+export const MODERATION_CATEGORIES = ["sexual", "graphic_violence", "weapons", "self_harm"] as const;
+export type ModerationCategory = (typeof MODERATION_CATEGORIES)[number];
+/** Operator hash lists by what they contain; the T0 action and the NCMEC draft follow the list. */
+export const HASH_LIST_CATEGORIES = ["csam", "ncii"] as const;
+export type HashListCategory = (typeof HASH_LIST_CATEGORIES)[number];
+export const MODERATION_TIERS = ["t0", "t1", "t2"] as const;
+export type ModerationTier = (typeof MODERATION_TIERS)[number];
+/** What a frame or file came from. `upload` covers avatars, banners, panels, emotes and alert images. */
+export const MODERATION_SUBJECTS = ["broadcast", "vod", "clip", "upload"] as const;
+export const MODERATION_CASE_STATUSES = [
+  "open",
+  /** T2: the label is applied; the case closes as cleared if an appeal overturns it. */
+  "labelled",
+  "cleared",
+  "actioned",
+  /** T0 only: the first of two `legal` reviewers dismissed it. */
+  "dismissal_pending",
+  "dismissed",
+  "confirmed",
+] as const;
+/** Where a case came from: a hash list, the classifier, or a human escalation. */
+export const MODERATION_CASE_ORIGINS = ["hash_list", "classifier", "human"] as const;
+export const MODERATION_REVIEW_DECISIONS = ["clear", "warn", "end_stream", "suspend", "escalate_legal"] as const;
+export const CONTENT_LABELS = ["mature"] as const;
+export const LEGAL_HOLD_REASONS = ["csam_match", "ncii_match", "csam_confirmed", "law_enforcement", "litigation"] as const;
+export const EVIDENCE_KINDS = ["frame", "upload", "vod_object", "clip_object", "thumbnail"] as const;
+export const EVIDENCE_STORAGE = ["inline", "bucket"] as const;
+export const NCMEC_REPORT_STATUSES = ["draft", "filed", "withdrawn"] as const;
+export const NCII_RELATIONSHIPS = ["self", "representative"] as const;
+export const NCII_STATUSES = ["received", "removed", "rejected", "auto_hidden"] as const;
+export const NCII_DECISIONS = ["removed", "rejected"] as const;

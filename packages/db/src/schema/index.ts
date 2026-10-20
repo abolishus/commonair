@@ -11,5 +11,6 @@ export * from "./money.ts";
 export * from "./ledger.ts";
 export * from "./coop.ts";
 export * from "./safety.ts";
+export * from "./moderation.ts";
 export * from "./platform.ts";
 export * from "./interactive.ts";

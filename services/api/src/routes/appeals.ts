@@ -36,12 +36,13 @@ type Subject = (typeof APPEAL_SUBJECTS)[number];
 /** Subject types each kind accepts. */
 export const KIND_SUBJECTS: Record<Kind, readonly Subject[]> = {
   integrity: ["session", "user", "integrity_flag"],
-  moderation: ["moderation_action"],
+  moderation: ["moderation_action", "content_label", "moderation_case"],
   dmca: ["dmca_notice"],
   account: ["account_action"],
 };
 /** Subject types whose decision tables are not wired to appeals yet. */
-export const UNWIRED_SUBJECTS: readonly Subject[] = ["dmca_notice", "account_action"];
+// content_label and moderation_case: wired by the E4c API unit (docs/testing/e4c-selectors.md).
+export const UNWIRED_SUBJECTS: readonly Subject[] = ["dmca_notice", "account_action", "content_label", "moderation_case"];
 
 const MINE_LIMIT = 100;
 
@@ -104,6 +105,8 @@ async function subjectConcerns(deps: Deps, type: Subject, id: string, userId: st
     }
     case "dmca_notice":
     case "account_action":
+    case "content_label":
+    case "moderation_case":
       return false;
   }
 }

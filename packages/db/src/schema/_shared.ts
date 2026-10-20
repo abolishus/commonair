@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as E from "@commonair/contracts/enums";
-import { bigint, pgEnum, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, customType, pgEnum, timestamp, uuid } from "drizzle-orm/pg-core";
 import { uuidv7 } from "../ids.ts";
 
 /** Columns are camelCase in TS and snake_case in SQL (`casing: "snake_case"`). */
@@ -17,6 +17,8 @@ export const updatedAt = () =>
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date());
+/** Raw bytes (sealed evidence). postgres-js returns a Buffer, which is a Uint8Array. */
+export const bytea = customType<{ data: Uint8Array; driverData: Uint8Array }>({ dataType: () => "bytea" });
 /** Money is always integer minor units (cents). */
 export const cents = () => bigint({ mode: "number" });
 
@@ -80,3 +82,16 @@ export const songRequestStatus = pgEnum("song_request_status", E.SONG_REQUEST_ST
 export const notificationType = pgEnum("notification_type", E.NOTIFICATION_TYPES);
 export const incidentStatus = pgEnum("incident_status", E.INCIDENT_STATUSES);
 export const componentStatus = pgEnum("component_status", E.COMPONENT_STATUSES);
+export const moderationCategory = pgEnum("moderation_category", E.MODERATION_CATEGORIES);
+export const hashListCategory = pgEnum("hash_list_category", E.HASH_LIST_CATEGORIES);
+export const moderationTier = pgEnum("moderation_tier", E.MODERATION_TIERS);
+export const moderationSubject = pgEnum("moderation_subject", E.MODERATION_SUBJECTS);
+export const moderationCaseStatus = pgEnum("moderation_case_status", E.MODERATION_CASE_STATUSES);
+export const moderationCaseOrigin = pgEnum("moderation_case_origin", E.MODERATION_CASE_ORIGINS);
+export const contentLabel = pgEnum("content_label", E.CONTENT_LABELS);
+export const legalHoldReason = pgEnum("legal_hold_reason", E.LEGAL_HOLD_REASONS);
+export const evidenceKind = pgEnum("evidence_kind", E.EVIDENCE_KINDS);
+export const evidenceStorage = pgEnum("evidence_storage", E.EVIDENCE_STORAGE);
+export const ncmecReportStatus = pgEnum("ncmec_report_status", E.NCMEC_REPORT_STATUSES);
+export const nciiRelationship = pgEnum("ncii_relationship", E.NCII_RELATIONSHIPS);
+export const nciiStatus = pgEnum("ncii_status", E.NCII_STATUSES);

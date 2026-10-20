@@ -49,6 +49,12 @@ export const broadcasts = pgTable(
     endedAt: ts(),
     transcodeActive: boolean().notNull().default(false),
     thumbnailKey: text(),
+    /**
+     * T1 restriction (ADR 0006): blurred behind an interstitial and left out of every directory
+     * list until a moderator closes `restrictedCaseId`. Set and cleared only with that case.
+     */
+    restrictedAt: ts(),
+    restrictedCaseId: uuid(),
     /** Aggregates from verified sessions only (maintained by the worker). */
     peakVerifiedViewers: integer().notNull().default(0),
     verifiedViewerSeconds: bigint({ mode: "number" }).notNull().default(0),

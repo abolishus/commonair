@@ -129,6 +129,17 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
       maxSessionsPerDevice: 3,
     },
   },
+  {
+    key: "moderation.thresholds",
+    protected: false,
+    description:
+      "Automated moderation (ADR 0006): T1 (blur and queue) and T2 (mature label) classifier thresholds and the frame sample interval. Range-checked by the database so no decision can switch a tier off.",
+    value: {
+      t1: { sexual: 0.97, graphic_violence: 0.9, weapons: 0.95, self_harm: 0.9 },
+      t2: { sexual: 0.8 },
+      sampleSeconds: 10,
+    },
+  },
 ] as const;
 
 export type GovernanceOverrides = Record<string, Record<string, unknown>>;

@@ -18,7 +18,8 @@
     "studio": "drizzle-kit studio",
     "demo:seed": "bun src/demo/cli.ts seed",
     "demo:clear": "bun src/demo/cli.ts clear",
-    "role": "bun src/roles/cli.ts"
+    "role": "bun src/roles/cli.ts",
+    "hold": "bun src/holds/cli.ts"
   },
   "dependencies": {
     "@commonair/config": "workspace:*",
