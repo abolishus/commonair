@@ -31,6 +31,7 @@ export {
   type ChatComposerProps,
   type ChatBadgeKind,
 } from "./chat.tsx";
+export { ChatEvent, type ChatEventProps, type ChatEventTone } from "./chat-event.tsx";
 export { ClipTrimmer, type ClipTrimmerProps } from "./clip-trimmer.tsx";
 export { AlertPreview, type AlertPreviewProps } from "./alert-preview.tsx";
 export {

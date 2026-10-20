@@ -67,6 +67,81 @@ describe("forms blocks", () => {
     await waitFor(() => expect(change).toHaveBeenCalledWith("plus"));
   });
 
+  test("OptionGroup forwards per-item controlProps to the radio that carries aria-checked", () => {
+    const change = vi.fn<(value: string) => void>();
+    render(
+      <OptionGroup
+        aria-label="Tier"
+        items={[1, 2, 3].map((tier) => ({
+          value: String(tier),
+          title: `Tier ${tier}`,
+          controlProps: { "data-testid": "support-tier", "data-tier": tier, "data-cents": tier * 500 },
+        }))}
+        value="2"
+        onValueChange={change}
+      />,
+    );
+    const radios = screen.getAllByTestId("support-tier");
+    expect(
+      radios.map((r) => [r.getAttribute("role"), r.getAttribute("data-tier"), r.getAttribute("data-cents")]),
+    ).toEqual([
+      ["radio", "1", "500"],
+      ["radio", "2", "1000"],
+      ["radio", "3", "1500"],
+    ]);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+    fireEvent.click(radios[2] as HTMLElement);
+    expect(change).toHaveBeenCalledWith("3");
+  });
+
+  test("OptionGroup multiple forwards controlProps to each checkbox", () => {
+    render(
+      <OptionGroup
+        multiple
+        aria-label="Extras"
+        items={[{ value: "a", title: "A", controlProps: { "data-testid": "extra", "data-extra": "a" } }]}
+        values={["a"]}
+      />,
+    );
+    const box = screen.getByTestId("extra");
+    expect([box.getAttribute("role"), box.getAttribute("data-extra"), box.getAttribute("aria-checked")]).toEqual([
+      "checkbox",
+      "a",
+      "true",
+    ]);
+  });
+
+  test("AmountField puts the input test id and data-cents (the parsed value) on the input", () => {
+    const change = vi.fn<(value: number) => void>();
+    const { rerender } = render(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={500}
+        onValueChange={change}
+        rangeError="Out of range"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    const input = screen.getByTestId("support-tip-amount") as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    expect([input.value, input.getAttribute("data-cents")]).toEqual(["5.00", "500"]);
+    fireEvent.change(input, { target: { value: "7.5" } });
+    expect(change).toHaveBeenCalledWith(750);
+    rerender(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={750}
+        onValueChange={change}
+        rangeError="Out of range"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    expect(input.getAttribute("data-cents")).toBe("750");
+    expect(input.value).toBe("7.5");
+  });
+
   test("CopyField copies and reports success; secrets can be revealed", async () => {
     const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

@@ -11,11 +11,13 @@ import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { toastActionError } from "../lib/action-error.ts";
 import { api } from "../lib/api.ts";
+import { ChatEventRow } from "./chat-event-row.tsx";
 import { ChatConnection, type ChatStatus } from "./connection.ts";
+import { chatEventView } from "./events.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
 import { ModMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
 import { chatReducer, type ChatRow } from "./state.ts";
-import { chatStatusView, nameColorIndex } from "./view.ts";
+import { badgeAttr, chatStatusView, nameColorIndex, visibleBadges } from "./view.ts";
 
 export interface ChatPanelProps {
   channel: string;
@@ -68,6 +70,10 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
         onNotice: (code, kind) => {
           if (kind === "error") toast.error(errorMessage(code));
           else dispatch({ type: "notice", id: `notice-${++noticeSeq.current}`, code });
+        },
+        onEvent: (type, data) => {
+          const event = chatEventView(type, data);
+          if (event) dispatch({ type: "event", id: `event-${++noticeSeq.current}`, event });
         },
       },
     );
@@ -155,6 +161,7 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
         <EmptyState icon={Message01Icon} title={t("chat.empty")} headingLevel={3} />
       ) : (
         rows.map((row) => {
+          if (row.kind === "event") return <ChatEventRow key={row.id} event={row.event} />;
           if (row.kind === "notice")
             return (
               <ChatMessage
@@ -175,6 +182,8 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
               data-testid="chat-message"
               data-id={row.id}
               data-author={user.username}
+              data-badges={badgeAttr(user.badges)}
+              badges={visibleBadges(user.badges)}
               data-deleted={row.deleted ? "true" : undefined}
               author={user.displayName}
               colorIndex={nameColorIndex(user.username)}

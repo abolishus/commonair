@@ -24,7 +24,11 @@ export interface AmountFieldProps {
   errors?: string | readonly (string | { message?: string } | undefined)[];
   hint?: React.ReactNode;
   "data-testid"?: string;
-  inputProps?: React.ComponentProps<typeof InputGroupInput>;
+  /** Forwarded to the `<input>`, which also carries `data-cents`: the current value in minor units. */
+  inputProps?: React.ComponentProps<typeof InputGroupInput> & {
+    "data-testid"?: string;
+    [key: `data-${string}`]: unknown;
+  };
 }
 function parseAmount(text: string, currency: string, locale: string): number | null {
   const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
@@ -102,6 +106,7 @@ export function AmountField({
         <InputGroupInput
           {...inputProps}
           id={id}
+          data-cents={value}
           inputMode="decimal"
           value={draft ?? formatValue(value, currency, locale)}
           aria-invalid={invalid || undefined}

@@ -18,6 +18,8 @@ export const COMPOSITION_TEST_IDS = [
   "footer-source-link",
   "live-badge",
   "stream-key-copy",
+  "support-tier",
+  "support-tip-amount",
 ] as const;
 
 /** `data-x={expr}` attributes written as `"data-x": expr` in a composition's prop callback. */
@@ -25,4 +27,6 @@ export const COMPOSITION_ATTRS = [
   "data-channel={card.channel.slug}",
   "data-relay-id={relay.id}",
   "data-status={relay.status}",
+  "data-tier={tier.tier}",
+  "data-cents={tier.price.cents}",
 ] as const;

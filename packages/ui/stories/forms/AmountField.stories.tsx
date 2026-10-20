@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { FieldError } from "../../src/components/field.tsx";
 import { AmountField } from "../../src/blocks/forms/index.ts";
@@ -34,6 +35,23 @@ export const Disabled: Story = {
       <Example />
     </fieldset>
   ),
+};
+/** `inputProps` reach the `<input>`, which also carries `data-cents` (the parsed value). */
+export const WithInputTestId: Story = {
+  render: function Render() {
+    const [cents, setCents] = React.useState(500);
+    return (
+      <AmountField
+        label="Tip amount"
+        currency="USD"
+        value={cents}
+        onValueChange={setCents}
+        min={100}
+        rangeError="Tips start at $1.00."
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />
+    );
+  },
 };
 export const ErrorState: Story = {
   render: () => (

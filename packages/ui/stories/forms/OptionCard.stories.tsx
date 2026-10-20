@@ -39,6 +39,21 @@ export const Disabled: Story = {
     </fieldset>
   ),
 };
+/** Per-item `controlProps` put test ids and values on each radio (the element with `aria-checked`). */
+export const WithControlProps: Story = {
+  render: () => (
+    <OptionGroup
+      aria-label="Tier"
+      defaultValue="2"
+      items={[499, 999, 2499].map((cents, index) => ({
+        value: String(index + 1),
+        title: `Tier ${index + 1}`,
+        price: { cents, currency: "USD" },
+        controlProps: { "data-testid": "support-tier", "data-tier": index + 1, "data-cents": cents },
+      }))}
+    />
+  ),
+};
 export const ErrorState: Story = {
   render: () => (
     <div className="flex flex-col gap-2">

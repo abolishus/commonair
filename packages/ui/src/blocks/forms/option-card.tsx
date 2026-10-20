@@ -22,7 +22,11 @@ export interface OptionCardItem {
   trailing?: React.ReactNode;
   price?: MoneyValue;
   disabled?: boolean;
+  /** Attributes for the item's radio or checkbox (the element that carries `aria-checked`). */
+  controlProps?: DataAttributes;
 }
+/** `data-*` attributes (test ids, machine-readable values) forwarded to an element. */
+export type DataAttributes = { [key: `data-${string}`]: string | number | boolean | undefined };
 export interface OptionCardProps extends OptionCardItem {
   selected?: boolean;
   multiple?: boolean;
@@ -39,6 +43,7 @@ export function OptionCard({
   multiple,
   disabled,
   onSelectedChange,
+  controlProps,
 }: OptionCardProps): React.JSX.Element {
   const id = React.useId();
   return (
@@ -50,13 +55,14 @@ export function OptionCard({
       >
         {multiple ? (
           <Checkbox
+            {...controlProps}
             id={id}
             checked={selected}
             disabled={disabled}
             onCheckedChange={(value) => onSelectedChange?.(value === true)}
           />
         ) : (
-          <RadioGroupItem id={id} value={value} disabled={disabled} />
+          <RadioGroupItem {...controlProps} id={id} value={value} disabled={disabled} />
         )}
         <FieldContent className="min-w-0 flex-1">
           <span className="font-medium">{title}</span>
