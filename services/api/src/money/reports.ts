@@ -7,7 +7,7 @@
  * creator's own accounts); `payments` rows only classify a posting (tier, gift, tip, payer),
  * never supply its amount. See docs/testing/e4b-selectors.md.
  */
-import { type SQL, and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { type SQL, and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { DELIVERY_SOURCES, MEMBER_CLASSES, type PROPOSAL_STATUSES } from "@commonair/contracts/enums";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
@@ -27,10 +27,10 @@ import {
 } from "@commonair/ledger";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
-import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
+import { decodeCursor, encodeCursor, pageOf } from "../lib/cursor.ts";
 import { isoOrNull } from "../lib/dto.ts";
-import { badRequest, conflict, notFound } from "../lib/errors.ts";
-import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
+import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
+import { type ResolvedContext, os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import {
   type PaymentFacts,
   type Period,
@@ -41,14 +41,20 @@ import {
   costCategory,
   csvSafeReference,
   isCategorySlug,
+  isIdCursor,
+  isMicroKeyCursor,
+  isReservedCostCategory,
   isRevenueLedgerKind,
   monthStart,
   parsePeriod,
   payoutMonth,
+  payoutRunRefusal,
+  payoutRunSubject,
   previousPeriod,
   revenueLineType,
   revenueSource,
   utcDays,
+  visiblePayer,
 } from "./reports-lib.ts";
 
 const { payments, payouts, payoutAccounts, subscriptions, users, infraCosts } = schema;
@@ -69,6 +75,17 @@ function period(from: string | undefined, to: string | undefined, now: Date): Pe
     if (err instanceof PeriodError) throw badRequest(err.message);
     throw err;
   }
+}
+
+/**
+ * Revenue is the channel owner's own money: editors (whom `owner` access also admits) and
+ * platform staff do not see it here.
+ */
+function requireOwnChannel(ctx: Pick<ResolvedContext, "caller" | "channel">) {
+  const caller = requireCaller(ctx);
+  const channel = requireChannel(ctx);
+  if (channel.ownerId !== caller.user.id) throw forbidden("Only the channel owner can see its revenue");
+  return channel;
 }
 
 /** The three accounts that make up what the co-op owes a creator (natural sum = owed). */
@@ -186,7 +203,8 @@ async function revenueSummary(
       bySource[revenueSource({ kind: g.paymentKind, quantity: g.multi ? 2 : 1, giftSubscription: g.gift })] += g.net;
     const day = daily.get(g.day);
     if (day) {
-      day.gross += g.gross;
+      // Daily gross is what was paid that day; reversals show in net only.
+      if (g.kind === "payment") day.gross += g.gross;
       day.net += g.net;
     }
   }
@@ -235,29 +253,31 @@ async function revenueLedger(
 ) {
   const { db } = deps;
   const currency = deps.env.CURRENCY;
-  const cur = decodeCursor(input.cursor, isKeyCursor);
-  const from = input.from ? new Date(input.from) : null;
-  const to = input.to ? new Date(input.to) : null;
-  if (from && to && !(from < to)) throw badRequest("from must be before to");
+  const cur = decodeCursor(input.cursor, isMicroKeyCursor);
+  // Same period rules as the summary (default: the current UTC month), so the CSV matches it.
+  const p = period(input.from, input.to, deps.now());
   const rows = [
     ...(await db.execute<{
       id: string;
       kind: string;
       occurred_at: string | Date;
+      /** Microsecond key for the cursor (a JS Date would truncate to milliseconds). */
+      t_key: string;
       ref_type: string | null;
       ref_id: string | null;
       gross: string | null;
       net: string;
     }>(sql`
       select t.id, t.kind, t.occurred_at, t.ref_type, t.ref_id,
+             to_char(t.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as t_key,
              t.metadata->>'revenueGrossCents' as gross, (-sum(e.amount_cents))::text as net
       from ledger_entries e
       join ledger_accounts a on a.id = e.account_id
       join ledger_transactions t on t.id = e.transaction_id
       where a.code in ${creatorCodes(ownerId, currency)}
         and t.kind in (${kindList(REVENUE_LEDGER_KINDS)})
-        ${from ? sql`and t.occurred_at >= ${from.toISOString()}::timestamptz` : sql``}
-        ${to ? sql`and t.occurred_at < ${to.toISOString()}::timestamptz` : sql``}
+        and t.occurred_at >= ${p.from.toISOString()}::timestamptz
+        and t.occurred_at < ${p.to.toISOString()}::timestamptz
         ${cur ? sql`and (t.occurred_at, t.id) < (${cur.t}::timestamptz, ${cur.id}::uuid)` : sql``}
       group by t.id
       order by t.occurred_at desc, t.id desc
@@ -319,10 +339,16 @@ async function revenueLedger(
         type: revenueLineType(kind, facts),
         tier: pay?.tier ?? null,
         quantity: pay?.quantity ?? 1,
-        from:
-          pay && pay.userId && pay.username && pay.anonymous !== true
-            ? { id: pay.userId, username: pay.username, displayName: pay.name ?? pay.username }
-            : null,
+        from: pay
+          ? visiblePayer({
+              kind: pay.kind,
+              anonymous: pay.anonymous,
+              user:
+                pay.userId && pay.username
+                  ? { id: pay.userId, username: pay.username, displayName: pay.name ?? pay.username }
+                  : null,
+            })
+          : null,
         reference: csvSafeReference(
           pay ? pay.providerRef : r.ref_type === "payout" && r.ref_id ? payoutById.get(r.ref_id)?.providerRef : null,
         ),
@@ -332,7 +358,7 @@ async function revenueLedger(
         net: money(net, currency),
       };
     },
-    (last) => encodeCursor({ t: new Date(last.occurred_at).toISOString(), id: last.id }),
+    (last) => encodeCursor({ t: last.t_key, id: last.id }),
   );
 }
 
@@ -355,12 +381,12 @@ const MY_PAYOUTS_LIMIT = 120;
 
 export const reportHandlers = {
   revenue: os.money.revenue.handler(async ({ context, input }) => {
-    const c = requireChannel(context);
+    const c = requireOwnChannel(context);
     return revenueSummary(context.deps, c, input);
   }),
 
   revenueLedger: os.money.revenueLedger.handler(async ({ context, input }) => {
-    const c = requireChannel(context);
+    const c = requireOwnChannel(context);
     return revenueLedger(context.deps, c.ownerId, input);
   }),
 
@@ -424,7 +450,8 @@ export const treasurerReportHandlers = {
     const { deps } = context;
     const now = deps.now();
     const periodEnd = new Date(input.periodEnd);
-    if (periodEnd > now) throw badRequest("periodEnd cannot be in the future");
+    const refusal = payoutRunRefusal(periodEnd, now);
+    if (refusal) throw badRequest(refusal);
     const currency = deps.env.CURRENCY;
     const { payoutRules } = await loadMoneySettings(deps.db);
     // Holds that are due count as available in this run.
@@ -441,8 +468,8 @@ export const treasurerReportHandlers = {
         actorType: "admin",
         actorId: caller.user.id,
         action: "payout.run",
-        subjectType: "payout_batch",
-        subjectId: uuidv7(now.getTime()),
+        subjectType: "payout_run",
+        subjectId: payoutRunSubject(periodEnd, currency),
         details: {
           periodStart: month.from.toISOString(),
           periodEnd: month.to.toISOString(),
@@ -458,23 +485,14 @@ export const treasurerReportHandlers = {
 
   payouts: os.money.treasurer.payouts.handler(async ({ context, input }) => {
     const { db } = context.deps;
-    const cur = decodeCursor(input.cursor, isKeyCursor);
+    // uuidv7 ids are time-ordered and unique, so the id alone is an exact keyset.
+    const cur = decodeCursor(input.cursor, isIdCursor);
     const rows = await db
       .select({ p: payouts, u: { id: users.id, username: users.username, name: users.name } })
       .from(payouts)
       .innerJoin(users, eq(users.id, payouts.userId))
-      .where(
-        and(
-          input.status ? eq(payouts.status, input.status) : undefined,
-          cur
-            ? or(
-                lt(payouts.createdAt, new Date(cur.t)),
-                and(eq(payouts.createdAt, new Date(cur.t)), lt(payouts.id, cur.id)),
-              )
-            : undefined,
-        ),
-      )
-      .orderBy(desc(payouts.createdAt), desc(payouts.id))
+      .where(and(input.status ? eq(payouts.status, input.status) : undefined, cur ? lt(payouts.id, cur.id) : undefined))
+      .orderBy(desc(payouts.id))
       .limit(input.limit + 1);
     return pageOf(
       rows,
@@ -485,7 +503,7 @@ export const treasurerReportHandlers = {
         reference: p.providerRef,
         createdAt: p.createdAt.toISOString(),
       }),
-      ({ p }) => encodeCursor({ t: p.createdAt.toISOString(), id: p.id }),
+      ({ p }) => encodeCursor({ id: p.id }),
     );
   }),
 
@@ -527,6 +545,7 @@ export const treasurerReportHandlers = {
     if (!isCategorySlug(category)) {
       throw badRequest("The category must be a lowercase slug (letters, digits, dashes)");
     }
+    if (isReservedCostCategory(category)) throw badRequest("This category is reserved for the co-op's own bookings");
     const periodStart = new Date(input.periodStart);
     const periodEnd = new Date(input.periodEnd);
     if (!(periodStart < periodEnd)) throw badRequest("periodStart must be before periodEnd");

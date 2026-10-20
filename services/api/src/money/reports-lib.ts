@@ -55,8 +55,17 @@ export function parsePeriod(from: string | undefined, to: string | undefined, no
   return period;
 }
 
-/** The period of the same length that ends where `p` starts. */
+/** `p` is exactly one whole UTC calendar month. */
+export function isWholeMonth(p: Period): boolean {
+  return monthStart(p.from).getTime() === p.from.getTime() && addMonths(p.from, 1).getTime() === p.to.getTime();
+}
+
+/**
+ * The comparison period: the previous calendar month when `p` is one whole UTC month (so
+ * September compares with all of August), otherwise the same-length window just before `p`.
+ */
 export function previousPeriod(p: Period): Period {
+  if (isWholeMonth(p)) return { from: addMonths(p.from, -1), to: p.from };
   const len = p.to.getTime() - p.from.getTime();
   return { from: new Date(p.from.getTime() - len), to: p.from };
 }
@@ -76,6 +85,34 @@ export function utcDays(p: Period): string[] {
 export function payoutMonth(periodEnd: Date): Period {
   const from = monthStart(new Date(periodEnd.getTime() - 1));
   return { from, to: periodEnd };
+}
+
+/**
+ * Why a payout run ending at `periodEnd` is refused at `now`, or null. Only the previous or the
+ * current UTC month may be run: older months were already settled (or deliberately skipped), and
+ * a run is dated at `periodEnd`, so backdating it would rewrite closed transparency months.
+ */
+export function payoutRunRefusal(periodEnd: Date, now: Date): string | null {
+  if (periodEnd > now) return "periodEnd cannot be in the future";
+  if (payoutMonth(periodEnd).from < addMonths(now, -1)) return "Only the previous or the current month can be run";
+  return null;
+}
+
+/** Audit subject id of a payout run: the batch is unique per UTC month and currency. */
+export const payoutRunSubject = (periodEnd: Date, currency: string): string =>
+  `${monthKey(payoutMonth(periodEnd).from)}:${currency}`;
+
+/**
+ * The payer shown on a revenue-ledger row. Fails closed for tips: a tip's payer is shown only
+ * when its tip row is known and explicitly not anonymous.
+ */
+export function visiblePayer<U>(p: {
+  kind: PaymentFacts["kind"];
+  anonymous: boolean | null;
+  user: U | null;
+}): U | null {
+  if (p.kind === "tip" && p.anonymous !== false) return null;
+  return p.user;
 }
 
 /** Where a payment's creator share came from on the dashboard. */
@@ -146,6 +183,24 @@ export function csvSafeReference(ref: string | null | undefined): string | null 
 
 /** Infrastructure cost categories become ledger account codes: a lowercase slug. */
 export const isCategorySlug = (s: string): boolean => /^[a-z0-9][a-z0-9-]{0,39}$/.test(s);
+
+/**
+ * Expense categories outside `infrastructure:` (from the chart of accounts). Transparency lists
+ * costs by their short name, so an infrastructure category may not reuse one of these.
+ */
+export const RESERVED_COST_CATEGORIES: readonly string[] = ["payment-fees"];
+export const isReservedCostCategory = (s: string): boolean => RESERVED_COST_CATEGORIES.includes(s);
+
+/** Keyset cursor at microsecond precision (Postgres timestamps), plus a uuid tie-break. */
+export const isMicroKeyCursor = (v: Record<string, unknown>): v is { t: string; id: string } =>
+  typeof v.t === "string" &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(v.t) &&
+  typeof v.id === "string" &&
+  /^[0-9a-f-]{36}$/.test(v.id);
+
+/** Uuid-only cursor (uuidv7 ids are time-ordered, so `id desc` is newest first). */
+export const isIdCursor = (v: Record<string, unknown>): v is { id: string } =>
+  typeof v.id === "string" && /^[0-9a-f-]{36}$/.test(v.id);
 
 /** Transparency cost category from a ledger expense category (`infrastructure:hosting` → `hosting`). */
 export const costCategory = (ledgerCategory: string): string =>

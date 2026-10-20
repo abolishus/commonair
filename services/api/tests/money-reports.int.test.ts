@@ -6,10 +6,18 @@
  * fixtures posted with the ledger's own rules (independent of the checkout handlers).
  * The API clock is pinned so hold windows and payout months are deterministic.
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
-import { creatorBalances, paymentSucceeded, post, postReversal, releaseDueHolds } from "@commonair/ledger";
+import {
+  type Posting,
+  creatorBalances,
+  ensureAccounts,
+  paymentSucceeded,
+  post,
+  postReversal,
+  releaseDueHolds,
+} from "@commonair/ledger";
 import { client, signUpAndSignIn, startApi, uniqueName, type TestApi } from "./harness.ts";
 
 type Person = Awaited<ReturnType<typeof signUpAndSignIn>>;
@@ -23,6 +31,8 @@ let owner: Person;
 let small: Person;
 let netted: Person;
 let treasurer: Person;
+/** A creator whose ledger rows share instants (keyset tie-breaks) and a tip with no tip row. */
+let tie: Person;
 const channelOf = new Map<string, string>();
 let payerA: string;
 let payerB: string;
@@ -56,6 +66,42 @@ interface PayInput {
   /** Status of the payer's own subscription (self subscriptions). */
   subStatus?: "active" | "past_due" | "canceled" | "expired";
   anonymous?: boolean;
+  /** Post at this microsecond-precision instant (the ledger API takes a millisecond Date). */
+  postAt?: string;
+  /** A tip payment whose tip row is missing (the payer must then stay hidden). */
+  noTipRow?: boolean;
+}
+
+/** `post` with a microsecond `occurred_at`, so rows can share a millisecond. */
+async function postAtMicros(posting: Posting, micros: string) {
+  await db().transaction(async (tx) => {
+    const ids = await ensureAccounts(
+      tx,
+      posting.entries.map((e) => e.code),
+      posting.currency,
+    );
+    const [t] = await tx
+      .insert(schema.ledgerTransactions)
+      .values({
+        kind: posting.kind,
+        description: posting.description,
+        occurredAt: sql`${micros}::timestamptz`,
+        refType: posting.refType,
+        refId: posting.refId,
+        idempotencyKey: posting.idempotencyKey,
+        metadata: posting.metadata,
+      })
+      .returning({ id: schema.ledgerTransactions.id });
+    if (!t) throw new Error("no transaction");
+    await tx.insert(schema.ledgerEntries).values(
+      posting.entries.map((e) => ({
+        transactionId: t.id,
+        accountId: ids.get(e.code) ?? "",
+        amountCents: e.amountCents,
+        currency: posting.currency,
+      })),
+    );
+  });
 }
 
 /** A succeeded payment with its subscription or tip row, posted with `paymentSucceeded`. */
@@ -65,7 +111,7 @@ async function pay(i: PayInput): Promise<string> {
   const occurredAt = at(i.at);
   const paymentId = uuidv7(occurredAt.getTime());
   let tipId: string | null = null;
-  if (i.kind === "tip") {
+  if (i.kind === "tip" && !i.noTipRow) {
     const [tip] = await db()
       .insert(schema.tips)
       .values({
@@ -119,22 +165,21 @@ async function pay(i: PayInput): Promise<string> {
         });
     }
   }
-  await post(
-    db(),
-    paymentSucceeded({
-      paymentId,
-      paymentKind: i.kind,
-      provider: "manual",
-      settlement: "cash",
-      creatorUserId: i.creator.userId,
-      grossCents: i.cents,
-      taxCents: 0,
-      feeCents: 0,
-      currency: "usd",
-      cut: CUT,
-      occurredAt,
-    }),
-  );
+  const posting = paymentSucceeded({
+    paymentId,
+    paymentKind: i.kind,
+    provider: "manual",
+    settlement: "cash",
+    creatorUserId: i.creator.userId,
+    grossCents: i.cents,
+    taxCents: 0,
+    feeCents: 0,
+    currency: "usd",
+    cut: CUT,
+    occurredAt,
+  });
+  if (i.postAt) await postAtMicros(posting, i.postAt);
+  else await post(db(), posting);
   return paymentId;
 }
 
@@ -212,11 +257,12 @@ beforeAll(async () => {
   small = await signUpAndSignIn(api);
   netted = await signUpAndSignIn(api);
   treasurer = await signUpAndSignIn(api);
+  tie = await signUpAndSignIn(api);
   await db().update(schema.users).set({ role: "treasurer" }).where(eq(schema.users.id, treasurer.userId));
   const chans = await db()
     .select({ id: schema.channels.id, ownerId: schema.channels.ownerId })
     .from(schema.channels)
-    .where(inArray(schema.channels.ownerId, [owner.userId, small.userId, netted.userId]));
+    .where(inArray(schema.channels.ownerId, [owner.userId, small.userId, netted.userId, tie.userId]));
   for (const c of chans) channelOf.set(c.ownerId, c.id);
   api.deps.now = () => now;
 
@@ -264,6 +310,22 @@ beforeAll(async () => {
   });
   P.netted1 = await pay({ creator: netted, payer: payerB, kind: "tip", cents: 5000, at: "2026-08-03T11:00:00Z" });
   P.small = await pay({ creator: small, payer: payerB, kind: "tip", cents: 1000, at: "2026-08-04T11:00:00Z" });
+  // Tie creator: two tips in one millisecond (different microseconds), two at the same instant,
+  // and a tip whose tip row is missing. 5 × 100 gross, 5 × 10 to the co-op.
+  for (const postAt of ["2026-08-06T10:00:00.000100Z", "2026-08-06T10:00:00.000900Z"]) {
+    await pay({ creator: tie, payer: payerB, kind: "tip", cents: 100, at: "2026-08-06T10:00:00Z", postAt });
+  }
+  for (let i = 0; i < 2; i++) {
+    await pay({ creator: tie, payer: payerB, kind: "tip", cents: 100, at: "2026-08-06T09:00:00Z" });
+  }
+  P.noTipRow = await pay({
+    creator: tie,
+    payer: payerB,
+    kind: "tip",
+    cents: 100,
+    at: "2026-08-06T08:00:00Z",
+    noTipRow: true,
+  });
   await releaseDueHolds(db(), { asOf: at("2026-08-15T00:00:00Z"), holdDays: 7, currency: "usd" });
   // After the release: a partial refund and a chargeback.
   await reverse("refund", P.tip, 200, "2026-08-16T10:00:00Z");
@@ -310,8 +372,10 @@ describe("revenue", () => {
     expect(day("2026-08-02")).toEqual({ date: "2026-08-02", gross: 1000, net: 900 });
     expect(day("2026-08-03")).toEqual({ date: "2026-08-03", gross: 1500, net: 1350 });
     expect(day("2026-08-15")).toEqual({ date: "2026-08-15", gross: 0, net: 0 });
-    expect(day("2026-08-16")).toEqual({ date: "2026-08-16", gross: -200, net: -180 });
-    expect(day("2026-08-17")).toEqual({ date: "2026-08-17", gross: -1000, net: -900 });
+    // Daily gross is payments only; reversals lower net.
+    expect(day("2026-08-16")).toEqual({ date: "2026-08-16", gross: 0, net: -180 });
+    expect(day("2026-08-17")).toEqual({ date: "2026-08-17", gross: 0, net: -900 });
+    expect(s.daily.reduce((sum, x) => sum + x.gross, 0)).toBe(s.gross.cents);
     expect(s.daily.reduce((sum, x) => sum + x.net, 0)).toBe(s.net.cents);
 
     const b = await creatorBalances(db(), owner.userId, "usd");
@@ -340,10 +404,32 @@ describe("revenue", () => {
     expect(r.body.previousNet.cents).toBe(0);
   });
 
-  test("non-owners get FORBIDDEN", async () => {
+  test("previousNet for a whole month is the whole previous calendar month", async () => {
+    // September (30 days) compares with all of August (31), not Aug 2 – Sep 1.
+    const r = await revenue(owner, owner.username, { from: AUG.to, to: "2026-10-01T00:00:00Z" });
+    expect(r.body.net.cents).toBe(0);
+    expect(r.body.previousNet.cents).toBe(2099);
+    // A partial window looks back by its own length: Aug 1–3 compares with Jul 29–31.
+    const part = await revenue(owner, owner.username, { from: AUG.from, to: "2026-08-04T00:00:00Z" });
+    expect(part.body.net.cents).toBe(900 + 1350);
+    expect(part.body.previousNet.cents).toBe(0);
+  });
+
+  test("non-owners get FORBIDDEN, editors and treasurers included", async () => {
     expect((await revenue(small, owner.username, AUG)).status).toBe(403);
     expect((await ledgerPage(small, owner.username, AUG)).status).toBe(403);
+    expect((await revenue(treasurer, owner.username, AUG)).status).toBe(403);
     expect((await client(api).call("GET", `/api/channels/${owner.username}/revenue`)).status).toBe(401);
+    const channelId = channelOf.get(owner.userId) ?? "";
+    await db().insert(schema.channelRoles).values({ channelId, userId: small.userId, role: "editor" });
+    try {
+      expect((await revenue(small, owner.username, AUG)).status).toBe(403);
+      expect((await ledgerPage(small, owner.username, AUG)).status).toBe(403);
+    } finally {
+      await db()
+        .delete(schema.channelRoles)
+        .where(and(eq(schema.channelRoles.channelId, channelId), eq(schema.channelRoles.userId, small.userId)));
+    }
   });
 });
 
@@ -390,17 +476,60 @@ describe("revenue ledger", () => {
     expect(gift?.reference).toBe(row?.ref);
   });
 
-  test("without a period it lists everything; a bad cursor is a client error", async () => {
-    const all = await ledgerPage(owner, owner.username, { limit: 100 });
-    expect(all.body.items).toHaveLength(7);
-    expect(all.body.items.at(-1)?.net.cents).toBe(900);
+  test("without a period it lists the current UTC month; a bad cursor is a client error", async () => {
+    const current = await ledgerPage(owner, owner.username, { limit: 100 });
+    expect(current.body.items).toHaveLength(6);
+    expect(current.body.items.reduce((s, l) => s + l.net.cents, 0)).toBe(2099);
+    // Only `from`: that month.
+    const july = await ledgerPage(owner, owner.username, { from: "2026-07-01T00:00:00Z", limit: 100 });
+    expect(july.body.items.map((l) => l.net.cents)).toEqual([900]);
     expect((await ledgerPage(owner, owner.username, { cursor: "nope" })).status).toBe(400);
+    // A millisecond cursor (the old format) is refused rather than silently losing rows.
+    const ms = Buffer.from(JSON.stringify({ t: "2026-08-02T10:00:00.000Z", id: uuidv7() })).toString("base64url");
+    expect((await ledgerPage(owner, owner.username, { cursor: ms })).status).toBe(400);
+    expect((await ledgerPage(owner, owner.username, { from: AUG.to, to: AUG.from })).status).toBe(400);
+  });
+
+  test("keyset paging keeps rows that share a millisecond or an instant", async () => {
+    const all = (await ledgerPage(tie, tie.username, { ...AUG, limit: 100 })).body.items;
+    expect(all).toHaveLength(5);
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 10; i++) {
+      const page = (await ledgerPage(tie, tie.username, { ...AUG, limit: 1, cursor })).body;
+      seen.push(...page.items.map((l) => l.id));
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    expect(seen).toEqual(all.map((l) => l.id));
+    // The two microsecond rows first (newest), then the same-instant pair by id descending.
+    const ids = await db()
+      .select({ id: schema.ledgerTransactions.id, at: schema.ledgerTransactions.occurredAt })
+      .from(schema.ledgerTransactions)
+      .where(inArray(schema.ledgerTransactions.id, seen));
+    const at9 = ids.filter((r) => r.at.toISOString() === "2026-08-06T09:00:00.000Z").map((r) => r.id);
+    expect(seen.slice(2, 4)).toEqual([...at9].sort().reverse());
+  });
+
+  test("a tip whose anonymity is unknown hides its payer", async () => {
+    const all = (await ledgerPage(tie, tie.username, { ...AUG, limit: 100 })).body.items;
+    const last = all.at(-1);
+    expect(last).toMatchObject({ type: "tip", from: null, net: { cents: 90 } });
+    for (const l of all.slice(0, -1)) expect(l.from?.id).toBe(payerB);
+    const [row] = await db()
+      .select({ id: schema.ledgerTransactions.id })
+      .from(schema.ledgerTransactions)
+      .where(and(eq(schema.ledgerTransactions.refId, P.noTipRow ?? ""), eq(schema.ledgerTransactions.kind, "payment")));
+    expect(last?.id).toBe(row?.id);
   });
 });
 
 describe("payouts", () => {
-  test("a future periodEnd is refused", async () => {
+  test("a future periodEnd is refused, and so is a month before the previous one", async () => {
     expect((await runPayouts("2026-08-25T00:00:00Z")).status).toBe(400);
+    // 00:00 on Jul 1 closes June; on Aug 20 only July and August may be run.
+    expect((await runPayouts("2026-07-01T00:00:00Z")).status).toBe(400);
+    expect((await db().select().from(schema.payouts)).length).toBe(0);
   });
 
   test("non-treasurers get FORBIDDEN", async () => {
@@ -434,9 +563,25 @@ describe("payouts", () => {
       "/api/treasurer/payouts?status=held",
     );
     expect(held.body.items.map((p) => p.user.username)).toEqual([owner.username]);
-    const all = await treasurer.client.call<Page<{ id: string }>>("GET", "/api/treasurer/payouts?limit=1");
-    expect(all.body.items).toHaveLength(1);
-    expect(all.body.nextCursor).not.toBeNull();
+    // Paged by id (uuidv7, newest first): every payout exactly once.
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { body: Page<{ id: string }> } = await treasurer.client.call<Page<{ id: string }>>(
+        "GET",
+        `/api/treasurer/payouts?${qs({ limit: 1, cursor: cursor ?? undefined })}`,
+      );
+      expect(page.body.items.length).toBeLessThanOrEqual(1);
+      seen.push(...page.body.items.map((p) => p.id));
+      cursor = page.body.nextCursor;
+    } while (cursor);
+    expect(seen).toEqual(
+      rows
+        .map((p) => p.id)
+        .sort()
+        .reverse(),
+    );
+    expect((await treasurer.client.call("GET", "/api/treasurer/payouts?cursor=bad")).status).toBe(400);
   });
 
   test("a second run in the same month is idempotent", async () => {
@@ -513,7 +658,9 @@ describe("payouts", () => {
     expect(b).toMatchObject({ liabilityCents: 0, receivableCents: 0, reservedCents: 0 });
 
     // The payout rows on the revenue ledger: reserved (negative), with a CSV-safe reference.
-    const lines = (await ledgerPage(netted, netted.username, { limit: 100 })).body.items;
+    const lines = (
+      await ledgerPage(netted, netted.username, { from: AUG.from, to: "2026-11-01T00:00:00Z", limit: 100 })
+    ).body.items;
     const payouts = lines.filter((l) => l.type === "payout");
     expect(payouts.map((l) => [l.net.cents, l.gross, l.deductions, l.reference])).toEqual([
       [-4500, null, null, "BANK-1002"],
@@ -521,11 +668,23 @@ describe("payouts", () => {
     ]);
 
     const audits = await db()
-      .select({ action: schema.auditLog.action })
+      .select({
+        action: schema.auditLog.action,
+        subjectType: schema.auditLog.subjectType,
+        subjectId: schema.auditLog.subjectId,
+      })
       .from(schema.auditLog)
       .where(inArray(schema.auditLog.action, ["payout.run", "payout.paid"]));
-    expect(audits.filter((a) => a.action === "payout.run")).toHaveLength(3);
+    const runs = audits.filter((a) => a.action === "payout.run");
+    expect(runs.map((a) => [a.subjectType, a.subjectId])).toEqual([
+      ["payout_run", "2026-08:usd"],
+      ["payout_run", "2026-08:usd"],
+      ["payout_run", "2026-09:usd"],
+    ]);
     expect(audits.filter((a) => a.action === "payout.paid")).toHaveLength(2);
+
+    // On Oct 2, August (before the previous month) can no longer be run.
+    expect((await runPayouts("2026-09-01T00:00:00Z")).status).toBe(400);
   });
 
   test("payout account and statement are the caller's own", async () => {
@@ -583,6 +742,10 @@ describe("costs and transparency", () => {
         })
       ).status,
     ).toBe(400);
+    // payment-fees is the co-op's own expense account, not an infrastructure category.
+    const fees = await treasurer.client.call("POST", "/api/treasurer/costs", { ...body, category: "payment-fees" });
+    expect(fees.status).toBe(400);
+    expect(await db().select().from(schema.infraCosts)).toEqual([]);
     expect((await treasurer.client.call("POST", "/api/treasurer/costs", body)).status).toBe(200);
 
     const [cost] = await db().select().from(schema.infraCosts);
@@ -615,11 +778,12 @@ describe("costs and transparency", () => {
     expect(r.status).toBe(200);
     expect(r.body.map((m) => m.month)).toEqual(["2026-10", "2026-09", "2026-08", "2026-07"]);
     const aug = r.body.find((m) => m.month === "2026-08");
-    // Owner 3533 − 1200, the netted creator's 5000 charged back in full, the small creator's 1000.
-    expect(aug?.revenue.cents).toBe(3333);
-    expect(aug?.coopRetained.cents).toBe(334);
+    // Owner 3533 − 1200, the netted creator's 5000 charged back in full, the small creator's
+    // 1000, the tie creator's 500.
+    expect(aug?.revenue.cents).toBe(3833);
+    expect(aug?.coopRetained.cents).toBe(384);
     expect(aug?.costs).toEqual([{ category: "hosting", amount: { cents: 1234, currency: "usd" } }]);
-    expect(aug?.surplus.cents).toBe(334 - 1234);
+    expect(aug?.surplus.cents).toBe(384 - 1234);
     expect(aug?.streamerPayouts.cents).toBe(4500);
     expect(aug?.patronageDistributed.cents).toBe(0);
     expect(aug?.egressBySource).toEqual({ origin: 0, relay: 0, p2p: 0, cdn: 0 });

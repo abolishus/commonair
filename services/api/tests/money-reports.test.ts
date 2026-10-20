@@ -11,14 +11,21 @@ import {
   costCategory,
   csvSafeReference,
   isCategorySlug,
+  isIdCursor,
+  isMicroKeyCursor,
+  isReservedCostCategory,
+  isWholeMonth,
   monthKey,
   monthStart,
   parsePeriod,
   payoutMonth,
+  payoutRunRefusal,
+  payoutRunSubject,
   previousPeriod,
   revenueLineType,
   revenueSource,
   utcDays,
+  visiblePayer,
 } from "../src/money/reports-lib.ts";
 
 const d = (s: string) => new Date(s);
@@ -92,21 +99,121 @@ describe("parsePeriod", () => {
   });
 });
 
+describe("isWholeMonth", () => {
+  test("exactly one UTC calendar month", () => {
+    expect(isWholeMonth({ from: d("2026-08-01T00:00:00Z"), to: d("2026-09-01T00:00:00Z") })).toBe(true);
+    expect(isWholeMonth({ from: d("2026-12-01T00:00:00Z"), to: d("2027-01-01T00:00:00Z") })).toBe(true);
+    expect(isWholeMonth({ from: d("2028-02-01T00:00:00Z"), to: d("2028-03-01T00:00:00Z") })).toBe(true);
+  });
+
+  test("anything else is not", () => {
+    // Not starting on the 1st, two months, a day short, an hour off (offset in the bound).
+    expect(isWholeMonth({ from: d("2026-08-02T00:00:00Z"), to: d("2026-09-02T00:00:00Z") })).toBe(false);
+    expect(isWholeMonth({ from: d("2026-08-01T00:00:00Z"), to: d("2026-10-01T00:00:00Z") })).toBe(false);
+    expect(isWholeMonth({ from: d("2026-08-01T00:00:00Z"), to: d("2026-08-31T00:00:00Z") })).toBe(false);
+    expect(isWholeMonth({ from: d("2026-08-01T00:00:00+01:00"), to: d("2026-09-01T00:00:00Z") })).toBe(false);
+  });
+});
+
 describe("previousPeriod", () => {
-  test("same length, ending where the period starts", () => {
+  test("a whole month compares with the whole previous calendar month", () => {
     const p = previousPeriod({ from: d("2026-08-01T00:00:00Z"), to: d("2026-09-01T00:00:00Z") });
-    // August has 31 days, so the previous period starts on July 1.
     expect(iso(p)).toEqual(["2026-07-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z"]);
   });
 
-  test("a short month looks back by its own length, not a calendar month", () => {
+  test("March compares with all of February, not a 31-day window", () => {
     const p = previousPeriod({ from: d("2026-03-01T00:00:00Z"), to: d("2026-04-01T00:00:00Z") });
-    expect(iso(p)).toEqual(["2026-01-29T00:00:00.000Z", "2026-03-01T00:00:00.000Z"]);
+    expect(iso(p)).toEqual(["2026-02-01T00:00:00.000Z", "2026-03-01T00:00:00.000Z"]);
   });
 
-  test("arbitrary spans", () => {
+  test("leap February and the month after it", () => {
+    expect(iso(previousPeriod({ from: d("2028-03-01T00:00:00Z"), to: d("2028-04-01T00:00:00Z") }))).toEqual([
+      "2028-02-01T00:00:00.000Z",
+      "2028-03-01T00:00:00.000Z",
+    ]);
+    expect(iso(previousPeriod({ from: d("2028-02-01T00:00:00Z"), to: d("2028-03-01T00:00:00Z") }))).toEqual([
+      "2028-01-01T00:00:00.000Z",
+      "2028-02-01T00:00:00.000Z",
+    ]);
+  });
+
+  test("January compares with the previous December", () => {
+    expect(iso(previousPeriod({ from: d("2027-01-01T00:00:00Z"), to: d("2027-02-01T00:00:00Z") }))).toEqual([
+      "2026-12-01T00:00:00.000Z",
+      "2027-01-01T00:00:00.000Z",
+    ]);
+  });
+
+  test("other spans look back by their own length", () => {
     const p = previousPeriod({ from: d("2026-08-10T12:00:00Z"), to: d("2026-08-11T00:00:00Z") });
     expect(iso(p)).toEqual(["2026-08-10T00:00:00.000Z", "2026-08-10T12:00:00.000Z"]);
+    // Two whole months are not one month: a same-length window (62 days).
+    const two = previousPeriod({ from: d("2026-07-01T00:00:00Z"), to: d("2026-09-01T00:00:00Z") });
+    expect(iso(two)).toEqual(["2026-04-30T00:00:00.000Z", "2026-07-01T00:00:00.000Z"]);
+  });
+});
+
+describe("payout runs", () => {
+  const now = d("2026-10-05T12:00:00Z");
+
+  test("the current and the previous month may be run", () => {
+    expect(payoutRunRefusal(d("2026-10-01T00:00:00Z"), now)).toBeNull(); // closes September
+    expect(payoutRunRefusal(d("2026-09-15T00:00:00Z"), now)).toBeNull();
+    expect(payoutRunRefusal(d("2026-09-01T00:00:00.001Z"), now)).toBeNull();
+    expect(payoutRunRefusal(now, now)).toBeNull();
+  });
+
+  test("future periodEnd and months before the previous one are refused", () => {
+    expect(payoutRunRefusal(d("2026-10-05T12:00:00.001Z"), now)).toMatch(/future/);
+    // Exactly 00:00 on Sep 1 closes August.
+    expect(payoutRunRefusal(d("2026-09-01T00:00:00Z"), now)).toMatch(/previous or the current month/);
+    expect(payoutRunRefusal(d("2026-08-20T00:00:00Z"), now)).toMatch(/previous or the current month/);
+  });
+
+  test("across the year boundary", () => {
+    const jan = d("2027-01-03T00:00:00Z");
+    expect(payoutRunRefusal(d("2027-01-01T00:00:00Z"), jan)).toBeNull(); // December
+    expect(payoutRunRefusal(d("2026-12-01T00:00:00Z"), jan)).not.toBeNull(); // November
+  });
+
+  test("the audit subject is the batch month and currency", () => {
+    expect(payoutRunSubject(d("2026-10-01T00:00:00Z"), "usd")).toBe("2026-09:usd");
+    expect(payoutRunSubject(d("2026-10-05T12:00:00Z"), "eur")).toBe("2026-10:eur");
+  });
+});
+
+describe("visiblePayer", () => {
+  const user = { id: "u" };
+
+  test("tips show the payer only when known not to be anonymous", () => {
+    expect(visiblePayer({ kind: "tip", anonymous: false, user })).toBe(user);
+    expect(visiblePayer({ kind: "tip", anonymous: true, user })).toBeNull();
+    // No tip row (or it was deleted): fail closed.
+    expect(visiblePayer({ kind: "tip", anonymous: null, user })).toBeNull();
+  });
+
+  test("subscriptions always show their payer", () => {
+    expect(visiblePayer({ kind: "subscription", anonymous: null, user })).toBe(user);
+    expect(visiblePayer({ kind: "subscription", anonymous: null, user: null })).toBeNull();
+  });
+});
+
+describe("cursors", () => {
+  const id = "01923456-789a-7bcd-8ef0-123456789abc";
+
+  test("microsecond keyset cursors", () => {
+    expect(isMicroKeyCursor({ t: "2026-08-02T10:00:00.123456Z", id })).toBe(true);
+    // Millisecond precision would lose rows that share a millisecond.
+    expect(isMicroKeyCursor({ t: "2026-08-02T10:00:00.123Z", id })).toBe(false);
+    expect(isMicroKeyCursor({ t: "2026-08-02T10:00:00.123456+00:00", id })).toBe(false);
+    expect(isMicroKeyCursor({ t: "2026-08-02T10:00:00.123456Z", id: "x" })).toBe(false);
+    expect(isMicroKeyCursor({ t: 1, id })).toBe(false);
+  });
+
+  test("id cursors", () => {
+    expect(isIdCursor({ id })).toBe(true);
+    expect(isIdCursor({ id: "nope" })).toBe(false);
+    expect(isIdCursor({})).toBe(false);
   });
 });
 
@@ -205,6 +312,12 @@ describe("cost categories", () => {
     expect(isCategorySlug("web hosting")).toBe(false);
     expect(isCategorySlug("")).toBe(false);
     expect(isCategorySlug("a".repeat(41))).toBe(false);
+  });
+
+  test("payment-fees is reserved", () => {
+    expect(isReservedCostCategory("payment-fees")).toBe(true);
+    expect(isReservedCostCategory("hosting")).toBe(false);
+    expect(isReservedCostCategory("payment-fees-2")).toBe(false);
   });
 
   test("transparency names", () => {
