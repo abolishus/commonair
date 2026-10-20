@@ -46,6 +46,36 @@ worker-money, D web-support (+ `ChatEvent`, OptionGroup/AmountField props), E we
 the e4b doc to `apps/web/tests/selectors.test.ts`/`i18n.test.ts`, then unit G (Stripe adapter
 against stripe-mock, webhook route, Connect onboarding, harness `--set provider=stripe`).
 
+### Session seven (2026-10-20, in progress)
+
+Resumed from `e64e007`. Round: finish B's fix round and E (fresh agents in the same worktrees),
+rerun the reviews of A, D and F, fix every HIGH (focused re-review), merge A–F, then the head adds
+the e4b doc to the web selector/i18n tests and pushes; then unit G (Stripe), then the open items.
+
+### Resume point (2026-10-20, stopped at the user's request)
+
+The user asked to stop the units and push `main`. On `main` (pushed): the contract step, migration
+`0013` + `0014` (partial indexes for the worker scans), unit **C worker-money** merged after
+review (no HIGH) plus its fix round (`b5d7c26`), spec updates (hourly hold release, Cancel row,
+renewal price copied on confirm, lock order payment → subscription, `chat-message`
+`data-badges`, no cancel on gifts, every held payout re-pended), `channel.tip` `decimal_places`
+follows the currency, and the unit G (Stripe) brief. Nothing below is merged:
+
+| Unit                  | Branch `worktree-agent-…`                                             | State                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A api-checkout        | `a429124a5bed5abe9` @ `4acc234`                                       | done (4 head decisions folded in); review was stopped midway — rerun it. Follow-up for A: send `decimal_places = minorUnits(currency)` in `channel.tip`                                                                                                                                                                                                                              |
+| B api-reports         | `a9845f0b5eb7d8c4b` @ `5ac96fb` + 1 uncommitted file in its worktree  | reviewed (no HIGH); fix round stopped midway (head decisions: payouts paged by id, revenue owner-only, previousNet = previous calendar month for whole months, runPayouts refuses periodEnd before the previous month, anonymous tip fail-closed, daily gross = payments only, reserve `payment-fees`, revenueLedger default month, payout-run audit subject). Resume it, then merge |
+| D web-support         | `a9d461986eaf7e292` @ `3c6dba7`                                       | done; review stopped midway — rerun it. Known fix: no `subscription-cancel` on gifted rows                                                                                                                                                                                                                                                                                           |
+| E web-money           | `abde70cbc8c84de35` (no commit; 21 uncommitted files in its worktree) | stopped while building `/revenue`; resume it from its worktree                                                                                                                                                                                                                                                                                                                       |
+| F harness `e4b-money` | `a21ffbae211abf479` @ `94f1523`                                       | done; review stopped midway — rerun it                                                                                                                                                                                                                                                                                                                                               |
+
+After A–F: add the e4b doc to `apps/web/tests/selectors.test.ts` and `i18n.test.ts`, then unit G
+(`.claude/briefs/e4b/G-stripe.md`). Open items from reviews: payout reservation is dated at
+`periodEnd` (a run on the 5th for the previous month books releases from days 1–5 into that
+month); optional `WorkerContext.money` config; packages/ui `PageTabs`/`ChoiceToggle` per-item
+`disabled`/`data-testid` so the Support dialog can use the compositions; channel accent in
+`ChannelSummary`; Support board fixture still shows a processing segment and card picker.
+
 ## Session five in flight (E4a design system)
 
 The user's session-five prompt: E4 starts with an application-design-only track (no API, worker,
