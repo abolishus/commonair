@@ -132,7 +132,8 @@ export const EVENTS = {
       is_anonymous: z.boolean(),
       amount: z.object({
         value: z.number().int(),
-        decimal_places: z.literal(2),
+        /** The currency's minor units (`minorUnits(currency)`): 2 for usd, 0 for jpy. */
+        decimal_places: z.number().int().min(0).max(4),
         currency: z.string(),
       }),
       message: z.string(),

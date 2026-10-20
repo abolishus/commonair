@@ -63,6 +63,10 @@ export const subscriptions = pgTable(
       .where(sql`${t.status} in ('active', 'past_due', 'incomplete')`),
     uniqueIndex("subscriptions_provider_ref_uq").on(t.provider, t.providerRef),
     index("subscriptions_gift_payment_idx").on(t.giftPaymentId),
+    /** The worker's renewal scan (`money-renew`). */
+    index("subscriptions_period_end_active_idx")
+      .on(t.currentPeriodEnd)
+      .where(sql`${t.status} = 'active'`),
     check("subscriptions_tier_range", sql`${t.tier} between 1 and 3`),
   ],
 );
@@ -119,6 +123,10 @@ export const payments = pgTable(
     index("payments_channel_idx").on(t.channelId),
     index("payments_status_idx").on(t.status, t.createdAt),
     index("payments_user_idx").on(t.userId, t.createdAt),
+    /** The worker's expiry scan (`money-expire-pending`). */
+    index("payments_expires_pending_idx")
+      .on(t.expiresAt)
+      .where(sql`${t.status} = 'pending'`),
     check("payments_quantity_range", sql`${t.quantity} between 1 and 100`),
     check("payments_tier_range", sql`${t.tier} is null or ${t.tier} between 1 and 3`),
     check("payments_amount_positive", sql`${t.amountCents} > 0`),

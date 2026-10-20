@@ -6,6 +6,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { JOBS } from "../src/jobs/index.ts";
 import { MONEY_BATCH_SIZE, MONEY_BUDGET_MS, moneyConfigFromEnv } from "../src/money/config.ts";
 import { tierCode } from "../src/money/ends.ts";
+import { takeWithinCap } from "../src/money/expire.ts";
 import { MONEY_JOBS, moneyLockKey } from "../src/money/job.ts";
 import { DAY_MS, isExpired, isPeriodOver, renewalExpiresAt, runBatches } from "../src/money/time.ts";
 
@@ -23,6 +24,21 @@ describe("renewal expiry arithmetic", () => {
     expect(renewalExpiresAt(feb, 1).toISOString()).toBe("2028-02-29T00:00:00.000Z");
     const march = new Date("2026-03-28T12:00:00.000Z");
     expect(renewalExpiresAt(march, 2).toISOString()).toBe("2026-03-30T12:00:00.000Z");
+  });
+
+  test("a renewal opened late still gets at least a day to pay", () => {
+    const end = new Date("2026-03-01T00:00:00.000Z");
+    // On time: the normal window.
+    expect(renewalExpiresAt(end, 7, end).toISOString()).toBe("2026-03-08T00:00:00.000Z");
+    // Six and a half days late: only half a day would be left, so now + 1 day.
+    const late = new Date(end.getTime() + 6.5 * DAY_MS);
+    expect(renewalExpiresAt(end, 7, late).toISOString()).toBe(new Date(late.getTime() + DAY_MS).toISOString());
+    // Ten days late (an outage): now + 1 day.
+    const outage = new Date(end.getTime() + 10 * DAY_MS);
+    expect(renewalExpiresAt(end, 7, outage).toISOString()).toBe("2026-03-12T00:00:00.000Z");
+    // Exactly at the boundary both rules agree.
+    const edge = new Date(end.getTime() + 6 * DAY_MS);
+    expect(renewalExpiresAt(end, 7, edge).toISOString()).toBe("2026-03-08T00:00:00.000Z");
   });
 
   test("rejects non-positive or fractional days", () => {
@@ -88,6 +104,17 @@ describe("runBatches", () => {
     expect(r).toEqual({ batches: 0, rows: 0, exhausted: true });
   });
 
+  test("an explicit `more` overrides the row count either way", async () => {
+    const steps = [
+      { rows: 1, more: true },
+      { rows: 5, more: true },
+      { rows: 5, more: false },
+    ];
+    let i = 0;
+    const r = await runBatches({ batchSize: 5, budgetMs: 1_000, clock: () => 0 }, async () => steps[i++]!);
+    expect(r).toEqual({ batches: 3, rows: 11, exhausted: false });
+  });
+
   test("passes the batch size as the limit and rejects a bad one", async () => {
     const seen: number[] = [];
     await runBatches({ batchSize: 7, budgetMs: 1_000, clock: () => 0 }, async (limit) => {
@@ -96,6 +123,28 @@ describe("runBatches", () => {
     });
     expect(seen).toEqual([7]);
     await expect(runBatches({ batchSize: 0, budgetMs: 1_000 }, async () => 0)).rejects.toThrow(RangeError);
+  });
+});
+
+describe("takeWithinCap", () => {
+  const q = (...quantities: number[]) => quantities.map((quantity, i) => ({ i, quantity }));
+
+  test("takes payments in order while their subscriptions fit", () => {
+    expect(takeWithinCap(q(1, 1, 1, 1), 3).map((r) => r.i)).toEqual([0, 1, 2]);
+    expect(takeWithinCap(q(2, 1, 5, 1), 3).map((r) => r.i)).toEqual([0, 1]);
+    expect(takeWithinCap(q(100, 100, 100, 100, 100, 1), 500).map((r) => r.i)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  test("always takes the first, even when it alone exceeds the cap", () => {
+    expect(takeWithinCap(q(100, 1), 50).map((r) => r.i)).toEqual([0]);
+  });
+
+  test("stops at the first that does not fit (keeps the order)", () => {
+    expect(takeWithinCap(q(2, 3, 1), 4).map((r) => r.i)).toEqual([0]);
+  });
+
+  test("empty in, empty out", () => {
+    expect(takeWithinCap([], 500)).toEqual([]);
   });
 });
 
