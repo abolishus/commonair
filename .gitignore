@@ -34,3 +34,6 @@ sbom/
 # AI agent worktrees
 .claude/worktrees/
 .claude/settings.local.json
+
+# Downloaded model weights (scripts/fetch-model.ts); never committed
+.cache/

@@ -11,8 +11,9 @@ export const MODEL = {
   repo: "AdamCodd/vit-base-nsfw-detector",
   revision: "8587de998f441aac03fdd57a85d2e4cb808c7d64",
   file: "onnx/model_int8.onnx",
-  /** sha256 of the file at the revision, recorded at the first download (scripts/fetch-model.ts). */
-  sha256: null as string | null,
+  /** sha256 of the file at the revision (equals the Hugging Face LFS oid; checked 2026-10-20). */
+  sha256: "d25aa73fe1eec78459e35ff911e2af98f652ee919b48d9c54316c86d5ff435fa" as string | null,
+  sizeBytes: 88_500_985,
   provider: "onnx:adamcodd-vit-nsfw",
 } as const;
 
