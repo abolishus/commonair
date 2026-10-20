@@ -142,6 +142,45 @@ describe("forms blocks", () => {
     expect(input.value).toBe("7.5");
   });
 
+  test("AmountField reports unparsed text: empty data-cents, the format error, and validity changes", () => {
+    const change = vi.fn<(value: number) => void>();
+    const validity = vi.fn<(valid: boolean) => void>();
+    render(
+      <AmountField
+        label="Tip"
+        currency="USD"
+        value={500}
+        onValueChange={change}
+        onValidityChange={validity}
+        presets={[{ label: "$10", value: 1000 }]}
+        rangeError="Out of range"
+        formatError="Enter an amount"
+        inputProps={{ "data-testid": "support-tip-amount" }}
+      />,
+    );
+    const input = screen.getByTestId("support-tip-amount") as HTMLInputElement;
+    for (const text of ["", "5.001", "abc"]) {
+      fireEvent.change(input, { target: { value: text } });
+      expect(input.getAttribute("data-cents")).toBe("");
+      expect(input.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText("Enter an amount")).toBeTruthy();
+    }
+    expect(change).not.toHaveBeenCalled();
+    // Reported once per transition, not on every keystroke.
+    expect(validity.mock.calls).toEqual([[false]]);
+    fireEvent.blur(input);
+    expect(input.value).toBe("abc");
+    fireEvent.change(input, { target: { value: "6" } });
+    expect(change).toHaveBeenLastCalledWith(600);
+    expect(validity.mock.calls).toEqual([[false], [true]]);
+    expect(screen.queryByText("Enter an amount")).toBeNull();
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.click(screen.getByText("$10"));
+    expect(change).toHaveBeenLastCalledWith(1000);
+    expect(validity.mock.calls).toEqual([[false], [true], [false], [true]]);
+    expect(input.getAttribute("data-cents")).toBe("500");
+  });
+
   test("CopyField copies and reports success; secrets can be revealed", async () => {
     const writeText = vi.fn<(value: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

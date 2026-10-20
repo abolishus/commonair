@@ -170,6 +170,23 @@ describe("Support dialog", () => {
     });
   });
 
+  it("tips: unparsed amount text blocks checkout until it parses", async () => {
+    const c = client(supportInfo(), async () => instructions);
+    await open(c);
+    fireEvent.click(id("support-tab-tip"));
+    await waitFor(() => expect(screen.queryByTestId("support-tip-amount")).not.toBeNull());
+    for (const text of ["", "5.001", "five"]) {
+      fireEvent.change(id("support-tip-amount"), { target: { value: text } });
+      expect(id("support-tip-amount").getAttribute("data-cents")).toBe("");
+      expect(id("support-total").getAttribute("data-cents")).toBe("0");
+      expect((id("support-submit") as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(screen.getByText(/^Enter an amount, like/)).toBeTruthy();
+    fireEvent.change(id("support-tip-amount"), { target: { value: "7" } });
+    expect(id("support-total").getAttribute("data-cents")).toBe("700");
+    expect((id("support-submit") as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("no tiers: sub and gift disabled with the reason, opens on tip", async () => {
     await open(client(supportInfo({ tiers: [] }), async () => instructions));
     expect(

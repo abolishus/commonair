@@ -39,6 +39,7 @@ export const supportMessages = {
   "support.gift.invalidTo": "Enter the viewer's username (3–25 lowercase letters, digits or underscores).",
   "support.tip.amount": "Tip amount",
   "support.tip.invalidAmount": "Tips are between {min} and {max}.",
+  "support.tip.unparsed": "Enter an amount, like {example}.",
   "support.tip.message": "Message (optional)",
   "support.tip.count": "{count} / {max}",
   "support.tip.anonymous": "Hide my name on this tip",
@@ -90,7 +91,6 @@ export const supportMessages = {
   "chat.badge.member": "Co-op member",
 
   "chat.event.subscribe": "{name} subscribed at Tier {tier}",
-  "chat.event.subscribeGift": "{name} received a Tier {tier} gift sub",
   "chat.event.giftOne": "{name} gifted a Tier {tier} sub",
   "chat.event.giftOther": "{name} gifted {total} Tier {tier} subs",
   "chat.event.giftAnonymousOne": "An anonymous viewer gifted a Tier {tier} sub",

@@ -108,6 +108,8 @@ export function giftError(draft: GiftDraft, maxCount: number): MessageKey | null
 
 export interface TipDraft {
   cents: number;
+  /** The amount text does not parse (empty, non-numeric, too many decimals): `cents` is stale. */
+  unparsed?: boolean;
   message: string;
   anonymous: boolean;
 }
@@ -119,6 +121,7 @@ export function tipPresets(limits: SupportInfo["tip"]): number[] {
 }
 
 export function tipError(draft: TipDraft, limits: SupportInfo["tip"]): MessageKey | null {
+  if (draft.unparsed) return "support.tip.unparsed";
   if (!Number.isSafeInteger(draft.cents) || draft.cents < limits.minCents || draft.cents > limits.maxCents)
     return "support.tip.invalidAmount";
   return null;
@@ -242,9 +245,12 @@ export const SUBSCRIPTION_STATUS_VIEW: Record<SubscriptionStatus, { key: Message
   expired: { key: "support.status.expired", tone: "neutral" },
 };
 
-/** Cancel at period end: active rows that are not already cancelling (spec, /settings/subscriptions). */
+/**
+ * Cancel at period end: active rows that are not already cancelling (spec, /settings/subscriptions).
+ * Gifted subscriptions never renew, so there is nothing to cancel.
+ */
 export function canCancel(subscription: SubscriptionDto): boolean {
-  return subscription.status === "active" && !subscription.cancelAtPeriodEnd;
+  return subscription.status === "active" && !subscription.cancelAtPeriodEnd && !subscription.gifted;
 }
 
 /** The period-end label: "Ends" when it will not renew (cancelling, gifted, ended), else "Renews". */

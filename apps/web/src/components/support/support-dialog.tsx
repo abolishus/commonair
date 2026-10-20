@@ -13,7 +13,7 @@ import {
   useLocale,
 } from "@commonair/ui";
 import { BreakdownBar, KeyValueList } from "@commonair/ui/blocks/data";
-import { AmountField, OptionGroup } from "@commonair/ui/blocks/forms";
+import { AmountField, ChoiceToggle, OptionGroup } from "@commonair/ui/blocks/forms";
 import { Alert, AlertDescription } from "@commonair/ui/components/alert";
 import { Button } from "@commonair/ui/components/button";
 import { Checkbox } from "@commonair/ui/components/checkbox";
@@ -60,6 +60,7 @@ import {
   type SupportInfo,
   type SupportTab,
   type TierNumber,
+  type TipDraft,
 } from "../../lib/support.ts";
 import { safeHttpUrl } from "../../lib/url.ts";
 
@@ -244,6 +245,11 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
     setDraft((d) => ({ ...d, ...next }));
     setError(null);
   };
+  // The amount field reports value and validity in one event: merge into the latest tip, not this render's.
+  const updateTip = (next: Partial<TipDraft>) => {
+    setDraft((d) => ({ ...d, tip: { ...d.tip, ...next } }));
+    setError(null);
+  };
 
   const submit = async () => {
     if (!request || inFlight.current) return;
@@ -313,29 +319,16 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
         void submit();
       }}
     >
-      {held && (
-        <div
-          data-testid="support-current"
-          data-status={held.status}
-          data-tier={held.tier}
-          className="flex flex-wrap items-center gap-2"
-        >
-          <StatusBadge tone={SUBSCRIPTION_STATUS_VIEW[held.status].tone}>
-            {supportText(SUBSCRIPTION_STATUS_VIEW[held.status].key)}
-          </StatusBadge>
-          <span>{t("support.current", { tier: held.tier })}</span>
-          {held.status === "incomplete" && (
-            <span className="text-muted-foreground">{t("support.current.incomplete")}</span>
-          )}
-        </div>
-      )}
+      {/* Raw Tabs until PageTabs takes per-item `disabled` and test ids (head-agent follow-up). */}
       <Tabs value={draft.tab} onValueChange={(value) => update({ tab: value as SupportTab })}>
         <TabsList aria-label={t("support.tabs")} className="w-full">
           <TabsTrigger
             data-testid="support-tab-sub"
             value="sub"
             disabled={!available.sub.enabled}
-            aria-describedby={reasonId("sub")}
+            aria-describedby={
+              [reasonId("sub"), held ? `${ids}-current` : undefined].filter(Boolean).join(" ") || undefined
+            }
           >
             {t("support.tab.sub")}
           </TabsTrigger>
@@ -361,6 +354,24 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
             {supportText(reason)}
           </p>
         ))}
+        {/* About the sub tab, but outside its panel: holding a subscription disables that tab. */}
+        {held && (
+          <div
+            id={`${ids}-current`}
+            data-testid="support-current"
+            data-status={held.status}
+            data-tier={held.tier}
+            className="flex flex-wrap items-center gap-2 pt-2"
+          >
+            <StatusBadge tone={SUBSCRIPTION_STATUS_VIEW[held.status].tone}>
+              {supportText(SUBSCRIPTION_STATUS_VIEW[held.status].key)}
+            </StatusBadge>
+            <span>{t("support.current", { tier: held.tier })}</span>
+            {held.status === "incomplete" && (
+              <span className="text-muted-foreground">{t("support.current.incomplete")}</span>
+            )}
+          </div>
+        )}
         <TabsContent value="sub" className="pt-2">
           {tierGroup}
         </TabsContent>
@@ -391,26 +402,15 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
             </Field>
             {draft.gift.mode === "random" ? (
               <>
-                <Field>
-                  <FieldLabel id={`${ids}-presets`}>{t("support.gift.count")}</FieldLabel>
-                  <ToggleGroup
-                    aria-labelledby={`${ids}-presets`}
-                    variant="outline"
-                    multiple={false}
-                    value={[draft.gift.count]}
-                    onValueChange={(values) => {
-                      const count = values.at(-1);
-                      if (count) update({ gift: { ...draft.gift, count } });
-                    }}
-                    className="flex-wrap"
-                  >
-                    {giftPresets(info.gift.maxCount).map((count) => (
-                      <ToggleGroupItem key={count} value={String(count)}>
-                        {count}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </Field>
+                <ChoiceToggle
+                  label={t("support.gift.count")}
+                  value={draft.gift.count}
+                  onValueChange={(count) => update({ gift: { ...draft.gift, count } })}
+                  options={giftPresets(info.gift.maxCount).map((count) => ({
+                    value: String(count),
+                    label: count,
+                  }))}
+                />
                 <Field data-invalid={giftProblem ? true : undefined}>
                   <FieldLabel htmlFor={`${ids}-count`}>{t("support.gift.countInput")}</FieldLabel>
                   <Input
@@ -462,7 +462,8 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
               currency={info.currency}
               locale={locale}
               value={draft.tip.cents}
-              onValueChange={(cents) => update({ tip: { ...draft.tip, cents } })}
+              onValueChange={(cents) => updateTip({ cents })}
+              onValidityChange={(valid) => updateTip({ unparsed: !valid })}
               presets={tipPresets(info.tip).map((cents) => ({ value: cents, label: money(cents) }))}
               min={info.tip.minCents}
               max={info.tip.maxCents}
@@ -470,6 +471,7 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
                 min: money(info.tip.minCents),
                 max: money(info.tip.maxCents),
               })}
+              formatError={t("support.tip.unparsed", { example: money(info.tip.minCents) })}
               inputProps={{ "data-testid": "support-tip-amount" }}
             />
             <Field>

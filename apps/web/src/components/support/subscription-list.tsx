@@ -79,9 +79,14 @@ export function SubscriptionList({ subscriptions, onCancel, onCancelError }: Sub
             </ItemMedia>
             <ItemContent className="min-w-0">
               <ItemTitle>
-                <Link to="/$channel" params={{ channel: s.channelSlug }} className="truncate hover:underline">
+                <Button
+                  variant="link"
+                  size="xs"
+                  nativeButton={false}
+                  render={<Link to="/$channel" params={{ channel: s.channelSlug }} />}
+                >
                   {s.channelSlug}
-                </Link>
+                </Button>
               </ItemTitle>
               <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span>{t("subscriptions.tier", { tier: s.tier })}</span>

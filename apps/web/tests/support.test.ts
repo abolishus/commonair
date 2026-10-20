@@ -124,6 +124,14 @@ describe("tips", () => {
     expect(tipError({ cents: 150.5, message: "", anonymous: false }, limits)).toBe("support.tip.invalidAmount");
   });
 
+  it("unparsed amount text is invalid even when the last parsed cents were fine", () => {
+    const tip = { cents: limits.minCents, message: "", anonymous: false, unparsed: true };
+    expect(tipError(tip, limits)).toBe("support.tip.unparsed");
+    expect(
+      supportTotal(supportInfo(), { tab: "tip", tier: 1, gift: { count: "1", mode: "random", to: "" }, tip }),
+    ).toBeNull();
+  });
+
   it("drops presets outside the limits", () => {
     expect(tipPresets(limits)).toEqual([200, 500, 1000, 2000]);
     expect(tipPresets({ ...limits, minCents: 600 })).toEqual([1000, 2000]);
@@ -252,9 +260,11 @@ describe("subscriptions", () => {
     for (const view of Object.values(SUBSCRIPTION_STATUS_VIEW)) expect(view.key in en).toBe(true);
   });
 
-  it("cancel only for active rows not already cancelling", () => {
+  it("cancel only for active, paid rows not already cancelling", () => {
     expect(canCancel(subscription())).toBe(true);
     expect(canCancel(subscription({ cancelAtPeriodEnd: true }))).toBe(false);
+    // Gifted subscriptions never renew: nothing to cancel.
+    expect(canCancel(subscription({ gifted: true }))).toBe(false);
     for (const status of ["incomplete", "past_due", "canceled", "expired"] as const)
       expect(canCancel(subscription({ status }))).toBe(false);
   });

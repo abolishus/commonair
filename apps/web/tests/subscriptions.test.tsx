@@ -80,6 +80,7 @@ describe("SubscriptionList", () => {
     const [row] = rows(list([subscription({ gifted: true })]));
     expect(row?.getAttribute("data-gifted")).toBe("true");
     expect(row?.textContent).toContain("Gift");
+    expect(row?.querySelector('[data-testid="subscription-cancel"]')).toBeNull();
   });
 
   it("ended and pending rows have no cancel; current ones sort first", () => {

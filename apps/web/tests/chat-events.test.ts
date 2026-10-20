@@ -44,14 +44,13 @@ const tipPayload = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("chatEventView", () => {
-  it("channel.subscribe → user, tier 1–3, gift flag", () => {
+  it("channel.subscribe → user and tier 1–3; gifted ones are summarised by the gift row", () => {
     const v = chatEventView("channel.subscribe", subscribe());
     expect(v).toMatchObject({ type: "channel.subscribe", user: "mothwing", name: "Mothwing", tier: 2, isGift: false });
     expect(v?.amount).toBeNull();
     expect(chatEventText(v!)).toBe("Mothwing subscribed at Tier 2");
-    const g = chatEventView("channel.subscribe", subscribe({ is_gift: true, tier: "3000" }));
-    expect(g?.tier).toBe(3);
-    expect(chatEventText(g!)).toBe("Mothwing received a Tier 3 gift sub");
+    expect(chatEventView("channel.subscribe", subscribe({ tier: "3000" }))?.tier).toBe(3);
+    expect(chatEventView("channel.subscribe", subscribe({ is_gift: true, tier: "3000" }))).toBeNull();
   });
 
   it("channel.subscription.gift → gifter and total; anonymous gifts have an empty user", () => {

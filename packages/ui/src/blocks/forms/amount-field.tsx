@@ -21,10 +21,17 @@ export interface AmountFieldProps {
   min?: number;
   max?: number;
   rangeError: React.ReactNode;
+  /** Shown while the typed text is not an amount (empty, non-numeric, too many decimals). Defaults to `rangeError`. */
+  formatError?: React.ReactNode;
+  /**
+   * Called when the typed text starts or stops parsing. While it does not parse, `value` is stale:
+   * treat the field as invalid. Presets and valid text report `true`.
+   */
+  onValidityChange?: (valid: boolean) => void;
   errors?: string | readonly (string | { message?: string } | undefined)[];
   hint?: React.ReactNode;
   "data-testid"?: string;
-  /** Forwarded to the `<input>`, which also carries `data-cents`: the current value in minor units. */
+  /** Forwarded to the `<input>`, which also carries `data-cents`: the current value in minor units, empty while the text does not parse. */
   inputProps?: React.ComponentProps<typeof InputGroupInput> & {
     "data-testid"?: string;
     [key: `data-${string}`]: unknown;
@@ -62,6 +69,8 @@ export function AmountField({
   min,
   max,
   rangeError,
+  formatError,
+  onValidityChange,
   errors,
   hint,
   inputProps,
@@ -77,7 +86,9 @@ export function AmountField({
     maximumFractionDigits: digits,
   }).formatToParts(0);
   const symbol = parts.find((part) => part.type === "currency")?.value ?? currency;
-  const invalid = value < (min ?? Number.MIN_SAFE_INTEGER) || value > (max ?? Number.MAX_SAFE_INTEGER);
+  const unparsed = draft !== null && parseAmount(draft, currency, locale) === null;
+  const outOfRange = value < (min ?? Number.MIN_SAFE_INTEGER) || value > (max ?? Number.MAX_SAFE_INTEGER);
+  const invalid = unparsed || outOfRange;
   return (
     <Field data-testid={props["data-testid"]}>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -90,6 +101,7 @@ export function AmountField({
             const next = values.at(-1);
             if (next) onValueChange(Number(next));
             setDraft(null);
+            if (unparsed) onValidityChange?.(true);
           }}
         >
           {presets.map((preset) => (
@@ -106,7 +118,7 @@ export function AmountField({
         <InputGroupInput
           {...inputProps}
           id={id}
-          data-cents={value}
+          data-cents={unparsed ? "" : value}
           inputMode="decimal"
           value={draft ?? formatValue(value, currency, locale)}
           aria-invalid={invalid || undefined}
@@ -115,15 +127,21 @@ export function AmountField({
             setDraft(text);
             const parsed = parseAmount(text, currency, locale);
             if (parsed !== null) onValueChange(parsed);
+            if ((parsed !== null) === unparsed) onValidityChange?.(parsed !== null);
           }}
-          onBlur={() => setDraft(null)}
+          // Keep unparsed text on blur so the error stays next to what the viewer typed.
+          onBlur={() => {
+            if (!unparsed) setDraft(null);
+          }}
         />
         <InputGroupAddon align="inline-end">
           <InputGroupText>{currency.toUpperCase()}</InputGroupText>
         </InputGroupAddon>
       </InputGroup>
       {hint && <FieldDescription>{hint}</FieldDescription>}
-      {invalid && rangeError && <FieldError>{rangeError}</FieldError>}
+      {unparsed
+        ? (formatError ?? rangeError) && <FieldError>{formatError ?? rangeError}</FieldError>
+        : outOfRange && rangeError && <FieldError>{rangeError}</FieldError>}
       {typeof errors === "string" ? <FieldError errors={[errors]} /> : errors && <FieldError errors={[...errors]} />}
     </Field>
   );

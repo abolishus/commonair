@@ -36,7 +36,9 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
   switch (type) {
     case "channel.subscribe": {
       const p = EVENTS[type].payload.safeParse(data);
-      if (!p.success) return null;
+      // A gift of N emits N gifted `channel.subscribe` plus one `channel.subscription.gift`;
+      // only the gift row is shown, since it summarises them.
+      if (!p.success || p.data.is_gift) return null;
       return {
         type,
         user: p.data.user_login,
@@ -44,7 +46,7 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
         tier: tierNumber(p.data.tier),
         amount: null,
         total: null,
-        isGift: p.data.is_gift,
+        isGift: false,
         message: null,
       };
     }
@@ -72,7 +74,7 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
         user: anonymous ? "" : (p.data.user_login ?? ""),
         name: anonymous ? null : p.data.user_name || p.data.user_login,
         tier: null,
-        // `decimal_places` is fixed at 2 in the catalog, so `value` is already in cents.
+        // `value` is in minor units (`decimal_places` = the currency's minor units).
         amount: { cents: p.data.amount.value, currency: p.data.amount.currency },
         total: null,
         isGift: false,
@@ -87,8 +89,7 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
 /** The event's one line in the viewer's language. */
 export function chatEventText(view: ChatEventView): string {
   const vars = { name: view.name ?? "", tier: view.tier ?? "", total: view.total ?? "" };
-  if (view.type === "channel.subscribe")
-    return view.isGift ? t("chat.event.subscribeGift", vars) : t("chat.event.subscribe", vars);
+  if (view.type === "channel.subscribe") return t("chat.event.subscribe", vars);
   if (view.type === "channel.subscription.gift") {
     if (view.total === 1) return view.name ? t("chat.event.giftOne", vars) : t("chat.event.giftAnonymousOne", vars);
     return view.name ? t("chat.event.giftOther", vars) : t("chat.event.giftAnonymousOther", vars);

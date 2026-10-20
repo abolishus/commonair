@@ -53,6 +53,30 @@ export const WithInputTestId: Story = {
     );
   },
 };
+/** Unparsed text (try clearing the field): `data-cents` empties and the format error shows. */
+export const UnparsedText: StoryObj<{ formatError?: string }> = {
+  args: { formatError: "Enter an amount, like 5.00." },
+  render: function Render(args: { formatError?: string }) {
+    const [cents, setCents] = React.useState(500);
+    const [valid, setValid] = React.useState(true);
+    return (
+      <div className="flex flex-col gap-2">
+        <AmountField
+          label="Tip amount"
+          currency="USD"
+          value={cents}
+          onValueChange={setCents}
+          onValidityChange={setValid}
+          min={100}
+          rangeError="Tips start at $1.00."
+          formatError={args.formatError}
+          inputProps={{ "data-testid": "support-tip-amount" }}
+        />
+        <p className="text-muted-foreground">{valid ? "Valid" : "Invalid"}</p>
+      </div>
+    );
+  },
+};
 export const ErrorState: Story = {
   render: () => (
     <div className="flex flex-col gap-2">
