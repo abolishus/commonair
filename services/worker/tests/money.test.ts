@@ -4,7 +4,7 @@
 import { QUEUES } from "@commonair/contracts/internal";
 import { describe, expect, test } from "vite-plus/test";
 import { JOBS } from "../src/jobs/index.ts";
-import { MONEY_BATCH_SIZE, MONEY_BUDGET_MS, moneyConfigFromEnv } from "../src/money/config.ts";
+import { MONEY_BATCH_SIZE, MONEY_BUDGET_MS, moneyConfig, moneyConfigFromEnv } from "../src/money/config.ts";
 import { tierCode } from "../src/money/ends.ts";
 import { takeWithinCap } from "../src/money/expire.ts";
 import { MONEY_JOBS, moneyLockKey } from "../src/money/job.ts";
@@ -184,5 +184,11 @@ describe("money job wiring", () => {
     expect(() => moneyConfigFromEnv({ PAYMENT_PENDING_DAYS: "0" })).toThrow("PAYMENT_PENDING_DAYS");
     expect(MONEY_BATCH_SIZE).toBeLessThanOrEqual(500);
     expect(MONEY_BUDGET_MS).toBe(30_000);
+  });
+
+  test("a context's injected config wins over the env", () => {
+    const injected = { currency: "eur", pendingDays: 3, batchSize: 10, budgetMs: 5 };
+    expect(moneyConfig({ money: injected })).toBe(injected);
+    expect(moneyConfig({})).toEqual(moneyConfigFromEnv());
   });
 });

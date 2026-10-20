@@ -8,7 +8,7 @@
  */
 import { loadMoneySettings, releaseDueHolds, type ReleaseResult } from "@commonair/ledger";
 import type { WorkerContext } from "../context.ts";
-import { MONEY_BUDGET_MS } from "./config.ts";
+import { moneyConfig } from "./config.ts";
 import { moneyMetrics } from "./metrics.ts";
 import { runBatches } from "./time.ts";
 
@@ -31,7 +31,11 @@ export async function releaseHolds(
   let totalCents = 0;
   // A call that released its full limit may have left more due lots: drain the backlog this run.
   const loop = await runBatches(
-    { batchSize: opts.limit ?? HOLD_RELEASE_LIMIT, budgetMs: opts.budgetMs ?? MONEY_BUDGET_MS, clock: opts.clock },
+    {
+      batchSize: opts.limit ?? HOLD_RELEASE_LIMIT,
+      budgetMs: opts.budgetMs ?? moneyConfig(ctx).budgetMs,
+      clock: opts.clock,
+    },
     async (limit) => {
       const r = await releaseDueHolds(ctx.db, {
         asOf,

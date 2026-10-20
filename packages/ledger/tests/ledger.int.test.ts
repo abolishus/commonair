@@ -397,8 +397,9 @@ describe("payouts", () => {
     );
     await releaseDueHolds(db, { asOf: new Date(), holdDays: 7, currency: cur });
   }
-  const jan = { periodStart: new Date("2026-01-01T00:00:00Z"), periodEnd: new Date("2026-02-01T00:00:00Z") };
-  const feb = { periodStart: new Date("2026-02-01T00:00:00Z"), periodEnd: new Date("2026-03-01T00:00:00Z") };
+  // Periods after every posting below, so all of it counts as of their end.
+  const jan = { periodStart: new Date("2099-01-01T00:00:00Z"), periodEnd: new Date("2099-02-01T00:00:00Z") };
+  const feb = { periodStart: new Date("2099-02-01T00:00:00Z"), periodEnd: new Date("2099-03-01T00:00:00Z") };
 
   test("batch reserves money for creators above the minimum, holds unready accounts, and is idempotent", async () => {
     const cur = "aud";
@@ -552,6 +553,179 @@ describe("payouts", () => {
     } finally {
       await other.close();
     }
+  });
+});
+
+describe("payouts count only what was available at period end", () => {
+  const at = (iso: string) => new Date(iso);
+  const JAN = { periodStart: at("2026-01-01T00:00:00Z"), periodEnd: at("2026-02-01T00:00:00Z") };
+  const FEB = { periodStart: at("2026-02-01T00:00:00Z"), periodEnd: at("2026-03-01T00:00:00Z") };
+  const HOLD = 7;
+
+  async function earnAt(creator: string, gross: number, cur: string, when: string): Promise<string> {
+    const p = paymentSucceeded({
+      paymentId: uuidv7(),
+      paymentKind: "tip",
+      provider: "stripe",
+      creatorUserId: creator,
+      grossCents: gross,
+      taxCents: 0,
+      feeCents: 0,
+      currency: cur,
+      cut: DEFAULT_PLATFORM_CUT,
+      occurredAt: at(when),
+    });
+    await post(db, p);
+    return p.refId!;
+  }
+  const release = (cur: string, asOf: string) => releaseDueHolds(db, { asOf: at(asOf), holdDays: HOLD, currency: cur });
+
+  /** The creator's liability (owed, natural terms) counting postings dated at or before `asOf`. */
+  async function owedAsOf(creator: string, cur: string, asOf: Date): Promise<number> {
+    const rows = await db.execute<{ total: string }>(sql`
+      select coalesce(sum(e.amount_cents), 0)::text as total
+      from ledger_entries e
+      join ledger_accounts a on a.id = e.account_id
+      join ledger_transactions t on t.id = e.transaction_id
+      where a.code = ${storedCode(accounts.creator(creator), cur)} and t.occurred_at <= ${asOf.toISOString()}::timestamptz`);
+    return 0 - Number(rows[0]!.total);
+  }
+  async function payoutsOf(creator: string) {
+    return (await db.select().from(s.payouts).where(eq(s.payouts.userId, creator))).sort(
+      (a, b) => a.periodStart.getTime() - b.periodStart.getTime(),
+    );
+  }
+
+  test("a run on the 5th leaves holds released on the 3rd for the next month, and reruns are idempotent", async () => {
+    const cur = "sgd";
+    const creator = await makeUser();
+    await earnAt(creator, 5000, cur, "2026-01-10T12:00:00Z"); // due Jan 17
+    await earnAt(creator, 2000, cur, "2026-01-27T12:00:00Z"); // due Feb 3
+    await release(cur, "2026-01-20T00:00:00Z");
+    await release(cur, "2026-02-03T12:00:00Z");
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ liabilityCents: 4500 + 1800, holdCents: 0 });
+
+    // On Feb 5 the treasurer runs January.
+    const r = await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    expect(r).toMatchObject({ held: 1, totalCents: 4500 });
+    const [janPayout] = await payoutsOf(creator);
+    expect(janPayout).toMatchObject({ amountCents: 4500, status: "held" });
+    const [reserve] = await db
+      .select()
+      .from(s.ledgerTransactions)
+      .where(eq(s.ledgerTransactions.idempotencyKey, `payout-reserve:${janPayout!.id}`));
+    expect(reserve?.occurredAt.toISOString()).toBe(JAN.periodEnd.toISOString());
+    // January closes with nothing owed and never overdrawn; Feb 3's release is still available.
+    expect(await owedAsOf(creator, cur, JAN.periodEnd)).toBe(0);
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ liabilityCents: 1800, reservedCents: 4500 });
+
+    // Rerunning January (even after more releases) reserves nothing more.
+    await earnAt(creator, 1000, cur, "2026-01-30T00:00:00Z"); // due Feb 6
+    await release(cur, "2026-02-06T00:00:00Z");
+    expect(await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 })).toMatchObject({
+      created: 0,
+      held: 0,
+      totalCents: 0,
+    });
+    expect(await payoutsOf(creator)).toHaveLength(1);
+
+    // February's run picks up everything released in February.
+    const next = await runPayoutBatch(db, { ...FEB, currency: cur, minimumCents: 100 });
+    expect(next.totalCents).toBe(1800 + 900);
+    expect((await payoutsOf(creator)).map((p) => p.amountCents)).toEqual([4500, 2700]);
+    expect(await owedAsOf(creator, cur, FEB.periodEnd)).toBe(0);
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ liabilityCents: 0, reservedCents: 7200 });
+  });
+
+  test("a release is dated when it fell due, so a late release job still counts for the month", async () => {
+    const cur = "pln";
+    const creator = await makeUser();
+    const late = await earnAt(creator, 3000, cur, "2026-01-20T00:00:00Z"); // due Jan 27
+    // The release job did not run until Feb 4.
+    await release(cur, "2026-02-04T00:00:00Z");
+    const [rel] = await db
+      .select()
+      .from(s.ledgerTransactions)
+      .where(eq(s.ledgerTransactions.idempotencyKey, `hold-release:${late}`));
+    expect(rel?.occurredAt.toISOString()).toBe("2026-01-27T00:00:00.000Z");
+    expect(await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 })).toMatchObject({
+      totalCents: 2700,
+    });
+  });
+
+  test("a hold due exactly at periodEnd counts; one due a millisecond later does not", async () => {
+    const cur = "czk";
+    const creator = await makeUser();
+    await earnAt(creator, 1000, cur, "2026-01-25T00:00:00Z"); // due Feb 1 00:00:00.000
+    await earnAt(creator, 2000, cur, "2026-01-25T00:00:00.001Z"); // due Feb 1 00:00:00.001
+    await release(cur, "2026-02-02T00:00:00Z");
+    const r = await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    expect(r.totalCents).toBe(900);
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({ liabilityCents: 1800, reservedCents: 900 });
+    expect((await runPayoutBatch(db, { ...FEB, currency: cur, minimumCents: 100 })).totalCents).toBe(1800);
+  });
+
+  test("a receivable owed after periodEnd is not netted into that month; the next run nets it", async () => {
+    const cur = "hkd";
+    const creator = await makeUser();
+    await earnAt(creator, 5000, cur, "2026-01-10T00:00:00Z");
+    await release(cur, "2026-01-20T00:00:00Z");
+    // A clawback shortfall booked on Feb 3.
+    await post(db, {
+      kind: "infrastructure_cost",
+      description: "test receivable",
+      refType: null,
+      refId: null,
+      idempotencyKey: `recv:${uuidv7()}`,
+      currency: cur,
+      occurredAt: at("2026-02-03T00:00:00Z"),
+      metadata: {},
+      entries: [
+        { code: accounts.creatorReceivable(creator), amountCents: 300 },
+        { code: accounts.cash("stripe"), amountCents: -300 },
+      ],
+    });
+
+    await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    const [janPayout] = await payoutsOf(creator);
+    // Never more than is available today, but January's books do not net February's receivable.
+    expect(janPayout?.amountCents).toBe(4200);
+    const [reserve] = await db
+      .select()
+      .from(s.ledgerTransactions)
+      .where(eq(s.ledgerTransactions.idempotencyKey, `payout-reserve:${janPayout!.id}`));
+    expect(reserve?.metadata).toMatchObject({ amountCents: 4200, receivableNettedCents: 0 });
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({
+      liabilityCents: 300,
+      receivableCents: 300,
+      reservedCents: 4200,
+      availableCents: 0,
+    });
+    expect(await owedAsOf(creator, cur, JAN.periodEnd)).toBe(300);
+
+    // February's earnings net the receivable.
+    await earnAt(creator, 1000, cur, "2026-02-05T00:00:00Z");
+    await release(cur, "2026-02-20T00:00:00Z");
+    const next = await runPayoutBatch(db, { ...FEB, currency: cur, minimumCents: 100 });
+    expect(next.totalCents).toBe(900);
+    expect(await creatorBalances(db, creator, cur)).toMatchObject({
+      liabilityCents: 0,
+      receivableCents: 0,
+      reservedCents: 4200 + 900,
+    });
+  });
+
+  test("a later month's reservation caps an earlier month run afterwards", async () => {
+    const cur = "isk";
+    const creator = await makeUser();
+    await earnAt(creator, 5000, cur, "2026-01-10T00:00:00Z");
+    await release(cur, "2026-01-20T00:00:00Z");
+    expect((await runPayoutBatch(db, { ...FEB, currency: cur, minimumCents: 100 })).totalCents).toBe(4500);
+    // January's balance at its end was 4500, but February already reserved it.
+    const r = await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    expect(r.totalCents).toBe(0);
+    expect(r.carriedOver).toContainEqual({ userId: creator, availableCents: 0 });
+    expect(await payoutsOf(creator)).toHaveLength(1);
   });
 });
 

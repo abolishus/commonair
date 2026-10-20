@@ -18,6 +18,7 @@ import type { WorkerContext } from "./context.ts";
 import { DEFAULT_CONCURRENCY, type QueueName } from "./env.ts";
 import { JOBS } from "./jobs/index.ts";
 import { metrics } from "./metrics.ts";
+import { type MoneyJobConfig, moneyConfigFromEnv } from "./money/config.ts";
 import { startOutboxRelay } from "./outbox.ts";
 import type { LoopHandle } from "./runtime/loop.ts";
 import { buildRegistry, type JobDefinition } from "./runtime/registry.ts";
@@ -43,6 +44,8 @@ export interface CreateWorkerOptions {
   segments?: boolean | SegmentConsumerOptions;
   /** Network list for integrity scoring; see `ClassifierHolder`. */
   classifier?: () => NetworkClassifier | undefined;
+  /** Money job tunables; read from env (`CURRENCY`, `PAYMENT_PENDING_DAYS`) when absent. */
+  money?: MoneyJobConfig;
   now?: () => Date;
 }
 
@@ -79,6 +82,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     busChannel: opts.busChannel ?? BUS.events,
     segmentStream: opts.segmentStream ?? STREAMS.segments,
     classifier: opts.classifier ?? (() => undefined),
+    money: opts.money ?? moneyConfigFromEnv(),
     now: opts.now ?? (() => new Date()),
   };
 
