@@ -31,13 +31,51 @@ export interface CheckoutRequest {
   /** Absolute URLs on this instance the provider may send the payer back to. */
   successUrl: string;
   cancelUrl: string;
+  /** Our `subscriptions.id` for a self subscription (the provider carries it as metadata). */
+  subscriptionId?: string;
+  /**
+   * Show a pending checkout again: the reference minted the first time. Providers with
+   * idempotent checkout (Stripe) then return the same session.
+   */
+  reference?: string;
 }
 
 export type CheckoutStart =
   | { kind: "redirect"; url: string; providerRef: string }
   | { kind: "instructions"; providerRef: string; instructions: string };
 
+export interface RefundRequest {
+  paymentId: string;
+  /** The payment's `provider_ref` once it succeeded (Stripe: the PaymentIntent id). */
+  providerRef: string;
+  amountCents: number;
+  idempotencyKey: string;
+}
+
+export interface PayoutOnboardingRequest {
+  userId: string;
+  /** The creator's existing provider account, or null to create one. */
+  accountId: string | null;
+  returnUrl: string;
+  refreshUrl: string;
+}
+
+/**
+ * Provider-managed adapters (Stripe) implement the optional methods; the manual adapter has
+ * none (the treasurer does those things by hand). Callers check for a method before using it.
+ */
 export interface PaymentAdapter {
   readonly provider: PaymentProvider;
   startCheckout(request: CheckoutRequest): Promise<CheckoutStart>;
+  /** Stop a provider subscription renewing (at period end) or end it now. */
+  cancelSubscription?(
+    providerSubscriptionRef: string,
+    opts: { atPeriodEnd: boolean; idempotencyKey: string },
+  ): Promise<void>;
+  /** Ask the provider to refund; the posting follows the provider's refund event. */
+  refund?(request: RefundRequest): Promise<{ providerRef: string }>;
+  /** Create the creator's payout account if needed and return an onboarding link. */
+  payoutOnboarding?(request: PayoutOnboardingRequest): Promise<{ accountId: string; url: string }>;
+  /** The processor fee of a succeeded payment (Stripe: its charge's balance transaction). */
+  paymentFee?(providerPaymentRef: string): Promise<{ feeCents: number; currency: string } | null>;
 }

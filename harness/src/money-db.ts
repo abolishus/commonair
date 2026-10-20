@@ -96,3 +96,31 @@ export async function ledgerSums(databaseUrl: string, paymentIds: readonly strin
     await handle.close();
   }
 }
+
+export interface PaymentFeeRow {
+  paymentId: string;
+  providerRef: string;
+  feeCents: number;
+  status: string;
+}
+
+/** The fee each payment carries (Stripe: what the API read from the processor), read-only. */
+export async function paymentFees(databaseUrl: string, paymentIds: readonly string[]): Promise<PaymentFeeRow[]> {
+  if (paymentIds.length === 0) return [];
+  const handle = createDb({ url: databaseUrl, max: 1, applicationName: "commonair-harness" });
+  const { sql } = handle;
+  try {
+    const rows = await sql<{ id: string; provider_ref: string; fee_cents: string; status: string }[]>`
+      select p.id::text as id, p.provider_ref, p.fee_cents::text as fee_cents, p.status::text as status
+        from payments p
+       where p.id::text in ${sql([...paymentIds])}`;
+    return rows.map((r) => ({
+      paymentId: r.id,
+      providerRef: r.provider_ref,
+      feeCents: Number(r.fee_cents),
+      status: r.status,
+    }));
+  } finally {
+    await handle.close();
+  }
+}

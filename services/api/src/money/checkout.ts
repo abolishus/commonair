@@ -240,7 +240,26 @@ export const checkoutHandlers = {
               .orderBy(desc(payments.createdAt))
               .limit(1);
             if (!p) throw conflict("Your subscription is being updated; try again shortly");
-            if (p.provider !== "manual") throw conflict("Your checkout is still open with the payment provider");
+            if (p.provider !== "manual") {
+              // The same checkout again: the provider's idempotent create returns the same session.
+              if (p.provider !== adapter.provider)
+                throw conflict("Your checkout is still open with another payment provider");
+              const again = await adapter.startCheckout({
+                paymentId: p.id,
+                kind: "subscription",
+                amountCents: p.amountCents,
+                currency: p.currency,
+                tier: held.tier as 1 | 2 | 3,
+                quantity: 1,
+                recurring: true,
+                payerUserId: caller.user.id,
+                creatorUserId: c.ownerId,
+                subscriptionId: held.id,
+                reference: p.providerRef,
+                ...urls,
+              });
+              return result(again, p.id, p.amountCents, p.currency);
+            }
             return {
               kind: "instructions" as const,
               paymentId: p.id,
@@ -266,6 +285,7 @@ export const checkoutHandlers = {
             recurring: true,
             payerUserId: caller.user.id,
             creatorUserId: c.ownerId,
+            subscriptionId,
             ...urls,
           });
           await tx.insert(subscriptions).values({
@@ -382,6 +402,21 @@ export const checkoutHandlers = {
     const problem = cancelProblem(current);
     if (problem)
       throw problem.code === "CONFLICT" ? conflict(problem.reason) : precondition("not_gift", problem.reason);
+    if (current.provider !== "manual" && !(current.status === "active" && current.cancelAtPeriodEnd)) {
+      // Provider-managed renewals: tell the provider first, so it stops charging before we show it.
+      const [row] = await deps.db
+        .select({ ref: subscriptions.providerRef })
+        .from(subscriptions)
+        .where(eq(subscriptions.id, current.id));
+      const adapter = createAdapter(deps.env);
+      if (!row?.ref || adapter.provider !== current.provider || !adapter.cancelSubscription)
+        throw precondition("payment_provider", "This subscription cannot be cancelled right now; try again later");
+      const atPeriodEnd = current.status === "active";
+      await adapter.cancelSubscription(row.ref, {
+        atPeriodEnd,
+        idempotencyKey: `cancel-${current.id}-${atPeriodEnd ? "period-end" : "now"}`,
+      });
+    }
     if (current.status === "past_due") {
       // The period is already over: end it now and fail the open renewal so a late confirm cannot
       // revive it. Lock order: payment row before subscription row (as the worker's expiry job).

@@ -37,7 +37,10 @@ export type CheckoutRequest =
 
 export interface CheckoutView {
   paymentId: string;
+  /** Manual: the `CA-…` reference. Stripe: empty until the payment succeeds (then its PaymentIntent). */
   reference: string;
+  /** Stripe: the Checkout URL the web app would navigate to (never followed by the harness). */
+  redirectUrl?: string;
   /** What the checkout says will be paid. */
   cents: number;
   /** Web only: what the dialog showed before submitting (`support-total`, `support-split`). */
@@ -552,7 +555,17 @@ export class ApiSupporter implements Supporter {
             returnPath,
             ...(req.kind === "gift" ? { gift: { count: req.count } } : {}),
           });
-    if (r.kind !== "instructions") throw new Error(`expected manual instructions, got a ${r.kind} checkout`);
+    if (r.kind === "redirect") {
+      // The amount a redirect will charge is the request's (tier price × count, or the tip).
+      let cents: number;
+      if (req.kind === "tip") cents = req.cents;
+      else {
+        const tiers = await this.api.money.tiers({ channel });
+        const price = tiers.find((t) => t.tier === req.tier)?.price.cents ?? 0;
+        cents = req.kind === "gift" ? price * req.count : price;
+      }
+      return { paymentId: r.paymentId, reference: "", redirectUrl: r.url, cents };
+    }
     return { paymentId: r.paymentId, reference: r.reference, cents: r.amount.cents };
   }
 
@@ -589,6 +602,22 @@ export class ApiTreasurer implements Treasurer {
 
   async find(reference: string): Promise<TreasuryPaymentView | null> {
     const p = await this.payment(reference);
+    return p
+      ? {
+          paymentId: p.paymentId,
+          reference: p.reference,
+          status: p.status,
+          kind: p.kind,
+          cents: p.amount.cents,
+          refunded: p.refunded.cents,
+        }
+      : null;
+  }
+
+  /** A payment by id among the newest of a status (Stripe checkouts have no reference to search yet). */
+  async findById(paymentId: string, status: "pending" | "succeeded" = "pending"): Promise<TreasuryPaymentView | null> {
+    const r = await this.api.money.treasurer.payments({ status, limit: 100 });
+    const p = r.items.find((x) => x.paymentId === paymentId);
     return p
       ? {
           paymentId: p.paymentId,

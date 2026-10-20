@@ -12,6 +12,12 @@
  * Every expected figure is computed from the tier prices set here and the `platform.cut` that
  * `money.support` reports, with the ledger's rounding rule (`src/money.ts`). `--set via=api`
  * drives the same steps through the API and the chat socket instead of the web app.
+ *
+ * `--set provider=stripe` (with `via=api`) runs the same steps against `PAYMENTS_PROVIDER=stripe`
+ * and stripe-mock: checkout returns a Stripe Checkout redirect (asserted, not followed), and the
+ * harness plays Stripe's part with signed webhook events (`src/stripe.ts`) instead of the
+ * treasurer's confirm and chargeback. The figures are the same; each payment also carries Stripe's
+ * fee, which is the co-op's expense and leaves the creator figures unchanged.
  */
 import { join } from "node:path";
 import type { Page } from "playwright";
@@ -35,7 +41,20 @@ import {
   WebSupporter,
   WebTreasurer,
 } from "../src/money-actors.ts";
-import { grantRole, ledgerSums } from "../src/money-db.ts";
+import type { CheckoutRequest, CheckoutView } from "../src/money-actors.ts";
+import { grantRole, ledgerSums, paymentFees } from "../src/money-db.ts";
+import {
+  StripeWebhook,
+  chargeRefunded,
+  dispute,
+  firstInvoicePaid,
+  isCheckoutRedirect,
+  paymentCompleted,
+  stripeId,
+  stripeMockFee,
+  stripeWebhookSecret,
+  subscriptionCheckoutCompleted,
+} from "../src/stripe.ts";
 import {
   type RevenueExpectation,
   type ScenarioPlan,
@@ -46,6 +65,7 @@ import {
   inconsistentLedgerRows,
   missingLedgerRows,
   monthlyShareCandidates,
+  parseProvider,
   parseReference,
   parseVia,
   priceOf,
@@ -140,6 +160,23 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   const signal = ctx.signal;
   const via = parseVia(ctx.param("via", "web"));
   ctx.data("via", via);
+  const provider = parseProvider(ctx.param("provider", "manual"));
+  ctx.data("provider", provider);
+  let webhook: StripeWebhook | null = null;
+  if (provider === "stripe") {
+    // The web app would navigate to Stripe Checkout; the harness asserts the redirect and plays
+    // Stripe's part with signed events instead, through the API.
+    ctx.assert("provider=stripe runs with --set via=api (Checkout redirects are not followed)", via === "api", {
+      via,
+    });
+    const secret = stripeWebhookSecret();
+    ctx.assert(
+      "the instance's webhook secret is set (HARNESS_STRIPE_WEBHOOK_SECRET or STRIPE_WEBHOOK_SECRET in .env)",
+      secret !== undefined,
+    );
+    if (secret === undefined) return;
+    webhook = new StripeWebhook(ctx.env.HARNESS_API_URL, secret, signal);
+  }
   const ui: WaitBudget = { timeoutMs: UI_TIMEOUT_MS, signal };
   const chat: WaitBudget = { timeoutMs: CHAT_TIMEOUT_MS, signal };
   const slow: WaitBudget = { timeoutMs: SETTLE_TIMEOUT_MS, signal };
@@ -176,8 +213,8 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     streamer.api.client.money.support({ channel }),
   );
   ctx.assert(
-    "PAYMENTS_PROVIDER is manual (this scenario covers the manual adapter; Stripe runs against stripe-mock elsewhere)",
-    before.provider === "manual",
+    `PAYMENTS_PROVIDER is ${provider} (--set provider=${provider}; Stripe needs STRIPE_API_BASE at stripe-mock)`,
+    before.provider === provider,
     { provider: before.provider },
   );
   ctx.assert("a new channel has no tiers yet", before.tiers.length === 0, { tiers: before.tiers.length });
@@ -241,6 +278,7 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
 
   let creator: Creator;
   let treasurer: Treasurer;
+  let apiTreasurer: ApiTreasurer | null = null;
   let publicReader: PublicReader;
   let events: ChatEventObserver;
   // Web path: the streamer's channel page, where chat events and A's badged message render.
@@ -254,7 +292,8 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   ctx.defer(() => observer.close());
   if (via === "api") {
     creator = new ApiCreator(streamer.api.client);
-    treasurer = new ApiTreasurer(treasurerUser.api.client);
+    apiTreasurer = new ApiTreasurer(treasurerUser.api.client);
+    treasurer = apiTreasurer;
     publicReader = publicApi;
     events = new SocketChatEvents(() => observer, channel);
   } else {
@@ -322,12 +361,60 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   }
 
   const paymentIds: string[] = [];
+  /** Stripe: the PaymentIntent the harness paid each payment with (its provider_ref afterwards). */
+  const paymentIntents = new Map<string, string>();
+
+  /**
+   * Stripe's part of a checkout: the events Stripe sends once the payer has paid, signed and
+   * posted. A subscription confirms on its first invoice (sent first, as Stripe may); the session's
+   * completion then only links it. Afterwards the payment's reference is the PaymentIntent.
+   */
+  const payWithStripe = async (label: string, checkout: CheckoutView, kind: CheckoutRequest["kind"]) => {
+    const hook = webhook;
+    const t = apiTreasurer;
+    if (!hook || !t) throw new Error("Stripe path without a webhook or API treasurer");
+    const found = await ctx.step(`treasurer: ${label} is listed pending`, () =>
+      waitFor(`pending payment ${checkout.paymentId}`, () => t.findById(checkout.paymentId), {
+        timeoutMs: UI_TIMEOUT_MS,
+        intervalMs: 500,
+        signal,
+      }),
+    );
+    ctx.assert(`${label} is pending before Stripe's events`, found.status === "pending", found);
+    const pi = stripeId("pi");
+    paymentIntents.set(checkout.paymentId, pi);
+    const money = { paymentId: checkout.paymentId, amountCents: checkout.cents, currency };
+    const started = performance.now();
+    await ctx.step(`Stripe: events completing ${label}`, async () => {
+      if (kind === "sub") {
+        const ids = { invoice: stripeId("in"), subscription: stripeId("sub") };
+        const paid = await hook.send(firstInvoicePaid({ ...money, ...ids, paymentIntent: pi }));
+        ctx.assert(`invoice.paid confirms ${label}`, paid.body.outcome === "confirmed", paid);
+        const linked = await hook.send(subscriptionCheckoutCompleted({ ...money, ...ids }));
+        check(`checkout.session.completed links ${label}`, linked.body.outcome === "subscription_linked", linked);
+      } else {
+        const done = await hook.send(paymentCompleted({ ...money, paymentIntent: pi }));
+        ctx.assert(`checkout.session.completed confirms ${label}`, done.body.outcome === "confirmed", done);
+      }
+    });
+    checkout.reference = pi;
+    return { found, started };
+  };
+
   const confirmAndSeeEvent = async (
     label: string,
-    reference: string,
+    checkout: CheckoutView,
+    kind: CheckoutRequest["kind"],
     eventWhat: string,
     match: Parameters<ChatEventObserver["waitEvent"]>[1],
   ) => {
+    if (provider === "stripe") {
+      const { found, started } = await payWithStripe(label, checkout, kind);
+      const event = await ctx.step(`chat shows ${eventWhat}`, () => events.waitEvent(eventWhat, match, chat));
+      ctx.metric(`${label.replaceAll(" ", "_")}.webhook_to_chat_event`, performance.now() - started, "ms");
+      return { found, event };
+    }
+    const reference = checkout.reference;
     // Short tries, reloading the page after the first, like the treasurer's status waits.
     const found = await ctx.step(`treasurer: find ${label} by reference`, () => {
       let tries = 0;
@@ -360,7 +447,13 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     A.supporter.checkout(channel, { kind: "sub", tier: plan.subTier }, ui),
   );
   paymentIds.push(sub.paymentId);
-  ctx.assert("support-reference is a CA- reference", parseReference(sub.reference) === sub.reference, sub);
+  if (provider === "stripe")
+    ctx.assert(
+      "checkout is a Stripe Checkout redirect (not followed)",
+      sub.redirectUrl !== undefined && isCheckoutRedirect(sub.redirectUrl),
+      sub,
+    );
+  else ctx.assert("support-reference is a CA- reference", parseReference(sub.reference) === sub.reference, sub);
   ctx.assert("support-amount is the tier-2 price", sub.cents === expected.sub.grossCents, sub);
   if (sub.shown) {
     check("support-dialog data-provider=manual", sub.shown.provider === "manual", sub.shown);
@@ -374,7 +467,8 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   }
   const subConfirmed = await confirmAndSeeEvent(
     "the subscription",
-    sub.reference,
+    sub,
+    "sub",
     `channel.subscribe by ${a.username} at tier ${plan.subTier}`,
     (e) => e.type === "channel.subscribe" && e.user === a.username && e.tier === plan.subTier,
   );
@@ -444,7 +538,8 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     check("gift support-total is count × tier price", gift.shown.totalCents === expected.gift.grossCents, gift.shown);
   const giftConfirmed = await confirmAndSeeEvent(
     "the gift",
-    gift.reference,
+    gift,
+    "gift",
     `channel.subscription.gift by ${a.username} with total ${GIFT_COUNT}`,
     (e) => e.type === "channel.subscription.gift" && e.total === plan.giftCount,
   );
@@ -478,12 +573,31 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   if (tip.shown) check("tip support-total is the tip", tip.shown.totalCents === expected.tip.grossCents, tip.shown);
   const tipConfirmed = await confirmAndSeeEvent(
     "the tip",
-    tip.reference,
+    tip,
+    "tip",
     `channel.tip of ${plan.tipCents} cents`,
     (e) => e.type === "channel.tip" && e.cents === plan.tipCents,
   );
   check("the anonymous tip event has an empty data-user", tipConfirmed.event.user === "", tipConfirmed.event);
   ctx.data("money.references", { sub: sub.reference, gift: gift.reference, tip: tip.reference });
+
+  if (provider === "stripe") {
+    // Fees are the co-op's expense: the creator figures below do not move, but each payment must
+    // carry the fee Stripe (stripe-mock) reports for its PaymentIntent.
+    const fees = await ctx.step("Stripe: each payment carries Stripe's fee (read-only)", () =>
+      paymentFees(databaseUrl, paymentIds),
+    );
+    ctx.data("money.fees", fees);
+    for (const row of fees) {
+      const pi = paymentIntents.get(row.paymentId) ?? "";
+      const reported = (await stripeMockFee(ctx.env.HARNESS_STRIPE_MOCK_URL, pi).catch(() => null)) ?? 0;
+      check(`payment ${row.paymentId}: provider_ref is its PaymentIntent`, row.providerRef === pi, row);
+      check(`payment ${row.paymentId}: fee ${row.feeCents} = stripe-mock's ${reported}`, row.feeCents === reported, {
+        ...row,
+        reported,
+      });
+    }
+  }
 
   // ------------------------------------------------------------ 5. dashboard
   const checkRevenue = (stage: string, r: RevenueView, want: RevenueExpectation) => {
@@ -545,9 +659,40 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   await ctx.step("treasurer: refund the tip in full", () =>
     treasurer.refund(tip.reference, expected.tip.grossCents, "harness: refund requested", ui),
   );
-  await ctx.step("treasurer: charge back the tier-2 payment", () =>
-    treasurer.chargeback(sub.reference, expected.sub.grossCents, "harness: bank chargeback", ui),
-  );
+  if (webhook) {
+    // Stripe: the refund was asked of Stripe; the posting follows its event. Chargebacks are
+    // Stripe's alone: a dispute opens (clawback now) and closes lost.
+    const hook = webhook;
+    const money = { currency };
+    await ctx.step("Stripe: charge.refunded for the tip", async () => {
+      const d = await hook.send(
+        chargeRefunded({
+          ...money,
+          paymentIntent: tip.reference,
+          refundId: stripeId("re"),
+          amountCents: expected.tip.grossCents,
+          amountRefunded: expected.tip.grossCents,
+        }),
+      );
+      ctx.assert("charge.refunded posts the refund", d.body.outcome === "refunded", d);
+    });
+    await ctx.step("Stripe: dispute on the tier-2 payment opens, then closes lost", async () => {
+      const ids = {
+        ...money,
+        disputeId: stripeId("dp"),
+        paymentIntent: sub.reference,
+        amountCents: expected.sub.grossCents,
+      };
+      const opened = await hook.send(dispute("charge.dispute.created", { ...ids, status: "needs_response" }));
+      ctx.assert("charge.dispute.created claws back", opened.body.outcome === "charged_back", opened);
+      const closed = await hook.send(dispute("charge.dispute.closed", { ...ids, status: "lost" }));
+      check("charge.dispute.closed (lost) closes it", closed.body.outcome === "lost", closed);
+    });
+  } else {
+    await ctx.step("treasurer: charge back the tier-2 payment", () =>
+      treasurer.chargeback(sub.reference, expected.sub.grossCents, "harness: bank chargeback", ui),
+    );
+  }
   const tipAfter = await treasurer.find(tip.reference, ui);
   const subAfter = await treasurer.find(sub.reference, ui);
   check(

@@ -31,6 +31,7 @@ import { decodeCursor, encodeCursor, pageOf } from "../lib/cursor.ts";
 import { isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { type ResolvedContext, os, requireCaller, requireChannel } from "../lib/orpc.ts";
+import { stripeOnboarding } from "./stripe-connect.ts";
 import {
   type PaymentFacts,
   type Period,
@@ -405,12 +406,21 @@ export const reportHandlers = {
     const caller = requireCaller(context);
     const { deps } = context;
     const [row] = await deps.db
-      .select({ provider: payoutAccounts.provider, enabled: payoutAccounts.payoutsEnabled })
+      .select({
+        provider: payoutAccounts.provider,
+        enabled: payoutAccounts.payoutsEnabled,
+        accountId: payoutAccounts.providerAccountId,
+      })
       .from(payoutAccounts)
       .where(eq(payoutAccounts.userId, caller.user.id));
     const provider = row?.provider ?? deps.env.PAYMENTS_PROVIDER;
     const enabled = row?.enabled === true;
-    // Stripe Connect onboarding lands with the Stripe unit; until then only the manual text.
+    if (provider === "stripe" && !enabled && deps.env.PAYMENTS_PROVIDER === "stripe") {
+      // Connect Express: create the account on first visit, then hand out a fresh onboarding link
+      // (links are single-use and short-lived). `account.updated` enables payouts later.
+      const onboardingUrl = await stripeOnboarding(deps, caller.user.id, row?.accountId ?? null);
+      return { provider, payoutsEnabled: false, onboardingUrl, instructions: null };
+    }
     return {
       provider,
       payoutsEnabled: enabled,
