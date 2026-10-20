@@ -8,6 +8,7 @@ import type { ValkeyClient } from "@commonair/service";
 import type { ObjectStorage } from "@commonair/storage";
 import type postgres from "postgres";
 import type { QueueName } from "./env.ts";
+import type { MoneyJobConfig } from "./money/config.ts";
 import type { WebhookSettings } from "./webhooks/settings.ts";
 
 export interface EnqueueOptions {
@@ -41,5 +42,7 @@ export interface WorkerContext {
   segmentStream: string;
   /** The operator's network list for integrity scoring (reloadable, hence a function). */
   classifier(): NetworkClassifier | undefined;
+  /** Money job tunables; `createWorker` reads them from env once. Read via `moneyConfig(ctx)`. */
+  money?: MoneyJobConfig;
   now(): Date;
 }

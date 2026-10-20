@@ -86,7 +86,11 @@ unless `closingAccount` is set (`PayoutBelowMinimumError`).
 
 **Hold release.** `releaseDueHolds(db, { asOf, holdDays, currency })` releases each payment
 older than `payout.rules.holdDays`; the amount is that payment's remaining hold, capped by the
-creator's total hold (a chargeback may have drawn on it).
+creator's total hold (a chargeback may have drawn on it). Each release is dated when it fell
+due (payment time + `holdDays`, capped at `asOf`), not when the job ran, so a late release job
+or a payout run releasing holds itself still books them into the month they became available.
+An `asOf` more than a minute in the future is refused (`RangeError`): it would release early
+and post future-dated lines every payout run would count as available.
 
 ## Poster
 
@@ -113,8 +117,25 @@ and carries the rest over. `runPayoutBatch(db, { periodStart, periodEnd, currenc
 computes available as released earnings − receivable − payouts already scheduled but not
 posted, and writes one `payouts` row per creator (status `pending`, or `held` with
 `payout_account_not_ready` when the payout account is missing or not enabled), idempotent per
-(user, periodStart). `postPayout` posts the ledger entry once the money is sent and marks the
-row paid.
+(user, periodStart).
+
+The reservation is dated `periodEnd`, so the amount is what was available **at** `periodEnd`:
+only postings dated at or before it count (`occurred_at <= periodEnd`, boundary included).
+Holds released and receivables owed after it carry to the next run, and a month's statement
+never shows more paid out than was available at its end. Because the reservation also lowers
+every later running balance, a late run is capped by the lowest running available balance
+(liability − receivable) at any posting date after `periodEnd`, counting every posting whatever
+its date (later reservations and cancels, reversals, releases): a chargeback or a later month's
+reservation that drew on the money after `periodEnd` leaves nothing for the earlier month,
+even if a later release refills the balance. Only the receivable owed by `periodEnd` (and
+still owed now) is netted; a later receivable stays owed and is netted by the next run.
+`reservableAt(atPeriodEnd, now, lowestAfterCents)` is the pure rule; before posting, the
+batch re-checks the amount against today's balances (`InsufficientBalanceError`).
+`postPayout` posts the ledger entry once the money is sent and marks the row paid.
+
+Backdated postings (reservations dated `periodEnd`, releases dated when due) can land behind
+a `statement` cursor a reader already passed: a later page will not show them, so re-read from
+the top to see them.
 
 ## Settings
 

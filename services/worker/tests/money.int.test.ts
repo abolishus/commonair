@@ -13,7 +13,7 @@ import { expirePendingPayments } from "../src/money/expire.ts";
 import { releaseHolds } from "../src/money/holds.ts";
 import { MONEY_JOBS, moneyLockKey, withMoneyLock } from "../src/money/job.ts";
 import { renewDueSubscriptions, renewOne } from "../src/money/renew.ts";
-import type { MoneyJobConfig } from "../src/money/config.ts";
+import { moneyConfigFromEnv, type MoneyJobConfig } from "../src/money/config.ts";
 import { DAY_MS } from "../src/money/time.ts";
 import { makeUser, setup, VALKEY_URL, waitFor, type TestEnv } from "./fixtures.ts";
 
@@ -619,5 +619,72 @@ describe("run lock", () => {
     await ctx().valkey.set(moneyLockKey(MONEY_JOBS.renew), "other-replica", "PX", 30_000);
     expect(await renewJob.handler({}, ctx(), { id: undefined, attemptsMade: 0 })).toEqual({ skipped: true });
     await ctx().valkey.del(moneyLockKey(MONEY_JOBS.renew));
+  });
+});
+
+describe("injected money config", () => {
+  test("createWorker reads the env config once onto the context", () => {
+    expect(ctx().money).toEqual(moneyConfigFromEnv());
+  });
+
+  test("the renew job uses the context's currency and pending days, not the env's", async () => {
+    const original = ctx().money;
+    ctx().money = { currency: "eur", pendingDays: 3, batchSize: 500, budgetMs: 30_000 };
+    try {
+      // Clear anything due from earlier tests so this run sees only our subscription.
+      await renewJob.handler({}, ctx(), { id: undefined, attemptsMade: 0 });
+      const owner = await channelWithTiers();
+      const viewer = await makeUser(db());
+      const end = ago(HOUR);
+      const sub = await subscription({
+        subscriberId: viewer.user.id,
+        channelId: owner.channel.id,
+        status: "active",
+        currentPeriodStart: ago(30 * DAY_MS),
+        currentPeriodEnd: end,
+      });
+      expect(await renewJob.handler({}, ctx(), { id: undefined, attemptsMade: 0 })).toMatchObject({ renewed: 1 });
+      const [p] = await pendingFor(sub.id);
+      expect(p?.currency).toBe("eur");
+      expect(p?.expiresAt?.toISOString()).toBe(new Date(end.getTime() + 3 * DAY_MS).toISOString());
+    } finally {
+      ctx().money = original;
+    }
+  });
+
+  test("the expiry job and hold release honour the injected batch size and budget", async () => {
+    const original = ctx().money;
+
+    try {
+      const owner = await channelWithTiers();
+      const viewer = await makeUser(db());
+      const stale = [];
+      for (let i = 0; i < 2; i++) {
+        stale.push(
+          await payment({
+            userId: viewer.user.id,
+            channelId: owner.channel.id,
+            status: "pending",
+            expiresAt: ago(HOUR),
+          }),
+        );
+      }
+      // No budget: the run does nothing and says so.
+      ctx().money = { ...cfg, batchSize: 1, budgetMs: 0 };
+      expect(await expireJob.handler({}, ctx(), { id: undefined, attemptsMade: 0 })).toMatchObject({
+        batches: 0,
+        exhausted: true,
+      });
+      expect(await releaseHolds(ctx())).toMatchObject({ batches: 0, exhausted: true });
+      expect(await Promise.all(stale.map((p) => payStatus(p.id)))).toEqual(["pending", "pending"]);
+
+      // One row per batch: both expire, over at least two batches.
+      ctx().money = { ...cfg, batchSize: 1 };
+      const r = await expireJob.handler({}, ctx(), { id: undefined, attemptsMade: 0 });
+      expect((r as { batches: number }).batches).toBeGreaterThanOrEqual(2);
+      expect(await Promise.all(stale.map((p) => payStatus(p.id)))).toEqual(["failed", "failed"]);
+    } finally {
+      ctx().money = original;
+    }
   });
 });
