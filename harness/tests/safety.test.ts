@@ -4,7 +4,7 @@
 /** The trust-safety scenario's pure parts: steps, deadlines, the NCII clock, log hygiene, args. */
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { PROTECTED_TABLES } from "../src/safety-db.ts";
+import { PROTECTED_TABLES, isoOrNull } from "../src/safety-db.ts";
 import { ffmpegFailure, internalSecret } from "../src/safety-io.ts";
 import {
   ALL_SAFETY_STEPS,
@@ -333,5 +333,18 @@ describe("fixtures, media and URLs", () => {
     expect(seen).toEqual([undefined, "a", "b"]);
     seen.length = 0;
     expect(await findInPages(fetchPage, (n) => n === 5, 2)).toBeNull();
+  });
+});
+
+describe("isoOrNull (timestamps from raw queries on the shared client)", () => {
+  test("accepts the strings drizzle's adapter leaves behind as well as Dates", () => {
+    expect(isoOrNull("2026-10-21 22:05:01.123456+00")).toBe("2026-10-21T22:05:01.123Z");
+    expect(isoOrNull(new Date("2026-10-21T22:05:01.123Z"))).toBe("2026-10-21T22:05:01.123Z");
+    expect(isoOrNull(null)).toBeNull();
+    expect(isoOrNull(undefined)).toBeNull();
+  });
+
+  test("refuses garbage instead of reporting a bogus time", () => {
+    expect(() => isoOrNull("not a time")).toThrow(/unparseable/);
   });
 });

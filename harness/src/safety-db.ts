@@ -78,6 +78,17 @@ export async function appRoleDeleteRefused(
   });
 }
 
+/**
+ * A timestamp read through the shared client as ISO 8601. Drizzle's postgres-js adapter replaces
+ * the driver's date parsers, so raw queries on that client return strings, not Dates.
+ */
+export function isoOrNull(v: Date | string | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) throw new Error("unparseable timestamp from the database");
+  return d.toISOString();
+}
+
 export interface DeletionState {
   pseudonymizedAt: string | null;
   deletedAt: string | null;
@@ -93,14 +104,16 @@ export async function deletionState(
   originalUsername: string,
 ): Promise<DeletionState> {
   return withDb(databaseUrl, async (sql) => {
-    const [u] = await sql<{ pseudonymized_at: Date | null; deleted_at: Date | null; username: string | null }[]>`
+    const [u] = await sql<
+      { pseudonymized_at: Date | string | null; deleted_at: Date | string | null; username: string | null }[]
+    >`
       select pseudonymized_at, deleted_at, username from users where id = ${userId}`;
     const [d] = await sql<{ status: string; retained: { table: string; reason: string; rows: number }[] }[]>`
       select status::text as status, retained from account_deletions
        where user_id = ${userId} order by requested_at desc limit 1`;
     return {
-      pseudonymizedAt: u?.pseudonymized_at?.toISOString() ?? null,
-      deletedAt: u?.deleted_at?.toISOString() ?? null,
+      pseudonymizedAt: isoOrNull(u?.pseudonymized_at),
+      deletedAt: isoOrNull(u?.deleted_at),
       usernameReplaced: u !== undefined && u.username !== originalUsername,
       deletionStatus: d?.status ?? null,
       retained: d?.retained ?? [],
