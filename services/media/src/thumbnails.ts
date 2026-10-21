@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * A 640×360 frame of each live broadcast every 60 s: hash-checked first, then stored as
+ * A 640×360 frame of each live broadcast every 60 s: PDQ-checked against the hash lists first (a
+ * match is handled as T0 live and nothing is written), then stored as
  * `thumbnails/<broadcastId>/latest.<ext>` (stable URL) and a timestamped copy (cache-busting key
  * written to `broadcasts.thumbnailKey`, and history for moderation review). Only the newest
  * `timings.thumbnailHistory` stamped copies are kept; older ones are deleted after each capture.
@@ -14,6 +15,7 @@ import type { BroadcastInfo, MediaContext } from "./context.ts";
 import { internalRtspUrl, thumbnailArgs } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
 import { every, type Loop } from "./loop.ts";
+import { errorCategory } from "./moderation/logging.ts";
 import { imageExt, imageType } from "./vod/finalize.ts";
 
 export const thumbnailPrefix = (broadcastId: string) => `thumbnails/${broadcastId}/`;
@@ -52,13 +54,11 @@ export class Thumbnailer {
       { timeoutMs: 20_000, secrets: [internalSecret], maxStdoutBytes: 8 * 1024 * 1024 },
     );
     if (image.byteLength === 0) throw new Error("ffmpeg produced an empty thumbnail");
-    const matched = await this.ctx.enforcer.check(image, {
-      subjectType: "broadcast",
-      subjectId: this.b.broadcastId,
-      channelId: this.b.channelId,
-      broadcastId: this.b.broadcastId,
-      path: this.b.path,
-    });
+    const matched = await this.ctx.moderation.checkLiveThumbnail(
+      { broadcastId: this.b.broadcastId, channelId: this.b.channelId, path: this.b.path },
+      image,
+      imageType(caps.imageFormat),
+    );
     if (matched) return false;
     const ext = imageExt(caps.imageFormat);
     const prefix = thumbnailPrefix(this.b.broadcastId);
@@ -80,7 +80,7 @@ export class Thumbnailer {
       await pruneThumbnails(storage, bucket, this.b.broadcastId, this.ctx.timings.thumbnailHistory);
     } catch (err) {
       // History grows by one per minute; the next capture tries again.
-      this.log.warn("thumbnail history cleanup failed", { err });
+      this.log.warn("thumbnail history cleanup failed", { error: errorCategory(err) });
     }
     return true;
   }

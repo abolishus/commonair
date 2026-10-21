@@ -10,7 +10,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "./disk.ts";
 import type { Capabilities } from "./ffmpeg/hwaccel.ts";
 import type { MediaMtxClient } from "./mediamtx.ts";
-import type { HashMatchEnforcer } from "./safety/enforce.ts";
+import type { MediaModeration } from "./moderation/moderation.ts";
 import type { MediaTimings } from "./settings.ts";
 import type { SlotLimiter } from "./transcode/slots.ts";
 import type { FinalizeJobControl } from "./vod/reconcile.ts";
@@ -26,7 +26,8 @@ export interface MediaContext {
   logger: Logger;
   timings: MediaTimings;
   caps: Capabilities;
-  enforcer: HashMatchEnforcer;
+  /** PDQ matching, T0 and the classifier hand-off (always on). */
+  moderation: MediaModeration;
   /** Root for per-broadcast segment directories and clip scratch space. */
   workDir: string;
   ffmpeg: string;
