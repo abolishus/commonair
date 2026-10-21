@@ -22,9 +22,9 @@ import { plaintextSha256 } from "@commonair/moderation";
 
 const { moderationCases: cases, evidenceObjects, vods, clips } = schema;
 
-/** Re-run once later: media may still flush recording segments after the T0 transaction. */
+/** Re-run later: media may still flush objects after the initial T0 transaction. */
 export const T0_MEDIA_SWEEP_DELAY_MS = 10 * 60_000;
-export const t0MediaSweepJobId = (caseId: string) => `t0-media:${caseId}:sweep`;
+export const t0MediaSweepJobId = (caseId: string, sweep = 1) => `t0-media:${caseId}:sweep:${sweep}`;
 /** Repeated failures of one job raise an alert from this attempt on. */
 export const T0_MEDIA_ALERT_AFTER_ATTEMPTS = 2;
 
@@ -146,11 +146,11 @@ export async function preserveOne(
   job: ModerationT0MediaJob,
   t: MediaTarget,
   acc: PreserveResult,
-): Promise<void> {
+): Promise<boolean> {
   const rt = moderationRuntime(ctx);
   const media = mediaStorage(ctx);
   const res = await media.get(ctx.mediaBucket, t.key);
-  if (!res) return; // already moved (an earlier run) or never written
+  if (!res) return false; // already moved (an earlier run) or never written
   const contentType = contentTypeOf(t.key, res.headers.get("content-type"));
   const plain = new Uint8Array(await res.arrayBuffer());
   const digest = await plaintextSha256(plain);
@@ -202,6 +202,19 @@ export async function preserveOne(
   }
   await media.delete(ctx.mediaBucket, t.key);
   acc.deleted++;
+  return true;
+}
+
+export function nextT0MediaSweep(
+  caseId: string,
+  currentJobId: string | undefined,
+  foundPublicObjects: number,
+): { jobId: string; delayMs: number } | null {
+  const prefix = `t0-media:${caseId}:sweep:`;
+  const match = currentJobId?.startsWith(prefix) ? /^\d+$/.exec(currentJobId.slice(prefix.length)) : null;
+  if (match && foundPublicObjects === 0) return null;
+  const sweepNumber = match ? Number(match[0]) + 1 : 1;
+  return { jobId: `${prefix}${sweepNumber}`, delayMs: T0_MEDIA_SWEEP_DELAY_MS };
 }
 
 export async function preserveT0Media(
@@ -218,9 +231,10 @@ export async function preserveT0Media(
   if (!c || c.tier !== "t0") throw new Error("t0-media: case not found or not T0");
   const acc: PreserveResult = { copied: 0, alreadyPreserved: 0, deleted: 0, evidenceIds: [] };
   let targets: MediaTarget[] = [];
+  let foundPublicObjects = 0;
   try {
     targets = await collectTargets(ctx, media, { type: c.subjectType, id: c.subjectId });
-    for (const t of targets) await preserveOne(ctx, job, t, acc);
+    for (const t of targets) if (await preserveOne(ctx, job, t, acc)) foundPublicObjects++;
   } catch (err) {
     if (meta.attemptsMade + 1 >= T0_MEDIA_ALERT_AFTER_ATTEMPTS)
       alert(ctx, "t0_media_failed", "T0 media could not be moved to evidence; retrying", {
@@ -252,12 +266,9 @@ export async function preserveT0Media(
       },
       ctx.now(),
     );
-  // One later sweep catches segments media flushed after the T0 transaction.
-  if (meta.id !== t0MediaSweepJobId(job.caseId) && c.subjectType !== "upload")
-    await ctx.enqueue(QUEUES.moderation, MODERATION_JOBS.t0Media, job, {
-      jobId: t0MediaSweepJobId(job.caseId),
-      delayMs: T0_MEDIA_SWEEP_DELAY_MS,
-    });
+  // Keep sweeping until a pass finds no public objects; every pass has a distinct durable id.
+  const nextSweep = c.subjectType === "upload" ? null : nextT0MediaSweep(job.caseId, meta.id, foundPublicObjects);
+  if (nextSweep) await ctx.enqueue(QUEUES.moderation, MODERATION_JOBS.t0Media, job, nextSweep);
   ctx.logger.info("T0 media preserved", {
     caseId: job.caseId,
     targets: targets.length,

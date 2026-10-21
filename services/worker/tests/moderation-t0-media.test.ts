@@ -4,7 +4,15 @@
 import { describe, expect, test } from "vite-plus/test";
 import type { ObjectStorage } from "@commonair/storage";
 import type { WorkerContext } from "../src/context.ts";
-import { collectClipTargets, preserveOne, type MediaTarget, type PreserveResult } from "../src/moderation/t0-media.ts";
+import {
+  collectClipTargets,
+  nextT0MediaSweep,
+  preserveOne,
+  T0_MEDIA_SWEEP_DELAY_MS,
+  t0MediaSweepJobId,
+  type MediaTarget,
+  type PreserveResult,
+} from "../src/moderation/t0-media.ts";
 
 const CASE_ID = "0193e6a0-0000-7000-8000-000000000001";
 const HOLD_ID = "0193e6a0-0000-7000-8000-000000000002";
@@ -15,6 +23,18 @@ function object(key: string, size = 12) {
 }
 
 describe("T0 clip object recovery", () => {
+  test("keeps delayed reconciliation alive across an upload discovered after the first pass", () => {
+    const firstSweep = nextT0MediaSweep(CASE_ID, `t0-media:${CASE_ID}`, 0);
+    expect(firstSweep).toEqual({ jobId: t0MediaSweepJobId(CASE_ID, 1), delayMs: T0_MEDIA_SWEEP_DELAY_MS });
+
+    // The recorder's final poll publishes a segment after the first pass; this sweep finds it.
+    const secondSweep = nextT0MediaSweep(CASE_ID, firstSweep?.jobId, 1);
+    expect(secondSweep).toEqual({ jobId: t0MediaSweepJobId(CASE_ID, 2), delayMs: T0_MEDIA_SWEEP_DELAY_MS });
+
+    // Once a full pass finds no public objects, the durable chain can stop.
+    expect(nextT0MediaSweep(CASE_ID, secondSweep?.jobId, 0)).toBeNull();
+  });
+
   test("lists deterministic clip prefixes and classifies orphan MP4 and image objects", async () => {
     const listed: string[] = [];
     const storage = {
