@@ -60,8 +60,8 @@ needs an amendment to this ADR.
   non-code data used at build time. CC licenses are not OSI licenses, but they
   are free-culture licenses that grant every right we need; we do not extend
   this to code.
-- **FFmpeg** is installed from Debian trixie packages in our own Bun-based media
-  image. Debian builds the standard flavour with `--enable-gpl` (libx264,
+- **FFmpeg** is installed from Debian trixie packages in our own Bun-based media,
+  api and worker images (api and worker decode uploads and frames for moderation). Debian builds the standard flavour with `--enable-gpl` (libx264,
   libx265), so the binaries are GPL-2.0-or-later (the optional
   `libavcodec-extra` flavour adds `--enable-version3`, making it
   GPL-3.0-or-later). We run it as a separate process and both are compatible

@@ -145,6 +145,14 @@ describe("compose.yaml: images", () => {
     }
   });
 
+  test("every service that decodes images through @commonair/moderation gets ffmpeg", () => {
+    // api (upload scanning), worker (live frame scans, NCII hashing) and media all spawn ffmpeg.
+    const runtime = read("infra/containers/service.Containerfile").split(/^FROM \S+ AS runtime$/m)[1] ?? "";
+    const install = /case "\$\{SERVICE\}" in ([a-z|]+)\)([^]*?);;/.exec(runtime);
+    expect(install?.[2], "runtime stage installs ffmpeg in a case on SERVICE").toMatch(/apt-get install[^\n]*ffmpeg/);
+    expect(new Set(install?.[1]?.split("|"))).toEqual(new Set(["media", "api", "worker"]));
+  });
+
   test("WAL-G download is checksum-verified for both architectures", () => {
     const cf = read("infra/postgres/Containerfile");
     expect(cf).toMatch(/WALG_VERSION=v3\.0\.9/);

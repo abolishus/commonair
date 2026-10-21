@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * ffmpeg decoding (already in the media and API images; no image library, ADR 0006 Q1). Every
+ * ffmpeg decoding (installed in the media, API and worker images; no image library, ADR 0006 Q1). Every
  * input is scaled to raw luma PDQ_LUMA_SIZE² and raw RGB CLASSIFIER_INPUT_SIZE²×3. Evidence frames
  * are encoded as PNG (lossless); T1/T2 review frames as JPEG.
  *

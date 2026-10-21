@@ -66,11 +66,19 @@ RUN set -eu; \
 FROM ${BUN_IMAGE} AS runtime
 ARG SERVICE
 ARG SOURCE_COMMIT=unknown
+# ffmpeg: media transcodes and cuts; api (upload scanning) and worker (live frame scans, NCII
+# hashing, evidence frames) decode and encode images through @commonair/moderation, which fails
+# closed without it.
 RUN set -eu; \
-    if [ "${SERVICE}" = media ]; then \
+    case "${SERVICE}" in media|api|worker) \
       apt-get update; \
       apt-get install -y --no-install-recommends ffmpeg; \
       rm -rf /var/lib/apt/lists/*; \
+      # What @commonair/moderation needs: PNG/JPEG encoders and its image demuxers.
+      for e in png mjpeg; do ffmpeg -hide_banner -encoders | grep -qE " $e "; done; \
+      for d in png_pipe jpeg_pipe gif webp_pipe bmp_pipe; do ffmpeg -hide_banner -demuxers | grep -qE " $d "; done;; \
+    esac; \
+    if [ "${SERVICE}" = media ]; then \
       ffmpeg -hide_banner -encoders | grep -q libx264; \
       ffmpeg -hide_banner -encoders | grep -q libwebp; \
       # MEDIA_WORK_DIR: a fresh named volume inherits this ownership.
