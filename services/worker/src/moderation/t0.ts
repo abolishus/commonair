@@ -439,7 +439,7 @@ export async function handleT0(ctx: WorkerContext, job: ModerationT0Job, meta: {
       distance: job.distance,
       provider: job.provider,
       providerVersion: job.listVersion,
-      evidence: job.evidence.length,
+      evidenceCount: job.evidence.length,
       broadcastEnded: r.ended !== null,
       hiddenVods: r.hidden.vodIds.length,
       hiddenClips: r.hidden.clipIds.length,
