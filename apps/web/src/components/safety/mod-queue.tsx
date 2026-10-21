@@ -143,8 +143,8 @@ export function ModQueue({ canReports, client: clientProp }: ModQueueProps): Rea
           key={selected.id}
           id={selected.id}
           client={client}
+          // The decided case stays open, refreshed, so the moderator sees its new status and history.
           onDecided={() => {
-            setSelected(null);
             cases.reload();
             labels.reload();
           }}
@@ -299,6 +299,7 @@ export function CaseDetail({
       loadFrame={(flagId) => client.frame(flagId)}
       onReview={async (input) => {
         await client.review({ id, ...input });
+        loaded.reload();
         onDecided();
       }}
     />

@@ -10,8 +10,13 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { EvidenceItem } from "../src/components/safety/legal.tsx";
 import { RestrictedStream } from "../src/components/safety/mature-gate.tsx";
 import { playerStage } from "../src/components/safety/stage.ts";
-import { CaseDetailView } from "../src/components/safety/mod-queue.tsx";
-import type { EvidenceObjectDto, MaturityClient, ModerationCaseDetailDto } from "../src/components/safety/client.ts";
+import { CaseDetail, CaseDetailView } from "../src/components/safety/mod-queue.tsx";
+import type {
+  EvidenceObjectDto,
+  MaturityClient,
+  ModerationCaseDetailDto,
+  ModerationClient,
+} from "../src/components/safety/client.ts";
 import {
   isLegal,
   isPlatformModerator,
@@ -152,6 +157,31 @@ describe("channel player stage", () => {
     expect(playerStage({ ...base, gateHit: true })).toBe("mature-gate");
     expect(playerStage(base)).toBe("player");
     expect(playerStage({ ...base, live: false, mature: true, restricted: true })).toBe("player");
+  });
+});
+
+describe("moderation case decision", () => {
+  it("keeps the decided case open and shows its refreshed status, without the review form", async () => {
+    let status: ModerationCaseDetailDto["status"] = "open";
+    const review = vi.fn<ModerationClient["review"]>(async () => {
+      status = "cleared";
+      return { ...caseDetail, status };
+    });
+    const client = {
+      case: vi.fn<ModerationClient["case"]>(async () => ({ ...caseDetail, status })),
+      frame: vi.fn<ModerationClient["frame"]>(async () => ({ contentType: "image/png", dataBase64: "aGVsbG8=" })),
+      review,
+    } as unknown as ModerationClient;
+    const onDecided = vi.fn<() => void>();
+    wrap(<CaseDetail id={caseDetail.id} client={client} onDecided={onDecided} />);
+    await waitFor(() => expect(screen.getByTestId("modq-detail").getAttribute("data-status")).toBe("open"));
+    fireEvent.click(screen.getByTestId("modq-decision-clear"));
+    fireEvent.change(screen.getByTestId("modq-note"), { target: { value: "synthetic review note" } });
+    fireEvent.click(screen.getByTestId("modq-submit"));
+    await waitFor(() => expect(screen.getByTestId("modq-detail").getAttribute("data-status")).toBe("cleared"));
+    expect(review).toHaveBeenCalledWith(expect.objectContaining({ id: caseDetail.id, decision: "clear" }));
+    expect(onDecided).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("modq-submit")).toBeNull();
   });
 });
 
