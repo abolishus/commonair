@@ -39,8 +39,15 @@ const ROOT = new URL("../", import.meta.url).pathname.replace(/\/$/, "");
 /** A service that restarted this often is crash-looping; waiting longer will not help. */
 export const CRASH_LOOP_RESTARTS = 3;
 
+/**
+ * podman-compose runs every build and start at once, and on macOS each is an SSH connection into
+ * the Podman VM. Its sshd refuses new handshakes once 10 are pending (MaxStartups 10:30), which
+ * surfaces as "ssh: handshake failed" or "internal libpod error" (125).
+ */
+const COMPOSE_PARALLEL = "4";
+
 function compose(args: string[], timeoutMs: number): void {
-  const proc = Bun.spawnSync(["podman", "compose", ...args], {
+  const proc = Bun.spawnSync(["podman", "compose", "--parallel", COMPOSE_PARALLEL, ...args], {
     stdio: ["inherit", "inherit", "inherit"],
     // podman-compose waits on depends_on health with no deadline of its own.
     timeout: timeoutMs,
@@ -49,6 +56,20 @@ function compose(args: string[], timeoutMs: number): void {
   if (proc.exitedDueToTimeout)
     throw new Error(`podman compose ${args.join(" ")} timed out after ${timeoutMs / 1000}s\n${diagnose()}`);
   if (proc.exitCode !== 0) throw new Error(`podman compose ${args.join(" ")} failed (${proc.exitCode})\n${diagnose()}`);
+}
+
+/**
+ * `up -d` is idempotent, so retry it once: a transient failure talking to the Podman VM (see
+ * COMPOSE_PARALLEL) should not fail the gate when a second pass starts everything cleanly.
+ */
+function composeUp(args: string[], timeoutMs: number): void {
+  try {
+    compose(args, timeoutMs);
+  } catch (e) {
+    if ((e as Error).message.includes("timed out")) throw e;
+    console.warn(`infra: podman compose ${args.join(" ")} failed; retrying once`);
+    compose(args, timeoutMs);
+  }
 }
 
 export interface ContainerRow {
@@ -301,7 +322,7 @@ if (import.meta.main) {
       preflight();
       sweepStaleTestContainers();
       compose(["build", ...BUILD_SERVICES], 20 * 60_000);
-      compose(["up", "-d", ...TEST_SERVICES], 5 * 60_000);
+      composeUp(["up", "-d", ...TEST_SERVICES], 5 * 60_000);
       await waitHealthy(HEALTHY_SERVICES);
       await waitExited(ONE_SHOT_SERVICES);
       sweepStaleTestDatabases();
@@ -309,7 +330,7 @@ if (import.meta.main) {
     } else if (cmd === "stack") {
       preflight();
       compose(["--profile", "harness", "build"], 20 * 60_000);
-      compose(["--profile", "harness", "up", "-d"], 10 * 60_000);
+      composeUp(["--profile", "harness", "up", "-d"], 10 * 60_000);
       await waitExited(ONE_SHOT_SERVICES);
       await waitHealthy(STACK_HEALTHY_SERVICES, 300_000);
       console.log("infra: platform healthy");
