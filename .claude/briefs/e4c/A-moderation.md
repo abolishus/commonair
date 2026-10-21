@@ -50,7 +50,7 @@ Every other E4c unit depends on you: **land correct, well-tested code first; spe
    BSD-3-Clause): luminance input, Jarosz filter downsample to 64×64, 2D DCT to 16×16, median
    threshold to 256 bits, quality metric; hex output in the reference bit order. Each ported file
    carries `SPDX-FileCopyrightText: Meta Platforms, Inc. and affiliates` plus ours, and
-   `SPDX-License-Identifier: BSD-3-Clause` (ADR 0008). `hammingDistance` on hex with popcount.
+   a BSD-3-Clause SPDX license identifier (ADR 0008). `hammingDistance` on hex with popcount.
    Do not name Meta or Facebook in product copy (clause 3).
 2. **Reference vectors.** Copy the benign reference photos and expected hashes from
    `pdq/data/reg-test-input` (and its expected-output file) at that tag into

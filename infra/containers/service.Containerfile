@@ -33,6 +33,9 @@ RUN set -eu; \
 
 # --- production dependencies of the closure.
 FROM ${BUN_IMAGE} AS deps
+# onnxruntime-node's postinstall would fetch CUDA from NuGet on Linux x64. --ignore-scripts
+# already stops it; this keeps it off if that flag is ever dropped (ADR 0006 Q2).
+ENV ONNXRUNTIME_NODE_INSTALL=skip
 WORKDIR /app
 COPY --from=manifests /manifests/ ./
 RUN set -eu; \
@@ -42,6 +45,7 @@ RUN set -eu; \
 # --- web build (no-op for every other image).
 FROM ${BUN_IMAGE} AS build
 ARG SERVICE
+ENV ONNXRUNTIME_NODE_INSTALL=skip
 WORKDIR /app
 COPY --from=manifests /manifests/ ./
 RUN set -eu; \
