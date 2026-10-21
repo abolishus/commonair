@@ -208,9 +208,34 @@ describe("registration", () => {
     h.session.close("done", false);
   });
 
+  test("a late idle check sends the PING first; only an unanswered PING drops the client", async () => {
+    // Long limits keep the real interval out of the way; the test drives checkIdle by hand.
+    const h = harness({ idlePingMs: 10_000 });
+    await h.login();
+    h.take();
+    const s = h.session as unknown as { checkIdle(): void; lastActivity: number; pingSentAt: number | null };
+    // One check arriving long after both deadlines (an event-loop stall).
+    s.lastActivity = Date.now() - 25_000;
+    s.checkIdle();
+    await tick();
+    expect(h.take()).toEqual(["PING :tmi.twitch.tv"]);
+    expect(h.closed).toBe(false);
+    s.checkIdle();
+    await tick();
+    expect(h.closed).toBe(false);
+    s.pingSentAt = Date.now() - 10_001;
+    s.checkIdle();
+    await tick();
+    expect(h.take()).toContain("ERROR :Closing Link: Ping timeout");
+    expect(h.closed).toBe(true);
+  });
+
   test("registration timeout closes the connection", async () => {
     const h = harness({ registrationTimeoutMs: 20 });
-    await new Promise((r) => setTimeout(r, 40));
+    // Poll: under load the timer can fire well after 20 ms.
+    for (const deadline = Date.now() + 2_000; !h.closed && Date.now() < deadline;) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
     expect(h.take()).toEqual(["ERROR :Closing Link: Registration timeout"]);
     expect(h.closed).toBe(true);
   });
@@ -493,10 +518,16 @@ describe("limits and lifecycle", () => {
     const h = harness({ idlePingMs: 40 });
     await h.login();
     h.take();
-    await new Promise((r) => setTimeout(r, 70));
-    expect(h.take()).toContain("PING :tmi.twitch.tv");
-    await new Promise((r) => setTimeout(r, 60));
-    expect(h.take()).toContain("ERROR :Closing Link: Ping timeout");
+    const lines: string[] = [];
+    for (const deadline = Date.now() + 2_000; !h.closed && Date.now() < deadline;) {
+      await new Promise((r) => setTimeout(r, 10));
+      lines.push(...h.take());
+    }
+    lines.push(...h.take());
+    // Order, not exact timings: under load both deadlines can pass between two polls.
+    const ping = lines.indexOf("PING :tmi.twitch.tv");
+    expect(ping).toBeGreaterThanOrEqual(0);
+    expect(lines.indexOf("ERROR :Closing Link: Ping timeout")).toBeGreaterThan(ping);
     expect(h.closed).toBe(true);
   });
 

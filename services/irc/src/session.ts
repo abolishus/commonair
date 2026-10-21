@@ -145,7 +145,8 @@ export class IrcSession {
   private outbox: string[] = [];
   private flushScheduled = false;
   private lastActivity = Date.now();
-  private pingSent = false;
+  /** When the idle PING went out; null until one is outstanding. */
+  private pingSentAt: number | null = null;
   private dropped = 0;
   private rateNoticeSent = false;
   private readonly timers: ReturnType<typeof setTimeout>[] = [];
@@ -191,7 +192,7 @@ export class IrcSession {
   line(raw: string): void {
     if (this.state === "closed") return;
     this.lastActivity = Date.now();
-    this.pingSent = false;
+    this.pingSentAt = null;
 
     if (!this.bucket.take()) {
       this.dropped++;
@@ -724,10 +725,14 @@ export class IrcSession {
 
   private checkIdle(): void {
     if (this.state === "closed") return;
-    const idle = Date.now() - this.lastActivity;
-    if (idle > 2 * this.limits.idlePingMs) return this.close("Ping timeout", true);
-    if (idle > this.limits.idlePingMs && !this.pingSent) {
-      this.pingSent = true;
+    const now = Date.now();
+    // Drop only after an unanswered PING: a late check must never skip straight to the timeout.
+    if (this.pingSentAt !== null) {
+      if (now - this.pingSentAt > this.limits.idlePingMs) this.close("Ping timeout", true);
+      return;
+    }
+    if (now - this.lastActivity > this.limits.idlePingMs) {
+      this.pingSentAt = now;
       this.emit({ command: "PING", trailing: SERVER_NAME });
     }
   }
