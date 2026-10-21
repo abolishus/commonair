@@ -42,3 +42,4 @@ export {
   type CommentAction,
 } from "./comment-item.tsx";
 export { EmoteGrid, EmoteTile, type EmoteGridProps, type EmoteTileProps, type EmoteTileData } from "./emote-grid.tsx";
+export { SensitiveMedia, FrameTile, type SensitiveMediaProps, type FrameTileProps } from "./sensitive-media.tsx";

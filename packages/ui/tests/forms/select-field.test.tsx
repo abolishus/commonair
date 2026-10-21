@@ -81,6 +81,16 @@ describe("SelectField", () => {
     expect(screen.getByRole("status").textContent).toBe("low");
   });
 
+  test("an option's data-testid reaches its item", async () => {
+    const options = latencies.map((o) => ({ ...o, "data-testid": `latency-${o.value}` }));
+    render(<SelectField label="Latency" options={options} defaultValue="normal" />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("combobox", { name: "Latency" }));
+    const item = await screen.findByTestId("latency-low");
+    expect(item.getAttribute("role")).toBe("option");
+    expect(item.textContent).toContain("Low latency");
+  });
+
   test("disabled disables the trigger and marks the field", () => {
     render(<SelectField label="Latency" options={latencies} defaultValue="normal" disabled data-testid="field" />);
     expect(screen.getByRole("combobox", { name: "Latency" }).hasAttribute("disabled")).toBe(true);

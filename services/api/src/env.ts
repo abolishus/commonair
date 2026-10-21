@@ -6,17 +6,24 @@ import {
   coreEnv,
   databaseEnv,
   developerEnv,
+  evidenceOpenEnv,
+  evidenceSealEnv,
   internalEnv,
   loadEnv,
   mailEnv,
   mediaEnv,
+  moderationEnv,
   paymentsEnv,
   playbackEnv,
   servicePorts,
   storageEnv,
   valkeyEnv,
+  workerEnv,
 } from "@commonair/config/env";
 import type { z } from "zod";
+
+/** The API enqueues trust & safety jobs into the worker's BullMQ prefix. */
+const bullPrefixEnv = workerEnv.pick({ WORKER_BULL_PREFIX: true });
 
 /** Each schema is parsed on its own: coreEnv carries a refinement, so it cannot be merged with `.extend`. */
 const SCHEMAS = [
@@ -32,6 +39,11 @@ const SCHEMAS = [
   playbackEnv,
   servicePorts,
   developerEnv,
+  // Trust & safety (ADR 0006): missing or invalid configuration refuses to start (fail closed).
+  moderationEnv,
+  evidenceSealEnv,
+  evidenceOpenEnv,
+  bullPrefixEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -45,7 +57,11 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof mediaEnv> &
   z.output<typeof playbackEnv> &
   z.output<typeof servicePorts> &
-  z.output<typeof developerEnv>;
+  z.output<typeof developerEnv> &
+  z.output<typeof moderationEnv> &
+  z.output<typeof evidenceSealEnv> &
+  z.output<typeof evidenceOpenEnv> &
+  z.output<typeof bullPrefixEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

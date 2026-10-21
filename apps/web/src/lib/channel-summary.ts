@@ -7,13 +7,26 @@ import type { Api } from "./api.ts";
 type ChannelDto = Awaited<ReturnType<Api["channels"]["get"]>>;
 
 export interface ChannelSummary {
+  /** Channel id (report subject). */
+  id: string;
   slug: string;
   displayName: string;
   title: string;
   avatarUrl: string | null;
   /** The channel's accent token (`theme.accent`); null when the channel never picked one. */
   accent: Accent | null;
-  live: { title: string; viewerCount: number; startedAt: string } | null;
+  /** Labelled mature (18+ gate). */
+  mature: boolean;
+  live: {
+    /** Broadcast id (report subject). */
+    id: string;
+    title: string;
+    viewerCount: number;
+    startedAt: string;
+    mature: boolean;
+    /** `under_review` while a T1 moderation case restricts the broadcast. */
+    restricted: "under_review" | null;
+  } | null;
   followerCount: number;
   /** The caller's follow state; null when anonymous (or the API did not say). */
   following: boolean | null;
@@ -23,12 +36,23 @@ export interface ChannelSummary {
 
 export function summarize(c: ChannelDto): ChannelSummary {
   return {
+    id: c.id,
     slug: c.slug,
     displayName: c.displayName,
     title: c.title,
     avatarUrl: c.avatarUrl,
     accent: c.theme.accent ?? null,
-    live: c.live ? { title: c.live.title, viewerCount: c.live.viewerCount, startedAt: c.live.startedAt } : null,
+    mature: c.mature === true,
+    live: c.live
+      ? {
+          id: c.live.id,
+          title: c.live.title,
+          viewerCount: c.live.viewerCount,
+          startedAt: c.live.startedAt,
+          mature: c.live.mature === true,
+          restricted: c.live.restricted ?? null,
+        }
+      : null,
     followerCount: c.followerCount,
     following: c.viewer?.following ?? null,
   };

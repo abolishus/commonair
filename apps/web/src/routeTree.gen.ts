@@ -17,11 +17,16 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
+import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
 import { Route as AppTransparencyRouteImport } from './routes/_app/transparency'
 import { Route as StudioDashboardRouteImport } from './routes/_studio/dashboard'
 import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
 import { Route as StudioRevenueRouteImport } from './routes/_studio/revenue'
 import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
+import { Route as AdminAdminAppealsRouteImport } from './routes/_admin/admin.appeals'
+import { Route as AdminAdminLegalRouteImport } from './routes/_admin/admin.legal'
+import { Route as AdminAdminModerationRouteImport } from './routes/_admin/admin.moderation'
+import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
 
 const AdminRoute = AdminRouteImport.update({
@@ -61,6 +66,11 @@ const AppSignupRoute = AppSignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTakedownRoute = AppTakedownRouteImport.update({
+  id: '/takedown',
+  path: '/takedown',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppTransparencyRoute = AppTransparencyRouteImport.update({
   id: '/transparency',
   path: '/transparency',
@@ -86,6 +96,26 @@ const EmbedChannelRoute = EmbedChannelRouteImport.update({
   path: '/embed/$channel',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAdminAppealsRoute = AdminAdminAppealsRouteImport.update({
+  id: '/admin/appeals',
+  path: '/admin/appeals',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminLegalRoute = AdminAdminLegalRouteImport.update({
+  id: '/admin/legal',
+  path: '/admin/legal',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminModerationRoute = AdminAdminModerationRouteImport.update({
+  id: '/admin/moderation',
+  path: '/admin/moderation',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
+  id: '/settings/appeals',
+  path: '/settings/appeals',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsSubscriptionsRoute =
   AppSettingsSubscriptionsRouteImport.update({
     id: '/settings/subscriptions',
@@ -99,11 +129,16 @@ export interface FileRoutesByFullPath {
   '/$channel': typeof AppChannelRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
+  '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
   '/dashboard': typeof StudioDashboardRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/admin/appeals': typeof AdminAdminAppealsRoute
+  '/admin/legal': typeof AdminAdminLegalRoute
+  '/admin/moderation': typeof AdminAdminModerationRoute
+  '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
 }
 export interface FileRoutesByTo {
@@ -112,11 +147,16 @@ export interface FileRoutesByTo {
   '/$channel': typeof AppChannelRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
+  '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
   '/dashboard': typeof StudioDashboardRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/admin/appeals': typeof AdminAdminAppealsRoute
+  '/admin/legal': typeof AdminAdminLegalRoute
+  '/admin/moderation': typeof AdminAdminModerationRoute
+  '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
 }
 export interface FileRoutesById {
@@ -128,12 +168,17 @@ export interface FileRoutesById {
   '/_app/$channel': typeof AppChannelRoute
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
+  '/_app/takedown': typeof AppTakedownRoute
   '/_app/transparency': typeof AppTransparencyRoute
   '/_studio/dashboard': typeof StudioDashboardRoute
   '/_studio/relays': typeof StudioRelaysRoute
   '/_studio/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/_app/': typeof AppIndexRoute
+  '/_admin/admin/appeals': typeof AdminAdminAppealsRoute
+  '/_admin/admin/legal': typeof AdminAdminLegalRoute
+  '/_admin/admin/moderation': typeof AdminAdminModerationRoute
+  '/_app/settings/appeals': typeof AppSettingsAppealsRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
 }
 export interface FileRouteTypes {
@@ -144,11 +189,16 @@ export interface FileRouteTypes {
     | '/$channel'
     | '/signin'
     | '/signup'
+    | '/takedown'
     | '/transparency'
     | '/dashboard'
     | '/relays'
     | '/revenue'
     | '/embed/$channel'
+    | '/admin/appeals'
+    | '/admin/legal'
+    | '/admin/moderation'
+    | '/settings/appeals'
     | '/settings/subscriptions'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -157,11 +207,16 @@ export interface FileRouteTypes {
     | '/$channel'
     | '/signin'
     | '/signup'
+    | '/takedown'
     | '/transparency'
     | '/dashboard'
     | '/relays'
     | '/revenue'
     | '/embed/$channel'
+    | '/admin/appeals'
+    | '/admin/legal'
+    | '/admin/moderation'
+    | '/settings/appeals'
     | '/settings/subscriptions'
   id:
     | '__root__'
@@ -172,12 +227,17 @@ export interface FileRouteTypes {
     | '/_app/$channel'
     | '/_app/signin'
     | '/_app/signup'
+    | '/_app/takedown'
     | '/_app/transparency'
     | '/_studio/dashboard'
     | '/_studio/relays'
     | '/_studio/revenue'
     | '/embed/$channel'
     | '/_app/'
+    | '/_admin/admin/appeals'
+    | '/_admin/admin/legal'
+    | '/_admin/admin/moderation'
+    | '/_app/settings/appeals'
     | '/_app/settings/subscriptions'
   fileRoutesById: FileRoutesById
 }
@@ -246,6 +306,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSignupRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/takedown': {
+      id: '/_app/takedown'
+      path: '/takedown'
+      fullPath: '/takedown'
+      preLoaderRoute: typeof AppTakedownRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/transparency': {
       id: '/_app/transparency'
       path: '/transparency'
@@ -281,6 +348,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmbedChannelRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_admin/admin/appeals': {
+      id: '/_admin/admin/appeals'
+      path: '/admin/appeals'
+      fullPath: '/admin/appeals'
+      preLoaderRoute: typeof AdminAdminAppealsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/legal': {
+      id: '/_admin/admin/legal'
+      path: '/admin/legal'
+      fullPath: '/admin/legal'
+      preLoaderRoute: typeof AdminAdminLegalRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/moderation': {
+      id: '/_admin/admin/moderation'
+      path: '/admin/moderation'
+      fullPath: '/admin/moderation'
+      preLoaderRoute: typeof AdminAdminModerationRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_app/settings/appeals': {
+      id: '/_app/settings/appeals'
+      path: '/settings/appeals'
+      fullPath: '/settings/appeals'
+      preLoaderRoute: typeof AppSettingsAppealsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/subscriptions': {
       id: '/_app/settings/subscriptions'
       path: '/settings/subscriptions'
@@ -293,10 +388,16 @@ declare module '@tanstack/react-router' {
 
 interface AdminRouteChildren {
   AdminTreasuryRoute: typeof AdminTreasuryRoute
+  AdminAdminAppealsRoute: typeof AdminAdminAppealsRoute
+  AdminAdminLegalRoute: typeof AdminAdminLegalRoute
+  AdminAdminModerationRoute: typeof AdminAdminModerationRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminTreasuryRoute: AdminTreasuryRoute,
+  AdminAdminAppealsRoute: AdminAdminAppealsRoute,
+  AdminAdminLegalRoute: AdminAdminLegalRoute,
+  AdminAdminModerationRoute: AdminAdminModerationRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
@@ -305,8 +406,10 @@ interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
+  AppTakedownRoute: typeof AppTakedownRoute
   AppTransparencyRoute: typeof AppTransparencyRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
 }
 
@@ -314,8 +417,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
+  AppTakedownRoute: AppTakedownRoute,
   AppTransparencyRoute: AppTransparencyRoute,
   AppIndexRoute: AppIndexRoute,
+  AppSettingsAppealsRoute: AppSettingsAppealsRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
 }
 

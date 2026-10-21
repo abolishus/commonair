@@ -44,7 +44,7 @@ interface LiveRow {
   categorySlug: string | null;
 }
 
-/** Every live, unsuspended channel with what ranking and cards need. */
+/** Every live, unsuspended, unrestricted channel with what ranking and cards need. */
 async function loadLive(deps: Deps, filter?: { categorySlug?: string | undefined }): Promise<LiveRow[]> {
   const rows = await deps.db
     .select({ c: channels, b: broadcasts, cat: categories, ownerImage: users.image })
@@ -57,6 +57,8 @@ async function loadLive(deps: Deps, filter?: { categorySlug?: string | undefined
         isNotNull(channels.liveBroadcastId),
         isNull(channels.suspendedAt),
         isNull(broadcasts.endedAt),
+        // A T1-restricted broadcast is in no list, search or front-page section until cleared.
+        isNull(broadcasts.restrictedAt),
         eq(users.banned, false),
         filter?.categorySlug ? eq(categories.slug, filter.categorySlug) : undefined,
       ),
@@ -292,6 +294,7 @@ export const directory = {
           isNull(channels.suspendedAt),
           eq(users.banned, false),
           or(sql`${doc} @@ ${query}`, ilike(channels.slug, like)),
+          sql`not exists (select 1 from ${broadcasts} where ${broadcasts.id} = ${channels.liveBroadcastId} and ${broadcasts.restrictedAt} is not null)`,
           adult ? undefined : eq(channels.mature, false),
         ),
       )

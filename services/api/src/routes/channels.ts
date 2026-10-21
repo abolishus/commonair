@@ -9,10 +9,14 @@ import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
 import { channelBySlug, iso, loadUsersPublic, toChannelDto, toPanelDto, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, forbidden, notFound, notImplemented } from "../lib/errors.ts";
+import { badRequest, forbidden, notFound } from "../lib/errors.ts";
 import { redactKeys, scanAndRevoke, type LeakSource } from "../lib/leaks.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
+import { assertCommittedUpload } from "../moderation/committed.ts";
+import { incomingKey, UPLOAD_TYPES } from "../moderation/upload-keys.ts";
+import { commitUpload } from "../moderation/uploads.ts";
+import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 
 const { channels, channelPanels, categories, follows, users, channelRoles, modActions } = schema;
 
@@ -22,22 +26,6 @@ async function scrubKeys(deps: Deps, text: string, source: LeakSource): Promise<
   return revoked > 0 || /live_[A-Za-z0-9_-]{43}/.test(text) ? redactKeys(text) : text;
 }
 
-const UPLOAD_TYPES: Record<string, readonly string[]> = {
-  avatar: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  banner: ["image/png", "image/jpeg", "image/webp"],
-  panel: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  emote: ["image/png", "image/webp", "image/gif"],
-  alert_image: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  alert_sound: ["audio/mpeg", "audio/ogg"],
-};
-const EXT: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/webp": "webp",
-  "image/gif": "gif",
-  "audio/mpeg": "mp3",
-  "audio/ogg": "ogg",
-};
 const UPLOAD_TTL_SECONDS = 600;
 
 const ROLE_ACTIONS = {
@@ -50,7 +38,9 @@ export const channelsRoutes = {
   get: os.channels.get.handler(async ({ context: { deps, caller }, input }) => {
     const c = await channelBySlug(deps, input.channel);
     if (!c) throw notFound("Channel not found");
-    const dto = await toChannelDto(deps, c);
+    const raw = await toChannelDto(deps, c);
+    const restricted = raw.live ? (await restrictedIds(deps.db, [raw.live.id])).has(raw.live.id) : false;
+    const dto = { ...raw, live: raw.live ? withRestriction(raw.live, restricted) : null };
     if (!caller) return { ...dto, viewer: null };
     // A follow the integrity system excluded still reads as followed to its owner.
     const [f] = await deps.db
@@ -81,11 +71,6 @@ export const channelsRoutes = {
     // A mature category forces the label; streamers cannot opt out of it.
     if (categoryMature) set.mature = true;
     if (input.theme !== undefined) {
-      const base = instanceMediaBase(deps.env);
-      if (input.theme.avatarKey && !isInstanceMediaRef(input.theme.avatarKey, base, `channels/${c.id}/avatar/`))
-        throw badRequest("The avatar must be one of your uploads");
-      if (input.theme.bannerKey && !isInstanceMediaRef(input.theme.bannerKey, base, `channels/${c.id}/banner/`))
-        throw badRequest("The banner must be one of your uploads");
       set.theme = input.theme;
     }
     if (input.vodEnabled !== undefined) set.vodEnabled = input.vodEnabled;
@@ -93,6 +78,16 @@ export const channelsRoutes = {
 
     const announced = ["title", "categoryId", "tags", "language", "mature"].some((k) => k in set);
     const updated = await deps.db.transaction(async (tx) => {
+      if (input.theme !== undefined) {
+        const base = instanceMediaBase(deps.env);
+        if (input.theme.avatarKey && !isInstanceMediaRef(input.theme.avatarKey, base, `channels/${c.id}/avatar/`))
+          throw badRequest("The avatar must be one of your uploads");
+        if (input.theme.bannerKey && !isInstanceMediaRef(input.theme.bannerKey, base, `channels/${c.id}/banner/`))
+          throw badRequest("The banner must be one of your uploads");
+        // Checking within this transaction serializes references against NCII key revocation.
+        if (input.theme.avatarKey) await assertCommittedUpload(deps, tx, input.theme.avatarKey, c.id, "avatar");
+        if (input.theme.bannerKey) await assertCommittedUpload(deps, tx, input.theme.bannerKey, c.id, "banner");
+      }
       const [row] = await tx.update(channels).set(set).where(eq(channels.id, c.id)).returning();
       if (!row) throw notFound("Channel not found");
       if (row.liveBroadcastId && ("title" in set || "categoryId" in set || "mature" in set))
@@ -135,9 +130,11 @@ export const channelsRoutes = {
     for (const p of panels)
       if (p.imageKey && !p.imageKey.startsWith(`channels/${c.id}/`))
         throw badRequest("Panel images must be your uploads");
+    // Every retained panel image must still be a committed, non-revoked upload.
     for (const p of panels)
       if (p.linkUrl && !/^https?:\/\//i.test(p.linkUrl)) throw badRequest("Links must be http(s)");
     const rows = await deps.db.transaction(async (tx) => {
+      for (const p of panels) if (p.imageKey) await assertCommittedUpload(deps, tx, p.imageKey, c.id, "panel");
       await tx.delete(channelPanels).where(eq(channelPanels.channelId, c.id));
       return panels.length ? tx.insert(channelPanels).values(panels).returning() : [];
     });
@@ -149,7 +146,8 @@ export const channelsRoutes = {
     const c = requireChannel(context);
     if (!UPLOAD_TYPES[input.purpose]?.includes(input.contentType))
       throw badRequest(`${input.contentType} is not allowed for ${input.purpose}`);
-    const key = `channels/${c.id}/${input.purpose}/${uuidv7()}.${EXT[input.contentType] ?? "bin"}`;
+    // Unpublished until channels.commitUpload has scanned it (ADR 0006 Q6).
+    const key = incomingKey(c.id, input.purpose, uuidv7(), input.contentType);
     const uploadUrl = await deps.storage.presignPut(deps.env.S3_BUCKET_MEDIA, key, {
       expiresSeconds: UPLOAD_TTL_SECONDS,
       contentType: input.contentType,
@@ -163,7 +161,11 @@ export const channelsRoutes = {
     };
   }),
 
-  commitUpload: os.channels.commitUpload.handler(notImplemented),
+  commitUpload: os.channels.commitUpload.handler(async ({ context, input }) => {
+    const c = requireChannel(context);
+    const caller = requireCaller(context);
+    return commitUpload(context.deps, { channelId: c.id, userId: caller.user.id, key: input.key });
+  }),
 
   follow: os.channels.follow.handler(async ({ context, input }) => {
     const { deps } = context;

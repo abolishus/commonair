@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { moneyMessages } from "./money.ts";
+import { safetyMessages } from "./safety.ts";
 import { supportMessages } from "./support.ts";
 
 /** English catalog. Keys are dotted by area; `{name}` placeholders are filled by `t()`. */
 export const en = {
   ...supportMessages,
   ...moneyMessages,
+  ...safetyMessages,
   "app.title": "Live streaming, owned by the people who make it",
 
   "nav.account": "Account",

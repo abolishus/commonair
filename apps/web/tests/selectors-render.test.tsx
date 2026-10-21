@@ -56,6 +56,11 @@ import { ChatEventRow } from "../src/chat/chat-event-row.tsx";
 import { chatEventView } from "../src/chat/events.ts";
 import { SupportForm, SupportInstructions } from "../src/components/support/support-dialog.tsx";
 import { subscription, supportInfo } from "./support-fixtures.ts";
+import { EvidenceItem } from "../src/components/safety/legal.tsx";
+import type { EvidenceObjectDto } from "../src/components/safety/client.ts";
+import { ChoiceToggle, SelectField } from "@commonair/ui/blocks/forms";
+import { PageTabs } from "@commonair/ui/blocks/headers";
+import { FrameTile } from "@commonair/ui/blocks/media";
 
 const router = createRouter({
   routeTree: createRootRoute(),
@@ -226,6 +231,131 @@ describe("composition-rendered selectors", () => {
     const link = one(doc, '[data-testid="footer-source-link"]');
     expect([link.tagName, link.getAttribute("href")]).toEqual(["A", "https://code.example.org/commonair"]);
     seenIds.add("footer-source-link");
+  });
+
+  it("trust and safety: report reason selector and blurred moderation frame expose their selectors", () => {
+    const reason = render(
+      <SelectField
+        label="Reason"
+        options={[{ value: "spam", label: "Spam" }]}
+        triggerProps={{ "data-testid": "report-reason" }}
+      />,
+    );
+    one(reason, '[data-testid="report-reason"]');
+
+    const frame = render(
+      <FrameTile
+        data-testid="modq-frame"
+        src="data:image/png;base64,aGVsbG8="
+        alt="Synthetic geometric fixture"
+        revealed={false}
+        onReveal={noop}
+        revealLabel="Reveal"
+        revealButtonProps={{ "data-testid": "modq-frame-reveal" }}
+      />,
+    );
+    const tile = one(frame, '[data-testid="modq-frame"]');
+    expect(tile.querySelector('[data-obscured="true"]')).not.toBeNull();
+    one(frame, '[data-testid="modq-frame-reveal"]');
+    seenIds.add("report-reason").add("modq-frame-reveal");
+
+    const evidence: EvidenceObjectDto = {
+      id: "0192f000-0000-7000-8000-000000000001",
+      caseId: "0192f000-0000-7000-8000-000000000002",
+      kind: "frame",
+      storage: "inline",
+      contentType: "image/png",
+      sizeBytes: 12,
+      sha256: "fixture-digest",
+      sourceSubjectType: "broadcast",
+      sourceSubjectId: "0192f000-0000-7000-8000-000000000003",
+      capturedAt: "2026-10-21T12:00:00.000Z",
+    };
+    const legalEvidence = render(
+      <EvidenceItem evidence={evidence} load={async () => ({ contentType: "image/png", dataBase64: "aGVsbG8=" })} />,
+    );
+    one(legalEvidence, '[data-testid="legal-evidence-view"]');
+    seenIds.add("legal-evidence-reveal");
+
+    const choice = render(
+      <>
+        <ChoiceToggle
+          label="Relationship"
+          value=""
+          options={[
+            { value: "self", label: "Self", "data-testid": "ncii-relationship-self" },
+            { value: "representative", label: "Representative", "data-testid": "ncii-relationship-representative" },
+          ]}
+        />
+        <ChoiceToggle
+          label="Decision"
+          value=""
+          options={["clear", "warn", "end_stream", "suspend", "escalate_legal"].map((decision) => ({
+            value: decision,
+            label: decision,
+            "data-testid": `modq-decision-${decision}`,
+          }))}
+        />
+        <ChoiceToggle
+          label="NCII"
+          value=""
+          options={["removed", "rejected"].map((decision) => ({
+            value: decision,
+            label: decision,
+            "data-testid": `ncii-decision-${decision}`,
+          }))}
+        />
+        <ChoiceToggle
+          label="Appeal"
+          value=""
+          options={[
+            { value: "upheld", label: "Upheld", "data-testid": "appealq-resolve-upheld" },
+            { value: "overturned", label: "Overturned", "data-testid": "appealq-resolve-overturned" },
+          ]}
+        />
+      </>,
+    );
+    for (const id of [
+      "ncii-relationship-self",
+      "ncii-relationship-representative",
+      "modq-decision-clear",
+      "modq-decision-warn",
+      "modq-decision-end_stream",
+      "modq-decision-suspend",
+      "modq-decision-escalate_legal",
+      "ncii-decision-removed",
+      "ncii-decision-rejected",
+      "appealq-resolve-upheld",
+      "appealq-resolve-overturned",
+    ])
+      one(choice, `[data-testid="${id}"]`);
+    const tabs = render(
+      <PageTabs
+        value="cases"
+        items={["cases", "reports", "ncii", "labels"].map((tab) => ({
+          id: tab,
+          label: tab,
+          "data-testid": `modq-tab-${tab}`,
+        }))}
+      />,
+    );
+    for (const id of ["modq-tab-cases", "modq-tab-reports", "modq-tab-ncii", "modq-tab-labels"])
+      one(tabs, `[data-testid="${id}"]`);
+    seenIds.add("ncii-relationship-self").add("ncii-relationship-representative");
+    seenIds.add("modq-decision-clear").add("modq-decision-warn").add("modq-decision-end_stream");
+    seenIds.add("modq-decision-suspend").add("modq-decision-escalate_legal");
+    seenIds.add("ncii-decision-removed").add("ncii-decision-rejected");
+    seenIds.add("appealq-resolve-upheld").add("appealq-resolve-overturned");
+    seenIds.add("modq-tab-cases").add("modq-tab-reports").add("modq-tab-ncii").add("modq-tab-labels");
+    const duration = render(
+      <SelectField
+        label="Duration"
+        options={[{ value: "day", label: "Day" }]}
+        triggerProps={{ "data-testid": "modq-duration" }}
+      />,
+    );
+    one(duration, '[data-testid="modq-duration"]');
+    seenIds.add("modq-duration");
   });
 
   it("player: live-badge only while live, on the player chrome", () => {

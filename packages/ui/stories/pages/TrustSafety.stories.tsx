@@ -20,8 +20,10 @@ import { Textarea } from "@commonair/ui/components/textarea";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
 import { FilterBar } from "@commonair/ui/blocks/data";
+import { DeadlineCountdown } from "@commonair/ui/blocks/feedback";
 import { ChoiceToggle, FormSection, SelectField } from "@commonair/ui/blocks/forms";
-import { ChatMessage } from "@commonair/ui/blocks/media";
+import { ChatMessage, SensitiveMedia } from "@commonair/ui/blocks/media";
+import { Button } from "@commonair/ui/components/button";
 import { decisions, detail, durations, filters, reports, templates } from "./fixtures/TrustSafety.ts";
 import { AdminPage, light, mobile320, pageParameters } from "./shell.tsx";
 
@@ -34,6 +36,7 @@ function TrustSafetyPage(): React.JSX.Element {
   const [decision, setDecision] = React.useState("chat");
   const [duration, setDuration] = React.useState("7");
   const [template, setTemplate] = React.useState("harassment-1");
+  const [frameRevealed, setFrameRevealed] = React.useState(false);
   return (
     <AdminPage>
       <PageContainer width="wide" className="flex flex-col gap-8 py-6">
@@ -161,6 +164,37 @@ function TrustSafetyPage(): React.JSX.Element {
               <FieldDescription>{detail.appeal}</FieldDescription>
             </Field>
           </FormSection>
+        </Section>
+        <Section
+          heading="Review safeguards"
+          description="A neutral geometric fixture demonstrates the blurred-by-default review treatment."
+          action={
+            <DeadlineCountdown
+              deadline="2026-10-21T12:15:00.000Z"
+              now="2026-10-21T12:00:00.000Z"
+              warnWithinMs={30 * 60_000}
+              dueLabel="SLA due"
+              overdueLabel="SLA overdue"
+            />
+          }
+        >
+          <SensitiveMedia
+            obscured={!frameRevealed}
+            overlay={
+              <>
+                <p className="text-muted-foreground">Blurred until a reviewer chooses to reveal</p>
+                <Button variant="outline" size="sm" onClick={() => setFrameRevealed(true)}>
+                  Reveal fixture
+                </Button>
+              </>
+            }
+          >
+            <div className="grid aspect-video grid-cols-3 gap-4 bg-muted p-8 sm:p-12">
+              <div className="rounded-full bg-muted-foreground/40" />
+              <div className="rounded-lg bg-muted-foreground/25" />
+              <div className="rounded-full bg-muted-foreground/60" />
+            </div>
+          </SensitiveMedia>
         </Section>
       </PageContainer>
     </AdminPage>

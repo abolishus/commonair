@@ -23,6 +23,7 @@
     "@commonair/email": "workspace:*",
     "@commonair/integrity": "workspace:*",
     "@commonair/ledger": "workspace:*",
+    "@commonair/moderation": "workspace:*",
     "@commonair/observability": "workspace:*",
     "@commonair/payments": "workspace:*",
     "@commonair/safe-regex": "workspace:*",

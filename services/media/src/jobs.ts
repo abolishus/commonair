@@ -10,6 +10,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import { Valkey } from "iovalkey";
 import { QUEUES } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
+import { errorCategory } from "./moderation/logging.ts";
 import { ClipJob, ClipUnavailableError, markClipFailed, processClip, type ClipDeps } from "./clips.ts";
 import { finalizeVod, VodFinalizeJob, type FinalizeDeps } from "./vod/finalize.ts";
 import type { FinalizeJobControl, FinalizeJobInfo, FinalizeJobState } from "./vod/reconcile.ts";
@@ -76,7 +77,7 @@ export function startJobs(opts: JobsOptions): Jobs {
         const lastAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
         if (err instanceof ClipUnavailableError || lastAttempt) {
           await markClipFailed(opts.clips.db, clipId, err instanceof ClipUnavailableError ? err.reason : null);
-          log.warn("clip failed", { clipId, err });
+          log.warn("clip failed", { clipId, error: errorCategory(err) });
           if (err instanceof ClipUnavailableError) return "failed";
         }
         throw err;
@@ -86,8 +87,8 @@ export function startJobs(opts: JobsOptions): Jobs {
   );
 
   for (const w of [finalizeWorker, clipsWorker]) {
-    w.on("failed", (job, err) => log.warn("job failed", { queue: w.name, jobId: job?.id, err }));
-    w.on("error", (err) => log.error("worker error", { queue: w.name, err }));
+    w.on("failed", (job, err) => log.warn("job failed", { queue: w.name, jobId: job?.id, error: errorCategory(err) }));
+    w.on("error", (err) => log.error("worker error", { queue: w.name, error: errorCategory(err) }));
   }
 
   const addFinalize = async (vodId: string) => {
@@ -111,7 +112,7 @@ export function startJobs(opts: JobsOptions): Jobs {
       if (running) return;
       running = true;
       for (const w of [finalizeWorker, clipsWorker])
-        void w.run().catch((err: unknown) => log.error("worker stopped", { queue: w.name, err }));
+        void w.run().catch((err: unknown) => log.error("worker stopped", { queue: w.name, error: errorCategory(err) }));
     },
     enqueueVodFinalize: addFinalize,
     vodFinalize: {
@@ -130,7 +131,7 @@ export function startJobs(opts: JobsOptions): Jobs {
             await job.remove();
           } catch (err) {
             // A worker picked it up between the check and the remove (the job is locked): owned.
-            log.debug("finalize job became active during requeue", { vodId, err });
+            log.debug("finalize job became active during requeue", { vodId, error: errorCategory(err) });
             return;
           }
         }

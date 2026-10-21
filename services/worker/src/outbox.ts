@@ -6,15 +6,17 @@
  * `BUS.events` → webhook fan-out jobs → `published_at`. Rows are claimed with
  * `FOR UPDATE SKIP LOCKED`, so replicas never claim the same row. Delivery is
  * at-least-once: if the commit fails after publishing, the batch is published
- * again (consumers dedupe by event id).
+ * again (consumers dedupe by event id). Internal (trust & safety) events are validated and
+ * marked published without ever reaching the bus or webhook fan-out.
  */
-import { BusEvent, EVENTS, type EventType } from "@commonair/contracts/events";
+import { BusEvent, EVENTS, isInternalEvent, type EventType } from "@commonair/contracts/events";
 import { QUEUES } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
 import { WEBHOOK_JOBS } from "./jobs/names.ts";
 import { metrics } from "./metrics.ts";
+import { moderationMetrics } from "./moderation/metrics.ts";
 import { AdaptiveDelay, startLoop, type LoopHandle } from "./runtime/loop.ts";
 
 const { events, eventSubscriptions: subs } = schema;
@@ -40,7 +42,14 @@ export function toBusEvent(row: EventRow): { ok: true; event: BusEvent } | { ok:
   };
 }
 
-/** Relay one batch. Returns how many rows were claimed. */
+/** Validate an internal event row; it is never published, only marked as handled. */
+export function checkInternalEvent(row: EventRow): { ok: true } | { ok: false; reason: string } {
+  const def = EVENTS[row.type as EventType];
+  if (row.version !== def.version) return { ok: false, reason: `unsupported version ${row.version}` };
+  const parsed = def.payload.safeParse(row.payload);
+  return parsed.success ? { ok: true } : { ok: false, reason: parsed.error.issues.map((i) => i.path.join(".")).join(",") };
+}
+
 /** Reject when `p` takes longer than `ms`; the caller treats it as a failed round trip. */
 export async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -54,6 +63,7 @@ export async function withTimeout<T>(p: Promise<T>, ms: number, label: string): 
   }
 }
 
+/** Relay one batch. Returns how many rows were claimed. */
 export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valkeyTimeoutMs = 2_000): Promise<number> {
   return ctx.db.transaction(async (tx) => {
     const rows = await tx
@@ -67,6 +77,20 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
 
     const valid: BusEvent[] = [];
     for (const row of rows) {
+      if (isInternalEvent(row.type)) {
+        // Audit and service fan-out only: never on BUS.events, never offered to apps.
+        const c = checkInternalEvent(row);
+        if (c.ok) moderationMetrics.outboxInternal.add(1, { type: row.type });
+        else {
+          metrics.outboxInvalid.add(1, { type: row.type });
+          ctx.logger.error("internal outbox event failed catalog validation", {
+            eventId: row.id,
+            type: row.type,
+            reason: c.reason,
+          });
+        }
+        continue;
+      }
       const r = toBusEvent(row);
       if (r.ok) valid.push(r.event);
       else {

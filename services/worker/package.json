@@ -19,6 +19,7 @@
     "@commonair/db": "workspace:*",
     "@commonair/integrity": "workspace:*",
     "@commonair/ledger": "workspace:*",
+    "@commonair/moderation": "workspace:*",
     "@commonair/observability": "workspace:*",
     "@commonair/payments": "workspace:*",
     "@commonair/service": "workspace:*",
