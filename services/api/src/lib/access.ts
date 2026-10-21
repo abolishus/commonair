@@ -81,6 +81,9 @@ export function decideAccess(f: AccessFacts): AccessDecision {
   if (f.write && caller.user.suspended) return deny("FORBIDDEN", "Your account is suspended");
 
   const roles = PLATFORM_LEVELS[access];
+  // Legal procedures (T0 cases, evidence, NCMEC drafts, holds) do not exist for anyone else
+  // (docs/testing/e4c-selectors.md "Evidence view": any other role → NOT_FOUND).
+  if (roles && access === "legal" && !roles.includes(caller.user.role)) return deny("NOT_FOUND", "Not found");
   if (roles) return roles.includes(caller.user.role) ? { ok: true } : deny("FORBIDDEN", "Insufficient platform role");
 
   if (access === "owner" || access === "moderator") {

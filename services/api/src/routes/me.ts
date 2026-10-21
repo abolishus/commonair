@@ -28,6 +28,15 @@ import {
 } from "../lib/errors.ts";
 import { pendingDocuments, recordAcceptances } from "../lib/legal.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
+import { audit } from "../events/audit.ts";
+import {
+  currentDeletion,
+  DELETION_GRACE_DAYS,
+  lockUser,
+  scheduledDeletion,
+  toDeletion,
+} from "../moderation/deletion.ts";
+import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 
 const { users, channels, follows, memberships, notifications, oauthTokens } = schema;
 
@@ -155,6 +164,10 @@ export const me = {
       deps,
       rows.map((r) => r.c),
     );
+    const restricted = await restrictedIds(
+      deps.db,
+      [...live.values()].map((l) => l.id),
+    );
     return pageOf(
       rows,
       input.limit,
@@ -166,7 +179,7 @@ export const me = {
           avatarUrl: channelAvatar(deps, r.c, r.ownerImage),
           accent: channelTheme(r.c).accent,
         },
-        live: live.get(r.c.id) ?? null,
+        live: ((l) => (l ? withRestriction(l, restricted.has(l.id)) : null))(live.get(r.c.id)),
         followedAt: iso(r.f.createdAt),
         notify: r.f.notify,
       }),
@@ -218,15 +231,89 @@ export const me = {
     return { ok: true as const };
   }),
 
-  labels: os.me.labels.handler(notImplemented),
+  labels: os.me.labels.handler(async ({ context }) => {
+    const caller = requireCaller(context);
+    const rows = await context.deps.db
+      .select({ l: schema.contentLabels })
+      .from(schema.contentLabels)
+      .innerJoin(channels, eq(channels.id, schema.contentLabels.channelId))
+      .where(and(eq(channels.ownerId, caller.user.id), isNull(schema.contentLabels.removedAt)))
+      .orderBy(desc(schema.contentLabels.appliedAt));
+    return rows.map(({ l }) => ({
+      id: l.id,
+      channelId: l.channelId,
+      label: l.label,
+      caseId: l.caseId,
+      appliedAt: iso(l.appliedAt),
+      removedAt: isoOrNull(l.removedAt),
+    }));
+  }),
   exports: {
     create: os.me.exports.create.handler(notImplemented),
     list: os.me.exports.list.handler(notImplemented),
   },
   deletion: {
-    request: os.me.deletion.request.handler(notImplemented),
-    cancel: os.me.deletion.cancel.handler(notImplemented),
-    get: os.me.deletion.get.handler(notImplemented),
+    request: os.me.deletion.request.handler(async ({ context, input }) => {
+      const caller = requireCaller(context);
+      const { deps } = context;
+      if (input.confirmUsername.toLowerCase() !== caller.user.username.toLowerCase())
+        throw badRequest("Type your username to confirm");
+      const now = deps.now();
+      const row = await deps.db.transaction(async (tx) => {
+        await lockUser(tx, caller.user.id);
+        const existing = await scheduledDeletion(tx, caller.user.id);
+        if (existing) return existing;
+        const [d] = await tx
+          .insert(schema.accountDeletions)
+          .values({
+            userId: caller.user.id,
+            requestedAt: now,
+            scheduledFor: new Date(now.getTime() + DELETION_GRACE_DAYS * 86_400_000),
+          })
+          .returning();
+        if (!d) throw new Error("deletion insert returned no row");
+        await audit(tx, {
+          actorType: "user",
+          actorId: caller.user.id,
+          action: "account.deletion.request",
+          subjectType: "user",
+          subjectId: caller.user.id,
+          details: { deletionId: d.id },
+        });
+        return d;
+      });
+      return toDeletion(row);
+    }),
+    cancel: os.me.deletion.cancel.handler(async ({ context }) => {
+      const caller = requireCaller(context);
+      const { deps } = context;
+      const now = deps.now();
+      await deps.db.transaction(async (tx) => {
+        await lockUser(tx, caller.user.id);
+        const d = await scheduledDeletion(tx, caller.user.id);
+        if (!d) throw notFound("No deletion is scheduled");
+        // Once due, the worker may already be deleting: too late to cancel.
+        if (d.scheduledFor.getTime() <= now.getTime()) throw conflict("This deletion is already under way");
+        await tx
+          .update(schema.accountDeletions)
+          .set({ status: "canceled" })
+          .where(and(eq(schema.accountDeletions.id, d.id), eq(schema.accountDeletions.status, "scheduled")));
+        await audit(tx, {
+          actorType: "user",
+          actorId: caller.user.id,
+          action: "account.deletion.cancel",
+          subjectType: "user",
+          subjectId: caller.user.id,
+          details: { deletionId: d.id },
+        });
+      });
+      return { ok: true as const };
+    }),
+    get: os.me.deletion.get.handler(async ({ context }) => {
+      const caller = requireCaller(context);
+      const d = await currentDeletion(context.deps.db, caller.user.id);
+      return d ? toDeletion(d) : null;
+    }),
   },
 
   bots: {

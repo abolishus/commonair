@@ -106,6 +106,25 @@ async function inMatureCategory(deps: Deps, ids: (string | null)[]): Promise<boo
   return rows.length > 0;
 }
 
+/** `MATURE_GATE`: the same answer for signed-out, under-age and unconfirmed viewers. */
+export const matureGate = () =>
+  apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream", { reason: "mature_gate" });
+
+/**
+ * Whether a broadcast needs a signed-in, 18+-confirmed viewer: the broadcast, its channel or a
+ * category is mature, or a T1 case restricts it (the player is blurred behind an interstitial,
+ * and only confirmed adults may reveal it).
+ */
+async function gated(
+  deps: Deps,
+  b: { mature: boolean; categoryId: string | null; restrictedAt: Date | null },
+  c: { mature: boolean; categoryId: string | null },
+): Promise<boolean> {
+  return (
+    b.mature || c.mature || b.restrictedAt !== null || (await inMatureCategory(deps, [b.categoryId, c.categoryId]))
+  );
+}
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -116,11 +135,7 @@ export const playback = {
       ? await deps.db.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId))
       : [];
     if (!b || b.endedAt) throw precondition("live", "This channel is offline");
-    if (
-      (b.mature || c.mature || (await inMatureCategory(deps, [b.categoryId, c.categoryId]))) &&
-      !(await confirmedAdult(deps, caller?.user.id))
-    )
-      throw precondition("mature_confirmation", "Confirm you are 18 or older to watch mature streams");
+    if ((await gated(deps, b, c)) && !(await confirmedAdult(deps, caller?.user.id))) throw matureGate();
 
     const sid = uuidv7();
     const path = mediaPath(c.slug);
@@ -286,6 +301,16 @@ export const playback = {
         : claims.src === "cdn"
           ? { source: "cdn" }
           : { source: "origin" });
+    // A label or restriction that arrived mid-stream applies at the next refresh.
+    const [gate] = s.broadcastId
+      ? await deps.db
+          .select({ b: broadcasts, c: { mature: schema.channels.mature, categoryId: schema.channels.categoryId } })
+          .from(broadcasts)
+          .innerJoin(schema.channels, eq(schema.channels.id, broadcasts.channelId))
+          .where(eq(broadcasts.id, s.broadcastId))
+      : [];
+    if (gate && (await gated(deps, gate.b, gate.c)) && !(await confirmedAdult(deps, s.userId ?? undefined)))
+      throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
     const { token } = await signFor(deps, s.id, s.channelId, claims.path, a);
     return {
       ok: true as const,
