@@ -8,6 +8,7 @@ import type { ValkeyClient } from "@commonair/service";
 import type { ObjectStorage } from "@commonair/storage";
 import type postgres from "postgres";
 import type { QueueName } from "./env.ts";
+import type { ModerationRuntime } from "./moderation/runtime.ts";
 import type { MoneyJobConfig } from "./money/config.ts";
 import type { WebhookSettings } from "./webhooks/settings.ts";
 
@@ -44,5 +45,10 @@ export interface WorkerContext {
   classifier(): NetworkClassifier | undefined;
   /** Money job tunables; `createWorker` reads them from env once. Read via `moneyConfig(ctx)`. */
   money?: MoneyJobConfig;
+  /**
+   * Trust & safety (classifier, evidence sealing key and bucket). `main.ts` always builds it and
+   * refuses to start without it; moderation jobs throw rather than run without it.
+   */
+  moderation?: ModerationRuntime;
   now(): Date;
 }

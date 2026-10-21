@@ -26,6 +26,16 @@ test("main.ts serves /healthz and /readyz and shuts down on SIGTERM", async () =
       AUTH_SECRET,
       WORKER_PORT: String(port),
       WORKER_BULL_PREFIX: `test-bull-${crypto.randomUUID()}`,
+      // These are synthetic local settings: startup composes required storage and sealing clients
+      // but the health test performs no object-storage operation or classifier scoring.
+      S3_ENDPOINT: "http://127.0.0.1:3900",
+      S3_ACCESS_KEY_ID: "synthetic-main-key",
+      S3_SECRET_ACCESS_KEY: "synthetic-main-secret",
+      S3_EVIDENCE_ACCESS_KEY_ID: "synthetic-evidence-key",
+      S3_EVIDENCE_SECRET_ACCESS_KEY: "synthetic-evidence-secret",
+      EVIDENCE_PUBLIC_KEY: Buffer.alloc(32, 7).toString("base64"),
+      MODERATION_CLASSIFIER: "scripted",
+      MODERATION_TEST_HOOKS: "true",
       LOG_LEVEL: "error",
       OTEL_EXPORTER_OTLP_ENDPOINT: "",
     },
