@@ -32,6 +32,7 @@ import type { Logger } from "@commonair/observability";
 import type { ModerationMetrics } from "./metrics.ts";
 import type { ModerationQueue } from "./queue.ts";
 import type { FrameTools } from "./tools.ts";
+import { errorCategory } from "./logging.ts";
 
 /** `channels.suspended_reason` / `vods|clips.removed_reason` the worker writes for a T0 match. */
 export const T0_REASON = "t0_hash_match";
@@ -93,7 +94,7 @@ const DROP_WARN_EVERY_MS = 60_000;
 const { PDQ_MIN_QUALITY, CLASSIFIER_BACKLOG_INTERVALS, FRAME_TTL_SECONDS, EVIDENCE_INLINE_MAX_BYTES } =
   MODERATION_CONSTANTS;
 
-const errName = (err: unknown) => (err instanceof Error ? err.name : "unknown");
+const errName = errorCategory;
 
 export class MediaModeration {
   /** Broadcasts, channels and paths with a T0 match in this process, known before the worker's transaction lands. */

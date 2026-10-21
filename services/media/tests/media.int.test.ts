@@ -562,6 +562,57 @@ describe("media pipeline", () => {
     expect(remaining).toEqual([]);
   }, 60_000);
 
+  test("T0 deletion during empty VOD handling cannot be overwritten as failed", async () => {
+    const { vodId: id } = await uploadPatternVod();
+    let enterPlaylist: () => void = () => {};
+    let releasePlaylist: () => void = () => {};
+    const reachedBarrier = new Promise<void>((resolve) => (enterPlaylist = resolve));
+    const waitAtBarrier = new Promise<void>((resolve) => (releasePlaylist = resolve));
+    const playlistKey = vodPrefix(id) + VOD_PLAYLIST;
+    const storage = new Proxy(media.ctx.storage, {
+      get(target, property) {
+        if (property === "get")
+          return async (bucket: string, key: string) => {
+            if (bucket === BUCKET && key === playlistKey) {
+              enterPlaylist();
+              await waitAtBarrier;
+              return new Response("#EXTM3U\n");
+            }
+            return target.get(bucket, key);
+          };
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const finalizing = finalizeVod(
+      {
+        db: tdb.db,
+        storage,
+        bucket: BUCKET,
+        moderation: { broadcastTainted: async () => false } as never,
+        ffmpeg: "ffmpeg",
+        imageFormat: "webp",
+        workDir,
+        logger,
+      },
+      id,
+    );
+    // The VOD is already processing and the empty playlist has been read; commit T0 deletion
+    // before the empty-recording failure transition can write `failed`.
+    await reachedBarrier;
+    await tdb.db
+      .update(schema.vods)
+      .set({ status: "deleted", removedReason: "t0_hash_match" })
+      .where(eq(schema.vods.id, id));
+    await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id));
+    releasePlaylist();
+
+    expect(await finalizing).toBe("removed");
+    const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+    expect(vod?.status).toBe("deleted");
+    expect(vod?.failedReason).toBeNull();
+  }, 60_000);
+
   test("T0 live: the synthetic pattern gets the publisher kicked first and one sealed t0 job", async () => {
     const live = await goLive(T0_PATTERN);
     const job = await waitFor("t0 job", async () => modQueue.getJob(t0JobId("broadcast", live.id)), 30_000);

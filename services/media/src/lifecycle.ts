@@ -15,6 +15,7 @@ import { BroadcastSession } from "./session.ts";
 import type { LocalWindow } from "./vod/recorder.ts";
 import { vodPrefix } from "./vod/recorder.ts";
 import { reconcileVods } from "./vod/reconcile.ts";
+import { errorCategory } from "./moderation/logging.ts";
 
 /** Consecutive reconciles a session's path may be missing from MediaMTX before it is stopped. */
 const MISSING_PATH_TOLERANCE = 2;
@@ -104,7 +105,7 @@ export class LiveCoordinator {
         livePaths = new Set((await this.ctx.mtx.listPaths()).filter(isLive).map((p) => p.name));
       } catch (err) {
         // Without MediaMTX we cannot tell what is live; never stop work on that basis.
-        this.log.warn("reconcile: MediaMTX unavailable", { err });
+        this.log.warn("reconcile: MediaMTX unavailable", { error: errorCategory(err) });
       }
 
       for (const [id, s] of this.sessions) {

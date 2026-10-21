@@ -17,6 +17,7 @@ import { internalRtspUrl, recorderArgs, recorderPlaylist } from "../ffmpeg/args.
 import { Supervisor } from "../ffmpeg/supervisor.ts";
 import { every, type Loop } from "../loop.ts";
 import { MAX_PENDING_UPLOADS } from "../settings.ts";
+import { errorCategory } from "../moderation/logging.ts";
 import { findWindow, parsePlaylist, renderPlaylist, type PlaylistSegment } from "./playlist.ts";
 
 export const vodPrefix = (vodId: string) => `vods/${vodId}/`;
@@ -142,7 +143,7 @@ export class SegmentRecorder {
     this.polling = this.polling
       .then(() => this.pollOnce())
       .catch((err: unknown) => {
-        this.log.warn("recorder poll failed", { err });
+        this.log.warn("recorder poll failed", { error: errorCategory(err) });
       });
     return this.polling;
   }
@@ -172,7 +173,7 @@ export class SegmentRecorder {
       for (const s of this.published) if (s.map) this.uploadedInits.add(s.map);
       this.log.info("resuming VOD recording", { segments: this.published.length });
     } catch (err) {
-      this.log.warn("could not read existing VOD playlist; continuing with a new one", { err });
+      this.log.warn("could not read existing VOD playlist; continuing with a new one", { error: errorCategory(err) });
     }
   }
 
@@ -194,7 +195,7 @@ export class SegmentRecorder {
         });
       } catch (err) {
         // Keep order: later segments wait until this one is up, so the playlist never has holes.
-        this.log.warn("segment upload failed; will retry", { err, segment: seg.uri });
+        this.log.warn("segment upload failed; will retry", { error: errorCategory(err) });
         break;
       }
       seg.uploaded = true;
@@ -225,7 +226,7 @@ export class SegmentRecorder {
       let drop = expired && uploadedOrNoVod;
       if (!drop && !s.uploaded && dropBacklog > 0) {
         // Object storage has been down for a long time: bound local disk use.
-        this.log.error("dropping unuploaded VOD segment (storage unavailable too long)", { segment: s.uri });
+        this.log.error("dropping unuploaded VOD segment (storage unavailable too long)");
         dropBacklog--;
         drop = true;
       }

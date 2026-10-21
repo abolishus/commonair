@@ -4,6 +4,7 @@
 /** All media work for one live broadcast, started on `online` and stopped on `offline`. */
 import type { BroadcastInfo, MediaContext } from "./context.ts";
 import { WARNINGS, type Warning } from "./health/rules.ts";
+import { errorCategory } from "./moderation/logging.ts";
 import { HealthSampler } from "./health/sampler.ts";
 import { LiveSampler, liveCapture } from "./moderation/sampler.ts";
 import { SimulcastManager } from "./simulcast.ts";
@@ -98,7 +99,7 @@ export class BroadcastSession {
     try {
       await fn();
     } catch (err) {
-      this.log.error("broadcast worker failed", { part, err });
+      this.log.error("broadcast worker failed", { part, error: errorCategory(err) });
     }
   }
 }

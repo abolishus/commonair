@@ -14,6 +14,7 @@ import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
 import { DiskBudget } from "./disk.ts";
+import { errorCategory } from "./moderation/logging.ts";
 import { probeCapabilities, type Capabilities } from "./ffmpeg/hwaccel.ts";
 import { startJobs, type Jobs } from "./jobs.ts";
 import { LiveCoordinator } from "./lifecycle.ts";
@@ -200,7 +201,9 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
   };
   const onMessage = (channel: string, message: string) => {
     if (channel !== busChannel) return;
-    void live.handleMessage(message).catch((err: unknown) => logger.error("live event handling failed", { err }));
+    void live
+      .handleMessage(message)
+      .catch((err: unknown) => logger.error("live event handling failed", { error: errorCategory(err) }));
   };
 
   const checks: Record<string, ReadinessCheck> = {
@@ -222,7 +225,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     checks,
     async start() {
       await storage.ensureBucket(ctx.bucket).catch((err: unknown) => {
-        logger.warn("could not ensure media bucket exists (bootstrap should create it)", { err });
+        logger.warn("could not ensure media bucket exists (bootstrap should create it)", { error: errorCategory(err) });
       });
       // Crash recovery first: no session records and no job reads a playlist until the work dir
       // left by a previous process is repaired. Job workers are idle until now, so every
@@ -233,14 +236,16 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
         await sweepScratchAtStartup({ workDir, logger });
         diskBudget.invalidate();
       } catch (err) {
-        logger.warn("work dir recovery failed", { err });
+        logger.warn("work dir recovery failed", { error: errorCategory(err) });
       }
       jobs.run();
       moderationRuntime.start();
       subscriber.on("message", onMessage);
       await subscriber.subscribe(busChannel);
       // Recover broadcasts that went live while we were down, then keep reconciling.
-      await live.reconcile().catch((err: unknown) => logger.warn("initial reconcile failed", { err }));
+      await live
+        .reconcile()
+        .catch((err: unknown) => logger.warn("initial reconcile failed", { error: errorCategory(err) }));
       reconcileLoop = every(timings.reconcileMs, () => live.reconcile(), { logger, name: "reconcile" });
       sweepLoop = every(timings.sweepMs, () => sweep(), { logger, name: "work-dir-sweep" });
       logger.info("media service started");

@@ -12,6 +12,7 @@ import { MODERATION_CONSTANTS, type DecodedFrame } from "@commonair/moderation";
 import type { Logger } from "@commonair/observability";
 import { internalRtspUrl } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
+import { errorCategory } from "./logging.ts";
 import type { LiveTarget } from "./moderation.ts";
 
 /** Retry delay after a failed capture (the source may still be waiting for its first keyframe). */
@@ -90,7 +91,7 @@ export class LiveSampler {
     } catch (err) {
       this.consecutiveFailures++;
       this.deps.onCaptureFailed?.();
-      const fields = { failures: this.consecutiveFailures, error: err instanceof Error ? err.name : "unknown" };
+      const fields = { failures: this.consecutiveFailures, error: errorCategory(err) };
       // Ids are in the child logger; the error message may carry the source URL, so only its name.
       if (this.consecutiveFailures % 10 === 0) this.deps.logger.error("moderation sampling keeps failing", fields);
       else this.deps.logger.warn("moderation sample failed", fields);

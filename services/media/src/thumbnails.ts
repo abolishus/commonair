@@ -15,6 +15,7 @@ import type { BroadcastInfo, MediaContext } from "./context.ts";
 import { internalRtspUrl, thumbnailArgs } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
 import { every, type Loop } from "./loop.ts";
+import { errorCategory } from "./moderation/logging.ts";
 import { imageExt, imageType } from "./vod/finalize.ts";
 
 export const thumbnailPrefix = (broadcastId: string) => `thumbnails/${broadcastId}/`;
@@ -79,7 +80,7 @@ export class Thumbnailer {
       await pruneThumbnails(storage, bucket, this.b.broadcastId, this.ctx.timings.thumbnailHistory);
     } catch (err) {
       // History grows by one per minute; the next capture tries again.
-      this.log.warn("thumbnail history cleanup failed", { err });
+      this.log.warn("thumbnail history cleanup failed", { error: errorCategory(err) });
     }
     return true;
   }

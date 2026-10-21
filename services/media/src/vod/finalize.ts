@@ -21,6 +21,7 @@ import type { DiskBudget } from "../disk.ts";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
 import { T0_REASON, type MediaModeration } from "../moderation/moderation.ts";
+import { errorCategory } from "../moderation/logging.ts";
 import { ActiveScratch } from "../recovery.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
@@ -133,10 +134,18 @@ export async function finalizeVod(
   const segments = res ? parsePlaylist(await res.text()).segments : [];
   if (segments.length === 0) {
     log.warn("VOD has no segments; marking failed");
-    await db
+    const failed = await db
       .update(schema.vods)
       .set({ status: "failed", failedReason: VOD_EMPTY_REASON })
-      .where(eq(schema.vods.id, vodId));
+      .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")))
+      .returning({ id: schema.vods.id });
+    if (failed.length === 0) {
+      const [current] = await db
+        .select({ status: schema.vods.status })
+        .from(schema.vods)
+        .where(eq(schema.vods.id, vodId));
+      return current?.status === "deleted" ? "removed" : "skipped";
+    }
     return "failed";
   }
 
@@ -251,7 +260,7 @@ async function sampleFrame(
     return stdout.byteLength > 0 ? stdout : null;
   } catch (err) {
     // Only the thumbnail: every sampled frame was PDQ-checked above, so a VOD without one is fine.
-    deps.logger.warn("could not take the VOD thumbnail", { error: err instanceof Error ? err.name : "unknown" });
+    deps.logger.warn("could not take the VOD thumbnail", { error: errorCategory(err) });
     return null;
   }
 }
