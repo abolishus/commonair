@@ -40,6 +40,7 @@ import { probeCapabilities } from "../src/ffmpeg/hwaccel.ts";
 import { runCommand } from "../src/ffmpeg/run.ts";
 import { MediaMtxClient } from "../src/mediamtx.ts";
 import { createMediaService, type MediaService } from "../src/service.ts";
+import { finalizeVod } from "../src/vod/finalize.ts";
 import { VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
 import {
   podmanAvailable,
@@ -515,6 +516,50 @@ describe("media pipeline", () => {
     expect(await media.ctx.storage.head(BUCKET, `${vodPrefix(id)}thumbnail.webp`)).toBeNull();
     expect(await media.ctx.storage.head(BUCKET, `${vodPrefix(id)}thumbnail.jpg`)).toBeNull();
   }, 90_000);
+
+  test("T0 deletion between VOD read and processing CAS cannot be overwritten or republished", async () => {
+    const { vodId: id } = await uploadPatternVod();
+    let enterBudget: () => void = () => {};
+    let releaseBudget: () => void = () => {};
+    const reachedBarrier = new Promise<void>((resolve) => (enterBudget = resolve));
+    const waitAtBarrier = new Promise<void>((resolve) => (releaseBudget = resolve));
+    const finalizing = finalizeVod(
+      {
+        db: tdb.db,
+        storage: media.ctx.storage,
+        bucket: BUCKET,
+        moderation: { broadcastTainted: async () => false } as never,
+        ffmpeg: "ffmpeg",
+        imageFormat: "webp",
+        workDir,
+        logger,
+        diskBudget: {
+          check: async () => {
+            enterBudget();
+            await waitAtBarrier;
+            return { ok: true };
+          },
+        } as never,
+      },
+      id,
+    );
+    // finalizeVod has read `recording` and reached the barrier immediately before its
+    // processing CAS. Simulate the T0 worker committing deletion and removing public objects.
+    await reachedBarrier;
+    await tdb.db
+      .update(schema.vods)
+      .set({ status: "deleted", removedReason: "t0_hash_match" })
+      .where(eq(schema.vods.id, id));
+    await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id));
+    releaseBudget();
+
+    expect(await finalizing).toBe("removed");
+    const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+    expect(vod?.status).toBe("deleted");
+    const remaining: string[] = [];
+    for await (const obj of media.ctx.storage.list(BUCKET, vodPrefix(id))) remaining.push(obj.key);
+    expect(remaining).toEqual([]);
+  }, 60_000);
 
   test("T0 live: the synthetic pattern gets the publisher kicked first and one sealed t0 job", async () => {
     const live = await goLive(T0_PATTERN);

@@ -115,7 +115,18 @@ export async function finalizeVod(
   // reconcile re-queues the job if every retry is used up).
   const budget = await deps.diskBudget?.check("vod-finalize");
   if (budget && !budget.ok) throw new Error("media work dir over disk budget");
-  await db.update(schema.vods).set({ status: "processing" }).where(eq(schema.vods.id, vodId));
+  const claimed = await db
+    .update(schema.vods)
+    .set({ status: "processing" })
+    .where(and(eq(schema.vods.id, vodId), inArray(schema.vods.status, ["recording", "processing"])))
+    .returning({ id: schema.vods.id });
+  if (claimed.length === 0) {
+    const [current] = await db
+      .select({ status: schema.vods.status })
+      .from(schema.vods)
+      .where(eq(schema.vods.id, vodId));
+    return current?.status === "deleted" ? "removed" : "skipped";
+  }
 
   const prefix = vodPrefix(vodId);
   const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
