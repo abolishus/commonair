@@ -17,6 +17,7 @@ import { setupModeration } from "../src/moderation/setup.ts";
 import { T0Outbox } from "../src/moderation/t0-outbox.ts";
 import { SegmentRecorder } from "../src/vod/recorder.ts";
 import type { MediaContext } from "../src/context.ts";
+import type { Database } from "@commonair/db";
 import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "../src/recovery.ts";
 import { BroadcastSession } from "../src/session.ts";
 import { scanChunks } from "../src/vod/finalize.ts";
@@ -269,6 +270,32 @@ describe("T0 live", () => {
     }
   });
 
+  test("sealing failure retries with the captured hit and logs only a safe error category", async () => {
+    const baseTools = fakeTools();
+    let encodeCalls = 0;
+    const tools = fakeTools({
+      encodePng: async (frame) => {
+        encodeCalls++;
+        if (encodeCalls === 1) throw new Error("private://evidence/object-secret");
+        return baseTools.encodePng(frame);
+      },
+    });
+    const { moderation, queue, lines, outbox } = await makeModeration({
+      tools,
+      matcher: fakeMatcher({ [MATCH]: "csam" }),
+    });
+    expect(await moderation.scanLiveFrame(target, fakeFrame("a", 90), new Date())).toBe("matched");
+    await moderation.settle();
+    expect(encodeCalls).toBe(2);
+    expect(queue.t0s).toHaveLength(1);
+    expect(queue.t0s[0]?.evidence).toHaveLength(2);
+    expect(await outbox.pending()).toHaveLength(1);
+    const output = lines.join("\n");
+    expect(output).toContain('"error":"Error"');
+    expect(output).not.toContain("private://");
+    expect(output).not.toContain("object-secret");
+  });
+
   test("the enqueue is retried until it lands, with a fatal log once it keeps failing", async () => {
     const queue = new FakeQueue();
     queue.failT0 = 6;
@@ -505,6 +532,43 @@ describe("pre-publish scans", () => {
 });
 
 describe("durable T0 replay", () => {
+  test("recovery logs only a fixed error category when object storage fails", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "commonair-recovery-log-"));
+    const broadcastDir = join(workDir, "broadcasts", target.broadcastId);
+    await mkdir(broadcastDir, { recursive: true });
+    let queryCount = 0;
+    type Query = {
+      from: () => Query;
+      where: () => Query;
+      limit: () => Promise<unknown[]>;
+    };
+    const db = {
+      select: () => {
+        const rows = queryCount++ === 0 ? [] : [{ id: "vod", status: "recording" }];
+        let query: Query;
+        query = { from: () => query, where: () => query, limit: async () => rows };
+        return query;
+      },
+    } as unknown as Database;
+    const { logger, lines } = captureLogger();
+    await recoverWorkDir({
+      db,
+      storage: {
+        get: async () => {
+          throw new Error("private://bucket/path/object-secret");
+        },
+      } as unknown as MediaContext["storage"],
+      bucket: "media",
+      workDir,
+      logger,
+    });
+    const output = lines.join("\n");
+    expect(output).toContain('"error":"Error"');
+    expect(output).not.toContain("private://");
+    expect(output).not.toContain("object-secret");
+    await rm(workDir, { recursive: true, force: true });
+  });
+
   test("restart keeps pending local segments private and kicks a still-live source before T0 acceptance", async () => {
     const dir = await mkdtemp(join(tmpdir(), "commonair-t0-replay-"));
     const outbox = new T0Outbox(dir);

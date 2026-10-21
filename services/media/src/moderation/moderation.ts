@@ -397,8 +397,11 @@ export class MediaModeration {
     this.log.error("T0 hash match on a live broadcast; ending it", { ...ids, ...this.matchFields(hit.match) });
     await this.kick(target.path, ids);
     this.recoveryProtected.add(target.broadcastId);
-    const persisted = await this.persistUntilStored(
-      await this.buildJob("broadcast", target.broadcastId, target.channelId, hit),
+    const persisted = await this.buildAndPersistUntilStored(
+      "broadcast",
+      target.broadcastId,
+      target.channelId,
+      hit,
       ids,
     );
     // Detach so the sampler can return before stopBroadcast waits for that same sampler to stop.
@@ -456,6 +459,32 @@ export class MediaModeration {
         });
         await this.sleep(delay);
         delay = Math.min((this.deps.retry ?? DEFAULT_RETRY).maxMs, delay * 2);
+      }
+    }
+  }
+
+  /** Keep the captured hit in memory and retry sealing as well as persistence. */
+  private async buildAndPersistUntilStored(
+    subjectType: ModerationT0Job["subjectType"],
+    subjectId: string,
+    channelId: string,
+    hit: Hit,
+    ids: Record<string, string>,
+  ): Promise<{ job: ModerationT0Job; path: string }> {
+    const policy = this.deps.retry ?? DEFAULT_RETRY;
+    const fatalAfter = this.deps.fatalAfterAttempts ?? 5;
+    let delay = policy.initialMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const job = await this.buildJob(subjectType, subjectId, channelId, hit);
+        return await this.persistUntilStored(job, ids);
+      } catch (err) {
+        const fields = { ...ids, attempt, error: errName(err) };
+        if (attempt >= fatalAfter)
+          this.log.fatal("T0 evidence could not be sealed; retaining the captured hit and retrying", fields);
+        else this.log.error("T0 evidence sealing failed; retaining the captured hit and retrying", fields);
+        await this.sleep(delay);
+        delay = Math.min(policy.maxMs, delay * 2);
       }
     }
   }
@@ -610,14 +639,13 @@ export class MediaModeration {
   async t0Prepublish(subjectType: "vod" | "clip", subjectId: string, channelId: string, hit: Hit): Promise<void> {
     const ids = { subjectType, subjectId, channelId };
     this.log.error("T0 hash match before publishing; not publishing", { ...ids, ...this.matchFields(hit.match) });
-    const job = await this.buildJob(subjectType, subjectId, channelId, hit);
-    const broadcastId = await this.sourceBroadcastId(job);
+    const persisted = await this.buildAndPersistUntilStored(subjectType, subjectId, channelId, hit, ids);
+    const broadcastId = await this.sourceBroadcastId(persisted.job);
     if (broadcastId) {
       this.taintedBroadcasts.add(broadcastId);
       this.taintedChannels.add(channelId);
       this.recoveryProtected.add(broadcastId);
     }
-    const persisted = await this.persistUntilStored(job, ids);
     if (broadcastId) {
       await this.stopBroadcastUntilStopped(broadcastId, ids);
     }

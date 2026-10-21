@@ -21,6 +21,7 @@ import { eq, inArray, and } from "drizzle-orm";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
+import { errorCategory } from "./moderation/logging.ts";
 import { parsePlaylist, renderPlaylist, type PlaylistSegment } from "./vod/playlist.ts";
 import { VOD_PLAYLIST, vodPrefix } from "./vod/recorder.ts";
 
@@ -209,7 +210,7 @@ async function recoverBroadcastDir(
     return { kept: false, uploaded };
   } catch (err) {
     // Keep the files; the next startup or sweep tries again.
-    log.warn("could not recover a recording; keeping its files", { broadcastId: name, err });
+    log.warn("could not recover a recording; keeping its files", { broadcastId: name, error: errorCategory(err) });
     return { kept: true, uploaded: 0 };
   }
 }
