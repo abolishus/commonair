@@ -6,6 +6,9 @@ import {
   coreEnv,
   databaseEnv,
   developerEnv,
+  moderationEnv,
+  evidenceSealEnv,
+  evidenceStorageEnv,
   paymentsEnv,
   servicePorts,
   storageEnv,
@@ -28,6 +31,17 @@ export const workerEnv = z.object({
   ...servicePorts.pick({ WORKER_PORT: true }).shape,
   ...storageEnv.partial({ S3_ENDPOINT: true, S3_ACCESS_KEY_ID: true, S3_SECRET_ACCESS_KEY: true }).shape,
   ...workerTuningEnv.shape,
+  // Trust & safety (ADR 0006): required, so a worker without them refuses to start.
+  ...moderationEnv.shape,
+  ...evidenceSealEnv.shape,
+  ...evidenceStorageEnv.shape,
+}).superRefine((env, ctx) => {
+  if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
+    ctx.addIssue({
+      code: "custom",
+      path: ["MODERATION_CLASSIFIER"],
+      message: "the scripted classifier needs MODERATION_TEST_HOOKS=true (harness only)",
+    });
 });
 export type WorkerEnv = z.output<typeof workerEnv>;
 
@@ -39,6 +53,10 @@ const QUEUE_DEFAULTS: Partial<Record<QueueName, number>> = {
   [QUEUES.webhooks]: 32,
   [QUEUES.retention]: 1,
   [QUEUES.integrity]: 8,
+  // Classifier inference is CPU-bound; scans, T0 transactions and the clock share these slots,
+  // and a scheduled job holding one never blocks a T0 (they finish in seconds).
+  [QUEUES.moderation]: 6,
+  [QUEUES.deletions]: 1,
 };
 export const DEFAULT_CONCURRENCY: Record<QueueName, number> = Object.fromEntries(
   QUEUE_NAMES.map((q) => [q, QUEUE_DEFAULTS[q] ?? 4]),
