@@ -251,7 +251,8 @@ describe("metrics", () => {
       return [{ name: "x_api", cpuPercent: calls * 10, memBytes: 0 }];
     });
     sampler.start();
-    await Bun.sleep(60);
+    // Poll rather than sleep a fixed 60 ms: a loaded machine can delay the 10 ms ticks.
+    for (const deadline = Date.now() + 2_000; calls < 2 && Date.now() < deadline;) await Bun.sleep(10);
     await sampler.stop();
     const s = sampler.summary().x_api;
     expect(s?.samples).toBeGreaterThanOrEqual(2);

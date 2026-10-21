@@ -62,10 +62,15 @@ function make(opts: WorkerFilterRunnerOptions = {}) {
 }
 
 const HELD = { action: "hold", timedOut: true };
+/**
+ * For tests about outcomes, not timing. The production hard timeout is the filter budget plus
+ * 25 ms, so one scheduling stall while other suites run in parallel would hold a message.
+ */
+const UNHURRIED = { hardTimeoutMs: 2_000, maxQueueWaitMs: 2_000 };
 
 describe("WorkerFilterRunner", () => {
   test("runs filters in a worker with the same outcomes as inline", async () => {
-    const { r } = make();
+    const { r } = make(UNHURRIED);
     expect(await r.run("hello there", typical)).toEqual({ action: "pass", body: "hello there", filterId: null });
     expect(await r.run("join discord.gg/abc", typical)).toEqual({ action: "block", filterId: "b3" });
     expect(await r.run("darn crypto giveaway", typical)).toEqual({
@@ -86,13 +91,16 @@ describe("WorkerFilterRunner", () => {
   });
 
   test("a filter set that timed out is quarantined: held without running, logged once", async () => {
-    const { r, reasons, quarantines } = make({ workers: 1, hardTimeoutMs: 50, quarantineMs: 300 });
+    // The evil pattern never finishes, so a 500 ms timeout still trips; a tighter one would also
+    // catch the benign run at the end when parallel suites stall the worker.
+    const { r, reasons, quarantines } = make({ workers: 1, hardTimeoutMs: 500, quarantineMs: 300 });
     expect(await r.run(evilBody, evil())).toMatchObject(HELD);
     const started = performance.now();
     // Recompiled (a channel reload) but identical: same quarantine.
     expect(await r.run("aaa", evil())).toMatchObject(HELD);
     expect(await r.run("aaa", evil())).toMatchObject(HELD);
-    expect(performance.now() - started).toBeLessThan(20);
+    // Far below the hard timeout: the quarantined set never reached a worker.
+    expect(performance.now() - started).toBeLessThan(200);
     expect(reasons).toEqual(["timeout", "quarantined", "quarantined"]);
     expect(quarantines()).toBe(1);
     expect(r.threads()).toBeLessThanOrEqual(3);
@@ -170,7 +178,7 @@ describe("WorkerFilterRunner", () => {
   });
 
   test("filter sets evicted from the worker cache are sent again", async () => {
-    const { r } = make({ workers: 1 });
+    const { r } = make({ workers: 1, ...UNHURRIED });
     const sets = Array.from({ length: 300 }, (_, i) => compileFilters([def({ id: `s${i}`, pattern: `word${i}\\b` })]));
     for (const [i, set] of sets.entries()) expect(await r.run(`word${i}`, set)).toMatchObject({ action: "block" });
     expect(await r.run("word0", sets[0] ?? [])).toEqual({ action: "block", filterId: "s0" });
