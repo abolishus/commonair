@@ -203,6 +203,11 @@ export interface ModqCaseView {
   status: string | null;
 }
 
+/** A queue row opens through its toggle button (`aria-pressed`), not by clicking the row. */
+async function openModqItem(item: Locator, b: WebBudget): Promise<void> {
+  await item.locator("button[aria-pressed]").first().click({ timeout: b.timeoutMs });
+}
+
 async function openModqCase(session: WebSession, caseId: string, b: WebBudget): Promise<Page> {
   return untilOnPage(
     session,
@@ -213,7 +218,7 @@ async function openModqCase(session: WebSession, caseId: string, b: WebBudget): 
       if (await visible(tab, 2_000)) await tab.click({ timeout: 2_000 }).catch(() => undefined);
       const item = byTestId(p, T.modqItem, { "case-id": caseId }).first();
       if (!(await visible(item))) return null;
-      await item.click({ timeout: b.timeoutMs });
+      await openModqItem(item, b);
       return (await visible(byTestId(p, T.modqDetail, { "case-id": caseId }), 5_000)) ? p : null;
     },
     b,
@@ -262,9 +267,9 @@ export async function clearModqCase(
   await byTestId(page, modqDecision("clear")).first().click(ui);
   await byTestId(page, T.modqNote).first().fill(note, ui);
   await clickConfirming(page, byTestId(page, T.modqSubmit).first(), b);
+  // The decided case stays open and refreshes in place (it leaves the open queue).
   await byTestId(page, T.modqDetail, { "case-id": caseId, status: "cleared" }).first().waitFor(ui);
-  const after = await openModqCase(session, caseId, b);
-  return readCase(after, caseId);
+  return readCase(page, caseId);
 }
 
 /** `/admin/moderation`: the T0 case never appears in the ordinary queue (checked after load). */
@@ -289,7 +294,7 @@ export async function decideNcii(session: WebSession, requestId: string, note: s
     },
     b,
   );
-  await byTestId(page, T.modqItem, { "ncii-id": requestId }).first().click(ui);
+  await openModqItem(byTestId(page, T.modqItem, { "ncii-id": requestId }).first(), b);
   await byTestId(page, T.nciiDecisionRemoved).first().click(ui);
   await byTestId(page, T.nciiNote).first().fill(note, ui);
   await clickConfirming(page, byTestId(page, T.nciiDecideSubmit).first(), b);
