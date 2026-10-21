@@ -9,6 +9,7 @@ import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { EvidenceItem } from "../src/components/safety/legal.tsx";
 import { RestrictedStream } from "../src/components/safety/mature-gate.tsx";
+import { playerStage } from "../src/components/safety/stage.ts";
 import { CaseDetailView } from "../src/components/safety/mod-queue.tsx";
 import type { EvidenceObjectDto, MaturityClient, ModerationCaseDetailDto } from "../src/components/safety/client.ts";
 import {
@@ -129,6 +130,28 @@ describe("moderation review frames", () => {
     fireEvent.click(screen.getAllByTestId("modq-frame-reveal")[0] as HTMLElement);
     expect(frames.map((frame) => frame.getAttribute("data-revealed"))).toEqual(["true", "false"]);
     expect(sensitive.map((frame) => frame?.getAttribute("data-obscured"))).toEqual(["false", "true"]);
+  });
+});
+
+describe("channel player stage", () => {
+  const base = { live: true, mature: false, restricted: false, confirmed: false, gateHit: false };
+
+  it("a restricted stream shows its interstitial, never the generic 18+ gate, even after playback refused", () => {
+    expect(playerStage({ ...base, restricted: true })).toBe("restricted-locked");
+    expect(playerStage({ ...base, restricted: true, gateHit: true })).toBe("restricted-locked");
+    expect(playerStage({ ...base, restricted: true, mature: true })).toBe("restricted-locked");
+  });
+
+  it("mounts the player under the blur only for a confirmed adult", () => {
+    expect(playerStage({ ...base, restricted: true, confirmed: true })).toBe("restricted-player");
+  });
+
+  it("mature streams gate unconfirmed viewers; a refused playback gates too", () => {
+    expect(playerStage({ ...base, mature: true })).toBe("mature-gate");
+    expect(playerStage({ ...base, mature: true, confirmed: true })).toBe("player");
+    expect(playerStage({ ...base, gateHit: true })).toBe("mature-gate");
+    expect(playerStage(base)).toBe("player");
+    expect(playerStage({ ...base, live: false, mature: true, restricted: true })).toBe("player");
   });
 });
 

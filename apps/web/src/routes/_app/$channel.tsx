@@ -12,6 +12,7 @@ import { FollowButton, FollowerCount, useFollow } from "../../components/channel
 import { SupportButton } from "../../components/support/support-dialog.tsx";
 import { isMatureGate, maturityClient } from "../../components/safety/client.ts";
 import { MatureGate, RestrictedStream, useViewerMaturity } from "../../components/safety/mature-gate.tsx";
+import { playerStage } from "../../components/safety/stage.ts";
 import { ReportButton } from "../../components/safety/report-dialog.tsx";
 import { t } from "../../i18n/index.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
@@ -49,7 +50,7 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
   const maturity = useViewerMaturity(signedIn, live && (mature || restricted), client);
   // `playback.start` refused with the 18+ gate (e.g. a mature category the page did not know about).
   const [gateHit, setGateHit] = React.useState(false);
-  const gated = live && (gateHit || (mature && !maturity.confirmed));
+  const stage = playerStage({ live, mature, restricted, confirmed: maturity.confirmed, gateHit });
   const onConfirmed = () => {
     maturity.markConfirmed();
     setGateHit(false);
@@ -76,21 +77,21 @@ function ChannelView({ initial }: { initial: ChannelSummary }): React.JSX.Elemen
         asideWidth="lg"
         main={
           <div className="flex min-w-0 flex-col gap-4">
-            {gated ? (
+            {stage === "mature-gate" ? (
               <MatureGate
                 signedIn={signedIn}
                 checking={signedIn && !maturity.loaded}
                 onConfirmed={onConfirmed}
                 client={client}
               />
-            ) : restricted ? (
+            ) : stage === "restricted-locked" || stage === "restricted-player" ? (
               <RestrictedStream
                 signedIn={signedIn}
                 confirmed={maturity.confirmed}
                 onConfirmed={onConfirmed}
                 client={client}
               >
-                {player}
+                {stage === "restricted-player" ? player : <div className="aspect-video w-full bg-muted" />}
               </RestrictedStream>
             ) : (
               player
