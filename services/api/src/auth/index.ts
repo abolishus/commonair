@@ -19,6 +19,7 @@ import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { publishUserControl } from "../lib/control.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
+import { isCommittedUpload, keyOfRef } from "../moderation/committed.ts";
 import { recordAcceptances, currentRequiredDocuments } from "../lib/legal.ts";
 import { appUrl, publicLink, sendNotice } from "../mail.ts";
 import { verifyAltcha } from "./altcha.ts";
@@ -80,11 +81,14 @@ export function createAuth(deps: Deps) {
   const publicUrl = new URL(site.publicUrl);
   const mediaBase = instanceMediaBase(env);
   /** One of the member's own channel avatar uploads (key or media-bucket URL). */
-  const ownAvatarRef = async (ref: string, userId: string | undefined) => {
+  const ownAvatarKey = async (ref: string, userId: string | undefined) => {
     const [c] = userId
       ? await db.select({ id: schema.channels.id }).from(schema.channels).where(eq(schema.channels.ownerId, userId))
       : [];
-    return c ? isInstanceMediaRef(ref, mediaBase, `channels/${c.id}/avatar/`) : false;
+    if (!c || !isInstanceMediaRef(ref, mediaBase, `channels/${c.id}/avatar/`)) return null;
+    const key = keyOfRef(ref, mediaBase);
+    if (!key || !(await isCommittedUpload(deps, currentExecutor(db), ref, c.id, "avatar"))) return null;
+    return key;
   };
   const VERIFY_MINUTES = 60;
   const RESET_MINUTES = 60;
@@ -242,8 +246,13 @@ export function createAuth(deps: Deps) {
               );
               if (refused.length > 0) throw bad("FIELD_NOT_ALLOWED", "This field cannot be changed");
             }
-            if (typeof data.image === "string" && !(await ownAvatarRef(data.image, ctx?.context.session?.user.id)))
-              throw bad("INVALID_IMAGE", "The profile image must be one of your uploads");
+            if (typeof data.image === "string") {
+              const key = await ownAvatarKey(data.image, ctx?.context.session?.user.id);
+              if (!key) throw bad("INVALID_IMAGE", "The profile image must be one of your uploads");
+              // Store the canonical key so the database guard can serialize every write with
+              // NCII removal, even though this Better Auth update hook is not transactional.
+              data.image = key;
+            }
             if (data.twoFactorEnabled === true && ctx) twoFactorEnabling.add(ctx);
           },
           after: async (user, ctx) => {

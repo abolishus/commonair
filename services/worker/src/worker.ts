@@ -18,6 +18,7 @@ import type { WorkerContext } from "./context.ts";
 import { DEFAULT_CONCURRENCY, type QueueName } from "./env.ts";
 import { JOBS } from "./jobs/index.ts";
 import { metrics } from "./metrics.ts";
+import { type ModerationOptions, resolveModeration } from "./moderation/runtime.ts";
 import { type MoneyJobConfig, moneyConfigFromEnv } from "./money/config.ts";
 import { startOutboxRelay } from "./outbox.ts";
 import type { LoopHandle } from "./runtime/loop.ts";
@@ -46,6 +47,8 @@ export interface CreateWorkerOptions {
   classifier?: () => NetworkClassifier | undefined;
   /** Money job tunables; read from env (`CURRENCY`, `PAYMENT_PENDING_DAYS`) when absent. */
   money?: MoneyJobConfig;
+  /** Trust & safety runtime; `main.ts` always passes it (and exits when it cannot build it). */
+  moderation?: ModerationOptions;
   now?: () => Date;
 }
 
@@ -83,6 +86,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     segmentStream: opts.segmentStream ?? STREAMS.segments,
     classifier: opts.classifier ?? (() => undefined),
     money: opts.money ?? moneyConfigFromEnv(),
+    moderation: opts.moderation ? resolveModeration(opts.moderation, valkey) : undefined,
     now: opts.now ?? (() => new Date()),
   };
 

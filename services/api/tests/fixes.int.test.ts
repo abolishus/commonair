@@ -8,6 +8,7 @@ import { BUS } from "@commonair/contracts/events";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, mediaPath } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { hmacHex, sha256Hex } from "@commonair/tokens";
+import { lockUploadReference } from "../src/moderation/committed.ts";
 import { instanceMediaBase } from "../src/lib/media-ref.ts";
 import { client, mailTo, signUpAndSignIn, startApi, subscriber, waitFor, type TestApi } from "./harness.ts";
 
@@ -101,6 +102,50 @@ describe("media references stay on this instance", () => {
     expect((await patch({ avatarKey: `${bucket}channels/${c.id}/avatar/02.png` })).status).toBe(200);
     expect((await patch({ avatarKey: `${bucket}channels/${bobs.id}/avatar/02.png` })).status).toBe(400);
     expect((await patch({ avatarKey: `${api.url}/static/default.png` })).status).toBe(400);
+  });
+
+  test("a concurrent avatar reattach waits for NCII revocation and is rejected", async () => {
+    const c = await channelOf(alice.username);
+    const key = `channels/${c.id}/avatar/revoked.png`;
+    let unlockRemoval!: () => void;
+    let signalLocked!: () => void;
+    const removalMayCommit = new Promise<void>((resolve) => (unlockRemoval = resolve));
+    const removalLocked = new Promise<void>((resolve) => (signalLocked = resolve));
+
+    const removal = db().transaction(async (tx) => {
+      await lockUploadReference(tx, key);
+      const [request] = await tx
+        .insert(schema.nciiRequests)
+        .values({
+          requesterName: "Synthetic requester",
+          requesterEmail: "requester@test.invalid",
+          relationship: "self",
+          contentUrls: [`${instanceMediaBase(api.deps.env)}${key}`],
+          description: "Synthetic fixture removal test",
+          goodFaith: true,
+          signature: "Synthetic signature",
+          deadlineAt: new Date(),
+        })
+        .returning();
+      if (!request) throw new Error("request insert returned no row");
+      await tx.insert(schema.nciiRequestItems).values({
+        requestId: request.id,
+        url: `${instanceMediaBase(api.deps.env)}${key}`,
+        subjectType: "upload",
+        subjectId: c.id,
+        uploadKey: key,
+        removedAt: new Date(),
+      });
+      signalLocked();
+      await removalMayCommit;
+    });
+
+    await removalLocked;
+    const reattach = alice.client.call("PATCH", `/api/channels/${alice.username}`, { theme: { avatarKey: key } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    unlockRemoval();
+    await removal;
+    expect((await reattach).status).toBe(400);
   });
 
   test("profile image through update-user must be an own avatar upload", async () => {

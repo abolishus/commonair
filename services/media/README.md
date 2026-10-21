@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # @commonair/media
 
 The media pipeline behind MediaMTX: stream health, adaptive transcoding, simulcast, VOD
-recording, clips, thumbnails and the CSAM hash-match hook. It has no public HTTP surface; it
+recording, clips, thumbnails and live moderation sampling (PDQ hash matching). It has no public HTTP surface; it
 serves only `/healthz` and `/readyz` on `MEDIA_PORT` (readiness checks MediaMTX's API,
 Postgres, Valkey and S3).
 
@@ -30,10 +30,10 @@ runs one **broadcast session** per live broadcast:
 | Transcode  | Passthrough by default. Above `TRANSCODE_VIEWER_THRESHOLD` viewers for 30 s, one ffmpeg ladder publishes `live/<slug>/1080p\|720p\|480p\|audio` back over RTSP (no upscaling, 2 s keyframes aligned via `-force_key_frames`, no B-frames). Stops after 2 min below 80% of the threshold.                                                |
 | Simulcast  | `ffmpeg -c copy` to every enabled target; reconnect backoff 1 s → 60 s. Status in `simulcast_sessions` and `KEYS.simulcastStatus`.                                                                                                                                                                                                      |
 | Recorder   | `ffmpeg -c copy` to local fMP4 HLS segments: a rolling 90 s buffer for live clips, and, when the channel has VODs on, each finished segment then the playlist is uploaded to `vods/<vodId>/`.                                                                                                                                           |
-| Thumbnails | Every 60 s a 640×360 frame, hash-checked, then `thumbnails/<broadcastId>/latest.<ext>` and a timestamped copy (written to `broadcasts.thumbnailKey`).                                                                                                                                                                                   |
+| Thumbnails | Every 60 s a 640×360 frame, PDQ-checked, then `thumbnails/<broadcastId>/latest.<ext>` and a timestamped copy (written to `broadcasts.thumbnailKey`).                                                                                                                                                                                    |
 
 BullMQ consumers: `QUEUES.vodFinalize` (`{vodId}`; enqueued here on offline and by reconcile)
-closes the playlist, samples frames for the hash check, sets duration/size/`ready` and
+PDQ-checks frames over the whole recording, closes the playlist, sets duration/size/`ready` and
 `expiresAt = now + channels.vodRetentionDays`. `QUEUES.clips` (`{clipId}`, enqueued by the API)
 cuts `durationSeconds` at `startOffset` seconds into the broadcast from the live buffer or the
 VOD and uploads `clips/<clipId>.mp4` plus a thumbnail.
@@ -73,7 +73,7 @@ finalizing; the next process resumes the same VOD (with a discontinuity).
 
 A VOD in status `failed` carries a stable code in `vods.failed_reason` (never free text or personal
 data; the web app maps codes to messages). `removed_reason` is only for removals (`deleted`, e.g.
-`csam_hash_match`).
+`t0_hash_match`).
 
 | Code               | Written by                         | Meaning                                                                |
 | ------------------ | ---------------------------------- | ---------------------------------------------------------------------- |
@@ -101,20 +101,58 @@ interval (RTMP does not report encoder drops). Two codes describe the server, no
 refuses to start without a working NVENC; `none` always uses the CPU. Thumbnails are WebP when
 ffmpeg has `libwebp` (the MediaMTX `-ffmpeg` image and Alpine's ffmpeg do) and JPEG otherwise.
 
-## CSAM hash matching
+## Moderation
 
-`HashMatcher` is the integration point. `HASH_MATCH_PROVIDER=none` (default) checks nothing and
-records nothing. `stub` matches exact SHA-256 digests listed in `HASH_MATCH_LIST_FILE` (one hex
-digest per line, `#` comments) and exists so the harness can exercise enforcement. On a match
-the image is discarded (never stored or logged), a `hash_match_results` row is written, the
-channel is suspended (`suspendedReason = csam_hash_match`) with an `audit_log` row in the same
-transaction, the publisher is kicked through the MediaMTX API and local work stops. A matching
-VOD or clip is removed.
+Media's half of automated moderation ([ADR 0006](../../docs/decisions/0006-automated-moderation.md),
+spec [docs/testing/e4c-selectors.md](../../docs/testing/e4c-selectors.md)), in `src/moderation/`.
+It cannot be switched off: there is no env var or setting that skips sampling or matching.
 
-Real perceptual-hash services (PhotoDNA, NCMEC/IWF hash lists and similar) require an
-application to and an agreement with the vendor, and often legal reporting obligations. Shipping
-a vendor adapter is a non-goal of this repository; operators who are approved implement
-`HashMatcher` against their vendor's API.
+**Startup fails closed.** `EVIDENCE_PUBLIC_KEY` must import, both operator lists
+(`MODERATION_HASHLIST_CSAM`, `MODERATION_HASHLIST_NCII`; an empty path is a valid empty list) must
+parse and the database block list (`local_hash_list`, one list per category) must load, or the
+service refuses to start. One log line lists each list's category, provider, version and size.
+Operator files reload on SIGHUP and on change; the block list is re-checked every
+`MODERATION_SAMPLE_SECONDS` with one aggregate query (version `local:<count>:<newest id>`). A
+failed reload keeps the last good list and logs the category and line number.
+
+**What is sampled, and when.** Per live broadcast: one frame as soon as the session starts (well
+within 3 s of publish; a failed capture retries after 1 s), then one every
+`min(MODERATION_SAMPLE_SECONDS, moderation.thresholds.sampleSeconds)` seconds, re-read before each
+wait, independent of the 60 s thumbnail. One ffmpeg reader takes a single frame from the internal
+RTSP source as PNG; `@commonair/moderation` decodes it to raw luma 512² (PDQ) and RGB 384²
+(classifier) of the same frame. Media runs PDQ itself; frames below quality 50 are never matched
+but are still classified. Every live thumbnail is PDQ-checked before it is written. Before a VOD
+or clip is set `ready`, every frame sampled at the live interval (VODs, in chunks of at most 60 s
+of segments) or every second (clips) is PDQ-checked, all of them, plus the thumbnail; a scan that
+cannot complete throws and the job retries (nothing is published).
+
+**What is stored.** Nothing for an unflagged frame: the RGB bytes go to Valkey
+(`KEYS.moderationFrame`, TTL 60 s) and a `scan` job on `QUEUES.moderation` carries the ids, the
+PDQ (null below quality 50) and the quality. Nothing is written to S3 or Postgres. If the
+moderation queue holds more than 3 waiting jobs per live broadcast, the classifier job is dropped
+(counted, warned once a minute); PDQ and matching still run on every frame.
+
+**T0 (a list match), kick first.** On a live match media (1) adds the broadcast, channel and path to
+an in-process tainted set and kicks the publisher through the MediaMTX API, (2) stops local workers
+without finalizing the VOD, (3) encodes the matched frame's luma and RGB as PNG, seals both to the
+evidence public key (the PDQ is recorded on the luma object) and enqueues `moderation.t0` with
+`jobId = t0JobId("broadcast", id)`, retrying with backoff until it lands (`fatal` log after five
+failures; the stream is off air regardless). A reconnect of a tainted channel or path is kicked
+before any work starts until the worker's suspension makes the API refuse it. A VOD or clip match
+enqueues `t0` for that VOD or clip (a failed enqueue fails the job, which retries) and marks it
+`deleted` with `removed_reason = t0_hash_match`; a clip is never uploaded. A VOD or clip of a
+broadcast with a T0 match (in this process, a T0 suspension, an open T0 case, or a T0 job on the
+queue) is never published. Media writes no moderation table, never suspends and never moves or
+deletes objects: the worker applies the T0 transaction, copies the media to the evidence bucket and
+deletes the public copies.
+
+**Logs** carry ids, categories, providers, list versions, distances and qualities only; ffmpeg
+errors are logged by name (their text can contain the source URL).
+
+**Metrics** (meter `media`): `moderation_frames_total{outcome=sampled|matched|low_quality|enqueued}`,
+`moderation_classifier_dropped_total`, `moderation_capture_failures_total`,
+`moderation_scan_enqueue_failures_total`, `moderation_t0_enqueue_failures_total`,
+`moderation_t0_total{subject}`, `moderation_prepublish_frames_total{subject}`.
 
 ## Secrets
 

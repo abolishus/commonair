@@ -9,6 +9,7 @@ import { runService } from "@commonair/service";
 import { createS3Storage } from "@commonair/storage";
 import { parseConcurrency, workerEnv } from "./env.ts";
 import { ClassifierHolder } from "./integrity/classifier.ts";
+import { buildModerationOptions } from "./moderation/startup.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
 import { createWorker } from "./worker.ts";
 
@@ -27,6 +28,13 @@ const storage =
         forcePathStyle: env.S3_FORCE_PATH_STYLE,
       })
     : undefined;
+if (!storage) throw new Error("worker media storage is required");
+const moderation = await buildModerationOptions(env);
+if (moderation.testHooks)
+  logger.warn("moderation test hooks are enabled; do not expose this worker to public traffic", {
+    classifier: env.MODERATION_CLASSIFIER,
+    testHooks: true,
+  });
 
 // Loaded once here and on SIGHUP, never per scoring run.
 const networks = new ClassifierHolder(logger);
@@ -44,6 +52,7 @@ const worker = createWorker({
   storage,
   mediaBucket: env.S3_BUCKET_MEDIA,
   classifier: () => networks.classifier,
+  moderation,
 });
 if (env.EVENTSUB_ALLOW_INSECURE_CALLBACKS)
   logger.warn("EVENTSUB_ALLOW_INSECURE_CALLBACKS is on: webhook callbacks may reach private networks");
