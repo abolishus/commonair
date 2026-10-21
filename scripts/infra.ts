@@ -5,10 +5,16 @@
  * Local infrastructure helper around `podman compose`.
  *
  *   bun scripts/infra.ts test   start the data services integration tests need, wait for health
- *   bun scripts/infra.ts stack  build and start the whole platform (+ harness profile), wait for health
+ *   bun scripts/infra.ts stack [override.yaml...]
+ *                               build and start the whole platform (+ harness profile), wait for health;
+ *                               override files are layered over compose.yaml (e.g.
+ *                               harness/compose.trust-safety.yaml for the `trust-safety` scenario)
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
 export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate"];
 /** Long-running services that report health. */
 export const HEALTHY_SERVICES = ["postgres", "valkey", "mailpit", "garage"];
@@ -100,6 +106,61 @@ function projectContainers(): ContainerRow[] {
       const [name = "", service = "", workingDir = "", status = "", restarts = "0"] = line.split("\t");
       return { name, service, workingDir, status, restarts: Number(restarts) || 0 };
     });
+}
+
+export interface ImageRow {
+  name: string;
+  /** Short or full id of the image the container was created from. */
+  imageId: string;
+  image: string;
+}
+
+/**
+ * Containers whose image tag now points at a newer build. podman-compose's `up -d` recreates a
+ * container when its config changes but not when only its image does, so after a build the
+ * stack would keep serving the old code.
+ */
+export function staleImageContainers(rows: ImageRow[], current: ReadonlyMap<string, string>): ImageRow[] {
+  return rows.filter((r) => {
+    const id = current.get(r.image);
+    return id !== undefined && r.imageId !== "" && !id.startsWith(r.imageId);
+  });
+}
+
+function removeStaleImageContainers(): void {
+  const out = Bun.spawnSync(
+    [
+      "podman",
+      "ps",
+      "-a",
+      "--filter",
+      `label=com.docker.compose.project=${PROJECT}`,
+      "--format",
+      "{{.Names}}\t{{.ImageID}}\t{{.Image}}",
+    ],
+    { timeout: 30_000 },
+  ).stdout.toString();
+  const rows = out
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [name = "", imageId = "", image = ""] = line.split("\t");
+      return { name, imageId, image };
+    });
+  const current = new Map<string, string>();
+  for (const image of new Set(rows.map((r) => r.image))) {
+    const p = Bun.spawnSync(["podman", "image", "inspect", "--format", "{{.Id}}", image], { timeout: 30_000 });
+    if (p.exitCode === 0) current.set(image, p.stdout.toString().trim());
+  }
+  const stale = staleImageContainers(rows, current);
+  if (stale.length === 0) return;
+  console.log(`infra: recreating ${stale.map((r) => r.name).join(", ")} and their dependents (image rebuilt)`);
+  // Volumes are kept; compose's `up -d` creates the containers again from the new images.
+  const rm = Bun.spawnSync(["podman", "rm", "-f", "--depend", "-t", "10", ...stale.map((r) => r.name)], {
+    stdio: ["inherit", "inherit", "inherit"],
+    timeout: 120_000,
+  });
+  if (rm.exitCode !== 0) throw new Error(`could not remove stale containers (${rm.exitCode})`);
 }
 
 /**
@@ -300,6 +361,16 @@ export async function waitExited(services: string[], timeoutMs = 300_000): Promi
   }
 }
 
+/** `-f` arguments for `stack`: none for the plain stack, else compose.yaml plus each override. */
+export function stackFiles(overrides: readonly string[]): string[] {
+  if (overrides.length === 0) return [];
+  for (const o of overrides) {
+    if (o.startsWith("-")) throw new Error(`unknown option ${o}; stack takes override file paths`);
+    if (!existsSync(resolve(ROOT, o))) throw new Error(`override file not found: ${o}`);
+  }
+  return ["compose.yaml", ...overrides].flatMap((f) => ["-f", resolve(ROOT, f)]);
+}
+
 export async function waitHealthy(services: string[], timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -329,8 +400,10 @@ if (import.meta.main) {
       console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);
     } else if (cmd === "stack") {
       preflight();
-      compose(["--profile", "harness", "build"], 20 * 60_000);
-      composeUp(["--profile", "harness", "up", "-d"], 10 * 60_000);
+      const files = stackFiles(process.argv.slice(3));
+      compose([...files, "--profile", "harness", "build"], 20 * 60_000);
+      removeStaleImageContainers();
+      composeUp([...files, "--profile", "harness", "up", "-d"], 10 * 60_000);
       await waitExited(ONE_SHOT_SERVICES);
       await waitHealthy(STACK_HEALTHY_SERVICES, 300_000);
       console.log("infra: platform healthy");
@@ -339,7 +412,7 @@ if (import.meta.main) {
     } else if (cmd === "reset") {
       compose(["down", "-v"], 5 * 60_000);
     } else {
-      console.error("usage: bun scripts/infra.ts test|stack|down|reset");
+      console.error("usage: bun scripts/infra.ts test | stack [override.yaml...] | down | reset");
       process.exit(2);
     }
   } catch (e) {

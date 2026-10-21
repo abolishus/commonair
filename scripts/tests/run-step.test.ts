@@ -8,6 +8,8 @@ import {
   type TestResource,
   crashLooping,
   foreignContainers,
+  stackFiles,
+  staleImageContainers,
   staleTestResources,
 } from "../infra.ts";
 import { runStep } from "../run-step.ts";
@@ -143,5 +145,45 @@ describe("staleTestResources", () => {
 
   test("an unknown creation time is never stale", () => {
     expect(staleTestResources([res("origin-test-68a93d4a", Number.NaN)], now)).toEqual([]);
+  });
+});
+
+describe("stackFiles", () => {
+  test("the plain stack passes no -f, so compose picks compose.yaml itself", () => {
+    expect(stackFiles([])).toEqual([]);
+  });
+
+  test("overrides are layered over compose.yaml, by absolute path", () => {
+    const args = stackFiles(["harness/compose.trust-safety.yaml"]);
+    expect(args.filter((a) => a === "-f")).toHaveLength(2);
+    expect(args[1]).toMatch(/\/compose\.yaml$/);
+    expect(args[3]).toMatch(/\/harness\/compose\.trust-safety\.yaml$/);
+  });
+
+  test("refuses a missing file or an option instead of starting the wrong stack", () => {
+    expect(() => stackFiles(["nope.yaml"])).toThrow(/not found/);
+    expect(() => stackFiles(["--build"])).toThrow(/unknown option/);
+  });
+});
+
+describe("staleImageContainers", () => {
+  const current = new Map([
+    ["localhost/commonair/api:dev", "b8c024aae97d8e2a244d"],
+    ["docker.io/dxflrs/garage:v2.4.1", "2711bbf081dcffff"],
+  ]);
+
+  test("a container whose tag now points at a newer build is stale", () => {
+    const rows = [{ name: "commonair_api_1", imageId: "0123456789ab", image: "localhost/commonair/api:dev" }];
+    expect(staleImageContainers(rows, current)).toEqual(rows);
+  });
+
+  test("current containers, unknown images and missing ids are left alone", () => {
+    const rows = [
+      { name: "commonair_api_1", imageId: "b8c024aae97d", image: "localhost/commonair/api:dev" },
+      { name: "commonair_garage_1", imageId: "2711bbf081dc", image: "docker.io/dxflrs/garage:v2.4.1" },
+      { name: "commonair_web_1", imageId: "aaaaaaaaaaaa", image: "localhost/commonair/web:dev" },
+      { name: "commonair_x_1", imageId: "", image: "localhost/commonair/api:dev" },
+    ];
+    expect(staleImageContainers(rows, current)).toEqual([]);
   });
 });
