@@ -6,7 +6,7 @@ import { chatStatusView, nameColorIndex } from "../src/chat/view.ts";
 import { en } from "../src/i18n/en.ts";
 import { healthBadge } from "../src/lib/stream-health.ts";
 import { isTreasurer } from "../src/lib/money.ts";
-import { accountMenu, footerNav, siteNav, studioNav } from "../src/lib/nav.ts";
+import { accountMenu, adminNav, footerNav, siteNav, studioNav } from "../src/lib/nav.ts";
 
 describe("site nav", () => {
   it("links the directory and marks it current only on /", () => {
@@ -21,18 +21,24 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, appeals, then sign out after a separator", () => {
     const items = accountMenu(true);
-    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "signOut"]);
-    expect(items.map((i) => i.to)).toEqual(["/dashboard", "/relays", "/settings/subscriptions", undefined]);
-    expect(items[3]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 3).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "appeals", "signOut"]);
+    expect(items.map((i) => i.to)).toEqual([
+      "/dashboard",
+      "/relays",
+      "/settings/subscriptions",
+      "/settings/appeals",
+      undefined,
+    ]);
+    expect(items[4]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 4).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
   });
 
   it("adds the treasury for treasurers only, before sign out", () => {
     expect(accountMenu(true, { treasurer: false }).some((i) => i.id === "treasury")).toBe(false);
     const items = accountMenu(true, { treasurer: true });
-    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "treasury", "signOut"]);
+    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "appeals", "treasury", "signOut"]);
     expect(items.find((i) => i.id === "treasury")?.to).toBe("/treasury");
   });
 
@@ -61,7 +67,15 @@ describe("account menu", () => {
       i.to ? [i.to] : [],
     );
     expect(new Set(targets)).toEqual(
-      new Set(["/dashboard", "/relays", "/settings/subscriptions", "/treasury", "/signin", "/signup"]),
+      new Set([
+        "/dashboard",
+        "/relays",
+        "/settings/subscriptions",
+        "/settings/appeals",
+        "/treasury",
+        "/signin",
+        "/signup",
+      ]),
     );
   });
 });
@@ -93,8 +107,24 @@ describe("studio nav", () => {
 });
 
 describe("footer nav", () => {
-  it("links the public transparency page", () => {
-    expect(footerNav()).toEqual([{ id: "transparency", to: "/transparency" }]);
+  it("links public transparency and takedown pages", () => {
+    expect(footerNav()).toEqual([
+      { id: "transparency", to: "/transparency" },
+      { id: "takedown", to: "/takedown" },
+    ]);
+  });
+});
+
+describe("trust and safety navigation", () => {
+  it("shows only the queues a role can open", () => {
+    const legal = { safetyStaff: true, legal: true, platformModerator: false };
+    const moderator = { safetyStaff: true, legal: false, platformModerator: true };
+    expect(adminNav("/admin/legal", legal).map((entry) => entry.id)).toEqual(["moderation", "legal"]);
+    expect(adminNav("/admin/appeals", moderator).map((entry) => entry.id)).toEqual(["moderation", "appeals"]);
+    expect(accountMenu(true, legal).map((entry) => entry.id)).toContain("legal");
+    expect(accountMenu(true, legal).map((entry) => entry.id)).toContain("moderation");
+    expect(accountMenu(true, moderator).map((entry) => entry.id)).toContain("moderation");
+    expect(accountMenu(true, moderator).map((entry) => entry.id)).not.toContain("legal");
   });
 });
 

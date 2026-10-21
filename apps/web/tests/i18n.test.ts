@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { en } from "../src/i18n/en.ts";
 import { t } from "../src/i18n/index.ts";
 import { moneyMessages } from "../src/i18n/money.ts";
+import { safetyMessages } from "../src/i18n/safety.ts";
 import { supportMessages } from "../src/i18n/support.ts";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
@@ -40,6 +41,7 @@ describe("message catalog", () => {
       join(SRC, "lib/relays.ts"),
       join(SRC, "lib/support.ts"),
       join(SRC, "lib/money.ts"),
+      join(SRC, "components/safety/labels.ts"),
     ];
     const dynamic = files
       .filter(([f, text]) => !allowed.includes(f) && /\bt\(\s*[`'a-zA-Z_]/.test(text))
@@ -47,14 +49,18 @@ describe("message catalog", () => {
     expect(dynamic).toEqual([]);
   });
 
-  it("keeps the E4b unit catalogs disjoint from each other and from the inline keys", () => {
+  it("keeps the E4b and E4c unit catalogs disjoint from each other and from the inline keys", () => {
     // `en` spreads the unit catalogs, so a repeated key would silently override another's text.
     const inline = [...readFileSync(join(SRC, "i18n/en.ts"), "utf8").matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]);
     const support = Object.keys(supportMessages);
     const money = Object.keys(moneyMessages);
+    const safety = Object.keys(safetyMessages);
     expect(support.filter((k) => k in moneyMessages)).toEqual([]);
+    expect(safety.filter((k) => k in moneyMessages || k in supportMessages)).toEqual([]);
     expect(inline.filter((k) => k !== undefined && (k in supportMessages || k in moneyMessages))).toEqual([]);
-    expect(support.length + money.length).toBeGreaterThan(100);
+    expect(inline.filter((k) => k !== undefined && k in safetyMessages)).toEqual([]);
+    expect(support.length + money.length + safety.length).toBeGreaterThan(150);
+    expect(readFileSync(join(SRC, "i18n/en.ts"), "utf8")).toContain("...safetyMessages");
   });
 
   it("maps every auth error code to a catalog key", () => {

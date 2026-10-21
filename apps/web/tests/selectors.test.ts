@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3- and e4b-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b- and e4c-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -105,6 +105,49 @@ describe("e4b-selectors.md", () => {
     expect(rendered(id, appText) || rendered(id, uiText) || viaTierTemplate(id, appText)).toBe(true);
   });
 });
+
+/** E4c cells can name several ids in the same first-column cell. */
+function e4cTestIds(): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing/e4c-selectors.md"), "utf8");
+  const section = text.split(/^### Viewer side /m)[1]?.split(/^## Scenario /m)[0] ?? "";
+  const prefixes =
+    /^(?:report|mature-gate|stream-restricted|ncii|footer-takedown|appeals|appeal-row|moderation-label|label-|account-|modq-|appealq-|legal-)/;
+  const ids = [...section.matchAll(/\b([a-z][a-z0-9_]+(?:-[a-z0-9_]+)+)\b/g)]
+    .map((match) => match[1] ?? "")
+    .filter((id) => prefixes.test(id) && !id.startsWith("data-"));
+  ids.push("report-reason");
+  return [...new Set(ids)];
+}
+
+describe("e4c-selectors.md", () => {
+  const ids = e4cTestIds();
+
+  it("lists the trust and safety selectors", () => {
+    expect(ids.length).toBeGreaterThan(55);
+    expect(ids).toContain("legal-evidence-reveal");
+    expect(ids).toContain("ncii-submit");
+  });
+
+  it.each(ids)("renders %s", (id) => {
+    expect(rendered(id, appText) || rendered(id, uiText) || viaE4cTemplate(id, appText)).toBe(true);
+  });
+
+  it("builds report reason items from REPORT_REASONS", () => {
+    expect(appText).toContain("`report-reason-${r}`");
+  });
+});
+
+function viaE4cTemplate(id: string, text: string): boolean {
+  const templates = [
+    [/^modq-tab-(cases|labels|reports|ncii)$/, '"data-testid": "modq-tab-reports"'],
+    [/^modq-decision-(clear|warn|end_stream|suspend|escalate_legal)$/, "`modq-decision-${d}`"],
+    [/^ncii-decision-(removed|rejected)$/, "`ncii-decision-${decision}`"],
+  ] as const;
+  return (
+    (COMPOSITION_TEST_IDS as readonly string[]).includes(id) &&
+    templates.some(([pattern, marker]) => pattern.test(id) && text.includes(marker))
+  );
+}
 
 describe("E2 data attributes", () => {
   it.each([

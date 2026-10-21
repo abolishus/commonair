@@ -14,9 +14,16 @@ export interface SiteNavEntry {
 }
 
 export interface AccountEntry {
-  id: "dashboard" | "relays" | "subscriptions" | "treasury" | "signOut";
+  id: "dashboard" | "relays" | "subscriptions" | "appeals" | "treasury" | "moderation" | "legal" | "signOut";
   /** Absent for actions (sign out). */
-  to?: "/dashboard" | "/relays" | "/settings/subscriptions" | "/treasury";
+  to?:
+    | "/dashboard"
+    | "/relays"
+    | "/settings/subscriptions"
+    | "/settings/appeals"
+    | "/treasury"
+    | "/admin/moderation"
+    | "/admin/legal";
   separatorBefore?: boolean;
   destructive?: boolean;
 }
@@ -34,13 +41,32 @@ export interface StudioEntry {
 }
 
 export interface FooterEntry {
-  id: "transparency";
-  to: "/transparency";
+  id: "transparency" | "takedown";
+  to: "/transparency" | "/takedown";
 }
 
 export interface AccountMenuOptions {
   /** Platform treasurers also get the treasury. */
   treasurer?: boolean;
+  /** Platform moderators, admins and `legal` also get the mod queue. */
+  safetyStaff?: boolean;
+  /** The `legal` role also gets the legal queue. */
+  legal?: boolean;
+}
+
+export interface AdminEntry {
+  id: "treasury" | "moderation" | "appeals" | "legal";
+  to: "/treasury" | "/admin/moderation" | "/admin/appeals" | "/admin/legal";
+  current: boolean;
+}
+
+export interface AdminNavOptions {
+  treasurer?: boolean;
+  /** Moderators, admins and `legal`: the mod queue. */
+  safetyStaff?: boolean;
+  /** Moderators and admins: the appeals queue. */
+  platformModerator?: boolean;
+  legal?: boolean;
 }
 
 /** Trailing slashes do not change the page (`/relays/` is `/relays`). */
@@ -61,13 +87,18 @@ export function accountMenu(
   arg: string | AccountMenuOptions = {},
 ): AccountEntry[] | SignedOutEntry[] {
   if (signedIn) {
-    const treasurer = typeof arg !== "string" && arg.treasurer === true;
-    const treasury: AccountEntry[] = treasurer ? [{ id: "treasury", to: "/treasury" }] : [];
+    const options = typeof arg === "string" ? {} : arg;
+    const staff: AccountEntry[] = [
+      ...(options.treasurer === true ? [{ id: "treasury", to: "/treasury" } as const] : []),
+      ...(options.safetyStaff === true ? [{ id: "moderation", to: "/admin/moderation" } as const] : []),
+      ...(options.legal === true ? [{ id: "legal", to: "/admin/legal" } as const] : []),
+    ];
     return [
       { id: "dashboard", to: "/dashboard" },
       { id: "relays", to: "/relays" },
       { id: "subscriptions", to: "/settings/subscriptions" },
-      ...treasury,
+      { id: "appeals", to: "/settings/appeals" },
+      ...staff,
       { id: "signOut", separatorBefore: true, destructive: true },
     ];
   }
@@ -89,5 +120,20 @@ export function studioNav(pathname: string): StudioEntry[] {
 
 /** Public pages linked from every footer. */
 export function footerNav(): FooterEntry[] {
-  return [{ id: "transparency", to: "/transparency" }];
+  return [
+    { id: "transparency", to: "/transparency" },
+    { id: "takedown", to: "/takedown" },
+  ];
+}
+
+/** The platform-tools sidebar: only the pages the role may open. */
+export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry[] {
+  const path = normalize(pathname);
+  const entries: Omit<AdminEntry, "current">[] = [
+    ...(options.treasurer === true ? [{ id: "treasury", to: "/treasury" } as const] : []),
+    ...(options.safetyStaff === true ? [{ id: "moderation", to: "/admin/moderation" } as const] : []),
+    ...(options.platformModerator === true ? [{ id: "appeals", to: "/admin/appeals" } as const] : []),
+    ...(options.legal === true ? [{ id: "legal", to: "/admin/legal" } as const] : []),
+  ];
+  return entries.map((entry) => ({ ...entry, current: path === entry.to }));
 }

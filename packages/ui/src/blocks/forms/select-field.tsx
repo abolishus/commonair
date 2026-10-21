@@ -10,6 +10,8 @@ export interface SelectFieldOption {
   value: string;
   label: string;
   disabled?: boolean;
+  /** Forwarded to the option's `SelectItem` (e2e selectors for one item). */
+  "data-testid"?: string;
 }
 
 export interface SelectFieldProps {
@@ -93,7 +95,12 @@ export function SelectField({
         </SelectTrigger>
         <SelectContent>
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+            <SelectItem
+              key={option.value}
+              value={option.value}
+              disabled={option.disabled}
+              data-testid={option["data-testid"]}
+            >
               {option.label}
             </SelectItem>
           ))}

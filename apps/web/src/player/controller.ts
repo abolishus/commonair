@@ -31,6 +31,8 @@ export interface PlayerControllerOptions {
   onState: (state: PlayerState) => void;
   /** The delivery source of the playlist being played: on start and after every `switchTo`. */
   onSource?: (source: PlayerSource) => void;
+  /** A failed start (e.g. `playback.start` refused with the 18+ gate); the state still goes to `error`. */
+  onStartError?: (err: unknown) => void;
 }
 
 const PLAYLIST_WAIT_MS = 45_000;
@@ -99,7 +101,8 @@ export class PlayerController {
         this.attachHls(HlsCtor, started.playlistUrl);
       }
       void video.play().catch(() => undefined);
-    } catch {
+    } catch (err) {
+      if (!this.stopped) this.opts.onStartError?.(err);
       this.setState("error");
     }
   }

@@ -10,9 +10,12 @@ import {
   BankIcon,
   CreditCardIcon,
   DashboardSquare01Icon,
+  JusticeScale01Icon,
+  LegalDocument01Icon,
   LiveStreaming02Icon,
   Logout03Icon,
   ServerStack01Icon,
+  Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -21,9 +24,17 @@ import { t } from "../i18n/index.ts";
 import { signOut } from "../lib/auth.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
 import { isTreasurer } from "../lib/money.ts";
-import { accountMenu, footerNav, siteNav, type AccountEntry, type SignedOutEntry } from "../lib/nav.ts";
+import {
+  accountMenu,
+  footerNav,
+  siteNav,
+  type AccountEntry,
+  type FooterEntry,
+  type SignedOutEntry,
+} from "../lib/nav.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
+import { isLegal, isSafetyStaff } from "./safety/access.ts";
 
 async function onSignOut(): Promise<void> {
   try {
@@ -54,12 +65,33 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         icon: icon(CreditCardIcon),
         render: <Link data-testid="account-subscriptions-link" to="/settings/subscriptions" />,
       };
+    case "appeals":
+      return {
+        id: entry.id,
+        label: t("nav.appeals"),
+        icon: icon(JusticeScale01Icon),
+        render: <Link data-testid="account-appeals-link" to="/settings/appeals" />,
+      };
     case "treasury":
       return {
         id: entry.id,
         label: t("nav.treasury"),
         icon: icon(BankIcon),
         render: <Link data-testid="account-treasury-link" to="/treasury" />,
+      };
+    case "moderation":
+      return {
+        id: entry.id,
+        label: t("nav.moderation"),
+        icon: icon(Shield01Icon),
+        render: <Link data-testid="account-moderation-link" to="/admin/moderation" />,
+      };
+    case "legal":
+      return {
+        id: entry.id,
+        label: t("nav.legal"),
+        icon: icon(LegalDocument01Icon),
+        render: <Link data-testid="account-legal-link" to="/admin/legal" />,
       };
     case "signOut":
       return {
@@ -142,7 +174,11 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
             data-username={me.username}
             username={me.username}
             menuLabel={t("nav.accountMenu", { name: me.displayName })}
-            items={accountMenu(true, { treasurer: isTreasurer(me) }).map(accountItem)}
+            items={accountMenu(true, {
+              treasurer: isTreasurer(me),
+              safetyStaff: isSafetyStaff(me),
+              legal: isLegal(me),
+            }).map(accountItem)}
           />
         ) : (
           signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
@@ -160,6 +196,18 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
   );
 }
 
+function footerLink(entry: FooterEntry): { label: string; render: React.ReactElement } {
+  switch (entry.id) {
+    case "transparency":
+      return {
+        label: t("footer.transparency"),
+        render: <Link data-testid="footer-transparency-link" to="/transparency" />,
+      };
+    case "takedown":
+      return { label: t("footer.takedown"), render: <Link data-testid="footer-takedown-link" to="/takedown" /> };
+  }
+}
+
 export type Instance = ReturnType<typeof useBootstrap>["instance"];
 
 /** Instance name, the public pages, license and the AGPL §13 source link (from `instance.info`). */
@@ -168,10 +216,7 @@ export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.
   return (
     <SiteFooter
       instanceName={instance.name}
-      links={footerNav().map((entry) => ({
-        label: t("footer.transparency"),
-        render: <Link data-testid="footer-transparency-link" to={entry.to} />,
-      }))}
+      links={footerNav().map(footerLink)}
       license={t("footer.license")}
       sourceLink={
         sourceUrl ? { label: t("footer.source"), href: sourceUrl, "data-testid": "footer-source-link" } : undefined

@@ -19,12 +19,21 @@ export interface PlayerProps {
   /** Shown over the video (the player's stage) while offline. */
   offline?: React.ReactNode;
   className?: string;
+  /** A failed `playback.start` (the channel page shows the 18+ gate for `mature_gate`). */
+  onStartError?: (err: unknown) => void;
 }
 
 const RETRY_MS = 5_000;
 
 /** Live player: autoplays muted (browsers block audible autoplay) with an unmute control. */
-export function Player({ channel, live, embed = false, offline, className }: PlayerProps): React.JSX.Element {
+export function Player({
+  channel,
+  live,
+  embed = false,
+  offline,
+  className,
+  onStartError,
+}: PlayerProps): React.JSX.Element {
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const [state, setState] = React.useState<PlayerState>(live ? "loading" : "offline");
   const [muted, setMuted] = React.useState(true);
@@ -32,6 +41,11 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
   const [source, setSource] = React.useState<PlayerSource | undefined>(undefined);
   // Bumped to start a fresh session after a failure (e.g. the stream is not ready yet).
   const [attempt, setAttempt] = React.useState(0);
+  // Latest callback without restarting the session when the parent re-renders.
+  const onStartErrorRef = React.useRef(onStartError);
+  React.useEffect(() => {
+    onStartErrorRef.current = onStartError;
+  });
 
   React.useEffect(() => {
     const video = videoRef.current;
@@ -47,6 +61,7 @@ export function Player({ channel, live, embed = false, offline, className }: Pla
       endApi: apiKeepalive(),
       embed,
       onSource: setSource,
+      onStartError: (err) => onStartErrorRef.current?.(err),
       onState: (s) => {
         setState(s);
         if (s === "error") retry = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS);
