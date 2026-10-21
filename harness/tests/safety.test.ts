@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { PROTECTED_TABLES } from "../src/safety-db.ts";
-import { internalSecret } from "../src/safety-io.ts";
+import { ffmpegFailure, internalSecret } from "../src/safety-io.ts";
 import {
   ALL_SAFETY_STEPS,
   DEADLINE_SLACK_MS,
@@ -39,6 +39,13 @@ import {
   withPrerequisites,
   withinDeadline,
 } from "../src/safety.ts";
+
+describe("ffmpeg failure reporting", () => {
+  test("publishing and frame extraction expose only safe failure categories", () => {
+    expect(ffmpegFailure("publish").message).toBe("fixture_publish_failed");
+    expect(ffmpegFailure("frame").message).toBe("fixture_frame_extraction_failed");
+  });
+});
 
 describe("step selection", () => {
   test("all, empty and lists", () => {

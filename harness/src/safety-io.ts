@@ -31,6 +31,9 @@ import {
 } from "./safety.ts";
 import { withTimeout } from "./wait.ts";
 
+export const ffmpegFailure = (stage: "publish" | "frame") =>
+  new Error(stage === "publish" ? "fixture_publish_failed" : "fixture_frame_extraction_failed");
+
 // ---------------------------------------------------------------- test hooks
 
 /** The instance's INTERNAL_API_SECRET (harness override first, then the repo `.env` Bun loaded). */
@@ -131,8 +134,7 @@ export class FixturePublisher {
     const proc = this.proc as Supervised;
     const started = Date.now();
     while (this.firstFrameAt === null) {
-      if (!proc.running)
-        throw new Error(`${this.name}: ffmpeg exited before publishing: ${proc.stderr().slice(-4).join(" | ")}`);
+      if (!proc.running) throw ffmpegFailure("publish");
       if (Date.now() - started > timeoutMs) {
         await proc.stop(500);
         throw new Error(`${this.name}: no frames within ${timeoutMs} ms`);
@@ -160,8 +162,7 @@ export async function extractFirstFrame(url: string, timeoutMs = 30_000): Promis
       timeoutMs,
     );
     if (code !== 0 || bytes.byteLength === 0) {
-      const err = (await new Response(proc.stderr).text()).trim().split("\n").slice(-2).join(" | ");
-      throw new Error(`ffmpeg could not read the clip's first frame (exit ${code}): ${err}`);
+      throw ffmpegFailure("frame");
     }
     return new Uint8Array(bytes);
   } finally {
