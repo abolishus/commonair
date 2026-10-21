@@ -182,12 +182,6 @@ export const mediaEnv = z.object({
   INGEST_WHIP_PUBLIC_URL: z.url().default("http://localhost:8889/live"),
   TRANSCODE_VIEWER_THRESHOLD: z.coerce.number().int().nonnegative().default(50),
   TRANSCODE_HWACCEL: z.enum(["auto", "nvenc", "none"]).default("auto"),
-  /**
-   * Deprecated (E4c): replaced by `moderationEnv`, which always runs the matcher. Removed once
-   * services/media moves to `@commonair/moderation`.
-   */
-  HASH_MATCH_PROVIDER: z.enum(["none", "stub"]).default("none"),
-  HASH_MATCH_LIST_FILE: z.string().optional(),
   /** Scratch space for recordings, clip cuts and thumbnails (defaults to <tmpdir>/commonair-media). */
   MEDIA_WORK_DIR: z.string().optional(),
   /** Most bytes the work dir may hold before new recordings and clips are refused (default 20 GiB). */
@@ -321,6 +315,8 @@ export const infraEnv = z.object({
   IMAGE_REGISTRY: z.string().optional(),
   IMAGE_TAG: z.string().optional(),
   WALG_RETAIN_FULL: z.coerce.number().int().positive().optional(),
+  /** Postgres `max_connections` (compose default 400: parallel integration suites hold many pools). */
+  POSTGRES_MAX_CONNECTIONS: z.coerce.number().int().positive().optional(),
   /** Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own. */
   COMPOSE_SUBNET: z.string().optional(),
   COMMONAIR_ENV_FILE: z.string().optional(),

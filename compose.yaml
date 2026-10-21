@@ -106,6 +106,8 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       WALG_RETAIN_FULL: ${WALG_RETAIN_FULL:-7}
+      # Parallel integration suites each hold several pools; 100 (the Postgres default) runs out.
+      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS:-400}
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"]
     volumes: ["postgres-data:/var/lib/postgresql/data"]
     healthcheck:
@@ -229,6 +231,13 @@ services:
       <<: *app-env
       OTEL_SERVICE_NAME: api
       EVIDENCE_PRIVATE_KEY: ${EVIDENCE_PRIVATE_KEY:-}
+      MODERATION_HASHLIST_CSAM: /var/lib/commonair/moderation/csam.pdq
+      MODERATION_HASHLIST_NCII: /var/lib/commonair/moderation/ncii.pdq
+      MODERATION_CLASSIFIER_MODEL: /var/lib/commonair/models/model.onnx
+    volumes:
+      - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
+      - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
+      - ${MODERATION_CLASSIFIER_MODEL:-./.cache/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx}:/var/lib/commonair/models/model.onnx:ro,Z
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3001}:3001"]
     depends_on: *app-depends
     healthcheck: *app-healthcheck
@@ -298,7 +307,12 @@ services:
       OTEL_SERVICE_NAME: media
       # Scratch space for VOD segments, clips and the live clip buffer.
       MEDIA_WORK_DIR: /var/lib/commonair/media
-    volumes: ["media-work:/var/lib/commonair/media"]
+      MODERATION_HASHLIST_CSAM: /var/lib/commonair/moderation/csam.pdq
+      MODERATION_HASHLIST_NCII: /var/lib/commonair/moderation/ncii.pdq
+    volumes:
+      - media-work:/var/lib/commonair/media
+      - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
+      - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
     depends_on:
       <<: *app-depends
       mediamtx:
@@ -308,6 +322,7 @@ services:
 
   worker:
     image: ${IMAGE_REGISTRY:-localhost/commonair}/worker:${IMAGE_TAG:-dev}
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${WORKER_PORT:-3005}:3005"]
     build:
       <<: *service-build
       args: { SERVICE: worker }
@@ -318,6 +333,13 @@ services:
       OTEL_SERVICE_NAME: worker
       S3_EVIDENCE_ACCESS_KEY_ID: ${S3_EVIDENCE_ACCESS_KEY_ID:-}
       S3_EVIDENCE_SECRET_ACCESS_KEY: ${S3_EVIDENCE_SECRET_ACCESS_KEY:-}
+      MODERATION_HASHLIST_CSAM: /var/lib/commonair/moderation/csam.pdq
+      MODERATION_HASHLIST_NCII: /var/lib/commonair/moderation/ncii.pdq
+      MODERATION_CLASSIFIER_MODEL: /var/lib/commonair/models/model.onnx
+    volumes:
+      - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
+      - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
+      - ${MODERATION_CLASSIFIER_MODEL:-./.cache/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx}:/var/lib/commonair/models/model.onnx:ro,Z
     depends_on: *app-depends
     healthcheck: *app-healthcheck
 

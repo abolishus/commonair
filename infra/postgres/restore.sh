@@ -45,4 +45,4 @@ wal-g backup-fetch "$target" "$backup"
 } >>"$target/postgresql.auto.conf"
 touch "$target/recovery.signal"
 
-echo "commonair-restore: ready; start postgres on $target to replay WAL" >&2
+echo "commonair-restore: ready; start postgres on $target to replay WAL (max_connections at least the primary's, or recovery aborts)" >&2

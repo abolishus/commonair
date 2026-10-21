@@ -68,6 +68,9 @@ function assertPinned(ref: string, where: string) {
 }
 
 describe("compose.yaml: rootless rules", () => {
+  test("publishes worker health for host-run harness scenarios", () => {
+    expect(compose.services.worker?.ports).toContain("${BIND_ADDRESS:-127.0.0.1}:${WORKER_PORT:-3005}:3005");
+  });
   test("keeps the existing service names and project name", () => {
     expect(compose.name).toBe("commonair");
     for (const s of ["postgres", "valkey", "mailpit"]) expect(compose.services[s]).toBeDefined();
@@ -106,10 +109,13 @@ describe("compose.yaml: rootless rules", () => {
 
   test.each(services)("%s: no engine sockets; named volumes or read-only repo binds", (name, s) => {
     const problems = (s.volumes ?? []).flatMap((v) => {
-      const [src = "", , mode = ""] = v.split(":");
+      const src = v.startsWith("${") ? v.slice(v.indexOf(":-") + 2, v.indexOf("}")) : (v.split(":")[0] ?? "");
+      const mode = v.slice(v.lastIndexOf(":") + 1);
       if (/(docker|podman)\.sock|\/run\/(user\/\d+\/)?(podman|docker)/.test(v)) return [`${v}: engine socket`];
       if (src.startsWith("./"))
-        return /\bro\b/.test(mode) && src.startsWith("./infra/") ? [] : [`${v}: bind must be ./infra/… and :ro`];
+        return /\bro\b/.test(mode) && (src.startsWith("./infra/") || src.startsWith("./.cache/models/"))
+          ? []
+          : [`${v}: bind must be a read-only infra fixture or cached model`];
       return Object.hasOwn(compose.volumes, src) ? [] : [`${v}: volume ${src} not declared`];
     });
     expect(problems, name).toEqual([]);
@@ -218,6 +224,10 @@ describe("compose.yaml: lifecycle", () => {
 });
 
 describe("compose.yaml: configuration and secrets", () => {
+  test("postgres raises max_connections through its entrypoint (parallel suites exhaust 100)", () => {
+    expect(compose.services.postgres?.environment?.POSTGRES_MAX_CONNECTIONS).toBe("${POSTGRES_MAX_CONNECTIONS:-400}");
+    expect(read("infra/postgres/entrypoint.sh")).toContain('-c "max_connections=${POSTGRES_MAX_CONNECTIONS}"');
+  });
   const withDb = services.filter(([, s]) => s.environment?.DATABASE_URL);
   test("services that need the database are the app services and migrate", () => {
     expect(withDb.map(([n]) => n).sort()).toEqual(
@@ -375,7 +385,8 @@ describe("Quadlet mirror", () => {
         keys(units[name]!, "Environment").map((e) => [e.slice(0, e.indexOf("=")), e.slice(e.indexOf("=") + 1)]),
       );
       for (const [k, v] of Object.entries(appEnv)) {
-        if (k === "DATABASE_URL" || k.startsWith("SMTP_") || k === "OTEL_SERVICE_NAME") continue;
+        if (k === "DATABASE_URL" || k.startsWith("SMTP_") || k.startsWith("MODERATION_") || k === "OTEL_SERVICE_NAME")
+          continue;
         // Per-service evidence scoping is checked by its own test above.
         if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY") continue;
         const expected = k === "TRUSTED_PROXY_CIDRS" ? "10.89.42.0/24" : v;

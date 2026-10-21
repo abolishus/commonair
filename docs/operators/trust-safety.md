@@ -32,22 +32,60 @@ version that fired.
 
 ## Configuration
 
-| Variable                                                   | Services           | Notes                                                                                                                         |
-| ---------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `MODERATION_SAMPLE_SECONDS`                                | media, worker      | 2–60, default 10. The effective interval is the smaller of this and the governance setting `moderation.sample_seconds` (5–60) |
-| `MODERATION_HASHLIST_CSAM`                                 | media, api, worker | Path to your CSAM list, one PDQ hash (64 lowercase hex) per line, `#` comments. Empty means none                              |
-| `MODERATION_HASHLIST_NCII`                                 | media, api, worker | Path to your NCII list, same format                                                                                           |
-| `MODERATION_CLASSIFIER`                                    | worker, api        | `onnx` (default). `scripted` is refused unless test hooks are on                                                              |
-| `MODERATION_CLASSIFIER_MODEL`                              | worker, api        | Path to the model; empty means the path `bun scripts/fetch-model.ts` writes. Checked by sha256 at start                       |
-| `MODERATION_TEST_HOOKS`                                    | all                | **Never on a public instance.** Harness only                                                                                  |
-| `EVIDENCE_PUBLIC_KEY`                                      | media, worker      | Seals evidence. `bun scripts/init-env.ts` generates the key pair                                                              |
-| `EVIDENCE_PRIVATE_KEY`                                     | api only           | Opens evidence for the `legal` view. Keep it out of every other service and out of backups of the environment                 |
-| `S3_BUCKET_EVIDENCE`, `S3_EVIDENCE_ACCESS_KEY_ID`/`SECRET` | worker only        | The evidence bucket and its own key. The main storage key has no access to it                                                 |
+| Variable                                                   | Services           | Notes                                                                                                                          |
+| ---------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `MODERATION_SAMPLE_SECONDS`                                | media, worker      | 2–60, default 10. The effective interval is the smaller of this and the governance setting `moderation.sample_seconds` (5–60)  |
+| `MODERATION_HASHLIST_CSAM`                                 | media, api, worker | Host path to the CSAM PDQ list, one 64-character hash per line; comments begin with `#`. The shipped empty file is the default |
+| `MODERATION_HASHLIST_NCII`                                 | media, api, worker | Host path to the NCII PDQ list, same format; the shipped empty file is the default                                             |
+| `MODERATION_CLASSIFIER`                                    | worker, api        | `onnx` (default). `scripted` is refused unless test hooks are on                                                               |
+| `MODERATION_CLASSIFIER_MODEL`                              | worker, api        | Host path to the verified model file. Its SHA-256 is checked when the classifier starts                                        |
+| `MODERATION_TEST_HOOKS`                                    | all                | **Never on a public instance.** Harness only                                                                                   |
+| `EVIDENCE_PUBLIC_KEY`                                      | media, worker      | Seals evidence. `bun scripts/init-env.ts` generates the key pair                                                               |
+| `EVIDENCE_PRIVATE_KEY`                                     | api only           | Opens evidence for the `legal` view. Keep it out of every other service and out of backups of the environment                  |
+| `S3_BUCKET_EVIDENCE`, `S3_EVIDENCE_ACCESS_KEY_ID`/`SECRET` | worker only        | The evidence bucket and its own key. The main storage key has no access to it                                                  |
 
 Hash lists reload on `SIGHUP` and on file change. A list that fails to parse is rejected and the
-last good list stays loaded. The local block list (content your staff removed, including NCII
+last good list stays loaded.
+
+**Update lists in place, or restart the services afterwards.** Each list is bind-mounted as a
+single file, and a container keeps the file it was started with. Overwriting that file in place
+(`cp new.pdq csam.pdq`, or `cat new.pdq > csam.pdq`) reaches the containers. If the file watcher
+does not pick it up, send `SIGHUP`.
+Replacing it with a new file (`mv new.pdq csam.pdq`, or an editor that saves a new copy) does not.
+The containers then keep matching the old list, with no error. In that case, restart media, API
+and worker. The local block list (content your staff removed, including NCII
 takedowns) lives in the database and always loads, so the platform matches re-uploads even with
 no external list configured.
+
+### Container paths and read-only mounts
+
+Compose mounts the two host hash-list paths read-only into media, API and worker. If the
+variables are empty, Compose mounts `infra/moderation/empty-hashlist`, which contains no hashes.
+Set the two variables in `.env` to absolute host paths when you configure operator lists; Compose
+passes those files into fixed container paths. Keep separate CSAM and NCII lists and do not put
+list contents in the repository.
+
+The ONNX model is mounted read-only into API and worker. Fetch and verify the pinned model into
+the default path, or configure a different host file with `MODERATION_CLASSIFIER_MODEL`:
+
+```
+bun scripts/fetch-model.ts
+```
+
+For Quadlet, create the default empty-list files (or install your separately managed operator
+lists at those paths) and copy the verified model before starting the units:
+
+```
+install -D infra/moderation/empty-hashlist ~/.local/share/commonair/moderation/csam.pdq
+install -D infra/moderation/empty-hashlist ~/.local/share/commonair/moderation/ncii.pdq
+bun scripts/fetch-model.ts
+install -D .cache/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx \
+  ~/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx
+```
+
+The units mount them read-only at the same container paths as Compose. Each source file must
+exist before starting the services. The model loader checks its pinned SHA-256 and refuses a
+mismatched model.
 
 **The platform ships no industry hash lists.** Coverage of known CSAM and NCII depends on you
 joining the programmes that share them (see "Everywhere" below) and pointing the variables
@@ -98,11 +136,12 @@ The application role and governance votes cannot release a hold.
 
 ## United States
 
-- **NCMEC CyberTipline (18 U.S.C. 2258A, as amended by the REPORT Act, 2024).** A provider that
+- **NCMEC CyberTipline (18 U.S.C. 2258A, as amended).** A provider that
   obtains actual knowledge of apparent CSAM must report it to NCMEC as soon as reasonably
   possible, preserve the report's contents for one year, store them securely following the NIST
-  Cybersecurity Framework, and limit access to them. US law does not require proactive scanning;
-  the pipeline scans because the co-op chose to.
+  Cybersecurity Framework, and limit access to them. The current statute includes amendments
+  through Public Law 119-60 (2025). US law does not require proactive scanning; the pipeline
+  scans because the co-op chose to. See [18 U.S.C. § 2258A](https://uscode.house.gov/us/usc/119-118/t18/s2258A/).
   - **Register as an ESP with NCMEC before launch.** Manual filing through NCMEC's reporting
     for registered ESPs is the default and works for every operator.
   - A CSAM match creates an NCMEC **draft**. A `legal` user reviews it, files it, then records
@@ -115,7 +154,7 @@ The application role and governance votes cannot release a hold.
   hours of a valid request; the FTC enforces it. The `/takedown` form and the NCII queue are
   built to it: the clock starts at receipt, the queue is alerted at 24 hours and escalated at
   36, and **at 48 hours undecided content is hidden automatically**. Removed content is hashed
-  into the local block list so re-uploads match.
+  into the local block list so re-uploads match. See the [FTC's business guidance](https://www.ftc.gov/business-guidance/resources/complying-take-it-down-act).
 - **DMCA.** The copyright notice and counter-notice flow is already built.
 - Section 230 does not cover federal criminal law.
 
@@ -131,8 +170,14 @@ The application role and governance votes cannot release a hold.
   UK-accessible instance that allows pornographic content needs a real age-assurance provider
   (an optional adapter, not built). The default policy prohibits explicit sexual content, which
   is meant to keep the default instance out of that duty, subject to your counsel's view.
-- Once OSA s.66 reporting to the NCA is in force, configure it as your reporting body. The draft
-  format stays NCMEC's.
+- **CSEA reporting.** From 7 April 2026, in-scope regulated user-to-user services must report
+  detected CSEA content to the NCA through its Industry Reporting Portal, subject to the
+  applicable scope and reporting rules. Services already reporting all detected CSEA content
+  to NCMEC are not required to duplicate reports to the NCA; services outside that arrangement
+  must register and submit reports in the required format and timeframe. The platform's NCMEC
+  draft is not an NCA submission, so operators must maintain the applicable reporting path.
+  See [Ofcom's current reporting guidance](https://www.ofcom.org.uk/online-safety/illegal-and-harmful-content/duty-to-report-child-sexual-exploitation-and-abuse-csea-content-know-the-rules-and-how-to-comply)
+  and the [NCA portal](https://www.nationalcrimeagency.gov.uk/what-we-do/crime-threats/child-sexual-abuse-and-exploitation/the-child-sexual-exploitation-abuse-industry-reporting-portal).
 
 ## European Union (Digital Services Act)
 
@@ -145,6 +190,8 @@ The application role and governance votes cannot release a hold.
 - Transparency reports (Arts. 15 and 24, on the harmonised templates). The platform keeps the
   data in `audit_log`, `reports` and `appeals`; mapping it to the templates is a follow-up.
 - The micro and small enterprise exemption (Art. 19) may apply to you.
+
+See the [Digital Services Act text](https://eur-lex.europa.eu/eli/reg/2022/2065/oj).
 
 ## Other jurisdictions
 
