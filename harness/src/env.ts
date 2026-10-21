@@ -15,6 +15,12 @@ const csv = z.string().transform((v) =>
     .filter(Boolean),
 );
 
+/** Optional string; empty or whitespace = unset. */
+const optionalString = z
+  .string()
+  .optional()
+  .transform((v) => (v?.trim() ? v.trim() : undefined));
+
 export const harnessEnvSchema = z.object({
   HARNESS_API_URL: z.url().default("http://localhost:3001"),
   HARNESS_WEB_URL: z.url().default("http://localhost:3000"),
@@ -64,6 +70,17 @@ export const harnessEnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v?.trim() ? v.trim() : undefined)),
+  /**
+   * `trust-safety`: the instance's INTERNAL_API_SECRET for the test-hook routes. Unset = the
+   * `INTERNAL_API_SECRET` Bun loaded from the repo `.env`.
+   */
+  HARNESS_INTERNAL_API_SECRET: optionalString,
+  /** `trust-safety`: the media bucket (read-only listing that nothing was published), from the repo `.env`. */
+  S3_ENDPOINT: optionalString,
+  S3_REGION: optionalString,
+  S3_ACCESS_KEY_ID: optionalString,
+  S3_SECRET_ACCESS_KEY: optionalString,
+  S3_BUCKET_MEDIA: optionalString,
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 

@@ -4,7 +4,7 @@
 /** The web ↔ harness contract (docs/testing/e1-selectors.md) and the pure helpers e2e-basic uses. */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { RELAY_STATUSES } from "@commonair/contracts";
+import { MODERATION_REVIEW_DECISIONS, RELAY_STATUSES, REPORT_REASONS } from "@commonair/contracts";
 import { describe, expect, test } from "vite-plus/test";
 import { extractLinks, findTokenLink } from "../src/mailpit.ts";
 import { verificationHop } from "../src/users.ts";
@@ -21,11 +21,17 @@ import {
   E4B_NESTED_TEST_IDS,
   E4B_ROUTE_PATTERNS,
   E4B_TEST_IDS,
+  E4C_NESTED_TEST_IDS,
+  E4C_ROUTE_PATTERNS,
+  E4C_TEST_IDS,
+  MODQ_DECISIONS,
   PLAYER_SOURCES,
   REVENUE_TIER_FIELDS,
   ROUTES,
   ROUTE_PATTERNS,
   TEST_IDS,
+  modqDecision,
+  reportReason,
   revenueTierInput,
   tid,
   webEmbedUrl,
@@ -36,6 +42,7 @@ const DOC = fileURLToPath(new URL("../../docs/testing/e1-selectors.md", import.m
 const DOC_E2 = fileURLToPath(new URL("../../docs/testing/e2-selectors.md", import.meta.url));
 const DOC_E3 = fileURLToPath(new URL("../../docs/testing/e3-selectors.md", import.meta.url));
 const DOC_E4B = fileURLToPath(new URL("../../docs/testing/e4b-selectors.md", import.meta.url));
+const DOC_E4C = fileURLToPath(new URL("../../docs/testing/e4c-selectors.md", import.meta.url));
 
 /** The lines of the `## <heading>` section (up to the next `## `; `###` subsections included). */
 function section(markdown: string, heading: string): string[] {
@@ -213,7 +220,7 @@ describe("selectors match docs/testing/e4b-selectors.md", () => {
     for (const f of REVENUE_TIER_FIELDS) expect(doc).toContain(`\`revenue-tier-${f}-<n>\``);
   });
 
-  test("E4b ids collide with no earlier id; TEST_IDS is the union of every milestone", () => {
+  test("E4b ids collide with no earlier id; TEST_IDS is the union of every milestone (E4c checked below)", () => {
     const earlier = new Set<string>([
       ...Object.values(E1_TEST_IDS),
       ...Object.values(E2_TEST_IDS),
@@ -222,7 +229,8 @@ describe("selectors match docs/testing/e4b-selectors.md", () => {
     const e4b = [...Object.values(E4B_TEST_IDS), ...Object.values(E4B_NESTED_TEST_IDS)];
     expect(new Set(e4b).size).toBe(e4b.length);
     for (const id of e4b) expect(earlier.has(id)).toBe(false);
-    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4b.length);
+    const later = Object.values(E4C_TEST_IDS).length + Object.values(E4C_NESTED_TEST_IDS).length;
+    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4b.length + later);
   });
 
   test("routes: same set; the new ones are built by ROUTES", () => {
@@ -242,6 +250,79 @@ describe("selectors match docs/testing/e4b-selectors.md", () => {
   test("firstColumnSpans reads every span of the first cell only", () => {
     const md = "## A\n\n| Id | Meaning |\n| - | - |\n| `a`, `b` | has `c` |\n### Sub\n| `d` | x |\n## B\n| `e` | y |\n";
     expect(firstColumnSpans(md, "A")).toEqual(["a", "b", "d"]);
+  });
+});
+
+describe("selectors match docs/testing/e4c-selectors.md", () => {
+  const doc = readFileSync(DOC_E4C, "utf8");
+  const spans = () =>
+    new Set(section(doc, "Test ids").flatMap((l) => [...l.matchAll(/`([a-z0-9_-]+)`/g)].map((m) => m[1] ?? "")));
+
+  test("data-testid values: the first-column ids of every table", () => {
+    const documented = firstColumnSpans(doc, "Test ids");
+    expect(documented.length).toBeGreaterThan(30);
+    expect(new Set(documented).size).toBe(documented.length);
+    const ours = Object.values(E4C_TEST_IDS);
+    expect([...ours].sort()).toEqual([...documented].sort());
+  });
+
+  test("ids named inside descriptions are documented there", () => {
+    const named = spans();
+    for (const id of Object.values(E4C_NESTED_TEST_IDS)) expect(named.has(id)).toBe(true);
+  });
+
+  test("modq-decision items: the first written in full, the rest as -<decision>", () => {
+    const row = doc.split("\n").find((l) => l.startsWith("| `modq-decision`")) ?? "";
+    expect(row).toContain("`modq-decision-clear`");
+    for (const d of MODQ_DECISIONS.slice(1)) expect(row).toContain(`\`-${d}\``);
+    expect([...MODQ_DECISIONS]).toEqual([...MODERATION_REVIEW_DECISIONS]);
+    expect(modqDecision("escalate_legal")).toBe("modq-decision-escalate_legal");
+  });
+
+  test("report-reason items follow REPORT_REASONS", () => {
+    const row = doc.split("\n").find((l) => l.startsWith("| `report-reason`")) ?? "";
+    expect(row).toContain("`REPORT_REASONS`");
+    expect(row).toContain("`report-reason-<reason>`");
+    expect(reportReason(REPORT_REASONS[0])).toBe(`report-reason-${REPORT_REASONS[0]}`);
+  });
+
+  test("E4c ids collide with no earlier id; TEST_IDS is the union of every milestone", () => {
+    const earlier = new Set<string>([
+      ...Object.values(E1_TEST_IDS),
+      ...Object.values(E2_TEST_IDS),
+      ...Object.values(E3_TEST_IDS),
+      ...Object.values(E4B_TEST_IDS),
+      ...Object.values(E4B_NESTED_TEST_IDS),
+    ]);
+    const e4c = [...Object.values(E4C_TEST_IDS), ...Object.values(E4C_NESTED_TEST_IDS)];
+    expect(new Set(e4c).size).toBe(e4c.length);
+    for (const id of e4c) expect(earlier.has(id)).toBe(false);
+    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4c.length);
+  });
+
+  test("routes: same set; the new ones are built by ROUTES", () => {
+    expect([...E4C_ROUTE_PATTERNS].sort()).toEqual(tableKeys(doc, "Routes").sort());
+    const added = [ROUTES.takedown, ROUTES.appeals, ROUTES.adminModeration, ROUTES.adminAppeals, ROUTES.adminLegal];
+    expect(added).toEqual(["/takedown", "/settings/appeals", "/admin/moderation", "/admin/appeals", "/admin/legal"]);
+    for (const r of added) expect(E4C_ROUTE_PATTERNS).toContain(r);
+    for (const r of E4C_ROUTE_PATTERNS.filter((r) => !(added as string[]).includes(r)))
+      expect(ROUTE_PATTERNS).toContain(r);
+  });
+
+  test("the scenario section lists seven steps, matching SAFETY_STEPS", async () => {
+    const { SAFETY_STEPS } = await import("../src/safety.ts");
+    const steps = section(doc, "Scenario `trust-safety`").filter((l) => /^\d+\. \*\*/.test(l));
+    expect(steps).toHaveLength(7);
+    expect(Object.keys(SAFETY_STEPS)).toHaveLength(7);
+  });
+
+  test("the documented hook routes and env are what the harness uses", async () => {
+    const { INTERNAL_ROUTES } = await import("@commonair/contracts/internal");
+    const s = section(doc, "Scenario `trust-safety`").join("\n");
+    expect(s).toContain(`\`PUT ${INTERNAL_ROUTES.moderationScript}\``);
+    expect(s).toContain(`\`POST ${INTERNAL_ROUTES.nciiTick}\``);
+    for (const v of ["MODERATION_CLASSIFIER=scripted", "MODERATION_SAMPLE_SECONDS=2", "MODERATION_TEST_HOOKS=true"])
+      expect(s).toContain(v);
   });
 });
 
