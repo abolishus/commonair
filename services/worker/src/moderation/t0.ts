@@ -199,12 +199,7 @@ export async function applyT0Once(ctx: WorkerContext, job: ModerationT0Job): Pro
     for (const e of job.evidence) {
       const sealed = b64(e.sealedBase64);
       if (sealed.length > INLINE_SEALED_MAX) throw new Error("T0 evidence object exceeds the inline limit");
-      if (e.keyId !== rt.sealing.keyId)
-        alert(ctx, "evidence_key_mismatch", "T0 evidence sealed to a different evidence key", {
-          caseId,
-          keyId: e.keyId,
-          expectedKeyId: rt.sealing.keyId,
-        });
+      if (e.keyId !== rt.sealing.keyId) throw new Error("T0 evidence key does not match the worker evidence key");
       const id = uuidv7(now.getTime());
       evidenceIds.push(id);
       await tx.insert(evidenceObjects).values({
