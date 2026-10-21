@@ -21,7 +21,7 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
 export const t0MediaReconcileJobId = (caseId: string, scheduledAt: number) =>
-  `t0-media:${caseId}:reconcile:${scheduledAt}`;
+  `t0-media-${caseId}-reconcile-${scheduledAt}`;
 
 const markerMissing = (action: string, subjectId: ReturnType<typeof sql>) =>
   notExists(

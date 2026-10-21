@@ -24,7 +24,7 @@ const { moderationCases: cases, moderationFlags: flags, evidenceObjects, auditLo
 
 /** Re-run later: media may still flush objects after the initial T0 transaction. */
 export const T0_MEDIA_SWEEP_DELAY_MS = 10 * 60_000;
-export const t0MediaSweepJobId = (caseId: string, sweep = 1) => `t0-media:${caseId}:sweep:${sweep}`;
+export const t0MediaSweepJobId = (caseId: string, sweep = 1) => `t0-media-${caseId}-sweep-${sweep}`;
 /** Repeated failures of one job raise an alert from this attempt on. */
 export const T0_MEDIA_ALERT_AFTER_ATTEMPTS = 2;
 export const T0_MEDIA_COMPLETE_AUDIT_ACTION = "moderation.t0.media_complete";
@@ -283,10 +283,11 @@ export function nextT0MediaSweep(
   currentJobId: string | undefined,
   foundPublicObjects: number,
 ): { jobId: string; delayMs: number } | null {
-  const base = `t0-media:${caseId}`;
-  const sweepPrefix = `${base}:sweep:`;
-  const recoveryMatch = currentJobId?.startsWith(`${base}:reconcile:`)
-    ? /^([^:]+)(?::sweep:(\d+))?$/.exec(currentJobId.slice(`${base}:reconcile:`.length))
+  const base = `t0-media-${caseId}`;
+  const sweepPrefix = `${base}-sweep-`;
+  const reconcilePrefix = `${base}-reconcile-`;
+  const recoveryMatch = currentJobId?.startsWith(reconcilePrefix)
+    ? /^(\d+)(?:-sweep-(\d+))?$/.exec(currentJobId.slice(reconcilePrefix.length))
     : null;
   const sweepMatch = currentJobId?.startsWith(sweepPrefix)
     ? /^\d+$/.exec(currentJobId.slice(sweepPrefix.length))
@@ -295,7 +296,7 @@ export function nextT0MediaSweep(
   if (recoveryMatch) {
     const token = recoveryMatch[1];
     const next = recoveryMatch[2] ? Number(recoveryMatch[2]) + 1 : 1;
-    return { jobId: `${base}:reconcile:${token}:sweep:${next}`, delayMs: T0_MEDIA_SWEEP_DELAY_MS };
+    return { jobId: `${reconcilePrefix}${token}-sweep-${next}`, delayMs: T0_MEDIA_SWEEP_DELAY_MS };
   }
   if (sweepMatch) {
     const sweepNumber = Number(sweepMatch[0]) + 1;

@@ -66,7 +66,8 @@ export interface T0Result {
 }
 
 const b64 = (s: string) => new Uint8Array(Buffer.from(s, "base64"));
-export const t0MediaJobId = (caseId: string) => `t0-media:${caseId}`;
+/** BullMQ refuses a custom id with `:` unless it has exactly three parts; these ids use `-`. */
+export const t0MediaJobId = (caseId: string) => `t0-media-${caseId}`;
 
 /** Advisory lock per subject so two jobs for one subject never interleave. */
 export const lockKey = (subjectType: string, subjectId: string) => `moderation:t0:${subjectType}:${subjectId}`;

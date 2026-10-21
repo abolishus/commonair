@@ -16,6 +16,8 @@ import {
 } from "../src/moderation/t0-media.ts";
 import { t0MediaReconcileJobId } from "../src/moderation/schedules.ts";
 import { reconcileT0Media } from "../src/moderation/schedules.ts";
+import { t0MediaJobId } from "../src/moderation/t0.ts";
+import { t0JobId } from "@commonair/contracts/internal";
 
 const CASE_ID = "0193e6a0-0000-7000-8000-000000000001";
 const HOLD_ID = "0193e6a0-0000-7000-8000-000000000002";
@@ -144,17 +146,37 @@ describe("T0 clip object recovery", () => {
   test("daily reconciliation uses a fresh stable job id per run after finite retries exhaust", () => {
     const first = t0MediaReconcileJobId(CASE_ID, 1_800_000_000_000);
     const second = t0MediaReconcileJobId(CASE_ID, 1_800_086_400_000);
-    expect(first).toBe(`t0-media:${CASE_ID}:reconcile:1800000000000`);
+    expect(first).toBe(`t0-media-${CASE_ID}-reconcile-1800000000000`);
     expect(second).not.toBe(first);
     expect(nextT0MediaSweep(CASE_ID, first, 1)).toEqual({
-      jobId: `${first}:sweep:1`,
+      jobId: `${first}-sweep-1`,
       delayMs: T0_MEDIA_SWEEP_DELAY_MS,
     });
-    expect(nextT0MediaSweep(CASE_ID, `${first}:sweep:1`, 0)).toBeNull();
+    expect(nextT0MediaSweep(CASE_ID, `${first}-sweep-1`, 1)).toEqual({
+      jobId: `${first}-sweep-2`,
+      delayMs: T0_MEDIA_SWEEP_DELAY_MS,
+    });
+    expect(nextT0MediaSweep(CASE_ID, `${first}-sweep-1`, 0)).toBeNull();
+  });
+
+  test("every t0 job id is one BullMQ accepts (a `:` only in exactly three parts)", () => {
+    // bullmq 6 Job.validateOptions: an id containing ":" must split into exactly 3 parts.
+    const accepted = (id: string) => !/^\d+$/.test(id) && (!id.includes(":") || id.split(":").length === 3);
+    const reconcile = t0MediaReconcileJobId(CASE_ID, 1_800_000_000_000);
+    const ids = [
+      t0JobId("broadcast", CASE_ID),
+      t0MediaJobId(CASE_ID),
+      t0MediaSweepJobId(CASE_ID, 3),
+      reconcile,
+      nextT0MediaSweep(CASE_ID, t0MediaJobId(CASE_ID), 1)?.jobId,
+      nextT0MediaSweep(CASE_ID, reconcile, 1)?.jobId,
+      nextT0MediaSweep(CASE_ID, `${reconcile}-sweep-4`, 1)?.jobId,
+    ];
+    for (const id of ids) expect(id !== undefined && accepted(id), String(id)).toBe(true);
   });
 
   test("keeps delayed reconciliation alive across an upload discovered after the first pass", () => {
-    const firstSweep = nextT0MediaSweep(CASE_ID, `t0-media:${CASE_ID}`, 0);
+    const firstSweep = nextT0MediaSweep(CASE_ID, t0MediaJobId(CASE_ID), 0);
     expect(firstSweep).toEqual({ jobId: t0MediaSweepJobId(CASE_ID, 1), delayMs: T0_MEDIA_SWEEP_DELAY_MS });
 
     // The recorder's final poll publishes a segment after the first pass; this sweep finds it.
