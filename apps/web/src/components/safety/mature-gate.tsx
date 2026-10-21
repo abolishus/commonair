@@ -150,14 +150,17 @@ export function RestrictedStream({
   children,
   client = maturityClient(),
 }: RestrictedStreamProps): React.JSX.Element {
-  const [revealed, setRevealed] = React.useState(false);
+  const canReveal = signedIn && confirmed;
+  const [reveal, setReveal] = React.useState({ eligible: canReveal, revealed: false });
+  if (reveal.eligible !== canReveal) setReveal({ eligible: canReveal, revealed: false });
+  const visible = canReveal && reveal.revealed;
   const { pending, notAdult, confirmMature } = useConfirmMature(client, onConfirmed);
   return (
     <SensitiveMedia
       data-testid="stream-restricted"
       data-reason="under_review"
-      data-revealed={revealed ? "true" : "false"}
-      obscured={!revealed}
+      data-revealed={visible ? "true" : "false"}
+      obscured={!visible}
       overlay={
         <>
           <p className="font-medium">{t("safety.restricted.title")}</p>
@@ -171,7 +174,7 @@ export function RestrictedStream({
               data-testid="stream-restricted-reveal"
               size="sm"
               variant="outline"
-              onClick={() => setRevealed(true)}
+              onClick={() => setReveal({ eligible: canReveal, revealed: true })}
             >
               {t("safety.restricted.reveal")}
             </Button>

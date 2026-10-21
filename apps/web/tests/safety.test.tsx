@@ -8,9 +8,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { EvidenceItem } from "../src/components/safety/legal.tsx";
+import { RestrictedStream } from "../src/components/safety/mature-gate.tsx";
 import { CaseDetailView } from "../src/components/safety/mod-queue.tsx";
-import type { EvidenceObjectDto, ModerationCaseDetailDto } from "../src/components/safety/client.ts";
-import { isLegal, isPlatformModerator, isSafetyStaff, mayOpenAdminPage } from "../src/components/safety/access.ts";
+import type { EvidenceObjectDto, MaturityClient, ModerationCaseDetailDto } from "../src/components/safety/client.ts";
+import {
+  isLegal,
+  isPlatformModerator,
+  isSafetyStaff,
+  mayOpenAdminPage,
+  requireAdminPage,
+} from "../src/components/safety/access.ts";
 import { isMatureGate } from "../src/components/safety/client.ts";
 import { uploadChannelFile, uploadFailureMessage, type UploadClient } from "../src/components/safety/upload.ts";
 import { en } from "../src/i18n/en.ts";
@@ -53,6 +60,16 @@ describe("trust and safety role boundary", () => {
     expect(mayOpenAdminPage("appeals", legal)).toBe(false);
     expect(mayOpenAdminPage("appeals", admin)).toBe(true);
     expect(mayOpenAdminPage("moderation", null)).toBe(false);
+  });
+
+  it("returns not-found from the legal route guard to signed-out and non-legal users", async () => {
+    await expect(requireAdminPage("/admin/legal", async () => null)).rejects.toMatchObject({ isNotFound: true });
+    await expect(requireAdminPage("/admin/legal", async () => ({ role: "moderator" }))).rejects.toMatchObject({
+      isNotFound: true,
+    });
+    await expect(requireAdminPage("/admin/legal", async () => ({ role: "legal" }))).resolves.toMatchObject({
+      me: { role: "legal" },
+    });
   });
 
   it("recognizes only the playback mature-gate refusal", () => {
@@ -115,6 +132,38 @@ describe("moderation review frames", () => {
   });
 });
 
+describe("restricted stream reveal", () => {
+  it("re-blurs immediately when sign-in or mature confirmation eligibility is lost", () => {
+    const client: MaturityClient = {
+      me: vi.fn<() => Promise<{ isAdult: boolean; matureConfirmed: boolean }>>(async () => ({
+        isAdult: true,
+        matureConfirmed: true,
+      })),
+      confirmMature: vi.fn<() => Promise<unknown>>(async () => undefined),
+    };
+    const view = wrap(
+      <RestrictedStream signedIn confirmed onConfirmed={() => undefined} client={client}>
+        <div>synthetic stream placeholder</div>
+      </RestrictedStream>,
+    );
+    fireEvent.click(screen.getByTestId("stream-restricted-reveal"));
+    expect(screen.getByTestId("stream-restricted").getAttribute("data-revealed")).toBe("true");
+
+    view.rerender(
+      <LocaleProvider locale={locale} messages={uiMessages}>
+        <TooltipProvider>
+          <RestrictedStream signedIn confirmed={false} onConfirmed={() => undefined} client={client}>
+            <div>synthetic stream placeholder</div>
+          </RestrictedStream>
+        </TooltipProvider>
+      </LocaleProvider>,
+    );
+    const restricted = screen.getByTestId("stream-restricted");
+    expect(restricted.getAttribute("data-revealed")).toBe("false");
+    expect(restricted.getAttribute("data-obscured")).toBe("true");
+  });
+});
+
 describe("legal evidence and uploads", () => {
   it("does not fetch evidence until the legal reviewer explicitly views it, then keeps it obscured until reveal", async () => {
     const load = vi.fn<() => Promise<{ contentType: string; dataBase64: string }>>(async () => ({
@@ -133,6 +182,24 @@ describe("legal evidence and uploads", () => {
     expect(frame?.getAttribute("data-obscured")).toBe("true");
     fireEvent.click(screen.getByTestId("legal-evidence-reveal"));
     expect(frame?.getAttribute("data-obscured")).toBe("false");
+  });
+
+  it("does not update evidence state when an explicit view finishes after unmount", async () => {
+    let finishLoad: ((value: { contentType: string; dataBase64: string }) => void) | undefined;
+    const load = vi.fn<() => Promise<{ contentType: string; dataBase64: string }>>(
+      () =>
+        new Promise<{ contentType: string; dataBase64: string }>((resolve) => {
+          finishLoad = resolve;
+        }),
+    );
+    const view = wrap(<EvidenceItem evidence={evidence} load={load} />);
+    fireEvent.click(screen.getByTestId("legal-evidence-view"));
+    expect(load).toHaveBeenCalledOnce();
+    view.unmount();
+    await act(async () => {
+      finishLoad?.({ contentType: "image/png", dataBase64: "aGVsbG8=" });
+    });
+    expect(screen.queryByTestId("legal-evidence")).toBeNull();
   });
 
   it("puts the uploaded object only through commitUpload and returns the committed key", async () => {
@@ -177,5 +244,27 @@ describe("legal evidence and uploads", () => {
     expect(result).toEqual({ ok: false, reason: "rejected" });
     expect(uploadFailureMessage("rejected")).toBe(en["safety.upload.rejected"]);
     expect(uploadFailureMessage("rejected")).not.toContain("upload_rejected");
+  });
+
+  it("reports transport failures without committing an upload", async () => {
+    const commit = vi.fn<UploadClient["commit"]>(async () => ({ key: "published/key", url: "/media/avatar" }));
+    const client: UploadClient = {
+      uploadUrl: vi.fn<UploadClient["uploadUrl"]>(async () => ({
+        uploadUrl: "https://upload.invalid/temporary",
+        key: "incoming/key",
+        headers: {},
+      })),
+      put: vi.fn<UploadClient["put"]>(async () => ({ ok: false })),
+      commit,
+    };
+    const result = await uploadChannelFile(client, {
+      channel: "rivertide",
+      purpose: "avatar",
+      file: new Blob(["synthetic neutral placeholder"], { type: "image/png" }),
+      contentType: "image/png",
+    });
+    expect(result).toEqual({ ok: false, reason: "failed" });
+    expect(commit).not.toHaveBeenCalled();
+    expect(uploadFailureMessage("failed")).toBe(en["safety.upload.failed"]);
   });
 });
