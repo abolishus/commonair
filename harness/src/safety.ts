@@ -152,10 +152,17 @@ export interface LogHit {
 export const IMAGE_BASE64_PATTERN = /(?:iVBORw0KGgo|\/9j\/|UklGR)[A-Za-z0-9+/]{32,}/;
 /** Any very long base64 run: a frame or file in a log line, whatever its format. */
 export const LONG_BASE64_PATTERN = /[A-Za-z0-9+/]{1024,}/;
+/** URLs are forbidden in service logs because signed media and evidence links carry access. */
+export const URL_PATTERN = /(?:\b(?:https?|wss?|rtmp|rtmps|s3|gs|file):\/\/|\bwww\.)[^\s"'<>]+/i;
+/** Evidence object locations must not leak, whether logged as a path or a bucket/key pair. */
+export const EVIDENCE_LOCATION_PATTERN =
+  /(?:["']?\bevidence(?:[-_ ]?(?:objects?|bucket|storage|key))?["']?\s*[:=]\s*["']?[^\s,"'}]+|(?:^|[\s"'])evidence(?:[-_ ]objects?)?\/[A-Za-z0-9._/-]+)/i;
 
 export const GENERIC_NEEDLES: readonly LogNeedle[] = [
   { kind: "image-base64", pattern: IMAGE_BASE64_PATTERN },
   { kind: "long-base64", pattern: LONG_BASE64_PATTERN },
+  { kind: "url", pattern: URL_PATTERN },
+  { kind: "evidence-location", pattern: EVIDENCE_LOCATION_PATTERN },
 ];
 
 export function emailNeedles(emails: readonly string[]): LogNeedle[] {

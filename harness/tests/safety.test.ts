@@ -140,6 +140,21 @@ describe("log hygiene matcher", () => {
     expect(scanLog("media", `x ${"QUJD".repeat(300)} y`, needles).map((h) => h.kind)).toEqual(["long-base64"]);
   });
 
+  test("finds arbitrary URLs and evidence locations without returning their values", () => {
+    const privateValues = [
+      "https://media.example.test/private/object?signature=secret",
+      "wss://api.example.test/socket",
+      "evidence/0199a3b2/case-1/sealed.bin",
+      '"evidenceKey":"bucket/private/case-1/object"',
+    ];
+    const text = privateValues.join("\n");
+    const hits = scanLog("api", text, needles);
+    expect(hits.map((hit) => hit.kind)).toEqual(["url", "url", "evidence-location", "evidence-location"]);
+    expect(JSON.stringify(hits)).not.toContain("example.test");
+    expect(JSON.stringify(hits)).not.toContain("sealed.bin");
+    expect(JSON.stringify(hits)).not.toContain("signature");
+  });
+
   test("ignores ids, hashes, tiers, scores and versions", () => {
     const line = JSON.stringify({
       level: "warn",
