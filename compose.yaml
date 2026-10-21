@@ -133,7 +133,7 @@ services:
       disable: true
 
   valkey:
-    image: docker.io/valkey/valkey:9.1.2-trixie
+    image: ghcr.io/valkey-io/valkey:9.1.2-trixie
     restart: unless-stopped
     # Ephemeral by design (docs/architecture.md): presence, caches, pub/sub, job queues.
     command: ["valkey-server", "--appendonly", "no", "--save", ""]
@@ -180,7 +180,7 @@ services:
       disable: true
 
   mailpit:
-    image: docker.io/axllent/mailpit:v1.31.6
+    image: ghcr.io/axllent/mailpit:v1.31.6
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025"
@@ -382,7 +382,10 @@ services:
     build:
       context: .
       dockerfile: infra/containers/probe.Containerfile
-      args: { BASE_IMAGE: "docker.io/otel/opentelemetry-collector-contrib:0.163.1" }
+      args:
+        {
+          BASE_IMAGE: "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.163.1",
+        }
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     # Host services in local development export to localhost:4318 (.env.example default).
@@ -398,7 +401,7 @@ services:
       test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
 
   prometheus:
-    image: docker.io/prom/prometheus:v3.15.0
+    image: quay.io/prometheus/prometheus:v3.15.0
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml

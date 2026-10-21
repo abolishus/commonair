@@ -6,7 +6,7 @@
 Description=CommonAir prometheus
 
 [Container]
-Image=docker.io/prom/prometheus:v3.15.0
+Image=quay.io/prometheus/prometheus:v3.15.0
 ContainerName=commonair-prometheus
 Network=commonair.network
 NetworkAlias=prometheus

@@ -6,7 +6,7 @@
 Description=CommonAir valkey
 
 [Container]
-Image=docker.io/valkey/valkey:9.1.2-trixie
+Image=ghcr.io/valkey-io/valkey:9.1.2-trixie
 ContainerName=commonair-valkey
 Network=commonair.network
 NetworkAlias=valkey

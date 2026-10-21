@@ -80,14 +80,14 @@ export default defineRailway((ctx) => {
 
   // Valkey holds ephemeral state only (architecture.md): no volume, no persistence.
   const valkey = service("valkey", {
-    source: image("docker.io/valkey/valkey:9.1.2-trixie"),
+    source: image("ghcr.io/valkey-io/valkey:9.1.2-trixie"),
     start: 'valkey-server --appendonly no --save ""',
   });
 
   // Staging email sink. Its UI shows verification links, so it sits behind basic auth
   // (MP_UI_AUTH="user:password", set by the bootstrap script).
   const mailpit = service("mailpit", {
-    source: image("docker.io/axllent/mailpit:v1.31.6"),
+    source: image("ghcr.io/axllent/mailpit:v1.31.6"),
     env: {
       MP_UI_AUTH: preserve(),
       MP_MAX_MESSAGES: "5000",

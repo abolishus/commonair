@@ -5,7 +5,7 @@
     "tag": "17.11-trixie",
     "notes": "PostgreSQL License (OSI-approved). Debian trixie base; Dockerfiles MIT (docker-library/postgres). Our own image extends this with the wal-g binary."
   },
-  "docker.io/valkey/valkey": {
+  "ghcr.io/valkey-io/valkey": {
     "license": "BSD-3-Clause",
     "source": "https://github.com/valkey-io/valkey/blob/9.1.2/COPYING",
     "tag": "9.1.2-trixie",
@@ -23,7 +23,7 @@
     "tag": "1.21.2-ffmpeg",
     "notes": "compose uses the -ffmpeg variant (alpine:3.24 + apk ffmpeg, GPL-2.0-or-later AND LGPL-2.1-or-later): its wget runs the runOnReady hooks and it also serves as the mock RTMP target. MediaMTX itself is MIT; tests that run the plain 1.21.2 tag (MIT only) are covered by this entry."
   },
-  "docker.io/axllent/mailpit": {
+  "ghcr.io/axllent/mailpit": {
     "license": "MIT",
     "source": "https://github.com/axllent/mailpit/blob/v1.31.6/LICENSE",
     "tag": "v1.31.6",
@@ -35,7 +35,7 @@
     "tag": "13.2.4",
     "notes": "grafana/grafana is the OSS edition per grafana.com Docker docs (grafana/grafana-enterprise is the proprietary edition; never use it). Some packages Apache-2.0 per LICENSING.md. Separate program used over the network."
   },
-  "docker.io/prom/prometheus": {
+  "quay.io/prometheus/prometheus": {
     "license": "Apache-2.0",
     "source": "https://github.com/prometheus/prometheus/blob/v3.15.0/LICENSE",
     "tag": "v3.15.0",
@@ -53,7 +53,7 @@
     "tag": "3.1.0",
     "notes": "Tempo 3.x is current; 2.10.8 is the last 2.x. Separate program used over the network."
   },
-  "docker.io/otel/opentelemetry-collector-contrib": {
+  "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib": {
     "license": "Apache-2.0",
     "source": "https://github.com/open-telemetry/opentelemetry-collector-releases/blob/v0.163.1/LICENSE",
     "tag": "0.163.1",
