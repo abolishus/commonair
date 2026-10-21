@@ -38,16 +38,14 @@ test("hiding a VOD hides its clips and the live-buffer clips of its broadcast, n
   const b = await makeBroadcast(t.db, channel.id, new Date(Date.now() - 3_600_000));
   const other = await makeBroadcast(t.db, channel.id, new Date(Date.now() - 7_200_000));
   const vodId = uuidv7();
-  await t.db
-    .insert(schema.vods)
-    .values({
-      id: vodId,
-      broadcastId: b.id,
-      channelId: channel.id,
-      title: "v",
-      storagePrefix: `vods/${vodId}/`,
-      status: "ready",
-    });
+  await t.db.insert(schema.vods).values({
+    id: vodId,
+    broadcastId: b.id,
+    channelId: channel.id,
+    title: "v",
+    storagePrefix: `vods/${vodId}/`,
+    status: "ready",
+  });
   const fromVod = await clip(channel.id, b.id, vodId);
   const fromLive = await clip(channel.id, b.id, null);
   const unrelated = await clip(channel.id, other.id, null);
