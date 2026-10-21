@@ -1,8 +1,17 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, test } from "vite-plus/test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HASH_LIST_CATEGORIES } from "@commonair/contracts/enums";
-import { createHashMatcher, HashListParseError, parseHashList, staticHashList } from "../src/hashlist.ts";
+import {
+  createHashMatcher,
+  HashListParseError,
+  parseHashList,
+  staticHashList,
+  watchHashListFiles,
+} from "../src/hashlist.ts";
 
 const csam = HASH_LIST_CATEGORIES[0]!;
 const ncii = HASH_LIST_CATEGORIES.find((x) => x !== csam)!;
@@ -38,6 +47,36 @@ describe("hash lists", () => {
     ).toBeNull();
     expect(createHashMatcher([]).match(hit(zero))).toBeNull();
   });
+  test("watcher retains the last good list after a malformed reload", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "hashlist-watch-"));
+    const path = join(dir, "operator.pdq");
+    const validHash = "a".repeat(64);
+    await writeFile(path, `${validHash}\n`);
+    const matcher = createHashMatcher([staticHashList(csam, "pdq:operator-list", [zero], "initial")]);
+    const errors: { message: string; category: string }[] = [];
+    const stop = watchHashListFiles([{ path, category: csam }], matcher, (err, category) => {
+      errors.push({ message: err.message, category });
+    });
+    try {
+      await writeFile(path, `${validHash}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const goodVersion = matcher.lists()[0]?.version;
+      expect(goodVersion).toMatch(/^sha256:/);
+      expect(matcher.lists()[0]?.nearest(validHash)).toBe(0);
+      await writeFile(path, `${validHash}\nnot-a-hash\n`);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.category).toBe(csam);
+      expect(errors[0]?.message).toContain("line 2");
+      expect(errors[0]?.message).not.toContain(validHash);
+      expect(matcher.lists()[0]?.version).toBe(goodVersion);
+      expect(matcher.lists()[0]?.nearest(validHash)).toBe(0);
+    } finally {
+      stop();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   test("replace swaps a provider list without dropping others", () => {
     const first = staticHashList(csam, "pdq:operator-list", [zero], "old");
     const matcher = createHashMatcher([first]);

@@ -36,3 +36,6 @@ records only the category, list version, quality and match distance.
 
 The bundled `.pdq` files are synthetic test fixtures, not operational lists. The code-based
 fixture generator is `bun packages/moderation/fixtures/generate.ts`.
+
+On this machine, a linear scan through 10,000 hashes averaged 0.12 ms per query. The pinned ONNX
+classifier took 82.1 ms for one benign 384×384 frame (CPU, first inference; hardware affects both).

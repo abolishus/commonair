@@ -97,6 +97,7 @@ describe("hammingDistance", () => {
 
 describe("quality", () => {
   test("uniform frames (black, white, grey) have quality 0", () => {
+    expect(pdqHash(new Uint8Array(512 * 512), 512, 512).quality).toBeLessThan(50);
     for (const v of [0, 128, 255]) expect(pdqHash(new Uint8Array(512 * 512).fill(v), 512, 512).quality).toBe(0);
   });
   test("near-uniform frames stay below the matching floor", () => {
