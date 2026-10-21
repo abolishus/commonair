@@ -4,12 +4,5 @@
 export { mediaServiceEnv, type MediaServiceEnv } from "./env.ts";
 export { createMediaService, type MediaService, type MediaServiceOptions } from "./service.ts";
 export { DEFAULT_TIMINGS, type MediaTimings } from "./settings.ts";
-export {
-  NoopHashMatcher,
-  StubVendorMatcher,
-  type HashMatcher,
-  type HashMatchResult,
-  type HashCheckContext,
-} from "./safety/hashmatch.ts";
 export { ClipJob } from "./clips.ts";
 export { VodFinalizeJob } from "./vod/finalize.ts";

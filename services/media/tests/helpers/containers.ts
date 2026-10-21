@@ -186,8 +186,15 @@ export interface Publisher {
   exited: Promise<number>;
 }
 
-/** A 720p30 test pattern with a 440 Hz tone, 2 s GOP (what OBS sends with recommended settings). */
-export function publishTestPattern(url: string): Publisher {
+/**
+ * A 720p30 test pattern with a 440 Hz tone, 2 s GOP (what OBS sends with recommended settings).
+ * `image`: loop a still image instead (the synthetic moderation fixtures; never anything else).
+ */
+export function publishTestPattern(url: string, opts: { image?: string } = {}): Publisher {
+  const video = opts.image
+    ? ["-loop", "1", "-framerate", "30", "-i", opts.image]
+    : ["-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30"];
+  const scale = opts.image ? ["-vf", "scale=1280:720,format=yuv420p"] : [];
   const proc = Bun.spawn(
     [
       "ffmpeg",
@@ -196,14 +203,12 @@ export function publishTestPattern(url: string): Publisher {
       "error",
       "-nostdin",
       "-re",
-      "-f",
-      "lavfi",
-      "-i",
-      "testsrc2=size=1280x720:rate=30",
+      ...video,
       "-f",
       "lavfi",
       "-i",
       "sine=frequency=440:sample_rate=48000",
+      ...scale,
       "-c:v",
       "libx264",
       "-preset",

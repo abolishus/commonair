@@ -20,16 +20,14 @@ import { CLIP_DISK_REASON } from "../src/clips.ts";
 import { DiskBudget } from "../src/disk.ts";
 import { runCommand } from "../src/ffmpeg/run.ts";
 import { startJobs, type Jobs } from "../src/jobs.ts";
-import { MediaMtxClient } from "../src/mediamtx.ts";
 import { ActiveScratch, BROADCASTS_DIR, recoverWorkDir, sweepWorkDir } from "../src/recovery.ts";
-import { HashMatchEnforcer } from "../src/safety/enforce.ts";
-import { NoopHashMatcher } from "../src/safety/hashmatch.ts";
 import { pruneThumbnails, thumbnailPrefix } from "../src/thumbnails.ts";
 import { VOD_EMPTY_REASON } from "../src/vod/finalize.ts";
 import { parsePlaylist, renderPlaylist, totalDuration } from "../src/vod/playlist.ts";
 import { VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
 import { reconcileVods, VOD_STALLED_REASON } from "../src/vod/reconcile.ts";
 import { podmanAvailable, startGarage, type Garage } from "./helpers/containers.ts";
+import { makeModeration } from "./helpers/moderation.ts";
 
 if (!podmanAvailable()) throw new Error("media integration tests need podman (rootless is fine)");
 
@@ -154,16 +152,9 @@ beforeAll(async () => {
   if (!channel) throw new Error("no channel");
   channelId = channel.id;
 
-  const enforcer = new HashMatchEnforcer({
-    db: tdb.db,
-    storage,
-    bucket: BUCKET,
-    mtx: new MediaMtxClient("http://127.0.0.1:9", "unused"),
-    matcher: new NoopHashMatcher(),
-    logger,
-    stopBroadcast: async () => {},
-  });
-  const common = { db: tdb.db, storage, bucket: BUCKET, enforcer, ffmpeg: "ffmpeg", workDir, logger };
+  // Moderation is not under test here: fake frames that never match (synthetic, quality 0).
+  const { moderation } = await makeModeration({ db: tdb.db, logger });
+  const common = { db: tdb.db, storage, bucket: BUCKET, moderation, ffmpeg: "ffmpeg", workDir, logger };
   jobs = startJobs({
     valkeyUrl: VALKEY_URL,
     prefix: bullPrefix,

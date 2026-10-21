@@ -15,6 +15,7 @@ import { BroadcastSession } from "./session.ts";
 import type { LocalWindow } from "./vod/recorder.ts";
 import { vodPrefix } from "./vod/recorder.ts";
 import { reconcileVods } from "./vod/reconcile.ts";
+import { errorCategory } from "./moderation/logging.ts";
 
 /** Consecutive reconciles a session's path may be missing from MediaMTX before it is stopped. */
 const MISSING_PATH_TOLERANCE = 2;
@@ -74,13 +75,17 @@ export class LiveCoordinator {
   }
 
   /** `finalizeVod` false: the broadcast ended but its VOD must not be published (hash match). */
-  offline(broadcastId: string, final: boolean, finalizeVod = final): Promise<void> {
+  offline(broadcastId: string, final: boolean, finalizeVod = final, strict = false): Promise<void> {
     return this.serial(async () => {
       const s = this.sessions.get(broadcastId);
       if (!s) return;
+      if (!strict) {
+        this.sessions.delete(broadcastId);
+        this.missing.delete(broadcastId);
+      }
+      await s.stop(final, finalizeVod, strict);
       this.sessions.delete(broadcastId);
       this.missing.delete(broadcastId);
-      await s.stop(final, finalizeVod);
     });
   }
 
@@ -104,7 +109,7 @@ export class LiveCoordinator {
         livePaths = new Set((await this.ctx.mtx.listPaths()).filter(isLive).map((p) => p.name));
       } catch (err) {
         // Without MediaMTX we cannot tell what is live; never stop work on that basis.
-        this.log.warn("reconcile: MediaMTX unavailable", { err });
+        this.log.warn("reconcile: MediaMTX unavailable", { error: errorCategory(err) });
       }
 
       for (const [id, s] of this.sessions) {
@@ -131,6 +136,15 @@ export class LiveCoordinator {
 
   private async startSession(info: BroadcastInfo & { suspended?: boolean }): Promise<void> {
     if (info.suspended) return;
+    // A reconnect of a channel with a T0 match here, before the worker's suspension lands.
+    if (this.ctx.moderation.isLiveTainted(info.channelId, info.path)) {
+      this.ctx.moderation.refuseReconnect({
+        broadcastId: info.broadcastId,
+        channelId: info.channelId,
+        path: info.path,
+      });
+      return;
+    }
     const vodId = info.vodEnabled ? await this.ensureVod(info) : null;
     const session = new BroadcastSession(this.ctx, info, vodId);
     this.sessions.set(info.broadcastId, session);
