@@ -83,7 +83,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     ffmpeg,
     bullPrefix: opts.bullPrefix,
     kickPublisher: async (path) => {
-      await mtx.kickPublisher(path);
+      return mtx.kickPublisher(path);
     },
     // The broadcast ended, but its VOD must not be finalized (published): the worker removes it.
     stopBroadcast: async (id) => coordinator?.offline(id, true, false),

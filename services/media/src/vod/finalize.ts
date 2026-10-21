@@ -175,33 +175,48 @@ export async function finalizeVod(
     await scratches.release(scratch);
   }
 
-  await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
-    contentType: "application/vnd.apple.mpegurl",
-    cacheControl: "public, max-age=3600",
-  });
   let thumbnailKey: string | null = null;
   if (thumbnail) {
     thumbnailKey = `${prefix}thumbnail.${imageExt(deps.imageFormat)}`;
-    await storage.put(bucket, thumbnailKey, thumbnail, { contentType: imageType(deps.imageFormat) });
   }
-  let size = 0;
-  for await (const obj of storage.list(bucket, prefix)) size += obj.size;
   const now = deps.now?.() ?? new Date();
   // A T0 job that landed while we scanned (another sample, the worker) wins over publishing.
   if (await moderation.broadcastTainted(vod.broadcastId)) {
     await markRemoved(db, vodId);
     return "removed";
   }
-  await db
-    .update(schema.vods)
-    .set({
-      status: "ready",
-      durationSeconds: totalDuration(segments),
-      sizeBytes: size,
-      expiresAt: new Date(now.getTime() + vod.retentionDays * DAY_MS),
-      ...(thumbnailKey ? { thumbnailKey } : {}),
-    })
-    .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")));
+  const size = await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ status: schema.vods.status })
+      .from(schema.vods)
+      .where(eq(schema.vods.id, vodId))
+      .for("update");
+    if (current?.status !== "processing") return null;
+    // Keep T0 cleanup serialized with publication through the ready transition. If cleanup
+    // committed first, no final objects are written; if this transaction wins, cleanup runs
+    // afterwards and removes the completed public media.
+    await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
+      contentType: "application/vnd.apple.mpegurl",
+      cacheControl: "public, max-age=3600",
+    });
+    if (thumbnail && thumbnailKey)
+      await storage.put(bucket, thumbnailKey, thumbnail, { contentType: imageType(deps.imageFormat) });
+    let totalSize = 0;
+    for await (const obj of storage.list(bucket, prefix)) totalSize += obj.size;
+    const changed = await tx
+      .update(schema.vods)
+      .set({
+        status: "ready",
+        durationSeconds: totalDuration(segments),
+        sizeBytes: totalSize,
+        expiresAt: new Date(now.getTime() + vod.retentionDays * DAY_MS),
+        ...(thumbnailKey ? { thumbnailKey } : {}),
+      })
+      .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")))
+      .returning({ id: schema.vods.id });
+    return changed.length > 0 ? totalSize : null;
+  });
+  if (size === null) return "removed";
   log.info("VOD ready", { segments: segments.length, sizeBytes: size });
   return "ready";
 }

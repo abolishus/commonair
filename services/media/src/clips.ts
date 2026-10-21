@@ -156,19 +156,34 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
       await markClipRemoved(db, clipId);
       return "removed";
     }
-    await storage.put(bucket, clipKey(clipId), await Bun.file(out).bytes(), { contentType: "video/mp4" });
     const thumbnailKey = thumb.byteLength > 0 ? clipThumbKey(clipId, deps.imageFormat) : null;
-    if (thumbnailKey) await storage.put(bucket, thumbnailKey, thumb, { contentType: imageType(deps.imageFormat) });
-    await db
-      .update(schema.clips)
-      .set({
-        status: "ready",
-        storageKey: clipKey(clipId),
-        thumbnailKey,
-        durationSeconds: Math.round(window.durationSeconds * 1000) / 1000,
-        ...(vodId && !clip.vodId ? { vodId } : {}),
-      })
-      .where(eq(schema.clips.id, clipId));
+    const clipBytes = await Bun.file(out).bytes();
+    const published = await db.transaction(async (tx) => {
+      const [current] = await tx
+        .select({ status: schema.clips.status })
+        .from(schema.clips)
+        .where(eq(schema.clips.id, clipId))
+        .for("update");
+      if (current?.status !== "processing") return false;
+      // T0 cleanup changes this row in its transaction. Holding the row lock across object
+      // publication makes cleanup and publication serialize: cleanup wins before uploads or
+      // runs after all uploads and the ready transition commit.
+      await storage.put(bucket, clipKey(clipId), clipBytes, { contentType: "video/mp4" });
+      if (thumbnailKey) await storage.put(bucket, thumbnailKey, thumb, { contentType: imageType(deps.imageFormat) });
+      const changed = await tx
+        .update(schema.clips)
+        .set({
+          status: "ready",
+          storageKey: clipKey(clipId),
+          thumbnailKey,
+          durationSeconds: Math.round(window.durationSeconds * 1000) / 1000,
+          ...(vodId && !clip.vodId ? { vodId } : {}),
+        })
+        .where(and(eq(schema.clips.id, clipId), eq(schema.clips.status, "processing")))
+        .returning({ id: schema.clips.id });
+      return changed.length > 0;
+    });
+    if (!published) return "removed";
     log.info("clip ready", { durationSeconds: window.durationSeconds, fromLiveBuffer: live !== null });
     return "ready";
   } finally {

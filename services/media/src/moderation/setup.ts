@@ -46,7 +46,7 @@ export async function setupModeration(opts: {
   logger: Logger;
   ffmpeg: string;
   bullPrefix?: string;
-  kickPublisher: (path: string) => Promise<void>;
+  kickPublisher: (path: string) => Promise<void | boolean>;
   stopBroadcast: (broadcastId: string) => Promise<void>;
   overrides?: ModerationOverrides;
 }): Promise<ModerationRuntime> {

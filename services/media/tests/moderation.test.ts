@@ -277,15 +277,20 @@ describe("T0 live", () => {
     expect(lines.filter((l) => JSON.parse(l).level === "fatal")).toHaveLength(1);
   });
 
-  test("a failing kick still seals and enqueues (the worker's suspension then refuses reconnects)", async () => {
+  test("a failing kick keeps T0 pending until the publisher is confirmed off air", async () => {
+    let calls = 0;
+    const q = new FakeQueue();
     const { moderation, queue } = await makeModeration({
+      queue: q,
       matcher: fakeMatcher({ [MATCH]: "csam" }),
       kickPublisher: async () => {
-        throw new Error("mediamtx down");
+        calls++;
+        if (calls < 4) throw new Error("mediamtx down");
       },
     });
     await moderation.scanLiveFrame(target, fakeFrame("a", 90), new Date());
     await moderation.settle();
+    expect(calls).toBe(4);
     expect(queue.t0s).toHaveLength(1);
   });
 
@@ -330,14 +335,15 @@ describe("T0 live", () => {
   test("logs carry ids, categories, versions and distances only", async () => {
     const queue = new FakeQueue();
     queue.failT0 = 2;
+    let calls = 0;
     const { moderation, lines } = await makeModeration({
       queue,
       matcher: fakeMatcher({ [MATCH]: "csam" }),
       kickPublisher: async () => {
-        throw new Error("kick failed for rtsp://internal:secret@127.0.0.1:8554/live/someone");
+        calls++;
+        if (calls === 1) throw new Error("kick failed for rtsp://internal:secret@127.0.0.1:8554/live/someone");
       },
     });
-    await moderation.scanLiveFrame(target, fakeFrame("1", 90), new Date());
     await moderation.scanLiveFrame(target, fakeFrame("a", 90), new Date());
     await moderation.settle();
     const all = lines.join("\n");

@@ -561,6 +561,10 @@ describe("media pipeline", () => {
     await media.jobs.enqueueClip(clipId);
     const clip = await waitForClip(clipId);
     expect(clip).toMatchObject({ status: "deleted", removedReason: "t0_hash_match" });
+    // A deleted T0 clip must not regain either public object after the worker cleanup.
+    expect(await media.ctx.storage.head(BUCKET, `clips/${clipId}.mp4`)).toBeNull();
+    expect(await media.ctx.storage.head(BUCKET, `clips/${clipId}.webp`)).toBeNull();
+    expect(await media.ctx.storage.head(BUCKET, `clips/${clipId}.jpg`)).toBeNull();
     // A reconnect on the same path is kicked again before any work starts.
     await publisher?.stop();
     const again = await goLiveNoWait(T0_PATTERN);

@@ -67,7 +67,8 @@ export interface ModerationDeps {
   matcher: HashMatcher;
   sealer: SealingKey;
   tools: FrameTools;
-  kickPublisher: (path: string) => Promise<void>;
+  /** Resolves after MediaMTX confirms the publisher is disconnected (false means already absent). */
+  kickPublisher: (path: string) => Promise<void | boolean>;
   /** Stop local workers for a broadcast without finalizing (publishing) its VOD. */
   stopBroadcast: (broadcastId: string) => Promise<void>;
   logger: Logger;
@@ -194,17 +195,21 @@ export class MediaModeration {
     return this.deps.queue.hasT0("broadcast", broadcastId);
   }
 
-  /** Kick a publisher (a few quick retries; the worker's suspension then refuses the reconnect). */
+  /** Keep retrying until the publisher is confirmed off air; fail closed while MediaMTX is unavailable. */
   async kick(path: string, ids: Record<string, string>): Promise<void> {
     let delay = 200;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    const fatalAfter = this.deps.fatalAfterAttempts ?? 5;
+    for (let attempt = 1; ; attempt++) {
       try {
         await this.deps.kickPublisher(path);
         return;
       } catch (err) {
-        this.log.error("T0: kicking the publisher failed", { ...ids, attempt, error: errName(err) });
-        if (attempt < 3) await this.sleep(delay);
-        delay *= 2;
+        const fields = { ...ids, attempt, error: errName(err) };
+        if (attempt >= fatalAfter)
+          this.log.fatal("T0: publisher remains live; retrying kick until confirmed off air", fields);
+        else this.log.error("T0: kicking the publisher failed; retrying", fields);
+        await this.sleep(delay);
+        delay = Math.min((this.deps.retry ?? DEFAULT_RETRY).maxMs, delay * 2);
       }
     }
   }
