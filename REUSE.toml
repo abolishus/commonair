@@ -32,3 +32,9 @@ path = ["**/CACHEDIR.TAG"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 CommonAir contributors"
 SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["packages/moderation/tests/vectors/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "Meta Platforms, Inc. and affiliates"
+SPDX-License-Identifier = "BSD-3-Clause"
