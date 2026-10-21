@@ -30,6 +30,26 @@ export async function lockUploadReference(tx: Executor, key: string): Promise<vo
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }
 
+export async function isCommittedUpload(
+  deps: Deps,
+  tx: Executor,
+  ref: string,
+  channelId: string,
+  purpose: UploadPurpose,
+): Promise<boolean> {
+  const key = keyOfRef(ref, instanceMediaBase(deps.env));
+  if (!key || !isCommittedKeyShape(key, channelId, purpose)) return false;
+  await lockUploadReference(tx, key);
+  const [revoked] = await tx
+    .select({ id: schema.nciiRequestItems.id })
+    .from(schema.nciiRequestItems)
+    .where(sql`${schema.nciiRequestItems.uploadKey} = ${key} and ${schema.nciiRequestItems.removedAt} is not null`)
+    .limit(1);
+  if (revoked) return false;
+  const head = await deps.storage.head(deps.env.S3_BUCKET_MEDIA, key);
+  return head !== null;
+}
+
 export async function assertCommittedUpload(
   deps: Deps,
   tx: Executor,
@@ -37,16 +57,6 @@ export async function assertCommittedUpload(
   channelId: string,
   purpose: UploadPurpose,
 ): Promise<void> {
-  const key = keyOfRef(ref, instanceMediaBase(deps.env));
-  if (!key || !isCommittedKeyShape(key, channelId, purpose))
+  if (!(await isCommittedUpload(deps, tx, ref, channelId, purpose)))
     throw badRequest(`Upload the ${purpose} image and commit it first`);
-  await lockUploadReference(tx, key);
-  const [revoked] = await tx
-    .select({ id: schema.nciiRequestItems.id })
-    .from(schema.nciiRequestItems)
-    .where(sql`${schema.nciiRequestItems.uploadKey} = ${key} and ${schema.nciiRequestItems.removedAt} is not null`)
-    .limit(1);
-  if (revoked) throw badRequest(`Upload the ${purpose} image and commit it first`);
-  const head = await deps.storage.head(deps.env.S3_BUCKET_MEDIA, key);
-  if (!head) throw badRequest(`Upload the ${purpose} image and commit it first`);
 }
