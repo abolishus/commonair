@@ -8,7 +8,13 @@ import type { WorkerContext } from "../context.ts";
 import { withRunLock } from "../integrity/lock.ts";
 import { runEvidenceAudit } from "../moderation/evidence-audit.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
-import { frameRetention, holdEligibility, incomingCleanup, ncmecUnfiled } from "../moderation/schedules.ts";
+import {
+  frameRetention,
+  holdEligibility,
+  incomingCleanup,
+  ncmecUnfiled,
+  reconcileT0Media,
+} from "../moderation/schedules.ts";
 import { defineJob, type JobDefinition, type Schedule } from "../runtime/registry.ts";
 
 export const moderationLockKey = (name: string) => `worker:lock:moderation:${name}`;
@@ -44,10 +50,14 @@ function scheduled(
 export const moderationSchedules: readonly JobDefinition[] = [
   scheduled(
     MODERATION_JOBS.evidenceAudit,
-    "Daily: re-read every evidence object and verify its digest; incident and fatal alert on loss",
+    "Daily: retry unfinished T0 media preservation and verify every evidence object digest",
     { pattern: "17 3 * * *" },
     6 * 3_600_000,
-    (ctx) => runEvidenceAudit(ctx),
+    async (ctx) => {
+      const t0Media = await reconcileT0Media(ctx);
+      const evidence = await runEvidenceAudit(ctx);
+      return { t0Media, evidence };
+    },
   ),
   scheduled(
     MODERATION_JOBS.ncmecUnfiled,

@@ -8,15 +8,20 @@
  * "Once" markers are audit rows, so they survive restarts and are visible in the case history.
  */
 import { schema, uuidv7 } from "@commonair/db";
+import { MODERATION_JOBS, QUEUES, type ModerationT0MediaJob } from "@commonair/contracts/internal";
 import { INCOMING_PREFIX, MODERATION_CONSTANTS } from "@commonair/moderation";
-import { and, eq, isNotNull, isNull, lt, notExists, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull, lt, notExists, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { alert, audit } from "./records.ts";
 import { mediaStorage } from "./runtime.ts";
+import { T0_MEDIA_COMPLETE_AUDIT_ACTION } from "./t0-media.ts";
 
 const { ncmecReports, legalHolds, auditLog, moderationCases: cases, moderationFlags: flags, incidents } = schema;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+
+export const t0MediaReconcileJobId = (caseId: string, scheduledAt: number) =>
+  `t0-media:${caseId}:reconcile:${scheduledAt}`;
 
 const markerMissing = (action: string, subjectId: ReturnType<typeof sql>) =>
   notExists(
@@ -95,6 +100,61 @@ export async function ncmecUnfiled(ctx: WorkerContext) {
     );
   }
   return { alerted: toAlert.length, incidents: toIncident.length };
+}
+
+/** Requeue T0 media cases that have not yet completed a clean preservation sweep. */
+export async function reconcileT0Media(ctx: WorkerContext, batch = 200) {
+  let cursor: string | undefined;
+  let selected = 0;
+  let enqueued = 0;
+  while (true) {
+    const due = await ctx.db
+      .select({
+        caseId: cases.id,
+        holdId: legalHolds.id,
+        channelId: cases.channelId,
+        subjectType: cases.subjectType,
+        subjectId: cases.subjectId,
+      })
+      .from(cases)
+      .innerJoin(legalHolds, eq(legalHolds.caseId, cases.id))
+      .where(
+        and(
+          eq(cases.tier, "t0"),
+          markerMissing(T0_MEDIA_COMPLETE_AUDIT_ACTION, sql`${cases.id}::text`),
+          ...(cursor ? [gt(cases.id, cursor)] : []),
+        ),
+      )
+      .orderBy(cases.id)
+      .limit(batch);
+    if (due.length === 0) break;
+    selected += due.length;
+    for (const c of due) {
+      const [flag] = c.channelId
+        ? []
+        : await ctx.db.select({ channelId: flags.channelId }).from(flags).where(eq(flags.caseId, c.caseId)).limit(1);
+      const channelId = c.channelId ?? flag?.channelId;
+      if (!channelId) {
+        ctx.logger.error("T0 media reconciliation has no channel reference", { caseId: c.caseId });
+        throw new Error("T0 media reconciliation missing channel");
+      }
+      const job: ModerationT0MediaJob = {
+        caseId: c.caseId,
+        holdId: c.holdId,
+        channelId,
+        broadcastId: c.subjectType === "broadcast" ? c.subjectId : null,
+      };
+      // A fresh timestamp id escapes any exhausted finite-attempt job while deduping this run.
+      await ctx.enqueue(QUEUES.moderation, MODERATION_JOBS.t0Media, job, {
+        jobId: t0MediaReconcileJobId(c.caseId, ctx.now().getTime()),
+      });
+      enqueued++;
+    }
+    // `due` is nonempty here; its final id is the next keyset cursor.
+    cursor = due[due.length - 1]?.caseId;
+    if (!cursor) throw new Error("T0 media reconciliation page is missing its last case id");
+  }
+  return { selected, enqueued };
 }
 
 /** Holds whose report was filed at least a year ago become eligible for release (never released here). */

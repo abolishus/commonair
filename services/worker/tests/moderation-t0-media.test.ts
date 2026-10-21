@@ -6,6 +6,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { WorkerContext } from "../src/context.ts";
 import {
   collectClipTargets,
+  markT0MediaComplete,
   nextT0MediaSweep,
   preserveOne,
   T0_MEDIA_SWEEP_DELAY_MS,
@@ -13,6 +14,8 @@ import {
   type MediaTarget,
   type PreserveResult,
 } from "../src/moderation/t0-media.ts";
+import { t0MediaReconcileJobId } from "../src/moderation/schedules.ts";
+import { reconcileT0Media } from "../src/moderation/schedules.ts";
 
 const CASE_ID = "0193e6a0-0000-7000-8000-000000000001";
 const HOLD_ID = "0193e6a0-0000-7000-8000-000000000002";
@@ -23,6 +26,133 @@ function object(key: string, size = 12) {
 }
 
 describe("T0 clip object recovery", () => {
+  test("pages past an unfinished first batch so later T0 cases are requeued", async () => {
+    const pages = [
+      [CASE_ID, HOLD_ID].map((caseId, index) => ({
+        caseId,
+        holdId: index === 0 ? HOLD_ID : CASE_ID,
+        channelId: CHANNEL_ID,
+        subjectType: "broadcast" as const,
+        subjectId: CHANNEL_ID,
+      })),
+      [
+        { caseId: "0193e6a0-0000-7000-8000-000000000004", holdId: HOLD_ID },
+        { caseId: "0193e6a0-0000-7000-8000-000000000005", holdId: HOLD_ID },
+      ].map((row) => ({ ...row, channelId: CHANNEL_ID, subjectType: "broadcast" as const, subjectId: CHANNEL_ID })),
+      [],
+    ];
+    let page = 0;
+    const enqueued: string[] = [];
+    const query = {
+      from() {
+        return query;
+      },
+      innerJoin() {
+        return query;
+      },
+      where() {
+        return query;
+      },
+      orderBy() {
+        return query;
+      },
+      async limit() {
+        return pages[page++] ?? [];
+      },
+    };
+    const ctx = {
+      db: { select: () => query },
+      enqueue: async (_queue: string, _name: string, job: { caseId: string }) => enqueued.push(job.caseId),
+      now: () => new Date(1_800_000_000_000),
+      logger: { error() {} },
+    } as unknown as WorkerContext;
+
+    const result = await reconcileT0Media(ctx, 2);
+
+    expect(result).toEqual({ selected: 4, enqueued: 4 });
+    expect(enqueued).toEqual(pages.slice(0, 2).flatMap((batch) => batch.map((row) => row.caseId)));
+    expect(page).toBe(3);
+  });
+
+  test("commits the completion audit and event together once after a clean pass", async () => {
+    const writes: string[] = [];
+    let complete = false;
+    let selects = 0;
+    let lockTail = Promise.resolve();
+    const tx = {
+      async execute() {},
+      select() {
+        const query = selects++ % 2 === 0 ? "completion" : "flag";
+        return {
+          from() {
+            return {
+              where() {
+                return {
+                  async limit() {
+                    if (query === "completion") return complete ? [{ id: "audit-id" }] : [];
+                    return [{ listCategory: "csam", provider: "fixture", providerVersion: "fixture-v1" }];
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+      insert() {
+        return {
+          async values(value: unknown) {
+            const row = value as { action?: string; type?: string };
+            if (row.action === "moderation.t0.media_complete") complete = true;
+            writes.push(row.action ? "audit" : row.type ? "event" : "other");
+          },
+        };
+      },
+    };
+    const ctx = {
+      db: {
+        async transaction(run: (tx: unknown) => Promise<unknown>) {
+          let release: (() => void) | undefined;
+          const transaction = {
+            ...tx,
+            async execute() {
+              const previous = lockTail;
+              lockTail = new Promise<void>((resolve) => {
+                release = resolve;
+              });
+              await previous;
+            },
+          };
+          try {
+            return await run(transaction);
+          } finally {
+            release?.();
+          }
+        },
+      },
+      now: () => new Date(0),
+    } as unknown as WorkerContext;
+    const job = { caseId: CASE_ID, holdId: HOLD_ID, channelId: CHANNEL_ID, broadcastId: null };
+
+    await Promise.all([
+      markT0MediaComplete(ctx, job, { type: "broadcast", id: CHANNEL_ID }),
+      markT0MediaComplete(ctx, job, { type: "broadcast", id: CHANNEL_ID }),
+    ]);
+
+    expect(writes).toEqual(["audit", "event"]);
+  });
+
+  test("daily reconciliation uses a fresh stable job id per run after finite retries exhaust", () => {
+    const first = t0MediaReconcileJobId(CASE_ID, 1_800_000_000_000);
+    const second = t0MediaReconcileJobId(CASE_ID, 1_800_086_400_000);
+    expect(first).toBe(`t0-media:${CASE_ID}:reconcile:1800000000000`);
+    expect(second).not.toBe(first);
+    expect(nextT0MediaSweep(CASE_ID, first, 1)).toEqual({
+      jobId: `${first}:sweep:1`,
+      delayMs: T0_MEDIA_SWEEP_DELAY_MS,
+    });
+    expect(nextT0MediaSweep(CASE_ID, `${first}:sweep:1`, 0)).toBeNull();
+  });
+
   test("keeps delayed reconciliation alive across an upload discovered after the first pass", () => {
     const firstSweep = nextT0MediaSweep(CASE_ID, `t0-media:${CASE_ID}`, 0);
     expect(firstSweep).toEqual({ jobId: t0MediaSweepJobId(CASE_ID, 1), delayMs: T0_MEDIA_SWEEP_DELAY_MS });
@@ -80,6 +210,39 @@ describe("T0 clip object recovery", () => {
         objects.delete(key);
       },
     } as unknown as ObjectStorage;
+    let selectNumber = 0;
+    let writeNumber = 0;
+    const tx = {
+      async execute() {
+        events.push("transaction-lock");
+      },
+      select() {
+        const current = selectNumber++;
+        return {
+          from() {
+            return {
+              where() {
+                return Object.assign(Promise.resolve([] as unknown[]), {
+                  async limit() {
+                    return current === 1
+                      ? [{ listCategory: "csam", provider: "fixture", providerVersion: "fixture-v1" }]
+                      : [];
+                  },
+                });
+              },
+            };
+          },
+        };
+      },
+      insert(table: unknown) {
+        return {
+          async values() {
+            void table;
+            events.push(["manifest-write", "audit-write", "event-write"][writeNumber++] ?? "unknown-write");
+          },
+        };
+      },
+    };
     const ctx = {
       storage,
       mediaBucket: "media",
@@ -94,8 +257,12 @@ describe("T0 clip object recovery", () => {
         },
       },
       db: {
-        select: () => ({ from: () => ({ where: async () => [] }) }),
-        insert: () => ({ values: async () => events.push("manifest-write") }),
+        async transaction(run: (tx: unknown) => Promise<unknown>) {
+          events.push("transaction-start");
+          const result = await run(tx);
+          events.push("transaction-commit");
+          return result;
+        },
       },
       now: () => new Date(0),
     } as unknown as WorkerContext;
@@ -111,9 +278,14 @@ describe("T0 clip object recovery", () => {
 
     expect(events).toEqual([
       "source-read",
+      "transaction-start",
+      "transaction-lock",
       "evidence-write",
       "evidence-verify-read",
       "manifest-write",
+      "audit-write",
+      "event-write",
+      "transaction-commit",
       "source-delete",
     ]);
     expect(objects.has(target.key)).toBe(false);
