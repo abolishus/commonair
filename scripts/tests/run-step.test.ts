@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { type ContainerRow, crashLooping, foreignContainers } from "../infra.ts";
+import {
+  type ContainerRow,
+  STALE_TEST_MS,
+  type TestResource,
+  crashLooping,
+  foreignContainers,
+  staleTestResources,
+} from "../infra.ts";
 import { runStep } from "../run-step.ts";
 
 const quiet = { stdio: "ignore" as const, log: () => {} };
@@ -90,5 +97,51 @@ describe("crashLooping", () => {
   test("flags a service at the restart threshold, not below it", () => {
     expect(crashLooping([row({ restarts: 2 })])).toEqual([]);
     expect(crashLooping([row({ restarts: 3, status: "exited" })])).toHaveLength(1);
+  });
+});
+
+describe("staleTestResources", () => {
+  const now = Date.parse("2026-10-21T12:00:00Z");
+  const old = now - STALE_TEST_MS - 1;
+  const res = (name: string, createdMs = old, kind: TestResource["kind"] = "container"): TestResource => ({
+    kind,
+    name,
+    createdMs,
+  });
+
+  test("selects old throwaway test containers, compose projects, volumes and networks", () => {
+    const rows = [
+      res("media-int-garage-a00d662b"),
+      res("media-int-mtx-e5c3f33f"),
+      res("media-int-target-ae031e9f"),
+      res("harness-mediamtx-2a9ddb70"),
+      res("origin-test-68a93d4a"),
+      res("commonair-it-783005c5_postgres_1"),
+      res("commonair-it-783005c5-restore"),
+      res("commonair-it-783005c5_postgres-data", old, "volume"),
+      res("commonair-it-783005c5_default", old, "network"),
+    ];
+    expect(staleTestResources(rows, now)).toEqual(rows);
+  });
+
+  test("keeps anything younger than the cutoff: another checkout may be mid-run", () => {
+    expect(staleTestResources([res("media-int-mtx-e5c3f33f", now - STALE_TEST_MS + 1)], now)).toEqual([]);
+  });
+
+  test("never touches the dev stack or unrelated containers", () => {
+    const rows = [
+      res("commonair_postgres_1"),
+      res("commonair_postgres-data", old, "volume"),
+      res("commonair_default", old, "network"),
+      res("commonair-it-783005c5"),
+      res("media-int-mtx-notahex1"),
+      res("my-media-int-mtx-e5c3f33f"),
+      res("podman", old, "network"),
+    ];
+    expect(staleTestResources(rows, now)).toEqual([]);
+  });
+
+  test("an unknown creation time is never stale", () => {
+    expect(staleTestResources([res("origin-test-68a93d4a", Number.NaN)], now)).toEqual([]);
   });
 });

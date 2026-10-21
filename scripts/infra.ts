@@ -94,6 +94,107 @@ export function crashLooping(rows: ContainerRow[]): ContainerRow[] {
   return rows.filter((r) => r.restarts >= CRASH_LOOP_RESTARTS);
 }
 
+/**
+ * Throwaway containers, compose projects (`commonair-it-*` containers, volumes, network) and
+ * databases that integration tests create. A killed run skips its cleanup and leaks them, and the
+ * leaked stacks keep running and load every later run.
+ */
+const TEST_RESOURCE =
+  /^(?:(?:harness-mediamtx|media-int-(?:garage|mtx|target)|origin-test)-[0-9a-f]{8}|commonair-it-[0-9a-f]{8}[_-][\w.-]+)$/;
+/** Far longer than any test run, so another checkout's run in progress is never touched. */
+export const STALE_TEST_MS = 2 * 60 * 60_000;
+
+export interface TestResource {
+  kind: "container" | "volume" | "network";
+  name: string;
+  createdMs: number;
+}
+
+export function staleTestResources(rows: TestResource[], now: number): TestResource[] {
+  // An unparseable creation time is NaN, which is never stale.
+  return rows.filter((r) => TEST_RESOURCE.test(r.name) && now - r.createdMs > STALE_TEST_MS);
+}
+
+function podmanJson<T>(args: string[]): T[] {
+  const p = Bun.spawnSync(["podman", ...args, "--format", "json"], { timeout: 30_000 });
+  try {
+    return (JSON.parse(p.stdout.toString() || "[]") as T[] | null) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function testResources(): TestResource[] {
+  return [
+    ...podmanJson<{ Names?: string[]; Created?: number }>(["ps", "-a"]).map((c) => ({
+      kind: "container" as const,
+      name: c.Names?.[0] ?? "",
+      createdMs: (c.Created ?? Number.NaN) * 1000,
+    })),
+    ...podmanJson<{ Name?: string; CreatedAt?: string }>(["volume", "ls"]).map((v) => ({
+      kind: "volume" as const,
+      name: v.Name ?? "",
+      createdMs: Date.parse(v.CreatedAt ?? ""),
+    })),
+    ...podmanJson<{ name?: string; created?: string }>(["network", "ls"]).map((n) => ({
+      kind: "network" as const,
+      name: n.name ?? "",
+      createdMs: Date.parse(n.created ?? ""),
+    })),
+  ];
+}
+
+/** Superuser SQL inside the stack's Postgres container (the app role cannot drop databases). */
+function psql(sql: string): string {
+  const id = containerId("postgres");
+  if (!id) throw new Error("postgres container not found");
+  const p = Bun.spawnSync(
+    ["podman", "exec", id, "sh", "-c", 'psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -Atc "$1"', "sh", sql],
+    { timeout: 60_000 },
+  );
+  if (p.exitCode !== 0) throw new Error(p.stderr.toString().trim());
+  return p.stdout.toString().trim();
+}
+
+function sweepStaleTestContainers(): void {
+  try {
+    const stale = staleTestResources(testResources(), Date.now());
+    const names = (kind: TestResource["kind"]) => stale.filter((r) => r.kind === kind).map((r) => r.name);
+    // Containers first: volumes and networks in use cannot be removed. --depend because compose's
+    // depends_on makes podman refuse to remove a container before its dependents.
+    for (const [kind, cmd] of [
+      ["container", ["rm", "-f", "--depend", "-t", "1"]],
+      ["volume", ["volume", "rm", "-f"]],
+      ["network", ["network", "rm", "-f"]],
+    ] as const) {
+      const list = names(kind);
+      if (list.length > 0) Bun.spawnSync(["podman", ...cmd, ...list], { timeout: 120_000 });
+    }
+    if (stale.length > 0) console.log(`infra: removed ${stale.length} stale test containers, volumes and networks`);
+  } catch (e) {
+    console.warn(`infra: stale test container sweep skipped: ${(e as Error).message}`);
+  }
+}
+
+function sweepStaleTestDatabases(): void {
+  try {
+    // PG_VERSION is written when a database is created, so its mtime is the database's age.
+    // %I quotes the name server-side, so no database name can inject SQL into the drop.
+    const stale = psql(
+      `select format('drop database if exists %I with (force)', datname) from pg_database d ` +
+        `where datname like 'commonair\\_test\\_%' ` +
+        `and (pg_stat_file('base/' || d.oid || '/PG_VERSION')).modification < now() - interval '${STALE_TEST_MS / 1000} seconds' ` +
+        `and not exists (select 1 from pg_stat_activity a where a.datid = d.oid)`,
+    )
+      .split("\n")
+      .filter(Boolean);
+    for (const drop of stale) psql(drop);
+    if (stale.length > 0) console.log(`infra: dropped ${stale.length} stale test databases`);
+  } catch (e) {
+    console.warn(`infra: stale test database sweep skipped: ${(e as Error).message}`);
+  }
+}
+
 function preflight(): void {
   const foreign = foreignContainers(projectContainers(), ROOT);
   if (foreign.length === 0) return;
@@ -198,10 +299,12 @@ if (import.meta.main) {
     const cmd = process.argv[2];
     if (cmd === "test") {
       preflight();
+      sweepStaleTestContainers();
       compose(["build", ...BUILD_SERVICES], 20 * 60_000);
       compose(["up", "-d", ...TEST_SERVICES], 5 * 60_000);
       await waitHealthy(HEALTHY_SERVICES);
       await waitExited(ONE_SHOT_SERVICES);
+      sweepStaleTestDatabases();
       console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);
     } else if (cmd === "stack") {
       preflight();

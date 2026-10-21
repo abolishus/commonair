@@ -19,7 +19,8 @@ import { DEMO_CHAT, DEMO_HANDLES, DEMO_STREAMERS } from "../src/demo/data.ts";
 import { verifyPassword } from "../src/demo/password.ts";
 import { countAnchoredUsers, seedDemo } from "../src/demo/seed.ts";
 
-vi.setConfig({ testTimeout: 60_000 });
+// Postgres runs DROP DATABASE one at a time: when many files finish together, teardown queues.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 const byText = (a: string, b: string) => a.localeCompare(b);
 

@@ -14,9 +14,26 @@ import { createValkey } from "@commonair/service";
 import { generateSigningKey, randomSecret } from "@commonair/tokens";
 import { buildDeps, createApp, loadApiEnv, type ApiApp, type Deps } from "../src/index.ts";
 import { DEFAULT_RATE_LIMITS } from "../src/lib/ratelimit.ts";
+import { vi } from "vite-plus/test";
 
 export const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 export const MAILPIT_API = process.env.MAILPIT_API_URL ?? "http://localhost:8025";
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
+
+async function s3Credential(name: "S3_ACCESS_KEY_ID" | "S3_SECRET_ACCESS_KEY", fallback: string): Promise<string> {
+  const fromProcess = process.env[name];
+  if (fromProcess) return fromProcess;
+  const localEnv = await Bun.file(new URL("../../../.env", import.meta.url))
+    .text()
+    .catch(() => "");
+  const value = new RegExp(`^${name}=(.*)$`, "m")
+    .exec(localEnv)?.[1]
+    ?.trim()
+    .replace(/^['"]|['"]$/g, "");
+  return value || fallback;
+}
 
 export interface TestApi {
   url: string;
@@ -34,6 +51,14 @@ export async function startApi(
 ): Promise<TestApi> {
   const db = await createTestDatabase();
   const { pkcs8B64 } = await generateSigningKey();
+  // Keep test evidence keys synthetic and isolated from operator credentials.
+  const evidencePair = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
+  const evidencePublicKey = Buffer.from(await crypto.subtle.exportKey("raw", evidencePair.publicKey)).toString(
+    "base64",
+  );
+  const evidencePrivateKey = Buffer.from(await crypto.subtle.exportKey("pkcs8", evidencePair.privateKey)).toString(
+    "base64",
+  );
   const internalSecret = randomSecret("", 32);
   const mediaPassword = randomSecret("", 32);
   const keyPrefix = `test:${crypto.randomUUID()}:`;
@@ -44,6 +69,10 @@ export async function startApi(
     fetch: (req, srv) => (app ? app.fetch(req, srv) : new Response("starting", { status: 503 })),
   });
   const url = `http://127.0.0.1:${server.port}`;
+  const [s3AccessKeyId, s3SecretAccessKey] = await Promise.all([
+    s3Credential("S3_ACCESS_KEY_ID", "GK0123456789abcdef01234567"),
+    s3Credential("S3_SECRET_ACCESS_KEY", "0".repeat(64)),
+  ]);
   const env = loadApiEnv({
     NODE_ENV: "test",
     // Relays and simulcast targets in tests live on loopback.
@@ -56,12 +85,14 @@ export async function startApi(
     VALKEY_URL,
     INTERNAL_API_SECRET: internalSecret,
     MEDIA_INTERNAL_PASSWORD: mediaPassword,
+    EVIDENCE_PUBLIC_KEY: evidencePublicKey,
+    EVIDENCE_PRIVATE_KEY: evidencePrivateKey,
     AUTH_SECRET: randomSecret("", 32),
     AUTH_TRUSTED_ORIGINS: "http://localhost:3000",
     ALTCHA_HMAC_KEY: randomSecret("", 32),
     S3_ENDPOINT: "http://localhost:3900",
-    S3_ACCESS_KEY_ID: "GK0123456789abcdef01234567",
-    S3_SECRET_ACCESS_KEY: "0".repeat(64),
+    S3_ACCESS_KEY_ID: s3AccessKeyId,
+    S3_SECRET_ACCESS_KEY: s3SecretAccessKey,
     PLAYBACK_SIGNING_KEY: pkcs8B64,
     SMTP_HOST: process.env.SMTP_HOST ?? "localhost",
     SMTP_PORT: process.env.SMTP_PORT ?? "1025",

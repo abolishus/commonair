@@ -198,7 +198,9 @@ describe("WorkerFilterRunner", () => {
     const at = (q: number) => samples[Math.min(samples.length - 1, Math.floor(q * samples.length))] ?? 0;
     if (process.env.CHAT_FILTER_BENCH)
       process.stderr.write(`filter worker p50 ${at(0.5).toFixed(3)} ms, p99 ${at(0.99).toFixed(3)} ms\n`);
-    // Lenient so a loaded CI machine does not flake; measured p99 is reported in the README.
-    expect(at(0.99)).toBeLessThan(10);
+    // Measured figures are in the README. The median catches a per-message regression; the tail only
+    // a gross one, since parallel suites can stall the event loop for tens of milliseconds.
+    expect(at(0.5)).toBeLessThan(2);
+    expect(at(0.99)).toBeLessThan(50);
   });
 });

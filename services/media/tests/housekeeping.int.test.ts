@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createLogger } from "@commonair/observability";
@@ -28,6 +28,10 @@ import { VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
 import { reconcileVods, VOD_STALLED_REASON } from "../src/vod/reconcile.ts";
 import { podmanAvailable, startGarage, type Garage } from "./helpers/containers.ts";
 import { makeModeration } from "./helpers/moderation.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 if (!podmanAvailable()) throw new Error("media integration tests need podman (rootless is fine)");
 

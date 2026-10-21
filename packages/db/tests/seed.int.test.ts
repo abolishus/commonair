@@ -3,7 +3,7 @@
 
 /** Seeds: legal drafts are inserted once per (kind, version) and never rewritten. */
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { PROTECTED_LITERALS } from "@commonair/config/site";
 import {
@@ -16,6 +16,10 @@ import {
 import { legalDocuments } from "../src/schema/safety.ts";
 import { seedLegalDocuments } from "../src/seed.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 describe("legal seed documents", () => {
   const docs = legalSeedDocuments();

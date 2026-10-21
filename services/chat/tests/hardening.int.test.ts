@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Review hardening: join-before-send, credential lifetime, banned moderators, user control. */
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { and, eq } from "drizzle-orm";
 import { BUS, type ServerFrame } from "@commonair/contracts";
 import { schema } from "@commonair/db";
@@ -22,6 +22,10 @@ import {
   startInstance,
   VALKEY_URL,
 } from "./helpers.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let a: ChatService;

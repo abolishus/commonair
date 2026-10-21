@@ -10,7 +10,8 @@ import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
 import { RoleUsageError, parseRoleArgs, setPlatformRole } from "../src/roles/cli.ts";
 
-vi.setConfig({ testTimeout: 60_000 });
+// Postgres runs DROP DATABASE one at a time: when many files finish together, teardown queues.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let app: Database;

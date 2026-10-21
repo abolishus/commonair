@@ -6,7 +6,7 @@
  * (`t.app.db`) that services use in production.
  */
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { createDb, schema as s, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import {
@@ -42,6 +42,10 @@ import {
   statement,
   storedCode,
 } from "../src/index.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let db: Database;

@@ -6,8 +6,7 @@
  * RTMP simulcast target, and a single-node Garage. Every container gets a unique name and
  * random host ports on 127.0.0.1, and is removed in `stop()`.
  */
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const MEDIAMTX_IMAGE = "docker.io/bluenviron/mediamtx:1.21.2-ffmpeg";
@@ -63,7 +62,9 @@ function run(name: string, args: string[]): Container {
 }
 
 const unique = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
-const scratch = mkdtempSync(join(tmpdir(), "media-int-"));
+const scratchRoot = join(REPO_ROOT, ".cache");
+mkdirSync(scratchRoot, { recursive: true });
+const scratch = mkdtempSync(join(scratchRoot, "media-int-"));
 
 /**
  * MediaMTX with infra/mediamtx/mediamtx.yml, pointed at `apiBase` (a fake API on the test host):

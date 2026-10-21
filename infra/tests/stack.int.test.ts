@@ -147,8 +147,22 @@ beforeAll(async () => {
 afterAll(async () => {
   await owner?.end({ timeout: 5 });
   await app?.end({ timeout: 5 });
-  run(["podman", "compose", "-p", PROJECT, "down", "-v", "-t", "5"], { allowFail: true });
-  run(["podman", "rm", "-f", `${PROJECT}-restore`], { allowFail: true });
+  // `podman compose down` walks every service in the file one podman call at a time and outlasted
+  // this hook under load, leaking running stacks. Remove by label instead; cleanup never fails the suite.
+  const label = `label=com.docker.compose.project=${PROJECT}`;
+  for (const cmd of [
+    // --depend: compose's depends_on makes podman refuse to remove a container before its dependents.
+    ["podman", "rm", "-f", "--depend", "-t", "5", "--filter", label],
+    ["podman", "rm", "-f", "-t", "5", `${PROJECT}-restore`],
+    ["podman", "volume", "prune", "-f", "--filter", label],
+    ["podman", "network", "prune", "-f", "--filter", label],
+  ]) {
+    try {
+      run(cmd, { allowFail: true, timeoutMs: 25_000 });
+    } catch (err) {
+      process.stderr.write(`stack teardown: ${String(err)}\n`);
+    }
+  }
   rmSync(envDir, { recursive: true, force: true });
 }, 120_000);
 
@@ -277,10 +291,14 @@ describe("compose data stack", () => {
       120_000,
     );
     const image = inspect(pg, "{{.ImageName}}");
+    // Recovery refuses to start with a lower max_connections than the primary had.
+    const [{ max_connections: maxConnections }] = (await owner`show max_connections`) as unknown as [
+      { max_connections: string },
+    ];
     const script = [
       "set -e",
       "commonair-restore /var/lib/postgresql/restore",
-      "gosu postgres postgres -D /var/lib/postgresql/restore -c port=5433 -c archive_mode=off -c listen_addresses='' &",
+      `gosu postgres postgres -D /var/lib/postgresql/restore -c port=5433 -c archive_mode=off -c listen_addresses='' -c max_connections=${maxConnections} &`,
       "for i in $(seq 1 120); do",
       `  if gosu postgres psql -h /var/run/postgresql -p 5433 -U commonair -d commonair -Atc "select pg_is_in_recovery()" 2>/dev/null | grep -qx f; then break; fi`,
       "  sleep 1",

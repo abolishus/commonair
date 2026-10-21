@@ -72,12 +72,16 @@ function isChromium(): boolean {
 }
 
 /** Native HLS on WebKit (Safari/iOS behaviour); hls.js everywhere MSE works. */
-function chooseNative(video: HTMLVideoElement): boolean {
-  const canNative = video.canPlayType("application/vnd.apple.mpegurl") !== "";
+async function chooseNative(video: HTMLVideoElement): Promise<boolean> {
   if (nativePref === "force") return true;
   if (nativePref === "off") return false;
-  if (canNative && !isChromium()) return true;
-  return !Hls.isSupported() && canNative;
+  const canNative = () => video.canPlayType("application/vnd.apple.mpegurl") !== "";
+  if (isChromium()) return !Hls.isSupported() && canNative();
+  // macOS WebKit fills its AVFoundation MIME cache off-thread; under load the first answer is "".
+  for (let waited = 0; !canNative() && waited < 2_000; waited += 100) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return canNative();
 }
 
 /** Native players do not retry a 404 playlist; wait until the live playlist exists. */
@@ -126,8 +130,9 @@ class Player {
   }
 
   async start(): Promise<void> {
+    const native = await chooseNative(this.video);
+    // TTFF counts from here, so a slow capability probe is not billed to playback.
     this.video.dataset.harnessStart = String(performance.now());
-    const native = chooseNative(this.video);
     this.info.path = native ? "native" : "mse";
     let url: string;
     if (mode === "direct") {

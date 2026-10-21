@@ -3,7 +3,7 @@
 
 /** Integrity DB jobs against real Postgres (as the application role) and Valkey. */
 import { and, count, eq, inArray, isNotNull } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { schema as s, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey, type ValkeyClient } from "@commonair/service";
@@ -11,6 +11,10 @@ import { KEYS, P2P_EVIDENCE } from "@commonair/contracts/internal";
 import { excludeFollowBursts, markEligibleStreamHours, scoreActiveSessions, verifyReceipts } from "../src/jobs.ts";
 import { recordFetch, recordFetches, recordHeartbeat } from "../src/store.ts";
 import type { HeartbeatSample } from "../src/types.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let app: Database;

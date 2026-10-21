@@ -7,12 +7,16 @@
  * switch a tier off must be refused by the database for the application role.
  */
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
 import { uuidv7 } from "../src/ids.ts";
 import type { Database } from "../src/client.ts";
 import { releaseHold } from "../src/holds/cli.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let app: Database;
@@ -127,7 +131,10 @@ describe("append-only evidence and flags", () => {
     const c = await makeT0Case(u);
     const h = await makeHold(u, c);
     const e = await makeEvidence(h, c);
-    await expectPgError(app.delete(s.evidenceObjects).where(eq(s.evidenceObjects.id, e)), /permission denied|append-only/);
+    await expectPgError(
+      app.delete(s.evidenceObjects).where(eq(s.evidenceObjects.id, e)),
+      /permission denied|append-only/,
+    );
     await expectPgError(
       owner.update(s.evidenceObjects).set({ keyId: "k2" }).where(eq(s.evidenceObjects.id, e)),
       /append-only/,
@@ -180,7 +187,10 @@ describe("append-only evidence and flags", () => {
         capturedAt: new Date(),
       })
       .returning({ id: s.moderationFlags.id });
-    await expectPgError(app.delete(s.moderationFlags).where(eq(s.moderationFlags.id, f!.id)), /permission denied|append-only/);
+    await expectPgError(
+      app.delete(s.moderationFlags).where(eq(s.moderationFlags.id, f!.id)),
+      /permission denied|append-only/,
+    );
     await expectPgError(
       owner.update(s.moderationFlags).set({ distance: 40 }).where(eq(s.moderationFlags.id, f!.id)),
       /append-only/,
@@ -212,10 +222,7 @@ describe("legal holds", () => {
     const h = await makeHold(u);
     await expectPgError(app.delete(s.legalHolds).where(eq(s.legalHolds.id, h)), /permission denied|cannot be deleted/);
     await expectPgError(
-      app
-        .update(s.legalHolds)
-        .set({ releasedAt: new Date(), releaseReason: "done" })
-        .where(eq(s.legalHolds.id, h)),
+      app.update(s.legalHolds).set({ releasedAt: new Date(), releaseReason: "done" }).where(eq(s.legalHolds.id, h)),
       /only the database owner/,
     );
     await expectPgError(
@@ -240,10 +247,7 @@ describe("legal holds", () => {
       /starts active/,
     );
     const h = await makeHold(u);
-    await expectPgError(
-      app.update(s.legalHolds).set({ userId: uuidv7() }).where(eq(s.legalHolds.id, h)),
-      /immutable/,
-    );
+    await expectPgError(app.update(s.legalHolds).set({ userId: uuidv7() }).where(eq(s.legalHolds.id, h)), /immutable/);
   });
 
   test("eligibility for release comes one year after filing at the earliest", async () => {
@@ -294,7 +298,10 @@ describe("NCMEC drafts", () => {
     const c = await makeT0Case(u);
     const h = await makeHold(u, c);
     const r = await makeDraft(c, h, u);
-    await expectPgError(app.delete(s.ncmecReports).where(eq(s.ncmecReports.id, r)), /permission denied|cannot be deleted/);
+    await expectPgError(
+      app.delete(s.ncmecReports).where(eq(s.ncmecReports.id, r)),
+      /permission denied|cannot be deleted/,
+    );
     await expectPgError(
       app
         .update(s.ncmecReports)
@@ -339,13 +346,24 @@ describe("T0 cases", () => {
   async function dismissFirst(c: string, reviewer: string): Promise<void> {
     await app
       .update(s.moderationCases)
-      .set({ status: "dismissal_pending", firstReviewerId: reviewer, firstReviewedAt: new Date(), firstReviewNote: "fp" })
+      .set({
+        status: "dismissal_pending",
+        firstReviewerId: reviewer,
+        firstReviewedAt: new Date(),
+        firstReviewNote: "fp",
+      })
       .where(eq(s.moderationCases.id, c));
   }
   async function dismissSecond(c: string, reviewer: string): Promise<void> {
     await app
       .update(s.moderationCases)
-      .set({ status: "dismissed", resolvedById: reviewer, resolvedAt: new Date(), resolution: "dismissed", resolutionNote: "fp" })
+      .set({
+        status: "dismissed",
+        resolvedById: reviewer,
+        resolvedAt: new Date(),
+        resolution: "dismissed",
+        resolutionNote: "fp",
+      })
       .where(eq(s.moderationCases.id, c));
   }
 
@@ -355,7 +373,10 @@ describe("T0 cases", () => {
     const l2 = await makeUser("legal");
     const mod = await makeUser("moderator");
     const c = await makeT0Case(u);
-    await expectPgError(app.update(s.moderationCases).set({ status: "dismissed" }).where(eq(s.moderationCases.id, c)), /cannot move/);
+    await expectPgError(
+      app.update(s.moderationCases).set({ status: "dismissed" }).where(eq(s.moderationCases.id, c)),
+      /cannot move/,
+    );
     await expectPgError(dismissFirst(c, mod), /legal reviewer/);
     await dismissFirst(c, l1);
     await expectPgError(dismissSecond(c, l1), /second, different legal reviewer/);
@@ -369,7 +390,10 @@ describe("T0 cases", () => {
       app.update(s.moderationCases).set({ status: "confirmed" }).where(eq(s.moderationCases.id, c)),
       /final/,
     );
-    await expectPgError(app.delete(s.moderationCases).where(eq(s.moderationCases.id, c)), /permission denied|cannot be deleted/);
+    await expectPgError(
+      app.delete(s.moderationCases).where(eq(s.moderationCases.id, c)),
+      /permission denied|cannot be deleted/,
+    );
   });
 
   test("a legal subject cannot review their own case", async () => {
@@ -381,10 +405,20 @@ describe("T0 cases", () => {
   test("a T0 case stays T0, and escalation opens a human-origin case", async () => {
     const u = await makeUser();
     const c = await makeT0Case(u);
-    await expectPgError(app.update(s.moderationCases).set({ tier: "t1" }).where(eq(s.moderationCases.id, c)), /stays T0/);
+    await expectPgError(
+      app.update(s.moderationCases).set({ tier: "t1" }).where(eq(s.moderationCases.id, c)),
+      /stays T0/,
+    );
     const [t1] = await app
       .insert(s.moderationCases)
-      .values({ tier: "t1", origin: "classifier", subjectType: "broadcast", subjectId: uuidv7(), userId: u, category: "sexual" })
+      .values({
+        tier: "t1",
+        origin: "classifier",
+        subjectType: "broadcast",
+        subjectId: uuidv7(),
+        userId: u,
+        category: "sexual",
+      })
       .returning({ id: s.moderationCases.id });
     await expectPgError(
       app.update(s.moderationCases).set({ tier: "t0" }).where(eq(s.moderationCases.id, t1!.id)),
@@ -405,7 +439,10 @@ describe("T0 cases", () => {
       .set({ suspendedAt: new Date(), suspendedReason: "t0_hash_match" })
       .where(eq(s.channels.id, ch));
     await expectPgError(app.update(s.users).set({ banned: false }).where(eq(s.users.id, u)), /dismissing its case/);
-    await expectPgError(app.update(s.users).set({ banReason: "other" }).where(eq(s.users.id, u)), /dismissing its case/);
+    await expectPgError(
+      app.update(s.users).set({ banReason: "other" }).where(eq(s.users.id, u)),
+      /dismissing its case/,
+    );
     await expectPgError(
       app.update(s.channels).set({ suspendedAt: null }).where(eq(s.channels.id, ch)),
       /dismissing its case/,
@@ -415,7 +452,13 @@ describe("T0 cases", () => {
     await app.transaction(async (tx) => {
       await tx
         .update(s.moderationCases)
-        .set({ status: "dismissed", resolvedById: l2, resolvedAt: new Date(), resolution: "dismissed", resolutionNote: "fp" })
+        .set({
+          status: "dismissed",
+          resolvedById: l2,
+          resolvedAt: new Date(),
+          resolution: "dismissed",
+          resolutionNote: "fp",
+        })
         .where(eq(s.moderationCases.id, c));
       await tx.update(s.users).set({ banned: false, banReason: null }).where(eq(s.users.id, u));
       await tx.update(s.channels).set({ suspendedAt: null, suspendedReason: null }).where(eq(s.channels.id, ch));
@@ -431,7 +474,14 @@ describe("T0 cases", () => {
       .returning({ id: s.broadcasts.id });
     const [v] = await app
       .insert(s.vods)
-      .values({ broadcastId: b!.id, channelId: ch, title: "v", storagePrefix: "vods/x/", status: "deleted", removedReason: "t0_hash_match" })
+      .values({
+        broadcastId: b!.id,
+        channelId: ch,
+        title: "v",
+        storagePrefix: "vods/x/",
+        status: "deleted",
+        removedReason: "t0_hash_match",
+      })
       .returning({ id: s.vods.id });
     await expectPgError(app.update(s.vods).set({ status: "ready" }).where(eq(s.vods.id, v!.id)), /stays removed/);
     await expectPgError(app.update(s.vods).set({ removedReason: null }).where(eq(s.vods.id, v!.id)), /stays removed/);
@@ -447,8 +497,14 @@ describe("mature label lock", () => {
       .values({ channelId: ch, label: "mature", caseId: uuidv7() })
       .returning({ id: s.contentLabels.id });
     await app.update(s.channels).set({ mature: true }).where(eq(s.channels.id, ch));
-    await expectPgError(app.update(s.channels).set({ mature: false }).where(eq(s.channels.id, ch)), /active mature label/);
-    await expectPgError(app.delete(s.contentLabels).where(eq(s.contentLabels.id, l!.id)), /permission denied|never deleted/);
+    await expectPgError(
+      app.update(s.channels).set({ mature: false }).where(eq(s.channels.id, ch)),
+      /active mature label/,
+    );
+    await expectPgError(
+      app.delete(s.contentLabels).where(eq(s.contentLabels.id, l!.id)),
+      /permission denied|never deleted/,
+    );
     await expectPgError(
       app.update(s.contentLabels).set({ caseId: uuidv7() }).where(eq(s.contentLabels.id, l!.id)),
       /immutable/,
@@ -493,7 +549,10 @@ describe("NCII clock", () => {
     expect(r.receivedAt.getTime()).toBeGreaterThanOrEqual(before - 5_000);
     expect(r.deadlineAt.getTime() - r.receivedAt.getTime()).toBe(48 * 3600 * 1000);
     await expectPgError(
-      app.update(s.nciiRequests).set({ deadlineAt: new Date("2100-01-01T00:00:00Z") }).where(eq(s.nciiRequests.id, r.id)),
+      app
+        .update(s.nciiRequests)
+        .set({ deadlineAt: new Date("2100-01-01T00:00:00Z") })
+        .where(eq(s.nciiRequests.id, r.id)),
       /immutable/,
     );
     await expectPgError(app.delete(s.nciiRequests).where(eq(s.nciiRequests.id, r.id)), /undecided/);
@@ -542,9 +601,15 @@ describe("local block list", () => {
       .insert(s.localHashList)
       .values({ category: "ncii", pdq: "f".repeat(64), sourceType: "ncii_request", sourceId: uuidv7() })
       .returning({ id: s.localHashList.id });
-    await expectPgError(app.delete(s.localHashList).where(eq(s.localHashList.id, e!.id)), /permission denied|never deleted/);
     await expectPgError(
-      app.update(s.localHashList).set({ pdq: "0".repeat(64) }).where(eq(s.localHashList.id, e!.id)),
+      app.delete(s.localHashList).where(eq(s.localHashList.id, e!.id)),
+      /permission denied|never deleted/,
+    );
+    await expectPgError(
+      app
+        .update(s.localHashList)
+        .set({ pdq: "0".repeat(64) })
+        .where(eq(s.localHashList.id, e!.id)),
       /immutable/,
     );
     await expectPgError(

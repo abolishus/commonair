@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Connection authentication: chat tokens, OAuth bearer tokens, anonymous read-only. */
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { eq } from "drizzle-orm";
 import { schema } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { sha256Hex, signChatToken } from "@commonair/tokens";
 import type { ChatService } from "../src/server.ts";
 import { chatToken, Client, createChannel, createOauthToken, createUser, isolation, startInstance } from "./helpers.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let svc: ChatService;

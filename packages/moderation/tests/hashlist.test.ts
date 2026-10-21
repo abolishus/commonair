@@ -51,20 +51,22 @@ describe("hash lists", () => {
     const dir = await mkdtemp(join(tmpdir(), "hashlist-watch-"));
     const path = join(dir, "operator.pdq");
     const validHash = "a".repeat(64);
-    await writeFile(path, `${validHash}\n`);
+    await writeFile(path, `${zero}\n`);
     const matcher = createHashMatcher([staticHashList(csam, "pdq:operator-list", [zero], "initial")]);
     const errors: { message: string; category: string }[] = [];
     const stop = watchHashListFiles([{ path, category: csam }], matcher, (err, category) => {
       errors.push({ message: err.message, category });
     });
     try {
+      // macOS starts the underlying directory event stream asynchronously.
+      await new Promise((resolve) => setTimeout(resolve, 100));
       await writeFile(path, `${validHash}\n`);
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await expect.poll(() => matcher.lists()[0]?.version, { timeout: 3000 }).toMatch(/^sha256:/);
       const goodVersion = matcher.lists()[0]?.version;
       expect(goodVersion).toMatch(/^sha256:/);
       expect(matcher.lists()[0]?.nearest(validHash)).toBe(0);
       await writeFile(path, `${validHash}\nnot-a-hash\n`);
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      await expect.poll(() => errors.length, { timeout: 3000 }).toBe(1);
       expect(errors).toHaveLength(1);
       expect(errors[0]?.category).toBe(csam);
       expect(errors[0]?.message).toContain("line 2");

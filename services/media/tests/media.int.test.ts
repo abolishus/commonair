@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { Queue } from "bullmq";
 import { and, desc, eq } from "drizzle-orm";
 import { Valkey } from "iovalkey";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import {
   KEYS,
   LiveEvent,
@@ -54,6 +54,10 @@ import {
   type Publisher,
 } from "./helpers/containers.ts";
 import { testKeys } from "./helpers/moderation.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 if (!podmanAvailable()) throw new Error("media integration tests need podman (rootless is fine)");
 
@@ -546,7 +550,7 @@ describe("media pipeline", () => {
     );
     // finalizeVod has read `recording` and reached the barrier immediately before its
     // processing CAS. Simulate the T0 worker committing deletion and removing public objects.
-    await reachedBarrier;
+    await barrierOrResult(reachedBarrier, finalizing);
     await tdb.db
       .update(schema.vods)
       .set({ status: "deleted", removedReason: "t0_hash_match" })
@@ -599,7 +603,7 @@ describe("media pipeline", () => {
     );
     // The VOD is already processing and the empty playlist has been read; commit T0 deletion
     // before the empty-recording failure transition can write `failed`.
-    await reachedBarrier;
+    await barrierOrResult(reachedBarrier, finalizing);
     await tdb.db
       .update(schema.vods)
       .set({ status: "deleted", removedReason: "t0_hash_match" })
@@ -707,27 +711,29 @@ async function expectEvidenceOpens(t0: ModerationT0Job): Promise<void> {
 }
 
 /** A VOD of the synthetic T0 pattern, recorded as fMP4 HLS and uploaded like the recorder does. */
+/** The barrier, or a clear failure if finalizeVod finished without reaching it (no 60 s hang). */
+async function barrierOrResult(barrier: Promise<void>, finalizing: Promise<string>): Promise<void> {
+  let reached = false;
+  await Promise.race([
+    barrier.then(() => {
+      reached = true;
+    }),
+    // Settles after the barrier in the normal case; only an early finish is an error.
+    finalizing.then(
+      (r) => {
+        if (!reached) throw new Error(`finalizeVod returned "${r}" before reaching the barrier`);
+      },
+      (err: unknown) => {
+        if (!reached) throw err;
+      },
+    ),
+  ]);
+}
+
 async function uploadPatternVod(): Promise<{ vodId: string; broadcastId: string }> {
   const bid = uuidv7();
   const id = uuidv7();
   const at = new Date(Date.now() - 60_000);
-  await tdb.db.insert(schema.broadcasts).values({
-    id: bid,
-    channelId,
-    ingestProtocol: "rtmp",
-    path: `live/${SLUG}`,
-    title: "pattern vod",
-    startedAt: at,
-    endedAt: new Date(at.getTime() + 8_000),
-  });
-  await tdb.db.insert(schema.vods).values({
-    id,
-    broadcastId: bid,
-    channelId,
-    title: "pattern vod",
-    status: "recording",
-    storagePrefix: vodPrefix(id),
-  });
   const dir = mkdtempSync(join(tmpdir(), "media-int-vod-"));
   try {
     // Two seconds of a benign test pattern, then the synthetic T0 pattern: the match must be found
@@ -788,6 +794,25 @@ async function uploadPatternVod(): Promise<{ vodId: string; broadcastId: string 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  // Rows last: the service's stale-VOD reconcile queues a `recording` VOD of an ended broadcast at
+  // once, and its own finalize job must not win the race against the test's barrier.
+  await tdb.db.insert(schema.broadcasts).values({
+    id: bid,
+    channelId,
+    ingestProtocol: "rtmp",
+    path: `live/${SLUG}`,
+    title: "pattern vod",
+    startedAt: at,
+    endedAt: new Date(at.getTime() + 8_000),
+  });
+  await tdb.db.insert(schema.vods).values({
+    id,
+    broadcastId: bid,
+    channelId,
+    title: "pattern vod",
+    status: "recording",
+    storagePrefix: vodPrefix(id),
+  });
   return { vodId: id, broadcastId: bid };
 }
 

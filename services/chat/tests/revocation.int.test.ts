@@ -6,7 +6,7 @@
  * the socket from sending: at once when the API announces it on BUS.userControl, and within the
  * re-validation window when no announcement arrives.
  */
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { eq } from "drizzle-orm";
 import { BUS, type UserControlMessage } from "@commonair/contracts";
 import { schema } from "@commonair/db";
@@ -25,6 +25,10 @@ import {
   startInstance,
   VALKEY_URL,
 } from "./helpers.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 const BOT_SCOPES = ["chat:read", "chat:edit"];
 const REVALIDATE_MS = 300;

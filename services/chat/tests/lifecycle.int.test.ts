@@ -3,7 +3,7 @@
 
 /** Persistence, shutdown, heartbeats, backpressure and the Valkey limiter. */
 import { connect as tcpConnect, type Socket } from "node:net";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { inArray } from "drizzle-orm";
 import { BUS, CHAT_LIMITS } from "@commonair/contracts";
 import { schema, uuidv7 } from "@commonair/db";
@@ -23,6 +23,10 @@ import {
   startInstance,
   VALKEY_URL,
 } from "./helpers.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 beforeAll(async () => {

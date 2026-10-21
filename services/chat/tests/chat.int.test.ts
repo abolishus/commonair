@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Two chat instances sharing Valkey and one throwaway database. */
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { and, eq } from "drizzle-orm";
 import { createValkey } from "@commonair/service";
 import { BUS, type BusEvent, EVENTS, type ServerFrame } from "@commonair/contracts";
@@ -19,6 +19,10 @@ import {
   startInstance,
   VALKEY_URL,
 } from "./helpers.ts";
+
+// Suites run in parallel with every other workspace: generous deadlines for tests, and for teardown,
+// since Postgres runs DROP DATABASE one at a time.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let a: ChatService;
@@ -382,6 +386,8 @@ describe("moderation commands", () => {
     expect((await modClient.command(ch.slug, "clear")).code).toBe("cmd_success");
     await viewerClient.waitFor((f) => f.op === "clear" && f.channel === ch.slug);
     expect((await modClient.command(ch.slug, "emoteonly")).code).toBe("emote_only_on");
+    // The viewer is on the other instance, which applies the mode when the settings frame arrives.
+    await viewerClient.waitFor((f) => f.op === "settings" && f.channel === ch.slug && f.settings.emoteOnly);
     expect((await viewerClient.say(ch.slug, "words")).notice?.code).toBe("msg_emoteonly");
     expect((await modClient.command(ch.slug, "emoteonlyoff")).code).toBe("emote_only_off");
     expect((await modClient.command(ch.slug, "followers", ["10m"])).code).toBe("followers_on");

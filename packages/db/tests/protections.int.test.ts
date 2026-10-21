@@ -9,7 +9,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 
 // Governance flows wait out real (shortened) review and voting windows.
-vi.setConfig({ testTimeout: 30_000 });
+// Postgres runs DROP DATABASE one at a time: when many files finish together, teardown queues.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 import type { GovernanceRuleSnapshot } from "@commonair/contracts/shapes";
 import * as s from "../src/schema/index.ts";
 import { FAST_GOVERNANCE, createTestDatabase, type TestDatabase } from "../src/testing.ts";
