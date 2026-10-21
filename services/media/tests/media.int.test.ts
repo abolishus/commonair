@@ -614,6 +614,25 @@ describe("media pipeline", () => {
   }, 60_000);
 
   test("T0 live: the synthetic pattern gets the publisher kicked first and one sealed t0 job", async () => {
+    // Earlier VOD T0 tests taint their channel while the worker is not consuming jobs here.
+    // Use a fresh channel so this case exercises a distinct live publisher, not channel taint.
+    const [owner] = await tdb.db
+      .insert(schema.users)
+      .values({ name: `${SLUG} T0`, email: `${SLUG}_t0@test.invalid`, username: `${SLUG}_t0` })
+      .returning({ id: schema.users.id });
+    if (!owner) throw new Error("could not create T0 live test owner");
+    const [liveChannel] = await tdb.db
+      .insert(schema.channels)
+      .values({
+        ownerId: owner.id,
+        slug: `${SLUG}_t0`,
+        displayName: `${SLUG} T0`,
+        vodEnabled: true,
+        vodRetentionDays: 14,
+      })
+      .returning({ id: schema.channels.id });
+    if (!liveChannel) throw new Error("could not create T0 live test channel");
+    channelId = liveChannel.id;
     const live = await goLive(T0_PATTERN);
     const job = await waitFor("t0 job", async () => modQueue.getJob(t0JobId("broadcast", live.id)), 30_000);
     const t0 = ModerationT0Job.parse(job.data);

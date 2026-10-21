@@ -5,8 +5,10 @@
 import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { and, eq } from "drizzle-orm";
 import { BUS } from "@commonair/contracts/events";
-import { createDb, type DbHandle } from "@commonair/db";
+import type { ModerationT0Job } from "@commonair/contracts/internal";
+import { createDb, schema, type DbHandle } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import { createLogger } from "@commonair/observability";
 import { createValkey, valkeyCheck, type ReadinessCheck } from "@commonair/service";
@@ -82,12 +84,66 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     valkey,
     logger,
     ffmpeg,
+    t0OutboxDir: join(workDir, "moderation-t0-outbox"),
     bullPrefix: opts.bullPrefix,
     kickPublisher: async (path) => {
       return mtx.kickPublisher(path);
     },
-    // The broadcast ended, but its VOD must not be finalized (published): the worker removes it.
-    stopBroadcast: async (id) => coordinator?.offline(id, true, false),
+    // A replay can run before local sessions are restored, so kick from the durable broadcast
+    // path first; then stop any local workers and flush the recorder before the T0 reaches a worker.
+    stopBroadcast: async (id) => {
+      const [broadcast] = await dbh.db
+        .select({ path: schema.broadcasts.path })
+        .from(schema.broadcasts)
+        .where(eq(schema.broadcasts.id, id))
+        .limit(1);
+      if (broadcast) await mtx.kickPublisher(broadcast.path);
+      await coordinator?.offline(id, true, false, true);
+    },
+    resolveBroadcastId: async (job: ModerationT0Job) => {
+      if (job.subjectType === "broadcast") return job.subjectId;
+      if (job.subjectType === "vod") {
+        const [vod] = await dbh.db
+          .select({ broadcastId: schema.vods.broadcastId })
+          .from(schema.vods)
+          .where(eq(schema.vods.id, job.subjectId))
+          .limit(1);
+        return vod?.broadcastId ?? null;
+      }
+      if (job.subjectType === "clip") {
+        const [clip] = await dbh.db
+          .select({ broadcastId: schema.clips.broadcastId, vodId: schema.clips.vodId })
+          .from(schema.clips)
+          .where(eq(schema.clips.id, job.subjectId))
+          .limit(1);
+        if (clip?.broadcastId) return clip.broadcastId;
+        if (clip?.vodId) {
+          const [vod] = await dbh.db
+            .select({ broadcastId: schema.vods.broadcastId })
+            .from(schema.vods)
+            .where(eq(schema.vods.id, clip.vodId))
+            .limit(1);
+          return vod?.broadcastId ?? null;
+        }
+      }
+      return null;
+    },
+    t0ActionCommitted: async (job: ModerationT0Job) => {
+      const c = schema.moderationCases;
+      const [row] = await dbh.db
+        .select({ id: c.id })
+        .from(c)
+        .where(
+          and(
+            eq(c.subjectType, job.subjectType),
+            eq(c.subjectId, job.subjectId),
+            eq(c.tier, "t0"),
+            eq(c.origin, "hash_list"),
+          ),
+        )
+        .limit(1);
+      return Boolean(row);
+    },
     overrides: opts.moderation,
   }).catch(async (err: unknown) => {
     await Promise.allSettled([subscriber.quit(), bus.quit(), valkey.quit(), dbh.close()]);
@@ -187,16 +243,19 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
   let reconcileLoop: Loop | null = null;
   let sweepLoop: Loop | null = null;
   const sweep = async () => {
+    await moderation.pruneCommittedT0Outbox();
     const { removed } = await sweepWorkDir({
       db: dbh.db,
       storage,
       bucket: ctx.bucket,
       workDir,
       logger,
-      owned: new Set(live.liveBroadcasts),
+      owned: new Set([...live.liveBroadcasts, ...moderation.protectedBroadcastIds()]),
       activeScratch,
       broadcastDirMaxAgeMs: timings.broadcastDirMaxAgeMs,
+      discardBroadcastIds: moderation.committedRecoveryBroadcastIds(),
     });
+    await moderationRuntime.finishT0Recovery();
     if (removed.length > 0) diskBudget.invalidate();
   };
   const onMessage = (channel: string, message: string) => {
@@ -227,19 +286,30 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       await storage.ensureBucket(ctx.bucket).catch((err: unknown) => {
         logger.warn("could not ensure media bucket exists (bootstrap should create it)", { error: errorCategory(err) });
       });
+      const protectedBroadcastIds = await moderationRuntime.prepareT0Replay();
       // Crash recovery first: no session records and no job reads a playlist until the work dir
-      // left by a previous process is repaired. Job workers are idle until now, so every
-      // scratch directory is a leftover.
+      // left by a previous process is repaired. Durable T0 broadcasts are excluded so recovery
+      // cannot republish their local segments before the queued cleanup runs.
       try {
-        const r = await recoverWorkDir({ db: dbh.db, storage, bucket: ctx.bucket, workDir, logger });
+        const r = await recoverWorkDir({
+          db: dbh.db,
+          storage,
+          bucket: ctx.bucket,
+          workDir,
+          logger,
+          protectedBroadcastIds,
+          discardBroadcastIds: moderationRuntime.committedRecoveryBroadcastIds(),
+        });
         if (r.directories > 0) logger.info("work dir recovered", { ...r });
         await sweepScratchAtStartup({ workDir, logger });
         diskBudget.invalidate();
+        await moderationRuntime.finishT0Recovery();
       } catch (err) {
         logger.warn("work dir recovery failed", { error: errorCategory(err) });
+        throw err;
       }
+      await moderationRuntime.start();
       jobs.run();
-      moderationRuntime.start();
       subscriber.on("message", onMessage);
       await subscriber.subscribe(busChannel);
       // Recover broadcasts that went live while we were down, then keep reconciling.

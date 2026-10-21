@@ -33,6 +33,7 @@ import type { ModerationMetrics } from "./metrics.ts";
 import type { ModerationQueue } from "./queue.ts";
 import type { FrameTools } from "./tools.ts";
 import { errorCategory } from "./logging.ts";
+import type { T0Outbox } from "./t0-outbox.ts";
 
 /** `channels.suspended_reason` / `vods|clips.removed_reason` the worker writes for a T0 match. */
 export const T0_REASON = "t0_hash_match";
@@ -72,16 +73,19 @@ export interface ModerationDeps {
   kickPublisher: (path: string) => Promise<void | boolean>;
   /** Stop local workers for a broadcast without finalizing (publishing) its VOD. */
   stopBroadcast: (broadcastId: string) => Promise<void>;
+  /** Resolve VOD/clip T0 work to its source broadcast so it can be tainted and taken offline. */
+  resolveBroadcastId: (job: ModerationT0Job) => Promise<string | null>;
+  /** True only after the worker's T0 case/action transaction has committed. */
+  t0ActionCommitted: (job: ModerationT0Job) => Promise<boolean>;
   logger: Logger;
   metrics: ModerationMetrics;
   /** `MODERATION_SAMPLE_SECONDS`. */
   envSampleSeconds: number;
+  t0Outbox: T0Outbox;
   /** Backoff of the live T0 enqueue (retried until it lands). */
   retry?: RetryPolicy;
   /** Attempts before a live T0 enqueue failure is logged `fatal` (it keeps retrying). */
   fatalAfterAttempts?: number;
-  /** Attempts for a pre-publish T0 enqueue before the job fails (BullMQ retries the job). */
-  prepublishAttempts?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
@@ -101,8 +105,12 @@ export class MediaModeration {
   private readonly taintedBroadcasts = new Set<string>();
   private readonly taintedChannels = new Set<string>();
   private readonly taintedPaths = new Set<string>();
+  private readonly recoveryProtected = new Set<string>();
+  private readonly committedRecoveryDiscards = new Set<string>();
   private readonly pending = new Set<Promise<unknown>>();
-  private stopped = false;
+  private startupOutbox: Array<{ job: ModerationT0Job; path: string }> | null = null;
+  private readonly committedOutbox = new Map<string, { job: ModerationT0Job; path: string }>();
+  private pruning: Promise<void> | null = null;
   private readonly log: Logger;
   private setting: { seconds: number; at: number } | null = null;
   private waiting: { n: number; at: number } | null = null;
@@ -162,6 +170,30 @@ export class MediaModeration {
   /** A channel or path with a T0 match here: a reconnect is kicked before any work starts. */
   isLiveTainted(channelId: string, path: string): boolean {
     return this.taintedChannels.has(channelId) || this.taintedPaths.has(path);
+  }
+
+  /** T0 broadcasts must be excluded from startup recovery and periodic work-dir sweeps. */
+  protectedBroadcastIds(): ReadonlySet<string> {
+    return new Set(this.recoveryProtected);
+  }
+
+  committedRecoveryBroadcastIds(): ReadonlySet<string> {
+    return new Set(this.committedRecoveryDiscards);
+  }
+
+  async finishT0Recovery(): Promise<void> {
+    for (const { path } of this.committedOutbox.values()) await this.deps.t0Outbox.accepted(path);
+    const remaining = await this.deps.t0Outbox.pending();
+    const protectedIds = new Set<string>();
+    for (const { job } of remaining) {
+      const id = await this.sourceBroadcastId(job);
+      if (id) protectedIds.add(id);
+    }
+    for (const id of this.committedRecoveryDiscards) {
+      if (!protectedIds.has(id)) this.recoveryProtected.delete(id);
+    }
+    this.committedOutbox.clear();
+    this.committedRecoveryDiscards.clear();
   }
 
   /**
@@ -364,12 +396,14 @@ export class MediaModeration {
     this.deps.metrics.frame("matched");
     this.log.error("T0 hash match on a live broadcast; ending it", { ...ids, ...this.matchFields(hit.match) });
     await this.kick(target.path, ids);
-    this.detach(
-      this.deps.stopBroadcast(target.broadcastId).catch((err: unknown) => {
-        this.log.error("T0: stopping local workers failed", { ...ids, error: errName(err) });
-      }),
+    this.recoveryProtected.add(target.broadcastId);
+    const persisted = await this.persistUntilStored(
+      await this.buildJob("broadcast", target.broadcastId, target.channelId, hit),
+      ids,
     );
-    this.detach(this.enqueueLiveT0(target, hit));
+    // Detach so the sampler can return before stopBroadcast waits for that same sampler to stop.
+    // Queueing follows the final recorder poll, so the worker cannot clean objects too early.
+    this.detach(this.stopThenEnqueueLiveT0(target, persisted.job));
   }
 
   /** Kick a reconnect of a tainted channel before any work starts (the worker suspends it meanwhile). */
@@ -382,58 +416,212 @@ export class MediaModeration {
     this.detach(this.kick(target.path, { broadcastId: target.broadcastId, channelId: target.channelId }));
   }
 
-  private async enqueueLiveT0(target: LiveTarget, hit: Hit): Promise<void> {
+  private async stopThenEnqueueLiveT0(target: LiveTarget, job: ModerationT0Job): Promise<void> {
     const ids = { broadcastId: target.broadcastId, channelId: target.channelId };
+    await this.stopBroadcastUntilStopped(target.broadcastId, ids);
+    await this.enqueuePersistedT0(job, ids);
+  }
+
+  private async stopBroadcastUntilStopped(broadcastId: string, ids: Record<string, string>): Promise<void> {
     const policy = this.deps.retry ?? DEFAULT_RETRY;
     const fatalAfter = this.deps.fatalAfterAttempts ?? 5;
-    let job: ModerationT0Job | null = null;
     let delay = policy.initialMs;
     for (let attempt = 1; ; attempt++) {
       try {
-        job ??= await this.buildJob("broadcast", target.broadcastId, target.channelId, hit);
-        await this.deps.queue.addT0(job);
-        this.deps.metrics.t0("broadcast");
-        this.log.error("T0 job enqueued", { ...ids, attempt });
-        return;
+        await this.deps.stopBroadcast(broadcastId);
+        break;
       } catch (err) {
-        this.deps.metrics.t0EnqueueFailed();
         const fields = { ...ids, attempt, error: errName(err) };
-        if (attempt === fatalAfter)
-          this.log.fatal("T0: enqueue keeps failing; the stream is off air, retrying until it lands", fields);
-        else this.log.error("T0: enqueue failed; retrying", fields);
-        if (this.stopped) {
-          this.log.fatal("T0: enqueue abandoned at shutdown; operator action required", ids);
-          return;
-        }
+        if (attempt === fatalAfter) this.log.fatal("T0: local workers still active; retrying before cleanup", fields);
+        else this.log.error("T0: stopping local workers failed; retrying", fields);
         await this.sleep(delay);
         delay = Math.min(policy.maxMs, delay * 2);
       }
     }
   }
 
-  /**
-   * T0 found before a VOD or clip is published: seal and enqueue (a few attempts; a failure
-   * throws so the job is retried and nothing is published).
-   */
-  async t0Prepublish(subjectType: "vod" | "clip", subjectId: string, channelId: string, hit: Hit): Promise<void> {
-    const ids = { subjectType, subjectId, channelId };
-    this.log.error("T0 hash match before publishing; not publishing", { ...ids, ...this.matchFields(hit.match) });
-    const job = await this.buildJob(subjectType, subjectId, channelId, hit);
-    const attempts = this.deps.prepublishAttempts ?? 5;
+  private async persistUntilStored(
+    job: ModerationT0Job,
+    ids: Record<string, string>,
+  ): Promise<{ job: ModerationT0Job; path: string }> {
     let delay = (this.deps.retry ?? DEFAULT_RETRY).initialMs;
     for (let attempt = 1; ; attempt++) {
       try {
-        await this.deps.queue.addT0(job);
-        this.deps.metrics.t0(subjectType);
-        return;
+        return await this.deps.t0Outbox.persist(job);
       } catch (err) {
-        this.deps.metrics.t0EnqueueFailed();
-        this.log.error("T0: enqueue failed", { ...ids, attempt, error: errName(err) });
-        if (attempt >= attempts) throw new Error("T0 enqueue failed", { cause: err });
+        this.log.fatal("T0 evidence could not be persisted; retaining it in memory and retrying", {
+          ...ids,
+          attempt,
+          error: errName(err),
+        });
         await this.sleep(delay);
         delay = Math.min((this.deps.retry ?? DEFAULT_RETRY).maxMs, delay * 2);
       }
     }
+  }
+
+  /** Load and taint durable T0 work before crash recovery can publish local recording segments. */
+  async prepareT0Replay(): Promise<Set<string>> {
+    this.startupOutbox ??= await this.deps.t0Outbox.pending();
+    const broadcasts = new Set<string>();
+    for (const id of this.committedRecoveryDiscards) broadcasts.add(id);
+    const quiesced = new Set<string>();
+    const uncommitted: Array<{ job: ModerationT0Job; path: string }> = [];
+    for (const record of this.startupOutbox) {
+      const { job } = record;
+      const broadcastId = await this.sourceBroadcastId(job);
+      if (broadcastId) {
+        this.taintedBroadcasts.add(broadcastId);
+        this.taintedChannels.add(job.channelId);
+        broadcasts.add(broadcastId);
+        if (!quiesced.has(broadcastId)) {
+          await this.stopBroadcastUntilStopped(broadcastId, this.jobIds(job));
+          quiesced.add(broadcastId);
+        }
+      }
+      if (await this.t0ActionCommitted(job)) {
+        this.committedOutbox.set(`${job.subjectType}:${job.subjectId}`, record);
+        if (broadcastId) this.committedRecoveryDiscards.add(broadcastId);
+        continue;
+      }
+      uncommitted.push(record);
+      if (broadcastId) this.recoveryProtected.add(broadcastId);
+    }
+    this.startupOutbox = uncommitted;
+    return broadcasts;
+  }
+
+  /** Re-enqueue sealed T0 jobs after local recovery has skipped all tainted broadcasts. */
+  async replayT0Outbox(): Promise<void> {
+    await this.prepareT0Replay();
+    const records = this.startupOutbox ?? [];
+    for (const { job, path } of records) {
+      const ids = this.jobIds(job);
+      const broadcastId = await this.sourceBroadcastId(job);
+      if (await this.t0ActionCommitted(job)) {
+        this.committedOutbox.set(`${job.subjectType}:${job.subjectId}`, { job, path });
+        if (broadcastId) {
+          this.committedRecoveryDiscards.add(broadcastId);
+          this.recoveryProtected.add(broadcastId);
+        }
+        continue;
+      }
+      if (broadcastId) {
+        await this.stopBroadcastUntilStopped(broadcastId, ids);
+        this.recoveryProtected.add(broadcastId);
+      }
+      this.detach(this.enqueuePersistedT0(job, ids));
+    }
+    this.startupOutbox = null;
+  }
+
+  /** Retire acknowledged records during the periodic serialized work-dir sweep. */
+  async pruneCommittedT0Outbox(): Promise<void> {
+    if (this.pruning) return this.pruning;
+    this.pruning = (async () => {
+      const records = await this.deps.t0Outbox.pending();
+      const stillProtected = new Set<string>();
+      for (const { job, path } of records) {
+        const broadcastId = await this.sourceBroadcastId(job);
+        if (await this.t0ActionCommitted(job)) {
+          this.committedOutbox.set(`${job.subjectType}:${job.subjectId}`, { job, path });
+          if (broadcastId) {
+            this.committedRecoveryDiscards.add(broadcastId);
+            this.recoveryProtected.add(broadcastId);
+          }
+        } else if (broadcastId) {
+          stillProtected.add(broadcastId);
+        }
+      }
+      for (const id of this.recoveryProtected)
+        if (!stillProtected.has(id) && !this.committedRecoveryDiscards.has(id)) this.recoveryProtected.delete(id);
+      for (const id of stillProtected) this.recoveryProtected.add(id);
+    })().finally(() => {
+      this.pruning = null;
+    });
+    return this.pruning;
+  }
+
+  private async sourceBroadcastId(job: ModerationT0Job): Promise<string | null> {
+    if (job.subjectType === "broadcast") return job.subjectId;
+    const ids = this.jobIds(job);
+    const policy = this.deps.retry ?? DEFAULT_RETRY;
+    const fatalAfter = this.deps.fatalAfterAttempts ?? 5;
+    let delay = policy.initialMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.deps.resolveBroadcastId(job);
+      } catch (err) {
+        const fields = { ...ids, attempt, error: errName(err) };
+        if (attempt === fatalAfter) this.log.fatal("T0 source lookup failed; retrying before admission", fields);
+        else this.log.error("T0 source lookup failed; retrying", fields);
+        await this.sleep(delay);
+        delay = Math.min(policy.maxMs, delay * 2);
+      }
+    }
+  }
+
+  private async t0ActionCommitted(job: ModerationT0Job): Promise<boolean> {
+    const ids = this.jobIds(job);
+    const policy = this.deps.retry ?? DEFAULT_RETRY;
+    const fatalAfter = this.deps.fatalAfterAttempts ?? 5;
+    let delay = policy.initialMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.deps.t0ActionCommitted(job);
+      } catch (err) {
+        const fields = { ...ids, attempt, error: errName(err) };
+        if (attempt === fatalAfter) this.log.fatal("T0 action lookup failed; retaining evidence and retrying", fields);
+        else this.log.error("T0 action lookup failed; retrying", fields);
+        await this.sleep(delay);
+        delay = Math.min(policy.maxMs, delay * 2);
+      }
+    }
+  }
+
+  private jobIds(job: ModerationT0Job): Record<string, string> {
+    return job.subjectType === "broadcast"
+      ? { broadcastId: job.subjectId, channelId: job.channelId }
+      : { subjectType: job.subjectType, subjectId: job.subjectId, channelId: job.channelId };
+  }
+
+  private async enqueuePersistedT0(job: ModerationT0Job, ids: Record<string, string>): Promise<void> {
+    const policy = this.deps.retry ?? DEFAULT_RETRY;
+    const fatalAfter = this.deps.fatalAfterAttempts ?? 5;
+    let delay = policy.initialMs;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.deps.queue.addT0(job);
+        if (job.subjectType !== "upload") this.deps.metrics.t0(job.subjectType);
+        this.log.error("T0 job enqueued", { ...ids, attempt });
+        return;
+      } catch (err) {
+        this.deps.metrics.t0EnqueueFailed();
+        const fields = { ...ids, attempt, error: errName(err) };
+        if (attempt === fatalAfter) this.log.fatal("T0 enqueue keeps failing; retrying until accepted", fields);
+        else this.log.error("T0 enqueue failed; retrying", fields);
+        await this.sleep(delay);
+        delay = Math.min(policy.maxMs, delay * 2);
+      }
+    }
+  }
+
+  /** T0 found before a VOD or clip is published: persist sealed evidence and retry until accepted. */
+  async t0Prepublish(subjectType: "vod" | "clip", subjectId: string, channelId: string, hit: Hit): Promise<void> {
+    const ids = { subjectType, subjectId, channelId };
+    this.log.error("T0 hash match before publishing; not publishing", { ...ids, ...this.matchFields(hit.match) });
+    const job = await this.buildJob(subjectType, subjectId, channelId, hit);
+    const broadcastId = await this.sourceBroadcastId(job);
+    if (broadcastId) {
+      this.taintedBroadcasts.add(broadcastId);
+      this.taintedChannels.add(channelId);
+      this.recoveryProtected.add(broadcastId);
+    }
+    const persisted = await this.persistUntilStored(job, ids);
+    if (broadcastId) {
+      await this.stopBroadcastUntilStopped(broadcastId, ids);
+    }
+    await this.enqueuePersistedT0(persisted.job, ids);
   }
 
   private async buildJob(
@@ -505,9 +693,8 @@ export class MediaModeration {
     while (this.pending.size > 0) await Promise.allSettled(this.pending);
   }
 
-  /** Stop retrying at shutdown (a pending live T0 enqueue logs `fatal`). */
+  /** Graceful shutdown waits until every known T0 is accepted by the queue. */
   async stop(): Promise<void> {
-    this.stopped = true;
     await this.settle();
   }
 }

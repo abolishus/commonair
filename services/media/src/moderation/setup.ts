@@ -7,6 +7,7 @@
  * There is no configuration that skips any of it.
  */
 import type { Database } from "@commonair/db";
+import { T0Outbox } from "./t0-outbox.ts";
 import { importSealingKey, type SealingKey } from "@commonair/moderation";
 import type { Logger } from "@commonair/observability";
 import { every, type Loop } from "../loop.ts";
@@ -34,8 +35,12 @@ export interface ModerationOverrides {
 
 export interface ModerationRuntime {
   moderation: MediaModeration;
+  /** Taint durable broadcasts before startup recovery can upload their local segments. */
+  prepareT0Replay(): Promise<Set<string>>;
+  committedRecoveryBroadcastIds(): ReadonlySet<string>;
+  finishT0Recovery(): Promise<void>;
   /** Start the local block list refresh loop. */
-  start(): void;
+  start(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -45,9 +50,12 @@ export async function setupModeration(opts: {
   valkey: ModerationDeps["valkey"];
   logger: Logger;
   ffmpeg: string;
+  t0OutboxDir: string;
   bullPrefix?: string;
   kickPublisher: (path: string) => Promise<void | boolean>;
   stopBroadcast: (broadcastId: string) => Promise<void>;
+  resolveBroadcastId: ModerationDeps["resolveBroadcastId"];
+  t0ActionCommitted: ModerationDeps["t0ActionCommitted"];
   overrides?: ModerationOverrides;
 }): Promise<ModerationRuntime> {
   const { env, logger } = opts;
@@ -74,9 +82,12 @@ export async function setupModeration(opts: {
     tools: { ...defaultFrameTools(opts.ffmpeg), ...opts.overrides?.tools },
     kickPublisher: opts.kickPublisher,
     stopBroadcast: opts.stopBroadcast,
+    resolveBroadcastId: opts.resolveBroadcastId,
+    t0ActionCommitted: opts.t0ActionCommitted,
     logger,
     metrics: createModerationMetrics(),
     envSampleSeconds: env.MODERATION_SAMPLE_SECONDS,
+    t0Outbox: new T0Outbox(opts.t0OutboxDir),
     retry: opts.overrides?.retry,
   });
   logger.info("media moderation ready", { keyId: sealer.keyId, sampleSeconds: env.MODERATION_SAMPLE_SECONDS });
@@ -84,7 +95,11 @@ export async function setupModeration(opts: {
   let loop: Loop | null = null;
   return {
     moderation,
-    start() {
+    prepareT0Replay: () => moderation.prepareT0Replay(),
+    committedRecoveryBroadcastIds: () => moderation.committedRecoveryBroadcastIds(),
+    finishT0Recovery: () => moderation.finishT0Recovery(),
+    async start() {
+      await moderation.replayT0Outbox();
       // The block list changes when legal confirms a case or an NCII request is removed; the
       // check is one aggregate query, as often as the shortest possible sample interval allows.
       loop ??= every(env.MODERATION_SAMPLE_SECONDS * 1000, () => lists.refreshLocal(), {

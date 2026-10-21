@@ -66,6 +66,10 @@ export interface RecoveryDeps {
   bucket: string;
   workDir: string;
   logger: Logger;
+  /** Durable T0 broadcasts stay local until the worker has applied its action. */
+  protectedBroadcastIds?: ReadonlySet<string>;
+  /** T0 action is committed: discard local segments without ever publishing them. */
+  discardBroadcastIds?: ReadonlySet<string>;
 }
 
 export interface RecoveryResult {
@@ -85,6 +89,15 @@ async function readRuns(dir: string): Promise<LocalRun[]> {
     runs.push({ runId: name.slice(0, -".m3u8".length), segments: parsePlaylist(text).segments });
   }
   return runs;
+}
+
+async function readdirOrEmpty(path: string): Promise<string[]> {
+  try {
+    return await readdir(path);
+  } catch (err) {
+    if (err instanceof Error && "code" in err && err.code === "ENOENT") return [];
+    throw err;
+  }
 }
 
 /** Upload what the crashed recorder had not, then rewrite the (still open) VOD playlist. */
@@ -122,14 +135,17 @@ export async function recoverWorkDir(deps: RecoveryDeps): Promise<RecoveryResult
   const log = deps.logger.child({ component: "recovery" });
   const root = join(deps.workDir, BROADCASTS_DIR);
   const result: RecoveryResult = { directories: 0, uploaded: 0, kept: 0 };
-  let names: string[];
-  try {
-    names = await readdir(root);
-  } catch {
-    return result;
-  }
+  const names = await readdirOrEmpty(root);
   for (const name of names) {
     result.directories++;
+    if (deps.discardBroadcastIds?.has(name)) {
+      await rm(join(root, name), { recursive: true, force: true });
+      continue;
+    }
+    if (deps.protectedBroadcastIds?.has(name)) {
+      result.kept++;
+      continue;
+    }
     const outcome = await recoverBroadcastDir(deps, root, name, ["recording", "processing"], log);
     if (outcome.kept) result.kept++;
     result.uploaded += outcome.uploaded;
@@ -158,6 +174,21 @@ async function recoverBroadcastDir(
     return { kept: false, uploaded: 0 };
   }
   try {
+    const [t0Case] = await deps.db
+      .select({ id: schema.moderationCases.id })
+      .from(schema.moderationCases)
+      .where(
+        and(
+          eq(schema.moderationCases.subjectType, "broadcast"),
+          eq(schema.moderationCases.subjectId, name),
+          eq(schema.moderationCases.tier, "t0"),
+        ),
+      )
+      .limit(1);
+    if (t0Case) {
+      await rm(dir, { recursive: true, force: true });
+      return { kept: false, uploaded: 0 };
+    }
     const [vod] = await deps.db
       .select({ id: schema.vods.id, status: schema.vods.status })
       .from(schema.vods)
@@ -217,6 +248,7 @@ export interface SweepOptions extends RecoveryDeps {
   /** Scratch dirs of running jobs. */
   activeScratch: ActiveScratch;
   broadcastDirMaxAgeMs: number;
+  discardBroadcastIds?: ReadonlySet<string>;
   now?: number;
 }
 
@@ -269,7 +301,13 @@ export async function sweepWorkDir(opts: SweepOptions): Promise<SweepResult> {
     removed.push(path);
   }
   const root = join(opts.workDir, BROADCASTS_DIR);
-  for (const name of await readdir(root).catch(() => [])) {
+  for (const name of await readdirOrEmpty(root)) {
+    if (opts.discardBroadcastIds?.has(name)) {
+      const path = join(root, name);
+      await rm(path, { recursive: true, force: true });
+      removed.push(path);
+      continue;
+    }
     if (opts.owned.has(name)) continue;
     const age = await ageMs(join(root, name), now);
     if (age === null || age < opts.broadcastDirMaxAgeMs) continue;

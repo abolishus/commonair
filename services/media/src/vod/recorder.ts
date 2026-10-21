@@ -112,13 +112,13 @@ export class SegmentRecorder {
    * finalize the VOD. On service shutdown (`final` false) the VOD stays `recording` and a new
    * process resumes it.
    */
-  async stop(final: boolean): Promise<void> {
+  async stop(final: boolean, strict = false): Promise<void> {
     this.stopping = true;
     await this.loop?.stop();
     this.loop = null;
     await this.supervisor?.stop();
     this.supervisor = null;
-    await this.poll();
+    await this.poll(strict);
     if (!final) return;
     const dir = this.dir;
     setTimeout(() => void rm(dir, { recursive: true, force: true }), LOCAL_GRACE_MS).unref();
@@ -138,17 +138,19 @@ export class SegmentRecorder {
     };
   }
 
-  private poll(): Promise<void> {
+  private poll(strict = false): Promise<void> {
     // Serialize: stop() polls once more while a scheduled poll may still be running.
     this.polling = this.polling
-      .then(() => this.pollOnce())
+      .catch(() => {})
+      .then(() => this.pollOnce(strict))
       .catch((err: unknown) => {
         this.log.warn("recorder poll failed", { error: errorCategory(err) });
+        if (strict) throw err;
       });
     return this.polling;
   }
 
-  private async pollOnce(): Promise<void> {
+  private async pollOnce(strict: boolean): Promise<void> {
     if (this.refused) await this.startRecording();
     for (const runId of this.runs) {
       const file = Bun.file(join(this.dir, recorderPlaylist(runId)));
@@ -161,7 +163,7 @@ export class SegmentRecorder {
         this.local.push({ ...s, uri, map, localPath: join(this.dir, uri), uploaded: false });
       }
     }
-    if (this.vodId) await this.upload(this.vodId);
+    if (this.vodId) await this.upload(this.vodId, strict);
     await this.prune();
   }
 
@@ -177,7 +179,7 @@ export class SegmentRecorder {
     }
   }
 
-  private async upload(vodId: string): Promise<void> {
+  private async upload(vodId: string, strict: boolean): Promise<void> {
     const { storage, bucket } = this.ctx;
     const prefix = vodPrefix(vodId);
     let changed = false;
@@ -196,6 +198,7 @@ export class SegmentRecorder {
       } catch (err) {
         // Keep order: later segments wait until this one is up, so the playlist never has holes.
         this.log.warn("segment upload failed; will retry", { error: errorCategory(err) });
+        if (strict) throw err;
         break;
       }
       seg.uploaded = true;

@@ -6,11 +6,19 @@
  * planted hash, and a fake queue. No image of anything is involved.
  */
 import { describe, expect, test } from "vite-plus/test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { ModerationT0Job } from "@commonair/contracts/internal";
 import { HashListParseError, plaintextSha256, type HashList } from "@commonair/moderation";
 import { loadLists, type ListTools } from "../src/moderation/lists.ts";
 import { LiveSampler, liveFrameArgs, type SamplerClock } from "../src/moderation/sampler.ts";
 import { setupModeration } from "../src/moderation/setup.ts";
+import { T0Outbox } from "../src/moderation/t0-outbox.ts";
+import { SegmentRecorder } from "../src/vod/recorder.ts";
+import type { MediaContext } from "../src/context.ts";
+import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "../src/recovery.ts";
+import { BroadcastSession } from "../src/session.ts";
 import { scanChunks } from "../src/vod/finalize.ts";
 import type { PlaylistSegment } from "../src/vod/playlist.ts";
 import {
@@ -384,10 +392,12 @@ describe("pre-publish scans", () => {
     expect(kicks).toEqual([]);
   });
 
-  test("a pre-publish enqueue that keeps failing throws (the job retries, nothing is published)", async () => {
+  test("a pre-publish enqueue retries until accepted and retains sealed evidence across restart", async () => {
     const queue = new FakeQueue();
-    queue.failT0 = 99;
-    const { moderation } = await makeModeration({ queue, prepublishAttempts: 3 });
+    queue.failT0 = 3;
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-outbox-"));
+    const outbox = new T0Outbox(dir);
+    const { moderation } = await makeModeration({ queue, t0Outbox: outbox });
     const hit = {
       match: {
         category: "csam" as const,
@@ -400,9 +410,58 @@ describe("pre-publish scans", () => {
       pdq: { hash: MATCH, quality: 90 },
       capturedAt: new Date(),
     };
-    await expect(
-      moderation.t0Prepublish("vod", "0192a1b2-0000-7000-8000-000000000005", target.channelId, hit),
-    ).rejects.toThrow("T0 enqueue failed");
+    await moderation.t0Prepublish("vod", "0192a1b2-0000-7000-8000-000000000005", target.channelId, hit);
+    expect(queue.t0s).toHaveLength(1);
+    expect(await outbox.pending()).toHaveLength(1);
+
+    const pending = await outbox.persist({
+      subjectType: "clip",
+      subjectId: "0192a1b2-0000-7000-8000-000000000006",
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam",
+      provider: "pdq:local",
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: new Date().toISOString(),
+      evidence: await moderation.sealHit(hit),
+    });
+    const afterRestart = new T0Outbox(dir);
+    await sweepScratchAtStartup({ workDir: dirname(dir), logger: captureLogger().logger });
+    expect((await afterRestart.pending()).map((x) => x.job.subjectId)).toContain(pending.job.subjectId);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("a T0 outbox write failure retries without discarding the known hit", async () => {
+    const base = new T0Outbox(join(tmpdir(), `commonair-t0-write-retry-${crypto.randomUUID()}`));
+    let writes = 0;
+    const outbox = {
+      persist: async (...args: Parameters<T0Outbox["persist"]>) => {
+        writes++;
+        if (writes === 1) throw new Error("synthetic write failure");
+        return base.persist(...args);
+      },
+      pending: () => base.pending(),
+      accepted: (path: string) => base.accepted(path),
+    } as T0Outbox;
+    const queue = new FakeQueue();
+    const { moderation } = await makeModeration({ queue, t0Outbox: outbox });
+    const hit = {
+      match: {
+        category: "csam" as const,
+        provider: "pdq:local" as const,
+        listVersion: "local:1:x",
+        distance: 3,
+        quality: 90,
+      },
+      frame: fakeFrame("a", 90),
+      pdq: { hash: MATCH, quality: 90 },
+      capturedAt: new Date(),
+    };
+    await moderation.t0Prepublish("clip", "0192a1b2-0000-7000-8000-000000000007", target.channelId, hit);
+    expect(writes).toBe(2);
+    expect(queue.t0s).toHaveLength(1);
   });
 
   test("a decoder error propagates (fail closed)", async () => {
@@ -442,6 +501,450 @@ describe("pre-publish scans", () => {
   test("live capture reads one frame over TCP RTSP as PNG", () => {
     const a = liveFrameArgs("rtsp://u:p@h:8554/live/x");
     expect(a).toEqual(expect.arrayContaining(["-rtsp_transport", "tcp", "-frames:v", "1", "-c:v", "png", "pipe:1"]));
+  });
+});
+
+describe("durable T0 replay", () => {
+  test("restart keeps pending local segments private and kicks a still-live source before T0 acceptance", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-replay-"));
+    const outbox = new T0Outbox(dir);
+    const workDir = await mkdtemp(join(tmpdir(), "commonair-t0-recovery-"));
+    const queue = new FakeQueue();
+    let publisherLive = true;
+    let uploads = 0;
+    const addT0 = queue.addT0.bind(queue);
+    queue.addT0 = async (job) => {
+      expect(publisherLive).toBe(false);
+      return addT0(job);
+    };
+    const { moderation } = await makeModeration({
+      queue,
+      t0Outbox: outbox,
+      resolveBroadcastId: async () => target.broadcastId,
+      stopBroadcast: async () => {
+        // The service's replay stop callback kicks MediaMTX even when no session was restored.
+        publisherLive = false;
+        queue.events.push("publisher-kicked");
+        queue.events.push("quiesced");
+      },
+    });
+    const hit = {
+      match: {
+        category: "csam" as const,
+        provider: "pdq:local" as const,
+        listVersion: "local:1:x",
+        distance: 3,
+        quality: 90,
+      },
+      frame: fakeFrame("a", 90),
+      pdq: { hash: MATCH, quality: 90 },
+      capturedAt: new Date(),
+    };
+    const job = {
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam" as const,
+      provider: "pdq:local" as const,
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: hit.capturedAt.toISOString(),
+      evidence: await moderation.sealHit(hit),
+    };
+    await outbox.persist({ ...job, subjectType: "broadcast", subjectId: target.broadcastId });
+    await outbox.persist({ ...job, subjectType: "vod", subjectId: "0192a1b2-0000-7000-8000-000000000009" });
+    await outbox.persist({ ...job, subjectType: "clip", subjectId: "0192a1b2-0000-7000-8000-000000000010" });
+    const localDir = join(workDir, "broadcasts", target.broadcastId);
+    await mkdir(localDir, { recursive: true });
+    const segmentPath = join(localDir, "segment-1.m4s");
+    await writeFile(segmentPath, "synthetic pending recorder segment");
+    const protectedBroadcastIds = await moderation.prepareT0Replay();
+    await recoverWorkDir({
+      db: stubDb(),
+      storage: {
+        put: async () => {
+          uploads++;
+        },
+      } as unknown as MediaContext["storage"],
+      bucket: "media",
+      workDir,
+      logger: captureLogger().logger,
+      protectedBroadcastIds,
+    });
+    expect(uploads).toBe(0);
+    expect(await Bun.file(segmentPath).exists()).toBe(true);
+    await moderation.replayT0Outbox();
+    expect(moderation.isLiveTainted(target.channelId, target.path)).toBe(true);
+    await moderation.settle();
+    expect(queue.events.indexOf("quiesced")).toBeGreaterThanOrEqual(0);
+    expect(queue.t0s).toHaveLength(3);
+    expect(queue.events.indexOf("t0")).toBeGreaterThan(queue.events.indexOf("quiesced"));
+    expect(queue.events.indexOf("publisher-kicked")).toBeLessThan(queue.events.indexOf("t0"));
+    expect(await outbox.pending()).toHaveLength(3);
+    await rm(dir, { recursive: true, force: true });
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  test("does not treat an unrelated T0 origin as acknowledgment, and retires only after hash-list commit", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-ack-"));
+    const outbox = new T0Outbox(dir);
+    const job = {
+      subjectType: "broadcast" as const,
+      subjectId: target.broadcastId,
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam" as const,
+      provider: "pdq:local" as const,
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: new Date().toISOString(),
+      evidence: [
+        {
+          kind: "frame" as const,
+          contentType: "image/png" as const,
+          sealedBase64: "AA==",
+          sha256: "0".repeat(64),
+          sizeBytes: 1,
+          keyId: "0".repeat(32),
+          pdq: null,
+          pdqQuality: null,
+          capturedAt: new Date().toISOString(),
+        },
+      ],
+    };
+    await outbox.persist(job);
+    const { moderation } = await makeModeration({
+      t0Outbox: outbox,
+      t0ActionCommitted: async () => false,
+    });
+    await moderation.prepareT0Replay();
+    await moderation.replayT0Outbox();
+    await moderation.settle();
+    expect(await outbox.pending()).toHaveLength(1);
+    expect(moderation.protectedBroadcastIds().has(target.broadcastId)).toBe(true);
+
+    const committed = await makeModeration({
+      t0Outbox: outbox,
+      t0ActionCommitted: async () => true,
+      stopBroadcast: async () => {},
+    });
+    await committed.moderation.prepareT0Replay();
+    expect(await outbox.pending()).toHaveLength(1);
+    await committed.moderation.finishT0Recovery();
+    expect(await outbox.pending()).toEqual([]);
+    expect(committed.moderation.protectedBroadcastIds().has(target.broadcastId)).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("committed VOD/clip T0 recovery discards local segments without public upload", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-committed-vod-"));
+    const workDir = await mkdtemp(join(tmpdir(), "commonair-t0-committed-recovery-"));
+    const outbox = new T0Outbox(dir);
+    const { moderation } = await makeModeration({
+      t0Outbox: outbox,
+      resolveBroadcastId: async () => target.broadcastId,
+      t0ActionCommitted: async () => true,
+    });
+    await outbox.persist({
+      subjectType: "vod",
+      subjectId: "0192a1b2-0000-7000-8000-000000000011",
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam",
+      provider: "pdq:local",
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: new Date().toISOString(),
+      evidence: [
+        {
+          kind: "frame",
+          contentType: "image/png",
+          sealedBase64: "AA==",
+          sha256: "0".repeat(64),
+          sizeBytes: 1,
+          keyId: "0".repeat(32),
+          pdq: null,
+          pdqQuality: null,
+          capturedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const vodJob = (await outbox.pending())[0]?.job;
+    if (!vodJob) throw new Error("expected durable VOD T0 record");
+    await outbox.persist({
+      ...vodJob,
+      subjectType: "clip",
+      subjectId: "0192a1b2-0000-7000-8000-000000000012",
+    });
+    const segmentDir = join(workDir, "broadcasts", target.broadcastId);
+    await mkdir(segmentDir, { recursive: true });
+    const segmentPath = join(segmentDir, "segment-1.m4s");
+    await writeFile(segmentPath, "synthetic local segment");
+    const protectedIds = await moderation.prepareT0Replay();
+    expect(protectedIds.has(target.broadcastId)).toBe(true);
+    expect(moderation.committedRecoveryBroadcastIds().has(target.broadcastId)).toBe(true);
+    let uploads = 0;
+    await recoverWorkDir({
+      db: stubDb(),
+      storage: { put: async () => uploads++ } as unknown as MediaContext["storage"],
+      bucket: "media",
+      workDir,
+      logger: captureLogger().logger,
+      protectedBroadcastIds: protectedIds,
+      discardBroadcastIds: moderation.committedRecoveryBroadcastIds(),
+    });
+    expect(uploads).toBe(0);
+    expect(await Bun.file(segmentPath).exists()).toBe(false);
+    await moderation.finishT0Recovery();
+    expect(moderation.protectedBroadcastIds().has(target.broadcastId)).toBe(false);
+    await rm(dir, { recursive: true, force: true });
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  test("periodic pruning retains acknowledgment until sweep discards committed broadcast bytes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-prune-"));
+    const workDir = await mkdtemp(join(tmpdir(), "commonair-t0-prune-work-"));
+    const outbox = new T0Outbox(dir);
+    const { moderation } = await makeModeration({ t0Outbox: outbox, t0ActionCommitted: async () => true });
+    await outbox.persist({
+      subjectType: "broadcast",
+      subjectId: target.broadcastId,
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam",
+      provider: "pdq:local",
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: new Date().toISOString(),
+      evidence: [
+        {
+          kind: "frame",
+          contentType: "image/png",
+          sealedBase64: "AA==",
+          sha256: "0".repeat(64),
+          sizeBytes: 1,
+          keyId: "0".repeat(32),
+          pdq: null,
+          pdqQuality: null,
+          capturedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    const segmentDir = join(workDir, "broadcasts", target.broadcastId);
+    await mkdir(segmentDir, { recursive: true });
+    const segmentPath = join(segmentDir, "segment-1.m4s");
+    await writeFile(segmentPath, "synthetic local segment");
+    await moderation.pruneCommittedT0Outbox();
+    expect(await outbox.pending()).toHaveLength(1);
+    expect(moderation.protectedBroadcastIds().has(target.broadcastId)).toBe(true);
+    await sweepWorkDir({
+      db: stubDb(),
+      storage: {} as MediaContext["storage"],
+      bucket: "media",
+      workDir,
+      logger: captureLogger().logger,
+      owned: moderation.protectedBroadcastIds(),
+      activeScratch: new ActiveScratch(),
+      broadcastDirMaxAgeMs: 0,
+      discardBroadcastIds: moderation.committedRecoveryBroadcastIds(),
+    });
+    await moderation.finishT0Recovery();
+    expect(await Bun.file(segmentPath).exists()).toBe(false);
+    expect(await outbox.pending()).toEqual([]);
+    await rm(dir, { recursive: true, force: true });
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  test("a crash before recovery completion leaves committed acknowledgment durable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-recovery-failure-"));
+    const outbox = new T0Outbox(dir);
+    const { moderation } = await makeModeration({
+      t0Outbox: outbox,
+      t0ActionCommitted: async () => true,
+    });
+    const job = {
+      subjectType: "broadcast" as const,
+      subjectId: target.broadcastId,
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam" as const,
+      provider: "pdq:local" as const,
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: new Date().toISOString(),
+      evidence: [
+        {
+          kind: "frame" as const,
+          contentType: "image/png" as const,
+          sealedBase64: "AA==",
+          sha256: "0".repeat(64),
+          sizeBytes: 1,
+          keyId: "0".repeat(32),
+          pdq: null,
+          pdqQuality: null,
+          capturedAt: new Date().toISOString(),
+        },
+      ],
+    };
+    await outbox.persist(job);
+    const protectedIds = await moderation.prepareT0Replay();
+    expect(protectedIds.has(target.broadcastId)).toBe(true);
+    expect(moderation.committedRecoveryBroadcastIds().has(target.broadcastId)).toBe(true);
+    // Simulate process death after preparation and before discard/finish.
+    expect(await outbox.pending()).toHaveLength(1);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test("replay that observes a newly committed VOD action waits for local discard", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "commonair-t0-replay-ack-race-"));
+    const workDir = await mkdtemp(join(tmpdir(), "commonair-t0-replay-ack-work-"));
+    const outbox = new T0Outbox(dir);
+    let actionChecks = 0;
+    const { moderation } = await makeModeration({
+      t0Outbox: outbox,
+      resolveBroadcastId: async () => target.broadcastId,
+      t0ActionCommitted: async () => ++actionChecks >= 3,
+    });
+    await outbox.persist({
+      subjectType: "vod",
+      subjectId: "0192a1b2-0000-7000-8000-000000000013",
+      channelId: target.channelId,
+      userId: null,
+      listCategory: "csam",
+      provider: "pdq:local",
+      listVersion: "local:1:x",
+      distance: 3,
+      quality: 90,
+      capturedAt: new Date().toISOString(),
+      evidence: [
+        {
+          kind: "frame",
+          contentType: "image/png",
+          sealedBase64: "AA==",
+          sha256: "0".repeat(64),
+          sizeBytes: 1,
+          keyId: "0".repeat(32),
+          pdq: null,
+          pdqQuality: null,
+          capturedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    await moderation.prepareT0Replay();
+    await moderation.replayT0Outbox();
+    expect(await outbox.pending()).toHaveLength(1);
+    expect(moderation.committedRecoveryBroadcastIds().has(target.broadcastId)).toBe(true);
+    const segmentDir = join(workDir, "broadcasts", target.broadcastId);
+    await mkdir(segmentDir, { recursive: true });
+    const segmentPath = join(segmentDir, "segment-1.m4s");
+    await writeFile(segmentPath, "synthetic local segment");
+    let uploads = 0;
+    await recoverWorkDir({
+      db: stubDb(),
+      storage: { put: async () => uploads++ } as unknown as MediaContext["storage"],
+      bucket: "media",
+      workDir,
+      logger: captureLogger().logger,
+      protectedBroadcastIds: moderation.protectedBroadcastIds(),
+      discardBroadcastIds: moderation.committedRecoveryBroadcastIds(),
+    });
+    await moderation.finishT0Recovery();
+    expect(uploads).toBe(0);
+    expect(await Bun.file(segmentPath).exists()).toBe(false);
+    expect(await outbox.pending()).toEqual([]);
+    await rm(dir, { recursive: true, force: true });
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  test("strict session stop propagates a worker failure and can retry quiescence", async () => {
+    const { logger } = captureLogger();
+    let failures = 1;
+    const idle = { stop: async () => {} };
+    const session = Object.create(BroadcastSession.prototype) as unknown as {
+      stopped: Promise<void> | null;
+      log: typeof logger;
+      ctx: { enqueueVodFinalize: () => Promise<void> };
+      frames: { stop: () => Promise<void> };
+      thumbnails: typeof idle;
+      transcode: typeof idle;
+      simulcast: typeof idle;
+      sampler: typeof idle;
+      recorder: { stop: (final: boolean, strict: boolean) => Promise<void> };
+      stop: (final: boolean, finalizeVod: boolean, strict: boolean) => Promise<void>;
+    };
+    session.stopped = null;
+    session.log = logger;
+    session.ctx = { enqueueVodFinalize: async () => {} };
+    session.frames = {
+      stop: async () => {
+        if (failures-- > 0) throw new Error("synthetic worker stop failure");
+      },
+    };
+    session.thumbnails = idle;
+    session.transcode = idle;
+    session.simulcast = idle;
+    session.sampler = idle;
+    session.recorder = { stop: async () => {} };
+    await expect(session.stop(true, false, true)).rejects.toThrow("synthetic worker stop failure");
+    await session.stop(true, false, true);
+  });
+
+  test("strict recorder quiescence rejects failed segment uploads and keeps local bytes", async () => {
+    const workDir = await mkdtemp(join(tmpdir(), "commonair-recorder-t0-"));
+    const broadcastId = target.broadcastId;
+    const dir = join(workDir, "broadcasts", broadcastId);
+    await mkdir(dir, { recursive: true });
+    const localPath = join(dir, "segment-1.m4s");
+    await writeFile(localPath, "synthetic segment bytes");
+    const { logger } = captureLogger();
+    const ctx = {
+      workDir,
+      logger,
+      bucket: "media",
+      storage: {
+        put: async () => {
+          throw new Error("synthetic storage failure");
+        },
+      },
+    } as unknown as MediaContext;
+    const recorder = new SegmentRecorder(
+      ctx,
+      {
+        broadcastId,
+        channelId: target.channelId,
+        slug: "synthetic",
+        path: target.path,
+        title: "synthetic",
+        startedAt: new Date(),
+        vodEnabled: true,
+      },
+      "0192a1b2-0000-7000-8000-000000000008",
+    );
+    const state = recorder as unknown as {
+      local: Array<{
+        uri: string;
+        durationSeconds: number;
+        startedAt: Date;
+        map: null;
+        localPath: string;
+        uploaded: boolean;
+      }>;
+    };
+    state.local.push({
+      uri: "segment-1.m4s",
+      durationSeconds: 10,
+      startedAt: new Date(),
+      map: null,
+      localPath,
+      uploaded: false,
+    });
+    await expect(recorder.stop(true, true)).rejects.toThrow("synthetic storage failure");
+    expect(await Bun.file(localPath).exists()).toBe(true);
+    await rm(workDir, { recursive: true, force: true });
   });
 });
 
@@ -568,8 +1071,11 @@ describe("startup and list reloads", () => {
         valkey: { set: async () => "OK" },
         logger,
         ffmpeg: "ffmpeg",
+        t0OutboxDir: join(tmpdir(), `commonair-setup-outbox-${crypto.randomUUID()}`),
         kickPublisher: async () => {},
         stopBroadcast: async () => {},
+        resolveBroadcastId: async () => null,
+        t0ActionCommitted: async () => false,
         overrides: { queue: new FakeQueue() },
       }),
     ).rejects.toThrow("evidence public key");
@@ -591,8 +1097,11 @@ describe("startup and list reloads", () => {
       valkey: { set: async () => "OK" },
       logger: captureLogger().logger,
       ffmpeg: "ffmpeg",
+      t0OutboxDir: join(tmpdir(), `commonair-setup-outbox-${crypto.randomUUID()}`),
       kickPublisher: async () => {},
       stopBroadcast: async () => {},
+      resolveBroadcastId: async () => null,
+      t0ActionCommitted: async () => false,
       overrides: { queue: new FakeQueue(), listTools: t, tools: fakeTools() },
     });
     expect(await rt.moderation.scanLiveFrame(target, fakeFrame("1", 90), new Date())).toBe("clean");

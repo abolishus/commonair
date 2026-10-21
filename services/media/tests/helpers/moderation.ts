@@ -7,6 +7,9 @@
  * decide which frames "match" without unit A's PDQ.
  */
 import type { ModerationScanJob, ModerationT0Job } from "@commonair/contracts/internal";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Database } from "@commonair/db";
 import {
   importOpeningKey,
@@ -22,6 +25,7 @@ import {
 } from "@commonair/moderation";
 import { createLogger, type Logger } from "@commonair/observability";
 import { createModerationMetrics } from "../../src/moderation/metrics.ts";
+import { T0Outbox } from "../../src/moderation/t0-outbox.ts";
 import { MediaModeration, type ModerationDeps } from "../../src/moderation/moderation.ts";
 import type { ModerationQueue } from "../../src/moderation/queue.ts";
 import type { FrameTools } from "../../src/moderation/tools.ts";
@@ -148,6 +152,7 @@ export function stubDb(opts: { setting?: unknown; liveCount?: number; fail?: boo
 
 export async function makeModeration(over: Partial<ModerationDeps> = {}): Promise<{
   moderation: MediaModeration;
+  outbox: T0Outbox;
   queue: FakeQueue;
   kicks: string[];
   stopped: string[];
@@ -161,6 +166,7 @@ export async function makeModeration(over: Partial<ModerationDeps> = {}): Promis
   const stopped: string[] = [];
   const { logger, lines } = captureLogger();
   const events = queue.events;
+  const outbox = over.t0Outbox ?? new T0Outbox(join(tmpdir(), `commonair-media-test-outbox-${randomUUID()}`));
   const moderation = new MediaModeration({
     db: stubDb(),
     valkey: { set: async () => "OK" },
@@ -175,12 +181,15 @@ export async function makeModeration(over: Partial<ModerationDeps> = {}): Promis
     stopBroadcast: async (id) => {
       stopped.push(id);
     },
+    resolveBroadcastId: async (job) => (job.subjectType === "broadcast" ? job.subjectId : null),
+    t0ActionCommitted: async () => false,
     logger,
     metrics: createModerationMetrics(),
     envSampleSeconds: 10,
+    t0Outbox: outbox,
     retry: { initialMs: 1, maxMs: 2 },
     sleep: async () => {},
     ...over,
   });
-  return { moderation, queue, kicks, stopped, opener, lines, events };
+  return { moderation, outbox, queue, kicks, stopped, opener, lines, events };
 }

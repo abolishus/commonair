@@ -65,22 +65,31 @@ export class BroadcastSession {
   }
 
   /** `final`: the broadcast ended (finalize the VOD). Otherwise the service is shutting down. */
-  stop(final: boolean, finalizeVod = final): Promise<void> {
-    this.stopped ??= (async () => {
-      await Promise.all([
-        this.guard("moderation", () => this.frames.stop()),
-        this.guard("thumbnails", () => this.thumbnails.stop()),
-        this.guard("transcode", () => this.transcode.stop()),
-        this.guard("simulcast", () => this.simulcast.stop()),
-        this.guard("health", () => this.sampler.stop()),
-        this.guard("recorder", () => this.recorder.stop(final)),
-      ]);
-      if (finalizeVod && this.vodId) {
-        const vodId = this.vodId;
-        await this.guard("vod-finalize enqueue", () => this.ctx.enqueueVodFinalize(vodId));
-      }
-      this.log.info("broadcast session stopped", { final });
-    })();
+  stop(final: boolean, finalizeVod = final, strict = false): Promise<void> {
+    if (this.stopped) {
+      return strict ? this.stopped.then(() => this.recorder.stop(final, true)) : this.stopped;
+    }
+    if (!this.stopped) {
+      const stopping = (async () => {
+        await Promise.all([
+          this.guard("moderation", () => this.frames.stop(), strict),
+          this.guard("thumbnails", () => this.thumbnails.stop(), strict),
+          this.guard("transcode", () => this.transcode.stop(), strict),
+          this.guard("simulcast", () => this.simulcast.stop(), strict),
+          this.guard("health", () => this.sampler.stop(), strict),
+          this.guard("recorder", () => this.recorder.stop(final, strict), strict),
+        ]);
+        if (finalizeVod && this.vodId) {
+          const vodId = this.vodId;
+          await this.guard("vod-finalize enqueue", () => this.ctx.enqueueVodFinalize(vodId));
+        }
+        this.log.info("broadcast session stopped", { final });
+      })();
+      this.stopped = stopping.catch((err: unknown) => {
+        this.stopped = null;
+        throw err;
+      });
+    }
     return this.stopped;
   }
 
@@ -95,11 +104,12 @@ export class BroadcastSession {
     return this.recorder.localWindow(start, durationSeconds);
   }
 
-  private async guard(part: string, fn: () => Promise<void>): Promise<void> {
+  private async guard(part: string, fn: () => Promise<void>, rethrow = false): Promise<void> {
     try {
       await fn();
     } catch (err) {
       this.log.error("broadcast worker failed", { part, error: errorCategory(err) });
+      if (rethrow) throw err;
     }
   }
 }
