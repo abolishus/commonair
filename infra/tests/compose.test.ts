@@ -384,6 +384,13 @@ describe("Quadlet mirror", () => {
     expect(compose.services.api!.environment!.TRUSTED_PROXY_CIDRS).toBe("${TRUSTED_PROXY_CIDRS:-10.89.42.0/24}");
   });
 
+  test("browser-facing S3 URLs default to the published Garage port, not the in-network host", () => {
+    const appEnv = compose.services.api!.environment!;
+    expect(appEnv.S3_ENDPOINT).toBe("http://garage:3900");
+    expect(appEnv.S3_PUBLIC_ENDPOINT).toBe("${S3_PUBLIC_ENDPOINT:-http://localhost:${GARAGE_S3_PORT:-3900}}");
+    expect(compose.services.garage!.ports).toContain("${BIND_ADDRESS:-127.0.0.1}:${GARAGE_S3_PORT:-3900}:3900");
+  });
+
   test("app units carry the same in-network environment as compose", () => {
     const appEnv = compose.services.api!.environment!;
     // Compose lets .env override it; the units pin the network's subnet.
@@ -397,6 +404,8 @@ describe("Quadlet mirror", () => {
           continue;
         // Per-service evidence scoping is checked by its own test above.
         if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY") continue;
+        // Browser-facing and deployment-specific: the units read it from the operator's env file.
+        if (k === "S3_PUBLIC_ENDPOINT") continue;
         const expected = k === "TRUSTED_PROXY_CIDRS" ? "10.89.42.0/24" : v;
         expect(env[k], `${name}: ${k}`).toBe(expected);
       }

@@ -35,6 +35,9 @@ x-app-env: &app-env
   DATABASE_URL: postgres://commonair_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/commonair
   VALKEY_URL: redis://valkey:6379
   S3_ENDPOINT: http://garage:3900
+  # Presigned uploads and public media URLs are opened by browsers, not by the services: they
+  # need the published Garage port, never the in-network hostname above.
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:${GARAGE_S3_PORT:-3900}}
   S3_REGION: garage
   S3_FORCE_PATH_STYLE: "true"
   MEDIAMTX_API_URL: http://mediamtx:9997
