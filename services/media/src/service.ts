@@ -19,8 +19,7 @@ import { startJobs, type Jobs } from "./jobs.ts";
 import { LiveCoordinator } from "./lifecycle.ts";
 import { every, type Loop } from "./loop.ts";
 import { MediaMtxClient } from "./mediamtx.ts";
-import { HashMatchEnforcer } from "./safety/enforce.ts";
-import { createHashMatcher, type HashMatcher } from "./safety/hashmatch.ts";
+import { setupModeration, type ModerationOverrides } from "./moderation/setup.ts";
 import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "./recovery.ts";
 import { DEFAULT_TIMINGS, type MediaTimings } from "./settings.ts";
 import { defaultTranscodeSlots, SlotLimiter } from "./transcode/slots.ts";
@@ -35,7 +34,8 @@ export interface MediaServiceOptions {
   bullPrefix?: string;
   /** Pub/sub channel for live events (tests use a unique one). */
   busChannel?: string;
-  hashMatcher?: HashMatcher;
+  /** Tests only: fakes for the moderation primitives (production always uses @commonair/moderation). */
+  moderation?: ModerationOverrides;
   workDir?: string;
   ffmpeg?: string;
   ffprobe?: string;
@@ -72,19 +72,27 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
   const subscriber = createValkey(env.VALKEY_URL, { name: "media-sub" });
   const storage: ObjectStorage = storageFromEnv(env);
   const mtx = new MediaMtxClient(env.MEDIAMTX_API_URL, env.MEDIA_INTERNAL_PASSWORD);
-  const matcher = opts.hashMatcher ?? createHashMatcher(env);
 
   let coordinator: LiveCoordinator | undefined;
-  const enforcer = new HashMatchEnforcer({
+  // Fail closed: a bad evidence key or hash list throws here and the service does not start.
+  const moderationRuntime = await setupModeration({
+    env,
     db: dbh.db,
-    storage,
-    bucket: env.S3_BUCKET_MEDIA,
-    mtx,
-    matcher,
+    valkey,
     logger,
-    // The broadcast ended, but its VOD must not be finalized (published): it is quarantined.
+    ffmpeg,
+    bullPrefix: opts.bullPrefix,
+    kickPublisher: async (path) => {
+      await mtx.kickPublisher(path);
+    },
+    // The broadcast ended, but its VOD must not be finalized (published): the worker removes it.
     stopBroadcast: async (id) => coordinator?.offline(id, true, false),
+    overrides: opts.moderation,
+  }).catch(async (err: unknown) => {
+    await Promise.allSettled([subscriber.quit(), bus.quit(), valkey.quit(), dbh.close()]);
+    throw err;
   });
+  const moderation = moderationRuntime.moderation;
 
   const diskBudget = new DiskBudget({
     dir: workDir,
@@ -112,7 +120,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     logger,
     timings,
     caps,
-    enforcer,
+    moderation,
     workDir,
     ffmpeg,
     ffprobe,
@@ -150,7 +158,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       db: dbh.db,
       storage,
       bucket: ctx.bucket,
-      enforcer,
+      moderation,
       ffmpeg,
       imageFormat: caps.imageFormat,
       workDir,
@@ -162,7 +170,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       db: dbh.db,
       storage,
       bucket: ctx.bucket,
-      enforcer,
+      moderation,
       ffmpeg,
       encoder: caps.encoder,
       imageFormat: caps.imageFormat,
@@ -228,6 +236,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
         logger.warn("work dir recovery failed", { err });
       }
       jobs.run();
+      moderationRuntime.start();
       subscriber.on("message", onMessage);
       await subscriber.subscribe(busChannel);
       // Recover broadcasts that went live while we were down, then keep reconciling.
@@ -243,6 +252,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       await sweepLoop?.stop();
       await live.shutdown();
       await jobs.close();
+      await moderationRuntime.stop();
       await Promise.allSettled([subscriber.quit(), bus.quit(), valkey.quit()]);
       await dbh.close();
     },

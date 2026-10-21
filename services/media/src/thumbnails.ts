@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * A 640×360 frame of each live broadcast every 60 s: hash-checked first, then stored as
+ * A 640×360 frame of each live broadcast every 60 s: PDQ-checked against the hash lists first (a
+ * match is handled as T0 live and nothing is written), then stored as
  * `thumbnails/<broadcastId>/latest.<ext>` (stable URL) and a timestamped copy (cache-busting key
  * written to `broadcasts.thumbnailKey`, and history for moderation review). Only the newest
  * `timings.thumbnailHistory` stamped copies are kept; older ones are deleted after each capture.
@@ -52,13 +53,11 @@ export class Thumbnailer {
       { timeoutMs: 20_000, secrets: [internalSecret], maxStdoutBytes: 8 * 1024 * 1024 },
     );
     if (image.byteLength === 0) throw new Error("ffmpeg produced an empty thumbnail");
-    const matched = await this.ctx.enforcer.check(image, {
-      subjectType: "broadcast",
-      subjectId: this.b.broadcastId,
-      channelId: this.b.channelId,
-      broadcastId: this.b.broadcastId,
-      path: this.b.path,
-    });
+    const matched = await this.ctx.moderation.checkLiveThumbnail(
+      { broadcastId: this.b.broadcastId, channelId: this.b.channelId, path: this.b.path },
+      image,
+      imageType(caps.imageFormat),
+    );
     if (matched) return false;
     const ext = imageExt(caps.imageFormat);
     const prefix = thumbnailPrefix(this.b.broadcastId);

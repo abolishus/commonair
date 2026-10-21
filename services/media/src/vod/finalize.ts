@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `QUEUES.vodFinalize` consumer: after a broadcast ends, close the VOD playlist
- * (`#EXT-X-ENDLIST`), hash-check sampled frames, record duration/size, mark it `ready` and set
- * its expiry from the channel's retention. Idempotent: a finished VOD is left alone.
+ * `QUEUES.vodFinalize` consumer: after a broadcast ends, PDQ-check frames sampled every effective
+ * sample interval over the **whole** recording (all of them, before publishing), close the VOD
+ * playlist (`#EXT-X-ENDLIST`), record duration/size, mark it `ready` and set its expiry from the
+ * channel's retention. A hash match → `moderation.t0` for the VOD, which is never published. A
+ * scan that cannot complete throws, so the job retries and nothing is published (fail closed).
+ * Idempotent: a finished VOD is left alone.
  */
 
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
@@ -16,9 +20,8 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "../disk.ts";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
+import { T0_REASON, type MediaModeration } from "../moderation/moderation.ts";
 import { ActiveScratch } from "../recovery.ts";
-import type { HashMatchEnforcer } from "../safety/enforce.ts";
-import { broadcastTainted, quarantineVod } from "../safety/quarantine.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
 import { VOD_PLAYLIST, vodPrefix } from "./recorder.ts";
@@ -30,7 +33,7 @@ export interface FinalizeDeps {
   db: Database;
   storage: ObjectStorage;
   bucket: string;
-  enforcer: HashMatchEnforcer;
+  moderation: MediaModeration;
   ffmpeg: string;
   imageFormat: ImageFormat;
   workDir: string;
@@ -48,20 +51,46 @@ const DAY_MS = 86_400_000;
 export const imageExt = (f: ImageFormat) => (f === "webp" ? "webp" : "jpg");
 export const imageType = (f: ImageFormat) => (f === "webp" ? "image/webp" : "image/jpeg");
 
-/** Up to `n` segment indexes spread over the recording (first, middle, last …). */
-export function sampleIndexes(count: number, n = 3): number[] {
-  if (count <= 0) return [];
-  if (count <= n) return [...Array(count).keys()];
-  const out = new Set<number>();
-  for (let i = 0; i < n; i++) out.add(Math.round((i * (count - 1)) / (n - 1)));
-  return [...out];
+/** Longest stretch of recording assembled into one scratch file for frame sampling. */
+export const SCAN_CHUNK_SECONDS = 60;
+
+/**
+ * Pure: consecutive segments grouped for sampling. A group shares one init segment (a new
+ * recorder run starts a new group) and spans at most `maxSeconds` (bounds scratch space; a single
+ * longer segment is its own group). Sampling restarts at each group's start, so frames are never
+ * further apart than the interval.
+ */
+export function scanChunks(segments: readonly PlaylistSegment[], maxSeconds = SCAN_CHUNK_SECONDS): PlaylistSegment[][] {
+  const out: PlaylistSegment[][] = [];
+  let cur: PlaylistSegment[] = [];
+  let secs = 0;
+  for (const seg of segments) {
+    const first = cur[0];
+    if (first && (first.map !== seg.map || secs + seg.durationSeconds > maxSeconds)) {
+      out.push(cur);
+      cur = [];
+      secs = 0;
+    }
+    cur.push(seg);
+    secs += seg.durationSeconds;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
+
+/** Mark a VOD removed by T0 (never published). Conditional, so a finished VOD is not overwritten. */
+async function markRemoved(db: Database, vodId: string): Promise<void> {
+  await db
+    .update(schema.vods)
+    .set({ status: "deleted", removedReason: T0_REASON })
+    .where(and(eq(schema.vods.id, vodId), inArray(schema.vods.status, ["recording", "processing"])));
 }
 
 export async function finalizeVod(
   deps: FinalizeDeps,
   vodId: string,
 ): Promise<"ready" | "failed" | "removed" | "skipped"> {
-  const { db, storage, bucket, logger } = deps;
+  const { db, storage, bucket, logger, moderation } = deps;
   const log = logger.child({ vodId, worker: "vod-finalize" });
   const [vod] = await db
     .select({
@@ -75,11 +104,11 @@ export async function finalizeVod(
     .innerJoin(schema.channels, eq(schema.channels.id, schema.vods.channelId))
     .where(eq(schema.vods.id, vodId));
   if (!vod || vod.status === "ready" || vod.status === "deleted" || vod.status === "failed") return "skipped";
-  // Never publish anything from a broadcast with a hash match (the match may have been found live,
-  // before or while this job was queued).
-  if (deps.enforcer.isTainted(vod.broadcastId) || (await broadcastTainted(db, vod.broadcastId))) {
-    log.warn("refusing to publish VOD of a broadcast with a hash match; quarantining");
-    await quarantineVod(deps, vodId, vod.broadcastId);
+  // Never publish anything from a broadcast with a T0 match (found live, before or while this job
+  // was queued). The worker copies its objects to evidence and removes the public copies.
+  if (await moderation.broadcastTainted(vod.broadcastId)) {
+    log.warn("refusing to publish the VOD of a broadcast with a T0 match");
+    await markRemoved(db, vodId);
     return "removed";
   }
   // Frame sampling needs scratch space; over budget, BullMQ retries later (and the stale-VOD
@@ -104,22 +133,43 @@ export async function finalizeVod(
   const scratch = await scratches.create(deps.workDir, "vod-");
   let thumbnail: Uint8Array<ArrayBuffer> | null = null;
   try {
-    for (const idx of sampleIndexes(segments.length)) {
-      const image = await sampleFrame(deps, prefix, segments[idx] as PlaylistSegment, scratch, idx);
-      if (!image) continue;
-      const matched = await deps.enforcer.check(image, {
-        subjectType: "vod",
-        subjectId: vodId,
-        channelId: vod.channelId,
-        broadcastId: vod.broadcastId,
-      });
-      if (matched) {
-        // The enforcer quarantines the whole broadcast too; do this VOD now so it is never published.
-        await quarantineVod(deps, vodId, vod.broadcastId);
+    const every = await moderation.sampleSeconds();
+    let frames = 0;
+    for (const [i, chunk] of scanChunks(segments).entries()) {
+      const file = join(scratch, `scan-${i}.mp4`);
+      const first = chunk[0] as PlaylistSegment;
+      const keys = [...(first.map ? [prefix + first.map] : []), ...chunk.map((sg) => prefix + sg.uri)];
+      // Missing objects or an undecodable chunk throw: the job retries, nothing is published.
+      await assembleFromStorage(storage, bucket, keys, scratch, file);
+      const { hit, frames: n } = await moderation.scanVideoFile(file, every, new Date());
+      await rm(file, { force: true });
+      frames += n;
+      if (n === 0) throw new Error("no frame decoded from a VOD chunk; not publishing");
+      if (hit) {
+        moderation.prepublishFrames("vod", frames);
+        await moderation.t0Prepublish("vod", vodId, vod.channelId, hit);
+        await markRemoved(db, vodId);
         return "removed";
       }
-      // The middle sample doubles as the VOD's thumbnail.
-      if (thumbnail === null || idx === Math.floor(segments.length / 2)) thumbnail = image;
+    }
+    moderation.prepublishFrames("vod", frames);
+    // The thumbnail is a frame of the middle segment, PDQ-checked before it is written.
+    const mid = Math.floor(segments.length / 2);
+    const image = await sampleFrame(deps, prefix, segments[mid] as PlaylistSegment, scratch, mid);
+    if (image) {
+      const { frame, pdq, match } = await moderation.checkImage(image);
+      if (match) {
+        await moderation.t0Prepublish("vod", vodId, vod.channelId, {
+          match,
+          frame,
+          pdq,
+          capturedAt: new Date(),
+          original: { bytes: image, contentType: imageType(deps.imageFormat) },
+        });
+        await markRemoved(db, vodId);
+        return "removed";
+      }
+      thumbnail = image;
     }
   } finally {
     await scratches.release(scratch);
@@ -137,6 +187,11 @@ export async function finalizeVod(
   let size = 0;
   for await (const obj of storage.list(bucket, prefix)) size += obj.size;
   const now = deps.now?.() ?? new Date();
+  // A T0 job that landed while we scanned (another sample, the worker) wins over publishing.
+  if (await moderation.broadcastTainted(vod.broadcastId)) {
+    await markRemoved(db, vodId);
+    return "removed";
+  }
   await db
     .update(schema.vods)
     .set({
@@ -146,7 +201,7 @@ export async function finalizeVod(
       expiresAt: new Date(now.getTime() + vod.retentionDays * DAY_MS),
       ...(thumbnailKey ? { thumbnailKey } : {}),
     })
-    .where(eq(schema.vods.id, vodId));
+    .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")));
   log.info("VOD ready", { segments: segments.length, sizeBytes: size });
   return "ready";
 }
@@ -169,9 +224,8 @@ async function sampleFrame(
     });
     return stdout.byteLength > 0 ? stdout : null;
   } catch (err) {
-    // An undecodable segment cannot be checked, and must not block the VOD forever; the
-    // thumbnails taken while live were checked already.
-    deps.logger.warn("could not sample VOD frame", { err, segment: seg.uri });
+    // Only the thumbnail: every sampled frame was PDQ-checked above, so a VOD without one is fine.
+    deps.logger.warn("could not take the VOD thumbnail", { error: err instanceof Error ? err.name : "unknown" });
     return null;
   }
 }

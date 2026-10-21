@@ -4,7 +4,9 @@
 /**
  * `QUEUES.clips` consumer: cut `durationSeconds` starting `startOffset` seconds into the
  * broadcast, from the live recorder's local buffer when the broadcast is still live, otherwise
- * from the VOD's segments in object storage. Output: `clips/<clipId>.mp4` plus a thumbnail.
+ * from the VOD's segments in object storage. Every second of the cut and its thumbnail are
+ * PDQ-checked before anything is uploaded; a match → `moderation.t0` for the clip, which is never
+ * published. Output: `clips/<clipId>.mp4` plus a thumbnail.
  */
 
 import { join } from "node:path";
@@ -17,8 +19,7 @@ import type { DiskBudget } from "./disk.ts";
 import { clipArgs, frameArgs, type H264Encoder, type ImageFormat } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
 import { ActiveScratch } from "./recovery.ts";
-import type { HashMatchEnforcer } from "./safety/enforce.ts";
-import { broadcastTainted, quarantinePrefix, CSAM_REASON } from "./safety/quarantine.ts";
+import { T0_REASON, type Hit, type MediaModeration } from "./moderation/moderation.ts";
 import { assembleFromStorage, concatFiles } from "./vod/assemble.ts";
 import { imageExt, imageType } from "./vod/finalize.ts";
 import { findWindow, parsePlaylist } from "./vod/playlist.ts";
@@ -49,7 +50,7 @@ export interface ClipDeps {
   db: Database;
   storage: ObjectStorage;
   bucket: string;
-  enforcer: HashMatchEnforcer;
+  moderation: MediaModeration;
   ffmpeg: string;
   encoder: H264Encoder;
   imageFormat: ImageFormat;
@@ -83,11 +84,8 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
   if (!clip || clip.status !== "processing") return "skipped";
   if (!clip.broadcastId || !clip.startedAt) throw new ClipUnavailableError("clip has no broadcast");
   if (!(clip.durationSeconds > 0)) throw new ClipUnavailableError("clip duration must be positive");
-  if (deps.enforcer.isTainted(clip.broadcastId) || (await broadcastTainted(db, clip.broadcastId))) {
-    await db
-      .update(schema.clips)
-      .set({ status: "deleted", removedReason: CSAM_REASON })
-      .where(eq(schema.clips.id, clipId));
+  if (await deps.moderation.broadcastTainted(clip.broadcastId)) {
+    await markClipRemoved(db, clipId);
     return "removed";
   }
   const start = new Date(clip.startedAt.getTime() + clip.startOffset * 1000);
@@ -131,34 +129,32 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
       }),
       { timeoutMs: Math.max(60_000, window.durationSeconds * 10_000) },
     );
+    // Every second of the cut, all of it, before anything is uploaded (decoder errors throw:
+    // the job retries and nothing is published).
+    const scan = await deps.moderation.scanVideoFile(out, CLIP_SAMPLE_SECONDS, new Date());
+    deps.moderation.prepublishFrames("clip", scan.frames);
+    if (scan.frames === 0) throw new Error("no frame decoded from the clip; not publishing");
+    if (scan.hit) return removeForT0(deps, clipId, clip.channelId, scan.hit);
     const { stdout: thumb } = await runCommand(
       deps.ffmpeg,
       frameArgs(out, window.durationSeconds / 2, deps.imageFormat),
       { timeoutMs: 30_000, maxStdoutBytes: 8 * 1024 * 1024 },
     );
     if (thumb.byteLength > 0) {
-      const matched = await deps.enforcer.check(thumb, {
-        subjectType: "clip",
-        subjectId: clipId,
-        channelId: clip.channelId,
-        broadcastId: clip.broadcastId,
-      });
-      if (matched) {
-        // Preserved for legal purposes, never published.
-        await storage.put(
-          bucket,
-          `${quarantinePrefix(clip.broadcastId)}${clipKey(clipId)}`,
-          await Bun.file(out).bytes(),
-          {
-            contentType: "video/mp4",
-          },
-        );
-        await db
-          .update(schema.clips)
-          .set({ status: "deleted", removedReason: CSAM_REASON })
-          .where(eq(schema.clips.id, clipId));
-        return "removed";
-      }
+      const { frame, pdq, match } = await deps.moderation.checkImage(thumb);
+      if (match)
+        return removeForT0(deps, clipId, clip.channelId, {
+          match,
+          frame,
+          pdq,
+          capturedAt: new Date(),
+          original: { bytes: thumb, contentType: imageType(deps.imageFormat) },
+        });
+    }
+    // A T0 job that landed while we cut (live sampling, the worker) wins over publishing.
+    if (await deps.moderation.broadcastTainted(clip.broadcastId)) {
+      await markClipRemoved(db, clipId);
+      return "removed";
     }
     await storage.put(bucket, clipKey(clipId), await Bun.file(out).bytes(), { contentType: "video/mp4" });
     const thumbnailKey = thumb.byteLength > 0 ? clipThumbKey(clipId, deps.imageFormat) : null;
@@ -178,6 +174,23 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
   } finally {
     await scratches.release(scratch);
   }
+}
+
+/** Clips are sampled every second (ADR 0006 Q1, vPDQ-style). */
+export const CLIP_SAMPLE_SECONDS = 1;
+
+async function markClipRemoved(db: Database, clipId: string): Promise<void> {
+  await db
+    .update(schema.clips)
+    .set({ status: "deleted", removedReason: T0_REASON })
+    .where(and(eq(schema.clips.id, clipId), eq(schema.clips.status, "processing")));
+}
+
+/** Enqueue T0 for the clip (throws if it cannot, so the job retries), then mark it removed. Nothing is uploaded. */
+async function removeForT0(deps: ClipDeps, clipId: string, channelId: string, hit: Hit): Promise<"removed"> {
+  await deps.moderation.t0Prepublish("clip", clipId, channelId, hit);
+  await markClipRemoved(deps.db, clipId);
+  return "removed";
 }
 
 async function findVod(db: Database, broadcastId: string): Promise<string | null> {

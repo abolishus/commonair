@@ -131,6 +131,15 @@ export class LiveCoordinator {
 
   private async startSession(info: BroadcastInfo & { suspended?: boolean }): Promise<void> {
     if (info.suspended) return;
+    // A reconnect of a channel with a T0 match here, before the worker's suspension lands.
+    if (this.ctx.moderation.isLiveTainted(info.channelId, info.path)) {
+      this.ctx.moderation.refuseReconnect({
+        broadcastId: info.broadcastId,
+        channelId: info.channelId,
+        path: info.path,
+      });
+      return;
+    }
     const vodId = info.vodEnabled ? await this.ensureVod(info) : null;
     const session = new BroadcastSession(this.ctx, info, vodId);
     this.sessions.set(info.broadcastId, session);
