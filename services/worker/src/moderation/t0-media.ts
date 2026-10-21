@@ -38,6 +38,42 @@ export interface MediaTarget {
   sourceId: string;
 }
 
+function clipKindForKey(key: string): Kind | null {
+  if (/\.mp4$/i.test(key)) return "clip_object";
+  if (/\.(?:png|jpe?g|webp)$/i.test(key)) return "thumbnail";
+  return null;
+}
+
+/** Include conventional media-bucket objects even when clip generation failed before saving DB keys. */
+export async function collectClipTargets(
+  storage: ObjectStorage,
+  bucket: string,
+  rows: readonly { id: string; storageKey: string | null; thumbnailKey: string | null }[],
+): Promise<MediaTarget[]> {
+  const targets = new Map<string, MediaTarget>();
+  for (const clip of rows) {
+    if (clip.storageKey)
+      targets.set(clip.storageKey, {
+        key: clip.storageKey,
+        kind: "clip_object",
+        sourceType: "clip",
+        sourceId: clip.id,
+      });
+    if (clip.thumbnailKey)
+      targets.set(clip.thumbnailKey, {
+        key: clip.thumbnailKey,
+        kind: "thumbnail",
+        sourceType: "clip",
+        sourceId: clip.id,
+      });
+    for await (const object of storage.list(bucket, `clips/${clip.id}.`)) {
+      const kind = clipKindForKey(object.key);
+      if (kind) targets.set(object.key, { key: object.key, kind, sourceType: "clip", sourceId: clip.id });
+    }
+  }
+  return [...targets.values()];
+}
+
 /** The objects a T0 case's subject owns, by listing prefixes and reading clip keys. */
 export async function collectTargets(
   ctx: WorkerContext,
@@ -75,10 +111,7 @@ export async function collectTargets(
         sourceType: "vod",
         sourceId: vodId,
       });
-  for (const c of clipRows) {
-    if (c.storageKey) out.push({ key: c.storageKey, kind: "clip_object", sourceType: "clip", sourceId: c.id });
-    if (c.thumbnailKey) out.push({ key: c.thumbnailKey, kind: "thumbnail", sourceType: "clip", sourceId: c.id });
-  }
+  out.push(...(await collectClipTargets(storage, ctx.mediaBucket, clipRows)));
   return out;
 }
 
@@ -108,7 +141,7 @@ export interface PreserveResult {
 }
 
 /** Seal, store, verify, record and only then delete the public copy of one object. */
-async function preserveOne(
+export async function preserveOne(
   ctx: WorkerContext,
   job: ModerationT0MediaJob,
   t: MediaTarget,
