@@ -223,4 +223,16 @@ describe("env", () => {
     expect(() => loadHarnessEnv({ HARNESS_API_URL: "not a url" })).toThrow(/HARNESS_API_URL/);
     expect(() => loadHarnessEnv({ HARNESS_PLAYER: "vlc" })).toThrow(/HARNESS_PLAYER/);
   });
+
+  test("local defaults follow the stack's published ports; explicit URLs still win", () => {
+    const moved = loadHarnessEnv({ WEB_PORT: "3100", WORKER_PORT: "3105", IRC_WS_PORT: "7680" });
+    expect(moved.HARNESS_WEB_URL).toBe("http://localhost:3100");
+    expect(moved.HARNESS_WORKER_HEALTH_URL).toBe("http://localhost:3105/healthz");
+    expect(moved.HARNESS_IRC_WS_URL).toBe("ws://localhost:7680");
+    expect(moved.HARNESS_API_URL).toBe("http://localhost:3001");
+    const explicit = loadHarnessEnv({ WEB_PORT: "3100", HARNESS_WEB_URL: "https://staging.example.test" });
+    expect(explicit.HARNESS_WEB_URL).toBe("https://staging.example.test");
+    // Blank port values (as in .env.example) fall back to the compose default.
+    expect(loadHarnessEnv({ WEB_PORT: " " }).HARNESS_WEB_URL).toBe("http://localhost:3000");
+  });
 });

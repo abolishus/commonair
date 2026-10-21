@@ -86,6 +86,29 @@ export const harnessEnvSchema = z.object({
 
 export type HarnessEnv = z.output<typeof harnessEnvSchema>;
 
+/**
+ * Local defaults follow the host ports compose publishes (`WEB_PORT` etc., from the repo `.env`),
+ * so a stack moved off a busy port is still found. An explicit `HARNESS_*` value always wins.
+ */
+export function localDefaults(source: Record<string, string | undefined>): Record<string, string> {
+  const port = (name: string, fallback: number) => source[name]?.trim() || String(fallback);
+  return {
+    HARNESS_API_URL: `http://localhost:${port("API_PORT", 3001)}`,
+    HARNESS_WEB_URL: `http://localhost:${port("WEB_PORT", 3000)}`,
+    HARNESS_ORIGIN_URL: `http://localhost:${port("ORIGIN_PORT", 3003)}`,
+    HARNESS_MAILPIT_URL: `http://localhost:${port("MAILPIT_HTTP_PORT", 8025)}`,
+    HARNESS_RTMP_URL: `rtmp://localhost:${port("MEDIAMTX_RTMP_PORT", 1935)}`,
+    HARNESS_WHIP_URL: `http://localhost:${port("MEDIAMTX_WEBRTC_PORT", 8889)}`,
+    HARNESS_IRC_WS_URL: `ws://localhost:${port("IRC_WS_PORT", 6680)}`,
+    HARNESS_CHAT_HEALTH_URL: `http://localhost:${port("CHAT_PORT", 3002)}/healthz`,
+    HARNESS_IRC_HEALTH_URL: `http://localhost:${port("IRC_HEALTH_PORT", 6681)}/healthz`,
+    HARNESS_WORKER_HEALTH_URL: `http://localhost:${port("WORKER_PORT", 3005)}/healthz`,
+    HARNESS_STRIPE_MOCK_URL: `http://localhost:${port("STRIPE_MOCK_PORT", 12111)}`,
+  };
+}
+
 export function loadHarnessEnv(source: Record<string, string | undefined> = process.env): HarnessEnv {
-  return loadEnv(harnessEnvSchema, source);
+  const merged = { ...source };
+  for (const [key, value] of Object.entries(localDefaults(source))) if (!merged[key]?.trim()) merged[key] = value;
+  return loadEnv(harnessEnvSchema, merged);
 }
