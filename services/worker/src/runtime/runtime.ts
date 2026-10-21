@@ -56,7 +56,9 @@ export class JobRuntime {
     let q = this.queues.get(name);
     if (!q) {
       q = new Queue(name, { connection: this.opts.connection, prefix: this.opts.prefix });
-      q.on("error", (err) => this.opts.logger.error("queue error", { queue: name, err }));
+      // BullMQ/Redis errors can contain URLs, keys, or other untrusted text. Keep logs
+      // operationally useful without serializing the provider error or its message.
+      q.on("error", () => this.opts.logger.error("queue error", { queue: name, errorCode: "QUEUE_ERROR" }));
       this.queues.set(name, q);
     }
     return q;
@@ -126,10 +128,16 @@ export class JobRuntime {
         prefix,
         concurrency: concurrency[queue],
       });
-      worker.on("failed", (job, err) =>
-        logger.warn("job failed", { queue, job: job?.name, jobId: job?.id, attempts: job?.attemptsMade, err }),
+      worker.on("failed", (job) =>
+        logger.warn("job failed", {
+          queue,
+          job: job?.name,
+          jobId: job?.id,
+          attempts: job?.attemptsMade,
+          errorCode: "JOB_FAILED",
+        }),
       );
-      worker.on("error", (err) => logger.error("worker error", { queue, err }));
+      worker.on("error", () => logger.error("worker error", { queue, errorCode: "WORKER_ERROR" }));
       this.workers.push(worker);
     }
     const wanted = new Set<string>();

@@ -21,28 +21,30 @@ import { z } from "zod";
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 export const QUEUE_NAMES = Object.values(QUEUES) as QueueName[];
 
-export const workerEnv = z.object({
-  ...coreEnv.shape,
-  ...databaseEnv.shape,
-  ...valkeyEnv.shape,
-  ...authEnv.pick({ AUTH_SECRET: true }).shape,
-  ...developerEnv.shape,
-  ...paymentsEnv.shape,
-  ...servicePorts.pick({ WORKER_PORT: true }).shape,
-  ...storageEnv.partial({ S3_ENDPOINT: true, S3_ACCESS_KEY_ID: true, S3_SECRET_ACCESS_KEY: true }).shape,
-  ...workerTuningEnv.shape,
-  // Trust & safety (ADR 0006): required, so a worker without them refuses to start.
-  ...moderationEnv.shape,
-  ...evidenceSealEnv.shape,
-  ...evidenceStorageEnv.shape,
-}).superRefine((env, ctx) => {
-  if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
-    ctx.addIssue({
-      code: "custom",
-      path: ["MODERATION_CLASSIFIER"],
-      message: "the scripted classifier needs MODERATION_TEST_HOOKS=true (harness only)",
-    });
-});
+export const workerEnv = z
+  .object({
+    ...coreEnv.shape,
+    ...databaseEnv.shape,
+    ...valkeyEnv.shape,
+    ...authEnv.pick({ AUTH_SECRET: true }).shape,
+    ...developerEnv.shape,
+    ...paymentsEnv.shape,
+    ...servicePorts.pick({ WORKER_PORT: true }).shape,
+    ...storageEnv.partial({ S3_ENDPOINT: true, S3_ACCESS_KEY_ID: true, S3_SECRET_ACCESS_KEY: true }).shape,
+    ...workerTuningEnv.shape,
+    // Trust & safety (ADR 0006): required, so a worker without them refuses to start.
+    ...moderationEnv.shape,
+    ...evidenceSealEnv.shape,
+    ...evidenceStorageEnv.shape,
+  })
+  .superRefine((env, ctx) => {
+    if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
+      ctx.addIssue({
+        code: "custom",
+        path: ["MODERATION_CLASSIFIER"],
+        message: "the scripted classifier needs MODERATION_TEST_HOOKS=true (harness only)",
+      });
+  });
 export type WorkerEnv = z.output<typeof workerEnv>;
 
 /**

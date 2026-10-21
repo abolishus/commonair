@@ -55,7 +55,9 @@ test("main.ts serves /healthz and /readyz and shuts down on SIGTERM", async () =
       { timeoutMs: 15_000, intervalMs: 100, label: "readyz" },
     );
     expect(ready.checks).toEqual({ postgres: "ok", valkey: "ok", queues: "ok" });
-    expect((await fetch(`http://127.0.0.1:${port}/healthz`)).status).toBe(200);
+    const health = await fetch(`http://127.0.0.1:${port}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toMatchObject({ moderation_test_hooks: true });
     expect((await fetch(`http://127.0.0.1:${port}/other`)).status).toBe(404);
   } finally {
     child.kill("SIGTERM");

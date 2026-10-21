@@ -9,17 +9,7 @@
  * enforce the two-reviewer T0 dismissal, the 48-hour NCII deadline and the mature-label lock.
  */
 import { sql } from "drizzle-orm";
-import {
-  boolean,
-  check,
-  doublePrecision,
-  index,
-  integer,
-  pgTable,
-  text,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, check, doublePrecision, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { channels } from "./channels.ts";
 import { legalHolds } from "./safety.ts";
 import {

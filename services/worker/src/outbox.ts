@@ -47,7 +47,9 @@ export function checkInternalEvent(row: EventRow): { ok: true } | { ok: false; r
   const def = EVENTS[row.type as EventType];
   if (row.version !== def.version) return { ok: false, reason: `unsupported version ${row.version}` };
   const parsed = def.payload.safeParse(row.payload);
-  return parsed.success ? { ok: true } : { ok: false, reason: parsed.error.issues.map((i) => i.path.join(".")).join(",") };
+  return parsed.success
+    ? { ok: true }
+    : { ok: false, reason: parsed.error.issues.map((i) => i.path.join(".")).join(",") };
 }
 
 /** Reject when `p` takes longer than `ms`; the caller treats it as a failed round trip. */

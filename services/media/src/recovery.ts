@@ -208,7 +208,7 @@ async function recoverBroadcastDir(
     }
     await rm(dir, { recursive: true, force: true });
     return { kept: false, uploaded };
-  } catch (err) {
+  } catch (err: unknown) {
     // Keep the files; the next startup or sweep tries again.
     log.warn("could not recover a recording; keeping its files", { broadcastId: name, error: errorCategory(err) });
     return { kept: true, uploaded: 0 };

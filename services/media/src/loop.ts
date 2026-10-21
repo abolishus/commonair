@@ -23,7 +23,7 @@ export function every(
     timer = null;
     if (stopped) return;
     current = fn()
-      .catch((err: unknown) => opts.logger.warn("periodic task failed", { task: opts.name, err }))
+      .catch(() => opts.logger.warn("periodic task failed", { task: opts.name, errorCode: "PERIODIC_TASK_FAILED" }))
       .finally(() => {
         if (!stopped) timer = setTimeout(tick, intervalMs);
       });

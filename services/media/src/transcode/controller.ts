@@ -174,8 +174,8 @@ export class TranscodeController {
         .where(eq(schema.broadcasts.id, this.b.broadcastId));
       await this.publish(renditions);
       this.log.info("renditions live", { renditions });
-    } catch (err) {
-      this.log.warn("could not advertise renditions", { err });
+    } catch {
+      this.log.warn("could not advertise renditions", { errorCode: "RENDITIONS_ADVERTISE_FAILED" });
     }
   }
 
@@ -189,8 +189,8 @@ export class TranscodeController {
         .set({ transcodeActive: false })
         .where(eq(schema.broadcasts.id, this.b.broadcastId));
       if (!silent && was) await this.publish(["source"]);
-    } catch (err) {
-      this.log.warn("could not withdraw renditions", { err });
+    } catch {
+      this.log.warn("could not withdraw renditions", { errorCode: "RENDITIONS_WITHDRAW_FAILED" });
     }
   }
 

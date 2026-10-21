@@ -20,6 +20,8 @@ export interface ServiceOptions<WS = undefined> {
   logger?: Logger;
   /** Named dependency checks for /readyz; each throws when unhealthy. */
   checks?: Record<string, ReadinessCheck>;
+  /** Non-sensitive runtime switches reported by /healthz for operator visibility. */
+  health?: Record<string, boolean>;
   fetch: (req: Request, server: Server<WS>) => Response | Promise<Response> | undefined | Promise<Response | undefined>;
   websocket?: WebSocketHandler<WS>;
   /** Called on shutdown after the listener stops accepting connections. */
@@ -84,7 +86,7 @@ export function runService<WS = undefined>(opts: ServiceOptions<WS>): RunningSer
       const { pathname } = new URL(req.url);
       if (pathname === "/healthz")
         return withSecurityHeaders(
-          Response.json({ ok: !stopping, service: opts.name }, { status: stopping ? 503 : 200 }),
+          Response.json({ ok: !stopping, service: opts.name, ...opts.health }, { status: stopping ? 503 : 200 }),
         );
       if (pathname === "/readyz") {
         const r = await readiness(checks);

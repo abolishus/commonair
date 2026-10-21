@@ -90,6 +90,7 @@ describe("events", () => {
       "moderation.case.resolved",
       "moderation.flagged",
       "moderation.restriction",
+      "moderation.t0.media_preserved",
       "ncii.request.decided",
       "ncii.request.received",
       "ncmec.draft.created",
@@ -109,6 +110,29 @@ describe("events", () => {
     expect(BusEvent.safeParse({ ...ev, type: "stream.online" }).success).toBe(true);
     const subscribe = contract.developer.events.subscribe["~orpc"].inputSchema as z.ZodObject;
     expect(subscribe.shape.type.safeParse("moderation.flagged").success).toBe(false);
+    expect(
+      EVENTS["moderation.t0.media_preserved"].payload.safeParse({
+        case_id: "case",
+        hold_id: "hold",
+        source_subject_type: "broadcast",
+        source_subject_id: "subject",
+        evidence_id: "evidence",
+        kind: "frame",
+        status: "object_preserved",
+      }).success,
+    ).toBe(true);
+    expect(
+      EVENTS["moderation.t0.media_preserved"].payload.safeParse({
+        case_id: "case",
+        hold_id: "hold",
+        source_subject_type: "broadcast",
+        source_subject_id: "subject",
+        evidence_id: null,
+        kind: null,
+        status: "reconciliation_complete",
+        object_key: "must-not-be-a-contract-field",
+      }).success,
+    ).toBe(true);
   });
 
   test("classifier scores leave unscored categories absent and stay in [0, 1]", () => {

@@ -56,7 +56,12 @@ export async function buildSnapshot(tx: Executor, i: SnapshotInput): Promise<Ncm
       ipHashes,
       ips,
     },
-    subject: { type: i.subject.type, id: i.subject.id, channelId: i.subject.channelId, channelSlug: channel?.slug ?? null },
+    subject: {
+      type: i.subject.type,
+      id: i.subject.id,
+      channelId: i.subject.channelId,
+      channelSlug: channel?.slug ?? null,
+    },
     match: i.match,
     evidenceIds: i.evidenceIds,
   });

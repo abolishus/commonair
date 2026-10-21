@@ -8,7 +8,8 @@ import { defineJob } from "../runtime/registry.ts";
 export const job = defineJob({
   queue: QUEUES.moderation,
   name: MODERATION_JOBS.t0Media,
-  description: "Seal a T0 subject's VOD, clip and thumbnail objects into the evidence bucket, then delete the public copies",
+  description:
+    "Seal a T0 subject's VOD, clip and thumbnail objects into the evidence bucket, then delete the public copies",
   data: ModerationT0MediaJob,
   attempts: 15,
   backoffMs: 5_000,

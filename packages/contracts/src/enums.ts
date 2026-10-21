@@ -218,7 +218,13 @@ export const MODERATION_CASE_STATUSES = [
 export const MODERATION_CASE_ORIGINS = ["hash_list", "classifier", "human"] as const;
 export const MODERATION_REVIEW_DECISIONS = ["clear", "warn", "end_stream", "suspend", "escalate_legal"] as const;
 export const CONTENT_LABELS = ["mature"] as const;
-export const LEGAL_HOLD_REASONS = ["csam_match", "ncii_match", "csam_confirmed", "law_enforcement", "litigation"] as const;
+export const LEGAL_HOLD_REASONS = [
+  "csam_match",
+  "ncii_match",
+  "csam_confirmed",
+  "law_enforcement",
+  "litigation",
+] as const;
 export const EVIDENCE_KINDS = ["frame", "upload", "vod_object", "clip_object", "thumbnail"] as const;
 export const EVIDENCE_STORAGE = ["inline", "bucket"] as const;
 export const NCMEC_REPORT_STATUSES = ["draft", "filed", "withdrawn"] as const;

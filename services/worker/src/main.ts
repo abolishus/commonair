@@ -64,6 +64,7 @@ runService({
   port: env.WORKER_PORT,
   logger,
   checks: worker.checks,
+  health: { moderation_test_hooks: moderation.testHooks },
   fetch: () => new Response("not found", { status: 404 }),
   shutdownTimeoutMs: SHUTDOWN_DEADLINE_MS + 3_000,
   onShutdown: async () => {

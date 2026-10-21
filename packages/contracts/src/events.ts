@@ -17,6 +17,7 @@ import {
   MODERATION_CATEGORIES,
   MODERATION_SUBJECTS,
   MODERATION_TIERS,
+  EVIDENCE_KINDS,
 } from "./enums.ts";
 
 const id = z.string();
@@ -493,6 +494,22 @@ export const EVENTS = {
     internal: true,
     description: "Internal: a live broadcast was restricted (T1) or the restriction was lifted",
     payload: { broadcast_id: id, channel_id: id, case_id: id, restricted: z.boolean() },
+  }),
+  "moderation.t0.media_preserved": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: T0 media evidence was preserved or its cleanup reconciliation completed",
+    payload: {
+      case_id: id,
+      hold_id: id,
+      source_subject_type: z.enum(MODERATION_SUBJECTS),
+      source_subject_id: id,
+      evidence_id: id.nullable(),
+      kind: z.enum(EVIDENCE_KINDS).nullable(),
+      status: z.enum(["object_preserved", "reconciliation_complete"]),
+    },
   }),
   "ncii.request.received": def({
     version: "1",

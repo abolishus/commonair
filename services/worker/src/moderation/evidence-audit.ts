@@ -76,7 +76,9 @@ export async function runEvidenceAudit(ctx: WorkerContext, batch = 500): Promise
   }
 
   // Inline objects, checked by the database itself.
-  const inline = await ctx.sql<{ id: string; header_hex: string; length: number; size_bytes: number; key_id: string }[]>`
+  const inline = await ctx.sql<
+    { id: string; header_hex: string; length: number; size_bytes: number; key_id: string }[]
+  >`
     select id, encode(substring(sealed from 1 for 21), 'hex') as header_hex,
            octet_length(sealed) as length, size_bytes, key_id
       from evidence_objects where storage = 'inline'`;
@@ -106,10 +108,7 @@ export async function runEvidenceAudit(ctx: WorkerContext, batch = 500): Promise
         startedAt: now,
       });
     }
-    await tx
-      .update(runs)
-      .set({ finishedAt: now, checked, missing, mismatched, incidentId })
-      .where(eq(runs.id, runId));
+    await tx.update(runs).set({ finishedAt: now, checked, missing, mismatched, incidentId }).where(eq(runs.id, runId));
     await audit(
       tx,
       {

@@ -111,8 +111,8 @@ export class DiskBudget {
     let verdict: BudgetVerdict;
     try {
       verdict = evaluateBudget(await this.usage(), this.config, need);
-    } catch (err) {
-      this.opts.logger.warn("disk budget measurement failed; allowing work", { err });
+    } catch {
+      this.opts.logger.warn("disk budget measurement failed; allowing work", { errorCode: "DISK_MEASUREMENT_FAILED" });
       return { ok: true };
     }
     if (!verdict.ok && Date.now() - this.lastRefusalLogAt > 60_000) {

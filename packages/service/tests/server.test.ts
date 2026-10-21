@@ -11,6 +11,7 @@ const svc = runService({
   port: 0,
   hostname: "127.0.0.1",
   logger: createLogger({ service: "test", write: () => {} }),
+  health: { moderation_test_hooks: true },
   checks: {
     dep: async () => {
       if (!healthy) throw new Error("dep down");
@@ -24,7 +25,9 @@ const svc = runService({
 afterAll(() => svc.stop());
 
 test("health, readiness and security headers", async () => {
-  expect((await fetch(new URL("/healthz", svc.url))).status).toBe(200);
+  const health = await fetch(new URL("/healthz", svc.url));
+  expect(health.status).toBe(200);
+  expect(await health.json()).toMatchObject({ moderation_test_hooks: true });
   expect((await fetch(new URL("/readyz", svc.url))).status).toBe(200);
   healthy = false;
   const r = await fetch(new URL("/readyz", svc.url));

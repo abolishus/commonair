@@ -54,6 +54,6 @@ if (import.meta.main) {
     if (p.exitCode !== 0) throw new Error(`djpeg failed for ${name}`);
     const { w, h, rgb } = parsePpm(new Uint8Array(p.stdout));
     await Bun.write(`${dir}decoded/${name}.512.rgb.gz`, Bun.gzipSync(cimgNearest(rgb, w, h, 512, 512), { level: 9 }));
-    console.log(`${name}: ${w}x${h} -> 512x512`);
+    process.stdout.write(`${name}: ${w}x${h} -> 512x512\n`);
   }
 }

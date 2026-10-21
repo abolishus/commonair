@@ -157,8 +157,8 @@ class SimulcastRunner {
         await this.ctx.valkey.hset(key, this.target.id, JSON.stringify({ status, lastError, at: at.toISOString() }));
         await this.ctx.valkey.expire(key, STATUS_TTL_SECONDS);
         this.log.info("simulcast status", { status, lastError });
-      } catch (err) {
-        this.log.warn("could not record simulcast status", { err, status });
+      } catch {
+        this.log.warn("could not record simulcast status", { errorCode: "SIMULCAST_STATUS_WRITE_FAILED", status });
       }
     });
     return this.writes;
