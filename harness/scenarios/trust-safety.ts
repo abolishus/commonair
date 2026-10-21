@@ -215,12 +215,6 @@ async function trustSafety(
     const [a, b, c, d] = await Promise.all(roles.map(([u]) => p.users.signIn(u)));
     return { l1: a as SignedInUser, l2: b as SignedInUser, mod: c as SignedInUser, admin: d as SignedInUser };
   });
-  ctx.data("users", {
-    legal1: l1.username,
-    legal2: l2.username,
-    moderator: mod.username,
-    admin: admin.username,
-  });
   const emails = [l1, l2, mod, admin].map((u) => u.email);
   // The tick as of now is what the worker's own per-minute schedule does: harmless, and it
   // fails early with a clear message when the override (test hooks) is not applied.
@@ -423,7 +417,6 @@ async function stepT0Live(run: Run): Promise<Step1Result> {
   const { ctx, staff } = run;
   const t = (w: string) => title(1, w);
   const a = await ctx.step(t("sign up streamer A"), () => newStreamer(run, "ts_a"));
-  ctx.data("users.a", a.user.username);
   const { pub, url } = await publisher(run, a, { image: fixturePath(FIXTURES.t0Csam) });
   const firstFrameAt = await ctx.step(t("A publishes the synthetic CSAM-list fixture pattern"), () => pub.start());
   const offAirAt = await ctx.step(t(`off air and suspended within ${run.deadlineMs} ms`), () =>
@@ -628,7 +621,6 @@ async function stepTwoReviewers(run: Run): Promise<void> {
   const { ctx, staff, databaseUrl } = run;
   const t = (w: string) => title(3, w);
   const b = await ctx.step(t("sign up streamer B"), () => newStreamer(run, "ts_b"));
-  ctx.data("users.b", b.user.username);
   const { pub } = await publisher(run, b, { image: fixturePath(FIXTURES.t0Ncii) });
   const firstAt = await ctx.step(t("B publishes the synthetic NCII-list fixture pattern"), () => pub.start());
   const offAt = await ctx.step(t("B off air and suspended"), () =>
@@ -691,7 +683,6 @@ async function stepT2Label(run: Run): Promise<void> {
   const t = (w: string) => title(4, w);
   const b = { timeoutMs: UI_TIMEOUT_MS, signal: ctx.signal };
   const c = await ctx.step(t("sign up streamer C"), () => newStreamer(run, "ts_c"));
-  ctx.data("users.c", c.user.username);
   await ctx.step(t("script sexual = 0.85 for C (scripted classifier)"), () =>
     hooks.setScores(c.channelId, { sexual: 0.85 }),
   );
@@ -780,7 +771,6 @@ async function stepT1Restrict(run: Run): Promise<void> {
   const t = (w: string) => title(5, w);
   const b = { timeoutMs: UI_TIMEOUT_MS, signal: ctx.signal };
   const d = await ctx.step(t("sign up streamer D"), () => newStreamer(run, "ts_d"));
-  ctx.data("users.d", d.user.username);
   await ctx.step(t("script sexual = 0.99 for D"), () => hooks.setScores(d.channelId, { sexual: 0.99 }));
   const { pub } = await publisher(run, d, benign(run, 5));
   await ctx.step(t("D goes live"), () => pub.start());
@@ -904,7 +894,6 @@ async function stepUploadRejected(run: Run): Promise<void> {
   ctx.assert("S3_ENDPOINT / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY are set (media bucket listing)", bucket !== null);
   if (bucket === null) return;
   const e = await ctx.step(t("sign up streamer E"), () => newStreamer(run, "ts_e"));
-  ctx.data("users.e", e.user.username);
   const before = (await e.user.api.client.channels.get({ channel: e.channel })).avatarUrl;
   const bytes = readFixture(fixturePath(FIXTURES.t0Csam));
   const { key, error } = await ctx.step(t("E uploads the synthetic fixture as an avatar and commits"), () =>
@@ -964,7 +953,6 @@ async function stepNcii(run: Run): Promise<void> {
   const t = (w: string) => title(7, w);
   const b = { timeoutMs: UI_TIMEOUT_MS, signal: ctx.signal };
   const f = await ctx.step(t("sign up streamer F"), () => newStreamer(run, "ts_f"));
-  ctx.data("users.f", f.user.username);
   // A run-unique pattern: its frames go onto the instance's local NCII block list below.
   const { pub } = await publisher(run, f, benign(run, 7));
   await ctx.step(t("F goes live with a run-unique benign pattern"), () => pub.start());
