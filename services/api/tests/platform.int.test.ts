@@ -619,11 +619,11 @@ describe("tokens, bots and the API surface", () => {
   });
 
   test("unbuilt procedures answer 501 NOT_IMPLEMENTED", async () => {
-    const r = await client(api).call<{ code: string }>("GET", `/api/channels/${alice.username}/vods`);
+    const r = await client(api).call<{ code: string }>("GET", `/api/channels/${alice.username}/points`);
     expect(r.status).toBe(501);
     expect(r.body.code).toBe("NOT_IMPLEMENTED");
     // Same procedure over the RPC transport (oRPC wraps the input in `json`).
-    const rpc = await fetch(`${api.url}/rpc/vods/list`, {
+    const rpc = await fetch(`${api.url}/rpc/bot/points/leaderboard`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ json: { channel: alice.username } }),

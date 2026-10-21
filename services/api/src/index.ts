@@ -15,6 +15,7 @@ import type { ApiEnv } from "./env.ts";
 import { createApiMailer, recipientLimitedMailer } from "./mail.ts";
 import { DEFAULT_RATE_LIMITS, valkeyRateLimitStore } from "./lib/ratelimit.ts";
 import { pinnedGet, resolveHost } from "./lib/outbound.ts";
+import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
@@ -97,6 +98,9 @@ export async function buildDeps(
       // A queue that cannot close (Valkey gone) must not keep the mailer and pools open.
       await closeModeration(deps).catch((err: unknown) =>
         logger.warn("moderation close failed", { err: (err as Error).name }),
+      );
+      await closeClipQueue(deps).catch((err: unknown) =>
+        logger.warn("clip queue close failed", { err: (err as Error).name }),
       );
       await mailer.close();
       valkey.disconnect();

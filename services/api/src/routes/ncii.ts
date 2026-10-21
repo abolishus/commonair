@@ -115,13 +115,26 @@ async function clearUploadReferences(tx: Executor, channelId: string, key: strin
 async function removeItem(tx: Executor, item: ItemRow, now: Date, mediaBase: string): Promise<EndedBroadcast | null> {
   let ended: EndedBroadcast | null = null;
   switch (item.subjectType) {
-    case "vod":
-      if (item.subjectId)
-        await tx
-          .update(vods)
-          .set({ status: "deleted", removedReason: "ncii" })
-          .where(and(eq(vods.id, item.subjectId), ne(vods.status, "deleted")));
+    case "vod": {
+      if (!item.subjectId) break;
+      await tx
+        .update(vods)
+        .set({ status: "deleted", removedReason: "ncii" })
+        .where(and(eq(vods.id, item.subjectId), ne(vods.status, "deleted")));
+      // Clips of the same broadcast carry the same content, including ones cut from the live
+      // buffer (no vod_id), whatever state the VOD was already in.
+      const [v] = await tx.select({ b: vods.broadcastId }).from(vods).where(eq(vods.id, item.subjectId));
+      await tx
+        .update(clips)
+        .set({ status: "deleted", removedReason: "ncii" })
+        .where(
+          and(
+            v ? or(eq(clips.vodId, item.subjectId), eq(clips.broadcastId, v.b)) : eq(clips.vodId, item.subjectId),
+            ne(clips.status, "deleted"),
+          ),
+        );
       break;
+    }
     case "clip":
       if (item.subjectId)
         await tx

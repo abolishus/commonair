@@ -1,13 +1,208 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** `clips.*`: not implemented in this unit (HTTP 501); a later unit replaces this file. */
-import { notImplemented } from "../lib/errors.ts";
-import { os } from "../lib/orpc.ts";
+/**
+ * `clips.*`: a clip row starts `processing` and is cut by media (`QUEUES.clips`), which PDQ-checks
+ * every second of it before publishing; a match removes it as T0 and it is never shown. Listing and
+ * reading follow `media/visibility.ts`. Deleting is not implemented yet (HTTP 501, milestone E6).
+ */
+import { and, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
+import type { z } from "zod";
+import type { dto } from "@commonair/contracts";
+import { schema } from "@commonair/db";
+import type { Deps } from "../deps.ts";
+import type { Caller } from "../lib/access.ts";
+import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor } from "../lib/cursor.ts";
+import { channelBySlug, iso, loadUsersPublic, mediaUrl } from "../lib/dto.ts";
+import { notFound, notImplemented, precondition } from "../lib/errors.ts";
+import { os, requireCaller } from "../lib/orpc.ts";
+import { clipQueue } from "../media/clip-queue.ts";
+import { audienceOf, clipVisible, urlsWithheld, vodShown } from "../media/visibility.ts";
+import { matureGate } from "./playback.ts";
+
+const { broadcasts, channels, clips: clipsT, vods } = schema;
+type ClipRow = typeof clipsT.$inferSelect;
+type ChannelRow = typeof channels.$inferSelect;
+type Clip = z.infer<typeof dto.Clip>;
+type Labelled = { mature: boolean; categoryId: string | null };
+
+/** `labels[i]` is clip i's broadcast (null when gone); mature media URLs follow the 18+ gate. */
+async function toClips(
+  deps: Deps,
+  caller: Caller | null,
+  channel: ChannelRow,
+  rows: readonly ClipRow[],
+  labels: readonly (Labelled | null)[],
+): Promise<Clip[]> {
+  const [creators, withheld] = await Promise.all([
+    loadUsersPublic(
+      deps,
+      rows.map((r) => r.creatorId).filter((id): id is string => id !== null),
+    ),
+    urlsWithheld(deps, caller, channel, labels),
+  ]);
+  return rows.map((c, i) => {
+    const u = c.creatorId ? creators.get(c.creatorId) : undefined;
+    const playable = c.status === "ready" && !(withheld[i] ?? true);
+    return {
+      id: c.id,
+      channelSlug: channel.slug,
+      title: c.title,
+      creator: u ? { id: u.id, username: u.username, displayName: u.displayName } : null,
+      status: c.status,
+      durationSeconds: c.durationSeconds,
+      url: playable ? mediaUrl(deps, c.storageKey) : null,
+      thumbnailUrl: playable ? mediaUrl(deps, c.thumbnailKey) : null,
+      views: c.views,
+      createdAt: iso(c.createdAt),
+    };
+  });
+}
+
+const labelsOf = (b: Labelled | null) => (b ? { mature: b.mature, categoryId: b.categoryId } : null);
+
+/** Where the cut starts, in seconds from the start of the broadcast, and which broadcast. */
+async function clipSource(
+  deps: Deps,
+  caller: Caller,
+  channel: ChannelRow,
+  input: { vodId?: string | undefined; startOffset?: number | undefined; durationSeconds: number },
+): Promise<{ broadcastId: string; vodId: string | null; startOffset: number; labels: Labelled }> {
+  if (input.vodId) {
+    const [row] = await deps.db
+      .select({ v: vods, b: broadcasts })
+      .from(vods)
+      .innerJoin(broadcasts, eq(broadcasts.id, vods.broadcastId))
+      .where(and(eq(vods.id, input.vodId), eq(vods.channelId, channel.id)))
+      .limit(1);
+    if (!row || !vodShown(audienceOf(caller, channel), row.v, channel, row.b.restrictedAt))
+      throw notFound("VOD not found");
+    if (row.v.status !== "ready") throw precondition("vod_ready", "The VOD is not ready yet");
+    const start = input.startOffset ?? 0;
+    if (start + input.durationSeconds > row.v.durationSeconds)
+      throw precondition("within_vod", "The clip must lie within the VOD");
+    return { broadcastId: row.v.broadcastId, vodId: row.v.id, startOffset: start, labels: row.b };
+  }
+  // The broadcast playback serves, so a stale unended row is never clipped.
+  const [live] = channel.liveBroadcastId
+    ? await deps.db.select().from(broadcasts).where(eq(broadcasts.id, channel.liveBroadcastId))
+    : [];
+  if (!live || live.endedAt) throw precondition("live", "The channel is not live; clip a VOD instead");
+  // A broadcast under review cannot be clipped: its clips would be hidden until the case closes.
+  if (live.restrictedAt !== null) throw precondition("not_under_review", "This stream is under review");
+  const elapsed = (deps.now().getTime() - live.startedAt.getTime()) / 1000;
+  return { broadcastId: live.id, vodId: null, startOffset: Math.max(0, elapsed - input.durationSeconds), labels: live };
+}
 
 export const clips = {
-  create: os.clips.create.handler(notImplemented),
-  list: os.clips.list.handler(notImplemented),
-  get: os.clips.get.handler(notImplemented),
+  create: os.clips.create.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const caller = requireCaller(context);
+    const channel = await channelBySlug(deps, input.channel);
+    if (!channel) throw notFound("Channel not found");
+    if (channel.suspendedAt !== null) throw precondition("channel_active", "This channel is suspended");
+    const src = await clipSource(deps, caller, channel, input);
+    // Whoever may not watch it may not clip it.
+    const [withheld] = await urlsWithheld(deps, caller, channel, [src.labels]);
+    if (withheld) throw matureGate();
+    const [row] = await deps.db
+      .insert(clipsT)
+      .values({
+        channelId: channel.id,
+        broadcastId: src.broadcastId,
+        vodId: src.vodId,
+        creatorId: caller.user.id,
+        title: input.title,
+        startOffset: src.startOffset,
+        durationSeconds: input.durationSeconds,
+      })
+      .returning();
+    if (!row) throw new Error("clip insert returned no row");
+    try {
+      await clipQueue(deps).enqueue(row.id);
+    } catch (err) {
+      deps.logger.error("clip enqueue failed", { clipId: row.id, err: (err as Error).name });
+      // Never leave a clip `processing` forever when media will not hear of it. Media skips a
+      // clip that is no longer `processing`, so a job that did land is harmless.
+      await deps.db
+        .update(clipsT)
+        .set({ status: "failed" })
+        .where(eq(clipsT.id, row.id))
+        .catch((e: unknown) => deps.logger.error("clip fail-mark failed", { clipId: row.id, err: (e as Error).name }));
+      throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Clipping is unavailable right now; try again" });
+    }
+    const [out] = await toClips(deps, caller, channel, [row], [labelsOf(src.labels)]);
+    return out as Clip;
+  }),
+
+  list: os.clips.list.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const channel = await channelBySlug(deps, input.channel);
+    if (!channel) throw notFound("Channel not found");
+    const audience = audienceOf(context.caller, channel);
+    if (audience === "public" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
+    const top = input.sort === "top";
+    // "top" pages by offset (views change between pages); "recent" by keyset.
+    let after: SQL | undefined;
+    let offset = 0;
+    if (top) {
+      offset = decodeCursor(input.cursor, isOffsetCursor)?.o ?? 0;
+    } else {
+      const cur = decodeCursor(input.cursor, isKeyCursor);
+      if (cur) {
+        const t = new Date(cur.t);
+        after = or(lt(clipsT.createdAt, t), and(eq(clipsT.createdAt, t), lt(clipsT.id, cur.id)));
+      }
+    }
+    const rows = await deps.db
+      .select({ c: clipsT, mature: broadcasts.mature, categoryId: broadcasts.categoryId, bid: broadcasts.id })
+      .from(clipsT)
+      .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
+      .where(and(eq(clipsT.channelId, channel.id), clipVisible(audience), after))
+      .orderBy(...(top ? [desc(clipsT.views)] : []), desc(clipsT.createdAt), desc(clipsT.id))
+      .limit(input.limit + 1)
+      .offset(offset);
+    const page = rows.slice(0, input.limit);
+    const items = await toClips(
+      deps,
+      context.caller,
+      channel,
+      page.map((r) => r.c),
+      page.map((r) => (r.bid === null ? null : { mature: r.mature ?? false, categoryId: r.categoryId })),
+    );
+    const last = page[page.length - 1]?.c;
+    const nextCursor =
+      rows.length > input.limit && last
+        ? top
+          ? encodeCursor({ o: offset + input.limit })
+          : encodeCursor({ t: iso(last.createdAt), id: last.id })
+        : null;
+    return { items, nextCursor };
+  }),
+
+  get: os.clips.get.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const [head] = await deps.db
+      .select({ channel: channels })
+      .from(clipsT)
+      .innerJoin(channels, eq(channels.id, clipsT.channelId))
+      .where(eq(clipsT.id, input.id))
+      .limit(1);
+    if (!head) throw notFound("Clip not found");
+    const audience = audienceOf(context.caller, head.channel);
+    if (audience === "public" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
+    const [row] = await deps.db
+      .select({ c: clipsT, mature: broadcasts.mature, categoryId: broadcasts.categoryId, bid: broadcasts.id })
+      .from(clipsT)
+      .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
+      .where(and(eq(clipsT.id, input.id), clipVisible(audience)))
+      .limit(1);
+    if (!row) throw notFound("Clip not found");
+    const labels = row.bid === null ? null : { mature: row.mature ?? false, categoryId: row.categoryId };
+    const [out] = await toClips(deps, context.caller, head.channel, [row.c], [labels]);
+    return out as Clip;
+  }),
+
   remove: os.clips.remove.handler(notImplemented),
 };

@@ -211,7 +211,8 @@ export async function hideContent(
           .set({ status: "deleted", removedReason: reason })
           .where(and(or(...vodWhere), ne(vods.status, "deleted")))
           .returning({ id: vods.id });
-  // Clips cut from those VODs carry the same content.
+  // Clips cut from those VODs carry the same content, and so do clips of the same broadcasts cut
+  // from the live buffer (they have no vod_id).
   const allVodIds = [
     ...new Set([
       ...(target.vodIds ?? []),
@@ -220,9 +221,18 @@ export async function hideContent(
         : []),
     ]),
   ];
+  const vodBroadcastIds = target.vodIds?.length
+    ? (
+        await tx
+          .select({ b: vods.broadcastId })
+          .from(vods)
+          .where(inArray(vods.id, [...target.vodIds]))
+      ).map((v) => v.b)
+    : [];
+  const broadcastIds = [...new Set([...(target.broadcastId ? [target.broadcastId] : []), ...vodBroadcastIds])];
   const clipWhere = [
     ...(target.clipIds?.length ? [inArray(clips.id, [...target.clipIds])] : []),
-    ...(target.broadcastId ? [eq(clips.broadcastId, target.broadcastId)] : []),
+    ...(broadcastIds.length ? [inArray(clips.broadcastId, broadcastIds)] : []),
     ...(allVodIds.length ? [inArray(clips.vodId, allVodIds)] : []),
   ];
   const hiddenClips =
