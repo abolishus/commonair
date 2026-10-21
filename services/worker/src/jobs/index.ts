@@ -8,12 +8,20 @@
  */
 import { integrityJobs } from "../integrity/jobs.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
+import { job as accountDeletion } from "./account-deletion.ts";
 import { job as closeStaleSessions } from "./close-stale-sessions.ts";
 import { job as expireAuthRows } from "./expire-auth-rows.ts";
 import { job as liveCounters } from "./live-counters.ts";
 import { job as moneyExpirePending } from "./money-expire-pending.ts";
 import { job as moneyReleaseHolds } from "./money-release-holds.ts";
 import { job as moneyRenew } from "./money-renew.ts";
+import { job as moderationNciiClock } from "./moderation-ncii-clock.ts";
+import { job as moderationNciiHash } from "./moderation-ncii-hash.ts";
+import { job as moderationScan } from "./moderation-scan.ts";
+import { moderationSchedules } from "./moderation-schedules.ts";
+import { job as moderationT0Escalated } from "./moderation-t0-escalated.ts";
+import { job as moderationT0Media } from "./moderation-t0-media.ts";
+import { job as moderationT0 } from "./moderation-t0.ts";
 import { job as pruneWebhookDeliveries } from "./prune-webhook-deliveries.ts";
 import { job as relaysOffline } from "./relays-offline.ts";
 import { job as vodRetention } from "./vod-retention.ts";
@@ -39,4 +47,12 @@ export const JOBS = [
   moneyExpirePending,
   moneyRenew,
   moneyReleaseHolds,
+  moderationScan,
+  moderationT0,
+  moderationT0Media,
+  moderationT0Escalated,
+  moderationNciiClock,
+  moderationNciiHash,
+  ...moderationSchedules,
+  accountDeletion,
 ] as readonly JobDefinition[];
