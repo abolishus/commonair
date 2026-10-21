@@ -15,6 +15,14 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
+## E4b validation resumed (2026-10-21)
+
+The user resumed E4b validation alongside E4c, superseding the earlier deferral. Manual API (77
+assertions), manual web (82) and Stripe API (95) scenarios pass locally. See PROGRESS.md for
+fixes, Storybook checks, local network/port setup and the positive-fee stripe-mock fixture. The
+last verify rerun failed only because the local `.env` lacked the E4c evidence keys; after
+`init-env --merge` infra comes up healthy. Final verify is user-run; no Railway deployment.
+
 ## Session eight in flight (E4c trust & safety)
 
 Started 2026-10-20 from `468f4f0`. Prompt: slice E4c (PLAN.md row E4c, ADR 0006): T0 hash match,
@@ -23,8 +31,8 @@ queue/appeals/NCII UI, harness `trust-safety`. Reviews are **harder than E4b**: 
 reviewer before every merge, a focused re-review after any HIGH fix, and a second,
 security-focused reviewer for the T0 path, holds, deletion, evidence storage and the NCII clock,
 even when the first finds no HIGH. Losing evidence, skipping a T0 action, showing T0 material
-outside the `legal` role, or switching the pipeline off counts as HIGH. The user said to **skip
-the E4b validations for now** and finish E4c first. Safety rules (every brief repeats them): never
+outside the `legal` role, or switching the pipeline off counts as HIGH. (The user first deferred
+E4b validations; they were resumed 2026-10-21, see above.) Safety rules (every brief repeats them): never
 obtain, generate, describe or handle real CSAM/NCII; synthetic geometric fixtures only;
 no industry hash lists; logs carry ids, categories and scores only.
 
@@ -41,7 +49,7 @@ table and large media into an evidence bucket only the worker can reach (ADR 000
 
 ### Step 2, head-agent contract step (done)
 
-Done and committed (`3d51fbc`, all on local `main`, **not pushed**):
+Done and committed (`3d51fbc`, on `main`, since pushed):
 
 - `docs/testing/e4c-selectors.md`: **the spec** (safety rules, tiers/thresholds, flow table,
   routes, test ids, `trust-safety` scenario steps, test hooks). Read it in full first.
@@ -62,7 +70,7 @@ Done and committed (`3d51fbc`, all on local `main`, **not pushed**):
   (`UNWIRED_SUBJECTS`) until the API unit wires them.
 - tsc clean in contracts, api, worker, chat, media, web, ui, harness after these changes.
 
-Done in the second sitting (2026-10-20, all on local `main`, **not pushed**; each commit had its
+Done in the second sitting (2026-10-20, on `main`, since pushed; each commit had its
 targeted checks pass: tsc, unit tests, lint/fmt of the touched files):
 
 - `7501bb9` **contracts**: `EventDef.internal`; internal events `moderation.flagged`,
@@ -122,35 +130,33 @@ targeted checks pass: tsc, unit tests, lint/fmt of the touched files):
   `evidence/<caseId>/<evidenceId>.<sha256 of sealed bytes>` so the daily audit can verify without
   the private key; VOD evidence is sealed per HLS object.
 
-Open items from the contract step:
+### Step 3, units A–F (merged and pushed)
 
-- **onnxruntime-node postinstall**: Bun's `pm untrusted` reports nothing blocked, which may mean
-  Bun's built-in default trust list lets the script run. It is a no-op on macOS; on Linux x64 it
-  could fetch CUDA from NuGet. Mitigated by `ONNXRUNTIME_NODE_INSTALL=skip` in compose/Quadlet, but
-  the **image build** (`infra/containers/service.Containerfile`, `bun install`) must also set it:
-  add `ENV ONNXRUNTIME_NODE_INSTALL=skip` before the install step and confirm in a Linux build that
-  no `.nuget`/CUDA files appear. Adding `"trustedDependencies": []` to the root was tried and
-  reverted (unclear effect on other packages' scripts).
-- Hash-list file mounts for media/api/worker and the model volume for the worker in compose are
-  not done (unit F writes `harness/compose.trust-safety.yaml` for the scenario; production mounts
-  are a head-agent integration task).
-- `docs/operators/trust-safety.md` (ADR 0006 Q5, "not legal advice" header, S3 Object Lock policy
-  for stores that support it): head agent, at integration.
-- Remove `HASH_MATCH_*` from config and `.env.example` once unit B merges.
+All six units were implemented in separate worktrees, merged in order after independent review,
+and their requested integration checks were run serially. B (media), C (worker), and D (API) also
+received separate security reviews. HIGH findings were fixed and received focused re-reviews.
+The final F review caught ffmpeg stderr leaking into harness errors; it was sanitized and
+re-reviewed. Unit commits are on `main`, currently `132a402`, pushed.
 
-### Step 3, fire and merge the units (resume here)
+- Media: native PDQ matcher, watcher/reload, T0 evidence retention and recovery; its integration
+  suite passed 23 tests.
+- Worker: moderation runtime and jobs, versioned automated actions, evidence and NCMEC/NCII
+  flows; integration suite passed 68 tests.
+- API: case, upload, evidence, appeals and takedown routes; avatar reattachment race guard. The
+  merged API integration suite passed 171 tests across 13 files.
+- Web/UI: moderation and legal views, appeals, NCII flow and mature gate; web tests passed 677,
+  typecheck/lint and `apps/web` build passed. Storybook and browser checks remain user-run.
+- Harness: `trust-safety` scenario and privacy-safe reports; targeted harness tests passed 289.
 
-Fire **A, B, C, D, E, F** (six, the maximum), each with the Agent tool in its own git worktree
-(`isolation: "worktree"`), prompt = "Read `.claude/briefs/e4c/_common.md` and
-`.claude/briefs/e4c/<X>.md` and do what they say. First run `git merge main --no-edit`." Merge **A
-first** after its review; then tell B, C and D (SendMessage) to `git merge main --no-edit` and run
-their integration tests for real. Review rules (harder than E4b): an independent reviewer before
-every merge (diff vs `_common.md`, the spec, AGENTS.md), a focused re-review after any HIGH fix,
-and a **second, security-focused reviewer for B, C and D** even with no HIGH. Losing evidence,
-skipping a T0 action, showing T0 material outside `legal`, or switching the pipeline off is HIGH.
-Apply contract requests yourself on `main` between merges. After all merge: the open items above,
-e4c doc wiring check, then hand the user the gate, `bun run verify --scenario trust-safety` and
-the browser checks.
+Head-agent integration after the merges: `ONNXRUNTIME_NODE_INSTALL=skip` was already in the
+service image build and remains set in Compose/Quadlet. Compose and Quadlet now mount hash lists
+read-only into media/API/worker and the verified ONNX model read-only into API/worker. Their
+default hash-list source is the intentionally empty FOSS fixture; no industry lists are present.
+`HASH_MATCH_*` was removed from config and `.env.example`. The operator guide now documents the
+container paths, Garage limitation and current US/UK/EU references.
+
+Remaining user-run checks: `bun run verify`, `bun run verify --scenario trust-safety`, image
+rebuilds, Storybook, browser checks and Railway.
 
 Decisions taken in the spec that go slightly beyond ADR 0006 (tell the user if asked): T0 removal
 of VOD/clip media is **not restored** after a two-reviewer dismissal (copies exist only as sealed

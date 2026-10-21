@@ -20,22 +20,67 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session eight (2026-10-20): E4c trust & safety (in progress)
+## E4b validation (2026-10-21)
+
+Resumed at the user's request. Local `e4b-money` passes: manual API **77/77** assertions,
+manual browser **82/82**, Stripe API against stripe-mock **95/95**. Stripe used the pinned
+v0.206.0 upstream fixtures with `balance_transaction.fee=50` and matching `net`; stock fixtures
+report zero fees and cannot confirm payments. Temporary mock keys and a compose override were
+used; no real Stripe account or money. The manual adapter was restored afterward.
+
+Storybook builds; Support dark/light, mobile 320, gift controls, instructions, no-tiers,
+PageTabs disabled tabs and wrapped ChoiceToggle inspected. Fixed oversized option-card radios
+(horizontal Field orientation), treasury actions racing a debounced search, and the harness
+reading the provider before Support loaded. Added option-card and worker health-port regressions.
+The gate also exposed formatting/lint issues and a macOS watcher-test race, now fixed.
+
+Full `bun run verify` passed before the last money/infra fixes. The rerun stopped at infra up
+because the local `.env` predated the E4c evidence keys (`garage-init: S3_EVIDENCE_ACCESS_KEY_ID
+is required`); after `init-env --merge`, `bun scripts/infra.ts test` is healthy. Final gate: user.
+Local setup: web uses port 3100; the existing Podman network is `10.89.0.0/24`, so API trust was
+set to that actual subnet for these runs. No Railway deployment was performed. ADR 0007
+follow-ups remain deferred.
+
+Gate flakes fixed on 2026-10-21. These were load-related failures, and none was a product bug:
+
+- The harness player now waits up to 2 s for WebKit's native-HLS answer.
+- Compose Postgres runs with `max_connections=400` (`POSTGRES_MAX_CONNECTIONS`, applied by the
+  entrypoint). The parallel suites peaked at the default of 100 and got "remaining connection slots
+  are reserved". A restore needs at least the primary's value, and `restore.sh` now says so.
+- Integration files that use a test database allow 30 s per test and 60 s for hooks: the suites
+  run in parallel, and Postgres runs DROP DATABASE one at a time.
+- The chat emote-only test waits for the settings frame on the other instance.
+- Media VOD fixture rows are inserted after the upload, so the service's stale-VOD reconcile
+  cannot finalize them first. The barrier tests fail fast instead of hanging.
+- The chat filter latency test asserts p50 < 2 ms and p99 < 50 ms.
+- The stack test tears down by label with `--depend`.
+- `infra.ts test` now removes test containers and stacks older than 2 h and idle test databases
+  created more than 2 h ago. Killed runs had leaked 4 running stacks, 22 containers and 60
+  databases.
+
+## Session eight (2026-10-20–21): E4c trust & safety (implemented; user validation pending)
 
 ADR 0006's open questions resolved (native TypeScript PDQ/vPDQ, default classifier
 `AdamCodd/vit-base-nsfw-detector` on ONNX Runtime for sexual content only, NCMEC drafted by the
 platform and filed by a `legal` user, evidence sealed in append-only Postgres because Garage
-cannot deny delete) and the license judgments recorded in ADR 0008. Waiting for the user to accept
-both; **both accepted 2026-10-20**. E4b validations are deferred at the user's request.
-**Contract step done** (head agent, all on local `main`, not pushed): spec, enums, migrations
+cannot deny delete) and the license judgments recorded in ADR 0008. Both were accepted
+2026-10-20.
+**Contract step done** (head agent, on `main`, since pushed): spec, enums, migrations
 0015/0016 with DB-enforced protections, hold CLI (`3d51fbc`); contracts with internal events,
 moderation jobs and payloads, T&S entities, `moderation.*`/`ncii.*` procedures and 501 stubs,
 `legal`/`safety-staff` access (`7501bb9`, `0e948da`); `moderationEnv` and the evidence keypair in
 init-env (`f038c0e`); `packages/moderation` scaffold with the evidence seal implemented and
 tested (`2813f99`); the worker-only Garage evidence bucket and key, evidence secrets scoped per
 service in compose/Quadlet (`6377f0c`); `scripts/fetch-model.ts` with the pinned digest
-(`5658eef`); unit briefs A–F (`738532e`). **Units not started**: next session fires them
-(HANDOFF.md "Step 3").
+(`5658eef`); unit briefs A–F (`738532e`). **Units A–F are reviewed and merged** on local `main`
+(HEAD `132a402`, pushed). B, C and D had additional security reviewers; HIGH findings were
+fixed and focused re-reviews passed. Final targeted checks: API integration 171/171 (13 files),
+worker integration 68/68, media integration 23/23, web unit 677/677 plus typecheck/lint/build,
+harness unit 289/289 plus typecheck/lint. The operator guide and production mounts are integrated;
+hash lists mount read-only with an empty FOSS default, the ONNX model mounts read-only into API
+and worker, and deprecated `HASH_MATCH_*` settings are removed. User validation remains: full
+`bun run verify`, `bun run verify --scenario trust-safety`, image rebuilds, Storybook, browser and
+Railway checks.
 
 ## Session six (2026-10-19): E4b money (in progress)
 
