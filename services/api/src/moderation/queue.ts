@@ -6,11 +6,9 @@
  * `t0-escalated` after a legal confirmation, `ncii-hash` after an NCII removal, and the
  * `ncii-clock` run of the test hook. The worker owns every T0 transaction; the API only enqueues.
  * Payloads are validated against the contract before they leave, and job ids collapse retries.
- *
- * BullMQ is not yet a dependency of the API (contract request in the E4c unit D report), so it
- * is loaded by name at startup: if it is missing, `initModeration` fails and the API refuses to
- * start (fail closed). Once the dependency is added this becomes a static import.
  */
+import { Queue, QueueEvents } from "bullmq";
+import { Valkey } from "iovalkey";
 import {
   MODERATION_JOBS,
   ModerationT0EscalatedJob,
@@ -42,35 +40,15 @@ export const DURABLE_JOB = {
 export const t0EscalatedJobId = (caseId: string) => `t0-escalated-${caseId}`;
 export const nciiHashJobId = (requestId: string) => `ncii-hash-${requestId}`;
 
-/** The slice of BullMQ the producer uses. */
-interface BullJob {
-  waitUntilFinished(events: BullQueueEvents, ttl?: number): Promise<unknown>;
-}
-interface BullQueue {
-  add(name: string, data: unknown, opts?: Record<string, unknown>): Promise<BullJob>;
-  close(): Promise<void>;
-}
-interface BullQueueEvents {
-  waitUntilReady(): Promise<unknown>;
-  close(): Promise<void>;
-}
-interface BullModule {
-  Queue: new (name: string, opts: { connection: unknown; prefix: string }) => BullQueue;
-  QueueEvents: new (name: string, opts: { connection: unknown; prefix: string }) => BullQueueEvents;
-}
-
 export async function createModerationQueue(valkeyUrl: string, prefix: string): Promise<ModerationQueue> {
-  const specifier = "bullmq";
-  const bull = (await import(specifier)) as BullModule;
-  const { Valkey } = await import("iovalkey");
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
   const conn = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-moderation-queue" });
-  const queue = new bull.Queue(QUEUES.moderation, { connection: conn, prefix });
-  let events: { ev: BullQueueEvents; conn: InstanceType<typeof Valkey> } | null = null;
+  const queue = new Queue(QUEUES.moderation, { connection: conn, prefix });
+  let events: { ev: QueueEvents; conn: InstanceType<typeof Valkey> } | null = null;
   const queueEvents = async () => {
     if (!events) {
       const c = new Valkey(valkeyUrl, { maxRetriesPerRequest: null, connectionName: "api-moderation-events" });
-      const ev = new bull.QueueEvents(QUEUES.moderation, { connection: c, prefix });
+      const ev = new QueueEvents(QUEUES.moderation, { connection: c, prefix });
       await ev.waitUntilReady();
       events = { ev, conn: c };
     }
@@ -97,7 +75,7 @@ export async function createModerationQueue(valkeyUrl: string, prefix: string): 
     async close() {
       await queue.close();
       conn.disconnect();
-      const e = events as { ev: BullQueueEvents; conn: InstanceType<typeof Valkey> } | null;
+      const e = events as { ev: QueueEvents; conn: InstanceType<typeof Valkey> } | null;
       if (e) {
         await e.ev.close();
         e.conn.disconnect();

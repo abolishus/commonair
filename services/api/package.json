@@ -36,6 +36,7 @@
     "@orpc/zod": "catalog:",
     "altcha-lib": "2.6.0",
     "better-auth": "1.7.10",
+    "bullmq": "6.3.16",
     "drizzle-orm": "catalog:",
     "iovalkey": "catalog:",
     "nodemailer": "10.1.7",
