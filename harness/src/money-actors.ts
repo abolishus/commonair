@@ -190,7 +190,6 @@ export class WebSupporter implements Supporter {
     await byTestId(page, T.supportOpen).click(ui);
     const dialog = byTestId(page, T.supportDialog);
     await dialog.waitFor(ui);
-    const provider = await dialog.getAttribute("data-provider", ui);
     const inDialog = (id: Parameters<typeof tid>[0], data?: Record<string, string>) =>
       dialog.locator(tid(id, data)).first();
 
@@ -224,7 +223,7 @@ export class WebSupporter implements Supporter {
     });
     const split = inDialog(T.supportSplit);
     const shown = {
-      provider,
+      provider: await dialog.getAttribute("data-provider", ui),
       totalCents: parseCents(await inDialog(T.supportTotal).getAttribute("data-cents", ui)),
       streamerShare: await split.getAttribute("data-streamer-share", ui),
       coopShare: await split.getAttribute("data-coop-share", ui),

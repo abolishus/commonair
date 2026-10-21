@@ -72,7 +72,9 @@ function TreasuryPage(): React.JSX.Element {
           <>
             {payments.failed && <FormError>{t("treasury.payments.loadFailed")}</FormError>}
             <PaymentsPanel
-              payments={payments.items ?? (payments.failed ? [] : null)}
+              payments={
+                reference !== normalizeReference(search) ? null : (payments.items ?? (payments.failed ? [] : null))
+              }
               hasMore={payments.hasMore}
               loadingMore={payments.loadingMore}
               onLoadMore={payments.loadMore}

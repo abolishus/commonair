@@ -82,6 +82,9 @@ describe("forms blocks", () => {
       />,
     );
     const radios = screen.getAllByTestId("support-tier");
+    for (const radio of radios) {
+      expect(radio.closest('[data-slot="field"]')?.getAttribute("data-orientation")).toBe("horizontal");
+    }
     expect(
       radios.map((r) => [r.getAttribute("role"), r.getAttribute("data-tier"), r.getAttribute("data-cents")]),
     ).toEqual([

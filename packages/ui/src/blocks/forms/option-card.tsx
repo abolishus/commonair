@@ -49,6 +49,7 @@ export function OptionCard({
   return (
     <FieldLabel htmlFor={id}>
       <Field
+        orientation="horizontal"
         className="w-full flex-row items-start gap-3 rounded-none border p-3"
         data-checked={selected || undefined}
         data-disabled={disabled || undefined}
