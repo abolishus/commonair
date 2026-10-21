@@ -533,22 +533,35 @@ export const chat = {
       const c = requireChannel(context);
       if (!input.imageKey.startsWith(`channels/${c.id}/emote/`))
         throw badRequest("Upload the emote image first (purpose: emote)");
-      const [{ n } = { n: 0 }] = await deps.db
-        .select({ n: sql<number>`count(*)::int` })
-        .from(emotes)
-        .where(eq(emotes.channelId, c.id));
-      if (Number(n) >= MAX_EMOTES) throw badRequest(`At most ${MAX_EMOTES} emotes per channel`);
       try {
-        const [row] = await deps.db
-          .insert(emotes)
-          .values({
-            channelId: c.id,
-            code: input.code,
-            imageKey: input.imageKey,
-            tier: input.tier,
-            animated: input.imageKey.endsWith(".gif"),
-          })
-          .returning();
+        const row = await deps.db.transaction(async (tx) => {
+          // Match NCII removal's lock so an upload cannot be reattached after its tombstone.
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.imageKey}, 0))`);
+          const [revoked] = await tx
+            .select({ id: schema.nciiRequestItems.id })
+            .from(schema.nciiRequestItems)
+            .where(
+              sql`${schema.nciiRequestItems.uploadKey} = ${input.imageKey} and ${schema.nciiRequestItems.removedAt} is not null`,
+            )
+            .limit(1);
+          if (revoked) throw badRequest("Upload the emote image first (purpose: emote)");
+          const [{ n } = { n: 0 }] = await tx
+            .select({ n: sql<number>`count(*)::int` })
+            .from(emotes)
+            .where(eq(emotes.channelId, c.id));
+          if (Number(n) >= MAX_EMOTES) throw badRequest(`At most ${MAX_EMOTES} emotes per channel`);
+          const [created] = await tx
+            .insert(emotes)
+            .values({
+              channelId: c.id,
+              code: input.code,
+              imageKey: input.imageKey,
+              tier: input.tier,
+              animated: input.imageKey.endsWith(".gif"),
+            })
+            .returning();
+          return created;
+        });
         if (!row) throw new Error("emote insert returned no row");
         await publishControl(deps, c.id, { op: "invalidate", scope: "channel" });
         return toEmote(deps, new Map([[c.id, c.slug]]))(row);

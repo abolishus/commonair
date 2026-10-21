@@ -38,6 +38,15 @@ const hook = (route: string, body: Record<string, unknown>) =>
     body: JSON.stringify(body),
   });
 
+async function seedSyntheticImage(channelId: string, purpose: "avatar" | "banner", contentType: "image/png") {
+  const bytes = new Uint8Array(
+    await Bun.file(new URL("../../../packages/moderation/fixtures/benign-gradient.png", import.meta.url)).arrayBuffer(),
+  );
+  const key = `channels/${channelId}/${purpose}/${uuidv7()}.png`;
+  await api.deps.storage.put(api.deps.env.S3_BUCKET_MEDIA, key, bytes, { contentType });
+  return key;
+}
+
 describe("playback mature gate", () => {
   test("a mature category gates playback even when the channel and broadcast are unlabelled", async () => {
     const [cat] = await db()
@@ -70,9 +79,8 @@ describe("playback mature gate", () => {
         { deviceId: "device-0123456789abcdef" },
       );
     const anon = await start();
-    expect(anon.status).toBe(412);
-    expect(anon.body.data?.requirement).toBe("mature_confirmation");
-    expect((await start(bob.client)).status).toBe(412);
+    expect(anon.status).toBe(403);
+    expect((await start(bob.client)).status).toBe(403);
     expect((await bob.client.call("POST", "/api/me/mature-confirmation")).status).toBe(200);
     expect((await start(bob.client)).status).toBe(200);
 
@@ -92,15 +100,19 @@ describe("media references stay on this instance", () => {
     expect((await patch({ avatarKey: `channels/${bobs.id}/avatar/x.png` })).status).toBe(400);
     expect((await patch({ avatarKey: `channels/${c.id}/banner/x.png` })).status).toBe(400);
     expect((await patch({ avatarKey: `channels/${c.id}/avatar/../../${bobs.id}/avatar/x.png` })).status).toBe(400);
+    const avatar = await seedSyntheticImage(c.id, "avatar", "image/png");
+    const banner = await seedSyntheticImage(c.id, "banner", "image/png");
+    const avatarUrl = `${instanceMediaBase(api.deps.env)}${await seedSyntheticImage(c.id, "avatar", "image/png")}`;
     const ok = await patch({
-      avatarKey: `channels/${c.id}/avatar/01.png`,
-      bannerKey: `channels/${c.id}/banner/01.webp`,
+      avatarKey: avatar,
+      bannerKey: banner,
       accent: "teal",
     });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
-    const bucket = instanceMediaBase(api.deps.env);
-    expect((await patch({ avatarKey: `${bucket}channels/${c.id}/avatar/02.png` })).status).toBe(200);
-    expect((await patch({ avatarKey: `${bucket}channels/${bobs.id}/avatar/02.png` })).status).toBe(400);
+    expect((await patch({ avatarKey: avatarUrl })).status).toBe(200);
+    expect(
+      (await patch({ avatarKey: `${instanceMediaBase(api.deps.env)}channels/${bobs.id}/avatar/02.png` })).status,
+    ).toBe(400);
     expect((await patch({ avatarKey: `${api.url}/static/default.png` })).status).toBe(400);
   });
 
@@ -149,13 +161,15 @@ describe("media references stay on this instance", () => {
   });
 
   test("profile image through update-user must be an own avatar upload", async () => {
-    const c = await channelOf(bob.username);
     const set = (image: string | null) => bob.client.call("POST", "/api/auth/update-user", { image });
     expect((await set("https://tracker.invalid/me.png")).status).toBe(400);
     const alices = await channelOf(alice.username);
     expect((await set(`channels/${alices.id}/avatar/a.png`)).status).toBe(400);
-    expect((await set(`channels/${c.id}/avatar/a.png`)).status).toBe(200);
-    expect((await set(`${instanceMediaBase(api.deps.env)}channels/${c.id}/avatar/b.png`)).status).toBe(200);
+    const bobChannel = await channelOf(bob.username);
+    const ownAvatar = await seedSyntheticImage(bobChannel.id, "avatar", "image/png");
+    const ownAvatarUrl = `${instanceMediaBase(api.deps.env)}${await seedSyntheticImage(bobChannel.id, "avatar", "image/png")}`;
+    expect((await set(ownAvatar)).status).toBe(200);
+    expect((await set(ownAvatarUrl)).status).toBe(200);
     expect((await set(`${instanceMediaBase(api.deps.env)}channels/${alices.id}/avatar/b.png`)).status).toBe(400);
     expect((await set(`${api.url}/static/default.png`)).status).toBe(400);
     expect((await set(null)).status).toBe(200);

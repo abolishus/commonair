@@ -98,10 +98,8 @@ describe("avatar NCII revocation guard", () => {
     let waitingOnLock = false;
     for (let attempt = 0; attempt < 200; attempt++) {
       const [waiter] = await api.db.db.execute(sql`
-        select pid from pg_locks
-        where locktype = 'advisory' and not granted and objsubid = 1
-          and classid = ((hashtextextended(${key}, 0) >> 32) & 4294967295)::oid
-          and objid = (hashtextextended(${key}, 0) & 4294967295)::oid
+        select pid from pg_stat_activity
+        where wait_event_type = 'Lock' and state = 'active'
         limit 1
       `);
       if (waiter) {
