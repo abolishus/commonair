@@ -47,7 +47,12 @@ export interface TestApi {
 }
 
 export async function startApi(
-  opts: { rateLimits?: Partial<Deps["rateLimits"]>; pinnedGet?: Deps["pinnedGet"] } = {},
+  opts: {
+    rateLimits?: Partial<Deps["rateLimits"]>;
+    pinnedGet?: Deps["pinnedGet"];
+    /** Extra env (e.g. the moderation test hooks), applied over the defaults below. */
+    env?: Record<string, string>;
+  } = {},
 ): Promise<TestApi> {
   const db = await createTestDatabase();
   const { pkcs8B64 } = await generateSigningKey();
@@ -97,6 +102,7 @@ export async function startApi(
     SMTP_HOST: process.env.SMTP_HOST ?? "localhost",
     SMTP_PORT: process.env.SMTP_PORT ?? "1025",
     MAIL_FROM: "Test <noreply@test.invalid>",
+    ...opts.env,
   });
   const built = await buildDeps(env, {
     logger: createLogger({ service: "api-test", write: process.env.API_TEST_LOG ? (l) => console.error(l) : () => {} }),

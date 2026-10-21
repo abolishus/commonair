@@ -24,6 +24,7 @@ import { canonicalIp, rateLimitSubjectIp } from "./lib/netrange.ts";
 import type { BaseContext, RequestInfo } from "./lib/orpc.ts";
 import { rateLimitKey } from "./lib/ratelimit.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
+import { isTestHookPath, testHook } from "./moderation/hooks.ts";
 import { router } from "./router.ts";
 
 const MAX_INTERNAL_BODY = 64 * 1024;
@@ -164,6 +165,12 @@ export function createApp(deps: Deps): ApiApp {
       const status =
         path === INTERNAL_ROUTES.mediaReady ? await mediaReady(deps, body) : await mediaNotReady(deps, body);
       return new Response(null, { status });
+    }
+    if (isTestHookPath(path)) {
+      // Disabled hooks answer 404 before the secret check, like any unknown internal path.
+      if (!deps.env.MODERATION_TEST_HOOKS) return new Response(null, { status: 404 });
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return testHook(deps, path, raw.method, await readJson(raw));
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
 
