@@ -24,3 +24,15 @@ in `fixtures/`, plus the scripted classifier. The real model runs in tests only 
 
 `onnxruntime-node` must never be in `trustedDependencies`: its postinstall downloads proprietary
 CUDA binaries. Container images also set `ONNXRUNTIME_NODE_INSTALL=skip`.
+
+## Operator hash lists
+
+Set `MODERATION_HASHLIST_CSAM` and `MODERATION_HASHLIST_NCII` to local UTF-8 files mounted read-only
+into the media service. Each non-comment line starts with one 64-character PDQ hex hash; an
+optional comma may introduce ignored metadata. Blank lines and `#` comments are allowed. Use only
+lists the operator is authorized to use; do not put list contents in logs or commit them. Empty
+paths load as empty lists. A reload keeps the last valid version if parsing fails. The service
+records only the category, list version, quality and match distance.
+
+The bundled `.pdq` files are synthetic test fixtures, not operational lists. The code-based
+fixture generator is `bun packages/moderation/fixtures/generate.ts`.
