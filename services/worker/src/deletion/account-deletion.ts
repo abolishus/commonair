@@ -21,7 +21,7 @@ import { exportObjectKey } from "@commonair/contracts/internal";
 import { schema, type Executor } from "@commonair/db";
 import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
-import { eventNeedles, redactPayload, referencesUser, type DeletedIdentity } from "./references.ts";
+import { eventNeedles, redactAnonymousTip, redactPayload, referencesUser, type DeletedIdentity } from "./references.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
 import { vodPrefix } from "../moderation/objects.ts";
 import { audit, endBroadcast, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
@@ -84,7 +84,8 @@ const SCAN_BATCH = 1000;
  * deliveries (delivered copies are the receivers'; ours go). Other people's rows that only
  * mention them are kept with the mentions redacted (`redactPayload`). The table is walked in
  * keyset-paginated batches, prefiltered in SQL, so only candidate payloads ever leave Postgres.
- * Anonymous tips carry no id: they are looked up through the user's tipped channels (indexed).
+ * Anonymous tips carry no id: they are looked up through the user's tipped channels (indexed) and
+ * only have their message redacted (`redactAnonymousTip`).
  * Runs last in the completion transaction, so events written by the completion itself (the
  * `stream.offline` of a channel taken off air) are scrubbed too.
  */
@@ -120,7 +121,16 @@ export async function scrubOutbox(
           inArray(sql<string>`${e.payload}->>'message'`, [...new Set(who.tips.map((t) => t.message))]),
         ),
       );
-    await remove(tips.filter((t) => referencesUser(t, who)).map((t) => t.id));
+    // Matched by fingerprint only (a stranger's tip can share it): the words go, the event stays.
+    for (const t of tips) {
+      const redacted = redactAnonymousTip(t, who);
+      if (redacted === null) continue;
+      await tx
+        .update(e)
+        .set({ payload: redacted as Record<string, unknown> })
+        .where(eq(e.id, t.id));
+      out.redacted++;
+    }
   }
 
   const needles = eventNeedles(who);

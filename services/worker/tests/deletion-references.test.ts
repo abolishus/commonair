@@ -2,7 +2,15 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { eventNeedles, redactPayload, referencesUser, type DeletedIdentity } from "../src/deletion/references.ts";
+import {
+  anonymousTipMatches,
+  eventNeedles,
+  isDistinctiveLogin,
+  redactAnonymousTip,
+  redactPayload,
+  referencesUser,
+  type DeletedIdentity,
+} from "../src/deletion/references.ts";
 
 const U = "0190f0f0-0000-7000-8000-00000000aaaa";
 const OTHER = "0190f0f0-0000-7000-8000-00000000cccc";
@@ -112,17 +120,30 @@ describe("events that reference a deleted user", () => {
 
   test("an anonymous tip is matched by channel, amount, currency and message of one of their tips", () => {
     const anon = { ...broadcaster, user_id: null, user_login: null, user_name: null, is_anonymous: true, amount };
-    expect(referencesUser(ev("channel.tip", { ...anon, message: "for the stream!" }), who)).toBe(true);
-    expect(referencesUser(ev("channel.tip", { ...anon, message: "for the stream!" }, OTHER), who)).toBe(false);
-    expect(referencesUser(ev("channel.tip", { ...anon, message: "something else" }), who)).toBe(false);
-    expect(referencesUser(ev("channel.tip", { ...anon, message: "" }), who)).toBe(false);
+    const matches = (type: string, payload: unknown, channelId?: string) =>
+      anonymousTipMatches(ev(type, payload, channelId), who);
+    expect(matches("channel.tip", { ...anon, message: "for the stream!" })).toBe(true);
+    expect(matches("channel.tip", { ...anon, message: "for the stream!" }, OTHER)).toBe(false);
+    expect(matches("channel.tip", { ...anon, message: "something else" })).toBe(false);
+    expect(matches("channel.tip", { ...anon, message: "" })).toBe(false);
     const other = { ...anon, message: "for the stream!" };
-    expect(referencesUser(ev("channel.tip", { ...other, amount: { ...amount, value: 251 } }), who)).toBe(false);
-    expect(referencesUser(ev("channel.tip", { ...other, amount: { ...amount, currency: "eur" } }), who)).toBe(false);
+    expect(matches("channel.tip", { ...other, amount: { ...amount, value: 251 } })).toBe(false);
+    expect(matches("channel.tip", { ...other, amount: { ...amount, currency: "eur" } })).toBe(false);
     // Someone else's named tip with the same words is theirs, not the deleted user's.
     const carol = { ...other, user_id: OTHER, user_login: "carol", user_name: "Carol", is_anonymous: false };
-    expect(referencesUser(ev("channel.tip", carol), who)).toBe(false);
-    expect(referencesUser(ev("channel.chat.message", { ...broadcaster, message: "for the stream!" }), who)).toBe(false);
+    expect(matches("channel.tip", carol)).toBe(false);
+    expect(matches("channel.chat.message", { ...broadcaster, message: "for the stream!" })).toBe(false);
+  });
+
+  test("a fingerprint-matched anonymous tip is never theirs to delete: only its message is redacted", () => {
+    // A stranger's anonymous tip can share the fingerprint (a 100-cent `gg`): the event and its
+    // deliveries must survive, so the match only ever costs the stock words.
+    const anon = { ...broadcaster, user_id: null, user_login: null, user_name: null, is_anonymous: true, amount };
+    const tip = ev("channel.tip", { ...anon, message: "for the stream!" });
+    expect(referencesUser(tip, who)).toBe(false);
+    expect(redactAnonymousTip(tip, who)).toEqual({ ...anon, message: "[deleted]" });
+    expect(redactAnonymousTip(ev("channel.tip", { ...anon, message: "something else" }), who)).toBeNull();
+    expect(redactAnonymousTip(ev("channel.tip", { ...anon, message: "[deleted]" }), who)).toBeNull();
   });
 
   test("common words as a display name, login or tip message never match other people's events", () => {
@@ -193,9 +214,29 @@ describe("events that reference a deleted user", () => {
     expect(referencesUser(ev(type, payload), who)).toBe(false);
   });
 
-  test("needles: case-folded id, email and logins, JSON-escaped; short logins only as whole values or mentions", () => {
-    expect(eventNeedles(who)).toEqual([U, "ulla@example.test", "ulla"]);
-    expect(eventNeedles({ ...who, logins: ['a"b\\c', "al"], email: "" })).toEqual([U, 'a\\"b\\\\c', '"al"', "@al"]);
+  test("needles: case-folded id, email and logins, JSON-escaped; word-like logins only as whole values or mentions", () => {
+    expect(eventNeedles(who)).toEqual([U, "ulla@example.test", '"ulla"', "@ulla"]);
+    expect(eventNeedles({ ...who, logins: ['a"b\\c', "Ulla_92"], email: "" })).toEqual([
+      U,
+      '"a\\"b\\\\c"',
+      '@a\\"b\\\\c',
+      "ulla_92",
+    ]);
+    // A login that is a common word never prefilters the whole table on a bare substring.
+    expect(eventNeedles({ ...who, logins: ["the"], email: "" })).toEqual([U, '"the"', "@the"]);
+  });
+
+  test.each([
+    ["the", false],
+    ["ulla", false],
+    ["everyone", false],
+    ["1000", false],
+    ["___", false],
+    ["ulla_q", true],
+    ["ulla92", true],
+    ["Ünal_7", true],
+  ])("isDistinctiveLogin(%s) is %s", (login, expected) => {
+    expect(isDistinctiveLogin(login)).toBe(expected);
   });
 
   test("someone else's text that mentions them is redacted, nothing else", () => {
@@ -208,18 +249,28 @@ describe("events that reference a deleted user", () => {
         fragments: [
           { type: "text", text: "thanks ", emote: null },
           { type: "mention", text: "@ulla", emote: null },
+          { type: "mention", text: "Ulla", emote: null },
+          { type: "mention", text: "@ullaq", emote: null },
         ],
       },
     };
+    // `ulla` could be a word: bare in text it stays; as `@ulla` or a mention fragment it goes.
     expect(redactPayload(msg, who)).toEqual({
       ...msg,
       message: {
-        text: "thanks [deleted] for the raid, [deleted]! mail [deleted]; ullaq and xulla stay",
+        text: "thanks Ulla for the raid, [deleted]! mail [deleted]; ullaq and xulla stay",
         fragments: [
           { type: "text", text: "thanks ", emote: null },
           { type: "mention", text: "[deleted]", emote: null },
+          { type: "mention", text: "[deleted]", emote: null },
+          { type: "mention", text: "@ullaq", emote: null },
         ],
       },
+    });
+    // A distinctive login is redacted bare too.
+    const u92: DeletedIdentity = { ...who, logins: ["ulla_92"], email: "" };
+    expect(redactPayload({ message: "thanks Ulla_92 and @ulla_92, not ulla_920" }, u92)).toEqual({
+      message: "thanks [deleted] and [deleted], not ulla_920",
     });
     expect(redactPayload({ ...broadcaster, message: { text: "hello there", fragments: [] } }, who)).toBeNull();
     // A short login is redacted only as an @mention.
@@ -227,5 +278,27 @@ describe("events that reference a deleted user", () => {
     expect(redactPayload({ message: "al already said hi @al" }, al)).toEqual({
       message: "al already said hi [deleted]",
     });
+  });
+
+  test("a login that is a common word never rewrites other people's text", () => {
+    const the: DeletedIdentity = { id: U, logins: ["the", "The"], email: "", tips: [] };
+    const chat = {
+      ...broadcaster,
+      chatter_user_id: OTHER,
+      chatter_user_login: "vic",
+      message: {
+        text: "the stream was great",
+        fragments: [{ type: "text", text: "the stream was great", emote: null }],
+      },
+      reply: { parent_message_id: "p", parent_user_login: "sam", parent_message_body: "The end" },
+    };
+    expect(redactPayload(chat, the)).toBeNull();
+    expect(
+      redactPayload({ ...broadcaster, user_id: OTHER, message: "for the win", reason: "the rules" }, the),
+    ).toBeNull();
+    expect(redactPayload({ title: "The Show" }, the)).toBeNull();
+    expect(referencesUser(ev("channel.chat.message", chat), the)).toBe(false);
+    // Only an explicit mention of them goes.
+    expect(redactPayload({ message: "the best, @the" }, the)).toEqual({ message: "the best, [deleted]" });
   });
 });

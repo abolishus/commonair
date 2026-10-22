@@ -17,13 +17,17 @@
  * Display names are not identifiers (several people can share one); every payload field that
  * carries one sits next to the id it belongs to, so the id rule covers it.
  *
- * An anonymous tip carries no id: an anonymous `channel.tip` is theirs when its channel, amount,
- * currency and non-empty message are those of one of their tips (`tips` rows link to no event).
+ * An anonymous tip carries no id, and `tips` rows link to no event, so it can only be matched by
+ * fingerprint (channel, amount, currency, non-empty message), which someone else's tip can share
+ * (a 100-cent `gg`). A matched anonymous tip is therefore never deleted, only its message is
+ * replaced (`redactAnonymousTip`): what is left (an anonymous amount on a channel) identifies no one,
+ * and a stranger's identical tip loses only its stock words, never the event or its deliveries.
  *
- * Someone else's event that only mentions them (an `@ulla` fragment, `thanks ulla`, an address
- * typed into chat) is that person's and is kept, with the mentions replaced (`redactPayload`):
- * whole-word logins and the email, only in free-text fields, so enums, amounts and ids are never
- * touched.
+ * Someone else's event that only mentions them (an `@ulla` fragment, an address typed into chat)
+ * is that person's and is kept, with the mentions replaced (`redactPayload`), only in free-text
+ * fields, so enums, amounts and ids are never touched. In text a login is redacted as an `@login`
+ * token; as a bare word only when it cannot be an ordinary word (`isDistinctiveLogin`), because a
+ * user named `the` must not rewrite every other chat line on the platform.
  */
 
 export interface TipFingerprint {
@@ -54,8 +58,14 @@ export const REDACTED = "[deleted]";
 /** Free-text payload fields (chat lines, tip messages, quoted replies, ban reasons, titles). */
 const FREE_TEXT_KEYS = new Set(["text", "message", "parent_message_body", "reason", "title", "description"]);
 
-/** Logins shorter than this are redacted inside text only as an `@mention`. */
-const MIN_REDACT_LENGTH = 3;
+/**
+ * A login that mixes letters with digits or underscores (`ulla_92`) is not a word anyone types by
+ * chance, so it is redacted bare in text too. Any other login (`the`, `ulla`, `everyone`) only as
+ * `@login` or as a whole `mention` fragment.
+ */
+export function isDistinctiveLogin(login: string): boolean {
+  return /\p{L}/u.test(login) && /[\d_]/.test(login);
+}
 
 const lowerSet = (xs: readonly string[]) => new Set(xs.filter((x) => x !== "").map((x) => x.toLowerCase()));
 
@@ -69,7 +79,8 @@ function some(value: unknown, visit: (obj: Json) => boolean, leaf: (s: string) =
   return false;
 }
 
-function anonymousTipIsTheirs(event: OutboxEvent, who: DeletedIdentity): boolean {
+/** Whether an anonymous `channel.tip` has the fingerprint of one of their tips (see the module note). */
+export function anonymousTipMatches(event: OutboxEvent, who: DeletedIdentity): boolean {
   if (event.type !== "channel.tip" || event.channelId === null || !isObject(event.payload)) return false;
   const p = event.payload;
   if (p.is_anonymous !== true || (p.user_id !== null && p.user_id !== undefined)) return false;
@@ -102,20 +113,28 @@ export function referencesUser(event: OutboxEvent, who: DeletedIdentity): boolea
     const folded = v.toLowerCase();
     return folded === id || (email !== "" && folded === email);
   };
-  return some(event.payload, visit, leaf) || anonymousTipIsTheirs(event, who);
+  return some(event.payload, visit, leaf);
 }
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** One pattern for every mention: the email anywhere, a login as a whole word (`@` optional when long). */
+/**
+ * One pattern for every mention in text: the email anywhere, a login as a whole `@login` token, and
+ * bare only when distinctive.
+ */
 function mentionPattern(who: DeletedIdentity): RegExp | null {
   const parts = [
     ...(who.email !== "" ? [escapeRe(who.email)] : []),
     ...[...lowerSet(who.logins)].map(
-      (l) => `(?<![\\w@.-])${l.length >= MIN_REDACT_LENGTH ? "@?" : "@"}${escapeRe(l)}(?![\\w-])`,
+      (l) => `(?<![\\w@.-])${isDistinctiveLogin(l) ? "@?" : "@"}${escapeRe(l)}(?![\\w-])`,
     ),
   ];
   return parts.length ? new RegExp(parts.join("|"), "giu") : null;
+}
+
+/** A chat `mention` fragment whose whole text is one of their logins, with or without `@`. */
+function isTheirMentionFragment(obj: Json, logins: ReadonlySet<string>): boolean {
+  return obj.type === "mention" && typeof obj.text === "string" && logins.has(obj.text.replace(/^@/, "").toLowerCase());
 }
 
 /**
@@ -125,8 +144,13 @@ function mentionPattern(who: DeletedIdentity): RegExp | null {
 export function redactPayload(payload: unknown, who: DeletedIdentity): unknown {
   const re = mentionPattern(who);
   if (!re) return null;
+  const logins = lowerSet(who.logins);
   let changed = false;
   const go = (value: unknown, key: string | null): unknown => {
+    if (isObject(value) && isTheirMentionFragment(value, logins)) {
+      changed = true;
+      return { ...value, text: REDACTED };
+    }
     if (typeof value === "string") {
       if (key === null || !FREE_TEXT_KEYS.has(key)) return value;
       const next = value.replace(re, REDACTED);
@@ -141,17 +165,27 @@ export function redactPayload(payload: unknown, who: DeletedIdentity): unknown {
   return changed ? out : null;
 }
 
+/**
+ * A fingerprint-matched anonymous tip with its message replaced; null when it does not match or is
+ * already redacted.
+ */
+export function redactAnonymousTip(event: OutboxEvent, who: DeletedIdentity): unknown {
+  if (!anonymousTipMatches(event, who) || !isObject(event.payload)) return null;
+  return { ...event.payload, message: REDACTED };
+}
+
 const jsonText = (s: string) => JSON.stringify(s).slice(1, -1);
 
 /**
  * Lower-cased substrings at least one of which appears in the lower-cased jsonb text of every
- * payload `referencesUser` accepts (anonymous tips aside: those are found by channel) or
+ * payload `referencesUser` accepts or
  * `redactPayload` changes. Only narrows the scan; the functions above decide.
  */
 export function eventNeedles(who: DeletedIdentity): string[] {
   const logins = [...lowerSet(who.logins)].map((l) =>
-    // Short logins match only as a whole value or an `@mention`, never inside other words.
-    l.length >= MIN_REDACT_LENGTH ? [l] : [`"${l}"`, `@${l}`],
+    // Ordinary-word logins match only as a whole value (a `…_login` key, a bare mention fragment)
+    // or an `@mention`, so a login like `the` does not pull in the whole table.
+    isDistinctiveLogin(l) ? [l] : [`"${l}"`, `@${l}`],
   );
   const needles = [who.id, who.email]
     .filter((x) => x !== "")

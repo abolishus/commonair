@@ -141,15 +141,6 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
         amount,
         message: named,
       }),
-      await insertEvent(db(), "channel.tip", S.channel.id, {
-        ...sb,
-        user_id: null,
-        user_login: null,
-        user_name: null,
-        is_anonymous: true,
-        amount: { ...amount, value: 400 },
-        message: anonymous,
-      }),
       await insertEvent(db(), "channel.follow", S.channel.id, { ...sb, ...ub, followed_at: new Date().toISOString() }),
       await insertEvent(db(), "channel.subscribe", S.channel.id, { ...sb, ...ub, tier: "1000", is_gift: false }),
       await insertEvent(db(), "channel.chat.message", S.channel.id, {
@@ -195,6 +186,16 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
         reply: null,
       }),
     ];
+    // Their anonymous tip is found by fingerprint only, so it is redacted, never deleted.
+    const anonTip = await insertEvent(db(), "channel.tip", S.channel.id, {
+      ...sb,
+      user_id: null,
+      user_login: null,
+      user_name: null,
+      is_anonymous: true,
+      amount: { ...amount, value: 400 },
+      message: anonymous,
+    });
     const sub = await makeSubscription(db(), {
       userId: S.user.id,
       type: "channel.follow",
@@ -205,7 +206,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     const delivery = (eventId: string) => ({ id: uuidv7(), subscriptionId: sub.id, eventId, messageId: uuidv7() });
     await db()
       .insert(schema.webhookDeliveries)
-      .values([delivery(theirs[2]!.id), delivery(kept[0]!.id)]);
+      .values([delivery(theirs[1]!.id), delivery(kept[0]!.id), delivery(anonTip.id)]);
 
     const d = await schedule(U.user.id);
     expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
@@ -217,12 +218,14 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
       .where(
         inArray(
           schema.events.id,
-          [...theirs, ...kept].map((e) => e.id),
+          [...theirs, ...kept, anonTip].map((e) => e.id),
         ),
       );
-    expect(left.map((e) => e.id).sort()).toEqual(kept.map((e) => e.id).sort());
+    expect(left.map((e) => e.id).sort()).toEqual([...kept, anonTip].map((e) => e.id).sort());
     const deliveries = await db().select({ eventId: schema.webhookDeliveries.eventId }).from(schema.webhookDeliveries);
-    expect(deliveries.map((x) => x.eventId)).toEqual([kept[0]!.id]);
+    expect(deliveries.map((x) => x.eventId).sort()).toEqual([kept[0]!.id, anonTip.id].sort());
+    const [anonLeft] = await db().select().from(schema.events).where(eq(schema.events.id, anonTip.id));
+    expect(anonLeft?.payload).toEqual({ ...anonTip.payload, message: "[deleted]" });
 
     // Free text cleared; the rows stay.
     const tips = await db()
@@ -269,6 +272,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(completeAudit?.details).toMatchObject({
       deleted: {
         events: theirs.length,
+        events_redacted: 1,
         webhook_deliveries: 1,
         tip_messages: 2,
         report_details: 1,
@@ -350,7 +354,8 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     const S = await makeUser(db());
     // W's display name and username are words other payloads carry as values.
     const W = await makeUser(db());
-    const wLogin = `w${uuidv7().slice(-10)}`;
+    // Mixes letters and an underscore, so it is redacted bare in text too.
+    const wLogin = `w_${uuidv7().slice(-10)}`;
     await db()
       .update(schema.users)
       .set({ name: "text", displayUsername: wLogin.toUpperCase(), username: wLogin })
@@ -410,6 +415,95 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(await piiRows([W.user.id, wLogin, W.user.email])).toEqual({ events: 0, webhook_deliveries: 0 });
   });
 
+  test("a login that is a common word rewrites no one else's text; a matching anonymous tip keeps its event", async () => {
+    const V = await makeUser(db());
+    const S = await makeUser(db());
+    const T = await makeUser(db(), "the");
+    await tip(app(), {
+      from: T.user.id,
+      channelId: S.channel.id,
+      creatorUserId: S.user.id,
+      cents: 100,
+      message: "gg",
+      anonymous: true,
+    });
+    const sb = broadcasterFields(S.user);
+    const vChat = (text: string, fragments: unknown[] = [{ type: "text", text, emote: null }]) =>
+      insertEvent(db(), "channel.chat.message", S.channel.id, {
+        ...sb,
+        chatter_user_id: V.user.id,
+        chatter_user_login: V.user.username,
+        chatter_user_name: V.user.name,
+        message_id: uuidv7(),
+        message: { text, fragments },
+        badges: [],
+        color: "",
+        reply: { parent_message_id: uuidv7(), parent_user_login: S.user.username, parent_message_body: "the end" },
+        is_bot: false,
+      });
+    const untouched = [
+      await vChat("the stream was great"),
+      await insertEvent(db(), "channel.ban", S.channel.id, {
+        ...sb,
+        user_id: V.user.id,
+        user_login: V.user.username,
+        user_name: V.user.name,
+        moderator_user_id: S.user.id,
+        moderator_user_login: S.user.username,
+        moderator_user_name: S.user.name,
+        reason: "broke the rules",
+        banned_at: new Date().toISOString(),
+        ends_at: null,
+        is_permanent: true,
+      }),
+    ];
+    const mention = await vChat("gg @the", [
+      { type: "text", text: "gg ", emote: null },
+      { type: "mention", text: "@the", emote: null },
+    ]);
+    // A stranger's anonymous tip with the same fingerprint (a 100-cent `gg`) on the same channel.
+    const strangerTip = await insertEvent(db(), "channel.tip", S.channel.id, {
+      ...sb,
+      user_id: null,
+      user_login: null,
+      user_name: null,
+      is_anonymous: true,
+      amount: { value: 100, decimal_places: 2, currency: "usd" },
+      message: "gg",
+    });
+    const sub = await makeSubscription(db(), {
+      userId: S.user.id,
+      type: "channel.tip",
+      condition: { broadcaster_user_id: S.user.id },
+      callbackUrl: "https://hooks.example.test/cb",
+      secret: "s3cr3t-s3cr3t",
+    });
+    const deliveryId = uuidv7();
+    await db()
+      .insert(schema.webhookDeliveries)
+      .values({ id: deliveryId, subscriptionId: sub.id, eventId: strangerTip.id, messageId: uuidv7() });
+
+    await schedule(T.user.id);
+    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+
+    const ids = [...untouched, mention, strangerTip].map((e) => e.id);
+    const left = await db().select().from(schema.events).where(inArray(schema.events.id, ids));
+    expect(left.map((e) => e.id).sort()).toEqual([...ids].sort());
+    for (const e of untouched) expect(left.find((x) => x.id === e.id)?.payload).toEqual(e.payload);
+    const m = left.find((x) => x.id === mention.id)?.payload as {
+      message: { text: string; fragments: { text: string }[] };
+    };
+    expect(m.message.text).toBe("gg [deleted]");
+    expect(m.message.fragments.map((f) => f.text)).toEqual(["gg ", "[deleted]"]);
+    expect(left.find((x) => x.id === strangerTip.id)?.payload).toEqual({
+      ...strangerTip.payload,
+      message: "[deleted]",
+    });
+    expect(
+      await db().select().from(schema.webhookDeliveries).where(eq(schema.webhookDeliveries.id, deliveryId)),
+    ).toHaveLength(1);
+  });
+
   test("the outbox is scanned in batches: every page is matched, deleted or redacted", async () => {
     const X = await makeUser(db());
     const S = await makeUser(db());
@@ -433,7 +527,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
           chatter_user_login: S.user.username,
           chatter_user_name: S.user.name,
           message_id: uuidv7(),
-          message: { text: `hi ${X.user.username}`, fragments: [] },
+          message: { text: `hi @${X.user.username}`, fragments: [] },
           reply: null,
         }),
       );
