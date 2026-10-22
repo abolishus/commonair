@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Built-in channel bot, loyalty points, polls, predictions, raids, alerts, goals, overlays. */
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -274,13 +275,26 @@ export const goals = pgTable(
   (t) => [index("goals_channel_idx").on(t.channelId)],
 );
 
-/** Secret URLs for OBS browser sources; scoped to one channel's overlay events. */
-export const overlayTokens = pgTable("overlay_tokens", {
-  id: id(),
-  channelId: uuid()
-    .notNull()
-    .references(() => channels.id, { onDelete: "cascade" }),
-  tokenHash: text().notNull().unique(),
-  createdAt: createdAt(),
-  revokedAt: ts(),
-});
+/**
+ * Secret URLs for OBS browser sources; scoped to one channel's overlay state and alert stream
+ * (ADR 0021). One unrevoked token per channel: creating a new one revokes the old in the same
+ * transaction. `expiresAt` null means no expiry (the streamer's choice).
+ */
+export const overlayTokens = pgTable(
+  "overlay_tokens",
+  {
+    id: id(),
+    channelId: uuid()
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    tokenHash: text().notNull().unique(),
+    createdAt: createdAt(),
+    expiresAt: ts(),
+    revokedAt: ts(),
+  },
+  (t) => [
+    uniqueIndex("overlay_tokens_active_uq")
+      .on(t.channelId)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);

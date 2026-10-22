@@ -591,6 +591,33 @@ export const AlertConfig = z.object({
   minAmountCents: z.number().int().min(0),
   durationMs: z.number().int().min(1000).max(30000),
 });
+/** `interact.overlays.status`: the token itself is never shown again after creation. */
+export const OverlayTokenStatus = z.object({
+  active: z.boolean(),
+  createdAt: Timestamp.nullable(),
+  /** Null with `active` true: no expiry. */
+  expiresAt: Timestamp.nullable(),
+});
+/**
+ * One alert on the overlay stream (`OVERLAY_EVENTS_PATH`, SSE event `alert`). Rendered by the
+ * API from the channel's `AlertConfig`: the overlay gets display text only, never the underlying
+ * event, a payer's id or anything the streamer does not already show on stream.
+ */
+export const OverlayAlert = z.object({
+  /** The source event's id (or a fresh UUIDv7 for a test alert): overlays de-duplicate on it. */
+  id: Id,
+  type: z.enum(E.ALERT_TYPES),
+  /** `template.message` with its variables filled in (anonymous tips show the i18n "Anonymous"). */
+  text: z.string(),
+  /** The supporter's message when `template.showMessage` and the event carried one. */
+  message: z.string().nullable(),
+  amountCents: z.number().int().nullable(),
+  currency: z.string().nullable(),
+  durationMs: z.number().int().min(1000).max(30000),
+  animation: z.enum(["fade", "slide", "none"]),
+  test: z.boolean(),
+  occurredAt: Timestamp,
+});
 export const Goal = z.object({
   id: Id,
   type: z.enum(E.GOAL_TYPES),

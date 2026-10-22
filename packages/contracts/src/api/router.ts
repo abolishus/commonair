@@ -1830,21 +1830,44 @@ export const contract = {
     },
     overlays: {
       token: owner
+        .meta({ access: "owner", rateLimit: "write" })
         .route({
           method: "POST",
           path: "/channels/{channel}/overlay-token",
-          summary: "Create (or rotate) the secret overlay URL token",
+          summary: "Create (or rotate) the secret overlay URL token; revokes the previous one",
           ...tag("Overlays"),
         })
-        .input(ChannelRef)
+        // ADR 0021: no expiry (null/absent, the default) or any future instant, no upper cap.
+        .input(ChannelRef.extend({ expiresAt: Timestamp.nullable().optional() }))
         .output(
           z.object({
+            /** Shown once; only its hash is stored. */
             token: z.string(),
             alertsUrl: z.string(),
             goalsUrl: z.string(),
             chatUrl: z.string(),
+            expiresAt: Timestamp.nullable(),
           }),
         ),
+      status: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/overlay-token",
+          summary: "Whether an overlay token is active, and when it expires",
+          ...tag("Overlays"),
+        })
+        .input(ChannelRef)
+        .output(D.OverlayTokenStatus),
+      revoke: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/overlay-token",
+          summary: "Revoke the overlay token without a replacement",
+          ...tag("Overlays"),
+        })
+        .input(ChannelRef)
+        .output(Ok),
       state: base
         .meta({ access: "overlay" })
         .route({

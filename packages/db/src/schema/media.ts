@@ -160,7 +160,12 @@ export const vods = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("vods_channel_idx").on(t.channelId, t.createdAt), index("vods_expiry_idx").on(t.expiresAt)],
+  (t) => [
+    index("vods_channel_idx").on(t.channelId, t.createdAt),
+    index("vods_expiry_idx").on(t.expiresAt),
+    // Clip backstop and "remove a VOD's clips" look VODs up by broadcast.
+    index("vods_broadcast_idx").on(t.broadcastId),
+  ],
 );
 
 export const clips = pgTable(

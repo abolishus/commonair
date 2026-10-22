@@ -155,6 +155,13 @@
       "when": 1792635284672,
       "tag": "0021_coop_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1792647353834,
+      "tag": "0022_e6_ops",
+      "breakpoints": true
     }
   ]
 }

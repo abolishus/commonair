@@ -242,6 +242,15 @@ export const coopEnv = z.object({
   COOP_TEST_HOOKS: bool.default(false),
 });
 
+/**
+ * Operations (E6, ADR 0021). Harness only, never on a public instance: serves
+ * `POST /internal/ops/tick` (run account deletion, export cleanup or VOD retention now).
+ * Services log a warning at every start while it is on.
+ */
+export const opsEnv = z.object({
+  OPS_TEST_HOOKS: bool.default(false),
+});
+
 export const moderationEnv = moderationShape.superRefine((env, ctx) => {
   if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
     ctx.addIssue({
@@ -438,6 +447,7 @@ export const ALL_ENV_SCHEMAS = {
   mediaEnv,
   moderationEnv: moderationShape,
   coopEnv,
+  opsEnv,
   evidenceSealEnv,
   evidenceOpenEnv,
   evidenceStorageEnv,

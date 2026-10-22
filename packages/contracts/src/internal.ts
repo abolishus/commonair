@@ -70,6 +70,11 @@ export const INTERNAL_ROUTES = {
    * `CoopTickBody`: the API enqueues that `COOP_JOBS` job, waits for it (30 s) and returns its result.
    */
   coopTick: "/internal/coop/tick",
+  /**
+   * Operations test hook (E6; served by the API only while `OPS_TEST_HOOKS=true`, otherwise 404).
+   * `POST` an `OpsTickBody`: the API enqueues that job, waits for it (60 s) and returns its result.
+   */
+  opsTick: "/internal/ops/tick",
 } as const;
 
 /** Published on BUS.live by the API when a broadcast starts/ends, and by media on transcode changes. */
@@ -434,3 +439,32 @@ export type CoopTickBody = z.infer<typeof CoopTickBody>;
 /** What a co-op job returns (counts only; logged and returned by the test hook). */
 export const CoopJobResult = z.record(z.string(), z.number().int());
 export type CoopJobResult = z.infer<typeof CoopJobResult>;
+
+// Data export and operations (E6, ADR 0021, docs/testing/e6-selectors.md) --------------------
+
+/** An export's archive and signed link live this long after it completes (also the SigV4 maximum). */
+export const EXPORT_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** One export per kind per user in this window (`RATE_LIMITED` with `retryAfterSeconds`). */
+export const EXPORT_COOLDOWN_SECONDS = 24 * 60 * 60;
+/** `manifest.json` `formatVersion` of the archive; bump on any incompatible change to its files. */
+export const EXPORT_FORMAT_VERSION = 1;
+
+/** Jobs on `QUEUES.exports`. */
+export const EXPORT_JOBS = {
+  /** Enqueued by `me.exports.create` (job id = export id): build, upload, email the link. */
+  build: "export-build",
+  /** Hourly: delete archives past `expires_at`, mark the exports `expired`. */
+  cleanup: "export-cleanup",
+} as const;
+export const ExportBuildJob = z.object({ exportId: z.uuid() });
+export type ExportBuildJob = z.infer<typeof ExportBuildJob>;
+/** Object key of an export archive in `S3_BUCKET_EXPORTS`; the worker writes nothing else there. */
+export const exportObjectKey = (userId: string, exportId: string) => `exports/${userId}/${exportId}.zip`;
+
+/** Jobs the ops test hook can run now. Each already runs on its own schedule. */
+export const OPS_TICK_JOBS = ["account-deletion", "export-cleanup", "vod-retention"] as const;
+/** Body of `INTERNAL_ROUTES.opsTick`; the response is the job's result (counts only). */
+export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });
+export type OpsTickBody = z.infer<typeof OpsTickBody>;
+export const OpsJobResult = z.record(z.string(), z.number().int());
+export type OpsJobResult = z.infer<typeof OpsJobResult>;

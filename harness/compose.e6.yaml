@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the E6 harness scenarios ONLY (docs/testing/e6-selectors.md, ADR 0021).
+# Never use it on a public instance: it turns on the operations test hook
+# (`POST /internal/ops/tick`, OPS_TEST_HOOKS) and lets relays and simulcast targets use private
+# addresses (the mock RTMP target and LAN relays live on the compose network).
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      OPS_TEST_HOOKS: "true"
+      OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true"
+  media:
+    environment:
+      OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true"
+  worker:
+    environment:
+      OPS_TEST_HOOKS: "true"

@@ -5,7 +5,7 @@
  * Local infrastructure helper around `podman compose`.
  *
  *   bun scripts/infra.ts test   start the data services integration tests need, wait for health
- *   bun scripts/infra.ts stack [override.yaml...]
+ *   bun scripts/infra.ts stack [--harness] [override.yaml...]
  *                               build and start the whole platform (+ harness profile), wait for health;
  *                               override files are layered over compose.yaml (e.g.
  *                               harness/compose.trust-safety.yaml for the `trust-safety` scenario)
@@ -361,8 +361,21 @@ export async function waitExited(services: string[], timeoutMs = 300_000): Promi
   }
 }
 
+/**
+ * The harness stack (ADR 0021): every harness override, layered in this order. `full` runs on it.
+ * Its Postgres volume must have been created with the E5 bootstrap (ADR 0020).
+ */
+export const HARNESS_OVERRIDES = [
+  "harness/compose.trust-safety.yaml",
+  "harness/compose.e5-coop.yaml",
+  "harness/compose.e6.yaml",
+] as const;
+
 /** `-f` arguments for `stack`: none for the plain stack, else compose.yaml plus each override. */
-export function stackFiles(overrides: readonly string[]): string[] {
+export function stackFiles(args: readonly string[]): string[] {
+  const overrides = args.includes("--harness")
+    ? [...HARNESS_OVERRIDES, ...args.filter((a) => a !== "--harness")]
+    : args;
   if (overrides.length === 0) return [];
   for (const o of overrides) {
     if (o.startsWith("-")) throw new Error(`unknown option ${o}; stack takes override file paths`);
@@ -412,7 +425,7 @@ if (import.meta.main) {
     } else if (cmd === "reset") {
       compose(["down", "-v"], 5 * 60_000);
     } else {
-      console.error("usage: bun scripts/infra.ts test | stack [override.yaml...] | down | reset");
+      console.error("usage: bun scripts/infra.ts test | stack [--harness] [override.yaml...] | down | reset");
       process.exit(2);
     }
   } catch (e) {

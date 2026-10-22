@@ -8,6 +8,7 @@ import {
   type TestResource,
   crashLooping,
   foreignContainers,
+  HARNESS_OVERRIDES,
   stackFiles,
   staleImageContainers,
   staleTestResources,
@@ -158,6 +159,13 @@ describe("stackFiles", () => {
     expect(args.filter((a) => a === "-f")).toHaveLength(2);
     expect(args[1]).toMatch(/\/compose\.yaml$/);
     expect(args[3]).toMatch(/\/harness\/compose\.trust-safety\.yaml$/);
+  });
+
+  test("--harness layers every harness override, then any extra file", () => {
+    const files = stackFiles(["--harness"]).filter((a) => a !== "-f");
+    expect(files).toHaveLength(1 + HARNESS_OVERRIDES.length);
+    expect(files.slice(1).map((f) => f.slice(f.indexOf("/harness/") + 1))).toEqual([...HARNESS_OVERRIDES]);
+    expect(stackFiles(["harness/compose.e6.yaml", "--harness"]).filter((a) => a === "-f")).toHaveLength(5);
   });
 
   test("refuses a missing file or an option instead of starting the wrong stack", () => {

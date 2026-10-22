@@ -257,7 +257,13 @@ export const dataExports = pgTable(
     createdAt: createdAt(),
     completedAt: ts(),
   },
-  (t) => [index("data_exports_user_idx").on(t.userId, t.createdAt)],
+  (t) => [
+    index("data_exports_user_idx").on(t.userId, t.createdAt),
+    // The cleanup job finds ready exports past their expiry (ADR 0021: 7 days).
+    index("data_exports_expiry_idx")
+      .on(t.expiresAt)
+      .where(sql`${t.status} = 'ready'`),
+  ],
 );
 
 export const accountDeletions = pgTable(

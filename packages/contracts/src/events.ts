@@ -740,7 +740,21 @@ export const BUS = {
   live: "bus:live",
   /** Platform-wide per-user control (UserControlMessage): suspension, deletion, token revocation. */
   userControl: "bus:user-control",
+  /**
+   * Per-channel overlay fan-out (E6): JSON `OverlayAlert` for test alerts (`interact.alerts.test`).
+   * Real alerts are derived from `BUS.events` by the API's overlay stream.
+   */
+  overlay: (channelId: string) => `overlay:${channelId}`,
 } as const;
+
+/**
+ * The overlay alert stream, served by the API as `text/event-stream` (not an oRPC procedure: OBS
+ * browser sources use `EventSource`). Auth: the overlay token as `?token=` (ADR 0021). SSE events:
+ * `alert` (data: `OverlayAlert` JSON), `ping` (every 15 s), and `revoked` (the token was revoked
+ * or expired; the server closes the stream right after). `interact.overlays.state` returns this
+ * URL as `eventsUrl`.
+ */
+export const OVERLAY_EVENTS_PATH = "/overlay/events";
 
 /** Only public events are published on `BUS.events`. */
 export const BusEvent = z.object({

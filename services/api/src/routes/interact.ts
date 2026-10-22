@@ -36,6 +36,8 @@ export const interact = {
   },
   overlays: {
     token: os.interact.overlays.token.handler(notImplemented),
+    status: os.interact.overlays.status.handler(notImplemented),
+    revoke: os.interact.overlays.revoke.handler(notImplemented),
     state: os.interact.overlays.state.handler(notImplemented),
   },
 };
