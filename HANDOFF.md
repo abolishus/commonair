@@ -15,11 +15,13 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
-## Session ten (E6, Phase 4 completion): built, awaiting the user's live runs
+## Session ten (E6, Phase 4 completion): validated live, one pre-existing gap open
 
-See PROGRESS.md "Session ten" (batches, reviews, and the exact commands the user runs). All E6
-units are merged on `main` (`72a7d48`); nothing has run against the live stack yet. When the
-scenarios fail live, fix in post as in E4c/E5 (symptom → root cause → fix, with a regression test). Spec `docs/testing/e6-selectors.md`, ADR 0021, briefs
+See PROGRESS.md "Session ten" ("Live runs"). Every E6 scenario, `e2e-relay`, `full` and `full
+--profile no-proprietary` pass on the harness stack except `ingest-whip` (WHIP's Opus audio does
+not play in WebKit's native HLS; needs an Opus → AAC transcode, pending the user's decision).
+`bun run verify` is green. The harness stack is `bun scripts/infra.ts stack --harness`; Postgres now
+runs under an init. Phase 5 has not started. Spec `docs/testing/e6-selectors.md`, ADR 0021, briefs
 `.claude/briefs/e6/`. The harness stack is now `bun scripts/infra.ts stack --harness` (every
 harness override layered, Postgres volume created once with the E5 bootstrap). Do not start
 Phase 5 in this session.

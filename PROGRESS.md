@@ -59,6 +59,44 @@ Playwright error; the listed `downloadUrl` scope and expiry were never checked; 
 read only `alert` frames) fixed and re-reviewed. Head `72a7d48`: harness redacts URL credentials
 from every step/run error; overlay-alert scans all three streams; username `content` reserved.
 
+**Live runs (2026-10-22, head agent at the user's request).** On the harness stack
+(`bun scripts/infra.ts stack --harness`, E5-bootstrapped volume): all seven E6 scenarios pass
+(`simulcast` 18/18, `overlay-alert` 41/41, `vod-clips` 28/28, `data-export` 42/42,
+`account-deletion` 25/25, `backup-restore` 11/11, `e2e-social` with the SDK bot), `e2e-relay`
+passes (21/21, 8 min), and `full` and `full --profile no-proprietary` pass 17/18 each; the
+only skip is the Stripe variant of `e4b-money`. **`ingest-whip` fails** (WebKit never shows a
+first frame): WHIP brings Opus audio, MediaMTX muxes it into HLS as is, and WebKit's native HLS
+does not play it (RTMP brings AAC and plays). Pre-existing, not E6; fixing it needs an Opus → AAC
+audio transcode for WHIP ingests in media (decision pending with the user). `bun run verify` is
+GREEN.
+
+Fixed while bringing it up (symptom → root cause → fix):
+
+- Postgres reset itself five times (backend "terminated by signal 13"), each time taking the
+  worker down → the postmaster ran as PID 1 and reaped orphans (timed-out `podman exec` /
+  healthchecks); one dying by SIGPIPE looked like a crashed backend → `init: true` (compose) and
+  `RunInit=true` (Quadlet), with a test (`ee904e0`).
+- Migrations 0022–0023 never ran → podman's `rm --depend <name>` removed migrate's dependents but
+  kept migrate, and compose restarted the old container → survivors removed by id; `stack` now
+  fails loudly if any container is still on an old image (`3624153`, `ae62f79`).
+- The tmi.js bot could never sign in through the IRC gateway (since Phase 1) → tmi.js lowercases
+  `PASS oauth:<token>` and bot tokens were mixed-case base64url → lowercase hex access tokens
+  (`randomTokenSecret`); chat logs refused upgrades with status and code (`089265c`).
+- Simulcast target changes while live were ignored → API publishes `simulcast-targets` on
+  BUS.live; media reconciles the live pushes; a disabled target reads idle (`b4a65b6`).
+- Export mail linked the privacy page → `createWorker` dropped `storageOrigin` (`3624153`).
+- e2e-relay refused to run → its preflight read `.env`; the API now reports
+  `outboundPrivateNetworks` on `/healthz` (`9357148`).
+- Harness: simulcast reloaded the dashboard into the session rate limit; overlay-alert tipped
+  below `tipMinCents`; manifest row rule for object files; SDK bot reply race; ingest viewers
+  stopped before the first heartbeat on a fast stack; simulcast re-enable budget 45 s.
+- Gate: chat filter-runner raced JavaScriptCore's ~400 ms backtracking cap (test timeout 250 ms;
+  production's is 50 ms); infra stack tests re-running one-shot containers got 60 s.
+
+Open follow-ups: `ingest-whip` + WebKit (Opus → AAC, above); the worker's Postgres client
+crashed the process on a connection reset and Podman did not restart it despite
+`unless-stopped` (the trigger is gone; make the worker survive and look at the restart policy).
+
 **User to run** (nothing here was run against the live stack): recreate the Postgres volume once
 with the E5 bootstrap (ADR 0020), `bun scripts/init-env.ts --merge` (new `OPS_TEST_HOOKS`), then
 `bun scripts/infra.ts stack --harness` (rebuilds api, worker, web, media images; migrations
