@@ -34,6 +34,11 @@ export class SurplusUnavailableError extends PatronagePeriodStateError {
   override name = "SurplusUnavailableError";
 }
 
+/** The approver is the person who computed the period (ADR 0020: two people; the trigger agrees). */
+export class SecondApproverError extends PatronagePeriodStateError {
+  override name = "SecondApproverError";
+}
+
 /** Serializes period computation and approval (overlap and surplus checks read, then write). */
 async function lockPeriods(tx: Executor): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext('patronage:periods'))`);
@@ -55,6 +60,37 @@ async function assertNoOverlap(
   if (clash) throw new PatronagePeriodOverlapError(`period overlaps ${clash.status} patronage period ${clash.id}`);
 }
 
+/** Retained surplus less what other computed-but-unapproved periods already intend to distribute. */
+async function surplusAvailable(tx: Executor, currency: string, selfId: string | null): Promise<number> {
+  const held = await retainedSurplus(tx, currency);
+  const rows = await tx.execute<{ total: string }>(sql`
+    select coalesce(sum(surplus_cents), 0)::text as total from patronage_periods
+    where currency = ${currency} and status = 'computed' ${selfId ? sql`and id <> ${selfId}` : sql``}`);
+  return held - Number(rows[0]?.total ?? 0);
+}
+
+/**
+ * The surplus a (re-)run of exactly [periodStart, periodEnd) could distribute now: retained
+ * surplus less other computed periods' surplus (a computed run of the same period is replaced, so
+ * its own surplus counts as available). Never negative. Call it in the transaction that computes.
+ */
+export async function availableSurplusCents(
+  db: Executor,
+  opts: { periodStart: Date; periodEnd: Date; currency: string },
+): Promise<number> {
+  assertCurrency(opts.currency);
+  const [same] = await db
+    .select({ id: schema.patronagePeriods.id })
+    .from(schema.patronagePeriods)
+    .where(
+      and(
+        eq(schema.patronagePeriods.periodStart, opts.periodStart),
+        eq(schema.patronagePeriods.periodEnd, opts.periodEnd),
+      ),
+    );
+  return Math.max(0, await surplusAvailable(db, opts.currency, same?.id ?? null));
+}
+
 /**
  * The surplus to distribute must be held in the ledger: retained surplus (after period
  * closes), less what other computed-but-unapproved periods already intend to distribute.
@@ -66,11 +102,7 @@ async function assertSurplusAvailable(
   selfId: string | null,
 ): Promise<void> {
   if (surplusCents === 0) return;
-  const held = await retainedSurplus(tx, currency);
-  const rows = await tx.execute<{ total: string }>(sql`
-    select coalesce(sum(surplus_cents), 0)::text as total from patronage_periods
-    where currency = ${currency} and status = 'computed' ${selfId ? sql`and id <> ${selfId}` : sql``}`);
-  const available = held - Number(rows[0]?.total ?? 0);
+  const available = await surplusAvailable(tx, currency, selfId);
   if (surplusCents > available) {
     throw new SurplusUnavailableError(
       `surplus of ${surplusCents} exceeds the ${available} cents of retained surplus available in ${currency}`,
@@ -231,6 +263,10 @@ export async function approvePeriod(
     }
     if (period.status !== "computed") {
       throw new PatronagePeriodStateError(`patronage period ${period.id} is ${period.status}; compute it first`);
+    }
+    // Checked under the row lock, so a concurrent re-run cannot change who computed it in between.
+    if (period.computedById === opts.approvedById) {
+      throw new SecondApproverError(`patronage period ${period.id} must be approved by someone other than its runner`);
     }
     if (totalCents > period.surplusCents) {
       throw new PatronagePeriodStateError(`allocations exceed the surplus of period ${period.id}`);

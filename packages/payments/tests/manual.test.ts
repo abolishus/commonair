@@ -76,6 +76,22 @@ describe("manualAdapter", () => {
     expect(a.providerRef).toBe("CA-00000001");
     expect(b.providerRef).toBe("CA-00000002");
   });
+  test("a member share has no creator and still gets instructions", async () => {
+    const adapter = manualAdapter({ instructions: "Send {amount} with {reference}.", reference: () => "CA-SHARE001" });
+    const start = await adapter.startCheckout({
+      ...request,
+      kind: "membership_share",
+      amountCents: 500,
+      tier: undefined,
+      recurring: false,
+      creatorUserId: null,
+    });
+    expect(start).toEqual({
+      kind: "instructions",
+      providerRef: "CA-SHARE001",
+      instructions: "Send 5.00 USD with CA-SHARE001.",
+    });
+  });
 });
 
 describe("createAdapter", () => {

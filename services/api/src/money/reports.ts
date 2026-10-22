@@ -660,7 +660,27 @@ async function transparency(deps: Deps, months: number) {
       group by 1, 2`),
   ]);
 
-  return aggregates
+  // A month with governance outcomes or members but no ledger postings is still shown.
+  const byMonth = new Map(aggregates.map((m) => [m.month, m]));
+  const shown = [
+    ...new Set([
+      ...byMonth.keys(),
+      ...[...decided].map((d) => d.month),
+      ...[...members].filter((r) => num(r.n) > 0).map((r) => r.month),
+    ]),
+  ].sort();
+  const empty = (month: string) => ({
+    month,
+    revenueCents: 0,
+    platformCutCents: 0,
+    streamerPayoutsCents: 0,
+    costs: [] as { category: string; cents: number }[],
+    surplusCents: 0,
+    patronageDistributedCents: 0,
+  });
+
+  return shown
+    .map((month) => byMonth.get(month) ?? empty(month))
     .map((m) => {
       const costs = new Map<string, number>();
       for (const c of m.costs)

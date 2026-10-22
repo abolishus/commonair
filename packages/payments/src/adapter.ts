@@ -27,7 +27,8 @@ export interface CheckoutRequest {
   /** Self subscriptions renew; gifts and tips are one-off. */
   recurring: boolean;
   payerUserId: string;
-  creatorUserId: string;
+  /** The channel owner paid; null for a `membership_share` (paid to the co-op, not a creator). */
+  creatorUserId: string | null;
   /** Absolute URLs on this instance the provider may send the payer back to. */
   successUrl: string;
   cancelUrl: string;

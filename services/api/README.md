@@ -108,6 +108,42 @@ Reports (`money/reports.ts`) read every figure from the ledger; `payments` only 
 posting (tier, gift, tip, payer). The revenue ledger omits hold releases and shows only CSV-safe
 reference tokens. `runPayouts` treats `periodEnd` as an exclusive end.
 
+## Co-op
+
+`coop.*` lives in `src/coop/` (`routes/coop.ts` only maps it); the contract and every flow are in
+[docs/testing/e5-selectors.md](../../docs/testing/e5-selectors.md), the policies in ADR 0020.
+
+- **Database first (ADR 0004).** The triggers in `0001`, `0002` and `0021` enforce proposal
+  transitions, the electorate and voting window, tallies, council responses, share transitions
+  and two-person patronage approval. Handlers check the same rules first for clear errors
+  (`coop/policy.ts`, a pure matrix) and map any trigger refusal that still happens (a race) to a
+  contract error in `coop/errors.ts`; the SQL message never reaches a client.
+- **The API never advances a proposal past discussion**, never writes `tallies` and never writes
+  governance settings: the worker does (`proposals-advance`). The API drafts, edits, submits,
+  withdraws, comments, votes and publishes the council's response.
+- **Secret ballot.** A vote is an upsert of the caller's own `votes` row (one per member, so a
+  change never adds a second). The choice goes nowhere else: audit `proposal.vote` and event
+  `coop.vote.cast` carry the proposal id only, and a view shows `myVote` to its voter alone.
+  While voting is open a view shows participation counts, never a tally; decided proposals show
+  the `tallies` row.
+- **Shares** use the manual adapter only (`PRECONDITION_FAILED manual_shares` with Stripe).
+  `treasurer.confirm` confirms a `membership_share` payment through `coop/membership.ts`
+  (`confirmShareTx`): payment `succeeded`, `sharePurchase` posted, share `held`, a viewer
+  membership with basis `share`. Exiting the viewer class moves a held share to `refund_pending`;
+  `coop.shares.refund` posts `shareRefund` and marks it `refunded`. Lock order: payment → share →
+  membership.
+- **Patronage.** `run` closes the ledger for exactly the period (`closePeriod`), then
+  `computePeriod` with the caller as `computedById` (surplus defaults to all available,
+  `availableSurplusCents`); `approve` refuses the runner (`SECOND_APPROVER`; the trigger does too)
+  and posts the allocation in the same transaction as its audit row and event.
+- **Audit and outbox.** Every action writes both in its transaction. Audit `details` hold ids,
+  enums and numbers; free text the actor wrote (a board minute reference, a refund note) goes to
+  `reason`. Members act as `user`, treasurers and admins as `admin`.
+- **Test hook.** With `COOP_TEST_HOOKS=true` (a warning at start; `/healthz` reports it),
+  `POST /internal/coop/tick` behind `INTERNAL_API_SECRET` enqueues the named `COOP_JOBS` job on
+  `QUEUES.coop` in the worker's BullMQ prefix, waits up to 30 s and returns its result (504 on
+  timeout or failure). Off, the path is 404 before the secret check.
+
 ## Relay lifecycle
 
 `src/routes/relays.ts`. Postgres (`relay_nodes.status`) is the record; `KEYS.relays` in Valkey
