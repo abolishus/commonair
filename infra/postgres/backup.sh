@@ -7,6 +7,7 @@
 #   podman compose exec postgres commonair-backup
 # Env: WALG_* / AWS_* (from the container), WALG_RETAIN_FULL (keep N full backups; unset = keep all).
 set -eu
+# shellcheck source=infra/postgres/walg-env.sh
 . /usr/local/lib/commonair/walg-env.sh
 
 # wal-g must read the data directory as its owner.

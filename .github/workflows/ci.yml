@@ -55,9 +55,9 @@ jobs:
           # Online audits: impostor commits, known-vulnerable actions, ref confusion.
           GH_TOKEN: ${{ github.token }}
         run: zizmor --format plain .github
-      - name: shellcheck (self-host scripts)
+      - name: shellcheck (self-host and Postgres image scripts)
         run: |
-          mapfile -t files < <(git ls-files 'scripts/selfhost.sh' 'scripts/selfhost/*.sh')
+          mapfile -t files < <(git ls-files 'scripts/selfhost.sh' 'scripts/selfhost/*.sh' 'infra/postgres/*.sh')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no self-host shell scripts yet"
           else

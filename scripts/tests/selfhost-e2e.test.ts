@@ -141,4 +141,9 @@ describe("CI job", () => {
     expect(unload).toBeGreaterThan(0);
     expect(unload).toBeLessThan(job.indexOf("scripts/selfhost/e2e.ts"));
   });
+
+  test("shellchecks the Postgres image scripts with the self-host scripts", () => {
+    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+    expect(ci).toMatch(/git ls-files 'scripts\/selfhost\.sh' 'scripts\/selfhost\/\*\.sh' 'infra\/postgres\/\*\.sh'/);
+  });
 });

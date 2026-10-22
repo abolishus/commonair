@@ -14,6 +14,7 @@
 # exits 126, which Postgres treats as FATAL: the server stops, the unit's Restart= starts it
 # again and the replay resumes from its last restartpoint once the bucket answers.
 set -u
+# shellcheck source=infra/postgres/walg-env.sh
 . /usr/local/lib/commonair/walg-env.sh
 
 # WAL-G's exit status for a segment the archive does not have (ExIoError).

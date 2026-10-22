@@ -11,6 +11,7 @@
 #     backup-name   default LATEST (see `wal-g backup-list`)
 #   RECOVERY_TARGET_TIME  optional, e.g. "2026-10-18 12:00:00+00" (point-in-time recovery)
 set -eu
+# shellcheck source=infra/postgres/walg-env.sh
 . /usr/local/lib/commonair/walg-env.sh
 
 if [ "$(id -u)" = 0 ]; then
