@@ -21,8 +21,11 @@ const port = z.coerce.number().int().min(1024).max(65535);
 const secret = z.string().min(32, "secrets must be at least 32 characters");
 
 const coreShape = z.object({
+  /** `production` turns on the production checks (instance contacts, IRC TLS certificate files). */
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  /** Minimum level the services log. */
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
+  /** Public base URL of the web app; links in mail, auth origins and the default noreply domain derive from it. */
   PUBLIC_URL: z.url().default("http://localhost:3000"),
   /** Public base of the API as browsers, bots and relays reach it (no trailing slash). */
   API_PUBLIC_URL: z.url().default("http://localhost:3001"),
@@ -30,18 +33,29 @@ const coreShape = z.object({
   CHAT_PUBLIC_URL: z.string().default("ws://localhost:3002/ws"),
   /** Public IRC gateway host and ports shown in developer docs. */
   IRC_PUBLIC_HOST: z.string().default("localhost"),
+  /** Name of this instance, shown in the UI, mail, legal documents and the IRC MOTD. */
   INSTANCE_NAME: z.string().min(1).default(SITE.name),
+  /** Whether this is the co-op's flagship instance; in production, only the flagship may use the built-in contacts. */
   INSTANCE_IS_FLAGSHIP: bool.default(false),
+  /** General contact address; required in production on instances other than the flagship. */
   CONTACT_EMAIL: z.email().optional(),
+  /** Where security reports go; required in production on instances other than the flagship. */
   SECURITY_EMAIL: z.email().optional(),
+  /** Where abuse reports go; required in production on instances other than the flagship. */
   ABUSE_EMAIL: z.email().optional(),
+  /** Where copyright (DMCA) notices go; required in production on instances other than the flagship. */
   DMCA_EMAIL: z.email().optional(),
+  /** Where privacy requests go; required in production on instances other than the flagship. */
   PRIVACY_EMAIL: z.email().optional(),
   /** Sender for automated mail; defaults to the flagship noreply on the flagship, else noreply@<public host>. */
   NOREPLY_EMAIL: z.email().optional(),
+  /** Repository URL of the running source code, linked from the UI, legal documents and the IRC MOTD (AGPL). */
   SOURCE_URL: z.url().default(SITE.repository.url),
+  /** Commit of the running build, appended to the source link; set by the container image build. */
   SOURCE_COMMIT: z.string().default("unknown"),
+  /** OTLP/HTTP collector for traces and metrics; unset turns telemetry off. */
   OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
+  /** Service name in telemetry; unset uses the service's own name (api, chat, …). */
   OTEL_SERVICE_NAME: z.string().optional(),
   /** Proxies whose X-Forwarded-For is trusted (comma-separated CIDRs), e.g. Caddy's network. */
   TRUSTED_PROXY_CIDRS: csv.default([]),
@@ -64,7 +78,9 @@ export const coreEnv = coreShape.superRefine((env, ctx) => {
 });
 
 export const databaseEnv = z.object({
+  /** Postgres connection URL: the least-privilege app role for services, the owner role for migrations. */
   DATABASE_URL: z.url(),
+  /** Most Postgres connections each service process holds. */
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   /** Password of the least-privilege application role (compose creates `commonair_app`). */
   POSTGRES_APP_PASSWORD: z.string().optional(),
@@ -76,18 +92,23 @@ export const databaseEnv = z.object({
 });
 
 export const valkeyEnv = z.object({
+  /** Valkey (Redis protocol) URL for presence, caches, rate limits and job queues. */
   VALKEY_URL: z.url(),
 });
 
 export const internalEnv = z.object({
   /** Shared secret for service-to-service calls (chat → api, media → api, worker → api). */
   INTERNAL_API_SECRET: secret,
+  /** API base URL other services and MediaMTX's hooks call on the internal network. */
   API_INTERNAL_URL: z.url().default("http://localhost:3001"),
+  /** Chat WebSocket URL the IRC gateway connects to; the API health check also probes it. */
   CHAT_INTERNAL_URL: z.string().default("ws://localhost:3002/ws"),
+  /** Origin base URL on the internal network; the API health check probes its `/readyz`. */
   ORIGIN_INTERNAL_URL: z.url().default("http://localhost:3003"),
 });
 
 export const storageEnv = z.object({
+  /** S3 endpoint the services use on the internal network (Garage by default). */
   S3_ENDPOINT: z.url(),
   /** S3 endpoint browsers reach for presigned uploads and downloads (not for public media). */
   S3_PUBLIC_ENDPOINT: z.url().optional(),
@@ -96,12 +117,19 @@ export const storageEnv = z.object({
    * which serves only the public key prefixes (ADR 0009); a CDN or public bucket may replace it.
    */
   MEDIA_PUBLIC_URL: z.url().default("http://localhost:3003/media"),
+  /** S3 region used to sign requests (`garage` for Garage). */
   S3_REGION: z.string().default("garage"),
+  /** S3 access key for the media, exports and backups buckets (not the evidence bucket). */
   S3_ACCESS_KEY_ID: z.string().min(1),
+  /** Secret of S3_ACCESS_KEY_ID. */
   S3_SECRET_ACCESS_KEY: z.string().min(1),
+  /** Use path-style S3 URLs (`<endpoint>/<bucket>/<key>`), as Garage needs. */
   S3_FORCE_PATH_STYLE: bool.default(true),
+  /** Bucket for public media (avatars, thumbnails, clips, VODs) and moderation frames. */
   S3_BUCKET_MEDIA: z.string().default("commonair-media"),
+  /** Bucket for personal data export archives, which users download through presigned URLs. */
   S3_BUCKET_EXPORTS: z.string().default("commonair-exports"),
+  /** Bucket for WAL-G Postgres backups (prefix `wal/` unless WALG_S3_PREFIX is set). */
   S3_BUCKET_BACKUPS: z.string().default("commonair-backups"),
   /**
    * Sealed T0 evidence too large for Postgres (VOD and clip objects). Only the worker holds a
@@ -111,36 +139,54 @@ export const storageEnv = z.object({
 });
 
 export const authEnv = z.object({
+  /** Secret that signs sessions and keys the HMACs of stored IP, device and mailbox hashes. */
   AUTH_SECRET: secret,
+  /** Origins besides PUBLIC_URL that auth and CORS accept (comma-separated). */
   AUTH_TRUSTED_ORIGINS: csv.default([]),
+  /** Minimum age to sign up, checked against the birth date; also filled into the legal documents. */
   AUTH_MIN_AGE: z.coerce.number().int().min(13).default(13),
+  /** HMAC key for the ALTCHA proof-of-work challenges on sign-up and NCII reports. */
   ALTCHA_HMAC_KEY: secret,
+  /** Discord OAuth client ID; sign-in with Discord is on when it and its secret are set. */
   OAUTH_DISCORD_CLIENT_ID: z.string().optional(),
+  /** Discord OAuth client secret. */
   OAUTH_DISCORD_CLIENT_SECRET: z.string().optional(),
+  /** Twitch OAuth client ID; sign-in with Twitch is on when it and its secret are set. */
   OAUTH_TWITCH_CLIENT_ID: z.string().optional(),
+  /** Twitch OAuth client secret. */
   OAUTH_TWITCH_CLIENT_SECRET: z.string().optional(),
+  /** GitHub OAuth client ID; sign-in with GitHub is on when it and its secret are set. */
   OAUTH_GITHUB_CLIENT_ID: z.string().optional(),
+  /** GitHub OAuth client secret. */
   OAUTH_GITHUB_CLIENT_SECRET: z.string().optional(),
 });
 
 export const mailEnv = z.object({
+  /** SMTP relay host for outgoing mail. */
   SMTP_HOST: z.string().default("localhost"),
+  /** SMTP relay port. */
   SMTP_PORT: z.coerce.number().int().positive().default(1025),
+  /** Connect with implicit TLS (usually port 465) instead of STARTTLS. */
   SMTP_SECURE: bool.default(false),
   /** Refuse to send credentials or mail without TLS (STARTTLS). Leave false only for a local catcher like Mailpit. */
   SMTP_REQUIRE_TLS: bool.default(false),
+  /** SMTP username; when set, STARTTLS is required unless SMTP_SECURE is on. */
   SMTP_USER: z.string().optional(),
+  /** SMTP password for SMTP_USER. */
   SMTP_PASSWORD: z.string().optional(),
+  /** From header of outgoing mail; unset uses `"<instance name>" <NOREPLY_EMAIL>`. */
   MAIL_FROM: z.string().optional(),
 });
 
 export const paymentsEnv = z.object({
   /** `manual` (default, no vendor) or `stripe` (test mode only in this build). */
   PAYMENTS_PROVIDER: z.enum(["manual", "stripe"]).default("manual"),
+  /** Stripe test-mode secret key (`sk_test_`/`rk_test_`), used when PAYMENTS_PROVIDER=stripe; live keys are refused. */
   STRIPE_SECRET_KEY: z
     .string()
     .refine((k) => !k.startsWith("sk_live_") && !k.startsWith("rk_live_"), "live Stripe keys are refused")
     .optional(),
+  /** Signing secret of the Stripe webhook endpoint for platform-account events. */
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   /** Signing secret of the Connect webhook endpoint (connected accounts' `account.updated`). */
   STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
@@ -179,14 +225,21 @@ export const mediaEnv = z.object({
    * Separate from INTERNAL_API_SECRET because it appears in ffmpeg process arguments.
    */
   MEDIA_INTERNAL_PASSWORD: secret,
+  /** MediaMTX control API, used by media and by the API's health and live-moderation checks. */
   MEDIAMTX_API_URL: z.url().default("http://localhost:9997"),
+  /** MediaMTX HLS server the origin pulls playlists and segments from. */
   MEDIAMTX_HLS_URL: z.url().default("http://localhost:8888"),
+  /** MediaMTX RTSP server media reads streams from and publishes renditions to. */
   MEDIAMTX_RTSP_URL: z.string().default("rtsp://localhost:8554"),
+  /** MediaMTX RTMP address on the internal network. Validated, but no service reads it yet; compose and the units set it. */
   MEDIAMTX_RTMP_URL: z.string().default("rtmp://localhost:1935"),
-  /** Public ingest endpoints shown to streamers. */
+  /** Public RTMP ingest URL shown to streamers (the server URL in OBS). */
   INGEST_RTMP_PUBLIC_URL: z.string().default("rtmp://localhost:1935/live"),
+  /** Public WHIP ingest base shown to streamers; `/<channel>/whip` is appended. */
   INGEST_WHIP_PUBLIC_URL: z.url().default("http://localhost:8889/live"),
+  /** Viewers above which a stream gets an adaptive ladder (after 30 s; it stops below 80% for 2 min). */
   TRANSCODE_VIEWER_THRESHOLD: z.coerce.number().int().nonnegative().default(50),
+  /** `auto` uses NVENC when a test encode works, else the CPU; `nvenc` refuses to start without it; `none` always uses the CPU. */
   TRANSCODE_HWACCEL: z.enum(["auto", "nvenc", "none"]).default("auto"),
   /** Scratch space for recordings, clip cuts and thumbnails (defaults to <tmpdir>/commonair-media). */
   MEDIA_WORK_DIR: z.string().optional(),
@@ -239,6 +292,7 @@ const moderationShape = z.object({
  * (`GOVERNANCE_BOOTSTRAP_JSON`, first migration only).
  */
 export const coopEnv = z.object({
+  /** Harness only: serves `POST /internal/coop/tick`. Never on a public instance. */
   COOP_TEST_HOOKS: bool.default(false),
 });
 
@@ -248,6 +302,7 @@ export const coopEnv = z.object({
  * Services log a warning at every start while it is on.
  */
 export const opsEnv = z.object({
+  /** Harness only: serves `POST /internal/ops/tick`. Never on a public instance. */
   OPS_TEST_HOOKS: bool.default(false),
 });
 
@@ -262,6 +317,7 @@ export const moderationEnv = moderationShape.superRefine((env, ctx) => {
 
 /** The evidence public key, raw 32-byte X25519, base64. Media, the worker and the API seal with it; none can open. */
 export const evidenceSealEnv = z.object({
+  /** Evidence public key (raw 32-byte X25519, base64) that sealed evidence is encrypted to. */
   EVIDENCE_PUBLIC_KEY: z
     .string()
     .refine((v) => base64Bytes(v)?.length === 32, "must be a base64 raw 32-byte X25519 public key"),
@@ -269,6 +325,7 @@ export const evidenceSealEnv = z.object({
 
 /** The evidence private key (X25519 PKCS#8 DER, base64). Only the API's legal-view handlers use it. */
 export const evidenceOpenEnv = z.object({
+  /** Evidence private key (X25519 PKCS#8 DER, base64); keep an offline copy, sealed evidence is unreadable without it. */
   EVIDENCE_PRIVATE_KEY: z.string().refine((v) => {
     const b = base64Bytes(v);
     return b?.length === 48 && hexOf(b.subarray(0, 16)) === X25519_PKCS8_PREFIX;
@@ -277,7 +334,9 @@ export const evidenceOpenEnv = z.object({
 
 /** The evidence bucket's own Garage key, read and write on that bucket only. Worker only. */
 export const evidenceStorageEnv = z.object({
+  /** S3 access key for the evidence bucket only. */
   S3_EVIDENCE_ACCESS_KEY_ID: z.string().min(1),
+  /** Secret of S3_EVIDENCE_ACCESS_KEY_ID. */
   S3_EVIDENCE_SECRET_ACCESS_KEY: z.string().min(1),
 });
 
@@ -286,13 +345,17 @@ export const playbackEnv = z.object({
   PLAYBACK_SIGNING_KEY: z.string().min(1),
   /** Public origin of the HLS edge (origin service), no trailing slash. */
   PLAYBACK_PUBLIC_URL: z.url().default("http://localhost:3003"),
+  /** Offer peer-to-peer segment sharing to players that support it (not native HLS). */
   P2P_ENABLED: bool.default(true),
   /** Tracker base URL handed to players (the API appends `?t=<playback token>`). */
   P2P_TRACKER_URL: z.url({ protocol: /^wss?$/ }).default("ws://localhost:8000"),
   /** Optional burst CDN (origin-pull). Disabled by default. */
   CDN_PROVIDER: z.enum(["none", "origin-pull"]).default("none"),
+  /** Public base URL of the origin-pull CDN; CDN_PROVIDER=origin-pull does nothing without it. */
   CDN_BASE_URL: z.url().optional(),
+  /** Verified viewers above which a channel's new sessions are sent to the CDN. */
   CDN_BURST_VIEWER_THRESHOLD: z.coerce.number().int().positive().default(5000),
+  /** Size of the origin's in-memory segment and playlist cache, in MB. */
   ORIGIN_CACHE_MB: z.coerce.number().int().positive().default(512),
   /** Compute relay issuance on this origin; replicas elect one leader per tick through Valkey. */
   ORIGIN_ISSUANCE_ENABLED: bool.default(true),
@@ -325,13 +388,16 @@ export const workerEnv = z.object({
  * Kept here so `.env.example` stays the single documented list.
  */
 export const infraEnv = z.object({
+  /** Password of the Postgres owner role `commonair` (migrations and backups). */
   POSTGRES_PASSWORD: z.string().min(1).optional(),
   /** Garage requires exactly 64 hex characters. */
   GARAGE_RPC_SECRET: z
     .string()
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
+  /** Bearer token for Garage's admin API, used by garage-init to create buckets and keys. */
   GARAGE_ADMIN_TOKEN: z.string().min(32).optional(),
+  /** Password of Grafana's `admin` user; Grafana refuses to start without it. */
   GRAFANA_ADMIN_PASSWORD: z.string().min(16).optional(),
   /** Host interface for published ports (default 127.0.0.1). */
   BIND_ADDRESS: z.string().optional(),
@@ -346,29 +412,46 @@ export const infraEnv = z.object({
   ACME_EMAIL: z.email().optional(),
   /** ACME directory URL override, e.g. a staging CA (default: Let's Encrypt production; no ZeroSSL fallback). */
   ACME_CA: z.url().optional(),
+  /** Compose only: registry and namespace of the CommonAir images (default `localhost/commonair`). */
   IMAGE_REGISTRY: z.string().optional(),
+  /** Compose only: tag of the CommonAir images (default `dev`). */
   IMAGE_TAG: z.string().optional(),
+  /** Full backups `commonair-backup` keeps; older ones are pruned (unset keeps all). */
   WALG_RETAIN_FULL: z.coerce.number().int().positive().optional(),
   /** Postgres `max_connections` (compose default 400: parallel integration suites hold many pools). */
   POSTGRES_MAX_CONNECTIONS: z.coerce.number().int().positive().optional(),
   /** Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own. */
   COMPOSE_SUBNET: z.string().optional(),
+  /** Compose only: path of the env file every container reads (default `.env`). */
   COMMONAIR_ENV_FILE: z.string().optional(),
 });
 
 export const servicePorts = z.object({
+  /** Port the web server listens on. */
   WEB_PORT: port.default(3000),
+  /** Port the API listens on. */
   API_PORT: port.default(3001),
+  /** Port the chat WebSocket service listens on. */
   CHAT_PORT: port.default(3002),
+  /** Port the HLS origin listens on. */
   ORIGIN_PORT: port.default(3003),
+  /** Plain-TCP IRC port. */
   IRC_PORT: port.default(6667),
+  /** IRC over TLS port. */
   IRC_TLS_PORT: port.default(6697),
+  /** IRC over WebSocket port (what tmi.js uses). */
   IRC_WS_PORT: port.default(6680),
+  /** HTTP port of the IRC gateway's `/healthz`, `/readyz` and `/stats`. */
   IRC_HEALTH_PORT: port.default(6681),
+  /** Port of the media service's health endpoints. */
   MEDIA_PORT: port.default(3004),
+  /** Port of the worker's health endpoints. */
   WORKER_PORT: port.default(3005),
+  /** Port the WebTorrent tracker listens on (WebSocket and health). */
   TRACKER_PORT: port.default(8000),
+  /** PEM certificate for the IRC TLS listener; set with IRC_TLS_KEY_FILE (required in production unless self-signed is allowed). */
   IRC_TLS_CERT_FILE: z.string().optional(),
+  /** PEM private key for IRC_TLS_CERT_FILE. */
   IRC_TLS_KEY_FILE: z.string().optional(),
   /**
    * Let a production instance run the IRC TLS listener on an ephemeral self-signed certificate
@@ -382,16 +465,21 @@ export const servicePorts = z.object({
 
 /** IRC gateway admission limits (per process). */
 export const ircEnv = z.object({
+  /** Most IRC connections per process; more are refused. */
   IRC_MAX_CONNECTIONS: z.coerce.number().int().positive().default(20_000),
+  /** Most IRC connections from one client address. */
   IRC_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().positive().default(50),
-  /** Token bucket for new connections per client address: burst size and refill rate. */
+  /** Token bucket for new connections per client address: the burst size. */
   IRC_CONNECT_BURST_PER_IP: z.coerce.number().int().positive().default(20),
+  /** Sustained new IRC connections per second per client address, after the burst. */
   IRC_CONNECT_PER_SECOND_PER_IP: z.coerce.number().positive().default(2),
 });
 
 /** WebTorrent tracker (services/tracker) limits. */
 export const trackerEnv = z.object({
+  /** Most tracker sockets per process; more are refused with 503. */
   TRACKER_MAX_CONNECTIONS: z.coerce.number().int().positive().default(20_000),
+  /** Most tracker sockets from one client address; more are refused with 429. */
   TRACKER_MAX_CONNECTIONS_PER_IP: z.coerce.number().int().positive().default(20),
   /** Most peers (offers) relayed per announce, whatever `numwant` asks for. */
   TRACKER_MAX_NUMWANT: z.coerce.number().int().positive().default(20),

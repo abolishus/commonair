@@ -54,6 +54,14 @@ describe("committed configuration reference", () => {
     expect(documentedNames(committed()).filter((k) => !known.has(k))).toEqual([]);
   });
 
+  test("describes every variable (add a JSDoc in packages/config/src/env.ts)", () => {
+    const undescribed = collect(readSources())
+      .filter((v) => v.description.trim() === "")
+      .map((v) => v.name);
+    expect(undescribed).toEqual([]);
+    expect(generatedBlock(committed())).not.toMatch(/\| — +\|$/m);
+  });
+
   test("lists each variable once", () => {
     const names = documentedNames(committed());
     expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual([]);
@@ -147,7 +155,26 @@ describe("sources", () => {
 
   test("unitKeys reads Environment= and Secret= targets", () => {
     const unit = "[Container]\nEnvironment=VALKEY_URL=redis://valkey:6379\nSecret=db,type=env,target=DATABASE_URL\n";
-    expect([...unitKeys([unit])].sort()).toEqual(["DATABASE_URL", "VALKEY_URL"]);
+    const { pinned, blanked } = unitKeys([unit]);
+    expect([...pinned].sort()).toEqual(["DATABASE_URL", "VALKEY_URL"]);
+    expect([...blanked]).toEqual([]);
+  });
+
+  test("unitKeys treats an empty Environment= value as scoping, unless another unit sets a value", () => {
+    const api = "Environment=S3_EVIDENCE_KEY=\nEnvironment=PORT=3001\nEnvironment=MIXED=\n";
+    const web = "Environment=EVIDENCE_PRIVATE_KEY=\nEnvironment=S3_EVIDENCE_KEY=\nEnvironment=MIXED=x\n";
+    const { pinned, blanked } = unitKeys([api, web]);
+    expect([...blanked].sort()).toEqual(["EVIDENCE_PRIVATE_KEY", "S3_EVIDENCE_KEY"]);
+    expect([...pinned].sort()).toEqual(["MIXED", "PORT"]);
+  });
+
+  test("the real units blank the evidence secrets rather than set them", () => {
+    const { pinned, blanked } = unitKeys(readSources().units);
+    for (const k of ["EVIDENCE_PRIVATE_KEY", "S3_EVIDENCE_ACCESS_KEY_ID", "S3_EVIDENCE_SECRET_ACCESS_KEY"]) {
+      expect(blanked.has(k)).toBe(true);
+      expect(pinned.has(k)).toBe(false);
+    }
+    expect(pinned.has("VALKEY_URL")).toBe(true);
   });
 
   test("formatDefault", () => {
@@ -166,7 +193,7 @@ describe("collect", () => {
     envTs: "/** The answer. */\n  ANSWER: z.coerce.number().default(42),",
     envExample: "# needed\nNEEDED=\nSECRET=__generate__\nANSWER=42\n",
     selfhostSh: "  env_set NEEDED x\n",
-    units: ["Environment=ANSWER=7\n"],
+    units: ["Environment=ANSWER=7\nEnvironment=SECRET=\n"],
   };
   const schemas = {
     one: z.object({ NEEDED: z.string(), ANSWER: z.coerce.number().default(42) }),
@@ -192,7 +219,14 @@ describe("collect", () => {
         description: "The answer.",
         selfHost: ["set in the units"],
       },
-      { name: "SECRET", group: "two", required: false, defaultText: null, description: "", selfHost: ["generated"] },
+      {
+        name: "SECRET",
+        group: "two",
+        required: false,
+        defaultText: null,
+        description: "",
+        selfHost: ["generated", "env file (blanked in units that must not see it)"],
+      },
     ]);
   });
 

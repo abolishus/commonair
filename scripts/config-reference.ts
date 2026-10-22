@@ -12,6 +12,7 @@
  * to start without it (both from the schema itself), a description (the JSDoc in env.ts, else
  * the comment above it in .env.example), and what a self-hosted install does with it (read
  * from scripts/selfhost.sh, the Quadlet units and the `__generate…__` markers in .env.example).
+ * The description is mandatory: a test fails on any variable without one.
  */
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -96,14 +97,24 @@ export function installKeys(selfhostSh: string): Set<string> {
   return keys;
 }
 
-/** Keys the Quadlet units set themselves (`Environment=`, `Secret=…,target=`), which win over the env file. */
-export function unitKeys(units: string[]): Set<string> {
-  const keys = new Set<string>();
+/**
+ * What the Quadlet units do with each key. `pinned`: some unit sets a value (`Environment=K=v`,
+ * `Secret=…,target=K`), which wins over the env file. `blanked`: units only ever set it empty
+ * (`Environment=K=`), which hides an env-file secret from the services that must not hold it;
+ * the services that need it still read the env file.
+ */
+export function unitKeys(units: string[]): { pinned: Set<string>; blanked: Set<string> } {
+  const pinned = new Set<string>();
+  const empty = new Set<string>();
   for (const u of units) {
-    for (const m of u.matchAll(/^Environment=([A-Z][A-Z0-9_]*)=/gm)) if (m[1]) keys.add(m[1]);
-    for (const m of u.matchAll(/^Secret=[^\n]*\btarget=([A-Z][A-Z0-9_]*)/gm)) if (m[1]) keys.add(m[1]);
+    for (const m of u.matchAll(/^Environment=([A-Z][A-Z0-9_]*)=(.*)$/gm)) {
+      if (!m[1]) continue;
+      if ((m[2] ?? "").trim() === "") empty.add(m[1]);
+      else pinned.add(m[1]);
+    }
+    for (const m of u.matchAll(/^Secret=[^\n]*\btarget=([A-Z][A-Z0-9_]*)/gm)) if (m[1]) pinned.add(m[1]);
   }
-  return keys;
+  return { pinned, blanked: new Set([...empty].filter((k) => !pinned.has(k))) };
 }
 
 const MAX_DEFAULT = 40;
@@ -124,7 +135,7 @@ export function collect(sources: Sources, schemas: Record<string, z.ZodObject> =
   const docs = jsDocs(sources.envTs);
   const example = exampleEntries(sources.envExample);
   const installed = installKeys(sources.selfhostSh);
-  const pinned = unitKeys(sources.units);
+  const { pinned, blanked } = unitKeys(sources.units);
   const seen = new Set<string>();
   const vars: EnvVar[] = [];
   for (const [group, schema] of Object.entries(schemas)) {
@@ -138,6 +149,7 @@ export function collect(sources: Sources, schemas: Record<string, z.ZodObject> =
       if (ex?.value.startsWith("__generate")) selfHost.push("generated");
       if (installed.has(name)) selfHost.push("set by install");
       if (pinned.has(name)) selfHost.push("set in the units");
+      if (blanked.has(name)) selfHost.push("env file (blanked in units that must not see it)");
       vars.push({
         name,
         group,

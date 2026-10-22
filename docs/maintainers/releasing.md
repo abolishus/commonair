@@ -178,8 +178,39 @@ So the changelog is only as good as the commit messages. Write subjects for oper
 always mark breaking changes, including any migration that is not additive (ADR 0023 §9 forbids
 those between adjacent releases).
 
-There is no `CHANGELOG.md`; the GitHub Releases are the changelog. Edit a release's notes with
-`gh release edit <tag> --notes-file <file>`.
+There are two records, built from the same script:
+
+- **GitHub Release notes**, one per tag, rcs included. `release.yml` generates them with
+  `--to <tag commit>` and the default `--from`, so they cover the commits since the nearest
+  earlier `v*` tag. For a stable release, replace them with the full notes since the previous
+  stable release ([Promoting an rc to stable](#promoting-an-rc-to-stable)). Edit a release's
+  notes with `gh release edit <tag> --notes-file <file>`.
+- **`CHANGELOG.md`** in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format, one
+  section per stable release. Prereleases get no section of their own. Changes worth an
+  operator's attention that commit subjects do not convey can be written by hand under
+  `## [Unreleased]` as they land, under Keep a Changelog headings (`### Added`, `### Changed`,
+  …).
+
+Update `CHANGELOG.md` on `main` once the stable release is published, not before tagging: the
+stable tag goes on the rc's commit, which must not change. For `v0.2.0`, using the `notes.md`
+generated above (`--from v0.1.0`, or `--from ''` for `v0.1.0`):
+
+1. Rename `## [Unreleased]` to `## [0.2.0] - YYYY-MM-DD`, with the date the stable tag was
+   pushed (UTC), and add a new, empty `## [Unreleased]` above it.
+2. Under the new version's heading, after any hand-written entries, paste `notes.md` without its
+   first line (`Changes in 0.2.0, since v0.1.0.`). Its `### Breaking changes`, `### Features`,
+   … headings sit at the same level as the hand-written ones. If a hand-written entry and a
+   generated line say the same thing, keep one.
+3. Update the link references at the bottom:
+
+   ```markdown
+   [Unreleased]: https://github.com/abolishus/commonair/compare/v0.2.0...HEAD
+   [0.2.0]: https://github.com/abolishus/commonair/compare/v0.1.0...v0.2.0
+   ```
+
+   For the first release, link `[0.1.0]` to `https://github.com/abolishus/commonair/releases/tag/v0.1.0`.
+
+4. Commit it as `docs(changelog): release 0.2.0` and push `main`.
 
 ## Yanking a bad release
 
