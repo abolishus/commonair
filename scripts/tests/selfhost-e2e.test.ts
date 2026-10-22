@@ -347,6 +347,14 @@ describe("CI verify job", () => {
     expect(job).toMatch(/\n {6}PODMAN_COMPOSE_PROVIDER: podman-compose\n/);
     expect(job).toContain("pipx install podman-compose==");
   });
+
+  test("fetches the pinned moderation model before the gate (its integration test needs it)", () => {
+    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+    const job = ci.slice(ci.indexOf("\n  verify:"), ci.indexOf("\n  release-dry-run:"));
+    const fetch = job.indexOf("run: bun scripts/fetch-model.ts");
+    expect(fetch).toBeGreaterThan(0);
+    expect(fetch).toBeLessThan(job.indexOf("bun run verify"));
+  });
 });
 
 describe("e2e: network exposure", () => {

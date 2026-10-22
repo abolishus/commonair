@@ -115,6 +115,14 @@ jobs:
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
       - name: Environment
         run: bun scripts/init-env.ts
+      - name: Moderation model cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/models
+          key: moderation-model-${{ hashFiles('packages/moderation/src/model.ts') }}
+      - name: Moderation model
+        # The classifier's integration test runs the pinned weights; fetch-model checks their sha256.
+        run: bun scripts/fetch-model.ts
       - name: Verify
         # Below the job's 90 so a hung gate fails this step and leaves time to collect logs;
         # a job-level timeout cancels the job and diagnostics would be lost.
