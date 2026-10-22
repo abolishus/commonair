@@ -17,6 +17,7 @@
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
     "@commonair/db": "workspace:*",
+    "@commonair/email": "workspace:*",
     "@commonair/governance": "workspace:*",
     "@commonair/integrity": "workspace:*",
     "@commonair/ledger": "workspace:*",
