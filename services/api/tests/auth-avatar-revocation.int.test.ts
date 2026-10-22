@@ -3,7 +3,7 @@
 
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { schema } from "@commonair/db";
+import { schema, uuidv7 } from "@commonair/db";
 import { instanceMediaBase } from "../src/lib/media-ref.ts";
 import { lockUploadReference } from "../src/moderation/committed.ts";
 import { signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
@@ -19,11 +19,38 @@ afterAll(async () => {
   await api?.stop();
 });
 
+/**
+ * A committed avatar upload: the key shape and the object in storage that `isCommittedUpload`
+ * needs. Without both the API refuses the key as "not one of your uploads" before the NCII
+ * guard runs, and the tests below would pass for the wrong reason.
+ */
+async function committedAvatar(channelId: string): Promise<string> {
+  const bytes = new Uint8Array(
+    await Bun.file(new URL("../../../packages/moderation/fixtures/benign-gradient.png", import.meta.url)).arrayBuffer(),
+  );
+  const key = `channels/${channelId}/avatar/${uuidv7()}.png`;
+  await api.deps.storage.put(api.deps.env.S3_BUCKET_MEDIA, key, bytes, { contentType: "image/png" });
+  return key;
+}
+
+async function memberChannelId(): Promise<string> {
+  const [channel] = await api.db.db.select().from(schema.channels).where(eq(schema.channels.ownerId, member.userId));
+  if (!channel) throw new Error("member channel not found");
+  return channel.id;
+}
+
 describe("avatar NCII revocation guard", () => {
+  test("control: a committed avatar without a tombstone is accepted", async () => {
+    const key = await committedAvatar(await memberChannelId());
+    const response = await member.client.call("POST", "/api/auth/update-user", { image: key });
+    expect(response.status).toBe(200);
+    const [user] = await api.db.db.select().from(schema.users).where(eq(schema.users.id, member.userId));
+    expect(user?.image).toBe(key);
+  });
+
   test("a tombstoned avatar cannot be reattached through Better Auth", async () => {
-    const [channel] = await api.db.db.select().from(schema.channels).where(eq(schema.channels.ownerId, member.userId));
-    if (!channel) throw new Error("member channel not found");
-    const key = `channels/${channel.id}/avatar/revoked.png`;
+    const channel = { id: await memberChannelId() };
+    const key = await committedAvatar(channel.id);
     const url = `${instanceMediaBase(api.deps.env)}${key}`;
     const [request] = await api.db.db
       .insert(schema.nciiRequests)
@@ -50,14 +77,14 @@ describe("avatar NCII revocation guard", () => {
 
     const response = await member.client.call("POST", "/api/auth/update-user", { image: key });
     expect(response.status).toBe(400);
+    expect((response.body as { code?: string }).code).toBe("INVALID_IMAGE");
     const [user] = await api.db.db.select().from(schema.users).where(eq(schema.users.id, member.userId));
     expect(user?.image).not.toBe(key);
   });
 
   test("an avatar reattach that races NCII removal waits, then is rejected", async () => {
-    const [channel] = await api.db.db.select().from(schema.channels).where(eq(schema.channels.ownerId, member.userId));
-    if (!channel) throw new Error("member channel not found");
-    const key = `channels/${channel.id}/avatar/race.png`;
+    const channel = { id: await memberChannelId() };
+    const key = await committedAvatar(channel.id);
     const url = `${instanceMediaBase(api.deps.env)}${key}`;
     let release!: () => void;
     let locked!: () => void;
@@ -96,10 +123,14 @@ describe("avatar NCII revocation guard", () => {
     await lockAcquired;
     const reattach = member.client.call("POST", "/api/auth/update-user", { image: key });
     let waitingOnLock = false;
-    for (let attempt = 0; attempt < 200; attempt++) {
+    // Only this test's database: other test files share the cluster, and their lock waiters
+    // once satisfied this check while the request here had already been refused. By deadline,
+    // since on a loaded machine the request can take seconds to reach the lock.
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
       const [waiter] = await api.db.db.execute(sql`
         select pid from pg_stat_activity
-        where wait_event_type = 'Lock' and state = 'active'
+        where wait_event_type = 'Lock' and state = 'active' and datname = current_database()
         limit 1
       `);
       if (waiter) {
@@ -117,5 +148,5 @@ describe("avatar NCII revocation guard", () => {
     expect((await reattach).status).toBe(400);
     const [user] = await api.db.db.select().from(schema.users).where(eq(schema.users.id, member.userId));
     expect(user?.image).toBeNull();
-  });
+  }, 60_000);
 });

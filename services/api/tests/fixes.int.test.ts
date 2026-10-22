@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Review-round regressions: mature categories, media references, admin audit, tokens, 2FA. */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { BUS } from "@commonair/contracts/events";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, mediaPath } from "@commonair/contracts/internal";
@@ -118,7 +118,8 @@ describe("media references stay on this instance", () => {
 
   test("a concurrent avatar reattach waits for NCII revocation and is rejected", async () => {
     const c = await channelOf(alice.username);
-    const key = `channels/${c.id}/avatar/revoked.png`;
+    // A real committed upload: a made-up key is refused on its shape before the NCII lock.
+    const key = await seedSyntheticImage(c.id, "avatar", "image/png");
     let unlockRemoval!: () => void;
     let signalLocked!: () => void;
     const removalMayCommit = new Promise<void>((resolve) => (unlockRemoval = resolve));
@@ -154,11 +155,23 @@ describe("media references stay on this instance", () => {
 
     await removalLocked;
     const reattach = alice.client.call("PATCH", `/api/channels/${alice.username}`, { theme: { avatarKey: key } });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The request must block on the removal's lock (only this test's database counts).
+    let waitingOnLock = false;
+    const deadline = Date.now() + 20_000;
+    while (!waitingOnLock && Date.now() < deadline) {
+      const [waiter] = await db().execute(sql`
+        select pid from pg_stat_activity
+        where wait_event_type = 'Lock' and state = 'active' and datname = current_database()
+        limit 1
+      `);
+      if (waiter) waitingOnLock = true;
+      else await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     unlockRemoval();
     await removal;
+    expect(waitingOnLock).toBe(true);
     expect((await reattach).status).toBe(400);
-  });
+  }, 60_000);
 
   test("profile image through update-user must be an own avatar upload", async () => {
     const set = (image: string | null) => bob.client.call("POST", "/api/auth/update-user", { image });
