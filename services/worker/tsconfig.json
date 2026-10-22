@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["bun"],
-    "lib": ["es2024", "dom"]
+    "lib": ["es2024", "dom"],
+    "jsx": "react-jsx"
   },
   "include": ["src", "tests"]
 }

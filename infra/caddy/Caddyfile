@@ -52,6 +52,12 @@
 	handle /rpc/* {
 		reverse_proxy api:3001
 	}
+	# Overlay alert stream (SSE, OVERLAY_EVENTS_PATH); the overlay pages under /overlay/* stay with web.
+	handle /overlay/events {
+		reverse_proxy api:3001 {
+			flush_interval -1
+		}
+	}
 
 	# Chat WebSocket: wss://<host>/chat → chat:3002/ws
 	handle /chat {

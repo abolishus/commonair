@@ -18,7 +18,7 @@ import {
   type ModerationT0Job,
   type ModerationT0MediaJob,
 } from "@commonair/contracts/internal";
-import { schema, uuidv7, type Executor } from "@commonair/db";
+import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
 import { MODERATION_CONSTANTS } from "@commonair/moderation";
 import { and, eq, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
@@ -188,6 +188,7 @@ export async function applyT0Once(ctx: WorkerContext, job: ModerationT0Job): Pro
       createdAt: now,
       updatedAt: now,
     });
+    await lockLegalHold(tx, userId);
     await tx.insert(legalHolds).values({
       id: holdId,
       userId,

@@ -1,0 +1,2 @@
+ALTER TABLE "account_deletions" ADD COLUMN "pending_objects" jsonb;--> statement-breakpoint
+CREATE INDEX "account_deletions_pending_idx" ON "account_deletions" USING btree ("completed_at") WHERE "account_deletions"."pending_objects" is not null;

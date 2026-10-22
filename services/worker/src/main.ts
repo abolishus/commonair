@@ -12,6 +12,7 @@ import { coopTestHooks } from "./coop/startup.ts";
 import { parseConcurrency, workerEnv } from "./env.ts";
 import { ClassifierHolder } from "./integrity/classifier.ts";
 import { buildModerationOptions } from "./moderation/startup.ts";
+import { mailableStorageOrigin } from "./exports/build.ts";
 import { opsTestHooks } from "./ops/startup.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
 import { createWorker } from "./worker.ts";
@@ -41,7 +42,11 @@ if (moderation.testHooks)
 const coopHooks = coopTestHooks(env, logger);
 const opsHooks = opsTestHooks(env, logger);
 const site = instanceSite(env);
-const mailer = createMailer(env, { site });
+// Presigned export links point at the storage endpoint browsers use, not the web origin. Only an
+// explicitly public endpoint qualifies, over https unless it is a local development host;
+// otherwise the mail links the session-checked privacy page instead.
+const storageOrigin = mailableStorageOrigin(env.S3_PUBLIC_ENDPOINT);
+const mailer = createMailer(env, { site, ...(storageOrigin ? { storageOrigin } : {}) });
 
 // Loaded once here and on SIGHUP, never per scoring run.
 const networks = new ClassifierHolder(logger);
@@ -61,6 +66,7 @@ const worker = createWorker({
   exportsBucket: env.S3_BUCKET_EXPORTS,
   mailer,
   site,
+  ...(storageOrigin ? { storageOrigin } : {}),
   classifier: () => networks.classifier,
   moderation,
 });

@@ -62,6 +62,11 @@ export interface TemplateDefinition<D, M> {
    * Everything else is free text and is only ever rendered as escaped text.
    */
   links: readonly StringKeys<D>[];
+  /**
+   * Link fields that may instead point at the instance's object storage (a presigned download),
+   * when the mailer was given `storageOrigin`. Each must also be listed in `links`.
+   */
+  storageLinks?: readonly string[];
   subject(ctx: EmailContext<M>, data: D): string;
   preview?(ctx: EmailContext<M>, data: D): string;
   body(ctx: EmailContext<M>, data: D): ReactNode;

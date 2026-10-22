@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
+import { lockLegalHold } from "../src/hold-lock.ts";
 import type { Database } from "../src/client.ts";
 
 let t: TestDatabase;
@@ -67,5 +68,34 @@ describe("indexes", () => {
       "overlay_tokens_active_uq",
       "vods_broadcast_idx",
     ]);
+  });
+});
+
+describe("legal-hold lock", () => {
+  test("a second transaction cannot take a user's hold lock while the first holds it", async () => {
+    const userId = "019a0000-0000-7000-8000-000000000001";
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => (locked = r));
+    const first = app.transaction(async (tx) => {
+      await lockLegalHold(tx, userId);
+      locked();
+      await held;
+    });
+    await lockTaken;
+    const second = t.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout = '200ms'`);
+      await lockLegalHold(tx, userId);
+    });
+    const err = await second.then(
+      () => undefined,
+      (e: unknown) => e as Error & { cause?: Error },
+    );
+    release();
+    await first;
+    expect(err?.cause?.message ?? err?.message).toMatch(/lock timeout/);
+    // Another user's lock is independent.
+    await app.transaction(async (tx) => lockLegalHold(tx, "019a0000-0000-7000-8000-000000000002"));
   });
 });

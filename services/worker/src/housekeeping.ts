@@ -3,7 +3,7 @@
 
 /** Housekeeping: expiry, pruning, stale-session closing, relay liveness, VOD retention. */
 import { KEYS } from "@commonair/contracts/internal";
-import { schema, uuidv7, type Executor } from "@commonair/db";
+import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
 
@@ -103,13 +103,6 @@ const ownerHeld = (channelId: typeof schema.vods.channelId | typeof schema.clips
                where c.id = ${channelId} and h.released_at is null)`;
 
 /**
- * The advisory lock that serializes a user's media deletion with a legal hold being placed on
- * them. Placing a hold takes it too (contract request), so a hold either commits before the
- * re-check below and the media stays, or waits until the one object in flight is gone.
- */
-export const legalHoldLockKey = (userId: string) => `legal_hold:${userId}`;
-
-/**
  * Run `remove` for one of a channel's media rows unless its owner is held, re-checked right
  * before the objects go (the batch was chosen earlier: a hold placed meanwhile must still win).
  * Returns true when the row was skipped as held.
@@ -125,7 +118,8 @@ async function unlessOwnerHeld(
       .from(schema.channels)
       .where(eq(schema.channels.id, channelId));
     if (owner) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${legalHoldLockKey(owner.id)}, 0))`);
+      // Placing a hold takes the same lock (`lockLegalHold`), so the re-check below cannot miss one.
+      await lockLegalHold(tx, owner.id);
       const [hold] = await tx
         .select({ id: schema.legalHolds.id })
         .from(schema.legalHolds)

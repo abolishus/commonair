@@ -14,6 +14,8 @@ export interface RenderOptions {
   locale?: string | undefined;
   /** Translations by tag; English is built in. */
   catalogs?: Catalogs;
+  /** Origin of the object storage browsers download from; allowed only for `storageLinks`. */
+  storageOrigin?: string | undefined;
 }
 
 export interface RenderedEmail {
@@ -51,7 +53,12 @@ function hasUnsafeChar(value: string): boolean {
  * protocol-relative (`//evil`), relative, `javascript:`/`vbscript:`/`file:`/`data:` and
  * lookalike-host links. Signed downloads go through an instance page that redirects.
  */
-export function normalizeInstanceUrl(value: unknown, site: Pick<InstanceSite, "publicUrl">, field = "url"): string {
+export function normalizeInstanceUrl(
+  value: unknown,
+  site: Pick<InstanceSite, "publicUrl">,
+  field = "url",
+  extraOrigin?: string,
+): string {
   if (typeof value !== "string" || value === "" || hasUnsafeChar(value)) throw new EmailLinkError(field);
   if (!/^https?:\/\//i.test(value)) throw new EmailLinkError(field);
   let url: URL;
@@ -61,15 +68,24 @@ export function normalizeInstanceUrl(value: unknown, site: Pick<InstanceSite, "p
     throw new EmailLinkError(field);
   }
   const origin = new URL(site.publicUrl).origin;
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin !== origin) throw new EmailLinkError(field);
+  const allowed = url.origin === origin || (extraOrigin !== undefined && url.origin === new URL(extraOrigin).origin);
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !allowed) throw new EmailLinkError(field);
   if (url.username !== "" || url.password !== "") throw new EmailLinkError(field);
   return url.href;
 }
 
 /** Return a copy of `data` with every declared link field validated and normalised. */
-export function normalizeLinks<D>(data: D, links: readonly string[], site: Pick<InstanceSite, "publicUrl">): D {
+export function normalizeLinks<D>(
+  data: D,
+  links: readonly string[],
+  site: Pick<InstanceSite, "publicUrl">,
+  storage?: { links: readonly string[]; origin: string | undefined },
+): D {
   const out = { ...data } as Record<string, unknown>;
-  for (const key of links) out[key] = normalizeInstanceUrl(out[key], site, key);
+  for (const key of links) {
+    const extra = storage?.links.includes(key) ? storage.origin : undefined;
+    out[key] = normalizeInstanceUrl(out[key], site, key, extra);
+  }
   return out as D;
 }
 
@@ -88,7 +104,10 @@ export async function renderEmail<K extends TemplateId>(
   const { locale, catalog } = resolveCatalog(opts.locale, opts.catalogs);
   // The registry is keyed by id, so this pairing is sound; TS cannot correlate the generic.
   const def = templates[id] as unknown as TemplateDefinition<TemplateData<K>, unknown>;
-  const data = normalizeLinks(input, def.links, opts.site);
+  const data = normalizeLinks(input, def.links, opts.site, {
+    links: def.storageLinks ?? [],
+    origin: opts.storageOrigin,
+  });
   const ctx = createContext(opts.site, locale, catalog.layout, catalog[id] as unknown) as EmailContext<unknown>;
   const subject = singleLine(def.subject(ctx, data));
   const preview = def.preview ? def.preview(ctx, data) : ctx.text((catalog[id] as { preview: string }).preview);

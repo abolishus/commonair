@@ -45,6 +45,8 @@ export interface WorkerContext {
   mailer?: Mailer;
   /** The instance identity for mail links; required whenever `mailer` is set. */
   site?: InstanceSite;
+  /** Origin browsers download objects from; the mailer accepts presigned links there. */
+  storageOrigin?: string;
   /** Pub/sub channel the outbox relay publishes to (BUS.events outside tests). */
   busChannel: string;
   /** Stream the segment consumer reads (STREAMS.segments outside tests); never key-prefixed. */

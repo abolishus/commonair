@@ -280,8 +280,19 @@ export const accountDeletions = pgTable(
     pseudonym: text(),
     /** What was retained and why (ledger records, legal holds), for the user's receipt. */
     retained: jsonb().$type<{ table: string; reason: string; rows: number }[]>().notNull().default([]),
+    /**
+     * Objects still to delete after completion (E6): media prefixes/keys and export archive keys,
+     * ids only. Written in the completion transaction and cleared once they are gone, so a failed
+     * or hold-deferred cleanup is retried by the deletion job (media waits while a hold is active).
+     */
+    pendingObjects: jsonb().$type<{ mediaPrefixes: string[]; mediaKeys: string[]; exportKeys: string[] }>(),
   },
-  (t) => [index("account_deletions_due_idx").on(t.status, t.scheduledFor)],
+  (t) => [
+    index("account_deletions_due_idx").on(t.status, t.scheduledFor),
+    index("account_deletions_pending_idx")
+      .on(t.completedAt)
+      .where(sql`${t.pendingObjects} is not null`),
+  ],
 );
 
 /**

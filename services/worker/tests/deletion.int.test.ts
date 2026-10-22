@@ -209,7 +209,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
       .values([delivery(theirs[1]!.id), delivery(kept[0]!.id), delivery(anonTip.id)]);
 
     const d = await schedule(U.user.id);
-    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
 
     // Outbox: every event naming them is gone, with its deliveries; the rest is kept.
     const left = await db()
@@ -309,7 +309,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     const [pseudonymized] = await db().select().from(schema.users).where(eq(schema.users.id, U.user.id));
     expect(pseudonymized?.email).not.toBe(old.email);
     // A second run finds nothing due and mails nobody.
-    expect(await runAccountDeletions(ctx())).toEqual({ completed: 0, failed: 0 });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 0, failed: 0 });
     expect(mailer.to(old.email)).toHaveLength(1);
   });
 
@@ -337,7 +337,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     const old = [L.user.email, L.user.username, L.user.name, slug, display];
 
     await schedule(L.user.id);
-    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
 
     const [ended] = await db().select().from(schema.broadcasts).where(eq(schema.broadcasts.id, b.id));
     expect(ended?.endedAt).not.toBeNull();
@@ -397,7 +397,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     ]);
 
     await schedule(W.user.id);
-    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
 
     const left = await db()
       .select()
@@ -484,7 +484,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
       .values({ id: deliveryId, subscriptionId: sub.id, eventId: strangerTip.id, messageId: uuidv7() });
 
     await schedule(T.user.id);
-    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
 
     const ids = [...untouched, mention, strangerTip].map((e) => e.id);
     const left = await db().select().from(schema.events).where(inArray(schema.events.id, ids));
@@ -574,13 +574,36 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     const exportId = await readyExport(H.user.id);
 
     await schedule(H.user.id);
-    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
 
     const [after] = await db().select().from(schema.legalHolds).where(eq(schema.legalHolds.id, hold!.id));
     expect(after).toEqual(hold);
     expect(await S3.head(MEDIA_BUCKET, `vods/${vodId}/index.m3u8`)).not.toBeNull();
     expect(await S3.head(EXPORTS_BUCKET, exportObjectKey(H.user.id, exportId))).toBeNull();
-    await S3.deletePrefix(MEDIA_BUCKET, `vods/${vodId}/`);
+
+    // The media stays pending while held: every run re-checks it and keeps it.
+    const pendingOf = async () =>
+      (
+        await db()
+          .select({ p: schema.accountDeletions.pendingObjects })
+          .from(schema.accountDeletions)
+          .where(eq(schema.accountDeletions.userId, H.user.id))
+      )[0]?.p;
+    expect(await pendingOf()).toMatchObject({
+      mediaPrefixes: expect.arrayContaining([`vods/${vodId}/`]),
+      exportKeys: [],
+    });
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 0, objectsHeld: 1 });
+    expect(await S3.head(MEDIA_BUCKET, `vods/${vodId}/index.m3u8`)).not.toBeNull();
+
+    // Released (owner only, as the hold CLI does): the next run deletes the media and clears it.
+    await db()
+      .update(schema.legalHolds)
+      .set({ releasedAt: new Date(), releaseReason: "test release" })
+      .where(eq(schema.legalHolds.id, hold!.id));
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 0, objectsPurged: 1 });
+    expect(await S3.head(MEDIA_BUCKET, `vods/${vodId}/index.m3u8`)).toBeNull();
+    expect(await pendingOf()).toBeNull();
   });
 
   test("on-demand ops jobs answer `skipped` while their run lock is busy", async () => {

@@ -6,13 +6,14 @@ import type { DateInput } from "../format.ts";
 import { Action, defineTemplate, H1, Muted, Notice, P } from "../template.tsx";
 
 export interface DataExportReadyData {
-  /** An instance page that checks the session and redirects to the signed download. */
+  /** The presigned download (object-storage origin) or the instance's privacy page. */
   downloadUrl: string;
   expiresAt: DateInput;
 }
 
 export const dataExportReady = defineTemplate("dataExportReady", {
   links: ["downloadUrl"],
+  storageLinks: ["downloadUrl"],
   subject: (ctx) => ctx.text(ctx.messages.subject),
   body: (ctx, d: DataExportReadyData) => {
     const m = ctx.messages;

@@ -741,7 +741,8 @@ export const BUS = {
   /** Platform-wide per-user control (UserControlMessage): suspension, deletion, token revocation. */
   userControl: "bus:user-control",
   /**
-   * Per-channel overlay fan-out (E6): JSON `OverlayAlert` for test alerts (`interact.alerts.test`).
+   * Per-channel overlay fan-out (E6): JSON `OverlayAlert` for test alerts (`interact.alerts.test`),
+   * and the API-internal `{"op":"revoke"}` that makes open streams re-check their token at once.
    * Real alerts are derived from `BUS.events` by the API's overlay stream.
    */
   overlay: (channelId: string) => `overlay:${channelId}`,

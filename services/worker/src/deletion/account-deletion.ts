@@ -18,8 +18,8 @@
  */
 import { BUS, UserControlMessage } from "@commonair/contracts/events";
 import { exportObjectKey } from "@commonair/contracts/internal";
-import { schema, type Executor } from "@commonair/db";
-import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { lockLegalHold, schema, type Executor } from "@commonair/db";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { eventNeedles, redactAnonymousTip, redactPayload, referencesUser, type DeletedIdentity } from "./references.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
@@ -424,9 +424,13 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       .from(s.legalHolds)
       .where(and(eq(s.legalHolds.userId, userId), isNull(s.legalHolds.releasedAt)))
       .limit(1);
+    const pending =
+      objectPrefixes.length + objectKeys.length + exportKeys.length > 0
+        ? { mediaPrefixes: objectPrefixes, mediaKeys: objectKeys, exportKeys }
+        : null;
     await tx
       .update(s.accountDeletions)
-      .set({ status: "completed", completedAt: now, pseudonym, retained })
+      .set({ status: "completed", completedAt: now, pseudonym, retained, pendingObjects: pending })
       .where(eq(s.accountDeletions.id, d.id));
     await audit(
       tx,
@@ -479,30 +483,80 @@ async function afterCommit(ctx: WorkerContext, c: Completed) {
       });
     }
   }
-  if (ctx.storage && c.exportKeys.length > 0) {
-    try {
-      for (const k of c.exportKeys) await ctx.storage.delete(ctx.exportsBucket, k);
-    } catch (err) {
-      ctx.logger.error("account deletion: export archives could not be deleted", {
-        deletionId: c.deletionId,
-        errorCode: safeErrorCode(err),
-      });
-    }
-  }
-  if (c.activeHold || !ctx.storage) return;
+  await purgePendingObjects(ctx, c.deletionId);
+}
+
+type PurgeOutcome = "purged" | "held" | "failed" | "none";
+
+/**
+ * Delete one completed deletion's `pending_objects`. Export archives always go (personal data,
+ * never evidence). Media goes only while the user has no active legal hold, re-checked under
+ * `lockLegalHold` (which placing a hold also takes); under a hold the media part stays pending
+ * and is retried after release. A failure leaves everything still pending for the next run.
+ */
+export async function purgePendingObjects(ctx: WorkerContext, deletionId: string): Promise<PurgeOutcome> {
+  const storage = ctx.storage;
+  if (!storage) return "none";
   try {
-    for (const p of c.objectPrefixes) await ctx.storage.deletePrefix(ctx.mediaBucket, p);
-    for (const k of c.objectKeys) await ctx.storage.delete(ctx.mediaBucket, k);
+    return await ctx.db.transaction(async (tx) => {
+      const [d] = await tx
+        .select({ userId: s.accountDeletions.userId, pending: s.accountDeletions.pendingObjects })
+        .from(s.accountDeletions)
+        .where(eq(s.accountDeletions.id, deletionId))
+        .for("update");
+      if (!d?.pending) return "none";
+      const { mediaPrefixes, mediaKeys, exportKeys } = d.pending;
+      for (const k of exportKeys) await storage.delete(ctx.exportsBucket, k);
+      let held = false;
+      if (mediaPrefixes.length + mediaKeys.length > 0) {
+        await lockLegalHold(tx, d.userId);
+        const [hold] = await tx
+          .select({ id: s.legalHolds.id })
+          .from(s.legalHolds)
+          .where(and(eq(s.legalHolds.userId, d.userId), isNull(s.legalHolds.releasedAt)))
+          .limit(1);
+        held = hold !== undefined;
+        if (!held) {
+          for (const p of mediaPrefixes) await storage.deletePrefix(ctx.mediaBucket, p);
+          for (const k of mediaKeys) await storage.delete(ctx.mediaBucket, k);
+        }
+      }
+      await tx
+        .update(s.accountDeletions)
+        .set({ pendingObjects: held ? { mediaPrefixes, mediaKeys, exportKeys: [] } : null })
+        .where(eq(s.accountDeletions.id, deletionId));
+      if (held) ctx.logger.info("account deletion: media kept under legal hold", { deletionId });
+      return held ? "held" : "purged";
+    });
   } catch (err) {
-    // The rows are already unpublished; the objects are unreachable and retention sweeps them.
-    ctx.logger.error("account deletion: media objects could not be deleted", {
-      deletionId: c.deletionId,
+    ctx.logger.error("account deletion: objects could not be deleted; retried next run", {
+      deletionId,
       errorCode: safeErrorCode(err),
     });
+    return "failed";
   }
 }
 
+/** Retry objects left by earlier completions (storage errors, or holds since released). */
+async function sweepPendingObjects(ctx: WorkerContext, batch: number) {
+  const rows = await ctx.db
+    .select({ id: s.accountDeletions.id })
+    .from(s.accountDeletions)
+    .where(and(eq(s.accountDeletions.status, "completed"), isNotNull(s.accountDeletions.pendingObjects)))
+    .orderBy(asc(s.accountDeletions.completedAt))
+    .limit(batch);
+  const counts = { objectsPurged: 0, objectsHeld: 0, objectsFailed: 0 };
+  for (const r of rows) {
+    const outcome = await purgePendingObjects(ctx, r.id);
+    if (outcome === "purged") counts.objectsPurged++;
+    else if (outcome === "held") counts.objectsHeld++;
+    else if (outcome === "failed") counts.objectsFailed++;
+  }
+  return counts;
+}
+
 export async function runAccountDeletions(ctx: WorkerContext, batch = 20) {
+  const swept = await sweepPendingObjects(ctx, batch);
   const due = await ctx.db
     .select({ id: s.accountDeletions.id })
     .from(s.accountDeletions)
@@ -533,5 +587,5 @@ export async function runAccountDeletions(ctx: WorkerContext, batch = 20) {
       });
     }
   }
-  return { completed, failed };
+  return { completed, failed, ...swept };
 }

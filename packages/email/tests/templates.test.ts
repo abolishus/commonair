@@ -260,6 +260,24 @@ test.each(HOSTILE_LINKS)("rejects link %j", async (link) => {
   );
 });
 
+test("a storage link is accepted only in a storageLinks field and only on the configured origin", async () => {
+  const signed = "http://storage.example.test:3900/commonair-exports/exports/u/e.zip?X-Amz-Expires=604800";
+  const storageOrigin = "http://storage.example.test:3900";
+  const mail = await render("dataExportReady", { ...samples.dataExportReady, downloadUrl: signed }, { storageOrigin });
+  expect(mail.html).toContain("storage.example.test:3900");
+  // Without the configured origin, or on another origin, it is refused.
+  await expect(render("dataExportReady", { ...samples.dataExportReady, downloadUrl: signed })).rejects.toBeInstanceOf(
+    EmailLinkError,
+  );
+  await expect(
+    render("dataExportReady", { ...samples.dataExportReady, downloadUrl: "https://evil.example/x" }, { storageOrigin }),
+  ).rejects.toBeInstanceOf(EmailLinkError);
+  // A template field not declared in storageLinks stays on the instance origin.
+  await expect(
+    render("contentRestored", { ...samples.contentRestored, contentUrl: `${storageOrigin}/x` }, { storageOrigin }),
+  ).rejects.toBeInstanceOf(EmailLinkError);
+});
+
 test("accepts and normalises links on the instance origin", async () => {
   expect(normalizeInstanceUrl("HTTPS://AIR.example.test:443/a/../b?q=1#f", site)).toBe(
     "https://air.example.test/b?q=1#f",
@@ -295,4 +313,11 @@ test("free-text fields may contain URLs: rendered as text, never as links", asyn
 
 test("interpolation keeps unknown placeholders visible", () => {
   expect(interpolate("Hi {name}, {missing}", { name: "Ada" })).toBe("Hi Ada, {missing}");
+});
+
+test("every storageLinks field is also a declared link", async () => {
+  const { templates } = await import("../src/registry.ts");
+  for (const def of Object.values(templates) as { links: readonly string[]; storageLinks?: readonly string[] }[]) {
+    for (const key of def.storageLinks ?? []) expect(def.links).toContain(key);
+  }
 });

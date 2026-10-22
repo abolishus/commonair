@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { and, eq, ne, sql } from "drizzle-orm";
-import { schema } from "@commonair/db";
+import { lockLegalHold, schema } from "@commonair/db";
 import { emit } from "../events/outbox.ts";
 import { toHold } from "../moderation/cases.ts";
 import { lockUser, scheduledDeletion, toDeletion } from "../moderation/deletion.ts";
@@ -83,6 +83,8 @@ export const admin = {
     if (!target) throw notFound("User not found");
     if (target.id === caller.user.id) throw forbidden("You cannot place a hold on yourself");
     const hold = await deps.db.transaction(async (tx) => {
+      // Serializes with media deletion (vod-retention, account deletion): see `lockLegalHold`.
+      await lockLegalHold(tx, target.id);
       const [h] = await tx
         .insert(schema.legalHolds)
         .values({ userId: target.id, reasonCode: input.reasonCode, reason: input.reason, createdById: caller.user.id })

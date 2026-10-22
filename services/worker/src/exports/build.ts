@@ -39,11 +39,30 @@ class PermanentExportError extends Error {
 
 const archiveName = (kind: ExportKind, exportId: string) => `export-${kind}-${exportId}.zip`;
 
+const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|.+\.localhost|.+\.test)$/i;
+
 /**
- * The link mailed to the user. A presigned GET for exactly this export's key, valid until its
- * `expires_at`, when the storage endpoint browsers use is on the instance's own origin (mail
- * templates only link there). Otherwise the instance's privacy page, which lists the export with
- * a freshly signed link (`me.exports.list`) after checking the session.
+ * The storage origin export mail may link to: `S3_PUBLIC_ENDPOINT` only (never the internal
+ * endpoint), and over https unless it is a local development host. A bearer link to a whole
+ * personal-data archive must not travel in cleartext or point at an unreachable address.
+ */
+export function mailableStorageOrigin(publicEndpoint: string | undefined): string | undefined {
+  if (!publicEndpoint) return undefined;
+  let url: URL;
+  try {
+    url = new URL(publicEndpoint);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol === "https:" || (url.protocol === "http:" && LOCAL_HOST.test(url.hostname))) return url.origin;
+  return undefined;
+}
+
+/**
+ * The link mailed to the user: a presigned GET for exactly this export's key, valid until its
+ * `expires_at`, on the storage origin the mailer accepts (`storageOrigin`) or the web origin.
+ * Otherwise the instance's privacy page, which lists the export with a freshly signed link
+ * (`me.exports.list`) after checking the session.
  */
 export async function exportDownloadLink(
   ctx: WorkerContext,
@@ -58,7 +77,8 @@ export async function exportDownloadLink(
     expiresSeconds: seconds,
     filename: archiveName(e.kind, e.id),
   });
-  return new URL(signed).origin === new URL(ctx.site.publicUrl).origin ? signed : page;
+  const origin = new URL(signed).origin;
+  return origin === new URL(ctx.site.publicUrl).origin || origin === ctx.storageOrigin ? signed : page;
 }
 
 async function markFailed(ctx: WorkerContext, exportId: string, code: ExportError) {

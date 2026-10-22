@@ -28,6 +28,8 @@ export interface Mailer {
 export interface MailerOptions {
   site: InstanceSite;
   catalogs?: Catalogs;
+  /** Object-storage origin browsers download from (presigned links in `storageLinks` fields). */
+  storageOrigin?: string;
 }
 
 export interface OutgoingMail {
@@ -73,6 +75,7 @@ export async function buildMail<K extends TemplateId>(
     site: opts.site,
     locale,
     ...(opts.catalogs ? { catalogs: opts.catalogs } : {}),
+    ...(opts.storageOrigin ? { storageOrigin: opts.storageOrigin } : {}),
   });
   const headers: Record<string, string> = {
     // RFC 3834: suppress vacation auto-replies to automated mail.

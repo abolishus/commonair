@@ -10,7 +10,7 @@
  * `t0-media`. Idempotent: the audit row `moderation.t0.escalated` marks a case as applied.
  */
 import type { ModerationT0EscalatedJob } from "@commonair/contracts/internal";
-import { schema, uuidv7 } from "@commonair/db";
+import { lockLegalHold, schema, uuidv7 } from "@commonair/db";
 import { decodeImage, MODERATION_CONSTANTS, pdqHash, plaintextSha256 } from "@commonair/moderation";
 import { and, eq, isNotNull } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
@@ -110,6 +110,7 @@ export async function applyT0Escalated(ctx: WorkerContext, job: ModerationT0Esca
     if (!holdId) {
       holdId = uuidv7(now.getTime());
       holdCreated = true;
+      await lockLegalHold(tx, userId);
       await tx.insert(legalHolds).values({
         id: holdId,
         userId,
