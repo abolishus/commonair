@@ -815,8 +815,14 @@ async function stepGovernance(run: Run, withProtected: boolean): Promise<void> {
       status: b.status,
     });
   }
+  // One list call per probe (newest first, so this run's proposals are on the first page), not a
+  // get per proposal: the probes run twice per tick, and anonymous calls share one 120/min bucket.
   const read = async () => {
-    for (const x of tracked) x.status = (await anon.coop.proposals.get({ id: x.id })).status;
+    const page = await anon.coop.proposals.list({ limit: 25 });
+    for (const x of tracked) {
+      const found = page.items.find((item) => item.id === x.id);
+      x.status = found ? found.status : (await anon.coop.proposals.get({ id: x.id })).status;
+    }
   };
 
   // Discussion → council review: publish each response as soon as its review opens.
@@ -849,7 +855,7 @@ async function stepGovernance(run: Run, withProtected: boolean): Promise<void> {
         }
         return tracked.every((x) => x.responded) ? true : null;
       },
-      { timeoutMs: reviewMs, intervalMs: 1_000 },
+      { timeoutMs: reviewMs, intervalMs: 2_000 },
     ),
   );
 
@@ -869,7 +875,7 @@ async function stepGovernance(run: Run, withProtected: boolean): Promise<void> {
         await Promise.all(open.map((x) => castVotes(run, x, voteStarted)));
         return tracked.every((x) => x.voted) ? true : null;
       },
-      { timeoutMs: votingMs, intervalMs: 1_000 },
+      { timeoutMs: votingMs, intervalMs: 2_000 },
     ),
   );
   await secretBallotChecks(run, tracked);
