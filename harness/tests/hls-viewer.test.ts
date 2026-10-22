@@ -243,6 +243,40 @@ describe("HTTP viewer against a fake origin", () => {
     expect(Date.now() - switchedAt).toBeLessThan(10_000);
   });
 
+  test("a heartbeat in flight when stop() begins is counted", async () => {
+    const { base } = startOrigin();
+    let received = 0;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const api = {
+      playback: {
+        start: async () => ({
+          sessionId: "s1",
+          token: "t",
+          playlistUrl: `${base}/index.m3u8?t=t`,
+          source: "origin",
+          heartbeatIntervalMs: 200,
+        }),
+        heartbeat: async () => {
+          received++;
+          await held;
+          return { ok: true };
+        },
+        end: async () => ({ ok: true }),
+      },
+    } as unknown as ApiClient;
+    const v = new HttpViewer({ target: { channel: "al" }, api, timing: BOT_TIMING });
+    await v.start();
+    await v.waitForFirstFrame(5_000);
+    for (let i = 0; i < 50 && received === 0; i++) await Bun.sleep(50);
+    expect(received).toBe(1);
+    const stopping = v.stop();
+    release();
+    const r = await stopping;
+    expect(r.heartbeats).toBe(1);
+    expect(r.heartbeatErrors).toBe(0);
+  });
+
   test("channel targets need an API client", async () => {
     await expect(new HttpViewer({ target: { channel: "x" } }).start()).rejects.toThrow(/API client/);
   });

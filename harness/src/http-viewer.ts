@@ -519,7 +519,14 @@ export class HttpViewer implements Viewer {
       } catch (err) {
         this.state.errors.push(`end: ${(err as Error).message}`);
       }
-      Object.assign(this.state, { ...final, errors: this.state.errors });
+      // Playback figures are as of the stop; heartbeat counts include requests that were in
+      // flight when it began, or a heartbeat the API saw would be missing from the report.
+      Object.assign(this.state, {
+        ...final,
+        heartbeats: this.state.heartbeats,
+        heartbeatErrors: this.state.heartbeatErrors,
+        errors: this.state.errors,
+      });
     }
     return { ...this.state, latencyMs: [...this.state.latencyMs], errors: [...this.state.errors] };
   }
