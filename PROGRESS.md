@@ -79,6 +79,27 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   host no longer installs `fuse-overlayfs`) checked on the host: the service user's Podman 5.4.2
   uses `overlay`, not `vfs`.
 
+- `fabb954` **CI: `fixtures.test.ts` regenerated PNGs with different bytes** → ffmpeg's PNG
+  encoder output depends on its build (zlib); the PDQ lists matched → compare decoded rgb24
+  pixels for the PNGs, bytes for the hash lists.
+- `062889c` **CI Debian e2e: `layer not known` while building loki** → a transient Podman 4.9
+  build-cache lookup failure right after pulling a base (the same build passed in the run
+  before) → retry a build once on exactly that error.
+- `aaac647` **CI Fedora e2e: "Podman unknown is too old (need 5.0 or newer)"** → `podman
+  version` failed for the service user and the empty output was read as a version; the cause
+  was `newuidmap`/`newgidmap` without file capabilities in the Fedora _container_ image
+  (`rpm -V`: P), which a real Fedora install has → `selfhost.sh` reports podman's own error, with
+  the fix for the newuidmap case; the Fedora e2e host reinstalls `shadow-utils`.
+- `562f8c9` **Debian e2e: Garage killed every two minutes, nothing behind it started** → Podman
+  reads a plain `HealthCmd` string as CMD-SHELL (`/bin/sh -c`); Garage's image has no shell, and
+  Loki, Tempo and the OTel collector only a static busybox. A JSON array is no fix: Podman 5.4
+  splits it on whitespace → every unit uses `HealthCmd=CMD <argv>`, exec form on Podman 4.9, 5.4
+  and 6.1 (checked on 5.4.2 and 6.1.4); the Quadlet mirror test asserts the exact form compose
+  uses. Proven live on the kept e2e host: after patching the installed units, Garage, Loki,
+  Tempo, the collector and then api, chat, media, origin, worker and tracker went healthy.
+- `3529dcd` (unit E review LOW) the Caddy S3 matchers no longer match the exports bucket root
+  (a signed listing) or the `incoming/` prefix itself.
+
 ### Self-hosting gaps
 
 - S3 for browsers: designed as ADR 0024 (`f50fe9e`): path-style bucket URLs on the main host,
@@ -96,7 +117,23 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   recovery instead of promoting early. backups.md has no manual replay procedure any more. Two
   review rounds, MEDIUMs fixed, LOWs left: no signal escalation for a stuck start; state file in
   `/tmp`; HealthStartup behaviour on CI's Podman 4.9 unproven until the CI e2e runs it.
-- Units E and H in flight (workflow `wf_b8a09f20-826`, based on `phase5/validate`).
+- **Unit E merged** (`117c2e3`; workflow `wf_b8a09f20-826`): Caddy `@s3-upload` (signed `PUT`
+  into `incoming/`, 10 MB cap, decimal as the contract) and `@s3-export` (signed `GET`/`HEAD`)
+  to `garage:3900` with Host and path kept; signed responses skip `encode` so `Content-Length`
+  and `ETag` stay; `selfhost.sh` writes `S3_PUBLIC_ENDPOINT=https://<host>` (a re-install keeps
+  an operator's own endpoint) and `upgrade` backfills a missing or empty one; the e2e presigns
+  with the API's own storage config inside `commonair-api` and checks the upload, the export
+  download (bytes and `content-disposition`) and ten refusals, on install and after the
+  upgrade; 21 new live Caddy tests. Review: no HIGH; the MEDIUM was an edit to
+  `infra/tests/caddy.test.ts` outside its list, needed because that test asserted Caddy has no
+  Garage upstream: accepted. Open LOW: an external S3 store is still not scripted (the units
+  set `S3_ENDPOINT=http://garage:3900`).
+- **Unit H merged** (`5034cab`): `relay/Makefile` targets and names follow `RELAY_TARGETS` and
+  `relayAssetName` (test `relay-makefile.test.ts`); backups.md documents Garage object backup
+  with rclone and a read-only Garage key for the restore drill (commands run against the pinned
+  Garage image). Open LOWs: the drill's bucket name is hardcoded; the rclone restore remote
+  lacks `no_check_bucket`.
+- Unit F in flight (workflow `wf_a204de86-f65`).
 
 ## Session eleven (2026-10-22): Phase 5 release and self-hosting (built; user validation pending)
 
