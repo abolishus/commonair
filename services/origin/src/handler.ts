@@ -198,10 +198,10 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
 
     // The source path serves media's AAC copy while one exists (WHIP's Opus audio does not play in
     // WebKit). Clients keep requesting `live/<slug>/…`; playlists are rewritten against that path.
-    const upstreamPath =
-      mr.rendition === undefined && (await deps.channels.sourceAac(channel.id))
-        ? sourceAacPath(mr.slug)
-        : mr.upstreamPath;
+    const aac = mr.rendition === undefined ? await deps.channels.sourceAac(channel.id) : "off";
+    // While the copy starts, players retry rather than receive audio WebKit cannot decode.
+    if (aac === "pending") return fail(503, "starting", mr, { "retry-after": "1" });
+    const upstreamPath = aac === "live" ? sourceAacPath(mr.slug) : mr.upstreamPath;
     const ref = { upstreamPath, file: mr.file, kind: mr.kind };
     const blocking = isBlocking(directives);
     let obj: MediaObject;

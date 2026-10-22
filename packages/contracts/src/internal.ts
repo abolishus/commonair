@@ -38,6 +38,7 @@ export const renditionPath = (slug: string, rendition: Exclude<(typeof RENDITION
  * `KEYS.sourceAac` is set; clients never name it.
  */
 export const SOURCE_AAC_DIR = "aac";
+export const SOURCE_AAC_STATES = { pending: "pending", live: "1" } as const;
 export const sourceAacPath = (slug: string) => `live/${slug}/${SOURCE_AAC_DIR}`;
 
 /** MediaMTX `authHTTPAddress` request body (MediaMTX 1.x). */
@@ -134,7 +135,11 @@ export const KEYS = {
   viewerCount: (channelId: string) => `viewer-count:${channelId}`,
   /** JSON array of active renditions for a live channel, set by media; absent = source only. */
   renditions: (channelId: string) => `renditions:${channelId}`,
-  /** "1" (with a TTL refreshed by media) while `sourceAacPath` carries the source for players. */
+  /**
+   * `SOURCE_AAC_STATES` value (TTL refreshed by media): "pending" while the AAC copy is needed but
+   * not live yet (origin answers the source with a retryable 503, so WebKit never gets Opus), "1"
+   * while `sourceAacPath` carries the source. Absent: serve the source as is.
+   */
   sourceAac: (channelId: string) => `source-aac:${channelId}`,
   /** HASH of simulcast target id → JSON {status,lastError,at}. */
   simulcastStatus: (broadcastId: string) => `simulcast:${broadcastId}`,

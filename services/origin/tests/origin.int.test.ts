@@ -325,6 +325,23 @@ describe("viewer playback (/hls)", () => {
     } finally {
       await valkey.del(KEYS.sourceAac(ids.channel));
     }
+    // Pending (the copy is starting): players are told to retry, never handed the original audio.
+    await valkey.set(KEYS.sourceAac(ids.channel), "pending", "EX", 60);
+    try {
+      const held = await waitFor(
+        "a retryable answer while the copy starts",
+        async () => {
+          const res = await get(`/hls/live/test/index.m3u8?t=${tk}`);
+          return res.status === 503 ? res : undefined;
+        },
+        10_000,
+      );
+      expect(held.headers.get("retry-after")).toBe("1");
+      // Renditions are not held back.
+      expect((await get(`/hls/live/test/720p/index.m3u8?t=${tk}`)).status).not.toBe(503);
+    } finally {
+      await valkey.del(KEYS.sourceAac(ids.channel));
+    }
     // Withdrawn: the original source again.
     await waitFor(
       "the original source back",

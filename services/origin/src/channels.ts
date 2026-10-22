@@ -9,7 +9,7 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { RENDITIONS } from "@commonair/contracts/enums";
-import { KEYS } from "@commonair/contracts/internal";
+import { KEYS, SOURCE_AAC_STATES } from "@commonair/contracts/internal";
 import type { Executor } from "@commonair/db";
 import { schema } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
@@ -33,6 +33,8 @@ export interface ChannelDirectoryOptions {
 }
 
 const RenditionList = z.array(z.enum(RENDITIONS));
+/** Whether the source is served as is, held back while media's AAC copy starts, or from the copy. */
+export type SourceAacState = "off" | "pending" | "live";
 /** Order in which renditions appear in the synthesized ladder (highest first). */
 const LADDER: Rendition[] = ["1080p", "720p", "480p", "audio"];
 
@@ -41,8 +43,8 @@ export class ChannelDirectory {
   private readonly lookups = new Coalescer<LiveChannel | null>();
   private readonly renditionCache = new TtlCache<Rendition[]>();
   private readonly renditionLookups = new Coalescer<Rendition[]>();
-  private readonly sourceAacCache = new TtlCache<boolean>();
-  private readonly sourceAacLookups = new Coalescer<boolean>();
+  private readonly sourceAacCache = new TtlCache<SourceAacState>();
+  private readonly sourceAacLookups = new Coalescer<SourceAacState>();
 
   constructor(private readonly opts: ChannelDirectoryOptions) {}
 
@@ -90,13 +92,14 @@ export class ChannelDirectory {
    * Whether media publishes an AAC copy of the channel's source (`KEYS.sourceAac`, set for WHIP's
    * Opus audio). Same short cache as renditions; a failed lookup serves the original source.
    */
-  async sourceAac(channelId: string): Promise<boolean> {
+  async sourceAac(channelId: string): Promise<SourceAacState> {
     const cached = this.sourceAacCache.get(channelId);
     if (cached !== undefined) return cached;
     return this.sourceAacLookups.run(channelId, async () => {
-      let value = false;
+      let value: SourceAacState = "off";
       try {
-        value = (await this.opts.valkey.get(KEYS.sourceAac(channelId))) === "1";
+        const raw = await this.opts.valkey.get(KEYS.sourceAac(channelId));
+        value = raw === SOURCE_AAC_STATES.live ? "live" : raw === SOURCE_AAC_STATES.pending ? "pending" : "off";
       } catch (err) {
         this.opts.logger?.warn("source-aac lookup failed", { err, channelId });
       }
