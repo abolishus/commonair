@@ -457,3 +457,22 @@ describe("verificationHop (API-path sign-ups)", () => {
     expect(hop("http://localhost:3000/apix/y")).toBeNull();
   });
 });
+
+describe("hydration wait", () => {
+  test("waits for html[data-hydrated] and tolerates a web build without it", async () => {
+    const { HYDRATED_SELECTOR, waitForHydration } = await import("../src/web/session.ts");
+    const seen: string[] = [];
+    const ok = { waitForSelector: async (s: string) => void seen.push(s) };
+    const never = {
+      waitForSelector: async () => {
+        throw new Error("Timeout 15000ms exceeded");
+      },
+    };
+    expect(await waitForHydration(ok as never)).toBe(true);
+    expect(seen).toEqual([HYDRATED_SELECTOR]);
+    expect(await waitForHydration(never as never)).toBe(false);
+    // The web root sets the marker the harness waits for.
+    const root = readFileSync(fileURLToPath(new URL("../../apps/web/src/routes/__root.tsx", import.meta.url)), "utf8");
+    expect(root).toContain('document.documentElement.dataset.hydrated = "true"');
+  });
+});

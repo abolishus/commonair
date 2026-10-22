@@ -68,6 +68,7 @@ export class WebSession {
   async goto(path: string, name = "main"): Promise<Page> {
     const page = await this.page(name);
     await page.goto(new URL(path, this.webUrl).toString(), { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await waitForHydration(page);
     return page;
   }
 
@@ -140,4 +141,20 @@ export async function readValue(locator: Locator, timeoutMs = 15_000): Promise<s
 /** Probe snapshot of every `<video>` on the page. */
 export async function probeStats(page: Page): Promise<ProbeVideoStats[]> {
   return page.evaluate(() => window.__harnessProbe?.snapshot() ?? []);
+}
+
+/** The web app sets `html[data-hydrated]` once React has hydrated (`routes/__root.tsx`). */
+export const HYDRATED_SELECTOR = "html[data-hydrated]";
+
+/**
+ * Wait for hydration before interacting: React resets input typed before it, and buttons whose
+ * state depends on it stay disabled. A web build without the marker only costs the timeout.
+ */
+export async function waitForHydration(page: Page, timeoutMs = 15_000): Promise<boolean> {
+  try {
+    await page.waitForSelector(HYDRATED_SELECTOR, { state: "attached", timeout: timeoutMs });
+    return true;
+  } catch {
+    return false;
+  }
 }

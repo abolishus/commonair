@@ -33,6 +33,11 @@ function RootComponent(): React.JSX.Element {
   const boot = Route.useLoaderData();
   const [theme, setThemeState] = React.useState<Theme>(boot.theme);
   const resolved = useResolvedTheme(theme);
+  // Set once React has hydrated: input typed before then is reset by React, so tests (the harness,
+  // screen readers' automation) can wait for `html[data-hydrated]` before they interact.
+  React.useEffect(() => {
+    document.documentElement.dataset.hydrated = "true";
+  }, []);
   const themeValue = React.useMemo(
     () => ({
       theme,
