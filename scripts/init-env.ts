@@ -61,12 +61,29 @@ function valkeyUrl(url: string): string {
   }
 }
 
+// The owner's DATABASE_URL carries POSTGRES_PASSWORD, which compose gives a fresh Postgres: the
+// example's fixed `commonair:commonair` would not match a generated password on a new volume (CI,
+// a new checkout). A kept URL is left as it is; selfhost.sh writes its own role URLs.
+const postgresPassword = existing.get("POSTGRES_PASSWORD") ?? randomSecret("", 32);
+function databaseUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.username !== "commonair") return url;
+    u.password = postgresPassword;
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 const out = readFileSync(".env.example", "utf8")
   .replace(/\r\n/g, "\n")
   .split("\n")
   .map((line) => {
     const [key] = line.split("=");
     if (key === "VALKEY_PASSWORD") return `${key}=${valkeyPassword}`;
+    if (key === "POSTGRES_PASSWORD") return `${key}=${postgresPassword}`;
+    if (key === "DATABASE_URL" && !existing.has(key)) return `${key}=${databaseUrl(line.slice(line.indexOf("=") + 1))}`;
     if (key === "VALKEY_URL") return `${key}=${valkeyUrl(existing.get(key) ?? line.slice(line.indexOf("=") + 1))}`;
     if (key !== undefined && existing.has(key)) return `${key}=${existing.get(key)}`;
     if (line.endsWith("=__generate_ed25519__")) return `${key}=${pkcs8B64}`;

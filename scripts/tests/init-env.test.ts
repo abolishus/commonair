@@ -83,3 +83,28 @@ describe("Valkey password", () => {
     expect(() => loadEnv(infraEnv, { VALKEY_PASSWORD: "a/b@c" })).toThrow(/VALKEY_PASSWORD/);
   });
 });
+
+describe("the owner's DATABASE_URL", () => {
+  test("a fresh env's DATABASE_URL carries the generated POSTGRES_PASSWORD", () => {
+    const env = initEnv();
+    expect(env.POSTGRES_PASSWORD).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const u = new URL(env.DATABASE_URL!);
+    expect([u.username, u.password, u.hostname, u.pathname]).toEqual([
+      "commonair",
+      env.POSTGRES_PASSWORD,
+      "localhost",
+      "/commonair",
+    ]);
+  });
+
+  test("a merge keeps an existing DATABASE_URL and POSTGRES_PASSWORD", () => {
+    const env = initEnv("POSTGRES_PASSWORD=kept\nDATABASE_URL=postgres://commonair:other@db:5432/x\n");
+    expect(env.POSTGRES_PASSWORD).toBe("kept");
+    expect(env.DATABASE_URL).toBe("postgres://commonair:other@db:5432/x");
+  });
+
+  test("a merge into a file without DATABASE_URL uses the kept password", () => {
+    const env = initEnv("POSTGRES_PASSWORD=kept-pw\n");
+    expect(new URL(env.DATABASE_URL!).password).toBe("kept-pw");
+  });
+});
