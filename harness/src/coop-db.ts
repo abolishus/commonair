@@ -129,6 +129,20 @@ export async function settingRow(
   });
 }
 
+/**
+ * Active streamer members in good standing: the council candidates, as `recomputeCouncil`
+ * selects them (`packages/governance/src/council.ts`). User ids only.
+ */
+export async function activeStreamerMembers(databaseUrl: string): Promise<string[]> {
+  return withDb(databaseUrl, async (sql) => {
+    const rows = await sql<{ user_id: string }[]>`
+      select distinct m.user_id::text as user_id
+        from memberships m join users u on u.id = m.user_id
+       where m.class = 'streamer' and m.status = 'active' and u.deleted_at is null and u.banned = false`;
+    return rows.map((r) => r.user_id);
+  });
+}
+
 export interface CoopLedgerQuery {
   /** `ledger_transactions.ref_id` values: shares, payments, the patronage period. */
   refIds: readonly string[];

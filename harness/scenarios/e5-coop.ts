@@ -31,6 +31,7 @@ import {
 } from "../src/coop-actors.ts";
 import {
   DEFAULT_APP_ROLE,
+  activeStreamerMembers,
   coopAuditRows,
   coopEventRows,
   coopLedgerSums,
@@ -52,6 +53,8 @@ import {
   STREAMER_MAJORITY_NOT_MET,
   choosePatronagePeriod,
   commentText,
+  councilSeatingProblem,
+  councilSize,
   cutChange,
   expectedTally,
   governancePeriods,
@@ -89,6 +92,8 @@ const UI_TIMEOUT_MS = 20_000;
 const ROLE_CLI_TIMEOUT_MS = 30_000;
 /** Membership, council and settings reads after a tick: synchronous, this covers page loads. */
 const SETTLE_MS = 30_000;
+/** One or two recompute ticks: enough to confirm a seating the outlook doubts. */
+const COUNCIL_SHORT_MS = 5_000;
 /** Slack added to each governance window for ticks, the worker's 15 s schedule and page loads. */
 const WINDOW_SLACK_MS = 60_000;
 const TIP_CENTS = 1_000;
@@ -590,18 +595,45 @@ async function stepCouncil(run: Run): Promise<void> {
   const t = (w: string) => title(2, w);
   const anon = ctx.platform.api().client;
   const wanted = [people.s1.id, people.s2.id];
-  const seated = await ctx.step(t("a council-recompute tick seats S1 and S2"), () =>
-    run.hooks.tickUntil(
-      "council-recompute",
-      "S1 and S2 seated in the current council term",
-      async () => {
-        const c = await anon.coop.council();
-        const ids = new Set(c.members.map((m) => m.user.id));
-        return wanted.every((id) => ids.has(id)) ? c : null;
-      },
-      { timeoutMs: SETTLE_MS * 2 },
-    ),
-  );
+  // On a long-lived stack other scenarios' streamers stay council candidates: say so plainly
+  // instead of timing out when the seating cannot (or likely will not) include S1 and S2.
+  const problem = await ctx.step(t("preflight: the next recompute can seat S1 and S2"), async () => {
+    const [settings, council, streamers] = await Promise.all([
+      anon.coop.settings(),
+      anon.coop.council(),
+      activeStreamerMembers(run.databaseUrl),
+    ]);
+    const input = {
+      size: councilSize(settings),
+      activeStreamers: streamers,
+      seated: council.members.map((m) => m.user.id),
+      wanted,
+    };
+    ctx.data("council.outlook", {
+      size: input.size,
+      activeStreamers: input.activeStreamers.length,
+      seated: input.seated.length,
+    });
+    return councilSeatingProblem(input);
+  });
+  if (problem) ctx.log.warn("council seating in doubt; one short recompute before failing", { problem });
+  const seated = await ctx.step(t("a council-recompute tick seats S1 and S2"), async () => {
+    try {
+      return await run.hooks.tickUntil(
+        "council-recompute",
+        "S1 and S2 seated in the current council term",
+        async () => {
+          const c = await anon.coop.council();
+          const ids = new Set(c.members.map((m) => m.user.id));
+          return wanted.every((id) => ids.has(id)) ? c : null;
+        },
+        { timeoutMs: problem ? COUNCIL_SHORT_MS : SETTLE_MS * 2 },
+      );
+    } catch (err) {
+      if (problem) throw new Error(`S1 and S2 were not seated: ${problem}`, { cause: err });
+      throw err;
+    }
+  });
   run.ids.termId = seated.termId ?? undefined;
   const termId = need(run.ids.termId, "the council term id");
   ctx.data("council", { termId, seats: seated.members.length });

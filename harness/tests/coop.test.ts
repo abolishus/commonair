@@ -28,6 +28,9 @@ import {
   auditMatches,
   ceilTo,
   choosePatronagePeriod,
+  councilSeatingProblem,
+  councilSize,
+  DEFAULT_COUNCIL_SIZE,
   commentText,
   cutChange,
   datetimeLocalUtc,
@@ -664,5 +667,69 @@ describe("the co-op test hook client", () => {
       hooks().tickUntil("proposals-advance", "x", async () => null, { timeoutMs: 5_000, intervalMs: 1 }),
     ).rejects.toBeInstanceOf(CoopHooksOff);
     status = 200;
+  });
+});
+
+describe("council seating outlook (step 2 on a long-lived stack)", () => {
+  const wanted = ["s1", "s2"];
+  const others = (n: number) => Array.from({ length: n }, (_, i) => `o${i}`);
+
+  test("council.config.size falls back to the seed default", () => {
+    expect(councilSize([])).toBe(DEFAULT_COUNCIL_SIZE);
+    expect(councilSize([{ key: "council.config", value: { minStreamingHours: 0.01 } }])).toBe(7);
+    expect(councilSize([{ key: "council.config", value: { size: 50 } }])).toBe(50);
+    expect(councilSize([{ key: "council.config", value: { size: 0 } }])).toBe(7);
+  });
+
+  test("a fresh stack seats S1 and S2", () => {
+    expect(councilSeatingProblem({ size: 7, activeStreamers: wanted, seated: [], wanted })).toBeNull();
+  });
+
+  test("already seated is fine whatever the competition", () => {
+    expect(
+      councilSeatingProblem({ size: 7, activeStreamers: [...wanted, ...others(10)], seated: wanted, wanted }),
+    ).toBeNull();
+  });
+
+  test("at most size candidates: an unfilled term or a vacancy reseats everyone", () => {
+    expect(
+      councilSeatingProblem({ size: 7, activeStreamers: [...wanted, ...others(5)], seated: others(5), wanted }),
+    ).toBeNull();
+    // A previous run's exited streamers still hold seats: a vacancy.
+    expect(
+      councilSeatingProblem({
+        size: 7,
+        activeStreamers: [...wanted, ...others(5)],
+        seated: ["old1", "old2", ...others(5)],
+        wanted,
+      }),
+    ).toBeNull();
+  });
+
+  test("a full term without a vacancy stands for the month", () => {
+    const problem = councilSeatingProblem({
+      size: 7,
+      activeStreamers: [...wanted, ...others(7)],
+      seated: others(7),
+      wanted,
+    });
+    expect(problem).toMatch(/full \(7\/7 seats, no vacancy\)/);
+    expect(problem).toMatch(/council\.config\.size/);
+  });
+
+  test("more candidates than seats: S1 and S2 are likely outranked even when a reseat is due", () => {
+    const problem = councilSeatingProblem({
+      size: 7,
+      activeStreamers: [...wanted, ...others(7)],
+      seated: ["gone", ...others(6)],
+      wanted,
+    });
+    expect(problem).toMatch(/9 active streamer members compete for 7 council seats/);
+  });
+
+  test("a streamer that is not an active member can never be seated", () => {
+    expect(councilSeatingProblem({ size: 7, activeStreamers: ["s1"], seated: [], wanted })).toMatch(
+      /not active streamer members/,
+    );
   });
 });

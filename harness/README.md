@@ -511,6 +511,12 @@ quorum 0.01, a 36-second streamer threshold). The scenario stops at once with th
 `INTERNAL_API_SECRET` (or `HARNESS_INTERNAL_API_SECRET`) come from the repo `.env`. Not part of
 `full`. The override layers with `harness/compose.trust-safety.yaml` (a unit test checks).
 
+Step 2 needs S1 and S2 among the council's `council.config.size` seats (7 by default). Every
+streamer another scenario qualifies stays a council candidate on a long-lived stack, so before it
+ticks, step 2 compares the active streamer members with the seats and the current term; when
+seating is not certain it tries one short recompute and then fails with the reason (term full, or
+S1 and S2 outranked) instead of a timeout. Reset the stack, or raise `council.config.size`, then.
+
 | Knob               | Default         | Meaning                                                         |
 | ------------------ | --------------- | --------------------------------------------------------------- |
 | `steps`            | `all`           | A prefix: `1-5` (each step builds on the previous one)          |

@@ -141,6 +141,63 @@ export function governancePeriods(settings: readonly { key: string; value: unkno
   };
 }
 
+// ---------------------------------------------------------------- council seating
+
+/** The seed's `council.config.size`, used when the stack's setting carries none. */
+export const DEFAULT_COUNCIL_SIZE = 7;
+
+/** `council.config.size` from `coop.settings`. */
+export function councilSize(settings: readonly { key: string; value: unknown }[]): number {
+  const config = settings.find((s) => s.key === "council.config")?.value as { size?: unknown } | undefined;
+  const size = config?.size;
+  return typeof size === "number" && Number.isInteger(size) && size > 0 ? size : DEFAULT_COUNCIL_SIZE;
+}
+
+export const COUNCIL_HINT =
+  "streamers from earlier runs (e5-coop, e4b-money, trust-safety) stay active streamer members on a long-lived " +
+  "stack; reset the stack (recreate the Postgres volume) or raise council.config.size in the bootstrap";
+
+export interface CouncilOutlookInput {
+  /** `council.config.size`. */
+  size: number;
+  /** Every active streamer member (the council candidates), S1 and S2 included. */
+  activeStreamers: readonly string[];
+  /** Seats of the current term (empty when there is none). */
+  seated: readonly string[];
+  /** The run's streamers who must be seated. */
+  wanted: readonly string[];
+}
+
+/**
+ * Whether the next `council-recompute` is certain to seat `wanted`, mirroring `reseatReason` and
+ * `seatCouncil`: with at most `size` candidates every eligible one is seated as soon as a reseat
+ * is due, and a missing candidate in a full term means a seat holder is no longer a streamer
+ * member (a vacancy, so a reseat). With more candidates than seats, a full term without a vacancy
+ * stands for the month, and a reseat ranks the run's streamers (seconds of streaming, no revenue
+ * yet) below established ones. Returns null when seating is certain, else why it is not.
+ */
+export function councilSeatingProblem(input: CouncilOutlookInput): string | null {
+  const active = new Set(input.activeStreamers);
+  const seated = new Set(input.seated);
+  if (input.wanted.every((id) => seated.has(id))) return null;
+  const inactive = input.wanted.filter((id) => !active.has(id));
+  if (inactive.length > 0) {
+    return `${inactive.length} of the run's streamers are not active streamer members, so no recompute can seat them`;
+  }
+  if (active.size <= input.size) return null;
+  const vacancy = input.seated.some((id) => !active.has(id));
+  if (input.seated.length >= input.size && !vacancy) {
+    return (
+      `the current council term is full (${input.seated.length}/${input.size} seats, no vacancy) and ` +
+      `${active.size} active streamer members compete, so no reseat is due this month; ${COUNCIL_HINT}`
+    );
+  }
+  return (
+    `${active.size} active streamer members compete for ${input.size} council seats, so the run's streamers ` +
+    `(seconds of streaming, no revenue yet) are likely outranked; ${COUNCIL_HINT}`
+  );
+}
+
 // ---------------------------------------------------------------- proposal changes
 
 /** The run's `spotlightSlots`: alternate 4/5 so each run really changes the setting. */
