@@ -325,3 +325,12 @@ describe("e2e unit env check", () => {
     expect(keys).toContain("PUBLIC_HOSTNAME");
   });
 });
+
+describe("CI verify job", () => {
+  test("pins podman compose to podman-compose, not the runner's docker-compose plugin", () => {
+    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+    const job = ci.slice(ci.indexOf("\n  verify:"), ci.indexOf("\n  release-dry-run:"));
+    expect(job).toMatch(/\n {6}PODMAN_COMPOSE_PROVIDER: podman-compose\n/);
+    expect(job).toContain("pipx install podman-compose==");
+  });
+});
