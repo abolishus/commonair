@@ -13,6 +13,7 @@ import {
   mailEnv,
   mediaEnv,
   moderationEnv,
+  coopEnv,
   paymentsEnv,
   playbackEnv,
   servicePorts,
@@ -44,6 +45,7 @@ const SCHEMAS = [
   evidenceSealEnv,
   evidenceOpenEnv,
   bullPrefixEnv,
+  coopEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -61,7 +63,8 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof moderationEnv> &
   z.output<typeof evidenceSealEnv> &
   z.output<typeof evidenceOpenEnv> &
-  z.output<typeof bullPrefixEnv>;
+  z.output<typeof bullPrefixEnv> &
+  z.output<typeof coopEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

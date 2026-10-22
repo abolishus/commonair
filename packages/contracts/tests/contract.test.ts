@@ -84,8 +84,16 @@ describe("events", () => {
     }
   });
 
-  test("internal trust & safety events are never offered to apps or put on the bus", () => {
+  test("internal trust & safety and co-op events are never offered to apps or put on the bus", () => {
     expect(INTERNAL_EVENT_TYPES.toSorted()).toEqual([
+      "coop.council.recomputed",
+      "coop.council.response",
+      "coop.election.update",
+      "coop.membership.update",
+      "coop.patronage.update",
+      "coop.proposal.comment",
+      "coop.share.update",
+      "coop.vote.cast",
       "legal.hold.placed",
       "moderation.case.resolved",
       "moderation.flagged",
@@ -100,7 +108,9 @@ describe("events", () => {
       expect(isInternalEvent(t)).toBe(true);
       // Ids and enums only: no field that could carry personal data, URLs or evidence keys.
       for (const k of Object.keys(EVENTS[t].payload.shape))
-        expect(k).not.toMatch(/email|name|url|key|ip|login|frame|bytes|hash|pdq|note|reason$/);
+        expect(k).not.toMatch(/email|name|url|key|(^|_)ip(_|$)|login|frame|bytes|hash|pdq|note|reason$|choice|body/);
+      // Secret ballot (e5-selectors.md): a vote event names the proposal only.
+      expect(Object.keys(EVENTS["coop.vote.cast"].payload.shape)).toEqual(["proposal_id"]);
     }
     expect(PUBLIC_EVENT_TYPES.length + INTERNAL_EVENT_TYPES.length).toBe(EVENT_TYPES.length);
     expect(isInternalEvent("stream.online")).toBe(false);

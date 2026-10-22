@@ -7,6 +7,7 @@ import {
   databaseEnv,
   developerEnv,
   moderationEnv,
+  coopEnv,
   evidenceSealEnv,
   evidenceStorageEnv,
   paymentsEnv,
@@ -36,6 +37,7 @@ export const workerEnv = z
     ...moderationEnv.shape,
     ...evidenceSealEnv.shape,
     ...evidenceStorageEnv.shape,
+    ...coopEnv.shape,
   })
   .superRefine((env, ctx) => {
     if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)

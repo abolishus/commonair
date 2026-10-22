@@ -61,6 +61,7 @@ const PLATFORM_LEVELS: Partial<Record<Access, readonly PlatformRole[]>> = {
   "platform-moderator": ["moderator", "admin"],
   legal: ["legal"],
   "safety-staff": ["moderator", "admin", "legal"],
+  finance: ["treasurer", "admin"],
 };
 
 export function decideAccess(f: AccessFacts): AccessDecision {

@@ -8,7 +8,12 @@
  * never supply its amount. See docs/testing/e4b-selectors.md.
  */
 import { type SQL, and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { DELIVERY_SOURCES, MEMBER_CLASSES, type PROPOSAL_STATUSES } from "@commonair/contracts/enums";
+import {
+  DELIVERY_SOURCES,
+  MEMBER_CLASSES,
+  type PROPOSAL_KINDS,
+  type PROPOSAL_STATUSES,
+} from "@commonair/contracts/enums";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
   PayoutStateError,
@@ -604,6 +609,7 @@ export const treasurerReportHandlers = {
 // Transparency -------------------------------------------------------------------------------
 
 type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+type ProposalKind = (typeof PROPOSAL_KINDS)[number];
 type MemberClass = (typeof MEMBER_CLASSES)[number];
 type DeliverySource = (typeof DELIVERY_SOURCES)[number];
 
@@ -623,11 +629,21 @@ async function transparency(deps: Deps, months: number) {
       from egress_samples
       where bucket_start >= ${range.from}::timestamptz and bucket_start < ${range.to}::timestamptz
       group by 1, 2`),
-    db.execute<{ month: string; id: string; title: string; status: ProposalStatus; decided_at: string | Date }>(sql`
-      select to_char(decided_at at time zone 'UTC', 'YYYY-MM') as month, id, title, status, decided_at
-      from proposals
-      where decided_at >= ${range.from}::timestamptz and decided_at < ${range.to}::timestamptz
-      order by decided_at, id`),
+    db.execute<{
+      month: string;
+      id: string;
+      title: string;
+      status: ProposalStatus;
+      kind: ProposalKind;
+      passed: boolean | null;
+      reason: string | null;
+      decided_at: string | Date;
+    }>(sql`
+      select to_char(p.decided_at at time zone 'UTC', 'YYYY-MM') as month, p.id, p.title, p.status, p.kind,
+             t.passed, t.reason, p.decided_at
+      from proposals p left join tallies t on t.proposal_id = p.id
+      where p.decided_at >= ${range.from}::timestamptz and p.decided_at < ${range.to}::timestamptz
+      order by p.decided_at, p.id`),
     // Members per class at each month end (the end is exclusive: joined before, not gone by then).
     db.execute<{ month: string; class: MemberClass; n: string }>(sql`
       with months as (
@@ -668,6 +684,9 @@ async function transparency(deps: Deps, months: number) {
             proposalId: d.id,
             title: d.title,
             status: d.status,
+            kind: d.kind,
+            passed: d.passed,
+            reason: d.reason,
             decidedAt: new Date(d.decided_at).toISOString(),
           })),
         members: memberCounts,

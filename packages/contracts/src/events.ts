@@ -18,6 +18,13 @@ import {
   MODERATION_SUBJECTS,
   MODERATION_TIERS,
   EVIDENCE_KINDS,
+  COUNCIL_STANCES,
+  ELECTION_STATUSES,
+  MEMBER_CLASSES,
+  MEMBERSHIP_BASES,
+  MEMBERSHIP_STATUSES,
+  PATRONAGE_STATUSES,
+  SHARE_STATUSES,
 } from "./enums.ts";
 
 const id = z.string();
@@ -451,6 +458,83 @@ export const EVENTS = {
       passed: z.boolean().nullable(),
       reason: z.string().nullable(),
     },
+  }),
+  // Internal (co-op, ADR 0020, docs/testing/e5-selectors.md). Ids, enums and numbers only:
+  // never a vote choice, a comment body or a minute reference.
+  "coop.membership.update": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a membership was activated, lapsed, appointed or exited",
+    payload: {
+      membership_id: id,
+      user_id: id,
+      class: z.enum(MEMBER_CLASSES),
+      status: z.enum(MEMBERSHIP_STATUSES),
+      basis: z.enum(MEMBERSHIP_BASES),
+    },
+  }),
+  "coop.share.update": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a member share changed status",
+    payload: { share_id: id, user_id: id, status: z.enum(SHARE_STATUSES), amount_cents: z.number().int() },
+  }),
+  "coop.proposal.comment": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a member commented on a proposal",
+    payload: { proposal_id: id, comment_id: id },
+  }),
+  "coop.vote.cast": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a vote was cast or changed (never the choice)",
+    payload: { proposal_id: id },
+  }),
+  "coop.council.response": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: the creator council published its response to a proposal",
+    payload: { proposal_id: id, term_id: id, stance: z.enum(COUNCIL_STANCES) },
+  }),
+  "coop.council.recomputed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a new creator council term was seated",
+    payload: { term_id: id, seats: z.number().int() },
+  }),
+  "coop.patronage.update": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a patronage period was computed or approved",
+    payload: {
+      period_id: id,
+      status: z.enum(PATRONAGE_STATUSES),
+      total_cents: z.number().int(),
+      members: z.number().int(),
+    },
+  }),
+  "coop.election.update": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a board election opened voting or closed",
+    payload: { election_id: id, class: z.enum(MEMBER_CLASSES), status: z.enum(ELECTION_STATUSES) },
   }),
   // Internal (trust & safety, ADR 0006). Ids and enums only: never frames, URLs, keys or PII.
   "moderation.flagged": def({

@@ -617,8 +617,29 @@ export const MembershipView = z.object({
       joinedAt: Timestamp,
     }),
   ),
-  eligibility: z.array(z.object({ class: z.enum(E.MEMBER_CLASSES), eligible: z.boolean(), detail: z.string() })),
-  share: z.object({ status: z.enum(E.SHARE_STATUSES), amount: Money }).nullable(),
+  eligibility: z.array(
+    z.object({
+      class: z.enum(E.MEMBER_CLASSES),
+      eligible: z.boolean(),
+      /** The basis the class would use now (null when not eligible, or worker without appointment). */
+      basis: z.enum(E.MEMBERSHIP_BASES).nullable(),
+      /** Progress toward the threshold: streamer `hours` in the window, viewer `cents` of the share; null for worker. */
+      progress: z.object({ have: z.number(), need: z.number(), unit: z.enum(["hours", "cents"]) }).nullable(),
+      detail: z.string(),
+    }),
+  ),
+  share: z.object({ id: Id, status: z.enum(E.SHARE_STATUSES), amount: Money }).nullable(),
+});
+/** A member share as the treasury sees it (`coop.shares.list`). */
+export const ShareView = z.object({
+  id: Id,
+  user: UserPublic.pick({ id: true, username: true, displayName: true }),
+  status: z.enum(E.SHARE_STATUSES),
+  amount: Money,
+  paymentId: Id.nullable(),
+  purchasedAt: Timestamp.nullable(),
+  refundedAt: Timestamp.nullable(),
+  createdAt: Timestamp,
 });
 export const GovernanceSetting = z.object({
   key: z.string(),
@@ -646,7 +667,13 @@ export const ProposalView = z.object({
     appliedAt: Timestamp.nullable(),
   }),
   councilResponse: z.object({ stance: z.enum(E.COUNCIL_STANCES), body: z.string(), publishedAt: Timestamp }).nullable(),
+  /** True once council review ended (or voting began) without a published response. */
+  councilResponseMissed: z.boolean(),
+  /** Decided proposals only: the `tallies` row. Never a running tally while voting is open. */
   tally: z.object({ breakdown: TallyBreakdown, passed: z.boolean(), reason: z.string() }).nullable(),
+  /** From the moment voting opens: how many of the frozen electorate voted (counts only). */
+  participation: z.object({ voted: z.number().int(), eligible: z.number().int() }).nullable(),
+  /** The caller's own vote; never anyone else's. */
   myVote: z.enum(E.VOTE_CHOICES).nullable(),
   canVote: z.boolean(),
   createdAt: Timestamp,
@@ -704,6 +731,22 @@ export const PatronageStatement = z.object({
     viewerHoursExcluded: z.number(),
   }),
 });
+/** A patronage period as treasurers and admins see it (`coop.patronage.periods`). */
+export const PatronagePeriodView = z.object({
+  id: Id,
+  periodStart: Timestamp,
+  periodEnd: Timestamp,
+  status: z.enum(E.PATRONAGE_STATUSES),
+  formulaVersion: z.string(),
+  surplus: Money,
+  total: Money,
+  retained: Money,
+  members: z.number().int(),
+  computedAt: Timestamp.nullable(),
+  computedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  approvedAt: Timestamp.nullable(),
+  approvedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+});
 export const TransparencyMonth = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/),
   revenue: Money,
@@ -718,6 +761,10 @@ export const TransparencyMonth = z.object({
       proposalId: Id,
       title: z.string(),
       status: z.enum(E.PROPOSAL_STATUSES),
+      kind: z.enum(E.PROPOSAL_KINDS),
+      /** From the `tallies` row; null when not decided by a tally (withdrawn). */
+      passed: z.boolean().nullable(),
+      reason: z.string().nullable(),
       decidedAt: Timestamp.nullable(),
     }),
   ),

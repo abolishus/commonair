@@ -140,6 +140,11 @@ describe("decideAccess", () => {
     ["safety-staff", "legal", true],
     ["safety-staff", "treasurer", false],
     ["safety-staff", "user", false],
+    ["finance", "treasurer", true],
+    ["finance", "admin", true],
+    ["finance", "moderator", false],
+    ["finance", "legal", false],
+    ["finance", "user", false],
   ] as const)("%s procedure with role %s → %s", (access, role, ok) => {
     expect(decideAccess({ meta: meta({ access }), caller: session({ role }), write: false }).ok).toBe(ok);
   });

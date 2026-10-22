@@ -9,6 +9,10 @@ import { transparencyHandler } from "../money/reports.ts";
 export const coop = {
   membership: os.coop.membership.handler(notImplemented),
   buyShare: os.coop.buyShare.handler(notImplemented),
+  shares: {
+    list: os.coop.shares.list.handler(notImplemented),
+    refund: os.coop.shares.refund.handler(notImplemented),
+  },
   exit: os.coop.exit.handler(notImplemented),
   appointWorker: os.coop.appointWorker.handler(notImplemented),
   settings: os.coop.settings.handler(notImplemented),
@@ -16,6 +20,7 @@ export const coop = {
     list: os.coop.proposals.list.handler(notImplemented),
     get: os.coop.proposals.get.handler(notImplemented),
     create: os.coop.proposals.create.handler(notImplemented),
+    update: os.coop.proposals.update.handler(notImplemented),
     submit: os.coop.proposals.submit.handler(notImplemented),
     withdraw: os.coop.proposals.withdraw.handler(notImplemented),
     comments: os.coop.proposals.comments.handler(notImplemented),
@@ -36,6 +41,7 @@ export const coop = {
     statement: os.coop.patronage.statement.handler(notImplemented),
     run: os.coop.patronage.run.handler(notImplemented),
     approve: os.coop.patronage.approve.handler(notImplemented),
+    periods: os.coop.patronage.periods.handler(notImplemented),
   },
   transparency: transparencyHandler,
 };

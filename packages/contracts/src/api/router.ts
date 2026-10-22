@@ -16,6 +16,8 @@ import {
   ChannelRef,
   Id,
   MATURE_GATE,
+  SECOND_APPROVER,
+  VOTE_REFUSED,
   Money,
   Ok,
   PageInput,
@@ -38,6 +40,7 @@ const treasurer = base.meta({ access: "treasurer" });
 const platformMod = base.meta({ access: "platform-moderator" });
 const legal = base.meta({ access: "legal" });
 const safetyStaff = base.meta({ access: "safety-staff" });
+const finance = base.meta({ access: "finance" });
 
 /** Image upload purposes that are scanned on commit (audio is not an image and is not scanned). */
 const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;
@@ -1880,6 +1883,26 @@ export const contract = {
       })
       .input(z.object({ returnPath: ReturnPath }))
       .output(D.CheckoutResult),
+    shares: {
+      list: treasurer
+        .route({
+          method: "GET",
+          path: "/coop/shares",
+          summary: "Member shares by status (treasury)",
+          ...tag("Co-op"),
+        })
+        .input(PageInput.extend({ status: z.enum(E.SHARE_STATUSES).optional() }))
+        .output(page(D.ShareView)),
+      refund: treasurer
+        .route({
+          method: "POST",
+          path: "/coop/shares/{shareId}/refund",
+          summary: "Record that a refund_pending share was paid back",
+          ...tag("Co-op"),
+        })
+        .input(z.object({ shareId: Id, sentAt: Timestamp, note: z.string().max(500).optional() }))
+        .output(D.ShareView),
+    },
     exit: user
       .route({
         method: "POST",
@@ -1941,6 +1964,23 @@ export const contract = {
           }),
         )
         .output(D.ProposalView),
+      update: user
+        .route({
+          method: "PATCH",
+          path: "/coop/proposals/{id}",
+          summary: "Edit your proposal while it is a draft or in discussion (restarts discussion)",
+          ...tag("Governance"),
+        })
+        .input(
+          z.object({
+            id: Id,
+            title: z.string().min(5).max(140),
+            body: z.string().min(1).max(50_000),
+            changes: z.array(GovernanceChange).max(20),
+            affectsCreators: z.boolean(),
+          }),
+        )
+        .output(D.ProposalView),
       submit: user
         .route({
           method: "POST",
@@ -1986,6 +2026,7 @@ export const contract = {
           summary: "Cast or change your vote while voting is open",
           ...tag("Governance"),
         })
+        .errors(VOTE_REFUSED)
         .input(z.object({ id: Id, choice: z.enum(E.VOTE_CHOICES) }))
         .output(D.ProposalView),
       councilRespond: user
@@ -2101,19 +2142,29 @@ export const contract = {
           z.object({
             periodStart: Timestamp,
             periodEnd: Timestamp,
-            surplusCents: z.number().int().nonnegative(),
+            /** Omitted: all retained surplus available after closing the period. */
+            surplusCents: z.number().int().nonnegative().optional(),
           }),
         )
-        .output(z.object({ periodId: Id, members: z.number().int(), total: Money })),
-      approve: treasurer
+        .output(z.object({ periodId: Id, members: z.number().int(), total: Money, surplus: Money })),
+      approve: finance
         .route({
           method: "POST",
           path: "/coop/patronage/{periodId}/approve",
-          summary: "Approve and post allocations to the ledger",
+          summary: "Approve and post allocations to the ledger (not the person who ran it)",
           ...tag("Patronage"),
         })
+        .errors(SECOND_APPROVER)
         .input(z.object({ periodId: Id }))
         .output(Ok),
+      periods: finance
+        .route({
+          method: "GET",
+          path: "/coop/patronage-periods",
+          summary: "Patronage periods, newest first",
+          ...tag("Patronage"),
+        })
+        .output(z.array(D.PatronagePeriodView)),
     },
     transparency: base
       .route({

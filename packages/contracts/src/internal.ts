@@ -65,6 +65,11 @@ export const INTERNAL_ROUTES = {
   moderationScript: "/internal/moderation/script",
   /** `POST` a `NciiTickBody`: run the NCII clock job once as of that time (test hooks only). */
   nciiTick: "/internal/moderation/ncii-tick",
+  /**
+   * Co-op test hook (served by the API only while `COOP_TEST_HOOKS=true`, otherwise 404). `POST` a
+   * `CoopTickBody`: the API enqueues that `COOP_JOBS` job, waits for it (30 s) and returns its result.
+   */
+  coopTick: "/internal/coop/tick",
 } as const;
 
 /** Published on BUS.live by the API when a broadcast starts/ends, and by media on transcode changes. */
@@ -214,8 +219,6 @@ export const QUEUES = {
   vodFinalize: "vod-finalize",
   exports: "exports",
   deletions: "deletions",
-  patronage: "patronage",
-  council: "council",
   integrity: "integrity",
   receipts: "receipts",
   email: "email",
@@ -226,6 +229,8 @@ export const QUEUES = {
   payments: "payments",
   /** Trust & safety (E4c): `MODERATION_JOBS`. */
   moderation: "moderation",
+  /** Co-op (E5): `COOP_JOBS`. Patronage runs are API calls (two-person approval), not jobs. */
+  coop: "coop",
 } as const;
 
 // Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
@@ -395,3 +400,32 @@ export type DeliverJob = z.infer<typeof DeliverJob>;
 export const VerifyCallbackJob = z.object({ subscriptionId: z.uuid() });
 export const TestEventJob = z.object({ subscriptionId: z.uuid(), eventId: z.uuid().optional() });
 export const RedeliverJob = z.object({ deliveryId: z.uuid() });
+
+// Co-op (E5, ADR 0020, docs/testing/e5-selectors.md) ----------------------------------------
+
+/**
+ * Job names on `QUEUES.coop` (all scheduled by the worker; the API enqueues them only on the test
+ * hook). Each step the jobs take is one transaction with its audit row and event.
+ */
+export const COOP_JOBS = {
+  /** Hourly: `syncMemberships` (streamers by hours, viewers by subscription; respects voluntary exits). */
+  membershipSync: "membership-sync",
+  /** Every 15 s: discussion → council review → voting → decided (+ tally) → applied. */
+  proposalsAdvance: "proposals-advance",
+  /** Daily: seat a new council term when none is current, the month changed, or a seat is vacant. */
+  councilRecompute: "council-recompute",
+  /** Every minute: nominating → voting, then `closeElection` when voting ends. */
+  electionsAdvance: "elections-advance",
+} as const;
+export type CoopJobName = (typeof COOP_JOBS)[keyof typeof COOP_JOBS];
+export const COOP_JOB_NAMES = Object.values(COOP_JOBS) as [CoopJobName, ...CoopJobName[]];
+/** Every co-op job takes an empty payload: it works from the database state and the clock. */
+export const CoopJob = z.object({});
+export type CoopJob = z.infer<typeof CoopJob>;
+
+/** Body of `INTERNAL_ROUTES.coopTick`; the response is the job's `CoopJobResult`. */
+export const CoopTickBody = z.object({ job: z.enum(COOP_JOB_NAMES) });
+export type CoopTickBody = z.infer<typeof CoopTickBody>;
+/** What a co-op job returns (counts only; logged and returned by the test hook). */
+export const CoopJobResult = z.record(z.string(), z.number().int());
+export type CoopJobResult = z.infer<typeof CoopJobResult>;
