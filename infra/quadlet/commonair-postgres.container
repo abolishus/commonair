@@ -22,11 +22,23 @@ Environment=WALG_S3_ENDPOINT=http://garage:3900
 Environment=S3_REGION=garage
 PublishPort=127.0.0.1:5432:5432
 Volume=commonair-postgres-data.volume:/var/lib/postgresql/data
-HealthCmd=pg_isready -U commonair -d commonair
+# Healthy = accepts connections and is out of recovery (infra/postgres/health.sh).
+HealthCmd=commonair-pg-health
 HealthInterval=10s
-HealthTimeout=3s
+HealthTimeout=5s
 HealthRetries=10
 HealthStartPeriod=30s
+# Until the startup check passes, Podman runs only it: the regular check above (and its kill)
+# starts afterwards. A plain pg_isready check killed a WAL replay after a restore at about two
+# minutes, and no retry count fixes that, since Podman counts failures, not progress. The
+# startup script tracks replay progress itself and stops the server only when it is stuck: no
+# progress for 10 min during replay, or not up within 2 min on a normal start (health.sh).
+# Retries=0: Podman never restarts on startup failures; the script's stop plus Restart= below
+# does, as a plain container exit (Quadlet HealthStartup* keys exist since Podman 4.5).
+HealthStartupCmd=commonair-pg-health --startup
+HealthStartupInterval=10s
+HealthStartupTimeout=5s
+HealthStartupRetries=0
 # An unhealthy container is killed, and Restart= below starts a fresh one.
 HealthOnFailure=kill
 # Dependents start only once this container reports healthy.
@@ -39,7 +51,10 @@ RestartSec=5
 # Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
 RestartSteps=10
 RestartMaxDelaySec=5min
-TimeoutStartSec=300
+# A backstop only, should the health checks never run: health.sh bounds a stuck start, and a
+# replay that is still advancing must not fail for taking long. Recovery keeps restartpoints,
+# so even this restart resumes the replay rather than starting it over.
+TimeoutStartSec=12h
 
 [Install]
 WantedBy=default.target

@@ -36,8 +36,9 @@ wal-g backup-fetch "$target" "$backup"
 
 {
   echo "# added by commonair-restore"
-  # Sourcing the env file makes replay work however the server is started.
-  echo "restore_command = '. /usr/local/lib/commonair/walg-env.sh && wal-g wal-fetch %f %p'"
+  # The wrapper sources the env file, so replay works however the server is started, and
+  # stops recovery instead of promoting early when the bucket fails (see wal-fetch.sh).
+  echo "restore_command = '/usr/local/bin/commonair-wal-fetch %f %p'"
   if [ -n "${RECOVERY_TARGET_TIME:-}" ]; then
     echo "recovery_target_time = '$RECOVERY_TARGET_TIME'"
     echo "recovery_target_action = 'promote'"
