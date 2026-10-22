@@ -117,7 +117,17 @@ Fixed while bringing it up (symptom → root cause → fix):
 - Gate: chat filter-runner raced JavaScriptCore's ~400 ms backtracking cap (test timeout 250 ms;
   production's is 50 ms); infra stack tests re-running one-shot containers got 60 s.
 
-Open follow-ups: `ingest-whip` + WebKit (Opus → AAC, above); the worker's Postgres client
+WHIP/WebKit (user-approved follow-up): media now publishes an AAC copy of a non-AAC source
+(`live/<slug>/aac`, video copied, `KEYS.sourceAac`), and origin serves it in place of the source
+under the same URLs (`186acf4`; media unit 4, origin int 14, API auth 26). Live: MediaMTX muxes
+the copy as H.264 + AAC and Chromium plays it. The harness native player was refusing to start in
+WebKit (`play()` NotAllowedError even muted/inline): it now records player errors and clicks once
+like a viewer (`aefda3b`); WebKit then reached first frame on both ingests. Final green runs of
+`ingest-whip`/`ingest-rtmp` were blocked by host load (load average ≈ 44 from another repo's
+suites): rerun when the machine is quiet. MediaMTX warns that the copy's LL-HLS part durations vary
+("will cause an error in iOS clients"); watch for it on real iOS.
+
+Open follow-ups: rerun `ingest-whip`/`ingest-rtmp` on a quiet machine; the worker's Postgres client
 crashed the process on a connection reset and Podman did not restart it despite
 `unless-stopped` (the trigger is gone; make the worker survive and look at the restart policy).
 
