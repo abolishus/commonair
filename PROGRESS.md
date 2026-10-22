@@ -20,6 +20,53 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session twelve (2026-10-22): validating and finishing Phase 5 (in progress)
+
+Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/validate`
+(worktree `.claude/worktrees/p5-validate`), merged to `main` only after review and a green gate.
+
+### What ran
+
+| Check                                           | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run verify` on `452752c`                   | red: 1 unit test (fixed `793db63`)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `verify` with the user's stack up               | `infra up` refuses another checkout's compose project; the gate runs with `VERIFY_INFRA=external` against those data services (same `.env`). The worktree also needs `.cache/models/*.onnx` copied in                                                                                                                                                                                                                                                                         |
+| `infra/tests/caddy.int.test.ts`                 | 10/10                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| GitHub `ci` run 39829039874 (push of `452752c`) | verify red (regex benchmark on a slow runner, fixed `793db63`); lint-workflows green; release dry run green, arm64 runners work; e2e fedora red (runner AppArmor, fixed `9599ef6`); e2e debian: see below                                                                                                                                                                                                                                                                     |
+| Signed release dry run, run 39830136878         | green. `release-dist`: 74 files, `sha256sum -c` all OK; `parseManifest` accepts the manifest; 6 relay binaries each with SBOM, signature, in-toto provenance; per-arch image SBOMs and image provenance; `SHA256SUMS.sigstore.json`. `cosign verify-blob` with identity `release.yml@refs/heads/main`: SHA256SUMS and all 6 binaries and their provenance verify; the tag regexp is refused, as it should be. The bundle's 13 `Image=` lines pin exactly the manifest digests |
+| Self-host e2e, Debian (local podman machine)    | run 1: install never got healthy (missing `nft`/`aardvark-dns`, fixed `7f3d401`)                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### Fixes (symptom → root cause → fix)
+
+- `793db63` **strict-stop test threw a TypeError** → the test's `BroadcastSession` stub
+  predates `audioCompat` (186acf4) → stub it. **Regex benchmark failed on CI (7.3 ms > 5 ms)**
+  → an absolute wall-clock limit on a shared runner several times slower than a workstation →
+  the limit is the larger of 5 ms and 8× one quadratic scan (`.{2,}!`) on the same machine.
+- `ed648c3` **`drivers.int.test.ts`: heartbeats 0 after the API saw one** → `HttpViewer.stop()` took its
+  report before awaiting its loops and wrote it back, dropping a heartbeat in flight → keep the
+  settled heartbeat counters; regression test in `hls-viewer.test.ts` that fails without it.
+- `9599ef6` **Fedora e2e on CI: "the user manager for commonair did not start"** → the
+  ubuntu-24.04 runner's AppArmor profile `unix-chkpwd` attaches by path inside the privileged
+  test host and denies `dac_read_search`; Fedora's `/etc/shadow` is mode 000, so PAM fails for
+  `user@1000` → the CI job unloads that profile on the runner (not the host under test), with a
+  test that the step precedes the e2e.
+- `7f3d401` **Debian e2e: every container fails, `netavark: unable to execute nft`** →
+  `aardvark-dns` and `nftables` are only Recommends of netavark on Debian; the e2e host had
+  Podman without recommends, and `selfhost.sh` installed packages only when `podman` was
+  missing → `selfhost.sh` checks for both helpers, installs them as root and names them in its
+  errors; the e2e hosts now start without Podman, like a fresh server, so the e2e exercises the
+  script's own package installation.
+
+### Self-hosting gaps
+
+- S3 for browsers: designed as ADR 0024 (`f50fe9e`): path-style bucket URLs on the main host,
+  unstripped, with a Caddy allowlist of two shapes (signed `PUT` into `incoming/`, signed
+  `GET`/`HEAD` of the exports bucket). Same origin, so no CORS, DNS, certificate or CSP change;
+  a separate `s3.<host>` would have needed all four. Unit E (brief written) builds it.
+- Units D (Postgres WAL replay), E (S3 route), F (per-unit secrets), G (client IPs, loopback,
+  Valkey password, IPv6): briefs in `.claude/briefs/phase5/`. D is in flight (workflow
+  `wf_a58d856f-30b`).
+
 ## Session eleven (2026-10-22): Phase 5 release and self-hosting (built; user validation pending)
 
 Started from `eefb597` (E6 done, supply-chain policy ADR 0022 landed as `9dd395a`). Policy
