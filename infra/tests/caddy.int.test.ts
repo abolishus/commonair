@@ -176,12 +176,26 @@ describe("caddy adapt: only presigned object URLs reach Garage", () => {
       expect(proxies(SITE_ENV).filter((p) => p.dial.startsWith("garage"))).toEqual([
         {
           dial: "garage:3900",
-          match: [{ method: ["PUT"], path: ["/commonair-media/incoming/*"], query: { "X-Amz-Signature": ["*"] } }],
+          match: [
+            {
+              method: ["PUT"],
+              not: [{ path: ["/commonair-media/incoming/"] }],
+              path: ["/commonair-media/incoming/*"],
+              query: { "X-Amz-Signature": ["*"] },
+            },
+          ],
           maxSize: 10_000_000,
         },
         {
           dial: "garage:3900",
-          match: [{ method: ["GET", "HEAD"], path: ["/commonair-exports/*"], query: { "X-Amz-Signature": ["*"] } }],
+          match: [
+            {
+              method: ["GET", "HEAD"],
+              not: [{ path: ["/commonair-exports/"] }],
+              path: ["/commonair-exports/*"],
+              query: { "X-Amz-Signature": ["*"] },
+            },
+          ],
         },
       ]);
     },
@@ -437,6 +451,8 @@ describe("caddy live: presigned object routes", () => {
     ["an export read with the signature name only in the path", "GET", `/${EXPORTS}/X-Amz-Signature=abc`],
     ["a bucket listing", "GET", `/${EXPORTS}?list-type=2`],
     ["a signed-looking bucket listing", "GET", `/${EXPORTS}?list-type=2&${SIG}`],
+    ["a signed-looking bucket listing with a trailing slash", "GET", `/${EXPORTS}/?list-type=2&${SIG}`],
+    ["a signed-looking upload to the incoming/ prefix itself", "PUT", `/${MEDIA}/incoming/?${SIG}`],
     ["a delete", "DELETE", `/${EXPORTS}/a.zip?${SIG}`],
     ["a delete in incoming/", "DELETE", `/${MEDIA}/incoming/c/a.png?${SIG}`],
     ["a multipart upload start", "POST", `/${MEDIA}/incoming/c/a.png?uploads&${SIG}`],

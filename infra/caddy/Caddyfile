@@ -58,11 +58,15 @@
 	@s3-upload {
 		method PUT
 		path /{$S3_BUCKET_MEDIA:commonair-media}/incoming/*
+		# The prefix itself is no object, and `*` also matches an empty suffix.
+		not path /{$S3_BUCKET_MEDIA:commonair-media}/incoming/
 		query X-Amz-Signature=*
 	}
 	@s3-export {
 		method GET HEAD
 		path /{$S3_BUCKET_EXPORTS:commonair-exports}/*
+		# The bucket root with a trailing slash would be a signed listing.
+		not path /{$S3_BUCKET_EXPORTS:commonair-exports}/
 		query X-Amz-Signature=*
 	}
 	# Object responses are passed through as stored: compressing would drop Content-Length and

@@ -74,10 +74,10 @@ describe("routing", () => {
   test("Garage only for presigned uploads into incoming/ and presigned export reads (ADR 0024)", () => {
     expect(site.match(/garage:/g)).toHaveLength(2);
     expect(site).toMatch(
-      /@s3-upload \{\n\t\tmethod PUT\n\t\tpath \/\{\$S3_BUCKET_MEDIA:commonair-media\}\/incoming\/\*\n\t\tquery X-Amz-Signature=\*\n\t\}/,
+      /@s3-upload \{\n\t\tmethod PUT\n\t\tpath \/\{\$S3_BUCKET_MEDIA:commonair-media\}\/incoming\/\*\n(?:\t\t#[^\n]*\n)*\t\tnot path \/\{\$S3_BUCKET_MEDIA:commonair-media\}\/incoming\/\n\t\tquery X-Amz-Signature=\*\n\t\}/,
     );
     expect(site).toMatch(
-      /@s3-export \{\n\t\tmethod GET HEAD\n\t\tpath \/\{\$S3_BUCKET_EXPORTS:commonair-exports\}\/\*\n\t\tquery X-Amz-Signature=\*\n\t\}/,
+      /@s3-export \{\n\t\tmethod GET HEAD\n\t\tpath \/\{\$S3_BUCKET_EXPORTS:commonair-exports\}\/\*\n(?:\t\t#[^\n]*\n)*\t\tnot path \/\{\$S3_BUCKET_EXPORTS:commonair-exports\}\/\n\t\tquery X-Amz-Signature=\*\n\t\}/,
     );
     expect(site).toMatch(/handle @s3-upload \{\n\t\trequest_body \{\n\t\t\tmax_size 10MB\n\t\t\}/);
     // Signed responses pass through unencoded (Content-Length and ETag as Garage sent them).
