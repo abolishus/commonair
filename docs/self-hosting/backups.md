@@ -68,13 +68,158 @@ and whether it succeeded. `upgrade` takes one before it changes anything.
 ## What is not backed up
 
 - **Objects in Garage**: avatars, thumbnails, clips, VODs, data exports and sealed evidence.
-  `selfhost.sh` does not copy them anywhere. If you need them to survive the server, copy the
-  buckets (`S3_BUCKET_MEDIA`, `S3_BUCKET_EVIDENCE`) to another S3 location on your own schedule.
+  `selfhost.sh` does not copy them anywhere. To keep them when the server is lost, copy them
+  off the server yourself: [Objects in Garage](#objects-in-garage) has a recipe.
 - **The env file**, `~/.config/commonair/commonair.env`. It holds every secret: the database
   passwords, the S3 keys, the session and signing keys, and `EVIDENCE_PRIVATE_KEY`, without
   which sealed evidence cannot be read. Keep an offline copy somewhere safe, and update it when
   you change the file. A restore onto a new server needs it.
 - **Valkey.** It holds only presence, caches and queues, and starts empty by design.
+
+## Objects in Garage
+
+This recipe copies the buckets that matter to another S3 location once a day with
+[rclone](https://rclone.org/), from the distribution's packages (`apt install rclone` on
+Debian 13, `dnf install rclone` on Fedora). It reads through a Garage key that can read those
+buckets and nothing else.
+
+| Bucket (env variable, default name)        | Holds                                    | Copy it?                                                                        |
+| ------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------- |
+| `S3_BUCKET_MEDIA`, `commonair-media`       | avatars, panels, thumbnails, clips, VODs | Yes                                                                             |
+| `S3_BUCKET_EVIDENCE`, `commonair-evidence` | sealed moderation evidence               | Yes. It is encrypted: reading it needs `EVIDENCE_PRIVATE_KEY` from the env file |
+| `S3_BUCKET_EXPORTS`, `commonair-exports`   | members' data exports                    | No. Each expires after 7 days, and members can request a new one                |
+| `S3_BUCKET_BACKUPS`, `commonair-backups`   | WAL-G's Postgres backups                 | No. Send WAL-G off the server instead ([Off-host S3](#off-host-s3))             |
+
+The commands below use the default bucket names. If your env file sets other names, use those.
+
+### Set it up
+
+As `commonair`, create the read-only key in the local Garage and allow it to read the two
+buckets:
+
+```sh
+podman exec commonair-garage /garage key create commonair-object-backup
+podman exec commonair-garage /garage bucket allow --read commonair-media --key commonair-object-backup
+podman exec commonair-garage /garage bucket allow --read commonair-evidence --key commonair-object-backup
+```
+
+The first command prints the `Key ID` and the `Secret key`. To see them again, run
+`podman exec commonair-garage /garage key info --show-secret commonair-object-backup`. Each
+command also logs two `INFO` lines about its connection to the node, which you can ignore.
+
+Create a bucket and a key at the other location, as for [off-host WAL-G](#off-host-s3) (a
+separate bucket, or a prefix of the same one). Then write `~/.config/rclone/rclone.conf` with
+one remote for each side, and make it readable only by `commonair` (`chmod 600`):
+
+```ini
+[garage]
+type = s3
+provider = Other
+endpoint = http://127.0.0.1:3900
+region = garage
+force_path_style = true
+access_key_id = <Key ID of commonair-object-backup>
+secret_access_key = <its Secret key>
+
+[offsite]
+type = s3
+provider = Other
+endpoint = https://fsn1.your-objectstorage.com
+region = fsn1
+force_path_style = true
+access_key_id = <key>
+secret_access_key = <secret>
+no_check_bucket = true
+```
+
+`garage` reaches the local Garage on the port it publishes on `127.0.0.1`. `no_check_bucket`
+stops rclone from trying to create the bucket, which a key limited to one bucket cannot do.
+Take a first copy by hand, with your bucket name in place of `<bucket>`:
+
+```sh
+rclone sync garage:commonair-media offsite:<bucket>/media
+rclone sync garage:commonair-evidence offsite:<bucket>/evidence
+```
+
+`rclone sync` makes the copy match the bucket, so an object deleted on the instance (a removed
+VOD, or the media of a deleted account) leaves the copy at the next run too. Use `rclone copy`
+instead if you would rather keep everything, but then deleted members' media stays in your
+backups.
+
+Media is not encrypted at rest. If you do not trust the other location with it, wrap the
+`offsite` remote in an [rclone crypt](https://rclone.org/crypt/) remote, and keep its password
+with your offline copy of the env file.
+
+### Run it daily
+
+Create two systemd user units in `~/.config/systemd/user/`. Do not start their names with
+`commonair-`: `selfhost.sh install` and `upgrade` remove every `commonair-*` unit there that the
+release does not ship.
+
+`object-backup.service`:
+
+```ini
+[Unit]
+Description=Copy CommonAir objects off the server
+After=commonair-garage.service
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/rclone sync garage:commonair-media offsite:<bucket>/media
+ExecStart=/usr/bin/rclone sync garage:commonair-evidence offsite:<bucket>/evidence
+```
+
+`object-backup.timer`:
+
+```ini
+[Unit]
+Description=Copy CommonAir objects off the server daily
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable the timer, then run the service once and read its log:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now object-backup.timer
+systemctl --user start object-backup.service
+journalctl --user -u object-backup.service
+```
+
+`systemctl --user list-timers` shows the next run. The timer starts an hour after the base
+backup, so the two do not compete for the disk. A failed run shows in
+`systemctl --user status object-backup.service`; `selfhost.sh status` does not know about it.
+
+### Restore objects
+
+On a new server, restore objects after the [restore onto a new server](#onto-a-new-server), once
+the instance runs: its Garage then has both buckets and the keys from your env file. Write the
+same `rclone.conf` (its `garage` key does not exist on the new Garage yet, and these commands do
+not need it). Writing needs keys that can write, so the commands take them from the env file
+for this run only: the main S3 key for media, the evidence key for evidence.
+
+```sh
+ENV=~/.config/commonair/commonair.env
+RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID=$(sed -n 's/^S3_ACCESS_KEY_ID=//p' "$ENV") \
+RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY=$(sed -n 's/^S3_SECRET_ACCESS_KEY=//p' "$ENV") \
+  rclone copy offsite:<bucket>/media garage:commonair-media
+RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID=$(sed -n 's/^S3_EVIDENCE_ACCESS_KEY_ID=//p' "$ENV") \
+RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY=$(sed -n 's/^S3_EVIDENCE_SECRET_ACCESS_KEY=//p' "$ENV") \
+  rclone copy offsite:<bucket>/evidence garage:commonair-evidence
+```
+
+Sealed evidence is readable again only with the `EVIDENCE_PRIVATE_KEY` of the env file it was
+sealed with. Then create the `commonair-object-backup` key on the new Garage as in
+[Set it up](#set-it-up), put its ID and secret in `rclone.conf` and enable the timer.
 
 ## Restore
 
@@ -153,34 +298,77 @@ Then point DNS at the new server.
 **An untested backup does not count.** Restore onto a scratch server regularly (at least before
 launch and after changing anything about backups), and check that your data is there.
 
-The drill runs a full copy of production: real accounts, queued notifications and simulcast
-targets. Keep it from reaching anyone.
+The drill reads the backups over the network, so they must be [off the server](#off-host-s3):
+production's local Garage listens only on its own `127.0.0.1`. The drill runs a full copy of
+production: real accounts, queued notifications and simulcast targets. Keep it from reaching
+anyone, and keep it from writing to your backups.
+
+### A read-only key for the drill
+
+Create a key that can read the backup bucket and do nothing else. On a second Garage node that
+runs as a `commonair-garage` container, as `commonair` there (use the bucket of your
+`WALG_S3_PREFIX`):
+
+```sh
+podman exec commonair-garage /garage key create commonair-restore-drill
+podman exec commonair-garage /garage bucket allow --read commonair-backups --key commonair-restore-drill
+```
+
+The first command prints the `Key ID` and the `Secret key` (later:
+`podman exec commonair-garage /garage key info --show-secret commonair-restore-drill`). Keep the
+key for the next drill, or delete it afterwards with
+`podman exec commonair-garage /garage key delete --yes commonair-restore-drill`. With another
+provider, create a key with read access to the bucket only, if it offers one. If it does not,
+the drill uses your production key, and only the steps below that turn off archiving and the
+backup timer protect your backups: do not skip them.
+
+### Run the drill
 
 1. Install the same version on a throwaway server or VM, with `--tls internal` and a hostname
-   of its own, such as `drill.example.org`.
+   of its own, such as `drill.example.org`. Turn off its daily backup at once, before it can
+   run with the settings you are about to copy in:
+   `systemctl --user disable --now commonair-backup.timer`. Its retention cleanup deletes old
+   base backups, and with your production settings those would be production's.
 2. Copy your env file over the new one, then change it before anything starts:
-   - Give the drill **a key that can only read the backup bucket** (`AWS_ACCESS_KEY_ID`,
-     `AWS_SECRET_ACCESS_KEY`). The restored database starts archiving its own WAL on promotion,
-     and with a writable key it would write into your production backup prefix.
+   - Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the drill's read-only key.
    - Point mail nowhere: `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_USER=` and
      `SMTP_PASSWORD=` (nothing listens there, so sending fails). Otherwise the worker sends
      queued notifications to real members with your production credentials.
    - Turn off payments: `PAYMENTS_PROVIDER=manual` and `STRIPE_SECRET_KEY=`.
-3. Run the [restore](#restore) from step 1 on, but replace its step 5 with a reinstall that
+3. Turn off WAL archiving on the drill's Postgres with a Quadlet drop-in, which replaces the
+   image's command (`archive_mode=on` and WAL-G's `archive_command`):
+
+   ```sh
+   mkdir -p ~/.config/containers/systemd/commonair-postgres.container.d
+   printf '[Container]\nExec=postgres -c archive_mode=off\n' \
+     > ~/.config/containers/systemd/commonair-postgres.container.d/drill.conf
+   systemctl --user daemon-reload
+   ```
+
+   Once the restored database promotes, it starts a new timeline and would archive it into the
+   same `WALG_S3_PREFIX` it replays from. With a key that can write, that puts the drill's WAL
+   and timeline history into production's archive, and a later restore of production follows
+   the newest timeline: the drill's. With the read-only key every upload fails, and Postgres
+   keeps each segment on disk and retries forever. A scratch `WALG_S3_PREFIX` is no way out:
+   the replay fetches WAL through the same setting, so it would find no archive to replay.
+   `selfhost.sh install` keeps drop-in directories, so this one stays through the reinstall
+   below.
+
+4. Run the [restore](#restore) from step 1 on, but replace its step 5 with a reinstall that
    keeps the drill's hostname and TLS mode (the copied env file holds production's):
 
    ```sh
    sh ~/commonair/selfhost.sh install --reinstall --domain drill.example.org --tls internal
    ```
 
-   Then turn off the drill's daily backup, which the reinstall enabled:
+   The reinstall enables the daily backup again, so turn it off again:
    `systemctl --user disable --now commonair-backup.timer`. If you only need to look at data,
    also stop the worker: `systemctl --user stop commonair-worker.service`.
 
-4. Sign in on the drill instance (trust its root first, [tls.md](tls.md#internal-ca)) and check
+5. Sign in on the drill instance (trust its root first, [tls.md](tls.md#internal-ca)) and check
    recent data: the newest accounts, streams and ledger entries. Do not go live on it: the
    restored simulcast targets would push the stream to real third-party platforms.
-5. Write down the date, the backup restored, how long it took, and anything that went wrong.
+6. Write down the date, the backup restored, how long it took, and anything that went wrong.
    Then delete the server.
 
 Contributors can run the automated drill against a development stack with

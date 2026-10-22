@@ -131,7 +131,10 @@ logged in to GitHub, following [verifying.md](../self-hosting/verifying.md):
 1. `cosign verify-blob` on `SHA256SUMS`, then `sha256sum --check` on every asset.
 2. `cosign verify` and both `cosign verify-attestation` types on every image in
    `release-manifest.json`.
-3. `cosign verify-blob` on one relay binary.
+3. `cosign verify-blob` on one relay binary. To check that the relay binaries come from the
+   tagged source, rebuild them from the tag with the workflow's `GO_VERSION`:
+   `make -C relay release VERSION=<tag>`. Every line of `relay/bin/SHA256SUMS` must match the
+   release's `SHA256SUMS` ([relay/README.md](../../relay/README.md#build)).
 4. Install it on a scratch VM with `--tls internal`
    ([install.md](../self-hosting/install.md)), and upgrade an existing scratch instance from the
    previous release.
