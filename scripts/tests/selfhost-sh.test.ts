@@ -134,6 +134,7 @@ case "$1" in
     cat > "$STUB_STATE/secrets/$name"
     ;;
   inspect) echo healthy ;;
+  ps) [ -z "\${STUB_NETWORK_FOREIGN:-}" ] || echo "\${STUB_NETWORK_FOREIGN}" ;;
   network)
     case "$2" in
       rm) [ -z "\${STUB_NETWORK_RM_FAIL:-}" ] || exit 2 ;;
@@ -1354,12 +1355,44 @@ describe("upgrade", () => {
   );
 
   test(
-    "a network that cannot be re-created is kept only when its lease range leaves out the trusted addresses",
+    "a network whose lease range already leaves out the trusted addresses is kept, not re-created",
     () => {
       const h = host();
       const r = h.run(INSTALL, { STUB_NETWORK_RM_FAIL: "1", STUB_NETWORK_LEASE_START: "10.89.42.129" });
       expect(r.code, r.err).toBe(0);
-      expect(r.err).toContain("keeping it: its lease range already starts at 10.89.42.129");
+      expect(h.calls().some((c) => c.startsWith("podman network rm"))).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "an upgrade that would have to re-create a network a foreign container holds changes nothing",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const before = h.calls().length;
+      const r = h.run(["upgrade", "--version", "v0.2.0"], { STUB_NETWORK_FOREIGN: "someone-elses-db" });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("containers outside the instance use it: someone-elses-db");
+      expect(r.err).toContain("nothing was changed");
+      expect(current(h)).toBe(join(h.home, ".local/share/commonair/releases/0.1.0"));
+      // Nothing was stopped, backed up or removed.
+      const during = h.calls().slice(before);
+      expect(
+        during.filter((c) => /^systemctl --user (stop|start commonair-backup)|^podman network rm/.test(c)),
+      ).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "our own containers on an old network do not block the upgrade; the network is re-created",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const r = h.run(["upgrade", "--version", "v0.2.0"], { STUB_NETWORK_FOREIGN: "commonair-api" });
+      expect(r.code, r.err).toBe(0);
+      expect(h.calls().some((c) => c.startsWith("podman network rm commonair"))).toBe(true);
     },
     TIMEOUT,
   );

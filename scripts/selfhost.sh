@@ -809,23 +809,39 @@ sockets() {
 # When it cannot go (a container outside the instance still uses it), the old one is kept only if
 # its lease range already leaves out the fixed addresses: otherwise another container could be
 # leased 10.89.42.10 or .11 and have its X-Forwarded-For believed, so the restart fails instead.
-recreate_network() {
-  systemctl --user stop commonair-network.service 2>/dev/null || true
-  podman network exists commonair 2>/dev/null || return 0
-  podman network rm commonair >/dev/null 2>&1 && return 0
+# True when the commonair network's lease range leaves out the fixed addresses the services trust
+# (Caddy 10.89.42.10, web .11): a network this release created, or one an operator already fixed.
+network_lease_ok() {
   _lease=$(podman network inspect commonair \
     --format '{{range .Subnets}}{{if .LeaseRange}}{{.LeaseRange.StartIP}}{{end}}{{end}}' 2>/dev/null) || _lease=""
   case "$_lease" in
-    10.89.42.*)
-      if [ "${_lease##*.}" -gt 11 ] 2>/dev/null; then
-        warn "could not remove the commonair network (a container outside the instance still uses it?); keeping it: its lease range already starts at $_lease"
-        return 0
-      fi
-      ;;
+    10.89.42.*) [ "${_lease##*.}" -gt 11 ] 2>/dev/null ;;
+    *) return 1 ;;
   esac
+}
+
+# Quadlet never changes an existing network, so a network from before IPRange is removed for
+# commonair-network.service to create again. One that is already right is kept: removing it would
+# gain nothing, and a rollback must not depend on it.
+recreate_network() {
+  podman network exists commonair 2>/dev/null || return 0
+  network_lease_ok && return 0
+  systemctl --user stop commonair-network.service 2>/dev/null || true
+  podman network rm commonair >/dev/null 2>&1 && return 0
   warn "could not remove the commonair network, and it can lease the fixed addresses 10.89.42.10/.11 the services trust" \
     "(lease range start: ${_lease:-none}). Stop whatever else uses it (podman network inspect commonair), then re-run."
   return 1
+}
+
+# Before an upgrade changes anything: a network that must be re-created but that a container
+# outside the instance holds cannot be removed, and the upgrade would stop at restart_stack with
+# everything down.
+network_preflight() {
+  podman network exists commonair 2>/dev/null || return 0
+  network_lease_ok && return 0
+  _foreign=$(podman ps -a --filter network=commonair --format '{{.Names}}' 2>/dev/null | grep -v '^commonair-' || true)
+  [ -z "$_foreign" ] || die "the commonair network must be re-created, but containers outside the instance use it: $(printf '%s' "$_foreign" | tr '\n' ' ')" \
+    "fix: remove them from the network (podman network disconnect commonair <name>), then re-run; nothing was changed"
 }
 
 # Runs migrate to completion within HEALTH_TIMEOUT. Postgres never gives up (Restart=always,
@@ -1131,6 +1147,7 @@ cmd_upgrade() {
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   # 2. pull every image by digest (nothing has changed yet if this fails)
   pull_images "$RELEASE_DIR"
+  network_preflight
   # 3. base backup of the current database
   info "taking a base backup before the upgrade"
   systemctl --user start commonair-backup.service ||
