@@ -20,31 +20,45 @@ running instance links to the exact source it runs.
 You need: [Bun](https://bun.sh) 1.4.3, [Podman](https://podman.io) 5+ with `podman-compose`,
 Go 1.27 (for the relay), FFmpeg (for the harness), and [`reuse`](https://reuse.software).
 
-```bash
+```sh
 git clone https://github.com/abolishus/commonair.git
+cd commonair
+bun install
+bun scripts/init-env.ts          # .env with fresh secrets (never committed)
 ```
 
-```bash
-cd commonair && bun install
+Start the data services (Postgres, Valkey, Mailpit, Garage) and run the fast checks:
+
+```sh
+bun scripts/infra.ts test        # waits until they are healthy
+bun run verify --quick           # the gate without integration tests: the inner loop only
 ```
 
-```bash
-bun scripts/init-env.ts
-```
+Run the whole platform:
 
-```bash
+```sh
 podman compose up -d
 ```
 
 Then open http://localhost:3000. Mail sent by the platform shows up in Mailpit at
-http://localhost:8025. Before committing, run the gate:
+http://localhost:8025.
 
-```bash
+Drive it the way real people do with the [harness](harness/README.md): streamers, viewers in
+real browsers, chat bots and viewbots.
+
+```sh
+bun run --filter @commonair/harness browsers   # Playwright Chromium and WebKit, once
+bun harness/src/cli.ts run smoke
+```
+
+Before committing, run the gate. `bun run verify:full` adds the full end-to-end harness
+scenario.
+
+```sh
 bun run verify
 ```
 
-`bun run verify:full` adds the full end-to-end harness scenario. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow (DCO sign-off, Conventional Commits) and
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow (DCO sign-off, Conventional Commits) and
 [AGENTS.md](AGENTS.md) for the engineering rules.
 
 ### Podman setup
@@ -89,10 +103,25 @@ Start with [docs/architecture.md](docs/architecture.md).
 
 ## Self-hosting
 
-A guide that takes an operator from a fresh Linux server to a running instance lives in
-[docs/self-hosting/](docs/self-hosting/). No proprietary services are required: payments default
-to a manual (treasurer-recorded) adapter, storage to Garage, and OAuth sign-in providers are
+[docs/self-hosting/](docs/self-hosting/) takes an operator from a fresh Debian 13 or Fedora 42+
+server to a running instance. No proprietary services are required: payments default to a
+manual (treasurer-recorded) adapter, storage to Garage, and OAuth sign-in providers are
 optional.
+
+Download the latest release's bundle and verify it
+([how](docs/self-hosting/install.md#2-download-and-verify-the-release)). Then install it as
+root with one command:
+
+```sh
+sh commonair-selfhost_0.1.0-rc.1/selfhost.sh install --yes \
+  --bundle "$PWD/commonair-selfhost_0.1.0-rc.1.tar.gz" \
+  --domain stream.example.org --email ops@example.org
+```
+
+Replace `0.1.0-rc.1` with the latest version on the
+[releases page](https://github.com/abolishus/commonair/releases). Releases are signed with
+cosign, and [verifying.md](docs/self-hosting/verifying.md) shows how to check them. Maintainers
+cut releases as described in [docs/maintainers/releasing.md](docs/maintainers/releasing.md).
 
 ## License and trademarks
 
