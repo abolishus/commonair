@@ -5,7 +5,7 @@
  * Milestone E6, overlay alerts (docs/testing/e6-selectors.md, "Scenario `overlay-alert`"):
  * 1 S configures the tip alert and creates a 7-day overlay token on `/overlays`; 2 a browser with
  * no cookies opens the alerts URL; 3 a test alert shows; 4 a confirmed 250-cent tip shows with V's
- * name, a 50-cent tip (below the minimum) shows nothing, an anonymous tip shows without V's name;
+ * name, a 150-cent tip (below the 200-cent minimum) shows nothing, an anonymous tip shows without V's name;
  * 5 the token authenticates nothing but its own overlay; 6 rotating and revoking refuse the open
  * overlays within 30 s; 7 a past expiry is refused and a 5-second token stops working, its open
  * stream closing within 30 s; 8 the audit rows exist.
@@ -50,7 +50,9 @@ import { waitFor } from "../src/wait.ts";
 import type { WebSession } from "../src/web/session.ts";
 
 const TIP_MESSAGE_TEMPLATE = "${user} tipped ${amount}";
-const MIN_CENTS = 100;
+// Tips start at MONEY_LIMITS.tipMinCents (100): the alert minimum sits above it so a real tip can fall below.
+const MIN_CENTS = 200;
+const BELOW_MIN_CENTS = 150;
 const DURATION_MS = 5_000;
 const SEVEN_DAYS_MS = 7 * 24 * 3_600_000;
 /** Spec: alerts within 10 s of the tip's confirmation; refusals within 30 s. */
@@ -74,7 +76,7 @@ interface OverlayAlertFrame {
 export default defineScenario({
   name: "overlay-alert",
   description:
-    "tip alert + 7-day overlay token on /overlays → cookie-less overlay live → test alert → 250-cent tip alert with the name, 50 cents nothing, anonymous without the name → token grants only its overlay → rotate and revoke refuse open overlays within 30 s → past expiry refused, 5 s token expires and its stream closes → audit rows",
+    "tip alert + 7-day overlay token on /overlays → cookie-less overlay live → test alert → 250-cent tip alert with the name, 150 cents (below 200) nothing, anonymous without the name → token grants only its overlay → rotate and revoke refuse open overlays within 30 s → past expiry refused, 5 s token expires and its stream closes → audit rows",
   needs: ["api", "web", "worker", "browser"],
   timeoutMs: 15 * 60_000,
   async run(ctx) {
@@ -269,14 +271,14 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   ctx.assert("4 the alert text names V", a250.text.includes(v.displayName));
 
   await delay(DURATION_MS + 1_000, undefined, { signal });
-  const tip50 = await ctx.step("4 V tips S 50 cents (below the minimum; confirmed)", () =>
-    confirmedTip(kit, treasurer, v, channel, { cents: 50, message: `${marker} 50` }),
+  const tipBelow = await ctx.step(`4 V tips S ${BELOW_MIN_CENTS} cents (below the minimum; confirmed)`, () =>
+    confirmedTip(kit, treasurer, v, channel, { cents: BELOW_MIN_CENTS, message: `${marker} ${BELOW_MIN_CENTS}` }),
   );
-  await ctx.step("4 nothing shows for the 50-cent tip within 10 s", async () => {
-    await delay(Math.max(0, tip50.confirmedAt + ALERT_DEADLINE_MS - Date.now()), undefined, { signal });
+  await ctx.step(`4 nothing shows for the ${BELOW_MIN_CENTS}-cent tip within 10 s`, async () => {
+    await delay(Math.max(0, tipBelow.confirmedAt + ALERT_DEADLINE_MS - Date.now()), undefined, { signal });
     const seen = await alertsSeen(obs);
-    const shown = [...seen.fromStream, ...seen.fromPage].filter((a) => a.amountCents === 50);
-    ctx.assert("4 no alert for the 50-cent tip", shown.length === 0, { shown: shown.length });
+    const shown = [...seen.fromStream, ...seen.fromPage].filter((a) => a.amountCents === BELOW_MIN_CENTS);
+    ctx.assert(`4 no alert for the ${BELOW_MIN_CENTS}-cent tip`, shown.length === 0, { shown: shown.length });
   });
 
   const tip300 = await ctx.step("4 V tips S 300 cents anonymously (confirmed)", () =>

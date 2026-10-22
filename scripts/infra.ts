@@ -127,7 +127,7 @@ export function staleImageContainers(rows: ImageRow[], current: ReadonlyMap<stri
   });
 }
 
-function removeStaleImageContainers(): void {
+function staleProjectContainers(): ImageRow[] {
   const out = Bun.spawnSync(
     [
       "podman",
@@ -152,7 +152,11 @@ function removeStaleImageContainers(): void {
     const p = Bun.spawnSync(["podman", "image", "inspect", "--format", "{{.Id}}", image], { timeout: 30_000 });
     if (p.exitCode === 0) current.set(image, p.stdout.toString().trim());
   }
-  const stale = staleImageContainers(rows, current);
+  return staleImageContainers(rows, current);
+}
+
+function removeStaleImageContainers(): void {
+  const stale = staleProjectContainers();
   if (stale.length === 0) return;
   console.log(`infra: recreating ${stale.map((r) => r.name).join(", ")} and their dependents (image rebuilt)`);
   // Volumes are kept; compose's `up -d` creates the containers again from the new images.
@@ -418,6 +422,14 @@ if (import.meta.main) {
       removeStaleImageContainers();
       composeUp([...files, "--profile", "harness", "up", "-d"], 10 * 60_000);
       await waitExited(ONE_SHOT_SERVICES);
+      // podman can keep a one-shot container (migrate) whose dependents block its removal, and
+      // compose then reuses it: the stack would run without the new migrations. Fail loudly.
+      const still = staleProjectContainers();
+      if (still.length > 0)
+        throw new Error(
+          `still on an old image: ${still.map((r) => r.name).join(", ")}; ` +
+            `run \`podman rm -f --depend ${still.map((r) => r.name).join(" ")}\` and \`stack\` again`,
+        );
       await waitHealthy(STACK_HEALTHY_SERVICES, 300_000);
       console.log("infra: platform healthy");
     } else if (cmd === "down") {

@@ -307,14 +307,14 @@ also checks the web flows.
 
 ### `overlay-alert`
 
-1. S enables the tip alert on `/overlays` (message `${user} tipped ${amount}`, min 100 cents,
+1. S enables the tip alert on `/overlays` (message `${user} tipped ${amount}`, min 200 cents (tips start at 100),
    5000 ms) and creates a token with `7d`: `overlay-url` shows; `overlay-token` `data-active="true"`
    and `data-expires-at` within a minute of now + 7 days.
 2. A new browser context (no cookies) opens the alerts URL: `overlay-alerts` `data-state="live"`.
 3. `alert-test`: an `overlay-alert` with `data-test="true"` appears.
 4. V tips S 250 cents (manual adapter; a treasurer confirms): within 10 s an `overlay-alert`
    with `data-type="tip"`, `data-amount-cents="250"` and V's display name in `overlay-alert-text`.
-   A 50-cent tip shows nothing within 10 s. An anonymous 300-cent tip shows the anonymous label
+   A 150-cent tip (below the minimum) shows nothing within 10 s. An anonymous 300-cent tip shows the anonymous label
    and V's name is nowhere in the overlay DOM.
 5. Scope: with the token as bearer and as `?token=`, `interact.alerts.list`,
    `stream.simulcast.list` and `me.get` are refused as anonymous; `interact.overlays.state`

@@ -21,14 +21,19 @@ import { AUTH_SECRET, makeApp, makeUser, setup, type TestEnv } from "./fixtures.
 import { EXPORTS_BUCKET, hrefs, mailTo, s3PublicOrigin, siteAt, stackStorage, tip } from "./e6-fixtures.ts";
 
 const storage = stackStorage();
-const mailer = createMailer(loadEnv(mailEnv), { site: siteAt(storage ? s3PublicOrigin() : "http://localhost:3000") });
+// The web origin differs from the storage origin, as on the real stack: the presigned link is
+// mailed only because `storageOrigin` reaches both the mailer and (through createWorker) the job.
+const WEB_ORIGIN = "http://localhost:3100";
+const storageOrigin = storage ? s3PublicOrigin() : undefined;
+const mailer = createMailer(loadEnv(mailEnv), {
+  site: siteAt(WEB_ORIGIN),
+  ...(storageOrigin ? { storageOrigin } : {}),
+});
 let env: TestEnv;
 
 describe.skipIf(!storage)("data export", () => {
   const S3 = storage as ObjectStorage;
-  // The storage endpoint browsers use is this instance's origin here, so the mail carries the
-  // presigned link itself (the other case is covered below).
-  const site = siteAt(storage ? s3PublicOrigin() : "http://localhost:3000");
+  const site = siteAt(WEB_ORIGIN);
 
   beforeAll(async () => {
     env = await setup({
@@ -39,6 +44,7 @@ describe.skipIf(!storage)("data export", () => {
       exportsBucket: EXPORTS_BUCKET,
       mailer,
       site,
+      ...(storageOrigin ? { storageOrigin } : {}),
     });
     // Services connect as the least-privilege role: so does the code under test.
     env.worker.ctx.db = env.t.app.db;
@@ -354,7 +360,9 @@ describe.skipIf(!storage)("data export", () => {
 
   test("off-origin storage: the mail links the instance's privacy page instead", async () => {
     const memory = new MemoryMailer({ site: siteAt("http://instance.example.test") });
-    const c: WorkerContext = { ...ctx(), mailer: memory, site: siteAt("http://instance.example.test") };
+    // No storage origin configured: only the instance's own origin may be mailed.
+    const { storageOrigin: _configured, ...base } = ctx();
+    const c: WorkerContext = { ...base, mailer: memory, site: siteAt("http://instance.example.test") };
     const link = await exportDownloadLink(c, {
       id: uuidv7(),
       userId: uuidv7(),

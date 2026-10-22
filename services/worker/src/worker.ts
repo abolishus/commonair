@@ -43,6 +43,8 @@ export interface CreateWorkerOptions {
   exportsBucket?: string;
   mailer?: Mailer;
   site?: InstanceSite;
+  /** Origin export mail may link presigned archives on (see `mailableStorageOrigin`). */
+  storageOrigin?: string;
   busChannel?: string;
   segmentStream?: string;
   jobs?: readonly JobDefinition[];
@@ -90,6 +92,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     exportsBucket: opts.exportsBucket ?? "commonair-exports",
     ...(opts.mailer ? { mailer: opts.mailer } : {}),
     ...(opts.site ? { site: opts.site } : {}),
+    ...(opts.storageOrigin ? { storageOrigin: opts.storageOrigin } : {}),
     busChannel: opts.busChannel ?? BUS.events,
     segmentStream: opts.segmentStream ?? STREAMS.segments,
     classifier: opts.classifier ?? (() => undefined),
