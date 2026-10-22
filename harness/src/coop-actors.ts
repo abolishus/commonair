@@ -555,7 +555,14 @@ export class WebCoop implements CoopDriver {
 
   async council(viewer: SignedInUser, b: WaitBudget): Promise<CouncilSnapshot> {
     const page = await this.openAs(viewer, R.council);
-    const d = await dataset(byCoopId(page, T.council), b.timeoutMs);
+    const wrapper = byCoopId(page, T.council);
+    // The wrapper renders (with an empty data-term-id) while the council loads: give it a moment
+    // to fill in before reading. An instance with no term keeps it empty, so this is bounded.
+    await wrapper
+      .and(page.locator(":not([data-term-id=''])"))
+      .waitFor({ timeout: Math.min(b.timeoutMs, 10_000) })
+      .catch(() => undefined);
+    const d = await dataset(wrapper, b.timeoutMs);
     return {
       termId: d.termId || null,
       members: (await datasets(byCoopId(page, T.councilMember))).map((m) => ({
