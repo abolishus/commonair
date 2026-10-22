@@ -12,6 +12,8 @@ written yet.
 | ---------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [decisions/](decisions/)                                         | Architecture Decision Records (ADRs): context, decision, consequences |
 | [operators/trust-safety.md](operators/trust-safety.md)           | Trust & safety duties, hash lists, evidence, holds (not legal advice) |
+| [deploy/hetzner.md](deploy/hetzner.md)                           | Production on a Hetzner dedicated server (ADR 0010)                   |
+| [deploy/railway.md](deploy/railway.md)                           | Optional staging environment on Railway                               |
 | [runbooks/](runbooks/)                                           | Operational procedures for running an instance (coming)               |
 | [self-hosting/](self-hosting/)                                   | How to deploy and operate your own instance (coming)                  |
 | [architecture.md](architecture.md)                               | System overview: services, data flow, relay network                   |

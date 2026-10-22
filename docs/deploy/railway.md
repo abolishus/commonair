@@ -5,7 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # Staging on Railway
 
-Railway is an **optional** host for a staging environment. The platform's default, FOSS
+Railway is an **optional** host for a staging environment; production runs on a Hetzner dedicated
+server ([hetzner.md](hetzner.md), ADR 0010). The platform's default, FOSS
 deployment stays `podman compose` / Quadlet (`infra/README.md`); nothing in the code depends on
 Railway. The Railway project is described as code in [`.railway/railway.ts`](../../.railway/railway.ts)
 with Railway's Infrastructure as Code (TypeScript, generally available; the older
