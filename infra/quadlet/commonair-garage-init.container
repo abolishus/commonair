@@ -6,6 +6,9 @@
 Description=CommonAir garage-init
 Requires=commonair-garage.service
 After=commonair-garage.service
+# Bounded retries (see [Service]): six attempts an hour, then the unit fails for good.
+StartLimitIntervalSec=1h
+StartLimitBurst=6
 
 [Container]
 Image=localhost/commonair/tools:latest
@@ -21,8 +24,15 @@ Exec=bun infra/garage/bootstrap.ts
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# It waits for Garage itself; a failure needs an operator, not a retry loop.
-Restart=no
+# A transient failure (Garage still starting after a reboot, a dropped connection)
+# is retried. RestartMode=direct (systemd >= 254) restarts without passing through the failed
+# state, so dependents are not failed with a dependency result, which their Restart=always
+# never retries (ADR 0023 §10). StartLimitBurst bounds it: a real failure still fails.
+Restart=on-failure
+RestartMode=direct
+RestartSec=10s
+RestartSteps=3
+RestartMaxDelaySec=1min
 TimeoutStartSec=600
 
 [Install]

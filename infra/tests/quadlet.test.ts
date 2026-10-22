@@ -59,6 +59,21 @@ describe("every container unit", () => {
   });
 });
 
+describe("SELinux labels on host bind mounts", () => {
+  test("a host path two or more units mount carries the shared label z, never the private Z", () => {
+    const users = new Map<string, string[]>();
+    for (const [name, unit] of units)
+      for (const v of values(unit, "Volume")) {
+        const src = v.slice(0, v.indexOf(":"));
+        if (src.endsWith(".volume")) continue;
+        users.set(src, [...(users.get(src) ?? []), `${name}: ${v}`]);
+      }
+    const shared = [...users.values()].filter((u) => u.length > 1);
+    expect(shared.length).toBeGreaterThanOrEqual(4);
+    expect(shared.flat().filter((v) => !/:(ro,)?z$/.test(v))).toEqual([]);
+  });
+});
+
 describe("long-running units restart for real", () => {
   test.each(longRunning)("%s: Restart=always with a delay that backs off", (_, unit) => {
     const service = section(unit, "Service");
@@ -92,12 +107,37 @@ describe("long-running units restart for real", () => {
 });
 
 describe("one-shot jobs", () => {
-  test.each(oneShots)("%s: run to completion once, no health check, no retry loop", (_, unit) => {
-    const service = section(unit, "Service");
-    expect(values(service, "Restart")).toEqual(["no"]);
+  // The timer runs the certificate sync again tomorrow; nothing depends on it.
+  const dependedOn = oneShots.filter(([n]) => n !== "commonair-irc-cert");
+
+  test.each(oneShots)("%s: runs to completion, no health check", (_, unit) => {
     expect(values(unit, "HealthCmd")).toEqual([]);
     expect(values(unit, "HealthOnFailure")).toEqual([]);
   });
+
+  test("the timer-driven certificate sync does not retry", () => {
+    const certSync = oneShots.find(([n]) => n === "commonair-irc-cert")![1];
+    expect(values(section(certSync, "Service"), "Restart")).toEqual(["no"]);
+  });
+
+  test.each(dependedOn)(
+    "%s: a transient failure is retried a bounded number of times without failing its dependents",
+    (_, unit) => {
+      const service = section(unit, "Service");
+      expect(values(service, "Restart")).toEqual(["on-failure"]);
+      // direct: dependents are not failed with a dependency result while it retries.
+      expect(values(service, "RestartMode")).toEqual(["direct"]);
+      expect(seconds(values(service, "RestartSec")[0] ?? "0")).toBeGreaterThan(0);
+      // Bounded: a finite burst within a finite interval.
+      const deps = section(unit, "Unit");
+      const burst = Number(values(deps, "StartLimitBurst")[0]);
+      expect(burst).toBeGreaterThan(1);
+      expect(burst).toBeLessThanOrEqual(10);
+      expect(seconds(values(deps, "StartLimitIntervalSec")[0] ?? "0")).toBeGreaterThan(0);
+      // Each attempt outlasts a slow start of what it waits for (Postgres recovery, Garage).
+      expect(seconds(values(service, "TimeoutStartSec")[0] ?? "0")).toBeGreaterThanOrEqual(600);
+    },
+  );
 
   test.each(oneShots.filter(([n]) => n !== "commonair-irc-cert"))(
     "%s: stays active after it exits, so dependents can restart without re-running it",

@@ -11,6 +11,9 @@
 Description=CommonAir migrate
 Requires=commonair-postgres.service
 After=commonair-postgres.service
+# Bounded retries (see [Service]): six attempts an hour, then the unit fails for good.
+StartLimitIntervalSec=1h
+StartLimitBurst=6
 
 [Container]
 Image=localhost/commonair/tools:latest
@@ -26,8 +29,15 @@ Exec=sh -c "bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# A failed migration needs an operator, not a retry loop; its dependents stay down.
-Restart=no
+# A transient failure (Postgres still in crash recovery after a reboot, a dropped connection)
+# is retried. RestartMode=direct (systemd >= 254) restarts without passing through the failed
+# state, so dependents are not failed with a dependency result, which their Restart=always
+# never retries (ADR 0023 §10). StartLimitBurst bounds it: a real failure still fails.
+Restart=on-failure
+RestartMode=direct
+RestartSec=10s
+RestartSteps=3
+RestartMaxDelaySec=1min
 TimeoutStartSec=600
 
 [Install]
