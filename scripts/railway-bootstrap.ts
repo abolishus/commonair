@@ -8,6 +8,8 @@
  *  1. secrets: generated once, then reused (a value already set on any service wins), and set on
  *     every service that needs them, through stdin so they never appear in process arguments;
  *  2. object storage: copies the Railway bucket's S3 credentials onto the app services;
+ *  2b. evidence (ADR 0006 Q4): the X25519 evidence keypair (public half to api/media/worker,
+ *     private half to api only) and the evidence bucket's own credentials (worker only);
  *  3. public domains: generates Railway service domains for the HTTP-facing services.
  *
  *   railway link --project <project> --environment staging
@@ -44,6 +46,13 @@ const DOMAINS: Record<string, number> = {
   mediamtx: 8889,
 };
 const BUCKET = "media";
+const EVIDENCE_BUCKET = "evidence";
+/** Evidence secrets are scoped, never set on every app service (ADR 0006 Q4). */
+const EVIDENCE_SCOPES: Record<string, readonly string[]> = {
+  api: ["EVIDENCE_PUBLIC_KEY", "EVIDENCE_PRIVATE_KEY"],
+  media: ["EVIDENCE_PUBLIC_KEY"],
+  worker: ["EVIDENCE_PUBLIC_KEY", "S3_EVIDENCE_ACCESS_KEY_ID", "S3_EVIDENCE_SECRET_ACCESS_KEY", "S3_BUCKET_EVIDENCE"],
+};
 
 const args = process.argv.slice(2);
 const flag = (name: string) => {
@@ -77,8 +86,8 @@ function setSecret(service: string, key: string, value: string): void {
   console.log(`set ${key} on ${service}`);
 }
 
-/** Bucket credentials as S3_* settings, tolerating the CLI's key spelling. */
-export function s3Settings(creds: Record<string, unknown>): Record<string, string> {
+/** Bucket credentials, tolerating the CLI's key spelling. */
+function bucketCredentials(creds: Record<string, unknown>) {
   const flat = new Map(
     Object.entries(creds)
       .filter(([, v]) => typeof v === "string" || typeof v === "boolean")
@@ -94,6 +103,12 @@ export function s3Settings(creds: Record<string, unknown>): Record<string, strin
   if (!endpoint || !accessKey || !secretKey || !bucketName)
     throw new Error(`unrecognized bucket credentials (keys: ${Object.keys(creds).join(", ")})`);
   const pathStyle = style === undefined ? "false" : /path|true/i.test(style) ? "true" : "false";
+  return { endpoint, accessKey, secretKey, bucketName, region, pathStyle };
+}
+
+/** Bucket credentials as S3_* settings. */
+export function s3Settings(creds: Record<string, unknown>): Record<string, string> {
+  const { endpoint, accessKey, secretKey, bucketName, region, pathStyle } = bucketCredentials(creds);
   return {
     S3_ENDPOINT: endpoint,
     S3_REGION: region,
@@ -104,6 +119,40 @@ export function s3Settings(creds: Record<string, unknown>): Record<string, strin
     S3_BUCKET_MEDIA: bucketName,
     S3_BUCKET_EXPORTS: bucketName,
     S3_BUCKET_BACKUPS: bucketName,
+  };
+}
+
+/**
+ * The evidence bucket's own key. The worker reaches it through the shared S3_ENDPOINT, region and
+ * addressing style, so the two buckets must agree on those.
+ */
+export function evidenceS3Settings(
+  creds: Record<string, unknown>,
+  main: Record<string, string>,
+): Record<string, string> {
+  const { endpoint, accessKey, secretKey, bucketName, region, pathStyle } = bucketCredentials(creds);
+  if (endpoint !== main.S3_ENDPOINT || region !== main.S3_REGION || pathStyle !== main.S3_FORCE_PATH_STYLE)
+    throw new Error("the evidence bucket's endpoint, region or addressing style differs from the media bucket's");
+  return {
+    S3_EVIDENCE_ACCESS_KEY_ID: accessKey,
+    S3_EVIDENCE_SECRET_ACCESS_KEY: secretKey,
+    S3_BUCKET_EVIDENCE: bucketName,
+  };
+}
+
+/** Reuse the evidence keypair when both halves exist; never pair a kept half with a fresh one. */
+export async function evidenceKeyPair(
+  publicKey: string | undefined,
+  privateKey: string | undefined,
+): Promise<{ EVIDENCE_PUBLIC_KEY: string; EVIDENCE_PRIVATE_KEY: string }> {
+  if (publicKey && privateKey) return { EVIDENCE_PUBLIC_KEY: publicKey, EVIDENCE_PRIVATE_KEY: privateKey };
+  if (publicKey || privateKey)
+    throw new Error("only one half of the evidence keypair is set; restore the other half or remove both");
+  const b64 = (b: ArrayBuffer) => Buffer.from(b).toString("base64");
+  const pair = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
+  return {
+    EVIDENCE_PUBLIC_KEY: b64(await crypto.subtle.exportKey("raw", pair.publicKey)),
+    EVIDENCE_PRIVATE_KEY: b64(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
   };
 }
 
@@ -127,6 +176,18 @@ async function main(): Promise<void> {
     for (const [key, value] of Object.entries(values)) if (current[svc]?.[key] !== value) setSecret(svc, key, value);
   for (const [svc, keys] of Object.entries(SUBSETS))
     for (const key of keys) if (current[svc]?.[key] !== values[key]) setSecret(svc, key, values[key]!);
+
+  // 2b. Evidence: the private half lives only on the API, so the API is its source of truth.
+  const evidenceCreds = JSON.parse(railway(["bucket", "credentials", "--bucket", EVIDENCE_BUCKET, "--json"])) as Record<
+    string,
+    unknown
+  >;
+  const evidence: Record<string, string> = {
+    ...(await evidenceKeyPair(existing("EVIDENCE_PUBLIC_KEY"), current.api?.EVIDENCE_PRIVATE_KEY)),
+    ...evidenceS3Settings(evidenceCreds, values),
+  };
+  for (const [svc, keys] of Object.entries(EVIDENCE_SCOPES))
+    for (const key of keys) if (current[svc]?.[key] !== evidence[key]) setSecret(svc, key, evidence[key]!);
 
   if (!current.mailpit?.MP_UI_AUTH) {
     const login = `staging:${randomSecret("", 18)}`;

@@ -63,6 +63,18 @@ RUN set -eu; \
       tar -C apps/web --exclude=./node_modules -cf - . | tar -C /out/web -xf -; \
     fi
 
+# --- moderation classifier weights, only with BUNDLE_MODEL set (hosts with no bind mount, such
+# as Railway). Compose and Quadlet mount the file instead. Pinned revision, sha256-checked by
+# fetch-model; this stage depends on those two files only, so it stays cached.
+FROM ${BUN_IMAGE} AS model
+ARG BUNDLE_MODEL
+WORKDIR /src
+COPY --from=manifests /src/scripts/fetch-model.ts scripts/
+COPY --from=manifests /src/packages/moderation/src/model.ts packages/moderation/src/
+RUN set -eu; \
+    mkdir -p /out; \
+    if [ -n "${BUNDLE_MODEL}" ]; then bun scripts/fetch-model.ts --out /out/model.onnx; fi
+
 # --- runtime.
 FROM ${BUN_IMAGE} AS runtime
 ARG SERVICE
@@ -97,6 +109,8 @@ RUN set -eu; \
     rm -rf /tmp/out .closure-dev
 COPY --chmod=0755 infra/containers/entrypoint.sh /opt/commonair/entrypoint.sh
 COPY infra/containers/healthcheck.ts /opt/commonair/healthcheck.ts
+# Empty unless BUNDLE_MODEL was set.
+COPY --from=model /out/ /opt/commonair/models/
 
 # Code is root-owned and read-only to the runtime user (uid 1000 `bun`), which keeps
 # rootless userns mappings simple and stops a compromised process rewriting itself.

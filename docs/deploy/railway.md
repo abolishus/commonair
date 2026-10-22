@@ -20,6 +20,7 @@ root `package.json`.
 | -------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `postgres`                                               | Railway managed Postgres                                       | migrations run as its owner; services use the least-privilege `commonair_app` role (ADR 0004). Backups are Railway's, not WAL-G |
 | `media` (bucket)                                         | Railway bucket                                                 | S3-compatible; one bucket holds media, exports and backups (keys are prefixed per kind)                                         |
+| `evidence` (bucket)                                      | Railway bucket                                                 | Sealed evidence only; its own key, set on the worker alone (ADR 0006 Q4)                                                        |
 | `valkey`                                                 | `ghcr.io/valkey-io/valkey` image                               | ephemeral by design, private only                                                                                               |
 | `mailpit`                                                | `ghcr.io/axllent/mailpit` image                                | staging email sink; UI behind basic auth (`MP_UI_AUTH`)                                                                         |
 | `migrate`                                                | tools image                                                    | runs migrations + app role on each deploy, then exits                                                                           |
@@ -104,7 +105,7 @@ railway link --project commonair --environment staging
 railway config plan                      # read the whole plan
 railway config apply                     # creates services, database, bucket
 
-# 3. Secrets, bucket credentials and public domains (idempotent; --dry-run to preview).
+# 3. Secrets (incl. the evidence keypair), bucket credentials and public domains (idempotent; --dry-run to preview).
 bun scripts/railway-bootstrap.ts --environment staging
 
 # 4. Redeploy so every service picks up its variables.

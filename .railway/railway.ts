@@ -77,6 +77,8 @@ export default defineRailway((ctx) => {
   const db = postgres("postgres");
   // Bucket regions cannot change after creation.
   const media = bucket("media", { region: "iad" });
+  // Its own bucket so the worker's evidence key reaches nothing else (ADR 0006 Q4).
+  const evidence = bucket("evidence", { region: "iad" });
 
   // Valkey holds ephemeral state only (architecture.md): no volume, no persistence.
   const valkey = service("valkey", {
@@ -165,7 +167,7 @@ export default defineRailway((ctx) => {
     svc: string,
     port: number,
     opts: { tcp?: number[] } = {},
-    extra: Record<string, string> = {},
+    extra: Record<string, string | ReturnType<typeof preserve>> = {},
   ) =>
     service(name, {
       ...opts,
@@ -224,7 +226,6 @@ export default defineRailway((ctx) => {
   });
 
   const web = app("web", "web", PORTS.web);
-  const api = app("api", "api", PORTS.api);
   const chat = app("chat", "chat", PORTS.chat);
   const origin = app("origin", "origin", PORTS.origin);
   // IRC: plain TCP through Railway's TCP proxy; TLS clients use the WebSocket listener behind an
@@ -232,12 +233,36 @@ export default defineRailway((ctx) => {
   const irc = app("irc", "irc", PORTS.ircHealth, { tcp: [PORTS.irc] }, { IRC_TLS_ALLOW_SELF_SIGNED: "true" });
   // Scratch space is the container filesystem: Railway volumes mount as root and the images
   // run as `bun`, so recordings in progress do not survive a restart on this host.
-  const mediaSvc = app("media", "media", PORTS.media);
-  const worker = app("worker", "worker", PORTS.worker);
+  // No bind mounts here: api and worker build the pinned classifier weights into their image
+  // (BUNDLE_MODEL is a Containerfile build arg).
+  const bundledModel = { BUNDLE_MODEL: "1", MODERATION_CLASSIFIER_MODEL: "/opt/commonair/models/model.onnx" };
+  // Evidence secrets only where ADR 0006 Q4 allows them, set by the bootstrap script.
+  const api = app(
+    "api",
+    "api",
+    PORTS.api,
+    {},
+    { ...bundledModel, EVIDENCE_PUBLIC_KEY: preserve(), EVIDENCE_PRIVATE_KEY: preserve() },
+  );
+  const mediaSvc = app("media", "media", PORTS.media, {}, { EVIDENCE_PUBLIC_KEY: preserve() });
+  const worker = app(
+    "worker",
+    "worker",
+    PORTS.worker,
+    {},
+    {
+      ...bundledModel,
+      ...Object.fromEntries(
+        ["EVIDENCE_PUBLIC_KEY", "S3_EVIDENCE_ACCESS_KEY_ID", "S3_EVIDENCE_SECRET_ACCESS_KEY", "S3_BUCKET_EVIDENCE"].map(
+          (k) => [k, preserve()],
+        ),
+      ),
+    },
+  );
 
   return project("commonair", {
     resources: [
-      group("Data", [db, valkey, media, mailpit, migrate]),
+      group("Data", [db, valkey, media, evidence, mailpit, migrate]),
       group("Media", [mediamtx, webrtcTcp, mediaSvc, origin]),
       group("App", [web, api, chat, irc, worker]),
     ],
