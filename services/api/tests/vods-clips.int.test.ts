@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
 import { setClipQueue } from "../src/media/clip-queue.ts";
+import { LIVE_CLIP_LAG_SECONDS } from "../src/routes/clips.ts";
 import { client, signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -207,8 +208,9 @@ describe("clips", () => {
     expect(enqueued).toContain(res.body.id);
     const [row] = await db().select().from(schema.clips).where(eq(schema.clips.id, res.body.id));
     expect(row?.broadcastId).toBe(b.id);
-    expect(row?.startOffset).toBeGreaterThan(105);
-    expect(row?.startOffset).toBeLessThan(115);
+    // Ends LIVE_CLIP_LAG_SECONDS behind the live edge, where media's recorder has finished segments.
+    expect(row?.startOffset).toBeGreaterThan(120 - LIVE_CLIP_LAG_SECONDS - 10 - 5);
+    expect(row?.startOffset).toBeLessThan(120 - LIVE_CLIP_LAG_SECONDS - 10 + 5);
   });
 
   test("an offline or under-review stream cannot be clipped", async () => {

@@ -27,6 +27,13 @@ type ChannelRow = typeof channels.$inferSelect;
 type Clip = z.infer<typeof dto.Clip>;
 type Labelled = { mature: boolean; categoryId: string | null };
 
+/**
+ * A live clip ends this far behind the live edge: what viewers just saw (HLS plays seconds behind),
+ * and what media's recorder already has on disk (4 s segments, polled every second, pulled from
+ * MediaMTX). Cutting up to "now" finds no finished segment and the clip fails.
+ */
+export const LIVE_CLIP_LAG_SECONDS = 10;
+
 /** `labels[i]` is clip i's broadcast (null when gone); mature media URLs follow the 18+ gate. */
 async function toClips(
   deps: Deps,
@@ -92,7 +99,8 @@ async function clipSource(
   // A broadcast under review cannot be clipped: its clips would be hidden until the case closes.
   if (live.restrictedAt !== null) throw precondition("not_under_review", "This stream is under review");
   const elapsed = (deps.now().getTime() - live.startedAt.getTime()) / 1000;
-  return { broadcastId: live.id, vodId: null, startOffset: Math.max(0, elapsed - input.durationSeconds), labels: live };
+  const end = Math.max(0, elapsed - LIVE_CLIP_LAG_SECONDS);
+  return { broadcastId: live.id, vodId: null, startOffset: Math.max(0, end - input.durationSeconds), labels: live };
 }
 
 export const clips = {
