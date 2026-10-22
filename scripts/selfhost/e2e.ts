@@ -219,7 +219,7 @@ function buildImages(commit: string): void {
 function relabel(commit: string, release: string, broken: ReleaseImage[] = []): void {
   for (const name of RELEASE_IMAGES) {
     const from = `${LOCAL}/${name}:${commit.slice(0, 12)}`;
-    const lines = [`FROM ${from}`, `LABEL org.commonair.e2e-release="${release}"`];
+    const lines = [`FROM ${from}`, `LABEL ${RELEASE_LABEL}="${release}"`];
     // An api that runs but never answers its health check.
     if (broken.includes(name)) lines.push('ENTRYPOINT ["sleep", "infinity"]');
     const dir = join(LOG_DIR, "relabel", `${release}-${name}`);
@@ -366,24 +366,32 @@ function collectLogs(): void {
 }
 
 /**
- * Tags under LOCAL from earlier commits. Each run builds 14 images (about 5 GB) tagged with its
- * commit, and nothing else ever removes them: repeated runs filled a 120 GB podman machine. The
- * e2e release tags (0.0.0-e2e.*) are rebuilt every run and replace their predecessors.
+ * What the e2e removes before it builds. Each run builds 14 images (about 5 GB) tagged with its
+ * commit, and the release images (0.0.0-e2e.*) are built FROM those, so they are their children:
+ * removing a parent while a child exists only untags it. So the children go first (every run
+ * rebuilds them), then any dangling former children (pruned by their own label, nothing else),
+ * then the other commits' images. The host images (host-<distro>:latest) are kept: they change
+ * only with the e2e itself.
  */
-export function staleImages(tags: readonly string[], commit: string): string[] {
+export function cleanupPlan(tags: readonly string[], commit: string): { releases: string[]; stale: string[] } {
   const current = commit.slice(0, 12);
-  return tags.filter((t) => {
-    if (!t.startsWith(`${LOCAL}/`)) return false;
-    const tag = t.slice(t.lastIndexOf(":") + 1);
-    return tag !== current && !tag.startsWith("0.0.0-e2e.");
-  });
+  const ours = tags.filter((t) => t.startsWith(`${LOCAL}/`) && !t.startsWith(`${LOCAL}/host-`));
+  const tagOf = (t: string) => t.slice(t.lastIndexOf(":") + 1);
+  return {
+    releases: ours.filter((t) => tagOf(t).startsWith("0.0.0-e2e.")),
+    stale: ours.filter((t) => tagOf(t) !== current && !tagOf(t).startsWith("0.0.0-e2e.")),
+  };
 }
+
+export const RELEASE_LABEL = "org.commonair.e2e-release";
 
 function removeStaleImages(commit: string): void {
   const tags = podman(["images", "--format", "{{.Repository}}:{{.Tag}}"], { quiet: true }).split("\n");
-  const stale = staleImages(tags, commit);
-  // rmi also drops the layers only those images held. No `image prune`: on a developer's machine
-  // dangling layers are their own build cache.
+  const { releases, stale } = cleanupPlan(tags, commit);
+  if (releases.length) podman(["rmi", "-f", ...releases], { allowFail: true, quiet: true });
+  // Untagged release images of earlier runs, which still pin their commit's layers. The filter
+  // keeps this to dangling images the e2e labelled: a developer's build cache is not touched.
+  podman(["image", "prune", "-f", "--filter", `label=${RELEASE_LABEL}`], { allowFail: true, quiet: true });
   if (stale.length) podman(["rmi", "-f", ...stale], { allowFail: true, quiet: true });
 }
 
@@ -603,7 +611,7 @@ export interface Listener {
   port: number;
 }
 
-/** Local address and port of each line of `ss -Hltn` (`*:80`, `0.0.0.0:80`, `[::]:80`, `127.0.0.1:3900`). */
+/** Local address and port of each line of `ss -Hltn(e)` (`*:80`, `0.0.0.0:80`, `[::]:80`, `127.0.0.1:3900`). */
 export function listeners(ssOutput: string): Listener[] {
   return ssOutput
     .split("\n")
@@ -641,20 +649,19 @@ export function missingListeners(ssOutput: string): number[] {
 }
 
 /**
- * The lines of `ss -Hltne` whose socket the given uid owns. The instance's listeners all belong to
- * the service user (its systemd holds Caddy's socket, rootlessport the published ports); the
- * operating system's own (sshd, systemd-resolved on Fedora) are not the instance's to judge.
+ * The lines of `ss -Hltne` the instance is judged by: every listener except the operating
+ * system's own services (`cgroup:/system.slice/…`: sshd, systemd-resolved on Fedora). The
+ * instance runs only in the service user's slice, and anything else, root's included, is judged.
  */
-export function ownedBy(ssOutput: string, uid: number): string {
+export function judgedListeners(ssOutput: string): string {
   return ssOutput
     .split("\n")
-    .filter((l) => new RegExp(`\\suid:${uid}(\\s|$)`).test(l))
+    .filter((l) => !/\scgroup:\/system\.slice\//.test(l))
     .join("\n");
 }
 
 function checkListeners(): void {
-  const uid = Number(inHost("id -u commonair").trim());
-  const ss = ownedBy(inHost("ss -Hltne"), uid);
+  const ss = judgedListeners(inHost("ss -Hltne"));
   const extra = unexpectedListeners(ss);
   expectThat(
     extra.length === 0,

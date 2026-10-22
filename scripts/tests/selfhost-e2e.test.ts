@@ -24,8 +24,8 @@ import {
   listeners,
   migratedFirst,
   missingListeners,
-  ownedBy,
-  staleImages,
+  cleanupPlan,
+  judgedListeners,
   probeCommand,
   refusedRequests,
   SOURCES,
@@ -154,6 +154,7 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
       "--build-arg",
       "--digestfile",
       "--distro",
+      "--filter",
       "--format",
       "--hostname",
       "--keep",
@@ -381,21 +382,20 @@ describe("e2e: network exposure", () => {
     "LISTEN 0      4096       127.0.0.1:3030       0.0.0.0:*",
   ].join("\n");
 
-  test("only the service user's sockets are judged, not the operating system's", () => {
-    const withUids = [
-      "LISTEN 0 4096 *:443 *:* uid:1000 ino:41 sk:1 cgroup:/user.slice/user-1000.slice/user@1000.service <->",
+  test("every listener is judged except the operating system's own services", () => {
+    const withCgroups = [
+      "LISTEN 0 4096 *:443 *:* uid:1000 ino:41 sk:1 cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope <->",
       "LISTEN 0 4096 0.0.0.0:5355 0.0.0.0:* uid:193 ino:42 sk:2 cgroup:/system.slice/systemd-resolved.service <->",
       "LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:* uid:193 ino:43 sk:3 cgroup:/system.slice/systemd-resolved.service <->",
       "LISTEN 0 128 0.0.0.0:22 0.0.0.0:* ino:44 sk:4 cgroup:/system.slice/ssh.service <->",
-      "LISTEN 0 4096 127.0.0.1:6379 0.0.0.0:* uid:10000 ino:45 sk:5 <->",
-      "LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* uid:1000 ino:46 sk:6 <->",
+      // Root-owned (ss prints no uid) and outside system.slice: judged, and reported.
+      "LISTEN 0 4096 0.0.0.0:5432 0.0.0.0:* ino:45 sk:5 cgroup:/ <->",
+      // A subuid-owned socket in the user's slice: judged too.
+      "LISTEN 0 4096 127.0.0.1:6379 0.0.0.0:* uid:100998 ino:46 sk:6 cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/x <->",
     ].join("\n");
-    const mine = ownedBy(withUids, 1000);
-    expect(listeners(mine)).toEqual([
-      { address: "*", port: 443 },
-      { address: "127.0.0.1", port: 5432 },
-    ]);
-    expect(unexpectedListeners(mine)).toEqual(["127.0.0.1:5432"]);
+    const judged = judgedListeners(withCgroups);
+    expect(listeners(judged).map((l) => l.port)).toEqual([443, 5432, 6379]);
+    expect(unexpectedListeners(judged)).toEqual(["0.0.0.0:5432", "127.0.0.1:6379"]);
   });
 
   test("listeners parses IPv4, IPv6 and dual-stack local addresses", () => {
@@ -473,20 +473,33 @@ describe("e2e: network exposure", () => {
 });
 
 describe("e2e image housekeeping", () => {
-  test("removes only this namespace's images of other commits", () => {
-    const commit = "803c7206aaaabbbbccccdddd";
-    expect(
-      staleImages(
-        [
-          "localhost/commonair-e2e/api:803c7206aaaa",
-          "localhost/commonair-e2e/api:562f8c9e1234",
-          "localhost/commonair-e2e/web:0.0.0-e2e.2",
-          "localhost/commonair/api:latest",
-          "docker.io/library/caddy:2.11.7-alpine",
-          "",
-        ],
-        commit,
-      ),
-    ).toEqual(["localhost/commonair-e2e/api:562f8c9e1234"]);
+  test("removes the release children first, then this namespace's images of other commits", () => {
+    const plan = cleanupPlan(
+      [
+        "localhost/commonair-e2e/api:803c7206aaaa",
+        "localhost/commonair-e2e/api:562f8c9e1234",
+        "localhost/commonair-e2e/api:0.0.0-e2e.2",
+        "localhost/commonair-e2e/web:0.0.0-e2e.3",
+        "localhost/commonair-e2e/host-fedora:latest",
+        "localhost/commonair/api:latest",
+        "docker.io/library/caddy:2.11.7-alpine",
+        "",
+      ],
+      "803c7206aaaabbbbccccdddd",
+    );
+    expect(plan).toEqual({
+      releases: ["localhost/commonair-e2e/api:0.0.0-e2e.2", "localhost/commonair-e2e/web:0.0.0-e2e.3"],
+      stale: ["localhost/commonair-e2e/api:562f8c9e1234"],
+    });
+  });
+
+  test("the release images carry the label the dangling-image prune selects", () => {
+    const src = readFileSync(join(ROOT, "scripts/selfhost/e2e.ts"), "utf8");
+    expect(src).toContain("LABEL ${RELEASE_LABEL}=");
+    expect(src).toContain('"image", "prune", "-f", "--filter", `label=${RELEASE_LABEL}`');
+    // Children before parents.
+    expect(src.indexOf('podman(["rmi", "-f", ...releases]')).toBeLessThan(
+      src.indexOf('podman(["rmi", "-f", ...stale]'),
+    );
   });
 });
