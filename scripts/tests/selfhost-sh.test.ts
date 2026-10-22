@@ -101,7 +101,9 @@ const REAL_TOOLS = [
 const STUBS: Record<string, string> = {
   podman: String.raw`
 case "$1" in
-  version) echo "\${STUB_PODMAN_VERSION:-5.4.2}" ;;
+  version)
+    if [ -n "\${STUB_PODMAN_BROKEN:-}" ]; then echo "\${STUB_PODMAN_BROKEN}" >&2; exit 125; fi
+    echo "\${STUB_PODMAN_VERSION:-5.4.2}" ;;
   pull)
     [ -z "\${STUB_PULL_FAIL:-}" ] || exit 125
     ;;
@@ -429,6 +431,24 @@ describe("host checks", () => {
     const r = h.run(INSTALL);
     expect(r.code).toBe(1);
     expect(r.err).toContain("catatonit is missing");
+  });
+
+  test("podman that cannot set up its user namespace is reported as such, not as too old", () => {
+    const r = host().run(INSTALL, {
+      STUB_PODMAN_BROKEN:
+        'Error: cannot set up namespace using "/usr/bin/newuidmap": should have setuid or have filecaps setuid: exit status 1',
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("newuidmap/newgidmap cannot set up the user namespace");
+    expect(r.err).toContain("dnf reinstall shadow-utils");
+    expect(r.err).not.toContain("too old");
+  });
+
+  test("any other podman failure is shown with its own message", () => {
+    const r = host().run(INSTALL, { STUB_PODMAN_BROKEN: "Error: database is locked" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("Error: database is locked");
+    expect(r.err).not.toContain("too old");
   });
 
   test.each([

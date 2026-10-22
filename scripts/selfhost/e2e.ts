@@ -279,7 +279,10 @@ export function hostContainerfile(distro: Distro): string {
     distro === "debian"
       ? "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
         "systemd systemd-sysv dbus curl ca-certificates iproute2 procps && rm -rf /var/lib/apt/lists/*"
-      : "RUN dnf install -y systemd curl iproute procps-ng util-linux shadow-utils && dnf clean all";
+      : "RUN dnf install -y systemd curl iproute procps-ng util-linux shadow-utils && dnf clean all && " +
+        // The container image ships newuidmap/newgidmap without the file capabilities a real
+        // Fedora install has (rpm -V: P), so rootless Podman cannot map its user namespace.
+        "dnf reinstall -y shadow-utils && dnf clean all";
   return [
     `FROM ${HOST_IMAGES[distro]}`,
     install,

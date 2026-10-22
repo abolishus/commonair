@@ -208,7 +208,16 @@ check_distro() {
 check_podman() {
   have podman || die "podman is not installed" \
     "fix: run this script as root once (it installs Podman), or: apt install podman / dnf install podman"
-  _pv=$(podman version --format '{{.Client.Version}}' 2>/dev/null || true)
+  if ! _pv=$(podman version --format '{{.Client.Version}}' 2>/dev/null); then
+    # Podman is there but cannot start for this user: report why rather than a version.
+    _why=$(podman version 2>&1 | tail -n 3 || true)
+    case "$_why" in
+      *newuidmap* | *newgidmap*)
+        die "podman does not run as $(id -un): newuidmap/newgidmap cannot set up the user namespace" \
+          "fix: they need setuid or file capabilities: sudo dnf reinstall shadow-utils / sudo apt install --reinstall uidmap" ;;
+      *) die "podman does not run as $(id -un): $_why" "fix: run 'podman info' as $(id -un) to see why" ;;
+    esac
+  fi
   _major=$(version_field "$_pv" 1)
   if [ -z "$_major" ] || [ "$_major" -lt "$REQUIRED_PODMAN_MAJOR" ]; then
     die "Podman ${_pv:-unknown} is too old (need ${REQUIRED_PODMAN_MAJOR}.0 or newer)" \
