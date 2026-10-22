@@ -4,6 +4,8 @@
 # Grafana OSS (provisioned datasources; admin password from the env file).
 [Unit]
 Description=CommonAir grafana
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
 Requires=commonair-prometheus.service
 After=commonair-prometheus.service
 Requires=commonair-loki.service
@@ -14,6 +16,8 @@ After=commonair-tempo.service
 [Container]
 Image=docker.io/grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
 ContainerName=commonair-grafana
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
 Network=commonair.network
 NetworkAlias=grafana
 EnvironmentFile=%h/.config/commonair/commonair.env
@@ -35,11 +39,17 @@ HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10
 HealthStartPeriod=30s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
 # Dependents start only once this container reports healthy.
 Notify=healthy
 
 [Service]
 Restart=always
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
 TimeoutStartSec=300
 
 [Install]

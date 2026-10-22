@@ -4,6 +4,8 @@
 # WebTorrent tracker.
 [Unit]
 Description=CommonAir tracker
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
 Requires=commonair-migrate.service
 After=commonair-migrate.service
 Requires=commonair-garage-init.service
@@ -16,6 +18,8 @@ After=commonair-otel-collector.service
 [Container]
 Image=localhost/commonair/tracker:latest
 ContainerName=commonair-tracker
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
 Network=commonair.network
 NetworkAlias=tracker
 EnvironmentFile=%h/.config/commonair/commonair.env
@@ -55,11 +59,17 @@ HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10
 HealthStartPeriod=30s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
 # Dependents start only once this container reports healthy.
 Notify=healthy
 
 [Service]
 Restart=always
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
 TimeoutStartSec=300
 
 [Install]

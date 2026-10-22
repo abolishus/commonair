@@ -10,6 +10,8 @@ After=commonair-garage.service
 [Container]
 Image=localhost/commonair/tools:latest
 ContainerName=commonair-garage-init
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
 Network=commonair.network
 NetworkAlias=garage-init
 EnvironmentFile=%h/.config/commonair/commonair.env
@@ -19,6 +21,8 @@ Exec=bun infra/garage/bootstrap.ts
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# It waits for Garage itself; a failure needs an operator, not a retry loop.
+Restart=no
 TimeoutStartSec=600
 
 [Install]

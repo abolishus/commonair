@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # One-shot: migrations as the owner, then the least-privilege app role.
+#
+# Every unit that touches the schema has Requires= and After= on this one, so it runs to
+# completion before any of them starts. Mind that a stop or restart of this unit propagates to
+# all of them (Requires= semantics): `selfhost.sh upgrade` stops the stack, installs the new
+# units, starts this unit on its own and only then the rest (ADR 0023 §9).
 [Unit]
 Description=CommonAir migrate
 Requires=commonair-postgres.service
@@ -10,6 +15,8 @@ After=commonair-postgres.service
 [Container]
 Image=localhost/commonair/tools:latest
 ContainerName=commonair-migrate
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
 Network=commonair.network
 NetworkAlias=migrate
 EnvironmentFile=%h/.config/commonair/commonair.env
@@ -19,6 +26,8 @@ Exec=sh -c "bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# A failed migration needs an operator, not a retry loop; its dependents stay down.
+Restart=no
 TimeoutStartSec=600
 
 [Install]
