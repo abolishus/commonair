@@ -112,6 +112,13 @@ EOF
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Podman's helpers. aardvark-dns and nftables are only Recommends of netavark on Debian, so a
+# Podman installed without recommends starts no container on a bridge network ("unable to execute
+# nft"). /usr/sbin is not on an unprivileged user's PATH on Debian, hence the explicit paths.
+have_catatonit() { [ -x "$SYSROOT/usr/libexec/podman/catatonit" ] || have catatonit; }
+have_aardvark() { [ -x "$SYSROOT/usr/lib/podman/aardvark-dns" ] || [ -x "$SYSROOT/usr/libexec/podman/aardvark-dns" ]; }
+have_nft() { [ -x "$SYSROOT/usr/sbin/nft" ] || have nft; }
+
 make_tmp() {
   if [ -z "$TMP_ROOT" ]; then
     TMP_ROOT=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/commonair-selfhost.XXXXXX")
@@ -207,10 +214,12 @@ check_podman() {
     die "Podman ${_pv:-unknown} is too old (need ${REQUIRED_PODMAN_MAJOR}.0 or newer)" \
       "fix: upgrade to the distribution's Podman 5 (Debian 13 and Fedora 42 ship it)"
   fi
-  if [ ! -x "$SYSROOT/usr/libexec/podman/catatonit" ] && ! have catatonit; then
-    die "catatonit is missing (every unit runs with RunInit=true)" \
-      "fix: apt install catatonit / dnf install catatonit"
-  fi
+  have_catatonit || die "catatonit is missing (every unit runs with RunInit=true)" \
+    "fix: apt install catatonit / dnf install catatonit"
+  have_aardvark || die "aardvark-dns is missing (the units find each other by name on the commonair network)" \
+    "fix: apt install aardvark-dns / dnf install aardvark-dns"
+  have_nft || die "nft is missing (Podman's netavark sets up the commonair network with nftables)" \
+    "fix: apt install nftables / dnf install nftables"
 }
 
 check_systemd() {
@@ -293,18 +302,18 @@ host_checks() {
 root_prepare() {
   check_distro
   _osid=$(sed -n 's/^ID=//p' "$SYSROOT/etc/os-release" | tr -d '"' | head -n 1)
-  if ! have podman || ! have runuser || { [ ! -x "$SYSROOT/usr/libexec/podman/catatonit" ] && ! have catatonit; }; then
+  if ! have podman || ! have runuser || ! have_catatonit || ! have_aardvark || ! have_nft; then
     case "$_osid" in
       debian)
-        info "installing podman (apt)"
+        info "installing podman and its helpers (apt)"
         DEBIAN_FRONTEND=noninteractive apt-get update -q
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -q podman catatonit uidmap passt dbus-user-session curl ca-certificates
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q podman catatonit uidmap passt aardvark-dns nftables dbus-user-session curl ca-certificates
         ;;
       fedora)
-        info "installing podman (dnf)"
-        dnf install -y -q podman catatonit passt curl
+        info "installing podman and its helpers (dnf)"
+        dnf install -y -q podman catatonit passt aardvark-dns nftables curl
         ;;
-      *) die "cannot install podman on ${_osid:-this distribution}" "fix: install Podman 5 and catatonit, then re-run" ;;
+      *) die "cannot install podman on ${_osid:-this distribution}" "fix: install Podman 5, catatonit, aardvark-dns and nftables, then re-run" ;;
     esac
   fi
   if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then

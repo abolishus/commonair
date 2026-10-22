@@ -9,8 +9,8 @@
  * 1. Builds the 14 release images from this checkout (an image already built for this commit,
  *    by its label, is reused), pushes them to a throwaway Zot registry and writes a release
  *    manifest with the real digests, then the bundle with bundle.ts and its SHA256SUMS.
- * 2. Starts a privileged systemd container (Debian 13, or Fedora 42 with --distro fedora) with
- *    Podman, and runs `selfhost.sh install --bundle … --tls internal --domain selfhost.test
+ * 2. Starts a privileged systemd container (Debian 13, or Fedora 42 with --distro fedora) like a
+ *    fresh server, without Podman, and runs `selfhost.sh install --bundle … --tls internal --domain selfhost.test
  *    --registry <zot>` in it as root, which prepares the host and continues as the unprivileged
  *    `commonair` user.
  * 3. Checks https://selfhost.test/ and /api/status through Caddy's internal CA.
@@ -26,7 +26,7 @@
  * network access for the base images and the third-party images the units pull. The outer
  * podman gets only flags Podman 4.9 has (build, push --digestfile, run --privileged
  * --systemd=always --add-host, network create, port, exec, rm -t); Podman 5 is needed only
- * inside the host container, which installs its distribution's. The host container reaches the
+ * inside the host container, where selfhost.sh installs its distribution's. The host container reaches the
  * registry by an --add-host entry with Zot's address, so it works on either network backend
  * (netavark, or CNI without the dnsname plugin). As root, Bun and podman must be on root's PATH. Logs go to .cache/selfhost-e2e/;
  * --keep leaves the containers running for debugging. Exits non-zero on failure.
@@ -251,12 +251,13 @@ async function release(version: string, commit: string, images: Record<string, {
 // --- host container -----------------------------------------------------------------------
 
 export function hostContainerfile(distro: Distro): string {
+  // What a fresh cloud server has: systemd and a few basics, but no Podman. selfhost.sh installs
+  // Podman and its helpers itself, as root, which is the path an operator takes.
   const install =
     distro === "debian"
       ? "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
-        "systemd systemd-sysv dbus dbus-user-session podman catatonit uidmap passt fuse-overlayfs " +
-        "curl ca-certificates iproute2 procps && rm -rf /var/lib/apt/lists/*"
-      : "RUN dnf install -y systemd podman catatonit passt fuse-overlayfs curl iproute procps-ng util-linux && dnf clean all";
+        "systemd systemd-sysv dbus curl ca-certificates iproute2 procps && rm -rf /var/lib/apt/lists/*"
+      : "RUN dnf install -y systemd curl iproute procps-ng util-linux shadow-utils && dnf clean all";
   return [
     `FROM ${HOST_IMAGES[distro]}`,
     install,

@@ -233,6 +233,7 @@ function host(opts: { cosign?: boolean; osRelease?: string; recordArgv?: boolean
     join(sys, "etc"),
     join(sys, "proc/sys/net/ipv4"),
     join(sys, "usr/libexec/podman"),
+    join(sys, "usr/sbin"),
   ])
     mkdirSync(d, { recursive: true });
   writeFileSync(join(sys, "etc/os-release"), opts.osRelease ?? 'ID=debian\nVERSION_ID="13"\n');
@@ -240,8 +241,10 @@ function host(opts: { cosign?: boolean; osRelease?: string; recordArgv?: boolean
   writeFileSync(join(sys, "etc/subuid"), `${user}:100000:65536\n`);
   writeFileSync(join(sys, "etc/subgid"), `${user}:100000:65536\n`);
   writeFileSync(join(sys, "proc/sys/net/ipv4/ip_unprivileged_port_start"), "80\n");
-  writeFileSync(join(sys, "usr/libexec/podman/catatonit"), "");
-  chmodSync(join(sys, "usr/libexec/podman/catatonit"), 0o755);
+  for (const helper of ["usr/libexec/podman/catatonit", "usr/libexec/podman/aardvark-dns", "usr/sbin/nft"]) {
+    writeFileSync(join(sys, helper), "");
+    chmodSync(join(sys, helper), 0o755);
+  }
 
   for (const tool of REAL_TOOLS) {
     // The Bun running this test (PATH may hold a wrapper that only works from its own directory).
@@ -428,6 +431,28 @@ describe("host checks", () => {
     expect(r.err).toContain("catatonit is missing");
   });
 
+  test.each([
+    ["usr/libexec/podman/aardvark-dns", "aardvark-dns is missing", "apt install aardvark-dns"],
+    ["usr/sbin/nft", "nft is missing", "apt install nftables"],
+  ])("%s missing", (helper, message, fix) => {
+    const h = host();
+    Bun.spawnSync(["rm", join(h.env.COMMONAIR_SYSROOT!, helper)]);
+    const r = h.run(INSTALL);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(message);
+    expect(r.err).toContain(fix);
+  });
+
+  test("aardvark-dns where Debian puts it counts", () => {
+    const h = host();
+    const sys = h.env.COMMONAIR_SYSROOT!;
+    Bun.spawnSync(["rm", join(sys, "usr/libexec/podman/aardvark-dns")]);
+    mkdirSync(join(sys, "usr/lib/podman"), { recursive: true });
+    writeFileSync(join(sys, "usr/lib/podman/aardvark-dns"), "");
+    chmodSync(join(sys, "usr/lib/podman/aardvark-dns"), 0o755);
+    expect(h.run(INSTALL).err).not.toContain("aardvark-dns is missing");
+  });
+
   test("as root without --yes it explains what it would do and stops", () => {
     const h = host();
     writeFileSync(
@@ -445,7 +470,11 @@ describe("host checks", () => {
 
 describe("as root", () => {
   /** Runs install as a stubbed root, with the old staging path planted as symlinks to a victim. */
-  const asRoot = (bundleDir: (h: Host, victim: string) => string, extra: string[]) => {
+  const asRoot = (
+    bundleDir: (h: Host, victim: string) => string,
+    extra: string[],
+    prepare: (h: Host, stubs: Record<string, string>) => void = () => {},
+  ) => {
     const h = host();
     const sys = h.env.COMMONAIR_SYSROOT!;
     mkdirSync(join(sys, "var/tmp"), { recursive: true });
@@ -476,6 +505,7 @@ exit 0`,
       useradd: "exit 1",
       sysctl: "exit 0",
     };
+    prepare(h, stubs);
     for (const [name, body] of Object.entries(stubs)) {
       writeFileSync(join(h.dir, "stub", name), `#!/bin/sh\n${body.replaceAll("\\${", "${")}\n`);
       chmodSync(join(h.dir, "stub", name), 0o755);
@@ -527,6 +557,27 @@ exit 0`,
       expect(call).not.toContain("--yes");
       expect(call.includes("--reinstall")).toBe(extra.includes("--reinstall"));
       expect(h.calls().some((c) => c.startsWith("chown"))).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a Podman installed without recommends gets its network helpers",
+    () => {
+      const { h, r } = asRoot(
+        () => releaseDir,
+        [],
+        (h, stubs) => {
+          Bun.spawnSync(["rm", join(h.env.COMMONAIR_SYSROOT!, "usr/sbin/nft")]);
+          stubs["apt-get"] = String.raw`printf '%s
+' "apt-get $*" >> "$STUB_LOG"`;
+        },
+      );
+      expect(r.code, r.err).toBe(0);
+      const install = h.calls().find((c) => c.startsWith("apt-get install"));
+      expect(install).toBeDefined();
+      for (const pkg of ["podman", "catatonit", "aardvark-dns", "nftables", "passt", "uidmap"])
+        expect(install!.split(" ")).toContain(pkg);
     },
     TIMEOUT,
   );

@@ -41,7 +41,10 @@ describe("e2e images", () => {
     (distro) => {
       const file = hostContainerfile(distro);
       expect(file.startsWith(`FROM ${HOST_IMAGES[distro]}\n`)).toBe(true);
-      for (const pkg of ["systemd", "podman", "catatonit", "passt", "curl"]) expect(file).toContain(` ${pkg}`);
+      for (const pkg of ["systemd", "curl"]) expect(file).toContain(` ${pkg}`);
+      // Like a fresh server: selfhost.sh installs Podman and its helpers, as an operator's would.
+      for (const pkg of ["podman", "catatonit", "passt", "aardvark-dns", "nftables"])
+        expect(file).not.toContain(` ${pkg}`);
       expect(file).toContain('CMD ["/sbin/init"]');
       expect(file).toContain("insecure = true");
     },
