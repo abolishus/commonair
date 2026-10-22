@@ -910,6 +910,24 @@ describe("re-install", () => {
   );
 
   test(
+    "operator drop-in directories survive a re-install",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const quadletDropIn = join(h.home, ".config/containers/systemd/commonair-media.container.d");
+      const serviceDropIn = join(h.home, ".config/systemd/user/commonair-backup.service.d");
+      for (const d of [quadletDropIn, serviceDropIn]) {
+        mkdirSync(d, { recursive: true });
+        writeFileSync(join(d, "10-local.conf"), "[Unit]\n");
+      }
+      expectOk(h.run([...INSTALL, "--reinstall"]));
+      expect(existsSync(join(quadletDropIn, "10-local.conf"))).toBe(true);
+      expect(existsSync(join(serviceDropIn, "10-local.conf"))).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  test(
     "a re-install after a failed migration is not refused by the start limit",
     () => {
       const h = host();

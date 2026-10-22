@@ -344,7 +344,7 @@ export const infraEnv = z.object({
   TLS_MODE: z.enum(["acme", "internal"]).optional(),
   /** Account email for ACME expiry notices (optional). */
   ACME_EMAIL: z.email().optional(),
-  /** ACME directory URL override, e.g. a staging CA (default: Caddy's, Let's Encrypt then ZeroSSL). */
+  /** ACME directory URL override, e.g. a staging CA (default: Let's Encrypt production; no ZeroSSL fallback). */
   ACME_CA: z.url().optional(),
   IMAGE_REGISTRY: z.string().optional(),
   IMAGE_TAG: z.string().optional(),

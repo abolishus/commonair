@@ -687,14 +687,16 @@ fetch_model() {
 install_units() {
   _rel=$1
   mkdir -p "$QUADLET_DIR" "$SYSTEMD_DIR"
+  # Operator drop-ins (commonair-<unit>.container.d/, e.g. for a GPU) are directories and stay.
   for _f in "$QUADLET_DIR"/commonair*; do
-    if [ -e "$_f" ]; then rm -f "$_f"; fi
+    if [ -f "$_f" ] || [ -L "$_f" ]; then rm -f "$_f"; fi
   done
   cp "$_rel"/quadlet/* "$QUADLET_DIR/"
   # Units in ~/.config/systemd/user shadow Quadlet's generated ones, so a commonair-* unit the
   # release does not ship (an older release's, or one copied by hand for a manual install) goes.
   for _f in "$SYSTEMD_DIR"/commonair-*; do
     [ -e "$_f" ] || [ -L "$_f" ] || continue
+    [ -d "$_f" ] && [ ! -L "$_f" ] && continue # a commonair-*.service.d drop-in
     _n=$(basename "$_f")
     [ -e "$_rel/systemd/$_n" ] && continue
     case "$_n" in *.timer) systemctl --user disable --now "$_n" >/dev/null 2>&1 || true ;; esac
