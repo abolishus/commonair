@@ -49,10 +49,15 @@ Decided by the head agent within these answers (recorded so reviewers can check 
   period (`closePeriod`, which refuses overlaps), so there is no separate monthly ledger close in
   E5. Allocations stay in `patronage-payable` until a later slice pays them out.
 - **The council is re-seated** when there is no current term, at the start of each UTC month, and
-  when a seat falls vacant (the member is no longer an active streamer member). Terms are
+  when a seat falls vacant (the member is no longer an active streamer member), and when the term
+  has fewer seats than `council.config.size` while an active streamer member is unseated. Terms are
   append-only; the current term is the latest one whose window contains now.
-- **A voluntary exit is respected by the membership sync.** The job does not re-activate a class
-  a member left within that class's window.
+- **A voluntary exit is respected by the membership sync.** The job does not re-activate a
+  streamer who exited within `streamer.windowDays`, and never re-activates a viewer who exited: a
+  viewer rejoins by buying a new share. Known limitation: a viewer who qualified only by
+  subscription has no rejoin path after exiting until an explicit join exists (follow-up).
+- **Drafts are private.** Creating, editing or withdrawing a draft writes audit rows but no public
+  `coop.proposal.update` event; the public record starts at submit.
 - **Proposals advance automatically.** A worker job moves proposals through discussion, council
   review, voting, the decision and the application of passed changes. Every step is one
   transaction with its audit row and event; the triggers re-check each one.
@@ -66,5 +71,5 @@ Decided by the head agent within these answers (recorded so reviewers can check 
 - New triggers protect tallies (they must equal the SQL tally), council terms, seats and responses
   (append-only), share transitions, and patronage periods, inputs and allocations (frozen once
   approved; two-person approval). The app role loses UPDATE/DELETE on the append-only ones.
-- Follow-ups: Stripe shares; paying out patronage payables; council election as an alternative
+- Follow-ups: Stripe shares; an explicit viewer join; paying out patronage payables; council election as an alternative
   seating method (would be a governance setting); board-election UI beyond read-only.
