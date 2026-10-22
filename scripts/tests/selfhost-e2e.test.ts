@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
 import {
+  AUTH_LIMIT,
+  AUTH_PROBE_PATH,
   CADDY_FORBIDDEN,
   EXPORT_FILENAME,
   HOST_IMAGES,
@@ -19,9 +21,15 @@ import {
   hostContainerfile,
   hostRunArgs,
   isTransientBuildError,
+  listeners,
   migratedFirst,
+  missingListeners,
+  probeCommand,
   refusedRequests,
+  SOURCES,
+  SPOOFED,
   storageScript,
+  unexpectedListeners,
   uploadBody,
 } from "../selfhost/e2e.ts";
 
@@ -323,5 +331,91 @@ describe("e2e unit env check", () => {
       .filter((l) => l && !l.startsWith("#"));
     expect(forbiddenKeys(keys.map((k) => `${k}=x`).join("\n"), CADDY_FORBIDDEN)).toEqual([]);
     expect(keys).toContain("PUBLIC_HOSTNAME");
+  });
+});
+
+describe("e2e: network exposure", () => {
+  // `ss -Hltn` as Debian 13's iproute2 prints it: dual-stack sockets as `*`, IPv6 in brackets.
+  const ss = [
+    "LISTEN 0      4096               *:80              *:*",
+    "LISTEN 0      4096               *:443             *:*",
+    "LISTEN 0      4096               *:1935            *:*",
+    "LISTEN 0      4096               *:6667            *:*",
+    "LISTEN 0      4096               *:6697            *:*",
+    "LISTEN 0      4096       127.0.0.1:3900       0.0.0.0:*",
+    "LISTEN 0      4096       127.0.0.1:3030       0.0.0.0:*",
+  ].join("\n");
+
+  test("listeners parses IPv4, IPv6 and dual-stack local addresses", () => {
+    expect(listeners("LISTEN 0 4096 [::1]:5432 [::]:*\nLISTEN 0 4096 [fe80::1%eth0]:22 [::]:*")).toEqual([
+      { address: "::1", port: 5432 },
+      { address: "fe80::1", port: 22 },
+    ]);
+    expect(listeners(ss)).toHaveLength(7);
+  });
+
+  test("the expected host passes", () => {
+    expect(unexpectedListeners(ss)).toEqual([]);
+    expect(missingListeners(ss)).toEqual([]);
+  });
+
+  test("any other listener fails, a loopback-only port on a public address too", () => {
+    const extra = [
+      "LISTEN 0 4096 127.0.0.1:6379 0.0.0.0:*",
+      "LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:*",
+      "LISTEN 0 4096 0.0.0.0:3900 0.0.0.0:*",
+      "LISTEN 0 4096 [::]:3030 [::]:*",
+      "LISTEN 0 4096 *:22 *:*",
+    ].join("\n");
+    expect(unexpectedListeners(`${ss}\n${extra}`)).toEqual([
+      "127.0.0.1:6379",
+      "127.0.0.1:5432",
+      "0.0.0.0:3900",
+      ":::3030",
+      "*:22",
+    ]);
+  });
+
+  test("Caddy's 80 and 443 and RTMP must listen; IRC may still wait for its certificate", () => {
+    const withoutCaddy = ss
+      .split("\n")
+      .filter((l) => !/:(80|443) /.test(l))
+      .join("\n");
+    expect(missingListeners(withoutCaddy)).toEqual([80, 443]);
+    const withoutIrc = ss
+      .split("\n")
+      .filter((l) => !/:66\d\d /.test(l))
+      .join("\n");
+    expect(missingListeners(withoutIrc)).toEqual([]);
+  });
+
+  test("the probe hits the API's rate-limited auth prefix from a chosen source, printing only the status", () => {
+    const cmd = probeCommand(SOURCES.a, SPOOFED);
+    expect(AUTH_PROBE_PATH.startsWith("/api/auth/")).toBe(true);
+    expect(cmd).toContain(`--interface ${SOURCES.a} -X POST`);
+    expect(cmd).toContain(`-H 'X-Forwarded-For: ${SPOOFED}'`);
+    expect(cmd).toContain(`https://selfhost.test${AUTH_PROBE_PATH}`);
+    expect(cmd).toContain("-o /dev/null -w '%{http_code}\\n'");
+    expect(probeCommand(SOURCES.b)).not.toContain("X-Forwarded-For");
+    // Three distinct local sources, all on the host's loopback network.
+    expect(new Set(Object.values(SOURCES)).size).toBe(3);
+    for (const s of Object.values(SOURCES)) expect(s).toMatch(/^127\.0\.0\.\d+$/);
+  });
+
+  test("the limit is the API's auth bucket, on the auth prefix", () => {
+    const limits = readFileSync(join(ROOT, "services/api/src/lib/ratelimit.ts"), "utf8");
+    expect(limits).toContain(`auth: { max: ${AUTH_LIMIT}, windowMs: 60_000 }`);
+    expect(readFileSync(join(ROOT, "packages/contracts/src/auth.ts"), "utf8")).toContain(
+      'export const AUTH_BASE_PATH = "/api/auth";',
+    );
+  });
+
+  test("runs on install; the Valkey and listener checks again after the upgrade", () => {
+    const src = readFileSync(join(ROOT, "scripts/selfhost/e2e.ts"), "utf8");
+    const calls = (fn: string) => src.match(new RegExp(`^\\s+${fn}\\(\\);$`, "gm"))?.length ?? 0;
+    expect(calls("checkClientAddresses")).toBe(1);
+    expect(calls("checkIpv6")).toBe(1);
+    expect(calls("checkValkeyAuth")).toBe(2);
+    expect(calls("checkListeners")).toBe(2);
   });
 });

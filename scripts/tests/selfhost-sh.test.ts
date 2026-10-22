@@ -813,11 +813,20 @@ describe("install", () => {
     });
     expect(env.POSTGRES_PASSWORD!.length).toBeGreaterThanOrEqual(20);
     expect(env.DATABASE_URL).toBe(`postgres://commonair_app:${env.POSTGRES_APP_PASSWORD}@postgres:5432/commonair`);
+    // Valkey's password, and the in-network URL that carries it.
+    expect(env.VALKEY_PASSWORD).toMatch(/^[0-9a-f]{64}$/);
+    expect(env.VALKEY_URL).toBe(`redis://:${env.VALKEY_PASSWORD}@valkey:6379`);
   });
 
   test("never prints a secret", () => {
     const env = envOf(h);
-    for (const key of ["POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "GRAFANA_ADMIN_PASSWORD", "AUTH_SECRET"]) {
+    for (const key of [
+      "POSTGRES_PASSWORD",
+      "POSTGRES_APP_PASSWORD",
+      "GRAFANA_ADMIN_PASSWORD",
+      "AUTH_SECRET",
+      "VALKEY_PASSWORD",
+    ]) {
       expect(env[key], key).toBeTruthy();
       expect(r.out + r.err, key).not.toContain(env[key]!);
     }
@@ -830,11 +839,17 @@ describe("install", () => {
     const argv = `${h.calls().join("\n")}\n${h.argv()}`;
     // The wrappers did record the real tools (awk writes the env file).
     expect(argv).toMatch(/^awk /m);
-    for (const key of ["POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "GRAFANA_ADMIN_PASSWORD", "AUTH_SECRET"])
+    for (const key of [
+      "POSTGRES_PASSWORD",
+      "POSTGRES_APP_PASSWORD",
+      "GRAFANA_ADMIN_PASSWORD",
+      "AUTH_SECRET",
+      "VALKEY_PASSWORD",
+    ])
       expect(argv, key).not.toContain(env[key]!);
   });
 
-  test("podman secrets hold the role URLs and the Grafana password", () => {
+  test("podman secrets hold the role URLs, the Grafana password and the Valkey URL", () => {
     const env = envOf(h);
     const secret = (n: string) => readFileSync(join(h.dir, "state/secrets", n), "utf8");
     expect(secret("commonair-database-url")).toBe(
@@ -844,10 +859,12 @@ describe("install", () => {
       `postgres://commonair:${env.POSTGRES_PASSWORD}@postgres:5432/commonair`,
     );
     expect(secret("commonair-grafana-admin-password")).toBe(env.GRAFANA_ADMIN_PASSWORD);
+    expect(secret("commonair-valkey-url")).toBe(`redis://:${env.VALKEY_PASSWORD}@valkey:6379`);
     expect(h.calls().filter((c) => c.startsWith("podman secret create"))).toEqual([
       "podman secret create --replace commonair-database-url -",
       "podman secret create --replace commonair-owner-database-url -",
       "podman secret create --replace commonair-grafana-admin-password -",
+      "podman secret create --replace commonair-valkey-url -",
     ]);
   });
 
@@ -893,8 +910,29 @@ describe("install", () => {
     expect(at("systemctl --user start --no-block")).toBeGreaterThan(
       at("systemctl --user start commonair-migrate.service"),
     );
-    expect(calls).toContain("systemctl --user enable --now commonair-backup.timer commonair-irc-cert.timer");
+    expect(calls).toContain(
+      "systemctl --user enable --now commonair-caddy.socket commonair-backup.timer commonair-irc-cert.timer",
+    );
     expect(calls).toContain("systemctl --user start commonair-irc-cert.service");
+  });
+
+  test("Caddy's sockets stop with the stack and start with it; the network is re-created in between", () => {
+    const calls = h.calls();
+    const at = (s: string) => calls.findIndex((c) => c.startsWith(s));
+    const stop = calls.find((c) => c.startsWith("systemctl --user stop commonair-caddy.socket "))!;
+    expect(stop).toContain("commonair-caddy.service");
+    expect(stop).toContain("commonair-api.service");
+    // Quadlet never re-creates an existing network, so its settings (IPRange) would not apply.
+    expect(at("systemctl --user stop commonair-network.service")).toBeGreaterThan(at(stop));
+    expect(at("podman network rm commonair")).toBeGreaterThan(at("systemctl --user stop commonair-network.service"));
+    expect(at("systemctl --user start commonair-migrate.service")).toBeGreaterThan(at("podman network rm commonair"));
+    const start = calls.find((c) => c.startsWith("systemctl --user start --no-block"))!;
+    expect(start).toContain("commonair-caddy.socket commonair-");
+    expect(start).toContain("commonair-caddy.service");
+  });
+
+  test("status lists the socket unit too", () => {
+    expect(h.run(["status"]).out).toContain("commonair-caddy.socket");
   });
 
   test("status reports the version, TLS and every unit", () => {
@@ -1122,12 +1160,15 @@ describe("stale units", () => {
       // From the manual install path (cp infra/systemd/*): shadows Quadlet's irc-cert unit.
       writeFileSync(join(dir, "commonair-irc-cert.service"), "[Service]\nExecStart=%h/.bun/bin/bun sync\n");
       writeFileSync(join(dir, "commonair-old.timer"), "[Timer]\nOnCalendar=daily\n");
+      // A rollback to a release without a socket unit: it stops listening and goes.
+      writeFileSync(join(dir, "commonair-old.socket"), "[Socket]\nListenStream=80\n");
       writeFileSync(join(dir, "someone-else.service"), "[Service]\n");
       expectOk(h.run(INSTALL));
       expect(readdirSync(dir).sort()).toEqual(
         [...readdirSync(join(ROOT, "infra/systemd")), "someone-else.service"].sort(),
       );
       expect(h.calls()).toContain("systemctl --user disable --now commonair-old.timer");
+      expect(h.calls()).toContain("systemctl --user disable --now commonair-old.socket");
       const disable = h.calls().indexOf("systemctl --user disable --now commonair-old.timer");
       expect(disable).toBeLessThan(h.calls().indexOf("systemctl --user daemon-reload"));
     },
@@ -1219,6 +1260,59 @@ describe("upgrade", () => {
       expect(envOf(h).S3_PUBLIC_ENDPOINT).toBe("https://stream.example.org");
       expect(readFileSync(file, "utf8").match(/^S3_PUBLIC_ENDPOINT=/gm)).toHaveLength(1);
       expect(mode(file)).toBe(0o600);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "gives an env file from before Valkey had a password one, and the URL that carries it",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      // An install from before: no VALKEY_PASSWORD, and init-env's development URL.
+      writeFileSync(
+        file,
+        readFileSync(file, "utf8")
+          .replace(/^VALKEY_PASSWORD=.*\n/m, "")
+          .replace(/^VALKEY_URL=.*$/m, "VALKEY_URL=redis://localhost:6379"),
+      );
+      const r = h.run(["upgrade", "--version", "v0.2.0"]);
+      expect(r.code, r.err).toBe(0);
+      const env = envOf(h);
+      expect(env.VALKEY_PASSWORD).toMatch(/^[0-9a-f]{64}$/);
+      expect(env.VALKEY_URL).toBe(`redis://:${env.VALKEY_PASSWORD}@valkey:6379`);
+      expect(readFileSync(join(h.dir, "state/secrets/commonair-valkey-url"), "utf8")).toBe(env.VALKEY_URL);
+      expect(r.out + r.err).not.toContain(env.VALKEY_PASSWORD!);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "keeps an existing Valkey password across upgrades",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const before = envOf(h).VALKEY_PASSWORD;
+      expectOk(h.run(["upgrade", "--version", "v0.2.0"]));
+      expect(envOf(h).VALKEY_PASSWORD).toBe(before);
+    },
+    TIMEOUT,
+  );
+
+  test.each([
+    ["empty", "VALKEY_PASSWORD=", "has no VALKEY_PASSWORD"],
+    ["not URL-safe", "VALKEY_PASSWORD=a/b@c", "may hold only letters"],
+  ])(
+    "refuses a Valkey password that is %s",
+    (_, line, message) => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      writeFileSync(file, readFileSync(file, "utf8").replace(/^VALKEY_PASSWORD=.*$/m, line));
+      const r = h.run(["install", "--reinstall"]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(message);
     },
     TIMEOUT,
   );

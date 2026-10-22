@@ -22,18 +22,47 @@
 #   INGEST_WHIP_PUBLIC_URL=https://<host>/live  INGEST_RTMP_PUBLIC_URL=rtmp://<host>/live
 #   S3_PUBLIC_ENDPOINT=https://<host>  (presigned uploads and export downloads, ADR 0024)
 # The bucket names come from S3_BUCKET_MEDIA and S3_BUCKET_EXPORTS (defaults as in .env.example).
+#
+# Listeners (CADDY_LISTEN): `ports` (the default, compose) binds :80 and :443 in the container.
+# `systemd` (the Quadlet unit) serves the sockets commonair-caddy.socket passes in: fd/3 (80),
+# fd/4 (443) and fdgram/5 (443/udp), opened in the host's network namespace, so each connection
+# comes from the client's own address, IPv6 included. Any other value fails to load.
+#
+# Client addresses: no `trusted_proxies`. Nothing in front of Caddy forwards for clients, so a
+# client's own X-Forwarded-For is never believed: Caddy sends the services the address it
+# accepted the connection from, and they trust that header from Caddy alone (its fixed address
+# in TRUSTED_PROXY_CIDRS). Under compose's port forwarding that address is an internal one.
 {
 	# `cert_issuer acme` without a directory URL is Let's Encrypt.
 	cert_issuer acme {$ACME_CA}
-	servers {
-		# Clients' real addresses reach the services only through X-Forwarded-For,
-		# which they trust from TRUSTED_PROXY_CIDRS.
-		trusted_proxies static private_ranges
-	}
 }
 
-# Snippets must precede the site that imports them. `tls [<email>] { … }`: the block keeps the
-# directive valid when ACME_EMAIL is empty.
+# Snippets must precede the site that imports them.
+(listen-ports) {
+}
+(listen-systemd) {
+	bind fd/4 {
+		protocols h1 h2
+	}
+	bind fdgram/5 {
+		protocols h3
+	}
+}
+(http-ports) {
+}
+# Port 80 from systemd: a redirect to HTTPS. ACME validates here (Caddy answers HTTP challenges
+# on its HTTP servers before any route) or over TLS-ALPN on 443.
+(http-systemd) {
+	http:// {
+		bind fd/3 {
+			protocols h1
+		}
+		redir https://{host}{uri} 308
+	}
+}
+import http-{$CADDY_LISTEN:ports}
+
+# `tls [<email>] { … }`: the block keeps the directive valid when ACME_EMAIL is empty.
 (tls-acme) {
 	tls {$ACME_EMAIL} {
 		protocols tls1.2
@@ -50,6 +79,7 @@
 }
 
 {$PUBLIC_HOSTNAME:localhost} {
+	import listen-{$CADDY_LISTEN:ports}
 	import tls-{$TLS_MODE:acme}
 
 	# Presigned object URLs (ADR 0024): https://<host>/<bucket>/<key>?X-Amz-…, forwarded to Garage

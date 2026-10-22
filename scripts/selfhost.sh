@@ -287,10 +287,21 @@ check_ports() {
 
 firewall_hints() {
   if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
-    info "firewalld is running; open the public ports:"
+    info "firewalld is running; open the public ports (IPv4 and IPv6):"
     info "  sudo firewall-cmd --permanent --add-port={80,443,1935,6667,6697}/tcp --add-port={443,8189}/udp && sudo firewall-cmd --reload"
   elif have nft; then
-    info "if an nftables ruleset filters input, allow tcp dports {80,443,1935,6667,6697} and udp dports {443,8189}"
+    info "if an nftables ruleset filters input, allow tcp dports {80,443,1935,6667,6697} and udp dports {443,8189}, for IPv4 and IPv6 (an inet table covers both)"
+  fi
+}
+
+# The public ports listen on IPv6 too wherever the host has it: say whether AAAA records work.
+ipv6_hint() {
+  have ip || return 0
+  _v6=$(ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+  if [ -n "$_v6" ]; then
+    info "this host has the global IPv6 address $_v6: the public ports listen on it too, so an AAAA record may point here"
+  else
+    info "no global IPv6 address: the public ports listen on IPv4 only; publish an A record, no AAAA"
   fi
 }
 
@@ -302,6 +313,7 @@ host_checks() {
   # Our own containers hold these ports on a re-install or upgrade.
   if ! instance_exists; then check_ports; fi
   firewall_hints
+  ipv6_hint
 }
 
 # --- root preparation ---------------------------------------------------------------------
@@ -648,6 +660,20 @@ configure_env() {
   # The app-role URL; the services get it as a podman secret as well (create_secrets).
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
+  valkey_env
+}
+
+# Valkey requires VALKEY_PASSWORD (init-env generated it in write_env, on install and, for an
+# older env file, on the first upgrade). The services' VALKEY_URL carries it; they get the URL as
+# a podman secret (create_secrets), and the env file says the same so it stays the one source.
+valkey_env() {
+  _vpw=$(env_get VALKEY_PASSWORD "$ENV_FILE")
+  [ -n "$_vpw" ] || die "$ENV_FILE has no VALKEY_PASSWORD (Valkey refuses to start without one)" \
+    "fix: delete the VALKEY_PASSWORD line (install and upgrade generate a new one) or set one, then re-run"
+  case "$_vpw" in
+    *[!A-Za-z0-9._~-]*) die "VALKEY_PASSWORD may hold only letters, digits and . _ ~ - (it goes into VALKEY_URL)" ;;
+  esac
+  env_set VALKEY_URL "redis://:$_vpw@valkey:6379"
 }
 
 # Variables an older install never wrote, filled in on upgrade without touching set values.
@@ -659,6 +685,9 @@ backfill_env() {
     info "setting S3_PUBLIC_ENDPOINT=https://$_host (browser uploads and export downloads)"
     env_set S3_PUBLIC_ENDPOINT "https://$_host"
   fi
+  # Before Valkey had a password, VALKEY_URL was the development default; write_env generated
+  # VALKEY_PASSWORD for this upgrade.
+  valkey_env
 }
 
 # Podman secrets the units read, re-created from the env file every time (idempotent).
@@ -674,6 +703,9 @@ create_secrets() {
   printf 'postgres://commonair:%s@postgres:5432/commonair' "$_owner" |
     podman secret create --replace commonair-owner-database-url - >/dev/null
   printf '%s' "$_grafana" | podman secret create --replace commonair-grafana-admin-password - >/dev/null
+  _vurl=$(env_get VALKEY_URL "$ENV_FILE")
+  [ -n "$_vurl" ] || die "$ENV_FILE lacks VALKEY_URL"
+  printf '%s' "$_vurl" | podman secret create --replace commonair-valkey-url - >/dev/null
   info "podman secrets updated"
 }
 
@@ -735,7 +767,7 @@ install_units() {
     [ -d "$_f" ] && [ ! -L "$_f" ] && continue # a commonair-*.service.d drop-in
     _n=$(basename "$_f")
     [ -e "$_rel/systemd/$_n" ] && continue
-    case "$_n" in *.timer) systemctl --user disable --now "$_n" >/dev/null 2>&1 || true ;; esac
+    case "$_n" in *.timer | *.socket) systemctl --user disable --now "$_n" >/dev/null 2>&1 || true ;; esac
     info "removing $_n (not part of this release)"
     rm -f "$_f"
   done
@@ -763,6 +795,24 @@ all_units() {
   done
 }
 
+# Socket units (Caddy's public ports, held by systemd and passed to the service).
+sockets() {
+  for _u in "$SYSTEMD_DIR"/commonair-*.socket; do
+    [ -f "$_u" ] && basename "$_u"
+  done
+  return 0
+}
+
+# The network's settings (its IPRange keeps the fixed addresses of Caddy and web free) apply only
+# when Podman creates it, and Quadlet never re-creates an existing one: so it goes while the
+# stack is down, and the first unit to start creates it from this release's commonair.network.
+recreate_network() {
+  systemctl --user stop commonair-network.service 2>/dev/null || true
+  podman network exists commonair 2>/dev/null || return 0
+  podman network rm commonair >/dev/null 2>&1 ||
+    warn "could not remove the commonair network (a container outside the instance still uses it?); keeping its old settings"
+}
+
 # Runs migrate to completion within HEALTH_TIMEOUT. Postgres never gives up (Restart=always,
 # RestartMode=direct, no start limit), so with an image that never gets healthy its start job,
 # and migrate's queued behind it (After=), never end: an unbounded start would hang here and
@@ -787,8 +837,10 @@ start_migrate() {
 
 # ADR 0023 §9: everything down, migrations to completion, then the rest.
 restart_stack() {
+  # The sockets first: a connection to one would start Caddy (and what it wants) mid-upgrade.
   # shellcheck disable=SC2046 # unit names have no spaces
-  systemctl --user stop $(all_units) 2>/dev/null || true
+  systemctl --user stop $(sockets) $(all_units) 2>/dev/null || true
+  recreate_network
   # migrate and garage-init retry with a start limit; a release whose migrate kept failing
   # leaves them start-limit-hit, which would refuse this start (a rollback, or a re-run) for
   # up to an hour.
@@ -797,8 +849,10 @@ restart_stack() {
   start_migrate || return 1
   info "starting the stack"
   # shellcheck disable=SC2046
-  systemctl --user start --no-block $(services)
-  systemctl --user enable --now commonair-backup.timer commonair-irc-cert.timer >/dev/null 2>&1 || true
+  systemctl --user start --no-block $(sockets) $(services)
+  # Enabled, a socket also listens at boot, before Caddy is up (connections wait in its queue).
+  # shellcheck disable=SC2046
+  systemctl --user enable --now $(sockets) commonair-backup.timer commonair-irc-cert.timer >/dev/null 2>&1 || true
 }
 
 unit_healthy() {
@@ -1108,6 +1162,11 @@ cmd_status() {
     _c=$(sed -n 's/^ContainerName=//p' "$QUADLET_DIR/${_u%.service}.container")
     _h=$(podman inspect --format '{{.State.Health.Status}}' "$_c" 2>/dev/null || true)
     printf '  %-34s %-10s %-10s %s\n' "${_u%.service}" "${_state:-?}" "${_sub:-?}" "${_h:--}"
+  done
+  for _u in $(sockets); do
+    _state=$(systemctl --user show "$_u" --property=ActiveState --value 2>/dev/null || true)
+    _sub=$(systemctl --user show "$_u" --property=SubState --value 2>/dev/null || true)
+    printf '  %-34s %-10s %-10s %s\n' "$_u" "${_state:-?}" "${_sub:-?}" "-"
   done
   say ""
   _last=$(systemctl --user show commonair-backup.service --property=ExecMainExitTimestamp --value 2>/dev/null || true)

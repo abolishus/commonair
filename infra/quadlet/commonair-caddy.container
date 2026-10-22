@@ -2,6 +2,13 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # Caddy TLS termination for PUBLIC_HOSTNAME (public: 80/443, see infra/README.md).
+#
+# The public ports are not PublishPort=: rootless Podman forwards those through rootlessport,
+# and every client would reach Caddy from one internal address. systemd holds them instead
+# (infra/systemd/commonair-caddy.socket: 80, 443 and 443/udp, IPv6 and IPv4) and hands the
+# listening sockets to this container (socket activation), so Caddy accepts each connection
+# from the client's own address, while it stays on the commonair network to reach the services
+# by name. The Caddyfile binds them as fd/3, fd/4 and fdgram/5 (CADDY_LISTEN=systemd).
 [Unit]
 Description=CommonAir caddy
 # Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
@@ -10,6 +17,9 @@ Wants=commonair-web.service
 After=commonair-web.service
 Wants=commonair-api.service
 After=commonair-api.service
+# The sockets must be listening before Caddy starts, or it has nothing to accept on.
+Wants=commonair-caddy.socket
+After=commonair-caddy.socket
 
 [Container]
 Image=docker.io/library/caddy:2.11.7-alpine@sha256:24ec7b05bc532c7bb57f727030c5056e257ff7138b4b50460306819ff79362bd
@@ -18,11 +28,12 @@ ContainerName=commonair-caddy
 RunInit=true
 Network=commonair.network
 NetworkAlias=caddy
+# Fixed, outside the network's IPRange: the services trust X-Forwarded-For from this address
+# only (TRUSTED_PROXY_CIDRS in their units).
+IP=10.89.42.10
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-caddy.env
-PublishPort=0.0.0.0:80:80
-PublishPort=0.0.0.0:443:443
-PublishPort=0.0.0.0:443:443/udp
+Environment=CADDY_LISTEN=systemd
 Volume=%h/commonair/infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro,Z
 Volume=commonair-caddy-data.volume:/data
 Volume=commonair-caddy-config.volume:/config

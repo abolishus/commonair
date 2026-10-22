@@ -231,6 +231,10 @@ export const STATIC_UNITS: Record<string, StaticList> = {
     why: "packages/db/src/migrate.ts and infra/postgres/apply-app-role.ts (DATABASE_URL is a Podman secret)",
     keys: ["GOVERNANCE_BOOTSTRAP_JSON", "POSTGRES_APP_PASSWORD"],
   },
+  valkey: {
+    why: "the server's password, which its Exec= hands to valkey-server on stdin (VALKEY_URL is a Podman secret)",
+    keys: ["VALKEY_PASSWORD"],
+  },
   postgres: {
     why: "the Postgres entrypoint and WAL-G (infra/postgres/*.sh), with the operator's AWS_* and WALG_* backup settings",
     keys: [
@@ -246,7 +250,7 @@ export const STATIC_UNITS: Record<string, StaticList> = {
 };
 
 /** Units without any env file: their images read nothing from the operator's file. */
-export const NO_ENV_UNITS = ["loki", "otel-collector", "prometheus", "tempo", "valkey"] as const;
+export const NO_ENV_UNITS = ["loki", "otel-collector", "prometheus", "tempo"] as const;
 
 export const unitName = (unit: string) => `commonair-${unit}`;
 export const keysPath = (unit: string) => `${KEYS_DIR}/${unitName(unit)}.keys`;

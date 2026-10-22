@@ -6,7 +6,7 @@
  * with a fresh random secret. Never overwrites an existing `.env` unless --force.
  * --merge keeps every value already in the target and only fills keys it lacks, so new
  * variables can be added without rotating secrets (an existing Postgres volume keeps its
- * password).
+ * password). VALKEY_PASSWORD is generated with the rest and written into VALKEY_URL as well.
  */
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { generateSigningKey, randomSecret } from "../packages/tokens/src/index.ts";
@@ -44,11 +44,30 @@ if (existing.has("EVIDENCE_PUBLIC_KEY") !== existing.has("EVIDENCE_PRIVATE_KEY")
   process.exit(1);
 }
 
+// Valkey's password also goes into VALKEY_URL (redis://:<password>@host:port), so the two are
+// written together: a fresh password is added to a URL without one, which is also how a merge
+// upgrades an older file. A kept password (even an empty one: no password) leaves a kept URL be.
+const valkeyPasswordIsNew = !existing.has("VALKEY_PASSWORD");
+const valkeyPassword = existing.get("VALKEY_PASSWORD") ?? hex(32);
+function valkeyUrl(url: string): string {
+  if (!valkeyPassword || (existing.has("VALKEY_URL") && !valkeyPasswordIsNew)) return url;
+  try {
+    const u = new URL(url);
+    if (u.password || !u.host) return url;
+    u.password = valkeyPassword;
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return url;
+  }
+}
+
 const out = readFileSync(".env.example", "utf8")
   .replace(/\r\n/g, "\n")
   .split("\n")
   .map((line) => {
     const [key] = line.split("=");
+    if (key === "VALKEY_PASSWORD") return `${key}=${valkeyPassword}`;
+    if (key === "VALKEY_URL") return `${key}=${valkeyUrl(existing.get(key) ?? line.slice(line.indexOf("=") + 1))}`;
     if (key !== undefined && existing.has(key)) return `${key}=${existing.get(key)}`;
     if (line.endsWith("=__generate_ed25519__")) return `${key}=${pkcs8B64}`;
     if (line.endsWith("=__generate_hex64__")) return `${key}=${hex(32)}`;

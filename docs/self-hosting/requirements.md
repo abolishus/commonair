@@ -42,8 +42,10 @@ Create an **A record** for the instance's hostname (for example `stream.example.
 points at the server's public IPv4 address. With the default ACME mode, do this before you
 install: Caddy asks the certificate authority for a certificate as soon as it starts.
 
-Do not create an AAAA record yet. The public ports bind IPv4 only, so IPv6 clients (and an ACME
-CA that validates over IPv6) would fail.
+If the server has a public IPv6 address, add an **AAAA record** for it too: every public port
+listens on IPv6 as well as IPv4 (`install` says whether the host has a global IPv6 address).
+Without IPv6 on the server, publish no AAAA record: clients and an ACME CA that prefer IPv6
+would fail to connect. Open the firewall for IPv6 as well as IPv4.
 
 The IRC gateway uses the same hostname, with the same certificate.
 
@@ -62,16 +64,22 @@ Open these inbound, in the host firewall and in any provider firewall in front o
 | 6667 | TCP      | plain IRC, if you offer it                              |
 | 22   | TCP      | SSH, ideally restricted to your own addresses           |
 
-Everything else (Postgres, Valkey, Garage, Grafana, Prometheus) listens on `127.0.0.1` only.
-Reach Grafana through an SSH tunnel:
+Each public port listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6). Ports 80 and
+443 are held by systemd (`commonair-caddy.socket`) and handed to Caddy, so the instance sees
+each HTTPS client's own address; the others go through rootless Podman's port forwarding.
+
+Nothing else is reachable from outside the containers, except two ports on the host's
+`127.0.0.1`: Garage's S3 API (3900, for the [off-host object copy](backups.md)) and Grafana
+(3030). Postgres, Valkey, Prometheus, the collector and the services are reachable only inside
+the instance's container network. Reach Grafana through an SSH tunnel:
 
 ```sh
 ssh -L 3030:127.0.0.1:3030 commonair@stream.example.org
 ```
 
 Rootless Podman cannot bind ports below 1024 by default. Run as root, `selfhost.sh` writes
-`net.ipv4.ip_unprivileged_port_start=80` to `/etc/sysctl.d/90-commonair.conf` so Caddy can bind
-80 and 443.
+`net.ipv4.ip_unprivileged_port_start=80` to `/etc/sysctl.d/90-commonair.conf` so the service
+user's systemd can bind 80 and 443 (the setting covers IPv6 too).
 
 ## Outbound network
 

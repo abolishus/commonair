@@ -137,7 +137,8 @@ Our own images (the app services and the tools-image jobs) read `.env` (`env_fil
 path overridable with `COMMONAIR_ENV_FILE`); third-party services get only the variables they use
 through `environment:`. Compose overrides the hostnames for the compose network:
 `DATABASE_URL=postgres://commonair_app:${POSTGRES_APP_PASSWORD}@postgres:5432/commonair`,
-`VALKEY_URL=redis://valkey:6379`, `S3_ENDPOINT=http://garage:3900`, `MEDIAMTX_*` → `mediamtx`,
+`VALKEY_URL=redis://:${VALKEY_PASSWORD}@valkey:6379` (`redis://valkey:6379` when `VALKEY_PASSWORD` is
+empty), `S3_ENDPOINT=http://garage:3900`, `MEDIAMTX_*` → `mediamtx`,
 `API_INTERNAL_URL=http://api:3001`, `CHAT_INTERNAL_URL=ws://chat:3002/ws`,
 `ORIGIN_INTERNAL_URL=http://origin:3003`, `SMTP_HOST=mailpit`,
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318`, `OTEL_SERVICE_NAME=<service>`.
@@ -146,6 +147,15 @@ Service secrets (`AUTH_SECRET`, `INTERNAL_API_SECRET`, `MEDIA_INTERNAL_PASSWORD`
 origin and media, `PLAYBACK_SIGNING_KEY`, …) reach the services only through that env file.
 MediaMTX gets just `INTERNAL_API_SECRET` (for its hook header); its own requests are
 authorized by the API's auth hook.
+
+**Valkey's password.** `bun scripts/init-env.ts` generates `VALKEY_PASSWORD` (64 hex characters)
+and writes it into `.env`'s `VALKEY_URL` too (`redis://:<password>@localhost:6379`), so services
+and tests run on the host authenticate; `--merge` does the same for an older `.env` without one.
+Valkey reads the password as configuration on its stdin, never on a command line `ps` shows, and
+its health check authenticates. To develop without one, set `VALKEY_PASSWORD=` (empty) and drop
+the password from `VALKEY_URL`; a test run from a package directory with no `.env` uses
+`redis://localhost:6379`, so give it the URL (`VALKEY_URL=… bun --bun vp test run …`) when the
+stack has a password.
 
 Variables used by compose itself (interpolated from `.env` or the shell). None of the secrets
 has a default; missing ones make the dependent container fail with a clear message.
@@ -158,6 +168,7 @@ has a default; missing ones make the dependent container fail with a clear messa
 | `GARAGE_ADMIN_TOKEN`                        | —                             | Garage admin API token (garage-init)                       |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | —                             | imported into Garage by garage-init; used by WAL-G too     |
 | `GRAFANA_ADMIN_PASSWORD`                    | —                             | Grafana refuses to start without it                        |
+| `VALKEY_PASSWORD`                           | — (empty: no password)        | Valkey's `requirepass`; init-env generates it              |
 | `GRAFANA_ADMIN_USER`                        | `admin`                       |                                                            |
 | `PUBLIC_HOSTNAME`                           | `localhost`                   | Caddy site address                                         |
 | `BIND_ADDRESS` / `CADDY_BIND_ADDRESS`       | `127.0.0.1` / `0.0.0.0`       | host bind addresses                                        |
@@ -267,9 +278,12 @@ Routes: `/api/*`, `/rpc/*` → api; `/chat` → chat `/ws` (WebSocket); `/hls/*`
 frame), nosniff, referrer and permissions policies; services may send a stricter CSP, which
 wins. No access log (it would record viewer IPs). Set `PUBLIC_URL`, `API_PUBLIC_URL`,
 `PLAYBACK_PUBLIC_URL` to `https://<host>`, `CHAT_PUBLIC_URL=wss://<host>/chat`,
-`P2P_TRACKER_URL=wss://<host>/tracker`. Services trust `x-forwarded-for` only from the compose
-network (its fixed subnet `10.89.42.0/24`; a non-empty `TRUSTED_PROXY_CIDRS` overrides it), so the
-web proxy and Caddy pass real client addresses through.
+`P2P_TRACKER_URL=wss://<host>/tracker`. Under compose, services trust `x-forwarded-for` from the
+whole compose network (its fixed subnet `10.89.42.0/24`; a non-empty `TRUSTED_PROXY_CIDRS`
+overrides it), which the harness relies on. Caddy itself trusts no client's `X-Forwarded-For`
+(no `trusted_proxies`); compose's published ports reach it from one internal address, so
+behind compose every client looks alike. The production units get real client addresses
+([Ports and client addresses](#ports-and-client-addresses)).
 
 Certificates come from `TLS_MODE` (ADR 0023 §11): `acme` (the default) gets them from Let's
 Encrypt, or from the directory in `ACME_CA`, with `ACME_EMAIL` for expiry notices; `internal`
@@ -279,7 +293,8 @@ uses Caddy's own CA, whose root is `/data/caddy/pki/authorities/local/root.crt` 
 ACME needs ports 80 and 443 on the public address. Rootless Podman cannot bind them by default:
 either `sysctl net.ipv4.ip_unprivileged_port_start=80` on the host and set
 `CADDY_HTTP_PORT=80 CADDY_HTTPS_PORT=443`, or redirect 80/443 to 8080/8443 in the host
-firewall.
+firewall. The Caddyfile picks its listeners from `CADDY_LISTEN`: unset (`ports`) under compose,
+`systemd` in the Quadlet unit (sockets passed in by systemd).
 
 ## GPU transcoding
 
@@ -325,26 +340,80 @@ Rules every unit follows (ADR 0023 §10, checked by `infra/tests/quadlet.test.ts
   `%h/.config/commonair/unit-env/commonair-<unit>.env` (0600), and reads that file
   (`EnvironmentFile=`). It fails closed: without a readable `commonair.env` the unit does not
   start. The lists of our services are generated from their env schemas by
-  `bun scripts/selfhost/unit-env.ts` (a test fails when they are stale); Valkey, Loki, Tempo,
-  Prometheus and the collector get no env file. Internal hostnames and ports are `Environment=`
+  `bun scripts/selfhost/unit-env.ts` (a test fails when they are stale); Valkey gets only
+  `VALKEY_PASSWORD`, and Loki, Tempo, Prometheus and the collector get no env file. Internal hostnames and ports are `Environment=`
   lines, which win over the env file. `DATABASE_URL` comes from the Podman secrets
-  `commonair-database-url` (app role) or `commonair-owner-database-url` (migrate), and
-  Grafana's password from `commonair-grafana-admin-password`.
+  `commonair-database-url` (app role) or `commonair-owner-database-url` (migrate),
+  `VALKEY_URL` (it holds the Valkey password) from `commonair-valkey-url`, and Grafana's
+  password from `commonair-grafana-admin-password`.
 - Config files are bind-mounted from `%h/commonair/infra/…`. Other host mounts are under
   `%h/.local/share/commonair/` (hash lists, the moderation model) and
   `%h/.config/commonair/irc-tls/`.
 
-Only Caddy (80/443 and 443/udp), MediaMTX RTMP (1935) and ICE (8189/udp), and IRC (6667/6697)
-bind `0.0.0.0`; everything else stays on `127.0.0.1` (a test enforces the list). WHIP signaling
-reaches MediaMTX through Caddy (`/live/<slug>/whip`), and MediaMTX advertises the addresses in
-`MTX_WEBRTCADDITIONALHOSTS` as ICE candidates. `mailpit`, `mock-rtmp` and `stripe-mock` are
-development-only and have no unit.
+WHIP signaling reaches MediaMTX through Caddy (`/live/<slug>/whip`), and MediaMTX advertises the
+addresses in `MTX_WEBRTCADDITIONALHOSTS` as ICE candidates. `mailpit`, `mock-rtmp` and
+`stripe-mock` are development-only and have no unit.
 
 `commonair-irc-cert.container` is a one-shot that copies Caddy's certificate for
 `IRC_PUBLIC_HOST` to the IRC unit's TLS mount (`irc/sync-cert.ts`, run in the `tools` image)
 and restarts IRC when it changed. `systemd/` holds the plain user units Quadlet does not
-generate: `commonair-backup.service` and `.timer` (daily WAL-G base backup) and
-`commonair-irc-cert.timer` (runs the sync daily).
+generate: `commonair-backup.service` and `.timer` (daily WAL-G base backup),
+`commonair-irc-cert.timer` (runs the sync daily) and `commonair-caddy.socket` (Caddy's public
+ports, below).
+
+### Ports and client addresses
+
+Under rootless Podman, a `PublishPort=` is forwarded by rootlessport: every connection reaches
+the container from one internal address (seen as the container's own on Podman 5 and 6), not
+from the client. Per-address limits then count every client as one (the API's auth and request
+limits, the tracker's and IRC's connection caps), and a Caddy that trusts `X-Forwarded-For` from
+private ranges (as it once did) lets any client pick its own address. Options weighed (tried by hand on a
+rootless Podman 6.1 host; Debian 13 and Fedora 42 ship 5.4, which behaves alike here):
+
+- **Pasta port forwarding** keeps the source address, but only for a container in pasta mode,
+  which cannot also join the `commonair` bridge network; Caddy would then reach every service
+  through ports published on the host's loopback, which any local process could reach too.
+- **Caddy on the host network**: real addresses and IPv6 for free, but the same loopback
+  publishing for every upstream, and any local process could then talk to them as Caddy.
+- **systemd socket activation** (chosen for Caddy): `infra/systemd/commonair-caddy.socket` holds
+  80, 443 and 443/udp in the host's network namespace and passes the listening sockets to
+  `commonair-caddy.service`; Podman hands them to the container, and Caddy binds them as `fd/3`,
+  `fd/4` and `fdgram/5` (`CADDY_LISTEN=systemd`). Caddy stays on the bridge network, reaches the
+  services by name, and accepts each connection from the client's own address, IPv6 included:
+  a bare `ListenStream=443` is dual-stack, or IPv4 alone on a host without IPv6. No extra image,
+  and it works rootless on both distributions (systemd ≥ 254, and the unprivileged-port sysctl
+  at 80, which covers IPv6 as well).
+
+Caddy trusts no client's `X-Forwarded-For` (no `trusted_proxies`) and sends the services the
+address it accepted the connection from. The services believe that header only from Caddy's
+fixed address, `10.89.42.10`, and the API also from the web app's proxy, `10.89.42.11`
+(`TRUSTED_PROXY_CIDRS` in each unit). Both addresses lie outside the network's `IPRange`
+(`10.89.42.128/25`), so no other container can be given them. `selfhost.sh` re-creates the
+network whenever it restarts the stack, because Quadlet never changes an existing one.
+
+IRC (6667, 6697) and MediaMTX (RTMP 1935, ICE 8189/udp) still use `PublishPort=`, without a host
+address, so they listen on IPv6 and IPv4 (IPv4 alone on a host without IPv6), but they see
+every client at one internal address. IRC's per-address caps therefore count all IRC clients
+together, and MediaMTX's view of an encoder's address (the API records a hash of it) is that
+internal one. IRC can move to socket activation once it accepts inherited sockets
+(`Bun.listen({ fd })` works); MediaMTX has no socket activation.
+
+Every published port and its fate (tests: `infra/tests/network.test.ts`, the e2e `ss` check):
+
+| Unit           | Port                      | Fate                                                              |
+| -------------- | ------------------------- | ----------------------------------------------------------------- |
+| caddy          | 80, 443, 443/udp          | public, systemd sockets (real client addresses, IPv6 and IPv4)    |
+| irc            | 6667, 6697                | public, `PublishPort=` on every address                           |
+| mediamtx       | 1935, 8189/udp            | public, `PublishPort=` on every address                           |
+| garage         | 3900                      | `127.0.0.1`: the off-host object copy (rclone); S3 signs requests |
+| grafana        | 3030 → 3000               | `127.0.0.1`: reached over an SSH tunnel; needs the admin login    |
+| postgres       | 5432                      | not published: backups and restores run in the container (`exec`) |
+| valkey         | 6379                      | not published (and it now has a password)                         |
+| otel-collector | 4318                      | not published: only the services export to it                     |
+| prometheus     | 9090                      | not published: Grafana reads it on the network                    |
+| api … tracker  | 3000–3003, 8000           | not published: Caddy reaches them by name                         |
+| mediamtx       | 8889 (WHIP)               | not published: Caddy reaches it by name                           |
+| irc            | 6680 (IRC over WebSocket) | not published until it has a TLS route                            |
 
 ### Release directories
 
@@ -376,17 +445,18 @@ touch ~/.local/share/commonair/moderation/csam.pdq ~/.local/share/commonair/mode
 printf 'postgres://commonair_app:%s@postgres:5432/commonair' "$APP_PW" | podman secret create commonair-database-url -
 printf 'postgres://commonair:%s@postgres:5432/commonair' "$OWNER_PW" | podman secret create commonair-owner-database-url -
 printf '%s' "$GRAFANA_PW" | podman secret create commonair-grafana-admin-password -
+printf 'redis://:%s@valkey:6379' "$VALKEY_PW" | podman secret create commonair-valkey-url -
 mkdir -p ~/.config/containers/systemd ~/.config/systemd/user
 cp infra/quadlet/* ~/.config/containers/systemd/ && cp infra/systemd/* ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user start commonair-migrate              # migrations first, then everything else
-systemctl --user start --no-block $(cd ~/.config/containers/systemd && ls commonair-*.container \
-  | grep -v -e irc-cert -e migrate | sed 's/\.container$/.service/')
-systemctl --user enable --now commonair-backup.timer commonair-irc-cert.timer
+systemctl --user start --no-block commonair-caddy.socket $(cd ~/.config/containers/systemd && \
+  ls commonair-*.container | grep -v -e irc-cert -e migrate | sed 's/\.container$/.service/')
+systemctl --user enable --now commonair-caddy.socket commonair-backup.timer commonair-irc-cert.timer
 ```
 
-`APP_PW`, `OWNER_PW` and `GRAFANA_PW` are the env file's `POSTGRES_APP_PASSWORD`,
-`POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD`. The host needs linger and the
+`APP_PW`, `OWNER_PW`, `GRAFANA_PW` and `VALKEY_PW` are the env file's `POSTGRES_APP_PASSWORD`,
+`POSTGRES_PASSWORD`, `GRAFANA_ADMIN_PASSWORD` and `VALKEY_PASSWORD`. The host needs linger and the
 unprivileged-port sysctl, as in [requirements.md](../docs/self-hosting/requirements.md). To test
 the release path itself (render, bundle, install, upgrade, rollback) on a throwaway systemd
 container instead, run `bun scripts/selfhost/e2e.ts` (its header lists what it needs).
@@ -395,7 +465,9 @@ container instead, run `bun scripts/selfhost/e2e.ts` (its header lists what it n
 
 - `infra/tests/*.test.ts` (unit): compose policy (rootless rules, pinned licensed images,
   healthchecks, app role, no secret defaults), Caddy routes, Quadlet parity with compose,
-  Garage bootstrap against a fake admin API, workspace closure, healthcheck probe.
+  Garage bootstrap against a fake admin API, workspace closure, healthcheck probe; network
+  exposure (`network.test.ts`: the published-port allowlist, Caddy's sockets, whom the services
+  trust `X-Forwarded-For` from, Valkey's password).
 - `infra/tests/stack.int.test.ts` (integration): a separate project `commonair-it-<rand>` with
   host ports +20000…: postgres (image build), valkey, garage, garage-init, mailpit, migrate.
   Asserts health, buckets + key via `@commonair/storage`, app-role limits (no TRUNCATE, no

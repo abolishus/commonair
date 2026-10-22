@@ -122,7 +122,8 @@ Checks, each failing with the fix to apply:
 - the distribution, Podman 5 and catatonit, systemd 254+ and a running user manager;
 - subuid and subgid entries, linger, and the unprivileged-port sysctl;
 - on a first install, that nothing listens on 80, 443, 1935, 6667, 6697 (TCP) or 443, 8189
-  (UDP). It prints the firewall command when firewalld is running.
+  (UDP). It prints the firewall command when firewalld is running, and whether the host has a
+  global IPv6 address (the public ports listen on it too, so an AAAA record can point here).
 
 Then it:
 

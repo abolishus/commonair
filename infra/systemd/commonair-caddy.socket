@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# The public HTTP(S) ports, held by systemd in the host's network namespace and passed to
+# commonair-caddy.service (socket activation). Caddy then sees every client's own address,
+# which rootless Podman's port forwarding (PublishPort=) would replace with one internal
+# address. A bare port listens on IPv6 and IPv4 (dual-stack); on a host without IPv6, systemd
+# listens on IPv4 alone. Binding 80 and 443 as the service user needs
+# net.ipv4.ip_unprivileged_port_start=80 (which covers IPv6 too).
+[Unit]
+Description=CommonAir public ports 80, 443 and 443/udp (Caddy)
+
+[Socket]
+# The order is the file descriptor order: fd/3, fd/4 and fdgram/5 in the Caddyfile
+# ((listen-systemd) and (http-systemd)).
+ListenStream=80
+ListenStream=443
+ListenDatagram=443
+# Dual-stack regardless of the host's net.ipv6.bindv6only.
+BindIPv6Only=both
+
+[Install]
+WantedBy=sockets.target

@@ -65,19 +65,18 @@ These are true of the current release. Each one is tracked for a later release.
 
 - **One host only.** `selfhost.sh` installs everything on one server. Splitting Postgres or
   media onto other servers is not scripted yet ([scaling.md](scaling.md)).
-- **IPv4 only.** Public ports bind `0.0.0.0`. Do not publish an AAAA record yet: clients and
-  the ACME CA that prefer IPv6 would fail to connect.
 - **A service holds its own secrets.** Each unit gets only its keys of `commonair.env`
   ([configuration.md](configuration.md#which-unit-sees-which-key)): Caddy gets none, but a
   compromised api or worker still holds the database password and S3 keys it needs.
-- **Client addresses are hidden.** Rootless Podman forwards public ports so that every client
-  appears to come from the container network's gateway. Per-address limits (such as the IRC
-  and tracker connection limits) then count all clients as one, and Caddy trusts
-  `X-Forwarded-For` from that private address, so a client can set its own. See
+- **IRC and RTMP clients share one address.** HTTPS (the web app, API, chat, HLS, the
+  tracker and WHIP signaling) sees each client's own address, IPv6 included: systemd holds
+  ports 80 and 443 and hands them to Caddy. IRC (6667, 6697) and MediaMTX (RTMP 1935, WebRTC
+  8189/udp) still go through rootless Podman's port forwarding, so every IRC client appears to
+  come from one internal address and IRC's per-address limits count them together. See
   [troubleshooting.md](troubleshooting.md#irc-clients-are-refused).
-- **Some local services have no password.** Valkey, the OpenTelemetry collector and Prometheus
-  listen on the host's `127.0.0.1` without authentication. Do not give other people a shell on
-  the server.
+- **Two local services listen on the host's loopback.** Garage (`127.0.0.1:3900`, for the
+  off-host object copy; every request needs an S3 key) and Grafana (`127.0.0.1:3030`, behind its
+  admin login). Nothing else is reachable from the host, and Valkey requires a password.
 - **Unit edits do not survive.** `install` and `upgrade` replace every `commonair*` file in
   `~/.config/containers/systemd/`, and a drop-in directory there (for example
   `commonair-media.container.d/` for a GPU) makes them fail. There is no supported way to

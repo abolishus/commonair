@@ -97,7 +97,7 @@ describe("bundle contents", () => {
     const systemd = readdirSync(join(ROOT, "infra/systemd")).map((f) => `systemd/${f}`);
     // Every unit with an env file renders it from its key list at start (unit-env.ts).
     const keyLists = readdirSync(join(ROOT, "infra/selfhost/env")).map((f) => `infra/selfhost/env/${f}`);
-    expect(keyLists).toHaveLength(16);
+    expect(keyLists).toHaveLength(17);
     const expected = [
       "selfhost.sh",
       "release-manifest.json",

@@ -104,7 +104,8 @@ journalctl --user -u commonair-caddy -n 200 --no-pager | grep -i -e acme -e cert
 Check, in order:
 
 1. **DNS.** The A record resolves to this server from outside (`dig +short stream.example.org`
-   from another network). No AAAA record, because the ports bind IPv4 only.
+   from another network). An AAAA record must point at this server's own IPv6 address, or be
+   absent; check `dig +short AAAA stream.example.org` too.
 2. **Ports 80 and 443 reach Caddy** from outside: the host firewall, and any provider firewall
    in front of it.
 3. **Rate limits.** After repeated failures, Let's Encrypt refuses for a while; the log says so.
@@ -169,12 +170,26 @@ sysctl --system
 
 ## IRC clients are refused
 
-Rootless Podman forwards public ports so that every client appears to come from the same
-address, the container network's gateway. The IRC gateway's per-address limits then apply to
-all clients together: after `IRC_MAX_CONNECTIONS_PER_IP` (50) connections, or a burst of
-`IRC_CONNECT_BURST_PER_IP` (20) new ones, everyone is refused. Until source addresses are
-preserved, raise both in the env file to what the whole instance should allow, and reinstall.
-The tracker's `TRACKER_MAX_CONNECTIONS_PER_IP` behaves the same way.
+Rootless Podman forwards the IRC ports (6667, 6697) so that every client appears to come from
+the same internal address. The IRC gateway's per-address limits then apply to all clients
+together: after `IRC_MAX_CONNECTIONS_PER_IP` (50) connections, or a burst of
+`IRC_CONNECT_BURST_PER_IP` (20) new ones, everyone is refused. Until IRC gets its ports from
+systemd as Caddy does, raise both in the env file to what the whole instance should allow, and
+reinstall. HTTPS clients (the tracker included) are not affected: Caddy sees each one's own
+address.
+
+## Valkey
+
+Valkey requires `VALKEY_PASSWORD` from the env file, and the services connect with the
+`VALKEY_URL` that carries it (`install` and `upgrade` write both and the `commonair-valkey-url`
+Podman secret). Valkey refuses to start with an empty password. To talk to it by hand:
+
+```sh
+podman exec -it commonair-valkey sh -c 'VALKEYCLI_AUTH="$VALKEY_PASSWORD" valkey-cli'
+```
+
+After changing the password in the env file, run `selfhost.sh install --reinstall`, which
+rewrites the URL and the secret and restarts everything together.
 
 ## Postgres
 
