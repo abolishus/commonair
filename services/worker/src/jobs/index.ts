@@ -16,6 +16,8 @@ import { job as coopMembershipSync } from "./coop-membership-sync.ts";
 import { job as coopProposalsAdvance } from "./coop-proposals-advance.ts";
 import { job as coopStreamHours } from "./coop-stream-hours.ts";
 import { job as expireAuthRows } from "./expire-auth-rows.ts";
+import { job as exportBuild } from "./export-build.ts";
+import { job as exportCleanup } from "./export-cleanup.ts";
 import { job as liveCounters } from "./live-counters.ts";
 import { job as moneyExpirePending } from "./money-expire-pending.ts";
 import { job as moneyReleaseHolds } from "./money-release-holds.ts";
@@ -65,4 +67,6 @@ export const JOBS = [
   coopCouncilRecompute,
   coopElectionsAdvance,
   coopStreamHours,
+  exportBuild,
+  exportCleanup,
 ] as readonly JobDefinition[];
