@@ -15,6 +15,16 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
+## Session nine in flight (E5 co-op)
+
+Started 2026-10-21 from `8e5e14a`. Goal: `e5-coop` passes twice in a row on the local stack;
+`e4b-money` and `trust-safety` pass once on the same stack. Process as before (units with
+disjoint ownership, independent review before merge, a second security reviewer for the API and
+worker units, focused re-review after any HIGH), orchestrated as workflows of three units at the
+user's request. State: see PROGRESS.md "Session nine". The bring-up recreates the local Postgres
+volume once with `GOVERNANCE_BOOTSTRAP_JSON` (ADR 0020); the overrides live in
+`harness/compose.e5-coop.yaml` (unit E).
+
 ## E4b validation resumed (2026-10-21)
 
 The user resumed E4b validation alongside E4c, superseding the earlier deferral. Manual API (77
