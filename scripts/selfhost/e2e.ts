@@ -20,7 +20,7 @@
  *    or S3 secret, the API its DATABASE_URL. Network exposure: Valkey refuses a client without
  *    its password; the API tells two source addresses on the host apart (its per-address auth
  *    rate limit, behind Caddy's socket-activated port) and ignores a client's X-Forwarded-For;
- *    HTTPS answers over IPv6 when the host has it; and `ss -ltn` shows only the allowlisted
+ *    HTTPS answers over IPv6 when the host has it; and `ss -ltne` shows only the allowlisted
  *    listeners.
  * 4. Builds release 0.0.0-e2e.2 (every image re-labelled, so every digest changes), upgrades,
  *    and checks from systemd's own invocation IDs and timestamps that the upgrade re-ran migrate
@@ -618,8 +618,21 @@ export function missingListeners(ssOutput: string): number[] {
   return REQUIRED_TCP_PORTS.filter((p) => !ports.has(p));
 }
 
+/**
+ * The lines of `ss -Hltne` whose socket the given uid owns. The instance's listeners all belong to
+ * the service user (its systemd holds Caddy's socket, rootlessport the published ports); the
+ * operating system's own (sshd, systemd-resolved on Fedora) are not the instance's to judge.
+ */
+export function ownedBy(ssOutput: string, uid: number): string {
+  return ssOutput
+    .split("\n")
+    .filter((l) => new RegExp(`\\suid:${uid}(\\s|$)`).test(l))
+    .join("\n");
+}
+
 function checkListeners(): void {
-  const ss = inHost("ss -Hltn");
+  const uid = Number(inHost("id -u commonair").trim());
+  const ss = ownedBy(inHost("ss -Hltne"), uid);
   const extra = unexpectedListeners(ss);
   expectThat(
     extra.length === 0,

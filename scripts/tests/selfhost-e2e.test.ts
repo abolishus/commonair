@@ -24,6 +24,7 @@ import {
   listeners,
   migratedFirst,
   missingListeners,
+  ownedBy,
   probeCommand,
   refusedRequests,
   SOURCES,
@@ -378,6 +379,23 @@ describe("e2e: network exposure", () => {
     "LISTEN 0      4096       127.0.0.1:3900       0.0.0.0:*",
     "LISTEN 0      4096       127.0.0.1:3030       0.0.0.0:*",
   ].join("\n");
+
+  test("only the service user's sockets are judged, not the operating system's", () => {
+    const withUids = [
+      "LISTEN 0 4096 *:443 *:* uid:1000 ino:41 sk:1 cgroup:/user.slice/user-1000.slice/user@1000.service <->",
+      "LISTEN 0 4096 0.0.0.0:5355 0.0.0.0:* uid:193 ino:42 sk:2 cgroup:/system.slice/systemd-resolved.service <->",
+      "LISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:* uid:193 ino:43 sk:3 cgroup:/system.slice/systemd-resolved.service <->",
+      "LISTEN 0 128 0.0.0.0:22 0.0.0.0:* ino:44 sk:4 cgroup:/system.slice/ssh.service <->",
+      "LISTEN 0 4096 127.0.0.1:6379 0.0.0.0:* uid:10000 ino:45 sk:5 <->",
+      "LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:* uid:1000 ino:46 sk:6 <->",
+    ].join("\n");
+    const mine = ownedBy(withUids, 1000);
+    expect(listeners(mine)).toEqual([
+      { address: "*", port: 443 },
+      { address: "127.0.0.1", port: 5432 },
+    ]);
+    expect(unexpectedListeners(mine)).toEqual(["127.0.0.1:5432"]);
+  });
 
   test("listeners parses IPv4, IPv6 and dual-stack local addresses", () => {
     expect(listeners("LISTEN 0 4096 [::1]:5432 [::]:*\nLISTEN 0 4096 [fe80::1%eth0]:22 [::]:*")).toEqual([
