@@ -15,8 +15,9 @@
  *    `commonair` user.
  * 3. Checks https://selfhost.test/ and /api/status through Caddy's internal CA.
  * 4. Builds release 0.0.0-e2e.2 (every image re-labelled, so every digest changes), upgrades,
- *    and checks from systemd's own timestamps that migrate finished before api and worker
- *    started, and that `status` reports the new version.
+ *    and checks from systemd's own invocation IDs and timestamps that the upgrade re-ran migrate
+ *    and that it finished before api and worker started, and that `status` reports the new
+ *    version. Then kills the worker container and checks that systemd restarts it.
  * 5. Upgrades to a deliberately broken release (an api that never gets healthy) and checks
  *    that it rolls back to 0.0.0-e2e.2 and stays healthy.
  *
@@ -335,13 +336,72 @@ function stamp(unit: string, property: string): number {
   return Number(inHost(`systemctl --user show ${unit} --property=${property} --value`, { user: true }).trim());
 }
 
-function checkMigrateFirst(): void {
-  const migrated = stamp("commonair-migrate.service", "ExecMainExitTimestampMonotonic");
-  expectThat(migrated > 0, "commonair-migrate ran to completion");
-  for (const s of ["api", "worker"]) {
-    const started = stamp(`commonair-${s}.service`, "ExecMainStartTimestampMonotonic");
-    expectThat(started > migrated, `${s} started after migrate finished (${started} > ${migrated})`);
+function prop(unit: string, property: string): string {
+  return inHost(`systemctl --user show ${unit} --property=${property} --value`, { user: true }).trim();
+}
+
+/** migrate's last run, taken before an upgrade so the check below can tell it ran again. */
+interface MigrateRun {
+  invocation: string;
+  started: number;
+}
+function migrateRun(): MigrateRun {
+  return {
+    invocation: prop("commonair-migrate.service", "InvocationID"),
+    started: stamp("commonair-migrate.service", "ExecMainStartTimestampMonotonic"),
+  };
+}
+
+/** The upgrade re-ran migrate (a new invocation, started after the old one) and api and worker
+ * started only after it finished. A leftover timestamp from the install cannot pass this. */
+export function migratedFirst(
+  before: MigrateRun,
+  after: MigrateRun & { exited: number },
+  started: Record<string, number>,
+): string[] {
+  const problems: string[] = [];
+  if (!after.invocation || after.invocation === before.invocation)
+    problems.push(`migrate did not run again (invocation ${after.invocation || "none"})`);
+  if (!(after.started > before.started))
+    problems.push(`migrate's last start ${after.started} is not after the pre-upgrade one ${before.started}`);
+  if (!(after.exited >= after.started)) problems.push(`migrate has not finished (exit ${after.exited})`);
+  for (const [unit, at] of Object.entries(started))
+    if (!(at > after.exited)) problems.push(`${unit} started at ${at}, before migrate finished at ${after.exited}`);
+  return problems;
+}
+
+function checkMigrateFirst(before: MigrateRun): void {
+  const after = { ...migrateRun(), exited: stamp("commonair-migrate.service", "ExecMainExitTimestampMonotonic") };
+  const started = Object.fromEntries(
+    ["api", "worker"].map((s) => [s, stamp(`commonair-${s}.service`, "ExecMainStartTimestampMonotonic")]),
+  );
+  const problems = migratedFirst(before, after, started);
+  expectThat(problems.length === 0, `the upgrade re-ran migrate before api and worker: ${problems.join("; ") || "ok"}`);
+}
+
+/** Kills a container behind systemd's back: Restart=always must bring it back as a new one. */
+async function checkRestart(service: string): Promise<void> {
+  const unit = `commonair-${service}.service`;
+  const container = `commonair-${service}`;
+  const id = () => inHost(`podman inspect --format '{{.Id}}' ${container}`, { user: true, allowFail: true }).trim();
+  const restarts = () => Number(prop(unit, "NRestarts"));
+  const idBefore = id();
+  const nBefore = restarts();
+  inHost(`podman kill ${container}`, { user: true });
+  for (let i = 0; i < 90; i++) {
+    await Bun.sleep(2000);
+    const active = inHost(`systemctl --user is-active ${unit}`, { user: true, allowFail: true }).trim();
+    const healthy =
+      inHost(`podman inspect --format '{{.State.Health.Status}}' ${container}`, {
+        user: true,
+        allowFail: true,
+      }).trim() === "healthy";
+    if (active === "active" && healthy && restarts() > nBefore && id() && id() !== idBefore) {
+      expectThat(true, `${service} came back by itself after podman kill (NRestarts ${nBefore} -> ${restarts()})`);
+      return;
+    }
   }
+  expectThat(false, `${service} did not come back within 180 s of podman kill`);
 }
 
 // --- main ---------------------------------------------------------------------------------
@@ -404,11 +464,16 @@ async function main(): Promise<void> {
         commit,
         push(v2, (n) => `${LOCAL}/${n}:${v2}`, port),
       );
+      const before = migrateRun();
       inHost(`sh ~/commonair/selfhost.sh upgrade --bundle /e2e/releases/${v2}/${bundleAssetName(v2)}`, { user: true });
       expectThat(installedVersion() === v2, `status reports ${v2}`);
-      checkMigrateFirst();
+      checkMigrateFirst(before);
       checkHttps();
     });
+
+    // The session-ten bug: a crashed worker stayed down under compose. Under Quadlet, systemd
+    // restarts it.
+    await step("a killed worker comes back by itself", () => checkRestart("worker"));
 
     await step(`broken release ${v3} rolls back to ${v2}`, async () => {
       relabel(commit, v3, ["api"]);

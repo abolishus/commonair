@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
-import { HOST_IMAGES, ZOT_IMAGE, buildSpecs, hostContainerfile } from "../selfhost/e2e.ts";
+import { HOST_IMAGES, ZOT_IMAGE, buildSpecs, hostContainerfile, migratedFirst } from "../selfhost/e2e.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const licenses = JSON.parse(readFileSync(join(ROOT, "infra/image-licenses.json"), "utf8")) as Record<
@@ -46,4 +46,29 @@ describe("e2e images", () => {
       expect(file).toContain("insecure = true");
     },
   );
+});
+
+describe("e2e: the upgrade re-ran migrate before api and worker", () => {
+  const before = { invocation: "aaa", started: 1_000 };
+  test("passes when migrate ran again and finished before both started", () => {
+    expect(
+      migratedFirst(before, { invocation: "bbb", started: 5_000, exited: 6_000 }, { api: 7_000, worker: 7_100 }),
+    ).toEqual([]);
+  });
+
+  test("fails when the upgrade skipped migrate (the install's run is still the last one)", () => {
+    const stale = { ...before, exited: 1_500 };
+    const problems = migratedFirst(before, stale, { api: 7_000, worker: 7_100 });
+    expect(problems.some((p) => p.includes("did not run again"))).toBe(true);
+    expect(problems.some((p) => p.includes("not after the pre-upgrade one"))).toBe(true);
+  });
+
+  test("fails when api or worker started before migrate finished", () => {
+    const problems = migratedFirst(
+      before,
+      { invocation: "bbb", started: 5_000, exited: 6_000 },
+      { api: 5_500, worker: 7_000 },
+    );
+    expect(problems).toEqual(["api started at 5500, before migrate finished at 6000"]);
+  });
 });
