@@ -416,6 +416,11 @@ export const COOP_JOBS = {
   councilRecompute: "council-recompute",
   /** Every minute: nominating → voting, then `closeElection` when voting ends. */
   electionsAdvance: "elections-advance",
+  /**
+   * Test hook only (no schedule here): run the integrity `stream-hours` pass now, under its run
+   * lock, so a test streamer qualifies without waiting for the 5-minute integrity schedule.
+   */
+  streamHours: "stream-hours",
 } as const;
 export type CoopJobName = (typeof COOP_JOBS)[keyof typeof COOP_JOBS];
 export const COOP_JOB_NAMES = Object.values(COOP_JOBS) as [CoopJobName, ...CoopJobName[]];

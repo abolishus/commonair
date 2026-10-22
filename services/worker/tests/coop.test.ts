@@ -25,15 +25,19 @@ describe("co-op job registration", () => {
     // Daily at 03:10 UTC.
     expect(coop?.get(COOP_JOBS.councilRecompute)?.schedule).toEqual({ pattern: "10 3 * * *", tz: "UTC" });
     const scheduled = scheduledJobs(reg).map((j) => j.name);
-    for (const name of COOP_JOB_NAMES) expect(scheduled).toContain(name);
+    for (const name of COOP_JOB_NAMES.filter((n) => n !== COOP_JOBS.streamHours)) expect(scheduled).toContain(name);
+    // Test-hook only: the integrity queue schedules stream-hours, so the coop copy has none.
+    expect(coop?.get(COOP_JOBS.streamHours)?.schedule).toBeUndefined();
   });
 
   test("jobs take the empty CoopJob payload and retry infrastructure errors", () => {
     for (const name of COOP_JOB_NAMES) {
       const def = coop!.get(name)!;
       expect(def.data.safeParse({}).success).toBe(true);
-      expect(def.attempts).toBeGreaterThan(1);
     }
+    // The test-hook stream-hours pass answers once; the scheduled integrity job retries.
+    for (const name of COOP_JOB_NAMES.filter((n) => n !== COOP_JOBS.streamHours))
+      expect(coop!.get(name)!.attempts).toBeGreaterThan(1);
   });
 
   test("each job has its own run-lock key", () => {

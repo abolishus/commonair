@@ -15,6 +15,8 @@ import { job as councilJob } from "../src/jobs/coop-council-recompute.ts";
 import { job as electionsJob } from "../src/jobs/coop-elections-advance.ts";
 import { job as membershipJob } from "../src/jobs/coop-membership-sync.ts";
 import { job as proposalsJob } from "../src/jobs/coop-proposals-advance.ts";
+import { job as streamHoursJob } from "../src/jobs/coop-stream-hours.ts";
+import { runLockKey } from "../src/integrity/jobs.ts";
 import { expirePendingPayments } from "../src/money/expire.ts";
 import { createWorker, type WorkerHandle } from "../src/worker.ts";
 import { fastWebhooks, quietLogger, VALKEY_URL } from "./fixtures.ts";
@@ -145,6 +147,13 @@ describe("run lock", () => {
     );
     expect(r).toEqual({ closed: 0 });
     expect(await ctx().valkey.get(coopLockKey(COOP_JOBS.electionsAdvance))).toBeNull();
+  });
+
+  test("the stream-hours tick waits for the integrity job's own lock, then runs the pass", async () => {
+    await ctx().valkey.set(runLockKey("stream-hours"), "scheduled-run", "PX", 300);
+    const r = (await streamHoursJob.handler({}, ctx(), meta)) as Record<string, number>;
+    expect(Object.keys(r).sort()).toEqual(["eligible", "updated"]);
+    expect(await ctx().valkey.get(runLockKey("stream-hours"))).toBeNull();
   });
 
   test("two concurrent handler runs do the work once", async () => {

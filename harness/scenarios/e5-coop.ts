@@ -513,6 +513,9 @@ async function stepMembership(run: Run, shareCents: number | null): Promise<void
       waitFor(
         "coop.membership streamer eligibility for S1 and S2",
         async () => {
+          // Run the stream-hours pass now instead of waiting for its 5-minute schedule (once
+          // scoring has verified the viewers); a busy or slow tick just means the next poll.
+          await run.hooks.tick("stream-hours").catch(() => undefined);
           const ms = await Promise.all(streamers.map((s) => apiMembership(s.api.client)));
           return ms.every((m) => m.eligibility.find((e) => e.class === "streamer")?.eligible === true) ? ms : null;
         },

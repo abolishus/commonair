@@ -251,7 +251,8 @@ The `e5-coop` stack uses `harness/compose.e5-coop.yaml` on a **freshly created d
 - `COOP_TEST_HOOKS=true` (API and worker; off by default, logged as a warning at every start,
   reported by `/healthz`; never on a public instance). It enables
   `POST /internal/coop/tick` behind `INTERNAL_API_SECRET`: body `CoopTickBody`
-  (`{ job: "membership-sync" | "proposals-advance" | "council-recompute" | "elections-advance" }`);
+  (`{ job: "membership-sync" | "proposals-advance" | "council-recompute" | "elections-advance" | "stream-hours" }`;
+  `stream-hours` is tick-only: it runs the integrity stream-hours pass now, under that job's run lock);
   the API enqueues that `COOP_JOBS` job on `QUEUES.coop`, waits for it (30 s) and returns its
   result. A job whose run lock stayed busy returns `{ skipped: 1 }`; the harness ticks again. Without test hooks the route is `404`. The schedules keep running either way.
 
