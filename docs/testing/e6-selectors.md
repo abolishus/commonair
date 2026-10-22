@@ -207,6 +207,23 @@ retry (`simulcast-load-error`, `alerts-load-error`, `overlay-token-load-error`,
 (`data-kind` `goals` | `chat`), navigation links (`account-privacy-link`, `studio-overlays-link`,
 `studio-content-link`) and page wrappers (`overlays-page`, `content-page`, `privacy-page`).
 
+## WHIP audio for WebKit
+
+WHIP ingests carry Opus audio, which MediaMTX muxes into HLS as is and WebKit's native HLS
+(Safari, iOS) does not decode. While a source's audio is not AAC and its video is H.264 (or
+absent), media publishes `sourceAacPath` (`live/<slug>/aac`: video copied, audio re-encoded to
+AAC) and sets `KEYS.sourceAac`: `pending` from the moment it decides a copy is needed (and while
+ffmpeg restarts), `1` once the copy produces output. The origin serves the copy wherever clients
+request the source, under the same URLs; the `aac` directory itself is not addressable. While
+`pending`, the source answers a retryable 503 (`retry-after: 1`), so no WebKit player starts on
+Opus. After 20 s still pending, media drops the mark and the original is served, so a copy that
+cannot start never makes the stream unwatchable.
+
+Glass-to-glass budgets in `ingest-rtmp` / `ingest-whip` (p50 per engine): 15 s, except WHIP into
+WebKit, 20 s. The copy's LL-HLS parts vary in length with WebRTC timing (MediaMTX warns for iOS
+clients) and WebKit's low-latency mode degrades on that: measured 10.8 to 17.5 s against about
+10 s for RTMP into WebKit and 3 to 6 s for WHIP into Chromium (decided 2026-10-22).
+
 ## Routes
 
 | Route                             | Change in E6                                                                                       |

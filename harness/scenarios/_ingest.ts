@@ -13,6 +13,16 @@ import { waitFor } from "../src/wait.ts";
 
 export const MAX_TTFF_MS = 15_000;
 export const MAX_GLASS_TO_GLASS_MS = 15_000;
+/**
+ * WHIP into WebKit: native HLS plays media's AAC copy, whose LL-HLS parts vary in length (WebRTC
+ * timing), and WebKit's low-latency mode degrades on that (spec e6, "WHIP audio for WebKit").
+ */
+export const MAX_GLASS_TO_GLASS_WHIP_WEBKIT_MS = 20_000;
+
+/** The glass-to-glass budget (p50) for one ingest protocol and browser engine. */
+export function glassToGlassBudgetMs(protocol: "rtmp" | "whip", engine: string): number {
+  return protocol === "whip" && engine === "webkit" ? MAX_GLASS_TO_GLASS_WHIP_WEBKIT_MS : MAX_GLASS_TO_GLASS_MS;
+}
 
 export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "whip"): Promise<void> {
   const p = ctx.platform;
@@ -58,11 +68,8 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
     const latency = summarize(samples);
     ctx.metric(`glass_to_glass.${engine}.p50`, latency.p50, "ms");
     ctx.metric(`glass_to_glass.${engine}.p95`, latency.p95, "ms");
-    ctx.assert(
-      `${engine}: glass-to-glass under ${MAX_GLASS_TO_GLASS_MS} ms`,
-      (latency.p50 ?? Infinity) < MAX_GLASS_TO_GLASS_MS,
-      latency,
-    );
+    const budget = glassToGlassBudgetMs(protocol, engine);
+    ctx.assert(`${engine}: glass-to-glass under ${budget} ms`, (latency.p50 ?? Infinity) < budget, latency);
     const report = await v.report();
     ctx.check(`${engine}: playback path`, report.playbackPath === (engine === "webkit" ? "native" : "mse"), {
       path: report.playbackPath,
