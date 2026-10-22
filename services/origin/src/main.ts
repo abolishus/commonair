@@ -10,17 +10,26 @@ import {
   mediaEnv,
   playbackEnv,
   servicePorts,
+  storageEnv,
   valkeyEnv,
 } from "@commonair/config";
 import { createDb } from "@commonair/db";
 import { createLogger, initTelemetry } from "@commonair/observability";
 import { createValkey, runService, valkeyCheck } from "@commonair/service";
+import { storageFromEnv } from "@commonair/storage";
 import { MAX_BLOCKING_MS } from "./llhls.ts";
 import { createMetrics } from "./metrics.ts";
 import { createOrigin } from "./origin.ts";
 
 const env = loadEnv(
-  coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(mediaEnv).and(playbackEnv).and(servicePorts),
+  coreEnv
+    .and(databaseEnv)
+    .and(valkeyEnv)
+    .and(internalEnv)
+    .and(mediaEnv)
+    .and(playbackEnv)
+    .and(storageEnv)
+    .and(servicePorts),
 );
 
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "origin" });
@@ -42,6 +51,7 @@ const origin = await createOrigin({
   cdn: { provider: env.CDN_PROVIDER, baseUrl: env.CDN_BASE_URL },
   trustedProxyCidrs: env.TRUSTED_PROXY_CIDRS,
   issuance: { enabled: env.ORIGIN_ISSUANCE_ENABLED },
+  media: { storage: storageFromEnv(env), bucket: env.S3_BUCKET_MEDIA },
   logger,
   metrics: createMetrics(),
 });

@@ -13,6 +13,11 @@ export interface PutOptions {
   cacheControl?: string;
 }
 
+export interface GetOptions {
+  /** An HTTP `Range` header value, passed through as is. */
+  range?: string;
+}
+
 export interface ObjectInfo {
   key: string;
   size: number;
@@ -22,7 +27,8 @@ export interface ObjectInfo {
 
 export interface ObjectStorage {
   put(bucket: string, key: string, body: BodyInit, opts?: PutOptions): Promise<void>;
-  get(bucket: string, key: string): Promise<Response | null>;
+  /** The object, or null when it does not exist. With `range`, a 206 partial response. */
+  get(bucket: string, key: string, opts?: GetOptions): Promise<Response | null>;
   head(bucket: string, key: string): Promise<ObjectInfo | null>;
   delete(bucket: string, key: string): Promise<void>;
   /** Delete every object under a prefix; returns how many were deleted. */
@@ -99,8 +105,8 @@ export function createS3Storage(opts: S3Options): ObjectStorage {
       if (!res.ok) await fail(res, `put ${bucket}/${key}`);
       await res.body?.cancel();
     },
-    async get(bucket, key) {
-      const res = await send(url(bucket, key));
+    async get(bucket, key, o = {}) {
+      const res = await send(url(bucket, key), o.range ? { headers: { range: o.range } } : {});
       if (res.status === 404) {
         await res.body?.cancel();
         return null;

@@ -89,7 +89,13 @@ export const internalEnv = z.object({
 
 export const storageEnv = z.object({
   S3_ENDPOINT: z.url(),
+  /** S3 endpoint browsers reach for presigned uploads and downloads (not for public media). */
   S3_PUBLIC_ENDPOINT: z.url().optional(),
+  /**
+   * Base URL of public media objects (`<base>/<key>`). The origin's `/media` route by default,
+   * which serves only the public key prefixes (ADR 0009); a CDN or public bucket may replace it.
+   */
+  MEDIA_PUBLIC_URL: z.url().default("http://localhost:3003/media"),
   S3_REGION: z.string().default("garage"),
   S3_ACCESS_KEY_ID: z.string().min(1),
   S3_SECRET_ACCESS_KEY: z.string().min(1),

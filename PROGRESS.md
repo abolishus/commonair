@@ -55,13 +55,16 @@ reviewed independently):
 - Web: a T1-restricted stream shows `stream-restricted` and plays only for confirmed adults; a
   decided moderation case stays open and refreshed.
 - Harness: deletion timestamps read as strings; queue rows open through their button; the NCII
-  form driver re-fills text fields that hydration reset; clip frames are read via a presigned URL.
+  form driver re-fills text fields that hydration reset; clip frames are read through the public
+  media URL (ADR 0009).
 
 Open:
-- Public media URLs (`S3_PUBLIC_ENDPOINT/<bucket>/<key>`) are not fetchable on the local stack:
-  Garage's S3 API refuses anonymous reads ("does not support anonymous access yet"), so avatars,
-  thumbnails, clips and VOD playback from object storage do not load in a browser. Needs Garage's
-  web endpoint (bucket website access) or a media proxy, plus an ADR; the harness works around it.
+
+- ~~Public media URLs not fetchable on the local stack~~ closed (2026-10-21, ADR 0009): media URLs
+  are `MEDIA_PUBLIC_URL/<key>`, served by the origin's `/media` route from the media bucket for
+  the public prefixes only (`channels/`, `clips/`, `thumbnails/`, `vods/`); `incoming/` and
+  `moderation/` (NCII-hidden, review frames) answer 404. The trust-safety scenario reads clip 2
+  through its public URL and checks clip 1's URL and hidden copy answer 404.
 - `ncii-hash` does not hash `broadcast` items yet (a `/live/<channel>` URL: the API ends the
   broadcast and deletes its VODs/clips, but their objects stay and no hashes are added); those
   items stay without `hashed_at` so a later fix picks them up. Requests decided before migration

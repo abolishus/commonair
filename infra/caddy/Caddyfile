@@ -8,6 +8,7 @@
 # Public URLs this implies (set them in .env):
 #   PUBLIC_URL=https://<host>  API_PUBLIC_URL=https://<host>  PLAYBACK_PUBLIC_URL=https://<host>
 #   CHAT_PUBLIC_URL=wss://<host>/chat  P2P_TRACKER_URL=wss://<host>/tracker
+#   MEDIA_PUBLIC_URL=https://<host>/media
 {
 	# ACME works without an account email; add `email you@domain` here to get expiry notices.
 	servers {
@@ -64,6 +65,10 @@
 		reverse_proxy origin:3003
 	}
 	handle /cdn/* {
+		reverse_proxy origin:3003
+	}
+	# Public media objects; the origin serves only the public key prefixes (ADR 0009).
+	handle /media/* {
 		reverse_proxy origin:3003
 	}
 

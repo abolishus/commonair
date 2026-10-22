@@ -391,6 +391,21 @@ describe("Quadlet mirror", () => {
     expect(compose.services.garage!.ports).toContain("${BIND_ADDRESS:-127.0.0.1}:${GARAGE_S3_PORT:-3900}:3900");
   });
 
+  test("public media goes through the origin's /media route, never Garage directly (ADR 0009)", () => {
+    for (const name of ["api", "origin", "worker", "web"])
+      expect(compose.services[name]!.environment!.MEDIA_PUBLIC_URL, name).toBe(
+        "${MEDIA_PUBLIC_URL:-http://localhost:${ORIGIN_PORT:-3003}/media}",
+      );
+    expect(compose.services.origin!.ports).toContain("${BIND_ADDRESS:-127.0.0.1}:${ORIGIN_PORT:-3003}:3003");
+    // Garage's web endpoint would publish the private prefixes; it stays off.
+    const garageToml = read("infra/garage/garage.toml");
+    expect(garageToml).not.toContain("[s3_web]");
+    expect(compose.services.garage!.ports!.some((p) => p.endsWith(":3902"))).toBe(false);
+    expect(/^MEDIA_PUBLIC_URL=http:\/\/localhost:3003\/media$/m.test(read(".env.example"))).toBe(true);
+    // Behind Caddy the same path reaches the origin.
+    expect(read("infra/caddy/Caddyfile")).toMatch(/handle \/media\/\* \{\s+reverse_proxy origin:3003\s+\}/);
+  });
+
   test("app units carry the same in-network environment as compose", () => {
     const appEnv = compose.services.api!.environment!;
     // Compose lets .env override it; the units pin the network's subnet.
@@ -405,7 +420,7 @@ describe("Quadlet mirror", () => {
         // Per-service evidence scoping is checked by its own test above.
         if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY") continue;
         // Browser-facing and deployment-specific: the units read it from the operator's env file.
-        if (k === "S3_PUBLIC_ENDPOINT") continue;
+        if (k === "S3_PUBLIC_ENDPOINT" || k === "MEDIA_PUBLIC_URL") continue;
         const expected = k === "TRUSTED_PROXY_CIDRS" ? "10.89.42.0/24" : v;
         expect(env[k], `${name}: ${k}`).toBe(expected);
       }

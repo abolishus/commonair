@@ -45,6 +45,7 @@ import {
   isUploadRejected,
   nciiClipUrl,
   nciiDeadlineOk,
+  nciiHiddenClip,
   nciiTickAsOf,
   parseSampleSeconds,
   parseSteps,
@@ -75,7 +76,6 @@ import {
   listMediaKeys,
   mediaBucketConfig,
   mediaKeyExists,
-  presignedMediaUrl,
   putPresigned,
   readFixture,
   serviceContainers,
@@ -972,13 +972,14 @@ async function stepNcii(run: Run): Promise<void> {
   // Off air before clip 2's frames reach the block list, so the live stream cannot match them.
   await pub.stop(1_000);
   const bucket = mediaBucketConfig(ctx.env);
-  ctx.assert("S3_ENDPOINT / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY are set (clip read)", bucket !== null);
+  ctx.assert("S3_ENDPOINT / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY are set (hidden clip check)", bucket !== null);
   if (bucket === null) return;
-  const frame = await ctx.step(t("read clip 2's first frame (kept in memory)"), () =>
-    extractFirstFrame(presignedMediaUrl(bucket, absoluteUrl(ready2.url as string, ctx.env.HARNESS_API_URL))),
+  // The public media URL itself, as a browser would read it (origin /media route, ADR 0009).
+  const frame = await ctx.step(t("read clip 2's first frame through its public URL (kept in memory)"), () =>
+    extractFirstFrame(absoluteUrl(ready2.url as string, ctx.env.HARNESS_API_URL)),
   );
   run.needles.push(...fixtureNeedles("clip-frame", frame));
-  void ready1;
+  const clip1Url = absoluteUrl(ready1.url as string, ctx.env.HARNESS_API_URL);
 
   const requester = (n: number): web.NciiFormInput => ({
     name: `Harness Requester ${ctx.runId} ${n}`,
@@ -1033,6 +1034,22 @@ async function stepNcii(run: Run): Promise<void> {
     ),
   );
   ctx.assert("NCII: clip 1 status is deleted", hidden.status === "deleted", hidden);
+  await ctx.step(t("clip 1's media is no longer public, and its hidden copy is never served"), async () => {
+    const hiddenCopy = nciiHiddenClip(clip1Url);
+    ctx.assert(
+      "NCII: clip 1's hidden copy exists in the media bucket",
+      await mediaKeyExists(bucket, hiddenCopy.key),
+      hiddenCopy,
+    );
+    for (const [what, url] of [
+      ["public URL", clip1Url],
+      ["hidden copy", hiddenCopy.url],
+    ] as const) {
+      const res = await fetch(url, { signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(10_000)]) });
+      await res.body?.cancel();
+      ctx.assert(`NCII: clip 1's ${what} answers 404`, res.status === 404, { status: res.status });
+    }
+  });
   const actions = await auditActions(databaseUrl, [r1.requestId, clip1.id]);
   ctx.assert(
     "NCII: the audit log shows ncii.auto_hide by system",

@@ -33,6 +33,22 @@ describe("S3 storage", () => {
     );
   });
 
+  test("get passes a Range header through and returns the 206", async () => {
+    const { calls, f } = fake(
+      (req) =>
+        new Response("23", {
+          status: req.headers.get("range") ? 206 : 200,
+          headers: { "content-range": "bytes 2-3/10" },
+        }),
+    );
+    const s = createS3Storage({ ...base, fetch: f });
+    const res = await s.get("media", "clips/c.mp4", { range: "bytes=2-3" });
+    expect(res?.status).toBe(206);
+    expect(calls[0]!.headers.get("range")).toBe("bytes=2-3");
+    await s.get("media", "clips/c.mp4");
+    expect(calls[1]!.headers.get("range")).toBeNull();
+  });
+
   test("returns null on 404 and maps S3 errors", async () => {
     const { f } = fake((req) =>
       req.url.includes("missing")

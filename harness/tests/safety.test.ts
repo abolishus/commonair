@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { PROTECTED_TABLES, isoOrNull } from "../src/safety-db.ts";
-import { ffmpegFailure, internalSecret, presignedMediaUrl } from "../src/safety-io.ts";
+import { ffmpegFailure, internalSecret } from "../src/safety-io.ts";
 import {
   ALL_SAFETY_STEPS,
   DEADLINE_SLACK_MS,
@@ -16,6 +16,7 @@ import {
   base64Windows,
   benignPatternSource,
   buildFixturePublishArgs,
+  clipMediaUrlParts,
   emailNeedles,
   errorOf,
   findInPages,
@@ -27,6 +28,7 @@ import {
   isUploadRejected,
   nciiClipUrl,
   nciiDeadlineOk,
+  nciiHiddenClip,
   nciiTickAsOf,
   parseSampleSeconds,
   parseSteps,
@@ -349,26 +351,24 @@ describe("isoOrNull (timestamps from raw queries on the shared client)", () => {
   });
 });
 
-describe("presignedMediaUrl", () => {
-  const config = {
-    endpoint: "http://localhost:3900",
-    region: "garage",
-    accessKeyId: "GK0123456789abcdef01234567",
-    secretAccessKey: "0".repeat(64),
-    bucket: "commonair-media",
-  };
-
-  test("signs the object key of a public media URL", () => {
-    const url = new URL(presignedMediaUrl(config, "http://localhost:3900/commonair-media/clips/a%20b.mp4"));
-    expect(url.origin).toBe("http://localhost:3900");
-    expect(decodeURIComponent(url.pathname)).toBe("/commonair-media/clips/a b.mp4");
-    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+describe("nciiHiddenClip", () => {
+  test("names the hidden key and its would-be URL under the public media base", () => {
+    expect(clipMediaUrlParts("http://localhost:3003/media/clips/0190-ab.mp4")).toEqual({
+      base: "http://localhost:3003/media/",
+      key: "clips/0190-ab.mp4",
+    });
+    expect(nciiHiddenClip("https://example.test/media/clips/a%20b.mp4")).toEqual({
+      key: "moderation/ncii-hidden/clips/a b.mp4",
+      url: "https://example.test/media/moderation/ncii-hidden/clips/a%20b.mp4",
+    });
   });
 
-  test("refuses URLs outside the media bucket", () => {
-    expect(() => presignedMediaUrl(config, "http://localhost:3900/other/clips/x.mp4")).toThrow(
-      "not a media bucket URL",
-    );
-    expect(() => presignedMediaUrl(config, "http://localhost:3900/commonair-media/")).toThrow("not a media bucket URL");
+  test("refuses URLs that are not a clip object", () => {
+    for (const bad of [
+      "http://localhost:3003/media/vods/v/index.m3u8",
+      "http://localhost:3003/media/clips/",
+      "http://localhost:3003/media/clips/x.mp4?x=1",
+    ])
+      expect(() => clipMediaUrlParts(bad), bad).toThrow("not a clip media URL");
   });
 });

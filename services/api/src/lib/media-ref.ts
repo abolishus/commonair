@@ -10,10 +10,9 @@ import type { Deps } from "../deps.ts";
 
 const KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$/;
 
-/** The public URL prefix of the media bucket (`<endpoint>/<bucket>/`), normalized. */
-export function instanceMediaBase(env: Deps["env"]): string {
-  const s3 = (env.S3_PUBLIC_ENDPOINT ?? env.S3_ENDPOINT).replace(/\/+$/, "");
-  return new URL(`${s3}/${env.S3_BUCKET_MEDIA}/`).href;
+/** The public URL prefix of media objects (`MEDIA_PUBLIC_URL` + `/`), normalized. */
+export function instanceMediaBase(env: Pick<Deps["env"], "MEDIA_PUBLIC_URL">): string {
+  return new URL(`${env.MEDIA_PUBLIC_URL.replace(/\/+$/, "")}/`).href;
 }
 
 function isKey(key: string, keyPrefix: string | undefined): boolean {

@@ -8,6 +8,7 @@ import type { dto } from "@commonair/contracts";
 import { ChannelTheme } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { instanceMediaBase } from "./media-ref.ts";
 import { viewerCount, viewerCounts } from "./viewers.ts";
 
 const { users, channels, categories, broadcasts, channelPanels, channelSubTiers } = schema;
@@ -24,12 +25,14 @@ export type ChannelCard = z.infer<typeof dto.ChannelCard>;
 export const iso = (d: Date) => d.toISOString();
 export const isoOrNull = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
-/** Public URL for an object in the media bucket; absolute URLs (e.g. OAuth avatars) pass through. */
-export function mediaUrl(deps: Deps, key: string | null | undefined): string | null {
+/**
+ * Public URL for an object in the media bucket (`MEDIA_PUBLIC_URL/<key>`, served by the origin's
+ * `/media` route: ADR 0009); absolute URLs (e.g. OAuth avatars) pass through.
+ */
+export function mediaUrl(deps: Pick<Deps, "env">, key: string | null | undefined): string | null {
   if (!key) return null;
   if (/^https?:\/\//.test(key)) return key;
-  const base = (deps.env.S3_PUBLIC_ENDPOINT ?? deps.env.S3_ENDPOINT).replace(/\/+$/, "");
-  return `${base}/${deps.env.S3_BUCKET_MEDIA}/${key.split("/").map(encodeURIComponent).join("/")}`;
+  return `${instanceMediaBase(deps.env)}${key.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 export function toUserPublic(deps: Deps, u: UserRow, botOwner: { id: string; username: string } | null): UserPublic {

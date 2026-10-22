@@ -20,6 +20,7 @@
     "@commonair/db": "workspace:*",
     "@commonair/observability": "workspace:*",
     "@commonair/service": "workspace:*",
+    "@commonair/storage": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@opentelemetry/api": "catalog:",
     "drizzle-orm": "catalog:",

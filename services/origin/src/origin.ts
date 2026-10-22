@@ -13,8 +13,10 @@ import { ChannelDirectory } from "./channels.ts";
 import { parseCidr, type Cidr } from "./clientip.ts";
 import { ContentStore, type ObjectRef, type MediaObject, type TtlPolicy } from "./content.ts";
 import { createHandler, type OriginFetch } from "./handler.ts";
+import { createMediaHandler, MEDIA_ROUTE, type MediaDeps } from "./media.ts";
 import { IssuanceRunner, runIssuance, type IssuanceRow } from "./issuance.ts";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
+import { rawPathOf } from "./paths.ts";
 import { ProductionStore } from "./production.ts";
 import { TokenRefresher } from "./refresh.ts";
 import { MediaUpstream } from "./upstream.ts";
@@ -31,6 +33,8 @@ export interface OriginOptions {
   mediaPassword: string;
   cacheMb: number;
   cdn: { provider: "none" | "origin-pull"; baseUrl?: string };
+  /** Serve public media objects at `/media/<key>` (ADR 0009); without it `/media` is a 404. */
+  media?: Omit<MediaDeps, "logger">;
   /** TRUSTED_PROXY_CIDRS. */
   trustedProxyCidrs?: string[];
   /** Stream name for SegmentFetch entries (tests use a unique one). */
@@ -101,7 +105,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     if (!parsed) opts.logger?.warn("ignoring invalid TRUSTED_PROXY_CIDRS entry");
     return parsed ? [parsed] : [];
   }) satisfies Cidr[];
-  const fetchHandler = createHandler({
+  const hlsHandler = createHandler({
     publicKey: signingKey.publicKey,
     store,
     channels: new ChannelDirectory({ db: opts.db, valkey: opts.valkey, logger: opts.logger }),
@@ -119,6 +123,12 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     logger: opts.logger,
     now,
   });
+  const mediaHandler = opts.media ? createMediaHandler({ ...opts.media, logger: opts.logger }) : undefined;
+  const fetchHandler: OriginFetch = (req, peerIp) => {
+    const rawPath = rawPathOf(req.url);
+    if (mediaHandler && rawPath.startsWith(MEDIA_ROUTE)) return mediaHandler(req, rawPath);
+    return hlsHandler(req, peerIp);
+  };
 
   const runner = new IssuanceRunner({
     db: opts.db,

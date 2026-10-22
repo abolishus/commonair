@@ -231,16 +231,6 @@ export async function listMediaKeys(config: MediaBucketConfig, prefix: string, m
   return (res.contents ?? []).map((o) => o.key);
 }
 
-/**
- * A presigned GET for a media URL the API returned (`<public endpoint>/<bucket>/<key>`). Garage's
- * S3 API serves no anonymous reads, so the public URL itself is not fetchable on the local stack.
- */
-export function presignedMediaUrl(config: MediaBucketConfig, mediaUrl: string, expiresIn = 300): string {
-  const [bucket, ...key] = new URL(mediaUrl).pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  if (bucket !== config.bucket || key.length === 0) throw new Error("not a media bucket URL");
-  return s3(config).presign(key.join("/"), { method: "GET", expiresIn });
-}
-
 export async function mediaKeyExists(config: MediaBucketConfig, key: string): Promise<boolean> {
   return s3(config).file(key).exists();
 }

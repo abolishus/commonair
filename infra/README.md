@@ -177,6 +177,13 @@ the old key with `podman compose exec garage /garage key delete --yes <old id>`.
 Browser uploads use presigned URLs to `S3_PUBLIC_ENDPOINT`; in production give Garage its own
 hostname (path-style URLs cannot live under a path prefix of the web host, SigV4 signs the path).
 
+Public media (avatars, thumbnails, clips, VODs) is read at `MEDIA_PUBLIC_URL`, by default the
+origin's `/media` route (`http://localhost:3003/media`; `https://<host>/media` behind Caddy). The
+origin reads the media bucket with the service key and serves only the public prefixes
+(`channels/`, `clips/`, `thumbnails/`, `vods/`), never `incoming/` or `moderation/`. Garage
+refuses anonymous reads on its S3 API, and its web endpoint stays off because it would publish
+the whole bucket (ADR 0009).
+
 ## Backups (WAL-G)
 
 The Postgres image adds WAL-G (glibc build for Ubuntu 24.04, which runs on Debian trixie;

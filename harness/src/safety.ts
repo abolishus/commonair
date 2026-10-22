@@ -437,6 +437,32 @@ export function absoluteUrl(url: string, base: string): string {
   return new URL(url, base).toString();
 }
 
+/** Private prefix NCII auto-hide moves objects to (services/worker/src/moderation/objects.ts). */
+export const NCII_HIDDEN_PREFIX = "moderation/ncii-hidden/";
+
+/**
+ * A clip's public media URL (`<MEDIA_PUBLIC_URL>/clips/<file>`) split into the public base and
+ * the object key, so the scenario can name the hidden copy's key and the URL it would have.
+ */
+export function clipMediaUrlParts(url: string): { base: string; key: string } {
+  const u = new URL(url);
+  const i = u.pathname.lastIndexOf("/clips/");
+  if (i === -1 || u.search || u.hash || u.pathname.endsWith("/")) throw new Error("not a clip media URL");
+  const key = u.pathname
+    .slice(i + 1)
+    .split("/")
+    .map(decodeURIComponent)
+    .join("/");
+  return { base: `${u.origin}${u.pathname.slice(0, i + 1)}`, key };
+}
+
+/** Where a clip's object lives once NCII auto-hide moved it, and the URL it would have if routed. */
+export function nciiHiddenClip(url: string): { key: string; url: string } {
+  const { base, key } = clipMediaUrlParts(url);
+  const hidden = `${NCII_HIDDEN_PREFIX}${key}`;
+  return { key: hidden, url: `${base}${hidden.split("/").map(encodeURIComponent).join("/")}` };
+}
+
 /** Upload object key prefix the API publishes avatars under. */
 export function avatarPrefix(channelId: string): string {
   return `channels/${channelId}/avatar/`;
