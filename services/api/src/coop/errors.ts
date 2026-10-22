@@ -9,6 +9,7 @@
  */
 import { ORPCError } from "@orpc/server";
 import { apiError, pgCode } from "../lib/errors.ts";
+import { violatesConstraint } from "../money/checkout-shared.ts";
 
 type Mapped = ORPCError<string, unknown>;
 
@@ -146,5 +147,22 @@ export async function withCoopErrors<T>(fn: () => Promise<T>): Promise<T> {
     const mapped = mapCoopDbError(err);
     if (mapped) throw mapped;
     throw err;
+  }
+}
+
+/**
+ * `withCoopErrors`, running `fn` again (up to `retries` more times) when it fails on the unique
+ * `constraint`. The check sees the raw database error: once mapped, the constraint is gone.
+ */
+export async function withCoopErrorsRetrying<T>(constraint: string, fn: () => Promise<T>, retries = 3): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt < retries && violatesConstraint(err, constraint)) continue;
+      const mapped = mapCoopDbError(err);
+      if (mapped) throw mapped;
+      throw err;
+    }
   }
 }

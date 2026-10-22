@@ -12,7 +12,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { Worker } from "bullmq";
 import { Valkey } from "iovalkey";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, QUEUES } from "@commonair/contracts/internal";
 import { type Database, schema } from "@commonair/db";
 import { FAST_GOVERNANCE } from "@commonair/db/testing";
@@ -161,6 +161,40 @@ describe("shares and memberships", () => {
   test("a second share is refused while one is open", async () => {
     const r = await call<Err>(viewer, "POST", "/api/coop/shares", { returnPath: "/coop/membership" });
     expect(r.status).toBe(409);
+  });
+
+  test("a reference collision mints a fresh reference instead of a conflict", async () => {
+    const buyer = await signUpAndSignIn(api);
+    // The bytes `manualReference` turns into the reference already taken by the first share.
+    const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let bits = 0n;
+    for (const ch of share.reference.slice(3)) bits = (bits << 5n) | BigInt(ALPHABET.indexOf(ch));
+    const taken = Uint8Array.from({ length: 5 }, (_, i) => Number((bits >> BigInt((4 - i) * 8)) & 0xffn));
+    const real = crypto.getRandomValues.bind(crypto);
+    let forced = 0;
+    const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(a: T): T => {
+      if (forced === 0 && a instanceof Uint8Array && a.length === 5) {
+        forced++;
+        a.set(taken);
+        return a;
+      }
+      return real(a as Uint8Array) as unknown as T;
+    });
+    try {
+      const r = await call<typeof share>(buyer, "POST", "/api/coop/shares", { returnPath: "/coop/membership" });
+      expect(forced).toBe(1);
+      expect(r.status).toBe(200);
+      expect(r.body.reference).toMatch(/^CA-/);
+      expect(r.body.reference).not.toBe(share.reference);
+    } finally {
+      spy.mockRestore();
+    }
+    const rows = await owner()
+      .select()
+      .from(schema.membershipShares)
+      .where(eq(schema.membershipShares.userId, buyer.userId));
+    expect(rows).toHaveLength(1);
+    expect(await auditOf("coop.share.request", rows[0]?.id)).toHaveLength(1);
   });
 
   test("with Stripe configured, shares are refused (manual only in E5)", async () => {
@@ -380,7 +414,8 @@ describe("proposals", () => {
 
     const [audit] = await auditOf("proposal.create", ordinary.id);
     expect(audit?.details).toMatchObject({ kind: "ordinary", affectsCreators: true });
-    expect(await eventsOf("coop.proposal.update", { proposal_id: ordinary.id, status: "draft" })).toHaveLength(1);
+    // The public event starts at submit: a draft's title never leaves the platform.
+    expect(await eventsOf("coop.proposal.update", { proposal_id: ordinary.id })).toHaveLength(0);
   });
 
   test("bad changes are refused", async () => {
@@ -411,6 +446,7 @@ describe("proposals", () => {
     const ok = await call<Proposal>(s2, "PATCH", `/api/coop/proposals/${ordinary.id}`, edit);
     expect(ok.status).toBe(200);
     expect(await auditOf("proposal.update", ordinary.id)).toHaveLength(1);
+    expect(await eventsOf("coop.proposal.update", { proposal_id: ordinary.id })).toHaveLength(0);
 
     expect((await call(s1, "POST", `/api/coop/proposals/${ordinary.id}/submit`)).status).toBe(404);
     for (const [who, p] of [
@@ -438,6 +474,19 @@ describe("proposals", () => {
     const w = await call<Proposal>(viewer, "POST", `/api/coop/proposals/${d.body.id}/withdraw`);
     expect(w.body.status).toBe("withdrawn");
     expect(await auditOf("proposal.withdraw", d.body.id)).toHaveLength(1);
+    // Discarding a draft never publishes it: still the author's only, and no public event.
+    for (const who of [null, outsider, s1]) {
+      expect((await call(who, "GET", `/api/coop/proposals/${d.body.id}`)).status).toBe(404);
+      expect((await call(who, "GET", `/api/coop/proposals/${d.body.id}/comments`)).status).toBe(404);
+      for (const q of ["", "?status=withdrawn"]) {
+        const l = await call<{ items: Proposal[] }>(who, "GET", `/api/coop/proposals${q}`);
+        expect(l.body.items.map((p) => p.id)).not.toContain(d.body.id);
+      }
+    }
+    expect((await call(viewer, "GET", `/api/coop/proposals/${d.body.id}`)).status).toBe(200);
+    const own = await call<{ items: Proposal[] }>(viewer, "GET", "/api/coop/proposals?status=withdrawn");
+    expect(own.body.items.map((p) => p.id)).toContain(d.body.id);
+    expect(await eventsOf("coop.proposal.update", { proposal_id: d.body.id })).toHaveLength(0);
   });
 
   test("members comment during discussion; others cannot", async () => {

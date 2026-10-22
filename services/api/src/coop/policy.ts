@@ -18,6 +18,7 @@ export interface ActionFacts {
   proposal: {
     authorId: string;
     status: ProposalStatus;
+    discussionEndsAt: Date | null;
     votingStartsAt: Date | null;
     votingEndsAt: Date | null;
   };

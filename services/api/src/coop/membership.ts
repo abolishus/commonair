@@ -27,8 +27,7 @@ import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.t
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
-import { violatesConstraint } from "../money/checkout-shared.ts";
-import { withCoopErrors } from "./errors.ts";
+import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
 import { eligibility, type MembershipViewDto } from "./views.ts";
 
@@ -209,93 +208,84 @@ export const membershipHandlers = {
     const { payoutRules } = await loadMoneySettings(deps.db);
     const currency = payoutRules.currency;
     const adapter = createAdapter(deps.env);
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await withCoopErrors(() =>
-          deps.db.transaction(async (tx) => {
-            const now = deps.now();
-            // Serializes this user's share purchases with the share trigger's own lock.
-            await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`commonair:share:${caller.user.id}`}))`);
-            const [open] = await tx
-              .select({ id: membershipShares.id })
-              .from(membershipShares)
-              .where(
-                and(eq(membershipShares.userId, caller.user.id), inArray(membershipShares.status, [...OPEN_SHARE])),
-              )
-              .limit(1);
-            if (open) throw conflict("You already have a member share");
-            const [viewer] = await tx
-              .select({ id: memberships.id })
-              .from(memberships)
-              .where(
-                and(
-                  eq(memberships.userId, caller.user.id),
-                  eq(memberships.class, "viewer"),
-                  eq(memberships.status, "active"),
-                  eq(memberships.basis, "share"),
-                ),
-              );
-            if (viewer) throw conflict("You are already a viewer member");
-            const paymentId = uuidv7();
-            const shareId = uuidv7();
-            const base = deps.env.PUBLIC_URL.replace(/\/+$/, "");
-            const start = await adapter.startCheckout({
-              paymentId,
-              kind: "membership_share",
-              amountCents: shareCents,
-              currency,
-              quantity: 1,
-              recurring: false,
-              payerUserId: caller.user.id,
-              creatorUserId: null,
-              successUrl: `${base}/coop/membership`,
-              cancelUrl: `${base}/coop/membership`,
-            });
-            await tx.insert(payments).values({
-              id: paymentId,
-              provider: adapter.provider,
-              providerRef: start.providerRef,
-              kind: "membership_share",
-              status: "pending",
-              userId: caller.user.id,
-              channelId: null,
-              amountCents: shareCents,
-              currency,
-              quantity: 1,
-              expiresAt: new Date(now.getTime() + deps.env.PAYMENT_PENDING_DAYS * DAY_MS),
-            });
-            const [share] = await tx
-              .insert(membershipShares)
-              .values({ id: shareId, userId: caller.user.id, amountCents: shareCents, currency, paymentId })
-              .returning();
-            if (!share) throw new Error("share insert returned nothing");
-            await audit(tx, {
-              actorType: MEMBER,
-              actorId: caller.user.id,
-              action: "coop.share.request",
-              subjectType: "membership_share",
-              subjectId: shareId,
-              details: { shareId, paymentId, amountCents: shareCents, currency },
-            });
-            await shareEvent(tx, share, now);
-            return {
-              kind: "instructions" as const,
-              paymentId,
-              reference: start.providerRef,
-              instructions:
-                start.kind === "instructions"
-                  ? start.instructions
-                  : manualInstructions(deps.env.MANUAL_PAYMENT_INSTRUCTIONS, start.providerRef, shareCents, currency),
-              amount: money(shareCents, currency),
-            };
-          }),
-        );
-      } catch (err) {
-        // A reference collision mints a new one.
-        if (attempt < 3 && violatesConstraint(err, "payments_provider_ref_uq")) continue;
-        throw err;
-      }
-    }
+    // A manual reference collision (`payments_provider_ref_uq`) mints a new one.
+    return withCoopErrorsRetrying("payments_provider_ref_uq", () =>
+      deps.db.transaction(async (tx) => {
+        const now = deps.now();
+        // Serializes this user's share purchases with the share trigger's own lock.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`commonair:share:${caller.user.id}`}))`);
+        const [open] = await tx
+          .select({ id: membershipShares.id })
+          .from(membershipShares)
+          .where(and(eq(membershipShares.userId, caller.user.id), inArray(membershipShares.status, [...OPEN_SHARE])))
+          .limit(1);
+        if (open) throw conflict("You already have a member share");
+        const [viewer] = await tx
+          .select({ id: memberships.id })
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.userId, caller.user.id),
+              eq(memberships.class, "viewer"),
+              eq(memberships.status, "active"),
+              eq(memberships.basis, "share"),
+            ),
+          );
+        if (viewer) throw conflict("You are already a viewer member");
+        const paymentId = uuidv7();
+        const shareId = uuidv7();
+        const base = deps.env.PUBLIC_URL.replace(/\/+$/, "");
+        const start = await adapter.startCheckout({
+          paymentId,
+          kind: "membership_share",
+          amountCents: shareCents,
+          currency,
+          quantity: 1,
+          recurring: false,
+          payerUserId: caller.user.id,
+          creatorUserId: null,
+          successUrl: `${base}/coop/membership`,
+          cancelUrl: `${base}/coop/membership`,
+        });
+        await tx.insert(payments).values({
+          id: paymentId,
+          provider: adapter.provider,
+          providerRef: start.providerRef,
+          kind: "membership_share",
+          status: "pending",
+          userId: caller.user.id,
+          channelId: null,
+          amountCents: shareCents,
+          currency,
+          quantity: 1,
+          expiresAt: new Date(now.getTime() + deps.env.PAYMENT_PENDING_DAYS * DAY_MS),
+        });
+        const [share] = await tx
+          .insert(membershipShares)
+          .values({ id: shareId, userId: caller.user.id, amountCents: shareCents, currency, paymentId })
+          .returning();
+        if (!share) throw new Error("share insert returned nothing");
+        await audit(tx, {
+          actorType: MEMBER,
+          actorId: caller.user.id,
+          action: "coop.share.request",
+          subjectType: "membership_share",
+          subjectId: shareId,
+          details: { shareId, paymentId, amountCents: shareCents, currency },
+        });
+        await shareEvent(tx, share, now);
+        return {
+          kind: "instructions" as const,
+          paymentId,
+          reference: start.providerRef,
+          instructions:
+            start.kind === "instructions"
+              ? start.instructions
+              : manualInstructions(deps.env.MANUAL_PAYMENT_INSTRUCTIONS, start.providerRef, shareCents, currency),
+          amount: money(shareCents, currency),
+        };
+      }),
+    );
   }),
 
   exit: os.coop.exit.handler(async ({ context, input }) => {

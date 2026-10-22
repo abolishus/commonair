@@ -10,7 +10,8 @@ import { describe, expect, test } from "vite-plus/test";
 import { contract, type ProcedureMeta } from "@commonair/contracts";
 import { DEFAULT_GOVERNANCE_SETTINGS } from "@commonair/db";
 import { membershipClassesOf } from "@commonair/governance";
-import { mapCoopDbError } from "../src/coop/errors.ts";
+import { ORPCError } from "@orpc/server";
+import { mapCoopDbError, withCoopErrorsRetrying } from "../src/coop/errors.ts";
 import { type ActionFacts, type ProposalAction, refuseProposalAction } from "../src/coop/policy.ts";
 import { classifyDraft } from "../src/coop/shared.ts";
 import {
@@ -124,6 +125,7 @@ const OTHER = "other";
 const proposal = (status: ActionFacts["proposal"]["status"], over: Partial<ActionFacts["proposal"]> = {}) => ({
   authorId: AUTHOR,
   status,
+  discussionEndsAt: status === "draft" ? null : at(-20),
   votingStartsAt: status === "voting" ? at(-10) : null,
   votingEndsAt: status === "voting" ? at(10) : null,
   ...over,
@@ -146,6 +148,16 @@ describe("proposal action policy", () => {
       expect(code(a, facts(proposal("draft"), OTHER))).toBe("NOT_FOUND");
     expect(proposalVisibleTo(proposal("draft"), null)).toBe(false);
     expect(proposalVisibleTo(proposal("discussion"), null)).toBe(true);
+  });
+
+  test("a withdrawn draft stays private to its author; a withdrawn submitted proposal is public", () => {
+    const discarded = proposal("withdrawn", { discussionEndsAt: null });
+    expect(proposalVisibleTo(discarded, null)).toBe(false);
+    expect(proposalVisibleTo(discarded, OTHER)).toBe(false);
+    expect(proposalVisibleTo(discarded, AUTHOR)).toBe(true);
+    for (const a of ["edit", "submit", "withdraw", "comment", "vote", "councilRespond"] as const)
+      expect(code(a, facts(discarded, OTHER))).toBe("NOT_FOUND");
+    expect(proposalVisibleTo(proposal("withdrawn"), null)).toBe(true);
   });
 
   test("edit: the author, while draft or discussion", () => {
@@ -471,5 +483,47 @@ describe("trigger refusals map to contract errors", () => {
     expect(dup).toMatchObject({ code: "CONFLICT", message: "The council already responded to this proposal" });
     expect(mapCoopDbError(new Error("boom"))).toBeNull();
     expect(mapCoopDbError(pgError("57014", "canceling statement"))).toBeNull();
+  });
+});
+
+describe("share reference collision retry", () => {
+  const collision = () =>
+    Object.assign(new Error("duplicate key value violates unique constraint"), {
+      code: "23505",
+      constraint_name: "payments_provider_ref_uq",
+    });
+
+  test("a duplicate reference runs the purchase again (the raw error, before mapping)", async () => {
+    let calls = 0;
+    const out = await withCoopErrorsRetrying("payments_provider_ref_uq", async () => {
+      calls++;
+      // Drizzle wraps the driver error; the constraint is on the cause.
+      if (calls === 1) throw Object.assign(new Error("Failed query"), { cause: collision() });
+      return "ok";
+    });
+    expect(out).toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  test("gives up after the retries with a mapped CONFLICT, never the SQL", async () => {
+    let calls = 0;
+    const err = await withCoopErrorsRetrying("payments_provider_ref_uq", async () => {
+      calls++;
+      throw collision();
+    }).catch((e: unknown) => e);
+    expect(calls).toBe(4);
+    expect(err).toBeInstanceOf(ORPCError);
+    expect((err as ORPCError<string, unknown>).code).toBe("CONFLICT");
+    expect((err as Error).message).not.toMatch(/duplicate key/);
+  });
+
+  test("other refusals are mapped at once, without a retry", async () => {
+    let calls = 0;
+    const err = await withCoopErrorsRetrying("payments_provider_ref_uq", async () => {
+      calls++;
+      throw Object.assign(new Error("x"), { code: "23505", constraint_name: "membership_shares_held_uq" });
+    }).catch((e: unknown) => e);
+    expect(calls).toBe(1);
+    expect((err as ORPCError<string, unknown>).code).toBe("CONFLICT");
   });
 });

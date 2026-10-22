@@ -22,7 +22,7 @@ import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors } from "./errors.ts";
 import { type ActionFacts, type ProposalAction, type Refusal, refuseProposalAction } from "./policy.ts";
 import { MEMBER, classifyDraft, currentCouncilTerm, isActiveMember, unknownUser, userPicks } from "./shared.ts";
-import { buildProposalView, proposalVisibleTo, type ProposalDto } from "./views.ts";
+import { buildProposalView, proposalPrivate, proposalVisibleTo, type ProposalDto } from "./views.ts";
 
 const { proposals, proposalComments, proposalElectorate, votes, tallies, councilResponses, governanceSettings } =
   schema;
@@ -184,7 +184,16 @@ async function lockProposal(
   return row;
 }
 
-async function proposalEvent(tx: Executor, p: Pick<ProposalRow, "id" | "title" | "status" | "kind">, now: Date) {
+/**
+ * `coop.proposal.update` is public (apps, webhooks, EventSub), so it starts at submit: a draft, its
+ * edits and its withdrawal stay with the author and emit nothing (the audit row records them).
+ */
+async function proposalEvent(
+  tx: Executor,
+  p: Pick<ProposalRow, "id" | "title" | "status" | "kind" | "discussionEndsAt">,
+  now: Date,
+) {
+  if (proposalPrivate(p)) return;
   await emit(
     tx,
     "coop.proposal.update",
@@ -211,9 +220,9 @@ export const proposalHandlers = {
     const { deps } = context;
     const callerId = context.caller?.user.id ?? null;
     const cur = decodeCursor(input.cursor, isKeyCursor);
-    const visible = callerId
-      ? or(sql`${proposals.status} <> 'draft'`, eq(proposals.authorId, callerId))
-      : sql`${proposals.status} <> 'draft'`;
+    // The SQL form of `proposalVisibleTo`: never-submitted proposals only for their author.
+    const isPublic = sql`not (${proposals.status} = 'draft' or (${proposals.status} = 'withdrawn' and ${proposals.discussionEndsAt} is null))`;
+    const visible = callerId ? or(isPublic, eq(proposals.authorId, callerId)) : isPublic;
     const rows = await deps.db
       .select()
       .from(proposals)
@@ -336,7 +345,7 @@ export const proposalHandlers = {
     const { deps } = context;
     const callerId = context.caller?.user.id ?? null;
     const [p] = await deps.db
-      .select({ status: proposals.status, authorId: proposals.authorId })
+      .select({ status: proposals.status, authorId: proposals.authorId, discussionEndsAt: proposals.discussionEndsAt })
       .from(proposals)
       .where(eq(proposals.id, input.id));
     if (!p || !proposalVisibleTo(p, callerId)) throw notFound("Proposal not found");

@@ -66,9 +66,18 @@ export interface ProposalFacts {
 const DECIDED: readonly ProposalStatus[] = ["passed", "rejected", "applied"];
 const REVIEW_OVER: readonly ProposalStatus[] = ["voting", "passed", "rejected", "applied"];
 
-/** Drafts exist only for their author (`get` → NOT_FOUND, `list` leaves them out). */
-export const proposalVisibleTo = (p: { status: ProposalStatus; authorId: string }, callerId: string | null) =>
-  p.status !== "draft" || p.authorId === callerId;
+/**
+ * A proposal that never left draft: a draft, or a draft its author withdrew (no discussion was
+ * ever opened, so the trigger never set `discussion_ends_at`). Withdrawing must not publish it.
+ */
+export const proposalPrivate = (p: { status: ProposalStatus; discussionEndsAt: Date | null }) =>
+  p.status === "draft" || (p.status === "withdrawn" && p.discussionEndsAt === null);
+
+/** Never-submitted proposals exist only for their author (`get` → NOT_FOUND, `list` leaves them out). */
+export const proposalVisibleTo = (
+  p: { status: ProposalStatus; authorId: string; discussionEndsAt: Date | null },
+  callerId: string | null,
+) => !proposalPrivate(p) || p.authorId === callerId;
 
 /** The voting window is open now (the trigger re-checks with the database clock). */
 export function votingOpen(
