@@ -493,3 +493,21 @@ describe("shellcheck", () => {
     300_000,
   );
 });
+
+describe("docs describe the per-unit env", () => {
+  // These docs are this unit's to keep current; the README and hetzner.md limitation bullets
+  // are tracked as a contract request until the orchestrator rewrites them.
+  const DOCS = [
+    "infra/README.md",
+    "docs/self-hosting/configuration.md",
+    "docs/self-hosting/backups.md",
+    "docs/self-hosting/troubleshooting.md",
+    "docs/self-hosting/upgrades.md",
+    "packages/config/src/env.ts",
+  ];
+  test.each(DOCS)("%s does not claim every container reads the whole env file", (doc) => {
+    const text = readFileSync(join(ROOT, doc), "utf8").replace(/\s+/g, " ");
+    expect(text).not.toMatch(/every container reads/i);
+    expect(text).not.toMatch(/whole env file/i);
+  });
+});

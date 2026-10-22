@@ -133,8 +133,9 @@ Config files are bind-mounted read-only from `infra/` with `:Z` (SELinux relabel
 
 ## Environment
 
-Every container reads `.env` (`env_file`, optional, path overridable with `COMMONAIR_ENV_FILE`)
-and compose overrides the hostnames for the compose network:
+Our own images (the app services and the tools-image jobs) read `.env` (`env_file`, optional,
+path overridable with `COMMONAIR_ENV_FILE`); third-party services get only the variables they use
+through `environment:`. Compose overrides the hostnames for the compose network:
 `DATABASE_URL=postgres://commonair_app:${POSTGRES_APP_PASSWORD}@postgres:5432/commonair`,
 `VALKEY_URL=redis://valkey:6379`, `S3_ENDPOINT=http://garage:3900`, `MEDIAMTX_*` → `mediamtx`,
 `API_INTERNAL_URL=http://api:3001`, `CHAT_INTERNAL_URL=ws://chat:3002/ws`,
@@ -162,7 +163,7 @@ has a default; missing ones make the dependent container fail with a clear messa
 | `BIND_ADDRESS` / `CADDY_BIND_ADDRESS`       | `127.0.0.1` / `0.0.0.0`       | host bind addresses                                        |
 | `IMAGE_REGISTRY` / `IMAGE_TAG`              | `localhost/commonair` / `dev` | names of our built images                                  |
 | `WALG_RETAIN_FULL`                          | `7`                           | full backups kept by `commonair-backup`                    |
-| `COMMONAIR_ENV_FILE`                        | `.env`                        | env file every container reads                             |
+| `COMMONAIR_ENV_FILE`                        | `.env`                        | env file our own images read                               |
 
 ## Database roles
 

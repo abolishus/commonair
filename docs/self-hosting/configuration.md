@@ -343,7 +343,7 @@ the tables by hand. Columns:
 | `WALG_RETAIN_FULL`         | no       | —       | —              | Full backups `commonair-backup` keeps; older ones are pruned (unset keeps all).                                                                                         |
 | `POSTGRES_MAX_CONNECTIONS` | no       | —       | —              | Postgres `max_connections` (compose default 400: parallel integration suites hold many pools).                                                                          |
 | `COMPOSE_SUBNET`           | no       | —       | —              | Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own.                                                                               |
-| `COMMONAIR_ENV_FILE`       | no       | —       | —              | Compose only: path of the env file every container reads (default `.env`).                                                                                              |
+| `COMMONAIR_ENV_FILE`       | no       | —       | —              | Compose only: path of the env file our own images read; third-party services do not (default `.env`).                                                                   |
 
 ### `servicePorts`
 

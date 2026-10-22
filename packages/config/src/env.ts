@@ -423,7 +423,7 @@ export const infraEnv = z.object({
   POSTGRES_MAX_CONNECTIONS: z.coerce.number().int().positive().optional(),
   /** Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own. */
   COMPOSE_SUBNET: z.string().optional(),
-  /** Compose only: path of the env file every container reads (default `.env`). */
+  /** Compose only: path of the env file our own images read; third-party services do not (default `.env`). */
   COMMONAIR_ENV_FILE: z.string().optional(),
 });
 
