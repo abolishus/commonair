@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { PROTECTED_TABLES, isoOrNull } from "../src/safety-db.ts";
-import { ffmpegFailure, internalSecret } from "../src/safety-io.ts";
+import { ffmpegFailure, internalSecret, presignedMediaUrl } from "../src/safety-io.ts";
 import {
   ALL_SAFETY_STEPS,
   DEADLINE_SLACK_MS,
@@ -346,5 +346,29 @@ describe("isoOrNull (timestamps from raw queries on the shared client)", () => {
 
   test("refuses garbage instead of reporting a bogus time", () => {
     expect(() => isoOrNull("not a time")).toThrow(/unparseable/);
+  });
+});
+
+describe("presignedMediaUrl", () => {
+  const config = {
+    endpoint: "http://localhost:3900",
+    region: "garage",
+    accessKeyId: "GK0123456789abcdef01234567",
+    secretAccessKey: "0".repeat(64),
+    bucket: "commonair-media",
+  };
+
+  test("signs the object key of a public media URL", () => {
+    const url = new URL(presignedMediaUrl(config, "http://localhost:3900/commonair-media/clips/a%20b.mp4"));
+    expect(url.origin).toBe("http://localhost:3900");
+    expect(decodeURIComponent(url.pathname)).toBe("/commonair-media/clips/a b.mp4");
+    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("refuses URLs outside the media bucket", () => {
+    expect(() => presignedMediaUrl(config, "http://localhost:3900/other/clips/x.mp4")).toThrow(
+      "not a media bucket URL",
+    );
+    expect(() => presignedMediaUrl(config, "http://localhost:3900/commonair-media/")).toThrow("not a media bucket URL");
   });
 });

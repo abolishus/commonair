@@ -75,6 +75,7 @@ import {
   listMediaKeys,
   mediaBucketConfig,
   mediaKeyExists,
+  presignedMediaUrl,
   putPresigned,
   readFixture,
   serviceContainers,
@@ -970,8 +971,11 @@ async function stepNcii(run: Run): Promise<void> {
   );
   // Off air before clip 2's frames reach the block list, so the live stream cannot match them.
   await pub.stop(1_000);
+  const bucket = mediaBucketConfig(ctx.env);
+  ctx.assert("S3_ENDPOINT / S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY are set (clip read)", bucket !== null);
+  if (bucket === null) return;
   const frame = await ctx.step(t("read clip 2's first frame (kept in memory)"), () =>
-    extractFirstFrame(absoluteUrl(ready2.url as string, ctx.env.HARNESS_API_URL)),
+    extractFirstFrame(presignedMediaUrl(bucket, absoluteUrl(ready2.url as string, ctx.env.HARNESS_API_URL))),
   );
   run.needles.push(...fixtureNeedles("clip-frame", frame));
   void ready1;

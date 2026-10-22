@@ -143,19 +143,28 @@ export async function submitTakedown(
   const page = await session.goto(ROUTES.takedown);
   const form = byTestId(page, T.nciiForm).first();
   await form.waitFor(ui);
-  await byTestId(page, T.nciiName).first().fill(input.name, ui);
-  await byTestId(page, T.nciiEmail).first().fill(input.email, ui);
+  const text = [
+    [T.nciiName, input.name],
+    [T.nciiEmail, input.email],
+    [T.nciiUrls, input.urls.join("\n")],
+    [T.nciiDescription, input.description],
+    [T.nciiSignature, input.signature],
+  ] as const;
+  for (const [id, value] of text) await byTestId(page, id).first().fill(value, ui);
   await byTestId(page, T.nciiRelationship).first().click(ui);
   await byTestId(page, T.nciiRelationshipSelf).first().click(ui);
-  await byTestId(page, T.nciiUrls).first().fill(input.urls.join("\n"), ui);
-  await byTestId(page, T.nciiDescription).first().fill(input.description, ui);
   await byTestId(page, T.nciiGoodFaith).first().check(ui);
-  await byTestId(page, T.nciiSignature).first().fill(input.signature, ui);
   const receipt = byTestId(page, T.nciiReceipt).first();
   await waitFor(
     "ncii-receipt (ALTCHA solved and the request accepted)",
     async () => {
       if (await receipt.isVisible()) return true;
+      // A fill that lands before hydration is reset by React; put it back before submitting.
+      for (const [id, value] of text) {
+        const field = byTestId(page, id).first();
+        if ((await field.inputValue({ timeout: 2_000 }).catch(() => value)) !== value)
+          await field.fill(value, { timeout: 2_000 }).catch(() => undefined);
+      }
       const submit = byTestId(page, T.nciiSubmit).first();
       if ((await submit.isVisible()) && (await submit.isEnabled()))
         await submit.click({ timeout: 2_000 }).catch(() => undefined);
