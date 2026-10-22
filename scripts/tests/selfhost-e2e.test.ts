@@ -128,3 +128,14 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
     expect([...flags].filter((f) => !KNOWN.has(f)).sort()).toEqual([]);
   });
 });
+
+describe("CI job", () => {
+  test("unloads the runner's unix-chkpwd AppArmor profile before the end-to-end run", () => {
+    // Without it the Fedora host's user manager fails PAM on ubuntu-24.04 runners.
+    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+    const job = ci.slice(ci.indexOf("\n  selfhost-e2e:"), ci.indexOf("\n  ci-ok:"));
+    const unload = job.indexOf("apparmor_parser -R /etc/apparmor.d/unix-chkpwd");
+    expect(unload).toBeGreaterThan(0);
+    expect(unload).toBeLessThan(job.indexOf("scripts/selfhost/e2e.ts"));
+  });
+});
