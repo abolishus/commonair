@@ -438,12 +438,25 @@ describe("media pipeline", () => {
     const from = new Date(startedAt.getTime() + offset * 1000);
     await waitFor("buffer covers the clip window", async () => {
       const w = media.coordinator.liveWindow(broadcastId, from, 4);
-      return w !== null && w.durationSeconds >= 4;
+      return w !== null && w !== "pending" && w.durationSeconds >= 4;
     });
     const id = await createClip(offset, 4);
     const clip = await waitForClip(id);
     expect(clip.status).toBe("ready");
     expect(clip.durationSeconds).toBeGreaterThan(3);
+    const duration = await mp4Duration(clip.storageKey ?? "");
+    expect(duration).toBeGreaterThan(3.5);
+    expect(duration).toBeLessThan(4.6);
+  }, 60_000);
+
+  test("a live clip queued before the buffer reaches its window waits for it", async () => {
+    // Regression: the job used to fail at once ("not live here"), e.g. on a channel without VODs
+    // when the clip was made seconds after going live, before ffmpeg closed the window's segment.
+    const offset = (Date.now() - startedAt.getTime()) / 1000 + 2;
+    expect(media.coordinator.liveWindow(broadcastId, new Date(startedAt.getTime() + offset * 1000), 4)).toBe("pending");
+    const id = await createClip(offset, 4);
+    const clip = await waitForClip(id);
+    expect(clip.status).toBe("ready");
     const duration = await mp4Duration(clip.storageKey ?? "");
     expect(duration).toBeGreaterThan(3.5);
     expect(duration).toBeLessThan(4.6);

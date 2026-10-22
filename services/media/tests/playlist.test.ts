@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { findWindow, parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "../src/vod/playlist.ts";
+import {
+  findLiveWindow,
+  findWindow,
+  parsePlaylist,
+  renderPlaylist,
+  totalDuration,
+  type PlaylistSegment,
+} from "../src/vod/playlist.ts";
 
 // Exactly what ffmpeg 7–9 writes for `-hls_segment_type fmp4 -hls_flags program_date_time`.
 const FFMPEG_PLAYLIST = `#EXTM3U
@@ -107,5 +114,49 @@ describe("findWindow", () => {
     expect(findWindow(segs, new Date("2026-10-18T19:00:00Z"), 10)).toBeNull();
     expect(findWindow(segs, new Date("2026-10-18T21:00:00Z"), 10)).toBeNull();
     expect(findWindow([], new Date(), 10)).toBeNull();
+  });
+});
+
+describe("findLiveWindow", () => {
+  const buffer = [
+    seg("r1_0.m4s", "2026-10-18T20:00:03Z", 6, "init_r1.mp4"),
+    seg("r1_1.m4s", "2026-10-18T20:00:09Z", 4, "init_r1.mp4"),
+    seg("r1_2.m4s", "2026-10-18T20:00:13Z", 4, "init_r1.mp4"),
+  ];
+  const recordingStart = new Date("2026-10-18T20:00:03Z");
+  const at = (s: string) => new Date(`2026-10-18T20:00:${s}Z`);
+
+  test("nothing recorded yet is pending, not missing", () => {
+    expect(findLiveWindow([], null, at("00"), 5)).toEqual({ status: "pending" });
+    expect(findLiveWindow([], recordingStart, at("00"), 5)).toEqual({ status: "pending" });
+  });
+
+  test("a window ending past the last finished segment is pending", () => {
+    expect(findLiveWindow(buffer, recordingStart, at("14"), 5)).toEqual({ status: "pending" });
+    // Ends exactly at the buffered edge: available.
+    expect(findLiveWindow(buffer, recordingStart, at("12"), 5).status).toBe("found");
+  });
+
+  test("a window inside the buffer is found", () => {
+    const r = findLiveWindow(buffer, recordingStart, at("10"), 5);
+    if (r.status !== "found") throw new Error(r.status);
+    expect(r.window.segments.map((s) => s.uri)).toEqual(["r1_1.m4s", "r1_2.m4s"]);
+    expect(r.window.offsetSeconds).toBe(1);
+    expect(r.window.durationSeconds).toBe(5);
+  });
+
+  test("a window before the recording began moves to its start, at full length", () => {
+    const r = findLiveWindow(buffer, recordingStart, at("00"), 5);
+    if (r.status !== "found") throw new Error(r.status);
+    expect(r.window.segments.map((s) => s.uri)).toEqual(["r1_0.m4s"]);
+    expect(r.window.offsetSeconds).toBe(0);
+    expect(r.window.durationSeconds).toBe(5);
+    // Moved, it must still be buffered in full.
+    expect(findLiveWindow(buffer.slice(0, 1), recordingStart, at("00"), 7)).toEqual({ status: "pending" });
+  });
+
+  test("a window already pruned from the buffer is outside", () => {
+    // The recording began at :03 but only :13 onwards is still on disk.
+    expect(findLiveWindow(buffer.slice(2), recordingStart, at("04"), 4)).toEqual({ status: "outside" });
   });
 });

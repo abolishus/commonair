@@ -18,7 +18,7 @@ import { Supervisor } from "../ffmpeg/supervisor.ts";
 import { every, type Loop } from "../loop.ts";
 import { MAX_PENDING_UPLOADS } from "../settings.ts";
 import { errorCategory } from "../moderation/logging.ts";
-import { findWindow, parsePlaylist, renderPlaylist, type PlaylistSegment } from "./playlist.ts";
+import { findLiveWindow, parsePlaylist, renderPlaylist, type PlaylistSegment } from "./playlist.ts";
 
 export const vodPrefix = (vodId: string) => `vods/${vodId}/`;
 export const VOD_PLAYLIST = "index.m3u8";
@@ -38,12 +38,17 @@ export interface LocalWindow {
   durationSeconds: number;
 }
 
+/** `pending`: live here, but the window is not on disk yet. `null`: outside the buffer. */
+export type LocalLookup = LocalWindow | "pending" | null;
+
 export class SegmentRecorder {
   private supervisor: Supervisor | null = null;
   private loop: Loop | null = null;
   private readonly runs: string[] = [];
   private local: LocalSegment[] = [];
   private readonly known = new Set<string>();
+  /** Start of the first segment ever recorded (pruning never moves it). */
+  private recordingStartedAt: Date | null = null;
   /** Everything already in the published VOD playlist, in order. */
   private published: PlaylistSegment[] = [];
   private readonly uploadedInits = new Set<string>();
@@ -125,9 +130,11 @@ export class SegmentRecorder {
   }
 
   /** Local segments covering a wall-clock window, for live clips. */
-  localWindow(start: Date, durationSeconds: number): LocalWindow | null {
-    const w = findWindow(this.local, start, durationSeconds);
-    if (!w) return null;
+  localWindow(start: Date, durationSeconds: number): LocalLookup {
+    const found = findLiveWindow(this.local, this.recordingStartedAt, start, durationSeconds);
+    if (found.status === "pending") return "pending";
+    if (found.status === "outside") return null;
+    const w = found.window;
     const first = w.segments[0];
     if (!first?.map) return null;
     return {
@@ -160,6 +167,8 @@ export class SegmentRecorder {
         if (this.known.has(uri)) continue;
         this.known.add(uri);
         const map = s.map ? basename(s.map) : null;
+        if (s.startedAt && (!this.recordingStartedAt || s.startedAt < this.recordingStartedAt))
+          this.recordingStartedAt = s.startedAt;
         this.local.push({ ...s, uri, map, localPath: join(this.dir, uri), uploaded: false });
       }
     }

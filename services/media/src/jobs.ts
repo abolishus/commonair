@@ -6,12 +6,21 @@
  * producer. Each queue object gets its own connection without a key prefix (BullMQ forbids
  * ioredis prefixes; isolation uses BullMQ's own `prefix`).
  */
-import { Queue, Worker, type Job } from "bullmq";
+import { DelayedError, Queue, Worker, type Job } from "bullmq";
 import { Valkey } from "iovalkey";
 import { QUEUES } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
 import { errorCategory } from "./moderation/logging.ts";
-import { ClipJob, ClipUnavailableError, markClipFailed, processClip, type ClipDeps } from "./clips.ts";
+import {
+  ClipJob,
+  ClipPendingError,
+  ClipUnavailableError,
+  LIVE_CLIP_RECHECK_MS,
+  LIVE_CLIP_WAIT_MS,
+  markClipFailed,
+  processClip,
+  type ClipDeps,
+} from "./clips.ts";
 import { finalizeVod, VodFinalizeJob, type FinalizeDeps } from "./vod/finalize.ts";
 import type { FinalizeJobControl, FinalizeJobInfo, FinalizeJobState } from "./vod/reconcile.ts";
 
@@ -64,7 +73,7 @@ export function startJobs(opts: JobsOptions): Jobs {
 
   const clipsWorker = new Worker(
     QUEUES.clips,
-    async (job: Job) => {
+    async (job: Job, token?: string) => {
       const parsed = ClipJob.safeParse(job.data);
       if (!parsed.success) {
         log.warn("discarding malformed clip job", { jobId: job.id });
@@ -73,7 +82,18 @@ export function startJobs(opts: JobsOptions): Jobs {
       const { clipId } = parsed.data;
       try {
         return await processClip(opts.clips, clipId);
-      } catch (err) {
+      } catch (caught) {
+        let err = caught;
+        if (err instanceof ClipPendingError) {
+          if (Date.now() < err.windowEnd.getTime() + LIVE_CLIP_WAIT_MS) {
+            // Delaying is not a failed attempt: the retry budget stays for real errors.
+            const delayed = await job.moveToDelayed(Date.now() + LIVE_CLIP_RECHECK_MS, token).then(
+              () => true,
+              (moveErr: unknown) => ((err = moveErr), false),
+            );
+            if (delayed) throw new DelayedError();
+          } else err = new ClipUnavailableError("live buffer never reached the clip window");
+        }
         const lastAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
         if (err instanceof ClipUnavailableError || lastAttempt) {
           await markClipFailed(opts.clips.db, clipId, err instanceof ClipUnavailableError ? err.reason : null);

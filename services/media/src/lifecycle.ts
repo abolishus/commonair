@@ -12,7 +12,7 @@ import { schema, uuidv7 } from "@commonair/db";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
 import { isLive } from "./mediamtx.ts";
 import { BroadcastSession } from "./session.ts";
-import type { LocalWindow } from "./vod/recorder.ts";
+import type { LocalLookup } from "./vod/recorder.ts";
 import { vodPrefix } from "./vod/recorder.ts";
 import { reconcileVods } from "./vod/reconcile.ts";
 import { errorCategory } from "./moderation/logging.ts";
@@ -39,7 +39,7 @@ export class LiveCoordinator {
     return this.sessions.get(broadcastId);
   }
 
-  liveWindow(broadcastId: string, start: Date, durationSeconds: number): LocalWindow | null {
+  liveWindow(broadcastId: string, start: Date, durationSeconds: number): LocalLookup {
     return this.sessions.get(broadcastId)?.liveWindow(start, durationSeconds) ?? null;
   }
 

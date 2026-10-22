@@ -23,7 +23,7 @@ import { T0_REASON, type Hit, type MediaModeration } from "./moderation/moderati
 import { assembleFromStorage, concatFiles } from "./vod/assemble.ts";
 import { imageExt, imageType } from "./vod/finalize.ts";
 import { findWindow, parsePlaylist } from "./vod/playlist.ts";
-import { VOD_PLAYLIST, vodPrefix, type LocalWindow } from "./vod/recorder.ts";
+import { VOD_PLAYLIST, vodPrefix, type LocalLookup } from "./vod/recorder.ts";
 
 export const ClipJob = z.object({ clipId: z.uuid() });
 export type ClipJob = z.infer<typeof ClipJob>;
@@ -43,6 +43,22 @@ export class ClipUnavailableError extends Error {
   }
 }
 
+/**
+ * The broadcast is live on this instance but the recorder has not written the window yet. The job
+ * checks again every `LIVE_CLIP_RECHECK_MS` until `LIVE_CLIP_WAIT_MS` past the window's end
+ * (measured from the window, not the job, so a backed-up queue does not use up the wait).
+ */
+export class ClipPendingError extends Error {
+  constructor(readonly windowEnd: Date) {
+    super("live buffer has not reached the clip window yet");
+    this.name = "ClipPendingError";
+  }
+}
+
+/** Covers ffmpeg's slow first segment after going live. */
+export const LIVE_CLIP_WAIT_MS = 60_000;
+export const LIVE_CLIP_RECHECK_MS = 1_000;
+
 /** `removedReason` of a clip refused because the media work dir is over its disk budget. */
 export const CLIP_DISK_REASON = "disk_budget_exceeded";
 
@@ -61,7 +77,7 @@ export interface ClipDeps {
   /** Registry of running jobs' scratch dirs, so the work-dir sweep leaves them alone. */
   scratch?: ActiveScratch;
   /** Local rolling buffer of a broadcast that is live on this instance. */
-  liveWindow: (broadcastId: string, start: Date, durationSeconds: number) => LocalWindow | null;
+  liveWindow: (broadcastId: string, start: Date, durationSeconds: number) => LocalLookup;
 }
 
 export async function processClip(deps: ClipDeps, clipId: string): Promise<"ready" | "removed" | "skipped"> {
@@ -100,6 +116,7 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
     let window: { offsetSeconds: number; durationSeconds: number };
     let vodId = clip.vodId;
     const live = deps.liveWindow(clip.broadcastId, start, clip.durationSeconds);
+    if (live === "pending") throw new ClipPendingError(new Date(start.getTime() + clip.durationSeconds * 1000));
     if (live) {
       await concatFiles([live.initPath, ...live.segmentPaths], source);
       window = live;

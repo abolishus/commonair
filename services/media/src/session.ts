@@ -10,7 +10,7 @@ import { LiveSampler, liveCapture } from "./moderation/sampler.ts";
 import { SimulcastManager } from "./simulcast.ts";
 import { Thumbnailer } from "./thumbnails.ts";
 import { TranscodeController } from "./transcode/controller.ts";
-import { SegmentRecorder, type LocalWindow } from "./vod/recorder.ts";
+import { SegmentRecorder, type LocalLookup } from "./vod/recorder.ts";
 
 export class BroadcastSession {
   readonly sampler: HealthSampler;
@@ -100,7 +100,7 @@ export class BroadcastSession {
     return w;
   }
 
-  liveWindow(start: Date, durationSeconds: number): LocalWindow | null {
+  liveWindow(start: Date, durationSeconds: number): LocalLookup {
     return this.recorder.localWindow(start, durationSeconds);
   }
 

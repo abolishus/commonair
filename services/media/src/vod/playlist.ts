@@ -115,3 +115,27 @@ export function findWindow(
   if (lengthMs <= 0) return null;
   return { segments: sameRun, offsetSeconds: offsetMs / 1000, durationSeconds: lengthMs / 1000 };
 }
+
+export type LiveWindow = { status: "found"; window: SegmentWindow } | { status: "pending" } | { status: "outside" };
+
+/**
+ * A live clip's window in the recorder's rolling buffer. `pending` while the window ends past the
+ * last finished segment: ffmpeg writes a segment (and the playlist) only once it closes, and the
+ * first one lands many seconds after going live, so the caller waits instead of failing. A window
+ * that starts before the recording began (clipped right after going live) is moved to its start.
+ */
+export function findLiveWindow(
+  segments: readonly PlaylistSegment[],
+  recordingStartedAt: Date | null,
+  start: Date,
+  durationSeconds: number,
+): LiveWindow {
+  let bufferedEndMs = -Infinity;
+  for (const s of segments)
+    if (s.startedAt) bufferedEndMs = Math.max(bufferedEndMs, s.startedAt.getTime() + s.durationSeconds * 1000);
+  if (!recordingStartedAt || bufferedEndMs === -Infinity) return { status: "pending" };
+  const from = new Date(Math.max(start.getTime(), recordingStartedAt.getTime()));
+  if (from.getTime() + durationSeconds * 1000 > bufferedEndMs) return { status: "pending" };
+  const window = findWindow(segments, from, durationSeconds);
+  return window ? { status: "found", window } : { status: "outside" };
+}
