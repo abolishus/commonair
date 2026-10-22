@@ -10,9 +10,22 @@ import { accountMenu, adminNav, footerNav, siteNav, studioNav } from "../src/lib
 
 describe("site nav", () => {
   it("links the directory and marks it current only on /", () => {
-    expect(siteNav("/")).toEqual([{ id: "directory", to: "/", current: true }]);
+    expect(siteNav("/")).toEqual([
+      { id: "directory", to: "/", current: true },
+      { id: "coop", to: "/coop", current: false },
+    ]);
     expect(siteNav("/rivertide")[0]?.current).toBe(false);
     expect(siteNav("/dashboard")[0]?.current).toBe(false);
+  });
+
+  it("links the co-op and marks it current on every /coop page", () => {
+    for (const path of ["/coop", "/coop/", "/coop/membership", "/coop/proposals/x"])
+      expect(siteNav(path).map((i) => [i.id, i.current])).toEqual([
+        ["directory", false],
+        ["coop", true],
+      ]);
+    expect(siteNav("/cooper").find((i) => i.id === "coop")?.current).toBe(false);
+    expect(siteNav("/transparency").find((i) => i.id === "coop")?.current).toBe(false);
   });
 
   it("ignores trailing slashes", () => {
@@ -21,24 +34,50 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, appeals, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, appeals, co-op, then sign out after a separator", () => {
     const items = accountMenu(true);
-    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "appeals", "signOut"]);
+    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "appeals", "coop", "signOut"]);
     expect(items.map((i) => i.to)).toEqual([
       "/dashboard",
       "/relays",
       "/settings/subscriptions",
       "/settings/appeals",
+      "/coop/membership",
       undefined,
     ]);
-    expect(items[4]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 4).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[5]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 5).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+  });
+
+  it("adds co-op administration for admins only, before sign out", () => {
+    expect(accountMenu(true, { admin: false }).some((i) => i.id === "adminCoop")).toBe(false);
+    expect(accountMenu(true).some((i) => i.id === "adminCoop")).toBe(false);
+    const items = accountMenu(true, { admin: true, safetyStaff: true });
+    expect(items.map((i) => i.id)).toEqual([
+      "dashboard",
+      "relays",
+      "subscriptions",
+      "appeals",
+      "coop",
+      "moderation",
+      "adminCoop",
+      "signOut",
+    ]);
+    expect(items.find((i) => i.id === "adminCoop")?.to).toBe("/admin/coop");
   });
 
   it("adds the treasury for treasurers only, before sign out", () => {
     expect(accountMenu(true, { treasurer: false }).some((i) => i.id === "treasury")).toBe(false);
     const items = accountMenu(true, { treasurer: true });
-    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "appeals", "treasury", "signOut"]);
+    expect(items.map((i) => i.id)).toEqual([
+      "dashboard",
+      "relays",
+      "subscriptions",
+      "appeals",
+      "coop",
+      "treasury",
+      "signOut",
+    ]);
     expect(items.find((i) => i.id === "treasury")?.to).toBe("/treasury");
   });
 
@@ -63,7 +102,7 @@ describe("account menu", () => {
   });
 
   it("only links pages that exist", () => {
-    const targets = [...accountMenu(true, { treasurer: true }), ...accountMenu(false, "/")].flatMap((i) =>
+    const targets = [...accountMenu(true, { treasurer: true, admin: true }), ...accountMenu(false, "/")].flatMap((i) =>
       i.to ? [i.to] : [],
     );
     expect(new Set(targets)).toEqual(
@@ -72,7 +111,9 @@ describe("account menu", () => {
         "/relays",
         "/settings/subscriptions",
         "/settings/appeals",
+        "/coop/membership",
         "/treasury",
+        "/admin/coop",
         "/signin",
         "/signup",
       ]),

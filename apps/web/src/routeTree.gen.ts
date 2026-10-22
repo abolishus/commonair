@@ -24,10 +24,21 @@ import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
 import { Route as StudioRevenueRouteImport } from './routes/_studio/revenue'
 import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
 import { Route as AdminAdminAppealsRouteImport } from './routes/_admin/admin.appeals'
+import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
 import { Route as AdminAdminLegalRouteImport } from './routes/_admin/admin.legal'
 import { Route as AdminAdminModerationRouteImport } from './routes/_admin/admin.moderation'
+import { Route as AppCoopIndexRouteImport } from './routes/_app/coop.index'
+import { Route as AppCoopCouncilRouteImport } from './routes/_app/coop.council'
+import { Route as AppCoopMembershipRouteImport } from './routes/_app/coop.membership'
+import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
+import { Route as AppCoopPatronageIndexRouteImport } from './routes/_app/coop.patronage.index'
+import { Route as AppCoopPatronagePeriodIdRouteImport } from './routes/_app/coop.patronage.$periodId'
+import { Route as AppCoopProposalsIndexRouteImport } from './routes/_app/coop.proposals.index'
+import { Route as AppCoopProposalsNewRouteImport } from './routes/_app/coop.proposals.new'
+import { Route as AppCoopProposalsIdIndexRouteImport } from './routes/_app/coop.proposals.$id.index'
+import { Route as AppCoopProposalsIdEditRouteImport } from './routes/_app/coop.proposals.$id.edit'
 
 const AdminRoute = AdminRouteImport.update({
   id: '/_admin',
@@ -101,6 +112,11 @@ const AdminAdminAppealsRoute = AdminAdminAppealsRouteImport.update({
   path: '/admin/appeals',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminCoopRoute = AdminAdminCoopRouteImport.update({
+  id: '/admin/coop',
+  path: '/admin/coop',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminLegalRoute = AdminAdminLegalRouteImport.update({
   id: '/admin/legal',
   path: '/admin/legal',
@@ -110,6 +126,26 @@ const AdminAdminModerationRoute = AdminAdminModerationRouteImport.update({
   id: '/admin/moderation',
   path: '/admin/moderation',
   getParentRoute: () => AdminRoute,
+} as any)
+const AppCoopIndexRoute = AppCoopIndexRouteImport.update({
+  id: '/coop/',
+  path: '/coop/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopCouncilRoute = AppCoopCouncilRouteImport.update({
+  id: '/coop/council',
+  path: '/coop/council',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopMembershipRoute = AppCoopMembershipRouteImport.update({
+  id: '/coop/membership',
+  path: '/coop/membership',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopSettingsRoute = AppCoopSettingsRouteImport.update({
+  id: '/coop/settings',
+  path: '/coop/settings',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
   id: '/settings/appeals',
@@ -122,6 +158,37 @@ const AppSettingsSubscriptionsRoute =
     path: '/settings/subscriptions',
     getParentRoute: () => AppRoute,
   } as any)
+const AppCoopPatronageIndexRoute = AppCoopPatronageIndexRouteImport.update({
+  id: '/coop/patronage/',
+  path: '/coop/patronage/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopPatronagePeriodIdRoute =
+  AppCoopPatronagePeriodIdRouteImport.update({
+    id: '/coop/patronage/$periodId',
+    path: '/coop/patronage/$periodId',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppCoopProposalsIndexRoute = AppCoopProposalsIndexRouteImport.update({
+  id: '/coop/proposals/',
+  path: '/coop/proposals/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopProposalsNewRoute = AppCoopProposalsNewRouteImport.update({
+  id: '/coop/proposals/new',
+  path: '/coop/proposals/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopProposalsIdIndexRoute = AppCoopProposalsIdIndexRouteImport.update({
+  id: '/coop/proposals/$id/',
+  path: '/coop/proposals/$id/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCoopProposalsIdEditRoute = AppCoopProposalsIdEditRouteImport.update({
+  id: '/coop/proposals/$id/edit',
+  path: '/coop/proposals/$id/edit',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -136,10 +203,21 @@ export interface FileRoutesByFullPath {
   '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
+  '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/legal': typeof AdminAdminLegalRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
+  '/coop/council': typeof AppCoopCouncilRoute
+  '/coop/membership': typeof AppCoopMembershipRoute
+  '/coop/settings': typeof AppCoopSettingsRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/coop/': typeof AppCoopIndexRoute
+  '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
+  '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/coop/patronage/': typeof AppCoopPatronageIndexRoute
+  '/coop/proposals/': typeof AppCoopProposalsIndexRoute
+  '/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
+  '/coop/proposals/$id/': typeof AppCoopProposalsIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
@@ -154,10 +232,21 @@ export interface FileRoutesByTo {
   '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
+  '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/legal': typeof AdminAdminLegalRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
+  '/coop/council': typeof AppCoopCouncilRoute
+  '/coop/membership': typeof AppCoopMembershipRoute
+  '/coop/settings': typeof AppCoopSettingsRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/coop': typeof AppCoopIndexRoute
+  '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
+  '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/coop/patronage': typeof AppCoopPatronageIndexRoute
+  '/coop/proposals': typeof AppCoopProposalsIndexRoute
+  '/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
+  '/coop/proposals/$id': typeof AppCoopProposalsIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -176,10 +265,21 @@ export interface FileRoutesById {
   '/embed/$channel': typeof EmbedChannelRoute
   '/_app/': typeof AppIndexRoute
   '/_admin/admin/appeals': typeof AdminAdminAppealsRoute
+  '/_admin/admin/coop': typeof AdminAdminCoopRoute
   '/_admin/admin/legal': typeof AdminAdminLegalRoute
   '/_admin/admin/moderation': typeof AdminAdminModerationRoute
+  '/_app/coop/council': typeof AppCoopCouncilRoute
+  '/_app/coop/membership': typeof AppCoopMembershipRoute
+  '/_app/coop/settings': typeof AppCoopSettingsRoute
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/_app/coop/': typeof AppCoopIndexRoute
+  '/_app/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
+  '/_app/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/_app/coop/patronage/': typeof AppCoopPatronageIndexRoute
+  '/_app/coop/proposals/': typeof AppCoopProposalsIndexRoute
+  '/_app/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
+  '/_app/coop/proposals/$id/': typeof AppCoopProposalsIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -196,10 +296,21 @@ export interface FileRouteTypes {
     | '/revenue'
     | '/embed/$channel'
     | '/admin/appeals'
+    | '/admin/coop'
     | '/admin/legal'
     | '/admin/moderation'
+    | '/coop/council'
+    | '/coop/membership'
+    | '/coop/settings'
     | '/settings/appeals'
     | '/settings/subscriptions'
+    | '/coop/'
+    | '/coop/patronage/$periodId'
+    | '/coop/proposals/new'
+    | '/coop/patronage/'
+    | '/coop/proposals/'
+    | '/coop/proposals/$id/edit'
+    | '/coop/proposals/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -214,10 +325,21 @@ export interface FileRouteTypes {
     | '/revenue'
     | '/embed/$channel'
     | '/admin/appeals'
+    | '/admin/coop'
     | '/admin/legal'
     | '/admin/moderation'
+    | '/coop/council'
+    | '/coop/membership'
+    | '/coop/settings'
     | '/settings/appeals'
     | '/settings/subscriptions'
+    | '/coop'
+    | '/coop/patronage/$periodId'
+    | '/coop/proposals/new'
+    | '/coop/patronage'
+    | '/coop/proposals'
+    | '/coop/proposals/$id/edit'
+    | '/coop/proposals/$id'
   id:
     | '__root__'
     | '/_admin'
@@ -235,10 +357,21 @@ export interface FileRouteTypes {
     | '/embed/$channel'
     | '/_app/'
     | '/_admin/admin/appeals'
+    | '/_admin/admin/coop'
     | '/_admin/admin/legal'
     | '/_admin/admin/moderation'
+    | '/_app/coop/council'
+    | '/_app/coop/membership'
+    | '/_app/coop/settings'
     | '/_app/settings/appeals'
     | '/_app/settings/subscriptions'
+    | '/_app/coop/'
+    | '/_app/coop/patronage/$periodId'
+    | '/_app/coop/proposals/new'
+    | '/_app/coop/patronage/'
+    | '/_app/coop/proposals/'
+    | '/_app/coop/proposals/$id/edit'
+    | '/_app/coop/proposals/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -355,6 +488,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminAppealsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/coop': {
+      id: '/_admin/admin/coop'
+      path: '/admin/coop'
+      fullPath: '/admin/coop'
+      preLoaderRoute: typeof AdminAdminCoopRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/legal': {
       id: '/_admin/admin/legal'
       path: '/admin/legal'
@@ -368,6 +508,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/moderation'
       preLoaderRoute: typeof AdminAdminModerationRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/_app/coop/': {
+      id: '/_app/coop/'
+      path: '/coop'
+      fullPath: '/coop/'
+      preLoaderRoute: typeof AppCoopIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/council': {
+      id: '/_app/coop/council'
+      path: '/coop/council'
+      fullPath: '/coop/council'
+      preLoaderRoute: typeof AppCoopCouncilRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/membership': {
+      id: '/_app/coop/membership'
+      path: '/coop/membership'
+      fullPath: '/coop/membership'
+      preLoaderRoute: typeof AppCoopMembershipRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/settings': {
+      id: '/_app/coop/settings'
+      path: '/coop/settings'
+      fullPath: '/coop/settings'
+      preLoaderRoute: typeof AppCoopSettingsRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/settings/appeals': {
       id: '/_app/settings/appeals'
@@ -383,12 +551,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSubscriptionsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/coop/patronage/': {
+      id: '/_app/coop/patronage/'
+      path: '/coop/patronage'
+      fullPath: '/coop/patronage/'
+      preLoaderRoute: typeof AppCoopPatronageIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/patronage/$periodId': {
+      id: '/_app/coop/patronage/$periodId'
+      path: '/coop/patronage/$periodId'
+      fullPath: '/coop/patronage/$periodId'
+      preLoaderRoute: typeof AppCoopPatronagePeriodIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/proposals/': {
+      id: '/_app/coop/proposals/'
+      path: '/coop/proposals'
+      fullPath: '/coop/proposals/'
+      preLoaderRoute: typeof AppCoopProposalsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/proposals/new': {
+      id: '/_app/coop/proposals/new'
+      path: '/coop/proposals/new'
+      fullPath: '/coop/proposals/new'
+      preLoaderRoute: typeof AppCoopProposalsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/proposals/$id/': {
+      id: '/_app/coop/proposals/$id/'
+      path: '/coop/proposals/$id'
+      fullPath: '/coop/proposals/$id/'
+      preLoaderRoute: typeof AppCoopProposalsIdIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/coop/proposals/$id/edit': {
+      id: '/_app/coop/proposals/$id/edit'
+      path: '/coop/proposals/$id/edit'
+      fullPath: '/coop/proposals/$id/edit'
+      preLoaderRoute: typeof AppCoopProposalsIdEditRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AdminRouteChildren {
   AdminTreasuryRoute: typeof AdminTreasuryRoute
   AdminAdminAppealsRoute: typeof AdminAdminAppealsRoute
+  AdminAdminCoopRoute: typeof AdminAdminCoopRoute
   AdminAdminLegalRoute: typeof AdminAdminLegalRoute
   AdminAdminModerationRoute: typeof AdminAdminModerationRoute
 }
@@ -396,6 +607,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminTreasuryRoute: AdminTreasuryRoute,
   AdminAdminAppealsRoute: AdminAdminAppealsRoute,
+  AdminAdminCoopRoute: AdminAdminCoopRoute,
   AdminAdminLegalRoute: AdminAdminLegalRoute,
   AdminAdminModerationRoute: AdminAdminModerationRoute,
 }
@@ -409,8 +621,18 @@ interface AppRouteChildren {
   AppTakedownRoute: typeof AppTakedownRoute
   AppTransparencyRoute: typeof AppTransparencyRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppCoopCouncilRoute: typeof AppCoopCouncilRoute
+  AppCoopMembershipRoute: typeof AppCoopMembershipRoute
+  AppCoopSettingsRoute: typeof AppCoopSettingsRoute
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
+  AppCoopIndexRoute: typeof AppCoopIndexRoute
+  AppCoopPatronagePeriodIdRoute: typeof AppCoopPatronagePeriodIdRoute
+  AppCoopProposalsNewRoute: typeof AppCoopProposalsNewRoute
+  AppCoopPatronageIndexRoute: typeof AppCoopPatronageIndexRoute
+  AppCoopProposalsIndexRoute: typeof AppCoopProposalsIndexRoute
+  AppCoopProposalsIdEditRoute: typeof AppCoopProposalsIdEditRoute
+  AppCoopProposalsIdIndexRoute: typeof AppCoopProposalsIdIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -420,8 +642,18 @@ const AppRouteChildren: AppRouteChildren = {
   AppTakedownRoute: AppTakedownRoute,
   AppTransparencyRoute: AppTransparencyRoute,
   AppIndexRoute: AppIndexRoute,
+  AppCoopCouncilRoute: AppCoopCouncilRoute,
+  AppCoopMembershipRoute: AppCoopMembershipRoute,
+  AppCoopSettingsRoute: AppCoopSettingsRoute,
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
+  AppCoopIndexRoute: AppCoopIndexRoute,
+  AppCoopPatronagePeriodIdRoute: AppCoopPatronagePeriodIdRoute,
+  AppCoopProposalsNewRoute: AppCoopProposalsNewRoute,
+  AppCoopPatronageIndexRoute: AppCoopPatronageIndexRoute,
+  AppCoopProposalsIndexRoute: AppCoopProposalsIndexRoute,
+  AppCoopProposalsIdEditRoute: AppCoopProposalsIdEditRoute,
+  AppCoopProposalsIdIndexRoute: AppCoopProposalsIdIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

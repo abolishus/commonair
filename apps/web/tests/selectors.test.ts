@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b- and e4c-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c- and e5-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
-import { COMPOSITION_ATTRS, COMPOSITION_TEST_IDS } from "./composition-ids.ts";
+import { COMPOSITION_ATTRS, COMPOSITION_TEST_IDS, E5_COMPOSITION_TEST_IDS, E5_TEMPLATES } from "./composition-ids.ts";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
 const SRC = join(ROOT, "apps/web/src");
@@ -148,6 +148,59 @@ function viaE4cTemplate(id: string, text: string): boolean {
     templates.some(([pattern, marker]) => pattern.test(id) && text.includes(marker))
   );
 }
+
+/**
+ * E5: ids sit in the first column (`coop`, `tally`, …) and inside the meaning column (`proposals-filter`,
+ * `proposal-title`, `vote-choice-yes`, …). Every backticked kebab-case token that is not a `data-*`
+ * attribute counts; `<x>` templates are kept as templates.
+ */
+function e5TestIds(): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing/e5-selectors.md"), "utf8");
+  const section = text.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  const ids = new Set<string>();
+  for (const line of section.split("\n")) {
+    if (!line.startsWith("|")) continue;
+    const first = line.split("|")[1] ?? "";
+    for (const m of first.matchAll(/`([a-z][a-z0-9-]*)`/g)) if (m[1] && !m[1].startsWith("data-")) ids.add(m[1]);
+    for (const m of line.matchAll(/`([a-z][a-z0-9]*(?:-[a-z0-9_<>]+)+)`/g))
+      if (m[1] && !m[1].startsWith("data-")) ids.add(m[1]);
+  }
+  return [...ids];
+}
+
+const e5ViaComposition = (id: string, text: string) =>
+  (E5_COMPOSITION_TEST_IDS as readonly string[]).includes(id) &&
+  (text.includes(`"data-testid": "${id}"`) ||
+    text.includes(`data-textarea-testid="${id}"`) ||
+    text.includes(`data-submit-testid="${id}"`) ||
+    // A concrete instance of a template (`vote-choice-yes` from `vote-choice-${value}`).
+    [...text.matchAll(/`([a-z-]+-)\$\{/g)].some((m) => m[1] !== undefined && id.startsWith(m[1])));
+
+describe("e5-selectors.md", () => {
+  const ids = e5TestIds();
+
+  it("lists the co-op selectors, templates included", () => {
+    expect(ids.length).toBeGreaterThan(90);
+    for (const id of ["coop", "tally", "vote-choice-yes", "proposal-comment-body", "membership-exit-<class>"])
+      expect(ids).toContain(id);
+    expect(ids.some((id) => id.startsWith("data-"))).toBe(false);
+  });
+
+  it.each(ids.filter((id) => !id.includes("<")))("renders %s", (id) => {
+    expect(onElement(id, appText) || e5ViaComposition(id, appText)).toBe(true);
+  });
+
+  it.each(ids.filter((id) => id.includes("<")))("builds %s from its template", (id) => {
+    const marker = E5_TEMPLATES[id];
+    expect(marker, id).toBeDefined();
+    expect(appText).toContain(marker);
+  });
+
+  it("every earlier id is still rendered (e1–e4c stay intact)", () => {
+    for (const id of ["nav-directory", "treasury-tab-payments", "transparency-month-row", "account-treasury-link"])
+      expect(rendered(id, appText)).toBe(true);
+  });
+});
 
 describe("E2 data attributes", () => {
   it.each([

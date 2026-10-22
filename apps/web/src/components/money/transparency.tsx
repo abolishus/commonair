@@ -25,10 +25,11 @@ import {
   type TransparencyMonthDto,
 } from "../../lib/money.ts";
 import { formatBytes } from "../../lib/relays.ts";
+import { CoopTransparency } from "../coop/transparency.tsx";
 
 /**
- * `/transparency` pieces (Transparency board) for the months shown. The patronage formula and
- * statement cards arrive with E5; nothing here links to them yet.
+ * `/transparency` pieces (Transparency board) for the months shown, with the co-op's governance
+ * outcomes and patronage distributed per month (E5, `CoopTransparency`).
  */
 
 export function TransparencyEmpty(): React.JSX.Element {
@@ -159,6 +160,7 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
           />
         </CardContent>
       </Card>
+      <CoopTransparency months={months} />
       <ResponsiveGrid cols={3}>
         <MetricPanel
           icon={<HugeiconsIcon icon={Radio02Icon} strokeWidth={2} aria-hidden />}

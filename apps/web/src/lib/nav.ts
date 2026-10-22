@@ -8,22 +8,34 @@
  */
 
 export interface SiteNavEntry {
-  id: "directory";
-  to: "/";
+  id: "directory" | "coop";
+  to: "/" | "/coop";
   current: boolean;
 }
 
 export interface AccountEntry {
-  id: "dashboard" | "relays" | "subscriptions" | "appeals" | "treasury" | "moderation" | "legal" | "signOut";
+  id:
+    | "dashboard"
+    | "relays"
+    | "subscriptions"
+    | "appeals"
+    | "coop"
+    | "treasury"
+    | "moderation"
+    | "legal"
+    | "adminCoop"
+    | "signOut";
   /** Absent for actions (sign out). */
   to?:
     | "/dashboard"
     | "/relays"
     | "/settings/subscriptions"
     | "/settings/appeals"
+    | "/coop/membership"
     | "/treasury"
     | "/admin/moderation"
-    | "/admin/legal";
+    | "/admin/legal"
+    | "/admin/coop";
   separatorBefore?: boolean;
   destructive?: boolean;
 }
@@ -52,6 +64,8 @@ export interface AccountMenuOptions {
   safetyStaff?: boolean;
   /** The `legal` role also gets the legal queue. */
   legal?: boolean;
+  /** Admins also get co-op administration (`/admin/coop`). */
+  admin?: boolean;
 }
 
 export interface AdminEntry {
@@ -76,7 +90,11 @@ function normalize(pathname: string): string {
 }
 
 export function siteNav(pathname: string): SiteNavEntry[] {
-  return [{ id: "directory", to: "/", current: normalize(pathname) === "/" }];
+  const path = normalize(pathname);
+  return [
+    { id: "directory", to: "/", current: path === "/" },
+    { id: "coop", to: "/coop", current: path === "/coop" || path.startsWith("/coop/") },
+  ];
 }
 
 /** Signed in: the account menu. Signed out: sign-in / sign-up links. */
@@ -92,12 +110,14 @@ export function accountMenu(
       ...(options.treasurer === true ? [{ id: "treasury", to: "/treasury" } as const] : []),
       ...(options.safetyStaff === true ? [{ id: "moderation", to: "/admin/moderation" } as const] : []),
       ...(options.legal === true ? [{ id: "legal", to: "/admin/legal" } as const] : []),
+      ...(options.admin === true ? [{ id: "adminCoop", to: "/admin/coop" } as const] : []),
     ];
     return [
       { id: "dashboard", to: "/dashboard" },
       { id: "relays", to: "/relays" },
       { id: "subscriptions", to: "/settings/subscriptions" },
       { id: "appeals", to: "/settings/appeals" },
+      { id: "coop", to: "/coop/membership" },
       ...staff,
       { id: "signOut", separatorBefore: true, destructive: true },
     ];

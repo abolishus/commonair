@@ -9,6 +9,7 @@ import { toast } from "@commonair/ui/toast";
 import {
   BankIcon,
   CreditCardIcon,
+  UserGroupIcon,
   DashboardSquare01Icon,
   JusticeScale01Icon,
   LegalDocument01Icon,
@@ -23,6 +24,7 @@ import * as React from "react";
 import { t } from "../i18n/index.ts";
 import { signOut } from "../lib/auth.ts";
 import { useBootstrap } from "../lib/bootstrap.ts";
+import { isAdmin } from "../lib/coop.ts";
 import { isTreasurer } from "../lib/money.ts";
 import {
   accountMenu,
@@ -71,6 +73,20 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("nav.appeals"),
         icon: icon(JusticeScale01Icon),
         render: <Link data-testid="account-appeals-link" to="/settings/appeals" />,
+      };
+    case "coop":
+      return {
+        id: entry.id,
+        label: t("nav.coopMembership"),
+        icon: icon(UserGroupIcon),
+        render: <Link data-testid="account-coop-link" to="/coop/membership" />,
+      };
+    case "adminCoop":
+      return {
+        id: entry.id,
+        label: t("nav.adminCoop"),
+        icon: icon(UserGroupIcon),
+        render: <Link data-testid="account-admin-coop-link" to="/admin/coop" />,
       };
     case "treasury":
       return {
@@ -133,12 +149,21 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
   const { theme, setTheme } = React.useContext(ThemeContext);
   const pathname = useLocation({ select: (location) => location.pathname });
 
-  const nav: NavItem[] = siteNav(pathname).map((entry) => ({
-    id: entry.id,
-    label: t("nav.directory"),
-    current: entry.current,
-    render: <Link data-testid="nav-directory" to="/" />,
-  }));
+  const nav: NavItem[] = siteNav(pathname).map((entry) =>
+    entry.id === "coop"
+      ? {
+          id: entry.id,
+          label: t("nav.coop"),
+          current: entry.current,
+          render: <Link data-testid="nav-coop" to="/coop" />,
+        }
+      : {
+          id: entry.id,
+          label: t("nav.directory"),
+          current: entry.current,
+          render: <Link data-testid="nav-directory" to="/" />,
+        },
+  );
 
   const signedOut = me ? [] : accountMenu(false, pathname);
   const signIn = signedOut.filter((entry) => entry.id === "signIn");
@@ -178,6 +203,7 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
               treasurer: isTreasurer(me),
               safetyStaff: isSafetyStaff(me),
               legal: isLegal(me),
+              admin: isAdmin(me),
             }).map(accountItem)}
           />
         ) : (
