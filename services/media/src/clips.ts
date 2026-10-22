@@ -31,7 +31,7 @@ export type ClipJob = z.infer<typeof ClipJob>;
 export const clipKey = (clipId: string) => `clips/${clipId}.mp4`;
 export const clipThumbKey = (clipId: string, f: ImageFormat) => `clips/${clipId}.${imageExt(f)}`;
 
-/** The clip can never be produced (no source media); retrying will not help. */
+/** The clip can never be produced (no source media); retrying will not help. The message is logged: fixed strings only, never user data. */
 export class ClipUnavailableError extends Error {
   constructor(
     message: string,

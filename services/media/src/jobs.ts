@@ -77,7 +77,12 @@ export function startJobs(opts: JobsOptions): Jobs {
         const lastAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
         if (err instanceof ClipUnavailableError || lastAttempt) {
           await markClipFailed(opts.clips.db, clipId, err instanceof ClipUnavailableError ? err.reason : null);
-          log.warn("clip failed", { clipId, error: errorCategory(err) });
+          // Unavailable reasons are fixed strings (no user data); they tell operators why.
+          log.warn("clip failed", {
+            clipId,
+            error: errorCategory(err),
+            ...(err instanceof ClipUnavailableError ? { detail: err.message } : {}),
+          });
           if (err instanceof ClipUnavailableError) return "failed";
         }
         throw err;
