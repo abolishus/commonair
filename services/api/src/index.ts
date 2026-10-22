@@ -16,6 +16,9 @@ import { createApiMailer, recipientLimitedMailer } from "./mail.ts";
 import { DEFAULT_RATE_LIMITS, valkeyRateLimitStore } from "./lib/ratelimit.ts";
 import { pinnedGet, resolveHost } from "./lib/outbound.ts";
 import { closeCoopTickRunner } from "./coop/hooks.ts";
+import { closeOpsTickRunner } from "./ops/hooks.ts";
+import { closeOverlayHub } from "./overlay/stream.ts";
+import { closeExportQueue } from "./privacy/export-queue.ts";
 import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
 
@@ -106,6 +109,12 @@ export async function buildDeps(
       await closeCoopTickRunner(deps).catch((err: unknown) =>
         logger.warn("coop queue close failed", { err: (err as Error).name }),
       );
+      for (const [what, close] of [
+        ["ops queue", closeOpsTickRunner],
+        ["overlay hub", closeOverlayHub],
+        ["export queue", closeExportQueue],
+      ] as const)
+        await close(deps).catch((err: unknown) => logger.warn(`${what} close failed`, { err: (err as Error).name }));
       await mailer.close();
       valkey.disconnect();
       await db.close();

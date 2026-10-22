@@ -17,15 +17,7 @@ import {
   toUserPublic,
 } from "../lib/dto.ts";
 import { encodeCursor, decodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import {
-  badRequest,
-  conflict,
-  forbidden,
-  isUniqueViolation,
-  notFound,
-  notImplemented,
-  precondition,
-} from "../lib/errors.ts";
+import { badRequest, conflict, forbidden, isUniqueViolation, notFound, precondition } from "../lib/errors.ts";
 import { pendingDocuments, recordAcceptances } from "../lib/legal.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
@@ -37,6 +29,8 @@ import {
   toDeletion,
 } from "../moderation/deletion.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
+import { appUrl, sendNotice } from "../mail.ts";
+import { createExport, listExports } from "../privacy/exports.ts";
 
 const { users, channels, follows, memberships, notifications, oauthTokens } = schema;
 
@@ -84,6 +78,22 @@ async function loadMe(deps: Deps, userId: string) {
     pendingLegal: pending.map((p) => ({ kind: p.kind, version: p.version })),
     channelSlug: channel[0]?.slug ?? null,
   };
+}
+
+/** After commit: tell the account's address when it will be deleted and how to cancel. */
+async function sendDeletionScheduled(deps: Deps, userId: string, deleteAt: Date): Promise<void> {
+  const [u] = await deps.db
+    .select({ email: users.email, locale: users.locale, accountType: users.accountType })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (!u || u.accountType !== "human") return;
+  await sendNotice(deps.logger, "accountDeletionScheduled", () =>
+    deps.mailer.send(
+      "accountDeletionScheduled",
+      { deleteAt, cancelUrl: appUrl(deps.site, "/settings/privacy"), locale: u.locale },
+      u.email,
+    ),
+  );
 }
 
 const toAccessToken = (t: typeof oauthTokens.$inferSelect, appName: string | null) => ({
@@ -249,8 +259,14 @@ export const me = {
     }));
   }),
   exports: {
-    create: os.me.exports.create.handler(notImplemented),
-    list: os.me.exports.list.handler(notImplemented),
+    create: os.me.exports.create.handler(async ({ context, input }) => {
+      const caller = requireCaller(context);
+      return createExport(context.deps, caller.user.id, input.kind);
+    }),
+    list: os.me.exports.list.handler(async ({ context }) => {
+      const caller = requireCaller(context);
+      return listExports(context.deps, caller.user.id);
+    }),
   },
   deletion: {
     request: os.me.deletion.request.handler(async ({ context, input }) => {
@@ -259,10 +275,12 @@ export const me = {
       if (input.confirmUsername.toLowerCase() !== caller.user.username.toLowerCase())
         throw badRequest("Type your username to confirm");
       const now = deps.now();
+      let created = false;
       const row = await deps.db.transaction(async (tx) => {
         await lockUser(tx, caller.user.id);
         const existing = await scheduledDeletion(tx, caller.user.id);
         if (existing) return existing;
+        created = true;
         const [d] = await tx
           .insert(schema.accountDeletions)
           .values({
@@ -282,6 +300,7 @@ export const me = {
         });
         return d;
       });
+      if (created) await sendDeletionScheduled(deps, caller.user.id, row.scheduledFor);
       return toDeletion(row);
     }),
     cancel: os.me.deletion.cancel.handler(async ({ context }) => {

@@ -4,24 +4,26 @@
 /**
  * `clips.*`: a clip row starts `processing` and is cut by media (`QUEUES.clips`), which PDQ-checks
  * every second of it before publishing; a match removes it as T0 and it is never shown. Listing and
- * reading follow `media/visibility.ts`. Deleting is not implemented yet (HTTP 501, milestone E6).
+ * reading follow `media/visibility.ts`. The channel's owner (or an editor or moderator) and the clip's
+ * creator may delete it: hidden at once, objects deleted by the worker's `vod-retention` (E6).
  */
-import { and, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import type { z } from "zod";
 import type { dto } from "@commonair/contracts";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
-import type { Caller } from "../lib/access.ts";
+import { channelAuthority, type Caller } from "../lib/access.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor } from "../lib/cursor.ts";
 import { channelBySlug, iso, loadUsersPublic, mediaUrl } from "../lib/dto.ts";
-import { notFound, notImplemented, precondition } from "../lib/errors.ts";
+import { notFound, precondition } from "../lib/errors.ts";
+import { audit } from "../events/audit.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { clipQueue } from "../media/clip-queue.ts";
-import { audienceOf, clipVisible, urlsWithheld, vodShown } from "../media/visibility.ts";
+import { clipVisible, urlsWithheld, viewerAudience, vodShown } from "../media/visibility.ts";
 import { matureGate } from "./playback.ts";
 
-const { broadcasts, channels, clips: clipsT, vods } = schema;
+const { broadcasts, channelRoles, channels, clips: clipsT, vods } = schema;
 type ClipRow = typeof clipsT.$inferSelect;
 type ChannelRow = typeof channels.$inferSelect;
 type Clip = z.infer<typeof dto.Clip>;
@@ -83,7 +85,7 @@ async function clipSource(
       .innerJoin(broadcasts, eq(broadcasts.id, vods.broadcastId))
       .where(and(eq(vods.id, input.vodId), eq(vods.channelId, channel.id)))
       .limit(1);
-    if (!row || !vodShown(audienceOf(caller, channel), row.v, channel, row.b.restrictedAt))
+    if (!row || !vodShown(await viewerAudience(deps, caller, channel), row.v, channel, row.b.restrictedAt))
       throw notFound("VOD not found");
     if (row.v.status !== "ready") throw precondition("vod_ready", "The VOD is not ready yet");
     const start = input.startOffset ?? 0;
@@ -148,8 +150,8 @@ export const clips = {
     const { deps } = context;
     const channel = await channelBySlug(deps, input.channel);
     if (!channel) throw notFound("Channel not found");
-    const audience = audienceOf(context.caller, channel);
-    if (audience === "public" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
+    const audience = await viewerAudience(deps, context.caller, channel);
+    if (audience !== "owner" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
     const top = input.sort === "top";
     // "top" pages by offset (views change between pages); "recent" by keyset.
     let after: SQL | undefined;
@@ -198,8 +200,8 @@ export const clips = {
       .where(eq(clipsT.id, input.id))
       .limit(1);
     if (!head) throw notFound("Clip not found");
-    const audience = audienceOf(context.caller, head.channel);
-    if (audience === "public" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
+    const audience = await viewerAudience(deps, context.caller, head.channel);
+    if (audience !== "owner" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
     const [row] = await deps.db
       .select({ c: clipsT, mature: broadcasts.mature, categoryId: broadcasts.categoryId, bid: broadcasts.id })
       .from(clipsT)
@@ -212,5 +214,55 @@ export const clips = {
     return out as Clip;
   }),
 
-  remove: os.clips.remove.handler(notImplemented),
+  remove: os.clips.remove.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const caller = requireCaller(context);
+    const [head] = await deps.db
+      .select({ c: clipsT, channel: channels })
+      .from(clipsT)
+      .innerJoin(channels, eq(channels.id, clipsT.channelId))
+      .where(eq(clipsT.id, input.id))
+      .limit(1);
+    // Anything the caller may not delete reads as missing: no existence leak.
+    if (!head) throw notFound("Clip not found");
+    const roles =
+      head.channel.ownerId === caller.user.id
+        ? []
+        : (
+            await deps.db
+              .select({ role: channelRoles.role })
+              .from(channelRoles)
+              .where(and(eq(channelRoles.channelId, head.channel.id), eq(channelRoles.userId, caller.user.id)))
+          ).map((r) => r.role);
+    const channelSide = channelAuthority(caller, head.channel, roles) !== null;
+    const creator = head.c.creatorId !== null && head.c.creatorId === caller.user.id;
+    if (!channelSide && !creator) throw notFound("Clip not found");
+    // Hidden from the owner too (removed, restricted, or its VOD removed): nothing left to delete.
+    const [visible] = await deps.db
+      .select({ id: clipsT.id })
+      .from(clipsT)
+      .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
+      .where(and(eq(clipsT.id, input.id), clipVisible("owner")))
+      .limit(1);
+    if (!visible) throw notFound("Clip not found");
+    const reason = channelSide ? "owner" : "creator";
+    await deps.db.transaction(async (tx) => {
+      const [c] = await tx
+        .update(clipsT)
+        .set({ removedReason: reason })
+        .where(and(eq(clipsT.id, input.id), ne(clipsT.status, "deleted"), isNull(clipsT.removedReason)))
+        .returning({ id: clipsT.id });
+      if (!c) throw notFound("Clip not found");
+      await audit(tx, {
+        actorType: "user",
+        actorId: caller.user.id,
+        action: "clip.remove",
+        subjectType: "clip",
+        subjectId: c.id,
+        channelId: head.channel.id,
+        details: { by: reason },
+      });
+    });
+    return { ok: true as const };
+  }),
 };

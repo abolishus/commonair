@@ -6,6 +6,7 @@ import { createLogger, initTelemetry } from "@commonair/observability";
 import { runService, valkeyCheck } from "@commonair/service";
 import { buildDeps, createApp, loadApiEnv, VERSION } from "./index.ts";
 import { coopHealth } from "./coop/hooks.ts";
+import { opsHealth } from "./ops/hooks.ts";
 import { moderationHealth, startModeration } from "./moderation/index.ts";
 
 const env = loadApiEnv();
@@ -27,7 +28,7 @@ runService({
     },
     valkey: valkeyCheck(built.deps.valkey),
   },
-  health: { ...moderationHealth(built.deps), ...coopHealth(built.deps) },
+  health: { ...moderationHealth(built.deps), ...coopHealth(built.deps), ...opsHealth(built.deps) },
   fetch: (req, server) => app.fetch(req, server),
   onShutdown: async () => {
     await built.close();

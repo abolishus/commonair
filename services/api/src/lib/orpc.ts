@@ -7,7 +7,7 @@
  * resolve the caller, enforce access and token scopes, apply the rate limit.
  */
 import { implement } from "@orpc/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { contract, type ProcedureMeta } from "@commonair/contracts";
 import { Slug } from "@commonair/contracts";
 import { schema } from "@commonair/db";
@@ -18,6 +18,7 @@ import { decideAccess, type Caller, type ChannelRole } from "./access.ts";
 import { bearerToken, resolveCaller } from "./caller.ts";
 import { apiError, rateLimited } from "./errors.ts";
 import { rateLimitKey } from "./ratelimit.ts";
+import { resolveOverlayToken } from "../overlay/tokens.ts";
 
 export interface RequestInfo {
   headers: Headers;
@@ -60,16 +61,16 @@ async function resolveRelay(deps: Deps, token: string | null): Promise<RelayRow 
   return row ?? null;
 }
 
+/** The overlay token of a request: OBS browser sources cannot set headers, so `?token=` too. */
+export function overlayTokenOf(req: Pick<RequestInfo, "headers" | "url">): string | null {
+  return bearerToken(req.headers) ?? req.url.searchParams.get("token");
+}
+
+/** The overlay token's channel, only while the token is unrevoked and unexpired (ADR 0021). */
 async function resolveOverlay(deps: Deps, req: RequestInfo): Promise<string | null> {
-  // OBS browser sources cannot set headers, so overlays may pass the token in the query.
-  const token = bearerToken(req.headers) ?? req.url.searchParams.get("token");
+  const token = overlayTokenOf(req);
   if (!token) return null;
-  const [row] = await deps.db
-    .select({ channelId: schema.overlayTokens.channelId })
-    .from(schema.overlayTokens)
-    .where(and(eq(schema.overlayTokens.tokenHash, await sha256Hex(token)), isNull(schema.overlayTokens.revokedAt)))
-    .limit(1);
-  return row?.channelId ?? null;
+  return (await resolveOverlayToken(deps.db, token, deps.now()))?.channelId ?? null;
 }
 
 async function resolveChannel(deps: Deps, slug: string, caller: Caller | null) {
