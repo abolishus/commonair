@@ -688,6 +688,10 @@ all_units() {
 restart_stack() {
   # shellcheck disable=SC2046 # unit names have no spaces
   systemctl --user stop $(all_units) 2>/dev/null || true
+  # migrate and garage-init retry with a start limit; a release whose migrate kept failing
+  # leaves them start-limit-hit, which would refuse this start (a rollback, or a re-run) for
+  # up to an hour.
+  systemctl --user reset-failed 'commonair-*' 2>/dev/null || true
   info "running migrations (commonair-migrate)"
   systemctl --user start commonair-migrate.service || return 1
   info "starting the stack"

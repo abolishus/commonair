@@ -148,8 +148,14 @@ case "$1" in
     if [ -n "\${STUB_BAD_VERSION:-}" ] && [ "$cur" = "$STUB_BAD_VERSION" ]; then echo activating; exit 3; fi
     echo active; exit 0 ;;
   show) echo active; exit 0 ;;
+  reset-failed) rm -f "$STUB_STATE/migrate-start-limit"; exit 0 ;;
   start)
-    case "$*" in *commonair-migrate.service*) [ "$cur" != "\${STUB_MIGRATE_FAIL:-none}" ] || exit 1 ;; esac
+    # A failed migrate ends start-limit-hit (Restart=on-failure + StartLimitBurst), refusing
+    # every later start until reset-failed.
+    case "$*" in *commonair-migrate.service*)
+      [ ! -e "$STUB_STATE/migrate-start-limit" ] || { echo "Start request repeated too quickly." >&2; exit 1; }
+      [ "$cur" != "\${STUB_MIGRATE_FAIL:-none}" ] || { : >"$STUB_STATE/migrate-start-limit"; exit 1; } ;;
+    esac
     case "$*" in *commonair-backup.service*) [ -z "\${STUB_BACKUP_FAIL:-}" ] || exit 1 ;; esac
     exit 0 ;;
 esac
@@ -796,6 +802,17 @@ describe("re-install", () => {
   );
 
   test(
+    "a re-install after a failed migration is not refused by the start limit",
+    () => {
+      const h = host();
+      expect(h.run(INSTALL, { STUB_MIGRATE_FAIL: "0.1.0" }).code).toBe(1);
+      expectOk(h.run([...INSTALL, "--yes"]));
+      expect(h.calls()).toContain("systemctl --user reset-failed commonair-*");
+    },
+    TIMEOUT,
+  );
+
+  test(
     "~/commonair that is not a link (a git clone) is never replaced",
     () => {
       const h = host();
@@ -999,6 +1016,11 @@ describe("upgrade", () => {
         calls.indexOf("systemctl --user start commonair-backup.service"),
       );
       expect(calls[failed + 1]).not.toMatch(/^systemctl --user start --no-block/);
+      // The rollback cleared the start limit the failed migrate left before starting migrate again.
+      const retry = calls.indexOf("systemctl --user start commonair-migrate.service", failed + 1);
+      expect(retry).toBeGreaterThan(failed);
+      const reset = calls.lastIndexOf("systemctl --user reset-failed commonair-*", retry);
+      expect(reset).toBeGreaterThan(failed);
     },
     TIMEOUT,
   );
