@@ -83,6 +83,11 @@ export interface ComputeOptions {
   periodEnd: Date;
   surplusCents: number;
   currency: string;
+  /**
+   * The treasurer running the computation. Recorded so that someone else approves it (ADR 0020;
+   * the database refuses an approval by the same person or without one).
+   */
+  computedById: string;
   /** Defaults to the `patronage.formula` setting; tests and what-if previews may pass one. */
   formula?: PatronageFormulaSetting;
 }
@@ -155,6 +160,7 @@ export async function computePeriod(db: Executor, opts: ComputeOptions): Promise
       retainedLines: result.retainedLines,
       currency: opts.currency,
       computedAt: new Date(),
+      computedById: opts.computedById,
     };
     let periodId: string;
     if (existing) {

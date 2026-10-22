@@ -134,6 +134,27 @@
       "when": 1792628944853,
       "tag": "0018_ncii_item_hashed_at",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792635025713,
+      "tag": "0019_coop_share_statuses",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792635284029,
+      "tag": "0020_coop_shares_patronage",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792635284672,
+      "tag": "0021_coop_protections",
+      "breakpoints": true
     }
   ]
 }

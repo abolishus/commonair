@@ -8,6 +8,7 @@ import { schema as s, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { recomputeCouncil, termWindow } from "../src/council.ts";
 import { syncMemberships } from "../src/membership.ts";
+import { uuidv7 } from "@commonair/db";
 
 let t: TestDatabase;
 let app: Database;
@@ -109,13 +110,9 @@ describe("syncMemberships", () => {
 
     // Viewers: held share, short share, active subscription, expired subscription, lapsing.
     const shareholder = await user();
-    await app
-      .insert(s.membershipShares)
-      .values({ userId: shareholder, amountCents: 500, currency: "usd", status: "held" });
+    await heldShare(shareholder, 500);
     const shortShare = await user();
-    await app
-      .insert(s.membershipShares)
-      .values({ userId: shortShare, amountCents: 100, currency: "usd", status: "held" });
+    await heldShare(shortShare, 100);
     const subscriber = await user();
     const expired = await user();
     await app.insert(s.subscriptions).values([
@@ -239,3 +236,64 @@ describe("recomputeCouncil", () => {
     expect(results[0]!.termId).toBe(results[1]!.termId);
   });
 });
+
+/**
+ * A held share the way the API makes one (the share trigger requires it): a succeeded share
+ * payment, the purchase posting, then pending → held.
+ */
+async function heldShare(userId: string, amountCents: number): Promise<void> {
+  const [pay] = await app
+    .insert(s.payments)
+    .values({
+      provider: "manual",
+      providerRef: `CA-${uuidv7()}`,
+      kind: "membership_share",
+      status: "succeeded",
+      succeededAt: new Date(),
+      userId,
+      amountCents,
+      currency: "usd",
+    })
+    .returning({ id: s.payments.id });
+  const [share] = await app
+    .insert(s.membershipShares)
+    .values({ userId, amountCents, currency: "usd", paymentId: pay!.id })
+    .returning({ id: s.membershipShares.id });
+  const account = async (code: string, type: "asset" | "liability") => {
+    const [a] = await app
+      .insert(s.ledgerAccounts)
+      .values({ code: `${code}@usd`, type, name: code, currency: "usd" })
+      .onConflictDoNothing()
+      .returning({ id: s.ledgerAccounts.id });
+    return (
+      a?.id ??
+      (
+        await app
+          .select()
+          .from(s.ledgerAccounts)
+          .where(eq(s.ledgerAccounts.code, `${code}@usd`))
+      )[0]!.id
+    );
+  };
+  const cash = await account("asset:cash:manual", "asset");
+  const liability = await account(`liability:member-share:${userId}`, "liability");
+  await app.transaction(async (tx) => {
+    const [txn] = await tx
+      .insert(s.ledgerTransactions)
+      .values({
+        kind: "share_purchase",
+        description: "share",
+        occurredAt: new Date(),
+        idempotencyKey: `share-purchase:${share!.id}`,
+      })
+      .returning({ id: s.ledgerTransactions.id });
+    await tx.insert(s.ledgerEntries).values([
+      { transactionId: txn!.id, accountId: cash, amountCents, currency: "usd" },
+      { transactionId: txn!.id, accountId: liability, amountCents: -amountCents, currency: "usd" },
+    ]);
+  });
+  await app
+    .update(s.membershipShares)
+    .set({ status: "held", purchasedAt: new Date() })
+    .where(eq(s.membershipShares.id, share!.id));
+}

@@ -50,6 +50,8 @@ const day2 = day1 + DAY;
 const period = { start: new Date(day1 - 2 * DAY), end: new Date(now + DAY) };
 
 const ids: Record<"a" | "b" | "c" | "v" | "n" | "x", string> = { a: "", b: "", c: "", v: "", n: "", x: "" };
+/** Two treasurers: one computes, the other approves (ADR 0020). */
+const finance = { runner: "", approver: "" };
 const channels: Record<string, string> = {};
 
 let seq = 0;
@@ -112,6 +114,11 @@ beforeAll(async () => {
   t = await createTestDatabase();
   db = t.app.db;
   for (const k of Object.keys(ids) as (keyof typeof ids)[]) ids[k] = await makeUser();
+  for (const k of ["runner", "approver"] as const) {
+    finance[k] = await makeUser();
+    // Roles are granted by the operator CLI, i.e. the owner.
+    await t.db.update(s.users).set({ role: "treasurer" }).where(eq(s.users.id, finance[k]));
+  }
 
   // Streamer A: 10 eligible hours on day 1 (capped at 8), 2 on day 2, plus rows that must not count.
   const a = await makeChannel(ids.a);
@@ -291,6 +298,7 @@ describe("period run", () => {
 
   test("computePeriod writes the period, inputs and allocations", async () => {
     const r = await computePeriod(db, {
+      computedById: finance.runner,
       periodStart: period.start,
       periodEnd: period.end,
       surplusCents,
@@ -332,6 +340,7 @@ describe("period run", () => {
 
   test("recomputing a computed period replaces it in place", async () => {
     const again = await computePeriod(db, {
+      computedById: finance.runner,
       periodStart: period.start,
       periodEnd: period.end,
       surplusCents,
@@ -343,7 +352,7 @@ describe("period run", () => {
   });
 
   test("approvePeriod posts allocations to the ledger, exactly once", async () => {
-    const approver = ids.v;
+    const approver = finance.approver;
     const before = await rawBalance(db, accounts.retainedSurplus(), "usd");
     const r = await approvePeriod(db, { periodId, approvedById: approver });
     expect(r.approvedNow).toBe(true);
@@ -376,23 +385,36 @@ describe("period run", () => {
 
   test("an approved period cannot be recomputed", async () => {
     await expect(
-      computePeriod(db, { periodStart: period.start, periodEnd: period.end, surplusCents: 1, currency: "usd" }),
+      computePeriod(db, {
+        computedById: finance.runner,
+        periodStart: period.start,
+        periodEnd: period.end,
+        surplusCents: 1,
+        currency: "usd",
+      }),
     ).rejects.toThrow(PatronagePeriodStateError);
   });
 
   test("a period with nothing to allocate approves without a ledger posting", async () => {
     const start = new Date(period.end.getTime() + DAY);
     const end = new Date(start.getTime() + DAY);
-    const r = await computePeriod(db, { periodStart: start, periodEnd: end, surplusCents: 0, currency: "usd" });
+    const r = await computePeriod(db, {
+      computedById: finance.runner,
+      periodStart: start,
+      periodEnd: end,
+      surplusCents: 0,
+      currency: "usd",
+    });
     // Memberships exist at that end, but there is nothing to share.
     expect(r.totalCents).toBe(0);
-    const a = await approvePeriod(db, { periodId: r.periodId, approvedById: ids.v });
+    const a = await approvePeriod(db, { periodId: r.periodId, approvedById: finance.approver });
     expect(a).toEqual({ ledgerTransactionId: null, totalCents: 0, approvedNow: true });
   });
 
   test("an overlapping period in the same currency is refused", async () => {
     await expect(
       computePeriod(db, {
+        computedById: finance.runner,
         periodStart: new Date(period.start.getTime() + DAY),
         periodEnd: new Date(period.end.getTime() + DAY),
         surplusCents: 1,
@@ -405,6 +427,7 @@ describe("period run", () => {
     const start = new Date(period.end.getTime() + 10 * DAY);
     await expect(
       computePeriod(db, {
+        computedById: finance.runner,
         periodStart: start,
         periodEnd: new Date(start.getTime() + DAY),
         surplusCents: 1_000_000_000,
@@ -418,6 +441,7 @@ describe("period run", () => {
     const held = await retainedSurplus(db, "eur");
     expect(held).toBe(10_000);
     const r = await computePeriod(db, {
+      computedById: finance.runner,
       periodStart: new Date(period.start.getTime() - DAY),
       periodEnd: period.end,
       surplusCents: held,
@@ -428,6 +452,7 @@ describe("period run", () => {
     const later = new Date(period.end.getTime() + 20 * DAY);
     await expect(
       computePeriod(db, {
+        computedById: finance.runner,
         periodStart: later,
         periodEnd: new Date(later.getTime() + DAY),
         surplusCents: 1,
@@ -451,13 +476,13 @@ describe("period run", () => {
       periodEnd: new Date("2021-02-01T00:00:00Z"),
       currency: "eur",
     });
-    await expect(approvePeriod(db, { periodId: r.periodId, approvedById: ids.v })).rejects.toThrow(
+    await expect(approvePeriod(db, { periodId: r.periodId, approvedById: finance.approver })).rejects.toThrow(
       SurplusUnavailableError,
     );
   });
 
   test("approving an unknown period fails", async () => {
-    await expect(approvePeriod(db, { periodId: uuidv7(), approvedById: ids.v })).rejects.toThrow(
+    await expect(approvePeriod(db, { periodId: uuidv7(), approvedById: finance.approver })).rejects.toThrow(
       PatronagePeriodStateError,
     );
   });

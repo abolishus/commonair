@@ -76,7 +76,8 @@ export const LEDGER_ACCOUNT_TYPES = ["asset", "liability", "equity", "revenue", 
 export const MEMBER_CLASSES = ["streamer", "viewer", "worker"] as const;
 export const MEMBERSHIP_STATUSES = ["active", "lapsed", "exited"] as const;
 export const MEMBERSHIP_BASES = ["streaming_hours", "share", "subscription", "board_appointment"] as const;
-export const SHARE_STATUSES = ["pending", "held", "refunded"] as const;
+/** `refund_pending`: the member exited and the treasurer owes the refund; `cancelled`: the payment expired unpaid (ADR 0020). */
+export const SHARE_STATUSES = ["pending", "held", "refund_pending", "refunded", "cancelled"] as const;
 
 export const PROPOSAL_KINDS = ["ordinary", "protected"] as const;
 export const PROPOSAL_STATUSES = [

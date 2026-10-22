@@ -24,6 +24,7 @@ import type {
   TallyBreakdown,
 } from "@commonair/contracts/shapes";
 import { users } from "./auth.ts";
+import { payments } from "./money.ts";
 import {
   cents,
   councilStance,
@@ -76,16 +77,19 @@ export const membershipShares = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     amountCents: cents().notNull(),
     currency: text().notNull(),
-    paymentId: uuid(),
+    paymentId: uuid().references(() => payments.id, { onDelete: "restrict" }),
     status: shareStatus().notNull().default("pending"),
     purchasedAt: ts(),
     refundedAt: ts(),
     createdAt: createdAt(),
   },
   (t) => [
+    // `refund_pending` also counts as open; the share trigger (0021) checks it, because an index
+    // predicate cannot use enum values added in the same migration run.
     uniqueIndex("membership_shares_held_uq")
       .on(t.userId)
       .where(sql`${t.status} in ('pending', 'held')`),
+    index("membership_shares_status_idx").on(t.status, t.createdAt),
   ],
 );
 
@@ -253,6 +257,10 @@ export const councilTerms = pgTable("council_terms", {
   endsAt: ts().notNull(),
   /** Inputs used to seat the council (eligibility window, size), for auditability. */
   method: jsonb().$type<Record<string, unknown>>().notNull(),
+  /** Set by trigger: seats are inserted only in the transaction that created the term (0021). */
+  txid: bigint({ mode: "number" })
+    .notNull()
+    .default(sql`txid_current()`),
 });
 
 export const councilMembers = pgTable(
@@ -360,8 +368,10 @@ export const patronagePeriods = pgTable(
     retainedLines: jsonb().$type<PatronageLine[]>().notNull().default([]),
     currency: text().notNull(),
     computedAt: ts(),
+    /** The treasurer who ran the computation; the approver must be someone else (ADR 0020, trigger). */
+    computedById: uuid().references(() => users.id, { onDelete: "restrict" }),
     approvedAt: ts(),
-    approvedById: uuid(),
+    approvedById: uuid().references(() => users.id, { onDelete: "restrict" }),
     ledgerTransactionId: uuid(),
     createdAt: createdAt(),
   },
