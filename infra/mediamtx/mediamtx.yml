@@ -116,7 +116,8 @@ paths:
       --post-data '{"path":"$MTX_PATH","sourceType":"$MTX_SOURCE_TYPE","sourceId":"$MTX_SOURCE_ID","query":"$MTX_QUERY"}'
       $API_INTERNAL_URL/internal/media/not-ready
 
-  # Transcoded renditions: live/<slug>/<rendition>, published over RTSP by services/media.
+  # Transcoded renditions: live/<slug>/<rendition>, and live/<slug>/aac (the source with AAC
+  # audio, for WHIP/Opus ingests), published over RTSP by services/media.
   # The API auth hook allows publishing here only to the internal user.
-  "~^live/[a-z0-9_]{3,25}/(1080p|720p|480p|audio)$":
+  "~^live/[a-z0-9_]{3,25}/(1080p|720p|480p|audio|aac)$":
     source: publisher

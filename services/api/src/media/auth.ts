@@ -7,11 +7,12 @@
  *
  * - publish `live/<slug>`: the channel's active stream key (RTMP `?key=`, WHIP bearer token),
  *   channel and owner not suspended.
- * - publish `live/<slug>/<rendition>`: internal credentials (the media service's ladder).
+ * - publish `live/<slug>/<rendition>` and `live/<slug>/aac`: internal credentials (the media
+ *   service's ladder and its AAC copy of the source).
  * - read / playback / api / metrics: internal credentials (MEDIA_INTERNAL_PASSWORD) only; viewers go through the origin.
  * - anything else (pprof, unknown paths): refused.
  */
-import { MEDIA_INTERNAL_USER, type MediaMtxAuthRequest } from "@commonair/contracts/internal";
+import { MEDIA_INTERNAL_USER, SOURCE_AAC_DIR, type MediaMtxAuthRequest } from "@commonair/contracts/internal";
 import { RENDITIONS } from "@commonair/contracts/enums";
 import { timingSafeEqual } from "@commonair/tokens";
 
@@ -21,7 +22,10 @@ export type MediaAuthPlan =
   | { kind: "deny" };
 
 const LIVE_PATH = /^live\/([a-z0-9_]{3,25})$/;
-const RENDITION_PATH = new RegExp(`^live/[a-z0-9_]{3,25}/(${RENDITIONS.filter((r) => r !== "source").join("|")})$`);
+// Renditions and the AAC copy of the source (SOURCE_AAC_DIR), both published by media.
+const RENDITION_PATH = new RegExp(
+  `^live/[a-z0-9_]{3,25}/(${[...RENDITIONS.filter((r) => r !== "source"), SOURCE_AAC_DIR].join("|")})$`,
+);
 
 /** Secret a publisher presented: RTMP/SRT query `key`, WHIP bearer token, or the password field. */
 export function presentedSecret(req: MediaMtxAuthRequest): string | null {

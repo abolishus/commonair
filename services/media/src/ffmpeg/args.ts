@@ -127,6 +127,41 @@ export function ladderArgs({ input, outputFor, rungs, encoder }: LadderInput): s
   return args;
 }
 
+/**
+ * The source with its audio re-encoded to AAC and the video copied, published back to MediaMTX
+ * (`sourceAacPath`): cheap enough to run for every WHIP broadcast, whatever the viewer count.
+ */
+export function aacCopyArgs(input: string, output: string): string[] {
+  return [
+    ...BASE,
+    ...PROGRESS,
+    ...RTSP_IN,
+    "-i",
+    input,
+    "-map",
+    "0:v:0?",
+    "-map",
+    "0:a:0",
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-ac",
+    "2",
+    "-ar",
+    "48000",
+    "-f",
+    "rtsp",
+    "-rtsp_transport",
+    "tcp",
+    "-pkt_size",
+    "1200",
+    output,
+  ];
+}
+
 export interface RecorderInput {
   input: string;
   /** Local directory for this broadcast's segments. */

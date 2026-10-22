@@ -25,7 +25,8 @@ import { createOrigin, type Origin } from "../src/origin.ts";
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 180_000 });
 
-const IMAGE = "docker.io/bluenviron/mediamtx:1.21.2";
+const IMAGE =
+  "docker.io/bluenviron/mediamtx:1.21.2@sha256:c7540465f868a02652118bea5a0daab12a29ac0f6cb8485abd535939ecddf886";
 const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 const CDN_BASE = "https://cdn.test.invalid";
 
@@ -221,6 +222,8 @@ beforeAll(async () => {
   await waitFor("mediamtx http", async () => (await fetch(hlsUrl)).status);
   publish(rtspPort, "live/test", "640x360");
   publish(rtspPort, "live/test/720p", "320x180");
+  // Media's AAC copy of a WHIP source (sourceAacPath); a distinct size tells the two apart.
+  publish(rtspPort, "live/test/aac", "160x90");
 
   origin = await createOrigin({
     db: t.db,
@@ -293,6 +296,44 @@ describe("viewer playback (/hls)", () => {
     expect(variants[2]).toMatch(/CODECS="mp4a/);
     expect(all.some((u) => u.startsWith("720p/video1_stream.m3u8?"))).toBe(true);
     await valkey.del(KEYS.renditions(ids.channel));
+  });
+
+  test("while media publishes an AAC copy, the source path serves it, under the same URLs", async () => {
+    const tk = await token();
+    await valkey.set(KEYS.sourceAac(ids.channel), "1", "EX", 60);
+    try {
+      // The flag is cached for 2 s, like renditions.
+      const r = await waitFor(
+        "the AAC copy behind the source path",
+        async () => {
+          const res = await text(`/hls/live/test/index.m3u8?t=${tk}`);
+          return res.body.includes("RESOLUTION=160x90") ? res : undefined;
+        },
+        10_000,
+      );
+      expect(r.status).toBe(200);
+      // Clients never see the internal directory: URIs stay relative to live/test.
+      const all = uris(r.body);
+      expect(all.length).toBeGreaterThan(0);
+      for (const u of all) expect(u.startsWith("aac/")).toBe(false);
+      const media = all.find((u) => u.startsWith("video"));
+      expect(media).toBeDefined();
+      const pl = await text(`/hls/live/test/${media?.split("?")[0]}?t=${tk}`);
+      expect(pl.status).toBe(200);
+      // The internal directory itself is not addressable.
+      expect((await get(`/hls/live/test/aac/index.m3u8?t=${tk}`)).status).toBe(404);
+    } finally {
+      await valkey.del(KEYS.sourceAac(ids.channel));
+    }
+    // Withdrawn: the original source again.
+    await waitFor(
+      "the original source back",
+      async () => {
+        const res = await text(`/hls/live/test/index.m3u8?t=${tk}`);
+        return res.body.includes("RESOLUTION=640x360") ? res : undefined;
+      },
+      10_000,
+    );
   });
 
   test("media playlist, init, segment and part all stream through", async () => {

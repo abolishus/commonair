@@ -41,6 +41,8 @@ export class ChannelDirectory {
   private readonly lookups = new Coalescer<LiveChannel | null>();
   private readonly renditionCache = new TtlCache<Rendition[]>();
   private readonly renditionLookups = new Coalescer<Rendition[]>();
+  private readonly sourceAacCache = new TtlCache<boolean>();
+  private readonly sourceAacLookups = new Coalescer<boolean>();
 
   constructor(private readonly opts: ChannelDirectoryOptions) {}
 
@@ -80,6 +82,25 @@ export class ChannelDirectory {
         this.opts.logger?.warn("renditions lookup failed", { err, channelId });
       }
       this.renditionCache.set(channelId, value, this.opts.renditionsTtlMs ?? 2_000);
+      return value;
+    }).promise;
+  }
+
+  /**
+   * Whether media publishes an AAC copy of the channel's source (`KEYS.sourceAac`, set for WHIP's
+   * Opus audio). Same short cache as renditions; a failed lookup serves the original source.
+   */
+  async sourceAac(channelId: string): Promise<boolean> {
+    const cached = this.sourceAacCache.get(channelId);
+    if (cached !== undefined) return cached;
+    return this.sourceAacLookups.run(channelId, async () => {
+      let value = false;
+      try {
+        value = (await this.opts.valkey.get(KEYS.sourceAac(channelId))) === "1";
+      } catch (err) {
+        this.opts.logger?.warn("source-aac lookup failed", { err, channelId });
+      }
+      this.sourceAacCache.set(channelId, value, this.opts.renditionsTtlMs ?? 2_000);
       return value;
     }).promise;
   }

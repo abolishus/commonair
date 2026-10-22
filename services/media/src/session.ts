@@ -8,6 +8,7 @@ import { errorCategory } from "./moderation/logging.ts";
 import { HealthSampler } from "./health/sampler.ts";
 import { LiveSampler, liveCapture } from "./moderation/sampler.ts";
 import { SimulcastManager } from "./simulcast.ts";
+import { AudioCompat } from "./transcode/audio-compat.ts";
 import { Thumbnailer } from "./thumbnails.ts";
 import { TranscodeController } from "./transcode/controller.ts";
 import { SegmentRecorder, type LocalLookup } from "./vod/recorder.ts";
@@ -15,6 +16,8 @@ import { SegmentRecorder, type LocalLookup } from "./vod/recorder.ts";
 export class BroadcastSession {
   readonly sampler: HealthSampler;
   readonly transcode: TranscodeController;
+  /** AAC copy of the source when its audio is not AAC (WHIP/Opus), for WebKit's HLS. */
+  readonly audioCompat: AudioCompat;
   private readonly simulcast: SimulcastManager;
   private readonly recorder: SegmentRecorder;
   private readonly thumbnails: Thumbnailer;
@@ -32,6 +35,7 @@ export class BroadcastSession {
     this.sampler = new HealthSampler(ctx, info, () => this.serverWarnings());
     this.transcode = new TranscodeController(ctx, info, () => this.sampler.latestProbe?.height ?? null);
     this.simulcast = new SimulcastManager(ctx, info);
+    this.audioCompat = new AudioCompat(ctx, info);
     this.recorder = new SegmentRecorder(ctx, info, vodId);
     this.thumbnails = new Thumbnailer(ctx, info);
     const target = { broadcastId: info.broadcastId, channelId: info.channelId, path: info.path };
@@ -59,6 +63,7 @@ export class BroadcastSession {
     this.thumbnails.start();
     await Promise.all([
       this.guard("transcode", () => this.transcode.start()),
+      this.guard("audio-compat", () => this.audioCompat.start()),
       this.guard("simulcast", () => this.simulcast.start()),
       this.guard("recorder", () => this.recorder.start()),
     ]);
@@ -81,6 +86,7 @@ export class BroadcastSession {
           this.guard("moderation", () => this.frames.stop(), strict),
           this.guard("thumbnails", () => this.thumbnails.stop(), strict),
           this.guard("transcode", () => this.transcode.stop(), strict),
+          this.guard("audio-compat", () => this.audioCompat.stop(), strict),
           this.guard("simulcast", () => this.simulcast.stop(), strict),
           this.guard("health", () => this.sampler.stop(), strict),
           this.guard("recorder", () => this.recorder.stop(final, strict), strict),

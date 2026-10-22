@@ -16,6 +16,9 @@ describe("planMediaAuth decision table", () => {
     ["publish", "live/alice", "rtmp", "publish"],
     ["publish", "live/alice", "webrtc", "publish"],
     ["publish", "live/alice/720p", "rtsp", "internal"],
+    // The AAC copy of a WHIP source (media's internal publish).
+    ["publish", "live/alice/aac", "rtsp", "internal"],
+    ["publish", "live/alice/aac2", "rtsp", "deny"],
     ["publish", "live/alice/source", "rtsp", "deny"],
     ["publish", "live/Alice", "rtmp", "deny"],
     ["publish", "other/alice", "rtmp", "deny"],

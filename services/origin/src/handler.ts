@@ -8,7 +8,7 @@
  *   GET /relay-pull/live/<slug>/…  member relays (Bearer relay token), relative URIs, no tokens
  *   GET /cdn/live/<slug>/…         CDN origin-pull (x-cdn-auth), relative URIs, no tokens
  */
-import { renditionPath } from "@commonair/contracts/internal";
+import { renditionPath, sourceAacPath } from "@commonair/contracts/internal";
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import type { Logger } from "@commonair/observability";
 import { authorizeViewer, checkCdnAuth, CDN_AUTH_HEADER, type RelayAuth } from "./auth.ts";
@@ -196,7 +196,13 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
     if (!channel) return fail(404, "offline", mr);
     if (p.route === "hls" && p.claims.cid !== channel.id) return fail(403, "forbidden: wrong_channel", mr);
 
-    const ref = { upstreamPath: mr.upstreamPath, file: mr.file, kind: mr.kind };
+    // The source path serves media's AAC copy while one exists (WHIP's Opus audio does not play in
+    // WebKit). Clients keep requesting `live/<slug>/…`; playlists are rewritten against that path.
+    const upstreamPath =
+      mr.rendition === undefined && (await deps.channels.sourceAac(channel.id))
+        ? sourceAacPath(mr.slug)
+        : mr.upstreamPath;
+    const ref = { upstreamPath, file: mr.file, kind: mr.kind };
     const blocking = isBlocking(directives);
     let obj: MediaObject;
     try {

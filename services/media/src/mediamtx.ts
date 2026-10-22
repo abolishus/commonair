@@ -48,14 +48,33 @@ export interface SourceInfo {
   height: number | null;
   hasVideo: boolean;
   hasAudio: boolean;
+  /** MediaMTX codec names ("H264", "Opus", "MPEG-4 Audio" = AAC), null when unknown. */
+  videoCodec: string | null;
+  audioCodec: string | null;
 }
+
+const VIDEO_CODEC = /^(H264|H265|AV1|VP8|VP9|MPEG-4 Video|M-JPEG)$/;
+const AUDIO_CODEC = /Audio|Opus|AAC|G711|LPCM|AC-3/;
 
 /** Track summary from the API, available immediately (no ffprobe round trip). */
 export function sourceInfo(p: MtxPath): SourceInfo {
-  const video = p.tracks2?.find((t) => /^(H264|H265|AV1|VP8|VP9|MPEG-4 Video|M-JPEG)$/.test(t.codec));
+  const video = p.tracks2?.find((t) => VIDEO_CODEC.test(t.codec));
   const hasVideo = video !== undefined || p.tracks.some((t) => /H26[45]|AV1|VP[89]|Video|JPEG/.test(t));
   const hasAudio = p.tracks.some((t) => /Audio|Opus|AAC|G711|LPCM|AC-3|MPEG-1\/2 Audio/.test(t));
-  return { height: video?.codecProps?.height ?? null, hasVideo, hasAudio };
+  const audioCodec =
+    p.tracks2?.find((t) => AUDIO_CODEC.test(t.codec))?.codec ?? p.tracks.find((t) => AUDIO_CODEC.test(t)) ?? null;
+  const videoCodec = video?.codec ?? p.tracks.find((t) => VIDEO_CODEC.test(t)) ?? null;
+  return { height: video?.codecProps?.height ?? null, hasVideo, hasAudio, videoCodec, audioCodec };
+}
+
+/**
+ * Whether players need an AAC copy of the source: there is audio and it is not AAC (WHIP brings
+ * Opus, which WebKit's native HLS does not decode), and the video can be copied as is (H.264, or
+ * no video). Other video codecs would need a full transcode, which this copy does not do.
+ */
+export function needsAacCopy(info: SourceInfo): boolean {
+  if (!info.hasAudio || info.audioCodec === null || info.audioCodec === "MPEG-4 Audio") return false;
+  return !info.hasVideo || info.videoCodec === "H264";
 }
 
 /** API path segment for kicking a source, by MediaMTX source type. */
