@@ -58,6 +58,16 @@ export function duplicateWaitMs(lastReplyAt: number | undefined, now: number): n
   return Math.max(0, lastReplyAt + CHAT_LIMITS.duplicateWindowMs + DUPLICATE_MARGIN_MS - now);
 }
 
+/**
+ * Wait out `waitMs`, then arm the reply waiters. Order matters: a waiter's timeout starts when it
+ * is armed, so arming before a ~30 s duplicate-window wait would time out a 10 s waiter before the
+ * !ping is even sent. The caller sends right after this resolves, so no reply is missed.
+ */
+export async function armAfterWait<T>(waitMs: number, wait: (ms: number) => Promise<void>, arm: () => T): Promise<T> {
+  if (waitMs > 0) await wait(waitMs);
+  return arm();
+}
+
 export const VIA = ["web", "api"] as const;
 export type Via = (typeof VIA)[number];
 
@@ -134,16 +144,16 @@ async function sdkBotPing(
       (f) => f.channel === o.channel && f.message.user.username === username && f.message.body === "pong",
       o.chat.timeoutMs,
     );
-  const tmiPong = pongFrom(o.tmiUsername);
-  const sdkPong = pongFrom(sdkAccount.username);
-  tmiPong.catch(() => undefined);
-  sdkPong.catch(() => undefined);
-  const wait = duplicateWaitMs(o.tmiLastReplyAt, Date.now());
-  if (wait > 0) {
-    await ctx.step(`wait ${Math.ceil(wait / 1000)} s for chat's duplicate window to pass`, () =>
-      sleep(wait, ctx.signal),
-    );
-  }
+  const [tmiPong, sdkPong] = await armAfterWait(
+    duplicateWaitMs(o.tmiLastReplyAt, Date.now()),
+    (ms) => ctx.step(`wait ${Math.ceil(ms / 1000)} s for chat's duplicate window to pass`, () => sleep(ms, ctx.signal)),
+    () => {
+      const pongs = [pongFrom(o.tmiUsername), pongFrom(sdkAccount.username)] as const;
+      // Awaited together below; keep an early rejection from being unhandled meanwhile.
+      for (const pong of pongs) pong.catch(() => undefined);
+      return pongs;
+    },
+  );
   const ping = `!ping sdk ${ctx.runId}`;
   const sent = performance.now();
   await ctx.step("fan: send !ping for both bots", () => o.sender.send(ping, o.chat));

@@ -4,7 +4,7 @@
 /** Pure parts of the E2 social scenario (docs/testing/e2-selectors.md). */
 import { describe, expect, test } from "vite-plus/test";
 import { CHAT_LIMITS } from "@commonair/contracts/chat";
-import { DUPLICATE_MARGIN_MS, VIA, duplicateWaitMs, parseVia } from "../scenarios/e2e-social.ts";
+import { DUPLICATE_MARGIN_MS, VIA, armAfterWait, duplicateWaitMs, parseVia } from "../scenarios/e2e-social.ts";
 import type { ApiClient } from "../src/api/client.ts";
 import type { ChatClient } from "../src/chat-client.ts";
 import {
@@ -173,5 +173,51 @@ describe("duplicateWaitMs (the SDK-bot !ping must not hit chat's duplicate filte
   });
   test("pins the dependency on chat's 30 s window (update the scenario if it changes)", () => {
     expect(CHAT_LIMITS.duplicateWindowMs).toBe(30_000);
+  });
+});
+
+describe("armAfterWait (reply waiters start their timeout only after the duplicate-window wait)", () => {
+  test("arms after the wait has finished", async () => {
+    const order: string[] = [];
+    const armed = await armAfterWait(
+      30_000,
+      async (ms) => {
+        order.push(`wait ${ms}`);
+        await Promise.resolve();
+        order.push("waited");
+      },
+      () => {
+        order.push("arm");
+        return "waiters";
+      },
+    );
+    expect(armed).toBe("waiters");
+    expect(order).toEqual(["wait 30000", "waited", "arm"]);
+  });
+
+  test("skips the wait when nothing is left to wait out", async () => {
+    const order: string[] = [];
+    await armAfterWait(
+      0,
+      async () => {
+        order.push("wait");
+      },
+      () => order.push("arm"),
+    );
+    expect(order).toEqual(["arm"]);
+  });
+
+  test("never arms when the wait is aborted", async () => {
+    let armed = false;
+    await expect(
+      armAfterWait(
+        5_000,
+        () => Promise.reject(new Error("aborted")),
+        () => {
+          armed = true;
+        },
+      ),
+    ).rejects.toThrow("aborted");
+    expect(armed).toBe(false);
   });
 });
