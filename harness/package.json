@@ -20,6 +20,7 @@
     "@orpc/client": "catalog:",
     "@orpc/contract": "catalog:",
     "altcha-lib": "2.6.0",
+    "fflate": "catalog:",
     "hls.js": "1.7.3",
     "playwright": "1.64.1",
     "tmi.js": "1.8.5",

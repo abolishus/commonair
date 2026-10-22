@@ -29,6 +29,7 @@
     "@opentelemetry/api": "catalog:",
     "bullmq": "6.3.16",
     "drizzle-orm": "catalog:",
+    "fflate": "catalog:",
     "iovalkey": "catalog:",
     "postgres": "catalog:",
     "zod": "catalog:"
