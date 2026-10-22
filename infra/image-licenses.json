@@ -101,6 +101,30 @@
     "tag": "3.24.2",
     "notes": "Primary software: musl libc (MIT) and BusyBox (GPL-2.0-only); other apk packages carry their own licenses. Alternative static runtime base."
   },
+  "ghcr.io/project-zot/zot": {
+    "license": "Apache-2.0",
+    "source": "https://github.com/project-zot/zot/blob/v2.1.22/LICENSE",
+    "tag": "v2.1.22",
+    "notes": "OCI registry (CNCF sandbox). Test only: scripts/selfhost/e2e.ts pushes the release images to a throwaway instance; also the self-run mirror ADR 0023 recommends. Multi-arch index (amd64, arm64), built 2026-10-06."
+  },
+  "docker.io/library/debian": {
+    "license": "GPL-2.0-or-later AND GPL-3.0-or-later AND MIT",
+    "source": "https://github.com/debuerreotype/debuerreotype/blob/master/LICENSE",
+    "tag": "trixie-20261005",
+    "notes": "Debian 13 base (dpkg/apt GPL-2.0-or-later, coreutils GPL-3.0-or-later, debuerreotype tooling MIT); every package carries its own DFSG license in /usr/share/doc/*/copyright. Test only: the Debian host of scripts/selfhost/e2e.ts, which apt-installs systemd (LGPL-2.1-or-later) and podman (Apache-2.0) into it."
+  },
+  "quay.io/fedora/fedora": {
+    "license": "GPL-2.0-or-later AND GPL-3.0-or-later AND MIT",
+    "source": "https://docs.fedoraproject.org/en-US/legal/license-approval/",
+    "tag": "42",
+    "notes": "Fedora 42 base image (rpm/dnf GPL-2.0-or-later, coreutils GPL-3.0-or-later, MIT-licensed packages among others); Fedora admits only FOSS licenses (Fedora Legal, source link). Test only: the --distro fedora host of scripts/selfhost/e2e.ts."
+  },
+  "docker.io/koalaman/shellcheck": {
+    "license": "GPL-3.0-or-later",
+    "source": "https://github.com/koalaman/shellcheck/blob/v0.11.0/LICENSE",
+    "tag": "v0.11.0",
+    "notes": "Lints scripts/selfhost.sh in scripts/tests/selfhost-sh.test.ts when no shellcheck binary is installed. Sources say GPLv3 'or (at your option) any later version'. Scratch image with the static binary. Released 2025-08-04."
+  },
   "mcr.microsoft.com/playwright": {
     "license": "Apache-2.0",
     "source": "https://github.com/microsoft/playwright/blob/v1.64.1/LICENSE",
