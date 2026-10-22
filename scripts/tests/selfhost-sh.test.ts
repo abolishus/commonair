@@ -151,6 +151,7 @@ case "$1" in
     echo active; exit 0 ;;
   show) echo active; exit 0 ;;
   reset-failed) rm -f "$STUB_STATE/migrate-start-limit"; exit 0 ;;
+  stop) case "$*" in *commonair-migrate.service*) : >"$STUB_STATE/migrate-stopped" ;; esac; exit 0 ;;
   start)
     if [ -n "\${STUB_DEP_FAILED:-}" ]; then
       if [ "$*" = "start --no-block $STUB_DEP_FAILED" ]; then rm -f "$STUB_STATE/dep-failed"
@@ -160,6 +161,13 @@ case "$1" in
     # A failed migrate ends start-limit-hit (Restart=on-failure + StartLimitBurst), refusing
     # every later start until reset-failed.
     case "$*" in *commonair-migrate.service*)
+      # A Postgres that never gets healthy: the start job waits behind it until a stop cancels
+      # it (or 60 s, so a regression fails the test instead of hanging it).
+      if [ "$cur" = "\${STUB_MIGRATE_HANG:-none}" ]; then
+        rm -f "$STUB_STATE/migrate-stopped"; n=0
+        until [ -e "$STUB_STATE/migrate-stopped" ] || [ $n -ge 1200 ]; do /bin/sleep 0.05; n=$((n + 1)); done
+        echo "Job for commonair-migrate.service canceled." >&2; exit 1
+      fi
       [ ! -e "$STUB_STATE/migrate-start-limit" ] || { echo "Start request repeated too quickly." >&2; exit 1; }
       [ "$cur" != "\${STUB_MIGRATE_FAIL:-none}" ] || { : >"$STUB_STATE/migrate-start-limit"; exit 1; } ;;
     esac
@@ -1074,6 +1082,30 @@ describe("upgrade", () => {
     },
     TIMEOUT,
   );
+
+  test("a migration stuck behind a Postgres that never gets healthy times out and rolls back", () => {
+    const h = host();
+    expectOk(h.run(INSTALL));
+    const started = Date.now();
+    const r = h.run(["upgrade", "--version", "v0.2.0"], { STUB_MIGRATE_HANG: "0.2.0" });
+    // COMMONAIR_HEALTH_TIMEOUT is 2 s; the stub gives up on its own only after 60 s.
+    expect(Date.now() - started).toBeLessThan(30_000);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("migrations did not finish within 2s");
+    expect(r.err).toContain("rolled back to 0.1.0, which is healthy");
+    expect(current(h)).toBe(join(h.home, ".local/share/commonair/releases/0.1.0"));
+    const calls = h.calls();
+    const stop = calls.indexOf("systemctl --user stop commonair-migrate.service commonair-postgres.service");
+    expect(stop).toBeGreaterThan(-1);
+    // The new release's stack was never started; the rollback migrated and started the old one.
+    const hung = calls.lastIndexOf("systemctl --user start commonair-migrate.service", stop);
+    expect(calls.slice(hung, stop).some((c) => c.startsWith("systemctl --user start --no-block"))).toBe(false);
+    const retry = calls.indexOf("systemctl --user start commonair-migrate.service", stop);
+    expect(retry).toBeGreaterThan(stop);
+    expect(calls.findIndex((c, i) => i > retry && c.startsWith("systemctl --user start --no-block"))).toBeGreaterThan(
+      retry,
+    );
+  }, 90_000);
 
   test(
     "keeps only the current and the previous release on disk",

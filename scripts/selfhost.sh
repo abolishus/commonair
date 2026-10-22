@@ -699,6 +699,28 @@ all_units() {
   done
 }
 
+# Runs migrate to completion within HEALTH_TIMEOUT. Postgres never gives up (Restart=always,
+# RestartMode=direct, no start limit), so with an image that never gets healthy its start job,
+# and migrate's queued behind it (After=), never end: an unbounded start would hang here and
+# never reach the rollback. Stopping both cancels those jobs, which also ends the client.
+# Backgrounded and polled, not timeout(1), which the test hosts (macOS) do not have.
+start_migrate() {
+  systemctl --user start commonair-migrate.service &
+  _mpid=$!
+  _deadline=$(($(date +%s) + HEALTH_TIMEOUT))
+  while kill -0 "$_mpid" 2>/dev/null; do
+    if [ "$(date +%s)" -ge "$_deadline" ]; then
+      warn "migrations did not finish within ${HEALTH_TIMEOUT}s (is Postgres healthy?)"
+      systemctl --user stop commonair-migrate.service commonair-postgres.service 2>/dev/null || true
+      kill "$_mpid" 2>/dev/null || true
+      wait "$_mpid" 2>/dev/null || true
+      return 1
+    fi
+    sleep "$POLL_INTERVAL"
+  done
+  wait "$_mpid"
+}
+
 # ADR 0023 §9: everything down, migrations to completion, then the rest.
 restart_stack() {
   # shellcheck disable=SC2046 # unit names have no spaces
@@ -708,7 +730,7 @@ restart_stack() {
   # up to an hour.
   systemctl --user reset-failed 'commonair-*' 2>/dev/null || true
   info "running migrations (commonair-migrate)"
-  systemctl --user start commonair-migrate.service || return 1
+  start_migrate || return 1
   info "starting the stack"
   # shellcheck disable=SC2046
   systemctl --user start --no-block $(services)
