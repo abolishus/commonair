@@ -77,8 +77,20 @@ export interface ManifestCheck {
   rowMismatches: { name: string; listed: number; actual: number }[];
 }
 
+/**
+ * Rows of one archive file, as the manifest counts them (spec "Data export"): an array counts its
+ * elements; an object without arrays is one row; an object holding arrays counts their elements,
+ * plus one when it also holds a non-array value.
+ */
 export function rowCount(value: unknown): number {
-  return Array.isArray(value) ? value.length : 1;
+  if (value === null || value === undefined) return 0;
+  if (Array.isArray(value)) return value.length;
+  if (typeof value !== "object") return 1;
+  const members = Object.values(value as Record<string, unknown>);
+  const arrays = members.filter(Array.isArray);
+  if (arrays.length === 0) return 1;
+  const record = members.some((m) => m !== null && !Array.isArray(m)) ? 1 : 0;
+  return record + arrays.reduce((n, a) => n + a.length, 0);
 }
 
 /** Compare the manifest with what the zip holds. */

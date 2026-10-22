@@ -71,10 +71,14 @@ describe("readZip and the manifest", () => {
     expect(manifestOk(c)).toBe(false);
   });
 
-  test("rowCount: arrays by length, objects as one", () => {
+  test("rowCount matches the worker's manifest rule", () => {
     expect(rowCount([])).toBe(0);
     expect(rowCount([1, 2])).toBe(2);
     expect(rowCount({ a: 1 })).toBe(1);
+    // Objects holding arrays (coop.json, safety.json, developer.json) count the arrays' elements.
+    expect(rowCount({ memberships: [], shares: [], votes: [] })).toBe(0);
+    expect(rowCount({ apps: [1], botTokens: [1], webhooks: [] })).toBe(2);
+    expect(rowCount({ id: "x", panels: [1, 2] })).toBe(3);
   });
 
   test("anything but a zip is refused", () => {

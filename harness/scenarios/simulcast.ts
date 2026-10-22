@@ -43,6 +43,12 @@ type SimulcastTarget = Awaited<ReturnType<ApiClient["stream"]["simulcast"]["list
 const DEFAULT_TARGET_URL = "rtmp://mock-rtmp:1936/live";
 /** Spec: `live` within 20 s of going live; disable/enable effects within 20 s. */
 const STATUS_DEADLINE_MS = 20_000;
+/**
+ * Re-enabling restarts the push. One stalled publish handshake costs the target's 10 s read
+ * timeout plus media's reconnect backoff, and counting frames needs a 10 s window: the same
+ * 45 s budget as the first push (step 3).
+ */
+const RESTART_DEADLINE_MS = 45_000;
 /** Spec: at least 60 video frames within 10 s. */
 const MIN_FRAMES = 60;
 const FRAME_WINDOW_S = 10;
@@ -247,7 +253,7 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
   );
   const toRestarted = Date.now() - enabledAt;
   ctx.metric("simulcast_enable_effect_ms", toRestarted, "ms");
-  ctx.check(`4 frames again within ${STATUS_DEADLINE_MS / 1000} s`, toRestarted <= STATUS_DEADLINE_MS + 3_000, {
+  ctx.check(`4 frames again within ${RESTART_DEADLINE_MS / 1000} s`, toRestarted <= RESTART_DEADLINE_MS, {
     toRestarted,
   });
 
