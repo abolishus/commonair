@@ -11,6 +11,7 @@ import { RPCHandler } from "@orpc/server/fetch";
 import { experimental_ZodSmartCoercionPlugin as ZodSmartCoercionPlugin } from "@orpc/zod/zod4";
 import type { Server } from "bun";
 import { AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
+import { OVERLAY_EVENTS_PATH } from "@commonair/contracts/events";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER } from "@commonair/contracts/internal";
 import { generateOpenApi } from "@commonair/contracts/openapi";
 import { sourceLink } from "@commonair/config/site";
@@ -21,9 +22,12 @@ import type { Deps } from "./deps.ts";
 import { toClientError } from "./lib/errors.ts";
 import { clientIp, looksProxied } from "./lib/ip.ts";
 import { canonicalIp, rateLimitSubjectIp } from "./lib/netrange.ts";
-import type { BaseContext, RequestInfo } from "./lib/orpc.ts";
+import { overlayTokenOf, type BaseContext, type RequestInfo } from "./lib/orpc.ts";
 import { rateLimitKey } from "./lib/ratelimit.ts";
 import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
+import { isOpsHookPath, opsHook } from "./ops/hooks.ts";
+import { overlayHub } from "./overlay/stream.ts";
+import { overlayTokenHash, resolveOverlayToken } from "./overlay/tokens.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
 import { isTestHookPath, testHook } from "./moderation/hooks.ts";
 import { router } from "./router.ts";
@@ -48,6 +52,11 @@ export function createApp(deps: Deps): ApiApp {
       {
         testHooks: true,
       },
+    );
+  if (deps.env.OPS_TEST_HOOKS)
+    deps.logger.warn(
+      "OPS_TEST_HOOKS is on: POST /internal/ops/tick runs deletion, export cleanup and VOD retention on demand; never on a public instance",
+      { testHooks: true },
     );
   const allowedOrigins = new Set(
     [deps.site.publicUrl, ...deps.env.AUTH_TRUSTED_ORIGINS].map((o) => {
@@ -161,6 +170,31 @@ export function createApp(deps: Deps): ApiApp {
     return new Request(req, { headers });
   }
 
+  /** The overlay alert stream (SSE). Authenticated only by the overlay token; cookies are ignored. */
+  async function overlayEvents(
+    raw: Request,
+    url: URL,
+    server?: Pick<Server<undefined>, "requestIP">,
+  ): Promise<Response> {
+    if (raw.method !== "GET") return json({ code: "METHOD_NOT_ALLOWED", message: "Use GET" }, 405);
+    const info = await requestInfo(raw, url, server);
+    const nowMs = deps.now().getTime();
+    const rl = await deps.rateLimitStore.hit(
+      rateLimitKey("default", `ip:${info.rateLimitHash}`),
+      deps.rateLimits.default,
+      nowMs,
+      `${nowMs}:${crypto.randomUUID()}`,
+    );
+    if (!rl.allowed)
+      return json({ code: "RATE_LIMITED", message: "Too many requests" }, 429, {
+        "retry-after": String(rl.retryAfterSeconds),
+      });
+    const token = overlayTokenOf(info);
+    const resolved = token ? await resolveOverlayToken(deps.db, token, deps.now()) : null;
+    if (!token || !resolved) return json({ code: "UNAUTHORIZED", message: "A valid overlay token is required" }, 401);
+    return overlayHub(deps).open(resolved, await overlayTokenHash(token), raw.signal);
+  }
+
   async function handle(raw: Request, server?: Pick<Server<undefined>, "requestIP">): Promise<Response> {
     const url = new URL(raw.url);
     const path = url.pathname;
@@ -186,6 +220,12 @@ export function createApp(deps: Deps): ApiApp {
       if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
       return coopHook(deps, raw.method, await readJson(raw));
     }
+    if (isOpsHookPath(path)) {
+      // Off: 404 before the secret check, like any unknown internal path.
+      if (!deps.env.OPS_TEST_HOOKS) return new Response(null, { status: 404 });
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return opsHook(deps, raw.method, await readJson(raw));
+    }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
 
     // Stripe webhooks: server to server, signature-authenticated, no cookies or CORS. The module
@@ -202,6 +242,8 @@ export function createApp(deps: Deps): ApiApp {
       for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
       return res;
     };
+
+    if (path === OVERLAY_EVENTS_PATH) return withCors(await overlayEvents(raw, url, server));
 
     if (path === "/api/openapi.json" && raw.method === "GET")
       return withCors(json(await openApiDocument(), 200, { "cache-control": "public, max-age=300" }));

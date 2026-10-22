@@ -3,10 +3,11 @@
 
 /**
  * `vods.*`: past broadcasts as media finalizes them. Listing and reading follow
- * `media/visibility.ts`; renaming and deleting are not implemented yet (HTTP 501, milestone E6:
- * deleting has to respect legal holds and evidence retention).
+ * `media/visibility.ts`. The owner renames, re-scopes and removes them (docs/testing/e6-selectors.md
+ * "VODs and clips"): a removal hides the VOD and its broadcast's clips at once; the worker's
+ * `vod-retention` deletes the objects later, unless the owner is under a legal hold.
  */
-import { and, desc, eq, lt, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import { VOD_FAILED_REASONS } from "@commonair/contracts/enums";
 import type { dto } from "@commonair/contracts";
@@ -14,11 +15,13 @@ import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { channelBySlug, iso, isoOrNull, mediaUrl } from "../lib/dto.ts";
-import { notFound, notImplemented } from "../lib/errors.ts";
-import { os } from "../lib/orpc.ts";
-import { audienceOf, urlsWithheld, vodShown, vodVisible } from "../media/visibility.ts";
+import { badRequest, notFound } from "../lib/errors.ts";
+import { channelAuthority, type Caller, type ChannelRole } from "../lib/access.ts";
+import { os, requireCaller } from "../lib/orpc.ts";
+import { audit } from "../events/audit.ts";
+import { urlsWithheld, viewerAudience, vodShown, vodVisible } from "../media/visibility.ts";
 
-const { broadcasts, channels, vods: vodsT } = schema;
+const { broadcasts, channelRoles, channels, clips: clipsT, vods: vodsT } = schema;
 type VodRow = typeof vodsT.$inferSelect;
 
 /** Media writes the HLS playlist under the VOD's storage prefix (services/media vod/recorder.ts). */
@@ -50,8 +53,8 @@ export const vods = {
     const { deps } = context;
     const channel = await channelBySlug(deps, input.channel);
     if (!channel) throw notFound("Channel not found");
-    const audience = audienceOf(context.caller, channel);
-    if (audience === "public" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
+    const audience = await viewerAudience(deps, context.caller, channel);
+    if (audience !== "owner" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
     const cur = decodeCursor(input.cursor, isKeyCursor);
     let after: SQL | undefined;
     if (cur) {
@@ -89,12 +92,109 @@ export const vods = {
       .innerJoin(channels, eq(channels.id, vodsT.channelId))
       .where(eq(vodsT.id, input.id))
       .limit(1);
-    if (!row || !vodShown(audienceOf(context.caller, row.channel), row.v, row.channel, row.b.restrictedAt))
+    if (
+      !row ||
+      !vodShown(await viewerAudience(deps, context.caller, row.channel), row.v, row.channel, row.b.restrictedAt)
+    )
       throw notFound("VOD not found");
     const [withheld] = await urlsWithheld(deps, context.caller, row.channel, [row.b]);
     return toVod(deps, row.v, row.channel.slug, withheld ?? true);
   }),
 
-  update: os.vods.update.handler(notImplemented),
-  remove: os.vods.remove.handler(notImplemented),
+  update: os.vods.update.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const caller = requireCaller(context);
+    const row = await managedVod(deps, caller, input.id);
+    const title = input.title?.trim();
+    if (title === "") throw badRequest("The title cannot be blank");
+    const set: Partial<typeof vodsT.$inferInsert> = {};
+    if (title !== undefined) set.title = title;
+    if (input.visibility !== undefined) set.visibility = input.visibility;
+    if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false);
+    const updated = await deps.db.transaction(async (tx) => {
+      const [v] = await tx
+        .update(vodsT)
+        .set({ ...set, updatedAt: deps.now() })
+        // Compare-and-set: a VOD removed meanwhile stays removed.
+        .where(and(eq(vodsT.id, row.v.id), ne(vodsT.status, "deleted"), isNull(vodsT.removedReason)))
+        .returning();
+      if (!v) throw notFound("VOD not found");
+      await audit(tx, {
+        actorType: "user",
+        actorId: caller.user.id,
+        action: "vod.update",
+        subjectType: "vod",
+        subjectId: v.id,
+        channelId: v.channelId,
+        details: { titleChanged: title !== undefined, visibility: input.visibility ?? null },
+      });
+      return v;
+    });
+    return toVod(deps, updated, row.channel.slug, false);
+  }),
+
+  remove: os.vods.remove.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const caller = requireCaller(context);
+    const row = await managedVod(deps, caller, input.id);
+    const now = deps.now();
+    await deps.db.transaction(async (tx) => {
+      const [v] = await tx
+        .update(vodsT)
+        .set({ removedReason: "owner", expiresAt: now, updatedAt: now })
+        .where(and(eq(vodsT.id, row.v.id), ne(vodsT.status, "deleted"), isNull(vodsT.removedReason)))
+        .returning({ id: vodsT.id, broadcastId: vodsT.broadcastId, channelId: vodsT.channelId });
+      if (!v) throw notFound("VOD not found");
+      // The broadcast's clips go with it (the clip shows the VOD's content).
+      const removedClips = await tx
+        .update(clipsT)
+        .set({ removedReason: "owner" })
+        .where(
+          and(
+            or(eq(clipsT.broadcastId, v.broadcastId), eq(clipsT.vodId, v.id)),
+            ne(clipsT.status, "deleted"),
+            isNull(clipsT.removedReason),
+          ),
+        )
+        .returning({ id: clipsT.id });
+      await audit(tx, {
+        actorType: "user",
+        actorId: caller.user.id,
+        action: "vod.remove",
+        subjectType: "vod",
+        subjectId: v.id,
+        channelId: v.channelId,
+        details: { clips: removedClips.length },
+      });
+    });
+    return { ok: true as const };
+  }),
 };
+
+/**
+ * A VOD the caller may manage (the channel owner or an editor). Anything else, including a removed
+ * VOD or another channel's, is `NOT_FOUND`: managing must not reveal that a VOD exists.
+ */
+async function managedVod(deps: Deps, caller: Caller, id: string) {
+  const [row] = await deps.db
+    .select({ v: vodsT, channel: channels, restrictedAt: broadcasts.restrictedAt })
+    .from(vodsT)
+    .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
+    .innerJoin(channels, eq(channels.id, vodsT.channelId))
+    .where(eq(vodsT.id, id))
+    .limit(1);
+  if (!row) throw notFound("VOD not found");
+  const roles: ChannelRole[] =
+    row.channel.ownerId === caller.user.id
+      ? []
+      : (
+          await deps.db
+            .select({ role: channelRoles.role })
+            .from(channelRoles)
+            .where(and(eq(channelRoles.channelId, row.channel.id), eq(channelRoles.userId, caller.user.id)))
+        ).map((r) => r.role);
+  const authority = channelAuthority(caller, row.channel, roles);
+  if (authority !== "owner" && authority !== "editor") throw notFound("VOD not found");
+  if (!vodShown("owner", row.v, row.channel, row.restrictedAt)) throw notFound("VOD not found");
+  return row;
+}
