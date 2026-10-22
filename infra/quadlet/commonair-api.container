@@ -6,13 +6,18 @@
 Description=CommonAir api
 # Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
 StartLimitIntervalSec=0
+# Dependency rule (every unit): Requires= only on the one-shots (migrate, garage-init), so a
+# failed migration keeps the schema users down instead of starting them on an old schema.
+# Long-running services are Wants= + After=: ordered the same, but a start that fails there
+# does not fail this unit's start job with result 'dependency' (which Restart= never retries);
+# the failed service retries on its own Restart=always and this one waits on its health.
 Requires=commonair-migrate.service
 After=commonair-migrate.service
 Requires=commonair-garage-init.service
 After=commonair-garage-init.service
-Requires=commonair-valkey.service
+Wants=commonair-valkey.service
 After=commonair-valkey.service
-Requires=commonair-otel-collector.service
+Wants=commonair-otel-collector.service
 After=commonair-otel-collector.service
 
 [Container]
@@ -71,6 +76,8 @@ Notify=healthy
 
 [Service]
 Restart=always
+# Restarts in place, never through failed/inactive, so Requires=/Wants= dependents are not cycled.
+RestartMode=direct
 RestartSec=5
 # Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
 RestartSteps=10

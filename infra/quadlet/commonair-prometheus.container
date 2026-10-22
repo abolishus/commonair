@@ -30,6 +30,7 @@ Notify=healthy
 
 [Service]
 Restart=always
+RestartMode=direct
 RestartSec=5
 # Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
 RestartSteps=10

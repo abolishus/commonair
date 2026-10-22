@@ -10,11 +10,11 @@ Requires=commonair-migrate.service
 After=commonair-migrate.service
 Requires=commonair-garage-init.service
 After=commonair-garage-init.service
-Requires=commonair-valkey.service
+Wants=commonair-valkey.service
 After=commonair-valkey.service
-Requires=commonair-otel-collector.service
+Wants=commonair-otel-collector.service
 After=commonair-otel-collector.service
-Requires=commonair-chat.service
+Wants=commonair-chat.service
 After=commonair-chat.service
 
 [Container]
@@ -77,6 +77,7 @@ Notify=healthy
 
 [Service]
 Restart=always
+RestartMode=direct
 RestartSec=5
 # Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
 RestartSteps=10

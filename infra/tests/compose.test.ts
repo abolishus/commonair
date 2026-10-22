@@ -394,10 +394,14 @@ describe("Quadlet mirror", () => {
       return !v.endsWith(SHARED_BINDS.has(src) ? ":ro,z" : ":ro,Z");
     });
     expect(badVolumes).toEqual([]);
-    const missingDeps = Object.keys(s.depends_on ?? {}).filter(
-      (d) => !unit.includes(`Requires=commonair-${d}.service`),
-    );
-    expect(missingDeps).toEqual([]);
+    // Every depends_on is an After= ordering. Requires= only for the one-shots (a failed migrate
+    // keeps schema users down); Wants= for long-running services, so a failed start there does
+    // not fail this unit with result 'dependency', which Restart=always never retries.
+    const deps = Object.keys(s.depends_on ?? {});
+    expect(deps.filter((d) => !keys(unit, "After").includes(`commonair-${d}.service`))).toEqual([]);
+    const strength = (d: string) => (ONE_SHOT.has(d) ? "Requires" : "Wants");
+    expect(deps.filter((d) => !keys(unit, strength(d)).includes(`commonair-${d}.service`))).toEqual([]);
+    expect(keys(unit, "Requires").filter((r) => !ONE_SHOT.has(r.replace(/^commonair-|\.service$/g, "")))).toEqual([]);
     const isPublic = (p: string) => p.startsWith("0.0.0.0:");
     expect(keys(unit, "PublishPort").filter(isPublic).sort()).toEqual((PUBLIC_PORTS[name] ?? []).toSorted());
     expect(keys(unit, "PublishPort").filter((p) => !isPublic(p) && !p.startsWith("127.0.0.1:"))).toEqual([]);

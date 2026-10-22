@@ -9,6 +9,13 @@
  * required container runs, which the exited one-shot jobs never do (infra/README.md). Quadlet
  * passes no restart policy to Podman at all: systemd restarts the unit (Restart=), and the
  * one-shots it depends on stay active (RemainAfterExit=yes). These tests pin that down.
+ *
+ * Dependency rule, so the stack converges after a reboot or upgrade: a start that fails fails
+ * the queued start jobs of every unit that Requires= it with result 'dependency', and
+ * Restart=always never retries those. So Requires= names only the one-shots (a failed migrate
+ * must keep schema users off an old schema); long-running dependencies are Wants= + After=
+ * (same ordering, no failure propagation), each retries on its own Restart=always, and
+ * RestartMode=direct keeps those auto-restarts from cycling dependents.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -82,6 +89,10 @@ describe("long-running units restart for real", () => {
     // Throttles a crash loop: 5 s growing to 5 min over ten restarts (systemd ≥ 254).
     expect(Number(values(service, "RestartSteps")[0])).toBeGreaterThanOrEqual(1);
     expect(seconds(values(service, "RestartMaxDelaySec")[0] ?? "")).toBe(300);
+  });
+
+  test.each(longRunning)("%s: restarts in place (RestartMode=direct), so dependents are not cycled", (_, unit) => {
+    expect(values(section(unit, "Service"), "RestartMode")).toEqual(["direct"]);
   });
 
   test.each(longRunning)("%s: a crash loop can never leave the unit permanently failed", (_, unit) => {
@@ -170,17 +181,18 @@ describe("migrations run before anything that reads the schema", () => {
 
   test("migrate runs as the owner after Postgres is healthy", () => {
     const migrate = units.find(([n]) => n === "commonair-migrate")![1];
-    expect(values(migrate, "Requires")).toEqual(["commonair-postgres.service"]);
+    expect(values(migrate, "Requires")).toEqual([]);
+    expect(values(migrate, "Wants")).toEqual(["commonair-postgres.service"]);
     expect(values(migrate, "After")).toEqual(["commonair-postgres.service"]);
     expect(values(migrate, "Secret")).toEqual(["commonair-owner-database-url,type=env,target=DATABASE_URL"]);
     const postgres = units.find(([n]) => n === "commonair-postgres")![1];
     expect(values(postgres, "Notify")).toEqual(["healthy"]);
   });
 
-  test("every Requires= has a matching After= and names an existing unit", () => {
+  test("every Requires= and Wants= has a matching After= and names an existing unit", () => {
     const names = new Set(units.map(([n]) => `${n}.service`));
     for (const [name, unit] of units) {
-      const requires = values(unit, "Requires");
+      const requires = [...values(unit, "Requires"), ...values(unit, "Wants")];
       expect(
         requires.filter((r) => !values(unit, "After").includes(r)),
         name,
@@ -193,7 +205,12 @@ describe("migrations run before anything that reads the schema", () => {
   });
 
   test("the dependency graph has no cycle", () => {
-    const deps = new Map(units.map(([n, u]) => [n, values(u, "Requires").map((r) => r.replace(/\.service$/, ""))]));
+    const deps = new Map(
+      units.map(([n, u]) => [
+        n,
+        [...values(u, "Requires"), ...values(u, "Wants")].map((r) => r.replace(/\.service$/, "")),
+      ]),
+    );
     const state = new Map<string, "visiting" | "done">();
     const visit = (n: string, path: string[]): void => {
       if (state.get(n) === "done") return;
@@ -203,5 +220,32 @@ describe("migrations run before anything that reads the schema", () => {
       state.set(n, "done");
     };
     for (const n of deps.keys()) visit(n, []);
+  });
+});
+
+describe("the dependency graph converges (no failure propagates through a long-running unit)", () => {
+  const oneShotServices = new Set(oneShots.map(([n]) => `${n}.service`));
+  const longRunningServices = new Set(longRunning.map(([n]) => `${n}.service`));
+
+  test.each(units)("%s: Requires= names only one-shots", (_, unit) => {
+    expect(values(unit, "Requires").filter((r) => !oneShotServices.has(r))).toEqual([]);
+  });
+
+  test.each(units)("%s: long-running dependencies are Wants= + After=", (_, unit) => {
+    const wants = values(unit, "Wants");
+    expect(wants.filter((w) => !longRunningServices.has(w))).toEqual([]);
+    expect(wants.filter((w) => !values(unit, "After").includes(w))).toEqual([]);
+  });
+
+  test("no unit BindsTo= or Requisite= anything (both propagate failures too)", () => {
+    for (const [name, unit] of units)
+      expect([...values(unit, "BindsTo"), ...values(unit, "Requisite")], name).toEqual([]);
+  });
+
+  test("the edge to a long-running dependency exists (api wants valkey; caddy wants api and web)", () => {
+    const of = (n: string) => units.find(([u]) => u === `commonair-${n}`)![1];
+    expect(values(of("api"), "Wants")).toContain("commonair-valkey.service");
+    expect(values(of("caddy"), "Wants")).toEqual(["commonair-web.service", "commonair-api.service"]);
+    expect(values(of("garage-init"), "Wants")).toEqual(["commonair-garage.service"]);
   });
 });

@@ -6,9 +6,9 @@
 Description=CommonAir otel-collector
 # Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
 StartLimitIntervalSec=0
-Requires=commonair-loki.service
+Wants=commonair-loki.service
 After=commonair-loki.service
-Requires=commonair-tempo.service
+Wants=commonair-tempo.service
 After=commonair-tempo.service
 
 [Container]
@@ -33,6 +33,7 @@ Notify=healthy
 
 [Service]
 Restart=always
+RestartMode=direct
 RestartSec=5
 # Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
 RestartSteps=10

@@ -9,7 +9,9 @@
 # units, starts this unit on its own and only then the rest (ADR 0023 §9).
 [Unit]
 Description=CommonAir migrate
-Requires=commonair-postgres.service
+# Wants=, not Requires= (the rule is in commonair-api.container): a Postgres start that fails
+# does not fail this job outright; it runs once Postgres is up or retries below.
+Wants=commonair-postgres.service
 After=commonair-postgres.service
 # Bounded retries (see [Service]): six attempts an hour, then the unit fails for good.
 StartLimitIntervalSec=1h

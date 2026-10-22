@@ -9,7 +9,7 @@ StartLimitIntervalSec=0
 # Every unit that reads the schema waits for migrations itself (selfhost.sh upgrade, ADR 0023 §9).
 Requires=commonair-migrate.service
 After=commonair-migrate.service
-Requires=commonair-api.service
+Wants=commonair-api.service
 After=commonair-api.service
 
 [Container]
@@ -64,6 +64,7 @@ Notify=healthy
 
 [Service]
 Restart=always
+RestartMode=direct
 RestartSec=5
 # Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
 RestartSteps=10
