@@ -64,6 +64,12 @@ export class BroadcastSession {
     ]);
   }
 
+  /** The channel's simulcast targets changed while live. */
+  reconcileSimulcast(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    return this.guard("simulcast", () => this.simulcast.reconcile());
+  }
+
   /** `final`: the broadcast ended (finalize the VOD). Otherwise the service is shutting down. */
   stop(final: boolean, finalizeVod = final, strict = false): Promise<void> {
     if (this.stopped) {

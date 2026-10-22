@@ -10,6 +10,7 @@ import { encryptSecret, sha256Hex } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
+import { publishLive } from "../lib/control.ts";
 import { badRequest, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { displayPrefix, newStreamKeySecret, obsStreamKey } from "../lib/streamkeys.ts";
@@ -42,6 +43,10 @@ async function simulcastStates(deps: Deps, broadcastId: string | null) {
   return out;
 }
 
+/** Media reconciles the channel's live pushes (after commit; lost messages wait for the next broadcast). */
+const targetsChanged = (deps: Deps, channelId: string) =>
+  publishLive(deps, { type: "simulcast-targets", channelId, at: new Date().toISOString() });
+
 const toTarget = (states: Map<string, z.infer<typeof SimulcastState>>) => (t: typeof simulcastTargets.$inferSelect) => {
   const s = states.get(t.id);
   return {
@@ -50,8 +55,9 @@ const toTarget = (states: Map<string, z.infer<typeof SimulcastState>>) => (t: ty
     name: t.name,
     rtmpUrl: t.rtmpUrl,
     enabled: t.enabled,
-    status: s?.status ?? "idle",
-    lastError: s?.lastError ?? null,
+    // A disabled target is not pushed: whatever its last push ended with, it is idle now.
+    status: t.enabled ? (s?.status ?? "idle") : ("idle" as const),
+    lastError: t.enabled ? (s?.lastError ?? null) : null,
   };
 };
 
@@ -248,6 +254,7 @@ export const stream = {
         })
         .returning();
       if (!row) throw new Error("simulcast insert returned no row");
+      await targetsChanged(deps, c.id);
       return toTarget(new Map())(row);
     }),
 
@@ -265,6 +272,7 @@ export const stream = {
           ? await deps.db.update(simulcastTargets).set(set).where(where).returning()
           : await deps.db.select().from(simulcastTargets).where(where);
       if (!row) throw notFound("Simulcast target not found");
+      if (Object.keys(set).length > 0) await targetsChanged(deps, c.id);
       return toTarget(await simulcastStates(deps, c.liveBroadcastId))(row);
     }),
 
@@ -275,6 +283,7 @@ export const stream = {
         .where(and(eq(simulcastTargets.id, input.id), eq(simulcastTargets.channelId, c.id)))
         .returning({ id: simulcastTargets.id });
       if (deleted.length === 0) throw notFound("Simulcast target not found");
+      await targetsChanged(context.deps, c.id);
       return { ok: true as const };
     }),
   },

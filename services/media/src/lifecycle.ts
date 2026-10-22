@@ -60,6 +60,16 @@ export class LiveCoordinator {
     }
     if (event.type === "online") await this.online(event.broadcastId);
     else if (event.type === "offline") await this.offline(event.broadcastId, true);
+    else if (event.type === "simulcast-targets") await this.simulcastTargetsChanged(event.channelId);
+  }
+
+  /** A channel's simulcast targets changed: its live session (if any) reconciles its pushes. */
+  simulcastTargetsChanged(channelId: string): Promise<void> {
+    return this.serial(async () => {
+      for (const s of this.sessions.values()) {
+        if (s.info.channelId === channelId) await s.reconcileSimulcast();
+      }
+    });
   }
 
   online(broadcastId: string): Promise<void> {

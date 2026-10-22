@@ -378,6 +378,29 @@ describe("media pipeline", () => {
     expect(JSON.stringify(await valkey.hgetall(KEYS.simulcastStatus(broadcastId)))).not.toContain(SIMULCAST_KEY);
   }, 60_000);
 
+  test("a target disabled mid-broadcast stops its push; re-enabled, it pushes again", async () => {
+    const targetPath = `live/${SIMULCAST_KEY}`;
+    const pushing = async () => (await targetApi.listPaths()).some((p) => p.name === targetPath && p.ready);
+    const setEnabled = async (enabled: boolean) => {
+      await tdb.db
+        .update(schema.simulcastTargets)
+        .set({ enabled })
+        .where(eq(schema.simulcastTargets.channelId, channelId));
+      await publish({ type: "simulcast-targets", channelId, at: new Date().toISOString() });
+    };
+    await waitFor("pushing before the change", async () => ((await pushing()) ? true : null));
+    await setEnabled(false);
+    await waitFor("push stopped", async () => ((await pushing()) ? null : true), 30_000);
+    await setEnabled(true);
+    await waitFor("push restarted", async () => ((await pushing()) ? true : null), 30_000);
+    const sessions = await tdb.db
+      .select({ status: schema.simulcastSessions.status })
+      .from(schema.simulcastSessions)
+      .where(eq(schema.simulcastSessions.broadcastId, broadcastId));
+    // One session per push: the stopped one and the restarted one.
+    expect(sessions.length).toBeGreaterThanOrEqual(2);
+  }, 90_000);
+
   test("transcode ladder starts above the viewer threshold and stops below it", async () => {
     const now = Date.now();
     await valkey.zadd(KEYS.viewers(channelId), now, "s1", now, "s2", now, "s3", now - 120_000, "stale");

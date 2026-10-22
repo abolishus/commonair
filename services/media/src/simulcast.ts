@@ -51,7 +51,7 @@ class SimulcastRunner {
   constructor(
     private readonly ctx: MediaContext,
     private readonly b: BroadcastInfo,
-    private readonly target: Target,
+    readonly target: Target,
     private readonly sessionId: string,
   ) {
     this.log = ctx.logger.child({ broadcastId: b.broadcastId, simulcastTargetId: target.id, worker: "simulcast" });
@@ -167,15 +167,34 @@ class SimulcastRunner {
 
 export class SimulcastManager {
   private runners: SimulcastRunner[] = [];
+  private stopped = false;
+  /** start, reconcile and stop run one at a time: a reconcile racing stop must not leak a push. */
+  private chain: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly ctx: MediaContext,
     private readonly b: BroadcastInfo,
   ) {}
 
-  async start(): Promise<void> {
+  private serial(fn: () => Promise<void>): Promise<void> {
+    const run = this.chain.then(fn, fn);
+    this.chain = run.catch(() => {});
+    return run;
+  }
+
+  start(): Promise<void> {
+    return this.serial(() => this.sync());
+  }
+
+  /** The targets changed mid-broadcast: stop pushes no longer wanted, start the new ones. */
+  reconcile(): Promise<void> {
+    return this.serial(() => this.sync());
+  }
+
+  private async sync(): Promise<void> {
+    if (this.stopped) return;
     const { db } = this.ctx;
-    const targets = await db
+    const enabled = await db
       .select({
         id: schema.simulcastTargets.id,
         rtmpUrl: schema.simulcastTargets.rtmpUrl,
@@ -183,6 +202,17 @@ export class SimulcastManager {
       })
       .from(schema.simulcastTargets)
       .where(and(eq(schema.simulcastTargets.channelId, this.b.channelId), eq(schema.simulcastTargets.enabled, true)));
+    const wanted = new Map(enabled.map((t) => [t.id, t]));
+    // A changed URL or key restarts the push; a disabled or removed target stops it.
+    const keep: SimulcastRunner[] = [];
+    for (const r of this.runners) {
+      const t = wanted.get(r.target.id);
+      if (t && t.rtmpUrl === r.target.rtmpUrl && t.streamKeyCiphertext === r.target.streamKeyCiphertext) keep.push(r);
+      else await r.stop();
+    }
+    this.runners = keep;
+    const running = new Set(keep.map((r) => r.target.id));
+    const targets = enabled.filter((t) => !running.has(t.id));
     for (const t of targets) {
       // On a service restart mid-broadcast, close the session the previous process left open.
       await db
@@ -206,8 +236,11 @@ export class SimulcastManager {
     }
   }
 
-  async stop(): Promise<void> {
-    await Promise.all(this.runners.map((r) => r.stop()));
-    this.runners = [];
+  stop(): Promise<void> {
+    return this.serial(async () => {
+      this.stopped = true;
+      await Promise.all(this.runners.map((r) => r.stop()));
+      this.runners = [];
+    });
   }
 }

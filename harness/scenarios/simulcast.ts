@@ -29,7 +29,7 @@ import {
   pushStopped,
 } from "../src/e6/ffprobe.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "../src/e6/selectors.ts";
-import { RpcResponses, chooseOption, confirmDialog, dataOf, reloadUntil, setSwitch } from "../src/e6/web.ts";
+import { RpcResponses, chooseOption, confirmDialog, dataOf, setSwitch } from "../src/e6/web.ts";
 import { containerLogs, serviceContainers } from "../src/safety-io.ts";
 import { scanLog, summarizeHits, textNeedles } from "../src/safety.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
@@ -146,15 +146,16 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
   const waitStatus = async (want: string, timeoutMs: number): Promise<number> => {
     const started = Date.now();
     if (session) {
+      // The section polls the list every 5 s itself; reloading the page instead would trip the
+      // session check's rate limit and render the dashboard signed out.
       const page = await session.goto(E6_ROUTES.dashboard);
-      await reloadUntil(
-        page,
+      await waitFor(
         `simulcast-target data-status="${want}"`,
         async () => {
           const row = byE6Id(page, E.simulcastTarget, { "target-id": targetId });
           return (await row.count()) > 0 && (await row.first().getAttribute("data-status")) === want ? true : null;
         },
-        { timeoutMs, intervalMs: 2_000, signal: ctx.signal },
+        { timeoutMs, intervalMs: 1_000, signal: ctx.signal },
       );
     } else {
       await waitFor(`target status ${want}`, async () => ((await status()) === want ? true : null), {

@@ -77,7 +77,10 @@ export const INTERNAL_ROUTES = {
   opsTick: "/internal/ops/tick",
 } as const;
 
-/** Published on BUS.live by the API when a broadcast starts/ends, and by media on transcode changes. */
+/**
+ * Published on BUS.live by the API when a broadcast starts/ends or simulcast targets change, and by
+ * media on transcode changes.
+ */
 export const LiveEvent = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("online"),
@@ -101,6 +104,15 @@ export const LiveEvent = z.discriminatedUnion("type", [
     channelId: z.uuid(),
     broadcastId: z.uuid(),
     renditions: z.array(z.enum(RENDITIONS)),
+    at: z.string(),
+  }),
+  /**
+   * Published by the API after a channel's simulcast targets change: media reconciles the pushes
+   * of that channel's live broadcast (start enabled ones, stop disabled, removed or changed ones).
+   */
+  z.object({
+    type: z.literal("simulcast-targets"),
+    channelId: z.uuid(),
     at: z.string(),
   }),
 ]);
