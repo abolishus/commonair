@@ -59,6 +59,14 @@ export function plan(i: PlanInput): Plan {
     if (!/^\d+$/.test(i.runNumber)) throw new Error(`invalid run number: ${i.runNumber}`);
     tag = `v0.0.0-dryrun.${i.runNumber}`;
   }
+  // Keyless signatures name the workflow ref (ADR 0023 §3 verifies `release.yml@refs/tags/v…`),
+  // and every job must run the tag's code, so a real release runs only from the tag itself.
+  if (!dryRun && i.ref !== `refs/tags/${tag}`) {
+    throw new Error(
+      `a real release must run from refs/tags/${tag}, not ${i.ref}: ` +
+        `gh workflow run release.yml --ref ${tag} -f tag=${tag} -f dry_run=false`,
+    );
+  }
   const version = versionFromTag(tag);
   const prerelease = isPrerelease(version);
   return {

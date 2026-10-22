@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vite-plus/test";
@@ -14,6 +14,7 @@ import { DRY_RUN_REGISTRY, type PlanInput, outputs, plan, registryFor } from "..
 import { BUILD_TYPE, contextFromEnv, slsaPredicate } from "../release/provenance.ts";
 import { archiveName, indexArgv, isInsecure, signArgv, sbomArgv } from "../release/publish-image.ts";
 import { attestBlobArgv, relayBuild, signBlobArgv } from "../release/relay.ts";
+import { type Fetch, client, parseChallenge, repoUrl, tagLatest } from "../release/tag-latest.ts";
 import { TOOLS, assertChecksum, currentHost, sha256Hex } from "../release/tools.ts";
 
 const base: PlanInput = {
@@ -73,12 +74,23 @@ describe("plan", () => {
   });
 
   test("a manual real release needs a tag and publishes to the owner's namespace", () => {
-    const dispatch = { ...base, eventName: "workflow_dispatch", ref: "refs/heads/main", inputDryRun: "false" };
+    const dispatch = { ...base, eventName: "workflow_dispatch", ref: "refs/tags/v2.0.0", inputDryRun: "false" };
     expect(() => plan(dispatch)).toThrow("needs a tag");
     expect(plan({ ...dispatch, inputTag: "v2.0.0", owner: "Fork-Owner" })).toMatchObject({
       dryRun: false,
       registry: "ghcr.io/fork-owner/commonair",
     });
+  });
+
+  test("a real release runs only from its own tag ref, so signatures carry @refs/tags/v…", () => {
+    const dispatch = { ...base, eventName: "workflow_dispatch", inputDryRun: "false", inputTag: "v2.0.0" };
+    expect(() => plan({ ...dispatch, ref: "refs/heads/main" })).toThrow("--ref v2.0.0");
+    expect(() => plan({ ...dispatch, ref: "refs/tags/v1.9.0" })).toThrow("must run from refs/tags/v2.0.0");
+    expect(() =>
+      plan({ ...base, eventName: "workflow_call", ref: "refs/heads/main", inputDryRun: "false", inputTag: "v2.0.0" }),
+    ).toThrow("must run from");
+    // Dry runs may run from anywhere.
+    expect(plan({ ...dispatch, ref: "refs/heads/main", inputDryRun: "true" }).dryRun).toBe(true);
   });
 
   test("anything that is not a tag push or dry_run=false is a dry run", () => {
@@ -182,6 +194,84 @@ describe("publish-image commands", () => {
       `ghcr.io/x/commonair/api@${d}`,
     ]);
     for (const c of cmds) expect(c.at(-1)).toMatch(/@sha256:/);
+  });
+});
+
+describe("tag-latest", () => {
+  const INDEX = "application/vnd.oci.image.index.v1+json";
+  const body = new TextEncoder().encode(JSON.stringify({ schemaVersion: 2, mediaType: INDEX, manifests: [] }));
+  const digest = `sha256:${new Bun.CryptoHasher("sha256").update(body).digest("hex")}`;
+
+  /** A fake ghcr: one Bearer challenge, then GET by digest and PUT to latest. */
+  function fakeRegistry(opts: { type?: string; putDigest?: string } = {}) {
+    const calls: { url: string; method: string; auth?: string; ct?: string }[] = [];
+    const f: Fetch = async (url, init = {}) => {
+      const h = (init.headers ?? {}) as Record<string, string>;
+      calls.push({ url, method: init.method ?? "GET", auth: h.Authorization, ct: h["Content-Type"] });
+      if (url.startsWith("https://ghcr.io/token")) return Response.json({ token: "T" });
+      if (h.Authorization !== "Bearer T")
+        return new Response(null, {
+          status: 401,
+          headers: { "WWW-Authenticate": 'Bearer realm="https://ghcr.io/token",service="ghcr.io"' },
+        });
+      if (init.method === "PUT")
+        return new Response(null, { status: 201, headers: { "Docker-Content-Digest": opts.putDigest ?? digest } });
+      return new Response(body, { headers: { "Content-Type": opts.type ?? INDEX } });
+    };
+    return { f, calls };
+  }
+
+  test("repository URLs: https for ghcr, http for the dry-run registry", () => {
+    expect(repoUrl("ghcr.io/x/commonair", "api")).toEqual({ base: "https://ghcr.io/v2", name: "x/commonair/api" });
+    expect(repoUrl(DRY_RUN_REGISTRY, "api").base).toBe("http://localhost:5000/v2");
+    expect(() => repoUrl("ghcr.io", "api")).toThrow("namespace");
+  });
+
+  test("bearer challenges are parsed", () => {
+    expect(parseChallenge('Bearer realm="https://r/token",service="r"')).toEqual({
+      realm: "https://r/token",
+      service: "r",
+    });
+    expect(parseChallenge('Basic realm="x"')).toBeNull();
+  });
+
+  test("copies the index bytes to latest under the same digest, authenticating once", async () => {
+    const { f, calls } = fakeRegistry();
+    const call = client(f, { user: "u", token: "p" });
+    await tagLatest(call, "ghcr.io/x/commonair", "api", digest);
+    const tokenReq = calls.find((c) => c.url.startsWith("https://ghcr.io/token"));
+    expect(tokenReq?.url).toContain("scope=repository%3Ax%2Fcommonair%2Fapi%3Apull%2Cpush");
+    expect(tokenReq?.auth).toBe(`Basic ${btoa("u:p")}`);
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put).toMatchObject({
+      url: "https://ghcr.io/v2/x/commonair/api/manifests/latest",
+      ct: INDEX,
+      auth: "Bearer T",
+    });
+    expect(calls.filter((c) => c.url.startsWith("https://ghcr.io/token"))).toHaveLength(1);
+  });
+
+  test("refuses a bad digest, a non-index, or a registry that resolves latest elsewhere", async () => {
+    await expect(tagLatest(client(fakeRegistry().f, null), "ghcr.io/x/c", "api", "sha256:zz")).rejects.toThrow(
+      "invalid digest",
+    );
+    const other = `sha256:${"0".repeat(64)}`;
+    await expect(tagLatest(client(fakeRegistry().f, null), "ghcr.io/x/c", "api", other)).rejects.toThrow(
+      "registry returned",
+    );
+    const single = fakeRegistry({ type: "application/vnd.oci.image.manifest.v1+json" });
+    await expect(tagLatest(client(single.f, null), "ghcr.io/x/c", "api", digest)).rejects.toThrow("not an index");
+    const moved = fakeRegistry({ putDigest: other });
+    await expect(tagLatest(client(moved.f, null), "ghcr.io/x/c", "api", digest)).rejects.toThrow("latest resolved to");
+  });
+
+  test("publish-image never pushes latest; the workflow moves it after the GitHub Release", () => {
+    const wf = readFileSync(join(import.meta.dirname, "../../.github/workflows/release.yml"), "utf8");
+    expect(readFileSync(join(import.meta.dirname, "../release/publish-image.ts"), "utf8")).not.toMatch(/"latest"/);
+    const job = wf.slice(wf.indexOf("\n  latest:"));
+    expect(job).toContain("needs: [prepare, publish]");
+    expect(job).toContain("if: needs.prepare.outputs.latest == 'true'");
+    expect(job).toContain("scripts/release/tag-latest.ts");
   });
 });
 

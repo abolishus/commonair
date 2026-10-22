@@ -3,18 +3,19 @@
 
 /**
  * Publish one release image: push the per-arch OCI archives by digest, create the multi-arch
- * index tagged `<version>` (and `latest` for stable releases), write its SBOMs and provenance,
+ * index tagged `<version>`, write its SBOMs and provenance,
  * and, when signing, sign the index and its children and attach the SBOMs and provenance as
  * cosign attestations (ADR 0023 §4).
  *
  *   bun scripts/release/publish-image.ts --image api --version 0.1.0 --commit <sha> \
  *     --registry ghcr.io/<owner>/commonair --platforms linux/amd64,linux/arm64 \
- *     --archives <dir with <image>-<arch>.tar> --out <dir> [--latest true|false] [--sign true|false]
+ *     --archives <dir with <image>-<arch>.tar> --out <dir> [--sign true|false]
  *
  * Writes `<out>/<image>.digest`, `<out>/<image sbom per platform>` and the provenance predicate.
- * Registries on localhost (the dry-run Zot) are spoken to over plain HTTP.
+ * Registries on localhost (the dry-run Zot) are spoken to over plain HTTP. `latest` is moved
+ * only after the GitHub Release exists, by tag-latest.ts.
  */
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { imageAssetBase, imageProvenanceAsset, sbomAsset } from "./assets.ts";
 import { parsePlatforms, type Platform } from "./images.ts";
@@ -139,19 +140,11 @@ if (import.meta.main) {
     archives: resolve(archives),
   };
 
-  // Index under <version>; pushing the same list again under `latest` must give the same digest.
   const digestFile = join(out, `${o.image}.digest`);
   Bun.spawnSync(["podman", "manifest", "rm", localList(o)]);
   for (const argv of indexArgv(o, o.version, digestFile)) run(argv);
   const digest = readDigest(digestFile);
   writeFileSync(digestFile, `${digest}\n`);
-  if (flag("latest")) {
-    const latestFile = join(out, `${o.image}.latest-digest`);
-    const push = indexArgv(o, "latest", latestFile).at(-1) as string[];
-    run(push);
-    if (readDigest(latestFile) !== digest) throw new Error("latest and version tags resolved to different digests");
-    rmSync(latestFile);
-  }
   console.log(`${remoteRef(o)}:${o.version}@${digest}`);
 
   const syftEnv: Record<string, string> = isInsecure(o.registry) ? { SYFT_REGISTRY_INSECURE_USE_HTTP: "true" } : {};
