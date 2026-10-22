@@ -604,6 +604,7 @@ local_addresses() {
 
 configure_env() {
   _host=$DOMAIN
+  _old_host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
   env_set NODE_ENV production
   env_set PUBLIC_HOSTNAME "$_host"
   env_set PUBLIC_URL "https://$_host"
@@ -612,6 +613,10 @@ configure_env() {
   env_set CHAT_PUBLIC_URL "wss://$_host/chat"
   env_set P2P_TRACKER_URL "wss://$_host/tracker"
   env_set MEDIA_PUBLIC_URL "https://$_host/media"
+  # Presigned uploads and export downloads go to this host, where Caddy forwards them to Garage
+  # (ADR 0024). A re-install keeps an operator's own S3 endpoint: anything but this instance's.
+  _s3=$(env_get S3_PUBLIC_ENDPOINT "$ENV_FILE")
+  if [ -z "$_s3" ] || [ "$_s3" = "https://$_old_host" ]; then env_set S3_PUBLIC_ENDPOINT "https://$_host"; fi
   env_set INGEST_WHIP_PUBLIC_URL "https://$_host/live"
   env_set INGEST_RTMP_PUBLIC_URL "rtmp://$_host/live"
   env_set IRC_PUBLIC_HOST "$_host"
@@ -632,6 +637,17 @@ configure_env() {
   # The app-role URL; the services get it as a podman secret as well (create_secrets).
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
+}
+
+# Variables an older install never wrote, filled in on upgrade without touching set values.
+backfill_env() {
+  _host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
+  [ -n "$_host" ] || return 0
+  # Before ADR 0024 presigned URLs pointed at the internal Garage address.
+  if [ -z "$(env_get S3_PUBLIC_ENDPOINT "$ENV_FILE")" ]; then
+    info "setting S3_PUBLIC_ENDPOINT=https://$_host (browser uploads and export downloads)"
+    env_set S3_PUBLIC_ENDPOINT "https://$_host"
+  fi
 }
 
 # Podman secrets the units read, re-created from the env file every time (idempotent).
@@ -1037,6 +1053,7 @@ cmd_upgrade() {
     die "the pre-upgrade backup failed; nothing was changed" "see: journalctl --user -u commonair-backup"
   # The new release's tools (init-env) may add variables; existing values are kept.
   write_env "$RELEASE_DIR"
+  backfill_env
   create_secrets
   prepare_mounts "$RELEASE_DIR"
   # 4. install the new units

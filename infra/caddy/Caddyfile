@@ -20,6 +20,8 @@
 #   CHAT_PUBLIC_URL=wss://<host>/chat  P2P_TRACKER_URL=wss://<host>/tracker
 #   MEDIA_PUBLIC_URL=https://<host>/media
 #   INGEST_WHIP_PUBLIC_URL=https://<host>/live  INGEST_RTMP_PUBLIC_URL=rtmp://<host>/live
+#   S3_PUBLIC_ENDPOINT=https://<host>  (presigned uploads and export downloads, ADR 0024)
+# The bucket names come from S3_BUCKET_MEDIA and S3_BUCKET_EXPORTS (defaults as in .env.example).
 {
 	# `cert_issuer acme` without a directory URL is Let's Encrypt.
 	cert_issuer acme {$ACME_CA}
@@ -49,7 +51,24 @@
 
 {$PUBLIC_HOSTNAME:localhost} {
 	import tls-{$TLS_MODE:acme}
-	encode zstd gzip
+
+	# Presigned object URLs (ADR 0024): https://<host>/<bucket>/<key>?X-Amz-…, forwarded to Garage
+	# with the path and Host unchanged, because both are signed. Only these two shapes; any other
+	# method, bucket, prefix or unsigned request on those paths falls through to the web app.
+	@s3-upload {
+		method PUT
+		path /{$S3_BUCKET_MEDIA:commonair-media}/incoming/*
+		query X-Amz-Signature=*
+	}
+	@s3-export {
+		method GET HEAD
+		path /{$S3_BUCKET_EXPORTS:commonair-exports}/*
+		query X-Amz-Signature=*
+	}
+	# Object responses are passed through as stored: compressing would drop Content-Length and
+	# change the ETag of a signed download (exports are zip already).
+	@compressible not query X-Amz-Signature=*
+	encode @compressible zstd gzip
 
 	header {
 		Strict-Transport-Security "max-age=63072000; includeSubDomains"
@@ -64,6 +83,19 @@
 	@internal path /internal /internal/*
 	handle @internal {
 		respond 404
+	}
+
+	# Browser uploads (avatars, banners, panels): at most the contract's 10 MB (10,000,000 bytes;
+	# Caddy's MB is decimal, like the contract's limit).
+	handle @s3-upload {
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy garage:3900
+	}
+	# Data export downloads.
+	handle @s3-export {
+		reverse_proxy garage:3900
 	}
 
 	# The embeddable player must be frameable by any site; everything else must not be.

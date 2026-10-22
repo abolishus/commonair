@@ -78,10 +78,6 @@ These are true of the current release. Each one is tracked for a later release.
 - **Some local services have no password.** Valkey, the OpenTelemetry collector and Prometheus
   listen on the host's `127.0.0.1` without authentication. Do not give other people a shell on
   the server.
-- **Browser uploads and export downloads need a public S3 endpoint**, which `selfhost.sh` does
-  not set up. Channel images (avatars, panels) and data-export downloads use presigned URLs to
-  `S3_PUBLIC_ENDPOINT`, and Garage is not reachable from outside the server. Those features do
-  not work on a self-hosted instance yet.
 - **Unit edits do not survive.** `install` and `upgrade` replace every `commonair*` file in
   `~/.config/containers/systemd/`, and a drop-in directory there (for example
   `commonair-media.container.d/` for a GPU) makes them fail. There is no supported way to

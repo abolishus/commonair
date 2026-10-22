@@ -120,6 +120,25 @@ straight to MediaMTX. When signaling works and no video arrives:
 
 RTMP (TCP 1935) has none of these requirements and is the fallback.
 
+## Image uploads or export downloads fail
+
+Channel images and data exports go from the browser to `https://<host>/<bucket>/…` with a
+presigned URL, which Caddy forwards to Garage ([tls.md](tls.md#uploads-and-export-downloads)).
+When they fail:
+
+1. **`S3_PUBLIC_ENDPOINT`** in the env file is `https://<host>`, the same host as
+   `PUBLIC_HOSTNAME`. Empty, or an address like `http://garage:3900`, makes the browser call a
+   host it cannot reach. Fix it and run `install --reinstall`.
+2. **A 404 from the web app** means Caddy did not recognize the request as a presigned one:
+   the bucket in the URL differs from `S3_BUCKET_MEDIA` or `S3_BUCKET_EXPORTS` in the env file,
+   or the URL lost its query string. Caddy reads the bucket names from the env file when it
+   starts: after changing them, reinstall.
+3. **A 403 with an XML body** comes from Garage: the signature does not match. The URL expired
+   (uploads after 10 minutes), the browser changed the content type or length, or a proxy in
+   front of Caddy rewrote the `Host` header or the path.
+4. **413** means the file is over the 10 MB upload limit.
+5. With `--tls internal`, the browser must trust Caddy's root, as for the site itself.
+
 ## Linger is missing
 
 Without linger, the `commonair` user's units stop when its last session ends, so the instance

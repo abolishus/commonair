@@ -6,7 +6,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
-import { HOST_IMAGES, ZOT_IMAGE, buildSpecs, hostContainerfile, hostRunArgs, migratedFirst } from "../selfhost/e2e.ts";
+import {
+  EXPORT_FILENAME,
+  HOST_IMAGES,
+  type Presigned,
+  ZOT_IMAGE,
+  buildSpecs,
+  exportBody,
+  hostContainerfile,
+  hostRunArgs,
+  migratedFirst,
+  refusedRequests,
+  storageScript,
+  uploadBody,
+} from "../selfhost/e2e.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const licenses = JSON.parse(readFileSync(join(ROOT, "infra/image-licenses.json"), "utf8")) as Record<
@@ -132,6 +145,113 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
       "--tls-verify",
     ]);
     expect([...flags].filter((f) => !KNOWN.has(f)).sort()).toEqual([]);
+  });
+});
+
+describe("e2e: browser access to object storage (ADR 0024)", () => {
+  /** Runs a storageScript with the repo's storage package against an in-memory S3 stand-in. */
+  async function runScript(script: string, objects: Map<string, string>): Promise<string> {
+    const server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const path = decodeURIComponent(new URL(req.url).pathname);
+        if (req.method === "PUT") objects.set(path, await req.text());
+        if (req.method === "DELETE") objects.delete(path);
+        if (req.method === "GET")
+          return objects.has(path) ? new Response(objects.get(path)) : new Response("", { status: 404 });
+        return new Response(null, { status: req.method === "DELETE" ? 204 : 200 });
+      },
+    });
+    try {
+      const local = script.replace("/app/packages/storage/src/index.ts", join(ROOT, "packages/storage/src/index.ts"));
+      const proc = Bun.spawn([process.execPath, "-e", local], {
+        cwd: join(ROOT, "packages/storage"),
+        env: {
+          PATH: process.env.PATH ?? "",
+          S3_ENDPOINT: `http://127.0.0.1:${server.port}`,
+          S3_PUBLIC_ENDPOINT: "https://selfhost.test",
+          S3_REGION: "garage",
+          S3_ACCESS_KEY_ID: "GKtest",
+          S3_SECRET_ACCESS_KEY: "secret",
+          S3_FORCE_PATH_STYLE: "true",
+          S3_BUCKET_MEDIA: "commonair-media",
+          S3_BUCKET_EXPORTS: "commonair-exports",
+          S3_BUCKET_EVIDENCE: "commonair-evidence",
+          S3_BUCKET_BACKUPS: "commonair-backups",
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [out, err, code] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(code, err).toBe(0);
+      return out.trim().split("\n").at(-1)!;
+    } finally {
+      await server.stop(true);
+    }
+  }
+
+  test("presign stores the export and signs every URL for the public host", async () => {
+    const objects = new Map<string, string>();
+    const p = JSON.parse(await runScript(storageScript("t1", "presign"), objects)) as Presigned;
+    expect(objects.get("/commonair-exports/e2e/t1.zip")).toBe(exportBody("t1"));
+    expect(p.endpoint).toBe("https://selfhost.test");
+    const { endpoint: _, ...urls } = p;
+    for (const [name, url] of Object.entries(urls))
+      expect(url, name).toMatch(/^https:\/\/selfhost\.test\/[^?]+\?.*X-Amz-Signature=/);
+    expect(new URL(p.upload).pathname).toBe("/commonair-media/incoming/e2e/t1.png");
+    expect(new URL(p.outside).pathname).toBe("/commonair-media/public/e2e/t1.png");
+    expect(new URL(p.download).searchParams.get("response-content-disposition")).toBe(
+      `attachment; filename="${EXPORT_FILENAME}"`,
+    );
+    expect(new URL(p.evidence).pathname.split("/")[1]).toBe("commonair-evidence");
+    expect(new URL(p.backups).pathname.split("/")[1]).toBe("commonair-backups");
+    // The length is signed, so curl's Content-Length (the body's) must be what was signed.
+    expect(new URL(p.upload).searchParams.get("X-Amz-SignedHeaders")).toContain("content-length");
+  });
+
+  test("verify reads the upload back and deletes what the run created", async () => {
+    const objects = new Map([
+      ["/commonair-media/incoming/e2e/t2.png", uploadBody("t2")],
+      ["/commonair-exports/e2e/t2.zip", exportBody("t2")],
+    ]);
+    expect(JSON.parse(await runScript(storageScript("t2", "verify"), objects))).toEqual({ uploaded: uploadBody("t2") });
+    expect(objects.size).toBe(0);
+    expect(JSON.parse(await runScript(storageScript("t3", "verify"), objects))).toEqual({ uploaded: null });
+  });
+
+  test("the refusals cover every out-of-scope shape the brief names", () => {
+    const sig = "?X-Amz-Signature=x";
+    const p: Presigned = {
+      endpoint: "https://selfhost.test",
+      upload: `https://selfhost.test/commonair-media/incoming/e2e/a.png${sig}`,
+      outside: `https://selfhost.test/commonair-media/public/e2e/a.png${sig}`,
+      download: `https://selfhost.test/commonair-exports/e2e/a.zip${sig}`,
+      incomingRead: `https://selfhost.test/commonair-media/incoming/e2e/a.png${sig}`,
+      evidence: `https://selfhost.test/commonair-evidence/incoming/e2e/a.png${sig}`,
+      backups: `https://selfhost.test/commonair-backups/incoming/e2e/a.png${sig}`,
+    };
+    expect(refusedRequests(p).map(([, method, url]) => `${method} ${url}`)).toEqual([
+      "PUT https://selfhost.test/commonair-media/incoming/e2e/a.png",
+      `GET ${p.incomingRead}`,
+      `PUT ${p.outside}`,
+      `GET ${p.evidence}`,
+      `GET ${p.backups}`,
+      "GET https://selfhost.test/commonair-exports?list-type=2",
+      `DELETE ${p.download}`,
+      `DELETE ${p.upload}`,
+    ]);
+  });
+
+  test("runs on install and again after the upgrade", () => {
+    const src = readFileSync(join(ROOT, "scripts/selfhost/e2e.ts"), "utf8");
+    expect(src.match(/^\s+checkBrowserStorage\("\w+"\);$/gm)?.map((l) => l.trim())).toEqual([
+      'checkBrowserStorage("install");',
+      'checkBrowserStorage("upgrade");',
+    ]);
   });
 });
 
