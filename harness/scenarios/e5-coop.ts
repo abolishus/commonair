@@ -187,7 +187,17 @@ function title(n: CoopStep, what: string): string {
 }
 
 /** Poll `read` until `done`; on timeout return the last value so the assertions report it. */
-async function settle<V>(what: string, read: () => Promise<V>, done: (v: V) => boolean, b: WaitBudget): Promise<V> {
+/**
+ * Re-read until `done`. `intervalMs` matters for page reads: each reload makes several API calls
+ * as the viewer, whose default bucket allows 120 a minute.
+ */
+async function settle<V>(
+  what: string,
+  read: () => Promise<V>,
+  done: (v: V) => boolean,
+  b: WaitBudget,
+  intervalMs = 3_000,
+): Promise<V> {
   let last: { v: V } | null = null;
   try {
     return await waitFor(
@@ -197,7 +207,7 @@ async function settle<V>(what: string, read: () => Promise<V>, done: (v: V) => b
         last = { v };
         return done(v) ? v : null;
       },
-      { timeoutMs: b.timeoutMs, intervalMs: 1_000, signal: b.signal },
+      { timeoutMs: b.timeoutMs, intervalMs, signal: b.signal },
     );
   } catch (err) {
     const seen = last as { v: V } | null;
