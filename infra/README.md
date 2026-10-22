@@ -259,6 +259,11 @@ wins. No access log (it would record viewer IPs). Set `PUBLIC_URL`, `API_PUBLIC_
 network (its fixed subnet `10.89.42.0/24`; a non-empty `TRUSTED_PROXY_CIDRS` overrides it), so the
 web proxy and Caddy pass real client addresses through.
 
+Certificates come from `TLS_MODE` (ADR 0023 §11): `acme` (the default) gets them from Let's
+Encrypt, or from the directory in `ACME_CA`, with `ACME_EMAIL` for expiry notices; `internal`
+uses Caddy's own CA, whose root is `/data/caddy/pki/authorities/local/root.crt` in the
+`caddy-data` volume ([docs/self-hosting/tls.md](../docs/self-hosting/tls.md)).
+
 ACME needs ports 80 and 443 on the public address. Rootless Podman cannot bind them by default:
 either `sysctl net.ipv4.ip_unprivileged_port_start=80` on the host and set
 `CADDY_HTTP_PORT=80 CADDY_HTTPS_PORT=443`, or redirect 80/443 to 8080/8443 in the host
@@ -268,44 +273,101 @@ firewall.
 
 `media` uses NVENC when `TRANSCODE_HWACCEL=auto|nvenc` and a GPU is visible. With the NVIDIA
 Container Toolkit's CDI spec installed, add `devices: ["nvidia.com/gpu=all"]` to `media` in a
-local `compose.override.yaml` (Quadlet: uncomment `AddDevice=` in `commonair-media.container`).
+local `compose.override.yaml` (Quadlet: uncomment `AddDevice=` in `commonair-media.container`;
+`selfhost.sh` replaces installed units on every install and upgrade, so a release install has no
+supported way to keep that edit yet).
 
 ## Production: Quadlet
 
 Compose is the development path; `quadlet/` is the production path on systemd (rootless user
-units). Same images, same config files, same variables. The chosen production host and its
-setup are in [docs/deploy/hetzner.md](../docs/deploy/hetzner.md) (ADR 0010).
+units). Same images, same config files, same variables. Operators install a signed release with
+`scripts/selfhost.sh`, which renders, installs and runs these units: the
+[self-hosting guide](../docs/self-hosting/README.md) is the reference, and
+[docs/deploy/hetzner.md](../docs/deploy/hetzner.md) the co-op's own production host (ADR 0010).
+This section describes the units for people who change them.
+
+### Units in the repository and rendered units
+
+The units here name our images `Image=localhost/commonair/<name>:latest`, so they work with
+images built from source, and the compose/Quadlet parity test compares like with like.
+Third-party images are pinned `name:tag@sha256:…` in both. A release never ships these files
+as they are: `scripts/selfhost/bundle.ts` renders every unit from the release manifest
+(`scripts/selfhost/render.ts`), replacing each `localhost/commonair/<name>:latest` with
+`<registry>/<name>:<version>@<digest>`, and refuses any other `localhost/` image
+(ADR 0023 §6–7).
+
+Rules every unit follows (ADR 0023 §10, checked by `infra/tests/quadlet.test.ts`):
+
+- `RunInit=true` (catatonit as PID 1 reaps orphans; see the Postgres fix in PROGRESS session
+  ten).
+- Long-running units: `Restart=always`, `RestartMode=direct`, back-off from 5 s to 5 min
+  (`RestartSteps=`, `RestartMaxDelaySec=`, systemd 254+), `StartLimitIntervalSec=0`, a health
+  check with `HealthOnFailure=kill` and `Notify=healthy`.
+- `Requires=` + `After=` only on the one-shots (`commonair-migrate`, `commonair-garage-init`,
+  `Type=oneshot`, `RemainAfterExit=yes`, bounded retries). Long-running dependencies are
+  `Wants=` + `After=`, so a failed start there does not fail dependents with result
+  `dependency`, which `Restart=` never retries.
+- Every unit reads `%h/.config/commonair/commonair.env` and sets its internal hostnames and
+  ports with `Environment=` lines, which win over the env file. `DATABASE_URL` comes from the
+  Podman secrets `commonair-database-url` (app role) or `commonair-owner-database-url`
+  (migrate), and Grafana's password from `commonair-grafana-admin-password`.
+- Config files are bind-mounted from `%h/commonair/infra/…`. Other host mounts are under
+  `%h/.local/share/commonair/` (hash lists, the moderation model) and
+  `%h/.config/commonair/irc-tls/`.
+
+Only Caddy (80/443 and 443/udp), MediaMTX RTMP (1935) and ICE (8189/udp), and IRC (6667/6697)
+bind `0.0.0.0`; everything else stays on `127.0.0.1` (a test enforces the list). WHIP signaling
+reaches MediaMTX through Caddy (`/live/<slug>/whip`), and MediaMTX advertises the addresses in
+`MTX_WEBRTCADDITIONALHOSTS` as ICE candidates. `mailpit`, `mock-rtmp` and `stripe-mock` are
+development-only and have no unit.
+
+`commonair-irc-cert.container` is a one-shot that copies Caddy's certificate for
+`IRC_PUBLIC_HOST` to the IRC unit's TLS mount (`irc/sync-cert.ts`, run in the `tools` image)
+and restarts IRC when it changed. `systemd/` holds the plain user units Quadlet does not
+generate: `commonair-backup.service` and `.timer` (daily WAL-G base backup) and
+`commonair-irc-cert.timer` (runs the sync daily).
+
+### Release directories
+
+`selfhost.sh` keeps each installed release in `~/.local/share/commonair/releases/<version>/`
+(the unpacked bundle: `selfhost.sh`, `release-manifest.json`, `release.env`, the rendered
+`quadlet/`, `systemd/`, the mounted config files under `infra/`, and `tools/`). `~/commonair` is
+a symlink to the current one and `~/.local/share/commonair/previous` to the one before, so the
+units' `%h/commonair/infra/…` mounts follow the symlink, and a rollback is a symlink flip plus
+the previous release's units. Install copies the rendered units to
+`~/.config/containers/systemd/` and `~/.config/systemd/user/`, replacing every `commonair*`
+file there. An upgrade keeps the current and the previous release and removes older ones.
+
+### Building from source
+
+To run the units with images you built yourself (to test a unit change on a real systemd host,
+not for production):
 
 ```sh
-git clone <repo> ~/commonair && cd ~/commonair     # units bind-mount config from %h/commonair/infra
-bun scripts/init-env.ts --out ~/.config/commonair/commonair.env   # then edit: real SMTP, URLs …
-IMAGE_TAG=latest podman compose build              # or pull released images and tag them
+git clone <repo> ~/src/commonair && cd ~/src/commonair && bun install
+ln -s ~/src/commonair ~/commonair                     # the units mount %h/commonair/infra/…
+IMAGE_TAG=latest podman compose build                 # localhost/commonair/<name>:latest
+bun scripts/init-env.ts --out ~/.config/commonair/commonair.env   # then set the public URLs, SMTP, NODE_ENV …
+bun scripts/fetch-model.ts --out ~/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx
+mkdir -p ~/.local/share/commonair/moderation ~/.config/commonair/irc-tls
+touch ~/.local/share/commonair/moderation/csam.pdq ~/.local/share/commonair/moderation/ncii.pdq
 printf 'postgres://commonair_app:%s@postgres:5432/commonair' "$APP_PW" | podman secret create commonair-database-url -
 printf 'postgres://commonair:%s@postgres:5432/commonair' "$OWNER_PW" | podman secret create commonair-owner-database-url -
 printf '%s' "$GRAFANA_PW" | podman secret create commonair-grafana-admin-password -
-mkdir -p ~/.config/containers/systemd && cp infra/quadlet/* ~/.config/containers/systemd/
-systemctl --user daemon-reload && systemctl --user start commonair-caddy commonair-web
-loginctl enable-linger "$USER"                     # keep running after logout
+mkdir -p ~/.config/containers/systemd ~/.config/systemd/user
+cp infra/quadlet/* ~/.config/containers/systemd/ && cp infra/systemd/* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user start commonair-migrate              # migrations first, then everything else
+systemctl --user start --no-block $(cd ~/.config/containers/systemd && ls commonair-*.container \
+  | grep -v -e irc-cert -e migrate | sed 's/\.container$/.service/')
+systemctl --user enable --now commonair-backup.timer commonair-irc-cert.timer
 ```
 
-`DATABASE_URL` comes from the podman secret, so remove it from the env file (or set it to the
-app-role URL). The env file must also contain `POSTGRES_PASSWORD`, `GARAGE_RPC_SECRET`,
-`GARAGE_ADMIN_TOKEN`. Units declare `Notify=healthy`, so systemd orders dependents after their
-dependencies are healthy; one-shot jobs are `Type=oneshot`. `mailpit`, `mock-rtmp` and
-`stripe-mock` are development-only and have no unit. Caddy publishes 80/443 directly (see the
-sysctl above).
-
-Only Caddy (80/443), MediaMTX RTMP (1935) and ICE (8189/udp), and IRC (6667/6697) bind
-`0.0.0.0`; everything else stays on `127.0.0.1` (a test enforces the list). WHIP signaling
-reaches MediaMTX through Caddy (`/live/<slug>/whip`), so set
-`INGEST_WHIP_PUBLIC_URL=https://<host>/live`, and give MediaMTX the server's public address
-with `MTX_WEBRTCADDITIONALHOSTS` in the env file.
-
-`systemd/` holds plain user units that Quadlet does not generate: `commonair-backup.timer`
-(daily WAL-G base backup) and `commonair-irc-cert.timer` (copies Caddy's certificate for
-`IRC_PUBLIC_HOST` to the IRC unit's TLS mount, `irc/sync-cert.ts`). Copy them to
-`~/.config/systemd/user/` and `systemctl --user enable --now` both timers
-([docs/deploy/hetzner.md](../docs/deploy/hetzner.md)).
+`APP_PW`, `OWNER_PW` and `GRAFANA_PW` are the env file's `POSTGRES_APP_PASSWORD`,
+`POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD`. The host needs linger and the
+unprivileged-port sysctl, as in [requirements.md](../docs/self-hosting/requirements.md). To test
+the release path itself (render, bundle, install, upgrade, rollback) on a throwaway systemd
+container instead, run `bun scripts/selfhost/e2e.ts` (its header lists what it needs).
 
 ## Tests
 

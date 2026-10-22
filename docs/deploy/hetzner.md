@@ -6,11 +6,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Production on Hetzner dedicated
 
 This guide covers the production host chosen in
-[ADR 0010](../decisions/0010-production-hosting.md): one Hetzner dedicated server running the
-Quadlet units from `infra/quadlet`, with backups stored off the server and a small cloud VM for
-monitoring. Nothing here is Hetzner-specific code. The same steps work on any dedicated Linux
-server, and [infra/README.md](../../infra/README.md#production-quadlet) remains the reference
-for the units themselves. Staging stays on Railway ([railway.md](railway.md)).
+[ADR 0010](../decisions/0010-production-hosting.md): one Hetzner dedicated server running a
+CommonAir release with `selfhost.sh`, with backups stored off the server and a small cloud VM
+for monitoring. Nothing here is Hetzner-specific code. Everything after the server's first boot
+is the [self-hosting guide](../self-hosting/README.md), which is the reference; this page adds
+only what is specific to Hetzner. Staging stays on Railway ([railway.md](railway.md)).
 
 The region is still open (ADR 0010). Pick it before ordering.
 
@@ -33,98 +33,70 @@ Hetzner's Robot console has no infrastructure-as-code path for ordering, so this
 2. Order the server in Robot and add your SSH public key during ordering, so the rescue
    system accepts it.
 3. Boot the rescue system and run `installimage`:
-   - image: **Debian 13 (trixie)**. It ships Podman 5, which the units need for
-     `Notify=healthy`. Ubuntu 24.04 ships Podman 4.9 and does not qualify.
+   - image: **Debian 13 (trixie)**. It ships Podman 5 and systemd 257, which the units need.
+     Ubuntu 24.04 ships Podman 4.9 and does not qualify.
    - `SWRAID 1`, `SWRAIDLEVEL 1` across both NVMe disks.
    - a hostname of your choice.
 4. Reboot into the installed system and confirm `ssh root@<server>` works.
 5. In Robot, enable the server firewall with the rules in [Firewall](#firewall).
 
-From here on, setup is scripted and can be run over SSH by any operator (or an agent given a
+From here on, setup is one script and can be run over SSH by any operator (or an agent given a
 deploy key).
 
 ## 2. Prepare the host
 
-As root:
+As root, update the system and add the packages Hetzner's image does not have:
 
 ```sh
-apt update && apt full-upgrade -y
-apt install -y podman git unattended-upgrades nftables
-adduser --disabled-password --gecos "" commonair
-loginctl enable-linger commonair                       # user units keep running after logout
-echo 'net.ipv4.ip_unprivileged_port_start=80' > /etc/sysctl.d/90-commonair.conf
-sysctl --system                                        # rootless Caddy may bind 80/443
+apt-get update && apt-get full-upgrade -y
+apt-get install -y unattended-upgrades nftables
 ```
 
-Add each operator's SSH key to `/home/commonair/.ssh/authorized_keys`. Use a separate key per
-person or agent, so one can be revoked alone. Disable password login and root login in
-`sshd_config` once the `commonair` user works.
+Install cosign 3.x ([install.md](../self-hosting/install.md#1-prepare-the-server)). Point the
+domain's A record at the server's IPv4 address. Do not add an AAAA record yet
+([Gaps](#gaps-before-go-live)).
 
-Install Bun for the `commonair` user (the setup scripts use it), at the version pinned in the
-root `package.json` (`devEngines.packageManager`).
+`selfhost.sh` does the rest of the host preparation when run as root with `--yes`: it installs
+Podman, creates the `commonair` user, enables linger and allows unprivileged ports from 80.
 
 ## 3. Install the stack
 
-As `commonair`, follow [infra/README.md → Production: Quadlet](../../infra/README.md#production-quadlet):
-clone the repository to `~/commonair`, generate `~/.config/commonair/commonair.env` with
-`bun scripts/init-env.ts --out …`, create the podman secrets, copy the units and start them.
-
-Production values in the env file:
-
-| Variable                                              | Value                                                    |
-| ----------------------------------------------------- | -------------------------------------------------------- |
-| `PUBLIC_HOSTNAME`                                     | your domain; its A/AAAA records point at the server      |
-| `PUBLIC_URL`, `API_PUBLIC_URL`, `PLAYBACK_PUBLIC_URL` | `https://<host>`                                         |
-| `CHAT_PUBLIC_URL` / `P2P_TRACKER_URL`                 | `wss://<host>/chat` / `wss://<host>/tracker`             |
-| `POSTGRES_PASSWORD`                                   | a real secret (the default is dev only)                  |
-| `SMTP_*`                                              | a real mail relay; Mailpit has no production unit        |
-| `S3_PUBLIC_ENDPOINT`                                  | Garage on its own hostname (path-style SigV4, see infra) |
-| `INGEST_RTMP_PUBLIC_URL`                              | `rtmp://<host>/live`                                     |
-| `INGEST_WHIP_PUBLIC_URL`                              | `https://<host>/live` (Caddy routes WHIP to MediaMTX)    |
-| `MTX_WEBRTCADDITIONALHOSTS`                           | the server's public IPv4 (and IPv6), comma-separated     |
-| `IRC_PUBLIC_HOST`                                     | the same as `PUBLIC_HOSTNAME` (see [IRC TLS](#irc-tls))  |
-| `NODE_ENV`                                            | `production`                                             |
-
-`MTX_WEBRTCADDITIONALHOSTS` is read by MediaMTX itself, not by the platform, so it is not in
-`.env.example`. Without it, MediaMTX offers only the container's internal address as an ICE
-candidate and WHIP from remote encoders fails after signaling succeeds.
-
-Install the timers next to the Quadlet units (they are plain systemd user units, which Quadlet
-does not generate):
+Download and verify the release, then install it as root
+([install.md](../self-hosting/install.md#2-download-and-verify-the-release)):
 
 ```sh
-mkdir -p ~/.config/systemd/user && cp ~/commonair/infra/systemd/* ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now commonair-backup.timer commonair-irc-cert.timer
+sh "commonair-selfhost_$VERSION/selfhost.sh" install --yes \
+  --bundle "$PWD/commonair-selfhost_$VERSION.tar.gz" \
+  --domain <your domain> --email <operator address> \
+  --require-signature
 ```
 
-`commonair-backup.timer` takes a WAL-G base backup daily at 03:00 UTC. It never starts
-Postgres, so it cannot interfere with a restore.
+`--domain` sets every public URL, `IRC_PUBLIC_HOST`, and the RTMP and WHIP ingest URLs. The
+server's public IPv4 becomes `MTX_WEBRTCADDITIONALHOSTS` automatically: Hetzner dedicated
+servers have it on their interface, so WHIP works without `--public-ip`.
 
-### IRC TLS
+Then, as `commonair`:
 
-IRC refuses to start in production without a certificate. `commonair-irc-cert.service` copies
-Caddy's certificate for `IRC_PUBLIC_HOST` into `~/.config/commonair/irc-tls`, which the IRC unit
-mounts, and restarts IRC when Caddy has renewed it. Caddy only holds certificates for its own
-sites, so `IRC_PUBLIC_HOST` must equal `PUBLIC_HOSTNAME`. On first install, start Caddy, wait
-until it has its certificate, then run the sync once before IRC can start:
+1. Give each operator their own SSH key in `/home/commonair/.ssh/authorized_keys`, so one can be
+   revoked alone. Disable password login and root login in `sshd_config` once the `commonair`
+   user works.
+2. Set the real SMTP relay and review the instance contacts in
+   `~/.config/commonair/commonair.env`, and apply them with
+   `sh ~/commonair/selfhost.sh install --reinstall`.
+3. Create the first admin account
+   ([install.md](../self-hosting/install.md#5-the-first-admin-account)).
 
-```sh
-systemctl --user start commonair-irc-cert.service
-```
-
-Images: until the Phase 5 release pipeline publishes signed images, build them on the server
-(`IMAGE_TAG=latest podman compose build`). Afterwards, pull the released tag and let
-`podman auto-update` roll it out.
+The IRC certificate follows on its own once DNS resolves and Caddy has its certificate
+([tls.md](../self-hosting/tls.md#the-irc-certificate)). Upgrades go through
+`selfhost.sh upgrade` ([upgrades.md](../self-hosting/upgrades.md)).
 
 ## 4. Backups off the server
 
-WAL-G reads `AWS_*` before the platform's `S3_*` settings (`infra/postgres/walg-env.sh`), so
-pointing it at Hetzner Object Storage takes only env file entries, without touching the
-buckets the services use:
+Send WAL-G to Hetzner Object Storage in a location other than the server's, as described in
+[backups.md](../self-hosting/backups.md#off-host-s3). The env-file entries:
 
 ```sh
-AWS_ENDPOINT=https://<location>.your-objectstorage.com    # a location other than the server's
+AWS_ENDPOINT=https://<location>.your-objectstorage.com
 AWS_REGION=<location>
 AWS_ACCESS_KEY_ID=<object storage key>
 AWS_SECRET_ACCESS_KEY=<object storage secret>
@@ -133,16 +105,16 @@ WALG_S3_PREFIX=s3://<bucket>/wal
 
 Create the bucket and key in the Hetzner Cloud console (or with OpenTofu, see
 [Infrastructure as code](#infrastructure-as-code)). Check the endpoint form and path-style
-support against Hetzner's Object Storage documentation when you set it up. Then confirm WAL is
-arriving:
+support against Hetzner's Object Storage documentation when you set it up. Apply the settings
+and confirm a base backup arrives:
 
 ```sh
-podman exec commonair-postgres commonair-backup
-podman exec commonair-postgres wal-g backup-list
+sh ~/commonair/selfhost.sh install --reinstall
+sh ~/commonair/selfhost.sh backup
 ```
 
-Before launch, **restore once onto a scratch server** with `commonair-restore`
-([infra/README.md → Backups](../../infra/README.md#backups-wal-g)) and check the data is there.
+Before launch, **restore once onto a scratch server**
+([the restore drill](../self-hosting/backups.md#the-restore-drill)) and check the data is there.
 An untested backup does not count (ADR 0010).
 
 ## Firewall
@@ -160,7 +132,9 @@ Allow inbound:
 | 6697    | TCP      | IRC over TLS                                    |
 | 6667    | TCP      | plain IRC, if you offer it                      |
 
-Allow established/related return traffic. Everything else (Postgres, Valkey, Garage, Grafana)
+Allow established/related return traffic. Robot's firewall is stateless, so also allow inbound
+TCP to the ephemeral port range (32768–65535) with the ACK flag, or outbound connections (image
+pulls, ACME, SMTP) never get their answers. Everything else (Postgres, Valkey, Garage, Grafana)
 stays on `127.0.0.1`; reach Grafana through an SSH tunnel
 (`ssh -L 3030:127.0.0.1:3030 commonair@<server>`).
 
@@ -171,14 +145,15 @@ if hosted there) belong in OpenTofu with the `hetznercloud/hcloud` provider, und
 to the Railway definition. Verify the provider's license at the pinned version (ADR 0002) when
 adding it. The API token is `HCLOUD_TOKEN` in the operator's shell or password manager, never
 in git. The dedicated server itself is ordered in Robot (step 1); everything after its first boot
-is `scripts/selfhost.sh` (PLAN Phase 5).
+is `scripts/selfhost.sh`.
 
 ## Operating it
 
-- **Deploys**: through the release pipeline and `podman auto-update`, not hand edits on the
-  server. Changes to units or config go through the repository.
-- **Logs and metrics**: `journalctl --user -u commonair-<service>`, `podman logs`, and Grafana
-  over the SSH tunnel.
+- **Deploys**: tagged releases through `selfhost.sh upgrade`, not hand edits on the server
+  (ADR 0023 replaced the `podman auto-update` plan of ADR 0010, because it cannot order
+  migrations). Changes to units or config go through the repository and a release.
+- **Status, logs and metrics**: `selfhost.sh status`, `journalctl --user -u commonair-<service>`,
+  and Grafana over the SSH tunnel ([troubleshooting.md](../self-hosting/troubleshooting.md)).
 - **Abuse reports**: Hetzner forwards abuse and copyright complaints to the account's abuse
   contact and expects an answer, usually within 24 hours. Route them into the trust-safety
   process ([operators/trust-safety.md](../operators/trust-safety.md)); a missed deadline can get
@@ -186,16 +161,24 @@ is `scripts/selfhost.sh` (PLAN Phase 5).
 - **Disk failure**: Hetzner replaces a failed disk on request. Check `cat /proc/mdstat` after any
   hardware alert and let the RAID resync.
 - **Capacity**: watch the network port's utilization. Near 1 Gbit/s sustained, add an
-  origin/media server or more member relays before anything else (ADR 0010).
+  origin/media server or more member relays before anything else (ADR 0010,
+  [scaling.md](../self-hosting/scaling.md)).
 
 ## Gaps before go-live
 
 Closed: public binds for RTMP, ICE and IRC; WHIP through Caddy; the ICE public address; the
-daily base backup and IRC certificate timers. Still open:
+daily base backup and IRC certificate timers; signed releases and the one-command install and
+upgrade (`selfhost.sh`, Phase 5). Still open:
 
-- Public ports bind IPv4 (`0.0.0.0`) only, like Caddy's. IPv6 viewers and encoders need
-  `[::]` binds added once the server has an IPv6 address in DNS.
+- Public ports bind IPv4 (`0.0.0.0`) only. IPv6 viewers and encoders need `[::]` binds before
+  the domain gets an AAAA record.
 - IRC over WebSocket (6680, what tmi.js uses) stays on `127.0.0.1`. tmi.js connects to `/` on
   its own hostname, so it needs a separate Caddy site, not a path on the main one.
-- `scripts/selfhost.sh`, the release pipeline and the operator guide are PLAN Phase 5 and not
-  written yet. Until then, steps 2–4 are run by hand.
+- Rootless port forwarding hides client addresses, so per-address limits count all clients as
+  one and `X-Forwarded-For` from clients is trusted. Source-address preservation is needed
+  before launch ([known limitations](../self-hosting/README.md#known-limitations)).
+- Every container reads the whole env file, including database passwords and the off-host
+  backup key. A secret-free shared env plus per-unit secrets is planned.
+- Channel image uploads and data-export downloads need a public S3 endpoint for Garage, which
+  the release does not set up yet.
+- Objects in Garage (VODs, clips, evidence) are not backed up off the server.
