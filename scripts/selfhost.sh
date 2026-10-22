@@ -118,7 +118,12 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # Podman installed without recommends starts no container on a bridge network ("unable to execute
 # nft"). /usr/sbin is not on an unprivileged user's PATH on Debian, hence the explicit paths.
 have_catatonit() { [ -x "$SYSROOT/usr/libexec/podman/catatonit" ] || have catatonit; }
-have_aardvark() { [ -x "$SYSROOT/usr/lib/podman/aardvark-dns" ] || [ -x "$SYSROOT/usr/libexec/podman/aardvark-dns" ]; }
+have_aardvark() {
+  for _d in /usr/lib/podman /usr/libexec/podman /usr/local/lib/podman /usr/local/libexec/podman; do
+    [ -x "$SYSROOT$_d/aardvark-dns" ] && return 0
+  done
+  have aardvark-dns
+}
 have_nft() { [ -x "$SYSROOT/usr/sbin/nft" ] || have nft; }
 
 make_tmp() {

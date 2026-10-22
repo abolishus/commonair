@@ -8,7 +8,9 @@
  * fixture hash lists `csam.pdq` and `ncii.pdq` from their PDQ hashes. The patterns stand in for
  * list entries in tests and the `trust-safety` harness scenario; they depict nothing.
  *
- *   bun packages/moderation/fixtures/generate.ts
+ *   bun packages/moderation/fixtures/generate.ts [out-dir]
+ *
+ * With `out-dir` the files go there instead of over the committed fixtures (the test uses it).
  *
  * The hashes are taken through the same path media uses (`decodeImage` → 512² luma → `pdqHash`).
  */
@@ -157,15 +159,16 @@ export const listText = (name: string, hash: string) =>
   `# SPDX-FileCopyrightText: 2026 CommonAir contributors\n# SPDX-License-Identifier: AGPL-3.0-or-later\n# synthetic fixture: PDQ of ${name}.png, a generated geometric test pattern (packages/moderation/fixtures/generate.ts)\n${hash}\n`;
 
 if (import.meta.main) {
+  const out = process.argv[2] ? `${process.argv[2].replace(/\/$/, "")}/` : FIXTURES_DIR;
   const pngs = new Map<PatternName, Uint8Array>();
   for (const [name, draw] of Object.entries(PATTERNS) as [PatternName, () => Uint8Array][]) {
     const png = await encodeImage(draw(), { width: W, height: H, format: "rgb" }, "png");
-    await Bun.write(`${FIXTURES_DIR}${name}.png`, png);
+    await Bun.write(`${out}${name}.png`, png);
     pngs.set(name, png);
   }
   const csam = await fixtureHash(pngs.get("t0-pattern") ?? new Uint8Array());
   const ncii = await fixtureHash(pngs.get("t0-ncii-pattern") ?? new Uint8Array());
-  await Bun.write(`${FIXTURES_DIR}csam.pdq`, listText("t0-pattern", csam.hash));
-  await Bun.write(`${FIXTURES_DIR}ncii.pdq`, listText("t0-ncii-pattern", ncii.hash));
+  await Bun.write(`${out}csam.pdq`, listText("t0-pattern", csam.hash));
+  await Bun.write(`${out}ncii.pdq`, listText("t0-ncii-pattern", ncii.hash));
   process.stdout.write(`t0-pattern quality ${csam.quality}, t0-ncii-pattern quality ${ncii.quality}\n`);
 }

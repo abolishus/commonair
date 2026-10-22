@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
+import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 
 const directory = new URL("../fixtures/", import.meta.url);
@@ -24,10 +28,10 @@ const pixels = (file: string) => {
   if (r.exitCode !== 0) throw new Error(`ffmpeg could not decode ${file}: ${r.stderr.toString()}`);
   return r.stdout;
 };
-const digest = async () =>
+const digest = async (dir: URL) =>
   Promise.all(
     names.map(async (name) => {
-      const file = new URL(name, directory).pathname;
+      const file = new URL(name, dir).pathname;
       const data = name.endsWith(".png") ? pixels(file) : new Uint8Array(await Bun.file(file).arrayBuffer());
       return createHash("sha256").update(data).digest("hex");
     }),
@@ -35,11 +39,17 @@ const digest = async () =>
 
 describe("synthetic fixture generator", () => {
   test("regenerating produces pixel-identical images and byte-identical fixture lists", async () => {
-    const before = await digest();
-    const script = new URL("../fixtures/generate.ts", import.meta.url).pathname;
-    const run = Bun.spawn([process.execPath, script], { stdout: "ignore", stderr: "ignore" });
-    expect(await run.exited).toBe(0);
-    expect(await digest()).toEqual(before);
+    // Into a scratch directory: regenerating in place would rewrite the committed PNGs with
+    // this machine's encoder bytes.
+    const out = mkdtempSync(join(tmpdir(), "commonair-fixtures-"));
+    try {
+      const script = new URL("../fixtures/generate.ts", import.meta.url).pathname;
+      const run = Bun.spawn([process.execPath, script, out], { stdout: "ignore", stderr: "ignore" });
+      expect(await run.exited).toBe(0);
+      expect(await digest(pathToFileURL(`${out}/`))).toEqual(await digest(directory));
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
     // Ten ffmpeg decodes plus the generator's encodes: seconds on a shared CI runner.
   }, 60_000);
 });

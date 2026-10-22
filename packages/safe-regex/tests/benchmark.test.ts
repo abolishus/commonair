@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Benchmark-style check of the cost model: every pattern the validator accepts from a generated
- * adversarial corpus must stay fast on worst-case 500-character messages. This is the evidence
- * that an accepted filter cannot stall chat; chat's filter worker adds a hard timeout on top.
+ * Benchmark-style check of the cost model: no pattern the validator accepts from a generated
+ * adversarial corpus does worse than quadratic work on worst-case 500-character messages,
+ * measured in units of one quadratic scan on the same machine. The absolute bound on what a
+ * filter can cost chat is the filter worker's hard timeout.
  */
 import { describe, expect, test } from "vite-plus/test";
 import { MAX_INPUT_LENGTH, unsafeFilterRegexReason } from "../src/index.ts";
@@ -15,8 +16,8 @@ const LIMIT_MS = 5;
  * Shared CI runners are several times slower than a workstation, so the absolute limit alone
  * fails there on patterns that are fine. The cost model's real claim is relative: no accepted
  * pattern is super-quadratic. One quadratic scan of the message (`.{2,}!`) is the unit; the
- * slowest accepted patterns take 6-9x it on a workstation and up to about 12x on a loaded runner,
- * while cubic work is about 250x (n/2 for n = 500) and exponential far more. The limit is the
+ * slowest accepted patterns take a few to about 12 of them (workstation to loaded runner), while
+ * cubic work (`a*a*a*!` on 500 a's) takes thousands and exponential far more. The limit is the
  * larger of LIMIT_MS and BASELINE_FACTOR scans.
  */
 const BASELINE = ".{2,}!";
