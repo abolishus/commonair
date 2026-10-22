@@ -15,6 +15,14 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
+## Session eleven (Phase 5, release and self-hosting): built, not yet validated
+
+Start here: [.claude/briefs/phase5/handoff-validation.md](.claude/briefs/phase5/handoff-validation.md).
+It covers proving the work (verify, the self-host e2e on Debian and Fedora, CI and a signed
+release dry run), closing the self-hosting gaps (S3 for browsers first), and cutting
+`v0.1.0-rc.1` with the user's go-ahead. Decisions: ADR 0023. State: PROGRESS.md "Session
+eleven".
+
 ## Session ten (E6, Phase 4 completion): validated live, one pre-existing gap open
 
 See PROGRESS.md "Session ten" ("Live runs"). Every E6 scenario, `e2e-relay`, `full` and `full
