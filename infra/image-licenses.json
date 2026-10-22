@@ -79,8 +79,8 @@
   },
   "docker.io/library/golang": {
     "license": "BSD-3-Clause",
-    "source": "https://github.com/golang/go/blob/go1.27.2/LICENSE",
-    "tag": "1.27.2-trixie",
+    "source": "https://github.com/golang/go/blob/go1.27.3/LICENSE",
+    "tag": "1.27.3-trixie",
     "notes": "Build stage only; never shipped. Debian trixie base packages carry assorted OSI licenses."
   },
   "gcr.io/distroless/static-debian13": {
