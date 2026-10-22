@@ -11,7 +11,8 @@ export type CoopTab = "overview" | "membership" | "proposals" | "council" | "set
 /** The co-op section tabs (`/coop/*`), as on the boards; links, not panels. */
 export function CoopTabs({ current }: { current: CoopTab | null }): React.JSX.Element {
   const items: PageTab[] = [
-    { id: "overview", label: t("coop.tab.overview"), render: <Link to="/coop" /> },
+    // Exact: otherwise the router marks Overview active on every /coop/* page.
+    { id: "overview", label: t("coop.tab.overview"), render: <Link to="/coop" activeOptions={{ exact: true }} /> },
     { id: "membership", label: t("coop.tab.membership"), render: <Link to="/coop/membership" /> },
     { id: "proposals", label: t("coop.tab.proposals"), render: <Link to="/coop/proposals" /> },
     { id: "council", label: t("coop.tab.council"), render: <Link to="/coop/council" /> },
