@@ -403,6 +403,82 @@ describe("host checks", () => {
   });
 });
 
+describe("as root", () => {
+  test(
+    "stages its inputs in a new root-owned directory and never writes into the service user's home",
+    async () => {
+      const h = host();
+      const sys = h.env.COMMONAIR_SYSROOT!;
+      mkdirSync(join(sys, "var/tmp"), { recursive: true });
+      // The service user's home, with the old staging path pre-planted as symlinks to a file
+      // root owns: a root cp or chown through them would overwrite or hand it over.
+      const userHome = join(h.dir, "commonair-home");
+      const victim = join(h.dir, "victim");
+      writeFileSync(victim, "root-owned\n");
+      mkdirSync(join(userHome, ".cache/commonair-install"), { recursive: true });
+      for (const f of ["selfhost.sh", "SHA256SUMS", bundleAssetName("0.1.0"), "model.onnx"])
+        symlinkSync(victim, join(userHome, ".cache/commonair-install", f));
+      // A short path for the user manager's bus socket (unix socket paths are length-limited).
+      const rt = mkdtempSync("/tmp/ca-rt-");
+      const bus = Bun.listen({ unix: join(rt, "bus"), socket: { data() {} } });
+      mkdirSync(join(sys, "run/user"), { recursive: true });
+      symlinkSync(rt, join(sys, "run/user/1234"));
+      const stubs: Record<string, string> = {
+        id: `case "$*" in "-u") echo 0 ;; "-un") echo root ;; "-u commonair") echo 1234 ;; *) exit 1 ;; esac`,
+        getent: `echo "commonair:x:1234:1234:CommonAir:${userHome}:/bin/sh"`,
+        // Records what the service user would be handed, then succeeds.
+        runuser: String.raw`
+printf '%s\n' "runuser $*" >> "$STUB_LOG"
+for a in "$@"; do case "$a" in */selfhost.sh) stage=\${a%/selfhost.sh} ;; esac; done
+ls -ld "$stage" > "$STUB_STATE/stage.ls"
+ls -l "$stage" >> "$STUB_STATE/stage.ls"
+printf '%s' "$stage" > "$STUB_STATE/stage.path"
+exit 0`,
+        useradd: "exit 1",
+        sysctl: "exit 0",
+      };
+      for (const [name, body] of Object.entries(stubs)) {
+        writeFileSync(join(h.dir, "stub", name), `#!/bin/sh\n${body.replaceAll("\\${", "${")}\n`);
+        chmodSync(join(h.dir, "stub", name), 0o755);
+      }
+      try {
+        const r = h.run([
+          "install",
+          "--bundle",
+          join(releaseDir, bundleAssetName("0.1.0")),
+          "--domain",
+          "stream.example.org",
+          "--email",
+          "ops@example.org",
+          "--yes",
+        ]);
+        expect(r.code, r.err).toBe(0);
+        expect(readFileSync(victim, "utf8")).toBe("root-owned\n");
+        const stage = readFileSync(join(h.dir, "state/stage.path"), "utf8");
+        expect(stage.startsWith(join(sys, "var/tmp/commonair-install."))).toBe(true);
+        const listing = readFileSync(join(h.dir, "state/stage.ls"), "utf8").trim().split("\n");
+        // The directory is readable but not writable by anyone else; so are the files.
+        expect(listing[0]).toMatch(/^drwxr-xr-x/);
+        const files = listing.filter((l) => l.startsWith("-"));
+        expect(files.map((l) => l.split(/\s+/).at(-1) ?? "").toSorted()).toEqual(
+          ["SHA256SUMS", bundleAssetName("0.1.0"), "selfhost.sh"].sort(),
+        );
+        for (const l of files) expect(l).toMatch(/^-rw-r--r--/);
+        // Removed once the service user's run is over.
+        expect(existsSync(stage)).toBe(false);
+        const call = h.calls().find((c) => c.startsWith("runuser"))!;
+        expect(call).toContain(`-u commonair -- env HOME=${userHome}`);
+        expect(call).toContain(`${stage}/selfhost.sh install --bundle ${stage}/${bundleAssetName("0.1.0")}`);
+        expect(h.calls().some((c) => c.startsWith("chown"))).toBe(false);
+      } finally {
+        bus.stop(true);
+        Bun.spawnSync(["rm", "-rf", rt]);
+      }
+    },
+    TIMEOUT,
+  );
+});
+
 describe("download and verification", () => {
   test(
     "downloads only over HTTPS from the repository's release URL",
@@ -439,6 +515,39 @@ describe("download and verification", () => {
     expect(existsSync(join(h.home, ".local/share/commonair/releases"))).toBe(false);
     expect(h.calls().filter((c) => c.startsWith("podman pull"))).toEqual([]);
   });
+
+  test(
+    "a local bundle with no SHA256SUMS is refused unless --insecure-no-checksum",
+    () => {
+      const h = host();
+      const lone = join(h.dir, "lone");
+      mkdirSync(lone);
+      const name = bundleAssetName("0.1.0");
+      writeFileSync(join(lone, name), readFileSync(join(releaseDir, name)));
+      const args = [
+        "install",
+        "--bundle",
+        join(lone, name),
+        "--domain",
+        "stream.example.org",
+        "--email",
+        "ops@example.org",
+      ];
+      const r = h.run(args);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("refusing an unverified bundle");
+      expect(r.err).toContain("--insecure-no-checksum");
+      expect(existsSync(join(h.home, ".local/share/commonair/releases"))).toBe(false);
+      expect(h.calls().filter((c) => c.startsWith("podman pull"))).toEqual([]);
+
+      const ok = h.run([...args, "--insecure-no-checksum"]);
+      expect(ok.code, ok.err).toBe(0);
+      expect(ok.err).toContain("is NOT verified");
+      // Never for a download.
+      expect(host().run([...INSTALL, "--insecure-no-checksum"]).err).toContain("only applies to a local --bundle");
+    },
+    TIMEOUT,
+  );
 
   test("a bundle without an entry in SHA256SUMS is refused", () => {
     const h = host({});
@@ -715,6 +824,72 @@ describe("re-install", () => {
       const pulls = h.calls().filter((c) => c.startsWith("podman pull") && c.includes(":0.2.0@"));
       expect(pulls.length).toBeGreaterThan(0);
       for (const p of pulls) expect(p).toContain("zot.internal:5000/commonair/");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("release repository", () => {
+  test(
+    "a fork's repository recorded in the installed release is used by a later upgrade",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const fork = "https://codeberg.example/fork/commonair";
+      const relEnv = join(h.home, "commonair/release.env");
+      writeFileSync(
+        relEnv,
+        readFileSync(relEnv, "utf8").replace(/^COMMONAIR_REPOSITORY_URL=.*$/m, `COMMONAIR_REPOSITORY_URL=${fork}`),
+      );
+      Bun.spawnSync(["sh", "-c", `: > "${h.log}"`]);
+      expectOk(h.run(["upgrade", "--version", "v0.2.0"]));
+      const urls = h
+        .calls()
+        .filter((c) => c.startsWith("curl"))
+        .map((c) => c.split(" ").at(-1));
+      expect(urls).toEqual([
+        `${fork}/releases/download/v0.2.0/SHA256SUMS`,
+        `${fork}/releases/download/v0.2.0/${bundleAssetName("0.2.0")}`,
+      ]);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "COMMONAIR_REPOSITORY_URL in the environment wins, and must be https",
+    () => {
+      const h = host();
+      const r = h.run(INSTALL, { COMMONAIR_REPOSITORY_URL: "https://git.example.net/me/commonair" });
+      expect(r.code, r.err).toBe(0);
+      expect(h.calls().find((c) => c.startsWith("curl"))).toContain(
+        "https://git.example.net/me/commonair/releases/download/v0.1.0/SHA256SUMS",
+      );
+      const bad = host().run(INSTALL, { COMMONAIR_REPOSITORY_URL: "http://git.example.net/me/commonair" });
+      expect(bad.code).toBe(1);
+      expect(bad.err).toContain("must be an https:// URL");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("stale units", () => {
+  test(
+    "commonair-* units in ~/.config/systemd/user that the release does not ship are removed",
+    () => {
+      const h = host();
+      const dir = join(h.home, ".config/systemd/user");
+      mkdirSync(dir, { recursive: true });
+      // From the manual install path (cp infra/systemd/*): shadows Quadlet's irc-cert unit.
+      writeFileSync(join(dir, "commonair-irc-cert.service"), "[Service]\nExecStart=%h/.bun/bin/bun sync\n");
+      writeFileSync(join(dir, "commonair-old.timer"), "[Timer]\nOnCalendar=daily\n");
+      writeFileSync(join(dir, "someone-else.service"), "[Service]\n");
+      expectOk(h.run(INSTALL));
+      expect(readdirSync(dir).sort()).toEqual(
+        [...readdirSync(join(ROOT, "infra/systemd")), "someone-else.service"].sort(),
+      );
+      expect(h.calls()).toContain("systemctl --user disable --now commonair-old.timer");
+      const disable = h.calls().indexOf("systemctl --user disable --now commonair-old.timer");
+      expect(disable).toBeLessThan(h.calls().indexOf("systemctl --user daemon-reload"));
     },
     TIMEOUT,
   );

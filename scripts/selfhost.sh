@@ -12,8 +12,10 @@
 set -eu
 
 # The one place the release URL comes from (it equals SITE.repository.url; a test enforces it).
-# Forks set COMMONAIR_REPOSITORY_URL.
-REPOSITORY_URL="${COMMONAIR_REPOSITORY_URL:-https://github.com/abolishus/commonair}"
+# Forks set COMMONAIR_REPOSITORY_URL on the first install; later runs read it from the installed
+# release (release.env, written by bundle.ts), so a fork never silently upgrades from upstream.
+DEFAULT_REPOSITORY_URL="https://github.com/abolishus/commonair"
+REPOSITORY_URL="${COMMONAIR_REPOSITORY_URL:-}"
 OIDC_ISSUER="https://token.actions.githubusercontent.com"
 CHECKSUMS_ASSET="SHA256SUMS"
 SIGNATURE_ASSET="SHA256SUMS.sigstore.json"
@@ -81,11 +83,18 @@ install options:
                         host's global interface addresses (never a "what is my IP" service).
   --model <path>        Use a local copy of the moderation model instead of downloading it.
   --require-signature   Fail unless cosign verifies SHA256SUMS against the release workflow.
+  --insecure-no-checksum
+                        Offline only: accept a --bundle with no SHA256SUMS. Its integrity is
+                        then not checked at all; never use it for a downloaded bundle.
   --unsupported-distro  Continue on a distribution other than Debian 13 or Fedora 42+.
   --yes                 Allow install over an existing instance (secrets are kept), and run
                         the root preparation without asking.
 
-upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature, --yes.
+upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
+  --insecure-no-checksum, --yes.
+
+A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
+upgrades use the repository recorded in the installed release.
 
 Run install as the user that will own the instance. Run it as root on a fresh server and it
 installs Podman, creates the `commonair` user, enables linger, lowers the unprivileged-port
@@ -149,6 +158,16 @@ installed_version() {
 }
 
 instance_exists() { [ -f "$ENV_FILE" ] || [ -L "$CURRENT_LINK" ]; }
+
+# The environment wins, then the installed release's own repository, then ours.
+resolve_repository_url() {
+  if [ -z "$REPOSITORY_URL" ]; then REPOSITORY_URL=$(env_get COMMONAIR_REPOSITORY_URL "$CURRENT_LINK/release.env"); fi
+  REPOSITORY_URL=${REPOSITORY_URL:-$DEFAULT_REPOSITORY_URL}
+  case "$REPOSITORY_URL" in
+    https://*) ;;
+    *) die "the release repository must be an https:// URL, not $REPOSITORY_URL" ;;
+  esac
+}
 
 # --- host checks --------------------------------------------------------------------------
 
@@ -295,41 +314,50 @@ root_prepare() {
 }
 
 # Re-runs this script as the service user with the original arguments.
+#
+# The user needs read access to the script, a local bundle and the model. Root stages them in a
+# fresh root-owned directory (mktemp in /var/tmp) that the user can read but not write: root never
+# writes into a path the service user controls, where a planted symlink would turn a root cp or
+# chown into a write to any file (the uid a rootless container escape lands on).
 run_as_service_user() {
   _uid=$(id -u "$SERVICE_USER")
   _home=$(getent passwd "$SERVICE_USER" | cut -d: -f6)
-  _rt="/run/user/$_uid"
+  _rt="$SYSROOT/run/user/$_uid"
   _i=0
   while [ ! -S "$_rt/bus" ] && [ ! -S "$_rt/systemd/private" ]; do
     _i=$((_i + 1))
     [ "$_i" -le 30 ] || die "the user manager for $SERVICE_USER did not start" "fix: systemctl status user@$_uid.service"
     sleep 1
   done
-  # The user must be able to read the script and a local bundle.
-  _stage="$_home/.cache/commonair-install"
-  runuser -u "$SERVICE_USER" -- mkdir -p "$_stage"
-  cp "$0" "$_stage/selfhost.sh"
-  chown "$SERVICE_USER:" "$_stage/selfhost.sh"
+  _stage=$(stage_for_service_user)
+  info "continuing as $SERVICE_USER"
+  _rc=0
+  # shellcheck disable=SC2046,SC2016 # validated flags without spaces; $HOME/$@ expand in the inner sh
+  runuser -u "$SERVICE_USER" -- env HOME="$_home" XDG_RUNTIME_DIR="$_rt" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$_rt/bus" sh -c 'cd "$HOME" && exec sh "$@"' sh \
+    "$_stage/selfhost.sh" install $(user_args "$_stage") || _rc=$?
+  rm -rf "$_stage"
+  exit "$_rc"
+}
+
+# Copies the script and the local inputs into a new root-owned, world-readable directory and
+# prints its path. mktemp creates it (0700, root), so nothing the service user made is written to.
+stage_for_service_user() {
+  _st=$(mktemp -d "$SYSROOT/var/tmp/commonair-install.XXXXXX")
+  cp "$0" "$_st/selfhost.sh"
   if [ -n "$BUNDLE" ]; then
-    cp "$BUNDLE" "$_stage/"
-    chown "$SERVICE_USER:" "$_stage/$(basename "$BUNDLE")"
+    cp "$BUNDLE" "$_st/"
     _sums="${SUMS_FILE:-$(dirname "$BUNDLE")/$CHECKSUMS_ASSET}"
     if [ -f "$_sums" ]; then
-      cp "$_sums" "$_stage/$CHECKSUMS_ASSET"
-      chown "$SERVICE_USER:" "$_stage/$CHECKSUMS_ASSET"
+      cp "$_sums" "$_st/$CHECKSUMS_ASSET"
       _sig="$(dirname "$_sums")/$SIGNATURE_ASSET"
-      if [ -f "$_sig" ]; then cp "$_sig" "$_stage/" && chown "$SERVICE_USER:" "$_stage/$SIGNATURE_ASSET"; fi
+      if [ -f "$_sig" ]; then cp "$_sig" "$_st/$SIGNATURE_ASSET"; fi
     fi
   fi
-  if [ -n "$MODEL_SRC" ]; then
-    cp "$MODEL_SRC" "$_stage/model.onnx"
-    chown "$SERVICE_USER:" "$_stage/model.onnx"
-  fi
-  info "continuing as $SERVICE_USER"
-  # shellcheck disable=SC2046,SC2016 # validated flags without spaces; $HOME/$@ expand in the inner sh
-  exec runuser -u "$SERVICE_USER" -- env HOME="$_home" XDG_RUNTIME_DIR="$_rt" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=$_rt/bus" sh -c 'cd "$HOME" && exec sh "$@"' sh \
-    "$_stage/selfhost.sh" install $(user_args "$_stage")
+  if [ -n "$MODEL_SRC" ]; then cp "$MODEL_SRC" "$_st/model.onnx"; fi
+  chmod 0644 "$_st"/*
+  chmod 0755 "$_st"
+  printf '%s' "$_st"
 }
 
 # Flags for the re-run as the service user, with local files moved to the staging directory.
@@ -344,6 +372,7 @@ user_args() {
   [ -n "$PUBLIC_IP" ] && _out="$_out --public-ip $PUBLIC_IP"
   [ -n "$MODEL_SRC" ] && _out="$_out --model $1/model.onnx"
   [ "$REQUIRE_SIGNATURE" = yes ] && _out="$_out --require-signature"
+  [ "$INSECURE_NO_CHECKSUM" = yes ] && _out="$_out --insecure-no-checksum"
   [ "$UNSUPPORTED_DISTRO" = yes ] && _out="$_out --unsupported-distro"
   [ "$YES" = yes ] && _out="$_out --yes"
   printf '%s' "$_out"
@@ -416,7 +445,10 @@ obtain_bundle() {
       verify_checksum "$_dir" "$_base"
     else
       if [ "$REQUIRE_SIGNATURE" = yes ]; then die "--require-signature: no $CHECKSUMS_ASSET next to $BUNDLE"; fi
-      warn "no $CHECKSUMS_ASSET next to $BUNDLE (or --sha256sums): its integrity is NOT verified"
+      [ "$INSECURE_NO_CHECKSUM" = yes ] || die "no $CHECKSUMS_ASSET next to $BUNDLE: refusing an unverified bundle" \
+        "fix: put the release's $CHECKSUMS_ASSET next to it or pass --sha256sums <path>" \
+        "offline with no checksum file at all: --insecure-no-checksum (you vouch for the bundle)"
+      warn "--insecure-no-checksum: $BUNDLE is NOT verified; you vouch for its integrity"
     fi
     BUNDLE_PATH="$_dir/$_base"
     return 0
@@ -622,6 +654,16 @@ install_units() {
     if [ -e "$_f" ]; then rm -f "$_f"; fi
   done
   cp "$_rel"/quadlet/* "$QUADLET_DIR/"
+  # Units in ~/.config/systemd/user shadow Quadlet's generated ones, so a commonair-* unit the
+  # release does not ship (an older release's, or one copied by hand for a manual install) goes.
+  for _f in "$SYSTEMD_DIR"/commonair-*; do
+    [ -e "$_f" ] || [ -L "$_f" ] || continue
+    _n=$(basename "$_f")
+    [ -e "$_rel/systemd/$_n" ] && continue
+    case "$_n" in *.timer) systemctl --user disable --now "$_n" >/dev/null 2>&1 || true ;; esac
+    info "removing $_n (not part of this release)"
+    rm -f "$_f"
+  done
   cp "$_rel"/systemd/* "$SYSTEMD_DIR/"
   systemctl --user daemon-reload
   info "units installed from $_rel"
@@ -759,6 +801,7 @@ parse_flags() {
   PUBLIC_IP=""
   MODEL_SRC=""
   REQUIRE_SIGNATURE=no
+  INSECURE_NO_CHECKSUM=no
   UNSUPPORTED_DISTRO=no
   YES=no
   while [ $# -gt 0 ]; do
@@ -782,6 +825,7 @@ parse_flags() {
         shift 2
         ;;
       --require-signature) REQUIRE_SIGNATURE=yes && shift ;;
+      --insecure-no-checksum) INSECURE_NO_CHECKSUM=yes && shift ;;
       --unsupported-distro) UNSUPPORTED_DISTRO=yes && shift ;;
       --yes | -y) YES=yes && shift ;;
       -h | --help) usage && exit 0 ;;
@@ -789,6 +833,7 @@ parse_flags() {
     esac
   done
   if [ -n "$VERSION" ] && [ -n "$BUNDLE" ]; then die "--version and --bundle are exclusive"; fi
+  if [ "$INSECURE_NO_CHECKSUM" = yes ] && [ -z "$BUNDLE" ]; then die "--insecure-no-checksum only applies to a local --bundle"; fi
   if [ -n "$DOMAIN" ] && ! is_hostname "$DOMAIN"; then die "not a hostname: $DOMAIN"; fi
   if [ -n "$EMAIL" ] && ! is_email "$EMAIL"; then die "not an email address: $EMAIL"; fi
   case "$TLS" in "" | acme | internal) ;; *) die "--tls must be acme or internal, not $TLS" ;; esac
@@ -810,6 +855,7 @@ cmd_install() {
     root_prepare
     run_as_service_user
   fi
+  resolve_repository_url
   if instance_exists && [ "$YES" != yes ]; then
     die "an instance is already installed (version $(installed_version))" \
       "re-run with --yes to reinstall it (secrets are kept), or use: selfhost.sh upgrade"
@@ -872,6 +918,7 @@ cmd_upgrade() {
   [ -L "$CURRENT_LINK" ] || die "no instance installed here" "fix: selfhost.sh install"
   _cur=$(readlink "$CURRENT_LINK")
   _curv=$(installed_version)
+  resolve_repository_url
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   check_podman
   check_systemd
