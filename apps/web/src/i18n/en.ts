@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { coopMessages } from "./coop.ts";
 import { moneyMessages } from "./money.ts";
 import { safetyMessages } from "./safety.ts";
 import { supportMessages } from "./support.ts";
@@ -10,6 +11,7 @@ export const en = {
   ...supportMessages,
   ...moneyMessages,
   ...safetyMessages,
+  ...coopMessages,
   "app.title": "Live streaming, owned by the people who make it",
 
   "nav.account": "Account",

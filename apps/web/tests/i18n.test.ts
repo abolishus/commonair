@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { en } from "../src/i18n/en.ts";
 import { t } from "../src/i18n/index.ts";
+import { coopMessages } from "../src/i18n/coop.ts";
 import { moneyMessages } from "../src/i18n/money.ts";
 import { safetyMessages } from "../src/i18n/safety.ts";
 import { supportMessages } from "../src/i18n/support.ts";
@@ -41,6 +42,7 @@ describe("message catalog", () => {
       join(SRC, "lib/relays.ts"),
       join(SRC, "lib/support.ts"),
       join(SRC, "lib/money.ts"),
+      join(SRC, "lib/coop.ts"),
       join(SRC, "components/safety/labels.ts"),
     ];
     const dynamic = files
@@ -61,6 +63,21 @@ describe("message catalog", () => {
     expect(inline.filter((k) => k !== undefined && k in safetyMessages)).toEqual([]);
     expect(support.length + money.length + safety.length).toBeGreaterThan(150);
     expect(readFileSync(join(SRC, "i18n/en.ts"), "utf8")).toContain("...safetyMessages");
+  });
+
+  it("keeps the E5 co-op catalog disjoint from every other catalog and the inline keys", () => {
+    const inline = [...readFileSync(join(SRC, "i18n/en.ts"), "utf8").matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]);
+    const coop = Object.keys(coopMessages);
+    expect(coop.filter((k) => k in moneyMessages || k in supportMessages || k in safetyMessages)).toEqual([]);
+    expect(inline.filter((k) => k !== undefined && k in coopMessages)).toEqual([]);
+    expect(coop.length).toBeGreaterThan(300);
+    expect(readFileSync(join(SRC, "i18n/en.ts"), "utf8")).toContain("...coopMessages");
+    // Every co-op key the catalog defines is used somewhere (no dead strings).
+    const used = files
+      .filter(([f]) => !f.startsWith(join(SRC, "i18n/")))
+      .map(([, text]) => text)
+      .join("\n");
+    expect(coop.filter((k) => !used.includes(`"${k}"`))).toEqual([]);
   });
 
   it("maps every auth error code to a catalog key", () => {
