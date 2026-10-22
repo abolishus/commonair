@@ -3,6 +3,7 @@
 
 import { coopMessages } from "./coop.ts";
 import { moneyMessages } from "./money.ts";
+import { opsMessages } from "./ops.ts";
 import { safetyMessages } from "./safety.ts";
 import { supportMessages } from "./support.ts";
 
@@ -12,6 +13,7 @@ export const en = {
   ...moneyMessages,
   ...safetyMessages,
   ...coopMessages,
+  ...opsMessages,
   "app.title": "Live streaming, owned by the people who make it",
 
   "nav.account": "Account",

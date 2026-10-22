@@ -19,10 +19,15 @@ import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
 import { Route as AppTransparencyRouteImport } from './routes/_app/transparency'
+import { Route as StudioContentRouteImport } from './routes/_studio/content'
 import { Route as StudioDashboardRouteImport } from './routes/_studio/dashboard'
+import { Route as StudioOverlaysRouteImport } from './routes/_studio/overlays'
 import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
 import { Route as StudioRevenueRouteImport } from './routes/_studio/revenue'
 import { Route as EmbedChannelRouteImport } from './routes/embed.$channel'
+import { Route as OverlayAlertsRouteImport } from './routes/overlay.alerts'
+import { Route as OverlayChatRouteImport } from './routes/overlay.chat'
+import { Route as OverlayGoalsRouteImport } from './routes/overlay.goals'
 import { Route as AdminAdminAppealsRouteImport } from './routes/_admin/admin.appeals'
 import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
 import { Route as AdminAdminLegalRouteImport } from './routes/_admin/admin.legal'
@@ -32,6 +37,7 @@ import { Route as AppCoopCouncilRouteImport } from './routes/_app/coop.council'
 import { Route as AppCoopMembershipRouteImport } from './routes/_app/coop.membership'
 import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
+import { Route as AppSettingsPrivacyRouteImport } from './routes/_app/settings.privacy'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
 import { Route as AppCoopPatronageIndexRouteImport } from './routes/_app/coop.patronage.index'
 import { Route as AppCoopPatronagePeriodIdRouteImport } from './routes/_app/coop.patronage.$periodId'
@@ -87,9 +93,19 @@ const AppTransparencyRoute = AppTransparencyRouteImport.update({
   path: '/transparency',
   getParentRoute: () => AppRoute,
 } as any)
+const StudioContentRoute = StudioContentRouteImport.update({
+  id: '/content',
+  path: '/content',
+  getParentRoute: () => StudioRoute,
+} as any)
 const StudioDashboardRoute = StudioDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioOverlaysRoute = StudioOverlaysRouteImport.update({
+  id: '/overlays',
+  path: '/overlays',
   getParentRoute: () => StudioRoute,
 } as any)
 const StudioRelaysRoute = StudioRelaysRouteImport.update({
@@ -105,6 +121,21 @@ const StudioRevenueRoute = StudioRevenueRouteImport.update({
 const EmbedChannelRoute = EmbedChannelRouteImport.update({
   id: '/embed/$channel',
   path: '/embed/$channel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OverlayAlertsRoute = OverlayAlertsRouteImport.update({
+  id: '/overlay/alerts',
+  path: '/overlay/alerts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OverlayChatRoute = OverlayChatRouteImport.update({
+  id: '/overlay/chat',
+  path: '/overlay/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OverlayGoalsRoute = OverlayGoalsRouteImport.update({
+  id: '/overlay/goals',
+  path: '/overlay/goals',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminAdminAppealsRoute = AdminAdminAppealsRouteImport.update({
@@ -150,6 +181,11 @@ const AppCoopSettingsRoute = AppCoopSettingsRouteImport.update({
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
   id: '/settings/appeals',
   path: '/settings/appeals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsPrivacyRoute = AppSettingsPrivacyRouteImport.update({
+  id: '/settings/privacy',
+  path: '/settings/privacy',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsSubscriptionsRoute =
@@ -198,10 +234,15 @@ export interface FileRoutesByFullPath {
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
+  '/content': typeof StudioContentRoute
   '/dashboard': typeof StudioDashboardRoute
+  '/overlays': typeof StudioOverlaysRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/overlay/alerts': typeof OverlayAlertsRoute
+  '/overlay/chat': typeof OverlayChatRoute
+  '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/legal': typeof AdminAdminLegalRoute
@@ -210,6 +251,7 @@ export interface FileRoutesByFullPath {
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
+  '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/coop/': typeof AppCoopIndexRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
@@ -227,10 +269,15 @@ export interface FileRoutesByTo {
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
+  '/content': typeof StudioContentRoute
   '/dashboard': typeof StudioDashboardRoute
+  '/overlays': typeof StudioOverlaysRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/overlay/alerts': typeof OverlayAlertsRoute
+  '/overlay/chat': typeof OverlayChatRoute
+  '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/legal': typeof AdminAdminLegalRoute
@@ -239,6 +286,7 @@ export interface FileRoutesByTo {
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
+  '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/coop': typeof AppCoopIndexRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
@@ -259,10 +307,15 @@ export interface FileRoutesById {
   '/_app/signup': typeof AppSignupRoute
   '/_app/takedown': typeof AppTakedownRoute
   '/_app/transparency': typeof AppTransparencyRoute
+  '/_studio/content': typeof StudioContentRoute
   '/_studio/dashboard': typeof StudioDashboardRoute
+  '/_studio/overlays': typeof StudioOverlaysRoute
   '/_studio/relays': typeof StudioRelaysRoute
   '/_studio/revenue': typeof StudioRevenueRoute
   '/embed/$channel': typeof EmbedChannelRoute
+  '/overlay/alerts': typeof OverlayAlertsRoute
+  '/overlay/chat': typeof OverlayChatRoute
+  '/overlay/goals': typeof OverlayGoalsRoute
   '/_app/': typeof AppIndexRoute
   '/_admin/admin/appeals': typeof AdminAdminAppealsRoute
   '/_admin/admin/coop': typeof AdminAdminCoopRoute
@@ -272,6 +325,7 @@ export interface FileRoutesById {
   '/_app/coop/membership': typeof AppCoopMembershipRoute
   '/_app/coop/settings': typeof AppCoopSettingsRoute
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
+  '/_app/settings/privacy': typeof AppSettingsPrivacyRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/_app/coop/': typeof AppCoopIndexRoute
   '/_app/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
@@ -291,10 +345,15 @@ export interface FileRouteTypes {
     | '/signup'
     | '/takedown'
     | '/transparency'
+    | '/content'
     | '/dashboard'
+    | '/overlays'
     | '/relays'
     | '/revenue'
     | '/embed/$channel'
+    | '/overlay/alerts'
+    | '/overlay/chat'
+    | '/overlay/goals'
     | '/admin/appeals'
     | '/admin/coop'
     | '/admin/legal'
@@ -303,6 +362,7 @@ export interface FileRouteTypes {
     | '/coop/membership'
     | '/coop/settings'
     | '/settings/appeals'
+    | '/settings/privacy'
     | '/settings/subscriptions'
     | '/coop/'
     | '/coop/patronage/$periodId'
@@ -320,10 +380,15 @@ export interface FileRouteTypes {
     | '/signup'
     | '/takedown'
     | '/transparency'
+    | '/content'
     | '/dashboard'
+    | '/overlays'
     | '/relays'
     | '/revenue'
     | '/embed/$channel'
+    | '/overlay/alerts'
+    | '/overlay/chat'
+    | '/overlay/goals'
     | '/admin/appeals'
     | '/admin/coop'
     | '/admin/legal'
@@ -332,6 +397,7 @@ export interface FileRouteTypes {
     | '/coop/membership'
     | '/coop/settings'
     | '/settings/appeals'
+    | '/settings/privacy'
     | '/settings/subscriptions'
     | '/coop'
     | '/coop/patronage/$periodId'
@@ -351,10 +417,15 @@ export interface FileRouteTypes {
     | '/_app/signup'
     | '/_app/takedown'
     | '/_app/transparency'
+    | '/_studio/content'
     | '/_studio/dashboard'
+    | '/_studio/overlays'
     | '/_studio/relays'
     | '/_studio/revenue'
     | '/embed/$channel'
+    | '/overlay/alerts'
+    | '/overlay/chat'
+    | '/overlay/goals'
     | '/_app/'
     | '/_admin/admin/appeals'
     | '/_admin/admin/coop'
@@ -364,6 +435,7 @@ export interface FileRouteTypes {
     | '/_app/coop/membership'
     | '/_app/coop/settings'
     | '/_app/settings/appeals'
+    | '/_app/settings/privacy'
     | '/_app/settings/subscriptions'
     | '/_app/coop/'
     | '/_app/coop/patronage/$periodId'
@@ -379,6 +451,9 @@ export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
   StudioRoute: typeof StudioRouteWithChildren
   EmbedChannelRoute: typeof EmbedChannelRoute
+  OverlayAlertsRoute: typeof OverlayAlertsRoute
+  OverlayChatRoute: typeof OverlayChatRoute
+  OverlayGoalsRoute: typeof OverlayGoalsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -453,11 +528,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTransparencyRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_studio/content': {
+      id: '/_studio/content'
+      path: '/content'
+      fullPath: '/content'
+      preLoaderRoute: typeof StudioContentRouteImport
+      parentRoute: typeof StudioRoute
+    }
     '/_studio/dashboard': {
       id: '/_studio/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof StudioDashboardRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/overlays': {
+      id: '/_studio/overlays'
+      path: '/overlays'
+      fullPath: '/overlays'
+      preLoaderRoute: typeof StudioOverlaysRouteImport
       parentRoute: typeof StudioRoute
     }
     '/_studio/relays': {
@@ -479,6 +568,27 @@ declare module '@tanstack/react-router' {
       path: '/embed/$channel'
       fullPath: '/embed/$channel'
       preLoaderRoute: typeof EmbedChannelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/overlay/alerts': {
+      id: '/overlay/alerts'
+      path: '/overlay/alerts'
+      fullPath: '/overlay/alerts'
+      preLoaderRoute: typeof OverlayAlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/overlay/chat': {
+      id: '/overlay/chat'
+      path: '/overlay/chat'
+      fullPath: '/overlay/chat'
+      preLoaderRoute: typeof OverlayChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/overlay/goals': {
+      id: '/overlay/goals'
+      path: '/overlay/goals'
+      fullPath: '/overlay/goals'
+      preLoaderRoute: typeof OverlayGoalsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_admin/admin/appeals': {
@@ -542,6 +652,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/appeals'
       fullPath: '/settings/appeals'
       preLoaderRoute: typeof AppSettingsAppealsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/privacy': {
+      id: '/_app/settings/privacy'
+      path: '/settings/privacy'
+      fullPath: '/settings/privacy'
+      preLoaderRoute: typeof AppSettingsPrivacyRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/subscriptions': {
@@ -625,6 +742,7 @@ interface AppRouteChildren {
   AppCoopMembershipRoute: typeof AppCoopMembershipRoute
   AppCoopSettingsRoute: typeof AppCoopSettingsRoute
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
+  AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
   AppCoopIndexRoute: typeof AppCoopIndexRoute
   AppCoopPatronagePeriodIdRoute: typeof AppCoopPatronagePeriodIdRoute
@@ -646,6 +764,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopMembershipRoute: AppCoopMembershipRoute,
   AppCoopSettingsRoute: AppCoopSettingsRoute,
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
+  AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
   AppCoopIndexRoute: AppCoopIndexRoute,
   AppCoopPatronagePeriodIdRoute: AppCoopPatronagePeriodIdRoute,
@@ -659,13 +778,17 @@ const AppRouteChildren: AppRouteChildren = {
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface StudioRouteChildren {
+  StudioContentRoute: typeof StudioContentRoute
   StudioDashboardRoute: typeof StudioDashboardRoute
+  StudioOverlaysRoute: typeof StudioOverlaysRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
   StudioRevenueRoute: typeof StudioRevenueRoute
 }
 
 const StudioRouteChildren: StudioRouteChildren = {
+  StudioContentRoute: StudioContentRoute,
   StudioDashboardRoute: StudioDashboardRoute,
+  StudioOverlaysRoute: StudioOverlaysRoute,
   StudioRelaysRoute: StudioRelaysRoute,
   StudioRevenueRoute: StudioRevenueRoute,
 }
@@ -678,6 +801,9 @@ const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
   StudioRoute: StudioRouteWithChildren,
   EmbedChannelRoute: EmbedChannelRoute,
+  OverlayAlertsRoute: OverlayAlertsRoute,
+  OverlayChatRoute: OverlayChatRoute,
+  OverlayGoalsRoute: OverlayGoalsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
