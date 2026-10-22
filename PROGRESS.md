@@ -20,6 +20,25 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session ten (2026-10-22): E6 Phase 4 completion (in flight)
+
+Started from `388f69f` after E5 closed (e5-coop passed twice, e4b-money and trust-safety once).
+Spec `docs/testing/e6-selectors.md`, policy ADR 0021 (the user decided: JSON-only export with a
+7-day link and one per kind per 24 h; overlay tokens with optional expiry (none, quick picks up
+to 6 months, or any exact date), one active per channel; the restore drill on a throwaway
+Postgres; `full` keeps load small and `load-plan` (20 × 200 per streamer) stays out; `full`
+includes e5-coop, trust-safety and e2e-relay on one harness stack; polls, predictions, raids and
+goals stay 501). Contract step on `main`: `93bab15` (spec, ADR, migration `0022_e6_ops`
+(overlay token expiry + one-active index, `vods_broadcast_idx`, export expiry index; db int 3/3),
+contracts (overlay token expiry/status/revoke, `OverlayAlert`, `BUS.overlay`,
+`OVERLAY_EVENTS_PATH`, `EXPORT_JOBS` and export constants, `opsTick`), `OPS_TEST_HOOKS`,
+`infra.ts stack --harness`, `harness/compose.e6.yaml`), `64ddf72` + `6a3d3d0` (fflate 0.8.3 MIT
+for worker and harness; worker → `@commonair/email`; harness → ledger, storage). Found while
+surveying: account deletion left `events`/`webhook_deliveries` payloads (usernames) and export
+objects in place, and `tips.message`; unit B fixes that. Briefs in `.claude/briefs/e6/`.
+Batches (workflows of three): 1 = A API, B worker, C `packages/ui`; 2 = D web, E1 harness
+feature scenarios, E2 harness ops (drill, load-plan, full, no-proprietary, SDK bot).
+
 ## Session nine (2026-10-21/22): E5 co-op
 
 Spec `docs/testing/e5-selectors.md`, policy ADR 0020 (the user decided: shares refunded at once
