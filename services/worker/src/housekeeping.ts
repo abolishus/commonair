@@ -87,15 +87,32 @@ export async function markRelaysOffline(ctx: WorkerContext, missedMs = 180_000) 
 /** The only object prefix a VOD may own (trailing slash: "vods/a" must never match "vods/ab…"). */
 export const vodPrefix = (vodId: string) => `vods/${vodId}/`;
 
+/** The only object keys a clip may own: `clips/<clip id>.<ext>` (video and thumbnail). */
+export const isOwnClipKey = (clipId: string, key: string) =>
+  key.startsWith(`clips/${clipId}.`) && /^clips\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/.test(key);
+
+/** Removals by the owner or the clip's creator (e6 spec "VODs and clips"); retention deletes their objects. */
+export const USER_REMOVED_REASONS = ["owner", "creator"] as const;
+
 /**
- * Expired VODs: delete their objects, then mark them deleted. A VOD whose
- * objects could not be deleted keeps its status and is retried next run.
+ * True while the channel's owner has an active legal hold (ADR 0006): their media is never
+ * deleted, whatever removed or expired it.
+ */
+const ownerHeld = (channelId: typeof schema.vods.channelId | typeof schema.clips.channelId) =>
+  sql`exists (select 1 from ${schema.legalHolds} h join ${schema.channels} c on c.owner_id = h.user_id
+               where c.id = ${channelId} and h.released_at is null)`;
+
+/**
+ * Expired VODs (retention, or removed by their owner: the API expires them at once) and clips
+ * removed by their owner or creator: delete their objects, then mark them deleted. A VOD or clip
+ * whose objects could not be deleted keeps its status and is retried next run. While the channel
+ * owner has an active legal hold nothing of theirs is deleted: those rows count as `held`.
  */
 export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
   const v = schema.vods;
   if (!ctx.storage) {
     ctx.logger.warn("VOD retention skipped: object storage is not configured");
-    return { deleted: 0, failed: 0, objects: 0 };
+    return { deleted: 0, failed: 0, objects: 0, held: 0, clipsDeleted: 0 };
   }
   const due = and(isNotNull(v.expiresAt), lt(v.expiresAt, ctx.now()), ne(v.status, "deleted"));
   // The media unit writes VODs under exactly `vods/<vod id>/`. Anything else is refused: a
@@ -107,11 +124,15 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
     .where(and(due, sql`not (${ownPrefix})`))
     .limit(batch);
   for (const r of refused) ctx.logger.error("VOD retention: refusing unexpected storage prefix", { vodId: r.id });
-  // Refused rows are excluded here so they can never starve valid ones out of the batch.
+  const [heldVods] = await ctx.db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(v)
+    .where(and(due, ownPrefix, ownerHeld(v.channelId)));
+  // Refused and held rows are excluded here so they can never starve valid ones out of the batch.
   const expired = await ctx.db
     .select({ id: v.id })
     .from(v)
-    .where(and(due, ownPrefix))
+    .where(and(due, ownPrefix, sql`not ${ownerHeld(v.channelId)}`))
     .orderBy(v.expiresAt)
     .limit(batch);
   let deleted = 0;
@@ -120,12 +141,73 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
   for (const vod of expired) {
     try {
       objects += await ctx.storage.deletePrefix(ctx.mediaBucket, vodPrefix(vod.id));
-      await ctx.db.update(v).set({ status: "deleted", removedReason: "retention" }).where(eq(v.id, vod.id));
+      // An owner removal keeps its reason; only plain expiry is recorded as retention.
+      await ctx.db
+        .update(v)
+        .set({ status: "deleted", removedReason: sql`coalesce(${v.removedReason}, 'retention')` })
+        .where(eq(v.id, vod.id));
       deleted++;
     } catch (err) {
       failed++;
       ctx.logger.error("VOD retention: object deletion failed", { vodId: vod.id, err });
     }
   }
-  return { deleted, failed, objects };
+  const clips = await purgeRemovedClips(ctx, batch);
+  return {
+    deleted,
+    failed: failed + clips.failed,
+    objects: objects + clips.objects,
+    held: (heldVods?.n ?? 0) + clips.held,
+    clipsDeleted: clips.deleted,
+  };
+}
+
+/** Clips removed by their owner or creator: delete the clip and thumbnail objects, then mark them deleted. */
+async function purgeRemovedClips(ctx: WorkerContext, batch: number) {
+  const c = schema.clips;
+  const out = { deleted: 0, failed: 0, objects: 0, held: 0 };
+  const storage = ctx.storage;
+  if (!storage) return out;
+  const removed = and(inArray(c.removedReason, [...USER_REMOVED_REASONS]), ne(c.status, "deleted"));
+  const [held] = await ctx.db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(c)
+    .where(and(removed, ownerHeld(c.channelId)));
+  out.held = held?.n ?? 0;
+  // Same rule as VOD prefixes: a key the media unit would not have written is never deleted, and
+  // such rows are kept out of the batch so they cannot starve valid ones.
+  const ownKey = (col: typeof c.storageKey | typeof c.thumbnailKey) =>
+    sql`(${col} is null or ${col} ~ ('^clips/' || ${c.id}::text || '\\.[a-z0-9]{2,5}$'))`;
+  const ownKeys = and(ownKey(c.storageKey), ownKey(c.thumbnailKey));
+  const refused = await ctx.db
+    .select({ id: c.id })
+    .from(c)
+    .where(and(removed, sql`not ${ownerHeld(c.channelId)}`, sql`not (${ownKeys})`))
+    .limit(batch);
+  for (const r of refused) ctx.logger.error("VOD retention: refusing unexpected clip object key", { clipId: r.id });
+  out.failed += refused.length;
+  const due = await ctx.db
+    .select({ id: c.id, storageKey: c.storageKey, thumbnailKey: c.thumbnailKey })
+    .from(c)
+    .where(and(removed, sql`not ${ownerHeld(c.channelId)}`, ownKeys))
+    .orderBy(c.createdAt)
+    .limit(batch);
+  for (const clip of due) {
+    const keys = [clip.storageKey, clip.thumbnailKey].filter((k): k is string => k !== null);
+    // Checked again here, so a regex slip in SQL can never widen what gets deleted.
+    if (keys.some((k) => !isOwnClipKey(clip.id, k))) {
+      out.failed++;
+      continue;
+    }
+    try {
+      for (const k of keys) await storage.delete(ctx.mediaBucket, k);
+      await ctx.db.update(c).set({ status: "deleted" }).where(eq(c.id, clip.id));
+      out.objects += keys.length;
+      out.deleted++;
+    } catch (err) {
+      out.failed++;
+      ctx.logger.error("VOD retention: clip object deletion failed", { clipId: clip.id, err });
+    }
+  }
+  return out;
 }

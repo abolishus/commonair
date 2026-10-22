@@ -9,11 +9,19 @@
  * governance, audit). **Held data is never touched**: `legal_holds`, `evidence_objects`,
  * `moderation_flags`, `moderation_cases` and `ncmec_reports` stay linked by id, and `retained`
  * lists them. While the user has an active hold no media object is deleted either.
+ *
+ * E6 adds, in the same transaction: outbox rows that reference the user and their webhook
+ * deliveries are deleted (`scrubOutbox`), the free text they wrote in rows that are kept is
+ * cleared (tip messages, report details, appeal bodies), and their data exports are deleted
+ * (archives after commit). The completed notice goes to the address on file, read in the
+ * transaction and never stored or logged.
  */
 import { BUS, UserControlMessage } from "@commonair/contracts/events";
+import { exportObjectKey } from "@commonair/contracts/internal";
 import { schema, type Executor } from "@commonair/db";
 import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
+import { eventNeedles, referencesUser, type DeletedIdentity } from "./references.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
 import { vodPrefix } from "../moderation/objects.ts";
 import { audit, endBroadcast, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
@@ -68,6 +76,47 @@ export async function heldRows(tx: Executor, userId: string): Promise<Retained[]
   ].filter((r) => r.rows > 0);
 }
 
+/** Delete in chunks so one user with a long history never builds an unbounded parameter list. */
+const CHUNK = 500;
+
+/**
+ * Outbox rows that reference the user (`referencesUser`), and the webhook deliveries of those
+ * rows, deleted. Delivered copies are the receivers'; ours go. Returns the counts.
+ */
+export async function scrubOutbox(tx: Executor, who: DeletedIdentity): Promise<{ events: number; deliveries: number }> {
+  const e = s.events;
+  const { exact, folded } = eventNeedles(who);
+  const conds = [
+    ...exact.map((n) => sql`strpos(${e.payload}::text, ${n}) > 0`),
+    ...folded.map((n) => sql`strpos(lower(${e.payload}::text), ${n}) > 0`),
+  ];
+  if (conds.length === 0) return { events: 0, deliveries: 0 };
+  const candidates = await tx
+    .select({ id: e.id, type: e.type, channelId: e.channelId, payload: e.payload })
+    .from(e)
+    .where(or(...conds));
+  const ids = candidates.filter((c) => referencesUser(c, who)).map((c) => c.id);
+  let events = 0;
+  let deliveries = 0;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    deliveries += (
+      await tx
+        .delete(s.webhookDeliveries)
+        .where(inArray(s.webhookDeliveries.eventId, chunk))
+        .returning({ id: s.webhookDeliveries.id })
+    ).length;
+    events += (await tx.delete(e).where(inArray(e.id, chunk)).returning({ id: e.id })).length;
+  }
+  return { events, deliveries };
+}
+
+/** Where the completed notice goes: read in the transaction, never stored or logged. */
+interface Notice {
+  email: string;
+  locale: string;
+}
+
 interface Completed {
   deletionId: string;
   userId: string;
@@ -76,7 +125,11 @@ interface Completed {
   ended: EndedBroadcast | null;
   objectKeys: string[];
   objectPrefixes: string[];
+  /** Export archives (deleted after commit even under a hold: they are copies, not held data). */
+  exportKeys: string[];
   activeHold: boolean;
+  completedAt: Date;
+  notice: Notice | null;
 }
 
 /** Complete one due deletion. Returns null if it is not due or someone else took it. */
@@ -106,6 +159,8 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
     let ended: EndedBroadcast | null = null;
     const objectKeys: string[] = [];
     const objectPrefixes: string[] = [];
+    const exportKeys: string[] = [];
+    let notice: Notice | null = null;
     if (user) {
       // Credentials and sessions.
       await del(
@@ -182,6 +237,60 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         tx.delete(s.songRequests).where(eq(s.songRequests.requesterId, userId)).returning({ id: s.songRequests.id }),
       );
       await tx.update(s.clips).set({ creatorId: null }).where(eq(s.clips.creatorId, userId));
+
+      // Outbox and webhook deliveries that name the user (E6), matched on the identity as it is
+      // now, before pseudonymization below replaces it.
+      const tipMessages = new Map<string, Set<string>>();
+      for (const t of await tx
+        .select({ channelId: s.tips.channelId, message: s.tips.message })
+        .from(s.tips)
+        .where(and(eq(s.tips.fromUserId, userId), ne(s.tips.message, "")))) {
+        tipMessages.set(t.channelId, (tipMessages.get(t.channelId) ?? new Set()).add(t.message));
+      }
+      const scrubbed = await scrubOutbox(tx, {
+        id: userId,
+        names: [user.username, user.name, user.displayUsername ?? ""],
+        email: user.email,
+        tipMessages,
+      });
+      counts.events = scrubbed.events;
+      counts.webhook_deliveries = scrubbed.deliveries;
+      // Free text the user wrote in rows that are kept (the rows reference the user by id only):
+      // tip messages, the details of reports they filed and the bodies of their appeals.
+      await del(
+        "tip_messages",
+        tx
+          .update(s.tips)
+          .set({ message: "" })
+          .where(and(eq(s.tips.fromUserId, userId), ne(s.tips.message, "")))
+          .returning({ id: s.tips.id }),
+      );
+      await del(
+        "report_details",
+        tx
+          .update(s.reports)
+          .set({ details: "" })
+          .where(and(eq(s.reports.reporterId, userId), ne(s.reports.details, "")))
+          .returning({ id: s.reports.id }),
+      );
+      await del(
+        "appeal_bodies",
+        tx
+          .update(s.appeals)
+          .set({ body: "" })
+          .where(and(eq(s.appeals.appellantId, userId), ne(s.appeals.body, "")))
+          .returning({ id: s.appeals.id }),
+      );
+      // Data exports: rows now, archives after commit.
+      const exports = await tx
+        .delete(s.dataExports)
+        .where(eq(s.dataExports.userId, userId))
+        .returning({ id: s.dataExports.id });
+      counts.data_exports = exports.length;
+      exportKeys.push(...exports.map((x) => exportObjectKey(userId, x.id)));
+      // An address already pseudonymized (a re-run) is not a mailbox.
+      if (!user.pseudonymizedAt && !user.email.endsWith("@deleted.invalid"))
+        notice = { email: user.email, locale: user.locale };
 
       // The user's channel: off air, content unpublished, profile pseudonymized, keys revoked.
       const [channel] = await tx.select().from(s.channels).where(eq(s.channels.ownerId, userId)).for("update");
@@ -273,7 +382,10 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       ended,
       objectKeys,
       objectPrefixes,
+      exportKeys,
       activeHold: activeHold !== undefined,
+      completedAt: now,
+      notice,
     };
   });
 }
@@ -286,6 +398,31 @@ async function afterCommit(ctx: WorkerContext, c: Completed) {
     await ctx.valkey.publish(BUS.userControl, JSON.stringify(msg));
   } catch (err) {
     ctx.logger.warn("user control publish failed", { userId: c.userId, errorCode: safeErrorCode(err) });
+  }
+  if (c.notice && ctx.mailer) {
+    try {
+      await ctx.mailer.send(
+        "accountDeletionCompleted",
+        { deletedAt: c.completedAt, locale: c.notice.locale },
+        c.notice.email,
+      );
+    } catch (err) {
+      // Never the address: the deletion id is enough to find the run.
+      ctx.logger.warn("account deletion: completed mail failed", {
+        deletionId: c.deletionId,
+        errorCode: safeErrorCode(err),
+      });
+    }
+  }
+  if (ctx.storage && c.exportKeys.length > 0) {
+    try {
+      for (const k of c.exportKeys) await ctx.storage.delete(ctx.exportsBucket, k);
+    } catch (err) {
+      ctx.logger.error("account deletion: export archives could not be deleted", {
+        deletionId: c.deletionId,
+        errorCode: safeErrorCode(err),
+      });
+    }
   }
   if (c.activeHold || !ctx.storage) return;
   try {

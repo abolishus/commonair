@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Process entry point: `bun services/worker/src/main.ts`. */
-import { loadEnv } from "@commonair/config";
+import { instanceSite, loadEnv } from "@commonair/config";
 import { createDb } from "@commonair/db";
+import { createMailer } from "@commonair/email";
 import { createLogger, initTelemetry } from "@commonair/observability";
 import { runService } from "@commonair/service";
 import { createS3Storage } from "@commonair/storage";
@@ -11,6 +12,7 @@ import { coopTestHooks } from "./coop/startup.ts";
 import { parseConcurrency, workerEnv } from "./env.ts";
 import { ClassifierHolder } from "./integrity/classifier.ts";
 import { buildModerationOptions } from "./moderation/startup.ts";
+import { opsTestHooks } from "./ops/startup.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
 import { createWorker } from "./worker.ts";
 
@@ -37,6 +39,9 @@ if (moderation.testHooks)
     testHooks: true,
   });
 const coopHooks = coopTestHooks(env, logger);
+const opsHooks = opsTestHooks(env, logger);
+const site = instanceSite(env);
+const mailer = createMailer(env, { site });
 
 // Loaded once here and on SIGHUP, never per scoring run.
 const networks = new ClassifierHolder(logger);
@@ -53,6 +58,9 @@ const worker = createWorker({
   concurrency: parseConcurrency(env.WORKER_CONCURRENCY),
   storage,
   mediaBucket: env.S3_BUCKET_MEDIA,
+  exportsBucket: env.S3_BUCKET_EXPORTS,
+  mailer,
+  site,
   classifier: () => networks.classifier,
   moderation,
 });
@@ -66,12 +74,13 @@ runService({
   port: env.WORKER_PORT,
   logger,
   checks: worker.checks,
-  health: { moderation_test_hooks: moderation.testHooks, coop_test_hooks: coopHooks },
+  health: { moderation_test_hooks: moderation.testHooks, coop_test_hooks: coopHooks, ops_test_hooks: opsHooks },
   fetch: () => new Response("not found", { status: 404 }),
   shutdownTimeoutMs: SHUTDOWN_DEADLINE_MS + 3_000,
   onShutdown: async () => {
     unwatchSighup();
     await worker.stop(SHUTDOWN_DEADLINE_MS);
+    await mailer.close();
     await db.close();
     await telemetry.shutdown();
   },

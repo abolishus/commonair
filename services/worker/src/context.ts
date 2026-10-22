@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { InstanceSite } from "@commonair/config/site";
 import type { Database } from "@commonair/db";
+import type { Mailer } from "@commonair/email";
 import type { NetworkClassifier } from "@commonair/integrity";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
@@ -37,6 +39,12 @@ export interface WorkerContext {
   /** Object storage for VOD retention; absent when S3 is not configured. */
   storage?: ObjectStorage;
   mediaBucket: string;
+  /** Bucket holding data export archives (`exportObjectKey`); nothing else is written there. */
+  exportsBucket: string;
+  /** Transactional mail (export ready, deletion completed); absent in tests that do not send. */
+  mailer?: Mailer;
+  /** The instance identity for mail links; required whenever `mailer` is set. */
+  site?: InstanceSite;
   /** Pub/sub channel the outbox relay publishes to (BUS.events outside tests). */
   busChannel: string;
   /** Stream the segment consumer reads (STREAMS.segments outside tests); never key-prefixed. */

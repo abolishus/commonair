@@ -24,6 +24,6 @@ export const job = defineJob({
       { ttlMs: 30_000, maxHoldMs: 30 * 60_000, job: ACCOUNT_DELETION_JOB, logger: ctx.logger },
       () => runAccountDeletions(ctx),
     );
-    return r.acquired ? r.value : { skipped: true };
+    return r.acquired ? r.value : { skipped: 1 };
   },
 });

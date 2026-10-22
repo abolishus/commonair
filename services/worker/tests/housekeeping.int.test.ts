@@ -29,7 +29,12 @@ const fakeStorage = {
     deletedPrefixes.push(prefix);
     return 3;
   },
+  async delete(_bucket: string, key: string) {
+    if (failingPrefixes.has(key)) throw new Error("S3 503");
+    deletedKeys.push(key);
+  },
 } as unknown as ObjectStorage;
+const deletedKeys: string[] = [];
 
 // Jobs run on demand only: no loops, no BullMQ workers.
 beforeAll(async () => {
@@ -252,7 +257,7 @@ describe("housekeeping", () => {
     const elsewhere = await vod((id) => `clips/${id}/`, at(-MIN));
 
     const r = await enforceVodRetention(ctx());
-    expect(r).toEqual({ deleted: 1, failed: 7, objects: 3 });
+    expect(r).toEqual({ deleted: 1, failed: 7, objects: 3, held: 0, clipsDeleted: 0 });
     expect(deletedPrefixes).toEqual([`vods/${expired.id}/`]);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect(await status(expired.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
@@ -263,6 +268,79 @@ describe("housekeeping", () => {
     failingPrefixes.clear();
     expect(await enforceVodRetention(ctx())).toMatchObject({ deleted: 1 });
     expect((await status(broken.id))?.status).toBe("deleted");
+    // Refused rows stay refused; clean them up so later runs in this file start empty.
+    await env.t.db.delete(schema.vods).where(eq(schema.vods.channelId, channel.id));
+  });
+
+  test("owner-removed VODs and removed clips are purged unless the owner is under a legal hold", async () => {
+    deletedPrefixes.length = 0;
+    deletedKeys.length = 0;
+    const purge = async (held: boolean) => {
+      const { user, channel } = await makeUser(env.t.db);
+      if (held)
+        await env.t.db
+          .insert(schema.legalHolds)
+          .values({ userId: user.id, reasonCode: "law_enforcement", reason: "preservation request" });
+      const b = await makeBroadcast(env.t.db, channel.id);
+      const vodId = uuidv7();
+      // vods.remove: removed_reason 'owner' and expires_at = now().
+      await env.t.db.insert(schema.vods).values({
+        id: vodId,
+        broadcastId: b.id,
+        channelId: channel.id,
+        title: "v",
+        storagePrefix: `vods/${vodId}/`,
+        status: "ready",
+        removedReason: "owner",
+        expiresAt: at(-1000),
+      });
+      const clip = async (removedReason: string | null, keys: (id: string) => [string | null, string | null]) => {
+        const id = uuidv7();
+        const [storageKey, thumbnailKey] = keys(id);
+        await env.t.db.insert(schema.clips).values({
+          id,
+          channelId: channel.id,
+          broadcastId: b.id,
+          vodId,
+          title: "c",
+          startOffset: 0,
+          durationSeconds: 10,
+          status: "ready",
+          storageKey,
+          thumbnailKey,
+          removedReason,
+        });
+        return id;
+      };
+      const own = (id: string): [string, string] => [`clips/${id}.mp4`, `clips/${id}.webp`];
+      return {
+        vodId,
+        byOwner: await clip("owner", own),
+        byCreator: await clip("creator", (id) => [`clips/${id}.mp4`, null]),
+        live: await clip(null, own),
+        moderated: await clip("moderation", own),
+        tampered: await clip("owner", (id) => [`clips/${id}.mp4`, `vods/${vodId}/index.m3u8`]),
+      };
+    };
+    const free = await purge(false);
+    const held = await purge(true);
+
+    const r = await enforceVodRetention(ctx());
+    // Held: the owner's VOD and both removed clips (and the tampered one) are counted, not deleted.
+    expect(r).toEqual({ deleted: 1, failed: 1, objects: 3 + 3, held: 1 + 3, clipsDeleted: 2 });
+    expect(deletedPrefixes).toEqual([`vods/${free.vodId}/`]);
+    expect(deletedKeys.sort()).toEqual(
+      [`clips/${free.byOwner}.mp4`, `clips/${free.byOwner}.webp`, `clips/${free.byCreator}.mp4`].sort(),
+    );
+    const vod = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
+    const clip = async (id: string) => (await env.t.db.select().from(schema.clips).where(eq(schema.clips.id, id)))[0];
+    expect(await vod(free.vodId)).toMatchObject({ status: "deleted", removedReason: "owner" });
+    expect((await clip(free.byOwner))?.status).toBe("deleted");
+    expect((await clip(free.byCreator))?.status).toBe("deleted");
+    for (const id of [free.live, free.moderated, free.tampered]) expect((await clip(id))?.status).toBe("ready");
+    expect(await vod(held.vodId)).toMatchObject({ status: "ready", removedReason: "owner" });
+    for (const id of [held.byOwner, held.byCreator, held.live, held.tampered])
+      expect((await clip(id))?.status).toBe("ready");
   });
 });
 

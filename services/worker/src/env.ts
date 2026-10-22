@@ -10,6 +10,8 @@ import {
   coopEnv,
   evidenceSealEnv,
   evidenceStorageEnv,
+  mailEnv,
+  opsEnv,
   paymentsEnv,
   servicePorts,
   storageEnv,
@@ -38,6 +40,9 @@ export const workerEnv = z
     ...evidenceSealEnv.shape,
     ...evidenceStorageEnv.shape,
     ...coopEnv.shape,
+    // E6: export emails and the operations test hook (ADR 0021).
+    ...mailEnv.shape,
+    ...opsEnv.shape,
   })
   .superRefine((env, ctx) => {
     if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)

@@ -8,7 +8,9 @@
  */
 import { BUS } from "@commonair/contracts/events";
 import { STREAMS } from "@commonair/contracts/internal";
+import type { InstanceSite } from "@commonair/config/site";
 import type { DbHandle } from "@commonair/db";
+import type { Mailer } from "@commonair/email";
 import type { NetworkClassifier } from "@commonair/integrity";
 import type { Logger } from "@commonair/observability";
 import { createValkey, valkeyCheck, type ReadinessCheck, type ValkeyClient } from "@commonair/service";
@@ -38,6 +40,9 @@ export interface CreateWorkerOptions {
   concurrency?: Partial<Record<QueueName, number>>;
   storage?: ObjectStorage;
   mediaBucket?: string;
+  exportsBucket?: string;
+  mailer?: Mailer;
+  site?: InstanceSite;
   busChannel?: string;
   segmentStream?: string;
   jobs?: readonly JobDefinition[];
@@ -82,6 +87,9 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     webhooks: opts.webhooks,
     storage: opts.storage,
     mediaBucket: opts.mediaBucket ?? "commonair-media",
+    exportsBucket: opts.exportsBucket ?? "commonair-exports",
+    ...(opts.mailer ? { mailer: opts.mailer } : {}),
+    ...(opts.site ? { site: opts.site } : {}),
     busChannel: opts.busChannel ?? BUS.events,
     segmentStream: opts.segmentStream ?? STREAMS.segments,
     classifier: opts.classifier ?? (() => undefined),
