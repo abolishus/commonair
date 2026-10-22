@@ -118,6 +118,8 @@ export const REFUSAL_EXPECTATIONS = {
     codes: [CHECK_VIOLATION, INSUFFICIENT_PRIVILEGE],
     message: /proposal|status/,
   },
+  // A membership in the owner role would let the app role disable every trigger.
+  "SET ROLE to the schema owner": { codes: [INSUFFICIENT_PRIVILEGE], message: /permission denied to set role/ },
 } as const satisfies Record<string, { codes: readonly string[]; message: RegExp }>;
 
 export type RefusalName = keyof typeof REFUSAL_EXPECTATIONS;
@@ -172,7 +174,8 @@ async function attempt(
   }
 }
 
-export async function refusalChecks(appUrl: string): Promise<Refusal[]> {
+/** `ownerRole` is the schema owner the app role must not be able to become. */
+export async function refusalChecks(appUrl: string, ownerRole: string): Promise<Refusal[]> {
   return withDb(appUrl, async ({ sql }) => {
     const oneEntry = sql`(select id from ledger_entries order by id limit 1)`;
     const oneAudit = sql`(select id from audit_log order by id limit 1)`;
@@ -234,6 +237,11 @@ export async function refusalChecks(appUrl: string): Promise<Refusal[]> {
                    values (${proposalId}, ${author}, 'restore drill', '', 'ordinary', false) returning id`;
           if (inserted.length !== 1) throw new Error("draft proposal not inserted");
         },
+      ),
+    );
+    results.push(
+      await attempt(sql, "SET ROLE to the schema owner", (tx) =>
+        tx.unsafe(`set local role "${ownerRole.replaceAll('"', '""')}"`),
       ),
     );
     return results;

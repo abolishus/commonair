@@ -11,9 +11,10 @@ import { createLogger } from "@commonair/observability";
 import { loadHarnessEnv } from "../env.ts";
 import { Platform } from "../platform.ts";
 import type { Viewer } from "../viewer.ts";
-import { type ShardMessage, type WorkerSpec, formatShardLine } from "./shard.ts";
+import { type ShardMessage, type WorkerSpec, writeShardLine } from "./shard.ts";
 
-const send = (msg: ShardMessage) => process.stdout.write(`${formatShardLine(msg)}\n`);
+/** Resolves once stdout has taken the whole line, so `process.exit` cannot truncate it. */
+const send = (msg: ShardMessage) => writeShardLine(process.stdout, msg);
 
 async function main(raw: string | undefined): Promise<number> {
   if (!raw) {
@@ -41,13 +42,13 @@ async function main(raw: string | undefined): Promise<number> {
     for (const { channel, http } of spec.shard.channels) {
       viewers.push(...(await platform.openViewers(channel, { http })));
     }
-    send({ type: "started", shard: spec.shard.index, viewers: viewers.length });
+    await send({ type: "started", shard: spec.shard.index, viewers: viewers.length });
     await stopped;
     const reports = await Promise.all(viewers.map((v) => v.stop()));
-    send({ type: "reports", shard: spec.shard.index, reports });
+    await send({ type: "reports", shard: spec.shard.index, reports });
     return 0;
   } catch (err) {
-    send({ type: "error", shard: spec.shard.index, error: err instanceof Error ? err.message : String(err) });
+    await send({ type: "error", shard: spec.shard.index, error: err instanceof Error ? err.message : String(err) });
     await Promise.allSettled(viewers.map((v) => v.stop()));
     return 1;
   } finally {

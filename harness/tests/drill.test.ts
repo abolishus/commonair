@@ -3,6 +3,9 @@
 
 import { validatePosting } from "@commonair/ledger";
 import { describe, expect, test } from "vite-plus/test";
+import backupRestore from "../scenarios/backup-restore.ts";
+import { DRILL_STEP_BUDGET_MS } from "../src/drill/drill.ts";
+import { DrillGuard } from "../src/drill/guard.ts";
 import {
   type Fingerprint,
   type LedgerEntryRow,
@@ -10,6 +13,7 @@ import {
   REQUIRED_FUNCTIONS,
   REQUIRED_GRANTS,
   REQUIRED_TRIGGERS,
+  type RoleFact,
   compareFingerprints,
   ledgerDigest,
   missingRequired,
@@ -53,18 +57,66 @@ function entry(id: string, tx: string, amount: number): LedgerEntryRow {
 const ENTRIES = [entry("e1", "t1", 100), entry("e2", "t1", -100), entry("e3", "t2", 7), entry("e4", "t2", -7)];
 const MARKER_ENTRIES = [entry("e9", MARKER_TX, 4242), entry("ea", MARKER_TX, -4242)];
 
+const SEARCH_PATH = "search_path=pg_catalog, public, pg_temp";
+
+/** The app role as app-role.sql leaves it. */
+function hardenedRole(): RoleFact {
+  return {
+    exists: true,
+    superuser: false,
+    inherit: false,
+    createRole: false,
+    createDb: false,
+    replication: false,
+    bypassRls: false,
+    memberOf: [],
+    columnGrants: [
+      { table: "ledger_entries", column: "memo", privilege: "INSERT" },
+      { table: "users", column: "display_name", privilege: "UPDATE" },
+    ],
+    temp: false,
+  };
+}
+
 /** A fingerprint taken right after migration and seeding. */
 function baseline(): Fingerprint {
   return {
     triggers: [
-      ...REQUIRED_TRIGGERS.map(([table, name]) => ({ table, name, enabled: "O" })),
-      { table: "memberships", name: "memberships_history", enabled: "O" },
+      ...REQUIRED_TRIGGERS.map(([table, name, fn]) => ({
+        table,
+        name,
+        enabled: "O",
+        def: `def-${name}`,
+        fn: `${fn}()`,
+      })),
+      {
+        table: "memberships",
+        name: "memberships_history",
+        enabled: "O",
+        def: "def-mh",
+        fn: "commonair_membership_history()",
+      },
     ],
     functions: [
-      ...REQUIRED_FUNCTIONS.map((name) => ({ name, args: "", md5: `md5-${name}` })),
-      { name: "commonair_setting", args: "p_key text", md5: "md5-setting" },
+      ...REQUIRED_FUNCTIONS.map((name) => ({
+        name,
+        args: "",
+        md5: `md5-${name}`,
+        owner: "commonair",
+        securityDefiner: false,
+        config: SEARCH_PATH,
+      })),
+      {
+        name: "commonair_setting",
+        args: "p_key text",
+        md5: "md5-setting",
+        owner: "commonair",
+        securityDefiner: false,
+        config: SEARCH_PATH,
+      },
     ],
     grants: [...REQUIRED_GRANTS, { table: "users", privilege: "UPDATE" }],
+    role: hardenedRole(),
     rowCounts: { users: 12, ledger_transactions: 2, ledger_entries: 4, audit_log: 3 },
     ledgerTransactionIds: ["t1", "t2"],
     ledgerDigest: ledgerDigest(ENTRIES),
@@ -192,6 +244,7 @@ describe("restore drill: fingerprint comparison", () => {
       triggers: [],
       functions: [],
       grants: [],
+      role: { ...hardenedRole(), exists: false, columnGrants: [] },
       rowCounts: {},
       ledgerTransactionIds: [],
       ledgerDigest: ledgerDigest([]),
@@ -203,8 +256,115 @@ describe("restore drill: fingerprint comparison", () => {
     expect(problems.some((p) => p.startsWith("before backup: trigger"))).toBe(true);
     expect(problems.some((p) => p.startsWith("after restore: function"))).toBe(true);
     expect(missingRequired(empty).length).toBe(
-      REQUIRED_TRIGGERS.length + REQUIRED_FUNCTIONS.length + REQUIRED_GRANTS.length,
+      REQUIRED_TRIGGERS.length + REQUIRED_FUNCTIONS.length + REQUIRED_GRANTS.length + 1,
     );
+  });
+
+  test("a trigger re-pointed at another function fails, even with its name and state intact", () => {
+    const after = restored();
+    after.triggers = after.triggers.map((t) =>
+      t.name === "ledger_entries_balanced" ? { ...t, fn: "noop()", def: "def-noop" } : t,
+    );
+    const problems = compareFingerprints(baseline(), after, marker);
+    expect(problems).toContain(
+      "after restore: trigger ledger_entries.ledger_entries_balanced runs noop(), not commonair_ledger_entry_balance_check()",
+    );
+    expect(problems).toContain(
+      "trigger ledger_entries.ledger_entries_balanced fn changed: commonair_ledger_entry_balance_check() → noop()",
+    );
+    expect(problems).toContain("trigger ledger_entries.ledger_entries_balanced definition changed");
+    // A same-named function in another schema is not the protection.
+    const shadow = restored();
+    shadow.triggers = shadow.triggers.map((t) =>
+      t.name === "audit_log_append_only" ? { ...t, fn: "evil.commonair_forbid_mutation()" } : t,
+    );
+    expect(compareFingerprints(baseline(), shadow, marker)).toContain(
+      "after restore: trigger audit_log.audit_log_append_only runs evil.commonair_forbid_mutation(), not commonair_forbid_mutation()",
+    );
+    // public.-qualified is the same function.
+    const qualified = baseline();
+    qualified.triggers = qualified.triggers.map((t) => ({ ...t, fn: `public.${t.fn}` }));
+    expect(missingRequired(qualified)).toEqual([]);
+  });
+
+  test("a trigger whose timing, events or deferrability changed fails", () => {
+    const after = restored();
+    after.triggers = after.triggers.map((t) =>
+      t.name === "ledger_transactions_balanced" ? { ...t, def: "def-not-deferrable" } : t,
+    );
+    expect(compareFingerprints(baseline(), after, marker)).toEqual([
+      "trigger ledger_transactions.ledger_transactions_balanced definition changed",
+    ]);
+  });
+
+  test("a protection function that lost its search_path or changed SECURITY DEFINER or owner fails", () => {
+    const after = restored();
+    after.functions = after.functions.map((f) =>
+      f.name === "commonair_forbid_mutation" ? { ...f, config: null, md5: "md5-no-search-path" } : f,
+    );
+    const problems = compareFingerprints(baseline(), after, marker);
+    expect(problems).toContain("after restore: function commonair_forbid_mutation has no pinned search_path");
+    expect(problems).toContain("function commonair_forbid_mutation() body changed");
+    expect(problems).toContain(`function commonair_forbid_mutation() config changed: ${SEARCH_PATH} → null`);
+    // Same definition hash (as if only the attribute moved): the field diff alone still fails it.
+    const secdef = restored();
+    secdef.functions = secdef.functions.map((f) =>
+      f.name === "commonair_setting" ? { ...f, securityDefiner: true, owner: "mallory" } : f,
+    );
+    expect(compareFingerprints(baseline(), secdef, marker)).toEqual([
+      "function commonair_setting(p_key text) owner changed: commonair → mallory",
+      "function commonair_setting(p_key text) securityDefiner changed: false → true",
+    ]);
+  });
+
+  test("an app role that can escape its grants fails", () => {
+    const member = restored();
+    member.role = { ...member.role, memberOf: ["commonair"] };
+    expect(compareFingerprints(baseline(), member, marker)).toEqual([
+      "after restore: app role is a member of commonair",
+      "app role membership commonair appeared after restore",
+    ]);
+    for (const [flag, label] of [
+      ["superuser", "SUPERUSER"],
+      ["inherit", "INHERIT"],
+      ["createRole", "CREATEROLE"],
+      ["createDb", "CREATEDB"],
+      ["replication", "REPLICATION"],
+      ["bypassRls", "BYPASSRLS"],
+    ] as const) {
+      const after = restored();
+      after.role = { ...after.role, [flag]: true };
+      expect(compareFingerprints(baseline(), after, marker)).toEqual([
+        `after restore: app role has ${label}`,
+        `app role ${flag} changed: false → true`,
+      ]);
+    }
+    const temp = restored();
+    temp.role = { ...temp.role, temp: true };
+    expect(compareFingerprints(baseline(), temp, marker)).toEqual([
+      "after restore: app role can create temporary tables",
+      "app role temp changed: false → true",
+    ]);
+    const gone = restored();
+    gone.role = { ...gone.role, exists: false };
+    expect(compareFingerprints(baseline(), gone, marker)).toContain("after restore: app role does not exist");
+  });
+
+  test("a column-level grant appearing or vanishing fails; UPDATE on an append-only column is required absent", () => {
+    const memo = restored();
+    memo.role = {
+      ...memo.role,
+      columnGrants: [...memo.role.columnGrants, { table: "ledger_entries", column: "memo", privilege: "UPDATE" }],
+    };
+    expect(compareFingerprints(baseline(), memo, marker)).toEqual([
+      "after restore: app role holds UPDATE on ledger_entries.memo",
+      "column grant UPDATE on ledger_entries.memo appeared after restore",
+    ]);
+    const dropped = restored();
+    dropped.role = { ...dropped.role, columnGrants: dropped.role.columnGrants.slice(1) };
+    expect(compareFingerprints(baseline(), dropped, marker)).toEqual([
+      "column grant INSERT on ledger_entries.memo missing after restore",
+    ]);
   });
 
   test("the ledger digest ignores arrival order and honors exclusions", () => {
@@ -225,6 +385,7 @@ describe("restore drill: refusals and postings", () => {
       "unbalanced posting": { code: "23514", detail: "ledger transaction x is unbalanced in usd: 1 cents" },
       "INSERT proposals with status passed": { code: "23514", detail: "proposals start as drafts" },
       "UPDATE proposals.status = passed": { code: "23514", detail: "proposal status cannot go from draft to passed" },
+      "SET ROLE to the schema owner": { code: "42501", detail: 'permission denied to set role "commonair"' },
     };
     const all: Refusal[] = REFUSALS.map((name) => ({ name, refused: true, ...db[name] }));
     expect(refusalProblems(all)).toEqual([]);
@@ -247,7 +408,7 @@ describe("restore drill: refusals and postings", () => {
               ? "unbalanced"
               : name.includes("proposal")
                 ? "proposal status cannot go"
-                : "permission denied",
+                : "permission denied to set role",
           },
     );
     expect(refusalProblems(typo)).toEqual([
@@ -402,5 +563,73 @@ describe("restore drill: containers", () => {
         "drill/r1/",
       ),
     ).toEqual({ backupBytes: 1024, walObjects: 1 });
+  });
+});
+
+describe("restore drill: SET ROLE refusal", () => {
+  test("a SET ROLE that succeeds (a membership in the owner) is a problem", () => {
+    const ok: Refusal[] = REFUSALS.map((name) => ({ name, refused: true, code: "42501", detail: "x" }));
+    const set = ok.map((r) =>
+      r.name === "SET ROLE to the schema owner"
+        ? { ...r, refused: false, code: null, detail: "the write succeeded (rolled back)" }
+        : r,
+    );
+    expect(refusalProblems(set)).toContain("SET ROLE to the schema owner: the write succeeded (rolled back)");
+  });
+});
+
+describe("restore drill: cleanup is authoritative (DrillGuard)", () => {
+  test("after cleanup starts, nothing more is created", async () => {
+    const removed: string[] = [];
+    const guard = new DrillGuard(new AbortController().signal, async () => {
+      removed.push("all");
+    });
+    expect(await guard.run("podman volume", async () => "ok")).toBe("ok");
+    await guard.cleanUp();
+    let ran = false;
+    await expect(
+      guard.run("podman run", async () => {
+        ran = true;
+      }),
+    ).rejects.toThrow("drill already cleaned up; refusing to podman run");
+    expect(ran).toBe(false);
+    expect(() => guard.assertLive("configure the app role")).toThrow(/cleaned up/);
+  });
+
+  test("an aborted signal (timeout, Ctrl-C) refuses new podman calls with its reason", async () => {
+    const ac = new AbortController();
+    const guard = new DrillGuard(ac.signal, async () => undefined);
+    ac.abort(new Error("scenario timed out after 1 ms"));
+    await expect(guard.run("podman run", async () => 1)).rejects.toThrow("scenario timed out after 1 ms");
+  });
+
+  test("cleanup waits for in-flight podman calls before removing, and runs once", async () => {
+    const order: string[] = [];
+    let finish: () => void = () => undefined;
+    const guard = new DrillGuard(new AbortController().signal, async () => {
+      order.push("remove");
+    });
+    const inFlight = guard.run("podman run", (signal) => {
+      expect(signal).toBe(guard.signal);
+      return new Promise<void>((resolve) => {
+        finish = () => {
+          order.push("run settled");
+          resolve();
+        };
+      });
+    });
+    const c1 = guard.cleanUp();
+    const c2 = guard.cleanUp();
+    expect(c1).toBe(c2);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual([]);
+    finish();
+    await inFlight;
+    await c1;
+    expect(order).toEqual(["run settled", "remove"]);
+  });
+
+  test("the scenario timeout covers every bounded drill wait", () => {
+    expect(backupRestore.timeoutMs).toBeGreaterThan(DRILL_STEP_BUDGET_MS);
   });
 });

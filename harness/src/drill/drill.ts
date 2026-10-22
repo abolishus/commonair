@@ -12,6 +12,7 @@ import { createDb, runMigrations } from "@commonair/db";
 import { createS3Storage } from "@commonair/storage";
 import type { ScenarioContext } from "../scenario.ts";
 import { waitFor } from "../wait.ts";
+import { DrillGuard } from "./guard.ts";
 import {
   type Fingerprint,
   type Marker,
@@ -48,8 +49,18 @@ import {
 } from "./seed.ts";
 
 const READY_TIMEOUT_MS = 180_000;
+const BACKUP_TIMEOUT_MS = 600_000;
 const ARCHIVE_TIMEOUT_MS = 120_000;
+const STOP_TIMEOUT_MS = 120_000;
+const RESTORE_TIMEOUT_MS = 600_000;
 const PROMOTE_TIMEOUT_MS = 300_000;
+
+/**
+ * The sum of the drill's bounded waits. The scenario's own timeout must exceed it (plus room for
+ * migrations, seeding and the checks), so a slow but healthy drill is never cut off mid-step.
+ */
+export const DRILL_STEP_BUDGET_MS =
+  READY_TIMEOUT_MS + BACKUP_TIMEOUT_MS + ARCHIVE_TIMEOUT_MS + STOP_TIMEOUT_MS + RESTORE_TIMEOUT_MS + PROMOTE_TIMEOUT_MS;
 
 const secret = () => `${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "").slice(0, 8)}`;
 
@@ -152,8 +163,11 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
   };
   const serverArgs = runArgs({ names, network, image, prefixUrl: prefix.url, runId: ctx.runId, server: true });
 
-  // Cleanup, registered before anything is created; it removes only the drill's own names.
-  ctx.defer(async () => {
+  // Cleanup, registered before anything is created; it removes only the drill's own names. It is
+  // authoritative: once it starts (deferred after a timeout, or the finally below) the guard
+  // refuses every further podman call, and it waits for in-flight ones before removing.
+  const guard = new DrillGuard(ctx.signal, async () => {
+    // No signal here: the scenario signal is already aborted when the runner calls cleanups.
     await podman(["rm", "-f", "-t", "5", names.container]);
     await podman(["volume", "rm", "-f", names.volume]);
     const deleted = await storage.deletePrefix(bucket, prefix.key).catch((err: unknown) => {
@@ -162,15 +176,56 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
     });
     ctx.log.info("drill cleaned up", { container: names.container, objectsDeleted: deleted });
   });
+  ctx.defer(() => guard.cleanUp());
+  /** Every podman call that creates or changes drill resources. */
+  const pod = (args: string[], opts: { env?: Record<string, string | undefined>; timeoutMs?: number } = {}) =>
+    guard.run(`podman ${args[0] ?? ""}`, (signal) => podmanOk(args, { ...opts, signal }));
 
+  try {
+    return await drillSteps(ctx, {
+      names,
+      prefix,
+      bucket,
+      storage,
+      pod,
+      guard,
+      network,
+      image,
+      ownerPassword,
+      appPassword,
+      podmanEnv,
+      serverArgs,
+    });
+  } finally {
+    await guard.cleanUp();
+  }
+}
+
+interface DrillSetup {
+  names: DrillNames;
+  prefix: { url: string; key: string };
+  bucket: string;
+  storage: ReturnType<typeof createS3Storage>;
+  pod: (args: string[], opts?: { env?: Record<string, string | undefined>; timeoutMs?: number }) => Promise<string>;
+  guard: DrillGuard;
+  network: string;
+  image: string;
+  ownerPassword: string;
+  appPassword: string;
+  podmanEnv: Record<string, string | undefined>;
+  serverArgs: string[];
+}
+
+async function drillSteps(ctx: ScenarioContext, d: DrillSetup): Promise<DrillResult> {
+  const { names, prefix, bucket, storage, pod, guard, network, image, ownerPassword, appPassword, podmanEnv } = d;
   const startServer = async (): Promise<number> => {
-    await podmanOk(["run", ...serverArgs], { env: podmanEnv });
-    return parsePort(await podmanOk(["port", names.container, "5432/tcp"]));
+    await pod(["run", ...d.serverArgs], { env: podmanEnv });
+    return parsePort(await pod(["port", names.container, "5432/tcp"]));
   };
 
   // 1. Start.
   const port1 = await ctx.step("start the drill Postgres (own volume, own WAL-G prefix)", async () => {
-    await podmanOk(["volume", "create", names.volume]);
+    await pod(["volume", "create", names.volume]);
     return startServer();
   });
   const ownerUrl1 = dbUrl(DRILL_OWNER, ownerPassword, port1);
@@ -188,11 +243,13 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
   // 2. Migrate and seed.
   await ctx.step("migrate as the owner", () => runMigrations(ownerUrl1, { seedLegal: true }));
   await ctx.step("configure the app role", async () => {
+    guard.assertLive("configure the app role");
     const proc = Bun.spawn(["bun", "infra/postgres/apply-app-role.ts"], {
       cwd: REPO_ROOT,
       env: { ...process.env, DATABASE_URL: ownerUrl1, POSTGRES_APP_PASSWORD: appPassword },
       stdout: "ignore",
       stderr: "pipe",
+      signal: ctx.signal,
     });
     const [code, err] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
     if (code !== 0) throw new Error(`apply-app-role failed (${code}): ${err.trim().split("\n").slice(-2).join(" | ")}`);
@@ -218,7 +275,7 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
 
   // 4. Backup, then the marker and a WAL switch.
   await ctx.step("commonair-backup", () =>
-    podmanOk(["exec", names.container, "commonair-backup"], { timeoutMs: 600_000 }),
+    pod(["exec", names.container, "commonair-backup"], { timeoutMs: BACKUP_TIMEOUT_MS }),
   );
   const marker = await ctx.step("post the WAL-replay marker as the app role", () => postMarker(appUrl1, ctx.runId));
   await ctx.step("switch WAL and wait until the segment is archived", () =>
@@ -248,14 +305,14 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
 
   // 5. Stop, wipe, restore, start.
   await ctx.step("stop the drill Postgres and wipe its volume", async () => {
-    await podmanOk(["stop", "-t", "30", names.container], { timeoutMs: 120_000 });
-    await podmanOk(["rm", names.container]);
-    await podmanOk(["volume", "rm", names.volume]);
-    await podmanOk(["volume", "create", names.volume]);
+    await pod(["stop", "-t", "30", names.container], { timeoutMs: STOP_TIMEOUT_MS });
+    await pod(["rm", names.container]);
+    await pod(["volume", "rm", names.volume]);
+    await pod(["volume", "create", names.volume]);
   });
   const restoreStarted = performance.now();
   await ctx.step("commonair-restore into the empty volume", () =>
-    podmanOk(
+    pod(
       [
         "run",
         ...runArgs({
@@ -268,7 +325,7 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
           command: ["commonair-restore"],
         }),
       ],
-      { env: podmanEnv, timeoutMs: 600_000 },
+      { env: podmanEnv, timeoutMs: RESTORE_TIMEOUT_MS },
     ),
   );
   const restoreFetchMs = performance.now() - restoreStarted;
@@ -288,7 +345,7 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
     ),
   );
   const restoreToPromotedMs = performance.now() - restoreStarted;
-  const logs = await podman(["logs", names.container]);
+  const logs = await podman(["logs", names.container], { signal: ctx.signal });
   const walSegmentsReplayed = countReplayedSegments(`${logs.stdout}\n${logs.stderr}`);
 
   // 6. Check.
@@ -302,11 +359,13 @@ export async function runDrill(ctx: ScenarioContext): Promise<DrillResult> {
     problems,
   );
   ctx.assert("every ledger transaction sums to 0 after the restore", after.imbalances.length === 0, after.imbalances);
-  const refusals = await ctx.step("the app role is refused every protected write", () => refusalChecks(appUrl2));
+  const refusals = await ctx.step("the app role is refused every protected write", () =>
+    refusalChecks(appUrl2, DRILL_OWNER),
+  );
   ctx.data("refusals", refusals);
   const refused = refusalProblems(refusals);
   ctx.assert(
-    "UPDATE/DELETE on ledger_entries and audit_log, an unbalanced posting and a direct passed proposal are refused",
+    "UPDATE/DELETE on ledger_entries and audit_log, an unbalanced posting, a direct passed proposal and SET ROLE to the owner are refused",
     refused.length === 0,
     refused,
   );

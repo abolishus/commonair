@@ -306,9 +306,13 @@ already exist, are the stack's, or if the WAL-G prefix would be the stack's.
 2. Migrate as the owner (`runMigrations`), configure the app role
    (`infra/postgres/apply-app-role.ts`, random password), run the demo seed CLI and post 20
    balanced ledger transactions with `@commonair/ledger` `post`, both as the app role.
-3. Fingerprint (`collectFingerprint`): non-internal triggers with `tgenabled`, `commonair_*`
-   functions with md5 of their body, the app role's table grants, row counts of every table, the
-   ordered md5 of `ledger_entries`, and unbalanced transactions. Required protections must be
+3. Fingerprint (`collectFingerprint`): non-internal triggers with `tgenabled`, the md5 of
+   `pg_get_triggerdef` and the function each runs; `commonair_*` functions with the md5 of
+   `pg_get_functiondef` (body, `SECURITY DEFINER`, `SET search_path`, volatility), owner and
+   `proconfig`; the app role's table and column grants, attributes (`SUPERUSER`, `INHERIT`,
+   `CREATEROLE`, `CREATEDB`, `REPLICATION`, `BYPASSRLS` all off), memberships (none) and `TEMP`
+   (revoked); row counts of every table, the ordered md5 of `ledger_entries`, and unbalanced
+   transactions. Required protections must be
    present before anything is compared, so an empty fingerprint never passes.
 4. `commonair-backup`; post the marker transaction; `pg_switch_wal()`; wait until
    `pg_stat_archiver` has archived that segment.
@@ -318,10 +322,12 @@ already exist, are the stack's, or if the WAL-G prefix would be the stack's.
    trigger, a changed or dropped function, a dropped or added grant, different row counts, a
    changed ledger, a missing marker, an unbalanced transaction each fail it); then as the app role
    `UPDATE`/`DELETE` on `ledger_entries` and `audit_log`, an unbalanced posting, and a proposal
-   inserted as or moved to `passed` must each be refused with the protection's SQLSTATE and
-   message (a typo or a lost connection is not a refusal).
-7. Cleanup (always): remove the container and the volume, delete `drill/<runId>/` from the
-   backups bucket.
+   inserted as or moved to `passed`, and `SET ROLE` to the schema owner must each be refused with
+   the protection's SQLSTATE and message (a typo or a lost connection is not a refusal).
+7. Cleanup (always, once): remove the container and the volume, delete `drill/<runId>/` from the
+   backups bucket. It is authoritative: on a timeout or Ctrl-C it refuses every later podman call
+   of the still-running drill, kills the in-flight one through the scenario signal and waits for
+   it before removing. The scenario timeout exceeds the sum of the drill's bounded waits.
 
 Metrics: `backup.bytes`, `backup.wal_objects`, `restore.fetch`, `restore.to_promoted`,
 `restore.wal_segments_replayed`. **Needs:** `podman`, the built Postgres image (the stack's), the

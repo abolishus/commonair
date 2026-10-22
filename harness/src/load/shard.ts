@@ -86,3 +86,81 @@ export function parseShardLine(line: string): ShardMessage | null {
   if (m.type === "error" && typeof m.error === "string") return m as ShardMessage;
   return null;
 }
+
+/** Anything with a Node-style `write(chunk, callback)`: process.stdout, or a fake in tests. */
+export interface LineSink {
+  write(chunk: string, cb: (err?: Error | null) => void): boolean;
+}
+
+/**
+ * Write one protocol line and resolve once the sink has taken all of it. The reports line runs to
+ * megabytes; `process.exit()` right after a bare `write` can drop the unflushed tail on a pipe.
+ */
+export function writeShardLine(out: LineSink, msg: ShardMessage): Promise<void> {
+  return new Promise((resolve, reject) => {
+    out.write(`${formatShardLine(msg)}\n`, (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+/**
+ * How long after a child exits the parent still waits for its stdout to deliver the reports line.
+ * The exit and the stdout pump race: a clean exit can resolve before the last pipe reads are parsed.
+ */
+export const SHARD_EXIT_DRAIN_MS = 10_000;
+
+/**
+ * The parent's view of one child: feeds it stdout lines and the exit, exposes `started` and
+ * `reports`. An exit only fails the shard if no reports line arrived within `drainMs` after it.
+ */
+export class ShardLink {
+  readonly started: Promise<number>;
+  readonly reports: Promise<ViewerReport[]>;
+  private resolveStarted: (n: number) => void = () => undefined;
+  private rejectStarted: (e: Error) => void = () => undefined;
+  private resolveReports: (r: ViewerReport[]) => void = () => undefined;
+  private rejectReports: (e: Error) => void = () => undefined;
+  private gotReports = false;
+  private exitTimer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    readonly index: number,
+    private readonly drainMs = SHARD_EXIT_DRAIN_MS,
+  ) {
+    this.started = new Promise((resolve, reject) => {
+      this.resolveStarted = resolve;
+      this.rejectStarted = reject;
+    });
+    this.reports = new Promise((resolve, reject) => {
+      this.resolveReports = resolve;
+      this.rejectReports = reject;
+    });
+    // Unhandled until awaited; never let an early failure crash the process.
+    this.started.catch(() => undefined);
+    this.reports.catch(() => undefined);
+  }
+
+  onLine(line: string): void {
+    const msg = parseShardLine(line);
+    if (!msg) return;
+    if (msg.type === "started") this.resolveStarted(msg.viewers);
+    else if (msg.type === "reports") {
+      this.gotReports = true;
+      clearTimeout(this.exitTimer);
+      this.resolveReports(msg.reports);
+    } else this.fail(new Error(`load shard ${this.index}: ${msg.error}`));
+  }
+
+  /** The child exited; `stderrTail` is read when the grace ends, for the error message. */
+  onExit(code: number, stderrTail: () => string[]): void {
+    if (this.gotReports) return;
+    this.exitTimer = setTimeout(() => {
+      if (this.gotReports) return;
+      this.fail(new Error(`load shard ${this.index} exited (${code}): ${stderrTail().slice(-3).join(" | ")}`));
+    }, this.drainMs);
+  }
+
+  private fail(e: Error): void {
+    this.rejectStarted(e);
+    this.rejectReports(e);
+  }
+}

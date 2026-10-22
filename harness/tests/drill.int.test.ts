@@ -24,7 +24,13 @@ const runId = `it${Date.now().toString(36)}`;
 
 beforeAll(async () => {
   t = await createTestDatabase();
+  // What infra/postgres/app-role.sql does to the real app role (the fingerprint requires it).
+  // NOINHERIT is harmless on the shared test role: it is never granted another role.
+  await t.sql.unsafe(`alter role ${TEST_APP_ROLE} noinherit`);
+  await t.sql.unsafe(`revoke temporary on database "${t.name}" from public`);
 }, 120_000);
+
+const ownerRole = () => decodeURIComponent(new URL(t.url).username);
 afterAll(async () => {
   await t?.drop();
 });
@@ -47,7 +53,7 @@ describe("restore drill against Postgres", () => {
     const after = await collectFingerprint(t.sql, TEST_APP_ROLE, [marker.transactionId]);
     expect(compareFingerprints(before, after, marker)).toEqual([]);
 
-    const refusals = await refusalChecks(t.appUrl);
+    const refusals = await refusalChecks(t.appUrl, ownerRole());
     expect(refusals.map((r) => r.name)).toEqual([...REFUSALS]);
     expect(refusalProblems(refusals)).toEqual([]);
     // The refused writes left nothing behind.
@@ -63,6 +69,7 @@ describe("restore drill against Postgres", () => {
       expect(problems).toContain("trigger ledger_entries.ledger_entries_append_only enabled state O → D");
       expect(problems).toContain("after restore: trigger ledger_entries.ledger_entries_append_only is disabled");
       expect(problems).toContain("grant UPDATE on users missing after restore");
+      expect(problems.some((p) => p.startsWith("column grant UPDATE on users."))).toBe(true);
     } finally {
       await t.sql.unsafe("alter table ledger_entries enable trigger ledger_entries_append_only");
       await t.sql.unsafe(`grant update on public.users to ${TEST_APP_ROLE}`);

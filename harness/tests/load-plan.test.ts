@@ -8,11 +8,14 @@ import { LOAD_PLAN_DEFAULTS, LOAD_SMOKE_DEFAULTS, LoadParamError, parseLoadParam
 import { type LoadMeasurements, buildLoadReport, loadVerdict } from "../src/load/report.ts";
 import {
   DEFAULT_HTTP_PER_PROCESS,
+  type LineSink,
+  ShardLink,
   formatShardLine,
   parseShardLine,
   shardCount,
   shardTotal,
   splitShards,
+  writeShardLine,
 } from "../src/load/shard.ts";
 import { type ViewerReport, aggregateReports, emptyReport } from "../src/viewer.ts";
 
@@ -228,5 +231,74 @@ describe("load report", () => {
       noErrors: true,
     });
     expect(loadVerdict({ ...buildLoadReport(m), glassToGlassP95Ms: null }).latencyOk).toBe(false);
+  });
+});
+
+describe("ShardLink: a child's exit races its stdout", () => {
+  const reportsLine = (n: number) =>
+    formatShardLine({
+      type: "reports",
+      shard: 0,
+      reports: Array.from({ length: n }, (_, i) => emptyReport(`v${i}`, "http", "http")),
+    });
+
+  test("a clean exit before the reports line is parsed still yields the reports", async () => {
+    const link = new ShardLink(0, 200);
+    link.onLine(formatShardLine({ type: "started", shard: 0, viewers: 3 }));
+    link.onExit(0, () => []);
+    await new Promise((r) => setTimeout(r, 20));
+    link.onLine(reportsLine(3));
+    expect(await link.started).toBe(3);
+    expect((await link.reports).length).toBe(3);
+  });
+
+  test("an exit with no reports line fails the shard after the drain grace, with the stderr tail", async () => {
+    const link = new ShardLink(2, 20);
+    link.onExit(1, () => ["a", "b", "boom"]);
+    await expect(link.reports).rejects.toThrow(/load shard 2 exited \(1\): a \| b \| boom/);
+    await expect(link.started).rejects.toThrow(/exited/);
+  });
+
+  test("an exit after the reports line is not an error", async () => {
+    const link = new ShardLink(0, 10);
+    link.onLine(reportsLine(1));
+    link.onExit(0, () => []);
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await link.reports).length).toBe(1);
+  });
+
+  test("an error line fails the shard at once", async () => {
+    const link = new ShardLink(1, 10_000);
+    link.onLine(formatShardLine({ type: "error", shard: 1, error: "no origin" }));
+    await expect(link.reports).rejects.toThrow("load shard 1: no origin");
+  });
+});
+
+describe("writeShardLine", () => {
+  test("resolves only after the sink has flushed the line", async () => {
+    let flush: (() => void) | undefined;
+    const written: string[] = [];
+    const sink: LineSink = {
+      write(chunk, cb) {
+        written.push(chunk);
+        flush = () => cb();
+        return false;
+      },
+    };
+    let done = false;
+    const p = writeShardLine(sink, { type: "started", shard: 0, viewers: 1 }).then(() => {
+      done = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(done).toBe(false);
+    expect(written[0]?.endsWith("\n")).toBe(true);
+    flush?.();
+    await p;
+    expect(done).toBe(true);
+  });
+
+  test("rejects on a write error", async () => {
+    const sink: LineSink = { write: (_c, cb) => (cb(new Error("EPIPE")), false) };
+    await expect(writeShardLine(sink, { type: "started", shard: 0, viewers: 1 })).rejects.toThrow("EPIPE");
   });
 });

@@ -13,6 +13,7 @@
  * (same steps, same assertions), to tell backend failures from web ones.
  */
 import { join } from "node:path";
+import { CHAT_LIMITS } from "@commonair/contracts/chat";
 import { twitchTagProblems } from "../src/bots/tmi-bot.ts";
 import { playerBundles } from "../src/player-server.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
@@ -28,7 +29,7 @@ import {
   timeoutDurationOk,
 } from "../src/social.ts";
 import type { SignedInUser } from "../src/users.ts";
-import { waitFor } from "../src/wait.ts";
+import { sleep, waitFor } from "../src/wait.ts";
 import { signInViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
 import { WebSession, byTestId } from "../src/web/session.ts";
@@ -42,6 +43,20 @@ const OFFLINE_TIMEOUT_MS = 60_000;
 
 /** Never let a failure screenshot show a secret. */
 const REDACT = [tid(T.streamKey)];
+
+/** Slack past chat's duplicate window so clock skew between harness and chat cannot bite. */
+export const DUPLICATE_MARGIN_MS = 2_000;
+
+/**
+ * How long to wait before a bot may repeat a reply it sent at `lastReplyAt` (epoch ms). Chat's
+ * duplicate filter refuses the same body from the same sender, bots included, within
+ * `CHAT_LIMITS.duplicateWindowMs` (msg_duplicate), so the tmi.js bot's second "pong" would be
+ * dropped if the second !ping came sooner.
+ */
+export function duplicateWaitMs(lastReplyAt: number | undefined, now: number): number {
+  if (lastReplyAt === undefined) return 0;
+  return Math.max(0, lastReplyAt + CHAT_LIMITS.duplicateWindowMs + DUPLICATE_MARGIN_MS - now);
+}
 
 export const VIA = ["web", "api"] as const;
 export type Via = (typeof VIA)[number];
@@ -91,11 +106,14 @@ async function sdkBotPing(
     streamer: SignedInUser;
     fan: SignedInUser;
     tmiUsername: string;
+    /** Epoch ms of the tmi.js bot's first "pong" (see duplicateWaitMs). */
+    tmiLastReplyAt: number | undefined;
     sender: SocialActor;
     chat: WaitBudget;
   },
 ): Promise<void> {
   const p = ctx.platform;
+  // Setup below runs inside the duplicate window; the remainder is waited out before the !ping.
   const sdkAccount = await ctx.step(
     "streamer: create the SDK bot and its token (me.bots.createToken, chat:read chat:edit)",
     () => p.createBot(o.streamer, "e2s_sdk"),
@@ -120,6 +138,12 @@ async function sdkBotPing(
   const sdkPong = pongFrom(sdkAccount.username);
   tmiPong.catch(() => undefined);
   sdkPong.catch(() => undefined);
+  const wait = duplicateWaitMs(o.tmiLastReplyAt, Date.now());
+  if (wait > 0) {
+    await ctx.step(`wait ${Math.ceil(wait / 1000)} s for chat's duplicate window to pass`, () =>
+      sleep(wait, ctx.signal),
+    );
+  }
   const ping = `!ping sdk ${ctx.runId}`;
   const sent = performance.now();
   await ctx.step("fan: send !ping for both bots", () => o.sender.send(ping, o.chat));
@@ -242,7 +266,16 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
 
   // 3b. An SDK bot (a bot token over the chat WebSocket) joins: both bots answer the next !ping,
   // the SDK bot's reply with the bot badge (docs/testing/e6-selectors.md).
-  await sdkBotPing(ctx, { channel, streamer, fan, tmiUsername: bot.username, sender: F, chat });
+  await sdkBotPing(ctx, {
+    channel,
+    streamer,
+    fan,
+    tmiUsername: bot.username,
+    // The fan already saw the reply, so "now" is a safe upper bound if the bot did not record it.
+    tmiLastReplyAt: reply?.at ?? Date.now(),
+    sender: F,
+    chat,
+  });
 
   check("no moderation controls for the fan", (await F.moderationControls()) === 0);
 

@@ -7,7 +7,7 @@
  * app-role grant back, the ledger balanced, and the app role refused every protected write.
  * Never touches the running stack's database. Needs podman and the built Postgres image.
  */
-import { runDrill } from "../src/drill/drill.ts";
+import { DRILL_STEP_BUDGET_MS, runDrill } from "../src/drill/drill.ts";
 import { defineScenario } from "../src/scenario.ts";
 
 export default defineScenario({
@@ -15,7 +15,9 @@ export default defineScenario({
   description:
     "throwaway Postgres → migrate, demo seed + 20 ledger postings as the app role → fingerprint → WAL-G backup → marker + WAL switch → wipe → restore + replay → triggers, functions, grants, rows and ledger match; protected writes refused",
   needs: ["podman"],
-  timeoutMs: 20 * 60_000,
+  // Above the sum of the drill's bounded waits plus room for migrate, seed and checks, so the
+  // runner never cuts a healthy drill off mid-step (cleanup is authoritative either way).
+  timeoutMs: DRILL_STEP_BUDGET_MS + 10 * 60_000,
   async run(ctx) {
     await runDrill(ctx);
   },

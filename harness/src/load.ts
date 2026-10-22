@@ -11,10 +11,10 @@
 import { fileURLToPath } from "node:url";
 import { type LoadReport, buildLoadReport, loadVerdict } from "./load/report.ts";
 import {
-  type ShardMessage,
+  SHARD_EXIT_DRAIN_MS,
+  ShardLink,
   type ShardSpec,
   type WorkerSpec,
-  parseShardLine,
   shardCount,
   shardTotal,
   splitShards,
@@ -131,51 +131,26 @@ const SHARD_STOP_GRACE_MS = 90_000;
 /** A child process driving one shard of the HTTP audience. */
 class ShardProcess {
   private proc: Supervised;
-  private started: Promise<number>;
-  private reports: Promise<ViewerReport[]>;
+  private link: ShardLink;
 
   constructor(ctx: ScenarioContext, spec: ShardSpec, maxMs: number) {
-    let onStarted: (n: number) => void = () => undefined;
-    let onReports: (r: ViewerReport[]) => void = () => undefined;
-    let onError: (e: Error) => void = () => undefined;
-    this.started = new Promise((resolve, reject) => {
-      onStarted = resolve;
-      onError = reject;
-    });
-    this.reports = new Promise((resolve, reject) => {
-      onReports = resolve;
-      const prev = onError;
-      onError = (e) => {
-        prev(e);
-        reject(e);
-      };
-    });
-    // Unhandled until awaited; never let an early failure crash the process.
-    this.started.catch(() => undefined);
-    this.reports.catch(() => undefined);
+    const link = new ShardLink(spec.index);
+    this.link = link;
     const worker: WorkerSpec = { shard: spec, runId: ctx.runId, maxMs };
     this.proc = spawnSupervised(["bun", WORKER_ENTRY, JSON.stringify(worker)], {
       name: `load-shard-${spec.index}`,
-      onStdoutLine: (line) => {
-        const msg: ShardMessage | null = parseShardLine(line);
-        if (!msg) return;
-        if (msg.type === "started") onStarted(msg.viewers);
-        else if (msg.type === "reports") onReports(msg.reports);
-        else onError(new Error(`load shard ${spec.index}: ${msg.error}`));
-      },
+      onStdoutLine: (line) => link.onLine(line),
     });
-    void this.proc.exited.then((code) =>
-      onError(new Error(`load shard ${spec.index} exited (${code}): ${this.proc.stderr().slice(-3).join(" | ")}`)),
-    );
+    void this.proc.exited.then((code) => link.onExit(code, () => this.proc.stderr()));
   }
 
   waitStarted(timeoutMs: number): Promise<number> {
-    return withTimeout(this.started, timeoutMs, "load shard start");
+    return withTimeout(this.link.started, timeoutMs, "load shard start");
   }
 
   async stop(): Promise<ViewerReport[]> {
     if (this.proc.running) void this.proc.stop(SHARD_STOP_GRACE_MS);
-    return withTimeout(this.reports, SHARD_STOP_GRACE_MS, "load shard reports");
+    return withTimeout(this.link.reports, SHARD_STOP_GRACE_MS + SHARD_EXIT_DRAIN_MS, "load shard reports");
   }
 
   kill(): Promise<number> {

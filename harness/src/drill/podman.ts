@@ -160,16 +160,21 @@ export interface PodmanResult {
   stderr: string;
 }
 
+export interface PodmanOptions {
+  env?: Record<string, string | undefined>;
+  timeoutMs?: number;
+  /** Kills the podman child when aborted (the drill's scenario signal). */
+  signal?: AbortSignal;
+}
+
 /** Run podman; `env` adds to the inherited environment (where the secrets live). */
-export async function podman(
-  args: readonly string[],
-  opts: { env?: Record<string, string | undefined>; timeoutMs?: number } = {},
-): Promise<PodmanResult> {
+export async function podman(args: readonly string[], opts: PodmanOptions = {}): Promise<PodmanResult> {
   const proc = Bun.spawn(["podman", ...args], {
     env: { ...process.env, ...opts.env },
     stdout: "pipe",
     stderr: "pipe",
     timeout: opts.timeoutMs ?? 120_000,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -180,10 +185,7 @@ export async function podman(
 }
 
 /** Run podman and return stdout; throws with the subcommand and stderr tail on failure. */
-export async function podmanOk(
-  args: readonly string[],
-  opts: { env?: Record<string, string | undefined>; timeoutMs?: number } = {},
-): Promise<string> {
+export async function podmanOk(args: readonly string[], opts: PodmanOptions = {}): Promise<string> {
   const r = await podman(args, opts);
   if (r.code !== 0) {
     const tail = r.stderr.trim().split("\n").slice(-4).join(" | ");
