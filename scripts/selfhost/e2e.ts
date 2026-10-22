@@ -31,9 +31,9 @@ import { DEFAULT_REGISTRY, RELEASE_IMAGES, type ReleaseImage, bundleAssetName } 
 import { REPO_ROOT, buildBundle } from "./bundle.ts";
 
 // Test-only images (ADR 0022: digest-pinned, licensed in infra/image-licenses.json).
-const ZOT_IMAGE =
+export const ZOT_IMAGE =
   "ghcr.io/project-zot/zot:v2.1.22@sha256:96cda11459ce6f8c60da3b03f03e9f67fd11b3ae2d82c4c04c92b3c608996080";
-const HOST_IMAGES = {
+export const HOST_IMAGES = {
   debian:
     "docker.io/library/debian:trixie-20261005@sha256:913f6706df59a68922d1dd08f78c2476560a8d367897200a6005b00e5f67c2d5",
   fedora: "quay.io/fedora/fedora:42@sha256:e78cd1a688cd079c23864f289a89a49a3f4ad66d817864e325e1d058310ee95c",
@@ -136,7 +136,7 @@ interface BuildSpec {
 }
 
 /** How compose builds each release image (compose.yaml is the source of truth). */
-function buildSpecs(): Record<ReleaseImage, BuildSpec> {
+export function buildSpecs(): Record<ReleaseImage, BuildSpec> {
   const compose = Bun.YAML.parse(readFileSync(join(REPO_ROOT, "compose.yaml"), "utf8")) as {
     services: Record<
       string,
@@ -243,7 +243,7 @@ async function release(version: string, commit: string, images: Record<string, {
 
 // --- host container -----------------------------------------------------------------------
 
-function hostContainerfile(distro: Distro): string {
+export function hostContainerfile(distro: Distro): string {
   const install =
     distro === "debian"
       ? "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
