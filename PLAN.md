@@ -112,6 +112,12 @@ changelog, images + relay binaries with provenance, cosign signing, CycloneDX SB
 Caddy TLS, `scripts/selfhost.sh` one-command install, operator guide (config, upgrades, backups,
 scaling), README contributor quickstart.
 
+Decisions: [ADR 0023](docs/decisions/0023-release-and-self-hosting.md) (semver tags, ghcr.io
+plus a mirror recipe, keyless cosign, Debian 13 and Fedora 42+, amd64 and arm64, the release
+manifest and self-host bundle contracts, upgrades through `selfhost.sh upgrade`). Units: A CI
+and the release workflow, B Quadlet/Caddy/`selfhost.sh`, C docs (after A and B). Briefs are in
+`.claude/briefs/phase5/`.
+
 ## Phase two (product roadmap, not built now)
 
 Twitch import (channel info, panels, emotes, schedule via Twitch OAuth); email / web push /

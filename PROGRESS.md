@@ -20,6 +20,30 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session eleven (2026-10-22): Phase 5 release and self-hosting (in flight)
+
+Started from `eefb597` (E6 done, supply-chain policy ADR 0022 landed as `9dd395a`). Policy
+ADR 0023. The user decided:
+
+- ghcr.io (`ghcr.io/abolishus/commonair/<image>`) plus a `cosign copy` mirror recipe for a
+  self-run FOSS registry;
+- keyless cosign through GitHub OIDC;
+- `selfhost.sh` supports Debian 13 and Fedora 42+;
+- semver from `v0.1.0` (first tag `v0.1.0-rc.1`);
+- arm64 is required at launch.
+
+Contract step: ADR 0023, `scripts/release/manifest.ts` (release manifest schema, image list,
+refs and asset names; 26 tests), and `infraEnv` `TLS_MODE`/`ACME_EMAIL`/`ACME_CA`. Briefs are
+in `.claude/briefs/phase5/`. Units:
+
+- **A**: CI + release workflow (`.github/**`, `scripts/release/**`).
+- **B**: Quadlet/Caddy/systemd + `selfhost.sh` (`infra/quadlet|caddy|systemd/**`,
+  `scripts/selfhost*`).
+- **C**: docs (`docs/self-hosting/**`, the release runbook, README, `hetzner.md`,
+  `infra/README.md`).
+
+A and B run as one batch in worktrees; C runs after they merge.
+
 ## Session ten (2026-10-22): E6 Phase 4 completion (in flight)
 
 Started from `388f69f` after E5 closed (e5-coop passed twice, e4b-money and trust-safety once).

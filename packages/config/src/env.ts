@@ -337,6 +337,15 @@ export const infraEnv = z.object({
   BIND_ADDRESS: z.string().optional(),
   /** Public hostname Caddy serves with TLS (profile `tls`). */
   PUBLIC_HOSTNAME: z.string().optional(),
+  /**
+   * Caddy's certificate source (ADR 0023): `acme` (default) gets a publicly trusted certificate
+   * for PUBLIC_HOSTNAME; `internal` uses Caddy's own CA for LAN and test hosts.
+   */
+  TLS_MODE: z.enum(["acme", "internal"]).optional(),
+  /** Account email for ACME expiry notices (optional). */
+  ACME_EMAIL: z.email().optional(),
+  /** ACME directory URL override, e.g. a staging CA (default: Caddy's, Let's Encrypt then ZeroSSL). */
+  ACME_CA: z.url().optional(),
   IMAGE_REGISTRY: z.string().optional(),
   IMAGE_TAG: z.string().optional(),
   WALG_RETAIN_FULL: z.coerce.number().int().positive().optional(),
