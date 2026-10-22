@@ -108,11 +108,14 @@ jobs:
         # WebKit/Chromium libraries for the harness scenarios, from the locked Playwright.
         run: harness/node_modules/.bin/playwright install-deps chromium webkit
       - name: Playwright browsers cache
-        if: env.FULL == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - name: Playwright browsers
+        # The harness integration tests (part of every gate, not only the full one) drive Chromium
+        # and WebKit.
+        run: bun run --filter @commonair/harness browsers
       - name: Environment
         run: bun scripts/init-env.ts
       - name: Moderation model cache

@@ -355,6 +355,16 @@ describe("CI verify job", () => {
     expect(fetch).toBeGreaterThan(0);
     expect(fetch).toBeLessThan(job.indexOf("bun run verify"));
   });
+
+  test("installs the Playwright browsers on every run (the harness integration tests use them)", () => {
+    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+    const job = ci.slice(ci.indexOf("\n  verify:"), ci.indexOf("\n  release-dry-run:"));
+    const install = job.indexOf("run: bun run --filter @commonair/harness browsers");
+    expect(install).toBeGreaterThan(0);
+    expect(install).toBeLessThan(job.indexOf("bun run verify"));
+    const cache = job.slice(job.indexOf("- name: Playwright browsers cache"), install);
+    expect(cache).not.toContain("if:");
+  });
 });
 
 describe("e2e: network exposure", () => {
