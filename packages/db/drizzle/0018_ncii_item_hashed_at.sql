@@ -1,0 +1,1 @@
+ALTER TABLE "ncii_request_items" ADD COLUMN "hashed_at" timestamp with time zone;

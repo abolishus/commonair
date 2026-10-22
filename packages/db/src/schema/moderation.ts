@@ -304,7 +304,10 @@ export const nciiRequestItems = pgTable(
     /** For uploads: the media key the URL resolved to. */
     uploadKey: text(),
     hiddenAt: ts(),
+    /** Set when staff decide `removed` (the API unpublishes in that transaction). */
     removedAt: ts(),
+    /** Set by the worker's `ncii-hash` job once the content is hashed and its objects deleted. */
+    hashedAt: ts(),
   },
   (t) => [
     index("ncii_request_items_request_idx").on(t.requestId),

@@ -7,8 +7,8 @@
  * `ncii` so re-uploads match T0, and only then delete the objects (e4c spec "NCII decision").
  * VODs are sampled every effective sample interval, clips every second, upload images once; frames
  * below PDQ_MIN_QUALITY are skipped. Objects are looked up at their public key and, for requests
- * auto-hidden earlier, under the private hidden prefix. Idempotent: an item with `removed_at`
- * is done; hashes insert with ON CONFLICT DO NOTHING.
+ * auto-hidden earlier, under the private hidden prefix. Idempotent: an item with `hashed_at` is
+ * done (`removed_at` is the API's, set when it unpublished); hashes insert with ON CONFLICT DO NOTHING.
  */
 import type { NciiHashJob } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
@@ -132,7 +132,7 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
   const pending = await ctx.db
     .select()
     .from(items)
-    .where(and(eq(items.requestId, req.id), isNull(items.removedAt)));
+    .where(and(eq(items.requestId, req.id), isNull(items.hashedAt)));
   const work = await mkdtemp(join(tmpdir(), "commonair-ncii-"));
   let hashed = 0;
   let deleted = 0;
@@ -143,7 +143,8 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
       if (i.subjectType === "vod" && i.subjectId) r = await hashVod(ctx, i.subjectId, every, work);
       else if (i.subjectType === "clip" && i.subjectId) r = await hashClip(ctx, i.subjectId, work);
       else if (i.subjectType === "upload" && i.uploadKey) r = await hashUpload(ctx, i.uploadKey);
-      else if (i.subjectType === null) continue; // not on this instance: nothing to hash
+      // Not on this instance (null), or not hashed yet (broadcast): left unmarked for a later run.
+      else continue;
       const now = ctx.now();
       // Hashes are committed before any object is deleted; a crash in between re-hashes next time.
       await ctx.db.transaction(async (tx) => {
@@ -173,8 +174,8 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
       await ctx.db.transaction(async (tx) => {
         await tx
           .update(items)
-          .set({ removedAt: now })
-          .where(and(eq(items.id, i.id), isNull(items.removedAt)));
+          .set({ hashedAt: now })
+          .where(and(eq(items.id, i.id), isNull(items.hashedAt)));
         await audit(
           tx,
           {
