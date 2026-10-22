@@ -57,6 +57,28 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   errors; the e2e hosts now start without Podman, like a fresh server, so the e2e exercises the
   script's own package installation.
 
+- `f2e8c49` **`auth-avatar-revocation.int.test.ts` failed in a full run, and 3/3 when run alone**
+  → both NCII avatar race tests (and the one in `fixes.int.test.ts`) used made-up keys
+  (`race.png`, `revoked.png`) that the API refuses on their shape before it takes the upload's
+  advisory lock, so nothing ever waited; the unscoped `pg_stat_activity` poll passed only when
+  another test file's lock waiter in the shared cluster matched → committed uploads (key shape
+  plus object in storage), a poll scoped to `current_database()` with a deadline, and a control
+  showing the same setup is accepted without a tombstone.
+- `8147fb8`, `9b33130` review follow-ups: a robust benchmark baseline with a ceiling; the
+  AppArmor step unloads only a loaded profile; CI shellchecks `infra/postgres/*.sh` (with source
+  directives).
+- `f0f755a` **every unit start in the e2e host waited 90 s** (`podman-user-wait-network-online`
+  timed out) → a container has no wait-online service, so `network-online.target` never
+  activates → the e2e host enables a oneshot that stands in for the distribution's wait-online
+  service, as on a real server. Proven in a throwaway container (`network-online.target` active).
+- Process: e2e run 2 mixed trees. The e2e builds images and the bundle from the live worktree
+  at different times, and unit D merged in between (units with the new health check, a Postgres
+  image without it). e2e runs now use a snapshot worktree (`.claude/worktrees/p5-e2e`) pinned to
+  a commit.
+- Review of the head fixes (`wf_987b1e1b-c78`, correctness + security): no HIGH; the MEDIUM (e2e
+  host no longer installs `fuse-overlayfs`) checked on the host: the service user's Podman 5.4.2
+  uses `overlay`, not `vfs`.
+
 ### Self-hosting gaps
 
 - S3 for browsers: designed as ADR 0024 (`f50fe9e`): path-style bucket URLs on the main host,
@@ -64,8 +86,17 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   `GET`/`HEAD` of the exports bucket). Same origin, so no CORS, DNS, certificate or CSP change;
   a separate `s3.<host>` would have needed all four. Unit E (brief written) builds it.
 - Units D (Postgres WAL replay), E (S3 route), F (per-unit secrets), G (client IPs, loopback,
-  Valkey password, IPv6): briefs in `.claude/briefs/phase5/`. D is in flight (workflow
-  `wf_a58d856f-30b`).
+  Valkey password, IPv6), H (relay Makefile, Garage object backup, read-only drill key):
+  briefs in `.claude/briefs/phase5/`.
+- **Unit D merged** (`e9fd60e`; workflow `wf_a58d856f-30b`): `infra/postgres/health.sh`
+  (`commonair-pg-health`) is ready only "in production" and accepting connections; a Podman
+  startup health check (`HealthStartupRetries=0`) lets a replay that makes progress run, and the
+  script stops a start stuck for 10 min (2 min without replay); `TimeoutStartSec=12h` is a
+  backstop. `e39d406`: a WAL fetch that fails for any reason other than "not found" now stops
+  recovery instead of promoting early. backups.md has no manual replay procedure any more. Two
+  review rounds, MEDIUMs fixed, LOWs left: no signal escalation for a stuck start; state file in
+  `/tmp`; HealthStartup behaviour on CI's Podman 4.9 unproven until the CI e2e runs it.
+- Units E and H in flight (workflow `wf_b8a09f20-826`, based on `phase5/validate`).
 
 ## Session eleven (2026-10-22): Phase 5 release and self-hosting (built; user validation pending)
 
