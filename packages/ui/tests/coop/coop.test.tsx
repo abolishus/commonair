@@ -36,7 +36,9 @@ import {
   formatSettingValue,
   proposalStatusTone,
   shareStatusTone,
+  parsePatronageSurplus,
   type PatronageRunFormValues,
+  type PatronageRunSubmission,
   type ProposalChangeDraft,
 } from "../../src/blocks/coop/index.ts";
 import { NoteDialog } from "../../src/blocks/forms/index.ts";
@@ -748,38 +750,99 @@ describe("GovernanceSettingsList", () => {
 });
 
 describe("Patronage admin", () => {
-  test("run form forwards test ids, reports values and submits; submit needs both times", async () => {
-    const user = userEvent.setup();
-    const onSubmit = vi.fn<(values: PatronageRunFormValues) => void>();
-    function Harness(): React.JSX.Element {
-      const [values, setValues] = React.useState<PatronageRunFormValues>({ start: "", end: "", surplus: "" });
-      return (
-        <PatronageRunForm
-          data-testid="patronage-run-form"
-          title="Run patronage"
-          currency="usd"
-          labels={{ start: "Start (UTC)", end: "End (UTC)", surplus: "Surplus", submit: "Compute" }}
-          values={values}
-          onValuesChange={setValues}
-          onSubmit={onSubmit}
-          startProps={{ "data-testid": "patronage-run-start" }}
-          endProps={{ "data-testid": "patronage-run-end" }}
-          surplusProps={{ "data-testid": "patronage-run-surplus" }}
-          submitProps={{ "data-testid": "patronage-run-submit" }}
-        />
-      );
-    }
-    render(<Harness />);
-    expect(screen.getByTestId("patronage-run-form")).toBeTruthy();
-    const submit = screen.getByTestId("patronage-run-submit") as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
+  function RunFormHarness({
+    onSubmit,
+    currency = "usd",
+    locale = "en-US",
+  }: {
+    onSubmit: (values: PatronageRunSubmission) => void;
+    currency?: string;
+    locale?: string;
+  }): React.JSX.Element {
+    const [values, setValues] = React.useState<PatronageRunFormValues>({ start: "", end: "", surplus: "" });
+    return (
+      <PatronageRunForm
+        data-testid="patronage-run-form"
+        title="Run patronage"
+        currency={currency}
+        locale={locale}
+        labels={{
+          start: "Start (UTC)",
+          end: "End (UTC)",
+          surplus: "Surplus",
+          surplusFormatError: "Not an amount",
+          submit: "Compute",
+        }}
+        values={values}
+        onValuesChange={setValues}
+        onSubmit={onSubmit}
+        startProps={{ "data-testid": "patronage-run-start" }}
+        endProps={{ "data-testid": "patronage-run-end" }}
+        surplusProps={{ "data-testid": "patronage-run-surplus" }}
+        submitProps={{ "data-testid": "patronage-run-submit" }}
+      />
+    );
+  }
+  const fillTimes = () => {
     fireEvent.change(screen.getByTestId("patronage-run-start"), { target: { value: "2026-10-01T00:00" } });
     fireEvent.change(screen.getByTestId("patronage-run-end"), { target: { value: "2026-10-21T00:00" } });
-    await user.type(screen.getByTestId("patronage-run-surplus"), "12.50");
+  };
+
+  test("run form forwards test ids and submits the surplus as integer cents; submit needs both times", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn<(values: PatronageRunSubmission) => void>();
+    render(<RunFormHarness onSubmit={onSubmit} />);
+    expect(screen.getByTestId("patronage-run-form")).toBeTruthy();
+    const submit = screen.getByTestId("patronage-run-submit") as HTMLButtonElement;
+    const surplus = screen.getByTestId("patronage-run-surplus");
+    expect(submit.disabled).toBe(true);
+    fillTimes();
+    await user.type(surplus, "12.34");
+    expect(attr(surplus, "data-cents")).toBe("1234");
     expect(submit.disabled).toBe(false);
     await user.click(submit);
-    expect(onSubmit).toHaveBeenCalledWith({ start: "2026-10-01T00:00", end: "2026-10-21T00:00", surplus: "12.50" });
+    expect(onSubmit).toHaveBeenCalledWith({ start: "2026-10-01T00:00", end: "2026-10-21T00:00", surplusCents: 1234 });
     expect(screen.getByText("USD")).toBeTruthy();
+  });
+
+  test("an empty surplus submits null (allocate all retained surplus)", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn<(values: PatronageRunSubmission) => void>();
+    render(<RunFormHarness onSubmit={onSubmit} />);
+    fillTimes();
+    const surplus = screen.getByTestId("patronage-run-surplus");
+    expect(attr(surplus, "data-cents")).toBe("");
+    await user.click(screen.getByTestId("patronage-run-submit"));
+    expect(onSubmit).toHaveBeenCalledWith({ start: "2026-10-01T00:00", end: "2026-10-21T00:00", surplusCents: null });
+  });
+
+  test.each(["abc", "1.005", "-5", "1.2.3"])(
+    "invalid surplus %j shows the format error and blocks submit",
+    async (text) => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn<(values: PatronageRunSubmission) => void>();
+      render(<RunFormHarness onSubmit={onSubmit} />);
+      fillTimes();
+      const surplus = screen.getByTestId("patronage-run-surplus");
+      await user.type(surplus, text);
+      expect(attr(surplus, "data-cents")).toBe("");
+      expect(attr(surplus, "aria-invalid")).toBe("true");
+      expect(screen.getByText("Not an amount")).toBeTruthy();
+      const submit = screen.getByTestId("patronage-run-submit") as HTMLButtonElement;
+      expect(submit.disabled).toBe(true);
+      fireEvent.submit(screen.getByTestId("patronage-run-form"));
+      expect(onSubmit).not.toHaveBeenCalled();
+    },
+  );
+
+  test("surplus parsing follows the locale's separators and the currency's minor digits", () => {
+    expect(parsePatronageSurplus("1.234,56", "eur", "de-DE")).toBe(123456);
+    expect(parsePatronageSurplus("1,50", "eur", "de-DE")).toBe(150);
+    expect(parsePatronageSurplus("1,234.5", "usd", "en-US")).toBe(123450);
+    expect(parsePatronageSurplus("1500", "jpy", "ja-JP")).toBe(1500);
+    expect(parsePatronageSurplus("1.5", "jpy", "ja-JP")).toBeUndefined();
+    expect(parsePatronageSurplus("1.234", "kwd", "en-US")).toBe(1234);
+    expect(parsePatronageSurplus("  ", "usd", "en-US")).toBeNull();
   });
 
   test("run result exposes members and cents", () => {

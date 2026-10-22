@@ -14,7 +14,7 @@ export {
 export { CopyField, type CopyFieldProps, type CopyAction } from "./copy-field.tsx";
 export { CodeBlock, type CodeBlockProps } from "./code-block.tsx";
 export { CharacterCountField, type CharacterCountFieldProps } from "./character-count-field.tsx";
-export { AmountField, type AmountFieldProps, type AmountPreset } from "./amount-field.tsx";
+export { AmountField, parseAmount, type AmountFieldProps, type AmountPreset } from "./amount-field.tsx";
 export { ChoiceToggle, type ChoiceToggleProps, type ChoiceToggleOption } from "./choice-toggle.tsx";
 export { TagsField, type TagsFieldProps } from "./tags-field.tsx";
 export { AccentPicker, type AccentPickerProps } from "./accent-picker.tsx";

@@ -9,6 +9,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@c
 import { cn } from "@commonair/ui/lib/utils";
 import type { DataAttributes } from "../../lib/data-attributes.ts";
 import { formatNumber } from "../../lib/format.ts";
+import { parseAmount } from "../forms/amount-field.tsx";
 import { useResolvedLocale } from "../../lib/locale.tsx";
 import { MoneyAmount, type MoneyValue } from "../../primitives/money-amount.tsx";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
@@ -22,8 +23,25 @@ export interface PatronageRunFormValues {
   /** `datetime-local` text, read as UTC by the page. */
   start: string;
   end: string;
-  /** Currency units as typed; empty = all available surplus. */
+  /** Surplus text as typed, in currency units (locale-aware); empty = all available surplus. */
   surplus: string;
+}
+
+/** What `onSubmit` receives: the surplus already parsed to integer minor units. */
+export interface PatronageRunSubmission {
+  start: string;
+  end: string;
+  /** Integer minor units, or `null` when the surplus was left empty (allocate all retained surplus). */
+  surplusCents: number | null;
+}
+
+/**
+ * The surplus text → minor units: `null` when empty, `undefined` when it does not parse.
+ * Exported so a page can share the composition's reading of the field.
+ */
+export function parsePatronageSurplus(text: string, currency: string, locale: string): number | null | undefined {
+  if (text.trim() === "") return null;
+  return parseAmount(text, currency, locale) ?? undefined;
 }
 
 export interface PatronageRunFormProps extends Omit<
@@ -40,17 +58,23 @@ export interface PatronageRunFormProps extends Omit<
     surplus: React.ReactNode;
     /** E.g. "Leave empty to allocate all retained surplus". */
     surplusHint?: React.ReactNode;
+    /** Shown while the surplus text is not an amount (non-numeric or too many decimals). */
+    surplusFormatError: React.ReactNode;
     submit: string;
   };
-  /** ISO 4217 code shown beside the surplus. */
+  /** ISO 4217 code shown beside the surplus; sets its minor digits. */
   currency: string;
+  /** Reads the surplus's decimal and group separators. */
+  locale?: string;
   values: PatronageRunFormValues;
   onValuesChange: (values: PatronageRunFormValues) => void;
-  onSubmit: (values: PatronageRunFormValues) => void | Promise<void>;
+  /** Called only when the surplus is empty or parses. */
+  onSubmit: (values: PatronageRunSubmission) => void | Promise<void>;
   pending?: boolean;
   error?: React.ReactNode;
   startProps?: DataAttributes;
   endProps?: DataAttributes;
+  /** Forwarded to the surplus `<input>`, which also carries `data-cents` (empty while empty or unparsed). */
   surplusProps?: DataAttributes;
   submitProps?: DataAttributes;
 }
@@ -61,6 +85,7 @@ export function PatronageRunForm({
   description,
   labels,
   currency,
+  locale,
   values,
   onValuesChange,
   onSubmit,
@@ -74,7 +99,11 @@ export function PatronageRunForm({
   ...props
 }: PatronageRunFormProps): React.JSX.Element {
   const id = React.useId();
+  const resolved = useResolvedLocale(locale);
   const set = (patch: Partial<PatronageRunFormValues>): void => onValuesChange({ ...values, ...patch });
+  const surplusCents = parsePatronageSurplus(values.surplus, currency, resolved);
+  const unparsed = surplusCents === undefined;
+  const surplusInvalid = unparsed || Boolean(error);
   return (
     <FormSection
       {...props}
@@ -83,11 +112,12 @@ export function PatronageRunForm({
       description={description}
       onSubmit={(event) => {
         event.preventDefault();
-        if (!pending) void onSubmit(values);
+        if (pending || surplusCents === undefined) return;
+        void onSubmit({ start: values.start, end: values.end, surplusCents });
       }}
       actions={{
         saveLabel: labels.submit,
-        disabled: pending || !values.start || !values.end,
+        disabled: pending || !values.start || !values.end || unparsed,
         saveProps: submitProps,
       }}
     >
@@ -118,16 +148,17 @@ export function PatronageRunForm({
         </Field>
       </div>
       {labels.timesHint ? <FieldDescription>{labels.timesHint}</FieldDescription> : null}
-      <Field data-invalid={error ? true : undefined}>
+      <Field data-invalid={surplusInvalid || undefined}>
         <FieldLabel htmlFor={`${id}-surplus`}>{labels.surplus}</FieldLabel>
         <InputGroup>
           <InputGroupInput
             {...surplusProps}
             id={`${id}-surplus`}
+            data-cents={surplusCents ?? ""}
             inputMode="decimal"
             value={values.surplus}
             disabled={pending}
-            aria-invalid={error ? true : undefined}
+            aria-invalid={surplusInvalid || undefined}
             onChange={(event) => set({ surplus: event.currentTarget.value })}
           />
           <InputGroupAddon align="inline-end">
@@ -135,6 +166,7 @@ export function PatronageRunForm({
           </InputGroupAddon>
         </InputGroup>
         {labels.surplusHint ? <FieldDescription>{labels.surplusHint}</FieldDescription> : null}
+        {unparsed ? <FieldError>{labels.surplusFormatError}</FieldError> : null}
         {error ? <FieldError>{error}</FieldError> : null}
       </Field>
     </FormSection>

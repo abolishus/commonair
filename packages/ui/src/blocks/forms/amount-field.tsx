@@ -38,7 +38,12 @@ export interface AmountFieldProps {
     [key: `data-${string}`]: unknown;
   };
 }
-function parseAmount(text: string, currency: string, locale: string): number | null {
+/**
+ * Locale-aware amount text → integer minor units, or `null` when the text is not an amount
+ * (empty, non-numeric, more decimals than the currency has, or beyond a safe integer).
+ * Integer arithmetic only, so "1.005" never rounds through a float.
+ */
+export function parseAmount(text: string, currency: string, locale: string): number | null {
   const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
   const decimal = parts.find((part) => part.type === "decimal")?.value ?? ".";
   const group = parts.find((part) => part.type === "group")?.value;

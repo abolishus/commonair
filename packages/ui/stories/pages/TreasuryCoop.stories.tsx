@@ -97,12 +97,14 @@ function PatronageTab({ showResult }: { showResult: boolean }): React.JSX.Elemen
         title="Run patronage"
         description="Closes the ledger for the period and computes every member's allocation. Someone else approves it."
         currency={CURRENCY}
+        locale={LOCALE}
         labels={{
           start: "Period start (UTC)",
           end: "Period end (UTC)",
           timesHint: "The end must be in the past. Closed periods cannot overlap.",
           surplus: "Surplus to allocate",
           surplusHint: "Leave empty to allocate all retained surplus.",
+          surplusFormatError: "Enter an amount like 120.50.",
           submit: "Compute run",
         }}
         values={values}
