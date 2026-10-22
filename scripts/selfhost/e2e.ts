@@ -261,6 +261,13 @@ export function hostContainerfile(distro: Distro): string {
   return [
     `FROM ${HOST_IMAGES[distro]}`,
     install,
+    // A real server reaches network-online.target at boot (ifupdown, networkd, NetworkManager);
+    // a container has nothing that does, and Podman's user units then wait 90 s for it on every
+    // start. This stands in for the distribution's wait-online service.
+    "RUN printf '[Unit]\\nDescription=e2e: the container network is up\\nBefore=network-online.target\\n" +
+      "[Service]\\nType=oneshot\\nRemainAfterExit=yes\\nExecStart=/bin/true\\n" +
+      "[Install]\\nWantedBy=network-online.target\\n' > /etc/systemd/system/e2e-online.service && " +
+      "systemctl enable e2e-online.service && systemctl add-wants multi-user.target network-online.target",
     // The throwaway registry speaks plain HTTP on the test network.
     `RUN mkdir -p /etc/containers/registries.conf.d && printf '[[registry]]\\nlocation = "${ZOT}:5000"\\ninsecure = true\\n' > /etc/containers/registries.conf.d/50-e2e.conf`,
     'CMD ["/sbin/init"]',

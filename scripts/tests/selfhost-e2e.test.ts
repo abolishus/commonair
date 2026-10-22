@@ -46,6 +46,9 @@ describe("e2e images", () => {
       for (const pkg of ["podman", "catatonit", "passt", "aardvark-dns", "nftables"])
         expect(file).not.toContain(` ${pkg}`);
       expect(file).toContain('CMD ["/sbin/init"]');
+      // network-online.target is reached at boot, as on a real server.
+      expect(file).toContain("WantedBy=network-online.target");
+      expect(file).toContain("systemctl add-wants multi-user.target network-online.target");
       expect(file).toContain("insecure = true");
     },
   );
