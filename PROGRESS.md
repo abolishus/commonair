@@ -20,6 +20,42 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## E4c `trust-safety` harness bring-up (2026-10-21, in progress)
+
+Steps 1–6 of `trust-safety` pass against the local Podman stack (T0 off air ≈ 5 s against a 9 s
+limit, T2 label ≈ 4 s, T1 restrict ≈ 3 s). Step 7 (NCII clock) fails: F's live clips fail in media
+(see "Open" below). Run it with `bun scripts/infra.ts stack harness/compose.trust-safety.yaml`, then
+`bun harness/src/cli.ts run trust-safety` (`--set steps=7` runs one step).
+
+Fixed (each with a regression test checked against the old code; API/worker/media changes
+reviewed independently):
+
+- Env/infra: `TRUSTED_PROXY_CIDRS` was unset locally, so all simulated users shared one auth
+  rate-limit bucket (local `.env` only). `infra.ts stack [override.yaml...]` layers compose
+  overrides and recreates containers whose image was rebuilt (podman-compose does not).
+  Compose defaults `S3_PUBLIC_ENDPOINT` to the published Garage port (presigned uploads and media
+  URLs carried `garage:3900`). ffmpeg is now in the api and worker images (uploads and live T1/T2
+  scans failed without it).
+- API: the `/internal/moderation/*` test hooks were never served; `startModeration` now runs at
+  boot (fail closed) and `/healthz` reports the hooks; `bullmq` was not a dependency, so every
+  real T0/escalation/NCII enqueue threw; `vods.list/get` and `clips.create/list/get` implemented
+  (were 501) with T0/NCII/T1 hiding, a removed-source backstop for clips and the 18+ gate on media
+  URLs; removing a VOD also removes its broadcast's clips.
+- Worker: `t0-media` job ids had `:` in a form BullMQ rejects, so evidence moves after T0 (and the
+  daily reconciler and digest checks) never ran; the T0 evidence count is logged as
+  `evidenceCount`.
+- Web: a T1-restricted stream shows `stream-restricted` and plays only for confirmed adults; a
+  decided moderation case stays open and refreshed.
+- Harness: deletion timestamps read as strings; queue rows open through their button.
+
+Open: live clips fail with "broadcast is not live here and has no VOD". The recorder's poll loop
+runs, but `Bun.file(<dir>/<runId>.m3u8).exists()` is false inside the media process although the
+playlist is on disk (`known` stays 0), so `localWindow` is always empty. Not yet explained; the
+recorder's `runs` id has not yet been compared with the on-disk playlist name.
+`e4b-money` passes on the same stack (82/82).
+vods/clips `update/remove` remain 501 (E6). `vods.broadcast_id` has no index (the clip backstop
+subquery uses it).
+
 ## E4b validation (2026-10-21)
 
 Resumed at the user's request. Local `e4b-money` passes: manual API **77/77** assertions,
