@@ -105,6 +105,27 @@ async function membershipView(deps: Deps, userId: string): Promise<MembershipVie
   for (const m of rows.toSorted((a, b) => Number(b.status === "active") - Number(a.status === "active")))
     if (!shown.has(m.class)) shown.set(m.class, m);
   const share = shares[0] ?? null;
+  // A pending share shows its payment reference again, so a member who left the page can still pay.
+  const [payment] =
+    share?.status === "pending" && share.paymentId
+      ? await db
+          .select({ providerRef: schema.payments.providerRef, provider: schema.payments.provider })
+          .from(schema.payments)
+          .where(eq(schema.payments.id, share.paymentId))
+      : [];
+  const pending =
+    share && payment?.provider === "manual"
+      ? {
+          paymentId: share.paymentId,
+          reference: payment.providerRef,
+          instructions: manualInstructions(
+            deps.env.MANUAL_PAYMENT_INSTRUCTIONS,
+            payment.providerRef,
+            share.amountCents,
+            share.currency,
+          ),
+        }
+      : { paymentId: null, reference: null, instructions: null };
   return {
     memberships: [...shown.values()].map((m) => ({
       id: m.id,
@@ -133,7 +154,9 @@ async function membershipView(deps: Deps, userId: string): Promise<MembershipVie
       ),
       activeWorker: rows.some((m) => m.class === "worker" && m.status === "active"),
     }),
-    share: share ? { id: share.id, status: share.status, amount: money(share.amountCents, share.currency) } : null,
+    share: share
+      ? { id: share.id, status: share.status, amount: money(share.amountCents, share.currency), ...pending }
+      : null,
   };
 }
 

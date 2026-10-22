@@ -156,6 +156,14 @@ describe("shares and memberships", () => {
     expect(s).toMatchObject({ status: "pending", userId: viewer.userId, amountCents: 500 });
     expect(await auditOf("coop.share.request", s?.id)).toHaveLength(1);
     expect(await eventsOf("coop.share.update", { share_id: s?.id, status: "pending" })).toHaveLength(1);
+    // The member can leave and come back: the pending share still shows how to pay.
+    const view = await call<{ share: Record<string, unknown> }>(viewer, "GET", "/api/coop/membership");
+    expect(view.body.share).toMatchObject({
+      status: "pending",
+      paymentId: share.paymentId,
+      reference: share.reference,
+      instructions: r.body.instructions,
+    });
   });
 
   test("a second share is refused while one is open", async () => {
@@ -238,7 +246,13 @@ describe("shares and memberships", () => {
     expect(view.body.memberships).toEqual([
       expect.objectContaining({ class: "viewer", status: "active", basis: "share" }),
     ]);
-    expect(view.body.share).toMatchObject({ status: "held", amount: { cents: 500 } });
+    expect(view.body.share).toMatchObject({
+      status: "held",
+      amount: { cents: 500 },
+      reference: null,
+      instructions: null,
+      paymentId: null,
+    });
     expect(view.body.eligibility.find((e) => e.class === "viewer")).toMatchObject({ eligible: true, basis: "share" });
 
     expect(await auditOf("payment.confirm", share.paymentId)).toHaveLength(1);

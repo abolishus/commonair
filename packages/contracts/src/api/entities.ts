@@ -628,7 +628,17 @@ export const MembershipView = z.object({
       detail: z.string(),
     }),
   ),
-  share: z.object({ id: Id, status: z.enum(E.SHARE_STATUSES), amount: Money }).nullable(),
+  share: z
+    .object({
+      id: Id,
+      status: z.enum(E.SHARE_STATUSES),
+      amount: Money,
+      /** While `pending` only: the payment, its reference and the manual instructions (null otherwise). */
+      paymentId: Id.nullable(),
+      reference: z.string().nullable(),
+      instructions: z.string().nullable(),
+    })
+    .nullable(),
 });
 /** A member share as the treasury sees it (`coop.shares.list`). */
 export const ShareView = z.object({

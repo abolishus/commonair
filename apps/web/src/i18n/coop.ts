@@ -115,8 +115,6 @@ export const coopMessages = {
   "coop.share.buy": "Buy the share",
   "coop.share.noteNone": "A one-time, refundable share makes you a viewer member.",
   "coop.share.notePending": "The treasury confirms it when your payment arrives.",
-  "coop.share.noteKeepReference":
-    "Write down this reference now and put it on your transfer: it is shown only here, once. The treasury confirms the share when your payment arrives.",
   "coop.share.noteHeld": "Refunded in full if you leave the viewer class.",
   "coop.share.noteHeldKept": "Held for as long as you are a viewer member.",
   "coop.share.noteRefundPending": "You left the viewer class; the treasury owes you this refund.",

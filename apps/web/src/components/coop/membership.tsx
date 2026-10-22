@@ -36,7 +36,7 @@ export interface MembershipPanelProps {
   rules: { shareCents: number; refundableOnExit: boolean } | null;
   /** Instance currency (the share's price before one exists). */
   currency: string;
-  /** Set after buying, until the page is left (the API does not return the reference again). */
+  /** Set after buying; a pending share loaded later carries the same details in `view.share`. */
   instructions: ShareInstructionsDto | null;
   buying: boolean;
   onBuy: () => void | Promise<void>;
@@ -62,7 +62,7 @@ export function MembershipPanel({
   view,
   rules,
   currency,
-  instructions,
+  instructions: bought,
   buying,
   onBuy,
   onExit,
@@ -70,6 +70,16 @@ export function MembershipPanel({
 }: MembershipPanelProps): React.JSX.Element {
   const { locale } = useLocale();
   const share = view?.share ?? null;
+  const instructions: ShareInstructionsDto | null =
+    bought ??
+    (share?.status === "pending" && share.paymentId && share.reference && share.instructions
+      ? {
+          paymentId: share.paymentId,
+          reference: share.reference,
+          instructions: share.instructions,
+          amount: share.amount,
+        }
+      : null);
   const shareStatus = instructions && !share ? "pending" : (share?.status ?? "none");
   const price = rules ? { cents: rules.shareCents, currency } : null;
   const amount = share?.amount ?? instructions?.amount ?? price;
@@ -77,11 +87,7 @@ export function MembershipPanel({
     shareStatus === "none"
       ? t("coop.share.noteNone")
       : shareStatus === "pending"
-        ? // The reference exists only in the buyShare response (ShareView has none), so a member who
-          // leaves the page cannot see it again: tell them to keep it while it is on screen.
-          instructions
-          ? t("coop.share.noteKeepReference")
-          : t("coop.share.notePending")
+        ? t("coop.share.notePending")
         : shareStatus === "held"
           ? rules?.refundableOnExit === false
             ? t("coop.share.noteHeldKept")

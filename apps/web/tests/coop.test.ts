@@ -72,9 +72,21 @@ describe("membership", () => {
     const none = membershipView({ memberships: [], share: null });
     expect(canBuyShare(none)).toBe(true);
     for (const status of ["pending", "held", "refund_pending"] as const)
-      expect(canBuyShare({ ...none, share: { id: "s", status, amount: usd(2500) } }), status).toBe(false);
+      expect(
+        canBuyShare({
+          ...none,
+          share: { id: "s", status, amount: usd(2500), paymentId: null, reference: null, instructions: null },
+        }),
+        status,
+      ).toBe(false);
     for (const status of ["refunded", "cancelled"] as const)
-      expect(canBuyShare({ ...none, share: { id: "s", status, amount: usd(2500) } }), status).toBe(true);
+      expect(
+        canBuyShare({
+          ...none,
+          share: { id: "s", status, amount: usd(2500), paymentId: null, reference: null, instructions: null },
+        }),
+        status,
+      ).toBe(true);
     // An active viewer membership (by subscription, say) already makes the user a viewer member.
     expect(
       canBuyShare({
@@ -102,7 +114,13 @@ describe("membership", () => {
     expect(exitRefundsShare(view, "viewer", false)).toBe(false);
     expect(exitRefundsShare(view, "viewer", null)).toBe(false);
     expect(exitRefundsShare(view, "streamer", true)).toBe(false);
-    expect(exitRefundsShare({ share: { id: "s", status: "pending", amount: usd(1) } }, "viewer", true)).toBe(false);
+    expect(
+      exitRefundsShare(
+        { share: { id: "s", status: "pending", amount: usd(1), paymentId: null, reference: null, instructions: null } },
+        "viewer",
+        true,
+      ),
+    ).toBe(false);
   });
 
   it("members by class from the newest month, zeros without one", () => {

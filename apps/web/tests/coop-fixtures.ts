@@ -60,7 +60,7 @@ export function membershipView(over: Partial<MembershipViewDto> = {}): Membershi
       },
       { class: "worker", eligible: false, basis: null, progress: null, detail: "Appointed by the board" },
     ],
-    share: { id: "s1", status: "held", amount: usd(2500) },
+    share: { id: "s1", status: "held", amount: usd(2500), paymentId: null, reference: null, instructions: null },
     ...over,
   };
 }
