@@ -146,10 +146,17 @@ case "$1" in
   show-environment) [ -z "\${STUB_NO_USER_SYSTEMD:-}" ] || exit 1; echo HOME=$HOME; exit 0 ;;
   is-active)
     if [ -n "\${STUB_BAD_VERSION:-}" ] && [ "$cur" = "$STUB_BAD_VERSION" ]; then echo activating; exit 3; fi
+    # A unit whose start job failed with result 'dependency': inactive, and no Restart= retry.
+    if [ "$2" = "\${STUB_DEP_FAILED:-none}" ] && [ -e "$STUB_STATE/dep-failed" ]; then echo inactive; exit 3; fi
     echo active; exit 0 ;;
   show) echo active; exit 0 ;;
   reset-failed) rm -f "$STUB_STATE/migrate-start-limit"; exit 0 ;;
   start)
+    if [ -n "\${STUB_DEP_FAILED:-}" ]; then
+      if [ "$*" = "start --no-block $STUB_DEP_FAILED" ]; then rm -f "$STUB_STATE/dep-failed"
+      elif [ "$2" = --no-block ] && [ ! -e "$STUB_STATE/dep-seen" ]; then : >"$STUB_STATE/dep-failed"; : >"$STUB_STATE/dep-seen"; fi
+    fi
+    case "$*" in *commonair-irc-cert.service*) [ -z "\${STUB_IRC_CERT_FAIL:-}" ] || exit 1 ;; esac
     # A failed migrate ends start-limit-hit (Restart=on-failure + StartLimitBurst), refusing
     # every later start until reset-failed.
     case "$*" in *commonair-migrate.service*)
@@ -175,6 +182,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 src="$STUB_RELEASES/\${url##*/}"
+[ "\${url##*/}" != "\${STUB_CURL_FAIL:-none}" ] || { echo "curl: (6) Could not resolve host" >&2; exit 6; }
 [ -f "$src" ] || { echo "curl: (22) 404 $url" >&2; exit 22; }
 cp "$src" "$out"
 `,
@@ -187,13 +195,19 @@ interface Host {
   dir: string;
   home: string;
   log: string;
+  /** Every real tool's argv, one line per call (what ps and /proc/<pid>/cmdline would show). */
+  argv(): string;
   env: Record<string, string>;
   run(args: string[], env?: Record<string, string>): { code: number; out: string; err: string };
   calls(): string[];
 }
 
 /** A fresh fake host: Debian 13, Podman 5, user systemd, linger, subuids, port sysctl 80. */
-function host(opts: { cosign?: boolean; osRelease?: string } = {}): Host {
+/**
+ * `recordArgv` wraps every real tool but sh and Bun to log its argv first. It triples the run
+ * time, so only the install whose argv the secrets test reads turns it on.
+ */
+function host(opts: { cosign?: boolean; osRelease?: string; recordArgv?: boolean } = {}): Host {
   const dir = mkdtempSync(join(tmpdir(), "commonair-selfhost-host-"));
   const home = join(dir, "home");
   const sys = join(dir, "sys");
@@ -201,6 +215,7 @@ function host(opts: { cosign?: boolean; osRelease?: string } = {}): Host {
   const bin = join(dir, "bin");
   const state = join(dir, "state");
   const log = join(dir, "calls.log");
+  const argvLog = join(dir, "argv.log");
   for (const d of [
     home,
     stub,
@@ -222,7 +237,13 @@ function host(opts: { cosign?: boolean; osRelease?: string } = {}): Host {
   for (const tool of REAL_TOOLS) {
     // The Bun running this test (PATH may hold a wrapper that only works from its own directory).
     const path = tool === "bun" ? process.execPath : Bun.which(tool);
-    if (path) symlinkSync(path, join(bin, tool));
+    if (!path) continue;
+    if (!opts.recordArgv || tool === "sh" || tool === "bun") symlinkSync(path, join(bin, tool));
+    else {
+      // Records the argv, then runs the real tool.
+      writeFileSync(join(bin, tool), `#!/bin/sh\nprintf '%s\\n' "${tool} $*" >> "${argvLog}"\nexec ${path} "$@"\n`);
+      chmodSync(join(bin, tool), 0o755);
+    }
   }
   const stubs: Record<string, string> = { ...STUBS };
   // sha256sum: the real one when present, else shasum (macOS) with the same flags.
@@ -261,6 +282,9 @@ function host(opts: { cosign?: boolean; osRelease?: string } = {}): Host {
     calls() {
       return existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
     },
+    argv() {
+      return existsSync(argvLog) ? readFileSync(argvLog, "utf8") : "";
+    },
   };
 }
 
@@ -293,6 +317,7 @@ describe("arguments", () => {
       "--public-ip",
       "--require-signature",
       "--yes",
+      "--reinstall",
       "--unsupported-distro",
     ])
       expect(r.out).toContain(flag);
@@ -410,9 +435,12 @@ describe("host checks", () => {
 });
 
 describe("as root", () => {
-  test(
-    "stages its inputs in a new root-owned directory and never writes into the service user's home",
-    async () => {
+  test.each([
+    ["--yes", [] as string[]],
+    ["--yes --reinstall", ["--reinstall"]],
+  ])(
+    "%s: stages its inputs in a new root-owned directory, never writes into the service user's home, and forwards only --reinstall",
+    async (_, extra) => {
       const h = host();
       const sys = h.env.COMMONAIR_SYSROOT!;
       mkdirSync(join(sys, "var/tmp"), { recursive: true });
@@ -457,6 +485,7 @@ exit 0`,
           "--email",
           "ops@example.org",
           "--yes",
+          ...extra,
         ]);
         expect(r.code, r.err).toBe(0);
         expect(readFileSync(victim, "utf8")).toBe("root-owned\n");
@@ -475,6 +504,9 @@ exit 0`,
         const call = h.calls().find((c) => c.startsWith("runuser"))!;
         expect(call).toContain(`-u commonair -- env HOME=${userHome}`);
         expect(call).toContain(`${stage}/selfhost.sh install --bundle ${stage}/${bundleAssetName("0.1.0")}`);
+        // --yes allowed the host preparation; it must not become consent to reinstall.
+        expect(call).not.toContain("--yes");
+        expect(call.includes("--reinstall")).toBe(extra.includes("--reinstall"));
         expect(h.calls().some((c) => c.startsWith("chown"))).toBe(false);
       } finally {
         bus.stop(true);
@@ -508,19 +540,23 @@ describe("download and verification", () => {
     expect(sh).not.toMatch(/curl[^\n]*\|\s*(ba)?sh/);
   });
 
-  test("a checksum mismatch aborts before anything is extracted", () => {
-    const h = host();
-    const bad = join(h.dir, "bad");
-    mkdirSync(bad);
-    const name = bundleAssetName("0.1.0");
-    writeFileSync(join(bad, name), readFileSync(join(releaseDir, name)));
-    writeFileSync(join(bad, "SHA256SUMS"), `${"0".repeat(64)}  ${name}\n`);
-    const r = h.run([...INSTALL.filter((_, i) => i < 1 || i > 2), "--bundle", join(bad, name)]);
-    expect(r.code).toBe(1);
-    expect(r.err).toContain(`checksum mismatch for ${name}`);
-    expect(existsSync(join(h.home, ".local/share/commonair/releases"))).toBe(false);
-    expect(h.calls().filter((c) => c.startsWith("podman pull"))).toEqual([]);
-  });
+  test(
+    "a checksum mismatch aborts before anything is extracted",
+    () => {
+      const h = host();
+      const bad = join(h.dir, "bad");
+      mkdirSync(bad);
+      const name = bundleAssetName("0.1.0");
+      writeFileSync(join(bad, name), readFileSync(join(releaseDir, name)));
+      writeFileSync(join(bad, "SHA256SUMS"), `${"0".repeat(64)}  ${name}\n`);
+      const r = h.run([...INSTALL.filter((_, i) => i < 1 || i > 2), "--bundle", join(bad, name)]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`checksum mismatch for ${name}`);
+      expect(existsSync(join(h.home, ".local/share/commonair/releases"))).toBe(false);
+      expect(h.calls().filter((c) => c.startsWith("podman pull"))).toEqual([]);
+    },
+    TIMEOUT,
+  );
 
   test(
     "a local bundle with no SHA256SUMS is refused unless --insecure-no-checksum",
@@ -624,7 +660,7 @@ describe("install", () => {
   let h: Host;
   let r: ReturnType<Host["run"]>;
   beforeAll(() => {
-    h = host();
+    h = host({ recordArgv: true });
     r = h.run([...INSTALL, "--tls", "internal", "--public-ip", "203.0.113.7,2001:db8::7"]);
   }, TIMEOUT);
 
@@ -679,6 +715,15 @@ describe("install", () => {
     }
     // And never passes one on a command line.
     expect(h.calls().join("\n")).not.toContain(env.POSTGRES_PASSWORD!);
+  });
+
+  test("never passes a password in any command's argv (stubs and real tools alike)", () => {
+    const env = envOf(h);
+    const argv = `${h.calls().join("\n")}\n${h.argv()}`;
+    // The wrappers did record the real tools (awk writes the env file).
+    expect(argv).toMatch(/^awk /m);
+    for (const key of ["POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "GRAFANA_ADMIN_PASSWORD", "AUTH_SECRET"])
+      expect(argv, key).not.toContain(env[key]!);
   });
 
   test("podman secrets hold the role URLs and the Grafana password", () => {
@@ -763,7 +808,7 @@ describe("install", () => {
 
 describe("re-install", () => {
   test(
-    "refuses without --yes, and keeps every secret with --yes",
+    "refuses without --reinstall (also with --yes), and keeps every secret with --reinstall",
     () => {
       const h = host();
       expectOk(h.run(INSTALL));
@@ -775,7 +820,12 @@ describe("re-install", () => {
       expect(again.err).toContain("an instance is already installed (version 0.1.0)");
       expect(envOf(h)).toEqual(before);
 
-      const yes = h.run([...INSTALL.slice(0, 3), "--yes"]);
+      // --yes is root's consent to prepare the host, never to reinstall.
+      const onlyYes = h.run([...INSTALL, "--yes"]);
+      expect(onlyYes.code).toBe(1);
+      expect(onlyYes.err).toContain("re-run with --reinstall");
+
+      const yes = h.run([...INSTALL.slice(0, 3), "--reinstall"]);
       expect(yes.code, yes.err).toBe(0);
       const after = envOf(h);
       for (const key of Object.keys(before).filter((k) => /SECRET|PASSWORD|_KEY|TOKEN/.test(k)))
@@ -795,7 +845,7 @@ describe("re-install", () => {
       expectOk(h.run(INSTALL));
       const file = join(h.home, ".config/commonair/commonair.env");
       writeFileSync(file, readFileSync(file, "utf8").replace(/^ABUSE_EMAIL=.*$/m, "ABUSE_EMAIL=abuse@example.net"));
-      expectOk(h.run([...INSTALL, "--yes"]));
+      expectOk(h.run([...INSTALL, "--reinstall"]));
       expect(envOf(h).ABUSE_EMAIL).toBe("abuse@example.net");
     },
     TIMEOUT,
@@ -806,7 +856,7 @@ describe("re-install", () => {
     () => {
       const h = host();
       expect(h.run(INSTALL, { STUB_MIGRATE_FAIL: "0.1.0" }).code).toBe(1);
-      expectOk(h.run([...INSTALL, "--yes"]));
+      expectOk(h.run([...INSTALL, "--reinstall"]));
       expect(h.calls()).toContain("systemctl --user reset-failed commonair-*");
     },
     TIMEOUT,
@@ -817,7 +867,7 @@ describe("re-install", () => {
     () => {
       const h = host();
       mkdirSync(join(h.home, "commonair"));
-      const r = h.run([...INSTALL, "--yes"]);
+      const r = h.run([...INSTALL, "--reinstall"]);
       expect(r.code).toBe(1);
       expect(r.err).toContain("is not a symlink");
       expect(statSync(join(h.home, "commonair")).isDirectory()).toBe(true);
@@ -1046,6 +1096,150 @@ describe("upgrade", () => {
       const r = h.run(["upgrade", "--version", "v0.1.0"]);
       expect(r.code).toBe(1);
       expect(r.err).toContain("version 0.1.0 is already installed");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("signature stripping", () => {
+  // Whoever can replace SHA256SUMS can also delete its signature: with cosign installed, a
+  // signature that is missing or cannot be downloaded stops the install before extraction.
+  const extracted = (h: Host) => existsSync(join(h.home, ".local/share/commonair/releases"));
+
+  test("--version: a release without SHA256SUMS.sigstore.json is refused", () => {
+    const h = host({ cosign: true });
+    const r = h.run(INSTALL);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("SHA256SUMS.sigstore.json");
+    expect(r.err).toContain("could not download");
+    expect(extracted(h)).toBe(false);
+    // Stopped before the bundle itself was fetched.
+    expect(h.calls().some((c) => c.startsWith("curl") && c.endsWith(bundleAssetName("0.1.0")))).toBe(false);
+    expect(h.calls().some((c) => c.startsWith("cosign"))).toBe(false);
+  });
+
+  test("--version: a signature download that fails is refused even when the asset exists", () => {
+    const h = host({ cosign: true });
+    writeFileSync(join(releaseDir, "SHA256SUMS.sigstore.json"), "{}");
+    try {
+      const r = h.run(INSTALL, { STUB_CURL_FAIL: "SHA256SUMS.sigstore.json" });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("could not download SHA256SUMS.sigstore.json");
+      expect(extracted(h)).toBe(false);
+    } finally {
+      Bun.spawnSync(["rm", join(releaseDir, "SHA256SUMS.sigstore.json")]);
+    }
+  });
+
+  test("--bundle: SHA256SUMS without its signature next to it is refused", () => {
+    const h = host({ cosign: true });
+    const r = h.run([
+      "install",
+      "--bundle",
+      join(releaseDir, bundleAssetName("0.1.0")),
+      "--domain",
+      "stream.example.org",
+      "--email",
+      "ops@example.org",
+    ]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("SHA256SUMS.sigstore.json is missing");
+    expect(extracted(h)).toBe(false);
+    expect(h.calls().filter((c) => c.startsWith("podman pull"))).toEqual([]);
+  });
+
+  test(
+    "without cosign the checksum-only path continues, with a loud warning",
+    () => {
+      const h = host();
+      const r = h.run(INSTALL);
+      expect(r.code, r.err).toBe(0);
+      expect(r.err).toContain("its SIGNATURE IS NOT");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("convergence", () => {
+  test(
+    "a unit left stopped by a failed dependency is started again while waiting for health",
+    () => {
+      const h = host();
+      const r = h.run(INSTALL, { STUB_DEP_FAILED: "commonair-web.service" });
+      expect(r.code, r.err).toBe(0);
+      const calls = h.calls();
+      const kick = calls.indexOf("systemctl --user start --no-block commonair-web.service");
+      expect(kick).toBeGreaterThan(
+        calls.findIndex((c) => c.startsWith("systemctl --user start --no-block commonair-")),
+      );
+      expect(calls[kick - 1]).toBe("systemctl --user reset-failed commonair-web.service");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("first IRC certificate", () => {
+  test(
+    "before DNS points here (no certificate) it gives up after a short bounded wait and the install succeeds",
+    () => {
+      const h = host();
+      // A clock that advances 5 s per reading, so the bound is measured in attempts, not wall time.
+      writeFileSync(
+        join(h.dir, "stub/date"),
+        `#!/bin/sh\nif [ "$1" = +%s ]; then n=$(cat "$STUB_STATE/clock" 2>/dev/null || echo 1000000); n=$((n + 5)); echo "$n" > "$STUB_STATE/clock"; echo "$n"; else exec ${Bun.which("date")} "$@"; fi\n`,
+      );
+      chmodSync(join(h.dir, "stub/date"), 0o755);
+      const r = h.run(INSTALL, { STUB_IRC_CERT_FAIL: "1", COMMONAIR_HEALTH_TIMEOUT: "900" });
+      expect(r.code, r.err).toBe(0);
+      expect(r.err).toContain("commonair-irc-cert.timer retries");
+      const attempts = h.calls().filter((c) => c === "systemctl --user start commonair-irc-cert.service").length;
+      // About 60 s at 5 s per attempt, not the 900 s health timeout (180 attempts).
+      expect(attempts).toBeGreaterThan(0);
+      expect(attempts).toBeLessThanOrEqual(15);
+      expect(r.out).toContain("is running");
+    },
+    TIMEOUT,
+  );
+});
+
+describe("applying edits to commonair.env", () => {
+  test(
+    "the command next steps prints works: install --reinstall reuses the installed release",
+    () => {
+      const h = host();
+      const first = h.run(INSTALL);
+      expectOk(first);
+      expect(first.out).not.toContain("--yes");
+      const printed = /sh (\S+)\/selfhost\.sh (install --reinstall)/.exec(first.out);
+      expect(printed?.[1]).toBe(join(h.home, "commonair"));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      writeFileSync(file, `${readFileSync(file, "utf8")}SMTP_HOST=smtp.example.net\n`);
+      const before = envOf(h);
+      Bun.spawnSync(["sh", "-c", `: > "${h.log}"`]);
+
+      const r = h.run(printed![2]!.split(" "));
+      expect(r.code, r.err).toBe(0);
+      expect(r.err).toContain("reusing the installed release 0.1.0");
+      expect(h.calls().filter((c) => c.startsWith("curl"))).toEqual([]);
+      expect(current(h)).toBe(join(h.home, ".local/share/commonair/releases/0.1.0"));
+      const after = envOf(h);
+      expect(after.SMTP_HOST).toBe("smtp.example.net");
+      for (const key of Object.keys(before).filter((k) => /SECRET|PASSWORD|_KEY|TOKEN/.test(k)))
+        expect(after[key], key).toBe(before[key]);
+      // The stack was restarted with the edits: migrate, then the services.
+      expect(h.calls()).toContain("systemctl --user start commonair-migrate.service");
+      expect(h.calls().some((c) => c.startsWith("systemctl --user start --no-block"))).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a first install still has to say which release",
+    () => {
+      const h = host();
+      const r = h.run(["install", "--reinstall", "--domain", "stream.example.org", "--email", "ops@example.org"]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("say which release");
     },
     TIMEOUT,
   );

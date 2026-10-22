@@ -23,6 +23,9 @@ SIGNATURE_ASSET="SHA256SUMS.sigstore.json"
 # Tests point these at fixtures; operators never need to.
 SYSROOT="${COMMONAIR_SYSROOT:-}"
 HEALTH_TIMEOUT="${COMMONAIR_HEALTH_TIMEOUT:-900}"
+# The first IRC certificate sync at install: short, because with ACME before DNS points here
+# there is no certificate to wait for; the timer retries later.
+IRC_CERT_TIMEOUT="${COMMONAIR_IRC_CERT_TIMEOUT:-60}"
 POLL_INTERVAL="${COMMONAIR_POLL_INTERVAL:-5}"
 
 DATA_DIR="$HOME/.local/share/commonair"
@@ -87,11 +90,14 @@ install options:
                         Offline only: accept a --bundle with no SHA256SUMS. Its integrity is
                         then not checked at all; never use it for a downloaded bundle.
   --unsupported-distro  Continue on a distribution other than Debian 13 or Fedora 42+.
-  --yes                 Allow install over an existing instance (secrets are kept), and run
-                        the root preparation without asking.
+  --reinstall           Allow install over an existing instance. Secrets and edits to
+                        commonair.env are kept. Without --version/--bundle it reuses the
+                        installed release: the way to apply edits to commonair.env.
+  --yes                 As root only: allow the host preparation below. It never implies
+                        --reinstall.
 
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
-  --insecure-no-checksum, --yes.
+  --insecure-no-checksum.
 
 A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
 upgrades use the repository recorded in the installed release.
@@ -119,13 +125,15 @@ env_get() {
 }
 
 # Set KEY=VALUE in the env file, replacing an existing line or appending one. Values are
-# validated by the callers (no newlines or backslashes), and the file stays 0600.
+# validated by the callers (no newlines), and the file stays 0600. The key and value reach awk
+# through its environment, never its argv: a command line is world-readable in ps and
+# /proc/<pid>/cmdline, and the values include passwords (DATABASE_URL).
 env_set() {
   _tmp="$ENV_FILE.tmp"
   (
     umask 077
-    awk -v k="$1" -v v="$2" '
-      BEGIN { done = 0 }
+    SELFHOST_KEY="$1" SELFHOST_VALUE="$2" awk '
+      BEGIN { k = ENVIRON["SELFHOST_KEY"]; v = ENVIRON["SELFHOST_VALUE"]; done = 0 }
       index($0, k "=") == 1 { if (!done) print k "=" v; done = 1; next }
       { print }
       END { if (!done) print k "=" v }
@@ -374,7 +382,8 @@ user_args() {
   [ "$REQUIRE_SIGNATURE" = yes ] && _out="$_out --require-signature"
   [ "$INSECURE_NO_CHECKSUM" = yes ] && _out="$_out --insecure-no-checksum"
   [ "$UNSUPPORTED_DISTRO" = yes ] && _out="$_out --unsupported-distro"
-  [ "$YES" = yes ] && _out="$_out --yes"
+  # --yes was root's consent to prepare the host; reinstalling needs its own (--reinstall).
+  [ "$REINSTALL" = yes ] && _out="$_out --reinstall"
   printf '%s' "$_out"
 }
 
@@ -399,14 +408,14 @@ verify_signature() {
       die "--require-signature: cosign is not installed" \
         "fix: install cosign (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run"
     fi
-    warn "cosign is not installed: SHA256SUMS is checked, but its signature is not"
+    warn "cosign is not installed: $CHECKSUMS_ASSET is checked, but its SIGNATURE IS NOT;" \
+      "install cosign (or pass --require-signature) so a tampered release page is caught"
     return 0
   fi
-  if [ ! -f "$1/$SIGNATURE_ASSET" ]; then
-    if [ "$REQUIRE_SIGNATURE" = yes ]; then die "--require-signature: $SIGNATURE_ASSET is missing"; fi
-    warn "$SIGNATURE_ASSET is missing: SHA256SUMS is not signature-checked"
-    return 0
-  fi
+  # With cosign installed a missing signature is never skipped: whoever can swap SHA256SUMS can
+  # also delete its signature.
+  [ -f "$1/$SIGNATURE_ASSET" ] || die "$SIGNATURE_ASSET is missing: refusing a release whose signature cannot be checked" \
+    "fix: put the release's $SIGNATURE_ASSET next to its $CHECKSUMS_ASSET (both are release assets)"
   info "verifying the signature of $CHECKSUMS_ASSET with cosign"
   cosign verify-blob --bundle "$1/$SIGNATURE_ASSET" \
     --certificate-identity-regexp "$(identity_regexp)" \
@@ -465,7 +474,9 @@ obtain_bundle() {
   fi
   download "$_url/$CHECKSUMS_ASSET" "$_dir/$CHECKSUMS_ASSET"
   if have cosign; then
-    download "$_url/$SIGNATURE_ASSET" "$_dir/$SIGNATURE_ASSET" || true
+    download "$_url/$SIGNATURE_ASSET" "$_dir/$SIGNATURE_ASSET" ||
+      die "could not download $SIGNATURE_ASSET: refusing a release whose signature cannot be checked" \
+        "fix: check the network and that the release has a $SIGNATURE_ASSET asset"
   fi
   verify_signature "$_dir"
   download "$_url/$_base" "$_dir/$_base"
@@ -511,7 +522,11 @@ apply_registry() {
 }
 
 env_set_file() {
-  awk -v k="$2" -v v="$3" 'index($0, k "=") == 1 { print k "=" v; next } { print }' "$1" >"$1.tmp"
+  SELFHOST_KEY="$2" SELFHOST_VALUE="$3" awk '
+    BEGIN { k = ENVIRON["SELFHOST_KEY"]; v = ENVIRON["SELFHOST_VALUE"] }
+    index($0, k "=") == 1 { print k "=" v; next }
+    { print }
+  ' "$1" >"$1.tmp"
   mv "$1.tmp" "$1"
 }
 
@@ -707,6 +722,18 @@ unit_healthy() {
   [ -z "$_h" ] || [ "$_h" = healthy ]
 }
 
+# A unit that is neither running nor restarting gets started again. That is a unit whose start
+# job failed with result 'dependency' (a one-shot it Requires= failed, now retried or reset),
+# which Restart= never retries; units only Want= long-running services, so this is rare.
+kick_if_stopped() {
+  case "$(systemctl --user is-active "$1" 2>/dev/null || true)" in
+    failed | inactive)
+      systemctl --user reset-failed "$1" 2>/dev/null || true
+      systemctl --user start --no-block "$1" 2>/dev/null || true
+      ;;
+  esac
+}
+
 # Waits until every long-running unit is active and healthy (IRC only with $1 = all).
 wait_healthy() {
   _deadline=$(($(date +%s) + HEALTH_TIMEOUT))
@@ -714,7 +741,9 @@ wait_healthy() {
     _pending=""
     for _s in $(services); do
       if [ "$1" != all ] && [ "$_s" = commonair-irc.service ]; then continue; fi
-      unit_healthy "$_s" || _pending="$_pending ${_s%.service}"
+      unit_healthy "$_s" && continue
+      _pending="$_pending ${_s%.service}"
+      kick_if_stopped "$_s"
     done
     if [ -z "$_pending" ]; then return 0; fi
     if [ "$(date +%s)" -ge "$_deadline" ]; then
@@ -727,10 +756,11 @@ wait_healthy() {
 
 # IRC refuses to start without a certificate; Caddy gets one shortly after it starts.
 first_irc_cert() {
-  _deadline=$(($(date +%s) + HEALTH_TIMEOUT))
+  _deadline=$(($(date +%s) + IRC_CERT_TIMEOUT))
   until systemctl --user start commonair-irc-cert.service >/dev/null 2>&1; do
     if [ "$(date +%s)" -ge "$_deadline" ]; then
-      warn "Caddy has no certificate for $(env_get IRC_PUBLIC_HOST "$ENV_FILE") yet; IRC TLS waits for commonair-irc-cert.timer"
+      warn "Caddy has no certificate for $(env_get IRC_PUBLIC_HOST "$ENV_FILE") yet (does DNS point here?); continuing without IRC."
+      warn "commonair-irc-cert.timer retries daily; once DNS resolves, run it now: systemctl --user start commonair-irc-cert.service"
       return 1
     fi
     sleep "$POLL_INTERVAL"
@@ -742,7 +772,7 @@ bring_up() {
   restart_stack || return 1
   wait_healthy core || return 1
   # Without DNS yet (ACME), there is no certificate: everything else is up, IRC TLS follows
-  # once the daily timer finds one (or the operator re-runs install --yes).
+  # once the daily timer finds one (or the operator starts commonair-irc-cert.service).
   if first_irc_cert; then wait_healthy all; fi
 }
 
@@ -765,8 +795,10 @@ next_steps() {
   say ""
   say "Next steps:"
   say "  - Point DNS for $_host at this server (A/AAAA) if you have not yet."
-  say "  - Set real SMTP_* values in $ENV_FILE, then: selfhost.sh install --yes (keeps secrets)."
-  say "  - Review the instance contacts (CONTACT_EMAIL, SECURITY_EMAIL, ...) in the same file."
+  say "  - Set real SMTP_* values in $ENV_FILE and review the instance contacts"
+  say "    (CONTACT_EMAIL, SECURITY_EMAIL, ...) there. Apply edits to that file with:"
+  say "      sh $CURRENT_LINK/selfhost.sh install --reinstall"
+  say "    (keeps secrets and the installed release)."
   if [ "$(env_get TLS_MODE "$ENV_FILE")" = internal ]; then
     say "  - TLS uses Caddy's internal CA. Trust its root on your clients:"
     say "      $(caddy_root_path)"
@@ -808,6 +840,7 @@ parse_flags() {
   INSECURE_NO_CHECKSUM=no
   UNSUPPORTED_DISTRO=no
   YES=no
+  REINSTALL=no
   while [ $# -gt 0 ]; do
     case "$1" in
       --version | --bundle | --sha256sums | --domain | --email | --tls | --registry | --public-ip | --model)
@@ -832,6 +865,7 @@ parse_flags() {
       --insecure-no-checksum) INSECURE_NO_CHECKSUM=yes && shift ;;
       --unsupported-distro) UNSUPPORTED_DISTRO=yes && shift ;;
       --yes | -y) YES=yes && shift ;;
+      --reinstall) REINSTALL=yes && shift ;;
       -h | --help) usage && exit 0 ;;
       *) die "unknown option: $1" "see: selfhost.sh --help" ;;
     esac
@@ -860,9 +894,9 @@ cmd_install() {
     run_as_service_user
   fi
   resolve_repository_url
-  if instance_exists && [ "$YES" != yes ]; then
+  if instance_exists && [ "$REINSTALL" != yes ]; then
     die "an instance is already installed (version $(installed_version))" \
-      "re-run with --yes to reinstall it (secrets are kept), or use: selfhost.sh upgrade"
+      "re-run with --reinstall to reinstall it (secrets are kept), or use: selfhost.sh upgrade"
   fi
   if [ -z "$DOMAIN" ]; then DOMAIN=$(env_get PUBLIC_HOSTNAME "$ENV_FILE"); fi
   [ -n "$DOMAIN" ] || die "--domain is required on the first install"
@@ -874,8 +908,16 @@ cmd_install() {
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
 
   host_checks
-  obtain_bundle
-  extract_bundle
+  if [ -z "$VERSION" ] && [ -z "$BUNDLE" ] && [ -L "$CURRENT_LINK" ]; then
+    # --reinstall alone: re-apply flags and commonair.env edits to the installed release.
+    RELEASE_DIR=$(readlink "$CURRENT_LINK")
+    BUNDLE_VERSION=$(installed_version)
+    [ -d "$RELEASE_DIR" ] || die "the installed release $RELEASE_DIR is missing" "fix: install --reinstall --version vX.Y.Z"
+    info "reusing the installed release $BUNDLE_VERSION"
+  else
+    obtain_bundle
+    extract_bundle
+  fi
   apply_registry "$RELEASE_DIR" "$REGISTRY"
   pull_images "$RELEASE_DIR"
   write_env "$RELEASE_DIR"
