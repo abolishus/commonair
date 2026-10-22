@@ -41,6 +41,7 @@ import {
   unitSetKeys,
 } from "../selfhost/unit-env.ts";
 import { QUADLET_DIR, readUnitDir, unitSection, unitValues } from "../selfhost/units.ts";
+import { shellcheck, shellcheckAvailable } from "./support/shellcheck.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -466,30 +467,12 @@ describe("render-env.sh", () => {
 });
 
 describe("shellcheck", () => {
-  const SHELLCHECK_IMAGE =
-    "docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d";
-  const bin = Bun.which("shellcheck");
-  const podman = Bun.which("podman");
-  test.skipIf(!bin && !podman && process.env.CI !== "true")(
+  // Skips only on a developer machine with neither; in CI the test runs and fails instead.
+  test.skipIf(!shellcheckAvailable && process.env.CI !== "true")(
     "render-env.sh is clean (POSIX sh)",
     () => {
-      if (!bin && !podman) throw new Error("shellcheck (or podman for the pinned image) is required in CI");
-      const r = bin
-        ? Bun.spawnSync([bin, "--shell=sh", "--severity=style", RENDER])
-        : Bun.spawnSync([
-            podman!,
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "-v",
-            `${RENDER}:/mnt/render-env.sh:ro,Z`,
-            SHELLCHECK_IMAGE,
-            "--shell=sh",
-            "--severity=style",
-            "/mnt/render-env.sh",
-          ]);
-      expect(r.exitCode, `${r.stdout.toString()}${r.stderr.toString()}`).toBe(0);
+      const r = shellcheck(RENDER);
+      expect(r.code, r.out).toBe(0);
     },
     300_000,
   );

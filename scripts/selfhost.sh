@@ -671,8 +671,9 @@ create_secrets() {
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   _owner=$(env_get POSTGRES_PASSWORD "$ENV_FILE")
   _grafana=$(env_get GRAFANA_ADMIN_PASSWORD "$ENV_FILE")
-  [ -n "$_app" ] && [ -n "$_owner" ] && [ -n "$_grafana" ] ||
+  if [ -z "$_app" ] || [ -z "$_owner" ] || [ -z "$_grafana" ]; then
     die "$ENV_FILE lacks POSTGRES_APP_PASSWORD, POSTGRES_PASSWORD or GRAFANA_ADMIN_PASSWORD"
+  fi
   # printf is a shell builtin: the values never appear in a process list.
   printf 'postgres://commonair_app:%s@postgres:5432/commonair' "$_app" |
     podman secret create --replace commonair-database-url - >/dev/null

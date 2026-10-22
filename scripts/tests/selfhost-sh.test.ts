@@ -28,6 +28,7 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { SITE } from "../../packages/config/src/site.ts";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, bundleAssetName } from "../release/manifest.ts";
 import { buildBundle } from "../selfhost/bundle.ts";
+import { shellcheck, shellcheckAvailable } from "./support/shellcheck.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SCRIPT = join(ROOT, "scripts/selfhost.sh");
@@ -1515,32 +1516,12 @@ describe("applying edits to commonair.env", () => {
 });
 
 describe("shellcheck", () => {
-  // The binary when installed, else the pinned image; CI must not skip (CI=true).
-  const SHELLCHECK_IMAGE =
-    "docker.io/koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d";
-  const bin = Bun.which("shellcheck");
-  const podman = Bun.which("podman");
   // Skips only on a developer machine with neither; in CI the test runs and fails instead.
-  test.skipIf(!bin && !podman && process.env.CI !== "true")(
+  test.skipIf(!shellcheckAvailable && process.env.CI !== "true")(
     "selfhost.sh is clean (POSIX sh)",
     () => {
-      if (!bin && !podman) throw new Error("shellcheck (or podman for the pinned image) is required in CI");
-      const r = bin
-        ? Bun.spawnSync([bin, "--shell=sh", "--severity=style", SCRIPT])
-        : Bun.spawnSync([
-            podman!,
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "-v",
-            `${SCRIPT}:/mnt/selfhost.sh:ro,Z`,
-            SHELLCHECK_IMAGE,
-            "--shell=sh",
-            "--severity=style",
-            "/mnt/selfhost.sh",
-          ]);
-      expect(r.exitCode, `${r.stdout.toString()}${r.stderr.toString()}`).toBe(0);
+      const r = shellcheck(SCRIPT);
+      expect(r.code, r.out).toBe(0);
     },
     300_000,
   );
