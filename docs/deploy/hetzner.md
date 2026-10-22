@@ -132,9 +132,15 @@ Allow inbound:
 | 6697    | TCP      | IRC over TLS                                    |
 | 6667    | TCP      | plain IRC, if you offer it                      |
 
-Allow established/related return traffic. Robot's firewall is stateless, so also allow inbound
-TCP to the ephemeral port range (32768–65535) with the ACK flag, or outbound connections (image
-pulls, ACME, SMTP) never get their answers. Everything else (Postgres, Valkey, Garage, Grafana)
+Allow established/related return traffic. Robot's firewall is stateless, so outbound traffic
+only gets its answers if you also allow, to the ephemeral port range (32768–65535):
+
+- inbound TCP with the ACK flag (image pulls, ACME, SMTP, the release download);
+- inbound UDP and TCP from source port 53 (DNS answers; without them nothing resolves, so every
+  flow above fails);
+- inbound UDP from source port 123, if the server syncs time over NTP.
+
+Everything else (Postgres, Valkey, Garage, Grafana)
 stays on `127.0.0.1`; reach Grafana through an SSH tunnel
 (`ssh -L 3030:127.0.0.1:3030 commonair@<server>`).
 
@@ -160,9 +166,9 @@ is `scripts/selfhost.sh`.
   the server's IP blocked.
 - **Disk failure**: Hetzner replaces a failed disk on request. Check `cat /proc/mdstat` after any
   hardware alert and let the RAID resync.
-- **Capacity**: watch the network port's utilization. Near 1 Gbit/s sustained, add an
-  origin/media server or more member relays before anything else (ADR 0010,
-  [scaling.md](../self-hosting/scaling.md)).
+- **Capacity**: watch the network port's utilization. Near 1 Gbit/s sustained, scale out in
+  the order of ADR 0010 §3: Postgres and Valkey to their own server, then origin/media servers,
+  with member relays and P2P before any CDN ([scaling.md](../self-hosting/scaling.md)).
 
 ## Gaps before go-live
 

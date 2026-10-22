@@ -159,7 +159,13 @@ bun scripts/release/changelog.ts --from v0.1.0 --to v0.2.0 --version 0.2.0 \
 gh release edit v0.2.0 --notes-file notes.md
 ```
 
-For the first stable release, `v0.1.0`, omit `--from` to include all history.
+For the first stable release, `v0.1.0`, omitting `--from` is not enough: it defaults to the
+nearest earlier `v*` tag, which is the last rc. Pass an empty `--from` to include all history:
+
+```sh
+bun scripts/release/changelog.ts --from '' --to v0.1.0 --version 0.1.0 \
+  --repo https://github.com/abolishus/commonair --out notes.md
+```
 
 ## The changelog
 

@@ -75,10 +75,12 @@ with `cosign verify` ([verifying.md](verifying.md#images)).
 
 The relay needs a public HTTPS URL: either its own certificate (`--tls-cert`, `--tls-key`) or a
 TLS-terminating proxy in front of it (`--behind-proxy`). The token goes in the environment, not
-on the command line, so it stays out of `ps` and shell history.
+on the command line, so it stays out of `ps` and shell history. Never type it into a command:
+read it without echo (paste it at the prompt), or keep it in a file only you can read.
 
 ```sh
-COMMONAIR_RELAY_TOKEN=relay_xxx commonair-relay \
+read -rs COMMONAIR_RELAY_TOKEN && export COMMONAIR_RELAY_TOKEN
+commonair-relay \
   --api https://stream.example.org/ \
   --public-url https://relay.example.org \
   --listen :8443 \
@@ -88,13 +90,17 @@ COMMONAIR_RELAY_TOKEN=relay_xxx commonair-relay \
   --tls-key /etc/letsencrypt/live/relay.example.org/privkey.pem
 ```
 
-With Podman, behind a proxy:
+With Podman, behind a proxy, keep the token in a Podman secret. `podman inspect` and `ps` then
+show only the secret's name:
 
 ```sh
+read -rs COMMONAIR_RELAY_TOKEN
+printf %s "$COMMONAIR_RELAY_TOKEN" | podman secret create commonair-relay-token -
+unset COMMONAIR_RELAY_TOKEN
 podman run -d --name commonair-relay --restart=always --stop-timeout 50 \
   -p 8443:8443 \
   -v commonair-relay:/data \
-  -e COMMONAIR_RELAY_TOKEN=relay_xxx \
+  --secret commonair-relay-token,type=env,target=COMMONAIR_RELAY_TOKEN \
   "$RELAY_IMAGE" \
   --api https://stream.example.org/ --public-url https://relay.example.org \
   --capacity-mbps 200 --behind-proxy

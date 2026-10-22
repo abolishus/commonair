@@ -33,20 +33,21 @@ metrics, logs and traces.
 
 ## The order to scale in
 
-[ADR 0010](../decisions/0010-production-hosting.md) sets the order. Scale out by role, not by
+[ADR 0010](../decisions/0010-production-hosting.md) §3 sets the order. Scale out by role, not by
 buying a bigger box:
 
-1. **Member relays and P2P before anything else.** Members who run a relay
+1. **Move Postgres and Valkey to their own server**, so the database stops competing with
+   FFmpeg for CPU and memory.
+2. **Add origin and media servers** for more egress and more transcoding.
+3. **Rely on member relays and P2P before any CDN.** Members who run a relay
    ([relays.md](relays.md)) serve viewers from their own upload bandwidth, and the WebTorrent
    P2P swarm (`P2P_ENABLED`, on by default) lets viewers share segments. Both take load off the
-   origin at no cost to the co-op.
-2. **Move Postgres and Valkey to their own server**, so the database stops competing with
-   FFmpeg for CPU and memory.
-3. **Add origin and media servers** for more egress and more transcoding.
+   origin at no cost to the co-op, so encourage relays from the start; they do not replace
+   steps 1 and 2 as the platform's own capacity.
 4. **A CDN last**, and only as an optional burst adapter (`CDN_PROVIDER=origin-pull`). The
    platform never requires one.
 
-Steps 2 and 3 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
+Steps 1 and 2 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
 running the same images with the same env file on another host, pointing `DATABASE_URL`,
 `VALKEY_URL` and the internal URLs at it, and keeping the internal ports off the public
 internet. Plan that work with the project before you need it.

@@ -110,8 +110,25 @@ To restore a specific backup instead of the newest, pass its name (from `selfhos
 after the target directory: `commonair-restore /var/lib/postgresql/data <backup-name>`. For a
 point in time, add `-e RECOVERY_TARGET_TIME='2026-10-18 12:00:00+00'` to the `podman run`.
 
-The first start after a restore replays WAL before Postgres accepts connections; on a large
-archive that takes a while, and the services wait for it.
+The first start after a restore replays WAL before Postgres accepts connections. The units
+give that limited time: `commonair-postgres` counts as failed (and is restarted) when its
+health check has not passed after about two minutes, and its start times out after five. A
+small archive replays well within that. If you restore an old base backup with a lot of WAL
+after it, or the restart loop shows in `journalctl --user -u commonair-postgres`, finish the
+replay by hand before step 4:
+
+```sh
+podman run -d --name commonair-replay --network commonair \
+  --env-file ~/.config/commonair/commonair.env \
+  -e POSTGRES_USER=commonair -e POSTGRES_DB=commonair \
+  -e WALG_S3_ENDPOINT=http://garage:3900 -e S3_REGION=garage \
+  -v commonair-postgres-data:/var/lib/postgresql/data "$PG_IMAGE"
+# Wait until this prints "f" (recovery over, database promoted), then stop it.
+podman exec commonair-replay psql -U commonair -d commonair -tAc 'select pg_is_in_recovery()'
+podman stop commonair-replay && podman rm commonair-replay
+```
+
+Then run step 4.
 
 ### Onto a new server
 
@@ -131,15 +148,33 @@ Then point DNS at the new server.
 **An untested backup does not count.** Restore onto a scratch server regularly (at least before
 launch and after changing anything about backups), and check that your data is there.
 
-1. Install the same version on a throwaway server or VM, with `--tls internal` and any hostname.
-2. Copy your env file over the new one, but give the drill **a key that can only read the
-   backup bucket** (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`). The restored database starts
-   archiving its own WAL on promotion, and with a writable key it would write into your
-   production backup prefix.
-3. Run the [restore](#restore) from step 1 on. Then turn off the drill's daily backup, which
-   `install --reinstall` enabled: `systemctl --user disable --now commonair-backup.timer`.
+The drill runs a full copy of production: real accounts, queued notifications and simulcast
+targets. Keep it from reaching anyone.
+
+1. Install the same version on a throwaway server or VM, with `--tls internal` and a hostname
+   of its own, such as `drill.example.org`.
+2. Copy your env file over the new one, then change it before anything starts:
+   - Give the drill **a key that can only read the backup bucket** (`AWS_ACCESS_KEY_ID`,
+     `AWS_SECRET_ACCESS_KEY`). The restored database starts archiving its own WAL on promotion,
+     and with a writable key it would write into your production backup prefix.
+   - Point mail nowhere: `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_USER=` and
+     `SMTP_PASSWORD=` (nothing listens there, so sending fails). Otherwise the worker sends
+     queued notifications to real members with your production credentials.
+   - Turn off payments: `PAYMENTS_PROVIDER=manual` and `STRIPE_SECRET_KEY=`.
+3. Run the [restore](#restore) from step 1 on, but replace its step 4 with a reinstall that
+   keeps the drill's hostname and TLS mode (the copied env file holds production's):
+
+   ```sh
+   sh ~/commonair/selfhost.sh install --reinstall --domain drill.example.org --tls internal
+   ```
+
+   Then turn off the drill's daily backup, which the reinstall enabled:
+   `systemctl --user disable --now commonair-backup.timer`. If you only need to look at data,
+   also stop the worker: `systemctl --user stop commonair-worker.service`.
+
 4. Sign in on the drill instance (trust its root first, [tls.md](tls.md#internal-ca)) and check
-   recent data: the newest accounts, streams and ledger entries.
+   recent data: the newest accounts, streams and ledger entries. Do not go live on it: the
+   restored simulcast targets would push the stream to real third-party platforms.
 5. Write down the date, the backup restored, how long it took, and anything that went wrong.
    Then delete the server.
 
