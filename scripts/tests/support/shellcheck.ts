@@ -9,7 +9,13 @@
 import { basename } from "node:path";
 import { TOOLS } from "../../release/tools.ts";
 
-export const SHELLCHECK_IMAGE = `docker.io/koalaman/shellcheck:v${TOOLS.shellcheck.version}@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d`;
+/** The image digest for each pinned version: a version bump without its digest fails loudly. */
+const IMAGE_DIGESTS: Record<string, string> = {
+  "0.11.0": "sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d",
+};
+const digest = IMAGE_DIGESTS[TOOLS.shellcheck.version];
+if (!digest) throw new Error(`no shellcheck image digest for ${TOOLS.shellcheck.version}: add it to IMAGE_DIGESTS`);
+export const SHELLCHECK_IMAGE = `docker.io/koalaman/shellcheck:v${TOOLS.shellcheck.version}@${digest}`;
 
 const local = (() => {
   const bin = Bun.which("shellcheck");

@@ -1387,6 +1387,33 @@ describe("upgrade", () => {
   );
 
   test(
+    "a container named like ours but run by no installed unit counts as foreign",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const r = h.run(["upgrade", "--version", "v0.2.0"], { STUB_NETWORK_FOREIGN: "commonair-test-db" });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("containers outside the instance use it: commonair-test-db");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a re-install checks the network before it stops anything",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const before = h.calls().length;
+      const r = h.run([...INSTALL, "--reinstall"], { STUB_NETWORK_FOREIGN: "someone-elses-db" });
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("containers outside the instance use it: someone-elses-db");
+      const during = h.calls().slice(before);
+      expect(during.filter((c) => /^systemctl --user stop|^podman network rm/.test(c))).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
     "our own containers on an old network do not block the upgrade; the network is re-created",
     () => {
       const h = host();

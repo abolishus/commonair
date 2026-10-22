@@ -809,12 +809,6 @@ sockets() {
   return 0
 }
 
-# The network's settings (its IPRange keeps the fixed addresses of Caddy and web free) apply only
-# when Podman creates it, and Quadlet never re-creates an existing one: so it goes while the
-# stack is down, and the first unit to start creates it from this release's commonair.network.
-# When it cannot go (a container outside the instance still uses it), the old one is kept only if
-# its lease range already leaves out the fixed addresses: otherwise another container could be
-# leased 10.89.42.10 or .11 and have its X-Forwarded-For believed, so the restart fails instead.
 # True when the commonair network's lease range leaves out the fixed addresses the services trust
 # (Caddy 10.89.42.10, web .11): a network this release created, or one an operator already fixed.
 network_lease_ok() {
@@ -839,13 +833,25 @@ recreate_network() {
   return 1
 }
 
-# Before an upgrade changes anything: a network that must be re-created but that a container
-# outside the instance holds cannot be removed, and the upgrade would stop at restart_stack with
-# everything down.
+# The container names the installed units run (ContainerName=), one per line.
+instance_containers() {
+  for _u in "$QUADLET_DIR"/commonair-*.container; do
+    [ -f "$_u" ] && sed -n 's/^ContainerName=//p' "$_u"
+  done
+  return 0
+}
+
+# Before anything is stopped (an upgrade, a re-install, a rollback): a network that must be
+# re-created but that a container outside the instance holds cannot be removed, and the restart
+# would end with everything down. Outside means not named by an installed unit, whatever its name.
 network_preflight() {
   podman network exists commonair 2>/dev/null || return 0
   network_lease_ok && return 0
-  _foreign=$(podman ps -a --filter network=commonair --format '{{.Names}}' 2>/dev/null | grep -v '^commonair-' || true)
+  _ours=$(instance_containers)
+  _foreign=$(podman ps -a --filter network=commonair --format '{{.Names}}' 2>/dev/null |
+    while IFS= read -r _n; do
+      [ -n "$_n" ] && ! printf '%s\n' "$_ours" | grep -qxF "$_n" && printf '%s\n' "$_n"
+    done || true)
   [ -z "$_foreign" ] || die "the commonair network must be re-created, but containers outside the instance use it: $(printf '%s' "$_foreign" | tr '\n' ' ')" \
     "fix: remove them from the network (podman network disconnect commonair <name>), then re-run; nothing was changed"
 }
@@ -874,6 +880,7 @@ start_migrate() {
 
 # ADR 0023 §9: everything down, migrations to completion, then the rest.
 restart_stack() {
+  network_preflight
   # The sockets first: a connection to one would start Caddy (and what it wants) mid-upgrade.
   # shellcheck disable=SC2046 # unit names have no spaces
   systemctl --user stop $(sockets) $(all_units) 2>/dev/null || true
