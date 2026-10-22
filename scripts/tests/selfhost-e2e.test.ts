@@ -100,6 +100,10 @@ describe("e2e: the upgrade re-ran migrate before api and worker", () => {
 describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
   const args = hostRunArgs("localhost/commonair-e2e/host-debian:latest", null, "10.89.0.2");
 
+  test("the host container has no pids limit, as a real server has none of 2048", () => {
+    expect(args).toContain("--pids-limit=-1");
+  });
+
   test("the host container resolves the registry by --add-host, not by network DNS", () => {
     // CNI without the dnsname plugin (Podman 4 on some distributions) has no container DNS.
     expect(args.join(" ")).toContain("--add-host commonair-e2e-zot:10.89.0.2");
@@ -112,6 +116,7 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
       "--hostname",
       "--privileged",
       "--systemd",
+      "--pids-limit",
       "--network",
       "--add-host",
       "-v",
@@ -145,6 +150,7 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
       "--label",
       "--name",
       "--network",
+      "--pids-limit",
       "--privileged",
       "--systemd",
       "--tls-verify",

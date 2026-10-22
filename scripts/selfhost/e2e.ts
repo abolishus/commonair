@@ -313,6 +313,10 @@ export function hostRunArgs(image: string, model: string | null, zotAddress: str
     DOMAIN,
     "--privileged",
     "--systemd=always",
+    // The whole instance runs in here (Bun, Postgres, Podman, conmon, health checks). Podman's
+    // default pids limit (2048) is a cap no real server has: on CI it ran out mid-install
+    // (pthread_create: Resource temporarily unavailable) and Bun services aborted.
+    "--pids-limit=-1",
     "--network",
     NETWORK,
     "--add-host",
