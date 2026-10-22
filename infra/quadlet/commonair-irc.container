@@ -26,7 +26,6 @@ Network=commonair.network
 NetworkAlias=irc
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-irc.env
-Environment=VALKEY_URL=redis://valkey:6379
 Environment=S3_ENDPOINT=http://garage:3900
 Environment=S3_REGION=garage
 Environment=S3_FORCE_PATH_STYLE=true
@@ -37,7 +36,8 @@ Environment=API_INTERNAL_URL=http://api:3001
 Environment=CHAT_INTERNAL_URL=ws://chat:3002/ws
 Environment=ORIGIN_INTERNAL_URL=http://origin:3003
 Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-Environment=TRUSTED_PROXY_CIDRS=10.89.42.0/24
+# X-Forwarded-For is believed only from Caddy, at its fixed address (commonair.network).
+Environment=TRUSTED_PROXY_CIDRS=10.89.42.10/32
 Environment=WEB_PORT=3000
 Environment=API_PORT=3001
 Environment=CHAT_PORT=3002
@@ -61,10 +61,13 @@ Environment=IRC_TLS_CERT_FILE=/run/commonair/irc-tls/tls.crt
 Environment=IRC_TLS_KEY_FILE=/run/commonair/irc-tls/tls.key
 # Shared label (z, not Z): commonair-irc-cert.container writes the same directory.
 Volume=%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,z
-# Raw IRC clients connect directly; IRC over WebSocket stays local until it has a TLS route.
-PublishPort=0.0.0.0:6667:6667
-PublishPort=0.0.0.0:6697:6697
-PublishPort=127.0.0.1:6680:6680
+# Raw IRC clients connect directly (IRC over WebSocket, 6680, is not published until it has a
+# TLS route). No host address: Podman then listens on IPv6 and IPv4, or IPv4 alone on a host
+# without IPv6. Rootless Podman forwards these through rootlessport, so IRC sees every client
+# at one internal address and its per-address limits count all clients together; systemd
+# socket activation (as Caddy has) needs IRC to accept inherited sockets (infra/README.md).
+PublishPort=6667:6667
+PublishPort=6697:6697
 HealthCmd=CMD bun /opt/commonair/healthcheck.ts
 HealthInterval=10s
 HealthTimeout=3s

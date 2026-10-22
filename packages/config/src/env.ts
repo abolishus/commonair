@@ -92,7 +92,10 @@ export const databaseEnv = z.object({
 });
 
 export const valkeyEnv = z.object({
-  /** Valkey (Redis protocol) URL for presence, caches, rate limits and job queues. */
+  /**
+   * Valkey (Redis protocol) URL for presence, caches, rate limits and job queues. With a password
+   * (VALKEY_PASSWORD), `redis://:<password>@host:6379`: init-env writes it that way.
+   */
   VALKEY_URL: z.url(),
 });
 
@@ -400,6 +403,15 @@ export const infraEnv = z.object({
   GARAGE_ADMIN_TOKEN: z.string().min(32).optional(),
   /** Password of Grafana's `admin` user; Grafana refuses to start without it. */
   GRAFANA_ADMIN_PASSWORD: z.string().min(16).optional(),
+  /**
+   * Password Valkey requires (`requirepass`). Empty runs Valkey without one (development only; the
+   * self-hosted unit refuses to start without it). It goes into VALKEY_URL unescaped, so only
+   * URL-safe characters (init-env generates 64 hex characters).
+   */
+  VALKEY_PASSWORD: z
+    .string()
+    .regex(/^[A-Za-z0-9._~-]*$/)
+    .optional(),
   /** Host interface for published ports (default 127.0.0.1). */
   BIND_ADDRESS: z.string().optional(),
   /** Public hostname Caddy serves with TLS (profile `tls`). */

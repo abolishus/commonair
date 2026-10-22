@@ -5,3 +5,8 @@
 [Network]
 NetworkName=commonair
 Subnet=10.89.42.0/24
+# Containers get their addresses from the upper half. The lower half holds the two fixed
+# addresses the services trust X-Forwarded-For from (TRUSTED_PROXY_CIDRS): Caddy 10.89.42.10
+# and web 10.89.42.11 (its proxy to the API), which no other container can then take.
+# selfhost.sh re-creates the network on every restart of the stack, so a change here applies.
+IPRange=10.89.42.128/25

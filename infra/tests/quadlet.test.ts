@@ -22,6 +22,10 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
 const DIR = new URL("../quadlet/", import.meta.url).pathname;
+// Socket units (infra/systemd) a container unit may want: systemd hands their sockets to it.
+const SOCKETS = new Set(
+  readdirSync(new URL("../systemd/", import.meta.url).pathname).filter((f) => f.endsWith(".socket")),
+);
 const units = readdirSync(DIR)
   .filter((f) => f.endsWith(".container"))
   .sort()
@@ -190,7 +194,7 @@ describe("migrations run before anything that reads the schema", () => {
   });
 
   test("every Requires= and Wants= has a matching After= and names an existing unit", () => {
-    const names = new Set(units.map(([n]) => `${n}.service`));
+    const names = new Set([...units.map(([n]) => `${n}.service`), ...SOCKETS]);
     for (const [name, unit] of units) {
       const requires = [...values(unit, "Requires"), ...values(unit, "Wants")];
       expect(
@@ -233,7 +237,7 @@ describe("the dependency graph converges (no failure propagates through a long-r
 
   test.each(units)("%s: long-running dependencies are Wants= + After=", (_, unit) => {
     const wants = values(unit, "Wants");
-    expect(wants.filter((w) => !longRunningServices.has(w))).toEqual([]);
+    expect(wants.filter((w) => !longRunningServices.has(w) && !SOCKETS.has(w))).toEqual([]);
     expect(wants.filter((w) => !values(unit, "After").includes(w))).toEqual([]);
   });
 
@@ -245,7 +249,11 @@ describe("the dependency graph converges (no failure propagates through a long-r
   test("the edge to a long-running dependency exists (api wants valkey; caddy wants api and web)", () => {
     const of = (n: string) => units.find(([u]) => u === `commonair-${n}`)![1];
     expect(values(of("api"), "Wants")).toContain("commonair-valkey.service");
-    expect(values(of("caddy"), "Wants")).toEqual(["commonair-web.service", "commonair-api.service"]);
+    expect(values(of("caddy"), "Wants")).toEqual([
+      "commonair-web.service",
+      "commonair-api.service",
+      "commonair-caddy.socket",
+    ]);
     expect(values(of("garage-init"), "Wants")).toEqual(["commonair-garage.service"]);
   });
 });

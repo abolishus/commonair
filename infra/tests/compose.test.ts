@@ -280,7 +280,8 @@ describe("compose.yaml: configuration and secrets", () => {
     for (const name of ["api", "chat", "irc", "origin", "media", "worker", "tracker", "web"]) {
       const env = compose.services[name]!.environment!;
       expect(env.DATABASE_URL, name).toContain("commonair_app:${POSTGRES_APP_PASSWORD:-}@postgres");
-      expect(env.VALKEY_URL).toBe("redis://valkey:6379");
+      // The password, when .env has one (init-env generates it), goes into the URL.
+      expect(env.VALKEY_URL).toBe("redis://${VALKEY_PASSWORD:+:${VALKEY_PASSWORD}@}valkey:6379");
       expect(env.S3_ENDPOINT).toBe("http://garage:3900");
       expect(env.API_INTERNAL_URL).toBe("http://api:3001");
       expect(env.CHAT_INTERNAL_URL).toBe("ws://chat:3002/ws");
@@ -402,11 +403,16 @@ describe("Quadlet mirror", () => {
       "%h/.local/share/commonair/moderation/ncii.pdq",
     ]);
   });
-  // The only ports a production host exposes; everything else binds 127.0.0.1.
+  // The only ports a production unit publishes. Public ones have no host address, so Podman
+  // listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6); Caddy's 80/443 are systemd
+  // sockets instead (infra/tests/network.test.ts). Loopback ones serve an operator procedure.
   const PUBLIC_PORTS: Record<string, string[]> = {
-    caddy: ["0.0.0.0:80:80", "0.0.0.0:443:443", "0.0.0.0:443:443/udp"],
-    mediamtx: ["0.0.0.0:1935:1935", "0.0.0.0:8189:8189/udp"],
-    irc: ["0.0.0.0:6667:6667", "0.0.0.0:6697:6697"],
+    mediamtx: ["1935:1935", "8189:8189/udp"],
+    irc: ["6667:6667", "6697:6697"],
+  };
+  const LOOPBACK_PORTS: Record<string, string[]> = {
+    garage: ["127.0.0.1:3900:3900"],
+    grafana: ["127.0.0.1:3030:3000"],
   };
 
   test("every production compose service has a unit, and nothing else does", () => {
@@ -427,7 +433,8 @@ describe("Quadlet mirror", () => {
     // busybox, so their checks never passed. A leading `CMD` word gives exec form on Podman 4.9
     // through 6 (5.4 splits a JSON array on whitespace instead of parsing it), so no argument
     // may contain a space.
-    const test = s.healthcheck?.test ?? [];
+    // Compose writes a literal `$` as `$$`.
+    const test = (s.healthcheck?.test ?? []).map((a) => a.replaceAll("$$", "$"));
     const form = test[0] === "CMD" ? test.join(" ") : test[1];
     expect(keys(unit, "HealthCmd"), name).toEqual(ONE_SHOT.has(name) ? [] : [form]);
     expect(
@@ -448,15 +455,20 @@ describe("Quadlet mirror", () => {
     const strength = (d: string) => (ONE_SHOT.has(d) ? "Requires" : "Wants");
     expect(deps.filter((d) => !keys(unit, strength(d)).includes(`commonair-${d}.service`))).toEqual([]);
     expect(keys(unit, "Requires").filter((r) => !ONE_SHOT.has(r.replace(/^commonair-|\.service$/g, "")))).toEqual([]);
-    const isPublic = (p: string) => p.startsWith("0.0.0.0:");
-    expect(keys(unit, "PublishPort").filter(isPublic).sort()).toEqual((PUBLIC_PORTS[name] ?? []).toSorted());
-    expect(keys(unit, "PublishPort").filter((p) => !isPublic(p) && !p.startsWith("127.0.0.1:"))).toEqual([]);
+    const isLoopback = (p: string) => p.startsWith("127.0.0.1:");
+    expect(
+      keys(unit, "PublishPort")
+        .filter((p) => !isLoopback(p))
+        .sort(),
+    ).toEqual((PUBLIC_PORTS[name] ?? []).toSorted());
+    expect(keys(unit, "PublishPort").filter(isLoopback).sort()).toEqual((LOOPBACK_PORTS[name] ?? []).toSorted());
     const dbSecret = /^Secret=commonair-(owner-)?database-url,type=env,target=DATABASE_URL$/m.test(unit);
     expect(dbSecret).toBe(Boolean(s.environment?.DATABASE_URL));
   });
 
   test("WHIP signaling is public only through Caddy; ICE keeps equal host and container ports", () => {
-    expect(keys(units.mediamtx!, "PublishPort")).toContain("127.0.0.1:8889:8889");
+    expect(keys(units.mediamtx!, "PublishPort").filter((p) => p.includes("8889"))).toEqual([]);
+    expect(keys(units.mediamtx!, "PublishPort")).toContain("8189:8189/udp");
     const caddy = read("infra/caddy/Caddyfile");
     const re = /@whip path_regexp (\S+)\n\s*handle @whip \{\s+reverse_proxy mediamtx:8889\s+\}/.exec(caddy);
     expect(re).not.toBeNull();
@@ -491,7 +503,8 @@ describe("Quadlet mirror", () => {
     expect(keys(sync, "User")).toEqual(["0"]);
     expect(keys(sync, "Network")).toEqual(["none"]);
     expect(keys(sync, "ExecStartPost")[0]).toContain("systemctl --user restart commonair-irc.service");
-    expect(keys(irc, "PublishPort")).toContain("127.0.0.1:6680:6680");
+    // IRC over WebSocket has no TLS route yet, so it is not published at all.
+    expect(keys(irc, "PublishPort").filter((p) => p.includes("6680"))).toEqual([]);
   });
 
   test("the network subnet default matches the trusted proxy default", () => {
@@ -569,7 +582,11 @@ describe("Quadlet mirror", () => {
         if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY") continue;
         // Browser-facing and deployment-specific: the units read it from the operator's env file.
         if (k === "S3_PUBLIC_ENDPOINT" || k === "MEDIA_PUBLIC_URL") continue;
-        const expected = k === "TRUSTED_PROXY_CIDRS" ? "10.89.42.0/24" : v;
+        // It holds the Valkey password: a Podman secret in the units (infra/tests/network.test.ts).
+        if (k === "VALKEY_URL") continue;
+        // The units trust Caddy's fixed address (and the API also web's), not the whole subnet.
+        const expected =
+          k === "TRUSTED_PROXY_CIDRS" ? (name === "api" ? "10.89.42.10/32,10.89.42.11/32" : "10.89.42.10/32") : v;
         expect(env[k], `${name}: ${k}`).toBe(expected);
       }
     }

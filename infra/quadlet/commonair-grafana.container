@@ -31,6 +31,7 @@ Environment=GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
 Environment=GF_NEWS_NEWS_FEED_ENABLED=false
 Environment=GF_PLUGINS_PLUGIN_ADMIN_ENABLED=false
 Secret=commonair-grafana-admin-password,type=env,target=GF_SECURITY_ADMIN_PASSWORD
+# Loopback only, for an SSH tunnel (docs/self-hosting/requirements.md); it needs the admin login.
 PublishPort=127.0.0.1:3030:3000
 Volume=%h/commonair/infra/grafana/provisioning:/etc/grafana/provisioning:ro,Z
 Volume=%h/commonair/infra/grafana/dashboards:/var/lib/grafana/dashboards:ro,Z

@@ -23,8 +23,9 @@ renews it on its own. `ACME_EMAIL` (set by `--email`) receives expiry notices. W
 `ACME_CA`, the issuer is Let's Encrypt only; Caddy does not fall back to another CA.
 
 **Point DNS first.** The CA validates over ports 80 and 443 on the address your A record names.
-Create the A record, wait until it resolves from outside, and only then install. Publish no
-AAAA record: the ports bind IPv4 only, and a CA that validates over IPv6 would fail.
+Create the A record, wait until it resolves from outside, and only then install. Publish an
+AAAA record only if the server has a public IPv6 address (the ports listen on it then, and the
+CA may validate over IPv6); an AAAA record pointing elsewhere makes validation fail.
 
 **Mind the rate limits.** Let's Encrypt limits failed validations per hostname per hour and
 duplicate certificates per week. A server that restarts Caddy in a loop with broken DNS can hit

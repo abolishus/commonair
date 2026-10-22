@@ -17,12 +17,16 @@
  *    access to object storage (ADR 0024): a presigned PUT into the media bucket's incoming/ and
  *    a presigned export GET succeed through Caddy, and unsigned or out-of-scope requests do not.
  *    And that each container has only its keys of commonair.env: Caddy no database, session
- *    or S3 secret, the API its DATABASE_URL.
+ *    or S3 secret, the API its DATABASE_URL. Network exposure: Valkey refuses a client without
+ *    its password; the API tells two source addresses on the host apart (its per-address auth
+ *    rate limit, behind Caddy's socket-activated port) and ignores a client's X-Forwarded-For;
+ *    HTTPS answers over IPv6 when the host has it; and `ss -ltn` shows only the allowlisted
+ *    listeners.
  * 4. Builds release 0.0.0-e2e.2 (every image re-labelled, so every digest changes), upgrades,
  *    and checks from systemd's own invocation IDs and timestamps that the upgrade re-ran migrate
  *    and that it finished before api and worker started, and that `status` reports the new
- *    version, and repeats the object storage checks. Then kills the worker container and
- *    checks that systemd restarts it.
+ *    version, and repeats the object storage, Valkey and listener checks. Then kills the worker
+ *    container and checks that systemd restarts it.
  * 5. Upgrades to a deliberately broken release (an api that never gets healthy) and checks
  *    that it rolls back to 0.0.0-e2e.2 and stays healthy.
  *
@@ -560,6 +564,161 @@ function checkUnitEnv(): void {
   expectThat(envKeys(api).includes("AUTH_SECRET"), "commonair-api has AUTH_SECRET");
 }
 
+// --- network exposure ---------------------------------------------------------------------
+
+/**
+ * TCP listeners the host may have: the public ports on any address (IPv6 and IPv4), and the two
+ * loopback-only ones an operator procedure needs (Garage for the off-host object copy, Grafana
+ * for an SSH tunnel). Everything else stays inside the commonair network.
+ */
+export const PUBLIC_TCP_PORTS = [80, 443, 1935, 6667, 6697] as const;
+export const LOOPBACK_TCP_PORTS = [3030, 3900] as const;
+/** Listeners that must be there once the instance is up (IRC may wait for its certificate). */
+export const REQUIRED_TCP_PORTS = [80, 443, 1935] as const;
+
+export interface Listener {
+  address: string;
+  port: number;
+}
+
+/** Local address and port of each line of `ss -Hltn` (`*:80`, `0.0.0.0:80`, `[::]:80`, `127.0.0.1:3900`). */
+export function listeners(ssOutput: string): Listener[] {
+  return ssOutput
+    .split("\n")
+    .map((l) => l.trim().split(/\s+/)[3] ?? "")
+    .filter(Boolean)
+    .map((local) => {
+      const i = local.lastIndexOf(":");
+      return {
+        address: local
+          .slice(0, i)
+          .replace(/^\[|\]$/g, "")
+          .replace(/%.*$/, ""),
+        port: Number(local.slice(i + 1)),
+      };
+    });
+}
+
+const isLoopback = (address: string) => address === "::1" || address.startsWith("127.");
+
+/** Listeners outside the allowlist, as `address:port`. */
+export function unexpectedListeners(ssOutput: string): string[] {
+  return listeners(ssOutput)
+    .filter(
+      ({ address, port }) =>
+        !(PUBLIC_TCP_PORTS as readonly number[]).includes(port) &&
+        !((LOOPBACK_TCP_PORTS as readonly number[]).includes(port) && isLoopback(address)),
+    )
+    .map(({ address, port }) => `${address}:${port}`);
+}
+
+/** Required public ports nobody listens on. */
+export function missingListeners(ssOutput: string): number[] {
+  const ports = new Set(listeners(ssOutput).map((l) => l.port));
+  return REQUIRED_TCP_PORTS.filter((p) => !ports.has(p));
+}
+
+function checkListeners(): void {
+  const ss = inHost("ss -Hltn");
+  const extra = unexpectedListeners(ss);
+  expectThat(
+    extra.length === 0,
+    `the host listens only on the allowlisted TCP ports (extra: ${extra.join(", ") || "none"})`,
+  );
+  const missing = missingListeners(ss);
+  expectThat(missing.length === 0, `the public TCP ports listen (missing: ${missing.join(", ") || "none"})`);
+}
+
+/** A path under the API's auth prefix: its non-GET requests are rate-limited per client address first. */
+export const AUTH_PROBE_PATH = "/api/auth/e2e-client-address";
+/** The API's auth bucket allows this many non-GET requests per address and minute. */
+export const AUTH_LIMIT = 10;
+/** Distinct local source addresses on the host (all of 127.0.0.0/8 is local). */
+export const SOURCES = { a: "127.0.0.2", b: "127.0.0.3", c: "127.0.0.4" } as const;
+export const SPOOFED = "203.0.113.7";
+
+/** curl of one POST to the auth probe from `source`, printing only the status code. */
+export function probeCommand(source: string, forwardedFor?: string): string {
+  const xff = forwardedFor ? `-H 'X-Forwarded-For: ${forwardedFor}' ` : "";
+  return (
+    `curl -sS -o /dev/null -w '%{http_code}\\n' --interface ${source} -X POST -H 'content-type: application/json' ` +
+    `${xff}--data '{}' --cacert ${ROOT_CA} https://${DOMAIN}${AUTH_PROBE_PATH}`
+  );
+}
+
+/**
+ * What the API thinks the client address is, through its per-address rate limit: the API (behind
+ * Caddy and its socket-activated public port) must tell two local sources apart, and a client's
+ * own X-Forwarded-For must not pick its address.
+ */
+function checkClientAddresses(): void {
+  const codes = (cmd: string, n: number) =>
+    inHost(Array.from({ length: n }, () => cmd).join("; "), { user: true })
+      .trim()
+      .split("\n")
+      .map((c) => c.trim());
+  // Source a spends its whole minute's budget, then one more is refused.
+  const a = codes(probeCommand(SOURCES.a), AUTH_LIMIT + 1);
+  expectThat(
+    a.slice(0, AUTH_LIMIT).every((c) => c !== "429") && a.at(-1) === "429",
+    `${AUTH_LIMIT} auth requests from ${SOURCES.a} pass and the next is rate-limited (${a.join(" ")})`,
+  );
+  // Through rootless port forwarding every client would share a's address and be refused too.
+  const [b] = codes(probeCommand(SOURCES.b), 1);
+  expectThat(b !== "429" && b !== "", `${SOURCES.b} is a different client to the API (${b})`);
+  // A believed X-Forwarded-For would make a a new, unlimited client.
+  const [spoofedNew] = codes(probeCommand(SOURCES.a, SPOOFED), 1);
+  expectThat(
+    spoofedNew === "429",
+    `${SOURCES.a} claiming X-Forwarded-For: ${SPOOFED} is still ${SOURCES.a} (${spoofedNew})`,
+  );
+  // And one that claims a's address is not refused as a.
+  const [spoofedOld] = codes(probeCommand(SOURCES.c, SOURCES.a), 1);
+  expectThat(
+    spoofedOld !== "429" && spoofedOld !== "",
+    `${SOURCES.c} claiming X-Forwarded-For: ${SOURCES.a} is not taken for ${SOURCES.a} (${spoofedOld})`,
+  );
+}
+
+/** HTTPS over IPv6 loopback when the host has it: the socket listens on IPv6 as well. */
+function checkIpv6(): void {
+  const has = inHost("ip -6 addr show dev lo 2>/dev/null | grep -q 'inet6 ::1' && echo yes || echo no").trim();
+  if (has !== "yes") {
+    log("skip: the host container has no IPv6 loopback");
+    return;
+  }
+  const code = inHost(
+    `curl -sS -o /dev/null -w '%{http_code}' -g --resolve '${DOMAIN}:443:[::1]' --cacert ${ROOT_CA} https://${DOMAIN}/`,
+    { user: true },
+  ).trim();
+  expectThat(code.startsWith("2"), `https://${DOMAIN}/ answers ${code} over IPv6 (::1)`);
+}
+
+/** Valkey refuses clients without its password; the services' URL carries it; ps never shows it. */
+function checkValkeyAuth(): void {
+  const anonymous = inHost("podman exec commonair-valkey valkey-cli ping 2>&1 || true", { user: true });
+  expectThat(
+    /NOAUTH/.test(anonymous) && !/PONG/.test(anonymous),
+    `valkey-cli without the password is refused (${anonymous.trim()})`,
+  );
+  const authed = inHost(`podman exec commonair-valkey sh -c 'VALKEYCLI_AUTH="$VALKEY_PASSWORD" valkey-cli ping'`, {
+    user: true,
+  }).trim();
+  expectThat(authed === "PONG", `valkey-cli with the password gets PONG (${authed})`);
+  // Prints only a verdict: the URL holds the password.
+  const url = inHost(
+    `podman exec commonair-api sh -c 'case "$VALKEY_URL" in redis://:?*@valkey:6379) echo with-password ;; *) echo without ;; esac'`,
+    { user: true },
+  ).trim();
+  expectThat(url === "with-password", `the api's VALKEY_URL carries the password (${url})`);
+  const shown = inHost(
+    `pw=$(sed -n 's/^VALKEY_PASSWORD=//p' ~/.config/commonair/commonair.env); ` +
+      `[ -n "$pw" ] && podman top commonair-valkey args | grep -cF "$pw" || true`,
+    { user: true },
+  ).trim();
+  expectThat(shown === "0", `no process in commonair-valkey shows the password on its command line (${shown})`);
+}
+
 function installedVersion(): string {
   return /version:\s+(\S+)/.exec(inHost("sh ~/commonair/selfhost.sh status", { user: true }))?.[1] ?? "";
 }
@@ -697,6 +856,10 @@ async function main(): Promise<void> {
       checkHttps();
       checkBrowserStorage("install");
       checkUnitEnv();
+      checkValkeyAuth();
+      checkClientAddresses();
+      checkIpv6();
+      checkListeners();
     });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {
@@ -713,6 +876,8 @@ async function main(): Promise<void> {
       checkHttps();
       checkBrowserStorage("upgrade");
       checkUnitEnv();
+      checkValkeyAuth();
+      checkListeners();
     });
 
     // The session-ten bug: a crashed worker stayed down under compose. Under Quadlet, systemd

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# Valkey (ephemeral: presence, caches, pub/sub, queues).
+# Valkey (ephemeral: presence, caches, pub/sub, queues), with a password (VALKEY_PASSWORD).
 [Unit]
 Description=CommonAir valkey
 # Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
@@ -14,9 +14,16 @@ ContainerName=commonair-valkey
 RunInit=true
 Network=commonair.network
 NetworkAlias=valkey
-PublishPort=127.0.0.1:6379:6379
-Exec=valkey-server --appendonly no --save ""
-HealthCmd=CMD valkey-cli ping
+# Only VALKEY_PASSWORD of commonair.env (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-valkey.env
+# The password reaches valkey-server as configuration on its stdin (`-`), never on a command
+# line that ps shows: written to a private temporary file, opened as stdin, unlinked, then
+# the image's entrypoint drops to the valkey user and execs the server, which reads it. Fails
+# closed: without a password it does not start (compose development may run without one).
+Exec=sh -c 'if [ -z "$VALKEY_PASSWORD" ]; then echo "commonair-valkey: VALKEY_PASSWORD is empty in commonair.env" >&2; exit 1; fi; umask 077 && f=$(mktemp) && printf "requirepass %%s\n" "$VALKEY_PASSWORD" >"$f" && exec <"$f" && rm -f "$f" && exec env -u VALKEY_PASSWORD docker-entrypoint.sh valkey-server - --appendonly no --save ""'
+# Authenticates (valkey-cli reads VALKEYCLI_AUTH) and wants PONG, so a NOAUTH reply fails it. Same
+# check as compose's, which also covers a development Valkey without a password.
+HealthCmd=[ -z "$VALKEY_PASSWORD" ] || export VALKEYCLI_AUTH="$VALKEY_PASSWORD"; valkey-cli ping | grep -qx PONG
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10
@@ -27,6 +34,9 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-valkey.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-valkey.env
 Restart=always
 RestartMode=direct
 RestartSec=5

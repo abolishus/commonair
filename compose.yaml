@@ -38,7 +38,8 @@ x-env-file: &env-file
 # Hostnames inside the compose network override the localhost defaults of .env.
 x-app-env: &app-env
   DATABASE_URL: postgres://commonair_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/commonair
-  VALKEY_URL: redis://valkey:6379
+  # With VALKEY_PASSWORD set (init-env generates one), redis://:<password>@valkey:6379.
+  VALKEY_URL: redis://${VALKEY_PASSWORD:+:${VALKEY_PASSWORD}@}valkey:6379
   S3_ENDPOINT: http://garage:3900
   # Presigned uploads are opened by browsers, not by the services: they need the published
   # Garage port, never the in-network hostname above.
@@ -153,11 +154,23 @@ services:
     image: ghcr.io/valkey-io/valkey:9.1.2-trixie@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
     restart: unless-stopped
     # Ephemeral by design (docs/architecture.md): presence, caches, pub/sub, job queues.
-    command: ["valkey-server", "--appendonly", "no", "--save", ""]
+    # VALKEY_PASSWORD (from .env; empty runs without one) reaches valkey-server as configuration
+    # on its stdin, never on a command line ps shows (the Quadlet unit does the same).
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:-}
+    command:
+      - sh
+      - -c
+      - umask 077 && f=$$(mktemp) && { [ -z "$$VALKEY_PASSWORD" ] || printf "requirepass %s\n" "$$VALKEY_PASSWORD"; } >"$$f" && exec <"$$f" && rm -f "$$f" && exec env -u VALKEY_PASSWORD docker-entrypoint.sh valkey-server - --appendonly no --save ""
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${VALKEY_PORT:-6379}:6379"]
     healthcheck:
       <<: *healthcheck
-      test: ["CMD", "valkey-cli", "ping"]
+      # Authenticates when there is a password (valkey-cli reads VALKEYCLI_AUTH); NOAUTH fails it.
+      test:
+        [
+          "CMD-SHELL",
+          '[ -z "$$VALKEY_PASSWORD" ] || export VALKEYCLI_AUTH="$$VALKEY_PASSWORD"; valkey-cli ping | grep -qx PONG',
+        ]
 
   garage:
     image: docker.io/dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020

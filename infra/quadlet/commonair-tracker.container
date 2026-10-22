@@ -24,7 +24,6 @@ Network=commonair.network
 NetworkAlias=tracker
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-tracker.env
-Environment=VALKEY_URL=redis://valkey:6379
 Environment=S3_ENDPOINT=http://garage:3900
 Environment=S3_REGION=garage
 Environment=S3_FORCE_PATH_STYLE=true
@@ -35,7 +34,8 @@ Environment=API_INTERNAL_URL=http://api:3001
 Environment=CHAT_INTERNAL_URL=ws://chat:3002/ws
 Environment=ORIGIN_INTERNAL_URL=http://origin:3003
 Environment=OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-Environment=TRUSTED_PROXY_CIDRS=10.89.42.0/24
+# X-Forwarded-For is believed only from Caddy, at its fixed address (commonair.network).
+Environment=TRUSTED_PROXY_CIDRS=10.89.42.10/32
 Environment=WEB_PORT=3000
 Environment=API_PORT=3001
 Environment=CHAT_PORT=3002
@@ -53,7 +53,8 @@ Environment=S3_EVIDENCE_SECRET_ACCESS_KEY=
 Environment=EVIDENCE_PRIVATE_KEY=
 Environment=ONNXRUNTIME_NODE_INSTALL=skip
 Secret=commonair-database-url,type=env,target=DATABASE_URL
-PublishPort=127.0.0.1:8000:8000
+# redis://:<VALKEY_PASSWORD>@valkey:6379: it holds the password, so a secret (selfhost.sh).
+Secret=commonair-valkey-url,type=env,target=VALKEY_URL
 HealthCmd=CMD bun /opt/commonair/healthcheck.ts
 HealthInterval=10s
 HealthTimeout=3s

@@ -16,6 +16,8 @@ Network=commonair.network
 NetworkAlias=garage
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-garage.env
+# Loopback only, for the off-host object copy (rclone, docs/self-hosting/backups.md). S3 signs
+# every request, so a local process still needs a key.
 PublishPort=127.0.0.1:3900:3900
 Volume=%h/commonair/infra/garage/garage.toml:/etc/garage.toml:ro,Z
 Volume=commonair-garage-meta.volume:/var/lib/garage/meta

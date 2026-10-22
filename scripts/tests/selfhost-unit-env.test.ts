@@ -196,9 +196,13 @@ describe("our services get what their schemas read", () => {
 });
 
 describe("third-party images and tools-image jobs get what they read", () => {
-  test("caddy: exactly the placeholders of the Caddyfile", () => {
+  test("caddy: exactly the placeholders of the Caddyfile, minus what its unit sets (CADDY_LISTEN)", () => {
+    const set = unitSetKeys(unitText("caddy"));
+    expect(set.has("CADDY_LISTEN")).toBe(true);
     const placeholders = new Set(
-      [...code(read("infra/caddy/Caddyfile")).matchAll(/\{\$([A-Z0-9_]+)/g)].map((m) => m[1]),
+      [...code(read("infra/caddy/Caddyfile")).matchAll(/\{\$([A-Z0-9_]+)/g)]
+        .map((m) => m[1])
+        .filter((k) => !set.has(k!)),
     );
     expect(listed("caddy")).toEqual([...placeholders].toSorted((a, b) => (a ?? "").localeCompare(b ?? "")));
   });
@@ -435,6 +439,7 @@ describe("render-env.sh", () => {
     "irc-cert": [],
     mediamtx: ["INTERNAL_API_SECRET"],
     migrate: ["POSTGRES_APP_PASSWORD"],
+    valkey: ["VALKEY_PASSWORD"],
     postgres: [
       "AWS_ACCESS_KEY_ID",
       "AWS_SECRET_ACCESS_KEY",

@@ -108,14 +108,23 @@ describe("headers and privacy", () => {
     expect(lines.filter((l) => /^log\b/.test(l))).toEqual([]);
   });
 
-  test("client addresses are trusted only from private ranges", () => {
-    expect(caddy).toContain("trusted_proxies static private_ranges");
+  test("no client's X-Forwarded-For is believed: Caddy trusts no proxy in front of it", () => {
+    // Nothing forwards for clients in front of Caddy (systemd hands it the public sockets), so
+    // the services get the address Caddy accepted the connection from (infra/tests/network.test.ts).
+    const directives = caddy
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("#"))
+      .join("\n");
+    expect(directives).not.toMatch(/trusted_proxies|client_ip_headers/);
   });
 });
 
 describe("TLS modes (ADR 0023 §11)", () => {
   test("the site imports the snippet named by TLS_MODE, acme when unset", () => {
-    expect(site.split("\n")[1]).toBe("\timport tls-{$TLS_MODE:acme}");
+    expect(site.split("\n").slice(1, 3)).toEqual([
+      "\timport listen-{$CADDY_LISTEN:ports}",
+      "\timport tls-{$TLS_MODE:acme}",
+    ]);
   });
 
   test("acme, empty and internal snippets exist and precede the site", () => {
