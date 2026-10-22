@@ -69,3 +69,45 @@ export const metrics = [
     body: "Median first response 41 min. 12 DMCA notices, 3 counter-notices. 0 government data requests.",
   },
 ];
+
+/** Proposals decided per month (`TransparencyMonth.governance`). */
+export const governance = [
+  {
+    proposalId: "0192d6f1-0000-7000-8000-000000000045",
+    title: "#45 Publish the integrity exclusion counts per channel",
+    status: "applied",
+    kind: "ordinary",
+    passed: true,
+    outcomeLabel: "Passed",
+    month: "2026-09",
+    decidedAt: "Sep 30",
+  },
+  {
+    proposalId: "0192d6f1-0000-7000-8000-000000000044",
+    title: "#44 Raise the streamer share of tips to 95%",
+    status: "rejected",
+    kind: "protected",
+    passed: false,
+    outcomeLabel: "Rejected",
+    reason: "Streamer-class majority not met",
+    month: "2026-09",
+    decidedAt: "Sep 28",
+  },
+  {
+    proposalId: "0192d6f1-0000-7000-8000-000000000043",
+    title: "#43 Rename the moderation queue to review queue",
+    status: "withdrawn",
+    kind: "ordinary",
+    passed: null,
+    outcomeLabel: "Withdrawn",
+    month: "2026-08",
+    decidedAt: "Aug 19",
+  },
+];
+
+/** Approved patronage allocations posted per month (`TransparencyMonth.patronageDistributed`). */
+export const patronageMonths = [
+  { month: "2026-09", label: "September 2026", members: 1_180, cents: 2_980_500 },
+  { month: "2026-08", label: "August 2026", members: 1_142, cents: 2_711_000 },
+  { month: "2026-07", label: "July 2026", members: 1_097, cents: 0 },
+];

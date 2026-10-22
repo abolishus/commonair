@@ -5,6 +5,7 @@ import * as React from "react";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import { Textarea } from "@commonair/ui/components/textarea";
+import type { DataAttributes } from "../../lib/data-attributes.ts";
 
 export interface CharacterCountFieldProps {
   label: React.ReactNode;
@@ -15,8 +16,9 @@ export interface CharacterCountFieldProps {
   multiline?: boolean;
   hint?: React.ReactNode;
   errors?: string | readonly (string | { message?: string } | undefined)[];
-  inputProps?: React.ComponentProps<typeof Input>;
-  textareaProps?: React.ComponentProps<typeof Textarea>;
+  /** Forwarded to the `<input>` (`data-*` included, e.g. a test id). */
+  inputProps?: React.ComponentProps<typeof Input> & DataAttributes;
+  textareaProps?: React.ComponentProps<typeof Textarea> & DataAttributes;
   "data-testid"?: string;
 }
 export function CharacterCountField({

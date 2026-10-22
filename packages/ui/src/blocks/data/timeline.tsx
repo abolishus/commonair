@@ -4,12 +4,15 @@
 import type * as React from "react";
 import { cn } from "@commonair/ui/lib/utils";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
+import type { DataAttributes } from "../../lib/data-attributes.ts";
 
 export interface TimelineStep {
   id: string;
   label: string;
   meta?: React.ReactNode;
   state: "done" | "current" | "upcoming";
+  /** Set on the step's `<li>` (test ids, the step's ISO time). */
+  attributes?: DataAttributes;
 }
 export interface TimelineUpdate {
   id: string;
@@ -42,7 +45,7 @@ export function Timeline({ steps, updates, className, ...props }: TimelineProps)
   return (
     <ol className={cn("flex flex-col gap-3", className)} {...props}>
       {(steps ?? []).map((step) => (
-        <li key={step.id} data-state={step.state} className="flex min-w-0 items-start gap-3">
+        <li {...step.attributes} key={step.id} data-state={step.state} className="flex min-w-0 items-start gap-3">
           <span
             aria-hidden="true"
             className={cn(

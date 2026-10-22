@@ -5,12 +5,12 @@ import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Download01Icon, Radio02Icon, Shield01Icon, Tick01Icon, UserGroupIcon } from "@hugeicons/core-free-icons";
-import { MoneyAmount, formatMoney } from "@commonair/ui";
+import { MoneyAmount, formatMoney, formatNumber } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemMedia } from "@commonair/ui/components/item";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
-import { PageHeader } from "@commonair/ui/blocks/headers";
+import { PageHeader, Section } from "@commonair/ui/blocks/headers";
 import {
   BreakdownBar,
   DataTable,
@@ -21,7 +21,19 @@ import {
   type DataTableColumn,
 } from "@commonair/ui/blocks/data";
 import { CodeBlock } from "@commonair/ui/blocks/forms";
-import { flow, formula, formulaNotes, intro, metrics, periods, statement, stats } from "./fixtures/Transparency.ts";
+import { GovernanceOutcomeList } from "@commonair/ui/blocks/coop";
+import {
+  flow,
+  formula,
+  formulaNotes,
+  governance,
+  intro,
+  metrics,
+  patronageMonths,
+  periods,
+  statement,
+  stats,
+} from "./fixtures/Transparency.ts";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Co-op/Transparency", parameters: pageParameters } satisfies Meta;
@@ -36,6 +48,22 @@ const statementColumns: DataTableColumn<(typeof statement)[number]>[] = [
   {
     id: "amount",
     header: "Amount",
+    align: "numeric",
+    cell: ({ row }) => <MoneyAmount value={{ cents: row.original.cents, currency: "USD" }} locale="en-US" />,
+  },
+];
+
+const patronageColumns: DataTableColumn<(typeof patronageMonths)[number]>[] = [
+  { id: "month", header: "Month", accessorKey: "label" },
+  {
+    id: "members",
+    header: "Members",
+    align: "numeric",
+    cell: ({ row }) => formatNumber(row.original.members, "en-US"),
+  },
+  {
+    id: "distributed",
+    header: "Distributed",
     align: "numeric",
     cell: ({ row }) => <MoneyAmount value={{ cents: row.original.cents, currency: "USD" }} locale="en-US" />,
   },
@@ -139,6 +167,32 @@ function TransparencyPage(): React.JSX.Element {
               />
             </CardContent>
           </Card>
+        </ResponsiveGrid>
+        <ResponsiveGrid cols={2}>
+          <Section heading="Governance outcomes" description="Every proposal decided, with the rule that decided it.">
+            <GovernanceOutcomeList
+              label="Governance outcomes"
+              itemProps={{ "data-testid": "transparency-governance" }}
+              items={governance.map((item) => ({
+                ...item,
+                link: { href: `#coop/proposals/${item.proposalId}` },
+                protectedLabel: "Protected",
+              }))}
+            />
+          </Section>
+          <Section heading="Patronage distributed" description="Approved allocations posted to members, by month.">
+            <DataTable
+              caption="Patronage distributed by month"
+              columns={patronageColumns}
+              rows={patronageMonths}
+              getRowId={(row) => row.month}
+              rowProps={(row) => ({
+                "data-testid": "transparency-patronage",
+                "data-month": row.month,
+                "data-cents": row.cents,
+              })}
+            />
+          </Section>
         </ResponsiveGrid>
         <ResponsiveGrid cols={3}>
           {metrics.map((metric) => (

@@ -9,7 +9,19 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { PageHeader, PageTabs, Section } from "@commonair/ui/blocks/headers";
 import { BreakdownBar, ListPanel, ProposalCard, StatCard, StatGrid } from "@commonair/ui/blocks/data";
-import { council, events, intro, membersByClass, membership, proposals, protectedNote, tabs } from "./fixtures/Coop.ts";
+import { GovernanceOutcomeList } from "@commonair/ui/blocks/coop";
+import {
+  council,
+  decisions,
+  events,
+  intro,
+  memberClasses,
+  membersByClass,
+  membership,
+  proposals,
+  protectedNote,
+} from "./fixtures/Coop.ts";
+import { coopTabs } from "./fixtures/CoopNav.ts";
 import { Amount } from "./money.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
@@ -20,21 +32,41 @@ type Story = StoryObj;
 function CoopPage(): React.JSX.Element {
   return (
     <ViewerPage current="coop" footer="coop">
-      <PageContainer width="wide" className="flex flex-col gap-6 py-6">
-        <PageHeader title="The co-op" description={intro} tabs={<PageTabs variant="default" items={tabs} />} />
+      <PageContainer width="wide" className="flex flex-col gap-6 py-6" data-testid="coop">
+        <PageHeader
+          title="The co-op"
+          description={intro}
+          tabs={<PageTabs variant="default" items={coopTabs("overview")} aria-label="Co-op" />}
+        />
         <SplitLayout
           asideWidth="lg"
           main={
             <div className="flex flex-col gap-6">
-              <Card data-accent={membership.accent}>
+              <Card
+                data-accent={membership.accent}
+                data-testid="coop-membership-card"
+                data-classes={memberClasses.join(",")}
+              >
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <ChannelAvatar name={membership.name} accent={membership.accent} size="md" decorative />
                     Your membership
                   </CardTitle>
-                  <CardDescription>{membership.since}</CardDescription>
-                  <CardAction>
+                  <CardDescription className="flex flex-wrap items-center gap-2">
+                    {membership.since}
                     <StatusBadge tone="success">{membership.standing}</StatusBadge>
+                  </CardDescription>
+                  <CardAction>
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      render={
+                        <a href="#coop/membership" aria-label="Manage membership" data-testid="coop-membership-link" />
+                      }
+                      nativeButton={false}
+                    >
+                      Manage
+                    </Button>
                   </CardAction>
                 </CardHeader>
                 <CardContent>
@@ -68,6 +100,10 @@ function CoopPage(): React.JSX.Element {
                   {proposals.map((proposal) => (
                     <ProposalCard
                       key={proposal.number}
+                      data-testid="coop-open-proposal"
+                      data-proposal-id={proposal.id}
+                      data-status={proposal.apiStatus}
+                      data-kind={proposal.protected ? "protected" : "ordinary"}
                       reference={`#${proposal.number}`}
                       title={proposal.title}
                       link={{ href: `#proposal/${proposal.number}` }}
@@ -85,6 +121,16 @@ function CoopPage(): React.JSX.Element {
                   ))}
                 </div>
               </Section>
+              <Section heading="Recent decisions">
+                <GovernanceOutcomeList
+                  label="Recent decisions"
+                  items={decisions.map((decision) => ({
+                    ...decision,
+                    link: { href: `#coop/proposals/${decision.proposalId}` },
+                    protectedLabel: "Protected",
+                  }))}
+                />
+              </Section>
             </div>
           }
           aside={
@@ -95,6 +141,10 @@ function CoopPage(): React.JSX.Element {
                 </CardHeader>
                 <CardContent className="flex flex-col gap-3">
                   <BreakdownBar
+                    data-testid="coop-members-by-class"
+                    data-streamer={membersByClass.find((segment) => segment.id === "streamer")?.value}
+                    data-viewer={membersByClass.find((segment) => segment.id === "viewer")?.value}
+                    data-worker={membersByClass.find((segment) => segment.id === "worker")?.value}
                     label="Members by class"
                     segments={membersByClass}
                     formatValue={(value) => formatNumber(value, "en-US")}
@@ -109,7 +159,12 @@ function CoopPage(): React.JSX.Element {
                 title="Creator council"
                 action={<span>term ends Mar 2027</span>}
                 items={council.map((member) => ({
-                  id: member.name,
+                  id: member.userId,
+                  attributes: {
+                    "data-testid": "coop-council-member",
+                    "data-user-id": member.userId,
+                    "data-rank": member.rank,
+                  },
                   media: <ChannelAvatar name={member.name} accent={member.accent} size="sm" decorative />,
                   title: member.name,
                   description: member.seat,

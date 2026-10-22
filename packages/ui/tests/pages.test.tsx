@@ -9,7 +9,7 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type * as React from "react";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { LocaleProvider } from "../src/lib/locale.tsx";
 import { TooltipProvider } from "../src/components/tooltip.tsx";
@@ -66,7 +66,18 @@ const BOARDS = [
   "Status",
   "Finances",
   "Expenses",
+  "Membership",
+  "Proposals",
+  "ProposalForm",
+  "Council",
+  "CoopSettings",
+  "Statements",
+  "TreasuryCoop",
+  "AdminCoop",
 ];
+
+/** Boards whose title differs from the file name (the viewer `Settings` board already owns that file name). */
+const TITLE_NAMES: Record<string, string> = { CoopSettings: "Settings" };
 
 beforeAll(() => {
   // Recharts measures its container; happy-dom has no layout engine.
@@ -87,7 +98,10 @@ describe("page stories", () => {
   });
 
   test.each(boards)("%s exports Default, Light and Mobile320 under Pages/", (name, mod) => {
-    expect(mod.default.title).toMatch(new RegExp(`^Pages/(Viewer|Channel|Creator studio|Co-op|Platform)/${name}$`));
+    const titleName = TITLE_NAMES[name] ?? name;
+    expect(mod.default.title).toMatch(
+      new RegExp(`^Pages/(Viewer|Channel|Creator studio|Co-op|Platform)/${titleName}$`),
+    );
     expect(mod.Light.globals).toEqual({ theme: "light" });
     expect(mod.Mobile320.globals).toEqual({ viewport: { value: "mobile320", isRotated: false } });
   });
@@ -106,6 +120,11 @@ describe("page stories", () => {
     expect(landmarks.length).toBeGreaterThan(0);
     expect(errors).toEqual([]);
   });
+});
+
+test("board titles are unique", () => {
+  const titles = boards.map(([, mod]) => mod.default.title);
+  expect(new Set(titles).size).toBe(titles.length);
 });
 
 describe("Support board matches the shipped dialog (manual adapter)", () => {
@@ -148,5 +167,89 @@ describe("Support board matches the shipped dialog (manual adapter)", () => {
       expect(tab.hasAttribute("disabled") || tab.getAttribute("aria-disabled") === "true").toBe(true);
     }
     expect(screen.getByRole("tab", { name: "Tip" }).getAttribute("aria-selected")).toBe("true");
+  });
+});
+
+type StoryLike = { render: () => React.ReactElement };
+
+describe("E5 co-op boards", () => {
+  const COOP = ["Coop", "Proposal", "Transparency", ...BOARDS.slice(BOARDS.indexOf("Membership"))];
+  const stories = (name: string): [string, StoryLike][] =>
+    Object.entries(boards.find(([board]) => board === name)?.[1] ?? {}).filter(
+      (entry): entry is [string, StoryLike] =>
+        entry[0] !== "default" && typeof (entry[1] as { render?: unknown }).render === "function",
+    );
+  const show = (story: StoryLike | undefined) =>
+    render(
+      <LocaleProvider locale="en">
+        <TooltipProvider>{story?.render()}</TooltipProvider>
+      </LocaleProvider>,
+    );
+
+  test.each(COOP.flatMap((name) => stories(name).map(([story, mod]) => [`${name}/${story}`, mod] as const)))(
+    "%s renders without console errors",
+    (_id, story) => {
+      const errors: unknown[][] = [];
+      vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+        if (!isHappyDomGap(args)) errors.push(args);
+      });
+      show(story);
+      expect(screen.getAllByRole("main").length).toBeGreaterThan(0);
+      expect(errors).toEqual([]);
+    },
+  );
+
+  const proposal = Object.fromEntries(stories("Proposal"));
+  const byId = (id: string) => screen.queryByTestId(id);
+
+  test("voting shows the ballot and participation, never a tally", () => {
+    show(proposal.Default);
+    expect(byId("proposal")?.getAttribute("data-status")).toBe("voting");
+    expect(byId("vote-panel")?.getAttribute("data-my-vote")).toBe("yes");
+    expect(byId("vote-participation")?.getAttribute("data-eligible")).toBe("5637");
+    expect(byId("tally")).toBeNull();
+    expect(screen.queryAllByTestId("tally-row")).toHaveLength(0);
+    expect(byId("council-response")?.getAttribute("data-stance")).toBe("oppose");
+  });
+
+  test("the rejected protected decision shows the tally per class and the failing check", () => {
+    show(proposal.Rejected);
+    expect(byId("vote-panel")).toBeNull();
+    const tally = byId("tally");
+    expect(tally?.getAttribute("data-passed")).toBe("false");
+    expect(tally?.getAttribute("data-reason")).toBe("streamer-class majority not met");
+    expect(screen.getAllByTestId("tally-row").map((row) => row.getAttribute("data-scope"))).toEqual([
+      "member_wide",
+      "streamer",
+      "viewer",
+      "worker",
+    ]);
+    const failed = screen
+      .getAllByTestId("tally-check")
+      .filter((check) => check.getAttribute("data-passed") === "false");
+    expect(failed.map((check) => check.getAttribute("data-rule"))).toEqual(["streamer_class_majority"]);
+  });
+
+  test("council review shows the respond form to council members; drafts show author actions", () => {
+    show(proposal.CouncilReview);
+    expect(byId("council-respond")).toBeTruthy();
+    expect(byId("proposal-comment-body")).toBeTruthy();
+    cleanup();
+    show(proposal.Draft);
+    expect(byId("proposal-submit")).toBeTruthy();
+    expect(byId("proposal-withdraw")).toBeTruthy();
+    expect(byId("proposal-comment-body")).toBeNull();
+    expect(byId("proposal-timeline-draft")?.getAttribute("data-state")).toBe("current");
+    expect(byId("proposal-timeline-voting")?.getAttribute("data-at")).toBe("");
+  });
+
+  test("the membership board's buy flow reveals the manual instructions", async () => {
+    const membership = Object.fromEntries(stories("Membership"));
+    show(membership.NotMember);
+    expect(byId("membership-share")?.getAttribute("data-status")).toBe("none");
+    expect(byId("membership-share-instructions")).toBeNull();
+    (byId("membership-buy-share") as HTMLButtonElement).click();
+    expect(await screen.findByTestId("membership-share-instructions")).toBeTruthy();
+    expect(byId("membership-buy-share")).toBeNull();
   });
 });

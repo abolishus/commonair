@@ -6,13 +6,6 @@ import type { Accent, StatusTone } from "@commonair/ui";
 import type { BreakdownSegment } from "@commonair/ui/blocks/data";
 import type { Money } from "../money.tsx";
 
-export const tabs = [
-  { id: "overview", label: "Overview", href: "#coop", current: true },
-  { id: "proposals", label: "Proposals", href: "#coop/proposals" },
-  { id: "council", label: "Council", href: "#coop/council" },
-  { id: "transparency", label: "Transparency", href: "#transparency" },
-];
-
 export const intro =
   "CommonAir is owned by its members: the people who stream, watch and work here. Members elect the creator council, vote on proposals and share the surplus.";
 
@@ -30,6 +23,8 @@ export const membership = {
 };
 
 export const proposals: {
+  id: string;
+  apiStatus: string;
   number: number;
   title: string;
   protected: boolean;
@@ -42,6 +37,8 @@ export const proposals: {
   voted: boolean;
 }[] = [
   {
+    id: "0192d6f1-0000-7000-8000-000000000047",
+    apiStatus: "voting",
     number: 47,
     title: "Lower the creator share of subscriptions from 71% to 65%",
     protected: true,
@@ -54,6 +51,8 @@ export const proposals: {
     voted: true,
   },
   {
+    id: "0192d6f1-0000-7000-8000-000000000048",
+    apiStatus: "voting",
     number: 48,
     title: "Add a small-channel seat to the creator council",
     protected: false,
@@ -66,6 +65,8 @@ export const proposals: {
     voted: false,
   },
   {
+    id: "0192d6f1-0000-7000-8000-000000000049",
+    apiStatus: "council_review",
     number: 49,
     title: "Adopt a clearer mature-content labelling policy",
     protected: false,
@@ -87,12 +88,51 @@ export const membersByClass: BreakdownSegment[] = [
 export const protectedNote =
   "Protected decisions (the revenue split, data policy, these rules) also need a majority of the streamer class.";
 
-export const council: { name: string; accent: Accent; seat: string }[] = [
-  { name: "rivertide", accent: "teal", seat: "Chair" },
-  { name: "Okonkwo Plays", accent: "amber", seat: "Seat 2" },
-  { name: "synthesist_ana", accent: "pink", seat: "Seat 3" },
-  { name: "Lumen Kitchen", accent: "green", seat: "Seat 4 · small-channel seat" },
-  { name: "Tinwhistle", accent: "sky", seat: "Seat 5 · small-channel seat" },
+export const council: { userId: string; name: string; accent: Accent; rank: number; seat: string }[] = [
+  { userId: "0192d6f2-0000-7000-8000-0000000000a1", name: "rivertide", accent: "teal", rank: 1, seat: "Chair" },
+  { userId: "0192d6f2-0000-7000-8000-0000000000a2", name: "Okonkwo Plays", accent: "amber", rank: 2, seat: "Seat 2" },
+  { userId: "0192d6f2-0000-7000-8000-0000000000a3", name: "synthesist_ana", accent: "pink", rank: 3, seat: "Seat 3" },
+  {
+    userId: "0192d6f2-0000-7000-8000-0000000000a4",
+    name: "Lumen Kitchen",
+    accent: "green",
+    rank: 4,
+    seat: "Seat 4 · small-channel seat",
+  },
+  {
+    userId: "0192d6f2-0000-7000-8000-0000000000a5",
+    name: "Tinwhistle",
+    accent: "sky",
+    rank: 5,
+    seat: "Seat 5 · small-channel seat",
+  },
+];
+
+/** Active classes of the signed-in member (`coop-membership-card` `data-classes`). */
+export const memberClasses = ["streamer", "viewer"];
+
+export const decisions = [
+  {
+    proposalId: "0192d6f1-0000-7000-8000-000000000045",
+    title: "#45 Publish the integrity exclusion counts per channel",
+    status: "applied",
+    kind: "ordinary",
+    passed: true,
+    outcomeLabel: "Passed",
+    month: "2026-10",
+    decidedAt: "Oct 2",
+  },
+  {
+    proposalId: "0192d6f1-0000-7000-8000-000000000044",
+    title: "#44 Raise the streamer share of tips to 95%",
+    status: "rejected",
+    kind: "protected",
+    passed: false,
+    outcomeLabel: "Rejected",
+    reason: "Streamer-class majority not met",
+    month: "2026-09",
+    decidedAt: "Sep 28",
+  },
 ];
 
 export const events = [

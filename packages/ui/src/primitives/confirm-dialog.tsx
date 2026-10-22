@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from "../components/alert-dialog.tsx";
 import { useUiMessages } from "../lib/locale.tsx";
+import type { DataAttributes } from "../lib/data-attributes.ts";
 
 export interface ConfirmDialogProps {
   /** Element that opens the dialog (rendered as the trigger, e.g. a `<Button>`). Omit when controlled. */
@@ -40,6 +41,8 @@ export interface ConfirmDialogProps {
   onConfirm: () => void | Promise<void>;
   /** Called when `onConfirm` throws or rejects (show a toast, for example). */
   onError?: (error: unknown) => void;
+  /** `data-*` attributes for the dialog itself (e.g. a test id for this particular dialog). */
+  contentProps?: DataAttributes;
 }
 
 /** Destructive or consequential confirmation. Use instead of `window.confirm`. */
@@ -57,6 +60,7 @@ export function ConfirmDialog({
   variant = "default",
   onConfirm,
   onError,
+  contentProps,
 }: ConfirmDialogProps): React.JSX.Element {
   const messages = useUiMessages();
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
@@ -102,7 +106,7 @@ export function ConfirmDialog({
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       {trigger && <AlertDialogTrigger render={trigger} />}
       {/* Focus starts on Cancel: Enter right after opening must never confirm by accident. */}
-      <AlertDialogContent initialFocus={cancelRef}>
+      <AlertDialogContent {...contentProps} initialFocus={cancelRef}>
         <AlertDialogHeader>
           {icon && (
             <AlertDialogMedia className={variant === "destructive" ? "text-destructive" : undefined}>

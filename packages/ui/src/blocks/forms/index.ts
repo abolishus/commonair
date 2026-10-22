@@ -24,3 +24,4 @@ export { DateOfBirthField, type DateOfBirthFieldProps } from "./date-of-birth-fi
 export { SwitchMatrix, type SwitchMatrixProps, type SwitchMatrixRow } from "./switch-matrix.tsx";
 export { CommentComposer, type CommentComposerProps } from "./comment-composer.tsx";
 export { SelectField, type SelectFieldProps, type SelectFieldOption } from "./select-field.tsx";
+export { NoteDialog, type NoteDialogProps } from "./note-dialog.tsx";

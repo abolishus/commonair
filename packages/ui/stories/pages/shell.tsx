@@ -249,30 +249,53 @@ export function StudioPage({
   );
 }
 
-const adminGroups: NavGroup[] = [
-  {
-    id: "admin",
-    items: [
-      {
-        id: "reports",
-        label: "Report queue",
-        href: "#reports",
-        current: true,
-        badge: { label: "27", tone: "destructive" },
-      },
-      { id: "appeals", label: "Appeals", href: "#appeals", badge: { label: "6" } },
-      { id: "dmca", label: "DMCA notices", href: "#dmca", badge: { label: "2" } },
-      { id: "integrity", label: "Integrity signals", href: "#integrity" },
-      { id: "relays", label: "Relays", href: "#relays" },
-      { id: "users", label: "Users & channels", href: "#users" },
-      { id: "legal", label: "Legal documents", href: "#legal" },
-      { id: "audit", label: "Audit log", href: "#audit" },
-    ],
-  },
-];
+export type AdminSection =
+  | "reports"
+  | "appeals"
+  | "dmca"
+  | "integrity"
+  | "relays"
+  | "users"
+  | "legal"
+  | "treasury"
+  | "coop"
+  | "audit";
 
-/** AdminShell for Trust & safety: brand, "Admin", the audit notice and the signed-in staff member. */
-export function AdminPage({ children }: { children: React.ReactNode }): React.JSX.Element {
+function adminGroups(current: AdminSection): NavGroup[] {
+  const item = (id: AdminSection, label: string, extra: Partial<NavItem> = {}): NavItem => ({
+    id,
+    label,
+    href: `#${id}`,
+    current: current === id,
+    ...extra,
+  });
+  return [
+    {
+      id: "admin",
+      items: [
+        item("reports", "Report queue", { badge: { label: "27", tone: "destructive" } }),
+        item("appeals", "Appeals", { badge: { label: "6" } }),
+        item("dmca", "DMCA notices", { badge: { label: "2" } }),
+        item("integrity", "Integrity signals"),
+        item("relays", "Relays"),
+        item("users", "Users & channels"),
+        item("legal", "Legal documents"),
+        item("treasury", "Treasury"),
+        item("coop", "Co-op"),
+        item("audit", "Audit log"),
+      ],
+    },
+  ];
+}
+
+/** AdminShell (Trust & safety, treasury, co-op admin): brand, "Admin", the audit notice and the signed-in staff member. */
+export function AdminPage({
+  current = "reports",
+  children,
+}: {
+  current?: AdminSection;
+  children: React.ReactNode;
+}): React.JSX.Element {
   return (
     <AdminShell
       header={
@@ -292,7 +315,7 @@ export function AdminPage({ children }: { children: React.ReactNode }): React.JS
           }
         />
       }
-      groups={adminGroups}
+      groups={adminGroups(current)}
       sidebarLabel="Admin"
       skipLabel="Skip to content"
       footer={<Footer />}
