@@ -56,12 +56,11 @@ journalctl --user -u commonair-worker -n 100 --no-pager
 
 Common causes:
 
-- **Postgres not healthy yet.** Services wait for it. After a crash or a reboot, Postgres
-  replays its local WAL first, which normally takes seconds; check `commonair-postgres`. The
-  unit does not wait indefinitely: if its health check has not passed after about two minutes
-  it is killed and restarted, and its start times out after five. A long replay, such as the
-  first start after restoring an old base backup, never finishes that way. Stop the instance and
-  finish the replay by hand as [backups.md](backups.md#restore) describes.
+- **Postgres not healthy yet.** Services wait for it. After a crash, a reboot or a restore,
+  Postgres replays WAL first; `journalctl --user -u commonair-postgres` shows each replayed
+  segment. The unit waits as long as the replay advances. It restarts Postgres when a normal
+  start has not come up after about two minutes, or when the replay has made no progress for
+  10 minutes ([backups.md](backups.md#restore)).
 - **The migration failed.** `commonair-migrate` retries six times an hour, then fails for good,
   and every service that needs the database stays down. Its log has the error. After fixing the
   cause, `sh ~/commonair/selfhost.sh install --reinstall` clears the failed state and starts

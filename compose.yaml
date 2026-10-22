@@ -123,7 +123,9 @@ services:
     volumes: ["postgres-data:/var/lib/postgresql/data"]
     healthcheck:
       <<: *healthcheck
-      test: ["CMD-SHELL", "pg_isready -U commonair -d commonair"]
+      # Healthy = accepts connections and is out of recovery (infra/postgres/health.sh). Compose
+      # has no startup check, so the WAL-replay allowance exists only in the Quadlet unit.
+      test: ["CMD", "commonair-pg-health"]
 
   # One-shot: migrations as the owner, then the least-privilege app role.
   migrate:

@@ -102,7 +102,11 @@ podman run --rm --network commonair \
   -v commonair-postgres-data:/var/lib/postgresql/data \
   "$PG_IMAGE" commonair-restore
 
-# 4. Start the instance again (migrations first, then every service).
+# 4. Start Postgres on its own. It replays the archived WAL, then accepts connections;
+#    this command returns once it does, which can take a while (see below).
+systemctl --user start commonair-postgres.service
+
+# 5. Start the instance again (migrations first, then every service).
 sh ~/commonair/selfhost.sh install --reinstall
 ```
 
@@ -110,25 +114,22 @@ To restore a specific backup instead of the newest, pass its name (from `selfhos
 after the target directory: `commonair-restore /var/lib/postgresql/data <backup-name>`. For a
 point in time, add `-e RECOVERY_TARGET_TIME='2026-10-18 12:00:00+00'` to the `podman run`.
 
-The first start after a restore replays WAL before Postgres accepts connections. The units
-give that limited time: `commonair-postgres` counts as failed (and is restarted) when its
-health check has not passed after about two minutes, and its start times out after five. A
-small archive replays well within that. If you restore an old base backup with a lot of WAL
-after it, or the restart loop shows in `journalctl --user -u commonair-postgres`, finish the
-replay by hand before step 4:
+The replay in step 4 takes as long as the archive after the base backup needs: seconds for a
+recent backup, possibly hours for an old one. You need to do nothing while it runs. Watch it in
+another terminal:
 
 ```sh
-podman run -d --name commonair-replay --network commonair \
-  --env-file ~/.config/commonair/commonair.env \
-  -e POSTGRES_USER=commonair -e POSTGRES_DB=commonair \
-  -e WALG_S3_ENDPOINT=http://garage:3900 -e S3_REGION=garage \
-  -v commonair-postgres-data:/var/lib/postgresql/data "$PG_IMAGE"
-# Wait until this prints "f" (recovery over, database promoted), then stop it.
-podman exec commonair-replay psql -U commonair -d commonair -tAc 'select pg_is_in_recovery()'
-podman stop commonair-replay && podman rm commonair-replay
+journalctl --user -fu commonair-postgres
 ```
 
-Then run step 4.
+Each `restored log file "…" from archive` line is one replayed WAL segment (16 MB). The replay
+is over at `database system is ready to accept connections`.
+
+`commonair-postgres` waits as long as the replay keeps advancing. If no new segment has been
+replayed for 10 minutes (an unreachable backup bucket, say), it stops Postgres and starts it
+again, which resumes the replay from its last restartpoint; a start that has not finished after
+12 hours fails the same way. Step 4 then returns an error: check the journal, fix the cause and
+run step 4 again. Do not skip it: `selfhost.sh install` gives Postgres only 15 minutes.
 
 ### Onto a new server
 
@@ -161,7 +162,7 @@ targets. Keep it from reaching anyone.
      `SMTP_PASSWORD=` (nothing listens there, so sending fails). Otherwise the worker sends
      queued notifications to real members with your production credentials.
    - Turn off payments: `PAYMENTS_PROVIDER=manual` and `STRIPE_SECRET_KEY=`.
-3. Run the [restore](#restore) from step 1 on, but replace its step 4 with a reinstall that
+3. Run the [restore](#restore) from step 1 on, but replace its step 5 with a reinstall that
    keeps the drill's hostname and TLS mode (the copied env file holds production's):
 
    ```sh
