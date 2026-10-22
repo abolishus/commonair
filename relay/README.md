@@ -184,13 +184,25 @@ shared test vectors in `packages/tokens/vectors.json`, which the Go tests reprod
 ```sh
 make            # gofmt check, go vet, go test -race, then bin/commonair-relay
 make release    # static binaries for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
-                # windows/amd64 in bin/, plus SHA256SUMS
+                # windows/amd64 and windows/arm64 in bin/, plus SHA256SUMS
 make image      # container image via podman
 ```
 
 Builds are reproducible: `CGO_ENABLED=0`, `-trimpath`, `-buildvcs=false`, an empty build id, and
-the version from `git describe` (`-X main.version=...`), with no timestamps. Two builds of the
-same commit with the same Go toolchain produce identical bytes; compare against `SHA256SUMS`.
+the version from `git describe` (`-X main.version=...`, without a leading `v`), with no
+timestamps. Two builds of the same commit with the same Go toolchain produce identical bytes.
+
+`make release` builds the same targets, under the same names
+(`commonair-relay_<version>_<os>_<arch>[.exe]`) and with the same flags, as the release workflow
+(`scripts/release/relay.ts`). To check a published release, check out its tag and build with
+the Go version in `GO_VERSION` of `.github/workflows/release.yml`:
+
+```sh
+make release VERSION=v0.1.0
+```
+
+Each line of `bin/SHA256SUMS` then matches the line for the same file in the release's
+`SHA256SUMS`.
 
 ## Layout
 
