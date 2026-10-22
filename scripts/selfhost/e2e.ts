@@ -169,6 +169,25 @@ export function buildSpecs(): Record<ReleaseImage, BuildSpec> {
   return specs as Record<ReleaseImage, BuildSpec>;
 }
 
+/**
+ * Podman 4.9 (CI's runner) sometimes fails a build's cache lookup right after pulling a base
+ * image ("checking if cached image exists from a previous build: getting top layer info: layer
+ * not known"); the same build passes when run again. Nothing else is retried.
+ */
+export function isTransientBuildError(message: string): boolean {
+  return /checking if cached image exists from a previous build: .*layer not known/.test(message);
+}
+
+function build(args: string[]): void {
+  try {
+    podman(["build", ...args]);
+  } catch (e) {
+    if (!(e instanceof StepError) || !isTransientBuildError(e.message)) throw e;
+    log(`podman build hit a transient storage error; retrying once`);
+    podman(["build", ...args]);
+  }
+}
+
 function buildImages(commit: string): void {
   const specs = buildSpecs();
   for (const name of RELEASE_IMAGES) {
@@ -186,7 +205,7 @@ function buildImages(commit: string): void {
       "--build-arg",
       `${k}=${v}`,
     ]);
-    podman(["build", "-f", file, ...buildArgs, "--label", `${REVISION_LABEL}=${commit}`, "-t", tag, context]);
+    build(["-f", file, ...buildArgs, "--label", `${REVISION_LABEL}=${commit}`, "-t", tag, context]);
   }
 }
 
@@ -200,7 +219,7 @@ function relabel(commit: string, release: string, broken: ReleaseImage[] = []): 
     const dir = join(LOG_DIR, "relabel", `${release}-${name}`);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "Containerfile"), `${lines.join("\n")}\n`);
-    podman(["build", "-t", `${LOCAL}/${name}:${release}`, dir]);
+    build(["-t", `${LOCAL}/${name}:${release}`, dir]);
   }
 }
 

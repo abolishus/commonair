@@ -15,6 +15,7 @@ import {
   exportBody,
   hostContainerfile,
   hostRunArgs,
+  isTransientBuildError,
   migratedFirst,
   refusedRequests,
   storageScript,
@@ -268,5 +269,17 @@ describe("CI job", () => {
   test("shellchecks the Postgres image scripts with the self-host scripts", () => {
     const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
     expect(ci).toMatch(/git ls-files 'scripts\/selfhost\.sh' 'scripts\/selfhost\/\*\.sh' 'infra\/postgres\/\*\.sh'/);
+  });
+});
+
+describe("transient build errors", () => {
+  test("only Podman 4.9's cache-lookup layer error is retried", () => {
+    expect(
+      isTransientBuildError(
+        "podman build -f infra/containers/probe.Containerfile … exited 125\nError: checking if cached image exists from a previous build: getting top layer info: layer not known",
+      ),
+    ).toBe(true);
+    expect(isTransientBuildError('Error: building at STEP "RUN bun install": exit status 1')).toBe(false);
+    expect(isTransientBuildError("Error: layer not known")).toBe(false);
   });
 });
