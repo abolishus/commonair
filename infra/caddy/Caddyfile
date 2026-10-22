@@ -1,17 +1,28 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# TLS termination for a real domain (compose profile `tls`). Caddy obtains and renews
-# certificates automatically (ACME) for {$PUBLIC_HOSTNAME}; the host must be reachable
-# on 80/443 (see infra/README.md for rootless port options).
+# TLS termination for PUBLIC_HOSTNAME (Quadlet unit commonair-caddy, compose profile `tls`).
+# The host must be reachable on 80/443 (see infra/README.md for rootless port options).
 #
-# Public URLs this implies (set them in .env):
+# Certificates (ADR 0023 §11), all from the instance env; no domain is written here:
+#   TLS_MODE=acme (the default, also when unset or empty): publicly trusted certificates over
+#     ACME. ACME_EMAIL (optional) gets expiry notices; ACME_CA (optional) overrides the
+#     directory, e.g. a staging CA. Without it the issuer is Let's Encrypt.
+#   TLS_MODE=internal: Caddy's own CA, for LAN and test hosts. Clients must trust its root,
+#     which Caddy writes to /data/caddy/pki/authorities/local/root.crt in the
+#     commonair-caddy-data volume (`selfhost.sh status` prints the host path).
+#   Any other TLS_MODE fails to load ("File to import not found: tls-<mode>"), on purpose.
+# Caddy substitutes {$VAR} before parsing, and an empty value leaves no token at all, so the
+# optional values sit only where a missing argument is still valid.
+#
+# Public URLs this implies (selfhost.sh install writes them to the env file):
 #   PUBLIC_URL=https://<host>  API_PUBLIC_URL=https://<host>  PLAYBACK_PUBLIC_URL=https://<host>
 #   CHAT_PUBLIC_URL=wss://<host>/chat  P2P_TRACKER_URL=wss://<host>/tracker
 #   MEDIA_PUBLIC_URL=https://<host>/media
 #   INGEST_WHIP_PUBLIC_URL=https://<host>/live  INGEST_RTMP_PUBLIC_URL=rtmp://<host>/live
 {
-	# ACME works without an account email; add `email you@domain` here to get expiry notices.
+	# `cert_issuer acme` without a directory URL is Let's Encrypt.
+	cert_issuer acme {$ACME_CA}
 	servers {
 		# Clients' real addresses reach the services only through X-Forwarded-For,
 		# which they trust from TRUSTED_PROXY_CIDRS.
@@ -19,7 +30,25 @@
 	}
 }
 
+# Snippets must precede the site that imports them. `tls [<email>] { … }`: the block keeps the
+# directive valid when ACME_EMAIL is empty.
+(tls-acme) {
+	tls {$ACME_EMAIL} {
+		protocols tls1.2
+	}
+}
+# TLS_MODE set but empty.
+(tls-) {
+	import tls-acme
+}
+(tls-internal) {
+	tls internal {
+		protocols tls1.2
+	}
+}
+
 {$PUBLIC_HOSTNAME:localhost} {
+	import tls-{$TLS_MODE:acme}
 	encode zstd gzip
 
 	header {
