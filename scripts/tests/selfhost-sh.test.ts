@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -443,83 +444,109 @@ describe("host checks", () => {
 });
 
 describe("as root", () => {
-  test.each([
-    ["--yes", [] as string[]],
-    ["--yes --reinstall", ["--reinstall"]],
-  ])(
-    "%s: stages its inputs in a new root-owned directory, never writes into the service user's home, and forwards only --reinstall",
-    async (_, extra) => {
-      const h = host();
-      const sys = h.env.COMMONAIR_SYSROOT!;
-      mkdirSync(join(sys, "var/tmp"), { recursive: true });
-      // The service user's home, with the old staging path pre-planted as symlinks to a file
-      // root owns: a root cp or chown through them would overwrite or hand it over.
-      const userHome = join(h.dir, "commonair-home");
-      const victim = join(h.dir, "victim");
-      writeFileSync(victim, "root-owned\n");
-      mkdirSync(join(userHome, ".cache/commonair-install"), { recursive: true });
-      for (const f of ["selfhost.sh", "SHA256SUMS", bundleAssetName("0.1.0"), "model.onnx"])
-        symlinkSync(victim, join(userHome, ".cache/commonair-install", f));
-      // A short path for the user manager's bus socket (unix socket paths are length-limited).
-      const rt = mkdtempSync("/tmp/ca-rt-");
-      const bus = Bun.listen({ unix: join(rt, "bus"), socket: { data() {} } });
-      mkdirSync(join(sys, "run/user"), { recursive: true });
-      symlinkSync(rt, join(sys, "run/user/1234"));
-      const stubs: Record<string, string> = {
-        id: `case "$*" in "-u") echo 0 ;; "-un") echo root ;; "-u commonair") echo 1234 ;; *) exit 1 ;; esac`,
-        getent: `echo "commonair:x:1234:1234:CommonAir:${userHome}:/bin/sh"`,
-        // Records what the service user would be handed, then succeeds.
-        runuser: String.raw`
+  /** Runs install as a stubbed root, with the old staging path planted as symlinks to a victim. */
+  const asRoot = (bundleDir: (h: Host, victim: string) => string, extra: string[]) => {
+    const h = host();
+    const sys = h.env.COMMONAIR_SYSROOT!;
+    mkdirSync(join(sys, "var/tmp"), { recursive: true });
+    // The service user's home, with the old staging path pre-planted as symlinks to a file
+    // root owns: a root cp or chown through them would overwrite or hand it over.
+    const userHome = join(h.dir, "commonair-home");
+    const victim = join(h.dir, "victim");
+    writeFileSync(victim, "root-owned\n");
+    mkdirSync(join(userHome, ".cache/commonair-install"), { recursive: true });
+    for (const f of ["selfhost.sh", "SHA256SUMS", bundleAssetName("0.1.0"), "model.onnx"])
+      symlinkSync(victim, join(userHome, ".cache/commonair-install", f));
+    // A short path for the user manager's bus socket (unix socket paths are length-limited).
+    const rt = mkdtempSync("/tmp/ca-rt-");
+    const bus = Bun.listen({ unix: join(rt, "bus"), socket: { data() {} } });
+    mkdirSync(join(sys, "run/user"), { recursive: true });
+    symlinkSync(rt, join(sys, "run/user/1234"));
+    const stubs: Record<string, string> = {
+      id: `case "$*" in "-u") echo 0 ;; "-un") echo root ;; "-u commonair") echo 1234 ;; *) exit 1 ;; esac`,
+      getent: `echo "commonair:x:1234:1234:CommonAir:${userHome}:/bin/sh"`,
+      // Records what the service user would be handed, then succeeds.
+      runuser: String.raw`
 printf '%s\n' "runuser $*" >> "$STUB_LOG"
 for a in "$@"; do case "$a" in */selfhost.sh) stage=\${a%/selfhost.sh} ;; esac; done
 ls -ld "$stage" > "$STUB_STATE/stage.ls"
 ls -l "$stage" >> "$STUB_STATE/stage.ls"
 printf '%s' "$stage" > "$STUB_STATE/stage.path"
 exit 0`,
-        useradd: "exit 1",
-        sysctl: "exit 0",
-      };
-      for (const [name, body] of Object.entries(stubs)) {
-        writeFileSync(join(h.dir, "stub", name), `#!/bin/sh\n${body.replaceAll("\\${", "${")}\n`);
-        chmodSync(join(h.dir, "stub", name), 0o755);
-      }
-      try {
-        const r = h.run([
-          "install",
-          "--bundle",
-          join(releaseDir, bundleAssetName("0.1.0")),
-          "--domain",
-          "stream.example.org",
-          "--email",
-          "ops@example.org",
-          "--yes",
-          ...extra,
-        ]);
-        expect(r.code, r.err).toBe(0);
-        expect(readFileSync(victim, "utf8")).toBe("root-owned\n");
-        const stage = readFileSync(join(h.dir, "state/stage.path"), "utf8");
-        expect(stage.startsWith(join(sys, "var/tmp/commonair-install."))).toBe(true);
-        const listing = readFileSync(join(h.dir, "state/stage.ls"), "utf8").trim().split("\n");
-        // The directory is readable but not writable by anyone else; so are the files.
-        expect(listing[0]).toMatch(/^drwxr-xr-x/);
-        const files = listing.filter((l) => l.startsWith("-"));
-        expect(files.map((l) => l.split(/\s+/).at(-1) ?? "").toSorted()).toEqual(
-          ["SHA256SUMS", bundleAssetName("0.1.0"), "selfhost.sh"].sort(),
-        );
-        for (const l of files) expect(l).toMatch(/^-rw-r--r--/);
-        // Removed once the service user's run is over.
-        expect(existsSync(stage)).toBe(false);
-        const call = h.calls().find((c) => c.startsWith("runuser"))!;
-        expect(call).toContain(`-u commonair -- env HOME=${userHome}`);
-        expect(call).toContain(`${stage}/selfhost.sh install --bundle ${stage}/${bundleAssetName("0.1.0")}`);
-        // --yes allowed the host preparation; it must not become consent to reinstall.
-        expect(call).not.toContain("--yes");
-        expect(call.includes("--reinstall")).toBe(extra.includes("--reinstall"));
-        expect(h.calls().some((c) => c.startsWith("chown"))).toBe(false);
-      } finally {
-        bus.stop(true);
-        Bun.spawnSync(["rm", "-rf", rt]);
-      }
+      useradd: "exit 1",
+      sysctl: "exit 0",
+    };
+    for (const [name, body] of Object.entries(stubs)) {
+      writeFileSync(join(h.dir, "stub", name), `#!/bin/sh\n${body.replaceAll("\\${", "${")}\n`);
+      chmodSync(join(h.dir, "stub", name), 0o755);
+    }
+    try {
+      const r = h.run([
+        "install",
+        "--bundle",
+        join(bundleDir(h, victim), bundleAssetName("0.1.0")),
+        "--domain",
+        "stream.example.org",
+        "--email",
+        "ops@example.org",
+        "--yes",
+        ...extra,
+      ]);
+      return { h, r, sys, userHome, victim };
+    } finally {
+      bus.stop(true);
+      Bun.spawnSync(["rm", "-rf", rt]);
+    }
+  };
+
+  test.each([
+    ["--yes", [] as string[]],
+    ["--yes --reinstall", ["--reinstall"]],
+  ])(
+    "%s: stages its inputs in a new root-owned directory, never writes into the service user's home, and forwards only --reinstall",
+    (_, extra) => {
+      const { h, r, sys, userHome, victim } = asRoot(() => releaseDir, extra);
+      expect(r.code, r.err).toBe(0);
+      expect(readFileSync(victim, "utf8")).toBe("root-owned\n");
+      const stage = readFileSync(join(h.dir, "state/stage.path"), "utf8");
+      expect(stage.startsWith(join(sys, "var/tmp/commonair-install."))).toBe(true);
+      const listing = readFileSync(join(h.dir, "state/stage.ls"), "utf8").trim().split("\n");
+      // The directory is readable but not writable by anyone else; so are the files.
+      expect(listing[0]).toMatch(/^drwxr-xr-x/);
+      const files = listing.filter((l) => l.startsWith("-"));
+      expect(files.map((l) => l.split(/\s+/).at(-1) ?? "").toSorted()).toEqual(
+        ["SHA256SUMS", bundleAssetName("0.1.0"), "selfhost.sh"].sort(),
+      );
+      for (const l of files) expect(l).toMatch(/^-rw-r--r--/);
+      // Removed once the service user's run is over.
+      expect(existsSync(stage)).toBe(false);
+      const call = h.calls().find((c) => c.startsWith("runuser"))!;
+      expect(call).toContain(`-u commonair -- env HOME=${userHome}`);
+      expect(call).toContain(`${stage}/selfhost.sh install --bundle ${stage}/${bundleAssetName("0.1.0")}`);
+      // --yes allowed the host preparation; it must not become consent to reinstall.
+      expect(call).not.toContain("--yes");
+      expect(call.includes("--reinstall")).toBe(extra.includes("--reinstall"));
+      expect(h.calls().some((c) => c.startsWith("chown"))).toBe(false);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "refuses to stage a symlinked input, which could point root at any file",
+    () => {
+      // A bundle path the service user could point anywhere, e.g. at a root-only file.
+      const { h, r, sys, victim } = asRoot((h, victim) => {
+        const linked = join(h.dir, "linked");
+        mkdirSync(linked);
+        symlinkSync(victim, join(linked, bundleAssetName("0.1.0")));
+        copyFileSync(join(releaseDir, "SHA256SUMS"), join(linked, "SHA256SUMS"));
+        return linked;
+      }, []);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("refusing to stage a symlink as root");
+      expect(readFileSync(victim, "utf8")).toBe("root-owned\n");
+      expect(h.calls().some((c) => c.startsWith("runuser"))).toBe(false);
+      expect(readdirSync(join(sys, "var/tmp"))).toEqual([]);
     },
     TIMEOUT,
   );
@@ -860,6 +887,29 @@ describe("re-install", () => {
   );
 
   test(
+    "a re-install keeps the WebRTC address unless a new --public-ip is given",
+    () => {
+      const h = host();
+      expectOk(h.run([...INSTALL, "--public-ip", "203.0.113.7"]));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      // An operator behind NAT corrects the address by hand.
+      writeFileSync(
+        file,
+        readFileSync(file, "utf8").replace(/^MTX_WEBRTCADDITIONALHOSTS=.*$/m, "MTX_WEBRTCADDITIONALHOSTS=198.51.100.9"),
+      );
+      expectOk(h.run([...INSTALL, "--reinstall"]));
+      expect(envOf(h).MTX_WEBRTCADDITIONALHOSTS).toBe("198.51.100.9");
+      expectOk(h.run([...INSTALL, "--reinstall", "--public-ip", "203.0.113.8"]));
+      expect(envOf(h).MTX_WEBRTCADDITIONALHOSTS).toBe("203.0.113.8");
+      // Keys init-env does not know (not in .env.example) survive the env rewrite.
+      writeFileSync(file, `${readFileSync(file, "utf8")}OPERATOR_NOTE=kept\n`);
+      expectOk(h.run([...INSTALL, "--reinstall"]));
+      expect(envOf(h)).toMatchObject({ MTX_WEBRTCADDITIONALHOSTS: "203.0.113.8", OPERATOR_NOTE: "kept" });
+    },
+    TIMEOUT,
+  );
+
+  test(
     "a re-install after a failed migration is not refused by the start limit",
     () => {
       const h = host();
@@ -975,7 +1025,9 @@ describe("upgrade", () => {
     "verify, pull, back up, install units, migrate before api and worker, health",
     () => {
       const h = host();
-      expectOk(h.run(INSTALL));
+      expectOk(h.run([...INSTALL, "--public-ip", "203.0.113.7"]));
+      const mtxBefore = envOf(h).MTX_WEBRTCADDITIONALHOSTS;
+      expect(mtxBefore).toBe("203.0.113.7");
       Bun.spawnSync(["sh", "-c", `: > "${h.log}"`]);
       const r = h.run(["upgrade", "--version", "v0.2.0"]);
       expect(r.code, r.err).toBe(0);
@@ -1007,6 +1059,8 @@ describe("upgrade", () => {
       expect(readlinkSync(join(h.home, ".local/share/commonair/previous"))).toBe(
         join(h.home, ".local/share/commonair/releases/0.1.0"),
       );
+      // The upgrade rewrites the env file through init-env; keys outside .env.example stay.
+      expect(envOf(h).MTX_WEBRTCADDITIONALHOSTS).toBe(mtxBefore);
       const status = h.run(["status"]).out;
       expect(status).toContain("version:   0.2.0");
       expect(status).toContain("previous:  0.1.0");

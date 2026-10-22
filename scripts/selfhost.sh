@@ -350,19 +350,29 @@ run_as_service_user() {
 
 # Copies the script and the local inputs into a new root-owned, world-readable directory and
 # prints its path. mktemp creates it (0700, root), so nothing the service user made is written to.
+# Root copies files the operator named, which may sit in a directory another user controls.
+# Refusing symlinks keeps root from reading an arbitrary file into the world-readable stage.
+stage_copy() {
+  if [ -L "$1" ]; then
+    rm -rf "$_st"
+    die "refusing to stage a symlink as root: $1 (pass the real file)"
+  fi
+  cp "$1" "$2"
+}
+
 stage_for_service_user() {
   _st=$(mktemp -d "$SYSROOT/var/tmp/commonair-install.XXXXXX")
-  cp "$0" "$_st/selfhost.sh"
+  stage_copy "$0" "$_st/selfhost.sh"
   if [ -n "$BUNDLE" ]; then
-    cp "$BUNDLE" "$_st/"
+    stage_copy "$BUNDLE" "$_st/$(basename "$BUNDLE")"
     _sums="${SUMS_FILE:-$(dirname "$BUNDLE")/$CHECKSUMS_ASSET}"
     if [ -f "$_sums" ]; then
-      cp "$_sums" "$_st/$CHECKSUMS_ASSET"
+      stage_copy "$_sums" "$_st/$CHECKSUMS_ASSET"
       _sig="$(dirname "$_sums")/$SIGNATURE_ASSET"
-      if [ -f "$_sig" ]; then cp "$_sig" "$_st/$SIGNATURE_ASSET"; fi
+      if [ -f "$_sig" ]; then stage_copy "$_sig" "$_st/$SIGNATURE_ASSET"; fi
     fi
   fi
-  if [ -n "$MODEL_SRC" ]; then cp "$MODEL_SRC" "$_st/model.onnx"; fi
+  if [ -n "$MODEL_SRC" ]; then stage_copy "$MODEL_SRC" "$_st/model.onnx"; fi
   chmod 0644 "$_st"/*
   chmod 0755 "$_st"
   printf '%s' "$_st"
@@ -562,6 +572,15 @@ write_env() {
     -v "$_rel/tools:/tools:ro,Z" -v "$_work:/out:Z" -w /tools \
     "$(tools_image "$_rel")" /tools/init-env.js --out /out/commonair.env --merge >/dev/null ||
     die "init-env failed in the tools image"
+  # init-env writes only the keys .env.example lists. Carry over every other key the old file
+  # had (MTX_WEBRTCADDITIONALHOSTS, operator additions), or each upgrade would drop them.
+  if [ -f "$ENV_FILE" ]; then
+    (umask 077 && awk -F= '
+      NR == FNR { if ($0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/) seen[$1] = 1; next }
+      /^[A-Za-z_][A-Za-z0-9_]*=/ && !($1 in seen) { print }
+    ' "$_work/commonair.env" "$ENV_FILE" >"$_work/carried.env" &&
+      cat "$_work/carried.env" >>"$_work/commonair.env")
+  fi
   (umask 077 && cp "$_work/commonair.env" "$ENV_FILE.tmp")
   chmod 600 "$ENV_FILE.tmp"
   mv "$ENV_FILE.tmp" "$ENV_FILE"
@@ -592,7 +611,10 @@ configure_env() {
     env_set ACME_EMAIL "$EMAIL"
     for _k in CONTACT_EMAIL SECURITY_EMAIL ABUSE_EMAIL DMCA_EMAIL PRIVACY_EMAIL; do env_default "$_k" "$EMAIL"; done
   fi
-  _ips=${PUBLIC_IP:-$(local_addresses)}
+  # Re-installs keep what the operator set (a NAT address, an earlier --public-ip) unless a new
+  # --public-ip is given; local interface addresses are only the first-install guess.
+  _ips=${PUBLIC_IP:-$(env_get MTX_WEBRTCADDITIONALHOSTS "$ENV_FILE")}
+  _ips=${_ips:-$(local_addresses)}
   if [ -n "$_ips" ]; then
     env_set MTX_WEBRTCADDITIONALHOSTS "$_ips"
   else
