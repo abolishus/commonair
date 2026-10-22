@@ -7,6 +7,7 @@ import { createDb } from "@commonair/db";
 import { createLogger, initTelemetry } from "@commonair/observability";
 import { runService } from "@commonair/service";
 import { createS3Storage } from "@commonair/storage";
+import { coopTestHooks } from "./coop/startup.ts";
 import { parseConcurrency, workerEnv } from "./env.ts";
 import { ClassifierHolder } from "./integrity/classifier.ts";
 import { buildModerationOptions } from "./moderation/startup.ts";
@@ -35,6 +36,7 @@ if (moderation.testHooks)
     classifier: env.MODERATION_CLASSIFIER,
     testHooks: true,
   });
+const coopHooks = coopTestHooks(env, logger);
 
 // Loaded once here and on SIGHUP, never per scoring run.
 const networks = new ClassifierHolder(logger);
@@ -64,7 +66,7 @@ runService({
   port: env.WORKER_PORT,
   logger,
   checks: worker.checks,
-  health: { moderation_test_hooks: moderation.testHooks },
+  health: { moderation_test_hooks: moderation.testHooks, coop_test_hooks: coopHooks },
   fetch: () => new Response("not found", { status: 404 }),
   shutdownTimeoutMs: SHUTDOWN_DEADLINE_MS + 3_000,
   onShutdown: async () => {

@@ -9,9 +9,10 @@
  * component's total among eligible candidates, so a score is a weighted sum of shares
  * in [0, 1].
  */
-import { and, eq, sql } from "drizzle-orm";
-import { schema, type Database } from "@commonair/db";
+import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
+import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import { contributionInputs, type ContributionInput } from "./inputs.ts";
+import { emitEvent, systemAudit } from "./outbox.ts";
 import {
   contributionWeightsOf,
   councilConfigOf,
@@ -106,87 +107,139 @@ export function seatCouncil(
   };
 }
 
-/** The council term containing `now`: the UTC calendar month (matches the monthly recompute schedule). */
+/** The UTC calendar month containing `now`. */
 export function termWindow(now: Date): { startsAt: Date; endsAt: Date } {
   const startsAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const endsAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   return { startsAt, endsAt };
 }
 
-export interface RecomputeResult {
-  termId: string;
-  created: boolean;
-  seats: CouncilSeat[];
+/** A term seated at `now` starts now and ends at the end of the UTC month. */
+export function newTermWindow(now: Date): { startsAt: Date; endsAt: Date } {
+  return { startsAt: new Date(now.getTime()), endsAt: termWindow(now).endsAt };
+}
+
+export type ReseatReason = "no_term" | "month_changed" | "vacancy";
+
+/** Seated members who are no longer active streamer members (their seats are vacant). */
+export function councilVacancies(seated: readonly string[], activeStreamers: ReadonlySet<string>): string[] {
+  return seated.filter((userId) => !activeStreamers.has(userId));
 }
 
 /**
- * Seat the council for the term containing `now`, once. A second call in the same
- * term returns the existing term unchanged (idempotent per term window), so retries
- * and duplicate schedules are harmless. Candidates are active streamer-class members.
+ * Why a new term must be seated at `now`, or null when the current term stands: there is no
+ * current term, the UTC month changed since it started, or a seat fell vacant.
+ */
+export function reseatReason(
+  current: { startsAt: Date; seated: readonly string[] } | null,
+  now: Date,
+  activeStreamers: ReadonlySet<string>,
+): ReseatReason | null {
+  if (!current) return "no_term";
+  if (
+    current.startsAt.getUTCFullYear() !== now.getUTCFullYear() ||
+    current.startsAt.getUTCMonth() !== now.getUTCMonth()
+  )
+    return "month_changed";
+  return councilVacancies(current.seated, activeStreamers).length > 0 ? "vacancy" : null;
+}
+
+export interface RecomputeResult {
+  termId: string;
+  created: boolean;
+  /** Why a new term was seated; null when the current term stands. */
+  reason: ReseatReason | null;
+  seats: CouncilSeat[];
+}
+
+/** Active streamer-class members whose accounts are in good standing: the council candidates. */
+async function activeStreamers(tx: Executor): Promise<Set<string>> {
+  const rows = await tx
+    .selectDistinct({ userId: schema.memberships.userId })
+    .from(schema.memberships)
+    .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
+    .where(
+      and(
+        eq(schema.memberships.class, "streamer"),
+        eq(schema.memberships.status, "active"),
+        sql`${schema.users.deletedAt} is null`,
+        eq(schema.users.banned, false),
+      ),
+    );
+  return new Set(rows.map((r) => r.userId));
+}
+
+/**
+ * Seat a new council term when one is due (`reseatReason`), otherwise return the current term.
+ * The current term is the latest by `computed_at` whose window contains `now`, as the council
+ * response trigger reads it. Terms and seats are append-only; the seats go in the term's own
+ * transaction (trigger), with the `council.recompute` audit row and the `coop.council.recomputed`
+ * event. Concurrent calls are serialized by an advisory lock, so one due reseat makes one term.
  */
 export async function recomputeCouncil(db: Database, now: Date): Promise<RecomputeResult> {
   return db.transaction(async (tx) => {
-    // Serialize concurrent recomputes; council_terms has no unique key on the window.
+    // council_terms has no unique key on the window: serialize recomputes instead.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('commonair:council-recompute'))`);
-    const { startsAt, endsAt } = termWindow(now);
-    const [existing] = await tx
-      .select({ id: schema.councilTerms.id })
+    const [current] = await tx
+      .select({ id: schema.councilTerms.id, startsAt: schema.councilTerms.startsAt })
       .from(schema.councilTerms)
-      .where(and(eq(schema.councilTerms.startsAt, startsAt), eq(schema.councilTerms.endsAt, endsAt)))
+      .where(and(lte(schema.councilTerms.startsAt, now), gt(schema.councilTerms.endsAt, now)))
+      .orderBy(desc(schema.councilTerms.computedAt), desc(schema.councilTerms.id))
       .limit(1);
-    if (existing) {
-      const seats = await tx
-        .select({
-          userId: schema.councilMembers.userId,
-          rank: schema.councilMembers.rank,
-          contributionScore: schema.councilMembers.contributionScore,
-        })
-        .from(schema.councilMembers)
-        .where(eq(schema.councilMembers.termId, existing.id))
-        .orderBy(schema.councilMembers.rank);
-      return { termId: existing.id, created: false, seats };
-    }
+    const currentSeats = current
+      ? await tx
+          .select({
+            userId: schema.councilMembers.userId,
+            rank: schema.councilMembers.rank,
+            contributionScore: schema.councilMembers.contributionScore,
+          })
+          .from(schema.councilMembers)
+          .where(eq(schema.councilMembers.termId, current.id))
+          .orderBy(schema.councilMembers.rank)
+      : [];
+    const streamers = await activeStreamers(tx);
+    const seated = currentSeats.map((s) => s.userId);
+    const reason = reseatReason(current ? { startsAt: current.startsAt, seated } : null, now, streamers);
+    if (current && reason === null) return { termId: current.id, created: false, reason, seats: currentSeats };
 
     const settings = await loadSettings(tx);
     const config = councilConfigOf(settings);
     const weights = contributionWeightsOf(settings);
     const windowStart = new Date(now.getTime() - config.eligibilityWindowDays * 86_400_000);
     const inputs = await contributionInputs(tx, windowStart, now, weights.dailyStreamingHourCap);
-    const streamers = await tx
-      .selectDistinct({ userId: schema.memberships.userId })
-      .from(schema.memberships)
-      .innerJoin(schema.users, eq(schema.users.id, schema.memberships.userId))
-      .where(
-        and(
-          eq(schema.memberships.class, "streamer"),
-          eq(schema.memberships.status, "active"),
-          sql`${schema.users.deletedAt} is null`,
-          eq(schema.users.banned, false),
-        ),
-      );
-    const candidates = streamers.map(
-      (s) =>
-        inputs.get(s.userId) ?? { userId: s.userId, revenueCents: 0, eligibleHours: 0, relayBytes: 0, viewerHours: 0 },
+    const candidates = [...streamers].map(
+      (userId) => inputs.get(userId) ?? { userId, revenueCents: 0, eligibleHours: 0, relayBytes: 0, viewerHours: 0 },
     );
     const seating = seatCouncil(candidates, config, weights);
     const method = { ...seating.method, windowStart: windowStart.toISOString(), windowEnd: now.toISOString() };
+    const { startsAt, endsAt } = newTermWindow(now);
 
-    const [term] = await tx
+    // The trigger stamps computed_at and txid; seats are accepted only in this transaction.
+    const termId = uuidv7(now.getTime());
+    await tx
       .insert(schema.councilTerms)
-      .values({ computedAt: now, startsAt, endsAt, method: method as unknown as Record<string, unknown> })
-      .returning({ id: schema.councilTerms.id });
-    if (!term) throw new Error("council term insert returned no row");
+      .values({ id: termId, startsAt, endsAt, method: method as unknown as Record<string, unknown> });
     if (seating.seats.length > 0) {
-      await tx.insert(schema.councilMembers).values(seating.seats.map((s) => ({ termId: term.id, ...s })));
+      await tx.insert(schema.councilMembers).values(seating.seats.map((s) => ({ termId, ...s })));
     }
-    await tx.insert(schema.auditLog).values({
-      actorType: "system",
-      action: "council.recompute",
-      subjectType: "council_term",
-      subjectId: term.id,
-      reason: "scheduled creator council recompute",
-      details: { seats: seating.seats.map((s) => s.userId), method: method as unknown as Record<string, unknown> },
-    });
-    return { termId: term.id, created: true, seats: seating.seats };
+    await systemAudit(
+      tx,
+      {
+        action: "council.recompute",
+        subjectType: "council_term",
+        subjectId: termId,
+        reason: "scheduled creator council recompute",
+        details: {
+          trigger: reason ?? "no_term",
+          previousTermId: current?.id ?? null,
+          vacated: councilVacancies(seated, streamers),
+          seats: seating.seats.map((s) => s.userId),
+          method: method as unknown as Record<string, unknown>,
+        },
+      },
+      now,
+    );
+    await emitEvent(tx, "coop.council.recomputed", { term_id: termId, seats: seating.seats.length }, now);
+    return { termId, created: true, reason: reason ?? "no_term", seats: seating.seats };
   });
 }

@@ -4,10 +4,12 @@
 /**
  * Expiry (docs/testing/e4b-selectors.md): a `pending` payment past `expires_at` becomes `failed`;
  * its `incomplete` subscriptions (own or gifted) become `expired`; a `past_due` subscription whose
- * renewal it was ends as `expired` with `channel.subscription.end`; its tip becomes `failed`.
+ * renewal it was ends as `expired` with `channel.subscription.end`; its tip becomes `failed`; its
+ * member share (docs/testing/e5-selectors.md) becomes `cancelled` with `coop.share.update`.
  * Nothing was posted to the ledger for a pending payment, so nothing is reversed.
  */
-import { schema } from "@commonair/db";
+import { schema, type Executor } from "@commonair/db";
+import { emitEvent, systemAudit } from "@commonair/governance";
 import { and, eq, inArray, isNotNull, lte, or } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import type { MoneyJobConfig } from "./config.ts";
@@ -20,6 +22,8 @@ export interface ExpireResult {
   subscriptions: number;
   ended: number;
   tips: number;
+  /** Member shares cancelled because their share payment expired. */
+  shares: number;
   batches: number;
   exhausted: boolean;
 }
@@ -46,6 +50,40 @@ export function takeWithinCap<T extends { quantity: number }>(rows: readonly T[]
   return out;
 }
 
+/**
+ * The member shares of failed `membership_share` payments: `pending → cancelled` (compare-and-set,
+ * after the payment rows were locked: lock order payment → share), each with its audit row and
+ * `coop.share.update` event. Nothing was posted for a pending share, so nothing is reversed.
+ */
+async function cancelShares(tx: Executor, paymentIds: readonly string[], now: Date): Promise<number> {
+  const ms = schema.membershipShares;
+  const cancelled = await tx
+    .update(ms)
+    .set({ status: "cancelled" })
+    .where(and(eq(ms.status, "pending"), inArray(ms.paymentId, [...paymentIds])))
+    .returning({ id: ms.id, userId: ms.userId, paymentId: ms.paymentId, amountCents: ms.amountCents });
+  for (const sh of cancelled) {
+    await systemAudit(
+      tx,
+      {
+        action: "coop.share.cancel",
+        subjectType: "membership_share",
+        subjectId: sh.id,
+        reason: "share payment expired unpaid",
+        details: { shareId: sh.id, paymentId: sh.paymentId, amountCents: sh.amountCents },
+      },
+      now,
+    );
+    await emitEvent(
+      tx,
+      "coop.share.update",
+      { share_id: sh.id, user_id: sh.userId, status: "cancelled", amount_cents: sh.amountCents },
+      now,
+    );
+  }
+  return cancelled.length;
+}
+
 /** One transaction: up to `limit` due payments, everything hanging off them, and the end events. */
 async function expireBatch(ctx: WorkerContext, now: Date, limit: number, subscriptionCap: number) {
   return ctx.db.transaction(async (tx) => {
@@ -61,7 +99,7 @@ async function expireBatch(ctx: WorkerContext, now: Date, limit: number, subscri
     const due = takeWithinCap(locked, subscriptionCap);
     const more = locked.length >= limit || due.length < locked.length;
     if (due.length === 0)
-      return { payments: [], subscriptions: 0, ended: [] as EndedSubscription[], tips: 0, more: false };
+      return { payments: [], subscriptions: 0, ended: [] as EndedSubscription[], tips: 0, shares: 0, more: false };
     const failed = await tx
       .update(p)
       .set({ status: "failed", updatedAt: now })
@@ -78,7 +116,7 @@ async function expireBatch(ctx: WorkerContext, now: Date, limit: number, subscri
     const paymentIds = failed.map((f) => f.id);
     const subIds = failed.flatMap((f) => (f.subscriptionId ? [f.subscriptionId] : []));
     const tipIds = failed.flatMap((f) => (f.tipId ? [f.tipId] : []));
-    if (paymentIds.length === 0) return { payments: [], subscriptions: 0, ended: [], tips: 0, more };
+    if (paymentIds.length === 0) return { payments: [], subscriptions: 0, ended: [], tips: 0, shares: 0, more };
 
     const byPayment = or(inArray(s.giftPaymentId, paymentIds), subIds.length > 0 ? inArray(s.id, subIds) : undefined);
     const incomplete = await tx
@@ -124,7 +162,15 @@ async function expireBatch(ctx: WorkerContext, now: Date, limit: number, subscri
         ),
       )
       .returning({ id: schema.tips.id });
-    return { payments: failed, subscriptions: incomplete.length + lapsed.length, ended, tips: tips.length, more };
+    const shares = await cancelShares(tx, paymentIds, now);
+    return {
+      payments: failed,
+      subscriptions: incomplete.length + lapsed.length,
+      ended,
+      tips: tips.length,
+      shares,
+      more,
+    };
   });
 }
 
@@ -136,13 +182,14 @@ export async function expirePendingPayments(
   const clock = opts.clock;
   const cap = opts.subscriptionCap ?? EXPIRY_SUBSCRIPTION_CAP;
   const now = ctx.now();
-  const totals = { payments: 0, subscriptions: 0, ended: 0, tips: 0 };
+  const totals = { payments: 0, subscriptions: 0, ended: 0, tips: 0, shares: 0 };
   const loop = await runBatches({ batchSize: cfg.batchSize, budgetMs: cfg.budgetMs, clock }, async (limit) => {
     const r = await expireBatch(ctx, now, limit, cap);
     totals.payments += r.payments.length;
     totals.subscriptions += r.subscriptions;
     totals.ended += r.ended.length;
     totals.tips += r.tips;
+    totals.shares += r.shares;
     for (const f of r.payments) moneyMetrics.expired.add(1, { kind: f.kind });
     if (r.ended.length) moneyMetrics.ended.add(r.ended.length, { reason: "renewal_unpaid" });
     await publishBadgeInvalidations(ctx, r.ended);
