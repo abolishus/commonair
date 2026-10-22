@@ -395,8 +395,18 @@ IRC (6667, 6697) and MediaMTX (RTMP 1935, ICE 8189/udp) still use `PublishPort=`
 address, so they listen on IPv6 and IPv4 (IPv4 alone on a host without IPv6), but they see
 every client at one internal address. IRC's per-address caps therefore count all IRC clients
 together, and MediaMTX's view of an encoder's address (the API records a hash of it) is that
-internal one. IRC can move to socket activation once it accepts inherited sockets
-(`Bun.listen({ fd })` works); MediaMTX has no socket activation.
+internal one. This part is not done yet:
+
+- **IRC** can move to socket activation the way Caddy did. That needs `services/irc` to take
+  inherited listeners (when `LISTEN_FDS` is set and `LISTEN_PID` matches, listen on fd 3 for
+  6667 and fd 4 for 6697 with `Bun.listen({ fd })` instead of binding), plus a
+  `commonair-irc.socket` and the IRC unit's `Wants=`/`After=` on it. Until then, raise
+  `IRC_MAX_CONNECTIONS_PER_IP` and the connect burst if many users share the gateway's count.
+- **MediaMTX** has no fix here. It cannot take inherited sockets (no socket activation, and its
+  RTMP and ICE listeners bind their own addresses), and moving it to the host network would
+  also put its RTSP, HLS, API and metrics listeners on the host. RTMP stream keys
+  are the access control, so the shared address limits only what its logs and the API's
+  recorded encoder hash can tell apart.
 
 Every published port and its fate (tests: `infra/tests/network.test.ts`, the e2e `ss` check):
 

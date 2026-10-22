@@ -806,11 +806,26 @@ sockets() {
 # The network's settings (its IPRange keeps the fixed addresses of Caddy and web free) apply only
 # when Podman creates it, and Quadlet never re-creates an existing one: so it goes while the
 # stack is down, and the first unit to start creates it from this release's commonair.network.
+# When it cannot go (a container outside the instance still uses it), the old one is kept only if
+# its lease range already leaves out the fixed addresses: otherwise another container could be
+# leased 10.89.42.10 or .11 and have its X-Forwarded-For believed, so the restart fails instead.
 recreate_network() {
   systemctl --user stop commonair-network.service 2>/dev/null || true
   podman network exists commonair 2>/dev/null || return 0
-  podman network rm commonair >/dev/null 2>&1 ||
-    warn "could not remove the commonair network (a container outside the instance still uses it?); keeping its old settings"
+  podman network rm commonair >/dev/null 2>&1 && return 0
+  _lease=$(podman network inspect commonair \
+    --format '{{range .Subnets}}{{if .LeaseRange}}{{.LeaseRange.StartIP}}{{end}}{{end}}' 2>/dev/null) || _lease=""
+  case "$_lease" in
+    10.89.42.*)
+      if [ "${_lease##*.}" -gt 11 ] 2>/dev/null; then
+        warn "could not remove the commonair network (a container outside the instance still uses it?); keeping it: its lease range already starts at $_lease"
+        return 0
+      fi
+      ;;
+  esac
+  warn "could not remove the commonair network, and it can lease the fixed addresses 10.89.42.10/.11 the services trust" \
+    "(lease range start: ${_lease:-none}). Stop whatever else uses it (podman network inspect commonair), then re-run."
+  return 1
 }
 
 # Runs migrate to completion within HEALTH_TIMEOUT. Postgres never gives up (Restart=always,
@@ -840,7 +855,7 @@ restart_stack() {
   # The sockets first: a connection to one would start Caddy (and what it wants) mid-upgrade.
   # shellcheck disable=SC2046 # unit names have no spaces
   systemctl --user stop $(sockets) $(all_units) 2>/dev/null || true
-  recreate_network
+  recreate_network || return 1
   # migrate and garage-init retry with a start limit; a release whose migrate kept failing
   # leaves them start-limit-hit, which would refuse this start (a rollback, or a re-run) for
   # up to an hour.

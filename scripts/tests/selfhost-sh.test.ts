@@ -134,6 +134,11 @@ case "$1" in
     cat > "$STUB_STATE/secrets/$name"
     ;;
   inspect) echo healthy ;;
+  network)
+    case "$2" in
+      rm) [ -z "\${STUB_NETWORK_RM_FAIL:-}" ] || exit 2 ;;
+      inspect) echo "\${STUB_NETWORK_LEASE_START:-}" ;;
+    esac ;;
   volume)
     case "$2" in inspect) echo "$STUB_STATE/caddy-data" ;; esac ;;
   exec) echo "backup-list: base_000000010000000000000003" ;;
@@ -1344,6 +1349,32 @@ describe("upgrade", () => {
       expect(r.code, r.err).toBe(0);
       expect(r.err).not.toContain("setting S3_PUBLIC_ENDPOINT");
       expect(envOf(h).S3_PUBLIC_ENDPOINT).toBe("https://s3.example.net");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a network that cannot be re-created is kept only when its lease range leaves out the trusted addresses",
+    () => {
+      const h = host();
+      const r = h.run(INSTALL, { STUB_NETWORK_RM_FAIL: "1", STUB_NETWORK_LEASE_START: "10.89.42.129" });
+      expect(r.code, r.err).toBe(0);
+      expect(r.err).toContain("keeping it: its lease range already starts at 10.89.42.129");
+    },
+    TIMEOUT,
+  );
+
+  test.each([
+    ["no lease range (a network from before IPRange)", ""],
+    ["a lease range that covers 10.89.42.10", "10.89.42.2"],
+  ])(
+    "a network that cannot be re-created and has %s stops the start before migrations",
+    (_name, lease) => {
+      const h = host();
+      const r = h.run(INSTALL, { STUB_NETWORK_RM_FAIL: "1", STUB_NETWORK_LEASE_START: lease });
+      expect(r.code).not.toBe(0);
+      expect(r.err).toContain("can lease the fixed addresses 10.89.42.10/.11");
+      expect(h.calls().some((c) => c.startsWith("systemctl --user start commonair-migrate.service"))).toBe(false);
     },
     TIMEOUT,
   );
