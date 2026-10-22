@@ -120,6 +120,10 @@ translation-ready now: all user-facing strings go through `@commonair/i18n` mess
 installable PWA; ActivityPub federation (followable channels, go-live posts); community
 translations through self-hosted Weblate; an ads policy decision for governance.
 
+Feature wins Twitch structurally can't ship (open books, verified audiences, one media clock,
+captions, accountable safety), sequenced as Wave 0–3 work units with ADR candidates 0011–0019:
+[docs/product/feature-wins.md](docs/product/feature-wins.md).
+
 ## Open decisions
 
 | #   | Question                                                               | Status                                                                                                                                      |
