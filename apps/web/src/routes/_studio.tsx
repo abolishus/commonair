@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { StudioShell, type NavItem } from "@commonair/ui/layouts";
-import { DashboardSquare01Icon, Money03Icon, ServerStack01Icon } from "@hugeicons/core-free-icons";
+import {
+  DashboardSquare01Icon,
+  Money03Icon,
+  Notification03Icon,
+  ServerStack01Icon,
+  Video01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
 import type * as React from "react";
@@ -10,7 +16,7 @@ import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
 import { studioNav, type StudioEntry } from "../lib/nav.ts";
 
-/** Creator tools (stream manager, revenue, relays) in the studio sidebar. Each page guards its own session. */
+/** Creator tools (stream manager, overlays, content, revenue, relays) in the studio sidebar. Each page guards its own session. */
 export const Route = createFileRoute("/_studio")({ component: StudioLayout });
 
 function studioItem(entry: StudioEntry): NavItem {
@@ -22,6 +28,20 @@ function studioItem(entry: StudioEntry): NavItem {
         label: t("studio.streamManager"),
         icon: <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={2} aria-hidden />,
         render: <Link to="/dashboard" />,
+      };
+    case "overlays":
+      return {
+        ...base,
+        label: t("studio.overlays"),
+        icon: <HugeiconsIcon icon={Notification03Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-overlays-link" to="/overlays" />,
+      };
+    case "content":
+      return {
+        ...base,
+        label: t("studio.content"),
+        icon: <HugeiconsIcon icon={Video01Icon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-content-link" to="/content" />,
       };
     case "revenue":
       return {

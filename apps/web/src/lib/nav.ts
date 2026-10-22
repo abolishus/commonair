@@ -19,6 +19,7 @@ export interface AccountEntry {
     | "relays"
     | "subscriptions"
     | "appeals"
+    | "privacy"
     | "coop"
     | "treasury"
     | "moderation"
@@ -31,6 +32,7 @@ export interface AccountEntry {
     | "/relays"
     | "/settings/subscriptions"
     | "/settings/appeals"
+    | "/settings/privacy"
     | "/coop/membership"
     | "/treasury"
     | "/admin/moderation"
@@ -47,8 +49,8 @@ export interface SignedOutEntry {
 }
 
 export interface StudioEntry {
-  id: "streamManager" | "revenue" | "relays";
-  to: "/dashboard" | "/revenue" | "/relays";
+  id: "streamManager" | "overlays" | "content" | "revenue" | "relays";
+  to: "/dashboard" | "/overlays" | "/content" | "/revenue" | "/relays";
   current: boolean;
 }
 
@@ -119,6 +121,7 @@ export function accountMenu(
       { id: "relays", to: "/relays" },
       { id: "subscriptions", to: "/settings/subscriptions" },
       { id: "appeals", to: "/settings/appeals" },
+      { id: "privacy", to: "/settings/privacy" },
       { id: "coop", to: "/coop/membership" },
       ...staff,
       { id: "signOut", separatorBefore: true, destructive: true },
@@ -135,6 +138,8 @@ export function studioNav(pathname: string): StudioEntry[] {
   const path = normalize(pathname);
   return [
     { id: "streamManager", to: "/dashboard", current: path === "/dashboard" },
+    { id: "overlays", to: "/overlays", current: path === "/overlays" },
+    { id: "content", to: "/content", current: path === "/content" },
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "relays", to: "/relays", current: path === "/relays" },
   ];

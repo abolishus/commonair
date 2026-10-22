@@ -33,6 +33,20 @@ export function apiKeepalive(): Api {
   return keepaliveClient;
 }
 
+/**
+ * For the OBS overlay: the overlay token as a bearer and no cookies, so the page acts as the
+ * overlay and never as whoever is signed in to the browser it runs in.
+ */
+export function overlayApi(token: string): Api {
+  return createORPCClient(
+    new RPCLink({
+      url: () => `${window.location.origin}/rpc`,
+      headers: { authorization: `Bearer ${token}` },
+      fetch: (request, init) => fetch(request, { ...init, credentials: "omit", referrerPolicy: "no-referrer" }),
+    }),
+  );
+}
+
 export function serverApi(baseUrl: string, headers: Record<string, string> = {}): Api {
   return createORPCClient(new RPCLink({ url: `${baseUrl.replace(/\/+$/, "")}/rpc`, headers }));
 }

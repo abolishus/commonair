@@ -17,6 +17,7 @@ import {
   Logout03Icon,
   ServerStack01Icon,
   Shield01Icon,
+  SquareLock01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -73,6 +74,13 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("nav.appeals"),
         icon: icon(JusticeScale01Icon),
         render: <Link data-testid="account-appeals-link" to="/settings/appeals" />,
+      };
+    case "privacy":
+      return {
+        id: entry.id,
+        label: t("nav.privacy"),
+        icon: icon(SquareLock01Icon),
+        render: <Link data-testid="account-privacy-link" to="/settings/privacy" />,
       };
     case "coop":
       return {

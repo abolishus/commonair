@@ -8,6 +8,7 @@ import { en } from "../src/i18n/en.ts";
 import { t } from "../src/i18n/index.ts";
 import { coopMessages } from "../src/i18n/coop.ts";
 import { moneyMessages } from "../src/i18n/money.ts";
+import { opsMessages } from "../src/i18n/ops.ts";
 import { safetyMessages } from "../src/i18n/safety.ts";
 import { supportMessages } from "../src/i18n/support.ts";
 
@@ -44,6 +45,10 @@ describe("message catalog", () => {
       join(SRC, "lib/money.ts"),
       join(SRC, "lib/coop.ts"),
       join(SRC, "components/safety/labels.ts"),
+      join(SRC, "lib/simulcast.ts"),
+      join(SRC, "lib/overlays.ts"),
+      join(SRC, "lib/content.ts"),
+      join(SRC, "lib/privacy.ts"),
     ];
     const dynamic = files
       .filter(([f, text]) => !allowed.includes(f) && /\bt\(\s*[`'a-zA-Z_]/.test(text))
@@ -78,6 +83,21 @@ describe("message catalog", () => {
       .map(([, text]) => text)
       .join("\n");
     expect(coop.filter((k) => !used.includes(`"${k}"`))).toEqual([]);
+  });
+
+  it("keeps the E6 ops catalog disjoint from every other catalog and the inline keys, and uses all of it", () => {
+    const inline = [...readFileSync(join(SRC, "i18n/en.ts"), "utf8").matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]);
+    const ops = Object.keys(opsMessages);
+    expect(
+      ops.filter((k) => k in moneyMessages || k in supportMessages || k in safetyMessages || k in coopMessages),
+    ).toEqual([]);
+    expect(inline.filter((k) => k !== undefined && k in opsMessages)).toEqual([]);
+    expect(readFileSync(join(SRC, "i18n/en.ts"), "utf8")).toContain("...opsMessages");
+    const used = files
+      .filter(([f]) => !f.startsWith(join(SRC, "i18n/")))
+      .map(([, text]) => text)
+      .join("\n");
+    expect(ops.filter((k) => !used.includes(`"${k}"`))).toEqual([]);
   });
 
   it("maps every auth error code to a catalog key", () => {

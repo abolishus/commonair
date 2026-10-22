@@ -34,19 +34,28 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, appeals, co-op, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, appeals, privacy, co-op, then sign out after a separator", () => {
     const items = accountMenu(true);
-    expect(items.map((i) => i.id)).toEqual(["dashboard", "relays", "subscriptions", "appeals", "coop", "signOut"]);
+    expect(items.map((i) => i.id)).toEqual([
+      "dashboard",
+      "relays",
+      "subscriptions",
+      "appeals",
+      "privacy",
+      "coop",
+      "signOut",
+    ]);
     expect(items.map((i) => i.to)).toEqual([
       "/dashboard",
       "/relays",
       "/settings/subscriptions",
       "/settings/appeals",
+      "/settings/privacy",
       "/coop/membership",
       undefined,
     ]);
-    expect(items[5]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 5).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[6]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 6).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
   });
 
   it("adds co-op administration for admins only, before sign out", () => {
@@ -58,6 +67,7 @@ describe("account menu", () => {
       "relays",
       "subscriptions",
       "appeals",
+      "privacy",
       "coop",
       "moderation",
       "adminCoop",
@@ -74,6 +84,7 @@ describe("account menu", () => {
       "relays",
       "subscriptions",
       "appeals",
+      "privacy",
       "coop",
       "treasury",
       "signOut",
@@ -111,6 +122,7 @@ describe("account menu", () => {
         "/relays",
         "/settings/subscriptions",
         "/settings/appeals",
+        "/settings/privacy",
         "/coop/membership",
         "/treasury",
         "/admin/coop",
@@ -122,9 +134,11 @@ describe("account menu", () => {
 });
 
 describe("studio nav", () => {
-  it("lists stream manager, revenue and relays, nothing else", () => {
+  it("lists stream manager, overlays, content, revenue and relays, nothing else", () => {
     expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
+      ["overlays", "/overlays"],
+      ["content", "/content"],
       ["revenue", "/revenue"],
       ["relays", "/relays"],
     ]);
@@ -132,6 +146,9 @@ describe("studio nav", () => {
 
   it.each([
     ["/dashboard", "streamManager"],
+    ["/overlays", "overlays"],
+    ["/overlays/", "overlays"],
+    ["/content", "content"],
     ["/revenue", "revenue"],
     ["/revenue/", "revenue"],
     ["/relays", "relays"],
@@ -144,6 +161,9 @@ describe("studio nav", () => {
   it("marks nothing current elsewhere", () => {
     expect(studioNav("/").some((i) => i.current)).toBe(false);
     expect(studioNav("/dashboards").some((i) => i.current)).toBe(false);
+    // The OBS overlay pages are not the studio's overlays page.
+    expect(studioNav("/overlay/alerts").some((i) => i.current)).toBe(false);
+    expect(studioNav("/contents").some((i) => i.current)).toBe(false);
   });
 });
 
