@@ -335,8 +335,18 @@ async function openVoting(id: string) {
   const rules = rulesFor(p!.kind, await loadSettings(app()), { affectsCreators: p!.affectsCreators });
   await app()
     .update(schema.proposals)
-    .set({ status: "voting", rules, votingEndsAt: sql`clock_timestamp() + interval '6 seconds'` })
+    // Long enough for the voting test's calls under parallel test load (6 s was flaky).
+    .set({ status: "voting", rules, votingEndsAt: sql`clock_timestamp() + interval '15 seconds'` })
     .where(eq(schema.proposals.id, id));
+}
+
+/** Sleep until every proposal's voting window has closed by the database clock. */
+async function waitForWindowsToClose(ids: string[]) {
+  const [r] = await app().execute<{ ms: string | null }>(sql`
+    select ceil(extract(epoch from (max(voting_ends_at) - clock_timestamp())) * 1000)::text as ms
+    from proposals where id in ${sql.raw(`(${ids.map((i) => `'${i}'`).join(",")})`)}`);
+  const ms = Number(r?.ms ?? 0);
+  if (ms > 0) await sleep(ms + 300);
 }
 
 /** What the worker records: the database's own tally as the tallies row. */
@@ -574,7 +584,7 @@ describe("proposals", () => {
   });
 
   test("after the window, votes are refused (API and database)", async () => {
-    await sleep(6500);
+    await waitForWindowsToClose([ordinary.id, protectedP.id]);
     const r = await call<Err>(viewer, "POST", `/api/coop/proposals/${ordinary.id}/vote`, { choice: "no" });
     expect(r.status).toBe(409);
     expect(r.body.data).toEqual({ reason: "voting_closed" });

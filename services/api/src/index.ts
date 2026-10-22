@@ -15,6 +15,7 @@ import type { ApiEnv } from "./env.ts";
 import { createApiMailer, recipientLimitedMailer } from "./mail.ts";
 import { DEFAULT_RATE_LIMITS, valkeyRateLimitStore } from "./lib/ratelimit.ts";
 import { pinnedGet, resolveHost } from "./lib/outbound.ts";
+import { closeCoopTickRunner } from "./coop/hooks.ts";
 import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
 
@@ -101,6 +102,9 @@ export async function buildDeps(
       );
       await closeClipQueue(deps).catch((err: unknown) =>
         logger.warn("clip queue close failed", { err: (err as Error).name }),
+      );
+      await closeCoopTickRunner(deps).catch((err: unknown) =>
+        logger.warn("coop queue close failed", { err: (err as Error).name }),
       );
       await mailer.close();
       valkey.disconnect();

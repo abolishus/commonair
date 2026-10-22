@@ -430,7 +430,13 @@ export const proposalHandlers = {
           .select({ userId: proposalElectorate.userId })
           .from(proposalElectorate)
           .where(and(eq(proposalElectorate.proposalId, p.id), eq(proposalElectorate.userId, caller.user.id)));
-        check("vote", { proposal: p, callerId: caller.user.id, now, inElectorate: inElectorate !== undefined });
+        // The window is judged by the database clock, as the trigger and `voting_starts_at` are:
+        // the API host's clock may be skewed against the database's.
+        const [clock] = await tx.execute<{ ms: string }>(
+          sql`select floor(extract(epoch from clock_timestamp()) * 1000)::bigint::text as ms`,
+        );
+        const dbNow = clock ? new Date(Number(clock.ms)) : now;
+        check("vote", { proposal: p, callerId: caller.user.id, now: dbNow, inElectorate: inElectorate !== undefined });
         // One row per member (unique index): a change updates the caller's own row, never adds one.
         // The trigger checks the window and electorate again with the database clock.
         await tx
