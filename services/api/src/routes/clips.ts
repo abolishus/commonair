@@ -20,7 +20,7 @@ import { notFound, precondition } from "../lib/errors.ts";
 import { audit } from "../events/audit.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { clipQueue } from "../media/clip-queue.ts";
-import { audienceOf, clipVisible, urlsWithheld, viewerAudience, vodShown } from "../media/visibility.ts";
+import { clipVisible, urlsWithheld, viewerAudience, vodShown } from "../media/visibility.ts";
 import { matureGate } from "./playback.ts";
 
 const { broadcasts, channelRoles, channels, clips: clipsT, vods } = schema;
@@ -150,8 +150,8 @@ export const clips = {
     const { deps } = context;
     const channel = await channelBySlug(deps, input.channel);
     if (!channel) throw notFound("Channel not found");
-    const audience = audienceOf(context.caller, channel);
-    if (audience === "public" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
+    const audience = await viewerAudience(deps, context.caller, channel);
+    if (audience !== "owner" && channel.suspendedAt !== null) return { items: [], nextCursor: null };
     const top = input.sort === "top";
     // "top" pages by offset (views change between pages); "recent" by keyset.
     let after: SQL | undefined;
@@ -200,8 +200,8 @@ export const clips = {
       .where(eq(clipsT.id, input.id))
       .limit(1);
     if (!head) throw notFound("Clip not found");
-    const audience = audienceOf(context.caller, head.channel);
-    if (audience === "public" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
+    const audience = await viewerAudience(deps, context.caller, head.channel);
+    if (audience !== "owner" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
     const [row] = await deps.db
       .select({ c: clipsT, mature: broadcasts.mature, categoryId: broadcasts.categoryId, bid: broadcasts.id })
       .from(clipsT)

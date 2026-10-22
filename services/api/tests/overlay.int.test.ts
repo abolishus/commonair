@@ -403,10 +403,16 @@ describe("alert stream", () => {
 
   test("an expiring token's open stream closes after expiry", async () => {
     const sid = await channelId(s.username);
-    const token = (await createToken(s, new Date(Date.now() + 1500).toISOString())).body.token;
+    // Opened well inside its window (no race with a loaded gate), then aged past expiry in the
+    // database: the re-check must refuse the expired token.
+    const token = (await createToken(s, new Date(Date.now() + 3_600_000).toISOString())).body.token;
     const st = await openStream(token);
     expect(st.res.status).toBe(200);
     await waitFor(async () => overlayHub(api.deps).count(sid) === 1);
+    await db()
+      .update(schema.overlayTokens)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(and(eq(schema.overlayTokens.channelId, sid), isNull(schema.overlayTokens.revokedAt)));
     await waitFor(async () => st.closed(), 5000);
     expect(st.frames.some((f) => f.event === "revoked")).toBe(true);
   });

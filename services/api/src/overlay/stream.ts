@@ -23,6 +23,8 @@ export interface OverlayHubOptions {
   pingMs: number;
   /** Token re-check interval: an expired or revoked token closes the stream within this. */
   recheckMs: number;
+  /** A re-check still unanswered after this closes the stream (fail closed, well inside 30 s). */
+  checkTimeoutMs: number;
   maxPerChannel: number;
   maxTotal: number;
   /** Alert configs are cached this long per channel (`alerts.set` invalidates locally). */
@@ -32,6 +34,7 @@ export interface OverlayHubOptions {
 export const OVERLAY_HUB_DEFAULTS: OverlayHubOptions = {
   pingMs: 15_000,
   recheckMs: 20_000,
+  checkTimeoutMs: 5_000,
   maxPerChannel: 20,
   maxTotal: 2000,
   configTtlMs: 10_000,
@@ -48,6 +51,17 @@ interface OpenStream {
   close(): void;
 }
 
+/** Seams for unit tests: the subscriber connection and the token lookup. */
+export interface OverlayHubIo {
+  connect(url: string): Valkey;
+  resolve: typeof resolveOverlayHash;
+}
+
+const DEFAULT_IO: OverlayHubIo = {
+  connect: (url) => createValkey(url, { name: "api-overlay-sub" }),
+  resolve: resolveOverlayHash,
+};
+
 const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
   "cache-control": "no-store",
@@ -58,8 +72,10 @@ const SSE_HEADERS = {
 
 export class OverlayHub {
   private sub: Valkey | null = null;
-  private ready: Promise<unknown> | null = null;
+  private ready: Promise<Valkey> | null = null;
   private readonly byChannel = new Map<string, Set<OpenStream>>();
+  /** The pending or settled `BUS.overlay(channelId)` subscription of each channel with streams. */
+  private readonly channelSubs = new Map<string, Promise<void>>();
   private total = 0;
   private readonly configs = new Map<string, { at: number; value: Promise<AlertConfig[]> }>();
   private readonly enc = new TextEncoder();
@@ -67,6 +83,7 @@ export class OverlayHub {
   constructor(
     private readonly deps: Deps,
     readonly opts: OverlayHubOptions = OVERLAY_HUB_DEFAULTS,
+    private readonly io: OverlayHubIo = DEFAULT_IO,
   ) {}
 
   /** Open streams (all channels, or one). */
@@ -88,9 +105,10 @@ export class OverlayHub {
     return value;
   }
 
-  private async subscriber(): Promise<Valkey> {
-    if (!this.sub) {
-      const sub = createValkey(this.deps.env.VALKEY_URL, { name: "api-overlay-sub" });
+  /** The shared subscriber. A failed first subscribe is forgotten, so the next open retries. */
+  private subscriber(): Promise<Valkey> {
+    if (!this.ready) {
+      const sub = this.io.connect(this.deps.env.VALKEY_URL);
       sub.on("error", (err: Error) => this.deps.logger.warn("overlay subscriber error", { err: err.name }));
       sub.on("message", (channel: string, message: string) => {
         void this.onMessage(channel, message).catch((err: unknown) =>
@@ -98,10 +116,16 @@ export class OverlayHub {
         );
       });
       this.sub = sub;
-      this.ready = sub.subscribe(BUS.events);
+      const ready = sub.subscribe(BUS.events).then(() => sub);
+      this.ready = ready;
+      ready.catch(() => {
+        if (this.ready !== ready) return;
+        this.ready = null;
+        this.sub = null;
+        sub.disconnect();
+      });
     }
-    await this.ready;
-    return this.sub;
+    return this.ready;
   }
 
   private async onMessage(channel: string, message: string): Promise<void> {
@@ -133,7 +157,9 @@ export class OverlayHub {
     if (alert.success) for (const s of streams) s.send("alert", alert.data);
   }
 
+  /** Count the stream in and make sure its channel is subscribed; on failure nothing stays counted. */
   private async join(s: OpenStream): Promise<void> {
+    const sub = await this.subscriber();
     let set = this.byChannel.get(s.channelId);
     if (!set) {
       set = new Set();
@@ -141,8 +167,23 @@ export class OverlayHub {
     }
     set.add(s);
     this.total++;
-    if (set.size === 1) await (await this.subscriber()).subscribe(BUS.overlay(s.channelId));
-    else await this.subscriber();
+    const id = s.channelId;
+    let subscribed = this.channelSubs.get(id);
+    if (!subscribed) {
+      const p = sub.subscribe(BUS.overlay(id)).then(() => undefined);
+      subscribed = p;
+      this.channelSubs.set(id, p);
+      // Forget a failed subscription so the channel's next open tries again.
+      p.catch(() => {
+        if (this.channelSubs.get(id) === p) this.channelSubs.delete(id);
+      });
+    }
+    try {
+      await subscribed;
+    } catch (err) {
+      this.leave(s);
+      throw err;
+    }
   }
 
   private leave(s: OpenStream): void {
@@ -151,6 +192,7 @@ export class OverlayHub {
     this.total--;
     if (set.size === 0) {
       this.byChannel.delete(s.channelId);
+      this.channelSubs.delete(s.channelId);
       this.sub?.unsubscribe(BUS.overlay(s.channelId)).catch(() => undefined);
     }
   }
@@ -196,7 +238,12 @@ export class OverlayHub {
     const recheck = () => {
       if (closed || checking) return;
       checking = true;
-      resolveOverlayHash(deps.db, tokenHash, deps.now())
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // A lookup that never settles must not hold off every later check past the 30 s budget.
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("overlay token check timed out")), opts.checkTimeoutMs);
+      });
+      Promise.race([this.io.resolve(deps.db, tokenHash, deps.now()), timeout])
         .then((live) => {
           if (live && live.channelId === token.channelId) return;
           write("event: revoked\ndata: {}\n\n");
@@ -205,6 +252,7 @@ export class OverlayHub {
         // Fail closed: when the token cannot be checked the stream ends and the overlay reconnects.
         .catch(() => close())
         .finally(() => {
+          clearTimeout(timer);
           checking = false;
         });
     };
@@ -223,7 +271,13 @@ export class OverlayHub {
       cancel: () => close(),
     });
 
-    await this.join(stream);
+    try {
+      await this.join(stream);
+    } catch (err) {
+      close();
+      deps.logger.warn("overlay stream join failed", { err: (err as Error).name });
+      return Response.json({ code: "SERVICE_UNAVAILABLE", message: "Overlay alerts are unavailable" }, { status: 503 });
+    }
     if (signal.aborted) {
       close();
       return new Response(null, { status: 499 });
@@ -245,6 +299,7 @@ export class OverlayHub {
     const sub = this.sub;
     this.sub = null;
     this.ready = null;
+    this.channelSubs.clear();
     sub?.disconnect();
   }
 }
@@ -262,9 +317,13 @@ export function overlayHub(deps: Deps): OverlayHub {
 }
 
 /** Replace the hub's timings (tests use short intervals). Closes any hub already running. */
-export async function configureOverlayHub(deps: Deps, opts: Partial<OverlayHubOptions>): Promise<OverlayHub> {
+export async function configureOverlayHub(
+  deps: Deps,
+  opts: Partial<OverlayHubOptions>,
+  io: Partial<OverlayHubIo> = {},
+): Promise<OverlayHub> {
   await hubs.get(deps)?.close();
-  const h = new OverlayHub(deps, { ...OVERLAY_HUB_DEFAULTS, ...opts });
+  const h = new OverlayHub(deps, { ...OVERLAY_HUB_DEFAULTS, ...opts }, { ...DEFAULT_IO, ...io });
   hubs.set(deps, h);
   return h;
 }

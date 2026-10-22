@@ -7,12 +7,13 @@
  * worker deletes the objects later; a T1-restricted broadcast's VODs and clips stay unlisted until
  * its case is cleared (docs/testing/e4c-selectors.md "T1 live"). None of these is shown to anyone,
  * the owner included. Beyond that the owner sees their own processing, failed, private and
- * subscriber-only items; an active subscriber also sees the channel's ready `subscribers` VODs;
+ * subscriber-only items; an active subscriber also sees the channel's ready `subscribers` VODs (and
+ * their clips: a clip is never more visible than its source VOD);
  * everyone else sees only ready, public items of a channel that is not suspended. Media of a mature
  * broadcast, channel or category is listed, but its URLs go only to the owner and to signed-in,
  * 18+-confirmed viewers, as for live playback.
  */
-import { and, eq, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, notInArray, sql, type SQL } from "drizzle-orm";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import type { Caller } from "../lib/access.ts";
@@ -76,6 +77,14 @@ export function vodVisible(audience: Audience): SQL {
  */
 const sourceRemoved = sql`exists (select 1 from ${vods} where (${vods.id} = ${clips.vodId} or ${vods.broadcastId} = ${clips.broadcastId}) and ((${vods.status} = 'deleted' and ${vods.removedReason} is distinct from 'retention') or ${vods.removedReason} in ('owner', 'creator')))`;
 
+/**
+ * A clip is no more visible than its source: hidden from this audience when the VOD it was cut
+ * from, or a VOD of its broadcast (clips cut live have no `vod_id`), is outside what the audience
+ * may watch. A clip of a VOD later set `private` or `subscribers` follows it.
+ */
+const sourceRestricted = (audience: Exclude<Audience, "owner">) =>
+  sql`exists (select 1 from ${vods} where (${vods.id} = ${clips.vodId} or ${vods.broadcastId} = ${clips.broadcastId}) and ${notInArray(vods.visibility, [...VIEWABLE[audience]])})`;
+
 /** Filter for `clips` left-joined with its broadcast (the broadcast may be gone). */
 export function clipVisible(audience: Audience): SQL {
   const always = and(
@@ -85,7 +94,7 @@ export function clipVisible(audience: Audience): SQL {
     sql`not ${sourceRemoved}`,
   ) as SQL;
   if (audience === "owner") return always;
-  return and(always, eq(clips.status, "ready")) as SQL;
+  return and(always, eq(clips.status, "ready"), sql`not ${sourceRestricted(audience)}`) as SQL;
 }
 
 /** The VOD rules for one row already loaded with its channel and broadcast restriction. */

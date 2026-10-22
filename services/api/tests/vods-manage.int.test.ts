@@ -218,3 +218,56 @@ describe("clips.remove", () => {
     expect((await client(api).call("DELETE", `/api/clips/${bySub}`)).status).toBe(401);
   });
 });
+
+describe("clips follow their source VOD's visibility", () => {
+  test("a subscriber's clip of a subscribers VOD stays with the owner and subscribers", async () => {
+    const c = await channelOf(s.username);
+    const b = await broadcast(c.id);
+    const id = await vod(c.id, b.id, { visibility: "subscribers", durationSeconds: 600 });
+    const r = await sub.client.call<{ id: string }>("POST", `/api/channels/${s.username}/clips`, {
+      title: "sub only",
+      vodId: id,
+      startOffset: 0,
+      durationSeconds: 30,
+    });
+    expect(r.status).toBe(200);
+    const clipId = r.body.id;
+    // As if media had cut it.
+    await db()
+      .update(schema.clips)
+      .set({ status: "ready", storageKey: `clips/${clipId}.mp4` })
+      .where(eq(schema.clips.id, clipId));
+
+    expect(await clipIds(s, s.username)).toContain(clipId);
+    expect(await clipIds(sub, s.username)).toContain(clipId);
+    expect(await clipIds(v, s.username)).not.toContain(clipId);
+    expect(await clipIds(null, s.username)).not.toContain(clipId);
+    expect((await sub.client.call("GET", `/api/clips/${clipId}`)).status).toBe(200);
+    expect((await v.client.call("GET", `/api/clips/${clipId}`)).status).toBe(404);
+    expect((await client(api).call("GET", `/api/clips/${clipId}`)).status).toBe(404);
+  });
+
+  test("clips of a VOD later set private (cut from it or live) are hidden from all but the owner", async () => {
+    const c = await channelOf(s.username);
+    const b = await broadcast(c.id);
+    const id = await vod(c.id, b.id);
+    const fromVod = await clip(c.id, b.id, v.userId, id);
+    const fromLive = await clip(c.id, b.id, v.userId);
+    expect(await clipIds(null, s.username)).toEqual(expect.arrayContaining([fromVod, fromLive]));
+
+    expect((await s.client.call("PATCH", `/api/vods/${id}`, { visibility: "private" })).status).toBe(200);
+    for (const who of [v, sub, null]) {
+      const ids = await clipIds(who, s.username);
+      expect(ids).not.toContain(fromVod);
+      expect(ids).not.toContain(fromLive);
+    }
+    expect((await client(api).call("GET", `/api/clips/${fromVod}`)).status).toBe(404);
+    expect((await sub.client.call("GET", `/api/clips/${fromLive}`)).status).toBe(404);
+    expect(await clipIds(s, s.username)).toEqual(expect.arrayContaining([fromVod, fromLive]));
+    expect((await s.client.call("GET", `/api/clips/${fromVod}`)).status).toBe(200);
+
+    // Back to public: everyone again.
+    await s.client.call("PATCH", `/api/vods/${id}`, { visibility: "public" });
+    expect(await clipIds(null, s.username)).toEqual(expect.arrayContaining([fromVod, fromLive]));
+  });
+});
