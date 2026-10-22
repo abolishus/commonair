@@ -37,3 +37,6 @@ sbom/
 
 # Downloaded model weights (scripts/fetch-model.ts); never committed
 .cache/
+
+# Local agent-tool copies and old session notes (Claude Code uses .claude/)
+.agents/
