@@ -124,10 +124,17 @@ the copy as H.264 + AAC and Chromium plays it. The harness native player was ref
 WebKit (`play()` NotAllowedError even muted/inline): it now records player errors and clicks once
 like a viewer (`aefda3b`); WebKit then reached first frame on both ingests. Final green runs of
 `ingest-whip`/`ingest-rtmp` were blocked by host load (load average ≈ 44 from another repo's
-suites): rerun when the machine is quiet. MediaMTX warns that the copy's LL-HLS part durations vary
+suites). On a quieter machine a WebKit viewer that started before the copy was live got Opus and
+failed to decode; media now marks the channel `pending` and origin answers the source with a
+retryable 503 until the copy is live (20 s cap, then the original is served) (`22031a1`; origin
+int 14, media unit 6). Result: `ingest-rtmp` passes, `ingest-whip` passes 2 of 3; the failing run
+missed only WebKit glass-to-glass (p50 10.8 / 14.5 / 17.5 s over three runs against a 15 s limit;
+RTMP in WebKit ≈ 9.7 s, Chromium on WHIP 3–6 s). Likely cause: the copy's LL-HLS part durations
+vary (MediaMTX warns for iOS clients); decision pending: re-encode WHIP video for steady parts, or
+give WHIP + WebKit its own latency budget. MediaMTX warns that the copy's LL-HLS part durations vary
 ("will cause an error in iOS clients"); watch for it on real iOS.
 
-Open follow-ups: rerun `ingest-whip`/`ingest-rtmp` on a quiet machine; the worker's Postgres client
+Open follow-ups: WHIP + WebKit latency (above); the worker's Postgres client
 crashed the process on a connection reset and Podman did not restart it despite
 `unless-stopped` (the trigger is gone; make the worker survive and look at the restart policy).
 
