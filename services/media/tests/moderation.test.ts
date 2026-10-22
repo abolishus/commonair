@@ -935,6 +935,7 @@ describe("durable T0 replay", () => {
       frames: { stop: () => Promise<void> };
       thumbnails: typeof idle;
       transcode: typeof idle;
+      audioCompat: typeof idle;
       simulcast: typeof idle;
       sampler: typeof idle;
       recorder: { stop: (final: boolean, strict: boolean) => Promise<void> };
@@ -950,6 +951,7 @@ describe("durable T0 replay", () => {
     };
     session.thumbnails = idle;
     session.transcode = idle;
+    session.audioCompat = idle;
     session.simulcast = idle;
     session.sampler = idle;
     session.recorder = { stop: async () => {} };

@@ -11,6 +11,14 @@ import { MAX_INPUT_LENGTH, unsafeFilterRegexReason } from "../src/index.ts";
 
 /** Per pattern and input, after one warm-up run (the first run includes JIT compilation). */
 const LIMIT_MS = 5;
+/**
+ * Shared CI runners are several times slower than a workstation, so the absolute limit alone
+ * fails there on patterns that are fine. The cost model's real claim is relative: no accepted
+ * pattern does much more work than one quadratic scan of the message (`.{2,}!`: about 0.7 ms on
+ * a workstation, the slowest accepted pattern about 2x that). The limit is the larger of the two.
+ */
+const BASELINE = ".{2,}!";
+const BASELINE_FACTOR = 8;
 
 /** mulberry32: a tiny seeded PRNG, so the corpus is the same on every run. */
 function rng(seed: number) {
@@ -131,15 +139,19 @@ describe("cost model benchmark", () => {
       // The corpus must exercise both sides of the model.
       expect(accepted.length).toBeGreaterThan(200);
       expect(patterns.length - accepted.length).toBeGreaterThan(200);
+      const baseline = slowest(new RegExp(BASELINE, "giu"), inputs).ms;
+      const limit = Math.max(LIMIT_MS, BASELINE_FACTOR * baseline);
       const slow: string[] = [];
       let max = 0;
       for (const p of accepted) {
         const { ms, input } = slowest(new RegExp(p, "giu"), inputs);
         max = Math.max(max, ms);
-        if (ms >= LIMIT_MS) slow.push(`${p} on ${JSON.stringify(input.slice(0, 12))}…: ${ms.toFixed(2)} ms`);
+        if (ms >= limit) slow.push(`${p} on ${JSON.stringify(input.slice(0, 12))}…: ${ms.toFixed(2)} ms`);
       }
       if (process.env.SAFE_REGEX_BENCH)
-        process.stderr.write(`${accepted.length}/${patterns.length} accepted, slowest ${max.toFixed(2)} ms\n`);
+        process.stderr.write(
+          `${accepted.length}/${patterns.length} accepted, slowest ${max.toFixed(2)} ms, limit ${limit.toFixed(2)} ms\n`,
+        );
       expect(slow).toEqual([]);
     },
   );
