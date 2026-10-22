@@ -365,6 +365,28 @@ function collectLogs(): void {
   );
 }
 
+/**
+ * Tags under LOCAL from earlier commits. Each run builds 14 images (about 5 GB) tagged with its
+ * commit, and nothing else ever removes them: repeated runs filled a 120 GB podman machine. The
+ * e2e release tags (0.0.0-e2e.*) are rebuilt every run and replace their predecessors.
+ */
+export function staleImages(tags: readonly string[], commit: string): string[] {
+  const current = commit.slice(0, 12);
+  return tags.filter((t) => {
+    if (!t.startsWith(`${LOCAL}/`)) return false;
+    const tag = t.slice(t.lastIndexOf(":") + 1);
+    return tag !== current && !tag.startsWith("0.0.0-e2e.");
+  });
+}
+
+function removeStaleImages(commit: string): void {
+  const tags = podman(["images", "--format", "{{.Repository}}:{{.Tag}}"], { quiet: true }).split("\n");
+  const stale = staleImages(tags, commit);
+  // rmi also drops the layers only those images held. No `image prune`: on a developer's machine
+  // dangling layers are their own build cache.
+  if (stale.length) podman(["rmi", "-f", ...stale], { allowFail: true, quiet: true });
+}
+
 function cleanup(): void {
   for (const c of [HOST, ZOT]) podman(["rm", "-f", "-t", "5", c], { allowFail: true, quiet: true });
   podman(["network", "rm", "-f", NETWORK], { allowFail: true, quiet: true });
@@ -829,7 +851,10 @@ async function main(): Promise<void> {
 
   cleanup();
   try {
-    await step("build the release images", () => buildImages(commit));
+    await step("build the release images", () => {
+      removeStaleImages(commit);
+      buildImages(commit);
+    });
     await step("start the Zot registry", async () => {
       podman(["network", "create", NETWORK]);
       podman(["run", "-d", "--name", ZOT, "--network", NETWORK, "-p", "127.0.0.1::5000", ZOT_IMAGE]);

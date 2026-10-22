@@ -25,6 +25,7 @@ import {
   migratedFirst,
   missingListeners,
   ownedBy,
+  staleImages,
   probeCommand,
   refusedRequests,
   SOURCES,
@@ -468,5 +469,24 @@ describe("e2e: network exposure", () => {
     expect(calls("checkIpv6")).toBe(1);
     expect(calls("checkValkeyAuth")).toBe(2);
     expect(calls("checkListeners")).toBe(2);
+  });
+});
+
+describe("e2e image housekeeping", () => {
+  test("removes only this namespace's images of other commits", () => {
+    const commit = "803c7206aaaabbbbccccdddd";
+    expect(
+      staleImages(
+        [
+          "localhost/commonair-e2e/api:803c7206aaaa",
+          "localhost/commonair-e2e/api:562f8c9e1234",
+          "localhost/commonair-e2e/web:0.0.0-e2e.2",
+          "localhost/commonair/api:latest",
+          "docker.io/library/caddy:2.11.7-alpine",
+          "",
+        ],
+        commit,
+      ),
+    ).toEqual(["localhost/commonair-e2e/api:562f8c9e1234"]);
   });
 });
