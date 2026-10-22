@@ -540,6 +540,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "postgres@3.4.9": "patches/postgres@3.4.9.patch",
+  },
   "overrides": {
     "@reduxjs/toolkit": "2.10.1",
     "use-sync-external-store": "1.6.0",

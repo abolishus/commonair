@@ -9,6 +9,7 @@ path = [
   "**/package.json",
   "**/tsconfig*.json",
   "bun.lock",
+  "patches/*.patch",
   "**/*.json",
   "**/drizzle/**",
   "**/routeTree.gen.ts",

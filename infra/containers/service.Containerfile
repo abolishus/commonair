@@ -14,8 +14,8 @@
 
 ARG BUN_IMAGE=docker.io/oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288
 
-# --- manifests: package.json files + lockfile only, so the install layer below is
-# cached until a manifest changes (not on every source edit).
+# --- manifests: package.json files, lockfile and dependency patches (patches/) only, so
+# the install layer below is cached until a manifest changes (not on every source edit).
 FROM ${BUN_IMAGE} AS manifests
 ARG SERVICE
 WORKDIR /src
@@ -25,6 +25,7 @@ RUN set -eu; \
     mkdir -p /manifests; \
     find . -name package.json -not -path '*/node_modules/*' -exec cp --parents {} /manifests/ \; ; \
     cp bun.lock /manifests/; \
+    cp -a patches /manifests/; \
     bun infra/containers/closure.ts "${SERVICE}" > /manifests/.closure; \
     bun infra/containers/closure.ts "${SERVICE}" --dev > /manifests/.closure-dev; \
     mkdir -p /sources; \
