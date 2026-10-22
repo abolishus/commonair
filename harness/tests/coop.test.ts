@@ -106,7 +106,7 @@ describe("bootstrap and the compose override", () => {
       quorum: 0.01,
     });
     expect(b["membership.classes"].streamer.minStreamingHours * 3600).toBeCloseTo(36);
-    expect(b["council.config"]).toEqual({ minStreamingHours: 0.01 });
+    expect(b["council.config"]).toEqual({ size: 50, minStreamingHours: 0.01 });
   });
 
   test("membership.classes carries every class whole, with the seeded defaults", () => {
@@ -126,7 +126,7 @@ describe("bootstrap and the compose override", () => {
     const protections = merged["governance.protections"] as Record<string, unknown>;
     expect(protections.memberWideThreshold).toBeCloseTo(2 / 3);
     expect(protections.protectedKeys).toContain("platform.cut");
-    expect((merged["council.config"] as Record<string, unknown>).size).toBe(7);
+    expect((merged["council.config"] as Record<string, unknown>).size).toBe(50);
     // Keys the override does not name are untouched.
     expect(merged["discovery.ranking"]).toBe(seeded["discovery.ranking"]);
     expect(preflightGovernance(Object.entries(merged).map(([key, value]) => ({ key, value }))).ok).toBe(true);

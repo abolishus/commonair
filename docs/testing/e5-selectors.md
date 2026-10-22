@@ -246,7 +246,8 @@ The `e5-coop` stack uses `harness/compose.e5-coop.yaml` on a **freshly created d
   `governance.protections` `{ councilReviewSeconds: 30, minVotingSeconds: 45, quorum: 0.01, streamerClassQuorum: 0.01 }`;
   `governance.ordinary` `{ discussionSeconds: 30, minVotingSeconds: 45, votingSeconds: 45, quorum: 0.01 }`;
   `membership.classes` with streamer `minStreamingHours: 0.01` (36 s) and the other defaults;
-  `council.config` `{ minStreamingHours: 0.01 }`.
+  `council.config` `{ size: 50, minStreamingHours: 0.01 }` (other harness scenarios' streamers also qualify
+  on a shared stack; 50 seats keep room for this run's S1 and S2).
 - `COOP_TEST_HOOKS=true` (API and worker; off by default, logged as a warning at every start,
   reported by `/healthz`; never on a public instance). It enables
   `POST /internal/coop/tick` behind `INTERNAL_API_SECRET`: body `CoopTickBody`

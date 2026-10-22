@@ -70,7 +70,7 @@ export const E5_GOVERNANCE_BOOTSTRAP = {
     viewer: { ...MEMBERSHIP_CLASSES_DEFAULTS.viewer },
     worker: { ...MEMBERSHIP_CLASSES_DEFAULTS.worker },
   },
-  "council.config": { minStreamingHours: 0.01 },
+  "council.config": { size: 50, minStreamingHours: 0.01 },
 } as const;
 
 /** The seed's rule: each override key is shallow-merged into that key's default value. */
