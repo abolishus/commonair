@@ -174,8 +174,10 @@ Rootless Podman forwards the IRC ports (6667, 6697) so that every client appears
 the same internal address. The IRC gateway's per-address limits then apply to all clients
 together: after `IRC_MAX_CONNECTIONS_PER_IP` (50) connections, or a burst of
 `IRC_CONNECT_BURST_PER_IP` (20) new ones, everyone is refused. Until IRC gets its ports from
-systemd as Caddy does, raise both in the env file to what the whole instance should allow, and
-reinstall. HTTPS clients (the tracker included) are not affected: Caddy sees each one's own
+systemd as Caddy does, raise both in the env file to what the whole instance should allow
+(`IRC_MAX_CONNECTIONS` still caps the total), then `systemctl --user restart commonair-irc`. A
+single client can otherwise use up the shared count and lock every other IRC user out. HTTPS
+clients (the tracker included) are not affected: Caddy sees each one's own
 address.
 
 ## Valkey

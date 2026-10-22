@@ -200,3 +200,26 @@ describe("Valkey requires a password", () => {
     expect(read(".env.example")).toMatch(/^VALKEY_PASSWORD=__generate_hex64__$/m);
   });
 });
+
+describe("IRC behind rootlessport (one shared client address)", () => {
+  const publishesIrc = values(code(unit("irc")), "PublishPort").some((p) => /^(\S+:)?6667:6667$/.test(p));
+  const keys = read("infra/selfhost/env/commonair-irc.keys").split("\n");
+  const troubleshooting = read("docs/self-hosting/troubleshooting.md");
+
+  test.skipIf(!publishesIrc)("operators can raise the per-address caps from the env file", () => {
+    for (const key of ["IRC_MAX_CONNECTIONS_PER_IP", "IRC_CONNECT_BURST_PER_IP", "IRC_CONNECT_PER_SECOND_PER_IP"]) {
+      expect(keys).toContain(key);
+      // A unit-level Environment= would win over the env file and make the advice useless.
+      expect(values(code(unit("irc")), "Environment").some((e) => e.startsWith(`${key}=`))).toBe(false);
+    }
+  });
+
+  test.skipIf(!publishesIrc)("troubleshooting documents the shared per-address cap and how to apply a change", () => {
+    const section = troubleshooting.split(/^## /m).find((s) => s.startsWith("IRC clients are refused"));
+    expect(section).toBeDefined();
+    expect(section).toContain("IRC_MAX_CONNECTIONS_PER_IP");
+    expect(section).toContain("IRC_CONNECT_BURST_PER_IP");
+    expect(section).toContain("systemctl --user restart commonair-irc");
+    expect(section).not.toMatch(/\breinstall\b/);
+  });
+});
