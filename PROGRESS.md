@@ -20,7 +20,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session eleven (2026-10-22): Phase 5 release and self-hosting (in flight)
+## Session eleven (2026-10-22): Phase 5 release and self-hosting (built; user validation pending)
 
 Started from `eefb597` (E6 done, supply-chain policy ADR 0022 landed as `9dd395a`). Policy
 ADR 0023. The user decided:
@@ -109,6 +109,78 @@ Open, not fixed (MEDIUM, design work for a later unit):
 - Valkey (no password), the OTel collector and Prometheus are published on host loopback.
 - An optional observability unit in a crash loop holds back app starts (`After=`).
 - `relay/Makefile` targets and names differ from `RELAY_TARGETS`.
+
+**Unit C merged** (workflow `wf_9223f701-530`): `48d6122`, fix `fd8431a`.
+
+- `docs/self-hosting/` has 12 pages: requirements, install, configuration, TLS, upgrades,
+  backups, scaling, relays, verifying, mirroring, troubleshooting, and known limitations.
+- `docs/maintainers/releasing.md`.
+- README quickstart refresh.
+- `hetzner.md` and `infra/README.md` rewritten around `selfhost.sh`.
+- `scripts/config-reference.ts` generates the env reference; its test (40) also checks every
+  relative link and anchor.
+- Review: one HIGH, fixed. The restore drill copied the production env file onto the scratch
+  server and then ran `install --reinstall`, starting a second production.
+- Head fixes `9f30839`: operator drop-in directories (`*.container.d/`, `*.service.d/`) made
+  install and upgrade fail under `set -e`; the `ACME_CA` JSDoc wrongly promised a ZeroSSL
+  fallback.
+
+Code gaps unit C found, documented as limitations, not fixed:
+
+- `S3_PUBLIC_ENDPOINT` is never set by `selfhost.sh` and Caddy has no route to Garage.
+  Presigned browser uploads (avatars, panels) and data-export downloads therefore point at
+  `garage:3900` and fail on a self-hosted instance. Needs a Caddy site or path for S3, plus
+  install setting the variable. **This blocks a fully working instance.**
+- Garage objects (VODs, clips, exports, evidence) have no backup; WAL-G covers Postgres only.
+- A long WAL replay after a restore hits the Postgres unit's health kill and its 300 s start
+  timeout. Postgres needs a recovery-aware health check or a longer start window.
+- The restore drill needs a read-only S3 key, or the promoted drill database archives WAL
+  into the production prefix.
+- Forks: `release.env` records `SITE.repository.url`. A fork that keeps upstream `SITE` must
+  set `COMMONAIR_REPOSITORY_URL` on every `upgrade`. ADR 0023 §2 says forks need no code
+  changes; that is true for publishing, not for upgrades.
+- Public ports bind IPv4 only (unchanged from E6).
+
+Head `481227b` covers the round-2 review findings:
+
+- one-line JSDoc for 88 env variables, so the reference has no blank descriptions (a test
+  enforces it);
+- scoped secrets (`EVIDENCE_PRIVATE_KEY`, `S3_EVIDENCE_*`) are labelled as blanked in the
+  units, not pinned;
+- the runbook explains how `CHANGELOG.md` is kept;
+- the replay note in troubleshooting is fixed.
+
+`MEDIAMTX_RTMP_URL` is set by compose and the units, but nothing reads it.
+
+Checks on `phase5/integrate`:
+
+- scripts unit tests pass (`config-reference` 43);
+- `packages/config` tests 10;
+- tsc;
+- `config-reference --check`;
+- `check-domains`;
+- `reuse lint`.
+
+**User to run** (nothing below has been run):
+
+1. `bun run verify` (needs network for the advisory checks).
+2. Self-host e2e, about an hour; it builds 14 images. Run
+   `bun scripts/selfhost/e2e.ts`, then `bun scripts/selfhost/e2e.ts --distro fedora`. It
+   needs a podman machine that allows `--privileged`. Logs and `timings.json` go to
+   `.cache/selfhost-e2e/`.
+3. `cd infra && bun --bun vp test run tests/caddy.int.test.ts`.
+4. Push `main`, then in GitHub:
+   - make branch protection require `ci-ok`;
+   - run the release dry run:
+     `gh workflow run release.yml --ref main -f dry_run=true -f sign=true`;
+   - check the `release-dist` artifact.
+5. On a fork, or here when ready: `git tag -s v0.1.0-rc.1 -m v0.1.0-rc.1 && git push origin v0.1.0-rc.1`.
+   After the first real release, make each `commonair/<image>` ghcr package public.
+6. Verify the release with the commands in `docs/self-hosting/verifying.md`.
+7. On a clean Debian 13 VM with DNS, follow `docs/self-hosting/install.md`
+   (`selfhost.sh install --version v0.1.0-rc.1 --domain … --email … --yes`). Then build a
+   second tag and run `selfhost.sh upgrade --version …`.
+8. Read through `docs/self-hosting/` as a newcomer.
 
 ## Session ten (2026-10-22): E6 Phase 4 completion (in flight)
 
