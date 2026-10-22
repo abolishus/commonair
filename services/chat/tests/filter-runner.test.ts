@@ -91,9 +91,10 @@ describe("WorkerFilterRunner", () => {
   });
 
   test("a filter set that timed out is quarantined: held without running, logged once", async () => {
-    // The evil pattern never finishes, so a 500 ms timeout still trips; a tighter one would also
-    // catch the benign run at the end when parallel suites stall the worker.
-    const { r, reasons, quarantines } = make({ workers: 1, hardTimeoutMs: 500, quarantineMs: 300 });
+    // JavaScriptCore abandons the evil pattern after ~400 ms (it returns false), so the timeout
+    // must sit well under that to trip; a tighter one would also catch the benign run at the end
+    // when parallel suites stall the worker.
+    const { r, reasons, quarantines } = make({ workers: 1, hardTimeoutMs: 250, quarantineMs: 300 });
     expect(await r.run(evilBody, evil())).toMatchObject(HELD);
     const started = performance.now();
     // Recompiled (a channel reload) but identical: same quarantine.

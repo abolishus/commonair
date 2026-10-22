@@ -215,7 +215,8 @@ describe("compose data stack", () => {
     const r = run(["podman", "start", "-a", id], { allowFail: true });
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("buckets created: none");
-  });
+    // Re-running a one-shot container takes several seconds on a loaded machine.
+  }, 60_000);
 
   test("the app role can read and write ordinary tables", async () => {
     const [row] = await app`select current_user as u, count(*)::int as n from governance_settings`;
@@ -250,7 +251,7 @@ describe("compose data stack", () => {
     expect(r.code, r.out).toBe(0);
     const [row] = await app`select 1 as ok`;
     expect(row?.ok).toBe(1);
-  });
+  }, 60_000);
 
   test("WAL segments are archived to the backups bucket", async () => {
     await owner`create table if not exists it_wal (id serial primary key, at timestamptz default now())`;
