@@ -134,7 +134,6 @@ export default defineRailway((ctx) => {
     MEDIAMTX_API_URL: privateUrl("http", "mediamtx", PORTS.mtxApi),
     MEDIAMTX_HLS_URL: privateUrl("http", "mediamtx", PORTS.mtxHls),
     MEDIAMTX_RTSP_URL: privateUrl("rtsp", "mediamtx", PORTS.mtxRtsp),
-    MEDIAMTX_RTMP_URL: privateUrl("rtmp", "mediamtx", PORTS.rtmp),
     SMTP_HOST: ref("RAILWAY_PRIVATE_DOMAIN", "mailpit"),
     SMTP_PORT: String(PORTS.smtp),
     SMTP_SECURE: "false",

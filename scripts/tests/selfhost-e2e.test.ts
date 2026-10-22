@@ -7,12 +7,15 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
 import {
+  CADDY_FORBIDDEN,
   EXPORT_FILENAME,
   HOST_IMAGES,
   type Presigned,
   ZOT_IMAGE,
   buildSpecs,
+  envKeys,
   exportBody,
+  forbiddenKeys,
   hostContainerfile,
   hostRunArgs,
   isTransientBuildError,
@@ -282,5 +285,43 @@ describe("transient build errors", () => {
     ).toBe(true);
     expect(isTransientBuildError('Error: building at STEP "RUN bun install": exit status 1')).toBe(false);
     expect(isTransientBuildError("Error: layer not known")).toBe(false);
+  });
+});
+
+describe("e2e unit env check", () => {
+  const env = [
+    "PATH=/usr/local/sbin:/usr/bin",
+    "PUBLIC_HOSTNAME=selfhost.test",
+    "TLS_MODE=internal",
+    "S3_BUCKET_MEDIA=commonair-media",
+    "HOSTNAME=abc",
+    "",
+  ].join("\n");
+
+  test("envKeys lists names only, never values", () => {
+    expect(envKeys("A=x=y\nB=\n not=an assignment\nC=secret value\n")).toEqual(["A", "B", "C"]);
+    expect(envKeys("A=DATABASE_URL\n")).toEqual(["A"]);
+  });
+
+  test("Caddy's own env passes; any database, session or S3 secret is caught", () => {
+    expect(forbiddenKeys(env, CADDY_FORBIDDEN)).toEqual([]);
+    for (const key of [
+      "DATABASE_URL",
+      "POSTGRES_PASSWORD",
+      "POSTGRES_APP_PASSWORD",
+      "SESSION_SECRET",
+      "AUTH_SECRET",
+      "S3_SECRET_ACCESS_KEY",
+      "S3_EVIDENCE_SECRET_ACCESS_KEY",
+    ])
+      expect(forbiddenKeys(`${env}${key}=x\n`, CADDY_FORBIDDEN), key).toEqual([key]);
+  });
+
+  test("Caddy's key list holds none of them", () => {
+    const keys = readFileSync(join(ROOT, "infra/selfhost/env/commonair-caddy.keys"), "utf8")
+      .split("\n")
+      .filter((l) => l && !l.startsWith("#"));
+    expect(forbiddenKeys(keys.map((k) => `${k}=x`).join("\n"), CADDY_FORBIDDEN)).toEqual([]);
+    expect(keys).toContain("PUBLIC_HOSTNAME");
   });
 });

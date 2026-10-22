@@ -183,8 +183,5 @@ upgrade (`selfhost.sh`, Phase 5). Still open:
 - Rootless port forwarding hides client addresses, so per-address limits count all clients as
   one and `X-Forwarded-For` from clients is trusted. Source-address preservation is needed
   before launch ([known limitations](../self-hosting/README.md#known-limitations)).
-- Every container reads the whole env file, including database passwords and the off-host
-  backup key. A secret-free shared env plus per-unit secrets is planned.
-- Channel image uploads and data-export downloads need a public S3 endpoint for Garage, which
-  the release does not set up yet.
-- Objects in Garage (VODs, clips, evidence) are not backed up off the server.
+- Objects in Garage (VODs, clips, evidence) are not backed up automatically; backups.md has
+  an rclone recipe ([backups](../self-hosting/backups.md#objects-in-garage)).

@@ -49,6 +49,15 @@ const OWN_IMAGE = /^\$\{IMAGE_REGISTRY:-localhost\/commonair\}\/([a-z-]+):\$\{IM
 // Tag for humans and image-licenses.json, digest because tags are mutable (ADR 0022).
 const PINNED = /^([a-z0-9.-]+\.[a-z]+(?::\d+)?\/[a-z0-9._/-]+):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}$/;
 
+/** The keys of commonair.env a Quadlet unit receives (infra/selfhost/env, `PREFIX_*` entries). */
+const keyList = (unit: string) =>
+  read(`infra/selfhost/env/commonair-${unit}.keys`)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+const listPasses = (list: string[], key: string) =>
+  list.some((e) => (e.endsWith("*") ? key.startsWith(e.slice(0, -1)) : e === key));
+
 /** `${VAR:-default}` → default (or the literal when not templated). */
 const defaultOf = (s: string) => s.replace(/\$\{[A-Z0-9_]+:-([^}]*)\}/g, "$1");
 
@@ -283,6 +292,17 @@ describe("compose.yaml: configuration and secrets", () => {
     }
   });
 
+  test("only our own images read the shared env file; third-party services list what they use", () => {
+    for (const [name, s] of services) {
+      if (s.build) continue;
+      expect(s.env_file, `${name}: a third-party image gets no shared env_file`).toBeUndefined();
+    }
+    const shared = services.filter(([, s]) => s.env_file).map(([n]) => n);
+    expect(shared.sort()).toEqual(
+      ["api", "chat", "garage-init", "irc", "media", "migrate", "origin", "tracker", "web", "worker"].sort(),
+    );
+  });
+
   test("no secret has a literal default in compose (only the dev Postgres owner password)", () => {
     const text = read("compose.yaml");
     const defaults = [
@@ -350,10 +370,8 @@ describe("Caddyfile", () => {
       expect(env[key], key).toBe(`\${${key}:-${example[key]}}`);
       expect(caddy, key).toContain(`{$${key}:${example[key]}}`);
     }
-    // The Quadlet unit reads the whole instance env file, which carries them.
-    expect(read("infra/quadlet/commonair-caddy.container")).toContain(
-      "EnvironmentFile=%h/.config/commonair/commonair.env",
-    );
+    // The Quadlet unit's key list passes them from the instance env file.
+    expect(keyList("caddy")).toEqual(expect.arrayContaining(["S3_BUCKET_MEDIA", "S3_BUCKET_EXPORTS"]));
   });
 });
 
@@ -504,6 +522,38 @@ describe("Quadlet mirror", () => {
     expect(read("infra/caddy/Caddyfile")).toMatch(/handle \/media\/\* \{\s+reverse_proxy origin:3003\s+\}/);
   });
 
+  test("each unit gets only its own keys of commonair.env, never the whole file", () => {
+    const withEnv = Object.entries(units).filter(([, unit]) => keys(unit, "EnvironmentFile").length > 0);
+    expect(withEnv.length).toBeGreaterThan(10);
+    for (const [name, unit] of withEnv) {
+      expect(keys(unit, "EnvironmentFile"), name).toEqual([`%h/.config/commonair/unit-env/commonair-${name}.env`]);
+      expect(keyList(name).length, name).toBeGreaterThan(0);
+    }
+  });
+
+  // Third-party services: what compose hands them is what their unit passes or sets itself.
+  test.each([
+    ["caddy", true],
+    ["garage", true],
+    ["grafana", false],
+    ["mediamtx", false],
+    ["postgres", false],
+  ] as const)(
+    "%s: the compose environment is covered by the unit's key list or its own settings (exactly: %s)",
+    (name, exact) => {
+      const unit = units[name]!;
+      const set = new Set([
+        ...keys(unit, "Environment").map((e) => e.slice(0, e.indexOf("="))),
+        ...keys(unit, "Secret").map((s) => /target=([A-Z0-9_]+)/.exec(s)?.[1] ?? ""),
+      ]);
+      const list = keyList(name);
+      const env = Object.keys(compose.services[name]!.environment ?? {});
+      expect(env.filter((k) => !set.has(k) && !listPasses(list, k))).toEqual([]);
+      // Caddy and Garage get exactly what compose gives them.
+      expect(exact ? list : env.toSorted()).toEqual(env.toSorted());
+    },
+  );
+
   test("app units carry the same in-network environment as compose", () => {
     const appEnv = compose.services.api!.environment!;
     // Compose lets .env override it; the units pin the network's subnet.
@@ -571,7 +621,8 @@ describe("systemd timers (infra/systemd)", () => {
     expect(keys(sync, "Image")).toEqual(["localhost/commonair/tools:latest"]);
     expect(keys(sync, "Exec")[0]).toContain("bun infra/irc/sync-cert.ts");
     expect(existsSync(join(ROOT, "infra/irc/sync-cert.ts"))).toBe(true);
-    expect(keys(sync, "EnvironmentFile")).toEqual(["%h/.config/commonair/commonair.env"]);
+    expect(keys(sync, "EnvironmentFile")).toEqual(["%h/.config/commonair/unit-env/commonair-irc-cert.env"]);
+    expect(keyList("irc-cert")).toEqual(["IRC_PUBLIC_HOST"]);
     // The script reads the volume by this name.
     expect(read("infra/quadlet/commonair-caddy-data.volume")).toContain("VolumeName=commonair-caddy-data\n");
   });

@@ -1133,6 +1133,24 @@ describe("stale units", () => {
     },
     TIMEOUT,
   );
+
+  test(
+    "per-unit env files from before are removed; the units render them again at start",
+    () => {
+      const h = host();
+      const dir = join(h.home, ".config/commonair/unit-env");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "commonair-gone.env"), "AUTH_SECRET=old\n");
+      expectOk(h.run(INSTALL));
+      expect(existsSync(dir)).toBe(false);
+      // The units render from the release's renderer and key lists.
+      const unit = readFileSync(join(h.home, ".config/containers/systemd/commonair-caddy.container"), "utf8");
+      expect(unit).toContain("EnvironmentFile=%h/.config/commonair/unit-env/commonair-caddy.env\n");
+      expect(existsSync(join(h.home, "commonair/scripts/selfhost/render-env.sh"))).toBe(true);
+      expect(existsSync(join(h.home, "commonair/infra/selfhost/env/commonair-caddy.keys"))).toBe(true);
+    },
+    TIMEOUT,
+  );
 });
 
 describe("upgrade", () => {

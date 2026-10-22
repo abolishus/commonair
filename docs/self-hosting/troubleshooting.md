@@ -37,8 +37,15 @@ host. As root, the same logs are available with
 `journalctl _SYSTEMD_USER_UNIT=commonair-api.service`.
 
 A service that refuses its configuration logs `Invalid environment:` followed by every bad
-variable. Fix them in `~/.config/commonair/commonair.env` and run
-`sh ~/commonair/selfhost.sh install --reinstall` ([configuration.md](configuration.md)).
+variable. Fix them in `~/.config/commonair/commonair.env` and restart that unit
+(`systemctl --user restart commonair-api`), or run
+`sh ~/commonair/selfhost.sh install --reinstall` to restart everything
+([configuration.md](configuration.md#changing-a-value)).
+
+A unit that fails before its container starts, with `render-env:` in its journal, could not
+copy its keys from `commonair.env` (the file is missing, unreadable or empty). It does not start
+without them. Restore the file (from your offline copy if need be, mode 0600) and start the unit
+again ([configuration.md](configuration.md#which-unit-sees-which-key)).
 
 Grafana has the services' structured logs, metrics and traces
 ([requirements.md](requirements.md#ports) shows the SSH tunnel).

@@ -6,20 +6,31 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # Configuration
 
 An instance is configured by one env file: `~/.config/commonair/commonair.env`, owned by the
-`commonair` user, mode 0600. `selfhost.sh install` writes it, and every container reads it.
+`commonair` user, mode 0600. `selfhost.sh install` writes it. It is the only file you edit and
+back up: no container reads it whole. Each unit gets a copy of just the keys it needs (see
+[Which unit sees which key](#which-unit-sees-which-key)).
 
 ## Changing a value
 
 1. Edit the file. It takes one `KEY=value` per line, with no quotes and no comment after a
    value.
-2. Apply it:
+2. Apply it, either way:
 
-   ```sh
-   sh ~/commonair/selfhost.sh install --reinstall
-   ```
+   - Restart the units that read the key, e.g. `systemctl --user restart commonair-api`. Every
+     unit copies its keys from `commonair.env` each time it starts, so a restart is enough for
+     any key a unit reads from the file.
+   - Or restart everything in order (migrations first):
 
-   Without `--version` or `--bundle`, this reuses the installed release. It keeps every secret
-   and edit, recreates the Podman secrets, and restarts the stack in order (migrations first).
+     ```sh
+     sh ~/commonair/selfhost.sh install --reinstall
+     ```
+
+     Without `--version` or `--bundle`, this reuses the installed release. It keeps every
+     secret and edit. Use it after changing `POSTGRES_APP_PASSWORD`, `POSTGRES_PASSWORD` or
+     `GRAFANA_ADMIN_PASSWORD`: it also recreates the Podman secrets made from them, which a
+     restart does not.
+
+   `selfhost.sh upgrade` applies every edit too, since it restarts the whole stack.
 
 `install` and `upgrade` never overwrite a value you set, with these exceptions, which
 `install` sets from its flags every time: the public URLs and `PUBLIC_HOSTNAME`,
@@ -37,12 +48,14 @@ upgrades.
 - **The units set some variables themselves** (internal hostnames, ports, the S3 endpoint, the
   OpenTelemetry endpoint, `TRUSTED_PROXY_CIDRS`). Those win over the env file, so editing them
   there has no effect. They are marked "set in the units" below.
-- **Some secrets are scoped by the units, not set by them.** Of the CommonAir services, only
+- **Each unit sees only its own keys** ([below](#which-unit-sees-which-key)). A key a unit's
+  list does not name never reaches that container, so setting it there has no effect on it.
+- **Some secrets are scoped more tightly still.** Of the CommonAir services, only
   `commonair-api` sees `EVIDENCE_PRIVATE_KEY`, and only `commonair-worker` sees
   `S3_EVIDENCE_ACCESS_KEY_ID` and `S3_EVIDENCE_SECRET_ACCESS_KEY` (`commonair-garage-init` also
-  reads them, to create that key): the other service units set them to an empty value. The env
-  file is still where they come from, so editing them there does take effect. They are marked
-  "env file (blanked in units that must not see it)" below.
+  reads them, to create that key). The other service units also set them to an empty value. The
+  env file is still where they come from, so editing them there does take effect. They are
+  marked "env file (blanked in units that must not see it)" below.
 - **`DATABASE_URL` comes from a Podman secret** (`commonair-database-url`, the least-privilege
   app role), which `install` recreates from `POSTGRES_APP_PASSWORD` every time.
 - **Production instances other than the co-op's flagship must publish their own contacts.**
@@ -53,6 +66,37 @@ upgrades.
 Never set `MODERATION_TEST_HOOKS`, `COOP_TEST_HOOKS`, `OPS_TEST_HOOKS`,
 `EVENTSUB_ALLOW_INSECURE_CALLBACKS` or `OUTBOUND_ALLOW_PRIVATE_NETWORKS` on a public instance.
 They exist for the test harness and development.
+
+## Which unit sees which key
+
+Before each start, a unit runs `~/commonair/scripts/selfhost/render-env.sh`, which copies the
+keys the unit needs from `commonair.env` into `~/.config/commonair/unit-env/<unit>.env` (mode
+0600), and the container reads that copy. The lists are in
+`~/commonair/infra/selfhost/env/<unit>.keys`, one key per line (`MTX_*` means every key starting
+with `MTX_`):
+
+- **CommonAir services** (`commonair-api`, `-chat`, `-irc`, `-media`, `-origin`, `-tracker`,
+  `-web`, `-worker`): every variable their configuration schema reads, generated from the
+  schemas below, except the ones the unit sets itself.
+- **Caddy**: `PUBLIC_HOSTNAME`, `TLS_MODE`, `ACME_EMAIL`, `ACME_CA`, `S3_BUCKET_MEDIA` and
+  `S3_BUCKET_EXPORTS`. No secret at all.
+- **MediaMTX**: `INTERNAL_API_SECRET` (its hooks call the API) and every `MTX_*` setting.
+- **Postgres**: `POSTGRES_PASSWORD`, `POSTGRES_MAX_CONNECTIONS`, the S3 key and backup bucket
+  WAL-G uses, and every `AWS_*` and `WALG_*` setting.
+- **Garage**: `GARAGE_RPC_SECRET` and `GARAGE_ADMIN_TOKEN`. **Grafana**: every `GF_*` setting
+  (its admin password is a Podman secret).
+- **The jobs** `commonair-migrate`, `commonair-garage-init` and `commonair-irc-cert`: what their
+  scripts read.
+- Valkey, Loki, Tempo, Prometheus and the OpenTelemetry collector get no env file.
+
+A key in `commonair.env` reaches a unit only if its list names it. The lists name every
+variable the services read, and the prefixes cover the third-party images' own settings
+(`MTX_*`, `GF_*`, `AWS_*`, `WALG_*`), so any documented setting works. The lists ship with each
+release and an upgrade replaces them: do not edit them.
+
+If `commonair.env` cannot be read (missing, unreadable, empty), the copy step fails and the
+unit does not start, rather than starting without its settings. `journalctl --user -u
+<unit>` shows `render-env:` and the reason.
 
 ## Variables outside the schemas
 
@@ -196,7 +240,6 @@ the tables by hand. Columns:
 | `MEDIAMTX_API_URL`              | no       | `http://localhost:9997`      | set in the units | MediaMTX control API, used by media and by the API's health and live-moderation checks.                                                                                            |
 | `MEDIAMTX_HLS_URL`              | no       | `http://localhost:8888`      | set in the units | MediaMTX HLS server the origin pulls playlists and segments from.                                                                                                                  |
 | `MEDIAMTX_RTSP_URL`             | no       | `rtsp://localhost:8554`      | set in the units | MediaMTX RTSP server media reads streams from and publishes renditions to.                                                                                                         |
-| `MEDIAMTX_RTMP_URL`             | no       | `rtmp://localhost:1935`      | set in the units | MediaMTX RTMP address on the internal network. Validated, but no service reads it yet; compose and the units set it.                                                               |
 | `INGEST_RTMP_PUBLIC_URL`        | no       | `rtmp://localhost:1935/live` | set by install   | Public RTMP ingest URL shown to streamers (the server URL in OBS).                                                                                                                 |
 | `INGEST_WHIP_PUBLIC_URL`        | no       | `http://localhost:8889/live` | set by install   | Public WHIP ingest base shown to streamers; `/\<channel>/whip` is appended.                                                                                                        |
 | `TRANSCODE_VIEWER_THRESHOLD`    | no       | `50`                         | —                | Viewers above which a stream gets an adaptive ladder (after 30 s; it stops below 80% for 2 min).                                                                                   |
@@ -300,7 +343,7 @@ the tables by hand. Columns:
 | `WALG_RETAIN_FULL`         | no       | —       | —              | Full backups `commonair-backup` keeps; older ones are pruned (unset keeps all).                                                                                         |
 | `POSTGRES_MAX_CONNECTIONS` | no       | —       | —              | Postgres `max_connections` (compose default 400: parallel integration suites hold many pools).                                                                          |
 | `COMPOSE_SUBNET`           | no       | —       | —              | Compose network subnet (default 10.89.42.0/24); a second stack on one host needs its own.                                                                               |
-| `COMMONAIR_ENV_FILE`       | no       | —       | —              | Compose only: path of the env file every container reads (default `.env`).                                                                                              |
+| `COMMONAIR_ENV_FILE`       | no       | —       | —              | Compose only: path of the env file our own images read; third-party services do not (default `.env`).                                                                   |
 
 ### `servicePorts`
 

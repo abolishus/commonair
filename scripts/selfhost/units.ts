@@ -58,3 +58,16 @@ export function releaseMounts(units: Iterable<string>): string[] {
       if (src.startsWith(RELEASE_MOUNT_PREFIX)) paths.add(src.slice(RELEASE_MOUNT_PREFIX.length));
   return [...paths].sort();
 }
+
+/**
+ * Repository paths of the release files a unit's `ExecStartPre=` lines run or read on the host,
+ * e.g. `scripts/selfhost/render-env.sh` and the unit's key list. The bundle ships each of them.
+ */
+export function releaseExecFiles(units: Iterable<string>): string[] {
+  const paths = new Set<string>();
+  for (const unit of units)
+    for (const line of unitValues(unit, "ExecStartPre"))
+      for (const word of line.split(/\s+/))
+        if (word.startsWith(RELEASE_MOUNT_PREFIX)) paths.add(word.slice(RELEASE_MOUNT_PREFIX.length));
+  return [...paths].sort();
+}

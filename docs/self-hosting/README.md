@@ -67,9 +67,9 @@ These are true of the current release. Each one is tracked for a later release.
   media onto other servers is not scripted yet ([scaling.md](scaling.md)).
 - **IPv4 only.** Public ports bind `0.0.0.0`. Do not publish an AAAA record yet: clients and
   the ACME CA that prefer IPv6 would fail to connect.
-- **Every container reads the whole env file.** Caddy, MediaMTX, Grafana and Garage can see the
-  database passwords and S3 keys in `commonair.env`. Treat a compromise of any container as a
-  compromise of those secrets.
+- **A service holds its own secrets.** Each unit gets only its keys of `commonair.env`
+  ([configuration.md](configuration.md#which-unit-sees-which-key)): Caddy gets none, but a
+  compromised api or worker still holds the database password and S3 keys it needs.
 - **Client addresses are hidden.** Rootless Podman forwards public ports so that every client
   appears to come from the container network's gateway. Per-address limits (such as the IRC
   and tracker connection limits) then count all clients as one, and Caddy trusts

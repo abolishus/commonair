@@ -133,8 +133,9 @@ Config files are bind-mounted read-only from `infra/` with `:Z` (SELinux relabel
 
 ## Environment
 
-Every container reads `.env` (`env_file`, optional, path overridable with `COMMONAIR_ENV_FILE`)
-and compose overrides the hostnames for the compose network:
+Our own images (the app services and the tools-image jobs) read `.env` (`env_file`, optional,
+path overridable with `COMMONAIR_ENV_FILE`); third-party services get only the variables they use
+through `environment:`. Compose overrides the hostnames for the compose network:
 `DATABASE_URL=postgres://commonair_app:${POSTGRES_APP_PASSWORD}@postgres:5432/commonair`,
 `VALKEY_URL=redis://valkey:6379`, `S3_ENDPOINT=http://garage:3900`, `MEDIAMTX_*` → `mediamtx`,
 `API_INTERNAL_URL=http://api:3001`, `CHAT_INTERNAL_URL=ws://chat:3002/ws`,
@@ -162,7 +163,7 @@ has a default; missing ones make the dependent container fail with a clear messa
 | `BIND_ADDRESS` / `CADDY_BIND_ADDRESS`       | `127.0.0.1` / `0.0.0.0`       | host bind addresses                                        |
 | `IMAGE_REGISTRY` / `IMAGE_TAG`              | `localhost/commonair` / `dev` | names of our built images                                  |
 | `WALG_RETAIN_FULL`                          | `7`                           | full backups kept by `commonair-backup`                    |
-| `COMMONAIR_ENV_FILE`                        | `.env`                        | env file every container reads                             |
+| `COMMONAIR_ENV_FILE`                        | `.env`                        | env file our own images read                               |
 
 ## Database roles
 
@@ -318,10 +319,17 @@ Rules every unit follows (ADR 0023 §10, checked by `infra/tests/quadlet.test.ts
   `Type=oneshot`, `RemainAfterExit=yes`, bounded retries). Long-running dependencies are
   `Wants=` + `After=`, so a failed start there does not fail dependents with result
   `dependency`, which `Restart=` never retries.
-- Every unit reads `%h/.config/commonair/commonair.env` and sets its internal hostnames and
-  ports with `Environment=` lines, which win over the env file. `DATABASE_URL` comes from the
-  Podman secrets `commonair-database-url` (app role) or `commonair-owner-database-url`
-  (migrate), and Grafana's password from `commonair-grafana-admin-password`.
+- No unit reads `%h/.config/commonair/commonair.env` whole. A unit with configuration runs
+  `ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh …`, which copies only the
+  keys of its list (`selfhost/env/commonair-<unit>.keys`) to
+  `%h/.config/commonair/unit-env/commonair-<unit>.env` (0600), and reads that file
+  (`EnvironmentFile=`). It fails closed: without a readable `commonair.env` the unit does not
+  start. The lists of our services are generated from their env schemas by
+  `bun scripts/selfhost/unit-env.ts` (a test fails when they are stale); Valkey, Loki, Tempo,
+  Prometheus and the collector get no env file. Internal hostnames and ports are `Environment=`
+  lines, which win over the env file. `DATABASE_URL` comes from the Podman secrets
+  `commonair-database-url` (app role) or `commonair-owner-database-url` (migrate), and
+  Grafana's password from `commonair-grafana-admin-password`.
 - Config files are bind-mounted from `%h/commonair/infra/…`. Other host mounts are under
   `%h/.local/share/commonair/` (hash lists, the moderation model) and
   `%h/.config/commonair/irc-tls/`.
@@ -342,7 +350,10 @@ generate: `commonair-backup.service` and `.timer` (daily WAL-G base backup) and
 
 `selfhost.sh` keeps each installed release in `~/.local/share/commonair/releases/<version>/`
 (the unpacked bundle: `selfhost.sh`, `release-manifest.json`, `release.env`, the rendered
-`quadlet/`, `systemd/`, the mounted config files under `infra/`, and `tools/`). `~/commonair` is
+`quadlet/`, `systemd/`, the mounted config files under `infra/`, the env renderer
+`scripts/selfhost/render-env.sh` with the key lists in `infra/selfhost/env/`, and `tools/`).
+Install removes the per-unit env files in `~/.config/commonair/unit-env/`; each unit writes its
+own again when it starts. `~/commonair` is
 a symlink to the current one and `~/.local/share/commonair/previous` to the one before, so the
 units' `%h/commonair/infra/…` mounts follow the symlink, and a rollback is a symlink flip plus
 the previous release's units. Install copies the rendered units to

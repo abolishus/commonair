@@ -20,7 +20,8 @@ ContainerName=commonair-grafana
 RunInit=true
 Network=commonair.network
 NetworkAlias=grafana
-EnvironmentFile=%h/.config/commonair/commonair.env
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-grafana.env
 Environment=GF_SECURITY_ADMIN_USER=admin
 Environment=GF_AUTH_ANONYMOUS_ENABLED=false
 Environment=GF_USERS_ALLOW_SIGN_UP=false
@@ -45,6 +46,9 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-grafana.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-grafana.env
 Restart=always
 RestartMode=direct
 RestartSec=5

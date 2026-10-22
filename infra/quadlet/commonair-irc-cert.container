@@ -17,7 +17,8 @@ RunInit=true
 User=0
 # It reads files only; nothing to reach over a network.
 Network=none
-EnvironmentFile=%h/.config/commonair/commonair.env
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-irc-cert.env
 Volume=commonair-caddy-data.volume:/caddy-data:ro
 # Shared label (z, not Z): commonair-irc.container reads the same directory.
 Volume=%h/.config/commonair/irc-tls:/state/irc-tls:z
@@ -26,6 +27,9 @@ Volume=%h/.config/commonair/irc-tls:/state/irc-tls:z
 Exec=sh -c "mkdir -p /tmp/stub && ln -sf /bin/true /tmp/stub/systemctl && PATH=/tmp/stub:/usr/local/bin:/usr/bin:/bin exec bun infra/irc/sync-cert.ts --caddy-data /caddy-data --out /state/irc-tls"
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-irc-cert.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-irc-cert.env
 Type=oneshot
 Restart=no
 ExecStartPre=/bin/mkdir -p %h/.config/commonair/irc-tls
