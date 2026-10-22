@@ -209,3 +209,36 @@ export function getInitial(name: string, locale: string): string {
   const first = graphemes.find((g) => LETTER.test(g)) ?? graphemes[0] ?? "?";
   return first.toLocaleUpperCase(locale);
 }
+
+const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
+
+/** 1_536_000 -> "1.5 MB" (decimal units, as storage and downloads report them), locale-aware. */
+export function formatBytes(bytes: number, locale: string): string {
+  let value = Math.max(0, bytes);
+  let index = 0;
+  while (value >= 1000 && index < BYTE_UNITS.length - 1) {
+    value /= 1000;
+    index++;
+  }
+  const unit = BYTE_UNITS[index] ?? "byte";
+  return cached(
+    `bytes|${locale}|${unit}`,
+    () =>
+      new Intl.NumberFormat(locale, {
+        style: "unit",
+        unit,
+        unitDisplay: "short",
+        maximumFractionDigits: index === 0 ? 0 : 1,
+      }),
+  ).format(value);
+}
+
+/** A media length as a clock: 75 -> "1:15", 3723 -> "1:02:03". Negative or fractional input floors at 0. */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}

@@ -34,6 +34,8 @@ export interface ConfirmDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "default" | "destructive";
+  /** Keeps confirm disabled (e.g. until a typed confirmation in `children` matches). */
+  confirmDisabled?: boolean;
   /**
    * Runs on confirm. A returned promise keeps the dialog open, with both buttons
    * disabled, until it settles; it closes on success and stays open on failure.
@@ -58,6 +60,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   variant = "default",
+  confirmDisabled = false,
   onConfirm,
   onError,
   contentProps,
@@ -90,7 +93,7 @@ export function ConfirmDialog({
   };
 
   const handleConfirm = async (): Promise<void> => {
-    if (pending) return;
+    if (pending || confirmDisabled) return;
     setPending(true);
     try {
       await onConfirm();
@@ -125,7 +128,7 @@ export function ConfirmDialog({
           <AlertDialogAction
             data-testid="confirm-dialog-confirm"
             variant={variant === "destructive" ? "destructive" : "default"}
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             focusableWhenDisabled
             aria-busy={pending || undefined}
             onClick={() => void handleConfirm()}

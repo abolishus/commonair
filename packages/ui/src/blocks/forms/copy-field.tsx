@@ -36,6 +36,7 @@ export interface CopyFieldProps {
   "data-testid"?: string;
   "data-value-testid"?: string;
   "data-copy-testid"?: string;
+  "data-reveal-testid"?: string;
 }
 export function CopyField({
   label,
@@ -80,7 +81,12 @@ export function CopyField({
         />
         {secret && (
           <InputGroupAddon align="inline-end">
-            <InputGroupButton aria-label={visible ? hideLabel : showLabel} onClick={() => setVisible((show) => !show)}>
+            <InputGroupButton
+              aria-label={visible ? hideLabel : showLabel}
+              aria-pressed={visible}
+              data-testid={dataProps["data-reveal-testid"]}
+              onClick={() => setVisible((show) => !show)}
+            >
               <HugeiconsIcon icon={visible ? EyeOffIcon : EyeIcon} strokeWidth={2} aria-hidden />
             </InputGroupButton>
           </InputGroupAddon>

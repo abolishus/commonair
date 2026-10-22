@@ -3,119 +3,38 @@
 
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Edit02Icon, MoreHorizontalIcon, Upload01Icon } from "@hugeicons/core-free-icons";
-import { IconButton, StatusBadge } from "@commonair/ui";
-import { Button } from "@commonair/ui/components/button";
 import { PageContainer, ResponsiveGrid } from "@commonair/ui/layouts";
-import { PageHeader, PageTabs } from "@commonair/ui/blocks/headers";
-import { DataTable, FilterBar, type DataTableColumn } from "@commonair/ui/blocks/data";
-import { MediaCard } from "@commonair/ui/blocks/media";
+import { PageHeader } from "@commonair/ui/blocks/headers";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { initialSelection, notes, tabs, videos, visibilities, type VideoRow } from "./fixtures/Content.ts";
+import { ContentBoard } from "@commonair/ui/blocks/studio";
+import { notes } from "./fixtures/Content.ts";
+import { clips as sampleClips, contentLabels, vods as sampleVods } from "../e6-fixtures.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/Content", parameters: pageParameters } satisfies Meta;
 export default meta;
 type Story = StoryObj;
 
-const columns: DataTableColumn<VideoRow>[] = [
-  {
-    id: "video",
-    header: "Video",
-    cell: ({ row }) => (
-      <MediaCard
-        layout="compact"
-        media={{
-          id: row.original.id,
-          title: row.original.title,
-          accent: "violet",
-          duration: row.original.duration,
-          views: `${row.original.date} · ${row.original.category}`,
-        }}
-      />
-    ),
-  },
-  {
-    id: "visibility",
-    header: "Visibility",
-    cell: ({ row }) => <StatusBadge tone={row.original.tone}>{row.original.visibility}</StatusBadge>,
-  },
-  { id: "views", header: "Views", accessorKey: "views", align: "numeric" },
-  { id: "expires", header: "Expires", accessorKey: "expires" },
-  {
-    id: "actions",
-    header: () => <span className="sr-only">Actions</span>,
-    cell: ({ row }) => (
-      <div className="flex gap-1">
-        <IconButton label={`Edit ${row.original.title}`} icon={Edit02Icon} size="icon-sm" />
-        <IconButton label={`More for ${row.original.title}`} icon={MoreHorizontalIcon} size="icon-sm" />
-      </div>
-    ),
-  },
-];
-
 function ContentPage(): React.JSX.Element {
-  const [query, setQuery] = React.useState("");
-  const [visibility, setVisibility] = React.useState("all");
-  const shown = videos.filter((video) => video.title.toLowerCase().includes(query.toLowerCase()));
+  const [vods, setVods] = React.useState(sampleVods);
+  const [clips, setClips] = React.useState(sampleClips);
   return (
     <StudioPage current="content">
       <PageContainer width="wide" className="flex flex-col gap-6 py-6">
-        <PageHeader
-          title="Videos & clips"
-          actions={
-            <Button variant="outline" size="sm">
-              <HugeiconsIcon icon={Upload01Icon} aria-hidden="true" />
-              Upload video
-            </Button>
+        <PageHeader title="Videos & clips" description="Rename, change who can watch, or delete." />
+        <ContentBoard
+          vods={vods}
+          clips={clips}
+          labels={contentLabels}
+          onSaveVod={(id, update) =>
+            setVods((current) => current.map((vod) => (vod.id === id ? { ...vod, ...update } : vod)))
           }
-          tabs={<PageTabs items={tabs} />}
-        />
-        <FilterBar
-          searchLabel="Search videos"
-          searchValue={query}
-          onSearchChange={setQuery}
-          filters={[
-            {
-              id: "content-visibility",
-              label: "Visibility",
-              value: visibility,
-              options: visibilities,
-              onValueChange: setVisibility,
-            },
-          ]}
-        />
-        <DataTable
-          caption="Videos"
-          columns={columns}
-          rows={shown}
-          getRowId={(row) => row.id}
-          selectable
-          defaultRowSelection={initialSelection}
-          selectionLabel="Select video"
-          selectionToolbar={(selected, clear) => (
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <span>{selected.length} selected</span>
-              <Button variant="outline" size="sm" onClick={clear}>
-                Highlight
-              </Button>
-              <Button variant="destructive" size="sm" onClick={clear}>
-                Delete
-              </Button>
-            </div>
-          )}
+          onDeleteVod={(id) => setVods((current) => current.filter((vod) => vod.id !== id))}
+          onDeleteClip={(id) => setClips((current) => current.filter((clip) => clip.id !== id))}
         />
         <ResponsiveGrid cols={2}>
           <AlertCallout description={notes.retention} />
-          <AlertCallout
-            tone="warning"
-            description={
-              <p>
-                {notes.claim} <a href="#claims">Review or counter-notice</a>.
-              </p>
-            }
-          />
+          <AlertCallout tone="warning" description={notes.claim} />
         </ResponsiveGrid>
       </PageContainer>
     </StudioPage>

@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Sample data from the StreamSetup board (ingest, renditions, simulcast, recording). */
-import type { Accent } from "@commonair/ui";
+/** Sample data from the StreamSetup board (ingest, renditions, recording); simulcast is in `../../e6-fixtures.tsx`. */
 
 export const protocols = [
   { value: "rtmp", label: "RTMP" },
@@ -36,44 +35,6 @@ export const renditions: Rendition[] = [
   { id: "480p", name: "480p", resolution: "854 × 480", bitrate: "1,400 kbps", enabled: true },
   { id: "360p", name: "360p", resolution: "640 × 360", bitrate: "800 kbps", enabled: true },
   { id: "audio", name: "Audio only", resolution: "—", bitrate: "128 kbps", enabled: false },
-];
-
-export const simulcastTargets: {
-  id: string;
-  name: string;
-  initial: string;
-  accent: Accent;
-  detail: string;
-  healthy: boolean;
-  enabled: boolean;
-}[] = [
-  {
-    id: "a",
-    name: "Video platform A",
-    initial: "Y",
-    accent: "red",
-    detail: "rtmp://a.example/live2 · key ••••3d",
-    healthy: true,
-    enabled: true,
-  },
-  {
-    id: "peertube",
-    name: "Fediverse video (PeerTube)",
-    initial: "P",
-    accent: "blue",
-    detail: "rtmp://tube.example/live · key ••••9a",
-    healthy: true,
-    enabled: true,
-  },
-  {
-    id: "custom",
-    name: "Custom RTMP",
-    initial: "+",
-    accent: "zinc",
-    detail: "Not configured",
-    healthy: false,
-    enabled: false,
-  },
 ];
 
 export const recording = [

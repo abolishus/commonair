@@ -4,7 +4,7 @@
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Download01Icon, FingerPrintIcon, Key01Icon, SquareLock01Icon } from "@hugeicons/core-free-icons";
+import { FingerPrintIcon, Key01Icon, SquareLock01Icon } from "@hugeicons/core-free-icons";
 import { ChannelAvatar, type Accent } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
@@ -30,6 +30,15 @@ import {
   sections,
   signInMethods,
 } from "./fixtures/Settings.ts";
+import { DeletionPanel, ExportPanel, type DeletionRequestView } from "@commonair/ui/blocks/privacy";
+import {
+  deletionLabels,
+  deletionScheduled,
+  exportCooldown,
+  exportKinds,
+  exportLabels,
+  exportRows,
+} from "../e6-fixtures.tsx";
 import { ViewerPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Viewer/Settings", parameters: pageParameters } satisfies Meta;
@@ -42,6 +51,7 @@ function SettingsPage(): React.JSX.Element {
   const [bio, setBio] = React.useState(profile.bio);
   const [accent, setAccent] = React.useState<Accent>(profile.accent);
   const [rows, setRows] = React.useState<SwitchMatrixRow[]>(notificationRows);
+  const [deletion, setDeletion] = React.useState<DeletionRequestView | null>(null);
   return (
     <ViewerPage>
       <PageContainer className="flex flex-col gap-6 py-6">
@@ -131,28 +141,19 @@ function SettingsPage(): React.JSX.Element {
                 />
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Your data</CardTitle>
-                <CardDescription>Everything we hold about you, in a portable archive.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ItemGroup>
-                  <ActionRow
-                    icon={<HugeiconsIcon icon={Download01Icon} aria-hidden="true" />}
-                    title="Export my data"
-                    description="JSON + media, ready within 24 hours. Last export: never."
-                    actions={[{ label: "Request export", onAction: () => undefined }]}
-                  />
-                  <ActionRow
-                    tone="destructive"
-                    title="Delete account"
-                    description="Profile, messages and media are removed. Ledger and vote history stay, pseudonymized."
-                    actions={[{ label: "Delete account…", onAction: () => undefined }]}
-                  />
-                </ItemGroup>
-              </CardContent>
-            </Card>
+            <ExportPanel
+              kinds={exportKinds(exportCooldown)}
+              exports={exportRows}
+              labels={exportLabels}
+              onRequest={() => undefined}
+            />
+            <DeletionPanel
+              request={deletion}
+              labels={deletionLabels}
+              username="fernsby"
+              onRequest={() => setDeletion(deletionScheduled)}
+              onCancel={() => setDeletion(null)}
+            />
           </div>
         </div>
       </PageContainer>

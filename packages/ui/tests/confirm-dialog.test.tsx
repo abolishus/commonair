@@ -37,6 +37,16 @@ function renderDialog(props: Partial<React.ComponentProps<typeof ConfirmDialog>>
 }
 
 describe("ConfirmDialog", () => {
+  test("confirmDisabled keeps confirm from firing", async () => {
+    const { onConfirm } = renderDialog({ confirmDisabled: true });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Delete clip" }));
+    const confirm = (await screen.findByTestId("confirm-dialog-confirm")) as HTMLButtonElement;
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    await user.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   test("buttons carry the stable e2e test ids", async () => {
     const user = userEvent.setup();
     renderDialog();
