@@ -10,6 +10,7 @@ import { sql } from "drizzle-orm";
 import { schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import { eligibleHoursByUser, tsz } from "./inputs.ts";
+import { emitEvent } from "./outbox.ts";
 import { contributionWeightsOf, loadSettings, membershipClassesOf, type MembershipClasses } from "./settings.ts";
 
 /** Eligible streaming hours over `membership.classes.streamer.windowDays` meet the minimum. */
@@ -51,6 +52,31 @@ export function subscriptionQualifies(
   if (s.priceCents < rules.viewer.minSubscriptionCents) return false;
   if (s.currentPeriodEnd === null) return s.provider === "manual";
   return s.currentPeriodEnd.getTime() > now.getTime();
+}
+
+/**
+ * Days a voluntary exit is respected for in a class: the job does not re-activate a class the
+ * member left within this window (ADR 0020, "within that class's window"). The streamer class
+ * uses its membership window `streamer.windowDays`. The viewer class has no window, so a viewer
+ * exit is respected indefinitely: the job never re-enrols a viewer who left, who rejoins only by
+ * an explicit action (a new share confirmed by the treasurer inserts the membership).
+ */
+export const exitWindowDays = (cls: "streamer" | "viewer", rules: Pick<MembershipClasses, "streamer">): number =>
+  cls === "streamer" ? rules.streamer.windowDays : Number.POSITIVE_INFINITY;
+
+/**
+ * Whether the latest membership in a class is a voluntary exit the job must respect at `now`.
+ * An exit without `exitedAt` (older rows) counts from when the row was created.
+ */
+export function exitRespected(
+  latest: { status: string; exitedAt: Date | null; createdAt: Date } | undefined,
+  now: Date,
+  windowDays: number,
+): boolean {
+  if (latest?.status !== "exited") return false;
+  if (windowDays === Number.POSITIVE_INFINITY) return true;
+  const at = latest.exitedAt ?? latest.createdAt;
+  return at.getTime() > now.getTime() - windowDays * 86_400_000;
 }
 
 export interface MembershipChange {
@@ -122,8 +148,12 @@ async function qualifyingSubscribers(tx: Executor, now: Date, rules: MembershipC
  * - A run never lapses more than `max(minLapseAllowance, maxLapseFraction × active)` members
  *   of a class unless `allowMassLapse` is set: a mass lapse is far more likely to be a data
  *   problem (lost stream hours, a payment outage) than reality. Refusals are logged and audited.
- * - Banned or deleted users are never activated; members who exited and qualify again are
- *   re-activated with a new membership row.
+ * - Banned or deleted users are never activated. A member whose latest membership in a class
+ *   is `exited` within `exitWindowDays` (streamer: the membership window; viewer: always) left
+ *   voluntarily and is not re-activated in that class; lapsed members (and streamer exits older
+ *   than the window) who qualify again get a new membership row.
+ * - Every activation and lapse writes its `audit_log` row and its `coop.membership.update` event
+ *   in this transaction.
  * - Safe to run concurrently (advisory lock, and inserts tolerate a concurrent activation)
  *   and repeatedly (a second run with the same facts changes nothing).
  */
@@ -151,10 +181,15 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
     const subscribed = await qualifyingSubscribers(tx, now, rules);
 
     // One row per (user, class): the active membership if any, else the latest.
-    const current = new Map<string, { id: string; userId: string; status: string; basis: Basis }>();
+    const current = new Map<
+      string,
+      { id: string; userId: string; status: string; basis: Basis; exitedAt: Date; createdAt: Date }
+    >();
     for (const r of rows(
       await tx.execute(sql`
-        select distinct on (user_id, class) id, user_id, class, status, basis
+        select distinct on (user_id, class) id, user_id, class, status, basis,
+               (extract(epoch from coalesce(exited_at, created_at)) * 1000)::float8 as exited_ms,
+               (extract(epoch from created_at) * 1000)::float8 as created_ms
           from memberships where class in ('streamer', 'viewer')
          order by user_id, class, (status = 'active') desc, created_at desc, id desc`),
     )) {
@@ -163,6 +198,8 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
         userId: String(r.user_id),
         status: String(r.status),
         basis: r.basis as Basis,
+        exitedAt: new Date(Number(r.exited_ms)),
+        createdAt: new Date(Number(r.created_ms)),
       });
     }
 
@@ -193,6 +230,8 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
         return;
       }
       if (!eligible || blocked.has(userId)) return;
+      // A voluntary exit inside the window is respected; a lapse re-activates when eligible again.
+      if (exitRespected(c, now, exitWindowDays(cls, rules))) return;
       inserts.push({ id: uuidv7(), user_id: userId, class: cls, basis });
     };
 
@@ -236,9 +275,16 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
       );
     }
     if (lapseIds.length) {
-      await tx.execute(sql`
-        update memberships set status = 'lapsed', lapsed_at = ${tsz(now)}, last_eligibility_check_at = ${tsz(now)}
-         where id = any(${uuids(lapseIds)}) and status = 'active'`);
+      // Compare-and-set: a membership exited meanwhile (by the member) is not lapsed or reported.
+      const lapsedNow = new Set(
+        rows(
+          await tx.execute(sql`
+            update memberships set status = 'lapsed', lapsed_at = ${tsz(now)}, last_eligibility_check_at = ${tsz(now)}
+             where id = any(${uuids(lapseIds)}) and status = 'active'
+            returning id`),
+        ).map((r) => String(r.id)),
+      );
+      result.lapsed = result.lapsed.filter((l) => lapsedNow.has(l.membershipId));
     }
     if (inserts.length) {
       // A concurrent activation (another writer) wins; ours is skipped, never an error.
@@ -282,6 +328,19 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
       }
     }
     if (audits.length) await tx.insert(schema.auditLog).values(audits);
+    for (const [list, status] of [
+      [result.activated, "active"],
+      [result.lapsed, "lapsed"],
+    ] as const) {
+      for (const c of list) {
+        await emitEvent(
+          tx,
+          "coop.membership.update",
+          { membership_id: c.membershipId, user_id: c.userId, class: c.class, status, basis: c.basis },
+          now,
+        );
+      }
+    }
     return result;
   });
 }

@@ -10,6 +10,10 @@ import { integrityJobs } from "../integrity/jobs.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
 import { job as accountDeletion } from "./account-deletion.ts";
 import { job as closeStaleSessions } from "./close-stale-sessions.ts";
+import { job as coopCouncilRecompute } from "./coop-council-recompute.ts";
+import { job as coopElectionsAdvance } from "./coop-elections-advance.ts";
+import { job as coopMembershipSync } from "./coop-membership-sync.ts";
+import { job as coopProposalsAdvance } from "./coop-proposals-advance.ts";
 import { job as expireAuthRows } from "./expire-auth-rows.ts";
 import { job as liveCounters } from "./live-counters.ts";
 import { job as moneyExpirePending } from "./money-expire-pending.ts";
@@ -55,4 +59,8 @@ export const JOBS = [
   moderationNciiHash,
   ...moderationSchedules,
   accountDeletion,
+  coopMembershipSync,
+  coopProposalsAdvance,
+  coopCouncilRecompute,
+  coopElectionsAdvance,
 ] as readonly JobDefinition[];

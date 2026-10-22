@@ -45,6 +45,10 @@ bun run --filter @commonair/worker test:int   # integration (Postgres + Valkey)
 | `payments`  | `money-expire-pending`     | every 5 min           | `{}`                                   | Pending payments past `expires_at` → `failed`, with their incomplete subscriptions, unpaid renewals (end event) and tips. See Money jobs.                                                                |
 | `payments`  | `money-renew`              | every 5 min           | `{}`                                   | Ends canceled, gift and tierless subscriptions at period end; opens one pending manual renewal (`past_due`). See Money jobs.                                                                             |
 | `payments`  | `money-release-holds`      | hourly (`41 * * * *`) | `{}`                                   | Moves creator shares past the `payout.rules` hold to available, draining any backlog within 30 s. See Money jobs.                                                                                        |
+| `coop`      | `proposals-advance`        | every 15 s            | `{}`                                   | Steps proposals through council review, voting, the decision (with its tally) and application. See Co-op.                                                                                                |
+| `coop`      | `membership-sync`          | hourly (`5 * * * *`)  | `{}`                                   | Activates and lapses streamer and viewer memberships; respects voluntary exits. See Co-op.                                                                                                               |
+| `coop`      | `council-recompute`        | daily (`10 3 * * *`)  | `{}`                                   | Seats a new creator council term when none is current, the month changed or a seat is vacant. See Co-op.                                                                                                 |
+| `coop`      | `elections-advance`        | every minute          | `{}`                                   | Opens board-election voting when nominations close; closes elections when voting ends. See Co-op.                                                                                                        |
 
 Producers in other services import the job names and payload schemas from
 `@commonair/worker` (`WEBHOOK_JOBS`, `VerifyCallbackJob`, …) until they move into
@@ -146,6 +150,48 @@ skipped (`worker.money.runs{outcome:"skipped"}`). Runs that throw retry 3 times 
   `worker.money.renewed`, `worker.money.subscriptions_ended{reason}` (`canceled`, `gift`,
   `no_tiers`, `renewal_unpaid`), `worker.money.released_cents{currency}`. Logs carry counts only,
   never user ids.
+
+## Co-op
+
+Four recurring jobs on the `coop` queue (`COOP_JOBS`, empty payload) carry out the worker rows of
+`docs/testing/e5-selectors.md` (Membership "Streamer", Proposal "Advance", Council "Recompute",
+board elections). The work itself is in `@commonair/governance` (`syncMemberships`,
+`advanceProposals`, `recomputeCouncil`, `advanceElections`); `src/coop/run.ts` calls it with the
+worker clock and logger and returns counts only (`CoopJobResult`), which the API's test hook
+hands back to the harness.
+
+| Job                 | Schedule                 | Max lock hold | What it does                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------- | ------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proposals-advance` | every 15 s               | 5 min         | One step per due proposal, oldest deadline first (100 per run): `discussion` → `council_review` (affects creators) or `voting`; `council_review` → `voting`; `voting` → `passed`/`rejected` with the `tallies` row; `passed` → `applied`. Opening a vote freezes `rulesFor(...)`, sets the window and writes one `vote_open` notification per electorate member. Deadlines are read from the database clock |
+| `membership-sync`   | hourly (`5 * * * *` UTC) | 30 min        | Streamer memberships by eligible hours, viewers by share or subscription; lapses with grace and the mass-lapse guard; a voluntary exit inside the window is not re-activated; `coop.membership.update` per change                                                                                                                                                                                           |
+| `council-recompute` | daily (`10 3 * * *` UTC) | 10 min        | Seats a new term (starting now, ending at the end of the UTC month) when there is no current term, the month changed, or a seated member is no longer an active streamer member; `coop.council.recomputed`                                                                                                                                                                                                  |
+| `elections-advance` | every minute             | 5 min         | `nominating` → `voting` at `nominations_close_at`, then `closeElection` at `voting_ends_at`; `coop.election.update` for each                                                                                                                                                                                                                                                                                |
+
+- **Every step is one transaction** with its `audit_log` row (actor `system`, details ids, enums
+  and numbers only) and its `events` row; `coop.proposal.update` is public, the other `coop.*`
+  events are internal (validated by the outbox relay, never published). Vote choices never leave
+  `votes`: audit rows say `{ passed, rule }`, events carry the outcome and reason only.
+- **The database decides.** Each proposal step locks the row (`for update`), re-checks that the
+  step is due with the database clock, and the triggers re-check it again: the transition, the
+  electorate, the re-tally on `passed`/`rejected`, and the `tallies` row (its outcome, reason and
+  every count must equal the SQL tally). If the TypeScript tally and the database disagree, the
+  transaction rolls back, nothing is recorded, the run logs `error` with the proposal id and both
+  reasons, counts `worker.coop.tally_disagreements` and goes on with the next proposal.
+- **Applying.** All changes and `applied` go in one savepoint. A change the settings trigger
+  refuses (superseded since the vote opened, or no longer passing) rolls the savepoint back,
+  leaves the proposal `passed`, writes `proposal.apply_refused` and a `warn` log; proposals with
+  that audit row are never retried.
+- **Run lock.** `worker:lock:coop:<job>`, as for money jobs. A run that finds the lock taken
+  waits up to 20 s for it (so a test-hook tick that lands during a scheduled run still runs)
+  and then returns `{ skipped: 1 }`. Overlap is harmless anyway: steps are compare-and-set under
+  row locks, and membership sync and council recompute hold advisory locks.
+- **Share expiry.** `money-expire-pending` also cancels the `pending` member share of an expired
+  `membership_share` payment, in the same transaction (lock order payment → share), with audit
+  `coop.share.cancel` and event `coop.share.update`.
+- **`COOP_TEST_HOOKS`.** Only the API changes behaviour (it serves `POST /internal/coop/tick`).
+  The worker logs a warning at every start and reports `coop_test_hooks` on `/healthz`.
+- **Metrics.** `worker.coop.runs{job,outcome}`, `worker.coop.proposal_steps{step}`,
+  `worker.coop.tally_disagreements`, `worker.coop.memberships{change}`.
 
 ## Webhooks
 

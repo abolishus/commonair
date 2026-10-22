@@ -7,9 +7,11 @@
  * most approvals win. Ties are broken by earlier nomination, then by user id, so the
  * result is deterministic and reproducible from the public ballot data.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, lte, sql } from "drizzle-orm";
 import type { Database } from "@commonair/db";
 import { schema, type Executor } from "@commonair/db";
+import type { Logger } from "@commonair/observability";
+import { emitEvent, systemAudit } from "./outbox.ts";
 import type { MemberClass } from "./tally.ts";
 
 export interface ElectionCandidate {
@@ -235,6 +237,100 @@ export async function closeElection(db: Database, electionId: string, now: Date)
         ineligibleCandidates: ineligible,
       },
     });
+    await emitEvent(
+      tx,
+      "coop.election.update",
+      { election_id: electionId, class: election.class, status: "closed" },
+      now,
+    );
     return { electionId, ...result, ineligibleCandidates: ineligible, alreadyClosed: false };
   });
+}
+
+/**
+ * `nominating → voting` once `nominations_close_at` has passed, compare-and-set under the row
+ * lock, with its audit row and `coop.election.update` event. Returns false when another run (or
+ * an admin) moved it first or it is not due.
+ */
+export async function openElectionVoting(db: Database, electionId: string, now: Date): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [election] = await tx
+      .select()
+      .from(schema.elections)
+      .where(eq(schema.elections.id, electionId))
+      .for("update");
+    if (!election || election.status !== "nominating" || election.nominationsCloseAt.getTime() > now.getTime())
+      return false;
+    await tx.update(schema.elections).set({ status: "voting" }).where(eq(schema.elections.id, electionId));
+    await systemAudit(
+      tx,
+      {
+        action: "election.open_voting",
+        subjectType: "election",
+        subjectId: electionId,
+        reason: "nominations closed",
+        details: { electionId, class: election.class, seats: election.seats },
+      },
+      now,
+    );
+    await emitEvent(
+      tx,
+      "coop.election.update",
+      { election_id: electionId, class: election.class, status: "voting" },
+      now,
+    );
+    return true;
+  });
+}
+
+export interface ElectionsAdvanceResult {
+  votingOpened: number;
+  closed: number;
+  failed: number;
+}
+
+/**
+ * One run of `elections-advance`: open voting for elections whose nominations closed, then close
+ * those whose voting ended. Each election is its own transaction; one failure never blocks the
+ * others (it is logged and retried on the next run).
+ */
+export async function advanceElections(
+  db: Database,
+  now: Date,
+  opts: { limit?: number; logger?: Pick<Logger, "error"> } = {},
+): Promise<ElectionsAdvanceResult> {
+  const limit = opts.limit ?? 50;
+  const result: ElectionsAdvanceResult = { votingOpened: 0, closed: 0, failed: 0 };
+  const due = (
+    status: "nominating" | "voting",
+    at: typeof schema.elections.nominationsCloseAt | typeof schema.elections.votingEndsAt,
+  ) =>
+    db
+      .select({ id: schema.elections.id })
+      .from(schema.elections)
+      .where(and(eq(schema.elections.status, status), lte(at, now)))
+      .orderBy(asc(at), asc(schema.elections.id))
+      .limit(limit);
+  // Both lists are read first, so the run that opens an election's voting never also closes it
+  // (each transition is its own step, with its own audit row and event).
+  const toOpen = await due("nominating", schema.elections.nominationsCloseAt);
+  const toClose = await due("voting", schema.elections.votingEndsAt);
+  for (const { id } of toOpen) {
+    try {
+      if (await openElectionVoting(db, id, now)) result.votingOpened++;
+    } catch (err) {
+      result.failed++;
+      opts.logger?.error("elections: opening voting failed", { electionId: id, err });
+    }
+  }
+  for (const { id } of toClose) {
+    try {
+      const closed = await closeElection(db, id, now);
+      if (!closed.alreadyClosed) result.closed++;
+    } catch (err) {
+      result.failed++;
+      opts.logger?.error("elections: closing failed", { electionId: id, err });
+    }
+  }
+  return result;
 }

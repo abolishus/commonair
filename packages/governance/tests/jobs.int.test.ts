@@ -100,13 +100,44 @@ describe("syncMemberships", () => {
     const banned = await streamer({ banned: true });
     await streamHours(banned, day(3), 6);
     await streamHours(banned, day(2), 6);
-    // Exited voluntarily: not re-enrolled.
+    // Exited voluntarily inside the window: not re-enrolled although eligible.
     const exited = await streamer();
     await streamHours(exited, day(3), 6);
     await streamHours(exited, day(2), 6);
+    await app.insert(s.memberships).values({
+      userId: exited.userId,
+      class: "streamer",
+      basis: "streaming_hours",
+      status: "exited",
+      exitedAt: day(5),
+    });
+    // Exited longer ago than the window: re-activated when eligible.
+    const exitedLongAgo = await streamer();
+    await streamHours(exitedLongAgo, day(3), 6);
+    await streamHours(exitedLongAgo, day(2), 6);
+    await app.insert(s.memberships).values({
+      userId: exitedLongAgo.userId,
+      class: "streamer",
+      basis: "streaming_hours",
+      status: "exited",
+      exitedAt: day(120),
+    });
+    // Lapsed (not a choice): re-activated when eligible again.
+    const relapsed = await streamer();
+    await streamHours(relapsed, day(3), 6);
+    await streamHours(relapsed, day(2), 6);
+    await app.insert(s.memberships).values({
+      userId: relapsed.userId,
+      class: "streamer",
+      basis: "streaming_hours",
+      status: "lapsed",
+      lapsedAt: day(30),
+    });
+    // A viewer who exited recently is not re-activated by a qualifying subscription either.
+    const exitedViewer = await user();
     await app
       .insert(s.memberships)
-      .values({ userId: exited.userId, class: "streamer", basis: "streaming_hours", status: "exited" });
+      .values({ userId: exitedViewer, class: "viewer", basis: "subscription", status: "exited", exitedAt: day(1) });
 
     // Viewers: held share, short share, active subscription, expired subscription, lapsing.
     const shareholder = await user();
@@ -118,6 +149,16 @@ describe("syncMemberships", () => {
     await app.insert(s.subscriptions).values([
       {
         subscriberId: subscriber,
+        channelId: good.channelId,
+        tier: 1,
+        status: "active",
+        provider: "manual",
+        priceCents: 499,
+        currency: "usd",
+        currentPeriodEnd: new Date(NOW.getTime() + 86_400_000),
+      },
+      {
+        subscriberId: exitedViewer,
         channelId: good.channelId,
         tier: 1,
         status: "active",
@@ -150,8 +191,11 @@ describe("syncMemberships", () => {
     expect(await activeOf(lonely.userId)).toEqual([]);
     expect(await activeOf(old.userId)).toEqual([]);
     expect(await activeOf(banned.userId)).toEqual([]);
-    // Exited members who qualify again are re-activated with a new row.
-    expect(await activeOf(exited.userId)).toEqual([{ class: "streamer", basis: "streaming_hours" }]);
+    // A recent voluntary exit is respected; an old exit or a lapse re-activates with a new row.
+    expect(await activeOf(exited.userId)).toEqual([]);
+    expect(await activeOf(exitedViewer)).toEqual([]);
+    expect(await activeOf(exitedLongAgo.userId)).toEqual([{ class: "streamer", basis: "streaming_hours" }]);
+    expect(await activeOf(relapsed.userId)).toEqual([{ class: "streamer", basis: "streaming_hours" }]);
     expect(await activeOf(shareholder)).toEqual([{ class: "viewer", basis: "share" }]);
     expect(await activeOf(shortShare)).toEqual([]);
     expect(await activeOf(subscriber)).toEqual([{ class: "viewer", basis: "subscription" }]);
@@ -160,15 +204,28 @@ describe("syncMemberships", () => {
     expect(await activeOf(worker)).toEqual([{ class: "worker", basis: "board_appointment" }]);
 
     expect(r.activated.map((a) => a.userId).sort()).toEqual(
-      [good.userId, exited.userId, shareholder, subscriber].sort(),
+      [good.userId, exitedLongAgo.userId, relapsed.userId, shareholder, subscriber].sort(),
     );
     expect(r.lapsed.map((a) => a.userId).sort()).toEqual([old.userId, lapsingViewer].sort());
+
+    // One coop.membership.update event per activation and lapse, ids and enums only.
+    const events = await app.select().from(s.events).where(eq(s.events.type, "coop.membership.update"));
+    expect(events).toHaveLength(7);
+    const lapseEvent = events.find((e) => e.payload.user_id === old.userId);
+    expect(lapseEvent!.payload).toEqual({
+      membership_id: r.lapsed.find((l) => l.userId === old.userId)!.membershipId,
+      user_id: old.userId,
+      class: "streamer",
+      status: "lapsed",
+      basis: "streaming_hours",
+    });
+    expect(events.filter((e) => e.payload.status === "active")).toHaveLength(5);
 
     // Lapsed rows keep their history; audit rows exist for every change, with ids only.
     const [lapsed] = await app.select().from(s.memberships).where(eq(s.memberships.userId, old.userId));
     expect(lapsed).toMatchObject({ status: "lapsed", lapsedAt: NOW });
     const audits = await app.select().from(s.auditLog).where(eq(s.auditLog.subjectType, "membership"));
-    expect(audits).toHaveLength(6);
+    expect(audits).toHaveLength(7);
     expect(JSON.stringify(audits.map((a) => a.details))).not.toMatch(/@example/);
     const history = await app.select().from(s.membershipHistory).where(eq(s.membershipHistory.userId, old.userId));
     expect(history.map((h) => h.status)).toEqual(["active", "lapsed"]);
@@ -177,14 +234,47 @@ describe("syncMemberships", () => {
     const again = await syncMemberships(app, NOW);
     expect(again.activated).toEqual([]);
     expect(again.lapsed).toEqual([]);
-    expect(again.confirmed).toBe(4);
+    expect(again.confirmed).toBe(5);
+  });
+});
+
+describe("syncMemberships and a viewer exit", () => {
+  test("a viewer exit older than the streamer window is still respected; an old viewer lapse is not", async () => {
+    const owner = await streamer();
+    const day = (d: number) => new Date(NOW.getTime() - d * 86_400_000);
+    const sub = (subscriberId: string) => ({
+      subscriberId,
+      channelId: owner.channelId,
+      tier: 1,
+      status: "active" as const,
+      provider: "manual" as const,
+      priceCents: 499,
+      currency: "usd",
+      currentPeriodEnd: new Date(NOW.getTime() + 86_400_000),
+    });
+    // Exited 120 days ago (past streamer.windowDays = 90) and still qualifies by subscription.
+    const exitedViewer = await user();
+    await app
+      .insert(s.memberships)
+      .values({ userId: exitedViewer, class: "viewer", basis: "subscription", status: "exited", exitedAt: day(120) });
+    const lapsedViewer = await user();
+    await app
+      .insert(s.memberships)
+      .values({ userId: lapsedViewer, class: "viewer", basis: "subscription", status: "lapsed", lapsedAt: day(120) });
+    await app.insert(s.subscriptions).values([sub(exitedViewer), sub(lapsedViewer)]);
+
+    const r = await syncMemberships(app, NOW);
+    expect(await activeOf(exitedViewer)).toEqual([]);
+    expect(await activeOf(lapsedViewer)).toEqual([{ class: "viewer", basis: "subscription" }]);
+    expect(r.activated.map((a) => a.userId)).not.toContain(exitedViewer);
+    expect(r.activated.map((a) => a.userId)).toContain(lapsedViewer);
   });
 });
 
 describe("recomputeCouncil", () => {
-  test("seats the top streamers once per term, with method and audit rows", async () => {
-    // Fresh database state for this describe: only the streamers created here have memberships.
-    const { startsAt, endsAt } = termWindow(NOW);
+  test("seats the top streamers, reseats on a vacancy or a new month, with method, audit and events", async () => {
+    // Streamer members from the sync test above are candidates too; assertions are relative.
+    const { endsAt } = termWindow(NOW);
     const day = (d: number) => new Date(NOW.getTime() - d * 86_400_000);
     const make = async (hoursPerDay: number[], revenueCents: number) => {
       const st = await streamer();
@@ -209,31 +299,100 @@ describe("recomputeCouncil", () => {
     const tooFew = await make([5], 1_000_000);
 
     const first = await recomputeCouncil(app, NOW);
-    expect(first.created).toBe(true);
+    expect(first).toMatchObject({ created: true, reason: "no_term" });
     const seated = first.seats.map((x) => x.userId);
     expect(seated.indexOf(top.userId)).toBeLessThan(seated.indexOf(second.userId));
     expect(seated).not.toContain(tooFew.userId);
     expect(first.seats.map((x) => x.rank)).toEqual(first.seats.map((_, i) => i + 1));
 
+    // The new term starts now and ends at the end of the UTC month.
     const [term] = await app.select().from(s.councilTerms).where(eq(s.councilTerms.id, first.termId));
-    expect(term).toMatchObject({ startsAt, endsAt });
+    expect(term).toMatchObject({ startsAt: NOW, endsAt });
     expect(term!.method).toMatchObject({ size: 7, minStreamingHours: 10, eligibilityWindowDays: 90 });
     const members = await app.select().from(s.councilMembers).where(eq(s.councilMembers.termId, first.termId));
     expect(members).toHaveLength(first.seats.length);
 
-    // Same term: idempotent; returns the existing seating.
-    const second2 = await recomputeCouncil(app, new Date(NOW.getTime() + 86_400_000));
-    expect(second2).toEqual({ ...first, created: false });
-    const terms = await app.select().from(s.councilTerms);
-    expect(terms).toHaveLength(1);
-    const audits = await app.select().from(s.auditLog).where(eq(s.auditLog.action, "council.recompute"));
-    expect(audits).toHaveLength(1);
+    // Same month, no vacancy: the current term stands.
+    const later = new Date(NOW.getTime() + 86_400_000);
+    const same = await recomputeCouncil(app, later);
+    expect(same).toEqual({ ...first, created: false, reason: null });
+    expect(await app.select().from(s.councilTerms)).toHaveLength(1);
+    expect(await app.select().from(s.auditLog).where(eq(s.auditLog.action, "council.recompute"))).toHaveLength(1);
 
-    // Concurrent calls in a new term create exactly one term.
+    // A seated member exits the streamer class: their seat is vacant and a new term is seated now.
+    await app
+      .update(s.memberships)
+      .set({ status: "exited", exitedAt: later })
+      .where(
+        and(
+          eq(s.memberships.userId, top.userId),
+          eq(s.memberships.class, "streamer"),
+          eq(s.memberships.status, "active"),
+        ),
+      );
+    const vacant = await recomputeCouncil(app, later);
+    expect(vacant).toMatchObject({ created: true, reason: "vacancy" });
+    expect(vacant.termId).not.toBe(first.termId);
+    expect(vacant.seats.map((x) => x.userId)).not.toContain(top.userId);
+    expect(vacant.seats.map((x) => x.userId)).toContain(second.userId);
+    const [vacantTerm] = await app.select().from(s.councilTerms).where(eq(s.councilTerms.id, vacant.termId));
+    expect(vacantTerm).toMatchObject({ startsAt: later, endsAt });
+    // The old term and its seats are kept (append-only).
+    expect(await app.select().from(s.councilMembers).where(eq(s.councilMembers.termId, first.termId))).toHaveLength(
+      first.seats.length,
+    );
+    const [audit] = await app.select().from(s.auditLog).where(eq(s.auditLog.subjectId, vacant.termId));
+    expect(audit).toMatchObject({ actorType: "system", action: "council.recompute" });
+    expect(audit!.details).toMatchObject({ trigger: "vacancy", previousTermId: first.termId, vacated: [top.userId] });
+    expect(await recomputeCouncil(app, later)).toMatchObject({ termId: vacant.termId, created: false });
+
+    // A new UTC month: concurrent calls seat exactly one new term.
     const next = new Date("2026-07-02T00:00:00Z");
     const results = await Promise.all([recomputeCouncil(app, next), recomputeCouncil(app, next)]);
     expect(results.filter((x) => x.created)).toHaveLength(1);
     expect(results[0]!.termId).toBe(results[1]!.termId);
+
+    // One event per seated term.
+    const events = await app.select().from(s.events).where(eq(s.events.type, "coop.council.recomputed"));
+    expect(events.map((e) => String(e.payload.term_id)).sort((a, b) => a.localeCompare(b))).toEqual(
+      [first.termId, vacant.termId, results.find((x) => x.created)!.termId].sort(),
+    );
+    expect(events.find((e) => e.payload.term_id === first.termId)!.payload).toEqual({
+      term_id: first.termId,
+      seats: first.seats.length,
+    });
+  });
+
+  test("an empty term is refilled once a streamer qualifies (unfilled), and stands otherwise", async () => {
+    // November: every streamer from the tests above is outside the 90-day window.
+    const nov = (d: number, h = 12) => new Date(Date.UTC(2026, 10, d, h));
+    const empty = await recomputeCouncil(app, nov(5));
+    expect(empty).toMatchObject({ created: true, reason: "no_term", seats: [] });
+    // Active streamers exist, but none is eligible: no new term (no daily churn).
+    expect(await recomputeCouncil(app, nov(6))).toMatchObject({ termId: empty.termId, created: false, reason: null });
+
+    const st = await streamer();
+    await streamHours(st, nov(3, 0), 8);
+    await streamHours(st, nov(4, 0), 8);
+    await app.insert(s.memberships).values({ userId: st.userId, class: "streamer", basis: "streaming_hours" });
+    const filled = await recomputeCouncil(app, nov(7));
+    expect(filled).toMatchObject({ created: true, reason: "unfilled" });
+    expect(filled.termId).not.toBe(empty.termId);
+    expect(filled.seats.map((x) => x.userId)).toEqual([st.userId]);
+    const [audit] = await app.select().from(s.auditLog).where(eq(s.auditLog.subjectId, filled.termId));
+    expect(audit!.details).toMatchObject({ trigger: "unfilled", previousTermId: empty.termId, vacated: [] });
+    // Every eligible streamer is seated: the term stands.
+    expect(await recomputeCouncil(app, nov(8))).toMatchObject({ termId: filled.termId, created: false });
+  });
+
+  test("a term that started in an earlier month is replaced (month_changed)", async () => {
+    // A term spanning a month boundary, as an operator or an older seating might have made.
+    const start = new Date("2026-08-31T12:00:00Z");
+    await app.transaction(async (tx) => {
+      await tx.insert(s.councilTerms).values({ startsAt: start, endsAt: new Date("2026-09-30T00:00:00Z"), method: {} });
+    });
+    const r = await recomputeCouncil(app, new Date("2026-09-02T00:00:00Z"));
+    expect(r).toMatchObject({ created: true, reason: "month_changed" });
   });
 });
 
