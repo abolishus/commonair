@@ -27,7 +27,7 @@ import {
   type ExportJobDto,
   type ExportKind,
 } from "../lib/privacy.ts";
-import { browserPollEnv, pollWhileVisible } from "../lib/stream-health.ts";
+import { browserPollEnv, pollWhileVisible, type PollEnv } from "../lib/stream-health.ts";
 import { useLoad } from "./money/use-load.ts";
 
 function exportLabels(): ExportPanelLabels {
@@ -82,7 +82,16 @@ function LoadError({ testId, message, onRetry }: { testId: string; message: stri
  * 5 s while one is queued or running. The download link is the API's presigned URL, shown only
  * while the export is ready and unexpired.
  */
-export function ExportSection({ hasChannel, now = Date.now }: { hasChannel: boolean; now?: () => number }) {
+export function ExportSection({
+  hasChannel,
+  now = Date.now,
+  pollEnv,
+}: {
+  hasChannel: boolean;
+  now?: () => number;
+  /** Tests pass a fake clock and visibility; the browser's otherwise. */
+  pollEnv?: PollEnv;
+}) {
   const [exports, setExports] = React.useState<ExportJobDto[] | null>(null);
   const [failed, setFailed] = React.useState(false);
   const seq = React.useRef({ next: 0, minApplied: 0 });
@@ -129,9 +138,9 @@ export function ExportSection({ hasChannel, now = Date.now }: { hasChannel: bool
         });
       },
       EXPORTS_POLL_MS,
-      browserPollEnv(),
+      pollEnv ?? browserPollEnv(),
     );
-  }, [polling, load]);
+  }, [polling, load, pollEnv]);
 
   if (exports === null && failed)
     return (

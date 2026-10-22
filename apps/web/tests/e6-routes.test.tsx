@@ -15,6 +15,7 @@ import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import type { SessionUser } from "../src/lib/bootstrap-types.ts";
 import type { EventSourceLike, OverlayConnectionDeps } from "../src/lib/overlay-connection.ts";
+import type { PollEnv } from "../src/lib/stream-health.ts";
 
 const session = vi.hoisted(() => ({ me: null as SessionUser | null }));
 const fns = vi.hoisted(() => ({
@@ -93,6 +94,7 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
 });
 
 const { SimulcastSection } = await import("../src/components/simulcast-section.tsx");
+const { ExportSection } = await import("../src/components/privacy-panels.tsx");
 const { OverlayAlertsPage } = await import("../src/components/overlay-alerts-page.tsx");
 const { Route: OverlaysRoute } = await import("../src/routes/_studio/overlays.tsx");
 const { Route: ContentRoute } = await import("../src/routes/_studio/content.tsx");
@@ -147,6 +149,44 @@ beforeEach(() => {
   session.me = owner;
 });
 afterEach(cleanup);
+
+/** A visible page whose interval fires only when the test says so. */
+function fakePoll() {
+  const timers = new Map<number, { fn: () => void; ms: number }>();
+  let next = 1;
+  const env: PollEnv = {
+    isVisible: () => true,
+    onVisibilityChange: () => () => {},
+    setInterval: (fn, ms) => {
+      const handle = next++;
+      timers.set(handle, { fn, ms });
+      return handle;
+    },
+    clearInterval: (handle) => {
+      timers.delete(handle as number);
+    },
+  };
+  return {
+    env,
+    /** Active intervals' periods. */
+    periods: () => [...timers.values()].map((timer) => timer.ms),
+    /** One interval period passes. */
+    tick: async () => {
+      await act(async () => {
+        for (const timer of timers.values()) timer.fn();
+        await Promise.resolve();
+      });
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 const target = (over: Record<string, unknown> = {}) => ({
   id: "0192f000-0000-7000-8000-0000000000a1",
@@ -275,6 +315,102 @@ const alertConfig = (type: string, over: Record<string, unknown> = {}) => ({
   minAmountCents: 0,
   durationMs: 6000,
   ...over,
+});
+
+describe("/dashboard simulcast polling", () => {
+  it("re-lists every 5 s while a target is enabled and the new status reaches data-status", async () => {
+    const poll = fakePoll();
+    fns.simulcastList.mockResolvedValueOnce([target({ status: "idle" })]).mockResolvedValue([target()]);
+    wrap(<SimulcastSection channel="rivertide" pollEnv={poll.env} />);
+    await waitFor(() => expect(screen.getByTestId("simulcast-target").getAttribute("data-status")).toBe("idle"));
+    expect(poll.periods()).toEqual([5_000]);
+    // The interval's start does not repeat the load that just answered.
+    expect(fns.simulcastList).toHaveBeenCalledTimes(1);
+    await poll.tick();
+    expect(fns.simulcastList).toHaveBeenCalledTimes(2);
+    expect(fns.simulcastList).toHaveBeenLastCalledWith({ channel: "rivertide" });
+    await waitFor(() => expect(screen.getByTestId("simulcast-target").getAttribute("data-status")).toBe("live"));
+    await poll.tick();
+    expect(fns.simulcastList).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops once every target is disabled and idle", async () => {
+    const poll = fakePoll();
+    fns.simulcastList
+      .mockResolvedValueOnce([target({ enabled: false, status: "live" })])
+      .mockResolvedValue([target({ enabled: false, status: "idle" })]);
+    wrap(<SimulcastSection channel="rivertide" pollEnv={poll.env} />);
+    await waitFor(() => expect(ids("simulcast-target")).toHaveLength(1));
+    // Disabled but still winding down: keep polling.
+    expect(poll.periods()).toEqual([5_000]);
+    await poll.tick();
+    await waitFor(() => expect(screen.getByTestId("simulcast-target").getAttribute("data-status")).toBe("idle"));
+    await waitFor(() => expect(poll.periods()).toEqual([]));
+    const calls = fns.simulcastList.mock.calls.length;
+    await poll.tick();
+    expect(fns.simulcastList).toHaveBeenCalledTimes(calls);
+  });
+
+  it("does not poll a list with nothing that can change", async () => {
+    const poll = fakePoll();
+    fns.simulcastList.mockResolvedValue([target({ enabled: false, status: "idle" })]);
+    wrap(<SimulcastSection channel="rivertide" pollEnv={poll.env} />);
+    await waitFor(() => expect(ids("simulcast-target")).toHaveLength(1));
+    expect(poll.periods()).toEqual([]);
+  });
+
+  it("starts polling after an add", async () => {
+    const poll = fakePoll();
+    fns.simulcastList.mockResolvedValueOnce([]).mockResolvedValue([target()]);
+    fns.simulcastCreate.mockResolvedValue(target({ status: "idle" }));
+    wrap(<SimulcastSection channel="rivertide" pollEnv={poll.env} />);
+    await screen.findByTestId("simulcast-empty");
+    expect(poll.periods()).toEqual([]);
+    fireEvent.change(screen.getByTestId("simulcast-name"), { target: { value: "Mock" } });
+    fireEvent.change(screen.getByTestId("simulcast-url"), { target: { value: "rtmp://mock-rtmp:1936/live" } });
+    fireEvent.change(screen.getByTestId("simulcast-key"), { target: { value: "k" } });
+    fireEvent.click(screen.getByTestId("simulcast-add"));
+    await waitFor(() => expect(poll.periods()).toEqual([5_000]));
+    await poll.tick();
+    await waitFor(() => expect(screen.getByTestId("simulcast-target").getAttribute("data-status")).toBe("live"));
+  });
+
+  it("a list answer that started before a toggle does not overwrite it", async () => {
+    const poll = fakePoll();
+    const slow = deferred<unknown>();
+    fns.simulcastList.mockResolvedValueOnce([target()]).mockReturnValueOnce(slow.promise);
+    fns.simulcastUpdate.mockResolvedValue(target({ enabled: false, status: "idle" }));
+    wrap(<SimulcastSection channel="rivertide" pollEnv={poll.env} />);
+    const row = await screen.findByTestId("simulcast-target");
+    await poll.tick();
+    expect(fns.simulcastList).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(row).getByTestId("simulcast-enabled"));
+    await waitFor(() => expect(screen.getByTestId("simulcast-target").getAttribute("data-enabled")).toBe("false"));
+    await act(async () => {
+      slow.resolve([target()]);
+      await slow.promise;
+    });
+    expect(screen.getByTestId("simulcast-target").getAttribute("data-enabled")).toBe("false");
+    expect(screen.getByTestId("simulcast-target").getAttribute("data-status")).toBe("idle");
+  });
+
+  it("a list answer that started before a remove does not bring the target back", async () => {
+    const poll = fakePoll();
+    const slow = deferred<unknown>();
+    fns.simulcastList.mockResolvedValueOnce([target()]).mockReturnValueOnce(slow.promise);
+    fns.simulcastRemove.mockResolvedValue({ ok: true });
+    wrap(<SimulcastSection channel="rivertide" pollEnv={poll.env} />);
+    const row = await screen.findByTestId("simulcast-target");
+    await poll.tick();
+    fireEvent.click(within(row).getByTestId("simulcast-remove"));
+    fireEvent.click(await waitFor(() => screen.getByTestId("confirm-dialog-confirm")));
+    await waitFor(() => expect(ids("simulcast-target")).toHaveLength(0));
+    await act(async () => {
+      slow.resolve([target()]);
+      await slow.promise;
+    });
+    expect(ids("simulcast-target")).toHaveLength(0);
+  });
 });
 
 describe("/overlays", () => {
@@ -567,6 +703,67 @@ describe("/settings/privacy", () => {
     fireEvent.click(ids("export-request")[1] as HTMLElement);
     await waitFor(() => expect(fns.exportsCreate).toHaveBeenCalledWith({ kind: "channel" }));
     await waitFor(() => expect(fns.exportsList).toHaveBeenCalledTimes(2));
+  });
+
+  it("polls exports.list while one is queued or running until both are ready", async () => {
+    const poll = fakePoll();
+    const queued = exportJob({ status: "queued", downloadUrl: null, expiresAt: null });
+    const running = exportJob({ id: "c", kind: "channel", status: "running", downloadUrl: null, expiresAt: null });
+    fns.exportsList
+      .mockResolvedValueOnce([queued, running])
+      .mockResolvedValueOnce([exportJob(), running])
+      .mockResolvedValue([exportJob(), exportJob({ id: "c", kind: "channel" })]);
+    wrap(<ExportSection hasChannel pollEnv={poll.env} />);
+    await waitFor(() => expect(ids("export-row")).toHaveLength(2));
+    expect(ids("export-row").map((row) => row.getAttribute("data-status"))).toEqual(["queued", "running"]);
+    expect(ids("export-download")).toHaveLength(0);
+    expect(poll.periods()).toEqual([5_000]);
+    expect(fns.exportsList).toHaveBeenCalledTimes(1);
+    await poll.tick();
+    await waitFor(() =>
+      expect(ids("export-row").map((row) => row.getAttribute("data-status"))).toEqual(["ready", "running"]),
+    );
+    expect(ids("export-download")).toHaveLength(1);
+    await poll.tick();
+    await waitFor(() => expect(ids("export-download")).toHaveLength(2));
+    // Nothing queued or running any more: polling stops.
+    await waitFor(() => expect(poll.periods()).toEqual([]));
+    const calls = fns.exportsList.mock.calls.length;
+    await poll.tick();
+    expect(fns.exportsList).toHaveBeenCalledTimes(calls);
+  });
+
+  it("does not poll exports when nothing is queued or running", async () => {
+    const poll = fakePoll();
+    fns.exportsList.mockResolvedValue([exportJob(), exportJob({ id: "f", status: "failed", downloadUrl: null })]);
+    wrap(<ExportSection hasChannel pollEnv={poll.env} />);
+    await waitFor(() => expect(ids("export-row")).toHaveLength(2));
+    expect(poll.periods()).toEqual([]);
+  });
+
+  it("a request starts polling and a stale list answer does not drop the new export", async () => {
+    const poll = fakePoll();
+    const slow = deferred<unknown>();
+    const job = exportJob({ status: "queued", downloadUrl: null, expiresAt: null });
+    fns.exportsList.mockResolvedValueOnce([]).mockReturnValueOnce(slow.promise).mockResolvedValue([exportJob()]);
+    fns.exportsCreate.mockResolvedValue(job);
+    wrap(<ExportSection hasChannel pollEnv={poll.env} />);
+    await screen.findByTestId("export-empty");
+    fireEvent.click(ids("export-request")[0] as HTMLElement);
+    await waitFor(() => expect(poll.periods()).toEqual([5_000]));
+    await poll.tick();
+    expect(fns.exportsList).toHaveBeenCalledTimes(2);
+    // A second request lands before the slow list answers.
+    fns.exportsCreate.mockResolvedValue({ ...job, id: "n", kind: "channel" });
+    fireEvent.click(ids("export-request")[1] as HTMLElement);
+    await waitFor(() => expect(ids("export-row")).toHaveLength(2));
+    await act(async () => {
+      slow.resolve([]);
+      await slow.promise;
+    });
+    expect(ids("export-row")).toHaveLength(2);
+    await poll.tick();
+    await waitFor(() => expect(ids("export-download")).toHaveLength(1));
   });
 
   it("deletion: request with the typed username, then the scheduled status and cancel", async () => {

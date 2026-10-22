@@ -8,7 +8,7 @@ import { HeadContent, Outlet, Scripts, createRootRoute, useLocation } from "@tan
 import * as React from "react";
 import { locale, t, uiMessages } from "../i18n/index.ts";
 import { getBootstrap } from "../lib/bootstrap.ts";
-import { isOverlayPath } from "../lib/overlay-page.ts";
+import { rootChrome } from "../lib/overlay-page.ts";
 import { storeTheme } from "../lib/theme.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import appCss from "../styles.css?url";
@@ -34,8 +34,8 @@ function RootComponent(): React.JSX.Element {
   const boot = Route.useLoaderData();
   const [theme, setThemeState] = React.useState<Theme>(boot.theme);
   const resolved = useResolvedTheme(theme);
-  // OBS browser sources composite the page over the stream: nothing may paint a background.
-  const overlay = useLocation({ select: (location) => isOverlayPath(location.pathname) });
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const chrome = rootChrome(pathname, theme);
   // Set once React has hydrated: input typed before then is reset by React, so tests (the harness,
   // screen readers' automation) can wait for `html[data-hydrated]` before they interact.
   React.useEffect(() => {
@@ -53,22 +53,11 @@ function RootComponent(): React.JSX.Element {
     [theme],
   );
   return (
-    <html
-      lang={locale}
-      data-theme={theme}
-      data-overlay={overlay ? "true" : undefined}
-      className={overlay ? "bg-transparent" : theme === "light" ? "light" : undefined}
-    >
+    <html lang={locale} data-theme={theme} data-overlay={chrome.dataOverlay} className={chrome.htmlClass}>
       <head>
         <HeadContent />
       </head>
-      <body
-        className={
-          overlay
-            ? "min-h-dvh bg-transparent font-sans antialiased"
-            : "min-h-dvh bg-background font-sans text-foreground antialiased"
-        }
-      >
+      <body className={chrome.bodyClass}>
         <LocaleProvider locale={locale} messages={uiMessages}>
           <NowProvider now={boot.now}>
             <TooltipProvider>

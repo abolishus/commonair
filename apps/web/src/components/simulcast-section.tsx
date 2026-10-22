@@ -21,7 +21,7 @@ import {
   type SimulcastErrorView,
   type SimulcastTargetDto,
 } from "../lib/simulcast.ts";
-import { browserPollEnv, pollWhileVisible } from "../lib/stream-health.ts";
+import { browserPollEnv, pollWhileVisible, type PollEnv } from "../lib/stream-health.ts";
 
 function labels(): SimulcastPanelLabels {
   return {
@@ -58,7 +58,14 @@ class ShownInline extends Error {}
  * tab is visible. A response requested before a local change is dropped, so a slow poll cannot
  * bring back a removed target or an old switch position.
  */
-export function SimulcastSection({ channel }: { channel: string }): React.JSX.Element {
+export function SimulcastSection({
+  channel,
+  pollEnv,
+}: {
+  channel: string;
+  /** Tests pass a fake clock and visibility; the browser's otherwise. */
+  pollEnv?: PollEnv;
+}): React.JSX.Element {
   const [targets, setTargets] = React.useState<SimulcastTargetDto[] | null>(null);
   const [failed, setFailed] = React.useState(false);
   const [error, setError] = React.useState<SimulcastErrorView | null>(null);
@@ -115,9 +122,9 @@ export function SimulcastSection({ channel }: { channel: string }): React.JSX.El
         });
       },
       SIMULCAST_POLL_MS,
-      browserPollEnv(),
+      pollEnv ?? browserPollEnv(),
     );
-  }, [polling, load]);
+  }, [polling, load, pollEnv]);
 
   const add = async (values: SimulcastAddValues): Promise<void> => {
     const problem = simulcastUrlProblem(values.rtmpUrl);

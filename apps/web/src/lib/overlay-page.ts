@@ -13,6 +13,32 @@ export function isOverlayPath(pathname: string): boolean {
   return pathname.startsWith(OVERLAY_PATH_PREFIX);
 }
 
+/** The root's `<html>` and `<body>` attributes for a page. */
+export interface RootChrome {
+  htmlClass: string | undefined;
+  dataOverlay: "true" | undefined;
+  bodyClass: string;
+}
+
+/**
+ * OBS browser sources composite the page over the stream: on `/overlay/*` nothing may paint a
+ * background or a theme colour, so the root drops `bg-background`, `text-foreground` and the
+ * theme class there.
+ */
+export function rootChrome(pathname: string, theme: string): RootChrome {
+  if (isOverlayPath(pathname))
+    return {
+      htmlClass: "bg-transparent",
+      dataOverlay: "true",
+      bodyClass: "min-h-dvh bg-transparent font-sans antialiased",
+    };
+  return {
+    htmlClass: theme === "light" ? "light" : undefined,
+    dataOverlay: undefined,
+    bodyClass: "min-h-dvh bg-background font-sans text-foreground antialiased",
+  };
+}
+
 /** Head tags for an overlay page; they override the root's (deepest route wins per name). */
 export function overlayHead(title: string) {
   return {
