@@ -40,5 +40,6 @@ describe("synthetic fixture generator", () => {
     const run = Bun.spawn([process.execPath, script], { stdout: "ignore", stderr: "ignore" });
     expect(await run.exited).toBe(0);
     expect(await digest()).toEqual(before);
-  });
+    // Ten ffmpeg decodes plus the generator's encodes: seconds on a shared CI runner.
+  }, 60_000);
 });
