@@ -54,9 +54,9 @@ Environment=MODERATION_HASHLIST_NCII=/var/lib/commonair/moderation/ncii.pdq
 Environment=MODERATION_CLASSIFIER_MODEL=/var/lib/commonair/models/model.onnx
 Environment=ONNXRUNTIME_NODE_INSTALL=skip
 Secret=commonair-database-url,type=env,target=DATABASE_URL
-Volume=%h/.local/share/commonair/moderation/csam.pdq:/var/lib/commonair/moderation/csam.pdq:ro,Z
-Volume=%h/.local/share/commonair/moderation/ncii.pdq:/var/lib/commonair/moderation/ncii.pdq:ro,Z
-Volume=%h/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx:/var/lib/commonair/models/model.onnx:ro,Z
+Volume=%h/.local/share/commonair/moderation/csam.pdq:/var/lib/commonair/moderation/csam.pdq:ro,z
+Volume=%h/.local/share/commonair/moderation/ncii.pdq:/var/lib/commonair/moderation/ncii.pdq:ro,z
+Volume=%h/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx:/var/lib/commonair/models/model.onnx:ro,z
 HealthCmd=bun /opt/commonair/healthcheck.ts
 HealthInterval=10s
 HealthTimeout=3s

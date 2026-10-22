@@ -352,8 +352,21 @@ describe("Quadlet mirror", () => {
   const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
   // Production-only units with no compose service: the timer-driven IRC certificate sync.
   const QUADLET_ONLY = new Set(["irc-cert"]);
-  // Bind mounts two units share (one writes, one reads) carry the shared SELinux label.
-  const SHARED_BINDS = new Set(["%h/.config/commonair/irc-tls"]);
+  // A host path bind-mounted by two or more units carries the shared SELinux label `z`: the
+  // private `Z` relabels it per container, so the last one to start locks the others out.
+  const bindSources = Object.values(units).flatMap((u) =>
+    [...new Set(keys(u, "Volume").map((v) => v.slice(0, v.indexOf(":"))))].filter((s) => !s.endsWith(".volume")),
+  );
+  const SHARED_BINDS = new Set(bindSources.filter((s, i) => bindSources.indexOf(s) !== i));
+
+  test("the shared bind mounts are the IRC certificate, the hash lists and the model", () => {
+    expect([...SHARED_BINDS].sort()).toEqual([
+      "%h/.config/commonair/irc-tls",
+      "%h/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx",
+      "%h/.local/share/commonair/moderation/csam.pdq",
+      "%h/.local/share/commonair/moderation/ncii.pdq",
+    ]);
+  });
   // The only ports a production host exposes; everything else binds 127.0.0.1.
   const PUBLIC_PORTS: Record<string, string[]> = {
     caddy: ["0.0.0.0:80:80", "0.0.0.0:443:443", "0.0.0.0:443:443/udp"],

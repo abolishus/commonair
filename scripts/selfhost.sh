@@ -609,7 +609,7 @@ fetch_model() {
   fi
   info "checking the moderation model (downloads it if missing)"
   podman run --rm --user 0:0 --entrypoint bun \
-    -v "$1/tools:/tools:ro,Z" -v "$_dir:/models:Z" -w /tools \
+    -v "$1/tools:/tools:ro,Z" -v "$_dir:/models:z" -w /tools \
     "$(tools_image "$1")" /tools/fetch-model.js --out "/models/$_file" >/dev/null ||
     die "the moderation model is missing or does not match its pinned sha256" \
       "fix: re-run with network access, or pass --model <path> with a verified copy"
