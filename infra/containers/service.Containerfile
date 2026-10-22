@@ -67,7 +67,7 @@ RUN set -eu; \
 # as Railway). Compose and Quadlet mount the file instead. Pinned revision, sha256-checked by
 # fetch-model; this stage depends on those two files only, so it stays cached.
 FROM ${BUN_IMAGE} AS model
-ARG BUNDLE_MODEL
+ARG BUNDLE_MODEL=""
 WORKDIR /src
 COPY --from=manifests /src/scripts/fetch-model.ts scripts/
 COPY --from=manifests /src/packages/moderation/src/model.ts packages/moderation/src/
