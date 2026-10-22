@@ -46,7 +46,8 @@ const registry = JSON.parse(read("infra/image-licenses.json")) as Record<string,
 
 const ONE_SHOT = new Set(["migrate", "garage-init"]);
 const OWN_IMAGE = /^\$\{IMAGE_REGISTRY:-localhost\/commonair\}\/([a-z-]+):\$\{IMAGE_TAG:-dev\}$/;
-const PINNED = /^([a-z0-9.-]+\.[a-z]+(?::\d+)?\/[a-z0-9._/-]+):([A-Za-z0-9._-]+)$/;
+// Tag for humans and image-licenses.json, digest because tags are mutable (ADR 0022).
+const PINNED = /^([a-z0-9.-]+\.[a-z]+(?::\d+)?\/[a-z0-9._/-]+):([A-Za-z0-9._-]+)@sha256:[0-9a-f]{64}$/;
 
 /** `${VAR:-default}` → default (or the literal when not templated). */
 const defaultOf = (s: string) => s.replace(/\$\{[A-Z0-9_]+:-([^}]*)\}/g, "$1");
@@ -60,7 +61,7 @@ function splitPort(spec: string): { address: string; host: string; container: st
 
 function assertPinned(ref: string, where: string) {
   const m = PINNED.exec(ref);
-  expect(m, `${where}: ${ref} must be fully qualified with a pinned tag`).not.toBeNull();
+  expect(m, `${where}: ${ref} must be fully qualified, pinned as name:tag@sha256:<digest>`).not.toBeNull();
   const [, repo, tag] = m!;
   expect(tag, `${where}: ${ref} uses a floating tag`).not.toMatch(/^(latest|main|nightly|edge)$/);
   const entry = registry[repo!];

@@ -1,0 +1,11 @@
+{
+  "advisoryExceptions": [
+    {
+      "id": "GHSA-67mh-4wv8-2f99",
+      "package": "esbuild",
+      "reason": "esbuild 0.18.20 comes only through drizzle-kit 0.31.11 -> @esbuild-kit/core-utils, a dev-only migration generator. The advisory is about esbuild's dev server (`serve`), which drizzle-kit never starts. Remove when drizzle-kit drops @esbuild-kit.",
+      "expires": "2027-01-22"
+    }
+  ],
+  "trustedDependencies": {}
+}

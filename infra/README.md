@@ -46,8 +46,10 @@ rootless). Nothing needs root, `privileged`, host ports below 1024 or the Podman
 
 "probe" images (`containers/probe.Containerfile`) are the upstream image unchanged plus a
 static BusyBox, because those images ship without a shell and a healthcheck needs `wget`.
-Every image is pinned and listed with its license in `image-licenses.json` (ADR 0002);
-`infra/tests/compose.test.ts` and `bun scripts/check-licenses.ts` enforce it.
+Every image is pinned as `name:tag@sha256:<digest>` and listed with its license in
+`image-licenses.json` (ADRs 0002 and 0022); `infra/tests/compose.test.ts`,
+`bun scripts/check-licenses.ts` and `bun scripts/check-supply-chain.ts` enforce it. To bump an
+image, change its tag, run `bun scripts/pin-images.ts --write`, and update its license entry.
 
 Docker Hub limits anonymous pulls, which stalls fresh stacks and CI. Where the publisher also
 pushes the same image to its own registry (Quay for Prometheus; GitHub's registry for Valkey,
@@ -71,6 +73,21 @@ only on Docker Hub stay there; `podman login docker.io` raises their limit.
 `loki` + `tempo` → `otel-collector`; then the app services, which wait for both one-shot jobs,
 Valkey and the collector. `irc` waits for `chat`; `origin` and `media` for `mediamtx`;
 `web` for `api`; `caddy` for `web` and `api`.
+
+**Restart policy under podman-compose.** podman-compose turns every `depends_on` entry into
+a hard `podman create --requires=…`, the one-shot `service_completed_successfully` jobs
+included. Podman only applies a restart policy when every required container is _running_,
+and `migrate` and `garage-init` have exited by design. So under `podman compose` an app
+service that exits on its own (crash, OOM, uncaught error) stays `stopped` with RestartCount 0,
+despite `restart: unless-stopped`. `podman ps` shows it as `Exited`. Containers without
+`--requires`, or whose dependencies all keep running, restart normally. The services are
+written to survive dependency restarts rather than relying on this: a Postgres restart or
+crash recovery fails the queries in flight and the pool reconnects
+(`packages/db/tests/reconnect.int.test.ts`). To bring a stopped service back, run
+`podman start commonair_<service>_1` (manual start does accept exited dependencies) or
+`bun scripts/infra.ts stack` again. Production is not affected: the Quadlet units run the
+one-shots as `Type=oneshot` with `RemainAfterExit=yes` and the services with `Restart=always`
+(see [Production: Quadlet](#production-quadlet)).
 
 ## Ports
 

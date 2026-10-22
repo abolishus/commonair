@@ -26,28 +26,36 @@ they are the source of truth across sessions. Architecture: [docs/architecture.m
    fails on stray literals.
 6. **No secrets in git.** `.env.example` is the only env file committed. Generate a local `.env`
    with `bun scripts/init-env.ts`.
-7. **Nothing is committed red.** Run `bun run verify` before every commit.
-8. **Integrity is enforced at the lowest layer that can enforce it.** Ledger append-only and
+7. **Vet, cool down, pin, audit** (ADR 0022). Before adding or upgrading any dependency run
+   `bun scripts/vet-package.ts <name>[@version]` and read every warning. Nothing younger than
+   7 days (`bunfig.toml` `minimumReleaseAge`); exact versions only; no install scripts unless
+   listed in `supply-chain.json`; Actions pinned to commit SHAs; third-party images pinned as
+   `name:tag@sha256:…` (`bun scripts/pin-images.ts --write`). `bun audit` and govulncheck must be
+   clean, apart from dated exceptions with reasons in `supply-chain.json`.
+8. **Nothing is committed red.** Run `bun run verify` before every commit.
+9. **Integrity is enforced at the lowest layer that can enforce it.** Ledger append-only and
    balance, governance protections, vote rules: database triggers (`packages/db/drizzle/0001_protections.sql`).
    Application checks are in addition to, never instead of, those.
 
 ## Commands
 
-| Command                                                 | What it does                                                                                                           |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `bun install`                                           | Install all workspaces (Bun isolated linker)                                                                           |
-| `bun scripts/init-env.ts`                               | Write `.env` with fresh random secrets (never overwrites)                                                              |
-| `bun scripts/infra.ts test`                             | Start Postgres, Valkey, Mailpit (and Garage) under Podman, wait for health                                             |
-| `bun run verify`                                        | **The gate**: format → lint → typecheck → unit → infra → migrations → integration → licenses → domains → reuse → relay |
-| `bun run verify --quick`                                | Same without integration tests (inner loop only, never the commit gate)                                                |
-| `bun run verify --scenario <name>`                      | Gate plus a named harness scenario                                                                                     |
-| `bun run verify:full`                                   | Gate plus the full harness scenario (end of every phase)                                                               |
-| `vp fmt`                                                | Format everything (Oxfmt)                                                                                              |
-| `vp lint --deny-warnings`                               | Lint with type-aware rules (Oxlint)                                                                                    |
-| `vp run -r test` / `vp run -r test:int`                 | Unit / integration tests in every workspace                                                                            |
-| `bun run --filter @commonair/db generate --name <name>` | Generate a named migration from schema changes                                                                         |
-| `podman compose up`                                     | The whole platform                                                                                                     |
-| `bun harness/src/cli.ts run <scenario>`                 | One harness scenario against the running stack                                                                         |
+| Command                                                 | What it does                                                                                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`                                           | Install all workspaces (Bun isolated linker)                                                                                          |
+| `bun scripts/init-env.ts`                               | Write `.env` with fresh random secrets (never overwrites)                                                                             |
+| `bun scripts/infra.ts test`                             | Start Postgres, Valkey, Mailpit (and Garage) under Podman, wait for health                                                            |
+| `bun run verify`                                        | **The gate**: format → lint → typecheck → unit → infra → migrations → integration → licenses → supply chain → domains → reuse → relay |
+| `bun scripts/vet-package.ts <name>[@ver]`               | Vet a package **before** `bun add`: age, advisories, license, install scripts, provenance, publisher                                  |
+| `bun scripts/pin-images.ts [--write]`                   | Report (or write) digest pins for every third-party container image                                                                   |
+| `bun run verify --quick`                                | Same without integration tests (inner loop only, never the commit gate)                                                               |
+| `bun run verify --scenario <name>`                      | Gate plus a named harness scenario                                                                                                    |
+| `bun run verify:full`                                   | Gate plus the full harness scenario (end of every phase)                                                                              |
+| `vp fmt`                                                | Format everything (Oxfmt)                                                                                                             |
+| `vp lint --deny-warnings`                               | Lint with type-aware rules (Oxlint)                                                                                                   |
+| `vp run -r test` / `vp run -r test:int`                 | Unit / integration tests in every workspace                                                                                           |
+| `bun run --filter @commonair/db generate --name <name>` | Generate a named migration from schema changes                                                                                        |
+| `podman compose up`                                     | The whole platform                                                                                                                    |
+| `bun harness/src/cli.ts run <scenario>`                 | One harness scenario against the running stack                                                                                        |
 
 Tests run under the Bun runtime (`bun --bun vp test run`), so services can use `Bun.*` APIs in
 code under test. Unit test files are `*.test.ts`; integration tests are `*.int.test.ts` and may
@@ -70,6 +78,8 @@ assume the infra services are up (`DATABASE_URL`, `VALKEY_URL`, …, with the `.
   owns; it may read anything but write only those.
 - Need a change outside your paths (a contract field, a migration, a shared component)? Do not
   make it. Report it as a **contract request** in your final message, with the exact change.
+- New or upgraded dependencies need a passing `bun scripts/vet-package.ts` first; paste its
+  output (with any warnings you accepted, and why) in your final message.
 - Shared lockfile: run `bun install` only when your brief allows adding dependencies, and add
   them to your own package's `package.json` with exact versions via the root `catalog` only if
   another package already uses them. The orchestrator reconciles `bun.lock` at integration.

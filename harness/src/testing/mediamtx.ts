@@ -12,7 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { waitFor } from "../wait.ts";
 
-export const MEDIAMTX_IMAGE = "docker.io/bluenviron/mediamtx:1.21.2";
+export const MEDIAMTX_IMAGE =
+  "docker.io/bluenviron/mediamtx:1.21.2@sha256:c7540465f868a02652118bea5a0daab12a29ac0f6cb8485abd535939ecddf886";
 
 export interface MediaMtxInstance {
   name: string;

@@ -8,5 +8,5 @@
 # Per-host settings come from the environment: MTX_AUTHHTTPADDRESS (auth hook URL),
 # API_INTERNAL_URL (online/offline hooks) and INTERNAL_API_SECRET.
 
-FROM docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+FROM docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95
 COPY infra/mediamtx/mediamtx.yml /mediamtx.yml

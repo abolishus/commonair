@@ -12,7 +12,7 @@
 # Only the service's workspace closure (infra/containers/closure.ts) is installed and
 # copied. The `media` variant adds FFmpeg from Debian (GPL-2.0-or-later, ADR 0002).
 
-ARG BUN_IMAGE=docker.io/oven/bun:1.4.3-slim
+ARG BUN_IMAGE=docker.io/oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288
 
 # --- manifests: package.json files + lockfile only, so the install layer below is
 # cached until a manifest changes (not on every source edit).

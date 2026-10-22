@@ -125,6 +125,13 @@ to streaming paths should be exercised by a harness scenario.
 
 Prefer the standard library and existing dependencies. If you need a new one:
 
+- Vet it first: `bun scripts/vet-package.ts <name>[@version]`. It refuses versions
+  published less than 7 days ago, versions with known vulnerabilities, deprecated
+  versions and non-OSI licenses, and it flags install scripts, missing provenance
+  and publisher changes for you to review. Then install the exact version it
+  prints. Upgrades follow the same rule. See
+  [ADR 0022](docs/decisions/0022-supply-chain.md).
+
 - Its license must be OSI-approved and on the allowlist: MIT, Apache-2.0, the
   BSD family, ISC, MPL-2.0, LGPL, GPL, AGPL, and OFL (fonts only). The license
   check in `bun run verify` fails on anything else, including source-available

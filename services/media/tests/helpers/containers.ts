@@ -9,8 +9,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const MEDIAMTX_IMAGE = "docker.io/bluenviron/mediamtx:1.21.2-ffmpeg";
-export const GARAGE_IMAGE = "docker.io/dxflrs/garage:v2.4.1";
+export const MEDIAMTX_IMAGE =
+  "docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95";
+export const GARAGE_IMAGE =
+  "docker.io/dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020";
 const REPO_ROOT = new URL("../../../../", import.meta.url).pathname;
 export const MEDIAMTX_CONFIG = join(REPO_ROOT, "infra/mediamtx/mediamtx.yml");
 export const MOCK_TARGET_CONFIG = join(REPO_ROOT, "infra/mediamtx/mock-rtmp-target.yml");

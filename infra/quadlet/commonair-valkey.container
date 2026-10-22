@@ -6,7 +6,7 @@
 Description=CommonAir valkey
 
 [Container]
-Image=ghcr.io/valkey-io/valkey:9.1.2-trixie
+Image=ghcr.io/valkey-io/valkey:9.1.2-trixie@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
 ContainerName=commonair-valkey
 Network=commonair.network
 NetworkAlias=valkey

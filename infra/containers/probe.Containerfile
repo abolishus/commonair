@@ -8,7 +8,7 @@
 #     --build-arg BASE_IMAGE=docker.io/grafana/loki:3.7.8 -t localhost/commonair/loki:dev .
 
 ARG BASE_IMAGE
-ARG PROBE_IMAGE=docker.io/library/alpine:3.24.2
+ARG PROBE_IMAGE=docker.io/library/alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 FROM ${PROBE_IMAGE} AS probe
 RUN apk add --no-cache busybox-static && cp /bin/busybox.static /busybox

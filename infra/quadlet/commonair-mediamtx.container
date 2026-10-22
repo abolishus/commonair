@@ -6,7 +6,7 @@
 Description=CommonAir mediamtx
 
 [Container]
-Image=docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+Image=docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95
 ContainerName=commonair-mediamtx
 Network=commonair.network
 NetworkAlias=mediamtx

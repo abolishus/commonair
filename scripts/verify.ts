@@ -4,7 +4,7 @@
 /**
  * The single verification gate. Every agent, contributor and CI job runs this.
  *
- *   bun run verify                 format → lint+types → unit → integration → repo policy → relay
+ *   bun run verify                 format → lint+types → unit → integration → repo policy → supply chain → relay
  *   bun run verify --quick         skip integration tests (inner loop only; never the commit gate)
  *   bun run verify --scenario chat ...plus the named harness scenario(s)
  *   bun run verify:full            everything, plus the full harness scenario
@@ -54,6 +54,8 @@ const steps: Step[] = [
   },
   { name: "integration tests", timeoutMin: 30, cmd: ["vp", "run", "--no-cache", "-r", "test:int"], when: () => !quick },
   { name: "licenses", timeoutMin: 5, cmd: ["bun", "scripts/check-licenses.ts"] },
+  // Pins, cooldown, install scripts, advisories, action SHAs, image digests (ADR 0022). Needs the network.
+  { name: "supply chain", timeoutMin: 5, cmd: ["bun", "scripts/check-supply-chain.ts"] },
   { name: "stray domains", timeoutMin: 5, cmd: ["bun", "scripts/check-domains.ts"] },
   { name: "reuse lint", timeoutMin: 5, cmd: ["reuse", "lint", "--quiet"] },
   {
@@ -68,6 +70,13 @@ const steps: Step[] = [
     timeoutMin: 10,
     cmd: ["bash", "-c", "go vet ./... && go test -race ./..."],
     cwd: "relay",
+    when: () => existsSync("relay/go.mod"),
+  },
+  {
+    // Known vulnerabilities in the Go toolchain's stdlib and any module the relay imports.
+    name: "relay: govulncheck",
+    timeoutMin: 5,
+    cmd: ["bun", "scripts/check-go-vulns.ts"],
     when: () => existsSync("relay/go.mod"),
   },
   {

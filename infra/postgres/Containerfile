@@ -10,7 +10,7 @@
 # (glibc 2.39) runs on Debian trixie (glibc 2.41). Checksums were computed from the
 # release assets on 2026-10-18 and match the digests GitHub publishes for them.
 
-ARG POSTGRES_IMAGE=docker.io/library/postgres:17.11-trixie
+ARG POSTGRES_IMAGE=docker.io/library/postgres:17.11-trixie@sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe
 
 FROM ${POSTGRES_IMAGE} AS walg
 ARG WALG_VERSION=v3.0.9

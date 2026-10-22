@@ -24,6 +24,9 @@
     "test:int": "vp run -r test:int",
     "build": "vp run -r build",
     "lint:licenses": "bun scripts/check-licenses.ts",
+    "lint:supply-chain": "bun scripts/check-supply-chain.ts",
+    "vet": "bun scripts/vet-package.ts",
+    "pin-images": "bun scripts/pin-images.ts",
     "lint:domains": "bun scripts/check-domains.ts",
     "lint:headers": "bun scripts/check-headers.ts",
     "lint:reuse": "reuse lint",
@@ -76,5 +79,6 @@
     "recharts": "3.8.0",
     "@tanstack/react-table": "8.21.3",
     "fflate": "0.8.3"
-  }
+  },
+  "trustedDependencies": []
 }

@@ -12,7 +12,7 @@ Requires=commonair-tempo.service
 After=commonair-tempo.service
 
 [Container]
-Image=docker.io/grafana/grafana:13.2.4
+Image=docker.io/grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
 ContainerName=commonair-grafana
 Network=commonair.network
 NetworkAlias=grafana

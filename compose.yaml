@@ -144,7 +144,7 @@ services:
       disable: true
 
   valkey:
-    image: ghcr.io/valkey-io/valkey:9.1.2-trixie
+    image: ghcr.io/valkey-io/valkey:9.1.2-trixie@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
     restart: unless-stopped
     # Ephemeral by design (docs/architecture.md): presence, caches, pub/sub, job queues.
     command: ["valkey-server", "--appendonly", "no", "--save", ""]
@@ -154,7 +154,7 @@ services:
       test: ["CMD", "valkey-cli", "ping"]
 
   garage:
-    image: docker.io/dxflrs/garage:v2.4.1
+    image: docker.io/dxflrs/garage:v2.4.1@sha256:9c96caa2612d3411acc5b0e6701fb238dbfba33e533a6d7d3d811a4b12d0d020
     restart: unless-stopped
     environment:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:-}
@@ -191,7 +191,7 @@ services:
       disable: true
 
   mailpit:
-    image: ghcr.io/axllent/mailpit:v1.31.6
+    image: ghcr.io/axllent/mailpit:v1.31.6@sha256:23fe39e81bde596a918000b3135c0f85dc8bb4c9ea6be274b051143f3e300387
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${MAILPIT_SMTP_PORT:-1025}:1025"
@@ -202,7 +202,7 @@ services:
 
   # ---------------------------------------------------------------- media
   mediamtx:
-    image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+    image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95
     restart: unless-stopped
     environment:
       # Expanded by MediaMTX itself in the runOnOnline/runOnOffline hooks of mediamtx.yml.
@@ -222,7 +222,7 @@ services:
 
   mock-rtmp:
     profiles: [harness]
-    image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg
+    image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95
     restart: unless-stopped
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${MOCK_RTMP_PORT:-1936}:1936"]
     volumes: ["./infra/mediamtx/mock-rtmp-target.yml:/mediamtx.yml:ro,Z"]
@@ -395,7 +395,7 @@ services:
       dockerfile: infra/containers/probe.Containerfile
       args:
         {
-          BASE_IMAGE: "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.163.1",
+          BASE_IMAGE: "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.163.1@sha256:1175b03003053962012f5a231f5567f66a3e8fdb960c7835c0e48f7aa1555806",
         }
     restart: unless-stopped
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
@@ -412,7 +412,7 @@ services:
       test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
 
   prometheus:
-    image: quay.io/prometheus/prometheus:v3.15.0
+    image: quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -431,7 +431,10 @@ services:
     build:
       context: .
       dockerfile: infra/containers/probe.Containerfile
-      args: { BASE_IMAGE: "docker.io/grafana/loki:3.7.8" }
+      args:
+        {
+          BASE_IMAGE: "docker.io/grafana/loki:3.7.8@sha256:1107dd5274e0ada47e42472b7a7e71f3b2a2fe878878108f3e2f9e51528f0193",
+        }
     restart: unless-stopped
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
@@ -446,7 +449,10 @@ services:
     build:
       context: .
       dockerfile: infra/containers/probe.Containerfile
-      args: { BASE_IMAGE: "docker.io/grafana/tempo:3.1.0" }
+      args:
+        {
+          BASE_IMAGE: "docker.io/grafana/tempo:3.1.0@sha256:3076b8dcdfb32fd6bc5ccef85e7b7313e6199b9cb84366257fc17ecb696db5fd",
+        }
     restart: unless-stopped
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
@@ -457,7 +463,7 @@ services:
       test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3200/ready"]
 
   grafana:
-    image: docker.io/grafana/grafana:13.2.4
+    image: docker.io/grafana/grafana:13.2.4@sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f
     restart: unless-stopped
     # Refuse to start with Grafana's built-in admin/admin.
     entrypoint:
@@ -494,7 +500,7 @@ services:
   # ---------------------------------------------------------------- optional profiles
   caddy:
     profiles: [tls]
-    image: docker.io/library/caddy:2.11.7-alpine
+    image: docker.io/library/caddy:2.11.7-alpine@sha256:24ec7b05bc532c7bb57f727030c5056e257ff7138b4b50460306819ff79362bd
     restart: unless-stopped
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-localhost}
@@ -518,7 +524,7 @@ services:
 
   stripe-mock:
     profiles: [stripe]
-    image: docker.io/stripe/stripe-mock:v0.206.0
+    image: docker.io/stripe/stripe-mock:v0.206.0@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78
     restart: unless-stopped
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${STRIPE_MOCK_PORT:-12111}:12111"]
     healthcheck:
