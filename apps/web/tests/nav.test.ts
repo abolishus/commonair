@@ -166,6 +166,10 @@ describe("trust and safety navigation", () => {
     expect(accountMenu(true, legal).map((entry) => entry.id)).toContain("moderation");
     expect(accountMenu(true, moderator).map((entry) => entry.id)).toContain("moderation");
     expect(accountMenu(true, moderator).map((entry) => entry.id)).not.toContain("legal");
+    expect(adminNav("/admin/coop", { admin: true }).map((entry) => entry)).toEqual([
+      { id: "coop", to: "/admin/coop", current: true },
+    ]);
+    expect(adminNav("/admin/coop", moderator).map((entry) => entry.id)).not.toContain("coop");
   });
 });
 

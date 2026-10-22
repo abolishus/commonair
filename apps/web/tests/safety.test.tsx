@@ -78,6 +78,15 @@ describe("trust and safety role boundary", () => {
     });
   });
 
+  it("opens /admin/coop to admins only (the layout's guard)", async () => {
+    for (const role of ["user", "treasurer", "moderator", "legal"])
+      await expect(requireAdminPage("/admin/coop", async () => ({ role }))).rejects.toMatchObject({ isNotFound: true });
+    await expect(requireAdminPage("/admin/coop/", async () => null)).rejects.toMatchObject({ isNotFound: true });
+    await expect(requireAdminPage("/admin/coop", async () => ({ role: "admin" }))).resolves.toMatchObject({
+      me: { role: "admin" },
+    });
+  });
+
   it("recognizes only the playback mature-gate refusal", () => {
     expect(isMatureGate({ code: "FORBIDDEN", data: { reason: "mature_gate" } })).toBe(true);
     expect(isMatureGate({ code: "FORBIDDEN", data: { reason: "banned" } })).toBe(false);

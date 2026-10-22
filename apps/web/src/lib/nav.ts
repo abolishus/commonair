@@ -69,8 +69,8 @@ export interface AccountMenuOptions {
 }
 
 export interface AdminEntry {
-  id: "treasury" | "moderation" | "appeals" | "legal";
-  to: "/treasury" | "/admin/moderation" | "/admin/appeals" | "/admin/legal";
+  id: "treasury" | "moderation" | "appeals" | "legal" | "coop";
+  to: "/treasury" | "/admin/moderation" | "/admin/appeals" | "/admin/legal" | "/admin/coop";
   current: boolean;
 }
 
@@ -81,6 +81,8 @@ export interface AdminNavOptions {
   /** Moderators and admins: the appeals queue. */
   platformModerator?: boolean;
   legal?: boolean;
+  /** Admins: co-op administration (appoint workers). */
+  admin?: boolean;
 }
 
 /** Trailing slashes do not change the page (`/relays/` is `/relays`). */
@@ -154,6 +156,7 @@ export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry
     ...(options.safetyStaff === true ? [{ id: "moderation", to: "/admin/moderation" } as const] : []),
     ...(options.platformModerator === true ? [{ id: "appeals", to: "/admin/appeals" } as const] : []),
     ...(options.legal === true ? [{ id: "legal", to: "/admin/legal" } as const] : []),
+    ...(options.admin === true ? [{ id: "coop", to: "/admin/coop" } as const] : []),
   ];
   return entries.map((entry) => ({ ...entry, current: path === entry.to }));
 }

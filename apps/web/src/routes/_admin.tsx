@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { AppShell, AdminShell, type NavItem } from "@commonair/ui/layouts";
-import { BankIcon, JusticeScale01Icon, LegalDocument01Icon, Shield01Icon } from "@hugeicons/core-free-icons";
+import {
+  BankIcon,
+  JusticeScale01Icon,
+  LegalDocument01Icon,
+  Shield01Icon,
+  UserGroupIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-router";
 import type * as React from "react";
@@ -19,11 +25,13 @@ import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../lib/bootstrap.ts";
 import { isTreasurer } from "../lib/money.ts";
+import { isAdmin } from "../lib/coop.ts";
 import { adminNav, type AdminEntry } from "../lib/nav.ts";
 
 /**
  * Platform tools: the treasury (treasurers), the mod queue (moderators, admins, `legal`), the
- * appeals queue (moderators, admins) and the legal queue (`legal` only). Anyone without the page's
+ * appeals queue (moderators, admins), the legal queue (`legal` only) and co-op administration
+ * (admins). Anyone without the page's
  * role, signed out included, gets the not-found page, decided in `beforeLoad` (on the server
  * during SSR) so neither the tools nor their sidebar ever render for them.
  */
@@ -68,6 +76,14 @@ function adminItem(entry: AdminEntry): NavItem {
         icon: icon(LegalDocument01Icon),
         render: <Link to="/admin/legal" />,
       };
+    case "coop":
+      return {
+        id: entry.id,
+        label: t("nav.adminCoop"),
+        current: entry.current,
+        icon: icon(UserGroupIcon),
+        render: <Link to="/admin/coop" />,
+      };
   }
 }
 
@@ -81,6 +97,7 @@ function AdminLayout(): React.JSX.Element {
     safetyStaff: isSafetyStaff(me),
     platformModerator: isPlatformModerator(me),
     legal: isLegal(me),
+    admin: isAdmin(me),
   }).map(adminItem);
   return (
     <AdminShell
