@@ -13,6 +13,7 @@ import {
   ItemTitle,
 } from "@commonair/ui/components/item";
 import { cn } from "@commonair/ui/lib/utils";
+import type { DataAttributes } from "../../lib/data-attributes.ts";
 
 export interface ListPanelItem {
   id: string;
@@ -24,6 +25,8 @@ export interface ListPanelItem {
   href?: string;
   render?: React.ReactElement;
   highlighted?: boolean;
+  /** Set on the item (test ids, machine-readable values). */
+  attributes?: DataAttributes;
 }
 export interface ListPanelProps extends Omit<React.ComponentProps<"section">, "title" | "ref"> {
   title: React.ReactNode;
@@ -49,6 +52,7 @@ export function ListPanel({
         {items.length
           ? items.map((item) => (
               <Item
+                {...item.attributes}
                 key={item.id}
                 variant="outline"
                 size="sm"

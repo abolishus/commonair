@@ -115,6 +115,38 @@ Added by the board follow-ups (U7):
 - `formatUnitCost(micros, currency, locale)`: sub-cent unit costs ("$0.0061 per viewer-hour") from
   integer micro-units.
 
+## E5 co-op compositions
+
+`@commonair/ui/blocks/coop`: the co-op pages (`/coop/*`, the treasury's shares and patronage tabs,
+`/admin/coop`) are built from these. Boards: `Pages/Co-op/{Coop, Membership, Proposals,
+ProposalForm, Proposal, Council, Settings, Statements, Transparency}` and
+`Pages/Platform/{TreasuryCoop, AdminCoop}`; the Proposal board has one story per state (draft,
+discussion, council review, voting, rejected, applied).
+
+| Composition                                                                          | For                                                                                                                                                            |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TallyTable`                                                                         | Decided proposals: counts per scope with turnout, every rule check with its threshold, the outcome and reason                                                  |
+| `VotePanel`, `VoteParticipation`                                                     | Open votes: yes/no/abstain, my vote, can't-vote reason, submit; voted of eligible. Neither takes a yes/no count (no tally)                                     |
+| `CouncilResponseCard`, `CouncilRespondForm`                                          | The council's published response (stance + text); the respond form for council members                                                                         |
+| `ProposalChangeEditor`, `ProposalChangeSummary`, `ProposalKindBadge`, `SettingValue` | Setting changes: key select + JSON value + protected badge + add/remove and the derived kind; read-only from → to                                              |
+| `MembershipList`, `EligibilityList`, `ShareCard`, `ShareInstructions`                | Memberships with exit (`ConfirmDialog`), per-class eligibility meters, the member share and the manual payment reference                                       |
+| `StatementView`, `StatementList`                                                     | One patronage statement line by line (cap badge, inputs); the statements list                                                                                  |
+| `GovernanceSettingsList`                                                             | Settings with protected badge, value (key-value or JSON) and "set by proposal" / seeded                                                                        |
+| `PatronageRunForm`, `PatronageRunResult`, `PatronagePeriodsTable`                    | Treasurer: run (surplus submitted as integer cents or `null`), its result, periods with an approve action disabled (with the reason) for the person who ran it |
+| `ShareRefundsTable`, `AppointWorkerForm`                                             | Treasury share refunds (with `NoteDialog`); admin worker appointment                                                                                           |
+| `SeatList`, `ElectionCard`, `GovernanceOutcomeList`                                  | Council and board seats; board elections read-only; decided proposals per month                                                                                |
+
+Test ids: compositions set the raw values the spec names as `data-*` themselves (e.g. a tally row's
+`data-scope`/`data-yes`, a statement line's `data-cents`); the page adds `data-testid` (and any other
+`data-*`) through rest props on the root and `itemProps` / `rowProps` / `…Props` on parts.
+`DataAttributes` is the shared type. Status tones: `proposalStatusTone`, `shareStatusTone`,
+`membershipStatusTone`, `patronageStatusTone`, `councilStanceTone`, `electionStatusTone`.
+
+Added to existing blocks for E5: `NoteDialog` (forms: a confirmation with a note, own test ids),
+`ConfirmDialog` `contentProps`, `Timeline` step `attributes`, `ListPanel` item `attributes`,
+`FormSection` `actions.saveProps` / `cancelProps`, `CharacterCountField` `data-*` on
+`inputProps` / `textareaProps`, `SelectField` `value={null}` (controlled, nothing chosen).
+
 ## How the shadcn layer was set up
 
 1. The CLI is pinned to `shadcn@4.21.1` (`SHADCN_VERSION` in `scripts/shadcn-add.ts`). A scratch

@@ -17,8 +17,8 @@ export interface SelectFieldOption {
 export interface SelectFieldProps {
   label: React.ReactNode;
   options: readonly SelectFieldOption[];
-  /** Controlled value; pair with `onValueChange`. */
-  value?: string;
+  /** Controlled value; pair with `onValueChange`. `null` is controlled with nothing chosen (shows `placeholder`). */
+  value?: string | null;
   /** Initial value when uncontrolled. */
   defaultValue?: string;
   onValueChange?: (value: string) => void;

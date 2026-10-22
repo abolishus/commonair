@@ -14,6 +14,7 @@ import {
 import { Button } from "@commonair/ui/components/button";
 import { FieldGroup } from "@commonair/ui/components/field";
 import { cn } from "@commonair/ui/lib/utils";
+import type { DataAttributes } from "../../lib/data-attributes.ts";
 
 export interface FormSectionProps extends Omit<React.ComponentProps<"form">, "title" | "action"> {
   title: React.ReactNode;
@@ -21,7 +22,15 @@ export interface FormSectionProps extends Omit<React.ComponentProps<"form">, "ti
   action?: React.ReactNode;
   children: React.ReactNode;
   onSubmit?: React.FormEventHandler<HTMLFormElement>;
-  actions?: { cancelLabel?: string; saveLabel: string; onCancel?: () => void; disabled?: boolean };
+  actions?: {
+    cancelLabel?: string;
+    saveLabel: string;
+    onCancel?: () => void;
+    disabled?: boolean;
+    /** `data-*` attributes for the submit button (e.g. its test id). */
+    saveProps?: DataAttributes;
+    cancelProps?: DataAttributes;
+  };
   variant?: "card" | "plain";
   "data-testid"?: string;
 }
@@ -51,11 +60,17 @@ export function FormSection({
       {actions && (
         <CardFooter className="justify-end gap-2">
           {actions.onCancel && (
-            <Button type="button" variant="ghost" onClick={actions.onCancel} disabled={actions.disabled}>
+            <Button
+              {...actions.cancelProps}
+              type="button"
+              variant="ghost"
+              onClick={actions.onCancel}
+              disabled={actions.disabled}
+            >
               {actions.cancelLabel}
             </Button>
           )}
-          <Button type="submit" disabled={actions.disabled}>
+          <Button {...actions.saveProps} type="submit" disabled={actions.disabled}>
             {actions.saveLabel}
           </Button>
         </CardFooter>
@@ -80,11 +95,17 @@ export function FormSection({
           {actions && (
             <footer className="mt-4 flex flex-wrap justify-end gap-2">
               {actions.onCancel && (
-                <Button type="button" variant="ghost" onClick={actions.onCancel} disabled={actions.disabled}>
+                <Button
+                  {...actions.cancelProps}
+                  type="button"
+                  variant="ghost"
+                  onClick={actions.onCancel}
+                  disabled={actions.disabled}
+                >
                   {actions.cancelLabel}
                 </Button>
               )}
-              <Button type="submit" disabled={actions.disabled}>
+              <Button {...actions.saveProps} type="submit" disabled={actions.disabled}>
                 {actions.saveLabel}
               </Button>
             </footer>
