@@ -6,7 +6,11 @@
  * server in each state the unit must tell apart: accepting connections (ready), replaying
  * archived WAL slowly but advancing (not ready, never stopped), replay stuck (stopped after
  * the bound), and a server that never comes up on a normal start (stopped after its bound).
- * The bounds are shortened through the script's environment. Needs podman.
+ * The bounds are shortened through the script's environment. The same states are then run under
+ * the health flags the Quadlet unit generates, driven by `podman healthcheck run`, to check that
+ * Podman itself never kills an advancing replay. Last, commonair-wal-fetch (the restore_command
+ * commonair-restore writes) must stop recovery when the bucket fails instead of promoting early.
+ * Needs podman.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
@@ -16,6 +20,28 @@ const IMAGE = `localhost/commonair/postgres:health-it-${SUFFIX}`;
 const VOLUME = `commonair-pgh-${SUFFIX}`;
 const name = (role: string) => `commonair-pgh-${role}-${SUFFIX}`;
 const SEGMENTS = 8;
+const BACKUPS = ["slow", "stuck", "pslow", "pstuck", "fetchfail"];
+/** The health flags infra/quadlet/commonair-postgres.container generates, with short intervals. */
+const QUADLET_HEALTH = [
+  "--health-cmd",
+  "commonair-pg-health",
+  "--health-interval",
+  "1s",
+  "--health-timeout",
+  "5s",
+  "--health-retries",
+  "2",
+  "--health-on-failure",
+  "kill",
+  "--health-startup-cmd",
+  "commonair-pg-health --startup",
+  "--health-startup-interval",
+  "1s",
+  "--health-startup-timeout",
+  "5s",
+  "--health-startup-retries",
+  "0",
+];
 const env = ["-e", "POSTGRES_USER=commonair", "-e", "POSTGRES_DB=commonair", "-e", "POSTGRES_PASSWORD=it"];
 
 // spawnSync blocks the event loop, so every call carries its own timeout.
@@ -32,6 +58,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const running = (c: string) => podman(["inspect", c, "--format", "{{.State.Running}}"]).out.trim() === "true";
 const health = (c: string, args: string[] = [], extraEnv: string[] = []) =>
   podman(["exec", ...extraEnv, c, "commonair-pg-health", ...args], 30_000);
+const status = (c: string) => podman(["inspect", c, "--format", "{{.State.Health.Status}}"]).out.trim();
 const psql = (c: string, sql: string) =>
   ok(["exec", "-u", "postgres", c, "psql", "-XqAt", "-U", "commonair", "-d", "commonair", "-c", sql]).trim();
 
@@ -46,7 +73,13 @@ async function until<T>(what: string, timeoutMs: number, probe: () => T | undefi
 }
 
 /** A recovering server on a base backup at /backup/<dir>, with the given restore_command. */
-function startRecovery(role: string, dir: string, restoreCommand: string, extraEnv: string[]): string {
+function startRecovery(
+  role: string,
+  dir: string,
+  restoreCommand: string,
+  extraEnv: string[],
+  runArgs: string[] = [],
+): string {
   const pgdata = `/backup/${dir}`;
   ok([
     "run",
@@ -76,6 +109,7 @@ function startRecovery(role: string, dir: string, restoreCommand: string, extraE
     `PGDATA=${pgdata}`,
     ...env,
     ...extraEnv,
+    ...runArgs,
     IMAGE,
     "postgres",
     "-c",
@@ -102,7 +136,8 @@ beforeAll(() => {
 }, 25 * 60_000);
 
 afterAll(() => {
-  for (const role of ["primary", "slow", "stuck", "nostart"]) podman(["rm", "-f", "-t", "0", name(role)]);
+  for (const role of ["primary", "slow", "stuck", "nostart", "pslow", "pstuck", "fetchfail", "walfetch"])
+    podman(["rm", "-f", "-t", "0", name(role)]);
   podman(["volume", "rm", "-f", VOLUME]);
   podman(["rmi", "-f", IMAGE]);
 }, 120_000);
@@ -135,7 +170,7 @@ describe("commonair-pg-health", () => {
     await until("primary ready", 60_000, () => (health(c).code === 0 ? true : undefined));
     expect(health(c, ["--startup"]).code).toBe(0);
 
-    for (const dir of ["slow", "stuck"])
+    for (const dir of BACKUPS)
       ok([
         "exec",
         "-u",
@@ -223,4 +258,102 @@ describe("commonair-pg-health", () => {
     expect(health(c, ["--startup"], bound).code).toBe(2);
     await until("container to exit", 30_000, () => (running(c) ? undefined : true));
   }, 120_000);
+});
+
+describe("under Podman's health checks (the Quadlet unit's flags)", () => {
+  test("an advancing replay is never killed, and the container turns healthy after promotion", async () => {
+    // A 3 s fetch against two 1 s regular-check retries: any regular check run during the replay,
+    // or any startup failure counted towards a kill, would stop this container.
+    const bound = ["-e", "COMMONAIR_PG_STALL_SECONDS=30"];
+    const c = startRecovery("pslow", "pslow", "sleep 3 && cp /backup/archive/%f %p", bound, QUADLET_HEALTH);
+    const alive: boolean[] = [];
+    const statuses: string[] = [];
+    await until("healthy", 240_000, () => {
+      podman(["healthcheck", "run", c], 30_000);
+      alive.push(running(c));
+      statuses.push(status(c));
+      return statuses.at(-1) === "healthy" || !alive.at(-1) ? true : undefined;
+    });
+    expect(alive.every(Boolean), `${statuses.join(",")}\n${podman(["logs", c]).out}`).toBe(true);
+    expect(statuses.at(-1)).toBe("healthy");
+    // The replay ran long enough for the checks to matter.
+    expect(statuses.filter((x) => x !== "healthy").length).toBeGreaterThanOrEqual(10);
+    expect(statuses).not.toContain("unhealthy");
+    expect(psql(c, "select count(*) from replayed")).toBe(String(SEGMENTS * 1000));
+    // Healthy now means the regular check runs; a few more runs keep it healthy.
+    for (let i = 0; i < 3; i++) expect(podman(["healthcheck", "run", c], 30_000).code).toBe(0);
+    expect(running(c)).toBe(true);
+  }, 300_000);
+
+  test("a stuck replay still makes the container exit", async () => {
+    const bound = ["-e", "COMMONAIR_PG_STALL_SECONDS=6"];
+    const c = startRecovery("pstuck", "pstuck", "sleep 3600", bound, QUADLET_HEALTH);
+    const started = Date.now();
+    await until("container to exit", 120_000, () => {
+      podman(["healthcheck", "run", c], 30_000);
+      return running(c) ? undefined : true;
+    });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(5000);
+    expect(podman(["logs", c]).out).toMatch(/immediate shutdown request/);
+  }, 180_000);
+});
+
+describe("commonair-wal-fetch", () => {
+  test("maps wal-g's exit status: found 0, not found 1, any other failure 126", () => {
+    // A stand-in wal-g on PATH that exits with the status it is told to.
+    const fake =
+      'mkdir -p /tmp/fake && printf "#!/bin/sh\\nexit \\$FAKE_RC\\n" > /tmp/fake/wal-g && chmod +x /tmp/fake/wal-g';
+    const codes = ok([
+      "run",
+      "--rm",
+      "--name",
+      name("walfetch"),
+      "--entrypoint",
+      "sh",
+      IMAGE,
+      "-c",
+      `${fake}; for rc in 0 74 1 2 124 137; do FAKE_RC=$rc PATH=/tmp/fake:$PATH commonair-wal-fetch 000000010000000000000001 /tmp/out 2>/dev/null; echo "$rc=$?"; done`,
+    ]);
+    expect(codes.trim().split("\n")).toEqual(["0=0", "74=1", "1=126", "2=126", "124=126", "137=126"]);
+  });
+
+  test("real wal-g: a missing segment is not found (74), an unreachable bucket is not", () => {
+    const out = ok([
+      "run",
+      "--rm",
+      "--entrypoint",
+      "sh",
+      IMAGE,
+      "-c",
+      "mkdir -p /tmp/st; WALG_FILE_PREFIX=/tmp/st wal-g wal-fetch 000000010000000000000001 /tmp/o 2>/dev/null; echo missing=$?; " +
+        "WALG_S3_PREFIX=s3://b/p AWS_ENDPOINT=http://127.0.0.1:1 AWS_ACCESS_KEY_ID=a AWS_SECRET_ACCESS_KEY=b WALG_S3_MAX_RETRIES=0 " +
+        "commonair-wal-fetch 000000010000000000000001 /tmp/o 2>/dev/null; echo unreachable=$?",
+    ]);
+    expect(out).toContain("missing=74");
+    expect(out).toContain("unreachable=126");
+  });
+
+  test("a replay whose bucket is unreachable stops instead of promoting early", async () => {
+    const bucket = [
+      "-e",
+      "WALG_S3_PREFIX=s3://commonair-backups/wal",
+      "-e",
+      "AWS_ENDPOINT=http://127.0.0.1:1",
+      "-e",
+      "AWS_ACCESS_KEY_ID=it",
+      "-e",
+      "AWS_SECRET_ACCESS_KEY=it",
+      "-e",
+      "WALG_S3_MAX_RETRIES=0",
+    ];
+    const c = startRecovery("fetchfail", "fetchfail", "/usr/local/bin/commonair-wal-fetch %f %p", bucket);
+    await until("container to exit", 120_000, () => (running(c) ? undefined : true));
+    const logs = podman(["logs", c]).out;
+    expect(logs).toMatch(/stopping recovery instead of promoting early/);
+    expect(logs).not.toMatch(/selected new timeline ID|archive recovery complete/);
+    // Recovery never ended (Postgres removes recovery.signal when it does), so the next start
+    // resumes the replay.
+    const left = ok(["run", "--rm", "-v", `${VOLUME}:/backup`, "--entrypoint", "ls", IMAGE, "/backup/fetchfail"]);
+    expect(left.split("\n")).toContain("recovery.signal");
+  }, 180_000);
 });

@@ -126,10 +126,14 @@ Each `restored log file "…" from archive` line is one replayed WAL segment (16
 is over at `database system is ready to accept connections`.
 
 `commonair-postgres` waits as long as the replay keeps advancing. If no new segment has been
-replayed for 10 minutes (an unreachable backup bucket, say), it stops Postgres and starts it
-again, which resumes the replay from its last restartpoint; a start that has not finished after
-12 hours fails the same way. Step 4 then returns an error: check the journal, fix the cause and
-run step 4 again. Do not skip it: `selfhost.sh install` gives Postgres only 15 minutes.
+replayed for 10 minutes (a fetch from the backup bucket that hangs, say), it stops Postgres and
+starts it again, which resumes the replay from its last restartpoint; a start that has not
+finished after 12 hours fails the same way. A fetch that fails outright (the bucket refuses the
+connection, the key is wrong) stops Postgres at once with `commonair-wal-fetch: … stopping
+recovery instead of promoting early` in the journal, and it restarts and retries the same way.
+The replay ends only when the archive has no next segment, never because the bucket failed.
+Step 4 then returns an error: check the journal, fix the cause and run step 4 again. Do not skip
+it: `selfhost.sh install` gives Postgres only 15 minutes.
 
 ### Onto a new server
 

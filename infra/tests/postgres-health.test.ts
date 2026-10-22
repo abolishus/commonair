@@ -77,6 +77,22 @@ describe("commonair-postgres.container health", () => {
   });
 });
 
+describe("restore_command", () => {
+  test("commonair-restore replays through commonair-wal-fetch, which the image ships", () => {
+    expect(read("infra/postgres/Containerfile")).toContain(
+      "COPY --chmod=0755 infra/postgres/wal-fetch.sh /usr/local/bin/commonair-wal-fetch",
+    );
+    expect(read("infra/postgres/restore.sh")).toContain("restore_command = '/usr/local/bin/commonair-wal-fetch %f %p'");
+  });
+
+  test("only wal-g's not-found status ends the replay; other failures are fatal (above 125)", () => {
+    const fetch = read("infra/postgres/wal-fetch.sh");
+    expect(fetch).toMatch(/^not_found=74$/m);
+    expect(fetch).toMatch(/"\$not_found"\) exit 1 ;;/);
+    expect(fetch).toMatch(/exit 126/);
+  });
+});
+
 describe("compose mirror", () => {
   const compose = parse(read("compose.yaml")) as {
     services: Record<string, { healthcheck?: { test?: string[] } }>;
