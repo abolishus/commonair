@@ -4,20 +4,24 @@
 # Twitch-compatible IRC gateway.
 [Unit]
 Description=CommonAir irc
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
 Requires=commonair-migrate.service
 After=commonair-migrate.service
 Requires=commonair-garage-init.service
 After=commonair-garage-init.service
-Requires=commonair-valkey.service
+Wants=commonair-valkey.service
 After=commonair-valkey.service
-Requires=commonair-otel-collector.service
+Wants=commonair-otel-collector.service
 After=commonair-otel-collector.service
-Requires=commonair-chat.service
+Wants=commonair-chat.service
 After=commonair-chat.service
 
 [Container]
 Image=localhost/commonair/irc:latest
 ContainerName=commonair-irc
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
 Network=commonair.network
 NetworkAlias=irc
 EnvironmentFile=%h/.config/commonair/commonair.env
@@ -55,7 +59,8 @@ Secret=commonair-database-url,type=env,target=DATABASE_URL
 # certificate for IRC_PUBLIC_HOST here and restarts this unit when it renews.
 Environment=IRC_TLS_CERT_FILE=/run/commonair/irc-tls/tls.crt
 Environment=IRC_TLS_KEY_FILE=/run/commonair/irc-tls/tls.key
-Volume=%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,Z
+# Shared label (z, not Z): commonair-irc-cert.container writes the same directory.
+Volume=%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,z
 # Raw IRC clients connect directly; IRC over WebSocket stays local until it has a TLS route.
 PublishPort=0.0.0.0:6667:6667
 PublishPort=0.0.0.0:6697:6697
@@ -65,11 +70,18 @@ HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10
 HealthStartPeriod=30s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
 # Dependents start only once this container reports healthy.
 Notify=healthy
 
 [Service]
 Restart=always
+RestartMode=direct
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
 TimeoutStartSec=300
 
 [Install]

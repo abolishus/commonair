@@ -350,6 +350,23 @@ describe("Quadlet mirror", () => {
   const keys = (unit: string, key: string) => [...unit.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
   // Dev/test-only services have no production unit.
   const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
+  // Production-only units with no compose service: the timer-driven IRC certificate sync.
+  const QUADLET_ONLY = new Set(["irc-cert"]);
+  // A host path bind-mounted by two or more units carries the shared SELinux label `z`: the
+  // private `Z` relabels it per container, so the last one to start locks the others out.
+  const bindSources = Object.values(units).flatMap((u) =>
+    [...new Set(keys(u, "Volume").map((v) => v.slice(0, v.indexOf(":"))))].filter((s) => !s.endsWith(".volume")),
+  );
+  const SHARED_BINDS = new Set(bindSources.filter((s, i) => bindSources.indexOf(s) !== i));
+
+  test("the shared bind mounts are the IRC certificate, the hash lists and the model", () => {
+    expect([...SHARED_BINDS].sort()).toEqual([
+      "%h/.config/commonair/irc-tls",
+      "%h/.local/share/commonair/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx",
+      "%h/.local/share/commonair/moderation/csam.pdq",
+      "%h/.local/share/commonair/moderation/ncii.pdq",
+    ]);
+  });
   // The only ports a production host exposes; everything else binds 127.0.0.1.
   const PUBLIC_PORTS: Record<string, string[]> = {
     caddy: ["0.0.0.0:80:80", "0.0.0.0:443:443", "0.0.0.0:443:443/udp"],
@@ -358,7 +375,7 @@ describe("Quadlet mirror", () => {
   };
 
   test("every production compose service has a unit, and nothing else does", () => {
-    const expected = services.map(([n]) => n).filter((n) => !DEV_ONLY.has(n));
+    const expected = [...services.map(([n]) => n).filter((n) => !DEV_ONLY.has(n)), ...QUADLET_ONLY];
     expect(Object.keys(units).sort()).toEqual(expected.sort());
   });
 
@@ -373,13 +390,18 @@ describe("Quadlet mirror", () => {
     expect(keys(unit, "HealthCmd")).toHaveLength(ONE_SHOT.has(name) ? 0 : 1);
     const badVolumes = keys(unit, "Volume").filter((v) => {
       const src = v.slice(0, v.indexOf(":"));
-      return src.endsWith(".volume") ? !existsSync(join(dir, src)) : !v.endsWith(":ro,Z");
+      if (src.endsWith(".volume")) return !existsSync(join(dir, src));
+      return !v.endsWith(SHARED_BINDS.has(src) ? ":ro,z" : ":ro,Z");
     });
     expect(badVolumes).toEqual([]);
-    const missingDeps = Object.keys(s.depends_on ?? {}).filter(
-      (d) => !unit.includes(`Requires=commonair-${d}.service`),
-    );
-    expect(missingDeps).toEqual([]);
+    // Every depends_on is an After= ordering. Requires= only for the one-shots (a failed migrate
+    // keeps schema users down); Wants= for long-running services, so a failed start there does
+    // not fail this unit with result 'dependency', which Restart=always never retries.
+    const deps = Object.keys(s.depends_on ?? {});
+    expect(deps.filter((d) => !keys(unit, "After").includes(`commonair-${d}.service`))).toEqual([]);
+    const strength = (d: string) => (ONE_SHOT.has(d) ? "Requires" : "Wants");
+    expect(deps.filter((d) => !keys(unit, strength(d)).includes(`commonair-${d}.service`))).toEqual([]);
+    expect(keys(unit, "Requires").filter((r) => !ONE_SHOT.has(r.replace(/^commonair-|\.service$/g, "")))).toEqual([]);
     const isPublic = (p: string) => p.startsWith("0.0.0.0:");
     expect(keys(unit, "PublishPort").filter(isPublic).sort()).toEqual((PUBLIC_PORTS[name] ?? []).toSorted());
     expect(keys(unit, "PublishPort").filter((p) => !isPublic(p) && !p.startsWith("127.0.0.1:"))).toEqual([]);
@@ -412,7 +434,17 @@ describe("Quadlet mirror", () => {
     const irc = units.irc!;
     expect(irc).toContain("Environment=IRC_TLS_CERT_FILE=/run/commonair/irc-tls/tls.crt\n");
     expect(irc).toContain("Environment=IRC_TLS_KEY_FILE=/run/commonair/irc-tls/tls.key\n");
-    expect(keys(irc, "Volume")).toContain("%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,Z");
+    expect(keys(irc, "Volume")).toContain("%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,z");
+    // The sync writes where IRC reads, from Caddy's data volume, as the host user.
+    const sync = units["irc-cert"]!;
+    expect(keys(sync, "Volume")).toEqual([
+      "commonair-caddy-data.volume:/caddy-data:ro",
+      "%h/.config/commonair/irc-tls:/state/irc-tls:z",
+    ]);
+    expect(keys(sync, "Exec")[0]).toContain("bun infra/irc/sync-cert.ts --caddy-data /caddy-data --out /state/irc-tls");
+    expect(keys(sync, "User")).toEqual(["0"]);
+    expect(keys(sync, "Network")).toEqual(["none"]);
+    expect(keys(sync, "ExecStartPost")[0]).toContain("systemctl --user restart commonair-irc.service");
     expect(keys(irc, "PublishPort")).toContain("127.0.0.1:6680:6680");
   });
 
@@ -471,6 +503,12 @@ describe("systemd timers (infra/systemd)", () => {
   const unit = (f: string) => readFileSync(join(dir, f), "utf8");
   const keys = (u: string, key: string) => [...u.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
 
+  // A timer's service is a plain unit here or generated by Quadlet from quadlet/<name>.container.
+  const serviceUnit = (service: string) =>
+    existsSync(join(dir, service))
+      ? unit(service)
+      : read(`infra/quadlet/${service.replace(/\.service$/, ".container")}`);
+
   test("every timer starts its own oneshot service and survives downtime", () => {
     const timers = readdirSync(dir).filter((f) => f.endsWith(".timer"));
     expect(timers.sort()).toEqual(["commonair-backup.timer", "commonair-irc-cert.timer"]);
@@ -479,8 +517,13 @@ describe("systemd timers (infra/systemd)", () => {
       expect(keys(unit(t), "Unit"), t).toEqual([service]);
       expect(keys(unit(t), "Persistent"), t).toEqual(["true"]);
       expect(keys(unit(t), "WantedBy"), t).toEqual(["timers.target"]);
-      expect(keys(unit(service), "Type"), service).toEqual(["oneshot"]);
+      expect(keys(serviceUnit(service), "Type"), service).toEqual(["oneshot"]);
     }
+  });
+
+  test("timer-driven services do not also start at boot on their own", () => {
+    expect(read("infra/quadlet/commonair-irc-cert.container")).not.toMatch(/^\[Install\]$/m);
+    expect(unit("commonair-backup.service")).not.toMatch(/^\[Install\]$/m);
   });
 
   test("the backup runs inside the Postgres container and never starts Postgres itself", () => {
@@ -493,9 +536,12 @@ describe("systemd timers (infra/systemd)", () => {
     expect(keys(backup, "Requires")).toEqual([]);
   });
 
-  test("the IRC certificate sync runs the repository's script with the instance env", () => {
-    const sync = unit("commonair-irc-cert.service");
-    expect(keys(sync, "ExecStart")).toEqual(["%h/.bun/bin/bun %h/commonair/infra/irc/sync-cert.ts"]);
+  test("the IRC certificate sync runs the repository's script in the tools image with the instance env", () => {
+    // In the tools image, so the host needs no Bun (ADR 0023 §8).
+    expect(existsSync(join(dir, "commonair-irc-cert.service"))).toBe(false);
+    const sync = serviceUnit("commonair-irc-cert.service");
+    expect(keys(sync, "Image")).toEqual(["localhost/commonair/tools:latest"]);
+    expect(keys(sync, "Exec")[0]).toContain("bun infra/irc/sync-cert.ts");
     expect(existsSync(join(ROOT, "infra/irc/sync-cert.ts"))).toBe(true);
     expect(keys(sync, "EnvironmentFile")).toEqual(["%h/.config/commonair/commonair.env"]);
     // The script reads the volume by this name.

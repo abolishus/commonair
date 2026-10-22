@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# One-shot, run by commonair-irc-cert.timer: copies Caddy's certificate for IRC_PUBLIC_HOST to
+# the IRC unit's TLS mount (infra/irc/sync-cert.ts in the tools image, so the host needs no Bun)
+# and restarts IRC when it changed. IRC reads its certificate once at start; Caddy renews it.
+[Unit]
+Description=CommonAir IRC certificate sync from Caddy
+After=commonair-caddy.service
+
+[Container]
+Image=localhost/commonair/tools:latest
+ContainerName=commonair-irc-cert
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
+# Container root is the host user (rootless), so the copies belong to the operator.
+User=0
+# It reads files only; nothing to reach over a network.
+Network=none
+EnvironmentFile=%h/.config/commonair/commonair.env
+Volume=commonair-caddy-data.volume:/caddy-data:ro
+# Shared label (z, not Z): commonair-irc.container reads the same directory.
+Volume=%h/.config/commonair/irc-tls:/state/irc-tls:z
+# The script restarts IRC itself when it runs on the host; in here a no-op systemctl takes that
+# call and ExecStartPost below restarts IRC from the host instead.
+Exec=sh -c "mkdir -p /tmp/stub && ln -sf /bin/true /tmp/stub/systemctl && PATH=/tmp/stub:/usr/local/bin:/usr/bin:/bin exec bun infra/irc/sync-cert.ts --caddy-data /caddy-data --out /state/irc-tls"
+
+[Service]
+Type=oneshot
+Restart=no
+ExecStartPre=/bin/mkdir -p %h/.config/commonair/irc-tls
+ExecStartPre=-/bin/sh -c 'rm -f %t/commonair-irc-cert.sum; cd %h/.config/commonair/irc-tls && sha256sum tls.crt tls.key > %t/commonair-irc-cert.sum'
+ExecStartPost=/bin/sh -c 'cd %h/.config/commonair/irc-tls && sha256sum -c --status %t/commonair-irc-cert.sum || systemctl --user restart commonair-irc.service'
+TimeoutStartSec=300
