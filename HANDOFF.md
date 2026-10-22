@@ -15,7 +15,17 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
-## Session nine in flight (E5 co-op)
+## Session nine (E5 co-op): milestone reached 2026-10-22
+
+See PROGRESS.md "E5 `e5-coop` milestone reached" for the runs, the bring-up fixes and what the user
+still runs. Open E5 follow-ups (ADR 0020): Stripe shares (`buyShare` answers `manual_shares` with
+Stripe); an explicit viewer join (a subscription-only viewer who exited has no rejoin path);
+paying patronage payables out; board-election UI beyond read-only; the membership view computes
+streaming hours for every channel owner per call (fine now, index it before scale); the web shows a
+skeleton forever when a co-op load fails (no retry). Old unit worktrees under
+`.claude/worktrees/wf_*` can be removed.
+
+### How session nine ran
 
 Started 2026-10-21 from `8e5e14a`. Goal: `e5-coop` passes twice in a row on the local stack;
 `e4b-money` and `trust-safety` pass once on the same stack. Process as before (units with

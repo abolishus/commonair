@@ -20,7 +20,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session nine (2026-10-21/22): E5 co-op (in progress)
+## Session nine (2026-10-21/22): E5 co-op
 
 Spec `docs/testing/e5-selectors.md`, policy ADR 0020 (the user decided: shares refunded at once
 on exit, two-person patronage approval, any seated council member responds, the local stack's
@@ -44,6 +44,44 @@ Podman database runs ~35 ms ahead), so a vote right after voting opened was refu
 database clock. Spec/ADR clarifications `9144093`. On `main`: API int 221/221, worker int 76/76,
 governance int 37/37, db int 95/95, patronage int 16/16, unit tests of every touched package and
 tsc of every package pass.
+
+## E5 `e5-coop` milestone reached (2026-10-22)
+
+`e5-coop` passes twice in a row on the local Podman stack (87/87 assertions each, 3m04s and
+3m00s, streamer qualification ≈ 48 s), and on the same stack `e4b-money` (82/82) and
+`trust-safety` (95/95) pass. Stack: `bun scripts/infra.ts stack harness/compose.trust-safety.yaml
+harness/compose.e5-coop.yaml` on a Postgres volume recreated once (ADR 0020), then
+`HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e5-coop` (`--set via=api` for the
+backend only).
+
+**Batch 2 merged** (workflow `wf_d2aba403-51c`): D web (`cd01013`, fix `5768099`), E harness
+(`9f52950`, fix `1001c4a`). No HIGH. Head follow-ups: `/admin/coop` guard and sidebar (`084eda8`,
+the layout guard sent admins to not-found), a pending share shows its payment reference again
+(`f54dafe`, contract + API + web), council size 50 on the test stack (`4240985`).
+
+Bring-up (symptom → root cause → fix):
+
+- Votes refused as `voting_closed` right after voting opened, ~1 in 3 integration runs → the API
+  judged the window by its host clock against the database-stamped window (the Podman database
+  runs ~35 ms ahead) → database clock (`d77a23e`).
+- `e5-coop` step 4 `RATE_LIMITED` → the scenario polled proposal status anonymously twice per
+  tick every second (~240/min against 120/min) → one list call every 2 s (`e65edcb`).
+- `/coop/council` read empty → the wrapper renders with an empty `data-term-id` while loading;
+  the driver read it at once (`369fdc1`, `74eeeab`); its retry reloaded the page every second,
+  ~300 calls/min as the viewer, so the session check got a 429 and the page rendered signed out
+  → re-read every 3 s (`7c82f40`).
+- Share refund step timed out → the treasury shares tab lists `refund_pending` only, so the row
+  leaves it; wait for that and the API status (`369fdc1`).
+- The co-op Overview tab stayed active on every `/coop/*` page → exact link match (`4df5d9b`).
+- Streamer qualification took 2–4 min waiting for the 5-minute integrity schedule → tick-only
+  `COOP_JOBS.streamHours` runs the pass under its own lock (`ff27a2d`).
+- With faster runs, sign-in and appoint-worker forms were filled before hydration (React reset
+  the state behind the visible values) → `html[data-hydrated]` set by the web root, and the
+  harness waits for it after every navigation (`39ce23c`; benefits every web scenario).
+
+Unverified (user): `bun run verify`, Storybook for the new co-op boards (`Pages/Co-op/*`,
+`Pages/Platform/TreasuryCoop`, `AdminCoop`), a browser pass over `/coop/*`, `/treasury` shares and
+patronage tabs, `/admin/coop` and `/transparency` (both themes, 320 px, keyboard).
 
 ## E4c `trust-safety` harness bring-up (2026-10-21/22, done)
 
