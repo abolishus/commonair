@@ -35,6 +35,9 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 | GitHub `ci` run 39829039874 (push of `452752c`)  | verify red (regex benchmark on a slow runner, fixed `793db63`); lint-workflows green; release dry run green, arm64 runners work; e2e fedora red (runner AppArmor, fixed `9599ef6`); e2e debian: see below                                                                                                                                                                                                                                                                     |
 | Signed release dry run, run 39830136878          | green. `release-dist`: 74 files, `sha256sum -c` all OK; `parseManifest` accepts the manifest; 6 relay binaries each with SBOM, signature, in-toto provenance; per-arch image SBOMs and image provenance; `SHA256SUMS.sigstore.json`. `cosign verify-blob` with identity `release.yml@refs/heads/main`: SHA256SUMS and all 6 binaries and their provenance verify; the tag regexp is refused, as it should be. The bundle's 13 `Image=` lines pin exactly the manifest digests |
 | Self-host e2e, Debian (local podman machine)     | run 1: missing `nft`/`aardvark-dns` (`7f3d401`); run 2: mixed trees (process, see below); run 3: Garage/Loki/Tempo health checks never pass (`562f8c9`); **run 4 at `562f8c9` (D, E, H) passed**: install 289 s, upgrade 155 s, worker restart 22 s, rollback 415 s; **run 5 at `2025ff3` (+F) passed**: 64 checks, 0 failed (install 318 s, upgrade 159 s, rollback 417 s)                                                                                                   |
+| `bun run verify` at `461f830` (external infra)   | **GREEN** in 609 s, every step (also at `5e8e683` in 450 s)                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Self-host e2e, Debian, run 6 at `b527dfa` (+G)   | **passed**: 81 checks, 0 failed (install 321 s, upgrade 158 s, rollback 425 s): two source addresses are two clients, a spoofed `X-Forwarded-For` is ignored, Valkey refuses unauthenticated clients, HTTPS over IPv6, only allowlisted listeners. The idle instance uses 531 tasks                                                                                                                                                                                           |
+| Self-host e2e, Fedora (local podman machine)     | run 1 at `24d7eba` (D, E, F, H) **passed**: 64 checks, 0 failed (install 283 s, upgrade 138 s, rollback 410 s); run 3 failed: disk full from accumulated e2e images (`9547d1e`)                                                                                                                                                                                                                                                                                               |
 | CI run 39844313957 (`phase5/validate`, before F) | **self-host e2e debian and fedora green** (rootful Podman 4.9 runners); release dry run green; verify red on the regex benchmark (fixed `44ab164`)                                                                                                                                                                                                                                                                                                                            |
 
 ### Fixes (symptom → root cause → fix)
@@ -101,6 +104,32 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 - `3529dcd` (unit E review LOW) the Caddy S3 matchers no longer match the exports bucket root
   (a signed listing) or the `incoming/` prefix itself.
 
+- `24d7eba`… CI verify had **never** been green (51 failed runs in history); each fix got it one
+  step further:
+  - `1c2ea60` **`selfhost.sh is clean` failed on CI only** → the test ran ubuntu-24.04's
+    `/usr/bin/shellcheck` 0.9.0 (SC2015 on a line 0.11.0 accepts) → the selfhost tests use only
+    the pinned 0.11.0 (local binary of that version, else its pinned image).
+  - `cfc53ab` **`infra up`: cannot connect to the Podman socket** → `podman compose` picked the
+    runner's docker-compose plugin → `PODMAN_COMPOSE_PROVIDER=podman-compose` in the job.
+  - `b527dfa` **migrations: password authentication failed for `commonair`** → init-env generated
+    `POSTGRES_PASSWORD` but copied the example's fixed `DATABASE_URL` (`commonair:commonair`);
+    existing checkouts never noticed (old volumes, hand-fixed URLs) → a fresh `DATABASE_URL`
+    carries the generated password; a kept one is left as it is.
+  - `869a6d3` **`onnx.int.test.ts`: model file missing** → CI never fetched the weights → the job
+    runs `scripts/fetch-model.ts` (sha256-checked), cached on `model.ts`.
+  - `461f830` the harness integration tests drive Chromium and WebKit on every gate, but CI
+    installed the browsers only for the full gate → installed on every run.
+- `c76a1cb` **CI Fedora e2e: api, irc and media aborted, Caddy 502** → `pthread_create`/`fork`
+  EAGAIN: Podman's default pids limit (2048) on the privileged test-host container capped the
+  whole instance → `--pids-limit=-1`. A real server has no such cap: systemd's user-slice limit is
+  about 21K tasks even on an 8 GB host (reviewer's estimate); the idle instance uses 531.
+- `803c720` **CI Fedora e2e: listener allowlist failed on `systemd-resolved`** (5355, 127.0.0.53/54)
+  → the check judged the operating system's sockets too → it reads `ss -Hltne` and keeps the
+  service user's sockets.
+- `9547d1e` **local Fedora e2e: no space left on device** → each run builds 14 images (about
+  5 GB) tagged by commit and nothing removed them → the e2e removes its own earlier-commit images
+  (only its namespace; no global prune, which would drop a developer's build cache).
+
 ### Self-hosting gaps
 
 - S3 for browsers: designed as ADR 0024 (`f50fe9e`): path-style bucket URLs on the main host,
@@ -146,7 +175,20 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 - Review of all head fixes `452752c..2025ff3` (`wf_d2aa8db2-74f`): no HIGH or MEDIUM; LOWs fixed
   in `24d7eba` (fixture regeneration into a scratch dir, benchmark claim wording, aardvark-dns
   under `/usr/local`).
-- Unit G in flight (workflow `wf_53630d41-25d`).
+- **Unit G merged** (`f93d9db`; workflow `wf_53630d41-25d`): Caddy takes 80/443 from a systemd
+  socket unit in the host's network namespace (`commonair-caddy.socket`, dual-stack), so it sees
+  real client addresses; no `trusted_proxies`; Caddy (10.89.42.10) and web (.11) have fixed
+  addresses outside the network's `IPRange=10.89.42.128/25`, and `TRUSTED_PROXY_CIDRS` is their
+  /32s; loopback publishes only Garage 3900 (rclone) and Grafana 3030 (SSH tunnel); Valkey requires
+  `VALKEY_PASSWORD` (generated, never on a command line, URL through a Podman secret); IRC and
+  MediaMTX ports dual-stack. Reviews: no HIGH; accepted MEDIUMs: files outside the brief that the
+  design needed (the socket unit, the Valkey key list), and IRC/RTMP still see one address
+  (needs socket activation in `services/irc`; MediaMTX has none: documented). Orchestrator fix
+  `1bb96cd` + `33e7609`: a correct network is kept (rollbacks never touch it) and every restart
+  first checks that no container outside the instance (by the units' `ContainerName=`) holds a
+  network that must be re-created, so upgrade, re-install and rollback cannot strand the instance.
+- Review of the orchestrator fixes `2025ff3..b527dfa` (`wf_fe158865-bef`): no HIGH or MEDIUM; LOWs
+  fixed in `33e7609`.
 
 ## Session eleven (2026-10-22): Phase 5 release and self-hosting (built; user validation pending)
 
