@@ -15,9 +15,11 @@ Written 2026-10-18, updated at the end of orchestration session four (E3 finishe
 Podman, local-first on `main`, DCO sign-off, subagent pods with disjoint ownership (≤ ~6 at once),
 an independent reviewer **before** every merge and a focused re-review of fix rounds for any HIGH.
 
-## Session ten (E6, Phase 4 completion): in flight
+## Session ten (E6, Phase 4 completion): built, awaiting the user's live runs
 
-See PROGRESS.md "Session ten". Spec `docs/testing/e6-selectors.md`, ADR 0021, briefs
+See PROGRESS.md "Session ten" (batches, reviews, and the exact commands the user runs). All E6
+units are merged on `main` (`72a7d48`); nothing has run against the live stack yet. When the
+scenarios fail live, fix in post as in E4c/E5 (symptom → root cause → fix, with a regression test). Spec `docs/testing/e6-selectors.md`, ADR 0021, briefs
 `.claude/briefs/e6/`. The harness stack is now `bun scripts/infra.ts stack --harness` (every
 harness override layered, Postgres volume created once with the E5 bootstrap). Do not start
 Phase 5 in this session.

@@ -50,6 +50,32 @@ export mail may carry the presigned link (`storageLinks`, https or local storage
 `pending_objects` (migration 0023) and retries them, media only without a hold; Caddy routes
 `/overlay/events` to the API.
 
+**Batch 2 merged** (workflow `wf_00a70280-12b`): D web (`d12a918`, fix `adae0c2`; web 943),
+E2 harness ops (`41f02e5`, fixes `31449f0`, `8dad99a`; harness 391 + drill int 1), E1 harness
+feature scenarios (`d62c5b9`, fix `4f3799d`; 65 new). Reviews (each unit had a security reviewer
+too): D none HIGH; E2 one HIGH (the SDK-bot step tripped chat's 30 s duplicate filter) fixed; E1
+four HIGH (deletion audit check by count only; overlay token could reach the report through a
+Playwright error; the listed `downloadUrl` scope and expiry were never checked; the payer check
+read only `alert` frames) fixed and re-reviewed. Head `72a7d48`: harness redacts URL credentials
+from every step/run error; overlay-alert scans all three streams; username `content` reserved.
+
+**User to run** (nothing here was run against the live stack): recreate the Postgres volume once
+with the E5 bootstrap (ADR 0020), `bun scripts/init-env.ts --merge` (new `OPS_TEST_HOOKS`), then
+`bun scripts/infra.ts stack --harness` (rebuilds api, worker, web, media images; migrations
+0022–0023), then `bun harness/src/cli.ts run <name>` for `simulcast`, `overlay-alert`,
+`vod-clips`, `data-export`, `account-deletion`, `backup-restore`, `e2e-social` (SDK bot), then
+`run full` and `run full --profile no-proprietary` (expected skip: the Stripe variant of
+`e4b-money` only), and `run load-plan` by hand. Plus `bun run verify`, Storybook (`Pages/Creator
+studio/Overlays`, `Content`, `Settings`, `StreamSetup`, the overlay view) and browser checks of
+`/dashboard` simulcast, `/overlays`, `/content`, `/settings/privacy` and `/overlay/alerts?token=…`
+(both themes, 320 px, OBS browser source).
+
+Known gaps, not blocking: alert strings render in English (no instance locale); alert-config
+cache is per API process (10 s); clips cut from `subscribers` VODs follow the VOD now, but clips
+have no visibility of their own; the export mail links the privacy page instead of the archive
+when `S3_PUBLIC_ENDPOINT` is unset or plain http on a public host; e4b-money's Stripe variant is
+declared in the registry's `DEFAULT_PARAM_NEEDS` rather than on the scenario.
+
 ## Session nine (2026-10-21/22): E5 co-op
 
 Spec `docs/testing/e5-selectors.md`, policy ADR 0020 (the user decided: shares refunded at once
