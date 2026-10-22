@@ -165,6 +165,18 @@ function removeStaleImageContainers(): void {
     timeout: 120_000,
   });
   if (rm.exitCode !== 0) throw new Error(`could not remove stale containers (${rm.exitCode})`);
+  // podman's `rm --depend` can remove a one-shot container's dependents yet keep the container
+  // itself (migrate, garage-init), and compose then restarts the old one: remove survivors by id.
+  for (const r of staleProjectContainers()) {
+    const id = Bun.spawnSync(["podman", "inspect", "--format", "{{.Id}}", r.name], { timeout: 30_000 });
+    const target = id.exitCode === 0 ? id.stdout.toString().trim() : r.name;
+    Bun.spawnSync(["podman", "rm", "-f", "--depend", "-t", "10", target], { timeout: 60_000 });
+    const one = Bun.spawnSync(["podman", "rm", "-f", "--ignore", "-t", "10", target], {
+      stdio: ["inherit", "inherit", "inherit"],
+      timeout: 60_000,
+    });
+    if (one.exitCode !== 0) throw new Error(`could not remove stale container ${r.name} (${one.exitCode})`);
+  }
 }
 
 /**

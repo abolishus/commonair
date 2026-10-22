@@ -162,13 +162,13 @@ async function sdkBotPing(
   ctx.assert("the tmi.js bot replied", tmiReply.message.user.username === o.tmiUsername);
   const badges = sdkReply.message.user.badges.map((b) => b.type);
   ctx.assert("the SDK bot's reply carries the bot badge", badges.includes("bot"), { badges });
-  ctx.check(
-    "the SDK bot recorded its !ping reply",
-    sdkBot.replies.some((r) => r.command === "!ping"),
-    {
-      replies: sdkBot.replies.length,
-    },
-  );
+  // The bot records a reply once chat acknowledges its send, which can come after the broadcast.
+  const recorded = await waitFor(
+    "the SDK bot's recorded !ping reply",
+    async () => (sdkBot.replies.some((r) => r.command === "!ping") ? true : null),
+    { timeoutMs: 5_000, intervalMs: 100, signal: ctx.signal },
+  ).catch(() => false);
+  ctx.check("the SDK bot recorded its !ping reply", recorded, { replies: sdkBot.replies.length });
   await ctx.step("fan: sees the SDK bot's reply", () => o.sender.waitMessage(sdkAccount.username, "pong", o.chat));
 }
 
