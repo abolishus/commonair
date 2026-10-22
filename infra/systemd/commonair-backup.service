@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# WAL-G base backup and prune to WALG_RETAIN_FULL (infra/postgres/backup.sh). WAL itself is
+# archived continuously; a base backup bounds how much WAL a restore has to replay.
+[Unit]
+Description=CommonAir Postgres base backup
+# Requisite, not Requires: a timer must never start Postgres that an operator stopped (restores).
+Requisite=commonair-postgres.service
+After=commonair-postgres.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/podman exec commonair-postgres commonair-backup

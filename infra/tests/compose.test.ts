@@ -348,6 +348,12 @@ describe("Quadlet mirror", () => {
   const keys = (unit: string, key: string) => [...unit.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
   // Dev/test-only services have no production unit.
   const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
+  // The only ports a production host exposes; everything else binds 127.0.0.1.
+  const PUBLIC_PORTS: Record<string, string[]> = {
+    caddy: ["0.0.0.0:80:80", "0.0.0.0:443:443", "0.0.0.0:443:443/udp"],
+    mediamtx: ["0.0.0.0:1935:1935", "0.0.0.0:8189:8189/udp"],
+    irc: ["0.0.0.0:6667:6667", "0.0.0.0:6697:6697"],
+  };
 
   test("every production compose service has a unit, and nothing else does", () => {
     const expected = services.map(([n]) => n).filter((n) => !DEV_ONLY.has(n));
@@ -372,10 +378,40 @@ describe("Quadlet mirror", () => {
       (d) => !unit.includes(`Requires=commonair-${d}.service`),
     );
     expect(missingDeps).toEqual([]);
-    const prefix = name === "caddy" ? "0.0.0.0:" : "127.0.0.1:";
-    expect(keys(unit, "PublishPort").filter((p) => !p.startsWith(prefix))).toEqual([]);
+    const isPublic = (p: string) => p.startsWith("0.0.0.0:");
+    expect(keys(unit, "PublishPort").filter(isPublic).sort()).toEqual((PUBLIC_PORTS[name] ?? []).toSorted());
+    expect(keys(unit, "PublishPort").filter((p) => !isPublic(p) && !p.startsWith("127.0.0.1:"))).toEqual([]);
     const dbSecret = /^Secret=commonair-(owner-)?database-url,type=env,target=DATABASE_URL$/m.test(unit);
     expect(dbSecret).toBe(Boolean(s.environment?.DATABASE_URL));
+  });
+
+  test("WHIP signaling is public only through Caddy; ICE keeps equal host and container ports", () => {
+    expect(keys(units.mediamtx!, "PublishPort")).toContain("127.0.0.1:8889:8889");
+    const caddy = read("infra/caddy/Caddyfile");
+    const re = /@whip path_regexp (\S+)\n\s*handle @whip \{\s+reverse_proxy mediamtx:8889\s+\}/.exec(caddy);
+    expect(re).not.toBeNull();
+    const whip = new RegExp(re![1]!);
+    // What the API hands out (INGEST_WHIP_PUBLIC_URL + /<slug>/whip) and MediaMTX's session URLs.
+    expect(whip.test("/live/some_streamer1/whip")).toBe(true);
+    expect(whip.test("/live/some_streamer1/whip/0e9c1f3a-4b5d-4e6f-8a7b-9c0d1e2f3a4b")).toBe(true);
+    // Never MediaMTX's other endpoints, nor web pages.
+    for (const p of [
+      "/live/a/whep",
+      "/live/a/index.m3u8",
+      "/live/a",
+      "/live/a/whip/x/y",
+      "/live/../whip",
+      "/v3/paths/list",
+    ])
+      expect(whip.test(p), p).toBe(false);
+  });
+
+  test("IRC TLS reads the certificate commonair-irc-cert.service syncs", () => {
+    const irc = units.irc!;
+    expect(irc).toContain("Environment=IRC_TLS_CERT_FILE=/run/commonair/irc-tls/tls.crt\n");
+    expect(irc).toContain("Environment=IRC_TLS_KEY_FILE=/run/commonair/irc-tls/tls.key\n");
+    expect(keys(irc, "Volume")).toContain("%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,Z");
+    expect(keys(irc, "PublishPort")).toContain("127.0.0.1:6680:6680");
   });
 
   test("the network subnet default matches the trusted proxy default", () => {
@@ -425,5 +461,42 @@ describe("Quadlet mirror", () => {
         expect(env[k], `${name}: ${k}`).toBe(expected);
       }
     }
+  });
+});
+
+describe("systemd timers (infra/systemd)", () => {
+  const dir = join(ROOT, "infra/systemd");
+  const unit = (f: string) => readFileSync(join(dir, f), "utf8");
+  const keys = (u: string, key: string) => [...u.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
+
+  test("every timer starts its own oneshot service and survives downtime", () => {
+    const timers = readdirSync(dir).filter((f) => f.endsWith(".timer"));
+    expect(timers.sort()).toEqual(["commonair-backup.timer", "commonair-irc-cert.timer"]);
+    for (const t of timers) {
+      const service = t.replace(/\.timer$/, ".service");
+      expect(keys(unit(t), "Unit"), t).toEqual([service]);
+      expect(keys(unit(t), "Persistent"), t).toEqual(["true"]);
+      expect(keys(unit(t), "WantedBy"), t).toEqual(["timers.target"]);
+      expect(keys(unit(service), "Type"), service).toEqual(["oneshot"]);
+    }
+  });
+
+  test("the backup runs inside the Postgres container and never starts Postgres itself", () => {
+    const backup = unit("commonair-backup.service");
+    const postgres = read("infra/quadlet/commonair-postgres.container");
+    const [container] = keys(postgres, "ContainerName");
+    expect(keys(backup, "ExecStart")).toEqual([`/usr/bin/podman exec ${container} commonair-backup`]);
+    expect(read("infra/postgres/Containerfile")).toContain("/usr/local/bin/commonair-backup");
+    expect(keys(backup, "Requisite")).toEqual(["commonair-postgres.service"]);
+    expect(keys(backup, "Requires")).toEqual([]);
+  });
+
+  test("the IRC certificate sync runs the repository's script with the instance env", () => {
+    const sync = unit("commonair-irc-cert.service");
+    expect(keys(sync, "ExecStart")).toEqual(["%h/.bun/bin/bun %h/commonair/infra/irc/sync-cert.ts"]);
+    expect(existsSync(join(ROOT, "infra/irc/sync-cert.ts"))).toBe(true);
+    expect(keys(sync, "EnvironmentFile")).toEqual(["%h/.config/commonair/commonair.env"]);
+    // The script reads the volume by this name.
+    expect(read("infra/quadlet/commonair-caddy-data.volume")).toContain("VolumeName=commonair-caddy-data\n");
   });
 });

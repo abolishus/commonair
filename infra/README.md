@@ -256,7 +256,8 @@ local `compose.override.yaml` (Quadlet: uncomment `AddDevice=` in `commonair-med
 ## Production: Quadlet
 
 Compose is the development path; `quadlet/` is the production path on systemd (rootless user
-units). Same images, same config files, same variables.
+units). Same images, same config files, same variables. The chosen production host and its
+setup are in [docs/deploy/hetzner.md](../docs/deploy/hetzner.md) (ADR 0010).
 
 ```sh
 git clone <repo> ~/commonair && cd ~/commonair     # units bind-mount config from %h/commonair/infra
@@ -276,6 +277,18 @@ app-role URL). The env file must also contain `POSTGRES_PASSWORD`, `GARAGE_RPC_S
 dependencies are healthy; one-shot jobs are `Type=oneshot`. `mailpit`, `mock-rtmp` and
 `stripe-mock` are development-only and have no unit. Caddy publishes 80/443 directly (see the
 sysctl above).
+
+Only Caddy (80/443), MediaMTX RTMP (1935) and ICE (8189/udp), and IRC (6667/6697) bind
+`0.0.0.0`; everything else stays on `127.0.0.1` (a test enforces the list). WHIP signaling
+reaches MediaMTX through Caddy (`/live/<slug>/whip`), so set
+`INGEST_WHIP_PUBLIC_URL=https://<host>/live`, and give MediaMTX the server's public address
+with `MTX_WEBRTCADDITIONALHOSTS` in the env file.
+
+`systemd/` holds plain user units that Quadlet does not generate: `commonair-backup.timer`
+(daily WAL-G base backup) and `commonair-irc-cert.timer` (copies Caddy's certificate for
+`IRC_PUBLIC_HOST` to the IRC unit's TLS mount, `irc/sync-cert.ts`). Copy them to
+`~/.config/systemd/user/` and `systemctl --user enable --now` both timers
+([docs/deploy/hetzner.md](../docs/deploy/hetzner.md)).
 
 ## Tests
 

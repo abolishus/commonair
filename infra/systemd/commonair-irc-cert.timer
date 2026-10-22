@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+[Unit]
+Description=Daily CommonAir IRC certificate sync
+
+[Timer]
+OnBootSec=5min
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+Unit=commonair-irc-cert.service
+
+[Install]
+WantedBy=timers.target

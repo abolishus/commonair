@@ -51,8 +51,14 @@ Environment=S3_EVIDENCE_SECRET_ACCESS_KEY=
 Environment=EVIDENCE_PRIVATE_KEY=
 Environment=ONNXRUNTIME_NODE_INSTALL=skip
 Secret=commonair-database-url,type=env,target=DATABASE_URL
-PublishPort=127.0.0.1:6667:6667
-PublishPort=127.0.0.1:6697:6697
+# Production refuses to start without a certificate. commonair-irc-cert.service copies Caddy's
+# certificate for IRC_PUBLIC_HOST here and restarts this unit when it renews.
+Environment=IRC_TLS_CERT_FILE=/run/commonair/irc-tls/tls.crt
+Environment=IRC_TLS_KEY_FILE=/run/commonair/irc-tls/tls.key
+Volume=%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,Z
+# Raw IRC clients connect directly; IRC over WebSocket stays local until it has a TLS route.
+PublishPort=0.0.0.0:6667:6667
+PublishPort=0.0.0.0:6697:6697
 PublishPort=127.0.0.1:6680:6680
 HealthCmd=bun /opt/commonair/healthcheck.ts
 HealthInterval=10s

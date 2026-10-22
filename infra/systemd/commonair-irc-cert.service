@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Copies Caddy's certificate for IRC_PUBLIC_HOST to the IRC unit's TLS mount and restarts IRC
+# when it changed (infra/irc/sync-cert.ts).
+[Unit]
+Description=CommonAir IRC certificate sync from Caddy
+After=commonair-caddy.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/commonair/commonair.env
+ExecStart=%h/.bun/bin/bun %h/commonair/infra/irc/sync-cert.ts

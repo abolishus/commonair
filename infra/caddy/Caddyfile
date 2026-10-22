@@ -9,6 +9,7 @@
 #   PUBLIC_URL=https://<host>  API_PUBLIC_URL=https://<host>  PLAYBACK_PUBLIC_URL=https://<host>
 #   CHAT_PUBLIC_URL=wss://<host>/chat  P2P_TRACKER_URL=wss://<host>/tracker
 #   MEDIA_PUBLIC_URL=https://<host>/media
+#   INGEST_WHIP_PUBLIC_URL=https://<host>/live  INGEST_RTMP_PUBLIC_URL=rtmp://<host>/live
 {
 	# ACME works without an account email; add `email you@domain` here to get expiry notices.
 	servers {
@@ -70,6 +71,13 @@
 	# Public media objects; the origin serves only the public key prefixes (ADR 0009).
 	handle /media/* {
 		reverse_proxy origin:3003
+	}
+
+	# WHIP signaling: live/<slug>/whip and the session URLs MediaMTX returns under it. Media
+	# itself flows over ICE (UDP 8189), not through Caddy.
+	@whip path_regexp ^/live/[a-z0-9_]+/whip(/[^/]+)?$
+	handle @whip {
+		reverse_proxy mediamtx:8889
 	}
 
 	handle_path /tracker* {
