@@ -33,6 +33,18 @@ council term `txid`, triggers for tallies, council, shares, patronage and commen
 as workflows of three: batch 1 = A API, B worker + governance lifecycle, C `packages/ui` boards;
 batch 2 = D web, E harness `e5-coop`.
 
+**Batch 1 merged** (workflow `wf_3f6e676f-c8d`): A API (`ac4b979`, fix `d8c1020`), B worker +
+governance lifecycle (`61dd4eb`, fix `e097e2b`), C `packages/ui` co-op compositions and boards
+(`f231af9`, fix `04da33a`). Reviews: no HIGH in any unit (A and B also had a security reviewer);
+MEDIUMs fixed (A: share reference retry, withdrawn drafts stayed public, draft titles on the
+public event; B: vote notices batched, transient apply errors no longer permanent, unfilled
+council refilled, viewer exits kept; C: run-form surplus parsed to cents). Head after merge:
+`d77a23e` — votes were judged by the API host's clock against a database-stamped window (the
+Podman database runs ~35 ms ahead), so a vote right after voting opened was refused; now the
+database clock. Spec/ADR clarifications `9144093`. On `main`: API int 221/221, worker int 76/76,
+governance int 37/37, db int 95/95, patronage int 16/16, unit tests of every touched package and
+tsc of every package pass.
+
 ## E4c `trust-safety` harness bring-up (2026-10-21/22, done)
 
 `trust-safety` passes twice in a row against the local Podman stack (92/92 assertions both runs;
