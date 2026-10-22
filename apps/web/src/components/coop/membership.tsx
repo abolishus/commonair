@@ -36,7 +36,7 @@ export interface MembershipPanelProps {
   rules: { shareCents: number; refundableOnExit: boolean } | null;
   /** Instance currency (the share's price before one exists). */
   currency: string;
-  /** Set after buying, until the page is left. */
+  /** Set after buying, until the page is left (the API does not return the reference again). */
   instructions: ShareInstructionsDto | null;
   buying: boolean;
   onBuy: () => void | Promise<void>;
@@ -77,7 +77,11 @@ export function MembershipPanel({
     shareStatus === "none"
       ? t("coop.share.noteNone")
       : shareStatus === "pending"
-        ? t("coop.share.notePending")
+        ? // The reference exists only in the buyShare response (ShareView has none), so a member who
+          // leaves the page cannot see it again: tell them to keep it while it is on screen.
+          instructions
+          ? t("coop.share.noteKeepReference")
+          : t("coop.share.notePending")
         : shareStatus === "held"
           ? rules?.refundableOnExit === false
             ? t("coop.share.noteHeldKept")

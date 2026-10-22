@@ -13,7 +13,11 @@ import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { appointError, isAdmin } from "../../lib/coop.ts";
 
-/** Admins only: the `_admin` layout's guard answers everyone else with not-found. */
+/**
+ * Admins only. The `_admin` layout's guard (`components/safety/access.ts`) must know this path:
+ * until `adminPageFor` maps `/admin/coop` to a page that `mayOpenAdminPage` grants to admins, the
+ * guard answers everyone, admins included, with not-found. The check below is the client fallback.
+ */
 export const Route = createFileRoute("/_admin/admin/coop")({ component: AdminCoopRoute });
 
 const EMPTY: AppointWorkerFormValues = { username: "", minute: "" };

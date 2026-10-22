@@ -256,6 +256,15 @@ describe("/coop/membership", () => {
     expect(attrs(box, ["data-reference", "data-payment-id", "data-cents"])).toEqual(["CA-ABC123", "pay-1", "2500"]);
     expect(box.textContent).toContain("Transfer to the co-op.");
     expect(all("membership-buy-share")).toHaveLength(0);
+    // The reference is not returned again once the page is left: the member is told to keep it.
+    expect(id("membership-share").textContent).toContain(en["coop.share.noteKeepReference"]);
+  });
+
+  it("a pending share loaded later (no instructions in hand) keeps the plain pending note", () => {
+    panel({ view: membershipView({ memberships: [], share: { id: "s", status: "pending", amount: usd(2500) } }) });
+    const card = id("membership-share");
+    expect(card.textContent).toContain(en["coop.share.notePending"]);
+    expect(card.textContent).not.toContain(en["coop.share.noteKeepReference"]);
   });
 
   it("a pending or refund_pending share hides buy; a refunded one offers it again", () => {
