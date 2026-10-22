@@ -14,16 +14,27 @@ const names = [
   "csam.pdq",
   "ncii.pdq",
 ];
+/**
+ * PNGs by their decoded pixels, hash lists by their bytes. ffmpeg's PNG encoder output depends
+ * on its build (zlib), so the same pixels encode to different bytes on a Linux runner than on a
+ * workstation; the images and the PDQ lists are what must not change.
+ */
+const pixels = (file: string) => {
+  const r = Bun.spawnSync(["ffmpeg", "-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]);
+  if (r.exitCode !== 0) throw new Error(`ffmpeg could not decode ${file}: ${r.stderr.toString()}`);
+  return r.stdout;
+};
 const digest = async () =>
   Promise.all(
     names.map(async (name) => {
-      const data = await Bun.file(new URL(name, directory)).arrayBuffer();
-      return createHash("sha256").update(new Uint8Array(data)).digest("hex");
+      const file = new URL(name, directory).pathname;
+      const data = name.endsWith(".png") ? pixels(file) : new Uint8Array(await Bun.file(file).arrayBuffer());
+      return createHash("sha256").update(data).digest("hex");
     }),
   );
 
 describe("synthetic fixture generator", () => {
-  test("regenerating produces byte-identical images and fixture lists", async () => {
+  test("regenerating produces pixel-identical images and byte-identical fixture lists", async () => {
     const before = await digest();
     const script = new URL("../fixtures/generate.ts", import.meta.url).pathname;
     const run = Bun.spawn([process.execPath, script], { stdout: "ignore", stderr: "ignore" });
