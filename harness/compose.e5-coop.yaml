@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the `e5-coop` harness scenario ONLY. Never use it on a public instance:
+# it turns on the co-op test hook (`POST /internal/coop/tick`, COOP_TEST_HOOKS) and bootstraps
+# seconds-long governance periods, quorum 0.01 and a 36-second streamer threshold.
+#
+# GOVERNANCE_BOOTSTRAP_JSON applies at the database's FIRST migration only (ADR 0020): recreate
+# the Postgres volume once, then start with this override:
+#
+#   podman compose down
+#   podman volume rm commonair_postgres-data
+#   podman compose -f compose.yaml -f harness/compose.e5-coop.yaml up -d
+#
+# It layers with harness/compose.trust-safety.yaml (different keys, mapping environments):
+#
+#   podman compose -f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml up -d
+#
+# The bootstrap is shallow-merged per key into the seeded defaults, so `membership.classes`
+# carries every class whole. Keep it equal to E5_GOVERNANCE_BOOTSTRAP in harness/src/coop.ts
+# (a unit test checks).
+
+services:
+  migrate:
+    environment:
+      GOVERNANCE_BOOTSTRAP_JSON: >-
+        {"governance.protections":{"councilReviewSeconds":30,"minVotingSeconds":45,"quorum":0.01,"streamerClassQuorum":0.01},
+        "governance.ordinary":{"discussionSeconds":30,"minVotingSeconds":45,"votingSeconds":45,"quorum":0.01},
+        "membership.classes":{"streamer":{"minStreamingHours":0.01,"windowDays":90,"minVerifiedViewers":2,"lapseGraceDays":14},
+        "viewer":{"shareCents":500,"shareRefundableOnExit":true,"activeSubscriptionQualifies":true,"minSubscriptionCents":300},
+        "worker":{"appointedBy":"board"}},
+        "council.config":{"minStreamingHours":0.01}}
+  api:
+    environment:
+      COOP_TEST_HOOKS: "true"
+  worker:
+    environment:
+      COOP_TEST_HOOKS: "true"

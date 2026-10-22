@@ -198,18 +198,19 @@ The full breakdown is in the report under `scenarios[].data.load`.
 
 ## Scenarios
 
-| Scenario       | What it proves                                                                                                                                             |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`        | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                            |
-| `ingest-rtmp`  | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                       |
-| `ingest-whip`  | The same over WHIP.                                                                                                                                        |
-| `viewers`      | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.    |
-| `load-smoke`   | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                       |
-| `e2e-basic`    | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline. |
-| `e2e-social`   | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                      |
-| `e2e-relay`    | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).          |
-| `e4b-money`    | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                     |
-| `trust-safety` | Milestone E4c: T0 live, evidence through deletion, two-reviewer dismissal, T2 label + appeal, T1 queue, upload rejection, NCII clock (see below).          |
+| Scenario       | What it proves                                                                                                                                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`        | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                                                                                      |
+| `ingest-rtmp`  | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                                                                                 |
+| `ingest-whip`  | The same over WHIP.                                                                                                                                                                                                  |
+| `viewers`      | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.                                                              |
+| `load-smoke`   | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                                                                                 |
+| `e2e-basic`    | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline.                                                           |
+| `e2e-social`   | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                                                                                |
+| `e2e-relay`    | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).                                                                    |
+| `e4b-money`    | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                                                                               |
+| `trust-safety` | Milestone E4c: T0 live, evidence through deletion, two-reviewer dismissal, T2 label + appeal, T1 queue, upload rejection, NCII clock (see below).                                                                    |
+| `e5-coop`      | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below). |
 
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
@@ -449,6 +450,90 @@ podman compose -f compose.yaml -f harness/compose.trust-safety.yaml up -d
 bun harness/src/cli.ts run trust-safety
 bun harness/src/cli.ts run trust-safety --set via=api --set steps=1,2,6
 podman compose up -d                                 # back to the normal configuration afterwards
+```
+
+### `e5-coop` (milestone E5)
+
+[docs/testing/e5-selectors.md](../docs/testing/e5-selectors.md), "Scenario `e5-coop`". Accounts
+are fresh per run: viewer V, streamers S1 and S2, worker W, treasurers T1 and T2 and an admin
+(roles from the operator CLI). The E5 routes and test ids live in `src/coop-selectors.ts` (a unit
+test checks them against the spec); the flows in `src/coop-actors.ts` (web and API), the test-hook
+client in `src/coop-io.ts`, the database checks in `src/coop-db.ts` and the pure parts in
+`src/coop.ts`.
+
+1. **Membership.** V buys the share (`/coop/membership`), T1 confirms it on `/treasury`; V is a
+   `viewer`/`share` member with the share `held`. S1 and S2 each stream an ffmpeg test pattern to
+   `viewersPerStream` harness HTTP viewers (the default 2 meets `minVerifiedViewers`) until
+   `coop.membership` shows the streamer class eligible (the worker's scoring and its 5-minute
+   `stream-hours` job; bounded by `qualifySeconds`, reported as `streamer_qualification`); a
+   `membership-sync` tick makes both `streaming_hours` members. The admin appoints W on
+   `/admin/coop` (`board_appointment`).
+2. **Council.** `council-recompute` ticks until the current term seats S1 and S2; `/coop/council`
+   lists both.
+3. **Revenue.** V tips S1 (manual); T1 confirms.
+4. **Governance vote.** S2 drafts the ordinary, creator-affecting `discovery.ranking` change on
+   `/coop/proposals/new` (the whole value, `spotlightSlots` alternating 4/5 per run) and submits
+   it; V and W comment. `proposals-advance` ticks run until the council review opens (S1 publishes
+   `support` at once), then until voting opens (V votes on the web, W, S1 and S2 through the API,
+   at once), then until it is decided (`tally` passed, per class streamer 2 / viewer 1 / worker 1
+   yes) and applied (`/coop/settings` shows `discovery.ranking` set by it).
+5. **Protected decision**, in the same windows: W's `platform.cut` change (streamer 0.85), S2
+   `oppose`, V, W, S2 yes and S1 no: rejected, `streamer-class majority not met`. Then, as the app
+   role (`--set appRole=`, default `commonair_app`) inside a transaction that is always rolled
+   back: setting it `passed`, inserting a `tallies` row with `passed = true` and applying its change
+   must each be refused; `platform.cut` is unchanged.
+6. **Patronage.** T1 runs `[run start, now − 1 s)` on `/treasury` (whole minutes through the web
+   form, whole seconds through the API; after any earlier period); T1's own approval is disabled and
+   refused with `second_approver`; T2 approves; S1's statement has a positive total and explained
+   lines. Every ledger transaction of the run (share purchase, tip, period close, patronage
+   allocation) sums to zero.
+7. **Transparency.** Both proposals (`data-passed` true / false) and this month's patronage.
+8. **Audit and outbox.** Every action of the run has its `audit_log` row (action, actor type,
+   actor) and its `events` row; drafts emit no event; no audit `details` or event payload holds a
+   vote choice, a comment body or an email; neither does any line of `podman logs --since <run
+   start>` of the `api`, `worker`, `media`, `web`, `chat`, `origin` and `irc` containers (a choice
+   field, or a voter's id or username beside a quoted choice).
+9. **Exit and refund.** V exits (`refund_pending`), T1 refunds on `/treasury` (`refunded`, a
+   balanced `share_refund`), S1, S2 and W exit, so later runs start from a clean electorate. When a
+   run stops before step 9 (a prefix or a failure), a best-effort cleanup exits the run's members
+   and refunds the share (`--set cleanup=off` keeps them).
+
+Governance windows run on the database clock: every wait polls state with a deadline (window +
+60 s) and ticks the job; a tick answering `{ skipped: 1 }` is simply repeated. The report holds
+ids, statuses, timings and counts (never emails, comment text or choices).
+
+**Needs:** `api`, `web`, `worker`, `mail`, `media`, `origin`, `ffmpeg`, `browser`, `podman`; a
+stack started with `harness/compose.e5-coop.yaml` on a **freshly created database** (the bootstrap
+applies at the first migration only; ADR 0020): `COOP_TEST_HOOKS=true` for `api` and `worker`,
+and `GOVERNANCE_BOOTSTRAP_JSON` for `migrate` (30 s discussion and council review, 45 s votes,
+quorum 0.01, a 36-second streamer threshold). The scenario stops at once with the reset hint when
+`governance.ordinary.discussionSeconds` > 60 or the tick hook answers 404. `DATABASE_URL` and
+`INTERNAL_API_SECRET` (or `HARNESS_INTERNAL_API_SECRET`) come from the repo `.env`. Not part of
+`full`. The override layers with `harness/compose.trust-safety.yaml` (a unit test checks).
+
+Step 2 needs S1 and S2 among the council's `council.config.size` seats (7 by default). Every
+streamer another scenario qualifies stays a council candidate on a long-lived stack, so before it
+ticks, step 2 compares the active streamer members with the seats and the current term; when
+seating is not certain it tries one short recompute and then fails with the reason (term full, or
+S1 and S2 outranked) instead of a timeout. Reset the stack, or raise `council.config.size`, then.
+
+| Knob               | Default         | Meaning                                                         |
+| ------------------ | --------------- | --------------------------------------------------------------- |
+| `steps`            | `all`           | A prefix: `1-5` (each step builds on the previous one)          |
+| `via`              | `web`           | `api`: everything through the API (no browser)                  |
+| `qualifySeconds`   | `600`           | How long step 1 waits for the streamer class to become eligible |
+| `viewersPerStream` | `2`             | Harness HTTP viewers per streamer                               |
+| `appRole`          | `commonair_app` | The role step 5 acts as for the refusal checks                  |
+| `cleanup`          | `on`            | `off`: keep the run's members when it stops before step 9       |
+
+```sh
+podman compose down && podman volume rm commonair_postgres-data   # once: periods are fixed at first migration
+podman compose -f compose.yaml -f harness/compose.e5-coop.yaml up -d
+bun harness/src/cli.ts run e5-coop
+bun harness/src/cli.ts run e5-coop --set via=api --set steps=1-5
+# with the other scenarios on one stack:
+podman compose -f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml up -d
+bun harness/src/cli.ts run e5-coop e4b-money trust-safety
 ```
 
 ### Adding a scenario
