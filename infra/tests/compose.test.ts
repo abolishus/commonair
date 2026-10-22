@@ -404,23 +404,18 @@ describe("Quadlet mirror", () => {
     expect(keys(unit, "NetworkAlias")).toEqual([name]);
     expect(keys(unit, "Network")).toEqual(["commonair.network"]);
     expect(/^Type=oneshot$/m.test(unit)).toBe(ONE_SHOT.has(name));
-    expect(keys(unit, "HealthCmd")).toHaveLength(ONE_SHOT.has(name) ? 0 : 1);
     // The same check in the same form. Podman reads a plain HealthCmd string as CMD-SHELL, which
     // needs /bin/sh; Garage's image has none and Loki, Tempo and the collector only a static
     // busybox, so their checks never passed. A leading `CMD` word gives exec form on Podman 4.9
     // through 6 (5.4 splits a JSON array on whitespace instead of parsing it), so no argument
     // may contain a space.
-    if (!ONE_SHOT.has(name)) {
-      const test = s.healthcheck?.test ?? [];
-      const [cmd] = keys(unit, "HealthCmd");
-      if (test[0] === "CMD") {
-        expect(
-          test.every((a) => !/\s/.test(a)),
-          name,
-        ).toBe(true);
-        expect(cmd, name).toBe(test.join(" "));
-      } else expect([test[0], cmd], name).toEqual(["CMD-SHELL", test[1]]);
-    }
+    const test = s.healthcheck?.test ?? [];
+    const form = test[0] === "CMD" ? test.join(" ") : test[1];
+    expect(keys(unit, "HealthCmd"), name).toEqual(ONE_SHOT.has(name) ? [] : [form]);
+    expect(
+      test[0] === "CMD-SHELL" || test.every((a) => !/\s/.test(a)),
+      `${name}: an exec-form argument with a space`,
+    ).toBe(true);
     const badVolumes = keys(unit, "Volume").filter((v) => {
       const src = v.slice(0, v.indexOf(":"));
       if (src.endsWith(".volume")) return !existsSync(join(dir, src));
