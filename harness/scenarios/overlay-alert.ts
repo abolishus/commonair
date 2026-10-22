@@ -310,7 +310,7 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
       `4 the anonymous alert frame carries the "${ANONYMOUS_LABEL}" label`,
       a.data.text.startsWith(anonymousText),
     );
-    checkFrames(ctx, observers, v, tip300.confirmedAt);
+    checkFrames(ctx, observers, v, tip300.confirmedAt, "4");
   });
 
   // ------------------------------------------------------------ 5. scope
@@ -456,6 +456,8 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   });
 
   // ------------------------------------------------------------ 8. audit
+  // Streams 2 and 3 opened after step 4: a replay or raw event on a new connection shows here.
+  checkFrames(ctx, observers, v, tip300.confirmedAt, "7");
   const audit = await ctx.step("8 audit rows (DB)", () => auditActionCounts(kit.databaseUrl, { channelId }));
   ctx.data("audit", audit);
   ctx.assert("8 alert.update is audited", (audit["alert.update"] ?? 0) >= 1, audit);
@@ -473,6 +475,7 @@ function checkFrames(
   streams: readonly SseStream[],
   v: SignedInUser,
   anonymousFrom: number,
+  step: string,
 ): void {
   const frames = streams.flatMap((st) => st.events);
   const email = v.email.toLowerCase();
@@ -482,14 +485,14 @@ function checkFrames(
     username: frames.some((f) => f.data.includes(v.username)),
     anonymousName: frames.some((f) => f.at >= anonymousFrom && f.data.includes(v.displayName)),
   };
-  ctx.data("overlayFrames", { streams: streams.length, frames: frames.length });
+  ctx.data(`overlayFrames${step}`, { streams: streams.length, frames: frames.length });
   ctx.assert(
-    "4 no frame (any event type) carries V's id, email or username, nor V's name after the anonymous tip",
+    `${step} no frame of ${streams.length} stream(s) (any event type) carries V's id, email or username, nor V's name after the anonymous tip`,
     !Object.values(leaks).some(Boolean),
     leaks,
   );
   const unexpected = [...new Set(frames.map((f) => f.event).filter((e) => !STREAM_EVENT_TYPES.has(e)))];
-  ctx.check("4 the stream sends only alert, ping and revoked events", unexpected.length === 0, { unexpected });
+  ctx.check(`${step} the streams send only alert, ping and revoked events`, unexpected.length === 0, { unexpected });
 }
 
 /** A new overlay stream with `token` is refused: not 200, or closed at once with no alert or ping. */

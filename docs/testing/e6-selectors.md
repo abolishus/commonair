@@ -62,10 +62,10 @@ by `data-testid`, never by visible text. Amounts in `data-*` attributes are inte
 Built in E2/E3 (`stream.simulcast.*`, `services/media/src/simulcast.ts`); E6 adds the studio UI
 and the scenario.
 
-| Flow   | Who   | What happens                                                                                                                                                                                                                                                                                                                                                   |
-| ------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Manage | owner | `/dashboard` simulcast section: list targets (name, platform, URL, enabled, live status, last error code), add (name, platform, `rtmp(s)://` URL, key), enable/disable, remove (`<ConfirmDialog>`). The key field is write-only; the list never shows it. Up to 5 targets (`MAX_SIMULCAST_TARGETS`). URL refusals show the API's reason (`outboundUrlProblem`) |
-| Push   | media | Unchanged: when the channel goes live, media pushes each enabled target with `-c copy` and reports `KEYS.simulcastStatus`. `stream.simulcast.list` shows `status` `live` within 20 s of going live                                                                                                                                                             |
+| Flow   | Who   | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Manage | owner | `/dashboard` simulcast section: list targets (name, platform, URL, enabled, live status, last error code), add (name, platform, `rtmp(s)://` URL, key), enable/disable, remove (`<ConfirmDialog>`). The key field is write-only; the list never shows it. Up to 5 targets (`MAX_SIMULCAST_TARGETS`). URL refusals show a reason in `simulcast-error` `data-reason`: `format` / `credentials` (checked in the browser), `url` (the API's generic `BAD_REQUEST`), `simulcast_limit` (`PRECONDITION_FAILED`), else the error code or `network` |
+| Push   | media | Unchanged: when the channel goes live, media pushes each enabled target with `-c copy` and reports `KEYS.simulcastStatus`. `stream.simulcast.list` shows `status` `live` within 20 s of going live                                                                                                                                                                                                                                                                                                                                          |
 
 The harness stack's `mock-rtmp` service (`infra/mediamtx/mock-rtmp-target.yml`, profile
 `harness`) is the target: `rtmp://mock-rtmp:1936/live` with the run's key, readable by the
@@ -201,7 +201,11 @@ Selector conventions added by the `packages/ui` blocks: a select's options are
 tabs are `content-tab-vods` / `content-tab-clips`; `overlay-url-value` is the URL input inside
 `overlay-url`; `alert-duration` is in seconds with `data-ms`; `simulcast-limit` (cap reached) and
 `export-empty` (no exports yet). The deletion request dialog asks for the username
-(`deletion-confirm-username`), as `me.deletion.request` requires.
+(`deletion-confirm-username`), as `me.deletion.request` requires. The web adds load errors with a
+retry (`simulcast-load-error`, `alerts-load-error`, `overlay-token-load-error`,
+`content-load-error`, `export-load-error`, `deletion-load-error`), `overlay-placeholder`
+(`data-kind` `goals` | `chat`), navigation links (`account-privacy-link`, `studio-overlays-link`,
+`studio-content-link`) and page wrappers (`overlays-page`, `content-page`, `privacy-page`).
 
 ## Routes
 

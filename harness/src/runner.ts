@@ -24,6 +24,7 @@ import {
   type StepSkip,
   excludedNeeds,
 } from "./scenario.ts";
+import { errorMessage } from "./redact.ts";
 
 export const DEFAULT_SCENARIO_TIMEOUT_MS = 10 * 60_000;
 
@@ -256,7 +257,7 @@ export async function runOne(
       }),
     ]);
   } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
+    error = errorMessage(err);
   } finally {
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onOuterAbort);

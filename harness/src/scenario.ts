@@ -10,6 +10,7 @@
 import type { Logger } from "@commonair/observability";
 import type { HarnessEnv } from "./env.ts";
 import type { Platform } from "./platform.ts";
+import { errorMessage } from "./redact.ts";
 
 /** Parts of the stack (or the harness host) a scenario depends on. The runner probes each once. */
 export const NEEDS = [
@@ -198,7 +199,7 @@ export class ScenarioRecorder {
         name,
         status: "failed",
         durationMs: Math.round(performance.now() - started),
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       });
       throw err;
     }
