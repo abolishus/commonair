@@ -32,6 +32,7 @@ interface Service {
   env_file?: { path: string; required: boolean }[];
   healthcheck?: { test?: string[]; disable?: boolean };
   depends_on?: Record<string, { condition: string }>;
+  init?: boolean;
 }
 interface Compose {
   name: string;
@@ -498,5 +499,14 @@ describe("systemd timers (infra/systemd)", () => {
     expect(keys(sync, "EnvironmentFile")).toEqual(["%h/.config/commonair/commonair.env"]);
     // The script reads the volume by this name.
     expect(read("infra/quadlet/commonair-caddy-data.volume")).toContain("VolumeName=commonair-caddy-data\n");
+  });
+});
+
+describe("postgres runs under an init", () => {
+  // As PID 1 the postmaster reaps orphans (timed-out execs, abandoned archive commands) and
+  // treats one that died by a signal as a crashed backend: every connection is reset.
+  test("compose and Quadlet keep the postmaster off PID 1", () => {
+    expect(compose.services.postgres?.init).toBe(true);
+    expect(read("infra/quadlet/commonair-postgres.container")).toMatch(/^RunInit=true$/m);
   });
 });

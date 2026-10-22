@@ -101,6 +101,10 @@ services:
       context: .
       dockerfile: infra/postgres/Containerfile
     restart: unless-stopped
+    # An init as PID 1 reaps orphans. The postmaster must not be PID 1: it treats any child it
+    # did not start (a timed-out healthcheck or `podman exec`, an abandoned archive command) that
+    # dies by a signal as a crashed backend and resets every connection (seen as SIGPIPE crashes).
+    init: true
     environment:
       POSTGRES_USER: commonair
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commonair}

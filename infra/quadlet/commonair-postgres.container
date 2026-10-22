@@ -8,6 +8,9 @@ Description=CommonAir postgres
 [Container]
 Image=localhost/commonair/postgres:latest
 ContainerName=commonair-postgres
+# Not the postmaster as PID 1: orphans (timed-out execs, abandoned archive commands) would be
+# reaped by it and treated as crashed backends, resetting every connection.
+RunInit=true
 Network=commonair.network
 NetworkAlias=postgres
 EnvironmentFile=%h/.config/commonair/commonair.env
