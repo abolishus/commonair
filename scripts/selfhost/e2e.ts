@@ -16,6 +16,8 @@
  * 3. Checks https://selfhost.test/ and /api/status through Caddy's internal CA, and browser
  *    access to object storage (ADR 0024): a presigned PUT into the media bucket's incoming/ and
  *    a presigned export GET succeed through Caddy, and unsigned or out-of-scope requests do not.
+ *    And that each container has only its keys of commonair.env: Caddy no database, session
+ *    or S3 secret, the API its DATABASE_URL.
  * 4. Builds release 0.0.0-e2e.2 (every image re-labelled, so every digest changes), upgrades,
  *    and checks from systemd's own invocation IDs and timestamps that the upgrade re-ran migrate
  *    and that it finished before api and worker started, and that `status` reports the new
@@ -493,6 +495,45 @@ function checkBrowserStorage(label: string): void {
   expectThat(uploaded === uploadBody(run), "the uploaded object is in the media bucket, byte for byte");
 }
 
+/** Keys the internet-facing Caddy container must never hold: each unit gets only its own keys. */
+export const CADDY_FORBIDDEN: readonly RegExp[] = [
+  /^DATABASE_URL$/,
+  /^POSTGRES_(APP_)?PASSWORD$/,
+  /^SESSION_/,
+  /^AUTH_SECRET$/,
+  /^S3_SECRET/,
+  /^S3_EVIDENCE_/,
+];
+
+/** The variable names of `env` output (KEY=value lines; values are never returned). */
+export function envKeys(envOutput: string): string[] {
+  return envOutput
+    .split("\n")
+    .filter((l) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(l))
+    .map((l) => l.slice(0, l.indexOf("=")));
+}
+
+/** Names in `env` output that match any of the patterns. */
+export function forbiddenKeys(envOutput: string, patterns: readonly RegExp[]): string[] {
+  return envKeys(envOutput).filter((k) => patterns.some((p) => p.test(k)));
+}
+
+/** Each container reads only its keys of commonair.env (scripts/selfhost/render-env.sh). */
+function checkUnitEnv(): void {
+  // Names only (`KEY=`): the e2e log keeps command output, and these values are secrets.
+  const namesOf = (container: string) => inHost(`podman exec ${container} env | sed 's/=.*/=/'`, { user: true });
+  const caddy = namesOf("commonair-caddy");
+  const leaked = forbiddenKeys(caddy, CADDY_FORBIDDEN);
+  expectThat(
+    leaked.length === 0,
+    `commonair-caddy holds no database, session or S3 secret (${leaked.join(", ") || "none"})`,
+  );
+  expectThat(envKeys(caddy).includes("PUBLIC_HOSTNAME"), "commonair-caddy has PUBLIC_HOSTNAME");
+  const api = namesOf("commonair-api");
+  expectThat(envKeys(api).includes("DATABASE_URL"), "commonair-api has DATABASE_URL");
+  expectThat(envKeys(api).includes("AUTH_SECRET"), "commonair-api has AUTH_SECRET");
+}
+
 function installedVersion(): string {
   return /version:\s+(\S+)/.exec(inHost("sh ~/commonair/selfhost.sh status", { user: true }))?.[1] ?? "";
 }
@@ -629,6 +670,7 @@ async function main(): Promise<void> {
       expectThat(installedVersion() === v1, `status reports ${v1}`);
       checkHttps();
       checkBrowserStorage("install");
+      checkUnitEnv();
     });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {
@@ -644,6 +686,7 @@ async function main(): Promise<void> {
       checkMigrateFirst(before);
       checkHttps();
       checkBrowserStorage("upgrade");
+      checkUnitEnv();
     });
 
     // The session-ten bug: a crashed worker stayed down under compose. Under Quadlet, systemd

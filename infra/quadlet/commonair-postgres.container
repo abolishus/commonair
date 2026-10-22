@@ -15,7 +15,8 @@ ContainerName=commonair-postgres
 RunInit=true
 Network=commonair.network
 NetworkAlias=postgres
-EnvironmentFile=%h/.config/commonair/commonair.env
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-postgres.env
 Environment=POSTGRES_USER=commonair
 Environment=POSTGRES_DB=commonair
 Environment=WALG_S3_ENDPOINT=http://garage:3900
@@ -45,6 +46,9 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-postgres.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-postgres.env
 Restart=always
 RestartMode=direct
 RestartSec=5

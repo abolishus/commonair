@@ -24,11 +24,15 @@ ContainerName=commonair-migrate
 RunInit=true
 Network=commonair.network
 NetworkAlias=migrate
-EnvironmentFile=%h/.config/commonair/commonair.env
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-migrate.env
 Secret=commonair-owner-database-url,type=env,target=DATABASE_URL
 Exec=sh -c "bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.ts"
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-migrate.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-migrate.env
 Type=oneshot
 RemainAfterExit=yes
 # A transient failure (Postgres still in crash recovery after a reboot, a dropped connection)

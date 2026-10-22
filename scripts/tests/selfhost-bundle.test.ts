@@ -95,6 +95,9 @@ describe("bundle contents", () => {
   test("equals the expected set", () => {
     const quadlet = readdirSync(join(ROOT, "infra/quadlet")).map((f) => `quadlet/${f}`);
     const systemd = readdirSync(join(ROOT, "infra/systemd")).map((f) => `systemd/${f}`);
+    // Every unit with an env file renders it from its key list at start (unit-env.ts).
+    const keyLists = readdirSync(join(ROOT, "infra/selfhost/env")).map((f) => `infra/selfhost/env/${f}`);
+    expect(keyLists).toHaveLength(16);
     const expected = [
       "selfhost.sh",
       "release-manifest.json",
@@ -112,6 +115,9 @@ describe("bundle contents", () => {
       "infra/otel-collector/config.yaml",
       "infra/prometheus/prometheus.yml",
       "infra/tempo/tempo.yaml",
+      // What the units' ExecStartPre= lines use from %h/commonair/.
+      "scripts/selfhost/render-env.sh",
+      ...keyLists,
       "tools/init-env.js",
       "tools/fetch-model.js",
       "tools/.env.example",

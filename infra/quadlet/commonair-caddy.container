@@ -18,7 +18,8 @@ ContainerName=commonair-caddy
 RunInit=true
 Network=commonair.network
 NetworkAlias=caddy
-EnvironmentFile=%h/.config/commonair/commonair.env
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-caddy.env
 PublishPort=0.0.0.0:80:80
 PublishPort=0.0.0.0:443:443
 PublishPort=0.0.0.0:443:443/udp
@@ -36,6 +37,9 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-caddy.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-caddy.env
 Restart=always
 RestartMode=direct
 RestartSec=5

@@ -54,7 +54,8 @@ The rollback cannot undo three things:
   release now runs against the new schema. That is safe only because migrations between
   adjacent releases are additive (below).
 - **Data written by the new release** while it ran.
-- **New env-file variables.** They stay, and the old release ignores them.
+- **New env-file variables.** They stay, and the old release ignores them. The units of the
+  release you roll back to pass only the keys of their own lists, from that release.
 
 If the rolled-back release does not work against the new schema, the last resort is to restore
 the backup taken in step 5 ([backups.md](backups.md#restore)). `selfhost.sh backup` lists the

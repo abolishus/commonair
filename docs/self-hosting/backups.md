@@ -52,8 +52,9 @@ sh ~/commonair/selfhost.sh install --reinstall
 sh ~/commonair/selfhost.sh backup
 ```
 
-Every container reads the env file, so these credentials are visible to all of them
-([README.md](README.md#known-limitations)). Give the key access to the backup bucket only.
+Only the Postgres container receives these settings (`AWS_*` and `WALG_*` are on its key list,
+[configuration.md](configuration.md#which-unit-sees-which-key)). Give the key access to the
+backup bucket only all the same.
 
 ## `selfhost.sh backup`
 
@@ -73,7 +74,9 @@ and whether it succeeded. `upgrade` takes one before it changes anything.
 - **The env file**, `~/.config/commonair/commonair.env`. It holds every secret: the database
   passwords, the S3 keys, the session and signing keys, and `EVIDENCE_PRIVATE_KEY`, without
   which sealed evidence cannot be read. Keep an offline copy somewhere safe, and update it when
-  you change the file. A restore onto a new server needs it.
+  you change the file. A restore onto a new server needs it. The per-unit copies in
+  `~/.config/commonair/unit-env/` need no backup: each unit writes its own from this file
+  whenever it starts.
 - **Valkey.** It holds only presence, caches and queues, and starts empty by design.
 
 ## Objects in Garage
@@ -239,10 +242,14 @@ podman volume export commonair-postgres-data --output ~/postgres-data-before-res
 podman volume rm commonair-postgres-data
 podman volume create commonair-postgres-data
 
-# 3. Restore the newest base backup into it.
+# 3. Restore the newest base backup into it, with the keys the Postgres unit gets from the env
+#    file (written fresh, so a just-replaced env file counts).
 PG_IMAGE=$(sed -n 's/^Image=//p' ~/commonair/quadlet/commonair-postgres.container)
+PG_ENV=~/.config/commonair/unit-env/commonair-postgres.env
+sh ~/commonair/scripts/selfhost/render-env.sh ~/commonair/infra/selfhost/env/commonair-postgres.keys \
+  ~/.config/commonair/commonair.env "$PG_ENV"
 podman run --rm --network commonair \
-  --env-file ~/.config/commonair/commonair.env \
+  --env-file "$PG_ENV" \
   -e WALG_S3_ENDPOINT=http://garage:3900 -e S3_REGION=garage \
   -v commonair-postgres-data:/var/lib/postgresql/data \
   "$PG_IMAGE" commonair-restore

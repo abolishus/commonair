@@ -36,6 +36,8 @@ PREVIOUS_LINK="$DATA_DIR/previous"
 CURRENT_LINK="$HOME/commonair"
 CONF_DIR="$HOME/.config/commonair"
 ENV_FILE="$CONF_DIR/commonair.env"
+# Per-unit copies of the keys each unit needs (scripts/selfhost/render-env.sh writes them).
+UNIT_ENV_DIR="$CONF_DIR/unit-env"
 SELFHOST_CONF="$CONF_DIR/selfhost.conf"
 QUADLET_DIR="$HOME/.config/containers/systemd"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
@@ -729,6 +731,10 @@ install_units() {
     rm -f "$_f"
   done
   cp "$_rel"/systemd/* "$SYSTEMD_DIR/"
+  # Each unit's env file is rendered from commonair.env at every start of the unit (ExecStartPre=
+  # with the release's render-env.sh and key list). Drop the old ones, so no copy of a secret
+  # stays behind for a unit this release no longer has, or under a key it no longer passes.
+  rm -rf "$UNIT_ENV_DIR"
   systemctl --user daemon-reload
   info "units installed from $_rel"
 }

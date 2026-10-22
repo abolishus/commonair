@@ -14,7 +14,8 @@ ContainerName=commonair-mediamtx
 RunInit=true
 Network=commonair.network
 NetworkAlias=mediamtx
-EnvironmentFile=%h/.config/commonair/commonair.env
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-mediamtx.env
 # The online/offline hooks in mediamtx.yml post to $API_INTERNAL_URL.
 Environment=API_INTERNAL_URL=http://api:3001
 # Encoders reach RTMP and WebRTC ICE directly; WHIP signaling goes through Caddy (HTTPS).
@@ -36,6 +37,9 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-mediamtx.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-mediamtx.env
 Restart=always
 RestartMode=direct
 RestartSec=5
