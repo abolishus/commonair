@@ -39,6 +39,17 @@ objects in place, and `tips.message`; unit B fixes that. Briefs in `.claude/brie
 Batches (workflows of three): 1 = A API, B worker, C `packages/ui`; 2 = D web, E1 harness
 feature scenarios, E2 harness ops (drill, load-plan, full, no-proprietary, SDK bot).
 
+**Batch 1 merged** (workflow `wf_4d6d02b7-197`): C `packages/ui` (`6b4ca30`, fix `a96261b`;
+ui tests 2227), A API (`26331d3`, fix `7127746`; new unit 38, int 26), B worker (`9b534b5`, fixes
+`1e78a4c`, `33a641d`; unit 324, int exports/deletion/housekeeping). Reviews: A one HIGH (a clip
+made a `subscribers` VOD public) fixed and re-reviewed; B four HIGH (the live user's
+`stream.offline` survived the scrub; the scrub deleted unrelated events platform-wide; worker
+tsconfig lacked `jsx`) fixed and re-reviewed; C none. Head fixes `24c7f61` (reviewed, no HIGH):
+export mail may carry the presigned link (`storageLinks`, https or local storage origin only);
+`lockLegalHold` taken by every hold insert and every media purge; account deletion records
+`pending_objects` (migration 0023) and retries them, media only without a hold; Caddy routes
+`/overlay/events` to the API.
+
 ## Session nine (2026-10-21/22): E5 co-op
 
 Spec `docs/testing/e5-selectors.md`, policy ADR 0020 (the user decided: shares refunded at once
