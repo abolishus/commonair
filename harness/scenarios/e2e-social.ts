@@ -4,7 +4,8 @@
 /**
  * Milestone E2 end to end (docs/testing/e2-selectors.md): a streamer goes live over RTMP; a fan
  * discovers the stream in the directory, follows it and sees it in their `following` section; an
- * unmodified tmi.js bot owned by the streamer answers `!ping` through the IRC gateway; the
+ * unmodified tmi.js bot owned by the streamer answers `!ping` through the IRC gateway, and so
+ * does an SDK bot on the chat WebSocket (E6), its reply carrying the bot badge; the
  * streamer times a troll out from the chat menu and everyone (web and IRC) sees it; the timeout
  * is lifted, the fan unfollows and the stream stops.
  *
@@ -12,6 +13,7 @@
  * (same steps, same assertions), to tell backend failures from web ones.
  */
 import { join } from "node:path";
+import { CHAT_LIMITS } from "@commonair/contracts/chat";
 import { twitchTagProblems } from "../src/bots/tmi-bot.ts";
 import { playerBundles } from "../src/player-server.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
@@ -27,7 +29,7 @@ import {
   timeoutDurationOk,
 } from "../src/social.ts";
 import type { SignedInUser } from "../src/users.ts";
-import { waitFor } from "../src/wait.ts";
+import { sleep, waitFor } from "../src/wait.ts";
 import { signInViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
 import { WebSession, byTestId } from "../src/web/session.ts";
@@ -42,6 +44,30 @@ const OFFLINE_TIMEOUT_MS = 60_000;
 /** Never let a failure screenshot show a secret. */
 const REDACT = [tid(T.streamKey)];
 
+/** Slack past chat's duplicate window so clock skew between harness and chat cannot bite. */
+export const DUPLICATE_MARGIN_MS = 2_000;
+
+/**
+ * How long to wait before a bot may repeat a reply it sent at `lastReplyAt` (epoch ms). Chat's
+ * duplicate filter refuses the same body from the same sender, bots included, within
+ * `CHAT_LIMITS.duplicateWindowMs` (msg_duplicate), so the tmi.js bot's second "pong" would be
+ * dropped if the second !ping came sooner.
+ */
+export function duplicateWaitMs(lastReplyAt: number | undefined, now: number): number {
+  if (lastReplyAt === undefined) return 0;
+  return Math.max(0, lastReplyAt + CHAT_LIMITS.duplicateWindowMs + DUPLICATE_MARGIN_MS - now);
+}
+
+/**
+ * Wait out `waitMs`, then arm the reply waiters. Order matters: a waiter's timeout starts when it
+ * is armed, so arming before a ~30 s duplicate-window wait would time out a 10 s waiter before the
+ * !ping is even sent. The caller sends right after this resolves, so no reply is missed.
+ */
+export async function armAfterWait<T>(waitMs: number, wait: (ms: number) => Promise<void>, arm: () => T): Promise<T> {
+  if (waitMs > 0) await wait(waitMs);
+  return arm();
+}
+
 export const VIA = ["web", "api"] as const;
 export type Via = (typeof VIA)[number];
 
@@ -53,7 +79,7 @@ export function parseVia(value: string): Via {
 export default defineScenario({
   name: "e2e-social",
   description:
-    "RTMP live → directory discovery → follow (+ following section) → tmi.js bot !ping via IRC → chat timeout from the menu seen on web and IRC → unban, unfollow, offline",
+    "RTMP live → directory discovery → follow (+ following section) → tmi.js bot !ping via IRC → SDK bot !ping with the bot badge → chat timeout from the menu seen on web and IRC → unban, unfollow, offline",
   needs: ["api", "web", "chat", "irc", "media", "origin", "ffmpeg", "browser"],
   timeoutMs: 6 * 60_000,
   async run(ctx) {
@@ -80,6 +106,70 @@ async function screenshotSessions(ctx: ScenarioContext, sessions: readonly WebSe
     ctx.data("screenshots", files);
     ctx.log.info("failure screenshots written", { dir, count: files.length });
   }
+}
+
+/** E6: the SDK bot answers `!ping` next to the tmi.js bot; both replies arrive, the SDK one badged. */
+async function sdkBotPing(
+  ctx: ScenarioContext,
+  o: {
+    channel: string;
+    streamer: SignedInUser;
+    fan: SignedInUser;
+    tmiUsername: string;
+    /** Epoch ms of the tmi.js bot's first "pong" (see duplicateWaitMs). */
+    tmiLastReplyAt: number | undefined;
+    sender: SocialActor;
+    chat: WaitBudget;
+  },
+): Promise<void> {
+  const p = ctx.platform;
+  // Setup below runs inside the duplicate window; the remainder is waited out before the !ping.
+  const sdkAccount = await ctx.step(
+    "streamer: create the SDK bot and its token (me.bots.createToken, chat:read chat:edit)",
+    () => p.createBot(o.streamer, "e2s_sdk"),
+  );
+  const sdkBot = p.sdkBot(sdkAccount, [o.channel]);
+  ctx.defer(() => sdkBot.stop());
+  await ctx.step("SDK bot connects over the chat WebSocket and joins", () => sdkBot.start());
+  const observer = await ctx.step("fan: a chat socket that watches the replies (API)", async () => {
+    const c = await p.chat(o.fan);
+    ctx.defer(() => c.close());
+    await c.join(o.channel);
+    return c;
+  });
+  // Only replies after this !ping count (`next` ignores frames already received).
+  const pongFrom = (username: string) =>
+    observer.next(
+      "message",
+      (f) => f.channel === o.channel && f.message.user.username === username && f.message.body === "pong",
+      o.chat.timeoutMs,
+    );
+  const [tmiPong, sdkPong] = await armAfterWait(
+    duplicateWaitMs(o.tmiLastReplyAt, Date.now()),
+    (ms) => ctx.step(`wait ${Math.ceil(ms / 1000)} s for chat's duplicate window to pass`, () => sleep(ms, ctx.signal)),
+    () => {
+      const pongs = [pongFrom(o.tmiUsername), pongFrom(sdkAccount.username)] as const;
+      // Awaited together below; keep an early rejection from being unhandled meanwhile.
+      for (const pong of pongs) pong.catch(() => undefined);
+      return pongs;
+    },
+  );
+  const ping = `!ping sdk ${ctx.runId}`;
+  const sent = performance.now();
+  await ctx.step("fan: send !ping for both bots", () => o.sender.send(ping, o.chat));
+  const [tmiReply, sdkReply] = await ctx.step("both bots' replies arrive", () => Promise.all([tmiPong, sdkPong]));
+  ctx.metric("sdk_bot_reply_round_trip", performance.now() - sent, "ms");
+  ctx.assert("the tmi.js bot replied", tmiReply.message.user.username === o.tmiUsername);
+  const badges = sdkReply.message.user.badges.map((b) => b.type);
+  ctx.assert("the SDK bot's reply carries the bot badge", badges.includes("bot"), { badges });
+  ctx.check(
+    "the SDK bot recorded its !ping reply",
+    sdkBot.replies.some((r) => r.command === "!ping"),
+    {
+      replies: sdkBot.replies.length,
+    },
+  );
+  await ctx.step("fan: sees the SDK bot's reply", () => o.sender.waitMessage(sdkAccount.username, "pong", o.chat));
 }
 
 async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: ScenarioContext["check"]): Promise<void> {
@@ -183,6 +273,19 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
   ctx.metric("bot_reply_round_trip", performance.now() - pingSent, "ms");
   const reply = bot.replies.find((r) => r.command === "!ping");
   if (reply?.receivedAt !== undefined) ctx.metric("bot_reply_latency", reply.at - reply.receivedAt, "ms");
+
+  // 3b. An SDK bot (a bot token over the chat WebSocket) joins: both bots answer the next !ping,
+  // the SDK bot's reply with the bot badge (docs/testing/e6-selectors.md).
+  await sdkBotPing(ctx, {
+    channel,
+    streamer,
+    fan,
+    tmiUsername: bot.username,
+    // The fan already saw the reply, so "now" is a safe upper bound if the bot did not record it.
+    tmiLastReplyAt: reply?.at ?? Date.now(),
+    sender: F,
+    chat,
+  });
 
   check("no moderation controls for the fan", (await F.moderationControls()) === 0);
 

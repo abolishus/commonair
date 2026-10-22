@@ -3,7 +3,8 @@
 
 /** Pure parts of the E2 social scenario (docs/testing/e2-selectors.md). */
 import { describe, expect, test } from "vite-plus/test";
-import { VIA, parseVia } from "../scenarios/e2e-social.ts";
+import { CHAT_LIMITS } from "@commonair/contracts/chat";
+import { DUPLICATE_MARGIN_MS, VIA, armAfterWait, duplicateWaitMs, parseVia } from "../scenarios/e2e-social.ts";
 import type { ApiClient } from "../src/api/client.ts";
 import type { ChatClient } from "../src/chat-client.ts";
 import {
@@ -156,5 +157,67 @@ describe("ApiActor", () => {
     await a.waitDeleted("m1", "troll", "", { timeoutMs: 50, signal });
     await expect(a.waitDeleted("m2", "nobody", "", { timeoutMs: 30, signal })).rejects.toThrow(/nobody/);
     expect(chat.listeners.size).toBe(0);
+  });
+});
+
+describe("duplicateWaitMs (the SDK-bot !ping must not hit chat's duplicate filter)", () => {
+  test("waits out the full duplicate window plus margin after the tmi.js bot's first pong", () => {
+    const at = 1_000_000;
+    expect(duplicateWaitMs(at, at)).toBe(CHAT_LIMITS.duplicateWindowMs + DUPLICATE_MARGIN_MS);
+    expect(duplicateWaitMs(at, at + 5_000)).toBe(CHAT_LIMITS.duplicateWindowMs + DUPLICATE_MARGIN_MS - 5_000);
+  });
+  test("no wait once the window has passed, or with no earlier reply", () => {
+    expect(duplicateWaitMs(0, CHAT_LIMITS.duplicateWindowMs + DUPLICATE_MARGIN_MS)).toBe(0);
+    expect(duplicateWaitMs(0, 10 * CHAT_LIMITS.duplicateWindowMs)).toBe(0);
+    expect(duplicateWaitMs(undefined, 0)).toBe(0);
+  });
+  test("pins the dependency on chat's 30 s window (update the scenario if it changes)", () => {
+    expect(CHAT_LIMITS.duplicateWindowMs).toBe(30_000);
+  });
+});
+
+describe("armAfterWait (reply waiters start their timeout only after the duplicate-window wait)", () => {
+  test("arms after the wait has finished", async () => {
+    const order: string[] = [];
+    const armed = await armAfterWait(
+      30_000,
+      async (ms) => {
+        order.push(`wait ${ms}`);
+        await Promise.resolve();
+        order.push("waited");
+      },
+      () => {
+        order.push("arm");
+        return "waiters";
+      },
+    );
+    expect(armed).toBe("waiters");
+    expect(order).toEqual(["wait 30000", "waited", "arm"]);
+  });
+
+  test("skips the wait when nothing is left to wait out", async () => {
+    const order: string[] = [];
+    await armAfterWait(
+      0,
+      async () => {
+        order.push("wait");
+      },
+      () => order.push("arm"),
+    );
+    expect(order).toEqual(["arm"]);
+  });
+
+  test("never arms when the wait is aborted", async () => {
+    let armed = false;
+    await expect(
+      armAfterWait(
+        5_000,
+        () => Promise.reject(new Error("aborted")),
+        () => {
+          armed = true;
+        },
+      ),
+    ).rejects.toThrow("aborted");
+    expect(armed).toBe(false);
   });
 });

@@ -135,8 +135,9 @@ export default defineScenario({
   description:
     "T0 live off air + legal-only evidence → evidence survives deletion → two-reviewer T0 dismissal → T2 label, 18+ gate, appeal → T1 restrict, mod queue, clear → upload rejected → NCII 48 h clock and block list; logs carry no frame data or emails",
   needs: ["api", "web", "media", "worker", "mail", "ffmpeg", "browser", "podman"],
-  // Needs the compose override (fixture lists, scripted classifier, test hooks): not part of `full`.
-  inFull: false,
+  // Needs the compose override (fixture lists, scripted classifier, test hooks): `full` runs on
+  // the harness stack, which layers it (ADR 0021).
+  inFull: true,
   timeoutMs: 30 * 60_000,
   async run(ctx) {
     const sessions: WebSession[] = [];

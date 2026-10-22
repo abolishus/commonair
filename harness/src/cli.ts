@@ -13,7 +13,7 @@ import { type LoadOptions, runLoad } from "./load.ts";
 import { stopAll } from "./process.ts";
 import { loadRegistry } from "./registry.ts";
 import { DEFAULT_REPORT_DIR, formatHuman, writeReport } from "./report.ts";
-import { newRunId, runScenarios } from "./runner.ts";
+import { formatSkipTable, newRunId, runScenarios } from "./runner.ts";
 import { defineScenario } from "./scenario.ts";
 
 async function main(argv: string[]): Promise<number> {
@@ -118,7 +118,8 @@ async function main(argv: string[]): Promise<number> {
   });
   await stopAll();
   const paths = writeReport(report, { dir: env.HARNESS_REPORT_DIR ?? DEFAULT_REPORT_DIR, jsonPath: command.report });
-  console.log(`\n${formatHuman(report)}\n\nreport: ${paths.json}\n        ${paths.text}`);
+  const skips = formatSkipTable(report.scenarios);
+  console.log(`\n${formatHuman(report)}${skips ? `\n\n${skips}` : ""}\n\nreport: ${paths.json}\n        ${paths.text}`);
   return report.ok ? 0 : 1;
 }
 

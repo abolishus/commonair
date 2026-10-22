@@ -27,17 +27,22 @@ Host requirements: Bun, Go (for `e2e-relay`), `ffmpeg` on `PATH` (≥ 8 for WHIP
 
 ## CLI
 
-| Command                                          | What it does                                                                                      |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `run <scenario...>`                              | Run scenarios in order. `full` expands to every scenario not marked `inFull: false`, smoke first. |
-| `list [--json]`                                  | Scenarios with descriptions and needs (`*` = part of `full`).                                     |
-| `load --streamers N --viewers M --duration 120s` | Load test (see below). `--browser-viewers K`, `--protocol rtmp\|whip`.                            |
+| Command                                          | What it does                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `run <scenario...>`                              | Run scenarios in order. `full`: see "`full` and the harness stack" below. |
+| `list [--json]`                                  | Scenarios with descriptions and needs (`*` = part of `full`).             |
+| `load --streamers N --viewers M --duration 120s` | Load test (see below). `--browser-viewers K`, `--protocol rtmp\|whip`.    |
 
 Options for `run` and `load`:
 
-- `--profile no-proprietary` (alias `--no-proprietary`): scenarios that need a vendor adapter
-  (`stripe`, `oauth`, `cdn`) are skipped and everything else runs on the FOSS defaults. Scenarios
-  read `ctx.profile` to pick the `manual` payment path, etc.
+- `--profile no-proprietary` (alias `--no-proprietary`): first reads the API's `/healthz` and
+  fails the run (one failed `no-proprietary preflight` entry, no scenario started) unless it
+  reports `stripe`, `oauth` and `cdn` all `false`; a missing flag fails too. Then scenarios whose
+  `needs` include `stripe`, `oauth` or `cdn` are skipped, and so are steps: a parameter variant
+  declared in `paramNeeds` (e.g. `e4b-money --set provider=stripe`) or a step run with
+  `ctx.optionalStep(name, needs, fn)`. Each skip carries its reason in the report
+  (`skipReason`, `skippedSteps`), and the CLI prints a skip table at the end. Expected on the
+  harness stack: no scenario skipped, one step (the `e4b-money` Stripe variant).
 - `--report <path>`: where the JSON report goes. Default `harness/reports/<time>-<cmd>-<run>.json`
   (gitignored), next to a `.txt` summary, plus `harness/reports/latest.json`.
 - `--set key=value`: scenario parameters (`ctx.param` / `ctx.intParam`), e.g. `--set viewers=50`.
@@ -47,6 +52,32 @@ Options for `run` and `load`:
 Exit code is 0 only if no scenario failed; 2 on usage errors. Ctrl-C aborts the run (cleanups and
 the report still happen); a second Ctrl-C exits immediately. Every ffmpeg process is supervised
 and killed if the harness exits.
+
+### `full` and the harness stack
+
+`full` runs every scenario except `load-plan` (ADR 0021): `smoke` first, `e2e-relay` last (it is
+the longest), the rest by name, about 25–30 minutes. `FULL_REQUIRED` in `src/registry.ts` names
+every Phase 4 scenario it must include (E6 adds `simulcast`, `overlay-alert`, `vod-clips`,
+`data-export`, `account-deletion` and `backup-restore`; `e5-coop`, `trust-safety` and `e2e-relay`
+joined in E6); if one is missing or marked `inFull: false`, `run full` refuses to start rather
+than run less. Naming scenarios explicitly is unaffected.
+
+`full` runs on the harness stack: `compose.yaml` with every harness override layered
+(`harness/compose.trust-safety.yaml`, `harness/compose.e5-coop.yaml`, `harness/compose.e6.yaml`),
+on a Postgres volume created once with the E5 bootstrap (ADR 0020: `harness/compose.e5-coop.yaml`
+gives `migrate` the short governance periods in `GOVERNANCE_BOOTSTRAP_JSON`, which apply at the
+database's first migration only; see `e5-coop` below).
+
+```sh
+# once: recreate the Postgres volume so the E5 bootstrap applies (destroys local data)
+podman compose down
+podman volume rm commonair_postgres-data
+bun scripts/infra.ts stack --harness
+# afterwards, and after every rebuild
+bun scripts/infra.ts stack --harness
+bun harness/src/cli.ts run full
+bun harness/src/cli.ts run full --profile no-proprietary   # Stripe, OAuth and CDN unset in .env
+```
 
 ## Configuration
 
@@ -192,25 +223,49 @@ duration with progress logs every 10 s, and reports:
 - CPU per container (`podman stats --no-stream --format json`, mean and peak, containers matching
   `HARNESS_CONTAINER_PREFIX`);
 - p50/p95 glass-to-glass (browser viewers), p95 HTTP delivery latency, p50/p95 TTFF;
-- stall ratio (stalled time / watched time) and stalls per viewer-minute.
+- stall ratio (stalled time / watched time), stall count and stalls per viewer-minute; errors.
 
-The full breakdown is in the report under `scenarios[].data.load`.
+The report's `scenarios[].data.load` section (`src/load/report.ts`) holds `egress` (method,
+`totalBytes`, `bytesPerSecond`, `perViewerBytes`, `perViewerBytesPerSecond`, `bySource`), `cpu`
+per container (`avgPercent`, `maxPercent`), `glassToGlassP95Ms`, `ttffP95Ms`, `stallRatio`,
+`stallCount`, `errors`, `started`/`viewers`, `shards`, and the raw aggregates under `breakdown`.
+Both load scenarios assert that every viewer started (hard) and check stall ratio < 5 %, p95
+glass-to-glass and TTFF < 15 s and no errors (soft).
+
+**Sharding.** One process drives about a thousand HTTP viewers. Past `httpPerProcess` (default 1000) the HTTP audience is split round-robin over child processes (`src/load/worker.ts`, spawned
+with `Bun.spawn` and supervised like ffmpeg): each opens its slice, prints `started`, holds until
+SIGINT and prints its viewers' final reports on one `LOAD_SHARD` stdout line, which the parent
+merges into the same report. Browser viewers always stay in the parent.
+
+| Knob (`--set`)       | `load-smoke` | `load-plan` | Meaning                                        |
+| -------------------- | ------------ | ----------- | ---------------------------------------------- |
+| `streamers`          | 2            | 20          | Streams published                              |
+| `viewersPerStreamer` | 5            | 200         | Viewers on every channel                       |
+| `viewers`            | —            | —           | Total instead (exclusive with the one above)   |
+| `seconds`            | 30           | 120         | Hold time (the egress window)                  |
+| `browserViewers`     | 2            | 20          | Real browsers among the viewers                |
+| `httpPerProcess`     | 1000         | 1000        | HTTP viewers per process before the run shards |
 
 ## Scenarios
 
-| Scenario       | What it proves                                                                                                                                                                                                       |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`        | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                                                                                      |
-| `ingest-rtmp`  | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                                                                                 |
-| `ingest-whip`  | The same over WHIP.                                                                                                                                                                                                  |
-| `viewers`      | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.                                                              |
-| `load-smoke`   | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                                                                                 |
-| `e2e-basic`    | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline.                                                           |
-| `e2e-social`   | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                                                                                |
-| `e2e-relay`    | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).                                                                    |
-| `e4b-money`    | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                                                                               |
-| `trust-safety` | Milestone E4c: T0 live, evidence through deletion, two-reviewer dismissal, T2 label + appeal, T1 queue, upload rejection, NCII clock (see below).                                                                    |
-| `e5-coop`      | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below). |
+| Scenario         | What it proves                                                                                                                                                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`          | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                                                                                         |
+| `ingest-rtmp`    | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                                                                                    |
+| `ingest-whip`    | The same over WHIP.                                                                                                                                                                                                     |
+| `viewers`        | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.                                                                 |
+| `load-smoke`     | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                                                                                    |
+| `e2e-basic`      | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline.                                                              |
+| `e2e-social`     | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                                                                                   |
+| `e2e-relay`      | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).                                                                       |
+| `e4b-money`      | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                                                                                  |
+| `trust-safety`   | Milestone E4c: T0 live, evidence through deletion, two-reviewer dismissal, T2 label + appeal, T1 queue, upload rejection, NCII clock (see below).                                                                       |
+| `e5-coop`        | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below).    |
+| `backup-restore` | E6: WAL-G backup of a throwaway Postgres, wipe, restore with WAL replay; triggers, protection functions, app-role grants, rows and the ledger come back, and the app role is refused every protected write (see below). |
+| `load-plan`      | E6: the load test at PLAN size, 20 streamers × 200 viewers for 120 s, sharded over processes. Not in `full`.                                                                                                            |
+
+E1's E6 scenarios (`simulcast`, `overlay-alert`, `vod-clips`, `data-export`, `account-deletion`)
+are documented with [docs/testing/e6-selectors.md](../docs/testing/e6-selectors.md).
 
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
@@ -229,6 +284,69 @@ the timeout is lifted, the fan unfollows, the stream stops. Chat waits are ≤ 1
 `moderation_to_irc` and `unban_to_chat`. `--set via=api` runs the same steps through the API and
 chat socket instead of Chromium, which separates backend failures from web ones. The `irc` need
 probes `HARNESS_IRC_HEALTH_URL` (default `http://localhost:6681/healthz`).
+
+E6 adds the SDK bot right after the tmi.js `!ping`: the streamer creates a second bot and its
+token (`me.bots.createToken`, scopes `chat:read chat:edit`), `SdkBot` (`src/bots/sdk-bot.ts`)
+joins over the chat WebSocket, the fan sends `!ping` again, and a chat socket opened for the fan
+must receive `pong` from both bots, the SDK bot's message carrying the `bot` badge
+(`sdk_bot_reply_round_trip`).
+
+### `backup-restore` (E6)
+
+The drill in [docs/testing/e6-selectors.md](../docs/testing/e6-selectors.md) ("Backup and restore
+drill"), in `src/drill/`. It never touches the running stack (ADR 0021): it reads the stack's
+Postgres container (`podman inspect`, by its compose labels) only for its image and network, and
+refuses to run if `commonair-drill-<runId>` or its volume `commonair-drill-<runId>-pgdata`
+already exist, are the stack's, or if the WAL-G prefix would be the stack's.
+
+1. Start `commonair-drill-<runId>` from the stack's Postgres image on the compose network, with
+   its own volume, a random owner password, `WALG_S3_PREFIX=s3://$S3_BUCKET_BACKUPS/drill/<runId>`
+   (the stack's Garage key) and Postgres on a random loopback port. Secrets reach podman through
+   its environment (`-e NAME`), never its arguments.
+2. Migrate as the owner (`runMigrations`), configure the app role
+   (`infra/postgres/apply-app-role.ts`, random password), run the demo seed CLI and post 20
+   balanced ledger transactions with `@commonair/ledger` `post`, both as the app role.
+3. Fingerprint (`collectFingerprint`): non-internal triggers with `tgenabled`, the md5 of
+   `pg_get_triggerdef` and the function each runs; `commonair_*` functions with the md5 of
+   `pg_get_functiondef` (body, `SECURITY DEFINER`, `SET search_path`, volatility), owner and
+   `proconfig`; the app role's table and column grants, attributes (`SUPERUSER`, `INHERIT`,
+   `CREATEROLE`, `CREATEDB`, `REPLICATION`, `BYPASSRLS` all off), memberships (none) and `TEMP`
+   (revoked); row counts of every table, the ordered md5 of `ledger_entries`, and unbalanced
+   transactions. Required protections must be
+   present before anything is compared, so an empty fingerprint never passes.
+4. `commonair-backup`; post the marker transaction; `pg_switch_wal()`; wait until
+   `pg_stat_archiver` has archived that segment.
+5. Stop and remove the container, remove and recreate the volume, `commonair-restore` into it (a
+   one-shot container), start Postgres again and wait for `pg_is_in_recovery()` to be false.
+6. `compareFingerprints(before, after, marker)` must find nothing (a missing, disabled or changed
+   trigger, a changed or dropped function, a dropped or added grant, different row counts, a
+   changed ledger, a missing marker, an unbalanced transaction each fail it); then as the app role
+   `UPDATE`/`DELETE` on `ledger_entries` and `audit_log`, an unbalanced posting, and a proposal
+   inserted as or moved to `passed`, and `SET ROLE` to the schema owner must each be refused with
+   the protection's SQLSTATE and message (a typo or a lost connection is not a refusal).
+7. Cleanup (always, once): remove the container and the volume, delete `drill/<runId>/` from the
+   backups bucket. It is authoritative: on a timeout or Ctrl-C it refuses every later podman call
+   of the still-running drill, kills the in-flight one through the scenario signal and waits for
+   it before removing. The scenario timeout exceeds the sum of the drill's bounded waits.
+
+Metrics: `backup.bytes`, `backup.wal_objects`, `restore.fetch`, `restore.to_promoted`,
+`restore.wal_segments_replayed`. **Needs:** `podman`, the built Postgres image (the stack's), the
+stack running (Garage, its network), and `S3_ENDPOINT`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`
+(and optionally `S3_BUCKET_BACKUPS`) from the repo `.env`. The database half is also covered by
+`tests/drill.int.test.ts` against a throwaway test database.
+
+```sh
+bun harness/src/cli.ts run backup-restore
+```
+
+### `load-plan` (E6)
+
+The load test at PLAN size (ADR 0021 §4), outside `full`; knobs in "Metrics and the load test".
+
+```sh
+bun harness/src/cli.ts run load-plan
+bun harness/src/cli.ts run load-plan --set streamers=10 --set viewersPerStreamer=100 --set httpPerProcess=500
+```
 
 ### `e2e-relay` (milestone E3)
 
@@ -283,8 +401,8 @@ process env, which Bun loads from the repo `.env`, else from the repo `.env` fil
 on the host that the API container can reach (the first non-internal, non-link-local IPv4; override
 with `--set relayHost=<addr>`). The relay pulls from the origin at `PLAYBACK_PUBLIC_URL`
 (`http://localhost:3003` locally). Railway staging has no relay. It also needs the worker
-(receipts and integrity). Not part of `full` (`inFull: false`): it needs the private-network
-setting and takes about 15 minutes.
+(receipts and integrity). Part of `full`, which runs it last: it takes about 15 minutes, and the
+harness stack sets the private-network setting.
 
 | Knob                   | Default | Meaning                                                                       |
 | ---------------------- | ------- | ----------------------------------------------------------------------------- |
@@ -357,7 +475,9 @@ screenshotted into `<report dir>/<run id>-e4b-money/`.
 **Needs:** `api`, `web`, `chat`, `worker`, `mail`, `browser`; `PAYMENTS_PROVIDER=manual` (the
 default; the scenario stops if `money.support` reports `stripe`) and `DATABASE_URL` pointing at
 the stack's Postgres (Bun loads it from the repo `.env` when run from the repo root). Part of
-`full`.
+`full`. Its Stripe variant (`--set provider=stripe`) is declared as a parameter variant needing
+`stripe` (`DEFAULT_PARAM_NEEDS` in `src/registry.ts`), so `--profile no-proprietary` reports it
+as the one skipped step.
 
 | Knob  | Default | Meaning                                                   |
 | ----- | ------- | --------------------------------------------------------- |
@@ -434,7 +554,7 @@ started with the override, which mounts the fixture lists and sets `MODERATION_C
 `MODERATION_SAMPLE_SECONDS=2` and `MODERATION_TEST_HOOKS=true` for `media`, `worker` and `api`
 (never on a public instance); `DATABASE_URL`, `INTERNAL_API_SECRET` (or
 `HARNESS_INTERNAL_API_SECRET`) and `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`
-from the repo `.env` (run from the repo root). Not part of `full`.
+from the repo `.env` (run from the repo root). Part of `full` (on the harness stack).
 
 | Knob                     | Default         | Meaning                                                       |
 | ------------------------ | --------------- | ------------------------------------------------------------- |
@@ -508,8 +628,8 @@ applies at the first migration only; ADR 0020): `COOP_TEST_HOOKS=true` for `api`
 and `GOVERNANCE_BOOTSTRAP_JSON` for `migrate` (30 s discussion and council review, 45 s votes,
 quorum 0.01, a 36-second streamer threshold). The scenario stops at once with the reset hint when
 `governance.ordinary.discussionSeconds` > 60 or the tick hook answers 404. `DATABASE_URL` and
-`INTERNAL_API_SECRET` (or `HARNESS_INTERNAL_API_SECRET`) come from the repo `.env`. Not part of
-`full`. The override layers with `harness/compose.trust-safety.yaml` (a unit test checks).
+`INTERNAL_API_SECRET` (or `HARNESS_INTERNAL_API_SECRET`) come from the repo `.env`. Part of
+`full` (on the harness stack). The override layers with `harness/compose.trust-safety.yaml` (a unit test checks).
 
 Step 2 needs S1 and S2 among the council's `council.config.size` seats (7 by default). Every
 streamer another scenario qualifies stays a council candidate on a long-lived stack, so before it

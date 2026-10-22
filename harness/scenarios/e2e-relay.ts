@@ -123,8 +123,9 @@ export default defineScenario({
   description:
     "member creates a relay on /relays → Go relay on the LAN serves honest viewers → viewbots excluded → receipts verified, count = honest → 5× liar relay suspended, its viewers back on origin → SIGTERM drain offline → restart active → retire",
   needs: ["api", "web", "mail", "media", "origin", "worker", "relay", "ffmpeg", "browser"],
-  // Needs Go and OUTBOUND_ALLOW_PRIVATE_NETWORKS=true on the stack, and runs ~15 minutes.
-  inFull: false,
+  // Needs Go and OUTBOUND_ALLOW_PRIVATE_NETWORKS=true (the harness stack sets it) and runs
+  // ~15 minutes: `full` runs it last (ADR 0021).
+  inFull: true,
   timeoutMs: 30 * 60_000,
   async run(ctx) {
     const plan = buildRelayPlan(ctx.params);
