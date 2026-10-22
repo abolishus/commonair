@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { eventNeedles, referencesUser, type DeletedIdentity } from "../src/deletion/references.ts";
+import { eventNeedles, redactPayload, referencesUser, type DeletedIdentity } from "../src/deletion/references.ts";
 
 const U = "0190f0f0-0000-7000-8000-00000000aaaa";
 const OTHER = "0190f0f0-0000-7000-8000-00000000cccc";
@@ -10,9 +10,9 @@ const CH = "0190f0f0-0000-7000-8000-00000000bbbb";
 
 const who: DeletedIdentity = {
   id: U,
-  names: ["ulla", "Ulla Q", ""],
+  logins: ["ulla", "Ulla", ""],
   email: "Ulla@Example.test",
-  tipMessages: new Map([[CH, new Set(["for the stream!"])]]),
+  tips: [{ channelId: CH, amountCents: 250, currency: "usd", message: "for the stream!" }],
 };
 
 const broadcaster = { broadcaster_user_id: OTHER, broadcaster_user_login: "sam", broadcaster_user_name: "Sam" };
@@ -100,30 +100,71 @@ describe("events that reference a deleted user", () => {
     ["coop.membership.update", { membership_id: "x", user_id: U, class: "viewer", status: "active", basis: "share" }],
     ["coop.share.update", { share_id: "x", user_id: U, status: "held", amount_cents: 1000 }],
     ["legal.hold.placed", { hold_id: "h", user_id: U, reason_code: "law_enforcement", case_id: null }],
-    [
-      // A mention of them in someone else's message.
-      "channel.chat.message",
-      {
-        ...broadcaster,
-        chatter_user_id: OTHER,
-        message: { text: "hi @ulla", fragments: [{ type: "mention", text: "@ulla", emote: null }] },
-      },
-    ],
-    // Their display name as a whole value, whatever the field.
-    ["coop.proposal.update", { proposal_id: "p", title: "Ulla Q", status: "open", kind: "ordinary" }],
+    // Their own channel going off air (the completion transaction itself emits this).
+    ["stream.offline", { broadcaster_user_id: U, broadcaster_user_login: "ulla", broadcaster_user_name: "Ulla Q" }],
+    // A login-only reference (no sibling id), case-insensitive.
+    ["channel.raid", { from_broadcaster_user_login: "ULLA", to_broadcaster_user_id: OTHER }],
     ["anything", { nested: [{ deep: { list: ["x", U.toUpperCase()] } }] }],
     ["anything", { contact: "ulla@example.TEST" }],
   ])("%s referencing them is theirs", (type, payload) => {
     expect(referencesUser(ev(type, payload), who)).toBe(true);
   });
 
-  test("an anonymous tip is matched by its message on a channel they tipped", () => {
+  test("an anonymous tip is matched by channel, amount, currency and message of one of their tips", () => {
     const anon = { ...broadcaster, user_id: null, user_login: null, user_name: null, is_anonymous: true, amount };
     expect(referencesUser(ev("channel.tip", { ...anon, message: "for the stream!" }), who)).toBe(true);
     expect(referencesUser(ev("channel.tip", { ...anon, message: "for the stream!" }, OTHER), who)).toBe(false);
     expect(referencesUser(ev("channel.tip", { ...anon, message: "something else" }), who)).toBe(false);
     expect(referencesUser(ev("channel.tip", { ...anon, message: "" }), who)).toBe(false);
+    const other = { ...anon, message: "for the stream!" };
+    expect(referencesUser(ev("channel.tip", { ...other, amount: { ...amount, value: 251 } }), who)).toBe(false);
+    expect(referencesUser(ev("channel.tip", { ...other, amount: { ...amount, currency: "eur" } }), who)).toBe(false);
+    // Someone else's named tip with the same words is theirs, not the deleted user's.
+    const carol = { ...other, user_id: OTHER, user_login: "carol", user_name: "Carol", is_anonymous: false };
+    expect(referencesUser(ev("channel.tip", carol), who)).toBe(false);
     expect(referencesUser(ev("channel.chat.message", { ...broadcaster, message: "for the stream!" }), who)).toBe(false);
+  });
+
+  test("common words as a display name, login or tip message never match other people's events", () => {
+    const words: DeletedIdentity = {
+      id: U,
+      logins: ["usd", "text", "1000"],
+      email: "w@example.test",
+      tips: [{ channelId: CH, amountCents: 100, currency: "usd", message: "gg" }],
+    };
+    const chat = {
+      ...broadcaster,
+      chatter_user_id: OTHER,
+      chatter_user_login: "vic",
+      chatter_user_name: "text",
+      message_id: "m",
+      message: { text: "gg", fragments: [{ type: "text", text: "gg", emote: null }] },
+      badges: [{ set_id: "subscriber", id: "1000" }],
+      color: "",
+      reply: null,
+      is_bot: false,
+    };
+    const tipOf = (message: string) => ({
+      ...broadcaster,
+      user_id: OTHER,
+      user_login: "carol",
+      user_name: "usd",
+      is_anonymous: false,
+      amount: { value: 100, decimal_places: 2, currency: "usd" },
+      message,
+    });
+    expect(referencesUser(ev("channel.chat.message", chat), words)).toBe(false);
+    expect(referencesUser(ev("channel.tip", tipOf("gg")), words)).toBe(false);
+    expect(referencesUser(ev("channel.subscribe", { ...broadcaster, user_id: OTHER, tier: "1000" }), words)).toBe(
+      false,
+    );
+    // A login that changed hands: the id next to it is someone else's.
+    expect(referencesUser(ev("channel.follow", { ...broadcaster, user_id: OTHER, user_login: "usd" }), words)).toBe(
+      false,
+    );
+    // And redaction never touches enums, amounts or names outside free text.
+    expect(redactPayload(chat, words)).toBeNull();
+    expect(redactPayload(tipOf("gg"), words)).toBeNull();
   });
 
   test.each([
@@ -133,8 +174,18 @@ describe("events that reference a deleted user", () => {
       "channel.chat.message",
       { ...broadcaster, chatter_user_id: OTHER, message: { text: "hey ulla, gg", fragments: [] } },
     ],
-    // Near misses: case differs for names, or another name that contains theirs.
-    ["channel.raid", { from_broadcaster_user_login: "ullaq", to_broadcaster_user_name: "Ulla" }],
+    // Near misses: another login that contains theirs; their display name is not an identifier.
+    ["channel.raid", { from_broadcaster_user_login: "ullaq", to_broadcaster_user_name: "Ulla Q" }],
+    // A mention is someone else's text: kept (and redacted, below).
+    [
+      "channel.chat.message",
+      {
+        ...broadcaster,
+        chatter_user_id: OTHER,
+        message: { text: "hi @ulla", fragments: [{ type: "mention", text: "@ulla", emote: null }] },
+      },
+    ],
+    ["coop.proposal.update", { proposal_id: "p", title: "Ulla Q", status: "open", kind: "ordinary" }],
     ["stream.offline", { ...broadcaster }],
     ["anything", null],
     ["anything", { n: 1, b: true, nil: null }],
@@ -142,12 +193,39 @@ describe("events that reference a deleted user", () => {
     expect(referencesUser(ev(type, payload), who)).toBe(false);
   });
 
-  test("needles: exact names and tip messages, case-folded id and email, JSON-escaped", () => {
-    expect(eventNeedles(who)).toEqual({
-      exact: ["ulla", "Ulla Q", "for the stream!"],
-      folded: [U, "ulla@example.test"],
+  test("needles: case-folded id, email and logins, JSON-escaped; short logins only as whole values or mentions", () => {
+    expect(eventNeedles(who)).toEqual([U, "ulla@example.test", "ulla"]);
+    expect(eventNeedles({ ...who, logins: ['a"b\\c', "al"], email: "" })).toEqual([U, 'a\\"b\\\\c', '"al"', "@al"]);
+  });
+
+  test("someone else's text that mentions them is redacted, nothing else", () => {
+    const msg = {
+      ...broadcaster,
+      chatter_user_id: OTHER,
+      chatter_user_login: "vic",
+      message: {
+        text: "thanks Ulla for the raid, @ulla! mail ulla@example.test; ullaq and xulla stay",
+        fragments: [
+          { type: "text", text: "thanks ", emote: null },
+          { type: "mention", text: "@ulla", emote: null },
+        ],
+      },
+    };
+    expect(redactPayload(msg, who)).toEqual({
+      ...msg,
+      message: {
+        text: "thanks [deleted] for the raid, [deleted]! mail [deleted]; ullaq and xulla stay",
+        fragments: [
+          { type: "text", text: "thanks ", emote: null },
+          { type: "mention", text: "[deleted]", emote: null },
+        ],
+      },
     });
-    const quoted = eventNeedles({ ...who, names: ['a"b\\c'], tipMessages: new Map([[CH, new Set(["x\ny"])]]) });
-    expect(quoted.exact).toEqual(['a\\"b\\\\c', "x\\ny"]);
+    expect(redactPayload({ ...broadcaster, message: { text: "hello there", fragments: [] } }, who)).toBeNull();
+    // A short login is redacted only as an @mention.
+    const al: DeletedIdentity = { ...who, logins: ["al"], email: "" };
+    expect(redactPayload({ message: "al already said hi @al" }, al)).toEqual({
+      message: "al already said hi [deleted]",
+    });
   });
 });

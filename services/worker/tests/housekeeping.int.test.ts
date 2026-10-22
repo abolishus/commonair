@@ -23,10 +23,13 @@ import { makeBroadcast, makeSubscription, makeUser, setup, waitFor, type TestEnv
 let env: TestEnv;
 const deletedPrefixes: string[] = [];
 const failingPrefixes = new Set<string>();
+/** Runs after each prefix deletion (a hold placed while retention is mid-batch). */
+let afterDeletePrefix: ((prefix: string) => Promise<void>) | null = null;
 const fakeStorage = {
   async deletePrefix(_bucket: string, prefix: string) {
     if (failingPrefixes.has(prefix)) throw new Error("S3 503");
     deletedPrefixes.push(prefix);
+    await afterDeletePrefix?.(prefix);
     return 3;
   },
   async delete(_bucket: string, key: string) {
@@ -341,6 +344,58 @@ describe("housekeeping", () => {
     expect(await vod(held.vodId)).toMatchObject({ status: "ready", removedReason: "owner" });
     for (const id of [held.byOwner, held.byCreator, held.live, held.tampered])
       expect((await clip(id))?.status).toBe("ready");
+  });
+
+  test("a legal hold placed while retention is mid-batch stops the rest of the owner's media", async () => {
+    deletedPrefixes.length = 0;
+    deletedKeys.length = 0;
+    const { user, channel } = await makeUser(env.t.db);
+    const b = await makeBroadcast(env.t.db, channel.id);
+    const vodIds = [uuidv7(), uuidv7()];
+    for (const [i, id] of vodIds.entries())
+      await env.t.db.insert(schema.vods).values({
+        id,
+        broadcastId: b.id,
+        channelId: channel.id,
+        title: "v",
+        storagePrefix: `vods/${id}/`,
+        status: "ready",
+        removedReason: "owner",
+        // Far in the past, so these two lead the batch, in this order.
+        expiresAt: new Date(Date.UTC(2000, 0, 1 + i)),
+      });
+    const clipId = uuidv7();
+    await env.t.db.insert(schema.clips).values({
+      id: clipId,
+      channelId: channel.id,
+      broadcastId: b.id,
+      title: "c",
+      startOffset: 0,
+      durationSeconds: 10,
+      status: "ready",
+      storageKey: `clips/${clipId}.mp4`,
+      removedReason: "owner",
+    });
+    // Staff place the hold right after the first VOD's objects go.
+    afterDeletePrefix = async () => {
+      afterDeletePrefix = null;
+      await env.t.db
+        .insert(schema.legalHolds)
+        .values({ userId: user.id, reasonCode: "law_enforcement", reason: "preservation request" });
+    };
+    try {
+      const r = await enforceVodRetention(ctx());
+      expect(r.deleted).toBe(1);
+    } finally {
+      afterDeletePrefix = null;
+    }
+    expect(deletedPrefixes).toEqual([`vods/${vodIds[0]}/`]);
+    expect(deletedKeys).not.toContain(`clips/${clipId}.mp4`);
+    const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
+    expect((await status(vodIds[0]!))?.status).toBe("deleted");
+    expect((await status(vodIds[1]!))?.status).toBe("ready");
+    const [clip] = await env.t.db.select().from(schema.clips).where(eq(schema.clips.id, clipId));
+    expect(clip?.status).toBe("ready");
   });
 });
 

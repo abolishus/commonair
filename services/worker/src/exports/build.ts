@@ -174,8 +174,17 @@ async function mailReady(
 }
 
 /**
+ * A `running` export older than this was abandoned: its worker died after the claim (OOM,
+ * SIGKILL) and BullMQ's re-delivery cannot claim it again (the claim is `queued` → `running`).
+ * There is no claim timestamp, so the row's age is used, with room for a long queue backlog.
+ */
+export const STALE_RUNNING_MS = 6 * 3_600_000;
+
+/**
  * `ready` exports past `expires_at`: delete the archive, then mark the export `expired` and
- * forget its key. Only the export's own key is ever deleted (whatever `storage_key` says).
+ * forget its key. Abandoned `running` builds (`STALE_RUNNING_MS`) are marked `failed`
+ * (`build_failed`) and lose any archive they uploaded. Only an export's own key is ever deleted
+ * (whatever `storage_key` says).
  */
 export async function cleanupExports(
   ctx: WorkerContext,
@@ -184,8 +193,13 @@ export async function cleanupExports(
   const e = s.dataExports;
   if (!ctx.storage) {
     ctx.logger.warn("export cleanup skipped: object storage is not configured");
-    return { expired: 0, failed: 0, orphans: 0 };
+    return { expired: 0, failed: 0, orphans: 0, abandoned: 0 };
   }
+  const abandoned = await ctx.db
+    .update(e)
+    .set({ status: "failed", error: EXPORT_ERRORS.buildFailed, storageKey: null, sizeBytes: null })
+    .where(and(eq(e.status, "running"), lt(e.createdAt, new Date(ctx.now().getTime() - STALE_RUNNING_MS))))
+    .returning({ id: e.id, userId: e.userId, kind: e.kind });
   const due = await ctx.db
     .select({ id: e.id, userId: e.userId })
     .from(e)
@@ -194,6 +208,19 @@ export async function cleanupExports(
     .limit(batch);
   let expired = 0;
   let failed = 0;
+  for (const x of abandoned) {
+    ctx.logger.warn("data export abandoned while running; marked failed", { exportId: x.id, kind: x.kind });
+    try {
+      await ctx.storage.delete(ctx.exportsBucket, exportObjectKey(x.userId, x.id));
+    } catch (err) {
+      // The orphan sweep below (or the next run's) deletes it: the row is no longer live.
+      failed++;
+      ctx.logger.error("export cleanup: abandoned archive deletion failed", {
+        exportId: x.id,
+        errorCode: safeErrorCode(err),
+      });
+    }
+  }
   for (const x of due) {
     try {
       await ctx.storage.delete(ctx.exportsBucket, exportObjectKey(x.userId, x.id));
@@ -213,7 +240,7 @@ export async function cleanupExports(
     ctx.logger.error("export cleanup: orphan sweep failed", { errorCode: safeErrorCode(err) });
     return 0;
   });
-  return { expired, failed, orphans };
+  return { expired, failed, orphans, abandoned: abandoned.length };
 }
 
 const ARCHIVE_KEY = /^exports\/([0-9a-f-]{36})\/([0-9a-f-]{36})\.zip$/;

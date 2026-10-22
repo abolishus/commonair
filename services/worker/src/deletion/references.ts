@@ -2,25 +2,44 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Which outbox rows (`events`) belong to a deleted user (e6 spec "Account deletion (additions)").
+ * Which outbox rows (`events`) belong to a deleted user (e6 spec "Account deletion (additions)"),
+ * and how other people's rows are cleaned of them.
  *
- * An event references the user when any string in its payload, at any depth, is their id or
- * their email address (both case-insensitive), or is exactly their username, display name or
- * display username, or a mention of one (`@name`): a reply quotes the parent's login without the
- * parent's id, and a mention fragment carries only `@login`. An anonymous tip carries no id, so
- * a `channel.tip` on a channel they tipped whose message is one of their tip messages is theirs
- * too. Whole values only: someone else's chat line that merely contains their name is that
- * person's text and stays. The SQL prefilter (`eventNeedles`) only narrows the scan; this
- * function decides.
+ * Matching is on identity only, never on arbitrary values: a common word that happens to equal a
+ * user's display name (`text`, `usd`, `1000`) must never take other people's events with it. An
+ * event is the user's when, at any depth:
+ *
+ * - a string is their id or their email (case-insensitive; both are unique);
+ * - a `…_login` key holds one of their logins (username, display username, channel slug; unique)
+ *   and its sibling `…_id`, if the object has one, is theirs or null: a reply quotes the parent's
+ *   login (and their words) without an id, and a login that changed hands later is someone else's.
+ *
+ * Display names are not identifiers (several people can share one); every payload field that
+ * carries one sits next to the id it belongs to, so the id rule covers it.
+ *
+ * An anonymous tip carries no id: an anonymous `channel.tip` is theirs when its channel, amount,
+ * currency and non-empty message are those of one of their tips (`tips` rows link to no event).
+ *
+ * Someone else's event that only mentions them (an `@ulla` fragment, `thanks ulla`, an address
+ * typed into chat) is that person's and is kept, with the mentions replaced (`redactPayload`):
+ * whole-word logins and the email, only in free-text fields, so enums, amounts and ids are never
+ * touched.
  */
+
+export interface TipFingerprint {
+  channelId: string;
+  amountCents: number;
+  currency: string;
+  message: string;
+}
 
 export interface DeletedIdentity {
   id: string;
-  /** Username, display name and display username, as they were before pseudonymization. */
-  names: readonly string[];
+  /** Username, display username and channel slug, as they were before pseudonymization. */
+  logins: readonly string[];
   email: string;
-  /** Non-empty messages of the user's tips, by channel id. */
-  tipMessages: ReadonlyMap<string, ReadonlySet<string>>;
+  /** The user's tips with a non-empty message. */
+  tips: readonly TipFingerprint[];
 }
 
 export interface OutboxEvent {
@@ -29,38 +48,114 @@ export interface OutboxEvent {
   payload: unknown;
 }
 
-function walk(value: unknown, visit: (value: string) => boolean): boolean {
-  if (typeof value === "string") return visit(value);
-  if (Array.isArray(value)) return value.some((v) => walk(v, visit));
-  if (value !== null && typeof value === "object")
-    return Object.values(value as Record<string, unknown>).some((v) => walk(v, visit));
+/** What replaces a mention of a deleted user in someone else's text. */
+export const REDACTED = "[deleted]";
+
+/** Free-text payload fields (chat lines, tip messages, quoted replies, ban reasons, titles). */
+const FREE_TEXT_KEYS = new Set(["text", "message", "parent_message_body", "reason", "title", "description"]);
+
+/** Logins shorter than this are redacted inside text only as an `@mention`. */
+const MIN_REDACT_LENGTH = 3;
+
+const lowerSet = (xs: readonly string[]) => new Set(xs.filter((x) => x !== "").map((x) => x.toLowerCase()));
+
+type Json = Record<string, unknown>;
+const isObject = (v: unknown): v is Json => v !== null && typeof v === "object" && !Array.isArray(v);
+
+function some(value: unknown, visit: (obj: Json) => boolean, leaf: (s: string) => boolean): boolean {
+  if (typeof value === "string") return leaf(value);
+  if (Array.isArray(value)) return value.some((v) => some(v, visit, leaf));
+  if (isObject(value)) return visit(value) || Object.values(value).some((v) => some(v, visit, leaf));
   return false;
+}
+
+function anonymousTipIsTheirs(event: OutboxEvent, who: DeletedIdentity): boolean {
+  if (event.type !== "channel.tip" || event.channelId === null || !isObject(event.payload)) return false;
+  const p = event.payload;
+  if (p.is_anonymous !== true || (p.user_id !== null && p.user_id !== undefined)) return false;
+  const amount = isObject(p.amount) ? p.amount : null;
+  if (typeof p.message !== "string" || p.message === "" || !amount) return false;
+  return who.tips.some(
+    (t) =>
+      t.channelId === event.channelId &&
+      t.message === p.message &&
+      t.amountCents === amount.value &&
+      t.currency.toLowerCase() === String(amount.currency).toLowerCase(),
+  );
 }
 
 export function referencesUser(event: OutboxEvent, who: DeletedIdentity): boolean {
   const id = who.id.toLowerCase();
   const email = who.email.toLowerCase();
-  const names = new Set(who.names.filter((n) => n !== "").flatMap((n) => [n, `@${n}`]));
-  const hit = walk(event.payload, (v) => {
+  const logins = lowerSet(who.logins);
+  const isLogin = (v: unknown) => typeof v === "string" && logins.has(v.toLowerCase());
+  const visit = (obj: Json) => {
+    for (const [k, v] of Object.entries(obj)) {
+      if (!k.endsWith("_login") || !isLogin(v)) continue;
+      const sibling = obj[`${k.slice(0, -"_login".length)}_id`];
+      if (sibling === undefined || sibling === null || (typeof sibling === "string" && sibling.toLowerCase() === id))
+        return true;
+    }
+    return false;
+  };
+  const leaf = (v: string) => {
     const folded = v.toLowerCase();
-    return folded === id || (email !== "" && folded === email) || names.has(v);
-  });
-  if (hit) return true;
-  if (event.type !== "channel.tip" || event.channelId === null) return false;
-  const message = (event.payload as { message?: unknown } | null)?.message;
-  return typeof message === "string" && message !== "" && (who.tipMessages.get(event.channelId)?.has(message) ?? false);
+    return folded === id || (email !== "" && folded === email);
+  };
+  return some(event.payload, visit, leaf) || anonymousTipIsTheirs(event, who);
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** One pattern for every mention: the email anywhere, a login as a whole word (`@` optional when long). */
+function mentionPattern(who: DeletedIdentity): RegExp | null {
+  const parts = [
+    ...(who.email !== "" ? [escapeRe(who.email)] : []),
+    ...[...lowerSet(who.logins)].map(
+      (l) => `(?<![\\w@.-])${l.length >= MIN_REDACT_LENGTH ? "@?" : "@"}${escapeRe(l)}(?![\\w-])`,
+    ),
+  ];
+  return parts.length ? new RegExp(parts.join("|"), "giu") : null;
+}
+
+/**
+ * Someone else's payload with every mention of the user in a free-text field replaced by
+ * `REDACTED`. Returns null when nothing changed.
+ */
+export function redactPayload(payload: unknown, who: DeletedIdentity): unknown {
+  const re = mentionPattern(who);
+  if (!re) return null;
+  let changed = false;
+  const go = (value: unknown, key: string | null): unknown => {
+    if (typeof value === "string") {
+      if (key === null || !FREE_TEXT_KEYS.has(key)) return value;
+      const next = value.replace(re, REDACTED);
+      if (next !== value) changed = true;
+      return next;
+    }
+    if (Array.isArray(value)) return value.map((v) => go(v, key));
+    if (isObject(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, go(v, k)]));
+    return value;
+  };
+  const out = go(payload, null);
+  return changed ? out : null;
 }
 
 const jsonText = (s: string) => JSON.stringify(s).slice(1, -1);
 
 /**
- * Substrings at least one of which appears in the text of every payload `referencesUser`
- * accepts, JSON-escaped the way Postgres renders jsonb as text: `exact` ones are matched as
- * they are, `folded` ones (the id and the email, which compare case-insensitively) against the
- * lower-cased text.
+ * Lower-cased substrings at least one of which appears in the lower-cased jsonb text of every
+ * payload `referencesUser` accepts (anonymous tips aside: those are found by channel) or
+ * `redactPayload` changes. Only narrows the scan; the functions above decide.
  */
-export function eventNeedles(who: DeletedIdentity): { exact: string[]; folded: string[] } {
-  const exact = [...who.names, ...[...who.tipMessages.values()].flatMap((s) => [...s])].filter((s) => s !== "");
-  const folded = [who.id, who.email].filter((s) => s !== "").map((s) => s.toLowerCase());
-  return { exact: [...new Set(exact.map(jsonText))], folded: [...new Set(folded.map(jsonText))] };
+export function eventNeedles(who: DeletedIdentity): string[] {
+  const logins = [...lowerSet(who.logins)].map((l) =>
+    // Short logins match only as a whole value or an `@mention`, never inside other words.
+    l.length >= MIN_REDACT_LENGTH ? [l] : [`"${l}"`, `@${l}`],
+  );
+  const needles = [who.id, who.email]
+    .filter((x) => x !== "")
+    .map((x) => x.toLowerCase())
+    .concat(logins.flat());
+  return [...new Set(needles.map((n) => (n.startsWith('"') ? `"${jsonText(n.slice(1, -1))}"` : jsonText(n))))];
 }

@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { strFromU8, unzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
-import { buildExport, cleanupExports, exportDownloadLink } from "../src/exports/build.ts";
+import { buildExport, cleanupExports, exportDownloadLink, STALE_RUNNING_MS } from "../src/exports/build.ts";
 import { MANIFEST } from "../src/exports/archive.ts";
 import { AUTH_SECRET, makeApp, makeUser, setup, type TestEnv } from "./fixtures.ts";
 import { EXPORTS_BUCKET, hrefs, mailTo, s3PublicOrigin, siteAt, stackStorage, tip } from "./e6-fixtures.ts";
@@ -411,5 +411,28 @@ describe.skipIf(!storage)("data export", () => {
     // A queued export's archive (a build in flight) is kept.
     expect(await S3.head(EXPORTS_BUCKET, exportObjectKey(u.user.id, live))).not.toBeNull();
     await S3.delete(EXPORTS_BUCKET, exportObjectKey(u.user.id, live));
+  });
+
+  test("a build abandoned in `running` (worker killed after the claim) is failed by cleanup, archive and all", async () => {
+    const u = await makeUser(db());
+    const stale = await requestExport(u.user.id, "account");
+    const fresh = await requestExport(u.user.id, "account");
+    const longAgo = new Date(Date.now() - STALE_RUNNING_MS - 60_000);
+    await db()
+      .update(schema.dataExports)
+      .set({ status: "running", createdAt: longAgo })
+      .where(eq(schema.dataExports.id, stale));
+    await db().update(schema.dataExports).set({ status: "running" }).where(eq(schema.dataExports.id, fresh));
+    // The killed worker had already uploaded.
+    await S3.put(EXPORTS_BUCKET, exportObjectKey(u.user.id, stale), new Uint8Array([1]));
+    // BullMQ's re-delivery cannot claim it.
+    expect(await buildExport(ctx(), stale, { lastAttempt: false })).toEqual({ skipped: 1 });
+
+    const r = await cleanupExports(ctx(), { sweepPrefix: `exports/${u.user.id}/` });
+    expect(r.abandoned).toBe(1);
+    expect(await exportRow(stale)).toMatchObject({ status: "failed", error: "build_failed", storageKey: null });
+    expect(await S3.head(EXPORTS_BUCKET, exportObjectKey(u.user.id, stale))).toBeNull();
+    // A build still in its window is left alone.
+    expect(await exportRow(fresh)).toMatchObject({ status: "running" });
   });
 });

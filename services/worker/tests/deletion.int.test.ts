@@ -13,12 +13,20 @@ import { MemoryMailer } from "@commonair/email";
 import type { ObjectStorage } from "@commonair/storage";
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { runAccountDeletions } from "../src/deletion/account-deletion.ts";
+import { runAccountDeletions, scrubOutbox } from "../src/deletion/account-deletion.ts";
 import { job as accountDeletionJob } from "../src/jobs/account-deletion.ts";
 import { job as exportCleanupJob } from "../src/jobs/export-cleanup.ts";
 import { job as vodRetentionJob } from "../src/jobs/vod-retention.ts";
 import { EXPORTS_BUCKET, MEDIA_BUCKET, siteAt, stackStorage, tip } from "./e6-fixtures.ts";
-import { broadcasterFields, insertEvent, makeSubscription, makeUser, setup, type TestEnv } from "./fixtures.ts";
+import {
+  broadcasterFields,
+  insertEvent,
+  makeBroadcast,
+  makeSubscription,
+  makeUser,
+  setup,
+  type TestEnv,
+} from "./fixtures.ts";
 
 const storage = stackStorage();
 const site = siteAt("http://localhost:3000");
@@ -139,7 +147,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
         user_login: null,
         user_name: null,
         is_anonymous: true,
-        amount,
+        amount: { ...amount, value: 400 },
         message: anonymous,
       }),
       await insertEvent(db(), "channel.follow", S.channel.id, { ...sb, ...ub, followed_at: new Date().toISOString() }),
@@ -299,6 +307,152 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     // A second run finds nothing due and mails nobody.
     expect(await runAccountDeletions(ctx())).toEqual({ completed: 0, failed: 0 });
     expect(mailer.to(old.email)).toHaveLength(1);
+  });
+
+  /** Every events / webhook_deliveries row whose text contains one of `needles` (case-insensitive). */
+  async function piiRows(needles: string[]) {
+    const out: Record<string, number> = {};
+    for (const table of ["events", "webhook_deliveries"]) {
+      const rows = await env.t.sql.unsafe<{ n: number }[]>(
+        `select count(*)::int as n from ${table} x where ${needles.map((_, i) => `strpos(lower(row_to_json(x)::text), lower($${i + 1})) > 0`).join(" or ")}`,
+        needles,
+      );
+      out[table] = rows[0]?.n ?? 0;
+    }
+    return out;
+  }
+
+  test("a user live at completion: the stream.offline the completion emits is scrubbed too", async () => {
+    const L = await makeUser(db());
+    // A channel whose slug and display name differ from the username, so each is checked.
+    const slug = `chan${uuidv7().slice(-8)}`;
+    const display = `Display ${uuidv7().slice(-8)}`;
+    await db().update(schema.channels).set({ slug, displayName: display }).where(eq(schema.channels.id, L.channel.id));
+    const b = await makeBroadcast(db(), L.channel.id);
+    await db().update(schema.channels).set({ liveBroadcastId: b.id }).where(eq(schema.channels.id, L.channel.id));
+    const old = [L.user.email, L.user.username, L.user.name, slug, display];
+
+    await schedule(L.user.id);
+    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+
+    const [ended] = await db().select().from(schema.broadcasts).where(eq(schema.broadcasts.id, b.id));
+    expect(ended?.endedAt).not.toBeNull();
+    const offline = await db()
+      .select()
+      .from(schema.events)
+      .where(sql`${schema.events.type} = 'stream.offline' and ${schema.events.channelId} = ${L.channel.id}`);
+    expect(offline).toEqual([]);
+    expect(await piiRows([L.user.id, ...old])).toEqual({ events: 0, webhook_deliveries: 0 });
+  });
+
+  test("names that are common words take no one else's events; mentions in kept text are redacted", async () => {
+    const V = await makeUser(db());
+    const S = await makeUser(db());
+    // W's display name and username are words other payloads carry as values.
+    const W = await makeUser(db());
+    const wLogin = `w${uuidv7().slice(-10)}`;
+    await db()
+      .update(schema.users)
+      .set({ name: "text", displayUsername: wLogin.toUpperCase(), username: wLogin })
+      .where(eq(schema.users.id, W.user.id));
+    await db()
+      .update(schema.channels)
+      .set({ slug: wLogin, displayName: "usd" })
+      .where(eq(schema.channels.id, W.channel.id));
+    await tip(app(), { from: W.user.id, channelId: S.channel.id, creatorUserId: S.user.id, cents: 100, message: "gg" });
+
+    const sb = broadcasterFields(S.user);
+    const vChat = (text: string, fragments: unknown[] = []) =>
+      insertEvent(db(), "channel.chat.message", S.channel.id, {
+        ...sb,
+        chatter_user_id: V.user.id,
+        chatter_user_login: V.user.username,
+        chatter_user_name: V.user.name,
+        message_id: uuidv7(),
+        message: { text, fragments: [{ type: "text", text, emote: null }, ...fragments] },
+        badges: [],
+        color: "",
+        reply: null,
+        is_bot: false,
+      });
+    const others = [
+      await vChat("gg"),
+      await insertEvent(db(), "channel.tip", S.channel.id, {
+        ...sb,
+        user_id: V.user.id,
+        user_login: V.user.username,
+        user_name: V.user.name,
+        is_anonymous: false,
+        amount: { value: 100, decimal_places: 2, currency: "usd" },
+        message: "gg",
+      }),
+    ];
+    const mention = await vChat(`thanks ${wLogin} for the raid`, [
+      { type: "mention", text: `@${wLogin}`, emote: null },
+    ]);
+
+    await schedule(W.user.id);
+    expect(await runAccountDeletions(ctx())).toEqual({ completed: 1, failed: 0 });
+
+    const left = await db()
+      .select()
+      .from(schema.events)
+      .where(
+        inArray(
+          schema.events.id,
+          [...others, mention].map((e) => e.id),
+        ),
+      );
+    expect(left.map((e) => e.id).sort()).toEqual([...others, mention].map((e) => e.id).sort());
+    for (const e of others) expect(left.find((x) => x.id === e.id)?.payload).toEqual(e.payload);
+    const redacted = left.find((x) => x.id === mention.id)?.payload as { message: { text: string } };
+    expect(redacted.message.text).toBe("thanks [deleted] for the raid");
+    expect(await piiRows([W.user.id, wLogin, W.user.email])).toEqual({ events: 0, webhook_deliveries: 0 });
+  });
+
+  test("the outbox is scanned in batches: every page is matched, deleted or redacted", async () => {
+    const X = await makeUser(db());
+    const S = await makeUser(db());
+    const sb = broadcasterFields(S.user);
+    const theirs = [];
+    const mentions = [];
+    for (let i = 0; i < 5; i++) {
+      theirs.push(
+        await insertEvent(db(), "channel.follow", S.channel.id, {
+          ...sb,
+          user_id: X.user.id,
+          user_login: X.user.username,
+          user_name: X.user.name,
+          followed_at: new Date().toISOString(),
+        }),
+      );
+      mentions.push(
+        await insertEvent(db(), "channel.chat.message", S.channel.id, {
+          ...sb,
+          chatter_user_id: S.user.id,
+          chatter_user_login: S.user.username,
+          chatter_user_name: S.user.name,
+          message_id: uuidv7(),
+          message: { text: `hi ${X.user.username}`, fragments: [] },
+          reply: null,
+        }),
+      );
+    }
+    const r = await app().transaction((tx) =>
+      scrubOutbox(tx, { id: X.user.id, logins: [X.user.username], email: X.user.email, tips: [] }, { batch: 2 }),
+    );
+    expect(r).toEqual({ events: 5, deliveries: 0, redacted: 5 });
+    const left = await db()
+      .select()
+      .from(schema.events)
+      .where(
+        inArray(
+          schema.events.id,
+          [...theirs, ...mentions].map((e) => e.id),
+        ),
+      );
+    expect(left.map((e) => e.id).sort()).toEqual(mentions.map((e) => e.id).sort());
+    for (const e of left) expect((e.payload as { message: { text: string } }).message.text).toBe("hi [deleted]");
   });
 
   test("held data is untouched and held media stays; exports go regardless", async () => {

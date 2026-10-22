@@ -19,9 +19,9 @@
 import { BUS, UserControlMessage } from "@commonair/contracts/events";
 import { exportObjectKey } from "@commonair/contracts/internal";
 import { schema, type Executor } from "@commonair/db";
-import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
-import { eventNeedles, referencesUser, type DeletedIdentity } from "./references.ts";
+import { eventNeedles, redactPayload, referencesUser, type DeletedIdentity } from "./references.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
 import { vodPrefix } from "../moderation/objects.ts";
 import { audit, endBroadcast, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
@@ -76,39 +76,84 @@ export async function heldRows(tx: Executor, userId: string): Promise<Retained[]
   ].filter((r) => r.rows > 0);
 }
 
-/** Delete in chunks so one user with a long history never builds an unbounded parameter list. */
-const CHUNK = 500;
+/** Outbox rows scanned per round trip, so memory stays bounded however large the table is. */
+const SCAN_BATCH = 1000;
 
 /**
- * Outbox rows that reference the user (`referencesUser`), and the webhook deliveries of those
- * rows, deleted. Delivered copies are the receivers'; ours go. Returns the counts.
+ * Outbox rows that reference the user (`referencesUser`) are deleted with their webhook
+ * deliveries (delivered copies are the receivers'; ours go). Other people's rows that only
+ * mention them are kept with the mentions redacted (`redactPayload`). The table is walked in
+ * keyset-paginated batches, prefiltered in SQL, so only candidate payloads ever leave Postgres.
+ * Anonymous tips carry no id: they are looked up through the user's tipped channels (indexed).
+ * Runs last in the completion transaction, so events written by the completion itself (the
+ * `stream.offline` of a channel taken off air) are scrubbed too.
  */
-export async function scrubOutbox(tx: Executor, who: DeletedIdentity): Promise<{ events: number; deliveries: number }> {
+export async function scrubOutbox(
+  tx: Executor,
+  who: DeletedIdentity,
+  { batch = SCAN_BATCH }: { batch?: number } = {},
+): Promise<{ events: number; deliveries: number; redacted: number }> {
   const e = s.events;
-  const { exact, folded } = eventNeedles(who);
-  const conds = [
-    ...exact.map((n) => sql`strpos(${e.payload}::text, ${n}) > 0`),
-    ...folded.map((n) => sql`strpos(lower(${e.payload}::text), ${n}) > 0`),
-  ];
-  if (conds.length === 0) return { events: 0, deliveries: 0 };
-  const candidates = await tx
-    .select({ id: e.id, type: e.type, channelId: e.channelId, payload: e.payload })
-    .from(e)
-    .where(or(...conds));
-  const ids = candidates.filter((c) => referencesUser(c, who)).map((c) => c.id);
-  let events = 0;
-  let deliveries = 0;
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK);
-    deliveries += (
+  const out = { events: 0, deliveries: 0, redacted: 0 };
+  const remove = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    out.deliveries += (
       await tx
         .delete(s.webhookDeliveries)
-        .where(inArray(s.webhookDeliveries.eventId, chunk))
+        .where(inArray(s.webhookDeliveries.eventId, ids))
         .returning({ id: s.webhookDeliveries.id })
     ).length;
-    events += (await tx.delete(e).where(inArray(e.id, chunk)).returning({ id: e.id })).length;
+    out.events += (await tx.delete(e).where(inArray(e.id, ids)).returning({ id: e.id })).length;
+  };
+  const cols = { id: e.id, type: e.type, channelId: e.channelId, payload: e.payload };
+
+  const tipped = [...new Set(who.tips.map((t) => t.channelId))];
+  if (tipped.length > 0) {
+    const tips = await tx
+      .select(cols)
+      .from(e)
+      .where(
+        and(
+          eq(e.type, "channel.tip"),
+          inArray(e.channelId, tipped),
+          sql`${e.payload}->>'is_anonymous' = 'true'`,
+          inArray(sql<string>`${e.payload}->>'message'`, [...new Set(who.tips.map((t) => t.message))]),
+        ),
+      );
+    await remove(tips.filter((t) => referencesUser(t, who)).map((t) => t.id));
   }
-  return { events, deliveries };
+
+  const needles = eventNeedles(who);
+  if (needles.length === 0) return out;
+  const matches = or(...needles.map((n) => sql`strpos(lower(${e.payload}::text), ${n}) > 0`));
+  let after: string | null = null;
+  for (;;) {
+    const page: { id: string; type: string; channelId: string | null; payload: Record<string, unknown> }[] = await tx
+      .select(cols)
+      .from(e)
+      .where(after === null ? matches : and(gt(e.id, after), matches))
+      .orderBy(asc(e.id))
+      .limit(batch);
+    if (page.length === 0) break;
+    after = page[page.length - 1]?.id ?? null;
+    const theirs: string[] = [];
+    for (const row of page) {
+      if (referencesUser(row, who)) {
+        theirs.push(row.id);
+        continue;
+      }
+      const redacted = redactPayload(row.payload, who);
+      if (redacted === null) continue;
+      await tx
+        .update(e)
+        .set({ payload: redacted as Record<string, unknown> })
+        .where(eq(e.id, row.id));
+      out.redacted++;
+    }
+    await remove(theirs);
+    if (page.length < batch) break;
+  }
+  return out;
 }
 
 /** Where the completed notice goes: read in the transaction, never stored or logged. */
@@ -161,6 +206,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
     const objectPrefixes: string[] = [];
     const exportKeys: string[] = [];
     let notice: Notice | null = null;
+    let identity: DeletedIdentity | null = null;
     if (user) {
       // Credentials and sessions.
       await del(
@@ -238,23 +284,26 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       );
       await tx.update(s.clips).set({ creatorId: null }).where(eq(s.clips.creatorId, userId));
 
-      // Outbox and webhook deliveries that name the user (E6), matched on the identity as it is
-      // now, before pseudonymization below replaces it.
-      const tipMessages = new Map<string, Set<string>>();
-      for (const t of await tx
-        .select({ channelId: s.tips.channelId, message: s.tips.message })
-        .from(s.tips)
-        .where(and(eq(s.tips.fromUserId, userId), ne(s.tips.message, "")))) {
-        tipMessages.set(t.channelId, (tipMessages.get(t.channelId) ?? new Set()).add(t.message));
-      }
-      const scrubbed = await scrubOutbox(tx, {
+      // The identity as it is now, before pseudonymization below replaces it: the outbox is
+      // scrubbed of it last, after every write in this transaction that can emit an event.
+      const [ownChannel] = await tx
+        .select({ slug: s.channels.slug })
+        .from(s.channels)
+        .where(eq(s.channels.ownerId, userId));
+      identity = {
         id: userId,
-        names: [user.username, user.name, user.displayUsername ?? ""],
+        logins: [user.username, user.displayUsername ?? "", ownChannel?.slug ?? ""],
         email: user.email,
-        tipMessages,
-      });
-      counts.events = scrubbed.events;
-      counts.webhook_deliveries = scrubbed.deliveries;
+        tips: await tx
+          .select({
+            channelId: s.tips.channelId,
+            amountCents: s.tips.amountCents,
+            currency: s.tips.currency,
+            message: s.tips.message,
+          })
+          .from(s.tips)
+          .where(and(eq(s.tips.fromUserId, userId), ne(s.tips.message, ""))),
+      };
       // Free text the user wrote in rows that are kept (the rows reference the user by id only):
       // tip messages, the details of reports they filed and the bodies of their appeals.
       await del(
@@ -351,6 +400,12 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           deletedAt: user.deletedAt ?? now,
         })
         .where(eq(s.users.id, userId));
+    }
+    if (identity) {
+      const scrubbed = await scrubOutbox(tx, identity);
+      counts.events = scrubbed.events;
+      counts.webhook_deliveries = scrubbed.deliveries;
+      counts.events_redacted = scrubbed.redacted;
     }
 
     const retained = await heldRows(tx, userId);
