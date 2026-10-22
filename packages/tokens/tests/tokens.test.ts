@@ -8,6 +8,7 @@ import {
   hmacHex,
   importSigningKey,
   randomSecret,
+  randomTokenSecret,
   sha256Hex,
   signPlaybackToken,
   signReceipt,
@@ -124,6 +125,11 @@ describe("helpers", () => {
     expect(await sha256Hex("abc")).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     expect(await hmacHex("k", "v")).not.toBe(await hmacHex("k2", "v"));
     expect(randomSecret("live_")).toMatch(/^live_[A-Za-z0-9_-]{43}$/);
+    // Access tokens survive the lowercasing Twitch-style IRC clients apply to PASS.
+    const token = randomTokenSecret("ca_");
+    expect(token).toMatch(/^ca_[0-9a-f]{64}$/);
+    expect(token.toLowerCase()).toBe(token);
+    expect(randomTokenSecret("ca_")).not.toBe(token);
     expect(timingSafeEqual("abc", "abc")).toBe(true);
     expect(timingSafeEqual("abc", "abd")).toBe(false);
   });

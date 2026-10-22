@@ -178,4 +178,15 @@ export function randomSecret(prefix = "", bytes = 32): string {
   return prefix + b64url(crypto.getRandomValues(new Uint8Array(bytes)));
 }
 
+/**
+ * Random secret in lowercase hex, for OAuth access tokens. Twitch-compatible IRC clients (tmi.js
+ * and others) lowercase the `PASS oauth:<token>` they send, so a mixed-case token could never sign
+ * in through the IRC gateway. `bytes` of entropy, as `randomSecret`.
+ */
+export function randomTokenSecret(prefix = "", bytes = 32): string {
+  return (
+    prefix + Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("")
+  );
+}
+
 export { decryptSecret, encryptSecret, signChatToken, verifyChatToken } from "./secrets.ts";

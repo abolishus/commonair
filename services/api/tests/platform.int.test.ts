@@ -575,6 +575,8 @@ describe("tokens, bots and the API surface", () => {
       scopes: ["chat:read"],
     });
     expect(minted.status).toBe(200);
+    // tmi.js lowercases the PASS it sends: the token must already be lowercase to sign in over IRC.
+    expect(minted.body.accessToken).toBe(minted.body.accessToken.toLowerCase());
     const asBot = client(api, { bearer: minted.body.accessToken });
     expect((await asBot.call("GET", "/api/me")).status).toBe(403); // needs user:read:email
     expect((await asBot.call("GET", "/api/me/follows")).status).toBe(403); // needs user:read:follows

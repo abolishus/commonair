@@ -4,7 +4,7 @@
 import { and, count, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
 import { schema, uuidv7, type Executor } from "@commonair/db";
-import { randomSecret, sha256Hex } from "@commonair/tokens";
+import { randomTokenSecret, sha256Hex } from "@commonair/tokens";
 import { isAdult, usernameProblem } from "../auth/identity.ts";
 import type { Deps } from "../deps.ts";
 import {
@@ -389,7 +389,8 @@ export const me = {
         .from(users)
         .where(and(eq(users.id, input.botId), eq(users.botOwnerId, caller.user.id), isNull(users.deletedAt)));
       if (!bot) throw notFound("Bot not found");
-      const accessToken = randomSecret("ca_");
+      // Lowercase: tmi.js and other Twitch-style IRC clients lowercase the token they send.
+      const accessToken = randomTokenSecret("ca_");
       const [token] = await deps.db
         .insert(oauthTokens)
         .values({

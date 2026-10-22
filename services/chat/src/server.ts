@@ -386,12 +386,19 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket")
       return Response.json({ error: "websocket_required" }, { status: 426 });
     const result = await auth.authenticate(req);
-    if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+    if (!result.ok) {
+      // Codes only: never the token. Clients (the IRC gateway) cannot see why an upgrade failed.
+      logger.info("upgrade refused", { status: result.status, error: result.error });
+      return Response.json({ error: result.error }, { status: result.status });
+    }
     let user: ConnData["user"] = null;
     if (result.identity.userId) {
       directory.invalidateProfile(result.identity.userId);
       const profile = await directory.profile(result.identity.userId);
-      if (!profile || profile.deleted) return Response.json({ error: "unknown_user" }, { status: 401 });
+      if (!profile || profile.deleted) {
+        logger.info("upgrade refused", { status: 401, error: "unknown_user" });
+        return Response.json({ error: "unknown_user" }, { status: 401 });
+      }
       user = { id: profile.id, username: profile.username, displayName: profile.displayName };
     }
     const now = Date.now();
