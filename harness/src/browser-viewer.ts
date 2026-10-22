@@ -130,6 +130,12 @@ class ViewerPage {
     }));
   }
 
+  /** One click on the page: the user gesture WebKit wants before it plays (see the player). */
+  async gesture(): Promise<void> {
+    if (this.closed) return;
+    await this.page.mouse.click(1, 1).catch(() => undefined);
+  }
+
   async stopPlayer(id: string): Promise<void> {
     if (this.closed || this.stoppedIds.has(id)) return;
     this.stoppedIds.add(id);
@@ -192,6 +198,9 @@ class BrowserViewer implements Viewer {
     return this.last;
   }
 
+  /** Whether the page was clicked to satisfy an autoplay refusal. */
+  private gestured = false;
+
   async waitForFirstFrame(timeoutMs = 45_000): Promise<number> {
     try {
       return await waitFor(
@@ -200,12 +209,21 @@ class BrowserViewer implements Viewer {
           const r = await this.report();
           const fatal = r.errors.find((e) => e.startsWith("start:"));
           if (fatal) throw new Error(fatal);
+          // Autoplay refused: press play once, as a viewer would.
+          if (!this.gestured && r.errors.some((e) => e.startsWith("play: NotAllowedError"))) {
+            this.gestured = true;
+            await this.host.gesture();
+          }
           return r.ttffMs ?? null;
         },
         { timeoutMs, intervalMs: 250 },
       );
     } catch (err) {
       if (err instanceof TimeoutError && err.lastError instanceof Error) throw err.lastError;
+      // Name what the player saw: a bare timeout says nothing about why playback never started.
+      const seen = this.last.errors.slice(-3);
+      if (err instanceof TimeoutError && seen.length > 0)
+        throw new Error(`${err.message} (player errors: ${seen.join(" | ").slice(0, 400)})`);
       throw err;
     }
   }

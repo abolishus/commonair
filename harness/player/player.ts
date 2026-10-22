@@ -158,11 +158,21 @@ class Player {
     }
     if (native) {
       await waitForPlaylist(url, this.abort.signal);
+      // Native HLS reports failures only on the element: record them, or a stall says nothing.
+      this.video.addEventListener("error", () => {
+        const e = this.video.error;
+        this.info.errors.push(`media: ${e?.code ?? "?"} ${e?.message ?? ""}`.trim());
+      });
       this.video.src = url;
     } else {
       this.attachHls(url);
     }
-    void this.video.play().catch(() => undefined);
+    void this.video.play().catch((err: unknown) => {
+      this.info.errors.push(`play: ${(err as Error).name}: ${(err as Error).message}`);
+      // WebKit can refuse autoplay even muted and inline; a viewer then presses play. The
+      // harness clicks the page once (a real user gesture) when it sees this error.
+      document.addEventListener("click", () => void this.video.play().catch(() => undefined), { once: true });
+    });
   }
 
   private attachHls(url: string): void {
