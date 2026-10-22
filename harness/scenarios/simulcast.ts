@@ -6,7 +6,8 @@
  * RTMP target on `/dashboard` (key `harness-<runId>`), goes live, the target reports `live` and
  * ffprobe counts frames arriving at the mock target at the source resolution; disabling stops
  * the push and re-enabling restarts it; going offline ends the `simulcast_sessions` row with
- * bytes sent. The key is never in an API response or a service log line of the run.
+ * bytes sent. The key is never in an API response (the harness's own, and on the web path every
+ * `/rpc` response the dashboard received), an outbox event or a service log line of the run.
  *
  * `--set via=api` drives the target through `stream.simulcast.*` instead of the dashboard.
  * `--set targetUrl=` overrides the target's RTMP URL as the media service reaches it
@@ -17,11 +18,18 @@
  * `OUTBOUND_ALLOW_PRIVATE_NETWORKS=true` for api and media).
  */
 import type { ApiClient } from "../src/api/client.ts";
-import { simulcastSessions } from "../src/e6/db.ts";
+import { eventsContaining, simulcastSessions } from "../src/e6/db.ts";
 import { type Kit, UI_TIMEOUT_MS, setupKit } from "../src/e6/kit.ts";
-import { mockRtmpPort, mockRtmpReadUrl, probeFrames } from "../src/e6/ffprobe.ts";
+import {
+  type FrameProbe,
+  NO_PUBLISHER_PROBE_S,
+  mockRtmpPort,
+  mockRtmpReadUrl,
+  probeFrames,
+  pushStopped,
+} from "../src/e6/ffprobe.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "../src/e6/selectors.ts";
-import { chooseOption, confirmDialog, dataOf, reloadUntil, setSwitch } from "../src/e6/web.ts";
+import { RpcResponses, chooseOption, confirmDialog, dataOf, reloadUntil, setSwitch } from "../src/e6/web.ts";
 import { containerLogs, serviceContainers } from "../src/safety-io.ts";
 import { scanLog, summarizeHits, textNeedles } from "../src/safety.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
@@ -82,8 +90,10 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
   let session: WebSession | null = null;
   const name = `mock ${ctx.runId}`.slice(0, 40);
   let targetId: string;
+  const browserRpc = new RpcResponses();
   if (kit.via === "web") {
     session = await kit.webSession("S", s);
+    browserRpc.attach(await session.page());
     const sess = session;
     targetId = await ctx.step("1 S adds the mock target on /dashboard", async () => {
       const page = await sess.goto(E6_ROUTES.dashboard);
@@ -203,14 +213,19 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
     await setEnabled(false);
     return Date.now();
   });
+  const stopProbes: FrameProbe[] = [];
   await ctx.step("4 the mock path has no publisher and the status is idle", () =>
     waitFor(
       "no publisher at the mock target and status idle",
       async () => {
-        const r = await probeFrames(readUrl, 2);
-        return r.frames === 0 && (await status()) === "idle" ? true : null;
+        stopProbes.push(await probeFrames(readUrl, NO_PUBLISHER_PROBE_S));
+        return pushStopped(stopProbes) && (await status()) === "idle" ? true : null;
       },
-      { timeoutMs: STATUS_DEADLINE_MS + SLACK_MS, intervalMs: 1_000, signal: ctx.signal },
+      {
+        timeoutMs: STATUS_DEADLINE_MS + SLACK_MS + 2 * NO_PUBLISHER_PROBE_S * 1000,
+        intervalMs: 500,
+        signal: ctx.signal,
+      },
     ),
   );
   const toStopped = Date.now() - disabledAt;
@@ -260,7 +275,9 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
   );
 
   await removeTarget(ctx, s, channel, targetId, session, responses);
-  await scanForKey(ctx, key, startedAt, responses);
+  const browserBodies = await browserRpc.settle();
+  if (session) ctx.data("browserRpcResponses", browserBodies.length);
+  await scanForKey(ctx, kit, key, startedAt, [...responses, ...browserBodies]);
 }
 
 async function removeTarget(
@@ -287,10 +304,21 @@ async function removeTarget(
   });
 }
 
-async function scanForKey(ctx: ScenarioContext, key: string, since: Date, responses: unknown[]): Promise<void> {
-  ctx.assert("5 no API response of the run contains the key", !responses.some((r) => JSON.stringify(r).includes(key)), {
+async function scanForKey(
+  ctx: ScenarioContext,
+  kit: Kit,
+  key: string,
+  since: Date,
+  responses: unknown[],
+): Promise<void> {
+  const text = (r: unknown) => (typeof r === "string" ? r : JSON.stringify(r));
+  ctx.assert("5 no API response of the run contains the key", !responses.some((r) => text(r).includes(key)), {
     responses: responses.length,
   });
+  const inEvents = await ctx.step("5 scan the outbox events of the run for the key (DB)", () =>
+    eventsContaining(kit.databaseUrl, key, since),
+  );
+  ctx.assert("5 no outbox event of the run contains the key", inEvents === 0, { events: inEvents });
   const needles = textNeedles("simulcast-key", [key]);
   const containers = await ctx.step("5 find the services' containers", () =>
     serviceContainers(ctx.env.HARNESS_CONTAINER_PREFIX),

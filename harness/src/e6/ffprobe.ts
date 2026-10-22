@@ -99,3 +99,16 @@ export async function probeFrames(url: string, seconds: number, binary = "ffprob
     if (proc.exitCode === null) proc.kill("SIGKILL");
   }
 }
+
+/** Seconds a "no publisher" probe reads: longer than one GOP of the test pattern (2 s). */
+export const NO_PUBLISHER_PROBE_S = 5;
+
+/**
+ * Has the push stopped? Only when the last `runs` probes (each longer than a GOP) all finished on
+ * their own (`exitCode` not null: ffprobe was not killed on a timeout) and decoded no frame. A
+ * single short probe can read 0 frames while the push runs (a reader waits for the next IDR).
+ */
+export function pushStopped(probes: readonly FrameProbe[], runs = 2): boolean {
+  if (probes.length < runs) return false;
+  return probes.slice(-runs).every((p) => p.frames === 0 && p.exitCode !== null);
+}

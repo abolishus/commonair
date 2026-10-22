@@ -6,7 +6,14 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { ffprobeFrameArgs, mockRtmpPort, mockRtmpReadUrl, parseFrameProbe, probeFrames } from "../../src/e6/ffprobe.ts";
+import {
+  ffprobeFrameArgs,
+  mockRtmpPort,
+  mockRtmpReadUrl,
+  parseFrameProbe,
+  probeFrames,
+  pushStopped,
+} from "../../src/e6/ffprobe.ts";
 
 describe("mock target URL", () => {
   test("rtmp://localhost:<port>/live/<key>", () => {
@@ -68,5 +75,22 @@ describe("probeFrames", () => {
     writeFileSync(bin, `#!/bin/sh\necho '{"streams":[{"width":640,"height":360,"nb_read_frames":"75"}]}'\n`);
     chmodSync(bin, 0o755);
     expect(await probeFrames("rtmp://h/live/k", 1, bin)).toEqual({ frames: 75, width: 640, height: 360, exitCode: 0 });
+  });
+});
+
+describe("pushStopped", () => {
+  const p = (frames: number, exitCode: number | null) => ({ frames, width: null, height: null, exitCode });
+
+  test("two finished probes in a row with no frame", () => {
+    expect(pushStopped([p(0, 1), p(0, 1)])).toBe(true);
+    expect(pushStopped([p(90, 0), p(0, 1), p(0, 0)])).toBe(true);
+  });
+
+  test("one probe, a probe with frames, or a killed probe is not proof", () => {
+    expect(pushStopped([])).toBe(false);
+    expect(pushStopped([p(0, 1)])).toBe(false);
+    expect(pushStopped([p(0, 1), p(3, 0)])).toBe(false);
+    // Killed on the outer timeout (exitCode null): a running push the reader waited on.
+    expect(pushStopped([p(0, 1), p(0, null)])).toBe(false);
   });
 });

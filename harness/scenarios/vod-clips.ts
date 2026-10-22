@@ -8,7 +8,8 @@
  * `/content`, after which V can neither see nor change it (`NOT_FOUND`, no existence leak); 3 S
  * deletes V's clip, and `vod-retention` (ops tick) deletes its objects; 4 S deletes the VOD, its
  * clips go with it, and `vod-retention` leaves nothing under `vods/<id>/`; 5 a VOD of a held
- * channel owner is hidden but its objects survive the tick (`held` ≥ 1).
+ * channel owner is hidden but every one of its objects survives the tick (`held` above the
+ * baseline counted just before the removal).
  *
  * `--set via=api` drives `/content` through `vods.*` and `clips.*`. Object checks read the media
  * bucket with the repo `.env` credentials (`S3_*`).
@@ -17,7 +18,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { ApiClient } from "../src/api/client.ts";
 import { clipRow, vodRow } from "../src/e6/db.ts";
 import { type Kit, UI_TIMEOUT_MS, setupKit, staffAccount } from "../src/e6/kit.ts";
-import { sumCounter } from "../src/e6/ops.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "../src/e6/selectors.ts";
 import { chooseOption, confirmDialog } from "../src/e6/web.ts";
 import { listMediaKeys, mediaBucketConfig, mediaKeyExists } from "../src/safety-io.ts";
@@ -31,6 +31,8 @@ const HELD_STREAM_SECONDS = 20;
 const VOD_READY_TIMEOUT_MS = 5 * 60_000;
 const CLIP_READY_TIMEOUT_MS = 3 * 60_000;
 const RETENTION_TIMEOUT_MS = 2 * 60_000;
+/** Listing cap for the held VOD's objects (a 20 s VOD has a handful of segments). */
+const MAX_HELD_KEYS = 1_000;
 
 type Vod = Awaited<ReturnType<ApiClient["vods"]["get"]>>;
 
@@ -296,27 +298,68 @@ async function heldVod(
   const vod = await streamVod(ctx, "S2", s2, HELD_STREAM_SECONDS);
   ctx.data("heldVodId", vod.id);
   const prefix = `vods/${vod.id}/`;
+  // Every object of the held VOD, recorded before the removal: each one must survive.
+  const keptBefore = await ctx.step("5 record the held VOD's objects", async () => {
+    const row = await vodRow(kit.databaseUrl, vod.id);
+    const keys = new Set(await listMediaKeys(bucket, prefix, MAX_HELD_KEYS));
+    if (row.thumbnailKey) keys.add(row.thumbnailKey);
+    return [...keys];
+  });
+  ctx.assert(
+    "5 the held VOD has objects (and fewer than the listing cap)",
+    keptBefore.length > 0 && keptBefore.length < MAX_HELD_KEYS,
+    {
+      objects: keptBefore.length,
+    },
+  );
+  // Holds left by other runs count as `held` too: only an increase over this baseline is S2's VOD.
+  const baseline = await ctx.step("5 baseline vod-retention tick before the removal", () =>
+    kit.ops.tickRan("vod-retention"),
+  );
+  const baselineHeld = baseline.held ?? 0;
+  ctx.data("heldBaseline", baselineHeld);
   await ctx.step("5 S2 deletes the VOD", () => s2.api.client.vods.remove({ id: vod.id }));
   const hidden = await errorOf(() => s2.api.client.vods.get({ id: vod.id }));
   ctx.assert("5 the held VOD is hidden (NOT_FOUND)", isNotFound(hidden), { code: apiError(hidden).code });
+  const due = await vodRow(kit.databaseUrl, vod.id);
+  ctx.assert(
+    "5 the removed VOD is due for retention (removed_reason owner, expires_at ≤ now)",
+    due.removedReason === "owner" && due.due,
+    {
+      removedReason: due.removedReason,
+      due: due.due,
+    },
+  );
   // Only ticks that ran after the removal count (and only non-skipped ones carry counts).
   const from = kit.ops.ticks.length;
-  const heldSince = () =>
-    sumCounter(
-      kit.ops.ticks.slice(from).flatMap((t) => (t.result ? [t.result] : [])),
-      "held",
-    );
+  const heldAfter = () =>
+    kit.ops.ticks
+      .slice(from)
+      .flatMap((t) => (t.result ? [t.result.held ?? 0] : []))
+      .some((n) => n > baselineHeld);
   const { results } = await ctx.step("5 ops tick vod-retention counts it held", () =>
-    kit.ops.tickUntil("vod-retention", "a held VOD", async () => (heldSince() >= 1 ? true : null), {
+    kit.ops.tickUntil("vod-retention", "held above the baseline", async () => (heldAfter() ? true : null), {
       timeoutMs: RETENTION_TIMEOUT_MS,
     }),
   );
   ctx.data("heldRetention", results);
-  ctx.assert("5 the retention result counts held ≥ 1", sumCounter(results, "held") >= 1, {
-    held: sumCounter(results, "held"),
+  ctx.assert(
+    "5 the retention result counts more held rows than before the removal",
+    results.some((r) => (r.held ?? 0) > baselineHeld),
+    { baseline: baselineHeld, held: results.map((r) => r.held ?? 0) },
+  );
+  const listed = new Set(await listMediaKeys(bucket, prefix, MAX_HELD_KEYS));
+  const missing: string[] = [];
+  for (const key of keptBefore) {
+    if (!listed.has(key) && !(await mediaKeyExists(bucket, key))) missing.push(key);
+  }
+  ctx.assert("5 every object of the held VOD still exists", missing.length === 0, {
+    objects: keptBefore.length,
+    missing: missing.length,
   });
-  const left = await listMediaKeys(bucket, prefix, 5);
-  ctx.assert("5 the held VOD's objects still exist", left.length > 0, { objects: left.length });
   const row = await vodRow(kit.databaseUrl, vod.id);
-  ctx.assert("5 the held VOD is not marked deleted", row.status !== "deleted", { status: row.status });
+  ctx.assert("5 the held VOD is still due and not marked deleted", row.status !== "deleted" && row.due, {
+    status: row.status,
+    due: row.due,
+  });
 }

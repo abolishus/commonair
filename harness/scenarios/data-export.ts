@@ -6,11 +6,15 @@
  * 1 U follows S, chats and tips in S's channel; V follows, chats and tips in U's channel;
  * 2 U requests `account` and `channel` exports on `/settings/privacy` (a second `account` request
  * is `RATE_LIMITED` and the button disabled) and both become ready; 3 the email carries a link
- * valid for at most 7 days that downloads a zip; 4 the archive lists its files, holds U's own
- * account, chat, follow and tip, and nothing of V (id, email, username, display name, chat text,
- * tip message) and no session, token, key or password hash of anyone; 5 V cannot list U's exports,
+ * that stops working by `expires_at`, is for the export's own key only (and is the email's only
+ * storage link) and downloads a zip; `me.exports.list`'s fresh links obey the same rules; 4 the
+ * archive lists its files, holds U's own account, chat, follow, tip and simulcast target (without
+ * its key), nothing of V (id, email, username, display name, chat text, tip message) and no
+ * session, token, key, password hash, nor any stored hash or ciphertext of U's stream key, overlay
+ * token, bot token or simulcast key; 5 V cannot list U's exports,
  * a tampered link and an unsigned GET are refused; 6 after `expires_at` passes, `export-cleanup`
- * marks it `expired`, deletes the object and the link stops working.
+ * marks it `expired`, deletes the object and the link stops working; between `expires_at` and that
+ * tick the list already offers no link.
  *
  * Every value scanned for is generated per run with a distinctive marker. The report carries
  * ids, counts, labels and file names only: never an email, token, key or link.
@@ -25,10 +29,11 @@ import {
   parseManifest,
   readZip,
   scanFiles,
+  secretNeedles,
   valueNeedles,
 } from "../src/e6/archive.ts";
-import { exportRow, expireExportNow, userSecrets } from "../src/e6/db.ts";
-import { type ExportJob, download, exportMailLink, requestExport, waitExportReady } from "../src/e6/exports.ts";
+import { exportRow, expireExportNow, storedSecrets, userSecrets } from "../src/e6/db.ts";
+import { type ExportJob, download, exportMail, requestExport, waitExportReady } from "../src/e6/exports.ts";
 import {
   type Kit,
   UI_TIMEOUT_MS,
@@ -39,7 +44,15 @@ import {
   staffAccount,
 } from "../src/e6/kit.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "../src/e6/selectors.ts";
-import { presignExpiresSeconds, secondsBetween, tamperSignature, unsignedUrl } from "../src/e6/signed-url.ts";
+import {
+  isPresignedFor,
+  linkWithinExpiry,
+  presignExpiresSeconds,
+  presignValidUntil,
+  secondsBetween,
+  tamperSignature,
+  unsignedUrl,
+} from "../src/e6/signed-url.ts";
 import { exportObjectKey, EXPORT_TTL_SECONDS } from "@commonair/contracts/internal";
 import { ApiTreasurer } from "../src/money-actors.ts";
 import { mediaKeyExists } from "../src/safety-io.ts";
@@ -50,6 +63,8 @@ import type { SignedInUser } from "../src/users.ts";
 /** Tolerance between `expiresAt` and `completedAt + 7 days` (both written in one transaction). */
 const EXPIRY_TOLERANCE_S = 5;
 const CLEANUP_TIMEOUT_MS = 2 * 60_000;
+/** U's simulcast target (disabled: it never pushes; the harness stack allows private targets). */
+const SIMULCAST_URL = "rtmp://mock-rtmp:1936/live";
 
 export default defineScenario({
   name: "data-export",
@@ -97,9 +112,27 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
     await chatOnce(kit, v, uChannel, text.vChat);
     await confirmedTip(kit, treasurer, v, uChannel, { cents: 300, message: text.vTip });
   });
-  // Secrets of U's that must not be in the archive: a stream key and an overlay token.
+  // Secrets of U's that must not be in the archive (values, hashes or ciphertexts): a stream key,
+  // an overlay token, a bot token and a simulcast target's key. The target itself must be listed.
   const uStreamKey = (await u.api.client.stream.rotateKey({ channel: uChannel })).key;
   const uOverlayToken = (await u.api.client.interact.overlays.token({ channel: uChannel, expiresAt: null })).token;
+  const simulcast = {
+    name: `e6dx sim ${tag}`.slice(0, 40),
+    key: `e6dxsk-${randomHex(12)}`,
+  };
+  const uBotToken = await ctx.step("1 U adds a simulcast target and mints a bot token", async () => {
+    await u.api.client.stream.simulcast.create({
+      channel: uChannel,
+      platform: "custom",
+      name: simulcast.name,
+      rtmpUrl: SIMULCAST_URL,
+      streamKey: simulcast.key,
+      enabled: false,
+    });
+    const bot = await u.api.client.me.bots.create({ username: `e6dxb_${randomHex(8)}`, displayName: "harness bot" });
+    return (await u.api.client.me.bots.createToken({ botId: bot.id, scopes: ["chat:read"], expiresInDays: 1 }))
+      .accessToken;
+  });
 
   // ------------------------------------------------------------ 2. request exports
   const session = kit.via === "web" ? await kit.webSession("U", u) : null;
@@ -133,11 +166,20 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
     ["account", accountJob],
     ["channel", channelJob],
   ] as const) {
-    const link = await ctx.step(`3 U's ${kind} export email has its link`, () => exportMailLink(kit, u, job.id));
+    const mail = await ctx.step(`3 U's ${kind} export email has its link`, () => exportMail(kit, u, job.id));
+    const link = mail.link;
     links[kind] = link;
+    ctx.assert(
+      `3 (${kind}) the email's only storage link is the export's own key`,
+      mail.storageLinks.length === 1 && isPresignedFor(link, exportObjectKey(u.id, job.id)),
+      { storageLinks: mail.storageLinks.length },
+    );
     const expires = presignExpiresSeconds(link);
     ctx.assert(`3 (${kind}) X-Amz-Expires ≤ 604800`, expires !== null && expires <= EXPORT_TTL_SECONDS, { expires });
     checkExpiry(ctx, kind, job);
+    ctx.assert(`3 (${kind}) the link stops working by expires_at`, linkWithinExpiry(link, job.expiresAt), {
+      overMs: overExpiryMs(link, job.expiresAt),
+    });
     const got = await ctx.step(`3 the ${kind} link downloads a zip`, () => download(link, ctx.signal));
     ctx.assert(`3 (${kind}) the link answers 200`, got.status === 200 && got.bytes !== null, { status: got.status });
     if (!got.bytes) return;
@@ -145,10 +187,52 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
     archives.set(kind, files);
     ctx.metric(`export_${kind}_bytes`, got.bytes.byteLength, "bytes");
   }
+  await ctx.step("3 me.exports.list's links are for each export's own key and end by expires_at", async () => {
+    const list = await u.api.client.me.exports.list();
+    const ready = list.filter((e) => e.id === accountId || e.id === channelId);
+    ctx.assert(
+      "3 the list has both exports ready with a downloadUrl",
+      ready.length === 2 && ready.every((e) => e.status === "ready" && e.downloadUrl !== null),
+      {
+        statuses: ready.map((e) => e.status),
+      },
+    );
+    for (const e of ready) {
+      const url = e.downloadUrl ?? "";
+      ctx.assert(
+        `3 (${e.kind}) the list link is for this export's key only`,
+        isPresignedFor(url, exportObjectKey(u.id, e.id)),
+      );
+      ctx.assert(`3 (${e.kind}) the list link stops working by expires_at`, linkWithinExpiry(url, e.expiresAt), {
+        overMs: overExpiryMs(url, e.expiresAt),
+      });
+    }
+    const account = ready.find((e) => e.id === accountId)?.downloadUrl;
+    if (account) {
+      const got = await download(account, ctx.signal);
+      ctx.assert("3 the list's account link downloads the zip", got.status === 200 && got.bytes !== null, {
+        status: got.status,
+      });
+    }
+  });
 
   // ------------------------------------------------------------ 4. archive contents
   await ctx.step("4 the archives", async () => {
     const secrets = await userSecrets(kit.databaseUrl, [u.id, v.id, s.id]);
+    const stored = await storedSecrets(kit.databaseUrl, u.id);
+    ctx.assert(
+      "4 U's stored secrets were read (stream key, overlay token, simulcast key, bot token)",
+      stored.streamKeyHashes.length > 0 &&
+        stored.overlayTokenHashes.length > 0 &&
+        stored.simulcastCiphertexts.length > 0 &&
+        stored.tokenHashes.length > 0,
+      {
+        streamKeys: stored.streamKeyHashes.length,
+        overlayTokens: stored.overlayTokenHashes.length,
+        simulcast: stored.simulcastCiphertexts.length,
+        tokens: stored.tokenHashes.length,
+      },
+    );
     checkArchives(ctx, archives, {
       u,
       s,
@@ -157,12 +241,19 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
       accountId,
       channelId,
       text,
+      simulcastName: simulcast.name,
       secrets: [
         ...valueNeedles("session-token", secrets.sessionTokens),
         ...valueNeedles("password-hash", secrets.passwordHashes),
         ...valueNeedles("provider-token", secrets.providerTokens),
-        ...valueNeedles("stream-key", [uStreamKey]),
-        ...valueNeedles("overlay-token", [uOverlayToken]),
+        ...secretNeedles("stream-key", [uStreamKey]),
+        ...secretNeedles("overlay-token", [uOverlayToken]),
+        ...secretNeedles("bot-token", [uBotToken]),
+        ...secretNeedles("simulcast-key", [simulcast.key]),
+        ...valueNeedles("stored:stream-key-hash", stored.streamKeyHashes),
+        ...valueNeedles("stored:overlay-token-hash", stored.overlayTokenHashes),
+        ...valueNeedles("stored:simulcast-key-ciphertext", stored.simulcastCiphertexts),
+        ...valueNeedles("stored:token-hash", stored.tokenHashes),
       ],
     });
   });
@@ -193,6 +284,18 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
     expireExportNow(kit.databaseUrl, accountId),
   );
   ctx.assert("6 the export row was moved", moved === 1, { moved });
+  // Past expires_at the export is no longer downloadable, whether or not cleanup has run yet.
+  const lapsed = (await u.api.client.me.exports.list()).find((e) => e.id === accountId);
+  ctx.assert("6 past expires_at the list offers no downloadUrl (before cleanup)", lapsed?.downloadUrl === null, {
+    status: lapsed?.status,
+    hasUrl: lapsed !== undefined && lapsed.downloadUrl !== null,
+  });
+  if (session) {
+    const page = await session.goto(E6_ROUTES.privacy);
+    await byE6Id(page, E.exportRow, { "export-id": accountId }).first().waitFor({ timeout: UI_TIMEOUT_MS });
+    const link = byE6Id(byE6Id(page, E.exportRow, { "export-id": accountId }), E.exportDownload);
+    ctx.assert("6 past expires_at the export row has no download link (before cleanup)", (await link.count()) === 0);
+  }
   await ctx.step("6 ops tick export-cleanup marks it expired", () =>
     kit.ops.tickUntil(
       "export-cleanup",
@@ -216,6 +319,16 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
   );
 }
 
+/** How far past `expiresAt` the link stays valid, in ms (null when unreadable); report only. */
+function overExpiryMs(url: string, expiresAt: string | null): number | null {
+  const until = presignValidUntil(url);
+  return until === null || expiresAt === null ? null : until - Date.parse(expiresAt);
+}
+
+function randomHex(bytes: number): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function checkExpiry(ctx: ScenarioContext, kind: string, job: ExportJob): void {
   const ok =
     job.completedAt !== null &&
@@ -234,6 +347,7 @@ interface ArchiveExpectations {
   accountId: string;
   channelId: string;
   text: { uChat: string; uTip: string; vChat: string; vTip: string };
+  simulcastName: string;
   secrets: Needle[];
 }
 
@@ -269,6 +383,13 @@ function checkArchives(
     ctx.assert(
       "4 U's tip message is in tips.json",
       containsValue(account, x.text.uTip, (n) => n === "tips.json"),
+    );
+  }
+  const channel = archives.get("channel");
+  if (channel) {
+    ctx.assert(
+      "4 channel.json lists U's simulcast target",
+      containsValue(channel, x.simulcastName, (n) => n === "channel.json"),
     );
   }
   // Another person never appears; S's channel appears only by its public slug (so S's username,

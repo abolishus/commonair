@@ -14,7 +14,7 @@ import { waitFor } from "../wait.ts";
 import type { WebSession } from "../web/session.ts";
 import { type Kit, UI_TIMEOUT_MS } from "./kit.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "./selectors.ts";
-import { exportLinkIn } from "./signed-url.ts";
+import { exportLinkIn, storageLinks } from "./signed-url.ts";
 import { dataOfAll, reloadUntil } from "./web.ts";
 
 export type ExportKind = "account" | "channel";
@@ -77,28 +77,49 @@ export async function waitExportReady(
   );
 }
 
-/** The export's presigned link from the user's `dataExportReady` email. */
-export async function exportMailLink(kit: Kit, user: SignedInUser, exportId: string): Promise<string> {
+/** What the export's `dataExportReady` email links to. */
+export interface ExportMail {
+  /** The presigned link for this export's own key. */
+  link: string;
+  /** Every presigned or storage-host link in the email (the export's own included). */
+  storageLinks: string[];
+}
+
+/** The export's email: its presigned link and every other storage link it carries. */
+export async function exportMail(kit: Kit, user: SignedInUser, exportId: string): Promise<ExportMail> {
   const message = await kit.ctx.platform.mailpit.waitForMessage(
     user.email,
     (m) => exportLinkIn(extractLinks(m), user.id, exportId) !== null,
     60_000,
   );
-  const link = exportLinkIn(extractLinks(message), user.id, exportId);
+  const links = extractLinks(message);
+  const link = exportLinkIn(links, user.id, exportId);
   if (!link) throw new Error("the export email has no link for this export");
-  return link;
+  return { link, storageLinks: storageLinks(links, new URL(link).origin) };
 }
 
-/** GET a URL without credentials; the body only when 200. */
+/** The export's presigned link from the user's `dataExportReady` email. */
+export async function exportMailLink(kit: Kit, user: SignedInUser, exportId: string): Promise<string> {
+  return (await exportMail(kit, user, exportId)).link;
+}
+
+/**
+ * GET a URL without credentials; the body only when 200. The URL is a presigned credential, so a
+ * network error is rethrown without it (fetch errors can carry the URL).
+ */
 export async function download(
   url: string,
   signal?: AbortSignal,
 ): Promise<{ status: number; bytes: Uint8Array | null }> {
   const timeout = AbortSignal.timeout(60_000);
-  const res = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: "manual" });
-  if (res.status !== 200) {
-    await res.body?.cancel().catch(() => undefined);
-    return { status: res.status, bytes: null };
+  try {
+    const res = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: "manual" });
+    if (res.status !== 200) {
+      await res.body?.cancel().catch(() => undefined);
+      return { status: res.status, bytes: null };
+    }
+    return { status: 200, bytes: new Uint8Array(await res.arrayBuffer()) };
+  } catch (err) {
+    throw new Error(`download failed (${err instanceof Error ? err.name : "error"})`);
   }
-  return { status: 200, bytes: new Uint8Array(await res.arrayBuffer()) };
 }

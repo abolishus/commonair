@@ -3,7 +3,15 @@
 
 /** The E6 kit's pure parts and the overlay-token client, plus the DB helpers' table filters. */
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { isHistoryTable, isPiiScanTable, quoteIdent } from "../../src/e6/db.ts";
+import {
+  DELETED_EMAIL,
+  emailRetained,
+  isHistoryTable,
+  isPiiScanTable,
+  lostRows,
+  nameRetained,
+  quoteIdent,
+} from "../../src/e6/db.ts";
 import { exportsBucketConfig, rebaseHttp, tokenClient, tokenOf } from "../../src/e6/kit.ts";
 import { loadHarnessEnv } from "../../src/env.ts";
 import type { ScenarioContext } from "../../src/scenario.ts";
@@ -120,5 +128,53 @@ describe("DB helper table filters", () => {
     expect(() => quoteIdent('a"; drop table x; --')).toThrow(/refusing identifier/);
     expect(() => quoteIdent("A")).toThrow(/refusing identifier/);
     expect(() => quoteIdent("1a")).toThrow(/refusing identifier/);
+  });
+});
+
+describe("deletion checks", () => {
+  test("lostRows compares by id and reference, never by count", () => {
+    const before = [
+      { table: "audit_log", id: "a1", refs: ["actor_id"] },
+      { table: "audit_log", id: "a2", refs: ["subject_id"] },
+      { table: "membership_history", id: "h1", refs: ["user_id"] },
+    ];
+    // The deletion added two audit rows of its own and dropped a2: the count went up, a2 is lost.
+    const after = [
+      { table: "audit_log", id: "a1", refs: ["actor_id"] },
+      { table: "audit_log", id: "a3", refs: ["subject_id"] },
+      { table: "audit_log", id: "a4", refs: ["subject_id"] },
+      { table: "membership_history", id: "h1", refs: ["user_id"] },
+    ];
+    expect(lostRows(before, after).map((r) => r.id)).toEqual(["a2"]);
+    // A row kept but no longer naming the user is lost too.
+    expect(lostRows(before, [...after.slice(0, 3), { table: "membership_history", id: "h1", refs: [] }])).toEqual([
+      before[1],
+      before[2],
+    ]);
+    // Same id in another table is a different row.
+    expect(
+      lostRows([before[2] as (typeof before)[number]], [{ table: "vote_history", id: "h1", refs: ["user_id"] }]),
+    ).toHaveLength(1);
+    expect(lostRows(before, [...before, ...after])).toEqual([]);
+  });
+
+  test("emailRetained catches the address or its local part anywhere, any case", () => {
+    const email = "e6ad_u_abc123@example.test";
+    expect(emailRetained("deleted_0a1b2c3d4e5f@deleted.invalid", email)).toBe(false);
+    expect(emailRetained(email.toUpperCase(), email)).toBe(true);
+    expect(emailRetained(`${email}.deleted`, email)).toBe(true);
+    expect(emailRetained("deleted+e6ad_u_abc123@deleted.invalid", email)).toBe(true);
+  });
+
+  test("DELETED_EMAIL is the placeholder shape only", () => {
+    expect(DELETED_EMAIL.test("deleted_0a1b2c3d4e5f@deleted.invalid")).toBe(true);
+    expect(DELETED_EMAIL.test("old@example.com.deleted.invalid")).toBe(false);
+    expect(DELETED_EMAIL.test("deleted_x@deleted.invalid")).toBe(false);
+  });
+
+  test("nameRetained checks every stored name field", () => {
+    expect(nameRetained(["deleted_0a1b2c3d4e5f", null], ["Udeleted run1", "e6ad_u_abc"])).toBe(false);
+    expect(nameRetained(["deleted_0a1b", "udeleted RUN1"], ["Udeleted run1"])).toBe(true);
+    expect(nameRetained(["former e6ad_u_abc"], ["Udeleted run1", "e6ad_u_abc"])).toBe(true);
   });
 });

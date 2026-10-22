@@ -30,12 +30,13 @@ import {
   tokenOf,
 } from "../src/e6/kit.ts";
 import { CONFIRM_DIALOG_CONFIRM, E6_ROUTES, E6_TEST_IDS as E, byE6Id, etid } from "../src/e6/selectors.ts";
-import { SseStream } from "../src/e6/sse.ts";
+import { SseStream, overlayEventsUrl, refusedStream } from "../src/e6/sse.ts";
 import {
   chooseOption,
   confirmDialog,
   dataOf,
   fillAmount,
+  gotoSecretUrl,
   installAlertRecorder,
   recordedAlerts,
   setSwitch,
@@ -56,6 +57,10 @@ const SEVEN_DAYS_MS = 7 * 24 * 3_600_000;
 const ALERT_DEADLINE_MS = 10_000;
 const REFUSE_DEADLINE_MS = 30_000;
 const SHORT_TOKEN_MS = 5_000;
+/** The overlay's i18n "Anonymous" label (`alert.anonymous`, instance locale `en`). */
+const ANONYMOUS_LABEL = "Anonymous";
+/** The only SSE event types the overlay stream may send. */
+const STREAM_EVENT_TYPES = new Set(["alert", "ping", "revoked"]);
 
 interface OverlayAlertFrame {
   id: string;
@@ -184,7 +189,10 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   if (kit.via === "web") {
     const obsSession = await kit.webSession("OBS");
     obsPage = await ctx.step("2 a cookie-less browser opens the alerts URL", async () => {
-      const page = await obsSession.goto(rebaseHttp(alertsUrl, ctx.env.HARNESS_WEB_URL));
+      const page = await gotoSecretUrl(
+        () => obsSession.goto(rebaseHttp(alertsUrl, ctx.env.HARNESS_WEB_URL)),
+        "the overlay page",
+      );
       await installAlertRecorder(page);
       await waitOverlayState(page, "live", UI_TIMEOUT_MS, signal);
       return page;
@@ -286,6 +294,8 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
     "4 the anonymous alert does not name V",
     !a300.text.includes(v.displayName) && !a300.text.includes(v.username),
   );
+  const anonymousText = `${ANONYMOUS_LABEL} tipped `;
+  ctx.assert(`4 the anonymous alert shows the "${ANONYMOUS_LABEL}" label`, a300.text.startsWith(anonymousText));
   if (obsPage) {
     // The 250-cent alert (which named V) ended seconds before this one started.
     const dom = await obsPage.content();
@@ -294,41 +304,43 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
       !dom.includes(v.displayName) && !dom.includes(v.username),
     );
   }
-  await ctx.step("4 no alert frame carries V's id, email or username", async () => {
-    await obs.waitEvent<OverlayAlertFrame>("alert", (a) => a.amountCents === 300, 10_000, signal);
-    const frames = obs.events.filter((e) => e.event === "alert").map((e) => e.data);
-    const leaks = {
-      id: frames.some((f) => f.includes(v.id)),
-      email: frames.some((f) => f.toLowerCase().includes(v.email.toLowerCase())),
-      username: frames.some((f) => f.includes(v.username)),
-      anonymousName: obs
-        .ofType<OverlayAlertFrame>("alert")
-        .some((a) => a.data.amountCents === 300 && JSON.stringify(a.data).includes(v.displayName)),
-    };
+  await ctx.step("4 no frame of any stream carries V's id, email or username", async () => {
+    const a = await obs.waitEvent<OverlayAlertFrame>("alert", (f) => f.amountCents === 300, 10_000, signal);
     ctx.assert(
-      "4 alert frames carry no payer id, email, username or anonymous name",
-      !Object.values(leaks).some(Boolean),
-      leaks,
+      `4 the anonymous alert frame carries the "${ANONYMOUS_LABEL}" label`,
+      a.data.text.startsWith(anonymousText),
     );
+    checkFrames(ctx, observers, v, tip300.confirmedAt);
   });
 
   // ------------------------------------------------------------ 5. scope
   await ctx.step("5 the token authenticates nothing but its own overlay", async () => {
     const token = tokenOf(alertsUrl);
+    const statusBefore = await s.api.client.interact.overlays.status({ channel });
     for (const mode of ["bearer", "query"] as const) {
       const c: ApiClient = tokenClient(apiUrl, token, mode, webOrigin);
       const refused = {
+        overlaysToken: isUnauthorized(await errorOf(() => c.interact.overlays.token({ channel, expiresAt: null }))),
+        overlaysRevoke: isUnauthorized(await errorOf(() => c.interact.overlays.revoke({ channel }))),
+        overlaysStatus: isUnauthorized(await errorOf(() => c.interact.overlays.status({ channel }))),
+        alertsTest: isUnauthorized(await errorOf(() => c.interact.alerts.test({ channel, type: "tip" }))),
         alertsList: isUnauthorized(await errorOf(() => c.interact.alerts.list({ channel }))),
         simulcastList: isUnauthorized(await errorOf(() => c.stream.simulcast.list({ channel }))),
         meGet: isUnauthorized(await errorOf(() => c.me.get())),
         otherChannelAlerts: isUnauthorized(await errorOf(() => c.interact.alerts.list({ channel: vChannel }))),
       };
       ctx.assert(
-        `5 (${mode}) alerts.list, simulcast.list and me.get are refused as anonymous`,
+        `5 (${mode}) overlays.token/revoke/status, alerts.test/list, simulcast.list and me.get are UNAUTHORIZED`,
         Object.values(refused).every(Boolean),
         refused,
       );
     }
+    const statusAfter = await s.api.client.interact.overlays.status({ channel });
+    ctx.assert(
+      "5 overlays.status is unchanged by the token-bearing attempts",
+      JSON.stringify(statusAfter) === JSON.stringify(statusBefore),
+      { activeBefore: statusBefore.active, activeAfter: statusAfter.active },
+    );
     const q = tokenClient(apiUrl, token, "query", webOrigin);
     const st = await q.interact.overlays.state();
     ctx.assert("5 interact.overlays.state answers S's channel", st.channelSlug === channel);
@@ -366,12 +378,22 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
     tokenClient(apiUrl, tokenOf(oldUrl), "query", webOrigin).interact.overlays.state(),
   );
   ctx.assert("6 the old token's state call is 401", isUnauthorized(oldState), { code: apiError(oldState).code });
+  await expectStreamRefused(
+    ctx,
+    "6 a new stream with the rotated-away token is refused",
+    apiUrl,
+    tokenOf(oldUrl),
+    signal,
+  );
   obs = await ctx.step("6 the new URL works", () => openObserver("overlay stream 2", alertsUrl));
   ctx.assert("6 the new alert stream answers 200", obs.status === 200, { status: obs.status });
   if (kit.via === "web") {
     const obs2 = await kit.webSession("OBS2");
     obsPage = await ctx.step("6 the new alerts URL is live in the browser", async () => {
-      const page = await obs2.goto(rebaseHttp(alertsUrl, ctx.env.HARNESS_WEB_URL));
+      const page = await gotoSecretUrl(
+        () => obs2.goto(rebaseHttp(alertsUrl, ctx.env.HARNESS_WEB_URL)),
+        "the rotated overlay page",
+      );
       await waitOverlayState(page, "live", UI_TIMEOUT_MS, signal);
       return page;
     });
@@ -396,6 +418,13 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   });
   const st = await s.api.client.interact.overlays.status({ channel });
   ctx.assert("6 overlays.status is inactive after revoke", !st.active);
+  await expectStreamRefused(
+    ctx,
+    "6 a new stream with the revoked token is refused",
+    apiUrl,
+    tokenOf(alertsUrl),
+    signal,
+  );
 
   // ------------------------------------------------------------ 7. expiry (API)
   const past = await errorOf(() =>
@@ -417,6 +446,7 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   await delay(Math.max(0, expiresAt + 1_000 - Date.now()), undefined, { signal });
   const expired = await errorOf(() => shortClient.interact.overlays.state());
   ctx.assert("7 after expiry the state call is 401", isUnauthorized(expired), { code: apiError(expired).code });
+  await expectStreamRefused(ctx, "7 a new stream with the expired token is refused", apiUrl, short.token, signal);
   const closedAt = await ctx.step("7 the open stream closes within 30 s of expiry", () =>
     shortStream.waitClosed(REFUSE_DEADLINE_MS + 5_000, signal),
   );
@@ -431,6 +461,52 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   ctx.assert("8 alert.update is audited", (audit["alert.update"] ?? 0) >= 1, audit);
   ctx.assert("8 overlay.token.create ×3 is audited", (audit["overlay.token.create"] ?? 0) >= 3, audit);
   ctx.assert("8 overlay.token.revoke is audited", (audit["overlay.token.revoke"] ?? 0) >= 1, audit);
+}
+
+/**
+ * Every frame of every overlay stream the run held open, whatever its event type: none carries
+ * V's id, email or username, none received after the anonymous tip's confirmation carries V's
+ * display name, and the stream sends only `alert`, `ping` and `revoked` events.
+ */
+function checkFrames(
+  ctx: ScenarioContext,
+  streams: readonly SseStream[],
+  v: SignedInUser,
+  anonymousFrom: number,
+): void {
+  const frames = streams.flatMap((st) => st.events);
+  const email = v.email.toLowerCase();
+  const leaks = {
+    id: frames.some((f) => f.data.includes(v.id)),
+    email: frames.some((f) => f.data.toLowerCase().includes(email)),
+    username: frames.some((f) => f.data.includes(v.username)),
+    anonymousName: frames.some((f) => f.at >= anonymousFrom && f.data.includes(v.displayName)),
+  };
+  ctx.data("overlayFrames", { streams: streams.length, frames: frames.length });
+  ctx.assert(
+    "4 no frame (any event type) carries V's id, email or username, nor V's name after the anonymous tip",
+    !Object.values(leaks).some(Boolean),
+    leaks,
+  );
+  const unexpected = [...new Set(frames.map((f) => f.event).filter((e) => !STREAM_EVENT_TYPES.has(e)))];
+  ctx.check("4 the stream sends only alert, ping and revoked events", unexpected.length === 0, { unexpected });
+}
+
+/** A new overlay stream with `token` is refused: not 200, or closed at once with no alert or ping. */
+async function expectStreamRefused(
+  ctx: ScenarioContext,
+  what: string,
+  apiUrl: string,
+  token: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const stream = await SseStream.open(what, overlayEventsUrl(apiUrl, token));
+  try {
+    const refused = await refusedStream(stream, 3_000, signal);
+    ctx.assert(what, refused, { status: stream.status, closed: stream.closedAt !== null });
+  } finally {
+    await stream.close();
+  }
 }
 
 /**

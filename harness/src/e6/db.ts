@@ -12,7 +12,7 @@
  * Nothing here returns personal data into the report: scans return table names, labels and
  * counts only.
  */
-import { createDb } from "@commonair/db";
+import { createDb, uuidv7 } from "@commonair/db";
 import { isoOrNull } from "../safety-db.ts";
 
 type Sql = ReturnType<typeof createDb>["sql"];
@@ -77,16 +77,33 @@ export interface MediaRow {
   thumbnailKey: string | null;
 }
 
-export async function vodRow(databaseUrl: string, vodId: string): Promise<MediaRow> {
+export interface VodRow extends MediaRow {
+  expiresAt: string | null;
+  /** `expires_at <= now()` on the database clock: retention will pick the row up. */
+  due: boolean;
+}
+
+export async function vodRow(databaseUrl: string, vodId: string): Promise<VodRow> {
   return withDb(databaseUrl, async (sql) => {
     const [r] = await sql<
-      { status: string; removed_reason: string | null; storage_prefix: string; thumbnail_key: string | null }[]
-    >`select status::text as status, removed_reason, storage_prefix, thumbnail_key from vods where id = ${vodId}`;
+      {
+        status: string;
+        removed_reason: string | null;
+        storage_prefix: string;
+        thumbnail_key: string | null;
+        expires_at: string | Date | null;
+        due: boolean;
+      }[]
+    >`select status::text as status, removed_reason, storage_prefix, thumbnail_key, expires_at,
+             coalesce(expires_at <= now(), false) as due
+        from vods where id = ${vodId}`;
     return {
       status: r?.status ?? null,
       removedReason: r?.removed_reason ?? null,
       storage: r?.storage_prefix ?? null,
       thumbnailKey: r?.thumbnail_key ?? null,
+      expiresAt: isoOrNull(r?.expires_at),
+      due: r?.due ?? false,
     };
   });
 }
@@ -172,11 +189,135 @@ export async function auditActionCounts(
   });
 }
 
-/** Audit rows naming the user as actor or subject. */
-export async function auditRowsReferencing(databaseUrl: string, userId: string): Promise<number> {
+/** One retained row that references a user: where it is and which of its columns name them. */
+export interface RowRef {
+  table: string;
+  id: string;
+  /** `column=value` pairs that held the user's id when recorded (ids only, no personal data). */
+  refs: string[];
+}
+
+/** Rows present in `before` that are missing from `after` or no longer reference the user the same way. */
+export function lostRows(before: readonly RowRef[], after: readonly RowRef[]): RowRef[] {
+  const now = new Map(after.map((r) => [`${r.table}/${r.id}`, new Set(r.refs)]));
+  return before.filter((r) => {
+    const refs = now.get(`${r.table}/${r.id}`);
+    return refs === undefined || r.refs.some((x) => !refs.has(x));
+  });
+}
+
+/**
+ * Every `audit_log` row naming the user as actor or subject, and every `*_history` row with the
+ * user's id in a uuid column, by primary key (spec step 4 compares these ids, never counts).
+ */
+export async function rowsReferencing(databaseUrl: string, userId: string): Promise<RowRef[]> {
+  return withDb(databaseUrl, async (sql) => {
+    const out: RowRef[] = [];
+    const audit = await sql<{ id: string; actor: boolean; subject: boolean }[]>`
+      select id::text as id, coalesce(actor_id = ${userId}::uuid, false) as actor, subject_id = ${userId} as subject
+        from audit_log where actor_id = ${userId}::uuid or subject_id = ${userId}`;
+    for (const r of audit) {
+      out.push({
+        table: "audit_log",
+        id: r.id,
+        refs: [...(r.actor ? ["actor_id"] : []), ...(r.subject ? ["subject_id"] : [])],
+      });
+    }
+    for (const [table, columns] of await historyUuidColumns(sql)) {
+      const cond = columns.map((c) => `${quoteIdent(c)} = $1::uuid`).join(" or ");
+      const flags = columns.map((c) => `coalesce(${quoteIdent(c)} = $1::uuid, false) as ${quoteIdent(c)}`).join(", ");
+      const rows = await sql.unsafe<Record<string, unknown>[]>(
+        `select id::text as id, ${flags} from public.${quoteIdent(table)} where ${cond}`,
+        [userId],
+      );
+      for (const r of rows) {
+        out.push({ table, id: String(r.id), refs: columns.filter((c) => r[c] === true) });
+      }
+    }
+    return out;
+  });
+}
+
+/** uuid columns of every `*_history` table that has an `id` primary key column. */
+async function historyUuidColumns(sql: Sql): Promise<Map<string, string[]>> {
+  const cols = await sql<{ table_name: string; column_name: string }[]>`
+    select c.table_name, c.column_name from information_schema.columns c
+     where c.table_schema = 'public' and c.data_type = 'uuid' and c.table_name like '%\\_history'
+       and c.column_name <> 'id'
+       and exists (select 1 from information_schema.columns i
+                    where i.table_schema = 'public' and i.table_name = c.table_name and i.column_name = 'id')
+     order by c.table_name, c.ordinal_position`;
+  const byTable = new Map<string, string[]>();
+  for (const c of cols) {
+    if (!isHistoryTable(c.table_name) || !IDENT.test(c.column_name)) continue;
+    byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
+  }
+  return byTable;
+}
+
+// ---------------------------------------------------------------- webhook delivery fixture
+
+/** The outbox `channel.tip` event of a named (non-anonymous) tip by the user with this message. */
+export async function tipEventId(databaseUrl: string, userId: string, message: string): Promise<string | null> {
+  return withDb(databaseUrl, async (sql) => {
+    const [r] = await sql<{ id: string }[]>`
+      select id::text as id from events
+       where type = 'channel.tip' and payload->>'user_id' = ${userId} and payload->>'message' = ${message}
+       order by occurred_at desc limit 1`;
+    return r?.id ?? null;
+  });
+}
+
+/**
+ * A webhook delivery log row for an outbox event, as the worker writes one when a receiver echoes
+ * the payload back (`response_body`). The public subscribe API is not implemented yet, so the
+ * scenario seeds a revoked subscription of the broadcaster (never fanned out to) and one delivery
+ * row; the deletion must remove it with the event. Returns the delivery id.
+ */
+export async function seedWebhookDelivery(
+  databaseUrl: string,
+  input: { subscriberId: string; eventId: string; responseBody: string },
+): Promise<{ subscriptionId: string; deliveryId: string }> {
+  return withDb(databaseUrl, async (sql) => {
+    const subscriptionId = uuidv7();
+    const deliveryId = uuidv7();
+    await sql.begin(async (tx) => {
+      await tx`
+        insert into event_subscriptions (id, user_id, type, version, condition, transport, callback_url, status)
+        values (${subscriptionId}, ${input.subscriberId}, 'channel.tip', '1',
+                ${JSON.stringify({ broadcaster_user_id: input.subscriberId })}::jsonb, 'webhook',
+                'http://harness.invalid/webhook', 'revoked')`;
+      await tx`
+        insert into webhook_deliveries (id, subscription_id, event_id, message_id, status, response_status, response_body)
+        values (${deliveryId}, ${subscriptionId}, ${input.eventId}, ${uuidv7()}, 'succeeded', 200, ${input.responseBody})`;
+    });
+    return { subscriptionId, deliveryId };
+  });
+}
+
+export async function webhookDeliveryExists(databaseUrl: string, deliveryId: string): Promise<boolean> {
+  return withDb(databaseUrl, async (sql) => {
+    const [r] = await sql<{ n: string }[]>`select count(*)::text as n from webhook_deliveries where id = ${deliveryId}`;
+    return Number(r?.n ?? 0) > 0;
+  });
+}
+
+/** Drop the seeded subscription (its delivery rows cascade). */
+export async function dropSubscription(databaseUrl: string, subscriptionId: string): Promise<void> {
+  await withDb(databaseUrl, async (sql) => {
+    await sql`delete from event_subscriptions where id = ${subscriptionId}`;
+  });
+}
+
+// ---------------------------------------------------------------- outbox scan
+
+/** Outbox rows whose payload contains `value` (case-sensitive). Returns a count, never rows. */
+export async function eventsContaining(databaseUrl: string, value: string, since?: Date): Promise<number> {
   return withDb(databaseUrl, async (sql) => {
     const [r] = await sql<{ n: string }[]>`
-      select count(*)::text as n from audit_log where actor_id = ${userId} or subject_id = ${userId}`;
+      select count(*)::text as n from events
+       where strpos(payload::text, ${value}) > 0
+         and ${since ? sql`occurred_at >= ${since.toISOString()}::timestamptz` : sql`true`}`;
     return Number(r?.n ?? 0);
   });
 }
@@ -213,28 +354,82 @@ export async function userSecrets(databaseUrl: string, userIds: readonly string[
   });
 }
 
+/**
+ * The stored forms of a user's channel and developer secrets (in memory only, never reported):
+ * stream-key hashes, overlay-token hashes, simulcast key ciphertexts and the access/refresh token
+ * hashes of the user and the bots they own. An archive must hold none of them.
+ */
+export async function storedSecrets(
+  databaseUrl: string,
+  userId: string,
+): Promise<{
+  streamKeyHashes: string[];
+  overlayTokenHashes: string[];
+  simulcastCiphertexts: string[];
+  tokenHashes: string[];
+}> {
+  return withDb(databaseUrl, async (sql) => {
+    const keys = await sql<{ v: string }[]>`
+      select k.key_hash as v from stream_keys k join channels c on c.id = k.channel_id where c.owner_id = ${userId}`;
+    const overlay = await sql<{ v: string }[]>`
+      select o.token_hash as v from overlay_tokens o join channels c on c.id = o.channel_id where c.owner_id = ${userId}`;
+    const simulcast = await sql<{ v: string }[]>`
+      select t.stream_key_ciphertext as v from simulcast_targets t join channels c on c.id = t.channel_id
+       where c.owner_id = ${userId}`;
+    const tokens = await sql<{ a: string; r: string | null }[]>`
+      select access_token_hash as a, refresh_token_hash as r from oauth_tokens
+       where user_id = ${userId} or user_id in (select id from users where bot_owner_id = ${userId})`;
+    const present = (v: string | null | undefined): v is string => typeof v === "string" && v.length > 0;
+    return {
+      streamKeyHashes: keys.map((r) => r.v).filter(present),
+      overlayTokenHashes: overlay.map((r) => r.v).filter(present),
+      simulcastCiphertexts: simulcast.map((r) => r.v).filter(present),
+      tokenHashes: tokens.flatMap((r) => [r.a, r.r]).filter(present),
+    };
+  });
+}
+
 // ---------------------------------------------------------------- account deletion
 
 export interface IdentityState {
   exists: boolean;
   /** `deleted_` + hex (only the shape is reported, never the value). */
   usernamePseudonymized: boolean;
-  /** True when the email column still equals the original (case-insensitive). */
+  /** True when the email column still contains the original address or its local part (any case). */
   emailKept: boolean;
+  /** The email is exactly the pseudonym placeholder (`deleted_<hex>@deleted.invalid`). */
   emailDeletedPlaceholder: boolean;
+  /** True when `name` or `display_username` still contains the original display name or username. */
+  nameKept: boolean;
   sessions: number;
   accounts: number;
   exports: number;
 }
 
+/** Does `stored` still hold the original email or its local part (case-insensitive)? */
+export function emailRetained(stored: string, originalEmail: string): boolean {
+  const s = stored.toLowerCase();
+  const email = originalEmail.toLowerCase();
+  const local = email.split("@")[0] ?? "";
+  return s.includes(email) || (local.length >= 4 && s.includes(local));
+}
+
+/** Does any stored name field still contain one of the original names (case-insensitive)? */
+export function nameRetained(stored: readonly (string | null)[], originals: readonly string[]): boolean {
+  const names = originals.map((o) => o.trim().toLowerCase()).filter((o) => o.length >= 4);
+  return stored.some((v) => v !== null && names.some((n) => v.toLowerCase().includes(n)));
+}
+
+export const DELETED_EMAIL = /^deleted_[0-9a-f]+@deleted\.invalid$/;
+
 export async function identityState(
   databaseUrl: string,
   userId: string,
-  originalEmail: string,
+  original: { email: string; username: string; displayName: string },
 ): Promise<IdentityState> {
   return withDb(databaseUrl, async (sql) => {
-    const [u] = await sql<{ username: string; email: string }[]>`
-      select username, email from users where id = ${userId}`;
+    const [u] = await sql<{ username: string; email: string; name: string; display_username: string | null }[]>`
+      select username, email, name, display_username from users where id = ${userId}`;
     const [s] = await sql<{ n: string }[]>`select count(*)::text as n from sessions where user_id = ${userId}`;
     const [a] = await sql<{ n: string }[]>`select count(*)::text as n from accounts where user_id = ${userId}`;
     const [e] = await sql<{ n: string }[]>`select count(*)::text as n from data_exports where user_id = ${userId}`;
@@ -242,8 +437,10 @@ export async function identityState(
       exists: u !== undefined,
       // The pseudonymized username is not personal data (`deleted_` + hex); only its shape is reported.
       usernamePseudonymized: u !== undefined && /^deleted_[0-9a-f]+$/.test(u.username),
-      emailKept: u !== undefined && u.email.toLowerCase() === originalEmail.toLowerCase(),
-      emailDeletedPlaceholder: u !== undefined && u.email.endsWith("@deleted.invalid"),
+      emailKept: u !== undefined && emailRetained(u.email, original.email),
+      emailDeletedPlaceholder: u !== undefined && DELETED_EMAIL.test(u.email),
+      nameKept:
+        u !== undefined && nameRetained([u.name, u.display_username], [original.displayName, original.username]),
       sessions: Number(s?.n ?? 0),
       accounts: Number(a?.n ?? 0),
       exports: Number(e?.n ?? 0),
@@ -279,31 +476,6 @@ export function isPiiScanTable(name: string): boolean {
 
 /** Column types the scan reads (text, varchar, json, jsonb, text arrays). */
 export const SCANNED_TYPES = ["text", "character varying", "json", "jsonb", "ARRAY"] as const;
-
-/** Rows per `*_history` table that reference the user's id in any uuid column. */
-export async function historyRefCounts(databaseUrl: string, userId: string): Promise<Record<string, number>> {
-  return withDb(databaseUrl, async (sql) => {
-    const cols = await sql<{ table_name: string; column_name: string }[]>`
-      select table_name, column_name from information_schema.columns
-       where table_schema = 'public' and data_type = 'uuid' and table_name like '%\\_history'
-       order by table_name, ordinal_position`;
-    const byTable = new Map<string, string[]>();
-    for (const c of cols) {
-      if (!isHistoryTable(c.table_name) || !IDENT.test(c.column_name)) continue;
-      byTable.set(c.table_name, [...(byTable.get(c.table_name) ?? []), c.column_name]);
-    }
-    const out: Record<string, number> = {};
-    for (const [table, columns] of byTable) {
-      const cond = columns.map((c) => `${quoteIdent(c)} = $1::uuid`).join(" or ");
-      const [r] = await sql.unsafe<{ n: string }[]>(
-        `select count(*)::text as n from public.${quoteIdent(table)} where ${cond}`,
-        [userId],
-      );
-      out[table] = Number(r?.n ?? 0);
-    }
-    return out;
-  });
-}
 
 export interface PiiNeedle {
   label: string;

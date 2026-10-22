@@ -7,8 +7,12 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   exportLinkIn,
   isPresignedFor,
+  linkWithinExpiry,
   presignExpiresSeconds,
+  presignSignedAt,
+  presignValidUntil,
   secondsBetween,
+  storageLinks,
   tamperSignature,
   unsignedUrl,
 } from "../../src/e6/signed-url.ts";
@@ -67,5 +71,44 @@ describe("export link helpers", () => {
   test("secondsBetween", () => {
     expect(secondsBetween("2026-10-22T00:00:00.000Z", "2026-10-29T00:00:00.400Z")).toBe(604_800);
     expect(secondsBetween("2026-10-22T00:00:10Z", "2026-10-22T00:00:00Z")).toBe(-10);
+  });
+});
+
+describe("link expiry against expires_at", () => {
+  const SIGNED_AT = Date.UTC(2026, 9, 22, 0, 0, 0);
+  const at = (date: string, expires: string) =>
+    `http://localhost:3900/b/${KEY}?X-Amz-Date=${date}&X-Amz-Expires=${expires}&X-Amz-Signature=${SIG}`;
+
+  test("X-Amz-Date parses as UTC; malformed or missing is null", () => {
+    expect(presignSignedAt(presigned())).toBe(SIGNED_AT);
+    expect(presignSignedAt(at("20261022T000000", "1"))).toBeNull();
+    expect(presignSignedAt(at("2026-10-22T00:00:00Z", "1"))).toBeNull();
+    expect(presignSignedAt(unsignedUrl(presigned()))).toBeNull();
+    expect(presignSignedAt("not a url")).toBeNull();
+  });
+
+  test("valid until = X-Amz-Date + X-Amz-Expires", () => {
+    expect(presignValidUntil(presigned())).toBe(SIGNED_AT + 604_800_000);
+    expect(presignValidUntil(at("20261022T000000Z", "x"))).toBeNull();
+  });
+
+  test("a link that outlives expires_at fails, one within it (or within the tolerance) passes", () => {
+    const expiresAt = new Date(SIGNED_AT + 604_800_000).toISOString();
+    expect(linkWithinExpiry(presigned(), expiresAt)).toBe(true);
+    expect(linkWithinExpiry(presigned(), new Date(SIGNED_AT + 604_800_000 - 3_000).toISOString())).toBe(true);
+    // A list link presigned 7 days from list time on day 6 outlives expires_at by days.
+    const day6 = at("20261028T000000Z", "604800");
+    expect(linkWithinExpiry(day6, expiresAt)).toBe(false);
+    expect(linkWithinExpiry(presigned(), new Date(SIGNED_AT + 604_800_000 - 10_000).toISOString())).toBe(false);
+    expect(linkWithinExpiry(presigned(), null)).toBe(false);
+    expect(linkWithinExpiry(unsignedUrl(presigned()), expiresAt)).toBe(false);
+  });
+
+  test("storageLinks: every signed link and every link to the storage origin", () => {
+    const other = presigned(exportObjectKey(USER, "other"));
+    const listing = "http://localhost:3900/commonair-exports/";
+    const links = ["http://localhost:3000/settings/privacy", presigned(), other, listing, "nope"];
+    expect(storageLinks(links, "http://localhost:3900")).toEqual([presigned(), other, listing]);
+    expect(storageLinks(links)).toEqual([presigned(), other]);
   });
 });

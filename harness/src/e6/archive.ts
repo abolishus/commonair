@@ -6,6 +6,7 @@
  * values that must never be in it. The scanner reports which needle (by label) was found in which
  * file, never the value itself: needles are other people's identities and secrets.
  */
+import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
 
 export interface ArchiveManifest {
@@ -127,6 +128,26 @@ export function valueNeedles(label: string, values: readonly (string | null | un
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ label, value: v, caseInsensitive });
+  }
+  return out;
+}
+
+/**
+ * Needles for secret values and the ways a store might hash them: the value itself and its
+ * SHA-256 as hex, base64url and base64 (a hash in an archive is as bad as the value).
+ */
+export function secretNeedles(label: string, values: readonly (string | null | undefined)[]): Needle[] {
+  const out: Needle[] = [];
+  for (const raw of values) {
+    const v = raw?.trim();
+    if (!v) continue;
+    const digest = createHash("sha256").update(v).digest();
+    out.push(
+      ...valueNeedles(label, [v]),
+      ...valueNeedles(`${label}:sha256-hex`, [digest.toString("hex")], true),
+      ...valueNeedles(`${label}:sha256-b64url`, [digest.toString("base64url")]),
+      ...valueNeedles(`${label}:sha256-b64`, [digest.toString("base64")]),
+    );
   }
   return out;
 }

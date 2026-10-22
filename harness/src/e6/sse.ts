@@ -6,7 +6,8 @@
  * an OBS browser source's `EventSource` sees, without a browser. The URL carries the overlay
  * token, so it is never logged; errors name the stream, not the URL.
  */
-import { waitFor } from "../wait.ts";
+import { OVERLAY_EVENTS_PATH } from "@commonair/contracts/events";
+import { sleep, waitFor } from "../wait.ts";
 
 export interface SseEvent {
   event: string;
@@ -167,4 +168,22 @@ export class SseStream {
     this.controller.abort();
     await this.done.catch(() => undefined);
   }
+}
+
+/** The overlay alert stream URL for a token on the API's origin (`OVERLAY_EVENTS_PATH?token=`). */
+export function overlayEventsUrl(apiUrl: string, token: string): string {
+  const u = new URL(OVERLAY_EVENTS_PATH, new URL(apiUrl).origin);
+  u.searchParams.set("token", token);
+  return u.toString();
+}
+
+/**
+ * Was a freshly opened stream refused? Not 200, or closed by the server within `graceMs` without
+ * having sent an `alert` or `ping` (a stream that stays open, or that delivers anything, is not).
+ */
+export async function refusedStream(stream: SseStream, graceMs: number, signal?: AbortSignal): Promise<boolean> {
+  if (stream.status !== 200) return true;
+  const deadline = Date.now() + graceMs;
+  while (stream.closedAt === null && Date.now() < deadline) await sleep(50, signal);
+  return stream.closedAt !== null && !stream.events.some((e) => e.event === "alert" || e.event === "ping");
 }

@@ -3,8 +3,10 @@
 
 /**
  * Milestone E6, account deletion (docs/testing/e6-selectors.md, "Scenario `account-deletion`"):
- * 1 U tips S and subscribes (both confirmed, with ledger postings), chats, follows and has a
- * ready export; 2 U requests deletion on `/settings/privacy` (the scheduled email arrives), an
+ * 1 U tips S and subscribes (both confirmed, with ledger postings), chats, follows, joins and
+ * leaves the co-op's viewer class (share bought, confirmed, refunded: `membership_history` rows)
+ * and has a ready export; a webhook delivery log row for U's tip event is seeded (the public
+ * subscribe API is not implemented yet); 2 U requests deletion on `/settings/privacy` (the scheduled email arrives), an
  * admin expedites it and an `account-deletion` ops tick completes it; 3 U's identity is gone (no
  * sign-in, pseudonymized username, no email, sessions, linked accounts or export object, no chat
  * message on S's channel); 4 history is kept (payments, balanced ledger transactions, audit and
@@ -13,17 +15,33 @@
  * `webhook_deliveries`) holds U's old email, username, display name, chat text or tip message;
  * 6 the completed email reached U's old address.
  *
+ * History is compared by row id: every `audit_log` and `*_history` row that named U before the
+ * request must still exist and still name U afterwards (the deletion adds rows of its own, so
+ * counts would hide a lost one).
+ *
  * `--set via=api` requests the deletion with `me.deletion.request`. The report carries ids,
  * counts and table names only: never U's email, name, messages or the export link.
  */
 import { exportObjectKey } from "@commonair/contracts/internal";
-import { auditRowsReferencing, historyRefCounts, identityState, paymentsOf, piiScan } from "../src/e6/db.ts";
+import { apiMembership } from "../src/coop-actors.ts";
+import {
+  dropSubscription,
+  identityState,
+  lostRows,
+  paymentsOf,
+  piiScan,
+  rowsReferencing,
+  seedWebhookDelivery,
+  tipEventId,
+  webhookDeliveryExists,
+} from "../src/e6/db.ts";
 import { download, exportMailLink, requestExport, waitExportReady } from "../src/e6/exports.ts";
 import {
   type Kit,
   UI_TIMEOUT_MS,
   chatOnce,
   confirmedSubscription,
+  confirmByReference,
   confirmedTip,
   exportsBucketConfig,
   setTiers,
@@ -39,6 +57,8 @@ import { deletionState } from "../src/safety-db.ts";
 import { mediaKeyExists } from "../src/safety-io.ts";
 import { errorOf } from "../src/safety.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
+import type { SignedInUser } from "../src/users.ts";
+import { waitFor } from "../src/wait.ts";
 import { ROUTES, TEST_IDS as T } from "../src/web/selectors.ts";
 
 const DELETION_TIMEOUT_MS = 3 * 60_000;
@@ -87,15 +107,42 @@ async function accountDeletion(ctx: ScenarioContext, kit: Kit): Promise<void> {
     await chatOnce(kit, u, sChannel, text.chat);
     await u.api.client.channels.follow({ channel: sChannel });
   });
+  await coopRoundTrip(kit, treasurer, treasurerUser, u);
+  const delivery = await ctx.step("1 seed a webhook delivery log row for U's tip event (DB)", async () => {
+    const eventId = await waitFor("U's channel.tip outbox event", () => tipEventId(kit.databaseUrl, u.id, text.tip), {
+      timeoutMs: 30_000,
+      intervalMs: 1_000,
+      signal: ctx.signal,
+    });
+    // A receiver that echoed the payload: U's name and tip text in the logged response body.
+    const seeded = await seedWebhookDelivery(kit.databaseUrl, {
+      subscriberId: s.id,
+      eventId,
+      responseBody: JSON.stringify({ echo: { user_name: u.displayName, user_login: u.username, message: text.tip } }),
+    });
+    ctx.defer(() => dropSubscription(kit.databaseUrl, seeded.subscriptionId));
+    return seeded;
+  });
   const session = kit.via === "web" ? await kit.webSession("U", u) : null;
   const exportId = await ctx.step("1 U requests an account export", () => requestExport(kit, session, u, "account"));
   await ctx.step("1 the export is ready", () => waitExportReady(kit, session, u, exportId));
   const exportLink = await ctx.step("1 the export email arrived", () => exportMailLink(kit, u, exportId));
-  const before = await ctx.step("1 history referencing U before deletion (DB)", async () => ({
-    audit: await auditRowsReferencing(kit.databaseUrl, u.id),
-    history: await historyRefCounts(kit.databaseUrl, u.id),
-  }));
-  ctx.data("before", before);
+  const before = await ctx.step("1 audit and history rows referencing U before deletion (DB)", () =>
+    rowsReferencing(kit.databaseUrl, u.id),
+  );
+  const tally = (rows: typeof before) =>
+    rows.reduce<Record<string, number>>((m, r) => ({ ...m, [r.table]: (m[r.table] ?? 0) + 1 }), {});
+  ctx.data("before", tally(before));
+  ctx.assert(
+    "1 U has audit rows before deletion",
+    before.some((r) => r.table === "audit_log"),
+    tally(before),
+  );
+  ctx.assert(
+    "1 U has *_history rows before deletion (membership_history)",
+    before.some((r) => r.table !== "audit_log"),
+    tally(before),
+  );
 
   // ------------------------------------------------------------ 2. request, expedite, complete
   await ctx.step("2 U requests deletion", async () => {
@@ -131,12 +178,19 @@ async function accountDeletion(ctx: ScenarioContext, kit: Kit): Promise<void> {
   // ------------------------------------------------------------ 3. identity gone
   const signIn = await errorOf(() => p.users.signIn(u));
   ctx.assert("3 U cannot sign in", signIn !== null);
-  const identity = await identityState(kit.databaseUrl, u.id, u.email);
+  const identity = await identityState(kit.databaseUrl, u.id, {
+    email: u.email,
+    username: u.username,
+    displayName: u.displayName,
+  });
   ctx.data("identity", identity);
   ctx.assert("3 the users row remains with a deleted_… username", identity.exists && identity.usernamePseudonymized);
-  ctx.assert("3 the users row no longer holds U's email", !identity.emailKept, {
-    placeholder: identity.emailDeletedPlaceholder,
-  });
+  ctx.assert(
+    "3 the users row holds no part of U's email (deleted_…@deleted.invalid)",
+    !identity.emailKept && identity.emailDeletedPlaceholder,
+    { kept: identity.emailKept, placeholder: identity.emailDeletedPlaceholder },
+  );
+  ctx.assert("3 the users row's name fields hold neither U's display name nor username", !identity.nameKept);
   ctx.assert("3 U's sessions and linked accounts are gone", identity.sessions === 0 && identity.accounts === 0, {
     sessions: identity.sessions,
     accounts: identity.accounts,
@@ -180,15 +234,17 @@ async function accountDeletion(ctx: ScenarioContext, kit: Kit): Promise<void> {
   ctx.assert("4 each of those ledger transactions sums to 0", unbalanced.length === 0, {
     unbalanced: unbalanced.map((r) => r.transactionId),
   });
-  const auditAfter = await auditRowsReferencing(kit.databaseUrl, u.id);
-  ctx.assert("4 audit rows naming U as actor or subject still exist", auditAfter >= before.audit && auditAfter > 0, {
-    before: before.audit,
-    after: auditAfter,
+  const after = await rowsReferencing(kit.databaseUrl, u.id);
+  ctx.data("after", tally(after));
+  const lost = lostRows(before, after);
+  const lostAudit = lost.filter((r) => r.table === "audit_log");
+  const lostHistory = lost.filter((r) => r.table !== "audit_log");
+  ctx.assert("4 every audit row that named U still exists and still names U", lostAudit.length === 0, {
+    lost: lostAudit.map((r) => r.id),
   });
-  const historyAfter = await historyRefCounts(kit.databaseUrl, u.id);
-  const lost = Object.entries(before.history).filter(([t, n]) => (historyAfter[t] ?? 0) < n);
-  ctx.data("historyRows", { before: before.history, after: historyAfter });
-  ctx.assert("4 *_history rows referencing U's id are all kept", lost.length === 0, { lost: lost.map(([t]) => t) });
+  ctx.assert("4 every *_history row that referenced U still exists and still references U", lostHistory.length === 0, {
+    lost: lostHistory.map((r) => `${r.table}/${r.id}`),
+  });
   const revenue = await s.api.client.money.revenue({ channel: sChannel });
   ctx.assert("4 S's revenue still includes the tip", revenue.bySource.tips > 0, { tips: revenue.bySource.tips });
 
@@ -203,6 +259,10 @@ async function accountDeletion(ctx: ScenarioContext, kit: Kit): Promise<void> {
     ]),
   );
   ctx.data("piiScan", scan);
+  ctx.assert(
+    "5 the webhook delivery of U's tip event was deleted with the event",
+    !(await webhookDeliveryExists(kit.databaseUrl, delivery.deliveryId)),
+  );
   ctx.assert("5 the scan covered the retained tables", scan.tables > 0 && scan.columns > 0, {
     tables: scan.tables,
   });
@@ -216,4 +276,48 @@ async function accountDeletion(ctx: ScenarioContext, kit: Kit): Promise<void> {
   await ctx.step("6 the completed email reached U's old address", () =>
     p.mailpit.waitForMessage(u.email, (m) => COMPLETED_SUBJECT.test(m.subject), 60_000),
   );
+}
+
+/**
+ * U joins the viewer class (share bought, confirmed) and leaves it again (exit, share refunded),
+ * so `membership_history` holds rows for U and the electorate stays as it was for later runs.
+ */
+async function coopRoundTrip(
+  kit: Kit,
+  treasurer: ApiTreasurer,
+  treasurerUser: SignedInUser,
+  u: SignedInUser,
+): Promise<void> {
+  const { ctx } = kit;
+  const settle = { timeoutMs: 30_000, intervalMs: 1_000, signal: ctx.signal };
+  await ctx.step("1 U buys the co-op viewer share (confirmed)", async () => {
+    const r = await u.api.client.coop.buyShare({ returnPath: "/coop/membership" });
+    if (r.kind !== "instructions") throw new Error("coop.buyShare answered a redirect (expected manual instructions)");
+    await confirmByReference(kit, treasurer, r.reference);
+  });
+  const joined = await ctx.step("1 U is an active viewer member", () =>
+    waitFor(
+      "U's active viewer membership",
+      async () => {
+        const m = await apiMembership(u.api.client);
+        return m.rows.some((x) => x.class === "viewer" && x.status === "active") && m.share.id ? m : null;
+      },
+      settle,
+    ),
+  );
+  const shareId = joined.share.id;
+  if (!shareId) throw new Error("U's share has no id");
+  await ctx.step("1 U exits the viewer class and the treasurer refunds the share", async () => {
+    await u.api.client.coop.exit({ class: "viewer" });
+    await treasurerUser.api.client.coop.shares.refund({
+      shareId,
+      sentAt: new Date(Date.now() - 5_000).toISOString(),
+      note: "harness account-deletion refund",
+    });
+    await waitFor(
+      "U's share refunded",
+      async () => ((await apiMembership(u.api.client)).share.status === "refunded" ? true : null),
+      settle,
+    );
+  });
 }

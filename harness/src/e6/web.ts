@@ -203,3 +203,52 @@ export async function waitOverlayState(page: Page, state: string, timeoutMs: num
   });
   return Date.now() - started;
 }
+
+/**
+ * Every `/rpc` response body a page receives (the browser's create/update/list answers), kept in
+ * memory for "the key is in no response" scans; never written to the report.
+ */
+export class RpcResponses {
+  readonly bodies: string[] = [];
+  private readonly pending = new Set<Promise<void>>();
+  private readonly pages = new WeakSet<Page>();
+
+  attach(page: Page): Page {
+    if (this.pages.has(page)) return page;
+    this.pages.add(page);
+    page.on("response", (res) => {
+      if (!isRpcUrl(res.url())) return;
+      const p: Promise<void> = res.text().then(
+        (t) => void this.bodies.push(t),
+        () => undefined,
+      );
+      this.pending.add(p);
+      void p.finally(() => this.pending.delete(p));
+    });
+    return page;
+  }
+
+  /** Wait for bodies still being read. */
+  async settle(): Promise<string[]> {
+    await Promise.allSettled(this.pending);
+    return this.bodies;
+  }
+}
+
+/** True for the API's oRPC endpoint (`…/rpc/…`). */
+export function isRpcUrl(url: string): boolean {
+  if (!URL.canParse(url)) return false;
+  return /(^|\/)rpc(\/|$)/.test(new URL(url).pathname);
+}
+
+/**
+ * Navigate to a URL that carries a credential (an overlay token). Playwright's navigation errors
+ * quote the URL, and step errors go into the report: rethrow with the error's name only.
+ */
+export async function gotoSecretUrl(goto: () => Promise<Page>, what: string): Promise<Page> {
+  try {
+    return await goto();
+  } catch (err) {
+    throw new Error(`${what} did not load (${err instanceof Error ? err.name : "error"})`);
+  }
+}

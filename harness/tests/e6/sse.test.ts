@@ -3,7 +3,7 @@
 
 /** The overlay stream client: SSE parsing and the waiters, against a fake overlay endpoint. */
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { SseParser, SseStream } from "../../src/e6/sse.ts";
+import { SseParser, SseStream, overlayEventsUrl, refusedStream } from "../../src/e6/sse.ts";
 
 describe("SseParser", () => {
   test("events split across arbitrary chunks", () => {
@@ -50,8 +50,13 @@ describe("SseStream", () => {
       port: 0,
       fetch(req) {
         const url = new URL(req.url);
-        if (url.searchParams.get("token") !== "good") return new Response(null, { status: 401 });
         const enc = new TextEncoder();
+        // A broken route that accepts a revoked token but ends the stream at once, sending nothing.
+        if (url.searchParams.get("token") === "empty")
+          return new Response(new ReadableStream({ start: (c) => c.close() }), {
+            headers: { "content-type": "text/event-stream" },
+          });
+        if (url.searchParams.get("token") !== "good") return new Response(null, { status: 401 });
         const close = url.searchParams.get("close") === "1";
         const body = new ReadableStream<Uint8Array>({
           async start(c) {
@@ -107,9 +112,31 @@ describe("SseStream", () => {
     expect(s.open).toBe(false);
   });
 
+  test("refusedStream: 401, or an empty stream closed at once, is refused; a live one is not", async () => {
+    const bad = await SseStream.open("t", url("token=bad"));
+    expect(await refusedStream(bad, 200)).toBe(true);
+    const empty = await SseStream.open("t", url("token=empty"));
+    expect(await refusedStream(empty, 1_000)).toBe(true);
+    const live = await SseStream.open("t", url("token=good"));
+    expect(await refusedStream(live, 300)).toBe(false);
+    await live.close();
+    // Delivered alerts and then closed: the token was accepted.
+    const delivered = await SseStream.open("t", url("token=good&close=1"));
+    expect(await refusedStream(delivered, 1_000)).toBe(false);
+  });
+
   test("waitEvent times out naming the stream, not the URL", async () => {
     const s = await SseStream.open("overlay stream x", url("token=good"));
     await expect(s.waitEvent("alert", () => false, 200)).rejects.toThrow(/overlay stream x/);
     await s.close();
+  });
+});
+
+describe("overlayEventsUrl", () => {
+  test("OVERLAY_EVENTS_PATH on the API origin with the token", () => {
+    const u = new URL(overlayEventsUrl("http://localhost:4000/some/base/", "tok/en+1"));
+    expect(u.origin).toBe("http://localhost:4000");
+    expect(u.pathname).toBe("/overlay/events");
+    expect(u.searchParams.get("token")).toBe("tok/en+1");
   });
 });

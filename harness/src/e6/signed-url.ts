@@ -10,6 +10,7 @@ import { exportObjectKey } from "@commonair/contracts/internal";
 
 export const SIGNATURE_PARAM = "X-Amz-Signature";
 export const EXPIRES_PARAM = "X-Amz-Expires";
+export const DATE_PARAM = "X-Amz-Date";
 
 /** True when `url` is a presigned GET for exactly `key` (path-style or virtual-hosted). */
 export function isPresignedFor(url: string, key: string): boolean {
@@ -31,6 +32,43 @@ export function presignExpiresSeconds(url: string): number | null {
   const v = new URL(url).searchParams.get(EXPIRES_PARAM);
   if (v === null || !/^\d+$/.test(v)) return null;
   return Number(v);
+}
+
+/** `X-Amz-Date` (`YYYYMMDDTHHMMSSZ`) as epoch ms, or null when absent or malformed. */
+export function presignSignedAt(url: string): number | null {
+  if (!URL.canParse(url)) return null;
+  const v = new URL(url).searchParams.get(DATE_PARAM);
+  const m = v === null ? null : /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(v);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m.map(Number) as [number, number, number, number, number, number, number];
+  const at = Date.UTC(y, mo - 1, d, h, mi, s);
+  return Number.isFinite(at) ? at : null;
+}
+
+/** The last instant the link is valid (`X-Amz-Date + X-Amz-Expires`) as epoch ms, or null. */
+export function presignValidUntil(url: string): number | null {
+  const signedAt = presignSignedAt(url);
+  const expires = URL.canParse(url) ? presignExpiresSeconds(url) : null;
+  return signedAt === null || expires === null ? null : signedAt + expires * 1000;
+}
+
+/**
+ * True when the presigned link stops working no later than `expiresAt` (+ `toleranceS` for the
+ * second-precision `X-Amz-Date` and the signing happening just after the row was written).
+ */
+export function linkWithinExpiry(url: string, expiresAt: string | null, toleranceS = 5): boolean {
+  const until = presignValidUntil(url);
+  const limit = expiresAt === null ? NaN : Date.parse(expiresAt);
+  return until !== null && Number.isFinite(limit) && until <= limit + toleranceS * 1000;
+}
+
+/** Links that look presigned (a SigV4 signature) or that point at `origin` (the storage host). */
+export function storageLinks(links: readonly string[], origin?: string): string[] {
+  return links.filter((l) => {
+    if (!URL.canParse(l)) return false;
+    const u = new URL(l);
+    return u.searchParams.has(SIGNATURE_PARAM) || (origin !== undefined && u.origin === origin);
+  });
 }
 
 /**

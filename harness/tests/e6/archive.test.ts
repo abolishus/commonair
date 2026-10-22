@@ -16,6 +16,7 @@ import {
   readZip,
   rowCount,
   scanFiles,
+  secretNeedles,
   valueNeedles,
 } from "../../src/e6/archive.ts";
 
@@ -165,5 +166,34 @@ describe("scanFiles", () => {
     expect(containsValue(files, "e6dx_s_abc1", (n) => n === "follows.json")).toBe(true);
     expect(containsValue(files, "e6dx_s_abc1", (n) => n === "chat.json")).toBe(false);
     expect(containsValue(files, "absent value")).toBe(false);
+  });
+});
+
+describe("secretNeedles", () => {
+  test("the value and its SHA-256 as hex, base64url and base64 are all found", async () => {
+    const { createHash } = await import("node:crypto");
+    const token = "ovl_abcdefghijklmnop";
+    const digest = createHash("sha256").update(token).digest();
+    const needles = secretNeedles("overlay-token", [token]);
+    expect(needles.map((n) => n.label)).toEqual([
+      "overlay-token",
+      "overlay-token:sha256-hex",
+      "overlay-token:sha256-b64url",
+      "overlay-token:sha256-b64",
+    ]);
+    for (const [name, text] of [
+      ["value.json", `{"t":"${token}"}`],
+      ["hex.json", `{"token_hash":"${digest.toString("hex").toUpperCase()}"}`],
+      ["b64url.json", `{"h":"${digest.toString("base64url")}"}`],
+      ["b64.json", `{"h":"${digest.toString("base64")}"}`],
+    ] as const) {
+      const hits = scanFiles(new Map([[name, strToU8(text)]]), needles);
+      expect(hits.length, name).toBe(1);
+    }
+    expect(scanFiles(new Map([["clean.json", strToU8('{"ok":true}')]]), needles)).toEqual([]);
+  });
+
+  test("empty values give no needles", () => {
+    expect(secretNeedles("x", [null, undefined, " "])).toEqual([]);
   });
 });
