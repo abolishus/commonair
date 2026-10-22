@@ -190,7 +190,7 @@ jobs:
         # and denies it the capabilities Fedora needs to read its mode-000 /etc/shadow: the
         # service user's systemd manager then fails PAM. This changes the runner, not the host
         # under test.
-        run: if [ -f /etc/apparmor.d/unix-chkpwd ]; then sudo apparmor_parser -R /etc/apparmor.d/unix-chkpwd; fi
+        run: if sudo grep -q '^unix-chkpwd ' /sys/kernel/security/apparmor/profiles; then sudo apparmor_parser -R /etc/apparmor.d/unix-chkpwd; fi
       - name: End-to-end
         # Rootful podman (the runner's 4.9) can start the privileged systemd container that runs
         # Podman 5 inside; rootless podman on the runner cannot delegate the cgroups it needs.

@@ -19,6 +19,8 @@ const LIMIT_MS = 5;
  */
 const BASELINE = ".{2,}!";
 const BASELINE_FACTOR = 8;
+/** About 8x a workstation's baseline. */
+const MAX_BASELINE_MS = 5;
 
 /** mulberry32: a tiny seeded PRNG, so the corpus is the same on every run. */
 function rng(seed: number) {
@@ -105,7 +107,7 @@ function hostileInputs(): string[] {
   return inputs;
 }
 
-function slowest(re: RegExp, inputs: readonly string[]): { ms: number; input: string } {
+function slowest(re: RegExp, inputs: readonly string[], limit = LIMIT_MS, minRuns = 2): { ms: number; input: string } {
   let worst = { ms: 0, input: "" };
   for (const s of inputs) {
     re.lastIndex = 0;
@@ -113,7 +115,7 @@ function slowest(re: RegExp, inputs: readonly string[]): { ms: number; input: st
     // Best of a few runs, with more retries when a run looks slow: preemption by other test
     // workers inflates single samples, never the minimum.
     let best = Infinity;
-    for (let i = 0; i < 2 || (best >= LIMIT_MS / 2 && i < 12); i++) {
+    for (let i = 0; i < minRuns || (best >= limit / 2 && i < 12); i++) {
       re.lastIndex = 0;
       const started = performance.now();
       re.test(s);
@@ -130,7 +132,7 @@ describe("cost model benchmark", () => {
   });
 
   test(
-    `every accepted pattern of the adversarial corpus runs in < ${LIMIT_MS} ms on a ${MAX_INPUT_LENGTH}-char message`,
+    `every accepted pattern of the adversarial corpus runs in < max(${LIMIT_MS} ms, ${BASELINE_FACTOR}x one quadratic scan) on a ${MAX_INPUT_LENGTH}-char message`,
     { timeout: 120_000 },
     () => {
       const inputs = hostileInputs();
@@ -139,12 +141,15 @@ describe("cost model benchmark", () => {
       // The corpus must exercise both sides of the model.
       expect(accepted.length).toBeGreaterThan(200);
       expect(patterns.length - accepted.length).toBeGreaterThan(200);
-      const baseline = slowest(new RegExp(BASELINE, "giu"), inputs).ms;
+      // Many runs per input: one preempted sample must not inflate the limit eightfold.
+      const baseline = slowest(new RegExp(BASELINE, "giu"), inputs, LIMIT_MS, 10).ms;
+      // A machine this slow measures nothing useful; fail rather than pass on a huge limit.
+      expect(baseline).toBeLessThan(MAX_BASELINE_MS);
       const limit = Math.max(LIMIT_MS, BASELINE_FACTOR * baseline);
       const slow: string[] = [];
       let max = 0;
       for (const p of accepted) {
-        const { ms, input } = slowest(new RegExp(p, "giu"), inputs);
+        const { ms, input } = slowest(new RegExp(p, "giu"), inputs, limit);
         max = Math.max(max, ms);
         if (ms >= limit) slow.push(`${p} on ${JSON.stringify(input.slice(0, 12))}…: ${ms.toFixed(2)} ms`);
       }

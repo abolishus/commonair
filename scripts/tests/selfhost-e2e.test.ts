@@ -37,7 +37,7 @@ describe("e2e images", () => {
   });
 
   test.each(Object.keys(HOST_IMAGES) as (keyof typeof HOST_IMAGES)[])(
-    "%s host: systemd as PID 1, Podman with catatonit, the e2e registry marked insecure",
+    "%s host: systemd as PID 1, no Podman (selfhost.sh installs it), the e2e registry marked insecure",
     (distro) => {
       const file = hostContainerfile(distro);
       expect(file.startsWith(`FROM ${HOST_IMAGES[distro]}\n`)).toBe(true);
