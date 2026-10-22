@@ -23,7 +23,7 @@ Environment=S3_REGION=garage
 PublishPort=127.0.0.1:5432:5432
 Volume=commonair-postgres-data.volume:/var/lib/postgresql/data
 # Healthy = accepts connections and is out of recovery (infra/postgres/health.sh).
-HealthCmd=commonair-pg-health
+HealthCmd=CMD commonair-pg-health
 HealthInterval=10s
 HealthTimeout=5s
 HealthRetries=10
@@ -35,7 +35,7 @@ HealthStartPeriod=30s
 # progress for 10 min during replay, or not up within 2 min on a normal start (health.sh).
 # Retries=0: Podman never restarts on startup failures; the script's stop plus Restart= below
 # does, as a plain container exit (Quadlet HealthStartup* keys exist since Podman 4.5).
-HealthStartupCmd=commonair-pg-health --startup
+HealthStartupCmd=CMD commonair-pg-health --startup
 HealthStartupInterval=10s
 HealthStartupTimeout=5s
 HealthStartupRetries=0

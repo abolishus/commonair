@@ -21,7 +21,7 @@ NetworkAlias=otel-collector
 PublishPort=127.0.0.1:4318:4318
 Volume=%h/commonair/infra/otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro,Z
 Exec=--config=/etc/otelcol-contrib/config.yaml
-HealthCmd=/usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:13133/
+HealthCmd=CMD /usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:13133/
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10

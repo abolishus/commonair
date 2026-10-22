@@ -61,7 +61,7 @@ Secret=commonair-database-url,type=env,target=DATABASE_URL
 Volume=commonair-media-work.volume:/var/lib/commonair/media
 Volume=%h/.local/share/commonair/moderation/csam.pdq:/var/lib/commonair/moderation/csam.pdq:ro,z
 Volume=%h/.local/share/commonair/moderation/ncii.pdq:/var/lib/commonair/moderation/ncii.pdq:ro,z
-HealthCmd=bun /opt/commonair/healthcheck.ts
+HealthCmd=CMD bun /opt/commonair/healthcheck.ts
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10

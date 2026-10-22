@@ -54,7 +54,7 @@ Environment=EVIDENCE_PRIVATE_KEY=
 Environment=ONNXRUNTIME_NODE_INSTALL=skip
 Secret=commonair-database-url,type=env,target=DATABASE_URL
 PublishPort=127.0.0.1:8000:8000
-HealthCmd=bun /opt/commonair/healthcheck.ts
+HealthCmd=CMD bun /opt/commonair/healthcheck.ts
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10

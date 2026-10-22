@@ -43,7 +43,7 @@ describe("commonair-postgres.container health", () => {
   });
 
   test("regular check: ready means accepting connections and out of recovery; unhealthy is killed", () => {
-    expect(one("HealthCmd")).toBe("commonair-pg-health");
+    expect(one("HealthCmd")).toBe("CMD commonair-pg-health");
     expect(one("HealthOnFailure")).toBe("kill");
     expect(one("Notify")).toBe("healthy");
     // About two minutes of failures after startup before the kill, as before.
@@ -54,7 +54,7 @@ describe("commonair-postgres.container health", () => {
   });
 
   test("startup check gates the regular one and never lets Podman restart on its failures", () => {
-    expect(one("HealthStartupCmd")).toBe("commonair-pg-health --startup");
+    expect(one("HealthStartupCmd")).toBe("CMD commonair-pg-health --startup");
     expect(one("HealthStartupRetries")).toBe("0");
     expect(seconds(one("HealthStartupInterval"))).toBe(10);
     expect(seconds(one("HealthStartupTimeout"))).toBeLessThan(seconds(one("HealthStartupInterval")));

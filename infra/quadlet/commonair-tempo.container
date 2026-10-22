@@ -17,7 +17,7 @@ NetworkAlias=tempo
 Volume=%h/commonair/infra/tempo/tempo.yaml:/etc/tempo.yaml:ro,Z
 Volume=commonair-tempo-data.volume:/var/tempo
 Exec=-config.file=/etc/tempo.yaml
-HealthCmd=/usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:3200/ready
+HealthCmd=CMD /usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:3200/ready
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10

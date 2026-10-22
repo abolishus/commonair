@@ -17,7 +17,7 @@ NetworkAlias=loki
 Volume=%h/commonair/infra/loki/loki.yaml:/etc/loki/config.yaml:ro,Z
 Volume=commonair-loki-data.volume:/loki
 Exec=-config.file=/etc/loki/config.yaml
-HealthCmd=/usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:3100/ready
+HealthCmd=CMD /usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:3100/ready
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10

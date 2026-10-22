@@ -18,7 +18,7 @@ PublishPort=127.0.0.1:9090:9090
 Volume=%h/commonair/infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
 Volume=commonair-prometheus-data.volume:/prometheus
 Exec=--config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=30d
-HealthCmd=wget -q -O /dev/null http://127.0.0.1:9090/-/ready
+HealthCmd=CMD wget -q -O /dev/null http://127.0.0.1:9090/-/ready
 HealthInterval=10s
 HealthTimeout=3s
 HealthRetries=10
