@@ -289,7 +289,7 @@ export class Platform {
         return http(e.HARNESS_WORKER_HEALTH_URL, "worker");
       case "relay":
         // Go to build relay/, and an API that accepts LAN (private, http) relay URLs.
-        return relayReadiness();
+        return relayReadiness({ ...process.env, HARNESS_API_URL: e.HARNESS_API_URL });
       case "mail":
         return (await this.mailpit.ping())
           ? null

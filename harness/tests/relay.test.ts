@@ -15,6 +15,7 @@ import {
   parseDotenv,
   pickLanIPv4,
   privateNetworksProblem,
+  relayReadiness,
   relayArgv,
   relayHost,
   relaySourceFiles,
@@ -310,5 +311,17 @@ describe("assignment from the playback token", () => {
     expect(tokenOfUrl("http://x/hls/live/a/index.m3u8?t=abc.def")).toBe("abc.def");
     expect(tokenOfUrl("http://x/hls/live/a/index.m3u8")).toBeNull();
     expect(tokenOfUrl("not a url")).toBeNull();
+  });
+});
+
+describe("relayReadiness asks the running API first", () => {
+  const goPresent = Bun.which("go") !== null;
+  test.skipIf(!goPresent)("the API's own setting wins over .env", async () => {
+    const off = { OUTBOUND_ALLOW_PRIVATE_NETWORKS: "false" };
+    expect(await relayReadiness(off, off, async () => ({ outboundPrivateNetworks: true }))).toBeNull();
+    expect(await relayReadiness({}, null, async () => ({ outboundPrivateNetworks: false }))).toMatch(/is "false"/);
+    // An older API without the field: fall back to the env files.
+    expect(await relayReadiness({ OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true" }, null, async () => ({}))).toBeNull();
+    expect(await relayReadiness({}, null, async () => null)).toMatch(/unset/);
   });
 });

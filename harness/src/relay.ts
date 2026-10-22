@@ -117,10 +117,27 @@ export async function goVersion(): Promise<string | null> {
 export async function relayReadiness(
   env: Record<string, string | undefined> = process.env,
   dotenv: Record<string, string> | null = readRepoDotenv(),
+  apiHealth: () => Promise<Record<string, unknown> | null> = () => fetchApiHealth(env),
 ): Promise<string | null> {
   if (!existsSync(join(RELAY_DIR, "go.mod"))) return "relay sources not present";
   if (!(await goVersion())) return "Go toolchain not found (`go version` failed): install Go to build relay/";
+  // The running API knows its own setting (compose overrides set it without touching `.env`).
+  const health = await apiHealth();
+  if (typeof health?.outboundPrivateNetworks === "boolean")
+    return health.outboundPrivateNetworks
+      ? null
+      : privateNetworksProblem({ OUTBOUND_ALLOW_PRIVATE_NETWORKS: "false" }, null);
   return privateNetworksProblem(env, dotenv);
+}
+
+async function fetchApiHealth(env: Record<string, string | undefined>): Promise<Record<string, unknown> | null> {
+  const base = env.HARNESS_API_URL ?? "http://localhost:3001";
+  try {
+    const res = await fetch(new URL("/healthz", base), { signal: AbortSignal.timeout(3_000) });
+    return res.ok ? ((await res.json()) as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Build ----------------------------------------------------------------------------------

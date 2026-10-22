@@ -76,6 +76,19 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
     ingestProtocol: health.ingestProtocol,
   });
 
+  // Players heartbeat every ~10 s (with jitter). On a fast stack the steps above can finish first,
+  // so wait for one before stopping: the check below must see heartbeats actually accepted.
+  await ctx.step("a heartbeat from every viewer", () =>
+    Promise.all(
+      viewers.map((v) =>
+        waitFor(`a heartbeat from ${v.id}`, async () => ((await v.report()).heartbeats > 0 ? true : null), {
+          timeoutMs: 25_000,
+          intervalMs: 500,
+          signal: ctx.signal,
+        }).catch(() => false),
+      ),
+    ),
+  );
   const finals = await ctx.step("stop viewers", () => Promise.all(viewers.map((v) => v.stop())));
   for (const r of finals) {
     ctx.check(`${r.engine}: heartbeats accepted`, r.heartbeats > 0 && r.heartbeatErrors === 0, {

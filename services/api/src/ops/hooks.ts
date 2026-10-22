@@ -139,6 +139,8 @@ export function opsHealth(deps: Pick<Deps, "env">) {
   ].some(([id, secret]) => Boolean(id && secret));
   return {
     opsTestHooks: env.OPS_TEST_HOOKS,
+    // LAN relays and simulcast targets accepted (development and harness stacks only).
+    outboundPrivateNetworks: env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
     stripe: env.PAYMENTS_PROVIDER === "stripe",
     oauth,
     // Media and playback are served by our own origin unless a burst CDN is configured.
