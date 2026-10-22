@@ -20,6 +20,19 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Session nine (2026-10-21/22): E5 co-op (in progress)
+
+Spec `docs/testing/e5-selectors.md`, policy ADR 0020 (the user decided: shares refunded at once
+on exit, two-person patronage approval, any seated council member responds, the local stack's
+database is recreated once with short bootstrap periods). Contract step on `main`: `231b2c0`
+(spec, ADR), `ede4cdd` (migrations 0019–0021: share statuses, patronage `computed_by_id`,
+council term `txid`, triggers for tallies, council, shares, patronage and comments; db int
+95/95, governance int 21/21, patronage int 14/14), `12d930b` (contracts: `finance` access,
+`coop.shares.*`, `proposals.update`, `patronage.periods`, internal co-op events, `QUEUES.coop`,
+`COOP_JOBS`, `/internal/coop/tick`, `COOP_TEST_HOOKS`). Briefs in `.claude/briefs/e5/`. Units run
+as workflows of three: batch 1 = A API, B worker + governance lifecycle, C `packages/ui` boards;
+batch 2 = D web, E harness `e5-coop`.
+
 ## E4c `trust-safety` harness bring-up (2026-10-21/22, done)
 
 `trust-safety` passes twice in a row against the local Podman stack (92/92 assertions both runs;
