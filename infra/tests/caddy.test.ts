@@ -28,6 +28,8 @@ describe("routing", () => {
   test("each public path reaches the service that owns it", () => {
     expect(Object.fromEntries(handles())).toEqual({
       "@internal": "respond 404",
+      "@s3-upload": "garage:3900",
+      "@s3-export": "garage:3900",
       "/api/*": "api:3001",
       "/rpc/*": "api:3001",
       "/overlay/events": "api:3001",
@@ -64,9 +66,22 @@ describe("routing", () => {
     expect(site.match(/mediamtx:/g)).toHaveLength(1);
   });
 
-  test("only the public services are upstreams (no Garage, Postgres, Grafana, collector)", () => {
+  test("only the public services are upstreams (no Postgres, Grafana, collector)", () => {
     const upstreams = new Set([...site.matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]!.split(":")[0]));
-    expect(upstreams).toEqual(new Set(["api", "chat", "mediamtx", "origin", "tracker", "web"]));
+    expect(upstreams).toEqual(new Set(["api", "chat", "garage", "mediamtx", "origin", "tracker", "web"]));
+  });
+
+  test("Garage only for presigned uploads into incoming/ and presigned export reads (ADR 0024)", () => {
+    expect(site.match(/garage:/g)).toHaveLength(2);
+    expect(site).toMatch(
+      /@s3-upload \{\n\t\tmethod PUT\n\t\tpath \/\{\$S3_BUCKET_MEDIA:commonair-media\}\/incoming\/\*\n\t\tquery X-Amz-Signature=\*\n\t\}/,
+    );
+    expect(site).toMatch(
+      /@s3-export \{\n\t\tmethod GET HEAD\n\t\tpath \/\{\$S3_BUCKET_EXPORTS:commonair-exports\}\/\*\n\t\tquery X-Amz-Signature=\*\n\t\}/,
+    );
+    expect(site).toMatch(/handle @s3-upload \{\n\t\trequest_body \{\n\t\t\tmax_size 10MB\n\t\t\}/);
+    // Signed responses pass through unencoded (Content-Length and ETag as Garage sent them).
+    expect(site).toMatch(/@compressible not query X-Amz-Signature=\*\n\tencode @compressible zstd gzip\n/);
   });
 });
 

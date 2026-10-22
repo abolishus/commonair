@@ -13,11 +13,14 @@
  *    fresh server, without Podman, and runs `selfhost.sh install --bundle … --tls internal --domain selfhost.test
  *    --registry <zot>` in it as root, which prepares the host and continues as the unprivileged
  *    `commonair` user.
- * 3. Checks https://selfhost.test/ and /api/status through Caddy's internal CA.
+ * 3. Checks https://selfhost.test/ and /api/status through Caddy's internal CA, and browser
+ *    access to object storage (ADR 0024): a presigned PUT into the media bucket's incoming/ and
+ *    a presigned export GET succeed through Caddy, and unsigned or out-of-scope requests do not.
  * 4. Builds release 0.0.0-e2e.2 (every image re-labelled, so every digest changes), upgrades,
  *    and checks from systemd's own invocation IDs and timestamps that the upgrade re-ran migrate
  *    and that it finished before api and worker started, and that `status` reports the new
- *    version. Then kills the worker container and checks that systemd restarts it.
+ *    version, and repeats the object storage checks. Then kills the worker container and
+ *    checks that systemd restarts it.
  * 5. Upgrades to a deliberately broken release (an api that never gets healthy) and checks
  *    that it rolls back to 0.0.0-e2e.2 and stays healthy.
  *
@@ -342,6 +345,147 @@ function checkHttps(): void {
   }
 }
 
+// Browser access to object storage (ADR 0024): presigned URLs signed by the API's own storage
+// config, opened through Caddy and its internal CA as a browser would.
+
+/** Presigned URLs for one check run, as the api container's storage config signs them. */
+export interface Presigned {
+  endpoint: string;
+  upload: string;
+  outside: string;
+  download: string;
+  incomingRead: string;
+  evidence: string;
+  backups: string;
+}
+
+export const uploadBody = (run: string) => `commonair e2e upload ${run}`;
+export const exportBody = (run: string) => `commonair e2e export ${run}`;
+export const EXPORT_FILENAME = "e2e-export.zip";
+
+/**
+ * JavaScript for `bun -e` in the api container (the workspace is at /app, so the storage
+ * package resolves its own dependencies). `presign` stores an export object and prints the
+ * presigned URLs as JSON; `verify` prints the uploaded object's body (null when missing) and
+ * deletes both objects.
+ */
+export function storageScript(run: string, op: "presign" | "verify"): string {
+  const c = JSON.stringify({
+    run,
+    op,
+    uploadKey: `incoming/e2e/${run}.png`,
+    outsideKey: `public/e2e/${run}.png`,
+    exportKey: `e2e/${run}.zip`,
+    upload: uploadBody(run),
+    export: exportBody(run),
+    filename: EXPORT_FILENAME,
+  });
+  return `
+const c = ${c};
+const { storageFromEnv } = await import("/app/packages/storage/src/index.ts");
+const env = process.env;
+const s = storageFromEnv({
+  S3_ENDPOINT: env.S3_ENDPOINT,
+  S3_PUBLIC_ENDPOINT: env.S3_PUBLIC_ENDPOINT || undefined,
+  S3_REGION: env.S3_REGION,
+  S3_ACCESS_KEY_ID: env.S3_ACCESS_KEY_ID,
+  S3_SECRET_ACCESS_KEY: env.S3_SECRET_ACCESS_KEY,
+  S3_FORCE_PATH_STYLE: env.S3_FORCE_PATH_STYLE !== "false",
+});
+const media = env.S3_BUCKET_MEDIA;
+const exportsBucket = env.S3_BUCKET_EXPORTS;
+const put = { expiresSeconds: 600, contentType: "image/png", contentLength: new TextEncoder().encode(c.upload).length };
+if (c.op === "presign") {
+  await s.put(exportsBucket, c.exportKey, c.export, { contentType: "application/zip" });
+  console.log(JSON.stringify({
+    endpoint: env.S3_PUBLIC_ENDPOINT ?? "",
+    upload: await s.presignPut(media, c.uploadKey, put),
+    outside: await s.presignPut(media, c.outsideKey, put),
+    download: await s.presignGet(exportsBucket, c.exportKey, { expiresSeconds: 600, filename: c.filename }),
+    incomingRead: await s.presignGet(media, c.uploadKey, { expiresSeconds: 600 }),
+    evidence: await s.presignGet(env.S3_BUCKET_EVIDENCE, c.uploadKey, { expiresSeconds: 600 }),
+    backups: await s.presignGet(env.S3_BUCKET_BACKUPS, c.uploadKey, { expiresSeconds: 600 }),
+  }));
+} else {
+  const res = await s.get(media, c.uploadKey);
+  const uploaded = res ? await res.text() : null;
+  for (const key of [c.uploadKey, c.outsideKey]) await s.delete(media, key);
+  await s.delete(exportsBucket, c.exportKey);
+  console.log(JSON.stringify({ uploaded }));
+}
+`;
+}
+
+/**
+ * Requests that must not succeed through Caddy: none may be 2xx. Most carry a valid signature,
+ * so Garage itself would accept them; only Caddy's allowlist stands in the way.
+ */
+export function refusedRequests(p: Presigned): [what: string, method: string, url: string][] {
+  const exportsBucket = new URL(p.download).pathname.split("/")[1];
+  const origin = new URL(p.download).origin;
+  return [
+    ["an unsigned PUT to incoming/", "PUT", p.upload.split("?")[0]!],
+    ["a presigned-looking GET of incoming/", "GET", p.incomingRead],
+    ["a signed PUT outside incoming/", "PUT", p.outside],
+    ["a signed GET of the evidence bucket", "GET", p.evidence],
+    ["a signed GET of the backups bucket", "GET", p.backups],
+    ["a listing of the exports bucket", "GET", `${origin}/${exportsBucket}?list-type=2`],
+    ["a DELETE of the export", "DELETE", p.download],
+    ["a DELETE of the upload", "DELETE", p.upload],
+  ];
+}
+
+/** Runs a storageScript in the api container; its last output line is JSON. */
+function inApi<T>(script: string): T {
+  // Base64 keeps the script out of the host shell's quoting.
+  const b64 = Buffer.from(script).toString("base64");
+  const out = inHost(`podman exec -w /app/packages/storage commonair-api bun -e "$(printf %s ${b64} | base64 -d)"`, {
+    user: true,
+  });
+  return JSON.parse(out.trim().split("\n").at(-1) ?? "null") as T;
+}
+
+const curlTo = (url: string) => `--cacert ${ROOT_CA} '${url}'`;
+
+function checkBrowserStorage(label: string): void {
+  const run = `${label}-${Date.now()}`;
+  const p = inApi<Presigned>(storageScript(run, "presign"));
+  expectThat(p.endpoint === `https://${DOMAIN}`, `S3_PUBLIC_ENDPOINT is https://${DOMAIN} (${p.endpoint || "unset"})`);
+  for (const [name, url] of Object.entries(p))
+    if (name !== "endpoint")
+      expectThat(url.startsWith(`https://${DOMAIN}/`), `the presigned ${name} URL is on https://${DOMAIN}/`);
+
+  // A presigned PUT into incoming/, as the web app's upload does it.
+  const put = inHost(
+    `curl -sS -o /dev/null -w '%{http_code}' -X PUT -H 'content-type: image/png' ` +
+      `--data-binary '${uploadBody(run)}' ${curlTo(p.upload)}`,
+    { user: true },
+  ).trim();
+  expectThat(put.startsWith("2"), `a presigned PUT into incoming/ through Caddy answers ${put}`);
+
+  // A presigned export GET: the exact bytes and the disposition the presign asked for.
+  const got = inHost(`curl -sS -i ${curlTo(p.download)}`, { user: true });
+  const split = got.indexOf("\r\n\r\n");
+  const head = got.slice(0, split);
+  const body = got.slice(split + 4);
+  const status = /^HTTP\/\S+ (\d+)/.exec(head)?.[1] ?? "";
+  const disposition = /^content-disposition: (.*?)\r?$/im.exec(head)?.[1] ?? "";
+  expectThat(status === "200", `a presigned export GET through Caddy answers ${status || "nothing"}`);
+  expectThat(body === exportBody(run), "the export download returns the stored bytes");
+  expectThat(
+    disposition === `attachment; filename="${EXPORT_FILENAME}"`,
+    `the export download carries the presigned disposition (${disposition || "none"})`,
+  );
+
+  for (const [what, method, url] of refusedRequests(p)) {
+    const code = inHost(`curl -sS -o /dev/null -w '%{http_code}' -X ${method} ${curlTo(url)}`, { user: true }).trim();
+    expectThat(!code.startsWith("2"), `${what} is refused (${code})`);
+  }
+
+  const { uploaded } = inApi<{ uploaded: string | null }>(storageScript(run, "verify"));
+  expectThat(uploaded === uploadBody(run), "the uploaded object is in the media bucket, byte for byte");
+}
+
 function installedVersion(): string {
   return /version:\s+(\S+)/.exec(inHost("sh ~/commonair/selfhost.sh status", { user: true }))?.[1] ?? "";
 }
@@ -477,6 +621,7 @@ async function main(): Promise<void> {
       );
       expectThat(installedVersion() === v1, `status reports ${v1}`);
       checkHttps();
+      checkBrowserStorage("install");
     });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {
@@ -491,6 +636,7 @@ async function main(): Promise<void> {
       expectThat(installedVersion() === v2, `status reports ${v2}`);
       checkMigrateFirst(before);
       checkHttps();
+      checkBrowserStorage("upgrade");
     });
 
     // The session-ten bug: a crashed worker stayed down under compose. Under Quadlet, systemd

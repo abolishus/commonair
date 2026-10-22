@@ -110,7 +110,10 @@ export const internalEnv = z.object({
 export const storageEnv = z.object({
   /** S3 endpoint the services use on the internal network (Garage by default). */
   S3_ENDPOINT: z.url(),
-  /** S3 endpoint browsers reach for presigned uploads and downloads (not for public media). */
+  /**
+   * S3 endpoint browsers reach for presigned uploads and export downloads (not for public
+   * media); unset means S3_ENDPOINT. Self-hosted: `https://<host>`, routed by Caddy (ADR 0024).
+   */
   S3_PUBLIC_ENDPOINT: z.url().optional(),
   /**
    * Base URL of public media objects (`<base>/<key>`). The origin's `/media` route by default,

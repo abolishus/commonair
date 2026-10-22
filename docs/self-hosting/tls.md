@@ -81,6 +81,24 @@ Firefox keeps its own trust store: import the file under Settings → Privacy & 
 Certificates. The root stays the same across restarts and upgrades as long as the
 `commonair-caddy-data` volume exists.
 
+## Uploads and export downloads
+
+Channel images (avatars, banners, panels) and data-export downloads use presigned object
+storage URLs on the same host and certificate: `https://<host>/<bucket>/<key>?X-Amz-…`.
+`install` sets `S3_PUBLIC_ENDPOINT=https://<host>` and `upgrade` adds it to an older env file,
+so there is nothing to configure. With the internal CA, the clients that trust the root for
+the site can upload and download too. Caddy forwards only presigned uploads into the media
+bucket's `incoming/` prefix (at most 10 MB) and presigned reads of the exports bucket to Garage
+(ADR 0024). Every other request on those paths gets the web app's 404, so the rest of Garage
+stays private.
+
+An external S3 store is not scripted: the units point `S3_ENDPOINT` at Garage. If you run the
+services against one anyway, set `S3_PUBLIC_ENDPOINT` to the store's public endpoint
+(`install --reinstall` and `upgrade` keep a value that is not `https://<host>`). The store then
+needs a CORS rule that allows `PUT` from `https://<host>` with the `content-type` header, and
+the site's Content-Security-Policy needs the store's origin in `connect-src`. The policy lives in
+the release's Caddyfile, so that edit does not survive an upgrade.
+
 ## The IRC certificate
 
 The IRC gateway serves TLS on 6697 with the same certificate as the web host, so

@@ -191,8 +191,19 @@ with a different secret. Generate a new pair, put it in `.env`, run
 `podman compose up -d garage-init` (imports and grants it), restart the services, then delete
 the old key with `podman compose exec garage /garage key delete --yes <old id>`.
 
-Browser uploads use presigned URLs to `S3_PUBLIC_ENDPOINT`; in production give Garage its own
-hostname (path-style URLs cannot live under a path prefix of the web host, SigV4 signs the path).
+Browser uploads (channel images) and data-export downloads use presigned path-style URLs on
+`S3_PUBLIC_ENDPOINT` (ADR 0024). In development that is the published Garage port
+(`http://localhost:${GARAGE_S3_PORT}`). Behind Caddy it is the site itself, `https://<host>`
+(`selfhost.sh` writes it; with the compose `tls` profile set it in `.env`): SigV4 signs the host
+and the full path, so the bucket path is used on the main host unchanged, never under a stripped
+prefix. Caddy forwards only two shapes to `garage:3900`, path and `Host` untouched:
+`PUT /<S3_BUCKET_MEDIA>/incoming/*` with an `X-Amz-Signature` query parameter (body at most
+10 MB, the upload contract's limit), and `GET`/`HEAD /<S3_BUCKET_EXPORTS>/*` with one. Anything
+else on those paths (other methods, buckets or prefixes, unsigned requests, listings) reaches the
+web app and gets a 404. Signed responses are not compressed, so Garage's `Content-Length` and
+`ETag` pass through. The uploads are same-origin, so neither CORS nor the CSP needs changing. An
+external S3 store with its own public endpoint instead needs CORS for the site's origin and that
+origin in the CSP's `connect-src`.
 
 Public media (avatars, thumbnails, clips, VODs) is read at `MEDIA_PUBLIC_URL`, by default the
 origin's `/media` route (`http://localhost:3003/media`; `https://<host>/media` behind Caddy). The

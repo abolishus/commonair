@@ -509,6 +509,11 @@ services:
       TLS_MODE: ${TLS_MODE:-acme}
       ACME_EMAIL: ${ACME_EMAIL:-}
       ACME_CA: ${ACME_CA:-}
+      # Caddy forwards presigned uploads into the media bucket's incoming/ prefix and presigned
+      # export downloads to Garage (ADR 0024). Browsers reach them only when the services sign
+      # for this host: set S3_PUBLIC_ENDPOINT=https://<PUBLIC_HOSTNAME> in .env as well.
+      S3_BUCKET_MEDIA: ${S3_BUCKET_MEDIA:-commonair-media}
+      S3_BUCKET_EXPORTS: ${S3_BUCKET_EXPORTS:-commonair-exports}
     # Public by design; see infra/README.md for reaching 80/443 rootless.
     ports:
       - "${CADDY_BIND_ADDRESS:-0.0.0.0}:${CADDY_HTTP_PORT:-8080}:80"
@@ -521,6 +526,7 @@ services:
     depends_on:
       web:
         condition: service_healthy
+      # api already waits for Garage and its buckets (garage-init), so Garage needs no entry.
       api:
         condition: service_healthy
     healthcheck:

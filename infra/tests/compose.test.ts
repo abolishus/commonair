@@ -338,6 +338,23 @@ describe("Caddyfile", () => {
     expect(caddy).toContain("Content-Security-Policy");
     expect(caddy).toContain("frame-ancestors 'none'");
   });
+  test("the bucket names Caddy routes presigned URLs for (ADR 0024) reach it, with .env.example's defaults", () => {
+    const example = Object.fromEntries(
+      read(".env.example")
+        .split("\n")
+        .filter((l) => /^[A-Z0-9_]+=/.test(l))
+        .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+    );
+    const env = compose.services.caddy?.environment ?? {};
+    for (const key of ["S3_BUCKET_MEDIA", "S3_BUCKET_EXPORTS"]) {
+      expect(env[key], key).toBe(`\${${key}:-${example[key]}}`);
+      expect(caddy, key).toContain(`{$${key}:${example[key]}}`);
+    }
+    // The Quadlet unit reads the whole instance env file, which carries them.
+    expect(read("infra/quadlet/commonair-caddy.container")).toContain(
+      "EnvironmentFile=%h/.config/commonair/commonair.env",
+    );
+  });
 });
 
 describe("Quadlet mirror", () => {

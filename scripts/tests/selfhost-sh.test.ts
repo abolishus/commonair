@@ -781,6 +781,8 @@ describe("install", () => {
       CHAT_PUBLIC_URL: "wss://stream.example.org/chat",
       P2P_TRACKER_URL: "wss://stream.example.org/tracker",
       MEDIA_PUBLIC_URL: "https://stream.example.org/media",
+      // Presigned uploads and export downloads through Caddy (ADR 0024).
+      S3_PUBLIC_ENDPOINT: "https://stream.example.org",
       INGEST_WHIP_PUBLIC_URL: "https://stream.example.org/live",
       INGEST_RTMP_PUBLIC_URL: "rtmp://stream.example.org/live",
       IRC_PUBLIC_HOST: "stream.example.org",
@@ -961,6 +963,30 @@ describe("re-install", () => {
   );
 
   test(
+    "a re-install points S3_PUBLIC_ENDPOINT at a new domain, but keeps an external store's",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      expectOk(h.run(["install", "--reinstall", "--domain", "tv.example.org"]));
+      expect(envOf(h)).toMatchObject({
+        PUBLIC_HOSTNAME: "tv.example.org",
+        S3_PUBLIC_ENDPOINT: "https://tv.example.org",
+      });
+      const file = join(h.home, ".config/commonair/commonair.env");
+      writeFileSync(
+        file,
+        readFileSync(file, "utf8").replace(/^S3_PUBLIC_ENDPOINT=.*$/m, "S3_PUBLIC_ENDPOINT=https://s3.example.net"),
+      );
+      expectOk(h.run(["install", "--reinstall", "--domain", "stream.example.org"]));
+      expect(envOf(h)).toMatchObject({
+        PUBLIC_HOSTNAME: "stream.example.org",
+        S3_PUBLIC_ENDPOINT: "https://s3.example.net",
+      });
+    },
+    TIMEOUT,
+  );
+
+  test(
     "operator drop-in directories survive a re-install",
     () => {
       const h = host();
@@ -1136,6 +1162,56 @@ describe("upgrade", () => {
       expect(readFileSync(join(h.home, ".config/containers/systemd/commonair-api.container"), "utf8")).toContain(
         ":0.2.0@sha256:",
       );
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "backfills S3_PUBLIC_ENDPOINT into an env file written before ADR 0024",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      // An install from before the change: the line is missing entirely.
+      writeFileSync(file, readFileSync(file, "utf8").replace(/^S3_PUBLIC_ENDPOINT=.*\n/m, ""));
+      expect(envOf(h).S3_PUBLIC_ENDPOINT).toBeUndefined();
+      const r = h.run(["upgrade", "--version", "v0.2.0"]);
+      expect(r.code, r.err).toBe(0);
+      expect(r.err).toContain("setting S3_PUBLIC_ENDPOINT=https://stream.example.org");
+      expect(envOf(h).S3_PUBLIC_ENDPOINT).toBe("https://stream.example.org");
+      expect(readFileSync(file, "utf8").match(/^S3_PUBLIC_ENDPOINT=/gm)).toHaveLength(1);
+      expect(mode(file)).toBe(0o600);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "backfills an empty S3_PUBLIC_ENDPOINT (init-env's default) too",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      writeFileSync(file, readFileSync(file, "utf8").replace(/^S3_PUBLIC_ENDPOINT=.*$/m, "S3_PUBLIC_ENDPOINT="));
+      expectOk(h.run(["upgrade", "--version", "v0.2.0"]));
+      expect(envOf(h).S3_PUBLIC_ENDPOINT).toBe("https://stream.example.org");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "never overwrites an operator's S3_PUBLIC_ENDPOINT (an external store)",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      writeFileSync(
+        file,
+        readFileSync(file, "utf8").replace(/^S3_PUBLIC_ENDPOINT=.*$/m, "S3_PUBLIC_ENDPOINT=https://s3.example.net"),
+      );
+      const r = h.run(["upgrade", "--version", "v0.2.0"]);
+      expect(r.code, r.err).toBe(0);
+      expect(r.err).not.toContain("setting S3_PUBLIC_ENDPOINT");
+      expect(envOf(h).S3_PUBLIC_ENDPOINT).toBe("https://s3.example.net");
     },
     TIMEOUT,
   );
