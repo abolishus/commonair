@@ -23,6 +23,7 @@ import { clientIp, looksProxied } from "./lib/ip.ts";
 import { canonicalIp, rateLimitSubjectIp } from "./lib/netrange.ts";
 import type { BaseContext, RequestInfo } from "./lib/orpc.ts";
 import { rateLimitKey } from "./lib/ratelimit.ts";
+import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
 import { isTestHookPath, testHook } from "./moderation/hooks.ts";
 import { router } from "./router.ts";
@@ -41,6 +42,13 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 
 export function createApp(deps: Deps): ApiApp {
   const auth = createAuth(deps);
+  if (deps.env.COOP_TEST_HOOKS)
+    deps.logger.warn(
+      "COOP_TEST_HOOKS is on: POST /internal/coop/tick runs co-op jobs on demand; never on a public instance",
+      {
+        testHooks: true,
+      },
+    );
   const allowedOrigins = new Set(
     [deps.site.publicUrl, ...deps.env.AUTH_TRUSTED_ORIGINS].map((o) => {
       try {
@@ -171,6 +179,12 @@ export function createApp(deps: Deps): ApiApp {
       if (!deps.env.MODERATION_TEST_HOOKS) return new Response(null, { status: 404 });
       if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
       return testHook(deps, path, raw.method, await readJson(raw));
+    }
+    if (isCoopHookPath(path)) {
+      // Off: 404 before the secret check, like any unknown internal path.
+      if (!deps.env.COOP_TEST_HOOKS) return new Response(null, { status: 404 });
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return coopHook(deps, raw.method, await readJson(raw));
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
 

@@ -52,9 +52,11 @@ export async function startApi(
     pinnedGet?: Deps["pinnedGet"];
     /** Extra env (e.g. the moderation test hooks), applied over the defaults below. */
     env?: Record<string, string>;
+    /** Governance settings overridden at first migration (e.g. `FAST_GOVERNANCE`). */
+    governance?: Record<string, Record<string, unknown>>;
   } = {},
 ): Promise<TestApi> {
-  const db = await createTestDatabase();
+  const db = await createTestDatabase(opts.governance ? { governance: opts.governance } : {});
   const { pkcs8B64 } = await generateSigningKey();
   // Keep test evidence keys synthetic and isolated from operator credentials.
   const evidencePair = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;

@@ -29,6 +29,8 @@ import { os, requireCaller } from "../lib/orpc.ts";
 import { confirmedPeriod, disputeOutcome, tierCode } from "./checkout-rules.ts";
 import { endSubscriptions, invalidateSubscribers, userEventFields } from "./checkout-shared.ts";
 import { requestProviderRefund } from "./stripe-refunds.ts";
+import { withCoopErrors } from "../coop/errors.ts";
+import { confirmShareTx } from "../coop/membership.ts";
 
 const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts, users } = schema;
 type PaymentRow = typeof payments.$inferSelect;
@@ -370,11 +372,24 @@ export const treasurerCheckoutHandlers = {
     const done = await deps.db.transaction(async (tx) => {
       const p = await lockedPayment(tx, input.paymentId);
       if (p.status !== "pending") throw conflict(`This payment is ${p.status}, not pending`);
-      if (p.kind === "membership_share") throw conflict("Member shares are not confirmed here");
       if (p.provider !== "manual") throw conflict("Card payments are confirmed by the payment provider");
       // Backdating before checkout would skip the creator hold and could start an already-ended period.
       if (receivedAt.getTime() < p.createdAt.getTime() - CLOCK_SKEW_MS)
         throw badRequest("The payment cannot be received before its checkout was created");
+      if (p.kind === "membership_share") {
+        // A share pays the co-op, not a channel: its own posting, share and membership (coop/membership.ts).
+        await withCoopErrors(() => confirmShareTx(tx, p, { receivedAt, now, actorId: caller.user.id }));
+        await audit(tx, {
+          actorType: ACTOR,
+          actorId: caller.user.id,
+          action: "payment.confirm",
+          subjectType: "payment",
+          subjectId: p.id,
+          reason: note,
+          details: { kind: p.kind, amountCents: p.amountCents, quantity: p.quantity, receivedAt: iso(receivedAt) },
+        });
+        return { channelId: null, subscribers: [] as string[] };
+      }
       const r = await confirmPaymentTx(tx, p, { receivedAt, now, feeCents: 0, taxCents: 0 });
       await audit(tx, {
         actorType: ACTOR,
@@ -388,7 +403,7 @@ export const treasurerCheckoutHandlers = {
       });
       return r;
     });
-    await invalidateSubscribers(deps, done.channelId, done.subscribers);
+    if (done.channelId) await invalidateSubscribers(deps, done.channelId, done.subscribers);
     return { ok: true as const };
   }),
 

@@ -24,8 +24,10 @@ import {
 import {
   PatronagePeriodOverlapError,
   PatronagePeriodStateError,
+  SecondApproverError,
   SurplusUnavailableError,
   approvePeriod,
+  availableSurplusCents,
   computePeriod,
   eligibleMembers,
   eligibleStreamingHours,
@@ -349,6 +351,28 @@ describe("period run", () => {
     expect(again.periodId).toBe(periodId);
     const inputs = await db.select().from(s.patronageInputs).where(eq(s.patronageInputs.periodId, periodId));
     expect(inputs).toHaveLength(4);
+  });
+
+  test("available surplus counts the same period's own computed surplus as available", async () => {
+    const held = await retainedSurplus(db, "usd");
+    expect(await availableSurplusCents(db, { periodStart: period.start, periodEnd: period.end, currency: "usd" })).toBe(
+      held,
+    );
+    // Any other period sees the computed run's surplus as spoken for.
+    const otherStart = new Date(period.end.getTime() + 40 * DAY);
+    expect(
+      await availableSurplusCents(db, {
+        periodStart: otherStart,
+        periodEnd: new Date(otherStart.getTime() + DAY),
+        currency: "usd",
+      }),
+    ).toBe(Math.max(0, held - surplusCents));
+  });
+
+  test("the person who ran a period cannot approve it, and nothing is posted", async () => {
+    await expect(approvePeriod(db, { periodId, approvedById: finance.runner })).rejects.toThrow(SecondApproverError);
+    const [p] = await db.select().from(s.patronagePeriods).where(eq(s.patronagePeriods.id, periodId));
+    expect(p).toMatchObject({ status: "computed", approvedById: null, ledgerTransactionId: null });
   });
 
   test("approvePeriod posts allocations to the ledger, exactly once", async () => {

@@ -210,6 +210,15 @@ describe("checkout session params", () => {
     );
     expect(() => checkoutSessionParams(request({ amountCents: 0 }), "r")).toThrow(/positive/);
   });
+
+  test("member shares are not sold through Stripe (ADR 0020)", () => {
+    expect(() =>
+      checkoutSessionParams(
+        request({ kind: "membership_share", recurring: false, creatorUserId: null, amountCents: 500 }),
+        "r",
+      ),
+    ).toThrow(/member shares/);
+  });
 });
 
 function fakeFetch(handler: (url: URL, init: RequestInit) => Response) {
