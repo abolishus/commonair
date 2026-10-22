@@ -119,7 +119,7 @@ export function newTermWindow(now: Date): { startsAt: Date; endsAt: Date } {
   return { startsAt: new Date(now.getTime()), endsAt: termWindow(now).endsAt };
 }
 
-export type ReseatReason = "no_term" | "month_changed" | "vacancy";
+export type ReseatReason = "no_term" | "month_changed" | "vacancy" | "unfilled";
 
 /** Seated members who are no longer active streamer members (their seats are vacant). */
 export function councilVacancies(seated: readonly string[], activeStreamers: ReadonlySet<string>): string[] {
@@ -128,12 +128,17 @@ export function councilVacancies(seated: readonly string[], activeStreamers: Rea
 
 /**
  * Why a new term must be seated at `now`, or null when the current term stands: there is no
- * current term, the UTC month changed since it started, or a seat fell vacant.
+ * current term, the UTC month changed since it started, a seat fell vacant, or the term has
+ * fewer than `size` seats while an active streamer member is not seated (`unfilled`: a term
+ * seated before anyone qualified must not stay empty for the rest of the month).
+ * `unfilled` is only a candidate: `recomputeCouncil` seats a new term only when the new
+ * seating would fill more seats than the current one, so ineligible streamers cause no churn.
  */
 export function reseatReason(
   current: { startsAt: Date; seated: readonly string[] } | null,
   now: Date,
   activeStreamers: ReadonlySet<string>,
+  size: number,
 ): ReseatReason | null {
   if (!current) return "no_term";
   if (
@@ -141,7 +146,12 @@ export function reseatReason(
     current.startsAt.getUTCMonth() !== now.getUTCMonth()
   )
     return "month_changed";
-  return councilVacancies(current.seated, activeStreamers).length > 0 ? "vacancy" : null;
+  if (councilVacancies(current.seated, activeStreamers).length > 0) return "vacancy";
+  if (current.seated.length < size) {
+    const seated = new Set(current.seated);
+    for (const userId of activeStreamers) if (!seated.has(userId)) return "unfilled";
+  }
+  return null;
 }
 
 export interface RecomputeResult {
@@ -199,11 +209,12 @@ export async function recomputeCouncil(db: Database, now: Date): Promise<Recompu
       : [];
     const streamers = await activeStreamers(tx);
     const seated = currentSeats.map((s) => s.userId);
-    const reason = reseatReason(current ? { startsAt: current.startsAt, seated } : null, now, streamers);
-    if (current && reason === null) return { termId: current.id, created: false, reason, seats: currentSeats };
-
     const settings = await loadSettings(tx);
     const config = councilConfigOf(settings);
+    const reason = reseatReason(current ? { startsAt: current.startsAt, seated } : null, now, streamers, config.size);
+    const stand = (termId: string): RecomputeResult => ({ termId, created: false, reason: null, seats: currentSeats });
+    if (current && reason === null) return stand(current.id);
+
     const weights = contributionWeightsOf(settings);
     const windowStart = new Date(now.getTime() - config.eligibilityWindowDays * 86_400_000);
     const inputs = await contributionInputs(tx, windowStart, now, weights.dailyStreamingHourCap);
@@ -212,6 +223,9 @@ export async function recomputeCouncil(db: Database, now: Date): Promise<Recompu
     );
     const seating = seatCouncil(candidates, config, weights);
     const method = { ...seating.method, windowStart: windowStart.toISOString(), windowEnd: now.toISOString() };
+    // An unfilled term is re-seated only when more seats would be filled (no daily churn while
+    // the unseated streamers are not eligible).
+    if (current && reason === "unfilled" && seating.seats.length <= seated.length) return stand(current.id);
     const { startsAt, endsAt } = newTermWindow(now);
 
     // The trigger stamps computed_at and txid; seats are accepted only in this transaction.

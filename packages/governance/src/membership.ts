@@ -56,10 +56,13 @@ export function subscriptionQualifies(
 
 /**
  * Days a voluntary exit is respected for in a class: the job does not re-activate a class the
- * member left within this window (ADR 0020). Both managed classes use the membership window
- * `streamer.windowDays`; the viewer class has no window of its own.
+ * member left within this window (ADR 0020, "within that class's window"). The streamer class
+ * uses its membership window `streamer.windowDays`. The viewer class has no window, so a viewer
+ * exit is respected indefinitely: the job never re-enrols a viewer who left, who rejoins only by
+ * an explicit action (a new share confirmed by the treasurer inserts the membership).
  */
-export const exitWindowDays = (rules: Pick<MembershipClasses, "streamer">): number => rules.streamer.windowDays;
+export const exitWindowDays = (cls: "streamer" | "viewer", rules: Pick<MembershipClasses, "streamer">): number =>
+  cls === "streamer" ? rules.streamer.windowDays : Number.POSITIVE_INFINITY;
 
 /**
  * Whether the latest membership in a class is a voluntary exit the job must respect at `now`.
@@ -71,6 +74,7 @@ export function exitRespected(
   windowDays: number,
 ): boolean {
   if (latest?.status !== "exited") return false;
+  if (windowDays === Number.POSITIVE_INFINITY) return true;
   const at = latest.exitedAt ?? latest.createdAt;
   return at.getTime() > now.getTime() - windowDays * 86_400_000;
 }
@@ -145,8 +149,9 @@ async function qualifyingSubscribers(tx: Executor, now: Date, rules: MembershipC
  *   of a class unless `allowMassLapse` is set: a mass lapse is far more likely to be a data
  *   problem (lost stream hours, a payment outage) than reality. Refusals are logged and audited.
  * - Banned or deleted users are never activated. A member whose latest membership in a class
- *   is `exited` within `exitWindowDays` left voluntarily and is not re-activated in that class;
- *   lapsed members (and exits older than the window) who qualify again get a new membership row.
+ *   is `exited` within `exitWindowDays` (streamer: the membership window; viewer: always) left
+ *   voluntarily and is not re-activated in that class; lapsed members (and streamer exits older
+ *   than the window) who qualify again get a new membership row.
  * - Every activation and lapse writes its `audit_log` row and its `coop.membership.update` event
  *   in this transaction.
  * - Safe to run concurrently (advisory lock, and inserts tolerate a concurrent activation)
@@ -197,7 +202,6 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
         createdAt: new Date(Number(r.created_ms)),
       });
     }
-    const exitWindow = exitWindowDays(rules);
 
     const candidates = new Set<string>([...hours.keys(), ...shareOf.keys(), ...subscribed]);
     for (const c of current.values()) if (c.status === "active") candidates.add(c.userId);
@@ -227,7 +231,7 @@ export async function syncMemberships(db: Database, now: Date, opts: SyncOptions
       }
       if (!eligible || blocked.has(userId)) return;
       // A voluntary exit inside the window is respected; a lapse re-activates when eligible again.
-      if (exitRespected(c, now, exitWindow)) return;
+      if (exitRespected(c, now, exitWindowDays(cls, rules))) return;
       inserts.push({ id: uuidv7(), user_id: userId, class: cls, basis });
     };
 

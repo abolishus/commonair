@@ -238,6 +238,39 @@ describe("syncMemberships", () => {
   });
 });
 
+describe("syncMemberships and a viewer exit", () => {
+  test("a viewer exit older than the streamer window is still respected; an old viewer lapse is not", async () => {
+    const owner = await streamer();
+    const day = (d: number) => new Date(NOW.getTime() - d * 86_400_000);
+    const sub = (subscriberId: string) => ({
+      subscriberId,
+      channelId: owner.channelId,
+      tier: 1,
+      status: "active" as const,
+      provider: "manual" as const,
+      priceCents: 499,
+      currency: "usd",
+      currentPeriodEnd: new Date(NOW.getTime() + 86_400_000),
+    });
+    // Exited 120 days ago (past streamer.windowDays = 90) and still qualifies by subscription.
+    const exitedViewer = await user();
+    await app
+      .insert(s.memberships)
+      .values({ userId: exitedViewer, class: "viewer", basis: "subscription", status: "exited", exitedAt: day(120) });
+    const lapsedViewer = await user();
+    await app
+      .insert(s.memberships)
+      .values({ userId: lapsedViewer, class: "viewer", basis: "subscription", status: "lapsed", lapsedAt: day(120) });
+    await app.insert(s.subscriptions).values([sub(exitedViewer), sub(lapsedViewer)]);
+
+    const r = await syncMemberships(app, NOW);
+    expect(await activeOf(exitedViewer)).toEqual([]);
+    expect(await activeOf(lapsedViewer)).toEqual([{ class: "viewer", basis: "subscription" }]);
+    expect(r.activated.map((a) => a.userId)).not.toContain(exitedViewer);
+    expect(r.activated.map((a) => a.userId)).toContain(lapsedViewer);
+  });
+});
+
 describe("recomputeCouncil", () => {
   test("seats the top streamers, reseats on a vacancy or a new month, with method, audit and events", async () => {
     // Streamer members from the sync test above are candidates too; assertions are relative.
@@ -328,6 +361,28 @@ describe("recomputeCouncil", () => {
       term_id: first.termId,
       seats: first.seats.length,
     });
+  });
+
+  test("an empty term is refilled once a streamer qualifies (unfilled), and stands otherwise", async () => {
+    // November: every streamer from the tests above is outside the 90-day window.
+    const nov = (d: number, h = 12) => new Date(Date.UTC(2026, 10, d, h));
+    const empty = await recomputeCouncil(app, nov(5));
+    expect(empty).toMatchObject({ created: true, reason: "no_term", seats: [] });
+    // Active streamers exist, but none is eligible: no new term (no daily churn).
+    expect(await recomputeCouncil(app, nov(6))).toMatchObject({ termId: empty.termId, created: false, reason: null });
+
+    const st = await streamer();
+    await streamHours(st, nov(3, 0), 8);
+    await streamHours(st, nov(4, 0), 8);
+    await app.insert(s.memberships).values({ userId: st.userId, class: "streamer", basis: "streaming_hours" });
+    const filled = await recomputeCouncil(app, nov(7));
+    expect(filled).toMatchObject({ created: true, reason: "unfilled" });
+    expect(filled.termId).not.toBe(empty.termId);
+    expect(filled.seats.map((x) => x.userId)).toEqual([st.userId]);
+    const [audit] = await app.select().from(s.auditLog).where(eq(s.auditLog.subjectId, filled.termId));
+    expect(audit!.details).toMatchObject({ trigger: "unfilled", previousTermId: empty.termId, vacated: [] });
+    // Every eligible streamer is seated: the term stands.
+    expect(await recomputeCouncil(app, nov(8))).toMatchObject({ termId: filled.termId, created: false });
   });
 
   test("a term that started in an earlier month is replaced (month_changed)", async () => {

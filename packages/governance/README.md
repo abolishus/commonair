@@ -79,16 +79,20 @@ row first and writing its audit row (actor `system`) and `coop.proposal.update` 
   raised to `governance.protections.minVotingSeconds` for protected proposals) + a 1 s margin, so
   the trigger's own clock reading never sees a window under the minimum. Every electorate member
   (built by the trigger in the same statement) gets a `vote_open` notification
-  (`{ proposalId, kind, votingEndsAt }`).
+  (`{ proposalId, kind, votingEndsAt }`), inserted in batches of `NOTIFICATION_BATCH` (1,000) so
+  a large electorate never exceeds the 65,535 parameters one statement may bind.
 - Deciding tallies the frozen electorate and the votes with `tally()` (votes after the deadline
   ignored), sets the status and inserts the `tallies` row; the triggers re-tally both. Audit
   details are `{ passed, rule }` (`decisionRule`: the failing `TALLY_RULES` id or `passed`). A
   database refusal is a TS/SQL disagreement: nothing is recorded, `error` is logged with both
   reasons and `disagreements` is counted. `opts.tallyFn` exists only for the test that proves it.
 - Applying writes every change (`value`, `updated_by_proposal_id`) and `applied` inside a
-  savepoint. When the settings trigger refuses (superseded since the vote opened, or the re-tally
-  no longer passes), the savepoint rolls back, the proposal stays `passed`, `proposal.apply_refused`
-  is written and a `warn` logged; `dueProposals` skips proposals with that audit row.
+  savepoint. When the settings trigger refuses for good (superseded since the vote opened, the
+  re-tally no longer passes, or already applied: `PERMANENT_REFUSAL`, or a settings history row
+  for one of the keys after `voting_starts_at`), the savepoint rolls back, the proposal stays
+  `passed`, `proposal.apply_refused` is written and a `warn` logged; `dueProposals` skips
+  proposals with that audit row. Any other error, including a `42501` from a missing grant, fails
+  the step (`failed`, logged) and the next run retries it.
 - Oldest deadline first, `limit` per run (default 50); a failing proposal is counted and logged
   and never blocks the others. Concurrent runs are safe: the row lock serializes them and the
   second finds nothing due.
@@ -108,7 +112,10 @@ row first and writing its audit row (actor `system`) and `coop.proposal.update` 
 
 `recomputeCouncil` seats a new term when `reseatReason` says so: there is no current term (the
 latest by `computed_at` whose window contains `now`), the UTC month changed since it started, or
-a seated member is no longer an active streamer member (`councilVacancies`). The new term starts
+a seated member is no longer an active streamer member (`councilVacancies`), or the term has
+fewer than `size` seats while an active streamer member is unseated and a new seating would fill
+more seats (`unfilled`: a term seated before anyone qualified, for example on a fresh instance,
+must not stay empty for the rest of the month; ineligible streamers cause no churn). The new term starts
 now and ends at the end of the UTC month (`newTermWindow`); otherwise the current term is
 returned unchanged. Terms and seats are append-only and the seats go in the term's transaction
 (trigger). The method (inputs, weights, totals, window) is stored in `council_terms.method`; the
@@ -137,10 +144,12 @@ nomination, then the lower user id. `canVoteInElection` / `canStandInElection` /
 no longer qualify (`status = lapsed`, `lapsedAt`), and refreshes `lastEligibilityCheckAt`. Only
 memberships with a basis the job manages are touched (`streaming_hours`; `share`/`subscription`).
 Banned or deleted users are never activated. A member whose latest membership in a class is
-`exited` with `exited_at` inside `exitWindowDays` (the membership window,
-`streamer.windowDays`, for both managed classes; the viewer class has no window of its own) left
-voluntarily and is not re-activated by the job (`exitRespected`); lapsed members and older exits
-re-activate when they qualify again. Every activation and lapse writes an `audit_log` row (ids
+`exited` with `exited_at` inside `exitWindowDays(class)` left voluntarily and is not re-activated
+by the job (`exitRespected`). The streamer window is `streamer.windowDays`. The viewer class has
+no window, so a viewer exit is respected indefinitely: the job never re-enrols a viewer who left;
+they rejoin by an explicit action (a new share confirmed by the treasurer inserts the
+membership). Lapsed members, and streamer exits older than the window, re-activate when they
+qualify again. Every activation and lapse writes an `audit_log` row (ids
 and numbers only) and a `coop.membership.update` event in the same transaction. Membership
 history is kept by the database trigger.
 

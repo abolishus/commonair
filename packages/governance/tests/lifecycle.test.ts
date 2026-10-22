@@ -4,7 +4,14 @@
 /** Pure helpers of the proposal lifecycle, council reseating and voluntary exits. */
 import { describe, expect, test } from "vite-plus/test";
 import { councilVacancies, newTermWindow, reseatReason } from "../src/council.ts";
-import { decisionRule, nextStep, votingSeconds, type ProposalClock } from "../src/lifecycle.ts";
+import {
+  PERMANENT_REFUSAL,
+  chunks,
+  decisionRule,
+  nextStep,
+  votingSeconds,
+  type ProposalClock,
+} from "../src/lifecycle.ts";
 import { exitRespected, exitWindowDays } from "../src/membership.ts";
 import { pgCode } from "../src/outbox.ts";
 import type { ProposalStatus } from "../src/rules.ts";
@@ -128,16 +135,32 @@ describe("council reseating", () => {
   });
 
   test("a new term is due with no current term, a new UTC month, or a vacancy", () => {
-    expect(reseatReason(null, NOW, active)).toBe("no_term");
+    expect(reseatReason(null, NOW, active, 7)).toBe("no_term");
     const june = new Date("2026-06-01T00:00:00Z");
-    expect(reseatReason({ startsAt: june, seated: ["a", "b"] }, NOW, active)).toBeNull();
-    expect(reseatReason({ startsAt: june, seated: [] }, NOW, active)).toBeNull();
-    expect(reseatReason({ startsAt: june, seated: ["a", "gone"] }, NOW, active)).toBe("vacancy");
+    expect(reseatReason({ startsAt: june, seated: ["a", "b", "c"] }, NOW, active, 7)).toBeNull();
+    expect(reseatReason({ startsAt: june, seated: ["a", "b"] }, NOW, active, 2)).toBeNull();
+    expect(reseatReason({ startsAt: june, seated: ["a", "gone"] }, NOW, active, 7)).toBe("vacancy");
     // Month change wins over a vacancy (both reseat; the reason names the first cause).
     const may = new Date("2026-05-31T23:59:59Z");
-    expect(reseatReason({ startsAt: may, seated: ["a", "gone"] }, NOW, active)).toBe("month_changed");
+    expect(reseatReason({ startsAt: may, seated: ["a", "gone"] }, NOW, active, 7)).toBe("month_changed");
     // Same month number, another year.
-    expect(reseatReason({ startsAt: new Date("2025-06-20T00:00:00Z"), seated: [] }, NOW, active)).toBe("month_changed");
+    expect(reseatReason({ startsAt: new Date("2025-06-20T00:00:00Z"), seated: [] }, NOW, active, 7)).toBe(
+      "month_changed",
+    );
+  });
+
+  test("an empty or under-filled term is unfilled while an active streamer is not seated", () => {
+    const june = new Date("2026-06-01T00:00:00Z");
+    expect(reseatReason({ startsAt: june, seated: [] }, NOW, active, 7)).toBe("unfilled");
+    expect(reseatReason({ startsAt: june, seated: ["a", "b"] }, NOW, active, 7)).toBe("unfilled");
+    // Every active streamer is seated: nobody to add.
+    expect(reseatReason({ startsAt: june, seated: ["a", "b", "c"] }, NOW, active, 7)).toBeNull();
+    // No active streamers at all: an empty term stands.
+    expect(reseatReason({ startsAt: june, seated: [] }, NOW, new Set(), 7)).toBeNull();
+    // A full term with unseated streamers stands.
+    expect(reseatReason({ startsAt: june, seated: ["a", "b"] }, NOW, active, 2)).toBeNull();
+    // A vacancy is named before an unfilled seat.
+    expect(reseatReason({ startsAt: june, seated: ["gone"] }, NOW, active, 7)).toBe("vacancy");
   });
 
   test("a term seated now starts now and ends at the end of the UTC month", () => {
@@ -151,8 +174,23 @@ describe("voluntary exits", () => {
   const rules = { streamer: { minStreamingHours: 10, windowDays: 90, minVerifiedViewers: 2, lapseGraceDays: 14 } };
   const DAY = 86_400_000;
 
-  test("the exit window is the membership window", () => {
-    expect(exitWindowDays(rules)).toBe(90);
+  test("the streamer exit window is the membership window; a viewer exit has no window", () => {
+    expect(exitWindowDays("streamer", rules)).toBe(90);
+    expect(exitWindowDays("viewer", rules)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  test("a viewer exit is respected however old it is", () => {
+    const window = exitWindowDays("viewer", rules);
+    const exited = (daysAgo: number) => ({
+      status: "exited",
+      exitedAt: new Date(NOW.getTime() - daysAgo * DAY),
+      createdAt: new Date(NOW.getTime() - 2000 * DAY),
+    });
+    expect(exitRespected(exited(1), NOW, window)).toBe(true);
+    expect(exitRespected(exited(91), NOW, window)).toBe(true);
+    expect(exitRespected(exited(1500), NOW, window)).toBe(true);
+    expect(exitRespected({ status: "exited", exitedAt: null, createdAt: new Date(0) }, NOW, window)).toBe(true);
+    expect(exitRespected({ status: "lapsed", exitedAt: null, createdAt: NOW }, NOW, window)).toBe(false);
   });
 
   test("an exit inside the window is respected; an older exit or a lapse is not", () => {
@@ -181,5 +219,31 @@ describe("pgCode", () => {
     expect(pgCode(new Error("plain"))).toBeUndefined();
     expect(pgCode({ code: "ECONNREFUSED" })).toBeUndefined();
     expect(pgCode(null)).toBeUndefined();
+  });
+});
+
+describe("vote_open notification batches", () => {
+  test("chunks splits into consecutive slices of at most the size", () => {
+    expect(chunks([], 3)).toEqual([]);
+    expect(chunks([1, 2, 3], 3)).toEqual([[1, 2, 3]]);
+    expect(chunks([1, 2, 3, 4, 5, 6, 7], 3)).toEqual([[1, 2, 3], [4, 5, 6], [7]]);
+    expect(chunks([1, 2], 0)).toEqual([[1], [2]]);
+  });
+});
+
+describe("apply refusals", () => {
+  test("only the settings guard's permanent refusals are final", () => {
+    for (const m of [
+      "setting discovery.ranking changed after proposal x opened for voting; the decision is superseded",
+      "proposal x fails re-tally: member-wide quorum not met",
+      "proposal x was already applied to discovery.ranking",
+    ])
+      expect(PERMANENT_REFUSAL.test(m)).toBe(true);
+    for (const m of [
+      "permission denied for table governance_settings",
+      "proposal x is not a passed, unapplied decision",
+      'new row for relation "governance_settings" violates check constraint',
+    ])
+      expect(PERMANENT_REFUSAL.test(m)).toBe(false);
   });
 });

@@ -182,6 +182,16 @@ async function lockProposal(tx: Executor, id: string): Promise<Proposal | undefi
   return row;
 }
 
+/** `vote_open` notifications per insert statement (5 parameters a row, well under the limit). */
+export const NOTIFICATION_BATCH = 1_000;
+
+/** `items` in consecutive slices of at most `size` (size ≥ 1). */
+export function chunks<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += Math.max(1, size)) out.push(items.slice(i, i + Math.max(1, size)));
+  return out;
+}
+
 /** discussion → council_review. */
 async function openCouncilReview(tx: Executor, p: Proposal, now: Date): Promise<void> {
   await tx.update(P).set({ status: "council_review" }).where(eq(P.id, p.id));
@@ -220,13 +230,16 @@ async function openVote(tx: Executor, p: Proposal, now: Date): Promise<number> {
     .select({ userId: schema.proposalElectorate.userId })
     .from(schema.proposalElectorate)
     .where(eq(schema.proposalElectorate.proposalId, p.id));
-  if (electorate.length > 0) {
+  const payload = { proposalId: p.id, kind: p.kind, votingEndsAt: opened?.votingEndsAt?.toISOString() ?? null };
+  // In batches: one statement binds at most 65,535 parameters, which one row per member of a
+  // large electorate would exceed (and the vote would never open).
+  for (const batch of chunks(electorate, NOTIFICATION_BATCH)) {
     await tx.insert(schema.notifications).values(
-      electorate.map((e) => ({
+      batch.map((e) => ({
         id: uuidv7(now.getTime()),
         userId: e.userId,
         type: "vote_open" as const,
-        payload: { proposalId: p.id, kind: p.kind, votingEndsAt: opened?.votingEndsAt?.toISOString() ?? null },
+        payload,
         createdAt: now,
       })),
     );
@@ -298,9 +311,45 @@ async function applyRefusedBefore(tx: Executor, id: string): Promise<boolean> {
 const REFUSALS = new Set(["42501", "23514", "P0001"]);
 
 /**
- * passed → applied, all or nothing, inside a savepoint. When the database refuses a change (a
- * superseded decision, or a re-tally that no longer passes) the savepoint is rolled back, the
- * proposal stays `passed` and an `apply_refused` audit row marks it so it is not retried.
+ * The settings guard's refusals that can never succeed on a retry: the decision was superseded,
+ * its frozen votes no longer pass, or it was already applied. Anything else with a refusal
+ * SQLSTATE (a missing grant after a migration, a misconfigured role) may be fixed by an
+ * operator, so it fails the step and is retried instead of being refused for good.
+ */
+export const PERMANENT_REFUSAL = /\bsuperseded\b|\bfails re-tally\b|\balready applied\b/;
+
+/** The Postgres error message, looking through drizzle's wrapper. */
+function pgMessage(err: unknown): string {
+  const parts: string[] = [];
+  for (let e: unknown = err, depth = 0; e && typeof e === "object" && depth < 5; depth++) {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string") parts.push(m);
+    e = (e as { cause?: unknown }).cause;
+  }
+  return parts.join("\n");
+}
+
+/** Whether a setting this proposal changes was changed after its vote opened (the guard's rule). */
+async function superseded(tx: Executor, p: Proposal): Promise<boolean> {
+  const keys = p.changes.map((c) => c.key);
+  if (keys.length === 0) return false;
+  // Compared in SQL: both timestamps keep their microseconds.
+  const rows = (await tx.execute(sql`
+    select 1 from governance_settings_history h join proposals p on p.id = ${p.id}::uuid
+     where h.key in (${sql.join(
+       keys.map((k) => sql`${k}`),
+       sql`, `,
+     )})
+       and h.changed_at > p.voting_starts_at
+     limit 1`)) as unknown as Row[];
+  return rows.length > 0;
+}
+
+/**
+ * passed → applied, all or nothing, inside a savepoint. When the database refuses the change for
+ * good (superseded since the vote opened, a re-tally that no longer passes, already applied) the
+ * savepoint is rolled back, the proposal stays `passed` and an `apply_refused` audit row marks it
+ * so it is not retried. Any other error propagates: the step fails and the next run retries it.
  */
 async function apply(tx: Executor, p: Proposal, now: Date): Promise<"applied" | { refused: string }> {
   const keys = p.changes.map((c) => c.key);
@@ -317,6 +366,7 @@ async function apply(tx: Executor, p: Proposal, now: Date): Promise<"applied" | 
   } catch (err) {
     const code = pgCode(err);
     if (!code || !REFUSALS.has(code)) throw err;
+    if (!PERMANENT_REFUSAL.test(pgMessage(err)) && !(await superseded(tx, p))) throw err;
     await systemAudit(
       tx,
       {

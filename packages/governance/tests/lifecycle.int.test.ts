@@ -9,7 +9,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { schema as s, type Database } from "@commonair/db";
-import { FAST_GOVERNANCE, createTestDatabase, type TestDatabase } from "@commonair/db/testing";
+import { FAST_GOVERNANCE, TEST_APP_ROLE, createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import type { GovernanceChange } from "@commonair/contracts/shapes";
 import { advanceProposal, advanceProposals, emptyAdvanceResult, type AdvanceResult } from "../src/lifecycle.ts";
 import { tally } from "../src/tally.ts";
@@ -392,6 +392,64 @@ describe("applying", () => {
     expect(await advance(f)).toEqual(only({ passed: 1 }));
     expect(await advance(f)).toEqual(only({ applied: 1 }));
     expect((await f.proposal(id)).status).toBe("applied");
+  });
+});
+
+describe("applying after a transient refusal", () => {
+  const f = fixture();
+
+  test("a refusal that is not permanent (a missing grant) fails the step and is retried", async () => {
+    const voters = [await f.member("viewer"), await f.member("streamer"), await f.member("worker")];
+    const ranking = (await f.setting("discovery.ranking")).value as Record<string, unknown>;
+    const id = await f.submitted(voters[0]!, {
+      changes: [{ key: "discovery.ranking", value: { ...ranking, spotlightSlots: 5 } }],
+    });
+    expect(await advance(f)).toEqual(only({ votingOpened: 1, notified: 3 }));
+    await f.vote(
+      id,
+      voters.map((u) => [u, "yes"] as [string, "yes"]),
+    );
+    await f.afterVoting(id);
+    expect(await advance(f)).toEqual(only({ passed: 1 }));
+
+    // A migration that forgot to re-grant the app role: the update is refused with 42501.
+    await f.t.sql.unsafe(`revoke update on governance_settings from ${TEST_APP_ROLE}`);
+    try {
+      expect(await advance(f)).toEqual(only({ failed: 1 }));
+      expect(await advance(f)).toEqual(only({ failed: 1 }));
+      expect((await f.audits(id)).filter((x) => x.action === "proposal.apply_refused")).toHaveLength(0);
+      expect((await f.proposal(id)).status).toBe("passed");
+    } finally {
+      await f.t.sql.unsafe(`grant update on governance_settings to ${TEST_APP_ROLE}`);
+    }
+
+    // Once the grant is back, the next run applies it.
+    expect(await advance(f)).toEqual(only({ applied: 1 }));
+    expect((await f.proposal(id)).status).toBe("applied");
+    expect((await f.setting("discovery.ranking")).updatedByProposalId).toBe(id);
+  });
+});
+
+describe("opening a vote for a large electorate", () => {
+  const f = fixture();
+
+  test("notifies every member even past the 65,535-parameter limit of one statement", async () => {
+    const author = await f.member("viewer");
+    const n = 14_000;
+    // 5 parameters a notification row: one insert for this electorate would need 70,000+.
+    await f.app.execute(sql`
+      insert into users (id, name, email, username)
+      select gen_random_uuid(), 'bulk' || i, 'bulk' || i || '@example.test', 'bulk' || i from generate_series(1, ${n}) i`);
+    await f.app.execute(sql`
+      insert into memberships (id, user_id, class, basis)
+      select gen_random_uuid(), id, 'viewer', 'share' from users where username like 'bulk%'`);
+    const id = await f.submitted(author);
+    expect(await advance(f)).toEqual(only({ votingOpened: 1, notified: n + 1 }));
+    expect((await f.proposal(id)).status).toBe("voting");
+    const [count] = (await f.app.execute(
+      sql`select count(*)::int as n from notifications where type = 'vote_open' and payload->>'proposalId' = ${id}`,
+    )) as unknown as { n: number }[];
+    expect(count!.n).toBe(n + 1);
   });
 });
 
