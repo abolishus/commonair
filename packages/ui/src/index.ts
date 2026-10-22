@@ -16,6 +16,8 @@ export {
   formatNumber,
   formatRelativeTime,
   formatDateTime,
+  formatBytes,
+  formatDuration,
   formatUnitCost,
   MICROS_PER_UNIT,
   type FormatUnitCostOptions,

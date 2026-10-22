@@ -3,20 +3,17 @@
 
 import * as React from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Add01Icon } from "@hugeicons/core-free-icons";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { ChannelAvatar, StatusBadge } from "@commonair/ui";
-import { Button } from "@commonair/ui/components/button";
+import { StatusBadge } from "@commonair/ui";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { Field, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
-import { ItemGroup } from "@commonair/ui/components/item";
 import { Switch } from "@commonair/ui/components/switch";
 import { PageContainer } from "@commonair/ui/layouts";
 import { PageHeader } from "@commonair/ui/blocks/headers";
 import { DataTable, type DataTableColumn } from "@commonair/ui/blocks/data";
-import { ActionRow, ChoiceToggle, CopyField, SelectField, SwitchField } from "@commonair/ui/blocks/forms";
+import { ChoiceToggle, CopyField, SelectField, SwitchField } from "@commonair/ui/blocks/forms";
+import { SimulcastPanel, type SimulcastTargetRow } from "@commonair/ui/blocks/studio";
 import {
   captions,
   ingest,
@@ -24,9 +21,9 @@ import {
   protocols,
   recording,
   renditions,
-  simulcastTargets,
   type Rendition,
 } from "./fixtures/StreamSetup.ts";
+import { simulcastLabels, simulcastPlatforms, simulcastTargets } from "../e6-fixtures.tsx";
 import { StudioPage, light, mobile320, pageParameters } from "./shell.tsx";
 
 const meta = { title: "Pages/Creator studio/StreamSetup", parameters: pageParameters } satisfies Meta;
@@ -39,9 +36,7 @@ function StreamSetupPage(): React.JSX.Element {
   const [enabled, setEnabled] = React.useState<Record<string, boolean>>(
     Object.fromEntries(renditions.map((row) => [row.id, row.enabled])),
   );
-  const [targets, setTargets] = React.useState<Record<string, boolean>>(
-    Object.fromEntries(simulcastTargets.map((target) => [target.id, target.enabled])),
-  );
+  const [targets, setTargets] = React.useState<SimulcastTargetRow[]>(simulcastTargets);
   const columns: DataTableColumn<Rendition>[] = [
     { id: "name", header: "Rendition", accessorKey: "name" },
     { id: "resolution", header: "Resolution", accessorKey: "resolution" },
@@ -131,38 +126,31 @@ function StreamSetupPage(): React.JSX.Element {
             <DataTable caption="Quality options" columns={columns} rows={renditions} getRowId={(row) => row.id} />
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Simulcast</CardTitle>
-            <CardDescription>
-              Restream to other platforms from our servers, so your upload stays the same.
-            </CardDescription>
-            <CardAction>
-              <Button variant="outline" size="sm">
-                <HugeiconsIcon icon={Add01Icon} aria-hidden="true" />
-                Add target
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <ItemGroup>
-              {simulcastTargets.map((target) => (
-                <ActionRow
-                  key={target.id}
-                  media={<ChannelAvatar name={target.initial} accent={target.accent} size="sm" decorative />}
-                  title={target.name}
-                  description={target.detail}
-                  status={target.healthy ? { label: "Healthy", tone: "success" } : undefined}
-                  trailingSwitch={{
-                    label: target.enabled ? "Enabled" : "Disabled",
-                    checked: targets[target.id] ?? false,
-                    onCheckedChange: (checked) => setTargets((current) => ({ ...current, [target.id]: checked })),
-                  }}
-                />
-              ))}
-            </ItemGroup>
-          </CardContent>
-        </Card>
+        <SimulcastPanel
+          targets={targets}
+          platforms={simulcastPlatforms}
+          labels={simulcastLabels}
+          onAdd={(values) =>
+            setTargets((current) => [
+              ...current,
+              {
+                id: `t${current.length + 1}`,
+                name: values.name,
+                platform: values.platform,
+                platformLabel: simulcastPlatforms.find((p) => p.value === values.platform)?.label ?? values.platform,
+                rtmpUrl: values.rtmpUrl,
+                enabled: true,
+                status: "idle",
+                statusLabel: "Idle",
+                lastError: null,
+              },
+            ])
+          }
+          onToggle={(id, enabled) =>
+            setTargets((current) => current.map((target) => (target.id === id ? { ...target, enabled } : target)))
+          }
+          onRemove={(id) => setTargets((current) => current.filter((target) => target.id !== id))}
+        />
         <Card>
           <CardHeader>
             <CardTitle>Recording</CardTitle>
