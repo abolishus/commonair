@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { RELEASE_IMAGES } from "../release/manifest.ts";
-import { HOST_IMAGES, ZOT_IMAGE, buildSpecs, hostContainerfile, migratedFirst } from "../selfhost/e2e.ts";
+import { HOST_IMAGES, ZOT_IMAGE, buildSpecs, hostContainerfile, hostRunArgs, migratedFirst } from "../selfhost/e2e.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const licenses = JSON.parse(readFileSync(join(ROOT, "infra/image-licenses.json"), "utf8")) as Record<
@@ -70,5 +70,61 @@ describe("e2e: the upgrade re-ran migrate before api and worker", () => {
       { api: 5_500, worker: 7_000 },
     );
     expect(problems).toEqual(["api started at 5500, before migrate finished at 6000"]);
+  });
+});
+
+describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
+  const args = hostRunArgs("localhost/commonair-e2e/host-debian:latest", null, "10.89.0.2");
+
+  test("the host container resolves the registry by --add-host, not by network DNS", () => {
+    // CNI without the dnsname plugin (Podman 4 on some distributions) has no container DNS.
+    expect(args.join(" ")).toContain("--add-host commonair-e2e-zot:10.89.0.2");
+  });
+
+  test("the host container uses only flags Podman 4.9 has", () => {
+    const PODMAN_4_9 = new Set([
+      "-d",
+      "--name",
+      "--hostname",
+      "--privileged",
+      "--systemd",
+      "--network",
+      "--add-host",
+      "-v",
+    ]);
+    const flags = args.filter((a) => a.startsWith("-")).map((a) => a.replace(/=.*$/, ""));
+    expect(flags.filter((f) => !PODMAN_4_9.has(f))).toEqual([]);
+  });
+
+  test("every outer podman flag in e2e.ts is one Podman 4.9 has", () => {
+    const src = readFileSync(join(ROOT, "scripts/selfhost/e2e.ts"), "utf8");
+    // String literals that are flags, outside the inner (in-host) shell scripts.
+    const flags = new Set([...src.matchAll(/"(--?[a-z][a-z-]*)(?:=[^"]*)?"/g)].map((m) => m[1]!));
+    const KNOWN = new Set([
+      "-a",
+      "-c",
+      "-d",
+      "-e",
+      "-f",
+      "-p",
+      "-t",
+      "-u",
+      "-v",
+      "-w",
+      "--add-host",
+      "--build-arg",
+      "--digestfile",
+      "--distro",
+      "--format",
+      "--hostname",
+      "--keep",
+      "--label",
+      "--name",
+      "--network",
+      "--privileged",
+      "--systemd",
+      "--tls-verify",
+    ]);
+    expect([...flags].filter((f) => !KNOWN.has(f)).sort()).toEqual([]);
   });
 });

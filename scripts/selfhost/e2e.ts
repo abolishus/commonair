@@ -21,8 +21,14 @@
  * 5. Upgrades to a deliberately broken release (an api that never gets healthy) and checks
  *    that it rolls back to 0.0.0-e2e.2 and stays healthy.
  *
- * Needs podman (rootful, or a podman machine that allows --privileged) and network access for
- * the base images and the third-party images the units pull. Logs go to .cache/selfhost-e2e/;
+ * Needs podman 4.9 or newer on the outer host (CI: `sudo bun scripts/selfhost/e2e.ts` on
+ * ubuntu-24.04, rootful Podman 4.9; locally: a podman machine that allows --privileged) and
+ * network access for the base images and the third-party images the units pull. The outer
+ * podman gets only flags Podman 4.9 has (build, push --digestfile, run --privileged
+ * --systemd=always --add-host, network create, port, exec, rm -t); Podman 5 is needed only
+ * inside the host container, which installs its distribution's. The host container reaches the
+ * registry by an --add-host entry with Zot's address, so it works on either network backend
+ * (netavark, or CNI without the dnsname plugin). As root, Bun and podman must be on root's PATH. Logs go to .cache/selfhost-e2e/;
  * --keep leaves the containers running for debugging. Exits non-zero on failure.
  */
 import { createHash } from "node:crypto";
@@ -261,13 +267,9 @@ export function hostContainerfile(distro: Distro): string {
   ].join("\n");
 }
 
-async function startHost(distro: Distro, model: string | null): Promise<void> {
-  const dir = join(LOG_DIR, `host-${distro}`);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "Containerfile"), hostContainerfile(distro));
-  const image = `${LOCAL}/host-${distro}:latest`;
-  podman(["build", "-t", image, dir]);
-  podman([
+/** `podman run` arguments for the host container (outer podman: Podman 4.9 flags only). */
+export function hostRunArgs(image: string, model: string | null, zotAddress: string): string[] {
+  return [
     "run",
     "-d",
     "--name",
@@ -280,13 +282,25 @@ async function startHost(distro: Distro, model: string | null): Promise<void> {
     NETWORK,
     "--add-host",
     `${DOMAIN}:127.0.0.1`,
+    // Name resolution on the test network needs netavark/aardvark (or CNI's dnsname plugin).
+    "--add-host",
+    `${ZOT}:${zotAddress}`,
     "-v",
     `${LOG_DIR}/releases:/e2e/releases:ro`,
     "-v",
     `${join(REPO_ROOT, "scripts/selfhost.sh")}:/e2e/selfhost.sh:ro`,
     ...(model ? ["-v", `${model}:/e2e/${MODEL_FILE}:ro`] : []),
     image,
-  ]);
+  ];
+}
+
+async function startHost(distro: Distro, model: string | null, zotAddress: string): Promise<void> {
+  const dir = join(LOG_DIR, `host-${distro}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "Containerfile"), hostContainerfile(distro));
+  const image = `${LOCAL}/host-${distro}:latest`;
+  podman(["build", "-t", image, dir]);
+  podman(hostRunArgs(image, model, zotAddress));
   for (let i = 0; i < 60; i++) {
     const state = podman(["exec", HOST, "systemctl", "is-system-running"], { allowFail: true, quiet: true }).trim();
     if (state === "running" || state === "degraded") return;
@@ -434,6 +448,13 @@ async function main(): Promise<void> {
       }
     });
     const port = podman(["port", ZOT, "5000/tcp"]).trim().split(":").at(-1)!;
+    const zotAddress = podman([
+      "inspect",
+      "--format",
+      `{{(index .NetworkSettings.Networks "${NETWORK}").IPAddress}}`,
+      ZOT,
+    ]).trim();
+    if (!zotAddress) throw new StepError(`no address for ${ZOT} on ${NETWORK}`);
 
     const v1 = "0.0.0-e2e.1";
     const v2 = "0.0.0-e2e.2";
@@ -445,7 +466,7 @@ async function main(): Promise<void> {
         push(v1, (n) => `${LOCAL}/${n}:${commit.slice(0, 12)}`, port),
       ),
     );
-    await step(`start a ${distro} host`, () => startHost(distro, model));
+    await step(`start a ${distro} host`, () => startHost(distro, model, zotAddress));
 
     await step(`install ${v1}`, () => {
       const bundle = `/e2e/releases/${v1}/${bundleAssetName(v1)}`;
