@@ -14,12 +14,14 @@ const LIMIT_MS = 5;
 /**
  * Shared CI runners are several times slower than a workstation, so the absolute limit alone
  * fails there on patterns that are fine. The cost model's real claim is relative: no accepted
- * pattern does much more work than one quadratic scan of the message (`.{2,}!`: about 0.7 ms on
- * a workstation, the slowest accepted pattern about 2x that). The limit is the larger of the two.
+ * pattern is super-quadratic. One quadratic scan of the message (`.{2,}!`) is the unit; the
+ * slowest accepted patterns take 6-9x it on a workstation and up to about 12x on a loaded runner,
+ * while cubic work is about 250x (n/2 for n = 500) and exponential far more. The limit is the
+ * larger of LIMIT_MS and BASELINE_FACTOR scans.
  */
 const BASELINE = ".{2,}!";
-const BASELINE_FACTOR = 8;
-/** About 8x a workstation's baseline. */
+const BASELINE_FACTOR = 32;
+/** A machine slower than this measures nothing useful (a workstation's baseline is under 1 ms). */
 const MAX_BASELINE_MS = 5;
 
 /** mulberry32: a tiny seeded PRNG, so the corpus is the same on every run. */
