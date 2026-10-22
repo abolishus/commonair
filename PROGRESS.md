@@ -20,12 +20,12 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## E4c `trust-safety` harness bring-up (2026-10-21, in progress)
+## E4c `trust-safety` harness bring-up (2026-10-21/22, done)
 
-Steps 1–6 of `trust-safety` pass against the local Podman stack (T0 off air ≈ 5 s against a 9 s
-limit, T2 label ≈ 4 s, T1 restrict ≈ 3 s). Step 7 (NCII clock) fails: F's live clips fail in media
-(see "Open" below). Run it with `bun scripts/infra.ts stack harness/compose.trust-safety.yaml`, then
-`bun harness/src/cli.ts run trust-safety` (`--set steps=7` runs one step).
+`trust-safety` passes twice in a row against the local Podman stack (92/92 assertions both runs;
+T0 off air ≈ 5 s against a 9 s limit, T2 label ≈ 4 s, T1 restrict ≈ 3 s), and `e4b-money` still
+passes on the same stack (82/82). Run it with `bun scripts/infra.ts stack harness/compose.trust-safety.yaml`,
+then `bun harness/src/cli.ts run trust-safety` (`--set steps=7` runs one step).
 
 Fixed (each with a regression test checked against the old code; API/worker/media changes
 reviewed independently):
@@ -40,21 +40,34 @@ reviewed independently):
   boot (fail closed) and `/healthz` reports the hooks; `bullmq` was not a dependency, so every
   real T0/escalation/NCII enqueue threw; `vods.list/get` and `clips.create/list/get` implemented
   (were 501) with T0/NCII/T1 hiding, a removed-source backstop for clips and the 18+ gate on media
-  URLs; removing a VOD also removes its broadcast's clips.
+  URLs; removing a VOD also removes its broadcast's clips. Live clips end 10 s behind the live edge.
+- Media: a live clip whose window the recorder has not written yet (ffmpeg writes the playlist
+  only when a segment closes, ~15–25 s after going live) failed at once with "not live here and
+  has no VOD" on channels without VODs. The lookup now returns `pending` and the clip job waits
+  (delayed BullMQ retry every 1 s, up to 60 s after it was queued); a window that starts before
+  the recording began moves to its start. (The earlier `Bun.file().exists()` theory was a timing
+  artefact: the playlist did not exist yet when the job ran.)
 - Worker: `t0-media` job ids had `:` in a form BullMQ rejects, so evidence moves after T0 (and the
   daily reconciler and digest checks) never ran; the T0 evidence count is logged as
-  `evidenceCount`.
+  `evidenceCount`. The `ncii-hash` job skipped every item because it read `removed_at` (set by the
+  API at decision time, and relied on by the 0017 avatar guard) as "already hashed"; it now marks
+  `ncii_request_items.hashed_at` (migration 0018).
 - Web: a T1-restricted stream shows `stream-restricted` and plays only for confirmed adults; a
   decided moderation case stays open and refreshed.
-- Harness: deletion timestamps read as strings; queue rows open through their button.
+- Harness: deletion timestamps read as strings; queue rows open through their button; the NCII
+  form driver re-fills text fields that hydration reset; clip frames are read via a presigned URL.
 
-Open: live clips fail with "broadcast is not live here and has no VOD". The recorder's poll loop
-runs, but `Bun.file(<dir>/<runId>.m3u8).exists()` is false inside the media process although the
-playlist is on disk (`known` stays 0), so `localWindow` is always empty. Not yet explained; the
-recorder's `runs` id has not yet been compared with the on-disk playlist name.
-`e4b-money` passes on the same stack (82/82).
-vods/clips `update/remove` remain 501 (E6). `vods.broadcast_id` has no index (the clip backstop
-subquery uses it).
+Open:
+- Public media URLs (`S3_PUBLIC_ENDPOINT/<bucket>/<key>`) are not fetchable on the local stack:
+  Garage's S3 API refuses anonymous reads ("does not support anonymous access yet"), so avatars,
+  thumbnails, clips and VOD playback from object storage do not load in a browser. Needs Garage's
+  web endpoint (bucket website access) or a media proxy, plus an ADR; the harness works around it.
+- `ncii-hash` does not hash `broadcast` items yet (a `/live/<channel>` URL: the API ends the
+  broadcast and deletes its VODs/clips, but their objects stay and no hashes are added); those
+  items stay without `hashed_at` so a later fix picks them up. Requests decided before migration
+  0018 need a one-off `ncii-hash` re-enqueue (none exist on a real instance yet).
+- vods/clips `update/remove` remain 501 (E6). `vods.broadcast_id` has no index (the clip backstop
+  subquery uses it).
 
 ## E4b validation (2026-10-21)
 
