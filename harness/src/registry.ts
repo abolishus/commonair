@@ -4,21 +4,80 @@
 /**
  * Scenario registry. Scenarios are discovered from `harness/scenarios/*.ts` (files starting with
  * `_` are helpers, not scenarios), so later units add a scenario by adding one file and never
- * edit a shared index. `full` is not a file: it expands to every scenario with `inFull !== false`.
+ * edit a shared index. `full` is not a file: it expands to every scenario with `inFull !== false`,
+ * `smoke` first and `e2e-relay` last, and refuses to run while a Phase 4 scenario it must
+ * include (`FULL_REQUIRED`) is missing or left out.
  */
 import { readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { NEEDS, type Scenario } from "./scenario.ts";
+import { NEEDS, type ParamNeed, type Scenario } from "./scenario.ts";
 
 export const SCENARIOS_DIR = fileURLToPath(new URL("../scenarios", import.meta.url));
 export const FULL = "full";
+
+/** Runs first: it validates the basics before anything long starts. */
+export const FULL_FIRST = "smoke";
+/** Runs last: the longest scenario (~15 min), so a failure elsewhere surfaces early. */
+export const FULL_LAST = "e2e-relay";
+
+/**
+ * Every scenario `full` must run (docs/testing/e6-selectors.md, ADR 0021): Phase 1–4 coverage.
+ * A missing file or an `inFull: false` on one of these fails `full` instead of shrinking it.
+ * `load-plan` is deliberately absent (20 × 200 is a manual run).
+ */
+export const FULL_REQUIRED = [
+  "smoke",
+  "ingest-rtmp",
+  "ingest-whip",
+  "viewers",
+  "load-smoke",
+  "e2e-basic",
+  "e2e-social",
+  "integrity-basic",
+  "e4b-money",
+  "trust-safety",
+  "e5-coop",
+  // E6 (unit E1 writes these five).
+  "simulcast",
+  "overlay-alert",
+  "vod-clips",
+  "data-export",
+  "account-deletion",
+  // E6 (this unit).
+  "backup-restore",
+  "e2e-relay",
+] as const;
+
+/**
+ * Parameter variants of scenarios whose module does not declare `paramNeeds` itself. The Stripe
+ * variant of `e4b-money` is the one step `--profile no-proprietary` skips.
+ */
+export const DEFAULT_PARAM_NEEDS: Readonly<Record<string, readonly ParamNeed[]>> = {
+  "e4b-money": [{ param: "provider", value: "stripe", needs: ["stripe"], step: "Stripe variant" }],
+};
 
 export class RegistryError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RegistryError";
   }
+}
+
+function validParamNeeds(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value)) return false;
+  return value.every((pn: unknown) => {
+    if (typeof pn !== "object" || pn === null) return false;
+    const p = pn as Partial<ParamNeed>;
+    return (
+      typeof p.param === "string" &&
+      typeof p.value === "string" &&
+      typeof p.step === "string" &&
+      Array.isArray(p.needs) &&
+      p.needs.every((n) => (NEEDS as readonly string[]).includes(n))
+    );
+  });
 }
 
 /** Validate a module's default export as a Scenario named after its file. */
@@ -36,16 +95,36 @@ export function validateScenario(value: unknown, file: string): Scenario {
   if (!Array.isArray(s.needs) || s.needs.some((n) => !(NEEDS as readonly string[]).includes(n))) {
     throw new RegistryError(`${file}: needs must be a list of ${NEEDS.join(", ")}`);
   }
+  if (!validParamNeeds(s.paramNeeds)) {
+    throw new RegistryError(`${file}: paramNeeds must be a list of { param, value, needs, step }`);
+  }
   return s as Scenario;
+}
+
+/** Order `full`: `FULL_FIRST` first, `FULL_LAST` last, the rest by name. Pure. */
+export function orderFull(scenarios: readonly Scenario[]): Scenario[] {
+  const included = scenarios.filter((s) => s.inFull !== false).sort((a, b) => a.name.localeCompare(b.name));
+  const middle = included.filter((s) => s.name !== FULL_FIRST && s.name !== FULL_LAST);
+  return [...included.filter((s) => s.name === FULL_FIRST), ...middle, ...included.filter((s) => s.name === FULL_LAST)];
+}
+
+/** Names `full` must include but does not (missing file or `inFull: false`). Pure. */
+export function missingFromFull(scenarios: readonly Scenario[], required: readonly string[] = FULL_REQUIRED): string[] {
+  const inFull = new Set(orderFull(scenarios).map((s) => s.name));
+  return required.filter((n) => !inFull.has(n));
 }
 
 export class Registry {
   private readonly byName = new Map<string, Scenario>();
 
-  constructor(scenarios: readonly Scenario[]) {
+  constructor(
+    scenarios: readonly Scenario[],
+    private readonly required: readonly string[] = [],
+  ) {
     for (const s of scenarios) {
       if (this.byName.has(s.name)) throw new RegistryError(`duplicate scenario "${s.name}"`);
-      this.byName.set(s.name, s);
+      const paramNeeds = s.paramNeeds ?? DEFAULT_PARAM_NEEDS[s.name];
+      this.byName.set(s.name, paramNeeds ? { ...s, paramNeeds } : s);
     }
   }
 
@@ -57,15 +136,22 @@ export class Registry {
     return this.byName.get(name);
   }
 
-  /** Scenarios `full` runs, in a stable order (smoke first: it validates the basics). */
+  /** Scenarios `full` runs, in a stable order (smoke first, e2e-relay last). */
   get full(): Scenario[] {
-    const list = this.all.filter((s) => s.inFull !== false);
-    return [...list.filter((s) => s.name === "smoke"), ...list.filter((s) => s.name !== "smoke")];
+    return orderFull(this.all);
   }
 
   /** Expand `full`, dedupe keeping first occurrence, and reject unknown names. */
   resolve(names: readonly string[]): Scenario[] {
     if (names.length === 0) throw new RegistryError("no scenario given (try `list`)");
+    if (names.includes(FULL)) {
+      const missing = missingFromFull(this.all, this.required);
+      if (missing.length > 0) {
+        throw new RegistryError(
+          `full: required scenario(s) missing or excluded (inFull: false): ${missing.join(", ")}`,
+        );
+      }
+    }
     const out: Scenario[] = [];
     const seen = new Set<string>();
     const unknown: string[] = [];
@@ -90,8 +176,14 @@ export class Registry {
   }
 }
 
-/** Import every scenario module in `dir`. */
-export async function loadRegistry(dir = SCENARIOS_DIR): Promise<Registry> {
+/**
+ * Import every scenario module in `dir`. The shipped directory enforces `FULL_REQUIRED`; another
+ * directory (tests, experiments) enforces nothing unless `required` is given.
+ */
+export async function loadRegistry(
+  dir = SCENARIOS_DIR,
+  required: readonly string[] = dir === SCENARIOS_DIR ? FULL_REQUIRED : [],
+): Promise<Registry> {
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".ts") && !f.startsWith("_") && !f.endsWith(".test.ts") && !f.endsWith(".d.ts"))
     .sort();
@@ -101,5 +193,5 @@ export async function loadRegistry(dir = SCENARIOS_DIR): Promise<Registry> {
     const mod = (await import(pathToFileURL(path).href)) as { default?: unknown };
     scenarios.push(validateScenario(mod.default, file));
   }
-  return new Registry(scenarios);
+  return new Registry(scenarios, required);
 }

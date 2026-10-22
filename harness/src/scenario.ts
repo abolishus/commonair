@@ -39,6 +39,25 @@ export const PROPRIETARY_NEEDS: readonly Need[] = ["stripe", "oauth", "cdn"];
 export const PROFILES = ["default", "no-proprietary"] as const;
 export type Profile = (typeof PROFILES)[number];
 
+/** The vendor needs among `needs` that the profile excludes (none under `default`). */
+export function excludedNeeds(needs: readonly Need[], profile: Profile): Need[] {
+  return profile === "no-proprietary" ? needs.filter((n) => PROPRIETARY_NEEDS.includes(n)) : [];
+}
+
+/**
+ * A variant of a scenario selected by a `--set` parameter that needs more of the stack than the
+ * default path (e.g. `e4b-money --set provider=stripe` needs stripe-mock). Active when
+ * `params[param] === value`: its needs are probed with the scenario's. Under `no-proprietary`
+ * an active vendor variant skips the scenario, and an inactive one is reported as a skipped step.
+ */
+export interface ParamNeed {
+  param: string;
+  value: string;
+  needs: readonly Need[];
+  /** Step name in the report, e.g. "Stripe variant". */
+  step: string;
+}
+
 export interface Scenario {
   /** Must equal the module's file name. */
   name: string;
@@ -48,6 +67,8 @@ export interface Scenario {
   inFull?: boolean;
   /** Hard deadline for the whole scenario (default 10 minutes). */
   timeoutMs?: number;
+  /** Parameter-selected variants with extra needs (see `ParamNeed`). */
+  paramNeeds?: readonly ParamNeed[];
   run(ctx: ScenarioContext): Promise<void>;
 }
 
@@ -60,6 +81,12 @@ export interface StepResult {
   status: "passed" | "failed";
   durationMs: number;
   error?: string;
+}
+
+/** A step the profile left out, with the reason (reported, never run). */
+export interface StepSkip {
+  name: string;
+  reason: string;
 }
 
 export interface AssertionResult {
@@ -90,6 +117,8 @@ export interface ScenarioResult {
   data: Record<string, unknown>;
   error?: string;
   skipReason?: string;
+  /** Steps the profile skipped (e.g. a vendor variant under `no-proprietary`). */
+  skippedSteps?: StepSkip[];
 }
 
 export class AssertionFailure extends Error {
@@ -126,6 +155,14 @@ export interface ScenarioContext {
   intParam(name: string, fallback: number): number;
   /** Run and time a named step; failures are recorded and rethrown. */
   step<T>(name: string, fn: () => Promise<T> | T): Promise<T>;
+  /**
+   * A step that needs parts of the stack the profile may exclude (stripe, oauth, cdn under
+   * `no-proprietary`): skipped with the reason in the report (resolves to undefined), or run
+   * like `step`.
+   */
+  optionalStep<T>(name: string, needs: readonly Need[], fn: () => Promise<T> | T): Promise<T | undefined>;
+  /** Record a step as skipped, with its reason. */
+  skipStep(name: string, reason: string): void;
   /** Hard assertion: records the outcome and throws on failure. */
   assert(name: string, condition: boolean, details?: unknown): void;
   /** Soft check: records the outcome; a failure marks the scenario failed but it continues. */
@@ -142,6 +179,7 @@ export class ScenarioRecorder {
   readonly assertions: AssertionResult[] = [];
   readonly metrics: Record<string, MetricValue> = {};
   readonly extra: Record<string, unknown> = {};
+  readonly skipped: StepSkip[] = [];
   readonly cleanups: (() => unknown)[] = [];
 
   get failedSoftly(): boolean {

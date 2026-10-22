@@ -3,11 +3,24 @@
 
 /**
  * Load test: N streamers × M viewers for a duration. Viewers are mostly HTTP-only (cheap) with a
- * slice of real browsers for true glass-to-glass latency. Reports origin egress by delivery
- * source (Prometheus when available, viewer-reported bytes otherwise), container CPU (podman
- * stats), p95 glass-to-glass and TTFF, and stall rate.
+ * slice of real browsers for true glass-to-glass latency. Past `httpPerProcess` HTTP viewers the
+ * HTTP audience moves to child harness processes (`load/worker.ts`). Reports origin egress by
+ * delivery source (Prometheus when available, viewer-reported bytes otherwise), container CPU
+ * (podman stats), p95 glass-to-glass and TTFF, and stalls, as the report's `load` section.
  */
+import { fileURLToPath } from "node:url";
+import { type LoadReport, buildLoadReport, loadVerdict } from "./load/report.ts";
+import {
+  type ShardMessage,
+  type ShardSpec,
+  type WorkerSpec,
+  parseShardLine,
+  shardCount,
+  shardTotal,
+  splitShards,
+} from "./load/shard.ts";
 import { ORIGIN_EGRESS_QUERY, CpuSampler, Prometheus, summarize } from "./metrics.ts";
+import { type Supervised, spawnSupervised } from "./process.ts";
 import type { ScenarioContext } from "./scenario.ts";
 import type { Streamer } from "./streamer.ts";
 import type { SignedInUser } from "./users.ts";
@@ -15,10 +28,15 @@ import { type Viewer, type ViewerAggregate, type ViewerReport, aggregateReports 
 
 export interface LoadOptions {
   streamers: number;
+  /** Total viewers, spread round-robin (ignored when `viewersPerStreamer` is set). */
   viewers: number;
+  /** Viewers on every channel (total = streamers × this). */
+  viewersPerStreamer?: number;
   durationMs: number;
   /** Browser viewers among `viewers` (default: 10 %, at most 20). Split between Chromium and WebKit. */
   browserViewers?: number;
+  /** HTTP viewers one process drives; above it they move to child processes (default: never). */
+  httpPerProcess?: number;
   protocol?: "rtmp" | "whip";
   width?: number;
   height?: number;
@@ -58,16 +76,34 @@ export function defaultBrowserViewers(viewers: number): number {
   return Math.min(20, Math.floor(viewers / 10));
 }
 
+/** Total viewers for the options (per-streamer wins over the total). Pure. */
+export function totalViewers(opts: Pick<LoadOptions, "streamers" | "viewers" | "viewersPerStreamer">): number {
+  return opts.viewersPerStreamer === undefined ? opts.viewers : opts.streamers * opts.viewersPerStreamer;
+}
+
+/** Child processes for an allocation (0 = every HTTP viewer stays in this process). Pure. */
+export function plannedShards(allocation: readonly LoadAllocation[], httpPerProcess: number | undefined): number {
+  if (httpPerProcess === undefined) return 0;
+  const n = shardCount(
+    allocation.reduce((s, a) => s + a.http, 0),
+    httpPerProcess,
+  );
+  return n > 1 ? n : 0;
+}
+
 export interface LoadResult {
   streamers: number;
   viewers: number;
   durationMs: number;
+  windowSeconds: number;
+  shards: number;
   all: ViewerAggregate;
   browser: ViewerAggregate;
   http: ViewerAggregate;
   egressBySource: Record<string, number>;
   egressMethod: "prometheus" | "viewer-reported";
   cpu: Record<string, { meanCpuPercent: number; peakCpuPercent: number; samples: number }>;
+  report: LoadReport;
 }
 
 async function mapLimit<T, R>(
@@ -87,10 +123,81 @@ async function mapLimit<T, R>(
   return out;
 }
 
+const WORKER_ENTRY = fileURLToPath(new URL("./load/worker.ts", import.meta.url));
+/** Generous: a child opens its viewers with a staggered start (~50 ms each). */
+const SHARD_START_MS_PER_VIEWER = 150;
+const SHARD_STOP_GRACE_MS = 90_000;
+
+/** A child process driving one shard of the HTTP audience. */
+class ShardProcess {
+  private proc: Supervised;
+  private started: Promise<number>;
+  private reports: Promise<ViewerReport[]>;
+
+  constructor(ctx: ScenarioContext, spec: ShardSpec, maxMs: number) {
+    let onStarted: (n: number) => void = () => undefined;
+    let onReports: (r: ViewerReport[]) => void = () => undefined;
+    let onError: (e: Error) => void = () => undefined;
+    this.started = new Promise((resolve, reject) => {
+      onStarted = resolve;
+      onError = reject;
+    });
+    this.reports = new Promise((resolve, reject) => {
+      onReports = resolve;
+      const prev = onError;
+      onError = (e) => {
+        prev(e);
+        reject(e);
+      };
+    });
+    // Unhandled until awaited; never let an early failure crash the process.
+    this.started.catch(() => undefined);
+    this.reports.catch(() => undefined);
+    const worker: WorkerSpec = { shard: spec, runId: ctx.runId, maxMs };
+    this.proc = spawnSupervised(["bun", WORKER_ENTRY, JSON.stringify(worker)], {
+      name: `load-shard-${spec.index}`,
+      onStdoutLine: (line) => {
+        const msg: ShardMessage | null = parseShardLine(line);
+        if (!msg) return;
+        if (msg.type === "started") onStarted(msg.viewers);
+        else if (msg.type === "reports") onReports(msg.reports);
+        else onError(new Error(`load shard ${spec.index}: ${msg.error}`));
+      },
+    });
+    void this.proc.exited.then((code) =>
+      onError(new Error(`load shard ${spec.index} exited (${code}): ${this.proc.stderr().slice(-3).join(" | ")}`)),
+    );
+  }
+
+  waitStarted(timeoutMs: number): Promise<number> {
+    return withTimeout(this.started, timeoutMs, "load shard start");
+  }
+
+  async stop(): Promise<ViewerReport[]> {
+    if (this.proc.running) void this.proc.stop(SHARD_STOP_GRACE_MS);
+    return withTimeout(this.reports, SHARD_STOP_GRACE_MS, "load shard reports");
+  }
+
+  kill(): Promise<number> {
+    return this.proc.stop(1_000);
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /** Run the load test inside a scenario context (records steps and metrics on it). */
 export async function runLoad(ctx: ScenarioContext, opts: LoadOptions): Promise<LoadResult> {
   const p = ctx.platform;
-  const browserViewers = opts.browserViewers ?? defaultBrowserViewers(opts.viewers);
+  const viewersTotal = totalViewers(opts);
+  const browserViewers = opts.browserViewers ?? defaultBrowserViewers(viewersTotal);
   const users = await ctx.step(`sign up ${opts.streamers} streamers`, () =>
     mapLimit(Array.from({ length: opts.streamers }), 4, () => p.signUp({ prefix: "load" })),
   );
@@ -117,16 +224,49 @@ export async function runLoad(ctx: ScenarioContext, opts: LoadOptions): Promise<
   cpu.start();
   ctx.defer(() => cpu.stop());
 
-  const allocation = allocateViewers(opts.streamers, opts.viewers, browserViewers);
-  const viewers: Viewer[] = await ctx.step(`open ${opts.viewers} viewers`, async () => {
+  const allocation = allocateViewers(opts.streamers, viewersTotal, browserViewers);
+  const shards = plannedShards(allocation, opts.httpPerProcess);
+  const shardSpecs =
+    shards > 0
+      ? splitShards(
+          allocation.map((a) => ({ channel: channels[a.channelIndex] as string, http: a.http })),
+          shards,
+        )
+      : [];
+  ctx.data("loadPlan", {
+    viewers: viewersTotal,
+    browserViewers,
+    shards: shardSpecs.map((s) => ({ index: s.index, viewers: shardTotal(s) })),
+  });
+
+  const children: ShardProcess[] = [];
+  const viewers: Viewer[] = await ctx.step(`open ${viewersTotal} viewers`, async () => {
     const opened: Viewer[] = [];
+    // Children first: they open their audience while this process opens the browsers.
+    const maxMs = opts.durationMs + 30 * 60_000;
+    for (const spec of shardSpecs) {
+      const child = new ShardProcess(ctx, spec, maxMs);
+      children.push(child);
+      ctx.defer(() => child.kill());
+    }
     for (const a of allocation) {
       const channel = channels[a.channelIndex] as string;
       opened.push(
-        ...(await p.openViewers(channel, { chromium: a.chromium, webkit: a.webkit, http: a.http, perPage: 5 })),
+        ...(await p.openViewers(channel, {
+          chromium: a.chromium,
+          webkit: a.webkit,
+          http: shards > 0 ? 0 : a.http,
+          perPage: 5,
+        })),
       );
     }
     for (const v of opened) ctx.defer(() => v.stop());
+    const started = await Promise.all(
+      children.map((c, i) =>
+        c.waitStarted(60_000 + SHARD_START_MS_PER_VIEWER * shardTotal(shardSpecs[i] as ShardSpec)),
+      ),
+    );
+    if (children.length > 0) ctx.log.info("load shards started", { shards: children.length, viewers: started });
     return opened;
   });
 
@@ -139,6 +279,7 @@ export async function runLoad(ctx: ScenarioContext, opts: LoadOptions): Promise<
       ctx.log.info("load progress", {
         started: agg.started,
         viewers: agg.viewers,
+        shardedViewers: viewersTotal - viewers.length,
         stallRatio: Number(agg.stallRatio.toFixed(4)),
         p95LatencyMs: agg.latency.p95,
       });
@@ -146,9 +287,13 @@ export async function runLoad(ctx: ScenarioContext, opts: LoadOptions): Promise<
   });
   const windowSeconds = (Date.now() - windowStarted) / 1000;
 
-  const reports: ViewerReport[] = await ctx.step("collect viewer reports", () =>
-    Promise.all(viewers.map((v) => v.stop())),
-  );
+  const reports: ViewerReport[] = await ctx.step("collect viewer reports", async () => {
+    const [local, ...remote] = await Promise.all([
+      Promise.all(viewers.map((v) => v.stop())),
+      ...children.map((c) => c.stop()),
+    ]);
+    return [...(local ?? []), ...remote.flat()];
+  });
   await cpu.stop();
 
   let egressBySource: Record<string, number> = {};
@@ -160,30 +305,62 @@ export async function runLoad(ctx: ScenarioContext, opts: LoadOptions): Promise<
       egressBySource = Object.fromEntries(rows.map((r) => [r.labels.source ?? "unknown", Math.round(r.value)]));
     }
   }
-  if (egressMethod === "viewer-reported") {
-    for (const r of reports) {
-      const source = r.source ?? "direct";
-      egressBySource[source] = (egressBySource[source] ?? 0) + r.bytesHttp;
-      if (r.bytesP2p > 0) egressBySource.p2p = (egressBySource.p2p ?? 0) + r.bytesP2p;
-    }
-  }
+  if (egressMethod === "viewer-reported") egressBySource = viewerReportedEgress(reports);
 
+  const all = aggregateReports(reports);
+  const browser = aggregateReports(reports.filter((r) => r.kind === "browser"));
+  const cpuSummary = cpu.summary();
   const result: LoadResult = {
     streamers: opts.streamers,
-    viewers: opts.viewers,
+    viewers: viewersTotal,
     durationMs: opts.durationMs,
-    all: aggregateReports(reports),
-    browser: aggregateReports(reports.filter((r) => r.kind === "browser")),
+    windowSeconds,
+    shards: children.length,
+    all,
+    browser,
     http: aggregateReports(reports.filter((r) => r.kind === "http")),
     egressBySource,
     egressMethod,
-    cpu: cpu.summary(),
+    cpu: cpuSummary,
+    report: buildLoadReport({
+      streamers: opts.streamers,
+      viewers: viewersTotal,
+      windowSeconds,
+      all,
+      browser,
+      egressBySource,
+      egressMethod,
+      cpu: cpuSummary,
+      shards: children.length,
+    }),
   };
   recordLoadMetrics(ctx, result);
   return result;
 }
 
+/** Egress by delivery source from the viewers' own byte counts (no Prometheus). Pure. */
+export function viewerReportedEgress(reports: readonly ViewerReport[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of reports) {
+    const source = r.source ?? "direct";
+    out[source] = (out[source] ?? 0) + r.bytesHttp;
+    if (r.bytesP2p > 0) out.p2p = (out.p2p ?? 0) + r.bytesP2p;
+  }
+  return out;
+}
+
+/** The spec's assertions on a load run: every viewer started (hard); stalls, latency, errors (soft). */
+export function judgeLoad(ctx: Pick<ScenarioContext, "assert" | "check">, rep: LoadReport): void {
+  const v = loadVerdict(rep);
+  ctx.assert("every viewer started playback", v.everyViewerStarted, { started: rep.started, viewers: rep.viewers });
+  ctx.check("stall ratio below 5 %", v.stallRatioOk, { stallRatio: rep.stallRatio, stalls: rep.stallCount });
+  ctx.check("p95 TTFF under 15 s", v.ttffOk, { ttffP95Ms: rep.ttffP95Ms });
+  ctx.check("p95 glass-to-glass under 15 s", v.latencyOk, { glassToGlassP95Ms: rep.glassToGlassP95Ms });
+  ctx.check("no viewer errors", v.noErrors, { errors: rep.errors });
+}
+
 export function recordLoadMetrics(ctx: Pick<ScenarioContext, "metric" | "data">, r: LoadResult): void {
+  const rep = r.report;
   ctx.metric("viewers.total", r.all.viewers);
   ctx.metric("viewers.started", r.all.started);
   ctx.metric("ttff.p95", r.all.ttff.p95, "ms");
@@ -193,9 +370,19 @@ export function recordLoadMetrics(ctx: Pick<ScenarioContext, "metric" | "data">,
   ctx.metric("glass_to_glass.p50", r.browser.latency.p50, "ms");
   ctx.metric("http_delivery_latency.p95", r.http.latency.p95, "ms");
   ctx.metric("stall.ratio", r.all.stallRatio);
+  ctx.metric("stall.count", r.all.stalls);
   ctx.metric("stall.per_minute", r.all.stallsPerMinute);
+  ctx.metric("errors", r.all.errors);
+  ctx.metric("egress.total", rep.egress.totalBytes, "bytes");
+  ctx.metric("egress.bytes_per_second", rep.egress.bytesPerSecond, "bytes/s");
+  ctx.metric("egress.per_viewer", rep.egress.perViewerBytes, "bytes");
   for (const [source, bytes] of Object.entries(r.egressBySource)) ctx.metric(`egress.${source}`, bytes, "bytes");
   const cpuMeans = Object.values(r.cpu).map((c) => c.meanCpuPercent);
   ctx.metric("cpu.containers_mean_total", cpuMeans.length ? cpuMeans.reduce((s, v) => s + v, 0) : null, "%");
-  ctx.data("load", { ...r, cpuSummary: summarize(cpuMeans) });
+  ctx.metric("load.shards", r.shards);
+  ctx.data("load", {
+    ...rep,
+    breakdown: { all: r.all, browser: r.browser, http: r.http },
+    cpuSummary: summarize(cpuMeans),
+  });
 }

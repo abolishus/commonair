@@ -4,7 +4,8 @@
 /**
  * Milestone E2 end to end (docs/testing/e2-selectors.md): a streamer goes live over RTMP; a fan
  * discovers the stream in the directory, follows it and sees it in their `following` section; an
- * unmodified tmi.js bot owned by the streamer answers `!ping` through the IRC gateway; the
+ * unmodified tmi.js bot owned by the streamer answers `!ping` through the IRC gateway, and so
+ * does an SDK bot on the chat WebSocket (E6), its reply carrying the bot badge; the
  * streamer times a troll out from the chat menu and everyone (web and IRC) sees it; the timeout
  * is lifted, the fan unfollows and the stream stops.
  *
@@ -53,7 +54,7 @@ export function parseVia(value: string): Via {
 export default defineScenario({
   name: "e2e-social",
   description:
-    "RTMP live → directory discovery → follow (+ following section) → tmi.js bot !ping via IRC → chat timeout from the menu seen on web and IRC → unban, unfollow, offline",
+    "RTMP live → directory discovery → follow (+ following section) → tmi.js bot !ping via IRC → SDK bot !ping with the bot badge → chat timeout from the menu seen on web and IRC → unban, unfollow, offline",
   needs: ["api", "web", "chat", "irc", "media", "origin", "ffmpeg", "browser"],
   timeoutMs: 6 * 60_000,
   async run(ctx) {
@@ -80,6 +81,61 @@ async function screenshotSessions(ctx: ScenarioContext, sessions: readonly WebSe
     ctx.data("screenshots", files);
     ctx.log.info("failure screenshots written", { dir, count: files.length });
   }
+}
+
+/** E6: the SDK bot answers `!ping` next to the tmi.js bot; both replies arrive, the SDK one badged. */
+async function sdkBotPing(
+  ctx: ScenarioContext,
+  o: {
+    channel: string;
+    streamer: SignedInUser;
+    fan: SignedInUser;
+    tmiUsername: string;
+    sender: SocialActor;
+    chat: WaitBudget;
+  },
+): Promise<void> {
+  const p = ctx.platform;
+  const sdkAccount = await ctx.step(
+    "streamer: create the SDK bot and its token (me.bots.createToken, chat:read chat:edit)",
+    () => p.createBot(o.streamer, "e2s_sdk"),
+  );
+  const sdkBot = p.sdkBot(sdkAccount, [o.channel]);
+  ctx.defer(() => sdkBot.stop());
+  await ctx.step("SDK bot connects over the chat WebSocket and joins", () => sdkBot.start());
+  const observer = await ctx.step("fan: a chat socket that watches the replies (API)", async () => {
+    const c = await p.chat(o.fan);
+    ctx.defer(() => c.close());
+    await c.join(o.channel);
+    return c;
+  });
+  // Only replies after this !ping count (`next` ignores frames already received).
+  const pongFrom = (username: string) =>
+    observer.next(
+      "message",
+      (f) => f.channel === o.channel && f.message.user.username === username && f.message.body === "pong",
+      o.chat.timeoutMs,
+    );
+  const tmiPong = pongFrom(o.tmiUsername);
+  const sdkPong = pongFrom(sdkAccount.username);
+  tmiPong.catch(() => undefined);
+  sdkPong.catch(() => undefined);
+  const ping = `!ping sdk ${ctx.runId}`;
+  const sent = performance.now();
+  await ctx.step("fan: send !ping for both bots", () => o.sender.send(ping, o.chat));
+  const [tmiReply, sdkReply] = await ctx.step("both bots' replies arrive", () => Promise.all([tmiPong, sdkPong]));
+  ctx.metric("sdk_bot_reply_round_trip", performance.now() - sent, "ms");
+  ctx.assert("the tmi.js bot replied", tmiReply.message.user.username === o.tmiUsername);
+  const badges = sdkReply.message.user.badges.map((b) => b.type);
+  ctx.assert("the SDK bot's reply carries the bot badge", badges.includes("bot"), { badges });
+  ctx.check(
+    "the SDK bot recorded its !ping reply",
+    sdkBot.replies.some((r) => r.command === "!ping"),
+    {
+      replies: sdkBot.replies.length,
+    },
+  );
+  await ctx.step("fan: sees the SDK bot's reply", () => o.sender.waitMessage(sdkAccount.username, "pong", o.chat));
 }
 
 async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: ScenarioContext["check"]): Promise<void> {
@@ -183,6 +239,10 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
   ctx.metric("bot_reply_round_trip", performance.now() - pingSent, "ms");
   const reply = bot.replies.find((r) => r.command === "!ping");
   if (reply?.receivedAt !== undefined) ctx.metric("bot_reply_latency", reply.at - reply.receivedAt, "ms");
+
+  // 3b. An SDK bot (a bot token over the chat WebSocket) joins: both bots answer the next !ping,
+  // the SDK bot's reply with the bot badge (docs/testing/e6-selectors.md).
+  await sdkBotPing(ctx, { channel, streamer, fan, tmiUsername: bot.username, sender: F, chat });
 
   check("no moderation controls for the fan", (await F.moderationControls()) === 0);
 

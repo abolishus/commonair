@@ -157,8 +157,9 @@ export default defineScenario({
   description:
     "co-op: share bought and confirmed, streamers qualify by hours, worker appointed → council seated → tip → ordinary proposal discussed, reviewed, voted, applied; protected proposal rejected in the streamer class and every DB bypass refused → patronage run + second approver + statements, ledger balanced → transparency → audit/outbox complete, no ballot or PII leaks → exits and share refund",
   needs: ["api", "web", "worker", "mail", "media", "origin", "ffmpeg", "browser", "podman"],
-  // Needs the compose override and a database bootstrapped with short periods: not part of `full`.
-  inFull: false,
+  // Needs the compose override and a database bootstrapped with short periods: `full` runs on the
+  // harness stack, which has both (ADR 0021).
+  inFull: true,
   timeoutMs: 45 * 60_000,
   async run(ctx) {
     const sessions: WebSession[] = [];

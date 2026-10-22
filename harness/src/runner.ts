@@ -4,7 +4,8 @@
 /**
  * Scenario runner: checks each scenario's needs, runs it with a deadline and an abort signal,
  * records steps/assertions/metrics, always runs its cleanups, and stops any stray child process
- * before the next scenario.
+ * before the next scenario. Under `--profile no-proprietary` it first checks that the stack
+ * itself runs without vendor adapters, then skips (and reports) what needs them.
  */
 import type { Logger } from "@commonair/observability";
 import type { HarnessEnv } from "./env.ts";
@@ -15,17 +16,20 @@ import { type RunReport, summarizeResults } from "./report.ts";
 import {
   AssertionFailure,
   type Need,
-  PROPRIETARY_NEEDS,
   type Profile,
   type Scenario,
   type ScenarioContext,
   ScenarioRecorder,
   type ScenarioResult,
+  type StepSkip,
+  excludedNeeds,
 } from "./scenario.ts";
 
 export const DEFAULT_SCENARIO_TIMEOUT_MS = 10 * 60_000;
 
 export type NeedsVerdict = { run: true } | { run: false; status: "skipped" | "failed"; reason: string };
+
+const profileReason = (needs: readonly Need[]) => `needs ${needs.join(", ")} (no-proprietary profile)`;
 
 /**
  * Decide whether a scenario can run. Under `no-proprietary`, needing a vendor adapter means
@@ -38,11 +42,8 @@ export async function evaluateNeeds(
   probe: (need: Need) => Promise<string | null>,
   skipUnavailable = false,
 ): Promise<NeedsVerdict> {
-  if (profile === "no-proprietary") {
-    const vendor = needs.filter((n) => PROPRIETARY_NEEDS.includes(n));
-    if (vendor.length > 0)
-      return { run: false, status: "skipped", reason: `needs ${vendor.join(", ")} (no-proprietary profile)` };
-  }
+  const vendor = excludedNeeds(needs, profile);
+  if (vendor.length > 0) return { run: false, status: "skipped", reason: profileReason(vendor) };
   const problems: string[] = [];
   for (const need of needs) {
     const problem = await probe(need);
@@ -50,6 +51,78 @@ export async function evaluateNeeds(
   }
   if (problems.length === 0) return { run: true };
   return { run: false, status: skipUnavailable ? "skipped" : "failed", reason: `unmet needs — ${problems.join("; ")}` };
+}
+
+export interface ScenarioPlan {
+  /** Needs to probe: the scenario's plus those of its active parameter variants. */
+  needs: Need[];
+  /** Set when the profile skips the whole scenario. */
+  skip: string | null;
+  /** Inactive variants the profile would skip anyway, reported as skipped steps. */
+  skippedSteps: StepSkip[];
+}
+
+/** What a scenario needs for these parameters, and what the profile skips. Pure. */
+export function planScenario(
+  scenario: Pick<Scenario, "needs" | "paramNeeds">,
+  profile: Profile,
+  params: Readonly<Record<string, string>>,
+): ScenarioPlan {
+  const needs = new Set<Need>(scenario.needs);
+  const skippedSteps: StepSkip[] = [];
+  const vendor = excludedNeeds(scenario.needs, profile);
+  let skip = vendor.length > 0 ? profileReason(vendor) : null;
+  for (const pn of scenario.paramNeeds ?? []) {
+    const excluded = excludedNeeds(pn.needs, profile);
+    if (params[pn.param] === pn.value) {
+      if (excluded.length > 0) skip ??= `${pn.step} (--set ${pn.param}=${pn.value}) ${profileReason(excluded)}`;
+      for (const n of pn.needs) needs.add(n);
+    } else if (excluded.length > 0) {
+      skippedSteps.push({ name: `${pn.step} (--set ${pn.param}=${pn.value})`, reason: profileReason(excluded) });
+    }
+  }
+  return { needs: [...needs], skip, skippedSteps };
+}
+
+/** The `/healthz` booleans that say whether the API runs a vendor adapter (E6 spec). */
+export const PROPRIETARY_HEALTH_KEYS = ["stripe", "oauth", "cdn"] as const satisfies readonly Need[];
+
+const HEALTH_HINTS: Record<(typeof PROPRIETARY_HEALTH_KEYS)[number], string> = {
+  stripe: "PAYMENTS_PROVIDER=stripe",
+  oauth: "an OAuth provider's client id and secret are set",
+  cdn: "CDN_PROVIDER and CDN_BASE_URL are set",
+};
+
+/**
+ * Why a stack fails the `no-proprietary` profile, from the API's `/healthz` body (empty when it
+ * passes). Fails closed: a missing or non-boolean flag is a problem, not a pass. Pure.
+ */
+export function proprietaryProblems(health: unknown): string[] {
+  if (typeof health !== "object" || health === null) return ["the API /healthz body is not a JSON object"];
+  const h = health as Record<string, unknown>;
+  const problems: string[] = [];
+  for (const key of PROPRIETARY_HEALTH_KEYS) {
+    const v = h[key];
+    if (v === true) problems.push(`${key}=true (${HEALTH_HINTS[key]})`);
+    else if (v !== false) problems.push(`/healthz does not report ${key} as a boolean`);
+  }
+  return problems;
+}
+
+/** Check the stack for the profile; null when it may run, else the message the run fails with. */
+export async function profilePreflight(
+  profile: Profile,
+  apiUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  if (profile !== "no-proprietary") return null;
+  const url = `${apiUrl.replace(/\/+$/, "")}/healthz`;
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(5_000) }).catch(() => null);
+  if (!res) return `--profile no-proprietary: the API /healthz is unreachable at ${new URL(url).origin}`;
+  const body: unknown = await res.json().catch(() => null);
+  const problems = proprietaryProblems(body);
+  if (problems.length === 0) return null;
+  return `--profile no-proprietary: the stack runs proprietary adapters or cannot say: ${problems.join("; ")}. Restart it without them (bun scripts/infra.ts stack --harness with them unset in .env).`;
 }
 
 export interface RunOptions {
@@ -63,6 +136,8 @@ export interface RunOptions {
   /** Inject a platform (tests); otherwise one is created and closed by the run. */
   platform?: Platform;
   signal?: AbortSignal;
+  /** Fetch for the profile preflight (tests). */
+  fetch?: typeof fetch;
 }
 
 export function newRunId(): string {
@@ -78,6 +153,11 @@ function makeContext(
 ): ScenarioContext {
   const log = opts.log.child({ scenario: scenario.name });
   const params = opts.params ?? {};
+  const step = <T>(name: string, fn: () => Promise<T> | T) => rec.step(name, fn, log);
+  const skipStep = (name: string, reason: string) => {
+    rec.skipped.push({ name, reason });
+    log.warn("step skipped", { step: name, reason });
+  };
   return {
     name: scenario.name,
     runId: opts.runId,
@@ -95,7 +175,16 @@ function makeContext(
       if (!Number.isInteger(n)) throw new Error(`parameter ${name} must be an integer`);
       return n;
     },
-    step: (name, fn) => rec.step(name, fn, log),
+    step,
+    async optionalStep(name, needs, fn) {
+      const excluded = excludedNeeds(needs, opts.profile);
+      if (excluded.length > 0) {
+        skipStep(name, profileReason(excluded));
+        return undefined;
+      }
+      return step(name, fn);
+    },
+    skipStep,
     assert(name, condition, details) {
       rec.record(name, condition, true, details);
       if (!condition) throw new AssertionFailure(name, details);
@@ -123,7 +212,10 @@ export async function runOne(
   const startedAt = new Date();
   const started = performance.now();
   const base = { name: scenario.name, description: scenario.description, startedAt: startedAt.toISOString() };
-  const verdict = await evaluateNeeds(scenario.needs, opts.profile, (n) => platform.probe(n), opts.skipUnavailable);
+  const plan = planScenario(scenario, opts.profile, opts.params ?? {});
+  const verdict: NeedsVerdict = plan.skip
+    ? { run: false, status: "skipped", reason: plan.skip }
+    : await evaluateNeeds(plan.needs, opts.profile, (n) => platform.probe(n), opts.skipUnavailable);
   if (!verdict.run) {
     opts.log.warn(`scenario ${verdict.status}`, { scenario: scenario.name, reason: verdict.reason });
     return {
@@ -139,6 +231,7 @@ export async function runOne(
   }
 
   const rec = new ScenarioRecorder();
+  for (const s of plan.skippedSteps) rec.skipped.push(s);
   const timeoutMs = scenario.timeoutMs ?? DEFAULT_SCENARIO_TIMEOUT_MS;
   const controller = new AbortController();
   const onOuterAbort = () => controller.abort(opts.signal?.reason);
@@ -182,21 +275,44 @@ export async function runOne(
     metrics: rec.metrics,
     data: rec.extra,
     ...(error === undefined ? {} : { error }),
+    ...(rec.skipped.length > 0 ? { skippedSteps: [...rec.skipped] } : {}),
+  };
+}
+
+/** The result that stands for a run the profile preflight refused. */
+export function preflightFailure(profile: Profile, message: string): ScenarioResult {
+  return {
+    name: `${profile} preflight`,
+    description: `the stack satisfies the ${profile} profile`,
+    status: "failed",
+    startedAt: new Date().toISOString(),
+    durationMs: 0,
+    steps: [],
+    assertions: [{ name: "no proprietary adapter on the stack", passed: false, hard: true }],
+    metrics: {},
+    data: {},
+    error: message,
   };
 }
 
 export async function runScenarios(scenarios: readonly Scenario[], opts: RunOptions): Promise<RunReport> {
   const runId = opts.runId ?? newRunId();
   const startedAt = new Date();
-  const platform = opts.platform ?? new Platform(opts.env, opts.log, runId);
   const results: ScenarioResult[] = [];
-  try {
-    for (const scenario of scenarios) {
-      if (opts.signal?.aborted) break;
-      results.push(await runOne(scenario, platform, { ...opts, runId }));
+  const refused = await profilePreflight(opts.profile, opts.env.HARNESS_API_URL, opts.fetch);
+  if (refused) {
+    opts.log.error("profile preflight failed", { profile: opts.profile, reason: refused });
+    results.push(preflightFailure(opts.profile, refused));
+  } else {
+    const platform = opts.platform ?? new Platform(opts.env, opts.log, runId);
+    try {
+      for (const scenario of scenarios) {
+        if (opts.signal?.aborted) break;
+        results.push(await runOne(scenario, platform, { ...opts, runId }));
+      }
+    } finally {
+      if (!opts.platform) await platform.close();
     }
-  } finally {
-    if (!opts.platform) await platform.close();
   }
   const ffmpeg = await probeFfmpeg()
     .then((c) => c.version)
@@ -223,4 +339,32 @@ export async function runScenarios(scenarios: readonly Scenario[], opts: RunOpti
     summary,
     ok: summary.failed === 0 && results.length > 0,
   };
+}
+
+export interface SkipRow {
+  scenario: string;
+  /** null = the whole scenario. */
+  step: string | null;
+  reason: string;
+}
+
+/** Every skip in a run: whole scenarios and single steps, in run order. Pure. */
+export function skipRows(results: readonly ScenarioResult[]): SkipRow[] {
+  const rows: SkipRow[] = [];
+  for (const r of results) {
+    if (r.status === "skipped") rows.push({ scenario: r.name, step: null, reason: r.skipReason ?? "skipped" });
+    for (const s of r.skippedSteps ?? []) rows.push({ scenario: r.name, step: s.name, reason: s.reason });
+  }
+  return rows;
+}
+
+/** The skip table printed at the end of a run (empty string when nothing was skipped). Pure. */
+export function formatSkipTable(results: readonly ScenarioResult[]): string {
+  const rows = skipRows(results);
+  if (rows.length === 0) return "";
+  const cells = rows.map((r) => [r.scenario, r.step ?? "(whole scenario)", r.reason] as const);
+  const w0 = Math.max("scenario".length, ...cells.map((c) => c[0].length));
+  const w1 = Math.max("step".length, ...cells.map((c) => c[1].length));
+  const line = (a: string, b: string, c: string) => `${a.padEnd(w0)}  ${b.padEnd(w1)}  ${c}`;
+  return [`skipped (${rows.length}):`, line("scenario", "step", "reason"), ...cells.map((c) => line(...c))].join("\n");
 }
