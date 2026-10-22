@@ -639,7 +639,14 @@ async function stepCouncil(run: Run): Promise<void> {
   ctx.data("council", { termId, seats: seated.members.length });
   const shown = await ctx.step(
     t(`the council lists both (${run.via === "web" ? "/coop/council" : "coop.council"})`),
-    () => run.driver.council(people.v, ui),
+    // The page renders its wrapper (empty data-term-id) while it loads: wait for this term's seats.
+    () =>
+      settle(
+        "the council page",
+        () => run.driver.council(people.v, ui),
+        (c) => c.termId === termId && wanted.every((id) => c.members.some((m) => m.userId === id)),
+        { timeoutMs: SETTLE_MS, signal: ctx.signal },
+      ),
   );
   const shownIds = new Set(shown.members.map((m) => m.userId));
   ctx.assert(

@@ -599,12 +599,15 @@ export class WebCoop implements CoopDriver {
     await byCoopId(row, T.treasuryShareRefund).first().click(ui);
     await byCoopId(page, T.treasuryShareRefundNote).fill(note, ui);
     await byCoopId(page, T.treasuryShareRefundSubmit).click(ui);
+    // The tab lists refund_pending shares, so a refunded row leaves it; the API then says refunded.
     await waitFor(
-      `treasury-share-row[data-share-id=${shareId}] data-status=refunded`,
+      `treasury-share-row[data-share-id=${shareId}] gone and the share refunded`,
       async () => {
         const p = await this.treasuryTab(treasurer, T.treasuryTabShares, short);
         const r = byCoopId(p, T.treasuryShareRow, { "share-id": shareId }).first();
-        return (await visible(r, 5_000)) && (await r.getAttribute("data-status")) === "refunded" ? true : null;
+        if ((await visible(r, 1_000)) && (await r.getAttribute("data-status")) === "refund_pending") return null;
+        const refunded = await treasurer.api.client.coop.shares.list({ status: "refunded", limit: 100 });
+        return refunded.items.some((x) => x.id === shareId) ? true : null;
       },
       { timeoutMs: b.timeoutMs, intervalMs: 1_000, signal: b.signal },
     );
