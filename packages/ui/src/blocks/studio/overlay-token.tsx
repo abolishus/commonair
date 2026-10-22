@@ -104,6 +104,9 @@ export interface OverlayTokenLabels {
   rotateDescription?: React.ReactNode;
   url: string;
   urlHint?: React.ReactNode;
+  /** Reveal / hide the masked URL (it holds the token; keep it off a captured screen). */
+  showUrl: string;
+  hideUrl: string;
   copy: string;
   copied: string;
   copyFailed: string;
@@ -115,7 +118,10 @@ export interface OverlayTokenLabels {
 export interface OverlayTokenPanelProps extends Omit<React.ComponentProps<"div">, "children" | "title" | "onError"> {
   /** `interact.overlays.status`; `null` while loading. */
   status: OverlayTokenStatusView | null;
-  /** The alerts URL from the create response: shown once, never refetched. */
+  /**
+   * The alerts URL from the create response: shown once (masked until revealed), never refetched,
+   * and only while `status.active`. The page must clear it on revoke so it is not kept around.
+   */
   createdUrl?: string | null;
   labels: OverlayTokenLabels;
   /** Gets `null` (no expiry) or the ISO instant from `resolveOverlayExpiry`. */
@@ -215,17 +221,23 @@ export function OverlayTokenPanel({
                 </span>
               </p>
             ) : null}
-            {createdUrl ? (
-              <CopyField
-                data-testid="overlay-url"
-                data-value-testid="overlay-url-value"
-                label={labels.url}
-                value={createdUrl}
-                hint={labels.urlHint}
-                copyLabel={labels.copy}
-                copiedLabel={labels.copied}
-                copyFailedLabel={labels.copyFailed}
-              />
+            {active && createdUrl ? (
+              // `data-url` lets e2e read the URL without revealing it on screen.
+              <div data-testid="overlay-url" data-url={createdUrl} className="min-w-0">
+                <CopyField
+                  data-value-testid="overlay-url-value"
+                  data-reveal-testid="overlay-url-reveal"
+                  label={labels.url}
+                  value={createdUrl}
+                  secret
+                  showLabel={labels.showUrl}
+                  hideLabel={labels.hideUrl}
+                  hint={labels.urlHint}
+                  copyLabel={labels.copy}
+                  copiedLabel={labels.copied}
+                  copyFailedLabel={labels.copyFailed}
+                />
+              </div>
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <SelectField

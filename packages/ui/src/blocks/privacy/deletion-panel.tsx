@@ -13,6 +13,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@commonair/ui/components/card";
+import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/field";
+import { Input } from "@commonair/ui/components/input";
 import { cn } from "@commonair/ui/lib/utils";
 import { formatDateTime } from "../../lib/format.ts";
 import { useLocale } from "../../lib/locale.tsx";
@@ -42,6 +44,10 @@ export interface DeletionPanelLabels {
   /** What is removed and what is kept, pseudonymized (ledger, votes, audit history). */
   confirmDescription: React.ReactNode;
   confirmLabel: string;
+  /** Label of the typed confirmation ("Type your username to confirm"). */
+  confirmUsername: React.ReactNode;
+  /** Optional hint under it ("Your username is {username}"). */
+  confirmUsernameHint?: (username: string) => React.ReactNode;
   /** "Your account will be deleted on {date}. Until then you can cancel." */
   scheduled: (date: React.ReactNode) => React.ReactNode;
   /** Shown after a cancel ("Deletion canceled. Your account stays."). */
@@ -54,7 +60,10 @@ export interface DeletionPanelProps extends Omit<React.ComponentProps<"div">, "c
   request: DeletionRequestView | null;
   loading?: boolean;
   labels: DeletionPanelLabels;
-  onRequest: () => void | Promise<void>;
+  /** The caller's username: confirm stays disabled until the typed text matches it (any case). */
+  username: string;
+  /** Gets the typed username, sent as `me.deletion.request` `{ confirmUsername }`. */
+  onRequest: (confirmUsername: string) => void | Promise<void>;
   onCancel: () => void | Promise<void>;
   onError?: (error: unknown) => void;
   locale?: string;
@@ -63,13 +72,15 @@ export interface DeletionPanelProps extends Omit<React.ComponentProps<"div">, "c
 
 /**
  * Account deletion: request behind a `ConfirmDialog` that says what is kept, then the scheduled
- * date with a cancel while it is scheduled. Renders `deletion-request`, `deletion-status`
+ * date with a cancel while it is scheduled. Confirming requires typing the username
+ * (`deletion-confirm-username`), as the contract's `confirmUsername` does. Renders `deletion-request`, `deletion-status`
  * (`data-status`, `data-scheduled-for`) and `deletion-cancel` (docs/testing/e6-selectors.md).
  */
 export function DeletionPanel({
   request,
   loading = false,
   labels,
+  username,
   onRequest,
   onCancel,
   onError,
@@ -79,6 +90,10 @@ export function DeletionPanel({
   ...props
 }: DeletionPanelProps): React.JSX.Element {
   const ctx = useLocale();
+  const inputId = React.useId();
+  const [typed, setTyped] = React.useState("");
+  const typedName = typed.trim();
+  const matches = typedName !== "" && typedName.toLowerCase() === username.trim().toLowerCase();
   const [canceling, setCanceling] = React.useState(false);
   const scheduled = request?.status === "scheduled";
   const canRequest = !loading && (request === null || request.status === "canceled");
@@ -156,9 +171,29 @@ export function DeletionPanel({
             description={labels.confirmDescription}
             confirmLabel={labels.confirmLabel}
             variant="destructive"
-            onConfirm={onRequest}
+            confirmDisabled={!matches}
+            onOpenChange={(open) => {
+              if (!open) setTyped("");
+            }}
+            onConfirm={() => onRequest(typedName)}
             onError={onError}
-          />
+          >
+            <Field>
+              <FieldLabel htmlFor={inputId}>{labels.confirmUsername}</FieldLabel>
+              <Input
+                id={inputId}
+                data-testid="deletion-confirm-username"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={typed}
+                onChange={(event) => setTyped(event.currentTarget.value)}
+              />
+              {labels.confirmUsernameHint ? (
+                <FieldDescription>{labels.confirmUsernameHint(username)}</FieldDescription>
+              ) : null}
+            </Field>
+          </ConfirmDialog>
         </CardFooter>
       ) : null}
     </Card>

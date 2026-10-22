@@ -174,22 +174,53 @@ describe("ExportPanel", () => {
 describe("DeletionPanel", () => {
   const scheduled = { status: "scheduled", statusLabel: "Scheduled", scheduledFor: "2026-11-21T12:00:00.000Z" };
   const renderPanel = (props: Partial<React.ComponentProps<typeof DeletionPanel>> = {}) => {
-    const handlers = { onRequest: vi.fn<() => void>(), onCancel: vi.fn<() => void>() };
+    const handlers = { onRequest: vi.fn<(confirmUsername: string) => void>(), onCancel: vi.fn<() => void>() };
     render(
-      <DeletionPanel request={null} labels={deletionLabels} locale="en" timeZone="UTC" {...handlers} {...props} />,
+      <DeletionPanel
+        request={null}
+        labels={deletionLabels}
+        username="Fernsby"
+        locale="en"
+        timeZone="UTC"
+        {...handlers}
+        {...props}
+      />,
     );
     return handlers;
   };
 
-  test("request opens a dialog that says what is kept, then calls onRequest", async () => {
+  test("request opens a dialog that says what is kept; confirm waits for the typed username", async () => {
     const { onRequest } = renderPanel();
     expect(screen.queryByTestId("deletion-status")).toBeNull();
     const user = userEvent.setup();
     await user.click(screen.getByTestId("deletion-request"));
     expect(onRequest).not.toHaveBeenCalled();
     expect((await screen.findByRole("alertdialog")).textContent).toContain("Payments, the ledger, votes");
-    await user.click(screen.getByTestId("confirm-dialog-confirm"));
-    expect(onRequest).toHaveBeenCalledOnce();
+    const confirm = screen.getByTestId("confirm-dialog-confirm");
+    // Focusable while disabled, so the state is `aria-disabled`.
+    const disabled = () => confirm.getAttribute("aria-disabled") === "true";
+    expect(disabled()).toBe(true);
+    await user.click(confirm);
+    expect(onRequest).not.toHaveBeenCalled();
+    const input = screen.getByTestId("deletion-confirm-username");
+    expect(screen.getByLabelText("Type your username to confirm")).toBe(input);
+    await user.type(input, "someone");
+    expect(disabled()).toBe(true);
+    await user.clear(input);
+    await user.type(input, " fernsby ");
+    expect(disabled()).toBe(false);
+    await user.click(confirm);
+    expect(onRequest).toHaveBeenCalledExactlyOnceWith("fernsby");
+  });
+
+  test("closing the dialog clears what was typed", async () => {
+    renderPanel();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("deletion-request"));
+    await user.type(await screen.findByTestId("deletion-confirm-username"), "Fernsby");
+    await user.click(screen.getByTestId("confirm-dialog-cancel"));
+    await user.click(screen.getByTestId("deletion-request"));
+    expect((await screen.findByTestId<HTMLInputElement>("deletion-confirm-username")).value).toBe("");
   });
 
   test("scheduled: status with its date and a cancel; no second request", async () => {

@@ -150,6 +150,7 @@ function SettingsPage(): React.JSX.Element {
             <DeletionPanel
               request={deletion}
               labels={deletionLabels}
+              username="fernsby"
               onRequest={() => setDeletion(deletionScheduled)}
               onCancel={() => setDeletion(null)}
             />

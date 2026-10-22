@@ -38,6 +38,7 @@ function Example({
       <DeletionPanel
         request={request}
         labels={deletionLabels}
+        username="fernsby"
         onRequest={() => setRequest(deletionScheduled)}
         onCancel={() =>
           setRequest((current) => (current ? { ...current, status: "canceled", statusLabel: "Canceled" } : null))

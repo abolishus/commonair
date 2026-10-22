@@ -227,6 +227,8 @@ function VodRow({
  * The studio's content page: VOD and clip tabs; VOD rows edit the title and visibility and delete
  * (confirmed), clip rows delete (confirmed). Renders the spec's `content-*`, `vod-*` and `clip-*`
  * test ids (docs/testing/e6-selectors.md); the tabs are `content-tab-vods` / `content-tab-clips`.
+ * Both panels stay mounted (the inactive one `hidden`) so either list's ids are always queryable;
+ * the two `content-empty` states differ by `data-kind` (`vods` / `clips`).
  */
 export function ContentBoard({
   vods,
@@ -264,12 +266,13 @@ export function ContentBoard({
             {labels.clips}
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="vods" data-testid="content-vods" className="min-w-0">
+        <TabsContent value="vods" data-testid="content-vods" keepMounted className="min-w-0">
           {vods === null ? (
             loading
           ) : vods.length === 0 ? (
             <EmptyState
               data-testid="content-empty"
+              data-kind="vods"
               icon={Video01Icon}
               title={labels.vodsEmptyTitle}
               description={labels.vodsEmptyDescription}
@@ -290,12 +293,13 @@ export function ContentBoard({
             </ItemGroup>
           )}
         </TabsContent>
-        <TabsContent value="clips" data-testid="content-clips" className="min-w-0">
+        <TabsContent value="clips" data-testid="content-clips" keepMounted className="min-w-0">
           {clips === null ? (
             loading
           ) : clips.length === 0 ? (
             <EmptyState
               data-testid="content-empty"
+              data-kind="clips"
               icon={Scissor01Icon}
               title={labels.clipsEmptyTitle}
               description={labels.clipsEmptyDescription}

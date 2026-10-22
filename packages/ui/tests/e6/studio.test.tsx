@@ -428,12 +428,21 @@ describe("OverlayTokenPanel", () => {
     expect(onRevoke).toHaveBeenCalledOnce();
   });
 
-  test("the created URL is shown in a copy field, in the clear", () => {
-    renderPanel({ createdUrl: "https://x.test/overlay/alerts?token=abc" });
+  test("the created URL is masked until revealed, and readable from data-url", async () => {
+    const url = "https://x.test/overlay/alerts?token=abc";
+    renderPanel({ createdUrl: url });
     const field = screen.getByTestId("overlay-url");
-    expect((within(field).getByTestId("overlay-url-value") as HTMLInputElement).value).toBe(
-      "https://x.test/overlay/alerts?token=abc",
-    );
+    expect(attr(field, "data-url")).toBe(url);
+    const value = within(field).getByTestId("overlay-url-value") as HTMLInputElement;
+    expect(value.value).not.toContain("token=abc");
+    await userEvent.setup().click(within(field).getByTestId("overlay-url-reveal"));
+    expect(value.value).toBe(url);
+  });
+
+  test("a revoked or inactive status hides the created URL", () => {
+    renderPanel({ status: inactive, createdUrl: "https://x.test/overlay/alerts?token=abc" });
+    expect(screen.queryByTestId("overlay-url")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("token=abc");
   });
 
   test("loading: no status, create disabled", () => {
@@ -510,6 +519,20 @@ describe("ContentBoard", () => {
     await user.click(within(row).getByTestId("clip-delete"));
     await user.click(await screen.findByTestId("confirm-dialog-confirm"));
     expect(onDeleteClip).toHaveBeenCalledWith("c1");
+  });
+
+  test("both panels stay mounted, so clip rows are queryable before the clips tab is opened", () => {
+    renderBoard();
+    const clipsPanel = screen.getByTestId("content-clips");
+    expect(clipsPanel.hidden).toBe(true);
+    expect(attr(within(clipsPanel).getByTestId("clip-row"), "data-clip-id")).toBe("c1");
+    expect(within(clipsPanel).getByTestId("clip-delete")).toBeTruthy();
+    expect(screen.getByTestId("content-vods").hidden).toBe(false);
+  });
+
+  test("the two empty states differ by data-kind", () => {
+    renderBoard({ vods: [], clips: [] });
+    expect(screen.getAllByTestId("content-empty").map((el) => attr(el, "data-kind"))).toEqual(["vods", "clips"]);
   });
 
   test("empty lists show the empty state; loading shows no rows", () => {
