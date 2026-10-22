@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# Backstop CI: runs the same `bun run verify` used locally. If it goes red on
-# main, fix main immediately.
+# Backstop CI: runs the same `bun run verify` used locally. If it goes red on main, fix main
+# immediately. Pull requests run the gate; main and the nightly schedule run the full harness
+# scenario, a release dry run (release.yml) and the self-host end-to-end test. `ci-ok` is the
+# one check branch protection requires.
 name: ci
 
 on:
@@ -13,41 +15,204 @@ on:
     - cron: "17 4 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUN_VERSION: "1.4.3"
+  GO_VERSION: "1.27.3"
 
 jobs:
-  verify:
+  lint-workflows:
+    name: lint workflows
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.3
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Tools
+        run: |
+          bun scripts/release/tools.ts install --dir "$RUNNER_TEMP/bin" actionlint zizmor shellcheck
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: actionlint
+        # Also shellchecks every `run:` script, with the shellcheck installed above.
+        run: actionlint -color
+      - name: zizmor
+        env:
+          # Online audits: impostor commits, known-vulnerable actions, ref confusion.
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --format plain .github
+      - name: shellcheck (self-host scripts)
+        run: |
+          mapfile -t files < <(git ls-files 'scripts/selfhost.sh' 'scripts/selfhost/*.sh')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no self-host shell scripts yet"
+          else
+            shellcheck --version
+            shellcheck "${files[@]}"
+          fi
+
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      # verify:full (with the harness) on main and nightly; the gate on pull requests.
+      FULL: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.27.3"
+          go-version: ${{ env.GO_VERSION }}
+          # Module and build cache, keyed on the relay's go.mod (it has no go.sum: no dependencies).
+          cache: true
+          cache-dependency-path: relay/go.mod
+      - name: Bun install cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
       - name: Tooling (reuse, podman-compose, ffmpeg)
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
           pipx install reuse==6.2.0
           pipx install podman-compose==1.6.0
           podman --version
-          # Playwright needs WebKit/Chromium system libraries for the harness scenarios.
-          bunx playwright@1.64.1 install-deps chromium webkit
       - run: bun install --frozen-lockfile
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(jq -r '.dependencies.playwright // .devDependencies.playwright' harness/package.json)" >> "$GITHUB_OUTPUT"
+      - name: Playwright system libraries
+        # WebKit/Chromium libraries for the harness scenarios, from the locked Playwright.
+        run: harness/node_modules/.bin/playwright install-deps chromium webkit
+      - name: Playwright browsers cache
+        if: env.FULL == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
       - name: Environment
         run: bun scripts/init-env.ts
       - name: Verify
         run: |
           export PATH="$PWD/node_modules/.bin:$PATH"
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.ref }}" = "refs/heads/main" ] && [ -f harness/src/cli.ts ]; then
-            bun run verify:full
+          if [ "$FULL" = true ] && [ -f harness/src/cli.ts ]; then
+            bun run verify:full 2>&1 | tee verify.log
           else
-            bun run verify
+            bun run verify 2>&1 | tee verify.log
           fi
+      - name: Summary
+        if: always()
+        run: bun scripts/release/ci-summary.ts verify verify.log
+      - name: Collect logs
+        if: failure()
+        run: |
+          mkdir -p ci-logs/podman
+          podman ps -a --format '{{.Names}}' > ci-logs/podman/containers.txt || true
+          while read -r name; do
+            [ -n "$name" ] && podman logs --timestamps "$name" > "ci-logs/podman/$name.log" 2>&1 || true
+          done < ci-logs/podman/containers.txt
+          cp verify.log ci-logs/ 2>/dev/null || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: verify-logs-${{ github.run_attempt }}
+          path: |
+            ci-logs/
+            harness/reports/
+          retention-days: 5
+          if-no-files-found: ignore
+
+  release-dry-run:
+    name: release dry run
+    if: github.event_name != 'pull_request'
+    # The `$/` self-repository form is not understood by actionlint 1.7.12 or by our pin check
+    # (scripts/supply-chain.ts exempts only `./`); `./` resolves to this same commit.
+    uses: ./.github/workflows/release.yml # zizmor: ignore[self-repository]
+    with:
+      dry_run: true
+    # A called workflow can only use what its caller grants, and GitHub checks the grant
+    # against every job it declares, including the ones a dry run skips (publish) or runs
+    # without pushing to ghcr (publish-image). This job never runs for pull requests.
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+
+  selfhost-e2e:
+    name: self-host e2e (${{ matrix.distro }})
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, fedora]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Free disk space
+        # 14 images plus a nested Podman store do not fit beside the preinstalled SDKs.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: End-to-end
+        # Rootful podman (the runner's 4.9) can start the privileged systemd container that runs
+        # Podman 5 inside; rootless podman on the runner cannot delegate the cgroups it needs.
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: sudo --preserve-env=CI,GITHUB_ACTIONS "$(command -v bun)" scripts/selfhost/e2e.ts --distro "$DISTRO"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: selfhost-e2e-${{ matrix.distro }}-${{ github.run_attempt }}
+          path: .cache/selfhost-e2e/
+          retention-days: 5
+          if-no-files-found: ignore
+
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [lint-workflows, verify, release-dry-run, selfhost-e2e]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Aggregate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bun scripts/release/ci-summary.ts needs

@@ -1,0 +1,379 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Releases (ADR 0023). A `v*` tag builds and publishes: the 14 images for amd64 and arm64 on
+# native runners, signed keylessly with SBOM and SLSA provenance attestations; the relay
+# binaries with SBOMs and Sigstore bundles; the release manifest, the self-host bundle and a
+# signed SHA256SUMS; then the GitHub Release.
+#
+# A dry run (workflow_dispatch with dry_run, or CI on main and nightly through workflow_call)
+# builds every one of those but pushes to a throwaway Zot registry on the runner, signs only
+# when `sign` is true, creates no release and uploads dist/ as a workflow artifact.
+#
+# Builder: podman (Apache-2.0), the same engine the platform is built and run with
+# everywhere else, so release images come from the exact command line contributors use.
+# `podman manifest add oci-archive:` + `manifest push --all` pushes each per-arch image by
+# digest and the index by tag, without QEMU or a buildx builder container.
+#
+# Supply chain: every logic step is a tested script in scripts/release/. Tools are installed
+# by scripts/release/tools.ts against pinned SHA-256s. This workflow restores no caches, so
+# nothing a pull request wrote can reach a release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.1.0-rc.1 (must exist unless dry_run)"
+        type: string
+        default: ""
+      dry_run:
+        description: "Build everything, push to a local registry, publish nothing"
+        type: boolean
+        default: true
+      sign:
+        description: "Sign and attest during a dry run too (real releases always sign)"
+        type: boolean
+        default: false
+      platforms:
+        description: "Image platforms (comma-separated)"
+        type: string
+        default: "linux/amd64,linux/arm64"
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        default: ""
+      dry_run:
+        type: boolean
+        default: true
+      sign:
+        type: boolean
+        default: false
+      platforms:
+        type: string
+        default: "linux/amd64,linux/arm64"
+
+permissions: {}
+
+concurrency:
+  group: ${{ inputs.dry_run && format('release-dry-run-{0}', github.run_id) || format('release-{0}', inputs.tag || github.ref_name) }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUN_VERSION: "1.4.3"
+  GO_VERSION: "1.27.3"
+  # Never let `go` fetch another toolchain behind setup-go's back.
+  GOTOOLCHAIN: local
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      commit: ${{ steps.plan.outputs.commit }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+      sign: ${{ steps.plan.outputs.sign }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      latest: ${{ steps.plan.outputs.latest }}
+      registry: ${{ steps.plan.outputs.registry }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+      build_matrix: ${{ steps.plan.outputs.build_matrix }}
+      images: ${{ steps.plan.outputs.images }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Plan
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_SIGN: ${{ inputs.sign }}
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: bun scripts/release/prepare.ts
+      - name: Release notes
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          COMMIT: ${{ steps.plan.outputs.commit }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/notes"
+          bun scripts/release/changelog.ts --to "$COMMIT" --version "$VERSION" --repo "$REPO_URL" --out "$RUNNER_TEMP/notes/release-notes.md"
+          cat "$RUNNER_TEMP/notes/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes/release-notes.md
+          retention-days: 7
+          if-no-files-found: error
+
+  build:
+    name: build ${{ matrix.image }} (${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Podman
+        # GitHub's ubuntu-24.04 images ship podman 4.9; install it from Ubuntu where an image lacks it.
+        run: |
+          if ! command -v podman >/dev/null; then
+            sudo apt-get update -q
+            sudo apt-get install -y -q podman
+          fi
+          podman --version
+      - name: Build
+        env:
+          IMAGE: ${{ matrix.image }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: >-
+          bun scripts/release/images.ts build --image "$IMAGE" --platform "$PLATFORM"
+          --version "$VERSION" --commit "$COMMIT" --source "$SOURCE"
+          --out "$RUNNER_TEMP/images/$IMAGE-$ARCH.tar"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ matrix.image }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/images/${{ matrix.image }}-${{ matrix.arch }}.tar
+          # Layers are already compressed.
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  publish-image:
+    name: publish ${{ matrix.image }}
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # Push to ghcr.io (real runs) and sign keylessly through the workflow's OIDC token.
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        image: ${{ fromJSON(needs.prepare.outputs.images) }}
+    services:
+      # Dry runs only: a throwaway OCI registry (Zot, Apache-2.0). An empty image skips it.
+      registry:
+        image: ${{ needs.prepare.outputs.dry_run == 'true' && 'ghcr.io/project-zot/zot-minimal:v2.1.22@sha256:6704abd9c4c988398d77915549d79c5daa2a2c5731964833e31ca039c9ac4ed3' || '' }}
+        ports: ["5000:5000"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Tools
+        run: |
+          bun scripts/release/tools.ts install --dir "$RUNNER_TEMP/bin" cosign syft
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: image-${{ matrix.image }}-*
+          path: ${{ runner.temp }}/images
+          merge-multiple: true
+      - name: Log in to the registry
+        if: needs.prepare.outputs.dry_run != 'true'
+        env:
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          DOCKER_CONFIG: ${{ runner.temp }}/docker
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/docker/config.json
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$REGISTRY_TOKEN" | podman login --username "$REGISTRY_USER" --password-stdin "${REGISTRY%%/*}"
+      - name: Publish
+        env:
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          PLATFORMS: ${{ needs.prepare.outputs.platforms }}
+          LATEST: ${{ needs.prepare.outputs.latest }}
+          SIGN: ${{ needs.prepare.outputs.sign }}
+          # podman writes, cosign and syft read, the same credentials.
+          DOCKER_CONFIG: ${{ runner.temp }}/docker
+          REGISTRY_AUTH_FILE: ${{ runner.temp }}/docker/config.json
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          bun scripts/release/publish-image.ts --image "$IMAGE" --version "$VERSION" \
+            --commit "$COMMIT" --registry "$REGISTRY" --platforms "$PLATFORMS" \
+            --archives "$RUNNER_TEMP/images" --out "$RUNNER_TEMP/published" \
+            --latest "$LATEST" --sign "$SIGN"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: published-${{ matrix.image }}
+          path: ${{ runner.temp }}/published/
+          retention-days: 7
+          if-no-files-found: error
+
+  relay:
+    name: relay binaries
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Tools
+        run: |
+          bun scripts/release/tools.ts install --dir "$RUNNER_TEMP/bin" cosign syft
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Build
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: bun scripts/release/relay.ts build --version "$VERSION" --out "$RUNNER_TEMP/relay"
+      - name: SBOM, provenance, signatures
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          SIGN: ${{ needs.prepare.outputs.sign }}
+        run: bun scripts/release/relay.ts attest --version "$VERSION" --commit "$COMMIT" --out "$RUNNER_TEMP/relay" --sign "$SIGN"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: relay
+          path: ${{ runner.temp }}/relay/
+          retention-days: 7
+          if-no-files-found: error
+
+  manifest:
+    name: manifest, bundle, checksums
+    needs: [prepare, publish-image, relay]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Signs SHA256SUMS keylessly.
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Tools
+        run: |
+          bun scripts/release/tools.ts install --dir "$RUNNER_TEMP/bin" cosign
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: published-*
+          path: ${{ runner.temp }}/published
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: relay
+          path: ${{ runner.temp }}/relay
+      - name: Release manifest
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          PLATFORMS: ${{ needs.prepare.outputs.platforms }}
+        run: |
+          mkdir -p dist
+          bun scripts/release/write-manifest.ts --digests "$RUNNER_TEMP/published" --tag "$TAG" --version "$VERSION" \
+            --commit "$COMMIT" --registry "$REGISTRY" --platforms "$PLATFORMS" --out dist/release-manifest.json
+      - name: Self-host bundle
+        run: bun scripts/selfhost/bundle.ts --manifest dist/release-manifest.json --out dist/
+      - name: Assemble, checksum, sign
+        env:
+          SIGN: ${{ needs.prepare.outputs.sign }}
+        run: bun scripts/release/assemble.ts --dist dist --published "$RUNNER_TEMP/published" --relay "$RUNNER_TEMP/relay" --sign "$SIGN"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: GitHub release
+    needs: [prepare, manifest]
+    if: needs.prepare.outputs.dry_run == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: notes
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          flags=(--verify-tag --title "$TAG" --notes-file notes/release-notes.md)
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease --latest=false); fi
+          gh release create "$TAG" --repo "$REPO" "${flags[@]}" dist/*
