@@ -504,6 +504,9 @@ services:
     restart: unless-stopped
     environment:
       PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-localhost}
+      TLS_MODE: ${TLS_MODE:-acme}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      ACME_CA: ${ACME_CA:-}
     # Public by design; see infra/README.md for reaching 80/443 rootless.
     ports:
       - "${CADDY_BIND_ADDRESS:-0.0.0.0}:${CADDY_HTTP_PORT:-8080}:80"

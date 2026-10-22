@@ -44,6 +44,72 @@ in `.claude/briefs/phase5/`. Units:
 
 A and B run as one batch in worktrees; C runs after they merge.
 
+**Batch 1 merged** (workflows `wf_51a89d8a-599` and `wf_2dd564fd-e73`).
+
+- **A, CI + release** (`5d1771d`, `8bcbf93`, fixes `f971aef`, `1ffec78`):
+  - `release.yml` builds the 14 images with podman for amd64 and arm64 on native runners, and
+    pushes them by digest as multi-arch indexes.
+  - It adds `cosign sign`, CycloneDX SBOM and SLSA v1 attestations, the six relay binaries
+    with SBOMs and Sigstore bundles, the manifest, the bundle, and a signed `SHA256SUMS`.
+  - `gh release create` runs only after everything else has succeeded; `latest` moves last.
+  - Dry runs push to a Zot service container.
+  - `ci.yml` gets per-job permissions, caches that cannot reach release jobs, diagnostics
+    uploaded on failure or timeout, `lint-workflows` (actionlint, zizmor, shellcheck), the
+    `ci-ok` aggregate, and a release dry run plus the self-host e2e on main and nightly.
+  - Logic lives in tested `scripts/release/*.ts`.
+  - Review: one HIGH (a real release dispatched from a branch would sign with an identity
+    that does not verify). Fixed: real releases need the tag ref.
+- **B, Quadlet/Caddy/`selfhost.sh`** (`67b093f` … `cc9f671`, head fix `0c52ff6`):
+  - Every unit has `RunInit=true`, `Restart=always` with backoff, `RestartMode=direct`,
+    `HealthOnFailure=kill` and `StartLimitIntervalSec=0`.
+  - `Requires=` only on the one-shots (migrate, garage-init); `Wants=`+`After=` for
+    long-running dependencies, so the stack converges after a failed start.
+  - IRC cert sync runs in the tools image (no Bun on the host).
+  - `~/commonair` is a symlink to `~/.local/share/commonair/releases/<version>`.
+  - Caddy: `import tls-{$TLS_MODE:acme}`, with internal CA mode.
+  - `scripts/selfhost/{render,bundle,e2e}.ts`; `selfhost.sh install|upgrade|backup|status`
+    as POSIX sh.
+  - Why the session-ten worker stayed down: podman-compose turns `depends_on` into
+    `--requires`, and Podman applies a restart policy only while every required container
+    runs; the one-shots have exited.
+  - Review over four rounds. HIGH findings fixed:
+    - root staging through symlinks;
+    - rollback blocked by the start limit;
+    - dependency start failure left the stack down;
+    - signature stripping when cosign is installed;
+    - a migrate start that hung forever behind an unhealthy Postgres.
+  - Head fix (found while verifying): `init-env --merge` dropped keys not in
+    `.env.example`, so every upgrade lost `MTX_WEBRTCADDITIONALHOSTS` (remote WHIP).
+- **Integration** (`phase5/integrate`):
+  - the compose `tls` profile passes `TLS_MODE`/`ACME_EMAIL`/`ACME_CA`;
+  - `zot-minimal` license entry;
+  - `scripts/tsconfig.json` includes `selfhost`.
+
+Tests on the merged tree:
+
+- scripts unit 350/350;
+- infra unit 448/448, plus `caddy.int.test.ts` 10/10 (B);
+- tsc for scripts and infra;
+- `check-licenses`, `check-domains`, `check-supply-chain`;
+- actionlint and zizmor clean;
+- shellcheck 0.11.0 clean;
+- a sample `bundle.ts` build renders pinned `Image=` lines.
+
+Not run: the self-host e2e (builds 14 images) and anything on GitHub's runners.
+
+Open, not fixed (MEDIUM, design work for a later unit):
+
+- Every unit reads the whole `commonair.env`, so Caddy, MediaMTX, Grafana and Garage see
+  database passwords. The fix is a secret-free shared env plus per-unit `Secret=`, mirrored
+  in compose.
+- Rootless port forwarding hides client addresses from Caddy (all clients arrive from the
+  bridge gateway), and `trusted_proxies private_ranges` then trusts client-sent
+  `X-Forwarded-For`. Per-IP rate limits need source-address preservation (e.g. pasta, or
+  Caddy on the host network).
+- Valkey (no password), the OTel collector and Prometheus are published on host loopback.
+- An optional observability unit in a crash loop holds back app starts (`After=`).
+- `relay/Makefile` targets and names differ from `RELAY_TARGETS`.
+
 ## Session ten (2026-10-22): E6 Phase 4 completion (in flight)
 
 Started from `388f69f` after E5 closed (e5-coop passed twice, e4b-money and trust-safety once).
