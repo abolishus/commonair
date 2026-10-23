@@ -83,6 +83,9 @@ export default defineScenario({
     // harness proxy, so a rate-limited read is retried rather than failing the run.
     await ctx.step("count stays at 3", async () => {
       const samples: number[] = [];
+      // Active sessions by verdict at each sample: a dip with fewer active sessions is a missed
+      // heartbeat, one with more pending or excluded is a scoring run changing a verdict.
+      const breakdown: ({ verified: number; pending: number; excluded: number } | null)[] = [];
       for (let i = 0; i < 8; i++) {
         await Bun.sleep(5_000);
         const { count } = await waitFor(
@@ -91,12 +94,19 @@ export default defineScenario({
           { timeoutMs: 20_000, intervalMs: 2_000, signal: ctx.signal },
         );
         samples.push(count);
+        // Diagnostic only: a rate-limited read is recorded as null, never fails the step.
+        breakdown.push(
+          await streamer.api.client.stream.health({ channel }).then(
+            (h) => h.viewers,
+            () => null,
+          ),
+        );
       }
       maxSeen = Math.max(maxSeen, ...samples);
       ctx.assert(
         `count stays at ${HONEST} for 40 s`,
         samples.every((c) => c === HONEST),
-        { samples },
+        { samples, breakdown, heartbeats: await Promise.all(honest.map(async (v) => (await v.report()).heartbeats)) },
       );
     });
 

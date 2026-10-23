@@ -30,6 +30,20 @@ export function expectedPlaybackPath(engine: BrowserEngine, canPlayHls: boolean)
   return canPlayHls && engine !== "chromium" ? "native" : "mse";
 }
 
+/**
+ * What a player that never showed a frame got that far with, for the timeout's message: its
+ * last errors, or else where it was (no session, a session but no bytes, bytes but no frame).
+ * Pure.
+ */
+export function playerState(r: ViewerReport): string {
+  const seen = r.errors.slice(-3);
+  if (seen.length > 0) return `player errors: ${seen.join(" | ").slice(0, 400)}`;
+  return (
+    `no player errors; path=${r.playbackPath ?? "none"} session=${r.sessionId ? "yes" : "none"} ` +
+    `source=${r.source ?? "none"} bytes=${r.bytesHttp} stalls=${r.stalls} heartbeats=${r.heartbeats}`
+  );
+}
+
 /** Init script for well-behaved viewers: hide the webdriver flag and give headless a language list. */
 export const HUMANIZE_SCRIPT = `
 Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false, configurable: true });
@@ -264,9 +278,7 @@ class BrowserViewer implements Viewer {
     } catch (err) {
       if (err instanceof TimeoutError && err.lastError instanceof Error) throw err.lastError;
       // Name what the player saw: a bare timeout says nothing about why playback never started.
-      const seen = this.last.errors.slice(-3);
-      if (err instanceof TimeoutError && seen.length > 0)
-        throw new Error(`${err.message} (player errors: ${seen.join(" | ").slice(0, 400)})`);
+      if (err instanceof TimeoutError) throw new Error(`${err.message} (${playerState(this.last)})`);
       throw err;
     }
   }
