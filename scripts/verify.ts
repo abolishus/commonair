@@ -8,6 +8,7 @@
  *   bun run verify --quick         skip integration tests (inner loop only; never the commit gate)
  *   bun run verify --scenario chat ...plus the named harness scenario(s)
  *   bun run verify:full            everything, plus the full harness scenario
+ *   bun run verify --full --shard rest  ...with one part of it (CI runs each shard as a job)
  *   bun run verify --only static,unit   only those step groups (CI runs each group as its own job)
  *
  * Groups: static (format, lint, types, repo policy, supply chain), unit, integration (infra,
@@ -29,6 +30,7 @@ const args = process.argv.slice(2);
 const full = args.includes("--full");
 const quick = args.includes("--quick");
 const scenarios = args.flatMap((a, i) => (a === "--scenario" && args[i + 1] ? [args[i + 1]!] : []));
+const shard = fullScenarioArg(args);
 
 export const GROUPS = ["static", "unit", "integration", "relay", "harness"] as const;
 export type Group = (typeof GROUPS)[number];
@@ -53,6 +55,21 @@ interface Step {
   /** Hard limit in minutes before the step's process tree is killed. */
   timeoutMin: number;
   when?: () => boolean;
+}
+
+/** The harness name the full step runs: `full`, or `full:<shard>` with `--shard <shard>`. */
+export function fullScenarioArg(argv: readonly string[]): string {
+  const name = argv[argv.indexOf("--shard") + 1];
+  return argv.includes("--shard") && name ? `full:${name}` : "full";
+}
+
+/** Why the `--shard` arguments are unusable, or null. The harness CLI checks the name itself. */
+export function shardError(argv: readonly string[]): string | null {
+  if (!argv.includes("--shard")) return null;
+  const name = argv[argv.indexOf("--shard") + 1];
+  if (!name || name.startsWith("-")) return "--shard needs a shard name (FULL_SHARDS in harness/src/registry.ts)";
+  if (!argv.includes("--full")) return "--shard runs part of the full scenario: pass --full too";
+  return null;
 }
 
 /** `infra up`: with the harness overrides when harness scenarios run in the same gate. */
@@ -142,10 +159,10 @@ export const steps: Step[] = [
     cmd: ["bun", "harness/src/cli.ts", "run", s],
   })),
   {
-    name: "harness: full scenario",
+    name: shard === "full" ? "harness: full scenario" : `harness: ${shard}`,
     group: "harness",
     timeoutMin: 45,
-    cmd: ["bun", "harness/src/cli.ts", "run", "full"],
+    cmd: ["bun", "harness/src/cli.ts", "run", shard],
     when: () => full,
   },
 ];
@@ -155,6 +172,8 @@ if (import.meta.main) {
   let only: Set<Group>;
   try {
     only = selectGroups(args);
+    const bad = shardError(args);
+    if (bad) throw new Error(bad);
   } catch (e) {
     console.error((e as Error).message);
     process.exit(2);

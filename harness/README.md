@@ -62,6 +62,10 @@ every Phase 4 scenario it must include (E6 adds `simulcast`, `overlay-alert`, `v
 joined in E6); if one is missing or marked `inFull: false`, `run full` refuses to start rather
 than run less. Naming scenarios explicitly is unaffected.
 
+`full:<shard>` runs one part of `full` (`FULL_SHARDS` in `src/shards.ts`: `relay` is e2e-relay,
+`long` is trust-safety and e5-coop, `rest` is everything else), each in `full`'s order and each on
+its own stack. CI runs one job per shard (`bun run verify --full --only harness --shard <name>`).
+
 `full` runs on the harness stack: `compose.yaml` with every harness override layered
 (`harness/compose.trust-safety.yaml`, `harness/compose.e5-coop.yaml`, `harness/compose.e6.yaml`),
 on a Postgres volume created once with the E5 bootstrap (ADR 0020: `harness/compose.e5-coop.yaml`

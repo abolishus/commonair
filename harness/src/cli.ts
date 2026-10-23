@@ -11,7 +11,7 @@ import { type Command, USAGE, UsageError, parseArgs } from "./args.ts";
 import { loadHarnessEnv } from "./env.ts";
 import { type LoadOptions, runLoad } from "./load.ts";
 import { stopAll } from "./process.ts";
-import { loadRegistry } from "./registry.ts";
+import { FULL_SHARDS, loadRegistry } from "./registry.ts";
 import { DEFAULT_REPORT_DIR, formatHuman, writeReport } from "./report.ts";
 import { formatSkipTable, newRunId, runScenarios } from "./runner.ts";
 import { defineScenario } from "./scenario.ts";
@@ -50,6 +50,7 @@ async function main(argv: string[]): Promise<number> {
     } else {
       const width = Math.max(4, ...registry.all.map((s) => s.name.length));
       console.log(`${"full".padEnd(width)}  every scenario below marked *`);
+      console.log(`${"full:<shard>".padEnd(width)}  one part of full: ${Object.keys(FULL_SHARDS).join(", ")}`);
       for (const s of registry.all) {
         console.log(
           `${s.name.padEnd(width)}${s.inFull === false ? " " : "*"} ${s.description}  [${s.needs.join(", ")}]`,

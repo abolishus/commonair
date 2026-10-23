@@ -6,12 +6,16 @@
  * `_` are helpers, not scenarios), so later units add a scenario by adding one file and never
  * edit a shared index. `full` is not a file: it expands to every scenario with `inFull !== false`,
  * `smoke` first and `e2e-relay` last, and refuses to run while a Phase 4 scenario it must
- * include (`FULL_REQUIRED`) is missing or left out.
+ * include (`FULL_REQUIRED`) is missing or left out. `full:<shard>` runs one part of `full`
+ * (`FULL_SHARDS`), so CI can run the parts on parallel runners.
  */
 import { readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { NEEDS, type ParamNeed, type Scenario } from "./scenario.ts";
+import { FULL_SHARDS, type FullShard } from "./shards.ts";
+
+export { FULL_SHARDS, type FullShard };
 
 export const SCENARIOS_DIR = fileURLToPath(new URL("../scenarios", import.meta.url));
 export const FULL = "full";
@@ -48,6 +52,13 @@ export const FULL_REQUIRED = [
   "backup-restore",
   "e2e-relay",
 ] as const;
+
+/** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */
+export function shardOf(full: readonly Scenario[], shard: FullShard): Scenario[] {
+  const named = new Set<string>(Object.values(FULL_SHARDS).flatMap((n) => n ?? []));
+  const mine: readonly string[] | null = FULL_SHARDS[shard];
+  return full.filter((s) => (mine === null ? !named.has(s.name) : mine.includes(s.name)));
+}
 
 /**
  * Parameter variants of scenarios whose module does not declare `paramNeeds` itself. The Stripe
@@ -141,10 +152,25 @@ export class Registry {
     return orderFull(this.all);
   }
 
-  /** Expand `full`, dedupe keeping first occurrence, and reject unknown names. */
+  /** Expand `full` and `full:<shard>`, dedupe keeping first occurrence, and reject unknown names. */
   resolve(names: readonly string[]): Scenario[] {
     if (names.length === 0) throw new RegistryError("no scenario given (try `list`)");
-    if (names.includes(FULL)) {
+    const shards = names.filter((n) => n.startsWith(`${FULL}:`)).map((n) => n.slice(FULL.length + 1));
+    const badShard = shards.filter((sh) => !Object.hasOwn(FULL_SHARDS, sh));
+    if (badShard.length > 0) {
+      throw new RegistryError(
+        `unknown full shard(s): ${badShard.join(", ")}. Shards: ${Object.keys(FULL_SHARDS).join(", ")}`,
+      );
+    }
+    if (shards.length > 0) {
+      // A shard named here but not in `full` would silently never run anywhere.
+      const inFull = new Set(this.full.map((s) => s.name));
+      const stray = Object.values(FULL_SHARDS)
+        .flatMap((n) => n ?? [])
+        .filter((n) => !inFull.has(n));
+      if (stray.length > 0) throw new RegistryError(`full shards name scenario(s) not in full: ${stray.join(", ")}`);
+    }
+    if (names.includes(FULL) || shards.length > 0) {
       const missing = missingFromFull(this.all, this.required);
       if (missing.length > 0) {
         throw new RegistryError(
@@ -156,7 +182,12 @@ export class Registry {
     const seen = new Set<string>();
     const unknown: string[] = [];
     for (const name of names) {
-      const expanded = name === FULL ? this.full : [this.byName.get(name)];
+      const expanded =
+        name === FULL
+          ? this.full
+          : name.startsWith(`${FULL}:`)
+            ? shardOf(this.full, name.slice(FULL.length + 1) as FullShard)
+            : [this.byName.get(name)];
       for (const s of expanded) {
         if (!s) {
           unknown.push(name);

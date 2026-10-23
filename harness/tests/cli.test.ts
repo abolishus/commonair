@@ -6,7 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { UsageError, parseArgs } from "../src/args.ts";
-import { FULL, Registry, RegistryError, loadRegistry, validateScenario } from "../src/registry.ts";
+import {
+  FULL,
+  FULL_SHARDS,
+  type FullShard,
+  Registry,
+  RegistryError,
+  loadRegistry,
+  validateScenario,
+} from "../src/registry.ts";
 import { type RunReport, formatHuman, reportStem, summarizeResults, writeReport } from "../src/report.ts";
 import { type Scenario, type ScenarioResult, defineScenario } from "../src/scenario.ts";
 
@@ -125,6 +133,30 @@ describe("scenario registry", () => {
     for (const n of ["api", "web", "chat", "irc", "media", "ffmpeg", "browser"] as const)
       expect(social?.needs).toContain(n);
     expect(r.full.map((s) => s.name)).toContain("e2e-social");
+  });
+
+  // CI runs `full` as one job per shard: together they must be exactly `full`, each once.
+  test("the full shards partition full, in its order, and each is non-empty", async () => {
+    const r = await loadRegistry();
+    const full = r.full.map((s) => s.name);
+    const parts = (Object.keys(FULL_SHARDS) as FullShard[]).map((sh) =>
+      r.resolve([`${FULL}:${sh}`]).map((s) => s.name),
+    );
+    for (const p of parts) expect(p.length).toBeGreaterThan(0);
+    expect(parts.flat().sort()).toEqual([...full].sort());
+    expect(new Set(parts.flat()).size).toBe(full.length);
+    for (const p of parts) expect(p).toEqual(full.filter((n) => p.includes(n)));
+    expect(r.resolve([`${FULL}:rest`])[0]?.name).toBe("smoke");
+  });
+
+  test("a new scenario lands in the rest shard; unknown shards and stray names are refused", () => {
+    const named = Object.values(FULL_SHARDS).flatMap((n) => n ?? []);
+    const r = new Registry([sc("smoke"), sc("brand-new"), ...named.map((n) => sc(n))]);
+    expect(r.resolve([`${FULL}:rest`]).map((s) => s.name)).toEqual(["smoke", "brand-new"]);
+    expect(() => r.resolve([`${FULL}:nope`])).toThrow(/unknown full shard\(s\): nope/);
+    // A shard scenario left out of full (inFull: false) would run nowhere: refuse.
+    const left = new Registry([sc("smoke"), ...named.map((n) => sc(n, { inFull: n !== "e5-coop" }))]);
+    expect(() => left.resolve([`${FULL}:rest`])).toThrow(/not in full: e5-coop/);
   });
 
   test("discovers scenarios dropped into a directory", async () => {

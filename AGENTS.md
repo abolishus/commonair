@@ -51,6 +51,7 @@ they are the source of truth across sessions. Architecture: [docs/architecture.m
 | `bun run verify --only static,unit`                     | Only those step groups (static, unit, integration, relay, harness); CI runs one job per group                                         |
 | `bun run verify --scenario <name>`                      | Gate plus a named harness scenario                                                                                                    |
 | `bun run verify:full`                                   | Gate plus the full harness scenario (end of every phase)                                                                              |
+| `bun run verify --full --only harness --shard <name>`   | One shard of the full harness scenario (`relay`, `long`, `rest`), as CI runs it                                                       |
 | `vp fmt`                                                | Format everything (Oxfmt)                                                                                                             |
 | `vp lint --deny-warnings`                               | Lint with type-aware rules (Oxlint)                                                                                                   |
 | `vp run -r test` / `vp run -r test:int`                 | Unit / integration tests in every workspace                                                                                           |
