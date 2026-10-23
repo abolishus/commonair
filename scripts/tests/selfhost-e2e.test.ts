@@ -311,6 +311,8 @@ describe("transient build errors", () => {
       ),
     ).toBe(true);
     expect(isTransientBuildError("Error: localhost/base:latest: image not known")).toBe(false);
+    // A base named by id that is really missing is not the lost-cache case.
+    expect(isTransientBuildError("Error: abc123def4567890: image not known")).toBe(false);
   });
 });
 
