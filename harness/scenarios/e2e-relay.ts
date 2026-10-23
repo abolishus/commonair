@@ -224,6 +224,8 @@ async function e2eRelay(
       const page = await ms.goto(ROUTES.dashboard);
       await byTestId(page, T.relaysLink).first().click(ui);
       await byTestId(page, T.relays).waitFor(ui);
+      // The table shows skeleton rows until the list loads: wait for its empty state or a row.
+      await byTestId(page, T.relaysEmpty).or(byTestId(page, T.relayRow)).first().waitFor(ui);
       check("relays page starts empty", (await byTestId(page, T.relaysEmpty).count()) > 0);
       return page;
     });
