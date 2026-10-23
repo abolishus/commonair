@@ -67,7 +67,7 @@ export function fullScenarioArg(argv: readonly string[]): string {
 export function shardError(argv: readonly string[]): string | null {
   if (!argv.includes("--shard")) return null;
   const name = argv[argv.indexOf("--shard") + 1];
-  if (!name || name.startsWith("-")) return "--shard needs a shard name (FULL_SHARDS in harness/src/registry.ts)";
+  if (!name || name.startsWith("-")) return "--shard needs a shard name (FULL_SHARDS in harness/src/shards.ts)";
   if (!argv.includes("--full")) return "--shard runs part of the full scenario: pass --full too";
   return null;
 }

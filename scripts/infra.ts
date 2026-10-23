@@ -9,18 +9,11 @@
  *                               build and start the whole platform (+ harness profile), wait for health;
  *                               override files are layered over compose.yaml (e.g.
  *                               harness/compose.trust-safety.yaml for the `trust-safety` scenario)
- *   bun scripts/infra.ts build [--harness] [override.yaml...]
- *                               build the platform's images only (CI warms its build cache with it)
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
- *
- * COMPOSE_BUILD_CACHE=<registry/prefix> builds every image with `--cache-from <prefix>/<image>`
- * (layers from earlier CI runs), and COMPOSE_BUILD_CACHE_PUSH=1 adds `--cache-to` to store new
- * ones. Unset, nothing changes.
  */
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate"];
 /** Long-running services that report health. */
@@ -411,39 +404,6 @@ type Condition = "service_started" | "service_healthy" | "service_completed_succ
 export interface ComposeService {
   profiles?: string[];
   depends_on?: string[] | Record<string, { condition?: Condition }>;
-  image?: string;
-  build?: unknown;
-}
-
-/**
- * A compose override that gives every built image a registry layer cache, keyed by the image's
- * name (`localhost/commonair/api:dev` → `<prefix>/api`), so services sharing an image share one.
- * Pure.
- */
-export function buildCacheOverride(
-  services: Record<string, ComposeService>,
-  prefix: string,
-  push: boolean,
-): { services: Record<string, { build: { cache_from: string[]; cache_to?: string[] } }> } {
-  const out: Record<string, { build: { cache_from: string[]; cache_to?: string[] } }> = {};
-  for (const [name, svc] of Object.entries(services)) {
-    if (svc.build === undefined) continue;
-    const image = (svc.image ?? name).split("/").pop()?.split(":")[0] ?? name;
-    const ref = `${prefix.replace(/\/+$/, "")}/${image}`;
-    out[name] = { build: push ? { cache_from: [ref], cache_to: [ref] } : { cache_from: [ref] } };
-  }
-  return { services: out };
-}
-
-/** `files` plus the build-cache override when COMPOSE_BUILD_CACHE is set. */
-function withBuildCache(files: string[]): string[] {
-  const prefix = process.env.COMPOSE_BUILD_CACHE;
-  if (!prefix) return files;
-  const base = files.length > 0 ? files : ["-f", resolve(ROOT, "compose.yaml")];
-  const override = buildCacheOverride(composeConfig(base), prefix, process.env.COMPOSE_BUILD_CACHE_PUSH === "1");
-  const path = join(mkdtempSync(join(tmpdir(), "commonair-build-cache-")), "compose.build-cache.yaml");
-  writeFileSync(path, JSON.stringify(override, null, 2));
-  return [...base, "-f", path];
 }
 
 function dependsOn(svc: ComposeService): Record<string, Condition> {
@@ -545,12 +505,9 @@ if (import.meta.main) {
       await waitExited(ONE_SHOT_SERVICES);
       sweepStaleTestDatabases();
       console.log(`infra: ${TEST_SERVICES.join(", ")} healthy`);
-    } else if (cmd === "build") {
-      preflight();
-      compose([...withBuildCache(stackFiles(process.argv.slice(3))), "--profile", "harness", "build"], 20 * 60_000);
     } else if (cmd === "stack") {
       preflight();
-      const files = withBuildCache(stackFiles(process.argv.slice(3)));
+      const files = stackFiles(process.argv.slice(3));
       compose([...files, "--profile", "harness", "build"], 20 * 60_000);
       removeStaleImageContainers();
       const plan = startPlan(composeConfig(files), new Set(["harness"]), ONE_SHOT_SERVICES);
@@ -576,7 +533,7 @@ if (import.meta.main) {
       compose(["down", "-v"], 5 * 60_000);
     } else {
       console.error(
-        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | build | stack [--harness] [override.yaml...] | down | reset",
+        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | stack [--harness] [override.yaml...] | down | reset",
       );
       process.exit(2);
     }

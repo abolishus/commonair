@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { type ComposeService, ONE_SHOT_SERVICES, buildCacheOverride, startPlan } from "../infra.ts";
+import { type ComposeService, ONE_SHOT_SERVICES, startPlan } from "../infra.ts";
 
 const healthy = { condition: "service_healthy" as const };
 const done = { condition: "service_completed_successfully" as const };
@@ -87,28 +87,5 @@ describe("startPlan", () => {
   test("a depends_on cycle behind a one-shot is an error, not a hang", () => {
     const cyclic = { job: {}, a: { depends_on: ["job", "b"] }, b: { depends_on: ["a"] } };
     expect(() => startPlan(cyclic, new Set(), ["job"])).toThrow(/depends_on cycle among a, b/);
-  });
-});
-
-describe("buildCacheOverride", () => {
-  const services: Record<string, ComposeService> = {
-    postgres: { image: "localhost/commonair/postgres:dev", build: { context: "." } },
-    migrate: { image: "localhost/commonair/tools:dev", build: { context: "." } },
-    "garage-init": { image: "localhost/commonair/tools:dev", build: { context: "." } },
-    valkey: { image: "ghcr.io/valkey-io/valkey:9@sha256:abc" },
-  };
-
-  test("reads from a cache per built image, never for pulled images; services sharing an image share it", () => {
-    const o = buildCacheOverride(services, "ghcr.io/abolishus/commonair/ci-cache/", false);
-    expect(o.services).toEqual({
-      postgres: { build: { cache_from: ["ghcr.io/abolishus/commonair/ci-cache/postgres"] } },
-      migrate: { build: { cache_from: ["ghcr.io/abolishus/commonair/ci-cache/tools"] } },
-      "garage-init": { build: { cache_from: ["ghcr.io/abolishus/commonair/ci-cache/tools"] } },
-    });
-  });
-
-  test("writes to the cache only when asked", () => {
-    const o = buildCacheOverride(services, "r/p", true);
-    expect(o.services.postgres?.build).toEqual({ cache_from: ["r/p/postgres"], cache_to: ["r/p/postgres"] });
   });
 });

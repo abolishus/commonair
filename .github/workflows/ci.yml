@@ -170,23 +170,20 @@ jobs:
   harness:
     # The full harness scenario against the whole platform, on main, nightly and a manual dispatch
     # (to prove a branch before it reaches main); pull requests run the gate only. One job per
-    # shard of `full` (FULL_SHARDS in harness/src/registry.ts), each on its own stack, so the
+    # shard of `full` (FULL_SHARDS in harness/src/shards.ts), each on its own stack, so the
     # scenario takes the longest shard's time, not the sum. Parallel to the verify groups.
     name: verify (harness ${{ matrix.shard }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: read
-      # Read the image build cache that build-cache writes (ghcr, private to this repository).
-      packages: read
     strategy:
       fail-fast: false
       matrix:
         shard: [relay, long, rest]
     env:
       PODMAN_COMPOSE_PROVIDER: podman-compose
-      COMPOSE_BUILD_CACHE: ghcr.io/${{ github.repository }}/ci-cache
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -201,12 +198,10 @@ jobs:
           playwright-deps: "true"
           browsers: "true"
           model: "true"
-      - name: Registry login (build cache, read)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: podman login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
       - name: Verify
-        timeout-minutes: 50
+        # Above verify's own limits (platform up 25 + browsers 10 + scenario 45), so a hung
+        # scenario is stopped by verify and still leaves its report and summary.
+        timeout-minutes: 80
         env:
           SHARD: ${{ matrix.shard }}
         run: |
@@ -233,37 +228,6 @@ jobs:
             harness/reports/
           retention-days: 5
           if-no-files-found: ignore
-
-  build-cache:
-    # Builds the platform's images with --cache-to so the next harness run reuses their layers
-    # (bun install above all). Only main's own code writes the cache: pull requests and dispatches
-    # of other branches only read it. Not part of ci-ok: a cold cache only costs time.
-    name: build cache
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
-    env:
-      PODMAN_COMPOSE_PROVIDER: podman-compose
-      COMPOSE_BUILD_CACHE: ghcr.io/${{ github.repository }}/ci-cache
-      COMPOSE_BUILD_CACHE_PUSH: "1"
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-          go-version: ${{ env.GO_VERSION }}
-          pipx: podman-compose==1.6.0
-      - name: Registry login (build cache, write)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: podman login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<< "$GH_TOKEN"
-      - name: Build and push the cache
-        run: bun scripts/infra.ts build --harness
 
   release-dry-run:
     name: release dry run

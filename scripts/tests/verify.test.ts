@@ -90,23 +90,20 @@ describe("CI verify jobs", () => {
     expect(verify.env.SHARD).toBe("${{ matrix.shard }}");
   });
 
-  // Only main's own code may write the image build cache the harness jobs build from.
-  test("the build cache is written only by main's pushes and nightly, and only read elsewhere", () => {
-    const writer = ci.jobs["build-cache"];
-    expect(writer.if).toBe(
-      "github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'schedule')",
-    );
-    expect(writer.permissions).toEqual({ contents: "read", packages: "write" });
-    expect(writer.env.COMPOSE_BUILD_CACHE_PUSH).toBe("1");
-    expect(runOf(writer)).toContain("bun scripts/infra.ts build --harness");
-    expect(ci.jobs.harness.permissions).toEqual({ contents: "read", packages: "read" });
-    expect(ci.jobs.harness.env.COMPOSE_BUILD_CACHE).toBe(writer.env.COMPOSE_BUILD_CACHE);
-    expect(ci.jobs.harness.env.COMPOSE_BUILD_CACHE_PUSH).toBeUndefined();
+  // Only the release (release.yml through release-dry-run) may push packages.
+  test("no CI job but the release dry run can write packages", () => {
     const writers = Object.entries(ci.jobs as Record<string, { permissions?: Record<string, string> }>)
       .filter(([, job]) => job.permissions?.packages === "write")
       .map(([name]) => name);
-    // release-dry-run calls release.yml, which pushes the release images.
-    expect(writers.sort()).toEqual(["build-cache", "release-dry-run"]);
+    expect(writers).toEqual(["release-dry-run"]);
+  });
+
+  test("a harness shard's step outlasts verify's own limits, so verify stops a hang and reports it", () => {
+    const step = ci.jobs.harness.steps.find((s: { name?: string }) => s.name === "Verify");
+    // platform up + browsers + the full scenario (this test passes no --scenario).
+    const own = steps.filter((s) => s.group === "harness").reduce((m, s) => m + s.timeoutMin, 0);
+    expect(step["timeout-minutes"]).toBeGreaterThanOrEqual(own);
+    expect(ci.jobs.harness["timeout-minutes"]).toBeGreaterThan(step["timeout-minutes"]);
   });
 
   // A dispatch on a branch is how a harness fix is proven before main; it ran nothing before.
