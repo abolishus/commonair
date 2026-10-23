@@ -56,6 +56,14 @@ describe("CI verify jobs", () => {
     expect(ci.jobs["ci-ok"].needs).toEqual(expect.arrayContaining(["verify", "harness"]));
   });
 
+  // A dispatch on a branch is how a harness fix is proven before main; it ran nothing before.
+  test("harness runs on main, nightly and a manual dispatch, never on a pull request", () => {
+    const cond: string = ci.jobs.harness.if;
+    for (const e of ["schedule", "workflow_dispatch", "push"]) expect(cond).toContain(`github.event_name == '${e}'`);
+    expect(cond).toContain("github.ref == 'refs/heads/main'");
+    expect(cond).not.toContain("pull_request");
+  });
+
   test("compose groups pin podman compose to podman-compose, not the runner's docker-compose plugin", () => {
     for (const job of [ci.jobs.verify, ci.jobs.harness]) expect(job.env.PODMAN_COMPOSE_PROVIDER).toBe("podman-compose");
     const integration = groups.find((g) => g.group === "integration")!;

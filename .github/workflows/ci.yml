@@ -3,7 +3,7 @@
 #
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
 # goes red on main, fix main immediately. Pull requests run the gate; main and the nightly
-# schedule also run the full harness scenario, a release dry run (release.yml) and the self-host end-to-end test. `ci-ok` is the
+# schedule (and a manual dispatch) also run the full harness scenario, a release dry run (release.yml) and the self-host end-to-end test. `ci-ok` is the
 # one check branch protection requires.
 name: ci
 
@@ -168,10 +168,11 @@ jobs:
           if-no-files-found: ignore
 
   harness:
-    # The full harness scenario against the whole platform, on main and nightly; pull requests
-    # run the gate only. Parallel to the verify groups, which cover the rest of verify:full.
+    # The full harness scenario against the whole platform, on main, nightly and a manual dispatch
+    # (to prove a branch before it reaches main); pull requests run the gate only. Parallel to the
+    # verify groups, which cover the rest of verify:full.
     name: verify (harness)
-    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
