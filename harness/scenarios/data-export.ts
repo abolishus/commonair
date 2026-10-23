@@ -155,6 +155,9 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
   ]);
   if (session) {
     const page = await session.goto(E6_ROUTES.privacy);
+    // The list renders after hydration: wait for the row, as step 6 does, or a slow runner (CI)
+    // counts before it exists.
+    await byE6Id(page, E.exportRow, { "export-id": accountId }).first().waitFor({ timeout: UI_TIMEOUT_MS });
     const link = byE6Id(byE6Id(page, E.exportRow, { "export-id": accountId }), E.exportDownload);
     ctx.check("2 the ready account row has a download link", (await link.count()) > 0);
   }
