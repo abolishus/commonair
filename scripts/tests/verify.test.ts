@@ -102,7 +102,7 @@ describe("CI verify jobs", () => {
     const step = ci.jobs.harness.steps.find((s: { name?: string }) => s.name === "Verify");
     // platform up + browsers + the full scenario (this test passes no --scenario).
     const own = steps.filter((s) => s.group === "harness").reduce((m, s) => m + s.timeoutMin, 0);
-    expect(step["timeout-minutes"]).toBeGreaterThanOrEqual(own);
+    expect(step["timeout-minutes"]).toBeGreaterThan(own);
     expect(ci.jobs.harness["timeout-minutes"]).toBeGreaterThan(step["timeout-minutes"]);
   });
 

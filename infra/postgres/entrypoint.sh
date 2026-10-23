@@ -19,6 +19,11 @@ set +u
 # shellcheck source=/dev/null
 . /usr/local/bin/docker-entrypoint.sh
 
+# As the stock _main does: a command that starts with a flag is a postgres server command.
+if [ "${1:0:1}" = - ]; then
+  set -- postgres "$@"
+fi
+
 if [ "${1:-}" = postgres ] && [ "$(id -u)" = 0 ]; then
   # The stock _main re-execs its own file as postgres, which would drop the override below:
   # prepare the directories as it does, then re-exec this script instead.

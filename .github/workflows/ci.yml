@@ -175,7 +175,7 @@ jobs:
     name: verify (harness ${{ matrix.shard }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 110
     permissions:
       contents: read
     strategy:
@@ -201,7 +201,7 @@ jobs:
       - name: Verify
         # Above verify's own limits (platform up 25 + browsers 10 + scenario 45), so a hung
         # scenario is stopped by verify and still leaves its report and summary.
-        timeout-minutes: 80
+        timeout-minutes: 85
         env:
           SHARD: ${{ matrix.shard }}
         run: |
