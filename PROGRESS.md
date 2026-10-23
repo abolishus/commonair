@@ -20,7 +20,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session twelve (2026-10-22/23): validating and finishing Phase 5 (Parts 1–2 done; release pending the user)
+## Session twelve (2026-10-22/23): validating and finishing Phase 5 (Parts 1–2 done, `ci-ok` green; release pending the user)
 
 Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/validate`
 (worktree `.claude/worktrees/p5-validate`), merged to `main` only after review and a green gate.
@@ -46,6 +46,12 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 | CI dispatch 39896210222 (sharded, `4ce2acd`)             | shards relay 15 min and long 13 min green; rest 13/15 (ingest-whip, integrity-basic, see below); Debian e2e red (Postgres init, fixed `6a4acd9`)                                                                                                                                                                                                                                                                                                                              |
 | CI dispatch 39955333600 (`a38438f`)                      | **all three harness shards green** (13–16 min); everything else green but Debian e2e ("layer not known" retry, fixed `fb3e9cd`)                                                                                                                                                                                                                                                                                                                                               |
 | `bun run verify` at `9d2ec72` (external infra)           | **GREEN** in 374 s                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| CI main run 39966231110 at `292a067`                     | every job green but the Fedora e2e: the worker never restarted after `podman kill` (EBUSY, the same as Debian in 39958894162; fixed `ffb3bc7`). Debian green; its "layer not known" retry fired once and worked                                                                                                                                                                                                                                                               |
+| Local Debian e2e at `292a067` (`--keep`)                 | passed (the race did not fire); the kept host then reproduced the worker failure on demand and proved the fix (below)                                                                                                                                                                                                                                                                                                                                                         |
+| `bun run verify` at `78f43e4` (external infra)           | **GREEN** in 599 s, every step                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| CI main run 39988149327 at `78f43e4`                     | every verify group, all three harness shards (12–15 min), lint, release dry run and the **Fedora e2e green** (worker back in 21 s, NRestarts 0 → 1). Debian e2e red before install: the host image build hit "layer not known" (fixed `cbc8786`)                                                                                                                                                                                                                              |
+| `verify --only static,integration` at `cbc8786`          | **GREEN** in 278 s (a full run before it was red only on `stack.int.test.ts` timing out at 60 s under load 12; 8/8 alone in 46 s)                                                                                                                                                                                                                                                                                                                                             |
+| CI main run 39994146130 at `cbc8786`                     | **`ci-ok` GREEN**: every verify group, all three harness shards (12–16 min), lint, release dry run, and both self-host e2e distros: Debian and Fedora 81 checks, 0 failed each (install 238 s, upgrade 135/137 s, rollback 396/399 s), worker back after `podman kill` (NRestarts 0 → 1)                                                                                                                                                                                      |
 
 ### Fixes (symptom → root cause → fix)
 
@@ -215,6 +221,40 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   `scripts/tests/verify.test.ts` (`dd67d8a`). `main` was fast-forwarded to `7910a24` and pushed
   at the user's request, then `9d216dd`.
 
+- `ffb3bc7` **e2e (Debian 39958894162, Fedora 39966231110): a killed worker never came back**,
+  once Postgres too (39896210222): every restart failed before our code with "Failed to spawn
+  executor: Device or resource busy" / "Failed to spawn 'start-pre' task" → systemd 257 (Debian 13,
+  Fedora 42) with Quadlet: `podman run --cgroups=split` enables cpu, memory and pids in the unit
+  cgroup's `subtree_control`; systemd prunes that cgroup when a unit goes inactive, which with
+  `RestartMode=direct` it never does (`service_enter_dead` skips the `*_BEFORE_AUTO_RESTART`
+  states), so the only prune left is a cgroup-empty event handled in auto-restart. When the event
+  is handled in stop-post instead, before the last control process's SIGCHLD, nothing prunes,
+  and `ExecStartPre=` (spawned into the unit cgroup itself, not `.control`) hits cgroup v2's
+  no-internal-processes rule on every retry. Upstream's related fix (systemd PR 41304, after 257)
+  does not cover a prune that never runs. Real servers are affected, not only the test host:
+  reproduced on demand on the kept Debian 13 e2e host's real `commonair-worker` (systemd 257.13,
+  Podman 5.4.2) and on a Fedora 42 host (Podman 5.8.2) by making the last `ExecStopPost=` leave
+  the cgroup before exiting → `scripts/selfhost/cgroup-reset.sh`, the first `ExecStopPost=` of
+  all 20 `RestartMode=direct` units (Quadlet appends its `podman rm` after it): from `.control`
+  it waits up to 10 s for podman's sub-cgroups to empty, removes them and disables the
+  controllers; a container still running is left alone. With the race forced, the worker came
+  back after every kill; without the script it reproduced the CI error exactly. The bundle ships
+  files named by `ExecStopPost=`; the e2e dumps the unit's cgroup tree when a restart check fails;
+  troubleshooting.md tells older installs to `systemctl --user restart <unit>`. `RestartMode=direct`
+  stays (ADR 0023 §10). Reviews: correctness (one HIGH, the e2e dump placed after a throwing
+  check: fixed, re-reviewed clean) and security (no HIGH/MEDIUM; LOWs taken: the test root is an
+  argument, not an env var; the script refuses anything but a user service's `.control`).
+- `78f43e4` **Fedora e2e upgrade: Docker Hub answered 500 for Garage's manifest** (39958894162;
+  the pull failed in 0.5 s) → Podman's own `--retry` covers only 502–504 and network errors →
+  `pull_images` tries up to four times (5/15/45 s) on 5xx, 429, 408, timeouts, dropped
+  connections and failed DNS servers; never on auth, not-found, digest-mismatch or unrecognised
+  errors; Podman's error is printed. 15 tests (the retry cases fail without it).
+- `cbc8786` **CI Debian e2e (39988149327): "layer not known" building the host image** → the
+  `fb3e9cd` retry covered the release images only; the host image's build called podman
+  directly → it goes through `build()`; a test fails on any other `podman build`. A run-wide
+  `--no-cache` after the first loss was tried and dropped on review (it would rebuild the shared
+  Bun stages for every image).
+
 ### Self-hosting gaps
 
 - S3 for browsers: designed as ADR 0024 (`f50fe9e`): path-style bucket URLs on the main host,
@@ -277,20 +317,16 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 
 ### Still open
 
-- **CI `ci-ok` is not yet green in one run.** On `phase5/harness-ci` the three harness shards
-  passed in dispatches 39955333600 and 39958894162 (13–16 min each), with every verify group, lint
-  and the release dry run. The self-host e2e is what is left, with two failures in 39958894162:
-  - Debian: after `podman kill`, `commonair-worker` never restarts: every restart fails before
-    any of our code with "Failed to spawn executor: Device or resource busy" (systemd retried 8
-    times in 180 s). The same error stopped Postgres's restart in 39896210222. Earlier runs
-    restarted the worker in 22 s. Likely cgroup v2's no-internal-processes rule (a child cgroup of
-    the killed container left in the unit's delegated cgroup); not yet shown whether only the
-    privileged e2e host or a real Debian 13 host does this. Needs a live host to inspect
-    (`systemd-cgls`, the unit's `cgroup.subtree_control` and children) when it happens.
-  - Fedora: Docker Hub answered 500 for Garage's manifest during the upgrade. External; a pull
-    retry in `selfhost.sh` would make a real install ride it out too.
-  - Open from the sharded run: ingest-whip and integrity-basic each failed once (now
-    self-diagnosing, see `a38438f`).
+- `ci-ok` went green in main run 39994146130 (all groups, shards and both distros). The worker
+  race is intermittent, so later runs are further samples; the proof of the fix is the on-demand
+  reproduction (see `ffb3bc7`).
+- Open from the sharded run: ingest-whip and integrity-basic each failed once (now
+  self-diagnosing, see `a38438f`).
+- `infra/tests/stack.int.test.ts` ("re-running migrate keeps the role working") can exceed its
+  60 s limit on a loaded workstation (76 s once at load 12); not seen on CI.
+- Not covered by a test: that Quadlet keeps appending its own `ExecStopPost=` after the unit's
+  (checked by hand on Podman 5.4.2 and 5.8.2). A rollback to a release before `ffb3bc7` loses
+  the cgroup reset again.
 - IRC (6667/6697) and MediaMTX RTMP/ICE still see one client address under rootless Podman:
   IRC needs systemd socket activation in `services/irc` (`LISTEN_FDS`, `Bun.listen({ fd })`),
   MediaMTX has none. Documented in `infra/README.md`.
