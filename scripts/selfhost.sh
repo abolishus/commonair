@@ -27,6 +27,8 @@ HEALTH_TIMEOUT="${COMMONAIR_HEALTH_TIMEOUT:-900}"
 # there is no certificate to wait for; the timer retries later.
 IRC_CERT_TIMEOUT="${COMMONAIR_IRC_CERT_TIMEOUT:-60}"
 POLL_INTERVAL="${COMMONAIR_POLL_INTERVAL:-5}"
+# Tries per image pull when the registry fails transiently (5 s, 15 s, 45 s apart).
+PULL_ATTEMPTS=4
 
 DATA_DIR="$HOME/.local/share/commonair"
 RELEASES_DIR="$DATA_DIR/releases"
@@ -585,11 +587,32 @@ tools_image() {
   sed -n 's/^Image=//p' "$1/quadlet/commonair-migrate.container" | head -n 1
 }
 
+# Whether a failed pull is worth another try: a registry's 5xx, 429 or 408, a timeout, a dropped
+# connection, a DNS server that failed to answer. Podman's own --retry covers only 502-504 and
+# network errors, and Docker Hub answers an occasional 500. An auth, not-found or digest error is
+# never retried: another try cannot fix it, and a digest that does not match must stop the
+# install, not be fetched again.
+pull_transient() {
+  printf '%s' "$1" | grep -Eqi 'unauthorized|denied|authentication required|manifest unknown|name unknown|not found|status:? 40([0-7]|9)|digest did not match|does not match' &&
+    return 1
+  printf '%s' "$1" | grep -Eqi 'status:? (5[0-9][0-9]|429|408)|too ?many ?requests|timeout|timed out|deadline exceeded|connection reset|unexpected EOF|service unavailable|bad gateway|temporary failure in name resolution|server misbehaving|network is unreachable|GOAWAY'
+}
+
 pull_images() {
   for _img in $(images_of "$1"); do
     info "pulling $_img"
-    podman pull --quiet "$_img" >/dev/null || die "could not pull $_img" \
-      "fix: check the network and the registry (--registry for a mirror)"
+    _try=1
+    _wait=5
+    until _err=$(podman pull --quiet "$_img" 2>&1 >/dev/null); do
+      printf '%s\n' "$_err" >&2
+      if [ "$_try" -ge "$PULL_ATTEMPTS" ] || ! pull_transient "$_err"; then
+        die "could not pull $_img" "fix: check the network and the registry (--registry for a mirror)"
+      fi
+      warn "pulling $_img failed (attempt $_try of $PULL_ATTEMPTS), retrying in ${_wait}s"
+      sleep "$_wait"
+      _try=$((_try + 1))
+      _wait=$((_wait * 3))
+    done
   done
 }
 

@@ -75,6 +75,10 @@ Common causes:
 - **An observability service in a crash loop.** App units start after the OpenTelemetry
   collector, so a collector that never gets healthy holds them back. Check
   `commonair-otel-collector`, `commonair-loki` and `commonair-tempo`.
+- **`Failed to spawn executor: Device or resource busy`** on every restart. The unit's cgroup
+  was not cleaned up after its container died, a gap in systemd 257 with in-place restarts.
+  Every unit now cleans it up itself after each stop (`scripts/selfhost/cgroup-reset.sh`). On
+  an instance installed before that, `systemctl --user restart <unit>` clears it.
 
 To restart one service by hand: `systemctl --user restart commonair-worker`.
 
@@ -82,16 +86,17 @@ To restart one service by hand: `systemctl --user restart commonair-worker`.
 
 Each check prints the problem and the fix. The ones you are most likely to meet:
 
-| Error                                               | Fix                                                                                                       |
-| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `linger is off for commonair`                       | As root: `loginctl enable-linger commonair`                                                               |
-| `no systemd user manager for commonair`             | Log in as `commonair` over SSH or with `machinectl shell commonair@`; `su` and `sudo -u` do not start one |
-| `net.ipv4.ip_unprivileged_port_start is 1024`       | As root, the `sysctl` command it prints, or run the install as root with `--yes`                          |
-| `no /etc/subuid entry for commonair`                | As root: `usermod --add-subuids 100000-165535 --add-subgids 100000-165535 commonair`                      |
-| `ports already in use`                              | Stop what listens there (`sudo ss -ltnup`), usually another web server on 80/443                          |
-| `an instance is already installed`                  | `install --reinstall` to reinstall, or `upgrade` for a new version                                        |
-| `checksum mismatch` / `signature … does not verify` | Download again. If it persists, do not install; report it to the project                                  |
-| `the instance did not become healthy`               | `selfhost.sh status`, then the logs of the units that are not healthy                                     |
+| Error                                               | Fix                                                                                                                                                        |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `linger is off for commonair`                       | As root: `loginctl enable-linger commonair`                                                                                                                |
+| `no systemd user manager for commonair`             | Log in as `commonair` over SSH or with `machinectl shell commonair@`; `su` and `sudo -u` do not start one                                                  |
+| `net.ipv4.ip_unprivileged_port_start is 1024`       | As root, the `sysctl` command it prints, or run the install as root with `--yes`                                                                           |
+| `no /etc/subuid entry for commonair`                | As root: `usermod --add-subuids 100000-165535 --add-subgids 100000-165535 commonair`                                                                       |
+| `ports already in use`                              | Stop what listens there (`sudo ss -ltnup`), usually another web server on 80/443                                                                           |
+| `an instance is already installed`                  | `install --reinstall` to reinstall, or `upgrade` for a new version                                                                                         |
+| `checksum mismatch` / `signature … does not verify` | Download again. If it persists, do not install; report it to the project                                                                                   |
+| `the instance did not become healthy`               | `selfhost.sh status`, then the logs of the units that are not healthy                                                                                      |
+| `could not pull <image>`                            | Podman's error is printed above it. A registry's 5xx, 429 or timeout is retried four times first; if it persists, try later or use a mirror (`--registry`) |
 
 ## ACME fails
 
