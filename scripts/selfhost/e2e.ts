@@ -848,6 +848,15 @@ async function checkRestart(service: string): Promise<void> {
       return;
     }
   }
+  // What a stuck restart needs to be diagnosed: the unit's cgroup tree as systemd left it.
+  inHost(
+    `rel=$(systemctl --user show ${unit} -p ControlGroup --value); [ -n "$rel" ] || exit 0; cg=/sys/fs/cgroup$rel; ` +
+      `systemctl --user status ${unit} --no-pager -n 0; ` +
+      `find "$cg" -type d | while read -r d; do printf '%s procs=[%s] subtree=[%s] %s\\n' "$d" ` +
+      `"$(tr '\\n' ' ' < "$d/cgroup.procs")" "$(cat "$d/cgroup.subtree_control")" "$(tr '\\n' ' ' < "$d/cgroup.events")"; done; ` +
+      `podman ps -a --format '{{.Names}} {{.Status}}'`,
+    { user: true, allowFail: true },
+  );
   expectThat(false, `${service} did not come back within 180 s of podman kill`);
 }
 

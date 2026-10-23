@@ -13,7 +13,8 @@
  * ~/.local/share/commonair/releases/<version>, and ~/commonair links to it):
  *   selfhost.sh, release-manifest.json, release.env (the manifest's facts for the shell),
  *   quadlet/ (rendered), systemd/, every config file the units mount from %h/commonair/ and
- *   every file their ExecStartPre= lines use from there (the env renderer and key lists),
+ *   every file their ExecStartPre= and ExecStopPost= lines use from there (the env renderer, key
+ *   lists and cgroup reset),
  *   tools/ (init-env and fetch-model bundled into single files, run with the tools image's Bun,
  *   plus .env.example and the licenses of the npm packages bundled into them), LICENSES/.
  */
@@ -116,7 +117,8 @@ export async function bundleEntries(opts: BundleOptions): Promise<{ version: str
   for (const [name, text] of readUnitDir(join(root, SYSTEMD_DIR))) add(`systemd/${name}`, text);
   for (const path of releaseMounts(units.values()))
     for (const file of filesUnder(root, path)) add(file, readFileSync(join(root, file)));
-  // The env renderer and the key lists the units' ExecStartPre= lines name (unit-env.ts).
+  // What the units' ExecStartPre= and ExecStopPost= lines name: the env renderer and key lists
+  // (unit-env.ts), and cgroup-reset.sh.
   for (const file of releaseExecFiles(units.values())) {
     if (!existsSync(join(root, file))) throw new Error(`a unit runs or reads ${file}, which does not exist`);
     add(file, readFileSync(join(root, file)));

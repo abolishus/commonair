@@ -115,7 +115,8 @@ describe("bundle contents", () => {
       "infra/otel-collector/config.yaml",
       "infra/prometheus/prometheus.yml",
       "infra/tempo/tempo.yaml",
-      // What the units' ExecStartPre= lines use from %h/commonair/.
+      // What the units' ExecStartPre= and ExecStopPost= lines use from %h/commonair/.
+      "scripts/selfhost/cgroup-reset.sh",
       "scripts/selfhost/render-env.sh",
       ...keyLists,
       "tools/init-env.js",

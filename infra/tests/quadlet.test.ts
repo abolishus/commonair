@@ -99,6 +99,17 @@ describe("long-running units restart for real", () => {
     expect(values(section(unit, "Service"), "RestartMode")).toEqual(["direct"]);
   });
 
+  test.each(units.filter(([, u]) => /^RestartMode=direct$/m.test(u)))(
+    "%s: resets its cgroup after every stop, before Quadlet's own clean-up (RestartMode=direct skips systemd's)",
+    (_, unit) => {
+      // Otherwise a restart can fail for good with "Failed to spawn executor: Device or resource
+      // busy" (scripts/selfhost/cgroup-reset.sh). Quadlet appends its ExecStopPost= after ours.
+      expect(values(section(unit, "Service"), "ExecStopPost")).toEqual([
+        "-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh",
+      ]);
+    },
+  );
+
   test.each(longRunning)("%s: a crash loop can never leave the unit permanently failed", (_, unit) => {
     // StartLimitIntervalSec=0 turns the start rate limit off, so systemd never gives up
     // (a burst limit is then moot); RestartSteps above does the throttling instead.

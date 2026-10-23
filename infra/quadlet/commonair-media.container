@@ -76,6 +76,9 @@ Notify=healthy
 #AddDevice=nvidia.com/gpu=all
 
 [Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
 # Renders that env file from commonair.env, so an edit there applies on the next restart. It
 # fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
 ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-media.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-media.env

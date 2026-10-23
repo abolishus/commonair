@@ -31,6 +31,9 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
 Restart=always
 RestartMode=direct
 RestartSec=5
