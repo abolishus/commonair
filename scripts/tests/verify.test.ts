@@ -28,6 +28,14 @@ describe("steps", () => {
   test("every group has a step, so a CI job per group never runs nothing", () => {
     for (const g of GROUPS) expect(steps.some((s) => s.group === g)).toBe(true);
   });
+
+  // CI's first full run started the plain stack: account-deletion, vod-clips, trust-safety,
+  // e5-coop, data-export, simulcast and e2e-relay all failed on a missing override.
+  test("platform up starts the harness stack, with every harness override", () => {
+    const up = steps.find((s) => s.name === "platform up");
+    expect(up?.group).toBe("harness");
+    expect(up?.cmd).toEqual(["bun", "scripts/infra.ts", "stack", "--harness"]);
+  });
 });
 
 // CI runs each group as its own job; these pin what the groups need from it, the fixes that

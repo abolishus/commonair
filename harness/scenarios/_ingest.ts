@@ -71,8 +71,11 @@ export async function ingestScenario(ctx: ScenarioContext, protocol: "rtmp" | "w
     const budget = glassToGlassBudgetMs(protocol, engine);
     ctx.assert(`${engine}: glass-to-glass under ${budget} ms`, (latency.p50 ?? Infinity) < budget, latency);
     const report = await v.report();
-    ctx.check(`${engine}: playback path`, report.playbackPath === (engine === "webkit" ? "native" : "mse"), {
+    // The player's own rule: Linux WebKit has no native HLS and rightly plays through hls.js.
+    const expected = report.engine === "http" ? "http" : await p.fleet.expectedPlaybackPath(report.engine);
+    ctx.check(`${engine}: playback path`, report.playbackPath === expected, {
       path: report.playbackPath,
+      expected,
     });
     ctx.check(`${engine}: delivered by the origin`, report.source === "origin", { source: report.source });
   }

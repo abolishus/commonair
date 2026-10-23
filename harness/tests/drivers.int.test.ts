@@ -8,7 +8,6 @@
  * follows the playlist and decodes the timestamp strip from segments.
  */
 import { dto } from "@commonair/contracts";
-import { webkit } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { createApi } from "../src/api/client.ts";
 import { BrowserFleet, openBrowserViewers } from "../src/browser-viewer.ts";
@@ -53,15 +52,7 @@ beforeAll(async () => {
   // The player page proxies /rpc to the API; direct mode never calls it.
   server = await startPlayerServer({ apiUrl: "http://127.0.0.1:9" });
   fleet = new BrowserFleet();
-  const browser = await webkit.launch();
-  try {
-    const page = await browser.newPage();
-    nativeHls.webkit = await page.evaluate(
-      () => document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== "",
-    );
-  } finally {
-    await browser.close();
-  }
+  nativeHls.webkit = (await fleet.expectedPlaybackPath("webkit")) === "native";
 }, 120_000);
 
 afterAll(async () => {

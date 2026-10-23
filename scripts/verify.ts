@@ -111,11 +111,13 @@ export const steps: Step[] = [
     when: () => existsSync("relay/go.mod"),
   },
   {
-    // Harness scenarios drive the whole platform in real browsers.
+    // Harness scenarios drive the whole platform in real browsers. They need the harness
+    // overrides (test hooks, short governance periods, private-network outbound): the plain
+    // stack fails half of `full`.
     name: "platform up",
     group: "harness",
     timeoutMin: 25,
-    cmd: ["bun", "scripts/infra.ts", "stack"],
+    cmd: ["bun", "scripts/infra.ts", "stack", "--harness"],
     when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
   },
   {

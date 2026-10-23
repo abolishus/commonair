@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Browser viewers: headless Playwright Chromium (hls.js over MSE) and WebKit (native HLS, like
- * Safari/iOS). Each page hosts one or more players; every page gets the measurement probe, and
+ * Browser viewers: headless Playwright Chromium (hls.js over MSE) and WebKit (native HLS where it
+ * has it, like Safari/iOS; Linux WebKit has none and uses hls.js too). Each page hosts one or more players; every page gets the measurement probe, and
  * well-behaved viewers also get a small init script that removes the most obvious automation
  * tells so integrity treats them like people (viewbots skip it on purpose).
  *
@@ -21,6 +21,15 @@ import { TimeoutError, waitFor } from "./wait.ts";
 
 export type BrowserEngine = "chromium" | "webkit";
 
+/**
+ * The path the players take in an engine, by their rule (prefersNativeHls in apps/web): native
+ * only where the browser can play HLS and is not Chromium, else hls.js over MSE. WebKit can on
+ * macOS; Playwright's Linux WebKit has no HLS backend.
+ */
+export function expectedPlaybackPath(engine: BrowserEngine, canPlayHls: boolean): "native" | "mse" {
+  return canPlayHls && engine !== "chromium" ? "native" : "mse";
+}
+
 /** Init script for well-behaved viewers: hide the webdriver flag and give headless a language list. */
 export const HUMANIZE_SCRIPT = `
 Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false, configurable: true });
@@ -37,6 +46,7 @@ export interface BrowserFleetOptions {
 /** Owns one browser process per engine for the whole run. */
 export class BrowserFleet {
   private browsers = new Map<BrowserEngine, Promise<Browser>>();
+  private hls = new Map<BrowserEngine, Promise<boolean>>();
 
   constructor(private readonly opts: BrowserFleetOptions = {}) {}
 
@@ -61,7 +71,33 @@ export class BrowserFleet {
     return b;
   }
 
+  /** Whether this engine's video element can play HLS itself, asked in the browser. */
+  canPlayHls(engine: BrowserEngine): Promise<boolean> {
+    let r = this.hls.get(engine);
+    if (!r) {
+      r = (async () => {
+        const page = await (await this.browser(engine)).newPage();
+        try {
+          return await page.evaluate(
+            () => document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== "",
+          );
+        } finally {
+          await page.close();
+        }
+      })();
+      r.catch(() => this.hls.delete(engine));
+      this.hls.set(engine, r);
+    }
+    return r;
+  }
+
+  /** The playback path the players take in this engine (see expectedPlaybackPath). */
+  async expectedPlaybackPath(engine: BrowserEngine): Promise<"native" | "mse"> {
+    return expectedPlaybackPath(engine, await this.canPlayHls(engine));
+  }
+
   async close(): Promise<void> {
+    this.hls.clear();
     const all = [...this.browsers.values()];
     this.browsers.clear();
     await Promise.allSettled(all.map(async (b) => (await b).close()));
