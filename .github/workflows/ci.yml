@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: CC0-1.0
 #
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
-# goes red on main, fix main immediately. Pull requests run the gate; main and the nightly
-# schedule (and a manual dispatch) also run the full harness scenario, a release dry run (release.yml) and the self-host end-to-end test. `ci-ok` is the
-# one check branch protection requires.
+# goes red on main, fix main immediately. Pull requests run the gate; main, the nightly schedule
+# and a manual dispatch also run the full harness scenario, a release dry run (release.yml) and
+# the self-host end-to-end test. `ci-ok` is the one check branch protection requires.
 name: ci
 
 on:

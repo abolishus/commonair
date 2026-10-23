@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Browser viewers: headless Playwright Chromium (hls.js over MSE) and WebKit (native HLS where it
- * has it, like Safari/iOS; Linux WebKit has none and uses hls.js too). Each page hosts one or more players; every page gets the measurement probe, and
+ * Browser viewers: headless Playwright Chromium (hls.js over MSE) and WebKit (native HLS where
+ * it has it, like Safari/iOS; Linux WebKit has none and uses hls.js too). Each page hosts one or more players; every page gets the measurement probe, and
  * well-behaved viewers also get a small init script that removes the most obvious automation
  * tells so integrity treats them like people (viewbots skip it on purpose).
  *
@@ -78,9 +78,16 @@ export class BrowserFleet {
       r = (async () => {
         const page = await (await this.browser(engine)).newPage();
         try {
-          return await page.evaluate(
-            () => document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== "",
-          );
+          // As the player asks: macOS WebKit fills its AVFoundation MIME cache off-thread, so the
+          // first answer under load can be "" (harness/player/player.ts chooseNative).
+          return await page.evaluate(async () => {
+            const video = document.createElement("video");
+            const can = () => video.canPlayType("application/vnd.apple.mpegurl") !== "";
+            for (let waited = 0; !can() && waited < 2_000; waited += 100) {
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            return can();
+          });
         } finally {
           await page.close();
         }

@@ -496,8 +496,11 @@ if (import.meta.main) {
     if (cmd === "test") {
       preflight();
       sweepStaleTestContainers();
-      compose(["build", ...BUILD_SERVICES], 20 * 60_000);
-      composeUp(["up", "-d", ...TEST_SERVICES], 5 * 60_000);
+      // Overrides as for `stack`: a gate that runs harness scenarios next passes --harness, so the
+      // first migration of a fresh volume already seeds the harness's governance bootstrap.
+      const files = stackFiles(process.argv.slice(3));
+      compose([...files, "build", ...BUILD_SERVICES], 20 * 60_000);
+      composeUp([...files, "up", "-d", ...TEST_SERVICES], 5 * 60_000);
       await waitHealthy(HEALTHY_SERVICES);
       await waitExited(ONE_SHOT_SERVICES);
       sweepStaleTestDatabases();
@@ -529,7 +532,9 @@ if (import.meta.main) {
     } else if (cmd === "reset") {
       compose(["down", "-v"], 5 * 60_000);
     } else {
-      console.error("usage: bun scripts/infra.ts test | stack [--harness] [override.yaml...] | down | reset");
+      console.error(
+        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | stack [--harness] [override.yaml...] | down | reset",
+      );
       process.exit(2);
     }
   } catch (e) {

@@ -55,16 +55,24 @@ interface Step {
   when?: () => boolean;
 }
 
+/** `infra up`: with the harness overrides when harness scenarios run in the same gate. */
+export function infraUpCmd(harnessFollows: boolean): string[] {
+  return ["bun", "scripts/infra.ts", "test", ...(harnessFollows ? ["--harness"] : [])];
+}
+
 export const steps: Step[] = [
   { name: "format", group: "static", timeoutMin: 5, cmd: ["vp", "fmt", "--check"] },
   { name: "lint", group: "static", timeoutMin: 10, cmd: ["vp", "lint", "--deny-warnings"] },
   { name: "typecheck", group: "static", timeoutMin: 10, cmd: ["vp", "run", "--no-cache", "-r", "typecheck"] },
   { name: "unit tests", group: "unit", timeoutMin: 15, cmd: ["vp", "run", "--no-cache", "-r", "test"] },
   {
+    // With harness scenarios to follow, the data services start with the harness overrides: the
+    // E5 governance bootstrap applies only at the volume's first migration (ADR 0020), and this
+    // migrate runs before platform up's.
     name: "infra up",
     group: "integration",
     timeoutMin: 10,
-    cmd: ["bun", "scripts/infra.ts", "test"],
+    cmd: infraUpCmd(full || scenarios.length > 0),
     when: () => !quick && process.env.VERIFY_INFRA !== "external",
   },
   {

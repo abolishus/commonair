@@ -14,8 +14,9 @@ import { waitFor } from "../src/wait.ts";
 export const MAX_TTFF_MS = 15_000;
 export const MAX_GLASS_TO_GLASS_MS = 15_000;
 /**
- * WHIP into WebKit: native HLS plays media's AAC copy, whose LL-HLS parts vary in length (WebRTC
+ * WHIP into WebKit on macOS: native HLS plays media's AAC copy, whose LL-HLS parts vary in length (WebRTC
  * timing), and WebKit's low-latency mode degrades on that (spec e6, "WHIP audio for WebKit").
+ * Linux WebKit plays through hls.js and needs no more than the plain budget; the looser one holds.
  */
 export const MAX_GLASS_TO_GLASS_WHIP_WEBKIT_MS = 20_000;
 

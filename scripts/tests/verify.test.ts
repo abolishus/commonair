@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { GROUPS, selectGroups, steps } from "../verify.ts";
+import { GROUPS, infraUpCmd, selectGroups, steps } from "../verify.ts";
 
 describe("selectGroups", () => {
   test("every group without --only", () => {
@@ -36,6 +36,15 @@ describe("steps", () => {
     expect(up?.group).toBe("harness");
     expect(up?.cmd).toEqual(["bun", "scripts/infra.ts", "stack", "--harness"]);
   });
+
+  // Review of that fix (HIGH): on a fresh volume, infra up's migrate seeded default governance
+  // before platform up, and the E5 bootstrap applies only at the first migration (ADR 0020).
+  test("infra up layers the harness overrides when harness scenarios follow, else none", () => {
+    expect(infraUpCmd(true)).toEqual(["bun", "scripts/infra.ts", "test", "--harness"]);
+    expect(infraUpCmd(false)).toEqual(["bun", "scripts/infra.ts", "test"]);
+    // This test runs without --full or --scenario: the plain gate starts the plain data services.
+    expect(steps.find((s) => s.name === "infra up")?.cmd).toEqual(infraUpCmd(false));
+  });
 });
 
 // CI runs each group as its own job; these pin what the groups need from it, the fixes that
@@ -58,10 +67,10 @@ describe("CI verify jobs", () => {
 
   // A dispatch on a branch is how a harness fix is proven before main; it ran nothing before.
   test("harness runs on main, nightly and a manual dispatch, never on a pull request", () => {
-    const cond: string = ci.jobs.harness.if;
-    for (const e of ["schedule", "workflow_dispatch", "push"]) expect(cond).toContain(`github.event_name == '${e}'`);
-    expect(cond).toContain("github.ref == 'refs/heads/main'");
-    expect(cond).not.toContain("pull_request");
+    expect(ci.jobs.harness.if).toBe(
+      "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || " +
+        "(github.event_name == 'push' && github.ref == 'refs/heads/main')",
+    );
   });
 
   test("compose groups pin podman compose to podman-compose, not the runner's docker-compose plugin", () => {
