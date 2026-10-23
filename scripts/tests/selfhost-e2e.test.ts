@@ -174,6 +174,9 @@ describe("e2e: browser access to object storage (ADR 0024)", () => {
   /** Runs a storageScript with the repo's storage package against an in-memory S3 stand-in. */
   async function runScript(script: string, objects: Map<string, string>): Promise<string> {
     const server = Bun.serve({
+      // The address the script dials: on a wildcard bind, another test's server bound to
+      // 127.0.0.1 on the same port would win the connection (BSD sockets) and answer 404.
+      hostname: "127.0.0.1",
       port: 0,
       async fetch(req) {
         const path = decodeURIComponent(new URL(req.url).pathname);
