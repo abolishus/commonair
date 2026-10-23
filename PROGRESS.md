@@ -212,8 +212,20 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 
 ### Still open
 
-- **CI `ci-ok` on `main`**: the verify groups and both e2e distros have each been green on CI, but
-  not yet all in one run; the run at `9d216dd` (with the pinned ffmpeg) is the candidate.
+- **CI `ci-ok` on `main` is red only on the harness job.** Main run 39878395003 at `9d216dd`:
+  verify static, unit, integration (green on CI for the first time) and relay, lint-workflows, the
+  release dry run and **both self-host e2e distros green**. Run 39881412275 at `8f5baec` (harness
+  `platform up` in waves for Podman 4.9, by the CI-split session) gets the whole stack up on CI,
+  then the full harness scenario, never run on CI before, passes 9 of 18:
+  - the scenarios that need test hooks or overrides fail because the stack was not started with
+    their compose overlays (account-deletion, vod-clips: `OPS_TEST_HOOKS`; trust-safety:
+    `MODERATION_TEST_HOOKS`; e5-coop: short governance periods from the first migration);
+  - ingest-rtmp and ingest-whip assert WebKit's native HLS path, which Playwright's Linux WebKit
+    does not have (the same fix as `7910a24` for the integration tests);
+  - data-export ("Invalid RTMP URL" adding a simulcast target), simulcast (dashboard wait times
+    out) and e2e-relay (fails in 10 ms) need diagnosis.
+    This is the Phase 1–4 harness on Linux CI, a unit of its own; the harness job and the CI split
+    belong to the "Verify CI step optimization" session.
 - IRC (6667/6697) and MediaMTX RTMP/ICE still see one client address under rootless Podman:
   IRC needs systemd socket activation in `services/irc` (`LISTEN_FDS`, `Bun.listen({ fd })`),
   MediaMTX has none. Documented in `infra/README.md`.
