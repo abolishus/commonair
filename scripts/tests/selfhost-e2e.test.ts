@@ -303,6 +303,15 @@ describe("transient build errors", () => {
     expect(isTransientBuildError('Error: building at STEP "RUN bun install": exit status 1')).toBe(false);
     expect(isTransientBuildError("Error: layer not known")).toBe(false);
   });
+
+  test("so is its lost cached intermediate image when a step creates its build container", () => {
+    expect(
+      isTransientBuildError(
+        "Error: identifier is not a container: preparing container for next step: creating build container: cac741d4304c14b6f862881abf9712839b059ce5cd5ee1663c0fdd3a25b3a408: image not known",
+      ),
+    ).toBe(true);
+    expect(isTransientBuildError("Error: localhost/base:latest: image not known")).toBe(false);
+  });
 });
 
 describe("e2e unit env check", () => {
