@@ -176,12 +176,17 @@ export function buildSpecs(): Record<ReleaseImage, BuildSpec> {
 }
 
 /**
- * Podman 4.9 (CI's runner) sometimes fails a build's cache lookup right after pulling a base
- * image ("checking if cached image exists from a previous build: getting top layer info: layer
- * not known"); the same build passes when run again. Nothing else is retried.
+ * Podman 4.9 (CI's runner) sometimes loses an intermediate image of its build cache: the cache
+ * lookup fails right after pulling a base ("checking if cached image exists from a previous build:
+ * getting top layer info: layer not known"), or a step reuses a cached image that is gone a moment
+ * later ("creating build container: <id>: image not known"). The same build passes when run
+ * again. Nothing else is retried.
  */
 export function isTransientBuildError(message: string): boolean {
-  return /checking if cached image exists from a previous build: .*layer not known/.test(message);
+  return (
+    /checking if cached image exists from a previous build: .*layer not known/.test(message) ||
+    /creating build container: [0-9a-f]{12,64}: image not known/.test(message)
+  );
 }
 
 function build(args: string[]): void {
