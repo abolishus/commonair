@@ -400,6 +400,81 @@ export function stackFiles(args: readonly string[]): string[] {
   return ["compose.yaml", ...overrides].flatMap((f) => ["-f", resolve(ROOT, f)]);
 }
 
+type Condition = "service_started" | "service_healthy" | "service_completed_successfully";
+export interface ComposeService {
+  profiles?: string[];
+  depends_on?: string[] | Record<string, { condition?: Condition }>;
+}
+
+function dependsOn(svc: ComposeService): Record<string, Condition> {
+  const d = svc.depends_on ?? {};
+  if (Array.isArray(d)) return Object.fromEntries(d.map((n) => [n, "service_started" as const]));
+  return Object.fromEntries(Object.entries(d).map(([n, v]) => [n, v.condition ?? "service_started"]));
+}
+
+/**
+ * How `stack` starts the platform. Podman 4.9 (Ubuntu 24.04, so CI) cannot `podman start` a
+ * container whose `--requires` chain passes an exited one-shot that itself requires a running
+ * container ("generating dependency graph … not found in input list"): its dependency walk
+ * skips running containers. So `first` (everything not behind a one-shot) goes up as usual, and
+ * the services behind `migrate`/`garage-init` follow in dependency waves with `--no-deps`, which
+ * creates them without `--requires`; `stack` waits for each wave's conditions itself.
+ */
+export function startPlan(
+  services: Record<string, ComposeService>,
+  profiles: ReadonlySet<string>,
+  oneShots: readonly string[],
+): { first: string[]; waves: { services: string[]; wait: Record<string, Condition> }[] } {
+  const enabled = Object.keys(services).filter((n) => {
+    const p = services[n]?.profiles ?? [];
+    return p.length === 0 || p.some((x) => profiles.has(x));
+  });
+  const deps = new Map(
+    enabled.map((n) => [n, Object.entries(dependsOn(services[n] ?? {})).filter(([d]) => enabled.includes(d))]),
+  );
+  // Behind a one-shot: depends on one, or on a service that is.
+  const later = new Set<string>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const n of enabled)
+      if (!later.has(n) && (deps.get(n) ?? []).some(([d]) => oneShots.includes(d) || later.has(d))) {
+        later.add(n);
+        grew = true;
+      }
+  }
+  const waves: { services: string[]; wait: Record<string, Condition> }[] = [];
+  const placed = new Set<string>();
+  while (placed.size < later.size) {
+    const wave = [...later].filter(
+      (n) => !placed.has(n) && (deps.get(n) ?? []).every(([d]) => !later.has(d) || placed.has(d)),
+    );
+    if (wave.length === 0)
+      throw new Error(`depends_on cycle among ${[...later].filter((n) => !placed.has(n)).join(", ")}`);
+    const wait: Record<string, Condition> = {};
+    for (const n of wave) for (const [d, c] of deps.get(n) ?? []) if (wait[d] !== "service_healthy") wait[d] = c;
+    waves.push({ services: wave.sort(), wait });
+    for (const n of wave) placed.add(n);
+  }
+  return { first: enabled.filter((n) => !later.has(n)), waves };
+}
+
+/** The merged compose configuration `stack` starts (after overrides). */
+function composeConfig(files: string[]): Record<string, ComposeService> {
+  const proc = Bun.spawnSync(["podman", "compose", ...files, "--profile", "harness", "config"], {
+    stderr: "pipe",
+  });
+  if (proc.exitCode !== 0) throw new Error(`podman compose config failed:\n${proc.stderr.toString()}`);
+  // The provider banner ("Executing external compose provider…") goes to stderr; stdout is YAML.
+  const parsed = Bun.YAML.parse(proc.stdout.toString()) as { services?: Record<string, ComposeService> };
+  return parsed.services ?? {};
+}
+
+async function waitConditions(wait: Record<string, Condition>): Promise<void> {
+  const of = (c: Condition) => Object.keys(wait).filter((s) => wait[s] === c);
+  await waitExited(of("service_completed_successfully"));
+  await waitHealthy(of("service_healthy"), 300_000);
+}
+
 export async function waitHealthy(services: string[], timeoutMs = 120_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -432,8 +507,13 @@ if (import.meta.main) {
       const files = stackFiles(process.argv.slice(3));
       compose([...files, "--profile", "harness", "build"], 20 * 60_000);
       removeStaleImageContainers();
-      composeUp([...files, "--profile", "harness", "up", "-d"], 10 * 60_000);
+      const plan = startPlan(composeConfig(files), new Set(["harness"]), ONE_SHOT_SERVICES);
+      composeUp([...files, "--profile", "harness", "up", "-d", ...plan.first], 10 * 60_000);
       await waitExited(ONE_SHOT_SERVICES);
+      for (const wave of plan.waves) {
+        await waitConditions(wave.wait);
+        composeUp([...files, "--profile", "harness", "up", "-d", "--no-deps", ...wave.services], 10 * 60_000);
+      }
       // podman can keep a one-shot container (migrate) whose dependents block its removal, and
       // compose then reuses it: the stack would run without the new migrations. Fail loudly.
       const still = staleProjectContainers();
