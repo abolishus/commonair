@@ -17,7 +17,7 @@ import { type BrowserEngine, BrowserFleet, openBrowserViewers } from "./browser-
 import { ChatClient } from "./chat-client.ts";
 import { AddressPool, DATACENTER_CIDRS_FILE, RESIDENTIAL_CIDRS_FILE, loadCidrList, seededRandom } from "./cidrs.ts";
 import type { HarnessEnv } from "./env.ts";
-import { probeFfmpeg } from "./ffmpeg.ts";
+import { probeFfmpeg, whipFfmpeg } from "./ffmpeg.ts";
 import { HttpViewer } from "./http-viewer.ts";
 import { Mailpit, mailpitEndpoint } from "./mailpit.ts";
 import { type PlayerServer, startPlayerServer } from "./player-server.ts";
@@ -308,7 +308,7 @@ export class Platform {
         await probeFfmpeg();
         return null;
       case "whip":
-        return (await probeFfmpeg()).muxers.has("whip") ? null : "local ffmpeg has no WHIP muxer";
+        return (await whipFfmpeg()) ? null : "no ffmpeg with a WHIP muxer (local, or the pinned image through podman)";
       case "browser": {
         const missing = [
           ["chromium", chromium.executablePath()],

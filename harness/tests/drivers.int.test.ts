@@ -8,6 +8,7 @@
  * follows the playlist and decodes the timestamp strip from segments.
  */
 import { dto } from "@commonair/contracts";
+import { webkit } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { createApi } from "../src/api/client.ts";
 import { BrowserFleet, openBrowserViewers } from "../src/browser-viewer.ts";
@@ -28,6 +29,13 @@ let rtmp: Streamer;
 let server: PlayerServer;
 let fleet: BrowserFleet;
 const cleanups: (() => Promise<unknown>)[] = [];
+/**
+ * Whether the player takes the native HLS path in each engine: its rule (prefersNativeHls in
+ * apps/web) is native only where the browser can play HLS and is not Chromium. WebKit can on
+ * macOS (as Safari and iOS do); Playwright's Linux WebKit has no HLS backend and correctly falls
+ * back to hls.js over MSE, as Chromium always does.
+ */
+const nativeHls: Record<"chromium" | "webkit", boolean> = { chromium: false, webkit: false };
 
 beforeAll(async () => {
   mtx = await startMediaMtx();
@@ -45,6 +53,15 @@ beforeAll(async () => {
   // The player page proxies /rpc to the API; direct mode never calls it.
   server = await startPlayerServer({ apiUrl: "http://127.0.0.1:9" });
   fleet = new BrowserFleet();
+  const browser = await webkit.launch();
+  try {
+    const page = await browser.newPage();
+    nativeHls.webkit = await page.evaluate(
+      () => document.createElement("video").canPlayType("application/vnd.apple.mpegurl") !== "",
+    );
+  } finally {
+    await browser.close();
+  }
 }, 120_000);
 
 afterAll(async () => {
@@ -93,12 +110,12 @@ describe("RTMP streamer → MediaMTX → browser viewers", () => {
       expect(latency.p50 ?? -1).toBeGreaterThan(0);
       expect(latency.p50 ?? Infinity).toBeLessThan(SANE_LATENCY_MS);
       const report = await viewer.stop();
-      // WebKit must take the native HLS path (Safari/iOS), Chromium hls.js over MSE.
-      expect(report.playbackPath).toBe(engine === "webkit" ? "native" : "mse");
+      // Native HLS where the engine has it (WebKit on macOS, as Safari/iOS), else hls.js over MSE.
+      expect(report.playbackPath).toBe(nativeHls[engine] ? "native" : "mse");
       expect(report.latencyMethod).toBe("strip");
       expect(report.errors.filter((e) => !e.startsWith("hls.js"))).toEqual([]);
       // hls.js reports bytes; native HLS hides them from the page.
-      expect(report.bytesHttp > 0 || engine === "webkit").toBe(true);
+      expect(report.bytesHttp > 0 || nativeHls[engine]).toBe(true);
     }, 120_000);
   }
 
@@ -249,7 +266,7 @@ describe("API-mode playback sessions", () => {
       const start = api.calls.find((c) => c.path.endsWith("/start"));
       expect(start?.input).toMatchObject({
         channel: "harness_chan",
-        nativeHls: engine === "webkit",
+        nativeHls: nativeHls[engine],
         p2pCapable: false,
       });
       expect(String(start?.input.deviceId).length).toBeGreaterThanOrEqual(16);

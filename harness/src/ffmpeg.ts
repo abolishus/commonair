@@ -45,7 +45,7 @@ export function parseListing(text: string, kind: "muxers" | "filters" | "encoder
   return names;
 }
 
-let cached: Promise<FfmpegCapabilities> | undefined;
+const cached = new Map<string, Promise<FfmpegCapabilities>>();
 
 async function output(cmd: string[]): Promise<string> {
   const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
@@ -53,23 +53,64 @@ async function output(cmd: string[]): Promise<string> {
   return out;
 }
 
-/** Probe the installed ffmpeg once per process. Throws if ffmpeg is not on PATH. */
-export function probeFfmpeg(binary = "ffmpeg"): Promise<FfmpegCapabilities> {
-  cached ??= (async () => {
-    const [version, muxers, filters, encoders] = await Promise.all([
-      output([binary, "-hide_banner", "-version"]),
-      output([binary, "-hide_banner", "-muxers"]),
-      output([binary, "-hide_banner", "-filters"]),
-      output([binary, "-hide_banner", "-encoders"]),
-    ]);
-    return {
-      ...parseVersion(version),
-      muxers: parseListing(muxers, "muxers"),
-      filters: parseListing(filters, "filters"),
-      encoders: parseListing(encoders, "encoders"),
-    };
-  })();
-  return cached;
+/**
+ * Probe an ffmpeg command (argv up to the ffmpeg arguments) once per process. The default is
+ * the installed ffmpeg; throws if it is not on PATH.
+ */
+export function probeFfmpeg(command: string | readonly string[] = "ffmpeg"): Promise<FfmpegCapabilities> {
+  const cmd = typeof command === "string" ? [command] : [...command];
+  const key = cmd.join("\0");
+  let probe = cached.get(key);
+  if (!probe) {
+    probe = (async () => {
+      const [version, muxers, filters, encoders] = await Promise.all([
+        output([...cmd, "-hide_banner", "-version"]),
+        output([...cmd, "-hide_banner", "-muxers"]),
+        output([...cmd, "-hide_banner", "-filters"]),
+        output([...cmd, "-hide_banner", "-encoders"]),
+      ]);
+      return {
+        ...parseVersion(version),
+        muxers: parseListing(muxers, "muxers"),
+        filters: parseListing(filters, "filters"),
+        encoders: parseListing(encoders, "encoders"),
+      };
+    })();
+    cached.set(key, probe);
+  }
+  return probe;
+}
+
+/**
+ * The ffmpeg in the pinned MediaMTX image the stack runs (compose.yaml): 8.x with the WHIP
+ * muxer. Distribution ffmpeg is often older (Ubuntu 24.04, CI's runner, has 6.1).
+ */
+export const CONTAINER_FFMPEG_IMAGE =
+  "docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95";
+
+/**
+ * Runs that image's ffmpeg on the host network, so it reaches what a local ffmpeg would. Only
+ * for generated sources (lavfi): it sees no host files.
+ */
+export function containerFfmpegCommand(podman: string): string[] {
+  return [podman, "run", "--rm", "-i", "--network", "host", "--entrypoint", "ffmpeg", CONTAINER_FFMPEG_IMAGE];
+}
+
+/**
+ * An ffmpeg command that can publish over WHIP: the installed one when it has the muxer, else
+ * the pinned image's through podman, else null. HARNESS_FFMPEG_CONTAINER=1 forces the image.
+ */
+export async function whipFfmpeg(): Promise<string[] | null> {
+  const force = process.env.HARNESS_FFMPEG_CONTAINER === "1";
+  if (!force) {
+    const local = await probeFfmpeg().catch(() => null);
+    if (local?.muxers.has("whip")) return ["ffmpeg"];
+  }
+  const podman = Bun.which("podman");
+  if (!podman) return null;
+  const cmd = containerFfmpegCommand(podman);
+  const caps = await probeFfmpeg(cmd).catch(() => null);
+  return caps?.muxers.has("whip") ? cmd : null;
 }
 
 export type IngestProtocol = "rtmp" | "whip";

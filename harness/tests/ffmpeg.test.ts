@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  CONTAINER_FFMPEG_IMAGE,
+  containerFfmpegCommand,
   BAD_KEYFRAME_SECONDS,
   HIGH_BITRATE_FACTOR,
   ProgressParser,
@@ -191,5 +194,26 @@ describe("progress parser", () => {
     expect(end?.done).toBe(true);
     expect(end?.bitrateKbps).toBeNull();
     expect(p.push("not a key value line")).toBeNull();
+  });
+});
+
+describe("the pinned image's ffmpeg (WHIP where the local one has none)", () => {
+  test("runs the stack's MediaMTX image on the host network with ffmpeg as the entrypoint", () => {
+    expect(containerFfmpegCommand("/usr/bin/podman")).toEqual([
+      "/usr/bin/podman",
+      "run",
+      "--rm",
+      "-i",
+      "--network",
+      "host",
+      "--entrypoint",
+      "ffmpeg",
+      CONTAINER_FFMPEG_IMAGE,
+    ]);
+  });
+
+  test("is exactly the image compose.yaml pins for MediaMTX", () => {
+    const compose = readFileSync(new URL("../../compose.yaml", import.meta.url), "utf8");
+    expect(compose).toContain(`image: ${CONTAINER_FFMPEG_IMAGE}`);
   });
 });

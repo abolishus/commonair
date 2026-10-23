@@ -14,6 +14,7 @@ import {
   ProgressParser,
   buildStreamerArgs,
   probeFfmpeg,
+  whipFfmpeg,
 } from "./ffmpeg.ts";
 import { type Supervised, spawnSupervised } from "./process.ts";
 import { withTimeout } from "./wait.ts";
@@ -74,6 +75,8 @@ export class Streamer {
   /** Wall-clock time the first progress block reported encoded frames. */
   firstFrameAt: number | null = null;
   private proc: Supervised | null = null;
+  /** The ffmpeg command (argv up to its arguments): the installed one, or the pinned image's for WHIP. */
+  private command: string[] = ["ffmpeg"];
   private latest: StreamerStats = { frames: 0, fps: 0, bitrateKbps: null, outTimeMs: 0, dropFrames: 0, speed: null };
   private progressListeners = new Set<(p: FfmpegProgress) => void>();
 
@@ -97,11 +100,15 @@ export class Streamer {
   /** Start publishing; resolves when ffmpeg has encoded and sent its first frames. */
   async start(): Promise<void> {
     if (this.proc?.running) throw new Error(`${this.name} already running`);
-    const caps = await probeFfmpeg();
-    if (this.opts.protocol === "whip" && !caps.muxers.has("whip")) {
-      throw new Error(
-        `ffmpeg ${caps.version} has no WHIP muxer (needs ffmpeg >= 8 built with WHIP); use RTMP or install a newer ffmpeg`,
-      );
+    let caps = await probeFfmpeg();
+    if (this.opts.protocol === "whip") {
+      const cmd = await whipFfmpeg();
+      if (!cmd)
+        throw new Error(
+          `ffmpeg ${caps.version} has no WHIP muxer (needs ffmpeg >= 8 built with WHIP), and podman is not there to run the pinned image's; use RTMP or install a newer ffmpeg`,
+        );
+      this.command = cmd;
+      caps = await probeFfmpeg(cmd);
     }
     const wantTimecode = this.opts.timecode ?? "auto";
     const timecode = wantTimecode === "auto" ? caps.filters.has("drawtext") : wantTimecode;
@@ -138,7 +145,7 @@ export class Streamer {
     const firstFrames = new Promise<void>((resolve) => {
       resolveFirst = resolve;
     });
-    const proc = spawnSupervised(["ffmpeg", ...args], {
+    const proc = spawnSupervised([...this.command, ...args], {
       name: this.name,
       onStdoutLine: (line) => {
         const p = parser.push(line);
