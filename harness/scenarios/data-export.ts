@@ -146,6 +146,8 @@ async function dataExport(ctx: ScenarioContext, kit: Kit): Promise<void> {
   if (session) {
     const page = await session.goto(E6_ROUTES.privacy);
     const button = byE6Id(page, E.exportRequest, { kind: "account" });
+    // The button is enabled until the export list loads (the list drives the cooldown).
+    await byE6Id(page, E.exportRow, { "export-id": accountId }).first().waitFor({ timeout: UI_TIMEOUT_MS });
     await button.waitFor({ timeout: UI_TIMEOUT_MS });
     ctx.assert("2 the account export button is disabled during the cooldown", await button.isDisabled());
   }
