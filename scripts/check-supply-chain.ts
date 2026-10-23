@@ -30,7 +30,7 @@ for (const p of manifests) findings.push(...checkManifest(p, JSON.parse(read(p))
 findings.push(...checkTrusted("package.json", JSON.parse(read("package.json")), policy));
 findings.push(...checkBunfig("bunfig.toml", existsSync("bunfig.toml") ? read("bunfig.toml") : null));
 
-const workflows = tracked.filter((p) => /^\.github\/workflows\/.+\.ya?ml$/.test(p));
+const workflows = tracked.filter((p) => /^\.github\/(workflows\/.+|actions\/.+\/action)\.ya?ml$/.test(p));
 for (const p of workflows) findings.push(...checkWorkflow(p, read(p)));
 
 const imageFiles = imageBearing(tracked).filter((p) => existsSync(p));

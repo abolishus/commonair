@@ -1,0 +1,128 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Shared setup for the verify jobs in ci.yml. Each job asks only for what its group of the gate
+# needs, so the fast groups never wait on the Ubuntu mirror. Expects a checkout.
+name: setup
+description: Bun, Go, workspace install and the gate's optional tooling
+
+inputs:
+  bun-version:
+    description: Bun version
+    required: true
+  go-version:
+    description: Go version
+    required: true
+  pipx:
+    description: Space-separated pinned pipx packages (e.g. "reuse==6.2.0")
+    default: ""
+  system:
+    description: 'Ubuntu packages: "none", "ffmpeg", or "harness" (ffmpeg plus the Playwright libraries)'
+    default: none
+  browsers:
+    description: Install the Playwright browsers
+    default: "false"
+  model:
+    description: Fetch the pinned moderation model
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ inputs.bun-version }}
+    - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      with:
+        go-version: ${{ inputs.go-version }}
+        # Module and build cache, keyed on the relay's go.mod (it has no go.sum: no dependencies).
+        cache: true
+        cache-dependency-path: relay/go.mod
+    - name: Bun install cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+    - name: Install workspaces
+      shell: bash
+      run: bun install --frozen-lockfile
+    - name: pipx tools
+      if: inputs.pipx != ''
+      shell: bash
+      env:
+        PIPX: ${{ inputs.pipx }}
+      run: |
+        read -ra pkgs <<< "$PIPX"
+        for p in "${pkgs[@]}"; do pipx install "$p"; done
+    - name: Versions
+      id: versions
+      shell: bash
+      run: |
+        echo "playwright=$(jq -r '.dependencies.playwright // .devDependencies.playwright' harness/package.json)" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+    - name: System packages cache
+      # The .debs apt fetched last time, for this runner image and package set: a hit installs
+      # them with dpkg and never touches the mirror (which has taken 30 minutes on a bad day).
+      if: inputs.system != 'none'
+      id: apt-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/apt-debs
+        key: apt-${{ steps.versions.outputs.image }}-${{ inputs.system }}-pw${{ steps.versions.outputs.playwright }}-v1
+    - name: System packages
+      if: inputs.system != 'none'
+      shell: bash
+      env:
+        SYSTEM: ${{ inputs.system }}
+        HIT: ${{ steps.apt-cache.outputs.cache-hit }}
+      run: |
+        debs="$HOME/apt-debs"
+        shopt -s nullglob
+        cached=("$debs"/*.deb)
+        if [ "$HIT" = true ] && [ "${#cached[@]}" -gt 0 ] && sudo timeout 300 dpkg -i "${cached[@]}" > /dev/null; then
+          echo "installed ${#cached[@]} cached packages"
+          exit 0
+        fi
+        # Miss, or a cached set dpkg could not install: fetch from the mirror and keep the .debs.
+        # Every apt call has a deadline, so a crawling mirror fails here by name instead of
+        # eating the job's budget.
+        printf '%s\n' 'APT::Keep-Downloaded-Packages "true";' 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+          'Acquire::Retries "3";' 'Acquire::http::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99ci > /dev/null
+        sudo rm -f /etc/apt/apt.conf.d/docker-clean
+        sudo apt-get clean
+        if [ "$SYSTEM" = harness ]; then
+          # Runs apt-get update itself; the WebKit/Chromium libraries of the locked Playwright.
+          timeout 600 harness/node_modules/.bin/playwright install-deps chromium webkit
+        else
+          sudo timeout 300 apt-get update -q
+        fi
+        [ "$HIT" = true ] && sudo timeout 300 apt-get install -f -y -q
+        sudo timeout 600 apt-get install -y -q --no-install-recommends ffmpeg
+        fetched=(/var/cache/apt/archives/*.deb)
+        mkdir -p "$debs"
+        if [ "${#fetched[@]}" -gt 0 ]; then cp "${fetched[@]}" "$debs"/; fi
+        echo "cached ${#fetched[@]} packages"
+    - name: Playwright browsers cache
+      if: inputs.browsers == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.versions.outputs.playwright }}
+    - name: Playwright browsers
+      if: inputs.browsers == 'true'
+      shell: bash
+      run: bun run --filter @commonair/harness browsers
+    - name: Environment
+      shell: bash
+      run: bun scripts/init-env.ts
+    - name: Moderation model cache
+      if: inputs.model == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .cache/models
+        key: moderation-model-${{ hashFiles('packages/moderation/src/model.ts') }}
+    - name: Moderation model
+      # The classifier's integration test runs the pinned weights; fetch-model checks their sha256.
+      if: inputs.model == 'true'
+      shell: bash
+      run: bun scripts/fetch-model.ts

@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: CC0-1.0
 #
-# Backstop CI: runs the same `bun run verify` used locally. If it goes red on main, fix main
-# immediately. Pull requests run the gate; main and the nightly schedule run the full harness
-# scenario, a release dry run (release.yml) and the self-host end-to-end test. `ci-ok` is the
+# Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
+# goes red on main, fix main immediately. Pull requests run the gate; main and the nightly
+# schedule also run the full harness scenario, a release dry run (release.yml) and the self-host end-to-end test. `ci-ok` is the
 # one check branch protection requires.
 name: ci
 
@@ -66,77 +66,64 @@ jobs:
           fi
 
   verify:
+    # One job per group of the gate (`bun run verify --only <group>`), in parallel: a pull request
+    # waits for the slowest group, not the sum, and a red group no longer hides the others.
+    name: verify (${{ matrix.group }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {
+              group: static,
+              timeout: 20,
+              step-timeout: 15,
+              pipx: "reuse==6.2.0",
+              system: none,
+              browsers: "false",
+              model: "false",
+            }
+          # ffmpeg: the harness unit tests probe and run the installed one.
+          - { group: unit, timeout: 25, step-timeout: 20, pipx: "", system: ffmpeg, browsers: "false", model: "false" }
+          # The harness integration tests drive Chromium and WebKit; the classifier's runs the model.
+          - {
+              group: integration,
+              timeout: 60,
+              step-timeout: 55,
+              pipx: "podman-compose==1.6.0",
+              system: harness,
+              browsers: "true",
+              model: "true",
+            }
+          - { group: relay, timeout: 15, step-timeout: 10, pipx: "", system: none, browsers: "false", model: "false" }
     env:
-      # verify:full (with the harness) on main and nightly; the gate on pull requests.
-      FULL: ${{ github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      GROUP: ${{ matrix.group }}
       # `podman compose` prefers the docker-compose plugin the runner image ships, which talks to
-      # a Podman socket nobody started; the gate is written for podman-compose (installed below).
+      # a Podman socket nobody started; the gate is written for podman-compose.
       PODMAN_COMPOSE_PROVIDER: podman-compose
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      # `$/` is not understood by actionlint or our pin check (see release-dry-run below).
+      - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        with:
           go-version: ${{ env.GO_VERSION }}
-          # Module and build cache, keyed on the relay's go.mod (it has no go.sum: no dependencies).
-          cache: true
-          cache-dependency-path: relay/go.mod
-      - name: Bun install cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
-      - name: Tooling (reuse, podman-compose, ffmpeg)
-        run: |
-          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
-          pipx install reuse==6.2.0
-          pipx install podman-compose==1.6.0
-          podman --version
-      - run: bun install --frozen-lockfile
-      - name: Playwright version
-        id: playwright
-        run: echo "version=$(jq -r '.dependencies.playwright // .devDependencies.playwright' harness/package.json)" >> "$GITHUB_OUTPUT"
-      - name: Playwright system libraries
-        # WebKit/Chromium libraries for the harness scenarios, from the locked Playwright.
-        run: harness/node_modules/.bin/playwright install-deps chromium webkit
-      - name: Playwright browsers cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
-      - name: Playwright browsers
-        # The harness integration tests (part of every gate, not only the full one) drive Chromium
-        # and WebKit.
-        run: bun run --filter @commonair/harness browsers
-      - name: Environment
-        run: bun scripts/init-env.ts
-      - name: Moderation model cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: .cache/models
-          key: moderation-model-${{ hashFiles('packages/moderation/src/model.ts') }}
-      - name: Moderation model
-        # The classifier's integration test runs the pinned weights; fetch-model checks their sha256.
-        run: bun scripts/fetch-model.ts
+          pipx: ${{ matrix.pipx }}
+          system: ${{ matrix.system }}
+          browsers: ${{ matrix.browsers }}
+          model: ${{ matrix.model }}
       - name: Verify
-        # Below the job's 90 so a hung gate fails this step and leaves time to collect logs;
+        # Below the job's limit so a hung gate fails this step and leaves time to collect logs;
         # a job-level timeout cancels the job and diagnostics would be lost.
-        timeout-minutes: 80
+        timeout-minutes: ${{ matrix.step-timeout }}
         run: |
           export PATH="$PWD/node_modules/.bin:$PATH"
-          if [ "$FULL" = true ] && [ -f harness/src/cli.ts ]; then
-            bun run verify:full 2>&1 | tee verify.log
-          else
-            bun run verify 2>&1 | tee verify.log
-          fi
+          bun scripts/verify.ts --only "$GROUP" 2>&1 | tee verify.log
       - name: Summary
         if: always()
         run: bun scripts/release/ci-summary.ts verify verify.log
@@ -152,7 +139,58 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure() || cancelled()
         with:
-          name: verify-logs-${{ github.run_attempt }}
+          name: verify-logs-${{ matrix.group }}-${{ github.run_attempt }}
+          path: |
+            ci-logs/
+            harness/reports/
+          retention-days: 5
+          if-no-files-found: ignore
+
+  harness:
+    # The full harness scenario against the whole platform, on main and nightly; pull requests
+    # run the gate only. Parallel to the verify groups, which cover the rest of verify:full.
+    name: verify (harness)
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      PODMAN_COMPOSE_PROVIDER: podman-compose
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      # `$/` is not understood by actionlint or our pin check (see release-dry-run below).
+      - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          go-version: ${{ env.GO_VERSION }}
+          pipx: podman-compose==1.6.0
+          system: harness
+          browsers: "true"
+          model: "true"
+      - name: Verify
+        timeout-minutes: 80
+        run: |
+          export PATH="$PWD/node_modules/.bin:$PATH"
+          bun scripts/verify.ts --full --only harness 2>&1 | tee verify.log
+      - name: Summary
+        if: always()
+        run: bun scripts/release/ci-summary.ts verify verify.log
+      - name: Collect logs
+        if: failure() || cancelled()
+        run: |
+          mkdir -p ci-logs/podman
+          podman ps -a --format '{{.Names}}' > ci-logs/podman/containers.txt || true
+          while read -r name; do
+            [ -n "$name" ] && podman logs --timestamps "$name" > "ci-logs/podman/$name.log" 2>&1 || true
+          done < ci-logs/podman/containers.txt
+          cp verify.log ci-logs/ 2>/dev/null || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() || cancelled()
+        with:
+          name: verify-logs-harness-${{ github.run_attempt }}
           path: |
             ci-logs/
             harness/reports/
@@ -224,7 +262,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint-workflows, verify, release-dry-run, selfhost-e2e]
+    needs: [lint-workflows, verify, harness, release-dry-run, selfhost-e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
