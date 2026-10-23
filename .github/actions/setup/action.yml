@@ -16,9 +16,12 @@ inputs:
   pipx:
     description: Space-separated pinned pipx packages (e.g. "reuse==6.2.0")
     default: ""
-  system:
-    description: 'Ubuntu packages: "none", "ffmpeg", or "harness" (ffmpeg plus the Playwright libraries)'
-    default: none
+  ffmpeg:
+    description: Install the pinned static ffmpeg build (with WHIP, libx264) on PATH
+    default: "false"
+  playwright-deps:
+    description: Install the Ubuntu libraries the Playwright browsers need
+    default: "false"
   browsers:
     description: Install the Playwright browsers
     default: "false"
@@ -60,20 +63,50 @@ runs:
       run: |
         echo "playwright=$(jq -r '.dependencies.playwright // .devDependencies.playwright' harness/package.json)" >> "$GITHUB_OUTPUT"
         echo "image=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
-    - name: System packages cache
-      # The .debs apt fetched last time, for this runner image and package set: a hit installs
+    - name: ffmpeg cache
+      if: inputs.ffmpeg == 'true'
+      id: ffmpeg-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/ffmpeg-static
+        key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
+    - name: ffmpeg
+      # A static build from BtbN/FFmpeg-Builds instead of Ubuntu's: noble's ffmpeg 6.1 has no WHIP
+      # muxer, and its ~360 MB of .debs from a slow mirror timed out a run. Pinned to a month-end
+      # autobuild (those are kept; the dailies are pruned) and checked against its SHA-256.
+      # GPL-3.0-or-later; a CI tool, never shipped. The runners are linux/amd64.
+      if: inputs.ffmpeg == 'true'
+      shell: bash
+      env:
+        HIT: ${{ steps.ffmpeg-cache.outputs.cache-hit }}
+        URL: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-09-30-13-08/ffmpeg-n8.1.3-9-g29e619e767-linux64-gpl-8.1.tar.xz
+        SHA256: 97ce978979194b5cf7e06a5e68020dbdaa7a4f3294c5452b6a1bc347100dbb79
+      run: |
+        dir="$HOME/ffmpeg-static"
+        if [ "$HIT" != true ]; then
+          archive="$RUNNER_TEMP/ffmpeg.tar.xz"
+          curl -fsSL --retry 3 --max-time 600 -o "$archive" "$URL"
+          echo "$SHA256  $archive" | sha256sum -c -
+          mkdir -p "$dir"
+          tar -xJf "$archive" -C "$dir" --strip-components=2 --wildcards '*/bin/ffmpeg' '*/bin/ffprobe'
+          rm "$archive"
+        fi
+        # Onto the PATH every step already has, rather than writing $GITHUB_PATH.
+        sudo install -m 755 "$dir/ffmpeg" "$dir/ffprobe" /usr/local/bin/
+        ffmpeg -hide_banner -version | head -1
+    - name: Playwright libraries cache
+      # The .debs apt fetched last time, for this runner image and Playwright: a hit installs
       # them with dpkg and never touches the mirror (which has taken 30 minutes on a bad day).
-      if: inputs.system != 'none'
+      if: inputs.playwright-deps == 'true'
       id: apt-cache
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/apt-debs
-        key: apt-${{ steps.versions.outputs.image }}-${{ inputs.system }}-pw${{ steps.versions.outputs.playwright }}-v1
-    - name: System packages
-      if: inputs.system != 'none'
+        key: apt-${{ steps.versions.outputs.image }}-pw${{ steps.versions.outputs.playwright }}-v2
+    - name: Playwright libraries
+      if: inputs.playwright-deps == 'true'
       shell: bash
       env:
-        SYSTEM: ${{ inputs.system }}
         HIT: ${{ steps.apt-cache.outputs.cache-hit }}
       run: |
         debs="$HOME/apt-debs"
@@ -84,20 +117,15 @@ runs:
           exit 0
         fi
         # Miss, or a cached set dpkg could not install: fetch from the mirror and keep the .debs.
-        # Every apt call has a deadline, so a crawling mirror fails here by name instead of
-        # eating the job's budget.
+        # The install has a deadline, so a crawling mirror fails here by name instead of eating
+        # the job's budget.
         printf '%s\n' 'APT::Keep-Downloaded-Packages "true";' 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
           'Acquire::Retries "3";' 'Acquire::http::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99ci > /dev/null
         sudo rm -f /etc/apt/apt.conf.d/docker-clean
         sudo apt-get clean
-        if [ "$SYSTEM" = harness ]; then
-          # Runs apt-get update itself; the WebKit/Chromium libraries of the locked Playwright.
-          timeout 600 harness/node_modules/.bin/playwright install-deps chromium webkit
-        else
-          sudo timeout 300 apt-get update -q
-        fi
-        [ "$HIT" = true ] && sudo timeout 300 apt-get install -f -y -q
-        sudo timeout 600 apt-get install -y -q --no-install-recommends ffmpeg
+        # Runs apt-get update (and apt-get install -f) itself: the WebKit/Chromium libraries of
+        # the locked Playwright.
+        timeout 900 harness/node_modules/.bin/playwright install-deps chromium webkit
         fetched=(/var/cache/apt/archives/*.deb)
         mkdir -p "$debs"
         if [ "${#fetched[@]}" -gt 0 ]; then cp "${fetched[@]}" "$debs"/; fi
