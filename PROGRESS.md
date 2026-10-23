@@ -20,7 +20,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session twelve (2026-10-22): validating and finishing Phase 5 (in progress)
+## Session twelve (2026-10-22/23): validating and finishing Phase 5 (Parts 1–2 done; release pending the user)
 
 Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/validate`
 (worktree `.claude/worktrees/p5-validate`), merged to `main` only after review and a green gate.
@@ -130,6 +130,26 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   5 GB) tagged by commit and nothing removed them → the e2e removes its own earlier-commit images
   (only its namespace; no global prune, which would drop a developer's build cache).
 
+- `5ff2e53` (review HIGH on `9547d1e`) **the e2e image cleanup freed nothing** → the release
+  images are built FROM the commit images, so removing a parent only untagged it → children first,
+  then dangling former children by their own label, then other commits' images. (Review MEDIUM on
+  `803c720`) the listener check now judges every listener except `cgroup:/system.slice/` (the
+  operating system's services), so root-owned sockets are judged too.
+- `7910a24` **CI harness tests: WHIP and two WebKit tests** → Ubuntu's ffmpeg 6.1 has no WHIP
+  muxer; Playwright's Linux WebKit has no native HLS, and the tests assumed WebKit always takes
+  the native path → the streamer falls back to the pinned MediaMTX image's ffmpeg 8.1 through
+  `podman run --network host` when the local one lacks WHIP (also for the scenarios' `whip`
+  need); the tests expect the player's own rule (native only for a non-Chromium engine that can
+  play HLS). 10/10 twice locally with the container path forced.
+- `0d182ec` CI Debian e2e: another Podman 4.9 build-cache loss ("creating build container …: image
+  not known") → retried once, like "layer not known".
+- The CI split (another session, at the user's request): `9ba12c7` verify runs as parallel jobs
+  per group (static, unit, integration, relay) plus a harness job on main/nightly, through a
+  shared setup action; `9d216dd` ffmpeg 8.1.3 from a pinned, SHA-256-checked static build (WHIP
+  included) and apt only for Playwright's libraries. The old single-job CI assertions moved to
+  `scripts/tests/verify.test.ts` (`dd67d8a`). `main` was fast-forwarded to `7910a24` and pushed
+  at the user's request, then `9d216dd`.
+
 ### Self-hosting gaps
 
 - S3 for browsers: designed as ADR 0024 (`f50fe9e`): path-style bucket URLs on the main host,
@@ -189,6 +209,39 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   network that must be re-created, so upgrade, re-install and rollback cannot strand the instance.
 - Review of the orchestrator fixes `2025ff3..b527dfa` (`wf_fe158865-bef`): no HIGH or MEDIUM; LOWs
   fixed in `33e7609`.
+
+### Still open
+
+- **CI `ci-ok` on `main`**: the verify groups and both e2e distros have each been green on CI, but
+  not yet all in one run; the run at `9d216dd` (with the pinned ffmpeg) is the candidate.
+- IRC (6667/6697) and MediaMTX RTMP/ICE still see one client address under rootless Podman:
+  IRC needs systemd socket activation in `services/irc` (`LISTEN_FDS`, `Bun.listen({ fd })`),
+  MediaMTX has none. Documented in `infra/README.md`.
+- SELinux labels (`:z`/`:Z`) are not exercised by the e2e: the privileged test host has no
+  `/sys/fs/selinux`, so its rootless Podman runs without SELinux. Only a real Fedora VM checks
+  them.
+- The e2e uses `--tls internal`; ACME (Let's Encrypt) is proven only by a real install.
+- Local e2e runs pull third-party images from Docker Hub in every fresh host and can hit its
+  anonymous rate limit after many runs (seen once); CI runners are unaffected. A pull-through
+  Zot mirror would fix it.
+- An external S3 store on a self-hosted instance is not scripted (the units set
+  `S3_ENDPOINT=http://garage:3900`).
+- LOWs left from reviews: unit D (no signal escalation for a stuck start; health state in
+  `/tmp`), unit H (drill bucket name hardcoded; rclone remote lacks `no_check_bucket`).
+
+### User to run (Part 3, each needs your go-ahead)
+
+1. Branch protection on `main` requiring `ci-ok` (and tag protection for `v*`).
+2. `git tag -s v0.1.0-rc.1 -m v0.1.0-rc.1 && git push origin v0.1.0-rc.1` (a real release:
+   keyless signing writes to the public Rekor log), then watch `release.yml`.
+3. Make each `ghcr.io/abolishus/commonair/<image>` package public.
+4. Verify the release with `docs/self-hosting/verifying.md` against the tag identity
+   (`release.yml@refs/tags/v0.1.0-rc.1`).
+5. A clean Debian 13 VM with DNS (Hetzner per ADR 0010, paid): follow
+   `docs/self-hosting/install.md`, ending with `selfhost.sh install --version v0.1.0-rc.1 --domain …
+   --email … --yes`; check TLS, an avatar upload and an export download in a browser; then tag
+   `v0.1.0-rc.2` and run `selfhost.sh upgrade --version v0.1.0-rc.2`, `selfhost.sh backup` and
+   `selfhost.sh status`.
 
 ## Session eleven (2026-10-22): Phase 5 release and self-hosting (built; user validation pending)
 
