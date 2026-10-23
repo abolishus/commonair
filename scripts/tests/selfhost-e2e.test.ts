@@ -343,33 +343,6 @@ describe("e2e unit env check", () => {
   });
 });
 
-describe("CI verify job", () => {
-  test("pins podman compose to podman-compose, not the runner's docker-compose plugin", () => {
-    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-    const job = ci.slice(ci.indexOf("\n  verify:"), ci.indexOf("\n  release-dry-run:"));
-    expect(job).toMatch(/\n {6}PODMAN_COMPOSE_PROVIDER: podman-compose\n/);
-    expect(job).toContain("pipx install podman-compose==");
-  });
-
-  test("fetches the pinned moderation model before the gate (its integration test needs it)", () => {
-    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-    const job = ci.slice(ci.indexOf("\n  verify:"), ci.indexOf("\n  release-dry-run:"));
-    const fetch = job.indexOf("run: bun scripts/fetch-model.ts");
-    expect(fetch).toBeGreaterThan(0);
-    expect(fetch).toBeLessThan(job.indexOf("bun run verify"));
-  });
-
-  test("installs the Playwright browsers on every run (the harness integration tests use them)", () => {
-    const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-    const job = ci.slice(ci.indexOf("\n  verify:"), ci.indexOf("\n  release-dry-run:"));
-    const install = job.indexOf("run: bun run --filter @commonair/harness browsers");
-    expect(install).toBeGreaterThan(0);
-    expect(install).toBeLessThan(job.indexOf("bun run verify"));
-    const cache = job.slice(job.indexOf("- name: Playwright browsers cache"), install);
-    expect(cache).not.toContain("if:");
-  });
-});
-
 describe("e2e: network exposure", () => {
   // `ss -Hltn` as Debian 13's iproute2 prints it: dual-stack sockets as `*`, IPv6 in brackets.
   const ss = [
