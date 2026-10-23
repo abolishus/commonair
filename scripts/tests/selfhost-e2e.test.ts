@@ -334,6 +334,18 @@ describe("transient build errors", () => {
       ".",
     ]);
   });
+
+  // CI run 39988149327: a release image's build lost the cache and was retried, then the host
+  // image's build, which did not go through the retry, failed on the same lost entry.
+  test("every podman build in the e2e goes through that retry", () => {
+    const source = readFileSync(join(ROOT, "scripts/selfhost/e2e.ts"), "utf8");
+    // The literal appears only in build() and buildRetryArgs(); any other build adds one.
+    expect(source.match(/"build"/g)).toHaveLength(2);
+    expect(source).toMatch(
+      /function build\(args: string\[\]\): void \{\n  try \{\n    podman\(\["build", \.\.\.args\]\);/,
+    );
+    expect(source).toMatch(/return \["build", "--no-cache", \.\.\.args\];/);
+  });
 });
 
 describe("e2e unit env check", () => {

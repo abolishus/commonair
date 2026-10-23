@@ -197,6 +197,12 @@ export function buildRetryArgs(args: readonly string[]): string[] {
   return ["build", "--no-cache", ...args];
 }
 
+/**
+ * Every image the e2e builds goes through here (a test checks that no other `podman build`
+ * exists): the host image's build hit the same lost cache entry on CI (run 39988149327) when it
+ * was the only one that did not. Each build retries once on its own; later builds keep the cache,
+ * since rebuilding the shared Bun stages for every image costs minutes and gigabytes.
+ */
 function build(args: string[]): void {
   try {
     podman(["build", ...args]);
@@ -355,7 +361,7 @@ async function startHost(distro: Distro, model: string | null, zotAddress: strin
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "Containerfile"), hostContainerfile(distro));
   const image = `${LOCAL}/host-${distro}:latest`;
-  podman(["build", "-t", image, dir]);
+  build(["-t", image, dir]);
   podman(hostRunArgs(image, model, zotAddress));
   for (let i = 0; i < 60; i++) {
     const state = podman(["exec", HOST, "systemctl", "is-system-running"], { allowFail: true, quiet: true }).trim();
