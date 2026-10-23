@@ -43,6 +43,9 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 | CI dispatch 39886965284 (`phase5/harness-ci`)            | everything green but the harness: **17 of 18** (data-export: one soft web check)                                                                                                                                                                                                                                                                                                                                                                                              |
 | CI dispatch 39890667562 (`phase5/harness-ci`)            | everything green but the harness: **17 of 18** (data-export passes; e2e-relay: one soft web check, the same load race). Both self-host e2e distros green (about 25 min)                                                                                                                                                                                                                                                                                                       |
 | `bun run verify` on `phase5/harness-ci` (external infra) | **GREEN** in 370 s                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| CI dispatch 39896210222 (sharded, `4ce2acd`)             | shards relay 15 min and long 13 min green; rest 13/15 (ingest-whip, integrity-basic, see below); Debian e2e red (Postgres init, fixed `6a4acd9`)                                                                                                                                                                                                                                                                                                                              |
+| CI dispatch 39955333600 (`a38438f`)                      | **all three harness shards green** (13–16 min); everything else green but Debian e2e ("layer not known" retry, fixed `fb3e9cd`)                                                                                                                                                                                                                                                                                                                                               |
+| `bun run verify` at `9d2ec72` (external infra)           | **GREEN** in 374 s                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Fixes (symptom → root cause → fix)
 
@@ -169,8 +172,42 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
     CI** while every API check passed → the page builds its export list after hydration and
     `count()` does not wait → wait for the export's row first; the review found the same race on
     the cooldown button (enabled until the list loads), fixed the same way.
-  - **e2e-relay: "relays page starts empty" failed on CI** → the same load race (skeleton rows
-    until the list loads) → wait for the empty state or a row.
+  - `9edae39` **e2e-relay: "relays page starts empty" failed on CI** → the same load race
+    (skeleton rows until the list loads) → wait for the empty state or a row.
+  - `4ce2acd`, `362d88e`, `682c7ad` **the harness job took ~34 min** (4 min image builds, 1.5 min
+    start, 27 min scenarios) → at the user's request (this session took over the CI items) `full`
+    runs as three shards on parallel runners: `full:relay` (e2e-relay), `full:long` (trust-safety,
+    e5-coop), `full:rest` (the complement, so a new scenario always runs); `verify --full --shard
+    <name>`; tests pin that the shards partition `full` and that the CI matrix is the shard list.
+    Each shard job takes 13–16 min. A registry layer cache for the image builds was built and
+    **removed** after its security review (three MEDIUMs: the cache shared the ghcr namespace with
+    the release packages, so its `packages: write` token, readable by unpinned pipx code on the
+    host, could overwrite release tags; a poisoned layer would be re-pushed forever; nothing prunes
+    it). Doing it safely needs a separate package namespace and admin rights to prune, for at most
+    ~3 min per shard. Shard step limits sit above verify's own (85 > 25 + 10 + 45), job 110.
+  - `6a4acd9`, `682c7ad` **CI Debian e2e: "migrations did not finish within 900s"** → on an empty
+    volume the stock entrypoint's temporary initdb server got the same `archive_mode=on` flags;
+    stopping it waited on `wal-push` to Garage (not ready on a first install: Postgres does not wait
+    for garage-init), `pg_ctl` gave up after 60 s and the unit failed (its restart then hit "Device
+    or resource busy" in the e2e host) → the entrypoint sources the stock script, overrides
+    `docker_temp_server_start` with `-c archive_mode=off` and re-execs itself as postgres; the real
+    server archives as before (the init WAL is worthless to a restore, and is archived later anyway).
+    `postgres-init.int.test.ts` (S3 unreachable) fails on the old entrypoint with the CI error and
+    passes now. A self-host product bug a real first install could hit.
+  - `9d2ec72` **the local gate once failed `verify reads the upload back` (uploaded: null)** → the
+    stand-in S3 bound the wildcard address and the script dialed 127.0.0.1:<port>; with test files
+    in parallel, another test's server bound to 127.0.0.1 on that port wins on BSD sockets → bind
+    127.0.0.1 (the review reproduced the misrouting on macOS; Linux refuses that bind). The
+    trigger is a check-then-bind race: `freePort()` in `harness/src/relay.ts` probes a port and
+    closes it before `relay.test.ts`/`liar-relay.test.ts` bind 127.0.0.1 on it; that race can now
+    only show as a loud EADDRINUSE there. Open LOW.
+  - `fb3e9cd` **CI Debian e2e: "layer not known", and the retry failed identically** → the retry
+    looked the same broken cache entry up again → it builds with `--no-cache`.
+  - `a38438f` **sharded run 39896210222: ingest-whip (Chromium first frame, no player errors) and
+    integrity-basic (count 3,3,3,3,3,2,2,3) failed once each**; both passed the runs before and
+    after, and CI's logs cannot say why → not loosened: the timeout now names the player's path,
+    session, source, bytes and heartbeats, and each stability sample records active sessions by
+    verdict (a missed heartbeat vs a verdict change). Open until one recurs with that data.
 - The CI split (another session, at the user's request): `9ba12c7` verify runs as parallel jobs
   per group (static, unit, integration, relay) plus a harness job on main/nightly, through a
   shared setup action; `9d216dd` ffmpeg 8.1.3 from a pinned, SHA-256-checked static build (WHIP
@@ -240,20 +277,20 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 
 ### Still open
 
-- **CI `ci-ok` on `main` is red only on the harness job.** Main run 39878395003 at `9d216dd`:
-  verify static, unit, integration (green on CI for the first time) and relay, lint-workflows, the
-  release dry run and **both self-host e2e distros green**. Run 39881412275 at `8f5baec` (harness
-  `platform up` in waves for Podman 4.9, by the CI-split session) gets the whole stack up on CI,
-  then the full harness scenario, never run on CI before, passes 9 of 18:
-  - the scenarios that need test hooks or overrides fail because the stack was not started with
-    their compose overlays (account-deletion, vod-clips: `OPS_TEST_HOOKS`; trust-safety:
-    `MODERATION_TEST_HOOKS`; e5-coop: short governance periods from the first migration);
-  - ingest-rtmp and ingest-whip assert WebKit's native HLS path, which Playwright's Linux WebKit
-    does not have (the same fix as `7910a24` for the integration tests);
-  - data-export ("Invalid RTMP URL" adding a simulcast target), simulcast (dashboard wait times
-    out) and e2e-relay (fails in 10 ms) need diagnosis.
-    This is the Phase 1–4 harness on Linux CI, a unit of its own; the harness job and the CI split
-    belong to the "Verify CI step optimization" session.
+- **CI `ci-ok` is not yet green in one run.** On `phase5/harness-ci` the three harness shards
+  passed in dispatches 39955333600 and 39958894162 (13–16 min each), with every verify group, lint
+  and the release dry run. The self-host e2e is what is left, with two failures in 39958894162:
+  - Debian: after `podman kill`, `commonair-worker` never restarts: every restart fails before
+    any of our code with "Failed to spawn executor: Device or resource busy" (systemd retried 8
+    times in 180 s). The same error stopped Postgres's restart in 39896210222. Earlier runs
+    restarted the worker in 22 s. Likely cgroup v2's no-internal-processes rule (a child cgroup of
+    the killed container left in the unit's delegated cgroup); not yet shown whether only the
+    privileged e2e host or a real Debian 13 host does this. Needs a live host to inspect
+    (`systemd-cgls`, the unit's `cgroup.subtree_control` and children) when it happens.
+  - Fedora: Docker Hub answered 500 for Garage's manifest during the upgrade. External; a pull
+    retry in `selfhost.sh` would make a real install ride it out too.
+  - Open from the sharded run: ingest-whip and integrity-basic each failed once (now
+    self-diagnosing, see `a38438f`).
 - IRC (6667/6697) and MediaMTX RTMP/ICE still see one client address under rootless Podman:
   IRC needs systemd socket activation in `services/irc` (`LISTEN_FDS`, `Bun.listen({ fd })`),
   MediaMTX has none. Documented in `infra/README.md`.
