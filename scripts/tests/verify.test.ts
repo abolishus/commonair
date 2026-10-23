@@ -57,15 +57,25 @@ describe("CI verify jobs", () => {
     );
   });
 
-  test("integration and harness get the moderation model and the Playwright browsers", () => {
+  test("integration and harness get the model, the browsers, their libraries and ffmpeg", () => {
     const integration = groups.find((g) => g.group === "integration")!;
-    expect([integration.model, integration.browsers, integration.system]).toEqual(["true", "true", "harness"]);
-    const harnessSetup = ci.jobs.harness.steps.find((s: { uses?: string }) => s.uses?.includes("actions/setup"));
-    expect([harnessSetup.with.model, harnessSetup.with.browsers, harnessSetup.with.system]).toEqual([
-      "true",
-      "true",
-      "harness",
-    ]);
+    const harnessSetup = ci.jobs.harness.steps.find((s: { uses?: string }) => s.uses?.includes("actions/setup")).with;
+    for (const w of [integration, harnessSetup])
+      expect([w.model, w.browsers, w["playwright-deps"], w.ffmpeg]).toEqual(["true", "true", "true", "true"]);
+  });
+
+  test("unit gets ffmpeg (the harness unit tests run it); static and relay touch neither apt nor ffmpeg", () => {
+    const by = (g: string) => groups.find((x) => x.group === g)!;
+    expect(by("unit").ffmpeg).toBe("true");
+    for (const g of ["static", "relay"]) expect([by(g).ffmpeg, by(g)["playwright-deps"]]).toEqual(["false", "false"]);
+  });
+
+  test("ffmpeg is one pinned build, checked by the hash its cache is keyed on", () => {
+    const steps = setup.runs.steps as { name?: string; env?: Record<string, string>; with?: Record<string, string> }[];
+    const install = steps.find((s) => s.name === "ffmpeg")!.env!;
+    expect(install.URL).toMatch(/^https:\/\/github\.com\/BtbN\/FFmpeg-Builds\/releases\/download\/autobuild-[\d-]+\//);
+    expect(install.SHA256).toMatch(/^[0-9a-f]{64}$/);
+    expect(steps.find((s) => s.name === "ffmpeg cache")!.with!.key).toContain(install.SHA256);
   });
 
   test("the setup action installs what those inputs ask for, gated only on the input", () => {

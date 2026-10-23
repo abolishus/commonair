@@ -82,23 +82,43 @@ jobs:
               timeout: 20,
               step-timeout: 15,
               pipx: "reuse==6.2.0",
-              system: none,
+              ffmpeg: "false",
+              playwright-deps: "false",
               browsers: "false",
               model: "false",
             }
           # ffmpeg: the harness unit tests probe and run the installed one.
-          - { group: unit, timeout: 25, step-timeout: 20, pipx: "", system: ffmpeg, browsers: "false", model: "false" }
+          - {
+              group: unit,
+              timeout: 25,
+              step-timeout: 20,
+              pipx: "",
+              ffmpeg: "true",
+              playwright-deps: "false",
+              browsers: "false",
+              model: "false",
+            }
           # The harness integration tests drive Chromium and WebKit; the classifier's runs the model.
           - {
               group: integration,
               timeout: 60,
               step-timeout: 55,
               pipx: "podman-compose==1.6.0",
-              system: harness,
+              ffmpeg: "true",
+              playwright-deps: "true",
               browsers: "true",
               model: "true",
             }
-          - { group: relay, timeout: 15, step-timeout: 10, pipx: "", system: none, browsers: "false", model: "false" }
+          - {
+              group: relay,
+              timeout: 15,
+              step-timeout: 10,
+              pipx: "",
+              ffmpeg: "false",
+              playwright-deps: "false",
+              browsers: "false",
+              model: "false",
+            }
     env:
       GROUP: ${{ matrix.group }}
       # `podman compose` prefers the docker-compose plugin the runner image ships, which talks to
@@ -114,7 +134,8 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
           go-version: ${{ env.GO_VERSION }}
           pipx: ${{ matrix.pipx }}
-          system: ${{ matrix.system }}
+          ffmpeg: ${{ matrix.ffmpeg }}
+          playwright-deps: ${{ matrix.playwright-deps }}
           browsers: ${{ matrix.browsers }}
           model: ${{ matrix.model }}
       - name: Verify
@@ -167,7 +188,8 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
           go-version: ${{ env.GO_VERSION }}
           pipx: podman-compose==1.6.0
-          system: harness
+          ffmpeg: "true"
+          playwright-deps: "true"
           browsers: "true"
           model: "true"
       - name: Verify
