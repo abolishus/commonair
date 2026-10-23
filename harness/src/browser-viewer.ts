@@ -3,8 +3,8 @@
 
 /**
  * Browser viewers: headless Playwright Chromium (hls.js over MSE) and WebKit (native HLS where
- * it has it, like Safari/iOS; Linux WebKit has none and uses hls.js too). Each page hosts one or more players; every page gets the measurement probe, and
- * well-behaved viewers also get a small init script that removes the most obvious automation
+ * it has it, like Safari/iOS; Linux WebKit has none and uses hls.js too). Each page hosts one or
+ * more players; every page gets the measurement probe, and well-behaved viewers also get a small init script that removes the most obvious automation
  * tells so integrity treats them like people (viewbots skip it on purpose).
  *
  * `player: "harness"` opens the harness player page; `player: "web"` opens the real web app's

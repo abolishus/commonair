@@ -4,8 +4,8 @@
 /**
  * Driver integration tests against a throwaway MediaMTX container: the ffmpeg streamer publishes
  * over RTMP and WHIP, the harness player plays MediaMTX's LL-HLS directly in Chromium (hls.js) and
- * WebKit (native HLS where it has it, else hls.js) with measured TTFF and glass-to-glass latency, and the HTTP-only viewer
- * follows the playlist and decodes the timestamp strip from segments.
+ * WebKit (native HLS where it has it, else hls.js) with measured TTFF and glass-to-glass latency,
+ * and the HTTP-only viewer follows the playlist and decodes the timestamp strip from segments.
  */
 import { dto } from "@commonair/contracts";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
