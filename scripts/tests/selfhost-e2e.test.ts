@@ -20,6 +20,7 @@ import {
   forbiddenKeys,
   hostContainerfile,
   hostRunArgs,
+  buildRetryArgs,
   isTransientBuildError,
   listeners,
   migratedFirst,
@@ -128,6 +129,7 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
       "--systemd",
       "--pids-limit",
       "--network",
+      "--no-cache",
       "--add-host",
       "-v",
     ]);
@@ -161,6 +163,7 @@ describe("e2e: the outer podman is CI's rootful Podman 4.9", () => {
       "--label",
       "--name",
       "--network",
+      "--no-cache",
       "--pids-limit",
       "--privileged",
       "--systemd",
@@ -316,6 +319,20 @@ describe("transient build errors", () => {
     expect(isTransientBuildError("Error: localhost/base:latest: image not known")).toBe(false);
     // A base named by id that is really missing is not the lost-cache case.
     expect(isTransientBuildError("Error: abc123def4567890: image not known")).toBe(false);
+  });
+
+  // CI: the retry of a 'layer not known' build failed identically, because it looked the same
+  // broken cache entry up again.
+  test("the retry builds without the cache, with the same arguments", () => {
+    expect(buildRetryArgs(["-f", "x.Containerfile", "-t", "img", "."])).toEqual([
+      "build",
+      "--no-cache",
+      "-f",
+      "x.Containerfile",
+      "-t",
+      "img",
+      ".",
+    ]);
   });
 });
 

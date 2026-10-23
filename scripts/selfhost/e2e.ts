@@ -189,13 +189,21 @@ export function isTransientBuildError(message: string): boolean {
   );
 }
 
+/**
+ * The retry of a build that hit a lost cache entry. Without the cache: the broken entry stays
+ * in storage, and a plain retry looked it up and failed the same way (CI, Debian e2e). Pure.
+ */
+export function buildRetryArgs(args: readonly string[]): string[] {
+  return ["build", "--no-cache", ...args];
+}
+
 function build(args: string[]): void {
   try {
     podman(["build", ...args]);
   } catch (e) {
     if (!(e instanceof StepError) || !isTransientBuildError(e.message)) throw e;
-    log(`podman build hit a transient storage error; retrying once`);
-    podman(["build", ...args]);
+    log(`podman build hit a lost build-cache entry; retrying once without the cache`);
+    podman(buildRetryArgs(args));
   }
 }
 
