@@ -118,6 +118,16 @@ manifest and self-host bundle contracts, upgrades through `selfhost.sh upgrade`)
 and the release workflow, B Quadlet/Caddy/`selfhost.sh`, C docs (after A and B). Briefs are in
 `.claude/briefs/phase5/`.
 
+## After rc.1
+
+Every follow-up once `v0.1.0-rc.1` ships is a milestone with its own plan in
+[`.claude/briefs/next/`](.claude/briefs/next/README.md), built the same way as E1–E6: R0 (rc.1 to
+`v0.1.0`), E7 (platform debts), E8 (3D interactivity and the channel bot), E9 (3C developer
+platform), W0–W3 (feature-wins waves, with corrections to that doc), N1 (notifications and PWA),
+N2 (i18n and Weblate), N3 (Twitch import), N4 (ActivityPub), M1 (money follow-ups), P1 (browser
+P2P client), L1 (first public instance). The README there holds the batch order, the gates and
+the decisions the user owns.
+
 ## Phase two (product roadmap, not built now)
 
 Twitch import (channel info, panels, emotes, schedule via Twitch OAuth); email / web push /

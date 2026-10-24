@@ -796,6 +796,10 @@ ActivityPub comes after the federation unit and its T&S design.
 
 ## 5. Sequencing
 
+**Status at `ef9f2b3` (2026-10-23).** E5 and E6 are done, most of the 2H2 items are fixed, and
+some owner paths changed. The wave plans in `.claude/briefs/next/` (W0–W3) list each correction
+and take precedence where they differ from this section.
+
 **Workstream E (not this pod's).** E5 (coop, 25 stubs), E6 (exports, VOD/clips stubs, overlays) and Phase 3D (interact 21, bot 15) own the stubbed namespaces. The only stub any unit here implements is `integrity.channelSummary` (W2-rollup-analytics).
 
 **Contract step first, every wave.** The orchestrator lands each wave's contract, enum, migration, KEYS, `packages/tokens` and router-registration edits in one commit, following the E4c "step 2" pattern, and writes `docs/testing/<unit>-selectors.md`. Then at most 6 units run in parallel on disjoint paths, each reviewed before merge.

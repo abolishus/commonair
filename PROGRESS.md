@@ -912,7 +912,8 @@ integration, licenses, domains, reuse, relay). All units below are merged except
 
 ## Next
 
-See HANDOFF.md: Milestone E1 (sign up → go live → watch → chat, end to end) first.
+After rc.1: the milestone plans in [`.claude/briefs/next/`](.claude/briefs/next/README.md)
+(R0 first, then E7 + W0).
 
 ## Previous next steps
 
