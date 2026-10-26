@@ -225,21 +225,52 @@ duration with progress logs every 10 s, and reports:
   `sum by (source) (increase(origin_egress_bytes_total[<window>]))`), falling back to bytes the
   viewers report;
 - CPU per container (`podman stats --no-stream --format json`, mean and peak, containers matching
-  `HARNESS_CONTAINER_PREFIX`);
+  `HARNESS_CONTAINER_PREFIX`), run locally or, with `HARNESS_LOAD_TARGET_SSH`, on the target over
+  SSH;
+- whole-host CPU (busy and steal across all cores), memory, load average and NIC bytes per
+  interface from `/proc` (`src/load/host.ts`), sampled every 5 s over the hold: the target's over
+  SSH, the generators' locally and over SSH (`target.cpu.p95`, `target.nic.tx_bytes_per_second`,
+  `generator.cpu.p95`, … metrics);
 - p50/p95 glass-to-glass (browser viewers), p95 HTTP delivery latency, p50/p95 TTFF;
 - stall ratio (stalled time / watched time), stall count and stalls per viewer-minute; errors.
 
 The report's `scenarios[].data.load` section (`src/load/report.ts`) holds `egress` (method,
 `totalBytes`, `bytesPerSecond`, `perViewerBytes`, `perViewerBytesPerSecond`, `bySource`), `cpu`
 per container (`avgPercent`, `maxPercent`), `glassToGlassP95Ms`, `ttffP95Ms`, `stallRatio`,
-`stallCount`, `errors`, `started`/`viewers`, `shards`, and the raw aggregates under `breakdown`.
-Both load scenarios assert that every viewer started (hard) and check stall ratio < 5 %, p95
-glass-to-glass and TTFF < 15 s and no errors (soft).
+`stallCount`, `errors`, `started`/`viewers`, `shards`, the raw aggregates under `breakdown`, and
+`target.host`, `target.containers` (source, incomplete flag, CPU) and `generator.host` (plus
+`generator.hosts` with remote shard hosts). Both load scenarios assert that every viewer started
+(hard) and check stall ratio < 5 %, p95 glass-to-glass and TTFF < 15 s and no errors (soft).
+An SSH failure mid-run marks the samples incomplete (`samples_incomplete` metric, `incomplete` in
+the summary); it never fails the scenario on its own.
+
+**Remote target.** Against an installed instance (`selfhost.sh`), the load test is configured by
+the `HARNESS_LOAD_*` variables (`src/load/env.ts`; all optional, unset = the local behaviour):
+
+| Variable                          | Meaning                                                                           |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| `HARNESS_LOAD_TARGET_SSH`         | SSH destination of the target as `commonair` (`podman stats` and `/proc` there)   |
+| `HARNESS_LOAD_TARGET_NIC_MBPS`    | The target's measured NIC ceiling; unset = no target-NIC rule                     |
+| `HARNESS_LOAD_GENERATOR_NIC_MBPS` | The generators' measured NIC ceiling; unset = no generator-NIC rule               |
+| `HARNESS_LOAD_GENERATOR_HOSTS`    | Where shards run: SSH destinations and/or `local`, dealt round-robin              |
+| `HARNESS_LOAD_GENERATOR_REPO`     | The checkout path on generator hosts (default: this checkout's path)              |
+| `HARNESS_LOAD_AUTH_PER_MINUTE`    | Pace sign-ups and sign-ins under the instance's per-address `auth` limit (10)     |
+| `HARNESS_LOAD_ACCOUNTS_FILE`      | Reuse streamer accounts across runs on one instance (test credentials, mode 0600) |
+
+With a remote target, a run is **inconclusive** (neither passed nor failed: `data.verdict`,
+metric `load.inconclusive`) when a generator's CPU p95 is over 80 % or its NIC transmit or
+receive p95 is within 15 % of the ceiling. The runbook, the per-address rate-limit caveat and the
+results are in [docs/operators/capacity.md](../docs/operators/capacity.md).
 
 **Sharding.** One process drives about a thousand HTTP viewers. Past `httpPerProcess` (default 1000) the HTTP audience is split round-robin over child processes (`src/load/worker.ts`, spawned
 with `Bun.spawn` and supervised like ffmpeg): each opens its slice, prints `started`, holds until
 SIGINT and prints its viewers' final reports on one `LOAD_SHARD` stdout line, which the parent
-merges into the same report. Browser viewers always stay in the parent.
+merges into the same report. Browser viewers always stay in the parent. With
+`HARNESS_LOAD_GENERATOR_HOSTS`, shards run on the listed hosts over SSH (`src/load/processes.ts`:
+the same worker and line protocol, from the same checkout path; at least one shard per host);
+the parent stops a remote shard by closing its stdin, which a shell wrapper on the far side turns
+into SIGINT. Only the instance URLs (`HARNESS_API_URL`, `HARNESS_WEB_URL`, `HARNESS_ORIGIN_URL`,
+`HARNESS_PLAYER`, `LOG_LEVEL`, …) are passed to the remote worker.
 
 | Knob (`--set`)       | `load-smoke` | `load-plan` | Meaning                                        |
 | -------------------- | ------------ | ----------- | ---------------------------------------------- |
@@ -267,6 +298,7 @@ merges into the same report. Browser viewers always stay in the parent.
 | `e5-coop`        | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below).    |
 | `backup-restore` | E6: WAL-G backup of a throwaway Postgres, wipe, restore with WAL replay; triggers, protection functions, app-role grants, rows and the ledger come back, and the app role is refused every protected write (see below). |
 | `load-plan`      | E6: the load test at PLAN size, 20 streamers × 200 viewers for 120 s, sharded over processes. Not in `full`.                                                                                                            |
+| `load-sweep`     | S1-a: steps viewers (or live streams) up until latency, TTFF, stalls, errors, target CPU or NIC breaks; one row per step, or inconclusive when the generator was the limit. Not in `full`.                              |
 
 E1's E6 scenarios (`simulcast`, `overlay-alert`, `vod-clips`, `data-export`, `account-deletion`)
 are documented with [docs/testing/e6-selectors.md](../docs/testing/e6-selectors.md).
@@ -346,11 +378,47 @@ bun harness/src/cli.ts run backup-restore
 ### `load-plan` (E6)
 
 The load test at PLAN size (ADR 0021 §4), outside `full`; knobs in "Metrics and the load test".
+Against a remote instance (`HARNESS_LOAD_TARGET_SSH`), a run where the generator was the limit is
+inconclusive rather than passed or failed.
 
 ```sh
 bun harness/src/cli.ts run load-plan
 bun harness/src/cli.ts run load-plan --set streamers=10 --set viewersPerStreamer=100 --set httpPerProcess=500
 ```
+
+### `load-sweep` (S1-a)
+
+Steps the load up until one host stops coping (`src/load/sweep.ts`), outside `full`. Streams stay
+up across steps; each step opens its audience, holds `seconds`, collects, and cools down. The
+sweep stops at the first step that breaks a target and records which (several breaking in one
+step are reported together), or at the first step where a generator was the limit
+(inconclusive). Report: `data.sweep` (one row per step), `data.sweepSummary` (last passing step,
+first failing step and why, per-viewer egress and CPU at the last passing step), and per step
+`data["sweep step N"]`. The scenario fails only if the first step already broke a target.
+
+```sh
+bun harness/src/cli.ts run load-sweep                                    # 250 → 4000 viewers
+bun harness/src/cli.ts run load-sweep --set steps=100,200,400 --set streamers=4
+bun harness/src/cli.ts run load-sweep --set streamerSteps=1,2,4,8 --set ladderViewers=60
+```
+
+| Knob (`--set`)                             | Default                | Meaning                                                              |
+| ------------------------------------------ | ---------------------- | -------------------------------------------------------------------- |
+| `steps`                                    | 250,500,1000,2000,4000 | Viewers per step (viewers axis); strictly increasing                 |
+| `streamerSteps`                            | —                      | Live streams per step instead (streams axis; exclusive with `steps`) |
+| `streamers`                                | 20                     | Streams on the viewers axis                                          |
+| `ladderViewers`                            | 60                     | Viewers per stream on the streams axis (≥ the transcode threshold)   |
+| `seconds` / `cooldownSeconds`              | 120 / 30               | Hold per step, pause between steps                                   |
+| `browserViewers` / `httpPerProcess`        | 10 / 1000              | As for `load-plan`                                                   |
+| `maxLatencyMs` / `maxTtffMs`               | 15000 / 15000          | p95 glass-to-glass and TTFF; break at or above                       |
+| `maxStallRatio` / `maxErrorRate`           | 0.05 / 0               | Break at or above / above                                            |
+| `maxTargetCpuP95`                          | 85                     | Target host CPU p95 (%); break above                                 |
+| `targetNicFraction`                        | 0.95                   | Target NIC transmit p95 as a share of `HARNESS_LOAD_TARGET_NIC_MBPS` |
+| `generatorCpuP95` / `generatorNicHeadroom` | 80 / 0.15              | The inconclusive judgment                                            |
+
+Each row also counts the streams with a transcode ladder at the end of the hold (from
+`playback.start`'s renditions) and failed heartbeats (a rate-limited generator address shows
+there first; see capacity.md).
 
 ### `e2e-relay` (milestone E3)
 

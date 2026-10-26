@@ -6,10 +6,14 @@
  * browsers, the HTTP audience spread over child harness processes (`--set httpPerProcess=N`,
  * default 1000). Not part of `full`: run it by hand on a machine that can sustain it.
  *
+ * Against a remote instance (`HARNESS_LOAD_TARGET_SSH`, docs/operators/capacity.md) it also
+ * samples the target host and its containers over SSH, and a run where the generator was the
+ * limit is reported as inconclusive instead of passed or failed.
+ *
  *   bun harness/src/cli.ts run load-plan [--set streamers=20] [--set viewersPerStreamer=200]
  *                                       [--set seconds=120] [--set browserViewers=20]
  */
-import { judgeLoad, runLoad } from "../src/load.ts";
+import { judgeLoadRun, runLoad } from "../src/load.ts";
 import { LOAD_PLAN_DEFAULTS, parseLoadParams } from "../src/load/params.ts";
 import { defineScenario } from "../src/scenario.ts";
 
@@ -30,6 +34,6 @@ export default defineScenario({
       browserViewers: p.browserViewers,
       httpPerProcess: p.httpPerProcess,
     });
-    judgeLoad(ctx, result.report);
+    judgeLoadRun(ctx, result);
   },
 });
