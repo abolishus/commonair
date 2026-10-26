@@ -8,7 +8,16 @@
  */
 import { z } from "zod";
 import * as E from "../enums.ts";
-import { AlertTemplate, BotConfig, ChannelChatSettings, ChannelTheme, GovernanceChange } from "../shapes.ts";
+import {
+  AlertTemplate,
+  BotConfig,
+  ChannelChatSettings,
+  ChannelTheme,
+  GovernanceChange,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_CONTENT_TYPES,
+  UPLOAD_PURPOSES,
+} from "../shapes.ts";
 import { SCOPE_NAMES } from "../scopes.ts";
 import { PUBLIC_EVENT_TYPES } from "../events.ts";
 import { MONEY_LIMITS } from "../currency.ts";
@@ -41,9 +50,6 @@ const platformMod = base.meta({ access: "platform-moderator" });
 const legal = base.meta({ access: "legal" });
 const safetyStaff = base.meta({ access: "safety-staff" });
 const finance = base.meta({ access: "finance" });
-
-/** Image upload purposes that are scanned on commit (audio is not an image and is not scanned). */
-const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;
 
 const ChannelUpdate = z.object({
   title: z.string().max(140).optional(),
@@ -444,8 +450,8 @@ export const contract = {
       .input(
         ChannelRef.extend({
           purpose: z.enum(UPLOAD_PURPOSES),
-          contentType: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif", "audio/mpeg", "audio/ogg"]),
-          sizeBytes: z.number().int().positive().max(10_000_000),
+          contentType: z.enum(UPLOAD_CONTENT_TYPES),
+          sizeBytes: z.number().int().positive().max(MAX_UPLOAD_BYTES),
         }),
       )
       .output(

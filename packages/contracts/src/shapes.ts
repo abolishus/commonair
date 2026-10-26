@@ -229,3 +229,26 @@ export const PayoutRulesSetting = z.object({
   currency: z.string().regex(/^[a-z]{3}$/),
 });
 export type PayoutRulesSetting = z.infer<typeof PayoutRulesSetting>;
+
+/** What a channel can upload, and which file types each purpose takes (enforced by `channels.uploadUrl`). */
+export const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;
+export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+export const UPLOAD_CONTENT_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "audio/mpeg",
+  "audio/ogg",
+] as const;
+export type UploadContentType = (typeof UPLOAD_CONTENT_TYPES)[number];
+export const UPLOAD_TYPES: Record<UploadPurpose, readonly UploadContentType[]> = {
+  avatar: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  banner: ["image/png", "image/jpeg", "image/webp"],
+  panel: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  emote: ["image/png", "image/webp", "image/gif"],
+  alert_image: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+  alert_sound: ["audio/mpeg", "audio/ogg"],
+};
+/** Largest presigned upload (`sizeBytes`), for every purpose. */
+export const MAX_UPLOAD_BYTES = 10_000_000;

@@ -6,21 +6,19 @@
  * `channels.commitUpload` scans the object and copies it to the public key, which is the same
  * key without the prefix. Pure functions, unit-tested.
  */
+import {
+  UPLOAD_PURPOSES,
+  UPLOAD_TYPES as CONTRACT_UPLOAD_TYPES,
+  type UploadPurpose,
+} from "@commonair/contracts/shapes";
 import { INCOMING_PREFIX } from "@commonair/moderation";
 
-export const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;
-export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
+export { UPLOAD_PURPOSES, type UploadPurpose };
+/** The contract's per-purpose types, widened so key parsing can look up any string. */
+export const UPLOAD_TYPES: Record<UploadPurpose, readonly string[]> = CONTRACT_UPLOAD_TYPES;
 /** Purposes that are images (scanned on commit); `alert_sound` is size- and type-checked only. */
 export const IMAGE_PURPOSES: readonly UploadPurpose[] = ["avatar", "banner", "panel", "emote", "alert_image"];
 
-export const UPLOAD_TYPES: Record<UploadPurpose, readonly string[]> = {
-  avatar: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  banner: ["image/png", "image/jpeg", "image/webp"],
-  panel: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  emote: ["image/png", "image/webp", "image/gif"],
-  alert_image: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-  alert_sound: ["audio/mpeg", "audio/ogg"],
-};
 export const EXT: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
