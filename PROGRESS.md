@@ -114,10 +114,14 @@ from `a38438f`: path mse, session up, 3.3 MB received, 0 stalls, 2 heartbeats, n
 ### Left
 
 - happy-dom 21.0.4 on or after 2026-10-27 (vet, bump both package.json files, drop the exception).
-- The droplet `commonair-rc-test`, its firewall and the `staging-stream.abolish.us` records stay up
-  until the user decides whether it becomes the staging host (ADR 0025, proposed) or is deleted.
-- ADR 0025 (DigitalOcean for staging and production, superseding 0010) is proposed, awaiting the
-  user; on acceptance: retire Railway, `docs/deploy/digitalocean.md`, mark 0010 superseded.
+- ADR 0025 **accepted** (2026-10-26): `docs/deploy/digitalocean.md`, 0010 superseded, Railway
+  retired from the repository. The droplet `commonair-rc-test` is the staging host until S1-g's
+  OpenTofu recreates it. The Railway project itself is still up: the user deletes it in Railway's
+  console.
+- Decided with the user the same day: managed Postgres and Valkey at S1 stage 1, with
+  `selfhost.sh` support for external managed services for every operator; 99.5% at launch, 99.9%
+  from stage 1; `v0.1.0` waits for R0-g (resend verification email); P1 moves into batch 2
+  (`.claude/briefs/next/README.md`).
 - Product gaps from the real host: no "resend verification email" on the sign-in page; no avatar or
   banner upload UI (`uploadChannelFile` is never called).
 - Not exercised on a real host: Fedora (SELinux labels) and a rollback (CI's e2e covers rollback).
