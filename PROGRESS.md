@@ -20,6 +20,12 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## In flight
+
+| Unit          | Brief                                | Owns                                                                                                                                                | State                    |
+| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| S1-a capacity | `.claude/briefs/s1/S1-a-capacity.md` | `harness/src/load*`, `harness/src/metrics.ts` (additive), `harness/scenarios/load-{plan,sweep}.ts`, `docs/operators/capacity.md`, `scripts/load/**` | brief ready, not started |
+
 ## Web gaps from the first real-host install (2026-10-26, branch `claude/web-gaps-resend-upload`)
 
 The two product gaps session thirteen found on staging-stream.abolish.us, closed in the web app:
@@ -120,10 +126,8 @@ from `a38438f`: path mse, session up, 3.3 MB received, 0 stalls, 2 heartbeats, n
   console.
 - Decided with the user the same day: managed Postgres and Valkey at S1 stage 1, with
   `selfhost.sh` support for external managed services for every operator; 99.5% at launch, 99.9%
-  from stage 1; `v0.1.0` waits for R0-g (resend verification email); P1 moves into batch 2
+  from stage 1; `v0.1.0` waits for R0-g (resend verification email, done in `6a1983f`); P1 moves into batch 2
   (`.claude/briefs/next/README.md`).
-- Product gaps from the real host: no "resend verification email" on the sign-in page; no avatar or
-  banner upload UI (`uploadChannelFile` is never called).
 - Not exercised on a real host: Fedora (SELinux labels) and a rollback (CI's e2e covers rollback).
 
 ## Session twelve (2026-10-22/23): validating and finishing Phase 5 (Parts 1–2 done, `ci-ok` green; release pending the user)

@@ -17,8 +17,8 @@ only `docs/self-hosting/`.
   ACME, then upgraded to rc.2, backed up and checked with `status`. The rc test host is a
   droplet because of ADR 0025 (accepted 2026-10-26: DigitalOcean for staging and production).
 - Found on that host and fixed in rc.2: the cosign install step, blocked SMTP egress, refusing
-  root and a session without a user manager. Found and not fixed: no "resend verification email"
-  on sign-in, no avatar or banner upload UI (`uploadChannelFile` is never called).
+  root and a session without a user manager. Found and fixed after rc.2 (`6a1983f`): "resend
+  verification email" on sign-in and sign-up, avatar and banner upload on the dashboard.
 
 ## 1. Decided (2026-10-26)
 
@@ -26,7 +26,7 @@ only `docs/self-hosting/`.
    docs and `infra/README.md`, ADR 0010 superseded, Railway's config, bootstrap script and guide
    removed. The Railway project itself is the user's to delete in Railway's console.
 2. `commonair-rc-test` is the staging droplet until S1-g's OpenTofu recreates it.
-3. `v0.1.0` waits for R0-g (resend verification email). The upload UI goes to E7.
+3. `v0.1.0` waits for R0-g (resend verification email): done in `6a1983f`, with the upload UI.
 
 ## 2. Code work (Claude, in a worktree, one batch)
 
@@ -38,7 +38,7 @@ only `docs/self-hosting/`.
 | R0-d units   | `infra/quadlet/**`, `infra/postgres/health.sh`                                                   | the observability crash loop no longer holds starts behind `After=` (`docs/self-hosting/README.md:86`); operator drop-ins under `~/.config/containers/systemd/*.d/` survive upgrades; unit D LOWs (signal escalation for a stuck start, state out of `/tmp`) |
 | R0-e tests   | `infra/tests/**`, `scripts/selfhost/e2e.ts`                                                      | test that Quadlet keeps the unit's `ExecStopPost=` order; `stack.int.test.ts` limit with headroom; optional pull-through Zot mirror for local e2e runs (Docker Hub rate limit)                                                                               |
 | R0-f docs    | `docs/self-hosting/**` (not `docs/deploy/**`, which ADR 0025's acceptance rewrites)              | fork upgrades (`COMMONAIR_REPOSITORY_URL`) documented; the stale IPv4-only and client-address limitations dropped from the self-hosting docs (the droplet proved both)                                                                                       |
-| R0-g resend  | the sign-in page and its i18n keys in `apps/web`                                                 | "resend verification email" on sign-in, calling the existing `send-verification-email` endpoint, rate-limited like the other auth calls                                                                                                                      |
+| R0-g resend  | done (`6a1983f`)                                                                                 | `ResendVerification` on /signin and the sign-up screen, 60 s cooldown, neutral answers; `e2e-basic` covers it                                                                                                                                                |
 
 R0-a and R0-b both touch the e2e; give the e2e file to R0-e and have the others add check
 functions in their own files that R0-e wires in.

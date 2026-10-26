@@ -16,7 +16,7 @@ State checked at `ef9f2b3` (2026-10-23). Line numbers below are from that commit
 0025 (proposed) moves hosting to DigitalOcean, the planned ADRs moved up one number, and S1
 (scaling) was added. Later that day the user accepted ADR 0025 (Railway retired, staging is
 the rc droplet), chose managed Postgres and Valkey at S1 stage 1 with the same external option
-for self-hosters, held `v0.1.0` for R0-g, and moved P1 into batch 2.
+for self-hosters, held `v0.1.0` for R0-g (landed the same day, `6a1983f`), and moved P1 into batch 2.
 
 ## Milestones
 
@@ -73,7 +73,7 @@ before counsel; L1 is the user's. No P2P claim ships before P1.
   still shift.
 - Settled 2026-10-26: ADR 0025 accepted; managed Postgres and Valkey for our instance at S1
   stage 1, with `selfhost.sh` support for external managed services for every operator; launch
-  target 99.5%, 99.9% from stage 1; `v0.1.0` waits for R0-g but not for E7 (E7 ships in
+  target 99.5%, 99.9% from stage 1; `v0.1.0` waits for R0-g (done) but not for E7 (E7 ships in
   `v0.2.0`).
 - Production region and droplet size (after S1-a).
 - Release cadence after `v0.1.0`: one minor per milestone batch, patch releases for R0-class
