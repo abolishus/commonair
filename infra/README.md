@@ -359,8 +359,8 @@ addresses in `MTX_WEBRTCADDITIONALHOSTS` as ICE candidates. `mailpit`, `mock-rtm
 `IRC_PUBLIC_HOST` to the IRC unit's TLS mount (`irc/sync-cert.ts`, run in the `tools` image)
 and restarts IRC when it changed. `systemd/` holds the plain user units Quadlet does not
 generate: `commonair-backup.service` and `.timer` (daily WAL-G base backup),
-`commonair-irc-cert.timer` (runs the sync daily) and `commonair-caddy.socket` (Caddy's public
-ports, below).
+`commonair-irc-cert.timer` (runs the sync daily), `commonair-caddy.socket` (Caddy's public
+ports, below) and `commonair-irc.socket` and `commonair-ircs.socket` (IRC's, below).
 
 ### Ports and client addresses
 
@@ -376,7 +376,7 @@ rootless Podman 6.1 host; Debian 13 and Fedora 42 ship 5.4, which behaves alike 
   through ports published on the host's loopback, which any local process could reach too.
 - **Caddy on the host network**: real addresses and IPv6 for free, but the same loopback
   publishing for every upstream, and any local process could then talk to them as Caddy.
-- **systemd socket activation** (chosen for Caddy): `infra/systemd/commonair-caddy.socket` holds
+- **systemd socket activation** (chosen for Caddy and IRC): `infra/systemd/commonair-caddy.socket` holds
   80, 443 and 443/udp in the host's network namespace and passes the listening sockets to
   `commonair-caddy.service`; Podman hands them to the container, and Caddy binds them as `fd/3`,
   `fd/4` and `fdgram/5` (`CADDY_LISTEN=systemd`). Caddy stays on the bridge network, reaches the
@@ -384,6 +384,17 @@ rootless Podman 6.1 host; Debian 13 and Fedora 42 ship 5.4, which behaves alike 
   a bare `ListenStream=443` is dual-stack, or IPv4 alone on a host without IPv6. No extra image,
   and it works rootless on both distributions (systemd ≥ 254, and the unprivileged-port sysctl
   at 80, which covers IPv6 as well).
+- **IRC** takes its raw ports the same way: `commonair-irc.socket` holds 6667 and
+  `commonair-ircs.socket` holds 6697 (two units, because `FileDescriptorName=` names every
+  descriptor of a unit), both passed to `commonair-irc.service` (`Sockets=`). Podman hands them
+  to the container, and the gateway accepts on them (`Bun.listen({ fd })`) after finding them by
+  name in `LISTEN_FDNAMES` (`irc`, `ircs`; fd 3 and 4 when unnamed). It reads `LISTEN_PID`
+  as Podman rewrites it (1, the container's catatonit, whose child the gateway is), unsets the
+  three variables, and exits with a log line rather than bind the ports itself when the
+  descriptors are missing or unusable: inside the container that would listen where no client
+  can reach. The per-address caps (`IRC_MAX_CONNECTIONS_PER_IP`, the connect burst) now count
+  each client apart. IRC over WebSocket (6680) stays behind Caddy. Compose has no socket
+  activation and keeps binding the ports.
 
 Caddy trusts no client's `X-Forwarded-For` (no `trusted_proxies`) and sends the services the
 address it accepted the connection from. The services believe that header only from Caddy's
@@ -392,29 +403,23 @@ fixed address, `10.89.42.10`, and the API also from the web app's proxy, `10.89.
 (`10.89.42.128/25`), so no other container can be given them. `selfhost.sh` re-creates the
 network whenever it restarts the stack, because Quadlet never changes an existing one.
 
-IRC (6667, 6697) and MediaMTX (RTMP 1935, ICE 8189/udp) still use `PublishPort=`, without a host
-address, so they listen on IPv6 and IPv4 (IPv4 alone on a host without IPv6), but they see
-every client at one internal address. IRC's per-address caps therefore count all IRC clients
-together, and MediaMTX's view of an encoder's address (the API records a hash of it) is that
-internal one. This part is not done yet:
+MediaMTX (RTMP 1935, ICE 8189/udp) still uses `PublishPort=`, without a host address, so it
+listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6), but it sees every client at one
+internal address: its view of an encoder's address (the API records a hash of it) is that
+internal one.
 
-- **IRC** can move to socket activation the way Caddy did. That needs `services/irc` to take
-  inherited listeners (when `LISTEN_FDS` is set and `LISTEN_PID` matches, listen on fd 3 for
-  6667 and fd 4 for 6697 with `Bun.listen({ fd })` instead of binding), plus a
-  `commonair-irc.socket` and the IRC unit's `Wants=`/`After=` on it. Until then, raise
-  `IRC_MAX_CONNECTIONS_PER_IP` and the connect burst if many users share the gateway's count.
 - **MediaMTX** has no fix here. It cannot take inherited sockets (no socket activation, and its
   RTMP and ICE listeners bind their own addresses), and moving it to the host network would
   also put its RTSP, HLS, API and metrics listeners on the host. RTMP stream keys
   are the access control, so the shared address limits only what its logs and the API's
   recorded encoder hash can tell apart.
 
-Every published port and its fate (tests: `infra/tests/network.test.ts`, the e2e `ss` check):
+Every published port and its fate (tests: `infra/tests/network.test.ts` and `irc-socket.test.ts`, the e2e `ss` check):
 
 | Unit           | Port                      | Fate                                                              |
 | -------------- | ------------------------- | ----------------------------------------------------------------- |
 | caddy          | 80, 443, 443/udp          | public, systemd sockets (real client addresses, IPv6 and IPv4)    |
-| irc            | 6667, 6697                | public, `PublishPort=` on every address                           |
+| irc            | 6667, 6697                | public, systemd sockets (real client addresses, IPv6 and IPv4)    |
 | mediamtx       | 1935, 8189/udp            | public, `PublishPort=` on every address                           |
 | garage         | 3900                      | `127.0.0.1`: the off-host object copy (rclone); S3 signs requests |
 | grafana        | 3030 → 3000               | `127.0.0.1`: reached over an SSH tunnel; needs the admin login    |

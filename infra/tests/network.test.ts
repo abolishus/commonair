@@ -3,8 +3,8 @@
 
 /**
  * Network exposure of the production units (infra/README.md, "Ports and client addresses"):
- * the ports each unit publishes (an explicit allowlist), Caddy's public ports as systemd sockets
- * so client addresses survive rootless Podman, whom the services believe X-Forwarded-For from,
+ * the ports each unit publishes (an explicit allowlist), Caddy's and IRC's public ports as systemd
+ * sockets so client addresses survive rootless Podman, whom the services believe X-Forwarded-For from,
  * and Valkey's password.
  */
 import { readdirSync, readFileSync } from "node:fs";
@@ -56,7 +56,6 @@ describe("published ports: an explicit allowlist", () => {
   const ALLOWED: Record<string, string[]> = {
     garage: ["127.0.0.1:3900:3900"],
     grafana: ["127.0.0.1:3030:3000"],
-    irc: ["6667:6667", "6697:6697"],
     mediamtx: ["1935:1935", "8189:8189/udp"],
   };
 
@@ -201,25 +200,37 @@ describe("Valkey requires a password", () => {
   });
 });
 
-describe("IRC behind rootlessport (one shared client address)", () => {
-  const publishesIrc = values(code(unit("irc")), "PublishPort").some((p) => /^(\S+:)?6667:6667$/.test(p));
-  const keys = read("infra/selfhost/env/commonair-irc.keys").split("\n");
-  const troubleshooting = read("docs/self-hosting/troubleshooting.md");
+describe("IRC's public ports are systemd sockets (client addresses survive rootless Podman)", () => {
+  const irc = unit("irc");
+  const ircSockets = ["commonair-irc.socket", "commonair-ircs.socket"];
 
-  test.skipIf(!publishesIrc)("operators can raise the per-address caps from the env file", () => {
-    for (const key of ["IRC_MAX_CONNECTIONS_PER_IP", "IRC_CONNECT_BURST_PER_IP", "IRC_CONNECT_PER_SECOND_PER_IP"]) {
-      expect(keys).toContain(key);
-      // A unit-level Environment= would win over the env file and make the advice useless.
-      expect(values(code(unit("irc")), "Environment").some((e) => e.startsWith(`${key}=`))).toBe(false);
+  test("the unit publishes nothing and wants both sockets, which systemd passes to it", () => {
+    expect(values(irc, "PublishPort")).toEqual([]);
+    for (const s of ircSockets) {
+      expect(values(irc, "Wants")).toContain(s);
+      expect(values(irc, "After")).toContain(s);
     }
+    expect(values(irc, "Sockets")).toEqual([ircSockets.join(" ")]);
+    // Still on the network, so it reaches chat by name.
+    expect(values(irc, "Network")).toEqual(["commonair.network"]);
   });
 
-  test.skipIf(!publishesIrc)("troubleshooting documents the shared per-address cap and how to apply a change", () => {
-    const section = troubleshooting.split(/^## /m).find((s) => s.startsWith("IRC clients are refused"));
-    expect(section).toBeDefined();
-    expect(section).toContain("IRC_MAX_CONNECTIONS_PER_IP");
-    expect(section).toContain("IRC_CONNECT_BURST_PER_IP");
-    expect(section).toContain("systemctl --user restart commonair-irc");
-    expect(section).not.toMatch(/\breinstall\b/);
+  test("each socket holds one public IRC port, dual-stack, at boot", () => {
+    const listens = ircSockets.map((f) => {
+      const text = code(read(`infra/systemd/${f}`));
+      expect(values(text, "BindIPv6Only"), f).toEqual(["both"]);
+      expect(values(text, "WantedBy"), f).toEqual(["sockets.target"]);
+      return [...text.matchAll(/^(Listen\w+)=(.*)$/gm)].map((m) => `${m[1]}=${m[2]}`);
+    });
+    expect(listens).toEqual([["ListenStream=6667"], ["ListenStream=6697"]]);
+  });
+
+  test("the WebSocket listener stays behind Caddy (not a socket, not published)", () => {
+    expect(values(irc, "Environment")).toContain("IRC_WS_PORT=6680");
+    for (const s of ircSockets) expect(read(`infra/systemd/${s}`)).not.toMatch(/^ListenStream=6680$/m);
+  });
+
+  test("compose keeps plain binding (no socket activation there)", () => {
+    expect(compose.services.irc?.ports?.map((p) => p.split(":").at(-1))).toEqual(["6667", "6697", "6680", "6681"]);
   });
 });

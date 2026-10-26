@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# IRC over TLS (6697), passed to commonair-irc.service alongside commonair-irc.socket (see there).
+[Unit]
+Description=CommonAir public IRC port 6697 (TLS)
+
+[Socket]
+# The port of the unit's IRC_TLS_PORT.
+ListenStream=6697
+FileDescriptorName=ircs
+BindIPv6Only=both
+# Not the service of the same name: both sockets go to the one gateway.
+Service=commonair-irc.service
+
+[Install]
+WantedBy=sockets.target

@@ -7,6 +7,7 @@ import { createLogger, initTelemetry } from "@commonair/observability";
 import { connectionLimits, ircEnv, trustedProxies } from "./env.ts";
 import { startGateway } from "./gateway.ts";
 import { startHealth } from "./health.ts";
+import { socketProblem, systemdListeners } from "./systemd.ts";
 import { loadTls } from "./tls.ts";
 import { websocketUpstream } from "./upstream.ts";
 
@@ -28,11 +29,30 @@ const tls = await loadTls({
 if (tls.ephemeral)
   logger.warn("IRC TLS uses an ephemeral self-signed certificate; set IRC_TLS_CERT_FILE and IRC_TLS_KEY_FILE");
 
+// Socket activation (commonair-irc.socket, commonair-ircs.socket): accept on the inherited
+// descriptors. If they were meant for us but cannot be used, stop: binding the ports instead
+// would listen inside the container where no client can reach it.
+const activation = systemdListeners(process.env, process.pid, process.ppid);
+if (activation.kind === "none" && activation.ignored)
+  logger.warn("ignoring systemd socket activation variables", { reason: activation.ignored });
+const problem =
+  activation.kind === "error"
+    ? activation.reason
+    : activation.kind === "fds"
+      ? (socketProblem(activation.tcp) ?? socketProblem(activation.tls))
+      : null;
+if (problem !== null) {
+  logger.error("systemd socket activation failed; not starting", { reason: problem });
+  await telemetry.shutdown();
+  process.exit(1);
+}
+
 const site = instanceSite(core);
 const gateway = startGateway({
   tcpPort: ports.IRC_PORT,
   tlsPort: ports.IRC_TLS_PORT,
   wsPort: ports.IRC_WS_PORT,
+  inherited: activation.kind === "fds" ? activation : undefined,
   tls,
   upstream: websocketUpstream(CHAT_INTERNAL_URL, logger),
   logger,

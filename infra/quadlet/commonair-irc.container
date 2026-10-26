@@ -16,6 +16,11 @@ Wants=commonair-otel-collector.service
 After=commonair-otel-collector.service
 Wants=commonair-chat.service
 After=commonair-chat.service
+# The public ports 6667 and 6697, held by systemd and passed in (socket activation).
+Wants=commonair-irc.socket
+After=commonair-irc.socket
+Wants=commonair-ircs.socket
+After=commonair-ircs.socket
 
 [Container]
 Image=localhost/commonair/irc:latest
@@ -61,13 +66,13 @@ Environment=IRC_TLS_CERT_FILE=/run/commonair/irc-tls/tls.crt
 Environment=IRC_TLS_KEY_FILE=/run/commonair/irc-tls/tls.key
 # Shared label (z, not Z): commonair-irc-cert.container writes the same directory.
 Volume=%h/.config/commonair/irc-tls:/run/commonair/irc-tls:ro,z
-# Raw IRC clients connect directly (IRC over WebSocket, 6680, is not published until it has a
-# TLS route). No host address: Podman then listens on IPv6 and IPv4, or IPv4 alone on a host
-# without IPv6. Rootless Podman forwards these through rootlessport, so IRC sees every client
-# at one internal address and its per-address limits count all clients together; systemd
-# socket activation (as Caddy has) needs IRC to accept inherited sockets (infra/README.md).
-PublishPort=6667:6667
-PublishPort=6697:6697
+# Raw IRC clients connect directly to 6667 and 6697, which commonair-irc.socket and
+# commonair-ircs.socket hold in the host's network namespace (dual-stack) and Podman passes
+# to the gateway (LISTEN_FDS, named irc and ircs): it then sees every client's own address, so
+# its per-address caps count each client apart. Nothing is published: rootlessport would hand
+# IRC every client from one internal address. IRC_PORT and IRC_TLS_PORT above must equal the
+# sockets' ListenStream= (infra/tests/irc-socket.test.ts). IRC over WebSocket (6680) is not
+# published until it has a TLS route.
 HealthCmd=CMD bun /opt/commonair/healthcheck.ts
 HealthInterval=10s
 HealthTimeout=3s
@@ -79,6 +84,8 @@ HealthOnFailure=kill
 Notify=healthy
 
 [Service]
+# Both socket units' descriptors go to this service (systemd.service(5) Sockets=).
+Sockets=commonair-irc.socket commonair-ircs.socket
 # Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
 # (scripts/selfhost/cgroup-reset.sh says why).
 ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
