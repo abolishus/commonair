@@ -136,7 +136,7 @@ describe("judgeLoadRun", () => {
   test("inconclusive: no assertion on the target, the verdict and the limits recorded", () => {
     const { out, ctx } = recorder();
     const verdict = judgeGenerators({ local: host(99, 0) }, null);
-    expect(judgeLoadRun(ctx, { report, generatorVerdict: verdict })).toBe("inconclusive");
+    expect(judgeLoadRun(ctx, { report, generatorVerdict: verdict, heartbeatErrors: 0 })).toBe("inconclusive");
     expect(out.asserts).toEqual([]);
     expect(out.checks).toEqual([]);
     expect(out.metrics["load.inconclusive"]).toBe(1);
@@ -145,10 +145,39 @@ describe("judgeLoadRun", () => {
 
   test("a local run (no verdict) is judged exactly as before", () => {
     const { out, ctx } = recorder();
-    expect(judgeLoadRun(ctx, { report, generatorVerdict: null })).toBe("judged");
+    expect(judgeLoadRun(ctx, { report, generatorVerdict: null, heartbeatErrors: 0 })).toBe("judged");
     expect(out.asserts).toEqual(["every viewer started playback"]);
     expect(out.checks).toHaveLength(4);
     expect(out.data.verdict).toBeUndefined();
+  });
+
+  test("remote: failed heartbeats above the threshold make the run inconclusive", () => {
+    const fine = judgeGenerators({ local: host(10, 0) }, null);
+    const { out, ctx } = recorder();
+    expect(judgeLoadRun(ctx, { report, generatorVerdict: fine, heartbeatErrors: 1 })).toBe("inconclusive");
+    expect(out.asserts).toEqual([]);
+    expect(out.metrics["load.inconclusive"]).toBe(1);
+    expect(out.data.verdict).toMatchObject({
+      outcome: "inconclusive",
+      limits: [],
+      invalid: ["1 failed heartbeats > 0: the generator's address was rate-limited"],
+    });
+  });
+
+  test("remote: exactly at a set threshold is judged, one above is not", () => {
+    const fine = judgeGenerators({ local: host(10, 0) }, null);
+    const at = recorder();
+    expect(judgeLoadRun(at.ctx, { report, generatorVerdict: fine, heartbeatErrors: 5 }, 5)).toBe("judged");
+    expect(at.out.data.verdict).toMatchObject({ outcome: "judged" });
+    expect(judgeLoadRun(recorder().ctx, { report, generatorVerdict: fine, heartbeatErrors: 6 }, 5)).toBe(
+      "inconclusive",
+    );
+  });
+
+  test("local: failed heartbeats do not change the judgment (the harness stack is judged as before)", () => {
+    const { out, ctx } = recorder();
+    expect(judgeLoadRun(ctx, { report, generatorVerdict: null, heartbeatErrors: 50 })).toBe("judged");
+    expect(out.asserts).toEqual(["every viewer started playback"]);
   });
 });
 

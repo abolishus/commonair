@@ -43,8 +43,9 @@ Real audiences behind one address (carrier-grade NAT, a campus, a household) mee
 so this is reported to the maintainers as a contract request (per-session limits for heartbeat
 and end, a playback bucket for start). Until it lands, a sweep from one generator measures the
 rate limiter past about 20 viewers, not the host. The harness reports failed heartbeats per step
-(`heartbeatErrors` in each sweep row, metric `heartbeat.errors`); a step with heartbeat errors is
-not a capacity number. The test instance must not raise the limits: there is no env override,
+(`heartbeatErrors` in each sweep row, metric `heartbeat.errors`); a step with more than
+`maxHeartbeatErrors` failed heartbeats (default 0) is judged inconclusive, in `load-sweep` and in
+`load-plan` against a remote target, because it is not a capacity number. The test instance must not raise the limits: there is no env override,
 and the instance under test is an unmodified release.
 
 ## The test instance
@@ -143,18 +144,24 @@ apt-get install -y iperf3
 **Generators.** On each one, as root:
 
 ```sh
-apt-get update && apt-get install -y git unzip ffmpeg podman iperf3
-# Bun at the version CI uses (.github/workflows/ci.yml BUN_VERSION), verified before use:
-BUN=1.4.3
-curl -fsSLO "https://github.com/oven-sh/bun/releases/download/bun-v$BUN/bun-linux-x64.zip"
-curl -fsSLO "https://github.com/oven-sh/bun/releases/download/bun-v$BUN/SHASUMS256.txt"
-sha256sum --check --ignore-missing SHASUMS256.txt
-unzip -o bun-linux-x64.zip && install -D bun-linux-x64/bun /root/.bun/bin/bun
-export PATH="/root/.bun/bin:$PATH"
+apt-get update && apt-get install -y git ffmpeg podman iperf3
 
 # The repository at the release under test, at the same path on every generator.
 git clone https://github.com/abolishus/commonair.git /srv/commonair
 cd /srv/commonair && git checkout "v$VERSION"
+
+# Bun from the image the release pins by digest (infra/containers/service.Containerfile,
+# BUN_IMAGE=docker.io/oven/bun:<tag>@sha256:<digest>). Podman refuses an image whose content
+# does not match the digest, so the binary is the one the repository vetted, not merely one
+# that matches a checksum downloaded from the same place.
+BUN_IMAGE=$(sed -n 's/^ARG BUN_IMAGE=\(.*@sha256:[0-9a-f]\{64\}\)$/\1/p' infra/containers/service.Containerfile)
+test -n "$BUN_IMAGE" || echo "STOP: no digest-pinned BUN_IMAGE in service.Containerfile" >&2
+podman pull "$BUN_IMAGE"
+BUN_CTR=$(podman create "$BUN_IMAGE")
+podman cp "$BUN_CTR:/usr/local/bin/bun" /usr/local/bin/bun
+podman rm "$BUN_CTR"
+bun --version      # must match the image tag (and CI's BUN_VERSION in .github/workflows/ci.yml)
+
 bun install --frozen-lockfile
 bunx playwright install --with-deps chromium webkit
 
@@ -215,7 +222,9 @@ export HARNESS_REPORT_DIR=/root/load-reports
 bun harness/src/cli.ts run load-sweep
 
 # Streams axis: 1 → 32 live streams at 60 viewers each (ladders start at
-# TRANSCODE_VIEWER_THRESHOLD, 50 by default), to find the transcode limit.
+# TRANSCODE_VIEWER_THRESHOLD, 50 by default), to find the transcode limit. Each streamer sends
+# 1920x1080 at 6000 kbps by default, so the ladder has rungs to make (a 640x360 source makes
+# at most one); set width, height and bitrateKbps to match the audience you expect.
 bun harness/src/cli.ts run load-sweep --set streamerSteps=1,2,4,8,16,32 --set ladderViewers=60
 
 # One fixed size (the PLAN size), judged pass/fail/inconclusive.
@@ -223,14 +232,24 @@ bun harness/src/cli.ts run load-plan
 ```
 
 Useful knobs (`--set`): `steps`, `streamers`, `seconds`, `cooldownSeconds`, `browserViewers`
-(default 10; glass-to-glass needs at least one), `httpPerProcess`, the targets `maxLatencyMs`,
+(default 10; glass-to-glass needs at least one), `httpPerProcess`, the source every streamer
+sends (`width`, `height`, `bitrateKbps`, `protocol`: 640x360 at 1200 kbps over RTMP on the
+viewers axis, 1920x1080 at 6000 kbps on the streams axis), the targets `maxLatencyMs`,
 `maxTtffMs`, `maxStallRatio`, `maxErrorRate`, `maxTargetCpuP95` (85), `targetNicFraction` (0.95),
-and the generator judge's `generatorCpuP95` (80) and `generatorNicHeadroom` (0.15). The harness
-README has the full list.
+the generator judge's `generatorCpuP95` (80) and `generatorNicHeadroom` (0.15), and
+`maxHeartbeatErrors` (0; `load-plan` takes it too). The harness README has the full list.
+
+**Read the outcome from the report, not the scenario status.** The harness has no
+"inconclusive" scenario status yet, so an inconclusive run shows as passed. Before using any
+number, check the outcome in the report: `data.verdict.outcome` for `load-plan` (`judged` or
+`inconclusive`, with `limits` and `invalid` saying why) and `data.sweepSummary.outcome` for
+`load-sweep` (`completed`, `break` or `inconclusive`; each row's `status`, `generatorLimits` and
+`invalidReasons` say which step and why). The metric `load.inconclusive` or
+`sweep.inconclusive` is 1 in the same case. An inconclusive run is not a capacity number.
 
 The sweep stops at the first step that breaks a target or where a generator was the limit. Its
-report (`$HARNESS_REPORT_DIR`) holds `data.sweep` (one row per step: streams, viewers, status,
-what broke, ladders, latency, TTFF, stalls, errors, heartbeat errors, target CPU p95 and NIC,
+report (`$HARNESS_REPORT_DIR`) holds `data.sweep` (one row per step: streams, the source shape
+they sent, viewers, status, what broke, why a step was invalid, ladders, latency, TTFF, stalls, errors, heartbeat errors, target CPU p95 and NIC,
 per-viewer egress, Postgres and Valkey CPU, generator CPU) and `data.sweepSummary` (the last
 passing step, the first failing one and why, per-viewer egress and CPU at the last passing
 step). Each step's full measurements are under `data["sweep step N"]` (`target`, `containers`,
@@ -250,11 +269,12 @@ reports off before deleting it. Nothing else is left behind.
 ## Results
 
 One row per size. Fill it from `data.sweepSummary` (and the streams-axis sweep for the stream
-column). Egress is per viewer at the last passing step; CPU and NIC are p95 there.
+column). Egress is per viewer at the last passing step; CPU and NIC are p95 there. The source
+column is each sweep's `source` (from `data.params` or any row): viewers axis / streams axis.
 
-| Size (slug)               | vCPU / RAM   | Max viewers within targets | Max live streams (with ladders) | Broke first          | Origin egress per viewer | Target CPU p95 | Target NIC tx p95 | Postgres CPU | Valkey CPU | Release  | Date         |
-| ------------------------- | ------------ | -------------------------- | ------------------------------- | -------------------- | ------------------------ | -------------- | ----------------- | ------------ | ---------- | -------- | ------------ |
-| _example: `g-4vcpu-16gb`_ | _4 / 16 GiB_ | _2000 (20 streams)_        | _8 (8)_                         | _target_cpu at 4000_ | _150 kB/s_               | _71 %_         | _310 Mbit/s_      | _9 %_        | _2 %_      | _v0.1.0_ | _2026-11-02_ |
+| Size (slug)               | vCPU / RAM   | Source (viewers / streams axis)             | Max viewers within targets | Max live streams (with ladders) | Broke first          | Origin egress per viewer | Target CPU p95 | Target NIC tx p95 | Postgres CPU | Valkey CPU | Release  | Date         |
+| ------------------------- | ------------ | ------------------------------------------- | -------------------------- | ------------------------------- | -------------------- | ------------------------ | -------------- | ----------------- | ------------ | ---------- | -------- | ------------ |
+| _example: `g-4vcpu-16gb`_ | _4 / 16 GiB_ | _640x360@1200k rtmp / 1920x1080@6000k rtmp_ | _2000 (20 streams)_        | _8 (8)_                         | _target_cpu at 4000_ | _150 kB/s_               | _71 %_         | _310 Mbit/s_      | _9 %_        | _2 %_      | _v0.1.0_ | _2026-11-02_ |
 
 The example row is invented to show the format; it is not a measurement.
 

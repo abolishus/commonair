@@ -8,13 +8,15 @@
  *
  * Against a remote instance (`HARNESS_LOAD_TARGET_SSH`, docs/operators/capacity.md) it also
  * samples the target host and its containers over SSH, and a run where the generator was the
- * limit is reported as inconclusive instead of passed or failed.
+ * limit, or where more than `maxHeartbeatErrors` (default 0) heartbeats failed, is reported as
+ * inconclusive instead of passed or failed.
  *
  *   bun harness/src/cli.ts run load-plan [--set streamers=20] [--set viewersPerStreamer=200]
  *                                       [--set seconds=120] [--set browserViewers=20]
+ *                                       [--set maxHeartbeatErrors=0]
  */
 import { judgeLoadRun, runLoad } from "../src/load.ts";
-import { LOAD_PLAN_DEFAULTS, parseLoadParams } from "../src/load/params.ts";
+import { LOAD_PLAN_DEFAULTS, parseLoadParams, parseMaxHeartbeatErrors } from "../src/load/params.ts";
 import { defineScenario } from "../src/scenario.ts";
 
 export default defineScenario({
@@ -26,7 +28,8 @@ export default defineScenario({
   timeoutMs: 60 * 60_000,
   async run(ctx) {
     const p = parseLoadParams(ctx.params, LOAD_PLAN_DEFAULTS);
-    ctx.data("params", p);
+    const maxHeartbeatErrors = parseMaxHeartbeatErrors(ctx.params);
+    ctx.data("params", { ...p, maxHeartbeatErrors });
     const result = await runLoad(ctx, {
       streamers: p.streamers,
       viewers: p.viewers,
@@ -34,6 +37,6 @@ export default defineScenario({
       browserViewers: p.browserViewers,
       httpPerProcess: p.httpPerProcess,
     });
-    judgeLoadRun(ctx, result);
+    judgeLoadRun(ctx, result, maxHeartbeatErrors);
   },
 });

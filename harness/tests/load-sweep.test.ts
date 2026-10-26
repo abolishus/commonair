@@ -5,6 +5,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { parseArgs } from "../src/args.ts";
 import type { GeneratorVerdict } from "../src/load/judge.ts";
 import {
+  DEFAULT_SOURCES,
   DEFAULT_SWEEP_THRESHOLDS,
   DEFAULT_VIEWER_STEPS,
   type StepMeasure,
@@ -12,6 +13,7 @@ import {
   type SweepRow,
   SweepParamError,
   containerCpuMean,
+  describeSource,
   hasLadder,
   judgeStep,
   parseSweepParams,
@@ -34,6 +36,7 @@ const good: StepMeasure = {
   targetCpuP95: 50,
   targetNicP95BytesPerSecond: 100_000_000,
   targetNicCeilingBytesPerSecond: 250_000_000,
+  heartbeatErrors: 0,
   generator: CONCLUSIVE,
 };
 
@@ -63,8 +66,53 @@ describe("step planning", () => {
       maxTtffMs: 15_000,
       maxStallRatio: 0.05,
       maxErrorRate: 0,
+      maxHeartbeatErrors: 0,
     });
     expect(p.generator).toEqual({ maxCpuP95: 80, nicHeadroom: 0.15 });
+  });
+
+  test("source shape: a small source on the viewers axis, 1080p at 6000 kbps on the streams axis", () => {
+    expect(parseSweepParams({}).source).toEqual({ protocol: "rtmp", width: 640, height: 360, bitrateKbps: 1200 });
+    expect(parseSweepParams({}).source).toEqual(DEFAULT_SOURCES.viewers);
+    const streams = parseSweepParams({ streamerSteps: "1,2" }).source;
+    expect(streams).toEqual({ protocol: "rtmp", width: 1920, height: 1080, bitrateKbps: 6000 });
+    expect(describeSource(streams)).toBe("1920x1080@6000k rtmp");
+  });
+
+  test("source shape overridable on either axis", () => {
+    expect(parseSweepParams({ width: "1280", height: "720", bitrateKbps: "3500", protocol: "whip" }).source).toEqual({
+      protocol: "whip",
+      width: 1280,
+      height: 720,
+      bitrateKbps: 3500,
+    });
+    expect(parseSweepParams({ streamerSteps: "1", bitrateKbps: "8000" }).source).toEqual({
+      protocol: "rtmp",
+      width: 1920,
+      height: 1080,
+      bitrateKbps: 8000,
+    });
+  });
+
+  test("bad source shapes are refused", () => {
+    expect(() => parseSweepParams({ protocol: "srt" })).toThrow(/protocol=srt: expected rtmp or whip/);
+    expect(() => parseSweepParams({ width: "1919" })).toThrow(/width=1919: expected an even number/);
+    expect(() => parseSweepParams({ height: "0" })).toThrow(/height=0/);
+    expect(() => parseSweepParams({ width: "7682" })).toThrow(/width=7682/);
+    expect(() => parseSweepParams({ height: "720.5" })).toThrow(/integer/);
+    expect(() => parseSweepParams({ bitrateKbps: "99" })).toThrow(/bitrateKbps=99/);
+    expect(() => parseSweepParams({ bitrateKbps: "" })).toThrow(/bitrateKbps=/);
+    expect(parseSweepParams({ width: "2", height: "4320", bitrateKbps: "100" }).source).toMatchObject({
+      width: 2,
+      height: 4320,
+      bitrateKbps: 100,
+    });
+  });
+
+  test("maxHeartbeatErrors: a non-negative integer", () => {
+    expect(parseSweepParams({ maxHeartbeatErrors: "5" }).thresholds.maxHeartbeatErrors).toBe(5);
+    expect(() => parseSweepParams({ maxHeartbeatErrors: "-1" })).toThrow(/maxHeartbeatErrors=-1/);
+    expect(() => parseSweepParams({ maxHeartbeatErrors: "0.5" })).toThrow(/integer/);
   });
 
   test("the streamers axis, and every threshold overridable", () => {
@@ -115,7 +163,7 @@ describe("judging one step", () => {
   const t = DEFAULT_SWEEP_THRESHOLDS;
 
   test("within every target passes", () => {
-    expect(judgeStep(good, t)).toEqual({ status: "pass", breaches: [] });
+    expect(judgeStep(good, t)).toEqual({ status: "pass", breaches: [], invalid: [] });
   });
 
   test("each target breaks on its own, at its boundary", () => {
@@ -166,6 +214,31 @@ describe("judging one step", () => {
       status: "inconclusive",
       breaches: [{ metric: "stalls" }],
     });
+  });
+});
+
+describe("failed heartbeats invalidate the measurement", () => {
+  const t = DEFAULT_SWEEP_THRESHOLDS;
+
+  test("default 0: one failed heartbeat makes the step inconclusive, none passes", () => {
+    expect(judgeStep({ ...good, heartbeatErrors: 0 }, t).status).toBe("pass");
+    const v = judgeStep({ ...good, heartbeatErrors: 1 }, t);
+    expect(v.status).toBe("inconclusive");
+    expect(v.breaches).toEqual([]);
+    expect(v.invalid).toEqual(["1 failed heartbeats > 0: the generator's address was rate-limited"]);
+  });
+
+  test("a set threshold: exactly at it passes, one above is inconclusive", () => {
+    const loose = { ...t, maxHeartbeatErrors: 10 };
+    expect(judgeStep({ ...good, heartbeatErrors: 10 }, loose)).toEqual({ status: "pass", breaches: [], invalid: [] });
+    expect(judgeStep({ ...good, heartbeatErrors: 11 }, loose).status).toBe("inconclusive");
+  });
+
+  test("inconclusive wins over a break; the breaches are still recorded", () => {
+    const v = judgeStep({ ...good, heartbeatErrors: 3, stallRatio: 0.5 }, t);
+    expect(v.status).toBe("inconclusive");
+    expect(v.breaches.map((b) => b.metric)).toEqual(["stalls"]);
+    expect(v.invalid).toHaveLength(1);
   });
 });
 
@@ -242,7 +315,7 @@ describe("rows", () => {
     },
     target: { cpuP95: 40, busiestTxP95: 90_000_000, totalTxMean: 80_000_000 },
     generatorCpuP95: 30,
-    heartbeatErrors: 4,
+    heartbeatErrors: 0,
     generator: CONCLUSIVE,
   };
 
@@ -259,8 +332,25 @@ describe("rows", () => {
       postgresCpuMeanPercent: 12,
       valkeyCpuMeanPercent: 3,
       generatorCpuP95: 30,
-      heartbeatErrors: 4,
+      heartbeatErrors: 0,
+      invalidReasons: [],
+      source: { protocol: "rtmp", width: 640, height: 360, bitrateKbps: 1200 },
     });
+  });
+
+  test("a row records the streams-axis source and the heartbeat verdict", () => {
+    const p = parseSweepParams({ streamerSteps: "1,2", maxHeartbeatErrors: "3" });
+    const ok = sweepRow(p, 2, { streamers: 2, viewers: 120 }, { ...input, heartbeatErrors: 3 }, null, 2);
+    expect(ok).toMatchObject({
+      status: "pass",
+      source: { width: 1920, height: 1080, bitrateKbps: 6000 },
+      heartbeatErrors: 3,
+      ladders: 2,
+    });
+    const bad = sweepRow(p, 2, { streamers: 2, viewers: 120 }, { ...input, heartbeatErrors: 4 }, null, 2);
+    expect(bad.status).toBe("inconclusive");
+    expect(bad.invalidReasons).toEqual(["4 failed heartbeats > 3: the generator's address was rate-limited"]);
+    expect(summarizeSweep("streamers", [ok, bad])).toMatchObject({ outcome: "inconclusive", brokeBy: [] });
   });
 
   test("the NIC rule uses the busiest interface against the ceiling", () => {

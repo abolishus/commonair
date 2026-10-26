@@ -378,8 +378,9 @@ bun harness/src/cli.ts run backup-restore
 ### `load-plan` (E6)
 
 The load test at PLAN size (ADR 0021 §4), outside `full`; knobs in "Metrics and the load test".
-Against a remote instance (`HARNESS_LOAD_TARGET_SSH`), a run where the generator was the limit is
-inconclusive rather than passed or failed.
+Against a remote instance (`HARNESS_LOAD_TARGET_SSH`), a run where the generator was the limit,
+or where more than `--set maxHeartbeatErrors` (default 0) heartbeats failed, is inconclusive rather
+than passed or failed (`data.verdict.outcome`; the scenario status cannot say "inconclusive" yet).
 
 ```sh
 bun harness/src/cli.ts run load-plan
@@ -391,8 +392,8 @@ bun harness/src/cli.ts run load-plan --set streamers=10 --set viewersPerStreamer
 Steps the load up until one host stops coping (`src/load/sweep.ts`), outside `full`. Streams stay
 up across steps; each step opens its audience, holds `seconds`, collects, and cools down. The
 sweep stops at the first step that breaks a target and records which (several breaking in one
-step are reported together), or at the first step where a generator was the limit
-(inconclusive). Report: `data.sweep` (one row per step), `data.sweepSummary` (last passing step,
+step are reported together), or at the first step where a generator was the limit or heartbeats
+failed (inconclusive; read `data.sweepSummary.outcome`, since the scenario status cannot say so). Report: `data.sweep` (one row per step), `data.sweepSummary` (last passing step,
 first failing step and why, per-viewer egress and CPU at the last passing step), and per step
 `data["sweep step N"]`. The scenario fails only if the first step already broke a target.
 
@@ -415,6 +416,12 @@ bun harness/src/cli.ts run load-sweep --set streamerSteps=1,2,4,8 --set ladderVi
 | `maxTargetCpuP95`                          | 85                     | Target host CPU p95 (%); break above                                 |
 | `targetNicFraction`                        | 0.95                   | Target NIC transmit p95 as a share of `HARNESS_LOAD_TARGET_NIC_MBPS` |
 | `generatorCpuP95` / `generatorNicHeadroom` | 80 / 0.15              | The inconclusive judgment                                            |
+| `maxHeartbeatErrors`                       | 0                      | Failed heartbeats above this make a step inconclusive                |
+| `width` / `height` / `bitrateKbps`         | see below              | What every streamer sends (even dimensions, kbps)                    |
+| `protocol`                                 | rtmp                   | `rtmp` or `whip`                                                     |
+
+Streamers send 640x360 at 1200 kbps on the viewers axis and 1920x1080 at 6000 kbps on the streams
+axis, so the transcode ladder has rungs to make; every row records the `source` it was run with.
 
 Each row also counts the streams with a transcode ladder at the end of the hold (from
 `playback.start`'s renditions) and failed heartbeats (a rate-limited generator address shows

@@ -8,12 +8,15 @@
  * each to find the transcode limit. Streams stay up across steps; each step holds `seconds` once
  * its viewers are started, then cools down. The sweep stops at the first step that breaks a
  * target (latency, TTFF, stalls, errors, target CPU p95, target NIC) or where the generator was
- * the limit (inconclusive). Not part of `full`. Meant for a remote instance
+ * the limit or heartbeats failed (inconclusive). Every streamer publishes `width`x`height` at
+ * `bitrateKbps` over `protocol`: 640x360 at 1200 kbps on the viewers axis, 1920x1080 at
+ * 6000 kbps on the streams axis, so the transcode ladder has rungs to make. Not part of `full`. Meant for a remote instance
  * (docs/operators/capacity.md); against the local stack it measures the harness machine.
  *
  *   bun harness/src/cli.ts run load-sweep [--set steps=250,500,1000] [--set streamers=20]
  *                                         [--set seconds=120] [--set cooldownSeconds=30]
  *   bun harness/src/cli.ts run load-sweep --set streamerSteps=1,2,4,8,16 [--set ladderViewers=60]
+ *                                         [--set width=1920 --set height=1080 --set bitrateKbps=6000]
  */
 import {
   type LoadResult,
@@ -29,6 +32,7 @@ import { mbpsToBytesPerSecond } from "../src/load/env.ts";
 import { LOCAL_HOST } from "../src/load/processes.ts";
 import {
   type SweepRow,
+  describeSource,
   hasLadder,
   parseSweepParams,
   stepShape,
@@ -81,6 +85,7 @@ export default defineScenario({
     const topo = loadTopology();
     const targetCeiling = mbpsToBytesPerSecond(topo.env.HARNESS_LOAD_TARGET_NIC_MBPS);
     ctx.data("params", { ...sp, target: topo.target, generators: topo.env.HARNESS_LOAD_GENERATOR_HOSTS });
+    ctx.log.info("sweep source", { axis: sp.axis, source: describeSource(sp.source) });
     if (!topo.target) ctx.log.warn("load-sweep without HARNESS_LOAD_TARGET_SSH: no target host CPU or NIC");
 
     let fleet: StreamerFleet = { users: [], channels: [], streamers: [] };
@@ -89,7 +94,7 @@ export default defineScenario({
       if (ctx.signal.aborted) break;
       const shape = stepShape(sp, step);
       const label = `step ${i + 1}/${sp.steps.length} (${shape.streamers} streams, ${shape.viewers} viewers)`;
-      fleet = await startStreamers(ctx, shape.streamers, {}, topo, fleet);
+      fleet = await startStreamers(ctx, shape.streamers, sp.source, topo, fleet);
       let ladders: number | null = null;
       const result = await runAudience(
         ctx,
@@ -139,6 +144,7 @@ export default defineScenario({
         streams: shape.streamers,
         status: row.status,
         broke: row.breaches.map((b) => b.metric),
+        invalid: row.invalidReasons,
         ladders: row.ladders,
       });
       if (stopsSweep(row)) {

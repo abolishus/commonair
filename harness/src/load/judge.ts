@@ -91,3 +91,15 @@ export function describeLimit(l: GeneratorLimit): string {
   const pct = (100 * l.bytesPerSecondP95) / l.ceilingBytesPerSecond;
   return `${l.host}: ${l.iface} ${l.direction} p95 at ${pct.toFixed(0)} % of the NIC ceiling`;
 }
+
+/**
+ * Failed heartbeats make a measurement invalid: against a real instance every simulated viewer
+ * shares the generator's address and its rate-limit bucket, so heartbeat failures mean the run
+ * measured the limiter, not the host (capacity.md). Returns the reason, or null when the count is
+ * at or under `max`. Pure.
+ */
+export function heartbeatInvalid(heartbeatErrors: number, max: number): string | null {
+  return heartbeatErrors > max
+    ? `${heartbeatErrors} failed heartbeats > ${max}: the generator's address was rate-limited`
+    : null;
+}

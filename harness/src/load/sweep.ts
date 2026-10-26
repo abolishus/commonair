@@ -11,7 +11,8 @@
  *
  * Each step is judged against the load targets (`judgeLoad`'s by default), the target's CPU p95
  * and NIC; the sweep stops at the first step that breaks one and records which. A step where the
- * generator was the limit is inconclusive and also stops the sweep. Parameters, planning and
+ * generator was the limit, or where heartbeats failed (the generator's address was rate-limited),
+ * is inconclusive and also stops the sweep. Parameters, planning and
  * judging are pure.
  */
 import {
@@ -19,6 +20,7 @@ import {
   type GeneratorVerdict,
   DEFAULT_GENERATOR_THRESHOLDS,
   describeLimit,
+  heartbeatInvalid,
 } from "./judge.ts";
 import { DEFAULT_HTTP_PER_PROCESS } from "./shard.ts";
 
@@ -41,6 +43,8 @@ export interface SweepThresholds {
   maxTargetCpuP95: number;
   /** Target NIC p95 at or above this share of its ceiling breaks (needs the ceiling). */
   targetNicFraction: number;
+  /** Failed heartbeats above this make the step inconclusive (the measurement is invalid). */
+  maxHeartbeatErrors: number;
 }
 
 /** `judgeLoad`'s thresholds (`loadVerdict`), plus the host limits from the S1-a brief. */
@@ -51,7 +55,29 @@ export const DEFAULT_SWEEP_THRESHOLDS: SweepThresholds = {
   maxErrorRate: 0,
   maxTargetCpuP95: 85,
   targetNicFraction: 0.95,
+  maxHeartbeatErrors: 0,
 };
+
+/** What each streamer publishes (`startStreamers`' `StreamOptions`, every field set). */
+export interface SourceShape {
+  protocol: "rtmp" | "whip";
+  width: number;
+  height: number;
+  bitrateKbps: number;
+}
+
+/**
+ * Default sources per axis. The streams axis needs a source big enough that the transcode ladder
+ * has rungs to make (1080p in, 720p and 480p out); the viewers axis keeps `startStreamers`'
+ * defaults (a small source, so the generator's ffmpeg stays cheap).
+ */
+export const DEFAULT_SOURCES: Readonly<Record<SweepParams["axis"], SourceShape>> = {
+  viewers: { protocol: "rtmp", width: 640, height: 360, bitrateKbps: 1200 },
+  streamers: { protocol: "rtmp", width: 1920, height: 1080, bitrateKbps: 6000 },
+};
+
+/** `1920x1080@6000k rtmp`, for logs and the report. */
+export const describeSource = (s: SourceShape): string => `${s.width}x${s.height}@${s.bitrateKbps}k ${s.protocol}`;
 
 export interface SweepParams {
   axis: "viewers" | "streamers";
@@ -67,6 +93,8 @@ export interface SweepParams {
   cooldownSeconds: number;
   browserViewers: number;
   httpPerProcess: number;
+  /** What every streamer publishes. */
+  source: SourceShape;
   thresholds: SweepThresholds;
   generator: GeneratorThresholds;
 }
@@ -80,12 +108,17 @@ export const SWEEP_PARAM_KEYS = [
   "cooldownSeconds",
   "browserViewers",
   "httpPerProcess",
+  "protocol",
+  "width",
+  "height",
+  "bitrateKbps",
   "maxLatencyMs",
   "maxTtffMs",
   "maxStallRatio",
   "maxErrorRate",
   "maxTargetCpuP95",
   "targetNicFraction",
+  "maxHeartbeatErrors",
   "generatorCpuP95",
   "generatorNicHeadroom",
 ] as const;
@@ -149,6 +182,17 @@ export function parseSweepParams(params: Readonly<Record<string, string>>): Swee
   const int = (key: string, fallback: number, min: number) => num(params, key, fallback, { min, integer: true });
   const d = DEFAULT_SWEEP_THRESHOLDS;
   const g = DEFAULT_GENERATOR_THRESHOLDS;
+  const s = DEFAULT_SOURCES[axis];
+  const protocol = params.protocol ?? s.protocol;
+  if (protocol !== "rtmp" && protocol !== "whip") {
+    throw new SweepParamError(`--set protocol=${protocol}: expected rtmp or whip`);
+  }
+  // x264 needs even dimensions; 8K is the most any rung or source makes sense at.
+  const dim = (key: "width" | "height", fallback: number, max: number) => {
+    const n = num(params, key, fallback, { min: 2, max, integer: true });
+    if (n % 2 !== 0) throw new SweepParamError(`--set ${key}=${n}: expected an even number`);
+    return n;
+  };
   return {
     axis,
     steps,
@@ -158,6 +202,12 @@ export function parseSweepParams(params: Readonly<Record<string, string>>): Swee
     cooldownSeconds: int("cooldownSeconds", 30, 0),
     browserViewers: int("browserViewers", 10, 0),
     httpPerProcess: int("httpPerProcess", DEFAULT_HTTP_PER_PROCESS, 1),
+    source: {
+      protocol,
+      width: dim("width", s.width, 7680),
+      height: dim("height", s.height, 4320),
+      bitrateKbps: num(params, "bitrateKbps", s.bitrateKbps, { min: 100, max: 100_000, integer: true }),
+    },
     thresholds: {
       maxLatencyMs: num(params, "maxLatencyMs", d.maxLatencyMs, { min: 1 }),
       maxTtffMs: num(params, "maxTtffMs", d.maxTtffMs, { min: 1 }),
@@ -165,6 +215,7 @@ export function parseSweepParams(params: Readonly<Record<string, string>>): Swee
       maxErrorRate: num(params, "maxErrorRate", d.maxErrorRate, { min: 0, max: 1 }),
       maxTargetCpuP95: num(params, "maxTargetCpuP95", d.maxTargetCpuP95, { min: 1, max: 100 }),
       targetNicFraction: num(params, "targetNicFraction", d.targetNicFraction, { min: 0.01, max: 1 }),
+      maxHeartbeatErrors: int("maxHeartbeatErrors", d.maxHeartbeatErrors, 0),
     },
     generator: {
       maxCpuP95: num(params, "generatorCpuP95", g.maxCpuP95, { min: 1, max: 100 }),
@@ -194,6 +245,8 @@ export interface StepMeasure {
   /** The target's busiest interface, transmit p95. */
   targetNicP95BytesPerSecond: number | null;
   targetNicCeilingBytesPerSecond: number | null;
+  /** Failed heartbeats; above the threshold the measurement is invalid. */
+  heartbeatErrors: number;
   generator: GeneratorVerdict;
 }
 
@@ -211,6 +264,8 @@ export interface StepVerdict {
   status: StepStatus;
   /** Every target that broke in this step (ties are reported together). */
   breaches: Breach[];
+  /** Why the measurement itself is invalid (failed heartbeats); non-empty = inconclusive. */
+  invalid: string[];
 }
 
 /** Judge one step. Pure. */
@@ -242,8 +297,10 @@ export function judgeStep(m: StepMeasure, t: SweepThresholds): StepVerdict {
       threshold: m.targetNicCeilingBytesPerSecond * t.targetNicFraction,
     });
   }
-  const status: StepStatus = m.generator.inconclusive ? "inconclusive" : breaches.length > 0 ? "break" : "pass";
-  return { status, breaches };
+  const invalid = [heartbeatInvalid(m.heartbeatErrors, t.maxHeartbeatErrors)].filter((r): r is string => r !== null);
+  const status: StepStatus =
+    m.generator.inconclusive || invalid.length > 0 ? "inconclusive" : breaches.length > 0 ? "break" : "pass";
+  return { status, breaches, invalid };
 }
 
 /** One row of the report's `sweep` section. */
@@ -251,12 +308,16 @@ export interface SweepRow {
   step: number;
   axis: SweepParams["axis"];
   streamers: number;
+  /** What every streamer published. */
+  source: SourceShape;
   viewers: number;
   started: number;
   status: StepStatus;
   breaches: Breach[];
   /** Generator limits when inconclusive (human-readable). */
   generatorLimits: string[];
+  /** Why the measurement was invalid (failed heartbeats), when inconclusive. */
+  invalidReasons: string[];
   /** Streams with a transcode ladder at the end of the hold (null = not checked). */
   ladders: number | null;
   glassToGlassP95Ms: number | null;
@@ -358,7 +419,7 @@ export interface StepResultInput {
 
 /** Judge a step and build its report row. Pure. */
 export function sweepRow(
-  p: Pick<SweepParams, "axis" | "thresholds">,
+  p: Pick<SweepParams, "axis" | "thresholds" | "source">,
   step: number,
   shape: { streamers: number; viewers: number },
   r: StepResultInput,
@@ -377,6 +438,7 @@ export function sweepRow(
       targetCpuP95: r.target.cpuP95,
       targetNicP95BytesPerSecond: r.target.busiestTxP95,
       targetNicCeilingBytesPerSecond,
+      heartbeatErrors: r.heartbeatErrors,
       generator: r.generator,
     },
     p.thresholds,
@@ -385,11 +447,13 @@ export function sweepRow(
     step,
     axis: p.axis,
     streamers: shape.streamers,
+    source: { ...p.source },
     viewers: shape.viewers,
     started: r.all.started,
     status: verdict.status,
     breaches: verdict.breaches,
     generatorLimits: r.generator.limits.map(describeLimit),
+    invalidReasons: verdict.invalid,
     ladders,
     glassToGlassP95Ms: r.browser.latency.p95,
     ttffP95Ms: r.all.ttff.p95,

@@ -37,7 +37,9 @@ export function parseProcStat(text: string): ProcStat {
     if (!m?.[1] || m[2] === undefined) continue;
     const nums = m[2].trim().split(/\s+/).map(Number);
     if (nums.length < 4 || nums.some((n) => !Number.isFinite(n))) continue;
-    const times = Object.fromEntries(CPU_FIELDS.map((f, i) => [f, nums[i] ?? 0])) as unknown as CpuTimes;
+    // Older kernels print fewer columns; a missing one counts as zero.
+    const [user = 0, nice = 0, system = 0, idle = 0, iowait = 0, irq = 0, softirq = 0, steal = 0] = nums;
+    const times: CpuTimes = { user, nice, system, idle, iowait, irq, softirq, steal };
     if (m[1] === "cpu") out.total = times;
     else out.cpus[m[1]] = times;
   }

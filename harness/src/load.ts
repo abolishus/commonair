@@ -18,7 +18,13 @@ import { mapLimit } from "./load/async.ts";
 import { AccountStore, AuthPacer, provisionStreamers } from "./load/accounts.ts";
 import { type LoadEnv, loadLoadEnv, mbpsToBytesPerSecond } from "./load/env.ts";
 import { type HostSummary, HostSampler, localSnapshot } from "./load/host.ts";
-import { type GeneratorThresholds, type GeneratorVerdict, describeLimit, judgeGenerators } from "./load/judge.ts";
+import {
+  type GeneratorThresholds,
+  type GeneratorVerdict,
+  describeLimit,
+  heartbeatInvalid,
+  judgeGenerators,
+} from "./load/judge.ts";
 import {
   LOCAL_HOST,
   LOCAL_REPO_ROOT,
@@ -465,20 +471,29 @@ export function judgeLoad(ctx: Pick<ScenarioContext, "assert" | "check">, rep: L
 }
 
 /**
- * Judge a run, unless the generator was the limit: then the run is **inconclusive** (recorded as
- * `data.verdict`, metric `load.inconclusive`), and the target is neither passed nor failed on it.
- * Returns the outcome. Local runs (no remote target) are always judged.
+ * Judge a run, unless the generator was the limit or, against a remote target, more than
+ * `maxHeartbeatErrors` heartbeats failed (the generator's address was rate-limited, so the run
+ * measured the limiter): then the run is **inconclusive** (recorded as `data.verdict`, metric
+ * `load.inconclusive`), and the target is neither passed nor failed on it. Returns the outcome.
+ * Local runs (no remote target) are always judged.
  */
 export function judgeLoadRun(
   ctx: Pick<ScenarioContext, "assert" | "check" | "data" | "metric" | "log">,
-  result: Pick<LoadResult, "report" | "generatorVerdict">,
+  result: Pick<LoadResult, "report" | "generatorVerdict" | "heartbeatErrors">,
+  maxHeartbeatErrors = 0,
 ): "judged" | "inconclusive" {
   const v = result.generatorVerdict;
-  if (v?.inconclusive) {
-    const limits = v.limits.map(describeLimit);
-    ctx.data("verdict", { outcome: "inconclusive", limits, notes: v.notes });
+  // Remote runs only: locally the harness stack is the target and judged exactly as before.
+  const invalid = v ? heartbeatInvalid(result.heartbeatErrors, maxHeartbeatErrors) : null;
+  if (v?.inconclusive || invalid !== null) {
+    const limits = v?.limits.map(describeLimit) ?? [];
+    const reasons = invalid === null ? [] : [invalid];
+    ctx.data("verdict", { outcome: "inconclusive", limits, invalid: reasons, notes: v?.notes ?? [] });
     ctx.metric("load.inconclusive", 1);
-    ctx.log.warn("load run inconclusive: the generator was the limit", { limits });
+    ctx.log.warn("load run inconclusive: the generator was the limit or the measurement is invalid", {
+      limits,
+      invalid: reasons,
+    });
     return "inconclusive";
   }
   if (v) ctx.data("verdict", { outcome: "judged", notes: v.notes });
