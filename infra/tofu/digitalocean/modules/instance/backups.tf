@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Off-host backups (docs/deploy/digitalocean.md §4): WAL-G and object backups in Spaces in a
-# region other than the droplet's. Private, CDN off, versioned so a stolen key cannot erase them.
+# region other than the droplet's. Private and CDN off. Versioning recovers from an accidental
+# overwrite or delete by the backup tools; it does not stop a stolen readwrite key, which can
+# delete noncurrent versions too (README, "Gaps": residual risk and the options).
 
 locals {
   backup_buckets = {
@@ -20,6 +22,8 @@ resource "digitalocean_spaces_bucket" "walg" {
     enabled = true
   }
 
+  # A rule with only the abort action is unconfirmed on Spaces: if the first apply rejects it,
+  # move abort_incomplete_multipart_upload_days into expire-noncurrent (README, "Gaps").
   lifecycle_rule {
     id                                     = "abort-incomplete-multipart"
     enabled                                = true
@@ -53,6 +57,8 @@ resource "digitalocean_spaces_bucket" "object_backups" {
     enabled = true
   }
 
+  # A rule with only the abort action is unconfirmed on Spaces: if the first apply rejects it,
+  # move abort_incomplete_multipart_upload_days into expire-noncurrent (README, "Gaps").
   lifecycle_rule {
     id                                     = "abort-incomplete-multipart"
     enabled                                = true

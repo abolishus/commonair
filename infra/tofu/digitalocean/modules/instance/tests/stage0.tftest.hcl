@@ -253,6 +253,18 @@ run "monitoring_in_the_app_region_is_rejected" {
   expect_failures = [digitalocean_droplet.monitoring]
 }
 
+run "monitoring_droplet_without_a_region_is_rejected" {
+  command = plan
+
+  variables {
+    monitoring_region = null
+  }
+
+  # The VPC is skipped without a region, so the droplet's precondition, not a provider error,
+  # is what the operator sees.
+  expect_failures = [digitalocean_droplet.monitoring]
+}
+
 run "media_volume_when_asked" {
   command = plan
 

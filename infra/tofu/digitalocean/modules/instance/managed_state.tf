@@ -84,6 +84,7 @@ resource "digitalocean_spaces_bucket" "instance" {
   region = var.region
   acl    = "private"
 
+  # Unconfirmed on Spaces as a rule of its own (README, "Gaps").
   lifecycle_rule {
     id                                     = "abort-incomplete-multipart"
     enabled                                = true

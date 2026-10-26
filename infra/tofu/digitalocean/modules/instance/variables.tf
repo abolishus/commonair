@@ -128,7 +128,7 @@ variable "backup_region" {
 }
 
 variable "backup_noncurrent_days" {
-  description = "Days a deleted or overwritten backup object stays recoverable. The backup keys can delete objects (Spaces grants have no write-without-delete), so versioning is what protects backups from a stolen droplet key."
+  description = "Days a deleted or overwritten backup object stays recoverable as a noncurrent version. This covers an accidental overwrite or delete by the backup tools, not a stolen backup key: a readwrite key can delete versions too (README, \"Gaps\")."
   type        = number
   default     = 14
   nullable    = false
@@ -159,7 +159,7 @@ variable "enable_monitoring_droplet" {
 }
 
 variable "monitoring_region" {
-  description = "Region of the monitoring droplet. Must differ from region, so monitoring outlives the host it watches."
+  description = "Region of the monitoring droplet. Required when enable_monitoring_droplet is true, and must differ from region, so monitoring outlives the host it watches."
   type        = string
   default     = null
 }

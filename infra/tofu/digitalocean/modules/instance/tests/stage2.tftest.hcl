@@ -39,6 +39,15 @@ run "network_load_balancer_in_front_of_the_app_droplets" {
 
   assert {
     condition = (
+      digitalocean_droplet.app[0].name == "commonair-production" &&
+      digitalocean_droplet.app[1].name == "commonair-production-app-2" &&
+      digitalocean_droplet.app[2].name == "commonair-production-app-3"
+    )
+    error_message = "app[0] keeps its stage 0/1 name; only the added droplets get an -app-N suffix."
+  }
+
+  assert {
+    condition = (
       digitalocean_loadbalancer.app[0].type == "REGIONAL_NETWORK" &&
       digitalocean_loadbalancer.app[0].network_stack == "DUALSTACK" &&
       digitalocean_loadbalancer.app[0].droplet_tag == "commonair-production-app"
@@ -62,6 +71,19 @@ run "network_load_balancer_in_front_of_the_app_droplets" {
   assert {
     condition     = one(digitalocean_loadbalancer.app[0].healthcheck).protocol == "tcp"
     error_message = "Health checks run against each droplet."
+  }
+}
+
+run "app0_name_is_the_same_at_stage0" {
+  command = plan
+
+  variables {
+    app_count = 1
+  }
+
+  assert {
+    condition     = digitalocean_droplet.app[0].name == "commonair-production"
+    error_message = "Going from app_count = 1 to 3 must not rename app[0]."
   }
 }
 

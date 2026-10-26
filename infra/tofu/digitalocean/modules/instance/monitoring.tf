@@ -11,7 +11,7 @@ resource "digitalocean_droplet" "monitoring" {
   region     = var.monitoring_region
   size       = var.monitoring_size
   image      = var.droplet_image
-  vpc_uuid   = digitalocean_vpc.monitoring[0].id
+  vpc_uuid   = one(digitalocean_vpc.monitoring[*].id)
   ipv6       = true
   monitoring = true
   ssh_keys   = var.ssh_key_fingerprints
@@ -23,7 +23,7 @@ resource "digitalocean_droplet" "monitoring" {
 
     precondition {
       condition     = var.monitoring_region != null && var.monitoring_region != var.region
-      error_message = "monitoring_region must be set and differ from region."
+      error_message = "enable_monitoring_droplet needs monitoring_region, set to a region other than region (or set enable_monitoring_droplet = false)."
     }
   }
 }

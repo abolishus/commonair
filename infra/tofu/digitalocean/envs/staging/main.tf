@@ -64,13 +64,15 @@ module "instance" {
 
   environment = "staging"
 
-  # Where commonair-rc-test runs today (PROGRESS, session thirteen, section 5).
+  # Where commonair-rc-test runs today (PROGRESS, session thirteen, section 5). Confirm these
+  # slugs with doctl before the first plan (README, "Running it").
   region       = "mkc1"
   droplet_size = "s5-4vcpu-8gb-80gb"
 
   backup_region = "nyc3"
 
-  # Staging is watched from production's monitoring droplet.
+  # Staging is watched from production's monitoring droplet, so it has no uptime monitoring
+  # until production is applied (README, "Running it").
   enable_monitoring_droplet = false
 
   ssh_key_fingerprints = var.ssh_key_fingerprints

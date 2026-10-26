@@ -107,6 +107,10 @@ the account; tofu never creates one, and a missing fingerprint fails the plan.
   versioned, with incomplete multipart uploads aborted after 2 days and old versions expired after
   `backup_noncurrent_days`, and one Spaces key per bucket;
 - the monitoring droplet in `monitoring_region`, with a firewall for SSH and the status page.
+  `monitoring_region` is required while `enable_monitoring_droplet` is true (the default).
+
+App droplets are named `commonair-<env>` at every stage; stage 2 adds `commonair-<env>-app-2`,
+`-app-3` and so on, so raising `app_count` never renames the host that runs the stack.
 
 **Stage 1** (`enable_managed_state = true`): managed PostgreSQL (`pg_version`, default 17 to
 match `infra/postgres/Containerfile`) and managed Valkey (`noeviction`, RDB persistence, TLS),
@@ -184,6 +188,22 @@ tofu apply staging.tfplan
 tofu output dns_records
 ```
 
+**Before the first plan, confirm the slugs.** The region and size slugs in each root
+(`region`, `backup_region`, `monitoring_region`, `droplet_size`, `monitoring_size`, `pg_size`,
+`valkey_size`) were written from documentation, and a mocked-provider test cannot catch a slug
+DigitalOcean does not offer. Check each against the account:
+
+```sh
+doctl compute region list
+doctl compute size list
+doctl databases options regions && doctl databases options slugs --engine pg
+doctl databases options slugs --engine valkey
+```
+
+**Staging has no uptime monitoring of its own.** `envs/staging` sets
+`enable_monitoring_droplet = false` because production's monitoring droplet watches it. Until
+production is applied, nothing outside the staging droplet notices when it is down.
+
 The token needs the custom scopes for what the plan touches: droplet, firewall, vpc,
 reserved_ip, block_storage, tag, project, ssh_key (read), regions and sizes (read) and
 spaces_key; database at stage 1 and load_balancer at stage 2. Production is the same with
@@ -227,9 +247,37 @@ The hand-made host has no reserved IP; if one is added by hand first, import it 
 
 - **Bucket-scoped Spaces keys work, with limits.** `digitalocean_spaces_key` takes `grant`
   blocks of `bucket` + `read`/`readwrite`/`fullaccess`. It cannot narrow to a prefix, a source
-  address or write-without-delete, so a WAL-G key can delete backups. Versioning with a
-  noncurrent-version expiry is the mitigation. The secret key is stored in state, hence state
-  encryption.
+  address or write-without-delete, so a WAL-G key can delete backups. The secret key is stored in
+  state, hence state encryption.
+- **Versioning does not protect backups from a stolen backup key.** The backup buckets are
+  versioned with a noncurrent-version expiry (`backup_noncurrent_days`). That recovers an object
+  the backup tools overwrote or deleted by mistake. A `readwrite` key can also delete noncurrent
+  versions (`DeleteObject` with a `versionId`) and suspend versioning, so an attacker holding the
+  droplet's WAL-G or object-backup key can erase every copy. **Residual risk, accepted for
+  launch:** compromise of the app droplet can take its off-host backups with it. Options, in
+  order of preference:
+  1. **Pull-based copy from the monitoring droplet.** The monitoring droplet, in a third region,
+     holds a `read` key on the backup buckets and its own `readwrite` key on a second copy bucket
+     the app droplet has no key for, and copies new objects on a schedule (`rclone copy`, never
+     `sync`, so deletions do not propagate). The app droplet's key cannot reach the copy.
+  2. **Object Lock** (write-once retention) if Spaces supports it. DigitalOcean's documentation
+     does not say it does: the [S3 compatibility page](https://docs.digitalocean.com/products/spaces/reference/s3-compatibility/)
+     (last verified 22 Jun 2026) lists versioning, lifecycle and bucket policies but not Object
+     Lock, and the [Spaces API reference](https://docs.digitalocean.com/reference/api/spaces/)
+     (last verified 3 Sep 2026) has no `PutObjectLockConfiguration`, retention or legal-hold
+     operation, only the `x-amz-object-lock-*` headers listed on `PutObject`. Unsupported
+     operations return `NotImplemented`, so a probe on a scratch bucket settles it. The provider's
+     `digitalocean_spaces_bucket` has no Object Lock argument either.
+  3. **A bucket policy denying `s3:DeleteObjectVersion`** to the backup keys. Spaces accepts
+     bucket policies through the API only, but its documentation does not say which actions or
+     principals it honours, or how to name a Spaces key as a principal; it needs the same probe.
+- **Lifecycle rule with only an abort action is unconfirmed.** Every bucket has an
+  `abort-incomplete-multipart` rule with no expiration of its own. The S3 compatibility page says
+  lifecycle covers "time-based expiration and removing incomplete multipart uploads" but not
+  whether a rule may hold only the abort. If the first apply rejects it, merge
+  `abort_incomplete_multipart_upload_days` into the `expire-noncurrent` rule in `backups.tf` and
+  drop the separate rule. The stage 1 instance buckets have no other rule to merge into; there,
+  drop the rule and record the gap (stale multipart parts are then billed until removed).
 - **Network load balancer: expressible.** `type = "REGIONAL_NETWORK"` exists, with `tcp` and
   `udp` forwarding rules and `network_stack = "DUALSTACK"`. Health checks are only `http`,
   `https` or `tcp`, so 443/udp has no health check of its own. Whether the droplets see client

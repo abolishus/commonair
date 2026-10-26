@@ -40,8 +40,10 @@ resource "digitalocean_vpc" "app" {
   description = "CommonAir ${var.environment}: app droplets and managed databases"
 }
 
+# Gated on monitoring_region too, so a missing region reaches the monitoring droplet's
+# precondition (a readable message) instead of a provider error on a VPC without a region.
 resource "digitalocean_vpc" "monitoring" {
-  count       = var.enable_monitoring_droplet ? 1 : 0
+  count       = var.enable_monitoring_droplet && var.monitoring_region != null ? 1 : 0
   name        = "${local.prefix}-${var.monitoring_region}"
   region      = var.monitoring_region
   description = "CommonAir ${var.environment}: monitoring"

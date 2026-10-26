@@ -7,7 +7,9 @@
 resource "digitalocean_droplet" "app" {
   count = var.app_count
 
-  name       = var.app_count == 1 ? local.prefix : "${local.prefix}-app-${count.index + 1}"
+  # app[0] keeps the stage 0/1 name at every stage, so raising app_count never renames the
+  # host that runs the stack; only the droplets stage 2 adds get a suffix.
+  name       = count.index == 0 ? local.prefix : "${local.prefix}-app-${count.index + 1}"
   region     = var.region
   size       = var.droplet_size
   image      = var.droplet_image
