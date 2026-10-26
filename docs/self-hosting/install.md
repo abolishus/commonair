@@ -22,6 +22,22 @@ and open the [ports](requirements.md#ports) in any firewall in front of it.
 
 Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) 3.x, so you and
 `selfhost.sh` can check the release's signature. The release workflow signs with cosign 3.1.3.
+Neither distribution ships cosign 3.x. Download the release binary into a fresh directory and install
+it only if it matches the SHA-256 this repository pins (`scripts/release/tools.ts`); the `&&`
+chain stops at the first failure:
+
+```sh
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 SUM=4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71 ;;
+  aarch64) ARCH=arm64 SUM=c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a ;;
+esac
+cd "$(mktemp -d)" &&
+  curl --proto '=https' --tlsv1.2 -fsSLo cosign \
+    "https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign-linux-$ARCH" &&
+  echo "$SUM  cosign" | sha256sum --check &&
+  install -m 0755 cosign /usr/local/bin/cosign
+```
+
 Without cosign, `selfhost.sh` still checks every download against `SHA256SUMS`, but nothing
 proves that `SHA256SUMS` itself came from the project.
 
@@ -181,8 +197,9 @@ MAIL_FROM=noreply@stream.example.org
 ```
 
 `SMTP_REQUIRE_TLS=true` refuses to send without STARTTLS. For implicit TLS on port 465, set
-`SMTP_PORT=465` and `SMTP_SECURE=true` instead. The env file takes one `KEY=value` per line,
-with no quotes and no comments after a value.
+`SMTP_PORT=465` and `SMTP_SECURE=true` instead. If your hosting provider blocks outbound SMTP
+ports, use your relay's alternate port ([requirements.md](requirements.md#smtp-relay)). The env
+file takes one `KEY=value` per line, with no quotes and no comments after a value.
 
 Review the contacts there too (`CONTACT_EMAIL`, `SECURITY_EMAIL`, `ABUSE_EMAIL`, `DMCA_EMAIL`,
 `PRIVACY_EMAIL`, all set to `--email`), and `INSTANCE_NAME`. Apply the edits:

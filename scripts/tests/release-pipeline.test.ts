@@ -411,6 +411,24 @@ describe("pinned tools", () => {
     }
   });
 
+  test("install.md's cosign download matches the pinned cosign", () => {
+    const doc = readFileSync(new URL("../../docs/self-hosting/install.md", import.meta.url), "utf8");
+    const { version, assets } = TOOLS.cosign;
+    expect(doc).toContain(`signs with cosign ${version}.`);
+    for (const platform of ["linux/amd64", "linux/arm64"] as const) {
+      const asset = assets[platform];
+      expect(asset, platform).toBeDefined();
+      if (!asset) continue;
+      // Each hash sits on its own architecture's line, so a swap fails.
+      expect(doc, platform).toContain(`ARCH=${platform.split("/")[1]} SUM=${asset.sha256} ;;`);
+    }
+    // One command for both architectures: the asset name ends in the architecture.
+    const url = assets["linux/amd64"]?.url ?? "missing";
+    expect(url.endsWith("-linux-amd64")).toBe(true);
+    expect(doc).toContain(`"${url.replace(/amd64$/, "$ARCH")}"`);
+    expect(assets["linux/arm64"]?.url).toBe(url.replace(/amd64$/, "arm64"));
+  });
+
   test("a checksum mismatch is refused", () => {
     const bytes = new TextEncoder().encode("hello");
     expect(() => assertChecksum("x", bytes, sha256Hex(bytes))).not.toThrow();

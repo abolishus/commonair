@@ -100,6 +100,13 @@ You need a real mail relay. Sign-up requires a verified email address, so nobody
 can create an account until mail works. Any SMTP service with STARTTLS or TLS works. Set the
 `SMTP_*` values after the install ([install.md](install.md#5-the-first-admin-account)).
 
+Some hosting providers block outbound SMTP ports. DigitalOcean blocks 25, 465 and 587 by default
+(seen on the first real install, v0.1.0-rc.1): mail times out and nothing says why. Check from the
+server before you sign up, for example `timeout 5 bash -c '</dev/tcp/smtp.example.org/587'`. If
+the port is blocked, use your relay's alternate port (often 2525; Resend also has 2587 for
+STARTTLS and 2465 for implicit TLS; see your relay's documentation) or ask the provider to lift
+the block.
+
 ## Optional: off-host object storage
 
 Backups go to the local Garage by default, which does not survive the loss of the server. For a
@@ -111,4 +118,5 @@ Garage node on a second host, or any other S3 service. See [backups.md](backups.
 - Root (or `sudo`) on the server, once, for the host preparation.
 - An SSH key for the `commonair` service user, which owns the instance. Rootless Podman and
   systemd user units need a real login session for that user: log in over SSH, or use
-  `machinectl shell commonair@`. `su` and `sudo -u` do not start a user manager.
+  `machinectl shell commonair@` (on Debian, `apt install systemd-container` first). `su` and
+  `sudo -u` do not start a user manager.
