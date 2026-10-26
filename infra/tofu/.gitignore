@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+
+# Provider downloads and the local backend cache. .terraform.lock.hcl is committed.
+.terraform/
+
+# State lives only in the encrypted remote backend, never in git (README, "State").
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# Plans can contain secrets and resource values.
+*.tfplan
+*.tfplan.json
+tfplan
+*.plan
+
+# Variable files can hold operator CIDRs or secrets; only the examples are committed.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Local overrides and crash logs.
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+crash.log
+crash.*.log

@@ -35,6 +35,9 @@ those definitions exist.
 
 ## 1. Create the droplet (operator, once per host)
 
+With OpenTofu, `tofu apply` in `infra/tofu/digitalocean/envs/<env>` does steps 1 and 2 and
+prints the records for step 3 ([Infrastructure as code](#infrastructure-as-code)). By hand:
+
 1. Create a droplet from the **Debian 13 (trixie)** image with IPv6 enabled and your SSH key
    added. Debian 13 ships Podman 5 and systemd 257, which the units need; Ubuntu 24.04 ships
    Podman 4.9 and does not qualify.
@@ -143,11 +146,29 @@ an SSH tunnel (`ssh -L 3030:127.0.0.1:3030 commonair@<droplet>`).
 
 ## Infrastructure as code
 
-Droplets, cloud firewalls, volumes, Spaces buckets and reserved IPs belong in OpenTofu with the
-`digitalocean/digitalocean` provider (MPL-2.0; verify at the pinned version per ADR 0002 and vet
-it per ADR 0022), under `infra/tofu/digitalocean/` (S1-g). DNS stays where the domain is. The
-token is `DIGITALOCEAN_TOKEN` in the operator's shell, never in git. Everything after a
-droplet's first boot is `scripts/selfhost.sh`.
+The droplets, cloud firewalls, VPCs, volumes, Spaces buckets and keys, reserved IP, managed
+databases and load balancer are OpenTofu definitions in
+[`infra/tofu/digitalocean/`](../../infra/tofu/README.md) (S1-g): a module for one instance and a
+root per environment (`envs/staging`, `envs/production`). They pin OpenTofu 1.13.1 and the
+`digitalocean/digitalocean` provider 2.106.0 (MPL-2.0), with hashes in `.terraform.lock.hcl`
+(ADR 0002, ADR 0022).
+
+- **Stage 0** (launch): the droplet (Debian 13, IPv6, monitoring agent, size from S1-a), a
+  reserved IPv4, an optional media volume, the [firewall](#firewall) above, the backup buckets
+  and keys in another region, and the monitoring droplet in a second region.
+- **Stage 1** (`enable_managed_state`): managed PostgreSQL and Valkey with one standby each,
+  database firewalls by droplet tag, and the instance's buckets in Spaces.
+- **Stage 2** (`app_count > 1`): app droplets behind a regional network load balancer. DNS
+  points at the load balancer, which cannot hold a reserved IP.
+
+Tofu does not do DNS (records stay in Cloudflare, DNS only; `tofu output dns_records` prints the
+values), does not install CommonAir (`selfhost.sh` over SSH, above), and puts no secrets in user
+data. State is encrypted and kept in a Spaces bucket the operator creates once.
+
+The operator runs `tofu plan` and `tofu apply` with `DIGITALOCEAN_TOKEN`, the Spaces keys and
+the state passphrase in their shell, never in git or on a command line (ADR 0025 decision 5).
+The [tofu README](../../infra/tofu/README.md) has the commands, from creating the state bucket to
+`tofu plan` for staging, and how the hand-made staging droplet is replaced.
 
 ## Operating it
 
