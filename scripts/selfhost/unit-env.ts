@@ -190,15 +190,16 @@ interface StaticList {
 export const STATIC_UNITS: Record<string, StaticList> = {
   caddy: {
     why: "the {$VAR} placeholders of infra/caddy/Caddyfile",
-    keys: ["ACME_CA", "ACME_EMAIL", "PUBLIC_HOSTNAME", "S3_BUCKET_EXPORTS", "S3_BUCKET_MEDIA", "TLS_MODE"],
+    keys: ["ACME_CA", "ACME_EMAIL", "PUBLIC_HOSTNAME", "S3_BUCKET_EXPORTS", "S3_BUCKET_MEDIA", "S3_MODE", "TLS_MODE"],
   },
   garage: {
     why: "Garage's own settings (garage.toml leaves its secrets to the environment)",
     keys: ["GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET"],
   },
-  "garage-init": {
-    why: "optionsFromEnv in infra/garage/bootstrap.ts (it creates both S3 keys)",
+  "storage-init": {
+    why: "optionsFromEnv in infra/garage/bootstrap.ts (it creates both S3 keys) and storeFromEnv in infra/garage/storage-init.ts",
     keys: [
+      "AWS_ENDPOINT",
       "GARAGE_ADMIN_TOKEN",
       "GARAGE_CAPACITY_BYTES",
       "GARAGE_EVIDENCE_KEY_NAME",
@@ -210,9 +211,14 @@ export const STATIC_UNITS: Record<string, StaticList> = {
       "S3_BUCKET_EVIDENCE",
       "S3_BUCKET_EXPORTS",
       "S3_BUCKET_MEDIA",
+      "S3_ENDPOINT",
       "S3_EVIDENCE_ACCESS_KEY_ID",
       "S3_EVIDENCE_SECRET_ACCESS_KEY",
+      "S3_FORCE_PATH_STYLE",
+      "S3_MODE",
+      "S3_REGION",
       "S3_SECRET_ACCESS_KEY",
+      "WALG_S3_PREFIX",
     ],
   },
   grafana: {
@@ -243,6 +249,9 @@ export const STATIC_UNITS: Record<string, StaticList> = {
       "POSTGRES_PASSWORD",
       "S3_ACCESS_KEY_ID",
       "S3_BUCKET_BACKUPS",
+      "S3_ENDPOINT",
+      "S3_FORCE_PATH_STYLE",
+      "S3_REGION",
       "S3_SECRET_ACCESS_KEY",
       "WALG_*",
     ],

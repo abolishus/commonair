@@ -4,10 +4,18 @@
 #
 # Sourced (not executed) by the entrypoint, commonair-backup and commonair-restore.
 # Lets WAL-G use the platform's S3 settings (S3_*) unless AWS_* are given explicitly,
-# so one env file serves compose, Quadlet and the backup scripts.
+# so one env file serves compose, Quadlet and the backup scripts. The store is the instance's
+# own (Garage, or the external store selfhost.sh --s3-endpoint configured) unless the operator
+# sends backups elsewhere with AWS_ENDPOINT (and its AWS_* keys) or WALG_S3_PREFIX.
 export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-${S3_ACCESS_KEY_ID:-}}"
 export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-${S3_SECRET_ACCESS_KEY:-}}"
 export AWS_REGION="${AWS_REGION:-${S3_REGION:-garage}}"
-export AWS_ENDPOINT="${AWS_ENDPOINT:-${WALG_S3_ENDPOINT:-http://garage:3900}}"
-export AWS_S3_FORCE_PATH_STYLE="${AWS_S3_FORCE_PATH_STYLE:-true}"
+# The instance's own path style applies to the instance's own store only: an operator's
+# AWS_ENDPOINT keeps the path-style default it always had.
+if [ -n "${AWS_ENDPOINT:-}" ] || [ -n "${WALG_S3_ENDPOINT:-}" ]; then
+  export AWS_S3_FORCE_PATH_STYLE="${AWS_S3_FORCE_PATH_STYLE:-true}"
+else
+  export AWS_S3_FORCE_PATH_STYLE="${AWS_S3_FORCE_PATH_STYLE:-${S3_FORCE_PATH_STYLE:-true}}"
+fi
+export AWS_ENDPOINT="${AWS_ENDPOINT:-${WALG_S3_ENDPOINT:-${S3_ENDPOINT:-http://garage:3900}}}"
 export WALG_S3_PREFIX="${WALG_S3_PREFIX:-s3://${S3_BUCKET_BACKUPS:-commonair-backups}/wal}"
