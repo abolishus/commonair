@@ -20,6 +20,28 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
+## Web gaps from the first real-host install (2026-10-26, branch `claude/web-gaps-resend-upload`)
+
+The two product gaps session thirteen found on staging-stream.abolish.us, closed in the web app:
+
+- **Resend verification email.** `ResendVerification` (`apps/web/src/components/resend-verification.tsx`)
+  on `/signin` after an `EMAIL_NOT_VERIFIED` refusal and on the sign-up "Check your email" screen.
+  It posts to better-auth's `send-verification-email` (`AUTH_ROUTES.sendVerificationEmail`, new).
+  Every answer but a 429 shows one neutral confirmation (better-auth answers alike for unknown and
+  verified addresses; a mail failure for a real one is a 500 the UI hides too). The per-IP auth
+  limit in `http.ts` covers it; the button also cools down for 60 s.
+- **Avatar and banner upload.** `ChannelAppearanceCard` on `/dashboard`: contract type/size checks,
+  `uploadChannelFile` (presigned PUT, scanning commit), the generic rejection message, a local
+  preview while uploading, then `channels.update` with the committed key merged into the theme as
+  the server has it at save time (a takedown may have cleared the other key). Remove buttons clear
+  a key. Upload limits moved to `@commonair/contracts/shapes` (`UPLOAD_TYPES`, `MAX_UPLOAD_BYTES`)
+  and are shared by the contract, the API and the web.
+- Harness: `e2e-basic` now resends the verification mail (expects two in Mailpit) and uploads an
+  avatar from the dashboard, then fetches it from `/media`. New ids in `e1-selectors.md`.
+- Open: the channel page does not show the banner yet (`bannerUrl` is in the DTO, no UI renders it).
+  The `send-verification-email` endpoint still answers 500 when SMTP fails for a real unverified
+  address (an enumeration signal at the HTTP level; the UI hides it).
+
 ## Session thirteen (2026-10-23/26): v0.1.0-rc.1 and rc.2 released, verified, installed and upgraded on a real host (Phase 5 Part 3 done)
 
 Continues session twelve's "User to run (Part 3)". Notes on branch `phase5/release-rc1`
