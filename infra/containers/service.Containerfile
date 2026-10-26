@@ -63,8 +63,7 @@ RUN set -eu; \
       tar -C apps/web --exclude=./node_modules -cf - . | tar -C /out/web -xf -; \
     fi
 
-# --- moderation classifier weights, only with BUNDLE_MODEL set (hosts with no bind mount, such
-# as Railway). Compose and Quadlet mount the file instead. Pinned revision, sha256-checked by
+# --- moderation classifier weights, only with BUNDLE_MODEL set (hosts with no bind mount). Compose and Quadlet mount the file instead. Pinned revision, sha256-checked by
 # fetch-model; this stage depends on those two files only, so it stays cached.
 FROM ${BUN_IMAGE} AS model
 ARG BUNDLE_MODEL=""

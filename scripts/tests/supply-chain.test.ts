@@ -170,7 +170,7 @@ describe("images", () => {
         "relay/Containerfile",
         "infra/containers/probe.Containerfile",
         "infra/quadlet/x.container",
-        ".railway/railway.ts",
+        "infra/caddy/x.yaml",
         ".github/workflows/ci.yml",
         "docs/x.yaml",
         ".claude/briefs/a.ts",
@@ -183,7 +183,7 @@ describe("images", () => {
       "relay/Containerfile",
       "infra/containers/probe.Containerfile",
       "infra/quadlet/x.container",
-      ".railway/railway.ts",
+      "infra/caddy/x.yaml",
       ".github/workflows/ci.yml",
     ]));
 

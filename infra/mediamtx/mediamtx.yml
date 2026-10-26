@@ -23,7 +23,7 @@ writeTimeout: 10s
 # user `internal` + password INTERNAL_API_SECRET in the JSON body, and streamers by the
 # stream key in the query (`?key=`) or the WHIP bearer token. Nothing is excluded: the control
 # API and metrics also go through the hook, so they need the internal credentials too.
-# Hosts other than compose's override this with MTX_AUTHHTTPADDRESS (e.g. Railway, .railway/).
+# Hosts where the API has another address override this with MTX_AUTHHTTPADDRESS.
 authMethod: http
 authHTTPAddress: http://api:3001/internal/media/auth
 authHTTPExclude: []
@@ -68,8 +68,7 @@ hlsSegmentMaxSize: 50M
 hlsMuxerCloseAfter: 60s
 
 ###############################################
-# WebRTC: WHIP ingest. ICE over a single UDP port (>= 1024, rootless). Railway has no public UDP
-# and overrides the ICE settings for ICE-TCP through a TCP proxy (.railway/railway.ts, webrtc-tcp).
+# WebRTC: WHIP ingest. ICE over a single UDP port (>= 1024, rootless).
 webrtc: true
 webrtcAddress: :8889
 webrtcEncryption: false

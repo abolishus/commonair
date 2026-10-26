@@ -404,7 +404,7 @@ them when the scenario fails). The Go relay is always stopped (SIGTERM, then SIG
 process env, which Bun loads from the repo `.env`, else from the repo `.env` file), and a LAN IPv4
 on the host that the API container can reach (the first non-internal, non-link-local IPv4; override
 with `--set relayHost=<addr>`). The relay pulls from the origin at `PLAYBACK_PUBLIC_URL`
-(`http://localhost:3003` locally). Railway staging has no relay. It also needs the worker
+(`http://localhost:3003` locally). It also needs the worker
 (receipts and integrity). Part of `full`, which runs it last: it takes about 15 minutes, and the
 harness stack sets the private-network setting.
 

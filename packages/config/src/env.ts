@@ -468,7 +468,7 @@ export const servicePorts = z.object({
   IRC_TLS_KEY_FILE: z.string().optional(),
   /**
    * Let a production instance run the IRC TLS listener on an ephemeral self-signed certificate
-   * when no files are configured. For hosts that do not expose the TLS port (e.g. Railway).
+   * when no files are configured. For hosts that do not expose the TLS port.
    */
   IRC_TLS_ALLOW_SELF_SIGNED: z
     .enum(["true", "false", "1", "0", ""])

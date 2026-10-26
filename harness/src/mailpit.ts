@@ -29,8 +29,8 @@ interface MessageResponse {
 }
 
 /**
- * Mailpit with optional HTTP basic auth (Mailpit's `MP_UI_AUTH`, which also guards the API, as on
- * Railway staging). Credentials come from `auth` (`user:password`) or from the URL's userinfo;
+ * Mailpit with optional HTTP basic auth (Mailpit's `MP_UI_AUTH`, which also guards the API, when a
+ * staging instance exposes it). Credentials come from `auth` (`user:password`) or from the URL's userinfo;
  * they are sent as a header, never left in the URL (fetch refuses URLs with credentials).
  */
 export class Mailpit {

@@ -76,7 +76,6 @@ commonair-relay --api <PUBLIC_URL> --token <token> \
 - **`--set relayHost=<addr>` overrides the detected LAN address.**
 - **The relay pulls from the origin at `PLAYBACK_PUBLIC_URL`.** That is
   `http://localhost:3003` locally, reachable from the host.
-- **Railway staging has no relay.**
 
 ## The `e2e-relay` scenario
 

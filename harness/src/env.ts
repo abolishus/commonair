@@ -27,7 +27,7 @@ export const harnessEnvSchema = z.object({
   HARNESS_ORIGIN_URL: z.url().default("http://localhost:3003"),
   /** Mailpit HTTP API (verification emails). */
   HARNESS_MAILPIT_URL: z.url().default("http://localhost:8025"),
-  /** Mailpit basic auth as `user:password` (its `MP_UI_AUTH`), e.g. for Railway staging. */
+  /** Mailpit basic auth as `user:password` (its `MP_UI_AUTH`), e.g. for a remote staging instance. */
   HARNESS_MAILPIT_AUTH: z.string().optional(),
   /** The instance's STRIPE_WEBHOOK_SECRET, for signing Stripe events in `e4b-money --set provider=stripe`. */
   HARNESS_STRIPE_WEBHOOK_SECRET: z.string().optional(),
