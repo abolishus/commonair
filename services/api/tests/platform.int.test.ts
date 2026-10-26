@@ -674,3 +674,21 @@ test("rate limits answer RATE_LIMITED with retryAfterSeconds", async () => {
     await limited.stop();
   }
 }, 60_000);
+
+test("anonymous playback calls use the playback bucket, not the per-address default", async () => {
+  const limited = await startApi({
+    rateLimits: { default: { max: 2, windowMs: 60_000 }, playback: { max: 3, windowMs: 60_000 } },
+  });
+  try {
+    const c = client(limited);
+    const end = () =>
+      c.call<{ code: string }>("POST", "/api/playback/end", { sessionId: crypto.randomUUID(), token: "not-a-token" });
+    // Past the default limit of 2, still admitted: the handler answers (the token is bad), not the limiter.
+    for (let i = 0; i < 3; i++) expect((await end()).body.code).not.toBe("RATE_LIMITED");
+    expect((await end()).status).toBe(429);
+    // The default bucket is untouched by playback calls.
+    expect((await c.call("GET", "/api/instance")).status).toBe(200);
+  } finally {
+    await limited.stop();
+  }
+}, 60_000);

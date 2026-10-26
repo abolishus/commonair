@@ -637,7 +637,10 @@ export const contract = {
   },
 
   playback: {
+    // Viewers are anonymous and many share an address (carrier-grade NAT, a campus, one load
+    // generator), so playback has its own per-address bucket instead of `default`.
     start: base
+      .meta({ access: "public", rateLimit: "playback" })
       .errors(MATURE_GATE)
       .route({
         method: "POST",
@@ -655,6 +658,7 @@ export const contract = {
       )
       .output(D.PlaybackStart),
     heartbeat: base
+      .meta({ access: "public", rateLimit: "playback" })
       .route({
         method: "POST",
         path: "/playback/heartbeat",
@@ -675,6 +679,7 @@ export const contract = {
         }),
       ),
     end: base
+      .meta({ access: "public", rateLimit: "playback" })
       .route({
         method: "POST",
         path: "/playback/end",

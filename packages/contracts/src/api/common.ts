@@ -41,7 +41,7 @@ export interface ProcedureMeta {
    */
   scopes?: Scope[];
   /** Per-caller rate limit bucket name (see services/api rate limits). */
-  rateLimit?: "default" | "write" | "auth" | "chat" | "expensive";
+  rateLimit?: "default" | "write" | "auth" | "chat" | "expensive" | "playback";
 }
 
 export const base = oc.$meta<ProcedureMeta>({ access: "public" }).errors({

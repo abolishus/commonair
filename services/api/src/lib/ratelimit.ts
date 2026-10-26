@@ -9,7 +9,7 @@
 import { KEYS } from "@commonair/contracts/internal";
 import type { ValkeyClient } from "@commonair/service";
 
-export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive" | "mail";
+export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive" | "mail" | "playback";
 export interface RateLimitRule {
   max: number;
   windowMs: number;
@@ -23,6 +23,12 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitBucket, RateLimitRule> = {
   expensive: { max: 5, windowMs: 3_600_000 },
   /** Per recipient address, across every sender (see recipientLimitedMailer). */
   mail: { max: 10, windowMs: 3_600_000 },
+  /**
+   * Per address for playback start, heartbeat and end. One viewer costs about 7 calls a minute
+   * (a start, a beat every 10 s), so this admits a few hundred viewers behind one address.
+   * Heartbeats also have a per-session floor (MIN_HEARTBEAT_WALL_SECONDS).
+   */
+  playback: { max: 3000, windowMs: 60_000 },
 };
 
 export interface RateLimitResult {
