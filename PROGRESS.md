@@ -312,6 +312,22 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
   directly → it goes through `build()`; a test fails on any other `podman build`. A run-wide
   `--no-cache` after the first loss was tried and dropped on review (it would rebuild the shared
   Bun stages for every image).
+- `5e4ce6c` **ingest-whip: Chromium never showed a first frame** (39896210222, 40179448209:
+  session, 3.3 MB over MSE, no errors, no stalls). Reproduced locally with 10% inbound WebRTC loss
+  on MediaMTX (`nft` drop on udp/8189 in its netns); hls.js debug logs showed the main stream
+  controller stuck in FRAG_LOADING from startup → hls.js 1.7.3 (latest) bug: new MediaMTX muxers pad
+  their playlists with `#EXT-X-GAP`, and a WHIP viewer always meets a new one (held by the origin's
+  503 until the AAC copy is live). When the live start fragment is a GAP, its init load is still in
+  flight when the next fragment starts. That fragment's init load aborts it, and the GAP fragment's
+  catch then aborts the fragment loader, which by now carries the next fragment. Before the first
+  parse nothing resets the state → `patches/hls.js@1.7.3.patch` aborts only when the failed fragment
+  is still current (both players; the web image copies `patches/`). `harness/tests/hls-gap-start.int.test.ts`
+  (MediaMTX-shaped fixture in Chromium) fails 3/3 without it and passes 5/5 with it. Under 10% loss
+  Chromium reached a first frame in 6/6 ingest-whip runs. Reviewed: sign-off, no HIGH/MEDIUM. Open
+  LOWs: the AES init-decrypt catch has the same unconditional abort (encrypted init only, unused); the
+  test needs a host ffmpeg; the patch must be redone on an hls.js upgrade (worth filing upstream).
+  Seen only under the forced loss, not addressed: WebKit TTFF over 15 s and missing latency samples
+  in both engines (lost IDRs degrade the copy); a macOS WebKit `play()` NotAllowedError once.
 
 ### Self-hosting gaps
 
@@ -378,8 +394,8 @@ Plan: `.claude/briefs/phase5/handoff-validation.md`. Work happens on `phase5/val
 - `ci-ok` went green in main run 39994146130 (all groups, shards and both distros). The worker
   race is intermittent, so later runs are further samples; the proof of the fix is the on-demand
   reproduction (see `ffb3bc7`).
-- Open from the sharded run: ingest-whip and integrity-basic each failed once (now
-  self-diagnosing, see `a38438f`).
+- Open from the sharded run: integrity-basic failed once (now self-diagnosing, see `a38438f`).
+  ingest-whip's Chromium no-first-frame is fixed (`5e4ce6c`).
 - `infra/tests/stack.int.test.ts` ("re-running migrate keeps the role working") can exceed its
   60 s limit on a loaded workstation (76 s once at load 12); not seen on CI.
 - Not covered by a test: that Quadlet keeps appending its own `ExecStopPost=` after the unit's
