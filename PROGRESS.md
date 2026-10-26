@@ -20,7 +20,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session thirteen (2026-10-23/24): v0.1.0-rc.1 cut and verified (Part 3; real-host install pending)
+## Session thirteen (2026-10-23/26): v0.1.0-rc.1 cut, verified and installed on a real host (rc.2 upgrade pending)
 
 Continues session twelve's "User to run (Part 3)". Notes on branch `phase5/release-rc1`
 (worktree `.claude/worktrees/p5-release`).
@@ -33,10 +33,50 @@ Continues session twelve's "User to run (Part 3)". Notes on branch `phase5/relea
 | 3. Packages public               | nothing to do: all 14 `ghcr.io/abolishus/commonair/<image>` manifests answer 200 to an anonymous token (packages inherit the public repository's visibility)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 4. `verifying.md`, as written    | from a clean directory with the pinned cosign 3.1.3: `SHA256SUMS` verifies against the tag regexp and the exact `refs/tags/v0.1.0-rc.1` identity, and is refused for `refs/heads/main`; `sha256sum --check` 74/74 OK; 6 relay binaries: signature and `slsaprovenance1` attestation OK; 14/14 images `cosign verify` OK; api CycloneDX and provenance attestations OK (one SBOM per platform, 5163/5180 components); provenance: `refs/tags/v0.1.0-rc.1`, commit `ef9f2b3` = the tag's, run 40057330617. Every tag resolves to the manifest digest; the bundle's 13 `Image=` lines equal the manifest's (relay has no unit). No doc step needed fixing |
 
+### 5. Real install: DigitalOcean droplet, Debian 13 (2026-10-24/26)
+
+The user chose DigitalOcean over Hetzner for this test (and, pending an ADR, for staging and
+production: tooling an agent can drive, `doctl` and an official MCP server). Droplet
+`commonair-rc-test` (`s5-4vcpu-8gb-80gb`, 4 shared vCPU, 8 GB, 80 GB, mkc1, IPv4 + IPv6), a
+DigitalOcean cloud firewall with exactly the requirements.md ports (SSH only from the operator),
+`staging-stream.abolish.us` A/AAAA in Cloudflare (DNS only). Debian 13.7, kernel 6.12, systemd 257.
+
+| Check                                     | Result                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| install.md §1–§2 as written               | worked: full-upgrade + reboot, cosign 3.1.3 against the pinned SHA-256, `SHA256SUMS` signature (tag identity) and bundle checksum OK. Gap: §1 gave no cosign install command (fixed below)                                                                                                               |
+| §3 `install --version v0.1.0-rc.1 …`      | **exit 0 in 302 s**. quay.io answered 503 once; the pull retry (`78f43e4`) recovered on its own                                                                                                                                                                                                          |
+| ACME                                      | **Let's Encrypt** (`YE1`) certificate for the host, valid to 2027-01-22, also on IRC 6697. HTTPS 200 over IPv4 and IPv6, HTTP → 308, `alt-svc: h3`, HSTS                                                                                                                                                 |
+| `status` (as `commonair` over SSH, §5)    | all 18 services active and healthy                                                                                                                                                                                                                                                                       |
+| Real client addresses (over the internet) | the auth bucket: 10 POSTs from the operator's IPv4 pass, the 11th is 429; a spoofed `X-Forwarded-For` is still 429; the operator's IPv6 and the droplet's own IPv4 are separate clients; claiming the operator's address in `X-Forwarded-For` is not believed                                            |
+| `podman kill commonair-worker`            | **back and healthy in 16 s**, NRestarts 0 → 1, no "Device or resource busy": the first real-host run of the cgroup reset (`ffb3bc7`)                                                                                                                                                                     |
+| Mail (Resend)                             | **DigitalOcean blocks outbound 25, 465 and 587**: the first verification mail timed out (`ETIMEDOUT` in nodemailer). Resend's 2587 (STARTTLS) works; `install --reinstall` 111–112 s                                                                                                                     |
+| Sign-up, admin role                       | sign-up through the web UI (ALTCHA, terms, verification mail); the role CLI from install.md §5 made `rctest1` admin                                                                                                                                                                                      |
+| Avatar (browser)                          | presigned PUT through Caddy's same-origin S3 route 200, `commitUpload` (hash matcher + classifier) 200, `channels.update` theme 200, `/media/channels/<id>/avatar/<id>.png` 200 `image/png`, bytes equal to the upload. Driven from the signed-in page: **the web app has no avatar upload control yet** |
+| Data export (browser UI)                  | requested from /settings/privacy, ready in about 10 s (2.5 kB); the signed link on the same host returns 200 `application/zip` with `content-disposition: attachment`; the same path unsigned is 404                                                                                                     |
+
+Found on the host, fixed on this branch: install.md §1 now has the pinned cosign download (a test
+keeps it equal to `scripts/release/tools.ts`); requirements.md and install.md describe blocked SMTP
+egress and alternate ports; `machinectl` needs `systemd-container` on Debian; **`status`, `backup`
+and `upgrade` refuse root and a session without a user manager with the fix** (before: `status`
+printed `?` for every unit under `su - commonair`).
+
+Found, not fixed (product gaps): the sign-in page offers no way to resend a lost verification mail
+(the first one was lost to the SMTP block; the API's `send-verification-email` endpoint works);
+the web app never calls `uploadChannelFile`, so there is no avatar/banner upload UI.
+
+`main` went red after rc.1 for two reasons unrelated to it (CI run 40179448209 at `683be21`):
+`bun audit` found happy-dom GHSA-834v-8h66-3h79 (published 2026-10-23; the fix 21.0.4 clears the
+7-day cooldown on 2026-10-27), taken as a dated exception until 2026-10-28 (test-only
+devDependency); and ingest-whip's Chromium first frame timed out again, now with the diagnostics
+from `a38438f`: path mse, session up, 3.3 MB received, 0 stalls, 2 heartbeats, no decoded frame.
+
 ### Left
 
-- 5. Real install on a clean Debian 13 VM with DNS (Hetzner, paid; the user provisions it), then
-     `v0.1.0-rc.2`, `upgrade`, `backup`, `status`.
+- happy-dom 21.0.4 on or after 2026-10-27 (vet, bump both package.json files, drop the exception).
+- ingest-whip: data arrives on the MSE path but no frame decodes; investigate the player/demux.
+- `v0.1.0-rc.2`, `upgrade`, `backup`, `status` on the droplet; then delete the droplet, its
+  firewall and the DNS records.
+- ADR superseding 0010: DigitalOcean for staging and production (note the SMTP egress block).
 
 ## Session twelve (2026-10-22/23): validating and finishing Phase 5 (Parts 1–2 done, `ci-ok` green; release pending the user)
 
