@@ -15,21 +15,18 @@ only `docs/self-hosting/`.
   and verified against their tag identities. Rulesets protect `main` (`ci-ok`) and `v*`.
 - rc.1 installed on a DigitalOcean droplet (`commonair-rc-test`, Debian 13, shared vCPU) with
   ACME, then upgraded to rc.2, backed up and checked with `status`. The rc test host is a
-  droplet because of ADR 0025 (proposed: DigitalOcean for staging and production).
+  droplet because of ADR 0025 (accepted 2026-10-26: DigitalOcean for staging and production).
 - Found on that host and fixed in rc.2: the cosign install step, blocked SMTP egress, refusing
   root and a session without a user manager. Found and not fixed: no "resend verification email"
   on sign-in, no avatar or banner upload UI (`uploadChannelFile` is never called).
 
-## 1. The user's steps
+## 1. Decided (2026-10-26)
 
-1. Accept or amend ADR 0025. On acceptance (separate from R0's units): `docs/deploy/hetzner.md`
-   becomes `docs/deploy/digitalocean.md`, `requirements.md`, `backups.md` and `infra/README.md`
-   stop naming Hetzner, ADR 0010 is marked superseded, and Railway is retired once the staging
-   droplet has run one upgrade.
-2. Decide whether `commonair-rc-test` becomes the staging droplet or is replaced by one created
-   with OpenTofu (ADR 0025 "Open questions").
-3. Decide whether `v0.1.0` waits for the two product gaps above (recommended: yes for the
-   verification-mail resend, which locks people out; the upload UI can be E7).
+1. ADR 0025 accepted. Its doc changes are made: `docs/deploy/digitalocean.md`, the self-hosting
+   docs and `infra/README.md`, ADR 0010 superseded, Railway's config, bootstrap script and guide
+   removed. The Railway project itself is the user's to delete in Railway's console.
+2. `commonair-rc-test` is the staging droplet until S1-g's OpenTofu recreates it.
+3. `v0.1.0` waits for R0-g (resend verification email). The upload UI goes to E7.
 
 ## 2. Code work (Claude, in a worktree, one batch)
 

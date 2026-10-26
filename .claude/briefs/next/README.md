@@ -14,7 +14,9 @@ AGENTS.md template; the plan file here is what those briefs are cut from.
 State checked at `ef9f2b3` (2026-10-23). Line numbers below are from that commit. Updated at
 `35ad653` (2026-10-26): rc.1 and rc.2 are released and upgraded on a DigitalOcean droplet, ADR
 0025 (proposed) moves hosting to DigitalOcean, the planned ADRs moved up one number, and S1
-(scaling) was added.
+(scaling) was added. Later that day the user accepted ADR 0025 (Railway retired, staging is
+the rc droplet), chose managed Postgres and Valkey at S1 stage 1 with the same external option
+for self-hosters, held `v0.1.0` for R0-g, and moved P1 into batch 2.
 
 ## Milestones
 
@@ -35,7 +37,7 @@ State checked at `ef9f2b3` (2026-10-23). Line numbers below are from that commit
 | [M1](M1-money-follow-ups.md)   | ADR 0007 follow-ups, Stripe Connect transfers, E5 money follow-ups                       | counsel and a legal entity before any live keys            | `e4b-money` and `e5-coop` extended (stripe-mock)               |
 | [P1](P1-p2p-client.md)         | the browser P2P client, so `bytesP2p` stops being 0                                      | ADR 0005 amendment                                         | `viewers` scenario reports real P2P bytes, integrity unchanged |
 | [S1](S1-scaling.md)            | scaling and availability on DigitalOcean: capacity numbers, targets, staged topology     | ADR 0032; R0-b for stage 1                                 | new `multi-instance` scenario; `failover` on real droplets     |
-| [L1](L1-public-instance.md)    | the first public instance (ADR 0025, proposed)                                           | user decisions, counsel, a tested restore, S1-a            | the launch checklist in the plan, signed off by the user       |
+| [L1](L1-public-instance.md)    | the first public instance (ADR 0025)                                                     | user decisions, counsel, a tested restore, S1-a            | the launch checklist in the plan, signed off by the user       |
 
 Ads stay a governance question (ROADMAP.md); no engineering milestone until members vote.
 
@@ -45,8 +47,10 @@ Batches, each at most six units at a time (AGENTS.md, PLAN.md "Milestones"):
 
 1. **R0** now, with S1's ADR, S1-a (capacity), S1-c (`multi-instance`) and S1-g (IaC): S1 owns
    `harness/scenarios/{load-plan,multi-instance}.ts` and `infra/tofu/**`, R0 neither.
-2. **E7 + W0** together: disjoint paths (E7 is API routes and small web pages; W0 is
-   `services/media`, `packages/integrity`, `services/worker/src/moderation`, the VOD prefix).
+2. **E7 + W0 + P1** together: disjoint paths (E7 is API routes and small web pages; W0 is
+   `services/media`, `packages/integrity`, `services/worker/src/moderation`, the VOD prefix; P1
+   is `apps/web/src/player/p2p/**` and `services/tracker/**`). P1 moved up because DigitalOcean
+   meters egress: until it ships, every viewer without a relay is served from the origin.
 3. **E8 + E9**, plus N2's infrastructure unit (it only touches `apps/web/src/i18n/**` and email
    catalogs). E8 owns `services/chat/src/plugins/**` and `routes/{interact,bot}.ts`; E9 owns
    `routes/developer.ts`, the OAuth routes and `packages/sdk`. E9's EventSub WebSocket
@@ -58,18 +62,20 @@ Batches, each at most six units at a time (AGENTS.md, PLAN.md "Milestones"):
    federates.
 
 The rest of S1 follows its own order (S1-b after R0-b; S1-e only near the stage 3 trigger).
-M1, P1 and L1 are not batched: M1 can run on stripe-mock at any time but must not take live
-keys before counsel; P1 any time, but no P2P claim ships before it; L1 is the user's.
+M1 and L1 are not batched: M1 can run on stripe-mock at any time but must not take live keys
+before counsel; L1 is the user's. No P2P claim ships before P1.
 
 ## Shared decisions the user owns
 
 - ADR numbers: 0011–0019 stay reserved for the feature-wins candidates (feature-wins.md §7);
-  0025 is hosting on DigitalOcean (proposed); the planned ones are 0026 E8, 0027 E9, 0028 N1,
+  0025 is hosting on DigitalOcean (accepted); the planned ones are 0026 E8, 0027 E9, 0028 N1,
   0029 N2, 0030 N4, 0031 N3 and 0032 S1. Numbers are taken when an ADR is written, so these can
   still shift.
-- ADR 0025 itself, and with it whether our instance uses DigitalOcean's managed Postgres and
-  Valkey (S1's ADR).
-- Whether `v0.1.0` waits for E7 (recommended: no; E7 is additive and ships in `v0.2.0`).
+- Settled 2026-10-26: ADR 0025 accepted; managed Postgres and Valkey for our instance at S1
+  stage 1, with `selfhost.sh` support for external managed services for every operator; launch
+  target 99.5%, 99.9% from stage 1; `v0.1.0` waits for R0-g but not for E7 (E7 ships in
+  `v0.2.0`).
+- Production region and droplet size (after S1-a).
 - Release cadence after `v0.1.0`: one minor per milestone batch, patch releases for R0-class
   fixes.
 - Which counsel questions to fund (DSA statements, Twitch terms, split-recipient status,

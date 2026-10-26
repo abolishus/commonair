@@ -6,18 +6,17 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # L1: the first public instance
 
 **Goal.** Run CommonAir's own instance in public on the release artifacts, per ADR 0025
-(proposed: DigitalOcean droplets for staging and production, superseding ADR 0010's Hetzner
-server and Railway staging). Growth past one droplet is [S1](S1-scaling.md).
+(DigitalOcean droplets for staging and production, superseding ADR 0010's Hetzner server and
+Railway staging). Growth past one droplet is [S1](S1-scaling.md).
 
 Mostly the user's and counsel's work; Claude's part is the checklist, the runbooks and fixes.
 
 ## Open decisions (ADR 0025 "Open questions" and others)
 
-- ADR 0025 accepted (it is proposed).
 - Region (North American or European audience first), droplet size (dedicated vCPUs, from the
   load test), Spaces region for off-host backups (not the droplet's region).
-- Mail: a relay on a non-blocked port (DigitalOcean blocks outbound 25, 465 and 587; staging uses
-  Resend on 2587), or DigitalOcean lifts the block.
+- Mail: settled, a relay's alternate port (DigitalOcean blocks outbound 25, 465 and 587; Resend on
+  2587, as on staging).
 - An egress budget: DigitalOcean meters transfer past the pooled allowance, so the launch size
   needs a monthly egress ceiling and an alert on it (S1).
 - Legal entity (ROADMAP.md non-goal today: "legal incorporation of the cooperative"), terms,
