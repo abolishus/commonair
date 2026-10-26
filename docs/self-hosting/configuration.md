@@ -66,7 +66,8 @@ shell that runs `install`, or run it from a terminal and it asks for them. They 
 `commonair.env` like every other secret. With Garage, `install` generates them instead.
 
 On an external store, `install --reinstall` keeps every stored value unless you pass a flag or a
-key pair again: that is how you rotate a key or move `S3_PUBLIC_ENDPOINT`. `upgrade` takes no
+key pair again: that is how you rotate a key or move `S3_PUBLIC_ENDPOINT`. A different
+`--s3-endpoint` or bucket name is refused, like a switch of store. `upgrade` takes no
 `--s3-*` flag and keeps the store as it is. Passing `--s3-*` to an instance that uses Garage is
 refused (see [backups.md](backups.md) for copying objects to another store by hand).
 

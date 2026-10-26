@@ -514,6 +514,43 @@ describe("an external store", () => {
     TIMEOUT,
   );
 
+  test.each([
+    ["--s3-endpoint", "https://ams3.digitaloceanspaces.com", "S3_ENDPOINT=https://nyc3.digitaloceanspaces.com"],
+    ["--s3-bucket-media", "other-media", "S3_BUCKET_MEDIA=ca-media"],
+    ["--s3-bucket-exports", "other-exports", "S3_BUCKET_EXPORTS=ca-exports"],
+    ["--s3-bucket-backups", "other-backups", "S3_BUCKET_BACKUPS=ca-backups"],
+    ["--s3-bucket-evidence", "other-evidence", "S3_BUCKET_EVIDENCE=ca-evidence"],
+  ])("a re-install never repoints the store: %s %s is refused, nothing changes", (flag, value, stored) => {
+    const before = readFileSync(envFile(h), "utf8");
+    h.clearLog();
+    const x = h.run(["install", "--reinstall", flag, value], KEYS);
+    expect(x.code).toBe(1);
+    expect(x.err).toContain(`keeps its objects at ${stored}; ${flag} ${value} would point it at other objects`);
+    expect(x.err).toContain("no --migrate-objects");
+    expect(x.err).toContain("backups.md");
+    expect(readFileSync(envFile(h), "utf8")).toBe(before);
+    expect(h.calls().filter((c) => c.startsWith("curl") || c.startsWith("podman"))).toEqual([]);
+  });
+
+  test(
+    "a re-install may repeat the stored endpoint and buckets",
+    () => {
+      const before = envOf(h);
+      expectOk(h.run(["install", "--reinstall", "--s3-endpoint", "https://nyc3.digitaloceanspaces.com", ...BUCKETS]));
+      const after = envOf(h);
+      for (const k of [
+        "S3_ENDPOINT",
+        "S3_BUCKET_MEDIA",
+        "S3_BUCKET_EXPORTS",
+        "S3_BUCKET_BACKUPS",
+        "S3_BUCKET_EVIDENCE",
+      ])
+        expect(after[k], k).toBe(before[k]);
+      expect(after.S3_ACCESS_KEY_ID).toBe(KEYS.S3_ACCESS_KEY_ID);
+    },
+    TIMEOUT,
+  );
+
   test("upgrade takes no --s3-* flag: the store is chosen at install", () => {
     const u = h.run(["upgrade", "--version", "v0.2.0", "--s3-region", "ams3"]);
     expect(u.code).toBe(1);
@@ -623,7 +660,90 @@ describe("choosing an external store", () => {
   });
 });
 
+/** Root's view of the fake host: id says 0, the service user exists with home userHome. */
+function asRoot(h: Host, userHome: string, runuser = "exit 0") {
+  const stubs: Record<string, string> = {
+    id: `case "$*" in "-u") echo 0 ;; "-un") echo root ;; "-u commonair") echo 1234 ;; *) exit 1 ;; esac`,
+    getent: `echo "commonair:x:1234:1234:CommonAir:${userHome}:/bin/sh"`,
+    runuser,
+    useradd: "exit 1",
+    sysctl: "exit 0",
+  };
+  for (const [name, body] of Object.entries(stubs)) {
+    writeFileSync(join(h.dir, "stub", name), `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> "$STUB_LOG"\n${body}\n`);
+    chmodSync(join(h.dir, "stub", name), 0o755);
+  }
+}
+
+/** Whether the host was touched: root_prepare's or the service user's run's commands. */
+const hostWork = (h: Host) =>
+  h.calls().filter((c) => /^(loginctl|useradd|sysctl|runuser|apt-get|dnf|curl|podman) /.test(`${c} `));
+
 describe("as root", () => {
+  test.each([
+    [
+      "the same bucket twice",
+      [...SPACES, "--s3-bucket-media", "same", "--s3-bucket-exports", "same"],
+      "four different buckets",
+    ],
+    ["no region", ["--s3-endpoint", "https://s3.example.net"], "--s3-region is required"],
+  ] as [string, string[], string][])("%s: refused before the host is prepared", (_, args, message) => {
+    const h = host();
+    const userHome = join(h.dir, "commonair-home");
+    mkdirSync(userHome);
+    asRoot(h, userHome);
+    const r = h.run([...INSTALL, "--yes", ...args], KEYS);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(message);
+    expect(hostWork(h)).toEqual([]);
+  });
+
+  test("a store switch or repoint of the service user's instance is refused before the host is prepared", () => {
+    const h = host();
+    const userHome = join(h.dir, "commonair-home");
+    const conf = join(userHome, ".config/commonair");
+    mkdirSync(conf, { recursive: true });
+    asRoot(h, userHome);
+    writeFileSync(join(conf, "commonair.env"), "S3_ENDPOINT=http://garage:3900\n");
+    const g = h.run([...INSTALL, "--reinstall", "--yes", ...SPACES], KEYS);
+    expect(g.code).toBe(1);
+    expect(g.err).toContain("keeps its objects in Garage on this host");
+    writeFileSync(
+      join(conf, "commonair.env"),
+      "S3_MODE=external\nS3_ENDPOINT=https://nyc3.digitaloceanspaces.com\nS3_REGION=nyc3\n",
+    );
+    const e = h.run([...INSTALL, "--reinstall", "--yes", "--s3-endpoint", "https://ams3.digitaloceanspaces.com"], KEYS);
+    expect(e.code).toBe(1);
+    expect(e.err).toContain("would point it at other objects");
+    expect(hostWork(h)).toEqual([]);
+  });
+
+  test("a symlinked env file is not read as root: the service user's run checks it", () => {
+    const h = host();
+    const userHome = join(h.dir, "commonair-home");
+    const conf = join(userHome, ".config/commonair");
+    mkdirSync(conf, { recursive: true });
+    const elsewhere = join(h.dir, "elsewhere.env");
+    writeFileSync(elsewhere, "S3_MODE=bogus\n");
+    symlinkSync(elsewhere, join(conf, "commonair.env"));
+    asRoot(h, userHome, "exit 3");
+    const sys = h.env.COMMONAIR_SYSROOT!;
+    mkdirSync(join(sys, "var/tmp"), { recursive: true });
+    const rt = mkdtempSync("/tmp/ca-rt-");
+    const bus = Bun.listen({ unix: join(rt, "bus"), socket: { data() {} } });
+    mkdirSync(join(sys, "run/user"), { recursive: true });
+    symlinkSync(rt, join(sys, "run/user/1234"));
+    try {
+      const r = h.run([...INSTALL, "--reinstall", "--yes", ...SPACES], KEYS);
+      // Past the precheck (which would have died on S3_MODE=bogus) to the service user's run.
+      expect(r.err).not.toContain("S3_MODE=bogus");
+      expect(h.calls().some((c) => c.startsWith("runuser"))).toBe(true);
+    } finally {
+      bus.stop(true);
+      Bun.spawnSync(["rm", "-rf", rt]);
+    }
+  });
+
   test(
     "the --s3-* flags reach the service user's run; the keys only through its environment",
     () => {
@@ -636,18 +756,8 @@ describe("as root", () => {
       const bus = Bun.listen({ unix: join(rt, "bus"), socket: { data() {} } });
       mkdirSync(join(sys, "run/user"), { recursive: true });
       symlinkSync(rt, join(sys, "run/user/1234"));
-      const stubs: Record<string, string> = {
-        id: `case "$*" in "-u") echo 0 ;; "-un") echo root ;; "-u commonair") echo 1234 ;; *) exit 1 ;; esac`,
-        getent: `echo "commonair:x:1234:1234:CommonAir:${userHome}:/bin/sh"`,
-        // Records the names (never the values) of the S3 keys the service user's run inherits.
-        runuser: `env | sed -n 's/^\\(S3_[A-Z_]*\\)=.*/\\1/p' | sort > "$STUB_STATE/runuser.env"\nexit 0`,
-        useradd: "exit 1",
-        sysctl: "exit 0",
-      };
-      for (const [name, body] of Object.entries(stubs)) {
-        writeFileSync(join(h.dir, "stub", name), `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> "$STUB_LOG"\n${body}\n`);
-        chmodSync(join(h.dir, "stub", name), 0o755);
-      }
+      // Records the names (never the values) of the S3 keys the service user's run inherits.
+      asRoot(h, userHome, `env | sed -n 's/^\\(S3_[A-Z_]*\\)=.*/\\1/p' | sort > "$STUB_STATE/runuser.env"\nexit 0`);
       try {
         const r = h.run(
           [

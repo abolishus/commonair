@@ -129,7 +129,8 @@ virtual-hosted ones.
   keys (it prints no key).
 - `install --reinstall` keeps the store's settings and keys unless you pass a flag or a key pair
   again. That is how you rotate a key: create the new one at the store, export it, reinstall,
-  then delete the old one.
+  then delete the old one. It refuses a different `--s3-endpoint` or bucket name, which would
+  leave the objects already stored behind; copy them first and install a new instance instead.
 - `upgrade` keeps the store as it is and takes no `--s3-*` flag.
 - WAL-G writes to the backups bucket of the same store. To keep backups in another region or
   provider, set `AWS_*` and `WALG_S3_PREFIX` as [backups.md](backups.md#off-host-s3) describes;

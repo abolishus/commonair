@@ -857,9 +857,30 @@ collect_s3_keys() {
   fi
 }
 
+# Refuses a flag that would repoint an external instance at other objects: a different endpoint
+# or bucket leaves everything already stored behind, like a switch of mode would.
+refuse_repoint() {
+  _stored=$(stored_s3 "$1")
+  if [ -n "$2" ] && [ -n "$_stored" ] && [ "$2" != "$_stored" ]; then
+    die "this instance keeps its objects at $1=$_stored; $3 $2 would point it at other objects" \
+      "selfhost.sh has no --migrate-objects: the objects already stored would stay behind." \
+      "fix: drop $3 to keep the store, or copy every bucket to the new place first (rclone, as in" \
+      "docs/self-hosting/backups.md, section 'Objects in Garage') and install a new instance against it."
+  fi
+  return 0
+}
+
 # Decides the store for install: the current one on an existing instance, external when any
 # --s3-* flag is given. Fills S3_SET_* for storage_env. Runs before anything is downloaded.
 resolve_storage() {
+  resolve_storage_settings
+  [ "$STORAGE_MODE" = external ] || return 0
+  collect_s3_keys "$STORAGE_STORED"
+}
+
+# The part of resolve_storage that needs no key: the mode, the endpoint and the buckets, checked
+# against $ENV_FILE. cmd_install also runs it as root, before preparing the host.
+resolve_storage_settings() {
   STORAGE_STORED=no
   _have=""
   if [ -f "$ENV_FILE" ]; then
@@ -875,6 +896,11 @@ resolve_storage() {
   fi
   [ "$STORAGE_MODE" = external ] || return 0
   [ "$_have" = external ] && STORAGE_STORED=yes
+  refuse_repoint S3_ENDPOINT "$S3_OPT_ENDPOINT" --s3-endpoint
+  refuse_repoint S3_BUCKET_MEDIA "$S3_OPT_BUCKET_MEDIA" --s3-bucket-media
+  refuse_repoint S3_BUCKET_EXPORTS "$S3_OPT_BUCKET_EXPORTS" --s3-bucket-exports
+  refuse_repoint S3_BUCKET_BACKUPS "$S3_OPT_BUCKET_BACKUPS" --s3-bucket-backups
+  refuse_repoint S3_BUCKET_EVIDENCE "$S3_OPT_BUCKET_EVIDENCE" --s3-bucket-evidence
   S3_SET_ENDPOINT=${S3_OPT_ENDPOINT:-$(stored_s3 S3_ENDPOINT)}
   [ -n "$S3_SET_ENDPOINT" ] || die "--s3-endpoint is required for an external object store" \
     "e.g. --s3-endpoint https://nyc3.digitaloceanspaces.com --s3-region nyc3 (object-storage.md)"
@@ -903,7 +929,24 @@ resolve_storage() {
   _n=$(printf '%s\n' "$S3_SET_BUCKET_MEDIA" "$S3_SET_BUCKET_EXPORTS" "$S3_SET_BUCKET_BACKUPS" "$S3_SET_BUCKET_EVIDENCE" |
     sort -u | wc -l | tr -d ' ')
   [ "$_n" -eq 4 ] || die "the media, exports, backups and evidence buckets must be four different buckets"
-  collect_s3_keys "$STORAGE_STORED"
+  return 0
+}
+
+# As root, before root_prepare: the same checks against the service user's env file, if it has
+# one, so a refused store choice changes nothing on the host. Keys are left to the user's run.
+# A symlinked env file is skipped (root does not follow links the service user controls); that
+# run checks it anyway. A subshell keeps root's ENV_FILE and STORAGE_* as they were.
+precheck_storage_as_root() {
+  _env=/nonexistent
+  if id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    _uhome=$(getent passwd "$SERVICE_USER" | cut -d: -f6)
+    _cand="$_uhome/.config/commonair/commonair.env"
+    if [ -n "$_uhome" ] && [ -f "$_cand" ] && [ ! -L "$_cand" ]; then _env=$_cand; fi
+  fi
+  (
+    ENV_FILE=$_env
+    resolve_storage_settings
+  ) || exit 1
 }
 
 # Where browsers send presigned uploads: the public endpoint's origin, or with virtual-hosted
@@ -1406,6 +1449,7 @@ cmd_install() {
       die "running as root: this prepares the host (podman, user $SERVICE_USER, linger, sysctl)" \
         "re-run with --yes to allow that, or run as the user that will own the instance"
     fi
+    precheck_storage_as_root
     root_prepare
     run_as_service_user
   fi
