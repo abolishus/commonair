@@ -13,6 +13,7 @@ import { LIMITS } from "./constants.ts";
 import type { Cidr } from "./net.ts";
 import { listenSocket, listenWebSocket, type Accept } from "./listeners.ts";
 import { IrcSession, type SessionLimits, type TransportKind } from "./session.ts";
+import { describeFdNames } from "./systemd.ts";
 import type { TlsMaterial } from "./tls.ts";
 import type { UpstreamFactory } from "./upstream.ts";
 
@@ -26,7 +27,7 @@ export interface GatewayOptions {
    * Listening sockets inherited from systemd (socket activation). When set, the TCP/TLS
    * listener accepts on that descriptor and its port is only reported, not bound.
    */
-  inherited?: { tcp: number; tls: number } | undefined;
+  inherited?: { tcp: number; tls: number; fdNames?: string | null } | undefined;
   tls?: TlsMaterial | undefined;
   upstream: UpstreamFactory;
   logger: Logger;
@@ -123,7 +124,12 @@ export function startGateway(opts: GatewayOptions): Gateway {
     tls: tls ? (tls.port ?? opts.tlsPort) : null,
     ws: ws?.port ?? null,
   };
-  opts.logger.info("irc gateway listening", { ...ports, socketActivated: opts.inherited !== undefined });
+  // fdNames shows operators (and the self-host e2e) whether LISTEN_FDNAMES or fd order placed the sockets.
+  opts.logger.info("irc gateway listening", {
+    ...ports,
+    socketActivated: opts.inherited !== undefined,
+    ...(opts.inherited ? { fdNames: describeFdNames(opts.inherited.fdNames) } : {}),
+  });
 
   return {
     ports,

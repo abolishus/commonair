@@ -13,7 +13,8 @@ import { socketProblem, systemdListeners } from "../../src/systemd.ts";
 import { websocketUpstream } from "../../src/upstream.ts";
 
 const [upstreamUrl = "", maxPerIp = "1"] = process.argv.slice(2);
-const logger = createLogger({ service: "irc-fd-test", write: () => {} });
+const logged: string[] = [];
+const logger = createLogger({ service: "irc-fd-test", write: (line) => void logged.push(line) });
 const activation = systemdListeners(process.env, process.pid, process.ppid);
 if (activation.kind !== "fds") {
   process.stdout.write(`${JSON.stringify({ error: activation })}\n`);
@@ -40,6 +41,7 @@ const ready = {
   activation,
   ports: gateway.ports,
   envLeft: Object.keys(process.env).filter((k) => k.startsWith("LISTEN_")),
+  listening: logged.map((l) => JSON.parse(l) as Record<string, unknown>).find((l) => l.msg === "irc gateway listening"),
 };
 process.stdout.write(`${JSON.stringify(ready)}\n`);
 process.on("SIGTERM", () => {

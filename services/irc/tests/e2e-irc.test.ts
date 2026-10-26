@@ -10,7 +10,9 @@ import {
   IRC_SOURCES,
   PER_IP_REFUSAL,
   PROBE_SCRIPT,
+  REGISTRATION_MARGIN_MS,
   REGISTRATION_TIMEOUT_MS,
+  beforeRegistrationTimeout,
   checkIrcClientAddresses,
   connectDelays,
   judgeProbe,
@@ -26,10 +28,12 @@ const pass: ProbeResult = {
   held: IRC_DEFAULTS.maxPerIp,
   overPlain: PER_IP_REFUSAL,
   overTls: PER_IP_REFUSAL,
+  overPlainAtMs: 20_200,
+  overTlsAtMs: 21_000,
   other: "PONG",
   tls: "PONG",
   tlsAuthorized: true,
-  elapsedMs: 21_000,
+  elapsedMs: 21_100,
 };
 
 describe("constants match the gateway", () => {
@@ -74,7 +78,11 @@ describe("connectDelays", () => {
     expect(results.slice(0, 50)).toEqual(Array(50).fill(null));
     expect(results.slice(50)).toEqual(["too_many_from_ip", "too_many_from_ip"]);
     // Well inside the registration timeout, which drops unregistered connections.
-    expect(elapsed).toBeLessThan(REGISTRATION_TIMEOUT_MS - 5000);
+    expect(elapsed).toBeLessThan(REGISTRATION_TIMEOUT_MS - REGISTRATION_MARGIN_MS);
+    // The planned start of each over-limit attempt passes the timing check, even 1 s late.
+    const plainAt = plan.delays.reduce((a, b) => a + b, 0) + plan.laterDelayMs;
+    expect(beforeRegistrationTimeout(plainAt + 1000, "plain")[0]).toBe(true);
+    expect(beforeRegistrationTimeout(plainAt + plan.laterDelayMs + 1000, "TLS")[0]).toBe(true);
   });
 
   test("timer slack (early or late) does not cause a rate refusal", () => {
@@ -103,7 +111,7 @@ describe("parseProbe and judgeProbe", () => {
 
   test("a passing result passes every check", () => {
     const checks = judgeProbe(pass, plan);
-    expect(checks.length).toBe(6);
+    expect(checks.length).toBe(7);
     expect(checks.filter(([ok]) => !ok)).toEqual([]);
   });
 
@@ -118,11 +126,43 @@ describe("parseProbe and judgeProbe", () => {
     ["rate refusal instead", { overTls: "ERROR :Closing Link: Reconnecting too fast" }, /\(TLS\) is refused/],
     ["TLS unverified", { tlsAuthorized: false }, /internal CA/],
     ["TLS failed", { tls: "fail: ECONNREFUSED" }, /internal CA/],
-    ["too slow", { elapsedMs: 31_000 }, /time out/],
+    [
+      "over-limit plain attempt too late",
+      { overPlainAtMs: 25_000 },
+      /over-limit plain .*30000 ms registration timeout/,
+    ],
+    ["over-limit TLS attempt too late", { overTlsAtMs: 29_999 }, /over-limit TLS .*30000 ms registration timeout/],
+    ["no timing recorded", { overTlsAtMs: undefined as unknown as number }, /over-limit TLS .*undefined ms/],
   ])("%s fails", (_, change, what) => {
     const failed = judgeProbe({ ...pass, ...change }, plan).filter(([ok]) => !ok);
     expect(failed.length).toBe(1);
     expect(failed[0]?.[1]).toMatch(what);
+  });
+
+  test("a long total run is fine once the over-limit attempts were in time", () => {
+    expect(judgeProbe({ ...pass, elapsedMs: 31_000 }, plan).filter(([ok]) => !ok)).toEqual([]);
+  });
+
+  test("a held connection timing out shows as the timeout, reported before the confusing admit", () => {
+    // Past the timeout the held connections are gone, so the over-limit attempts are admitted.
+    const late = { ...pass, overPlainAtMs: 31_000, overTlsAtMs: 32_000, overPlain: "PONG", overTls: "PONG" };
+    const failed = judgeProbe(late, plan)
+      .filter(([ok]) => !ok)
+      .map(([, w]) => w);
+    expect(failed[0]).toMatch(/over-limit plain attempt started at 31000 ms.*registration timeout/);
+    expect(failed[1]).toMatch(/refused per address \(PONG\)/);
+    expect(failed[2]).toMatch(/over-limit TLS attempt started at 32000 ms.*registration timeout/);
+  });
+
+  test("beforeRegistrationTimeout: the deadline is the timeout minus the margin", () => {
+    const deadline = REGISTRATION_TIMEOUT_MS - REGISTRATION_MARGIN_MS;
+    expect(beforeRegistrationTimeout(0, "x")[0]).toBe(true);
+    expect(beforeRegistrationTimeout(deadline - 1, "x")[0]).toBe(true);
+    expect(beforeRegistrationTimeout(deadline, "x")[0]).toBe(false);
+    expect(beforeRegistrationTimeout(-1, "x")[0]).toBe(false);
+    expect(beforeRegistrationTimeout(Number.NaN, "x")[0]).toBe(false);
+    expect(beforeRegistrationTimeout("20000", "x")[0]).toBe(false);
+    expect(beforeRegistrationTimeout(null, "x")[1]).toMatch(/started at null ms, not 5000 ms before/);
   });
 
   test("no result is one failure", () => {
@@ -154,7 +194,7 @@ describe("checkIrcClientAddresses", () => {
       servername: "selfhost.test",
     });
     expect(sent.sources).toEqual(IRC_SOURCES);
-    expect(reported.length).toBe(7);
+    expect(reported.length).toBe(8);
     expect(reported.every(([ok]) => ok)).toBe(true);
   });
 

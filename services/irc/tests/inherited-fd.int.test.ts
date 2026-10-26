@@ -106,7 +106,7 @@ let upstream: ReturnType<typeof startFakeUpstream>;
 let child: ReturnType<typeof Bun.spawn<"ignore", "pipe", "inherit">>;
 let ports: { tcp: number; tls: number };
 let sources: [Source, Source];
-let ready: { activation: unknown; ports: unknown; envLeft: string[] };
+let ready: { activation: unknown; ports: unknown; envLeft: string[]; listening?: Record<string, unknown> };
 
 beforeAll(async () => {
   upstream = startFakeUpstream(users);
@@ -161,9 +161,13 @@ afterAll(async () => {
 
 describe("a gateway on inherited listening sockets", () => {
   test("found both by name, reports the configured ports, and unset the variables", () => {
-    expect(ready.activation).toEqual({ kind: "fds", tcp: 4, tls: 3 });
+    expect(ready.activation).toEqual({ kind: "fds", tcp: 4, tls: 3, fdNames: "ircs:irc" });
     expect(ready.ports).toEqual({ tcp: 6667, tls: 6697, ws: null });
     expect(ready.envLeft).toEqual([]);
+  });
+
+  test("the listening log line names how the sockets were found", () => {
+    expect(ready.listening).toMatchObject({ tcp: 6667, tls: 6697, socketActivated: true, fdNames: "ircs:irc" });
   });
 
   test("accepts a plain client and a TLS client (certificate verified)", async () => {
@@ -213,6 +217,6 @@ describe("a gateway on inherited listening sockets", () => {
     expect(await run.exited, await new Response(run.stderr).text()).toBe(0);
     const checks = judgeProbe(parseProbe(out), plan);
     expect(checks.filter(([ok]) => !ok)).toEqual([]);
-    expect(checks.length).toBe(6);
+    expect(checks.length).toBe(7);
   });
 });

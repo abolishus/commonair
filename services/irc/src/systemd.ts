@@ -16,7 +16,8 @@ export const FD_NAMES = { tcp: "irc", tls: "ircs" } as const;
 export type Activation =
   /** Not socket-activated (or the variables were meant for another process): bind the ports. */
   | { kind: "none"; ignored?: string }
-  | { kind: "fds"; tcp: number; tls: number }
+  /** `fdNames`: LISTEN_FDNAMES as received, or null when absent (the fd-order fallback). */
+  | { kind: "fds"; tcp: number; tls: number; fdNames: string | null }
   /** Socket-activated, but the descriptors cannot be used: the gateway must not start. */
   | { kind: "error"; reason: string };
 
@@ -52,7 +53,7 @@ export function systemdListeners(env: Record<string, string | undefined>, pid: n
   if (names === undefined || names === "") {
     // No names: the order of the ListenStream= lines, plain first.
     if (count !== 2) return { kind: "error", reason: `expected 2 unnamed sockets (6667, 6697), got ${count}` };
-    return { kind: "fds", tcp: fds[0] ?? 0, tls: fds[1] ?? 0 };
+    return { kind: "fds", tcp: fds[0] ?? 0, tls: fds[1] ?? 0, fdNames: null };
   }
   const list = names.split(":");
   if (list.length !== count)
@@ -70,7 +71,12 @@ export function systemdListeners(env: Record<string, string | undefined>, pid: n
       kind: "error",
       reason: `expected exactly one socket named ${FD_NAMES.tcp} and one named ${FD_NAMES.tls}, got ${list.join(", ")}`,
     };
-  return { kind: "fds", tcp, tls };
+  return { kind: "fds", tcp, tls, fdNames: names };
+}
+
+/** How the descriptors were found, for the startup log: the names received, or the fallback. */
+export function describeFdNames(fdNames: string | null | undefined): string {
+  return fdNames ? fdNames : "unnamed, fd-order fallback";
 }
 
 /** Null when `fd` is an open socket, else why it cannot be listened on. */

@@ -34,6 +34,12 @@ export const IRC_SOURCES = { held: "127.0.0.2", other: "127.0.0.3", tls: "127.0.
 export const PER_IP_REFUSAL = "ERROR :Closing Link: Too many connections from your address";
 /** Unregistered connections are dropped after this long (LIMITS.registrationTimeoutMs). */
 export const REGISTRATION_TIMEOUT_MS = 30_000;
+/**
+ * The over-limit attempts must start this long before the first held connection would time out:
+ * once held connections are dropped, the cap has room again and an over-limit attempt would be
+ * admitted, which would look like a broken per-address cap instead of a slow probe.
+ */
+export const REGISTRATION_MARGIN_MS = 5_000;
 
 /**
  * Milliseconds to wait before each of `count` connections from one address so that none is
@@ -65,6 +71,9 @@ export interface ProbeResult {
   /** First line each later connection got: PONG, an ERROR line, or `fail: …`. */
   overPlain: string;
   overTls: string;
+  /** Milliseconds since the first held connection when each over-limit attempt started. */
+  overPlainAtMs: number;
+  overTlsAtMs: number;
   other: string;
   tls: string;
   tlsAuthorized: boolean;
@@ -125,12 +134,14 @@ for (const d of plan.delays) {
   if ((await attempt(plan.sources.held, false)).line === "PONG") held++;
 }
 await sleep(plan.laterDelayMs);
+const overPlainAtMs = Date.now() - started;
 const overPlain = (await attempt(plan.sources.held, false)).line;
 await sleep(plan.laterDelayMs);
+const overTlsAtMs = Date.now() - started;
 const overTls = (await attempt(plan.sources.held, true)).line;
 const other = (await attempt(plan.sources.other, false)).line;
 const t = await attempt(plan.sources.tls, true);
-console.log(JSON.stringify({ held, overPlain, overTls, other, tls: t.line, tlsAuthorized: t.authorized, elapsedMs: Date.now() - started }));
+console.log(JSON.stringify({ held, overPlain, overTls, overPlainAtMs, overTlsAtMs, other, tls: t.line, tlsAuthorized: t.authorized, elapsedMs: Date.now() - started }));
 for (const s of open) s.destroy();
 process.exit(0);
 `;
@@ -150,6 +161,21 @@ export function parseProbe(output: string): ProbeResult | null {
   }
 }
 
+/**
+ * The check that an over-limit attempt started while the held connections were still open.
+ * It is reported before that attempt's refusal check, so a slow probe fails with this message.
+ */
+export function beforeRegistrationTimeout(atMs: unknown, what: string): [boolean, string] {
+  const deadline = REGISTRATION_TIMEOUT_MS - REGISTRATION_MARGIN_MS;
+  const ok = typeof atMs === "number" && Number.isFinite(atMs) && atMs >= 0 && atMs < deadline;
+  return [
+    ok,
+    ok
+      ? `the ${what} attempt started at ${atMs} ms, before the held connections' ${REGISTRATION_TIMEOUT_MS} ms registration timeout`
+      : `the ${what} attempt started at ${String(atMs)} ms, not ${REGISTRATION_MARGIN_MS} ms before the gateway's ${REGISTRATION_TIMEOUT_MS} ms registration timeout drops the held connections: the probe was too slow, so a refusal check would be meaningless`,
+  ];
+}
+
 /** The checks a probe result must pass, as [ok, what] in the order they are reported. */
 export function judgeProbe(r: ProbeResult | null, plan: ProbePlan): [boolean, string][] {
   if (!r) return [[false, "the IRC probe printed a result"]];
@@ -157,16 +183,14 @@ export function judgeProbe(r: ProbeResult | null, plan: ProbePlan): [boolean, st
   const n = plan.delays.length;
   return [
     [r.held === n, `${n} IRC connections from ${held} are admitted, the per-address cap (${r.held} answered PING)`],
+    beforeRegistrationTimeout(r.overPlainAtMs, "over-limit plain"),
     [r.overPlain === PER_IP_REFUSAL, `one more from ${held} on ${plan.port} is refused per address (${r.overPlain})`],
+    beforeRegistrationTimeout(r.overTlsAtMs, "over-limit TLS"),
     [r.overTls === PER_IP_REFUSAL, `one more from ${held} on ${plan.tlsPort} (TLS) is refused too (${r.overTls})`],
     [r.other === "PONG", `${other} is a different IRC client and is admitted (${r.other})`],
     [
       r.tls === "PONG" && r.tlsAuthorized,
       `${tls} over TLS on ${plan.tlsPort} is admitted with a certificate for ${plan.tls.servername} from the internal CA (${r.tls}, authorized: ${r.tlsAuthorized})`,
-    ],
-    [
-      r.elapsedMs < REGISTRATION_TIMEOUT_MS,
-      `the probe finished (${r.elapsedMs} ms) before unregistered connections time out`,
     ],
   ];
 }

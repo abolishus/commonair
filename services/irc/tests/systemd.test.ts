@@ -3,7 +3,7 @@
 
 import { openSync, closeSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { FD_NAMES, LISTEN_FDS_START, socketProblem, systemdListeners } from "../src/systemd.ts";
+import { FD_NAMES, LISTEN_FDS_START, describeFdNames, socketProblem, systemdListeners } from "../src/systemd.ts";
 
 const PID = 4242;
 const run = (vars: Record<string, string>, pid = PID, ppid?: number) => {
@@ -34,11 +34,17 @@ describe("systemdListeners", () => {
   });
 
   test("two fds without names: fd 3 plain, fd 4 TLS", () => {
-    expect(run({ LISTEN_PID: String(PID), LISTEN_FDS: "2" }).result).toEqual({ kind: "fds", tcp: 3, tls: 4 });
+    expect(run({ LISTEN_PID: String(PID), LISTEN_FDS: "2" }).result).toEqual({
+      kind: "fds",
+      tcp: 3,
+      tls: 4,
+      fdNames: null,
+    });
     expect(run({ LISTEN_PID: String(PID), LISTEN_FDS: "2", LISTEN_FDNAMES: "" }).result).toEqual({
       kind: "fds",
       tcp: 3,
       tls: 4,
+      fdNames: null,
     });
   });
 
@@ -47,11 +53,13 @@ describe("systemdListeners", () => {
       kind: "fds",
       tcp: 3,
       tls: 4,
+      fdNames: "irc:ircs",
     });
     expect(run({ LISTEN_PID: String(PID), LISTEN_FDS: "2", LISTEN_FDNAMES: "ircs:irc" }).result).toEqual({
       kind: "fds",
       tcp: 4,
       tls: 3,
+      fdNames: "ircs:irc",
     });
   });
 
@@ -62,9 +70,9 @@ describe("systemdListeners", () => {
 
   test("Podman's LISTEN_PID=1 counts when the parent is the container init (catatonit)", () => {
     const vars = { LISTEN_PID: "1", LISTEN_FDS: "2", LISTEN_FDNAMES: "irc:ircs" };
-    expect(run(vars, 2, 1).result).toEqual({ kind: "fds", tcp: 3, tls: 4 });
+    expect(run(vars, 2, 1).result).toEqual({ kind: "fds", tcp: 3, tls: 4, fdNames: "irc:ircs" });
     // Bun as pid 1 itself (no init).
-    expect(run(vars, 1, 0).result).toEqual({ kind: "fds", tcp: 3, tls: 4 });
+    expect(run(vars, 1, 0).result).toEqual({ kind: "fds", tcp: 3, tls: 4, fdNames: "irc:ircs" });
     // Not under the init: meant for someone else.
     expect(run(vars, 2, 77).result.kind).toBe("none");
   });
@@ -94,6 +102,16 @@ describe("systemdListeners", () => {
   ])("the variables are unset afterwards (%o)", (vars) => {
     const { env } = run(vars);
     expect(env).toEqual({ OTHER: "kept" });
+  });
+});
+
+describe("describeFdNames", () => {
+  test("the names received, or the unnamed fd-order fallback", () => {
+    expect(describeFdNames("irc:ircs")).toBe("irc:ircs");
+    expect(describeFdNames("ircs:irc")).toBe("ircs:irc");
+    expect(describeFdNames(null)).toBe("unnamed, fd-order fallback");
+    expect(describeFdNames(undefined)).toBe("unnamed, fd-order fallback");
+    expect(describeFdNames("")).toBe("unnamed, fd-order fallback");
   });
 });
 
