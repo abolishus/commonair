@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Copy to terraform.tfvars (ignored by git). No secrets belong here: the token, Spaces keys
+# and the state passphrase come from the environment.
+
+# Open decisions: ADR 0025 (region) and S1-a (size). Placeholders, not choices.
+region            = "<region slug>"
+backup_region     = "<another Spaces region>"
+monitoring_region = "<a third region>"
+droplet_size      = "<dedicated-vCPU size slug from S1-a>"
+
+# doctl compute ssh-key list --format Name,FingerPrint
+ssh_key_fingerprints = ["00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"]
+operator_cidrs       = ["192.0.2.10/32", "2001:db8::/64"]
+
+# Stage 1 (ADR 0032): managed Postgres and Valkey, instance buckets in Spaces.
+# enable_managed_state = true
+# instance_origin      = "https://stream.example.org"
+
+# Stage 2: app droplets behind a network load balancer (needs stage 1).
+# app_count = 2

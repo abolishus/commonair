@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Copy to terraform.tfvars (ignored by git). No secrets belong here: the token, Spaces keys
+# and the state passphrase come from the environment.
+
+# doctl compute ssh-key list --format Name,FingerPrint
+ssh_key_fingerprints = ["00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00"]
+
+# Your own addresses, as narrow as you can (a /32 or a /64).
+operator_cidrs = ["192.0.2.10/32", "2001:db8::/64"]
