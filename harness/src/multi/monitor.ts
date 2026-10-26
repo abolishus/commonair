@@ -3,10 +3,10 @@
 
 /**
  * Watching what the replicas ask Valkey, through `MONITOR`: which origin took the relay
- * issuance lock on each tick (services/origin/src/issuance.ts). The winner of `SET
- * issuance:lock <id> PX … NX` computes and then releases the lock with an `EVAL … issuance:lock
- * <id>`; losers only ever send the SET. So the distinct ids released in a tick are the replicas
- * that computed it, and the distinct client addresses sending the SET are the replicas competing.
+ * issuance lock (services/origin/src/issuance.ts). The winner of `SET issuance:lock <id> PX … NX`
+ * computes and then releases the lock with an `EVAL … issuance:lock <id>`; losers only ever send
+ * the SET. So each release is one computation, its id the replica that made it, and the client
+ * addresses sending the SET are the replicas competing.
  *
  * MONITOR costs Valkey some throughput while it runs; the scenario keeps one open for its
  * duration and only keeps the lines that mention the issuance lock.
@@ -38,49 +38,87 @@ export function parseMonitorLine(line: string): MonitorEntry | null {
   return args.length === 0 ? null : { at, client, args };
 }
 
-/**
- * The issuance tick a timestamp belongs to. Each origin ticks once a minute: first 10 s past the
- * minute, then on a `setInterval` that drifts (seen 26 s late on a long-running stack), so a 60 s
- * bucket holds one tick of every origin wherever its timer has got to; buckets are centred on :10.
- */
-export const issuanceTick = (at: number) => Math.floor((at + 20_000) / 60_000);
-
 export const ISSUANCE_LOCK_KEY = "issuance:lock";
 
-export interface IssuanceTick {
-  tick: number;
-  /** Distinct client hosts that sent `SET issuance:lock … NX` (the replicas competing). */
-  contenders: string[];
-  /** Distinct lock ids released (the replicas that computed this tick). */
+/** Each origin ticks once a minute (services/origin/src/origin.ts `setInterval`). */
+export const ISSUANCE_INTERVAL_MS = 60_000;
+/**
+ * The sliding window in which two distinct leaders mean a double computation. Origin timers
+ * drift independently, so two origins that both compute every minute release `d` and `60 − d`
+ * seconds apart; one of those gaps is at most 30 s, inside any window over 30 s. A window under
+ * the interval leaves room for jitter when leadership legitimately passes from one tick to the
+ * next (the other origin won the race a minute later).
+ */
+export const DOUBLE_LEADER_WINDOW_MS = 45_000;
+
+export interface IssuanceRelease {
+  at: number;
+  /** The releasing replica's lock id. */
+  id: string;
+}
+
+export interface IssuanceReport {
+  /** Every release of the lock, oldest first: one per computation. */
+  releases: IssuanceRelease[];
+  /** Distinct lock ids released (replicas that computed at least once). */
   leaders: string[];
+  /** Distinct client hosts that sent `SET issuance:lock … NX` (replicas competing). Data only. */
+  contenders: string[];
+  /** The most distinct ids released inside any `windowMs` window (1 when one leader at a time). */
+  maxLeadersInWindow: number;
+  /** Each window (starting at a release) holding more than one leader. */
+  doubled: { at: number; ids: string[] }[];
+  /** Releases per minute observed (≈1 with one leader, ≈2 when both origins compute), or null. */
+  releasesPerMinute: number | null;
 }
 
 const hostOf = (client: string) => client.replace(/:\d+$/, "");
 
-/** Group the lock traffic by tick. Pure. */
-export function issuanceTicks(entries: readonly MonitorEntry[], key = ISSUANCE_LOCK_KEY): IssuanceTick[] {
-  const by = new Map<number, { contenders: Set<string>; leaders: Set<string> }>();
-  const slot = (t: number) => {
-    let s = by.get(t);
-    if (!s) by.set(t, (s = { contenders: new Set(), leaders: new Set() }));
-    return s;
-  };
+/**
+ * Leaders measured directly from the lock traffic, with no clock bucketing: the winner of `SET
+ * issuance:lock <id> NX` computes and releases with `EVAL … issuance:lock <id>`, so each release
+ * is one computation. `observedMs` is how long the traffic was watched. Pure.
+ */
+export function issuanceReport(
+  entries: readonly MonitorEntry[],
+  opts: { observedMs: number; windowMs?: number; key?: string },
+): IssuanceReport {
+  const key = opts.key ?? ISSUANCE_LOCK_KEY;
+  const windowMs = opts.windowMs ?? DOUBLE_LEADER_WINDOW_MS;
+  const contenders = new Set<string>();
+  const releases: IssuanceRelease[] = [];
   for (const e of entries) {
     const cmd = e.args[0]?.toLowerCase();
     if (cmd === "set" && e.args[1] === key && e.args.some((a) => a.toUpperCase() === "NX")) {
-      slot(issuanceTick(e.at)).contenders.add(hostOf(e.client));
+      contenders.add(hostOf(e.client));
     } else if ((cmd === "eval" || cmd === "evalsha") && e.client !== "lua") {
       // EVAL script numkeys key… arg…: the release passes the lock key, then the holder's id.
       const numKeys = Number(e.args[2]);
       const keys = e.args.slice(3, 3 + numKeys);
       if (!keys.includes(key)) continue;
       const id = e.args[3 + numKeys];
-      if (id) slot(issuanceTick(e.at)).leaders.add(id);
+      if (id) releases.push({ at: e.at, id });
     }
   }
-  return [...by.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([tick, s]) => ({ tick, contenders: [...s.contenders].sort(), leaders: [...s.leaders].sort() }));
+  releases.sort((a, b) => a.at - b.at);
+  const doubled: { at: number; ids: string[] }[] = [];
+  let maxLeadersInWindow = 0;
+  for (let i = 0; i < releases.length; i++) {
+    const first = releases[i] as IssuanceRelease;
+    const ids = new Set<string>();
+    for (let j = i; j < releases.length && (releases[j] as IssuanceRelease).at - first.at < windowMs; j++)
+      ids.add((releases[j] as IssuanceRelease).id);
+    maxLeadersInWindow = Math.max(maxLeadersInWindow, ids.size);
+    if (ids.size > 1) doubled.push({ at: first.at, ids: [...ids].sort() });
+  }
+  return {
+    releases,
+    leaders: [...new Set(releases.map((r) => r.id))].sort(),
+    contenders: [...contenders].sort(),
+    maxLeadersInWindow,
+    doubled,
+    releasesPerMinute: opts.observedMs > 0 ? (releases.length * 60_000) / opts.observedMs : null,
+  };
 }
 
 // ---------------------------------------------------------------- client

@@ -3,9 +3,9 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import {
+  DOUBLE_LEADER_WINDOW_MS,
   type MonitorEntry,
-  issuanceTick,
-  issuanceTicks,
+  issuanceReport,
   parseMonitorLine,
   startMonitor,
 } from "../src/multi/monitor.ts";
@@ -39,19 +39,8 @@ describe("parseMonitorLine", () => {
   });
 });
 
-describe("issuanceTick", () => {
-  test("ticks fire 10 s past the minute and sit mid-bucket, so drift either side stays in one tick", () => {
-    const minute = 29_358_000 * 60_000;
-    const tickAt = minute + 10_000;
-    expect(issuanceTick(tickAt - 25_000)).toBe(issuanceTick(tickAt));
-    expect(issuanceTick(tickAt + 25_000)).toBe(issuanceTick(tickAt));
-    expect(issuanceTick(tickAt + 60_000)).toBe(issuanceTick(tickAt) + 1);
-  });
-});
-
-describe("issuanceTicks", () => {
-  const minute = 29_358_000 * 60_000;
-  const at = (k: number, ms = 0) => minute + k * 60_000 + 10_000 + ms;
+describe("issuanceReport", () => {
+  const t0 = 29_358_000 * 60_000 + 10_000;
   const set = (t: number, host: string, id: string): MonitorEntry => ({
     at: t,
     client: `${host}:4${id.length}`,
@@ -62,39 +51,118 @@ describe("issuanceTicks", () => {
     client: `${host}:5000`,
     args: [cmd, cmd === "eval" ? RELEASE : "f00d", "1", "issuance:lock", id],
   });
+  /** An origin ticking every `every` ms from `start` for `n` ticks: SET then, if it leads, release. */
+  const origin = (host: string, id: string, start: number, n: number, leads: (k: number) => boolean, every = 60_000) =>
+    Array.from({ length: n }, (_, k) => {
+      const at = start + k * every;
+      return leads(k) ? [set(at, host, id), release(at + 40, host, id)] : [set(at, host, id)];
+    }).flat();
 
-  test("one leader: both origins contend, one releases", () => {
-    const ticks = issuanceTicks([
-      set(at(0), "10.0.0.1", "o1"),
-      set(at(0, 3), "10.0.0.2", "o2"),
-      release(at(0, 40), "10.0.0.1", "o1"),
-      { at: at(0, 41), client: "lua", args: ["DEL", "issuance:lock"] },
-    ]);
-    expect(ticks).toEqual([{ tick: issuanceTick(at(0)), contenders: ["10.0.0.1", "10.0.0.2"], leaders: ["o1"] }]);
+  test("one leader: both origins contend, one releases each minute", () => {
+    const r = issuanceReport(
+      [
+        ...origin("10.0.0.1", "o1", t0, 5, () => true),
+        ...origin("10.0.0.2", "o2", t0 + 3, 5, () => false),
+        { at: t0 + 41, client: "lua", args: ["DEL", "issuance:lock"] },
+      ],
+      { observedMs: 5 * 60_000 },
+    );
+    expect(r.contenders).toEqual(["10.0.0.1", "10.0.0.2"]);
+    expect(r.leaders).toEqual(["o1"]);
+    expect(r.maxLeadersInWindow).toBe(1);
+    expect(r.doubled).toEqual([]);
+    expect(r.releasesPerMinute).toBe(1);
   });
 
-  test("two leaders in one tick: the second origin took the lock after the first released it", () => {
-    const ticks = issuanceTicks([
-      set(at(1), "10.0.0.1", "o1"),
-      release(at(1, 20), "10.0.0.1", "o1"),
-      set(at(1, 90), "10.0.0.2", "o2"),
-      release(at(1, 120), "10.0.0.2", "o2", "evalsha"),
-    ]);
-    expect(ticks[0]?.leaders).toEqual(["o1", "o2"]);
+  test("leadership passing between ticks (a race won a minute later) is not a double", () => {
+    // Aligned timers with jitter: o1 wins ticks 0 and 2, o2 wins 1 and 3, ~60 s apart.
+    const r = issuanceReport(
+      [
+        release(t0, "10.0.0.1", "o1"),
+        release(t0 + 59_200, "10.0.0.2", "o2"),
+        release(t0 + 120_300, "10.0.0.1", "o1"),
+        release(t0 + 179_900, "10.0.0.2", "o2"),
+      ],
+      { observedMs: 4 * 60_000 },
+    );
+    expect(r.leaders).toEqual(["o1", "o2"]);
+    expect(r.maxLeadersInWindow).toBe(1);
+    expect(r.releasesPerMinute).toBe(1);
   });
 
-  test("ticks are separate, in order; other keys and plain SETs are ignored", () => {
-    const ticks = issuanceTicks([
-      set(at(3), "10.0.0.1", "o1"),
-      set(at(2), "10.0.0.2", "o2"),
-      { at: at(2, 5), client: "10.0.0.3:1", args: ["set", "issuance:lock", "x"] },
-      { at: at(2, 6), client: "10.0.0.3:1", args: ["eval", RELEASE, "1", "worker:lock:integrity:x", "y"] },
-      { at: at(2, 7), client: "10.0.0.3:1", args: ["get", "issuance:lock"] },
-    ]);
-    expect(ticks.map((t) => [t.tick - issuanceTick(at(0)), t.contenders, t.leaders])).toEqual([
-      [2, ["10.0.0.2"], []],
-      [3, ["10.0.0.1"], []],
-    ]);
+  test.each([1_000, 5_000, 15_000, 29_000, 30_000, 31_000, 45_000, 50_000, 59_000])(
+    "two origins both computing, timers drifted %i ms apart, is a double whatever the drift",
+    (drift) => {
+      const r = issuanceReport(
+        [...origin("10.0.0.1", "o1", t0, 4, () => true), ...origin("10.0.0.2", "o2", t0 + drift, 4, () => true)],
+        { observedMs: 4 * 60_000 },
+      );
+      expect(r.maxLeadersInWindow).toBe(2);
+      expect(r.doubled.length).toBeGreaterThan(0);
+      expect(r.doubled[0]?.ids).toEqual(["o1", "o2"]);
+      expect(r.releasesPerMinute).toBe(2);
+    },
+  );
+
+  test("a drifting timer (one origin 26 s late on a long-running stack) with one leader stays single", () => {
+    // Only the late origin's SET wins after the early one stops; contention alone is not a double.
+    const r = issuanceReport(
+      [...origin("10.0.0.1", "o1", t0, 3, () => true), ...origin("10.0.0.2", "o2", t0 + 26_000, 3, () => false)],
+      { observedMs: 3 * 60_000 },
+    );
+    expect(r.maxLeadersInWindow).toBe(1);
+    expect(r.contenders).toHaveLength(2);
+  });
+
+  test("a second leader right after the first released (same tick) is a double", () => {
+    const r = issuanceReport(
+      [
+        set(t0, "10.0.0.1", "o1"),
+        release(t0 + 20, "10.0.0.1", "o1"),
+        set(t0 + 90, "10.0.0.2", "o2"),
+        release(t0 + 120, "10.0.0.2", "o2", "evalsha"),
+      ],
+      { observedMs: 60_000 },
+    );
+    expect(r.doubled).toEqual([{ at: t0 + 20, ids: ["o1", "o2"] }]);
+  });
+
+  test("the window is half-open and configurable", () => {
+    const entries = [release(t0, "a", "o1"), release(t0 + DOUBLE_LEADER_WINDOW_MS, "b", "o2")];
+    expect(issuanceReport(entries, { observedMs: 60_000 }).maxLeadersInWindow).toBe(1);
+    expect(
+      issuanceReport(entries, { observedMs: 60_000, windowMs: DOUBLE_LEADER_WINDOW_MS + 1 }).maxLeadersInWindow,
+    ).toBe(2);
+  });
+
+  test("other keys, plain SETs, lua-issued commands and order of arrival", () => {
+    const r = issuanceReport(
+      [
+        release(t0 + 60_000, "10.0.0.1", "o1"),
+        set(t0, "10.0.0.2", "o2"),
+        { at: t0 + 5, client: "10.0.0.3:1", args: ["set", "issuance:lock", "x"] },
+        { at: t0 + 6, client: "10.0.0.3:1", args: ["eval", RELEASE, "1", "worker:lock:integrity:x", "y"] },
+        { at: t0 + 7, client: "10.0.0.3:1", args: ["get", "issuance:lock"] },
+        { at: t0 + 8, client: "lua", args: ["eval", RELEASE, "1", "issuance:lock", "z"] },
+        release(t0, "10.0.0.2", "o2"),
+      ],
+      { observedMs: 120_000 },
+    );
+    expect(r.contenders).toEqual(["10.0.0.2"]);
+    expect(r.releases.map((x) => x.id)).toEqual(["o2", "o1"]);
+    expect(r.releasesPerMinute).toBe(1);
+  });
+
+  test("nothing observed", () => {
+    const r = issuanceReport([], { observedMs: 0 });
+    expect(r).toEqual({
+      releases: [],
+      leaders: [],
+      contenders: [],
+      maxLeadersInWindow: 0,
+      doubled: [],
+      releasesPerMinute: null,
+    });
   });
 });
 

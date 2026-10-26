@@ -44,14 +44,48 @@ describe("DeliveryCounter", () => {
     expect(c.summary(["a", "a"]).expected).toBe(1);
   });
 
-  test("seen and seenAt follow the first delivery", () => {
+  test("seenAt and count follow the deliveries", () => {
     const c = new DeliveryCounter();
     c.record("a", 10);
     c.record("a", 20);
-    expect(c.seen(["a", "b"])).toBe(1);
     expect(c.seenAt("a")).toBe(10);
     expect(c.seenAt("b")).toBeNull();
     expect(c.count("a")).toBe(2);
+  });
+
+  test("a tracked group counts distinct first deliveries as they arrive", () => {
+    const c = new DeliveryCounter();
+    c.record("a");
+    c.track("g", ["a", "b", "c", "c"]);
+    // Keys seen before tracking count at once.
+    expect(c.seenCount("g")).toBe(1);
+    c.record("b");
+    c.record("b");
+    c.record("zzz");
+    expect(c.seenCount("g")).toBe(2);
+    c.record("c");
+    expect(c.seenCount("g")).toBe(3);
+  });
+
+  test("a key may belong to several groups; untracked or re-tracked groups throw", () => {
+    const c = new DeliveryCounter();
+    c.track("one", ["a", "b"]);
+    c.track("two", ["b", "c"]);
+    c.record("b");
+    expect([c.seenCount("one"), c.seenCount("two")]).toEqual([1, 1]);
+    expect(() => c.seenCount("nope")).toThrow(/not tracked/);
+    expect(() => c.track("one", [])).toThrow(/already tracked/);
+  });
+
+  test("the running count matches a rescan over a large group", () => {
+    const c = new DeliveryCounter();
+    const keys = Array.from({ length: 20_000 }, (_, i) => `k${i}`);
+    c.track("big", keys);
+    for (let i = 0; i < 20_000; i += 3) c.record(`k${i}`);
+    for (let i = 0; i < 20_000; i += 6) c.record(`k${i}`);
+    const rescan = keys.filter((k) => c.count(k) > 0).length;
+    expect(c.seenCount("big")).toBe(rescan);
+    expect(c.summary(keys).delivered).toBe(rescan);
   });
 
   test("samples are capped, totals are not", () => {

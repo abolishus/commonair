@@ -19,7 +19,9 @@
  *   client's backoff, and no message acknowledged before the kill is missing from history;
  * - worker loss: worker-2 is killed mid-backlog, worker-1 drains it.
  *
- * Without the replicas running, every step is skipped with the reason (start the stack with
+ * Every claim gets its weighted share of the time left (`ClaimBudget`), so one claim at its worst
+ * case cannot push the rest past the scenario timeout. Without the replicas running, every step
+ * is skipped with the reason (start the stack with
  * the override and `--profile multi`; see harness/README.md). Killed replicas are restored and
  * health-checked before the scenario ends.
  */
@@ -29,10 +31,18 @@ import { CookieJar } from "../src/api/cookies.ts";
 import { ChatClient } from "../src/chat-client.ts";
 import { HttpViewer } from "../src/http-viewer.ts";
 import { percentile } from "../src/metrics.ts";
+import { ClaimBudget } from "../src/multi/budget.ts";
 import { chatUrlFor, connectOn, sendClassified, sendUntilRejected } from "../src/multi/chat.ts";
 import { DeliveryCounter, exactlyOnce, perSenderOrderKept, withinOneBatch } from "../src/multi/exactly-once.ts";
 import { oncePerTick, schedulerReport } from "../src/multi/jobs.ts";
-import { type MonitorHandle, ISSUANCE_LOCK_KEY, issuanceTicks, startMonitor } from "../src/multi/monitor.ts";
+import {
+  type MonitorHandle,
+  DOUBLE_LEADER_WINDOW_MS,
+  ISSUANCE_INTERVAL_MS,
+  ISSUANCE_LOCK_KEY,
+  issuanceReport,
+  startMonitor,
+} from "../src/multi/monitor.ts";
 import { insertOutboxBacklog, unpublishedCount } from "../src/multi/outbox-db.ts";
 import { healthy, killContainer, listReplicaContainers, restoreContainer } from "../src/multi/podman-ops.ts";
 import { ReconnectingChat } from "../src/multi/reconnecting-chat.ts";
@@ -41,6 +51,7 @@ import { completedSchedulerRuns, listenToBus, oldestCompleted } from "../src/mul
 import { startForwardingProxy } from "../src/proxy.ts";
 import { errorMessage } from "../src/redact.ts";
 import { type ScenarioContext, defineScenario } from "../src/scenario.ts";
+import type { Need } from "../src/scenario.ts";
 import type { SignedInUser } from "../src/users.ts";
 import { AUTH_ROUTES } from "../src/users.ts";
 import { sleep, waitFor } from "../src/wait.ts";
@@ -69,6 +80,30 @@ export const CLAIMS = [
   "worker loss mid-backlog",
 ] as const;
 
+export const SCENARIO_TIMEOUT_MS = 10 * 60_000;
+/** Kept back from the claims for the restores and defers at the end. */
+export const TEARDOWN_RESERVE_MS = 45_000;
+/** In-claim restore of a killed replica; the defer retries with longer if it is still down. */
+const RESTORE_MS = 30_000;
+/** Rows in the worker-loss backlog. */
+export const WORKER_LOSS_BACKLOG = 10_000;
+/**
+ * Each claim's worst case (ms), in `CLAIMS` order: the sum of its own waits plus a little work.
+ * They and the reserve fit the timeout (tests/multi-budget.test.ts), and the budget shares the
+ * time actually left by these weights.
+ */
+export const CLAIM_WEIGHTS_MS = [
+  15_000, // rate limits: 12 requests
+  20_000, // chat across: 10 s delivery wait
+  CHANNEL_TTL_MS + 15_000, // cache staleness: ban, slow mode and empty room run side by side
+  55_000, // outbox: 45 s drain + 2 s repeats
+  115_000, // viewers: 40 s live + 30 s first frame + 40 s converge
+  10_000, // recurring jobs: reads only
+  30_000, // issuance: the monitor has watched since the start; tops up to 75 s observed
+  70_000, // reconnect: 20 s reconnect + 10 s live + 2 s flush + 30 s restore
+  135_000, // worker loss: 20 s start + 75 s drain + 2 s repeats + 30 s restore
+] as const satisfies readonly number[];
+
 interface Kit {
   ctx: ScenarioContext;
   tag: string;
@@ -79,16 +114,21 @@ interface Kit {
   bus: DeliveryCounter;
   monitor: MonitorHandle | null;
   monitorError: string | null;
+  /** When MONITOR started watching (epoch ms). */
+  monitorAt: number;
   startedAt: number;
+  budget: ClaimBudget;
 }
 
 export default defineScenario({
   name: "multi-instance",
   description:
     "two of each app service (api, chat, worker, origin): shared rate limits, chat fan-out and cache invalidation across instances, outbox exactly-once, viewer counts, recurring jobs, one issuance leader, chat reconnect and worker loss after podman kill",
-  needs: ["api", "chat", "worker", "origin", "media", "ffmpeg", "mail", "podman"],
+  // Mail for the signups' verification links. Media and ffmpeg only for viewer counts, which is
+  // skipped with the reason when they are missing.
+  needs: ["api", "chat", "worker", "origin", "mail", "podman"],
   inFull: true,
-  timeoutMs: 10 * 60_000,
+  timeoutMs: SCENARIO_TIMEOUT_MS,
   async run(ctx) {
     const startedAt = Date.now();
     const urls = replicaUrls(process.env);
@@ -129,6 +169,7 @@ export default defineScenario({
     ctx.defer(() => listener.stop());
     let monitor: MonitorHandle | null = null;
     let monitorError: string | null = null;
+    const monitorAt = Date.now();
     try {
       monitor = await startMonitor(urls.valkey, [ISSUANCE_LOCK_KEY]);
       const m = monitor;
@@ -137,9 +178,14 @@ export default defineScenario({
       monitorError = errorMessage(err);
     }
 
-    const kit: Kit = { ctx, tag, urls, containers, api2, bus, monitor, monitorError, startedAt };
+    const budget = new ClaimBudget({
+      deadline: startedAt + SCENARIO_TIMEOUT_MS,
+      weights: CLAIM_WEIGHTS_MS,
+      reserveMs: TEARDOWN_RESERVE_MS,
+    });
+    const kit: Kit = { ctx, tag, urls, containers, api2, bus, monitor, monitorError, monitorAt, startedAt, budget };
     // Before any signup: with the forwarding proxy untrusted, signups would share the address.
-    await claim(kit, CLAIMS[0], () => sharedRateLimit(kit));
+    await claim(kit, 0, () => sharedRateLimit(kit));
 
     const p = ctx.platform;
     const [streamer, alice, bob, troll, slow1, slow2] = await ctx.step("sign up six users", () =>
@@ -150,28 +196,63 @@ export default defineScenario({
     if (!streamer || !alice || !bob || !troll || !slow1 || !slow2) throw new Error("signup returned fewer users");
     const channel = streamer.me.channelSlug ?? streamer.username;
 
-    await claim(kit, CLAIMS[1], () => chatAcrossInstances(kit, channel, alice, bob));
-    await claim(kit, CLAIMS[2], async () => {
-      await cacheStaleness(kit, channel, streamer, troll, slow1, slow2);
-      await emptyRoomStaleness(kit, alice, bob);
-    });
-    await claim(kit, CLAIMS[3], () => outboxExactlyOnce(kit, channel, streamer));
-    await claim(kit, CLAIMS[4], () => viewerCounts(kit, channel, streamer));
-    await claim(kit, CLAIMS[5], () => recurringJobs(kit));
-    await claim(kit, CLAIMS[6], () => issuanceLeader(kit));
-    await claim(kit, CLAIMS[7], () => reconnectOnLoss(kit, channel, streamer, alice));
-    await claim(kit, CLAIMS[8], () => workerLoss(kit, channel, streamer));
+    await claim(kit, 1, () => chatAcrossInstances(kit, channel, alice, bob));
+    // Three rooms, so the three timings run side by side: the ban in the streamer's channel,
+    // slow mode in bob's, the empty-room case in alice's.
+    await claim(kit, 2, () =>
+      allParts(kit, CLAIMS[2], {
+        ban: () => banStaleness(kit, channel, streamer, troll),
+        "slow mode": () => slowModeStaleness(kit, bob, slow1, slow2),
+        "empty room": () => emptyRoomStaleness(kit, alice, bob),
+      }),
+    );
+    await claim(kit, 3, () => outboxExactlyOnce(kit, channel, streamer));
+    const mediaMissing = await viewerNeedsMissing(ctx);
+    if (mediaMissing) ctx.skipStep(CLAIMS[4], mediaMissing);
+    else await claim(kit, 4, () => viewerCounts(kit, channel, streamer));
+    await claim(kit, 5, () => recurringJobs(kit));
+    await claim(kit, 6, () => issuanceLeader(kit));
+    await claim(kit, 7, () => reconnectOnLoss(kit, channel, streamer, alice));
+    await claim(kit, 8, () => workerLoss(kit, channel, streamer));
+    ctx.metric("multi.bus.invalid_messages", listener.invalid);
   },
 });
 
-/** Run one claim as a step; a throw is recorded as a failed check, so the next claim still runs. */
-async function claim(kit: Kit, name: string, fn: () => Promise<void>): Promise<void> {
+/**
+ * Run one claim as a step within its share of the time left; a throw is recorded as a failed
+ * check, so the next claim still runs.
+ */
+async function claim(kit: Kit, index: number, fn: () => Promise<void>): Promise<void> {
+  const name = CLAIMS[index] ?? `claim ${index}`;
+  const allowedMs = kit.budget.begin(index);
+  kit.ctx.data(`budgetMs.${index}`, allowedMs);
   try {
     await kit.ctx.step(name, fn);
   } catch (err) {
     if (kit.ctx.signal.aborted) throw err;
-    kit.ctx.check(`${name}: completed`, false, { error: errorMessage(err) });
+    kit.ctx.check(`${name}: completed`, false, { error: errorMessage(err), allowedMs });
   }
+}
+
+/** Run independent parts of one claim side by side; each failure is its own failed check. */
+async function allParts(kit: Kit, name: string, parts: Record<string, () => Promise<void>>): Promise<void> {
+  const entries = Object.entries(parts);
+  const results = await Promise.allSettled(entries.map(([, run]) => run()));
+  if (kit.ctx.signal.aborted) throw kit.ctx.signal.reason;
+  results.forEach((r, i) => {
+    if (r.status === "rejected")
+      kit.ctx.check(`${name}: ${entries[i]?.[0] ?? i} completed`, false, { error: errorMessage(r.reason) });
+  });
+}
+
+/** Viewer counts stream through MediaMTX with ffmpeg; why they cannot run here, or null. */
+async function viewerNeedsMissing(ctx: ScenarioContext): Promise<string | null> {
+  const problems: string[] = [];
+  for (const need of ["media", "ffmpeg"] as const satisfies readonly Need[]) {
+    const problem = await ctx.platform.probe(need).catch((err: unknown) => errorMessage(err));
+    if (problem) problems.push(`${need}: ${problem}`);
+  }
+  return problems.length > 0 ? `needs ${problems.join("; ")}` : null;
 }
 
 /** Why the scenario cannot run (replicas missing or unhealthy), or null. */
@@ -315,19 +396,15 @@ async function chatAcrossInstances(kit: Kit, channel: string, alice: SignedInUse
 
 // ---------------------------------------------------------------- cache staleness
 
-async function cacheStaleness(
-  kit: Kit,
-  channel: string,
-  streamer: SignedInUser,
-  troll: SignedInUser,
-  slow1: SignedInUser,
-  slow2: SignedInUser,
-): Promise<void> {
-  const { ctx, urls } = kit;
-  const instances = [
+const INSTANCES = (urls: Kit["urls"]) =>
+  [
     { name: "chat1", base: null },
     { name: "chat2", base: urls.chat2 },
   ] as const;
+
+async function banStaleness(kit: Kit, channel: string, streamer: SignedInUser, troll: SignedInUser): Promise<void> {
+  const { ctx } = kit;
+  const instances = INSTANCES(kit.urls);
 
   // Ban: made through api-2, observed by the troll's own socket on each instance.
   const trollOn = await Promise.all(instances.map((i) => connectOn(troll.api, i.base, ctx.log)));
@@ -357,7 +434,7 @@ async function cacheStaleness(
     trollOn.map((c, i) =>
       sendUntilRejected(c, channel, `ban:${kit.tag}:i${i}:`, {
         intervalMs: 2_000,
-        deadline: banAt + STANDING_TTL_MS + 10_000,
+        deadline: kit.budget.until(STANDING_TTL_MS + 10_000),
         signal: ctx.signal,
       }),
     ),
@@ -376,10 +453,22 @@ async function cacheStaleness(
       { ms, code: r?.code ?? null, acceptedAfterBan: r?.acceptedBefore.length ?? null, banFrame: frameAt !== null },
     );
   });
+}
 
-  // Slow mode: set through api-1; one regular chatter per instance sends every 3 s. A send is
-  // refused only after an accepted one reserved the slow-mode window, so slow mode was in effect
-  // at that accepted send: its time bounds the staleness from above.
+/**
+ * Slow mode in `owner`'s channel, set through api-1; one regular chatter per instance sends every
+ * 3 s. A send is refused only after an accepted one reserved the slow-mode window, so slow mode
+ * was in effect at that accepted send: its time bounds the staleness from above.
+ */
+async function slowModeStaleness(
+  kit: Kit,
+  owner: SignedInUser,
+  slow1: SignedInUser,
+  slow2: SignedInUser,
+): Promise<void> {
+  const { ctx, urls } = kit;
+  const instances = INSTANCES(urls);
+  const channel = owner.me.channelSlug ?? owner.username;
   const slowSeconds = 20;
   const chatters = await Promise.all([connectOn(slow1.api, null, ctx.log), connectOn(slow2.api, urls.chat2, ctx.log)]);
   for (const c of chatters) ctx.defer(() => c.close());
@@ -392,14 +481,14 @@ async function cacheStaleness(
         () => null,
       ),
   );
-  await streamer.api.client.chat.updateSettings({ channel, slowModeSeconds: slowSeconds });
+  await owner.api.client.chat.updateSettings({ channel, slowModeSeconds: slowSeconds });
   const slowAt = Date.now();
-  ctx.defer(() => streamer.api.client.chat.updateSettings({ channel, slowModeSeconds: 0 }).catch(() => undefined));
+  ctx.defer(() => owner.api.client.chat.updateSettings({ channel, slowModeSeconds: 0 }).catch(() => undefined));
   const slowed = await Promise.all(
     chatters.map((c, i) =>
       sendUntilRejected(c, channel, `slow:${kit.tag}:${i}:`, {
         intervalMs: 3_000,
-        deadline: slowAt + CHANNEL_TTL_MS + 10_000,
+        deadline: kit.budget.until(CHANNEL_TTL_MS + 10_000),
         signal: ctx.signal,
       }),
     ),
@@ -419,7 +508,7 @@ async function cacheStaleness(
       { ms, code: r?.code ?? null, accepted: r?.acceptedBefore.length ?? null, settingsFrame: frameAt !== null },
     );
   });
-  await streamer.api.client.chat.updateSettings({ channel, slowModeSeconds: 0 });
+  await owner.api.client.chat.updateSettings({ channel, slowModeSeconds: 0 });
 }
 
 /**
@@ -427,7 +516,7 @@ async function cacheStaleness(
  * (services/chat/src/rooms.ts `part`), but keeps the room's cached settings until their TTL. A
  * change made while it has no members is never heard there: the next member to join that
  * instance gets the old settings until the cache expires. Owner `host`, chatter `guest`, in the
- * host's own channel so no earlier step keeps chat-2 subscribed to it.
+ * host's own channel so no other step keeps chat-2 subscribed to it.
  */
 async function emptyRoomStaleness(kit: Kit, host: SignedInUser, guest: SignedInUser): Promise<void> {
   const { ctx, urls } = kit;
@@ -451,7 +540,7 @@ async function emptyRoomStaleness(kit: Kit, host: SignedInUser, guest: SignedInU
   const joined = await again.join(room);
   const r = await sendUntilRejected(again, room, `empty:${kit.tag}:`, {
     intervalMs: 3_000,
-    deadline: changedAt + CHANNEL_TTL_MS + 10_000,
+    deadline: kit.budget.until(CHANNEL_TTL_MS + 10_000),
     signal: ctx.signal,
   });
   const reserving = r.acceptedBefore.at(-1);
@@ -478,10 +567,11 @@ async function broadcasterOf(api: Api, channel: string) {
   return { channelId: c.id, userId: c.owner.id, login: c.slug, name: c.displayName };
 }
 
-async function waitDelivered(kit: Kit, keys: readonly string[], timeoutMs: number): Promise<number> {
+/** Wait until every key of a tracked group was on the bus (capped by the claim's budget). */
+async function waitDelivered(kit: Kit, group: string, total: number, timeoutMs: number): Promise<number> {
   const t0 = Date.now();
-  await waitFor(`${keys.length} events on the bus`, () => kit.bus.seen(keys) >= keys.length, {
-    timeoutMs,
+  await waitFor(`${total} events on the bus`, () => kit.bus.seenCount(group) >= total, {
+    timeoutMs: kit.budget.cap(timeoutMs - 2_000),
     intervalMs: 100,
     signal: kit.ctx.signal,
   }).catch(() => undefined);
@@ -496,15 +586,17 @@ async function outboxExactlyOnce(kit: Kit, channel: string, streamer: SignedInUs
   // Through both APIs: each `channels.update` writes one outbox row in its transaction.
   const host2 = kit.api2({ jar: streamer.api.jar });
   const viaApi = Array.from({ length: 20 }, (_, i) => `multi:${kit.tag}:api:${i}`);
+  const viaDbAll = Array.from({ length: 2_000 }, (_, i) => `multi:${kit.tag}:once:${i}`);
+  kit.bus.track("outbox", [...viaApi, ...(ctx.env.DATABASE_URL ? viaDbAll : [])]);
   for (const [i, title] of viaApi.entries())
     await (i % 2 === 0 ? streamer.api : host2).client.channels.update({ channel, title });
   let viaDb: string[] = [];
   if (ctx.env.DATABASE_URL) {
-    viaDb = Array.from({ length: 2_000 }, (_, i) => `multi:${kit.tag}:once:${i}`);
+    viaDb = viaDbAll;
     await insertOutboxBacklog(ctx.env.DATABASE_URL, await broadcasterOf(streamer.api, channel), viaDb);
   } else ctx.skipStep("outbox backlog of 2000 rows", "DATABASE_URL not set (the repo .env provides it)");
   const expected = [...viaApi, ...viaDb];
-  const drained = await waitDelivered(kit, expected, 60_000);
+  const drained = await waitDelivered(kit, "outbox", expected.length, 47_000);
   const s = kit.bus.summary(expected);
   ctx.metric("multi.outbox.events", expected.length);
   ctx.metric("multi.outbox.drain_ms", drained, "ms");
@@ -522,21 +614,23 @@ async function workerLoss(kit: Kit, channel: string, streamer: SignedInUser): Pr
   }
   const worker2 = containerOf(kit.containers, "worker-2");
   if (!worker2) throw new Error("worker-2 container not found");
-  const n = 20_000;
+  const n = WORKER_LOSS_BACKLOG;
   const titles = Array.from({ length: n }, (_, i) => `multi:${kit.tag}:kill:${i}`);
+  kit.bus.track("kill", titles);
   const ids = await insertOutboxBacklog(databaseUrl, await broadcasterOf(streamer.api, channel), titles);
   // Kill while the relays are draining: after the first batches, long before the last.
-  await waitFor("relay started on the backlog", () => kit.bus.seen(titles) >= OUTBOX_BATCH * 2, {
-    timeoutMs: 30_000,
+  await waitFor("relay started on the backlog", () => kit.bus.seenCount("kill") >= OUTBOX_BATCH * 2, {
+    timeoutMs: kit.budget.cap(20_000),
     intervalMs: 10,
     signal: ctx.signal,
   });
   const killedAt = await killContainer(worker2.name);
   ctx.defer(() => restoreContainer(worker2.name, kit.urls.worker2Health).catch(() => undefined));
-  const seenAtKill = kit.bus.seen(titles);
+  const seenAtKill = kit.bus.seenCount("kill");
   ctx.metric("multi.worker_loss.relayed_before_kill", seenAtKill);
   ctx.check("worker-2 died with the backlog still draining", seenAtKill < n, { seenAtKill, backlog: n });
-  const drained = await waitDelivered(kit, titles, 120_000);
+  // Leave the in-claim restore its time.
+  const drained = await waitDelivered(kit, "kill", n, Math.max(0, kit.budget.remaining() - RESTORE_MS));
   const s = kit.bus.summary(titles);
   ctx.metric("multi.worker_loss.drain_ms", Date.now() - killedAt, "ms");
   ctx.metric("multi.worker_loss.duplicates", s.extra);
@@ -549,7 +643,7 @@ async function workerLoss(kit: Kit, channel: string, streamer: SignedInUser): Pr
     withinOneBatch(s, OUTBOX_BATCH),
     { duplicates: s.extra, sample: s.duplicated.slice(0, 5) },
   );
-  const back = await restoreContainer(worker2.name, kit.urls.worker2Health);
+  const back = await restoreContainer(worker2.name, kit.urls.worker2Health, kit.budget.cap(RESTORE_MS, 15_000));
   ctx.metric("multi.restore_ms.worker", back, "ms");
 }
 
@@ -561,7 +655,7 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
   const s = await p.streamerFor(streamer, { protocol: "rtmp", width: 640, height: 360, bitrateKbps: 800 });
   ctx.defer(() => s.stop());
   await s.start();
-  await p.waitForLive(channel, true, 45_000);
+  await p.waitForLive(channel, true, kit.budget.cap(40_000, 5_000));
   const perApi = 2;
   const viewers = [
     ...Array.from({ length: perApi }, () => p.api()),
@@ -572,7 +666,8 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
     await v.start();
   }
   const total = viewers.length;
-  const first = await Promise.allSettled(viewers.map((v) => v.waitForFirstFrame(60_000)));
+  const firstFrameMs = kit.budget.cap(30_000, 5_000);
+  const first = await Promise.allSettled(viewers.map((v) => v.waitForFirstFrame(firstFrameMs)));
   const started = first.filter((r) => r.status === "fulfilled").length;
   ctx.check("every viewer started playback", started === total, { started, total });
 
@@ -588,7 +683,7 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
       samples.push({ api1: c1, api2: c2 });
       return c1 === started && c2 === started;
     },
-    { timeoutMs: 150_000, intervalMs: 2_000, signal: ctx.signal },
+    { timeoutMs: kit.budget.cap(40_000, 2_000), intervalMs: 2_000, signal: ctx.signal },
   ).then(
     () => true,
     () => false,
@@ -630,28 +725,41 @@ async function issuanceLeader(kit: Kit): Promise<void> {
     ctx.check("Valkey MONITOR available to watch the issuance lock", false, { error: kit.monitorError });
     return;
   }
-  const contended = () => issuanceTicks(monitor.entries).filter((t) => t.contenders.length >= 2);
-  // Ticks fire 10 s past each minute; at most one more minute to wait.
-  await waitFor("an issuance tick both origins contended", () => contended().length >= 1, {
-    timeoutMs: 80_000,
+  // Every origin ticks at least once in any minute; a quarter more for a late timer. MONITOR has
+  // watched since the scenario started, so this is usually already true.
+  const enough = ISSUANCE_INTERVAL_MS + 15_000;
+  await waitFor("a full issuance interval observed", () => Date.now() - kit.monitorAt >= enough, {
+    timeoutMs: kit.budget.cap(Math.max(0, kit.monitorAt + enough - Date.now()) + 1_000),
     intervalMs: 1_000,
     signal: ctx.signal,
   }).catch(() => undefined);
-  const ticks = issuanceTicks(monitor.entries);
-  const both = contended();
-  const doubled = both.filter((t) => t.leaders.length > 1);
-  ctx.data("issuanceTicks", ticks);
-  ctx.metric("multi.issuance.ticks", both.length);
-  ctx.metric("multi.issuance.double_leader_ticks", doubled.length);
-  ctx.check("both origins compete for the issuance lock", both.length > 0, {
-    ticks: ticks.length,
+  const observedMs = Date.now() - kit.monitorAt;
+  const r = issuanceReport(monitor.entries, { observedMs });
+  ctx.data("issuance", {
+    observedMs,
+    windowMs: DOUBLE_LEADER_WINDOW_MS,
+    // Contention is context, not a claim: a late timer may find the lock already released.
+    contenders: r.contenders,
+    leaders: r.leaders,
+    releases: r.releases.slice(-20),
+    doubled: r.doubled.slice(0, 10),
+    monitorError: monitor.error,
+  });
+  ctx.metric("multi.issuance.contenders", r.contenders.length);
+  ctx.metric("multi.issuance.releases_per_minute", r.releasesPerMinute);
+  ctx.metric("multi.issuance.max_leaders_in_window", r.maxLeadersInWindow);
+  ctx.metric("multi.issuance.double_leader_windows", r.doubled.length);
+  ctx.check("issuance ran while watched (the lock was taken and released)", r.releases.length > 0, {
+    observedMs,
     monitorError: monitor.error,
   });
   ctx.check(
-    "exactly one origin computes issuance per tick",
-    both.length > 0 && both.every((t) => t.leaders.length === 1),
+    `exactly one origin computes issuance at a time (one leader in any ${DOUBLE_LEADER_WINDOW_MS / 1000} s)`,
+    r.releases.length > 0 && r.maxLeadersInWindow === 1,
     {
-      ticks: both,
+      maxLeadersInWindow: r.maxLeadersInWindow,
+      releasesPerMinute: r.releasesPerMinute,
+      doubled: r.doubled.slice(0, 5),
     },
   );
 }
@@ -693,7 +801,8 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
   ctx.defer(() => restoreContainer(chat2.name, urls.chat2Health).catch(() => undefined));
   burst.close();
 
-  const back = await Promise.allSettled(watchers.map((w) => w.waitConnected(killedAt, 30_000)));
+  const reconnectMs = kit.budget.cap(20_000, 5_000);
+  const back = await Promise.allSettled(watchers.map((w) => w.waitConnected(killedAt, reconnectMs)));
   const reconnected = back.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
   const ms = reconnected.map((c) => c.connectedAt - killedAt);
   ctx.metric("multi.reconnect_ms", ms.length ? Math.max(...ms) : null, "ms");
@@ -715,7 +824,7 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
   const live = await waitFor(
     "reconnected clients receive new messages",
     () => watchers.every((w) => w.messages().some((m) => m.body === after)),
-    { timeoutMs: 10_000, intervalMs: 100, signal: ctx.signal },
+    { timeoutMs: kit.budget.cap(10_000, 2_000), intervalMs: 100, signal: ctx.signal },
   ).then(
     () => true,
     () => false,
@@ -734,6 +843,6 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
     sample: lost.slice(0, 5),
   });
 
-  const restored = await restoreContainer(chat2.name, urls.chat2Health);
+  const restored = await restoreContainer(chat2.name, urls.chat2Health, kit.budget.cap(RESTORE_MS, 15_000));
   ctx.metric("multi.restore_ms.chat", restored, "ms");
 }

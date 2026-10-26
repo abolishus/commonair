@@ -23,10 +23,33 @@ export interface DeliverySummary {
 export class DeliveryCounter {
   private readonly counts = new Map<string, number>();
   private readonly firstAt = new Map<string, number>();
+  /** Key → the tracked groups it belongs to. */
+  private readonly groupsOf = new Map<string, string[]>();
+  /** Group → how many of its keys have been seen at least once (kept as keys arrive). */
+  private readonly seenIn = new Map<string, number>();
+
+  /**
+   * Watch a group of keys: `seenCount(group)` then answers in O(1) however often it is polled,
+   * instead of rescanning thousands of keys. Keys already seen count at once.
+   */
+  track(group: string, keys: Iterable<string>): void {
+    if (this.seenIn.has(group)) throw new Error(`group ${group} already tracked`);
+    let n = 0;
+    for (const key of new Set(keys)) {
+      const groups = this.groupsOf.get(key);
+      if (groups) groups.push(group);
+      else this.groupsOf.set(key, [group]);
+      if (this.counts.has(key)) n++;
+    }
+    this.seenIn.set(group, n);
+  }
 
   record(key: string, at = Date.now()): void {
-    this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
-    if (!this.firstAt.has(key)) this.firstAt.set(key, at);
+    const n = this.counts.get(key) ?? 0;
+    this.counts.set(key, n + 1);
+    if (n > 0) return;
+    this.firstAt.set(key, at);
+    for (const g of this.groupsOf.get(key) ?? []) this.seenIn.set(g, (this.seenIn.get(g) ?? 0) + 1);
   }
 
   count(key: string): number {
@@ -38,10 +61,10 @@ export class DeliveryCounter {
     return this.firstAt.get(key) ?? null;
   }
 
-  /** How many of `keys` have been seen at least once. */
-  seen(keys: Iterable<string>): number {
-    let n = 0;
-    for (const k of keys) if (this.counts.has(k)) n++;
+  /** How many distinct keys of a tracked group have been seen at least once. */
+  seenCount(group: string): number {
+    const n = this.seenIn.get(group);
+    if (n === undefined) throw new Error(`group ${group} is not tracked`);
     return n;
   }
 

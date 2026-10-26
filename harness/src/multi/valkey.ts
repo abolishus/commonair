@@ -5,40 +5,51 @@
  * The scenario's read-only views of Valkey: the event bus (`BUS.events`, where the outbox relay
  * publishes every event exactly when it relays it) and BullMQ's completed jobs.
  */
-import { BUS } from "@commonair/contracts/events";
+import { BUS, BusEvent } from "@commonair/contracts/events";
 import { RedisClient } from "bun";
 import { type JobRun, jobRunFromHash } from "./jobs.ts";
 
-export interface BusMessage {
-  id: string;
-  type: string;
-  payload: Record<string, unknown>;
-}
-
 export interface BusListener {
+  /** Messages on the bus that are not JSON or fail the `BusEvent` contract. */
+  readonly invalid: number;
   stop(): Promise<void>;
 }
 
-/** Subscribe to `BUS.events`; `onEvent` gets every parsed event. Resolves once subscribed. */
-export async function listenToBus(url: string, onEvent: (e: BusMessage, at: number) => void): Promise<BusListener> {
+/**
+ * Subscribe to `BUS.events`; `onEvent` gets every event that matches the `BusEvent` contract
+ * (@commonair/contracts/events). The rest are counted, not passed on. Resolves once subscribed.
+ */
+export async function listenToBus(url: string, onEvent: (e: BusEvent, at: number) => void): Promise<BusListener> {
   const client = new RedisClient(url);
   await client.connect();
+  let invalid = 0;
   await client.subscribe(BUS.events, (message) => {
     const at = Date.now();
-    try {
-      const e = JSON.parse(message) as Partial<BusMessage>;
-      if (typeof e.id === "string" && typeof e.type === "string" && e.payload && typeof e.payload === "object")
-        onEvent({ id: e.id, type: e.type, payload: e.payload }, at);
-    } catch {
-      // Not ours to judge: other consumers validate the bus.
-    }
+    const e = parseBusMessage(message);
+    if (e) onEvent(e, at);
+    else invalid++;
   });
   return {
+    get invalid() {
+      return invalid;
+    },
     async stop() {
       await client.unsubscribe(BUS.events).catch(() => undefined);
       client.close();
     },
   };
+}
+
+/** One `BUS.events` message as a `BusEvent`, or null when it is not JSON or breaks the contract. */
+export function parseBusMessage(message: string): BusEvent | null {
+  let json: unknown;
+  try {
+    json = JSON.parse(message);
+  } catch {
+    return null;
+  }
+  const parsed = BusEvent.safeParse(json);
+  return parsed.success ? parsed.data : null;
 }
 
 /** Completed scheduler jobs of a BullMQ queue (prefix `bull`, as the worker runs it). */
