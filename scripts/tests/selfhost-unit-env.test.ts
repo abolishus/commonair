@@ -484,7 +484,7 @@ describe("shellcheck", () => {
 });
 
 describe("docs describe the per-unit env", () => {
-  // These docs are this unit's to keep current; the README and hetzner.md limitation bullets
+  // These docs are this unit's to keep current; the README and digitalocean.md limitation bullets
   // are tracked as a contract request until the orchestrator rewrites them.
   const DOCS = [
     "infra/README.md",

@@ -110,8 +110,8 @@ the block.
 ## Optional: off-host object storage
 
 Backups go to the local Garage by default, which does not survive the loss of the server. For a
-real instance, point WAL-G at an S3-compatible bucket somewhere else: Hetzner Object Storage, a
-Garage node on a second host, or any other S3 service. See [backups.md](backups.md).
+real instance, point WAL-G at an S3-compatible bucket somewhere else: DigitalOcean Spaces, Hetzner Object
+Storage, a Garage node on a second host, or any other S3 service. See [backups.md](backups.md).
 
 ## Accounts and access
 

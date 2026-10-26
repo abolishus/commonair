@@ -310,7 +310,8 @@ Compose is the development path; `quadlet/` is the production path on systemd (r
 units). Same images, same config files, same variables. Operators install a signed release with
 `scripts/selfhost.sh`, which renders, installs and runs these units: the
 [self-hosting guide](../docs/self-hosting/README.md) is the reference, and
-[docs/deploy/hetzner.md](../docs/deploy/hetzner.md) the co-op's own production host (ADR 0010).
+[docs/deploy/digitalocean.md](../docs/deploy/digitalocean.md) the co-op's own staging and production
+hosts (ADR 0025).
 This section describes the units for people who change them.
 
 ### Units in the repository and rendered units

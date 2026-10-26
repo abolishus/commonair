@@ -5,7 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0010: Production hosting on Hetzner dedicated servers
 
-- Status: accepted (2026-10-21), region open (see [Open questions](#open-questions))
+- Status: superseded by [ADR 0025](0025-hosting-on-digitalocean.md) (2026-10-26); accepted
+  2026-10-21. Kept for its reasoning; Hetzner stays a valid self-host target
 - Date: 2026-10-21 (prices and allowances checked on this date)
 
 ## Context

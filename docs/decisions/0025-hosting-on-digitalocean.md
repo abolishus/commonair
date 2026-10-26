@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0025: Staging and production on DigitalOcean (supersedes ADR 0010)
 
-- Status: proposed (2026-10-26)
+- Status: accepted (2026-10-26)
 - Date: 2026-10-26 (provider facts checked on 2026-10-24)
 
 ## Context
@@ -75,16 +75,30 @@ Hostinger is out: prepaid terms, one IP per VPS, no confirmed IPv6 or Debian 13 
 - Abuse and copyright complaints come through DigitalOcean's abuse process; the abuse-response
   runbook ADR 0010 asked for still applies.
 - Region is open again, and easier: DigitalOcean has North American and European regions.
-- Docs to change on acceptance: `docs/deploy/hetzner.md` becomes `docs/deploy/digitalocean.md`;
-  `requirements.md` and `infra/README.md` stop naming Hetzner as the production host; ADR 0010 is
-  marked superseded.
+- Docs changed on acceptance: `docs/deploy/hetzner.md` became `docs/deploy/digitalocean.md`;
+  the self-hosting docs and `infra/README.md` stopped naming Hetzner as the production host; ADR
+  0010 is marked superseded; Railway is retired (decision 2: the rc test droplet ran the rc.1 →
+  rc.2 upgrade).
+
+## Settled at acceptance (2026-10-26)
+
+- **Staging is the rc test droplet** (`commonair-rc-test`, `staging-stream.abolish.us`) until the
+  OpenTofu definitions exist (S1-g); then it is recreated from them. Its shared vCPUs are fine for
+  staging; production still uses dedicated vCPUs.
+- **Production mail uses a relay's alternate port** (Resend on 2587, as on staging) rather than
+  waiting on DigitalOcean to lift the SMTP block.
+- **State stays on the droplet at launch.** Postgres, Valkey and Garage run in the stack, exactly
+  what self-hosters run, so our instance keeps testing the shipped path. Moving to DigitalOcean's
+  managed Postgres and Valkey is stage 1 of the scaling plan, decided in its own ADR, and comes
+  with `selfhost.sh` support for external managed Postgres, Valkey and S3 from any provider, so
+  self-hosters get the same option (`.claude/briefs/next/S1-scaling.md`).
+- **Availability at launch is 99.5% a month**; 99.9% is the target once stage 1 adds database
+  failover.
 
 ## Open questions
 
 - Production region (North American or European audience first).
-- Production droplet size, after the E6 load test.
-- Whether the staging droplet is the rc test host (`staging-stream.abolish.us`) kept running, or a
-  fresh one created with OpenTofu.
+- Production droplet size, after the S1-a load test (`.claude/briefs/next/S1-scaling.md`).
 
 Sources (2026-10-24): Hetzner's price adjustment notice of 15 June 2026; Hetzner Cloud CPX pricing;
 DigitalOcean droplet pricing; DigitalOcean's MCP server announcement (2025-08-26); Hostinger's

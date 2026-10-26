@@ -32,15 +32,16 @@ Create a bucket and a key at the other location, then add to
 `~/.config/commonair/commonair.env`:
 
 ```sh
-AWS_ENDPOINT=https://fsn1.your-objectstorage.com
-AWS_REGION=fsn1
+AWS_ENDPOINT=https://ams3.digitaloceanspaces.com
+AWS_REGION=ams3
 AWS_ACCESS_KEY_ID=<key>
 AWS_SECRET_ACCESS_KEY=<secret>
 WALG_S3_PREFIX=s3://<bucket>/wal
 ```
 
-That example is Hetzner Object Storage in Falkenstein; pick a location other than the server's,
-and check the endpoint form against Hetzner's documentation. A second Garage node on another
+That example is DigitalOcean Spaces in Amsterdam; pick a region other than the server's, and
+check the endpoint form against your provider's documentation (Hetzner Object Storage, for one,
+uses `https://<location>.your-objectstorage.com`). A second Garage node on another
 host works the same way, with its own endpoint, region (`garage` unless you changed it) and a
 key that has read and write access to the bucket. `AWS_S3_FORCE_PATH_STYLE` defaults to `true`,
 which both accept.

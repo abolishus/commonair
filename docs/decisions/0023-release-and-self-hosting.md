@@ -14,7 +14,8 @@ PLAN Phase 5: anyone should be able to take a tagged release and get a running i
 fresh Linux server with one command, using signed images and binaries that come with
 provenance and an SBOM. Before this ADR the Quadlet units referenced `localhost/commonair/*:latest`
 images built on the server from a git clone, and setup was the manual steps in
-[deploy/hetzner.md](../deploy/hetzner.md). ADR 0010 chose the host. ADR 0022 sets the
+`deploy/hetzner.md` (now [deploy/digitalocean.md](../deploy/digitalocean.md)). ADR 0010 chose the
+host; ADR 0025 replaced it. ADR 0022 sets the
 supply-chain rules that everything here must follow: Actions pinned to commit SHAs and
 third-party images pinned to digests.
 

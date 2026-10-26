@@ -264,7 +264,7 @@ const DOC_FILES = (): string[] => {
       .filter((f) => f.endsWith(".md"))
       .map((f) => `docs/self-hosting/${f}`),
     "docs/maintainers/releasing.md",
-    "docs/deploy/hetzner.md",
+    "docs/deploy/digitalocean.md",
     "infra/README.md",
     "README.md",
   ];

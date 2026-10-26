@@ -10,11 +10,12 @@ things first: network egress, CPU for the media pipeline, or disk.
 
 ## What to watch
 
-**Port utilization, first.** Viewers dominate cost and capacity. One viewer at about 3 Mbit/s
-uses about 1.35 GB per hour, so a 1 Gbit/s port carries a few hundred concurrent viewers from
-the origin alone. Watch the sustained utilization of the server's network port (your
-provider's graphs, or `sar -n DEV` from sysstat). Near the port's capacity, add capacity as
-described below. Do not wait for a bill: on an unmetered port, the symptom is buffering.
+**Egress, first.** Viewers dominate cost and capacity. One viewer at about 3 Mbit/s uses about
+1.35 GB per hour, so a 1 Gbit/s port carries a few hundred concurrent viewers from the origin
+alone. On an unmetered port, watch its sustained utilization (your provider's graphs, or
+`sar -n DEV` from sysstat): the symptom of a full port is buffering, not a bill. On a metered
+host (DigitalOcean, most clouds), watch transfer against your allowance and budget as well: the
+bill arrives before the port fills.
 
 **CPU while streamers are live.** Each live stream with enough viewers gets an adaptive ladder
 (FFmpeg), and every stream is sampled for moderation. Relevant settings:
@@ -33,21 +34,26 @@ metrics, logs and traces.
 
 ## The order to scale in
 
-[ADR 0010](../decisions/0010-production-hosting.md) §3 sets the order. Scale out by role, not by
-buying a bigger box:
+Scale out by role, not by buying a bigger box. The stages follow the co-op's own plan for its
+instance (ADR 0025; the scaling milestone, S1):
 
-1. **Move Postgres and Valkey to their own server**, so the database stops competing with
-   FFmpeg for CPU and memory.
-2. **Add origin and media servers** for more egress and more transcoding.
-3. **Rely on member relays and P2P before any CDN.** Members who run a relay
+1. **Move state off the host.** Postgres and Valkey go to their own servers, or to managed
+   services, so the database stops competing with FFmpeg for CPU and memory and can fail over.
+   Objects go to an external S3 store. `selfhost.sh` will accept an external Postgres, Valkey
+   and S3 from any provider (S1-b), so a self-hosted instance can use the same managed products
+   as ours; a managed Postgres must let a non-superuser owner create the protection triggers and
+   the non-owner app role (ADR 0004).
+2. **Add app servers** (API, chat, web, worker, origin, tracker) behind a load balancer.
+3. **Add media servers** for more transcoding and ingest.
+4. **Rely on member relays and P2P before any CDN.** Members who run a relay
    ([relays.md](relays.md)) serve viewers from their own upload bandwidth, and the WebTorrent
    P2P swarm (`P2P_ENABLED`, on by default) lets viewers share segments. Both take load off the
    origin at no cost to the co-op, so encourage relays from the start; they do not replace
-   steps 1 and 2 as the platform's own capacity.
-4. **A CDN last**, and only as an optional burst adapter (`CDN_PROVIDER=origin-pull`). The
+   the steps above as the platform's own capacity.
+5. **A CDN last**, and only as an optional burst adapter (`CDN_PROVIDER=origin-pull`). The
    platform never requires one.
 
-Steps 1 and 2 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
+Steps 1 to 3 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
 running the same images with the same env file on another host, pointing `DATABASE_URL`,
 `VALKEY_URL` and the internal URLs at it, and keeping the internal ports off the public
 internet. Plan that work with the project before you need it.
