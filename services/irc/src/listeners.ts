@@ -5,7 +5,7 @@
  * Transports: plain TCP, TLS, and IRC-over-WebSocket. Each adapts its socket to
  * the session's `Transport` interface and feeds it lines.
  */
-import type { Server, ServerWebSocket, Socket, TCPSocketListener } from "bun";
+import type { FdSocketOptions, Server, ServerWebSocket, Socket, SocketHandler, TCPSocketListener } from "bun";
 import { LineFramer, splitFrame, type FramerSink } from "./irc/framer.ts";
 import { clientAddress, type Cidr } from "./net.ts";
 import type { Transport, TransportKind } from "./session.ts";
@@ -84,39 +84,46 @@ function drain(socket: Socket<SocketState>): void {
   if (st.closing) socket.end();
 }
 
-export function listenSocket(opts: {
-  kind: "tcp" | "tls";
-  hostname: string;
-  port: number;
-  maxFrameBytes: number;
-  tls?: { cert: string; key: string } | undefined;
-  accept: Accept;
-}): TCPSocketListener<SocketState> {
-  return Bun.listen<SocketState>({
-    hostname: opts.hostname,
-    port: opts.port,
-    ...(opts.tls ? { tls: opts.tls } : {}),
-    socket: {
-      open(socket) {
-        socket.data = { sink: null, framer: null, pending: [], pendingBytes: 0, closing: false };
-        // No PROXY protocol support: a TCP/TLS peer address is always the client's own.
-        const sink = opts.accept(socketTransport(opts.kind, socket), clientAddress(socket.remoteAddress, null, []));
-        if (!sink) return;
-        socket.data.sink = sink;
-        socket.data.framer = new LineFramer(opts.maxFrameBytes, sink);
-      },
-      data(socket, chunk) {
-        if (!socket.data.closing) socket.data.framer?.push(chunk);
-      },
-      drain,
-      close(socket) {
-        socket.data.sink?.transportClosed();
-      },
-      error(socket) {
-        socket.data.sink?.transportClosed();
-      },
+/** Where a TCP/TLS listener listens: a port it binds, or a socket inherited from systemd. */
+export type ListenAt = { hostname: string; port: number } | { fd: number };
+
+/**
+ * `Bun.listen({ fd })`: the runtime accepts an inherited listening socket (proved by
+ * tests/inherited-fd.int.test.ts), but bun-types declares no overload for it.
+ */
+const listenFd = Bun.listen as unknown as (opts: FdSocketOptions<SocketState>) => TCPSocketListener<SocketState>;
+
+export function listenSocket(
+  opts: ListenAt & {
+    kind: "tcp" | "tls";
+    maxFrameBytes: number;
+    tls?: { cert: string; key: string } | undefined;
+    accept: Accept;
+  },
+): TCPSocketListener<SocketState> {
+  const socket: SocketHandler<SocketState> = {
+    open(socket) {
+      socket.data = { sink: null, framer: null, pending: [], pendingBytes: 0, closing: false };
+      // No PROXY protocol support: a TCP/TLS peer address is always the client's own.
+      const sink = opts.accept(socketTransport(opts.kind, socket), clientAddress(socket.remoteAddress, null, []));
+      if (!sink) return;
+      socket.data.sink = sink;
+      socket.data.framer = new LineFramer(opts.maxFrameBytes, sink);
     },
-  });
+    data(socket, chunk) {
+      if (!socket.data.closing) socket.data.framer?.push(chunk);
+    },
+    drain,
+    close(socket) {
+      socket.data.sink?.transportClosed();
+    },
+    error(socket) {
+      socket.data.sink?.transportClosed();
+    },
+  };
+  const tls = opts.tls ? { tls: opts.tls } : {};
+  if ("fd" in opts) return listenFd({ fd: opts.fd, ...tls, socket });
+  return Bun.listen<SocketState>({ hostname: opts.hostname, port: opts.port, ...tls, socket });
 }
 
 // ------------------------------------------------------------ WebSocket

@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Plain IRC (6667), held by systemd in the host's network namespace and passed to
+# commonair-irc.service (socket activation), so the gateway sees every client's own address and
+# its per-address caps count each client apart. Rootless Podman's port forwarding (PublishPort=)
+# would replace them all with one internal address. TLS (6697) is commonair-ircs.socket:
+# FileDescriptorName= names every descriptor of a socket unit, so each name needs its own unit.
+[Unit]
+Description=CommonAir public IRC port 6667
+
+[Socket]
+# The port of the unit's IRC_PORT.
+ListenStream=6667
+# The gateway finds its descriptors by name (LISTEN_FDNAMES), not by order.
+FileDescriptorName=irc
+# Dual-stack regardless of the host's net.ipv6.bindv6only; IPv4 alone on a host without IPv6.
+BindIPv6Only=both
+
+[Install]
+WantedBy=sockets.target

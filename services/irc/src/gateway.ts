@@ -22,6 +22,11 @@ export interface GatewayOptions {
   tcpPort: number | null;
   tlsPort: number | null;
   wsPort: number | null;
+  /**
+   * Listening sockets inherited from systemd (socket activation). When set, the TCP/TLS
+   * listener accepts on that descriptor and its port is only reported, not bound.
+   */
+  inherited?: { tcp: number; tls: number } | undefined;
   tls?: TlsMaterial | undefined;
   upstream: UpstreamFactory;
   logger: Logger;
@@ -80,12 +85,15 @@ export function startGateway(opts: GatewayOptions): Gateway {
     return session;
   };
 
+  const at = (port: number, fd: number | undefined) => (fd === undefined ? { hostname, port } : { fd });
   const tcp =
-    opts.tcpPort === null ? null : listenSocket({ kind: "tcp", hostname, port: opts.tcpPort, maxFrameBytes, accept });
+    opts.tcpPort === null
+      ? null
+      : listenSocket({ kind: "tcp", ...at(opts.tcpPort, opts.inherited?.tcp), maxFrameBytes, accept });
   const tls =
     opts.tlsPort === null || !opts.tls
       ? null
-      : listenSocket({ kind: "tls", hostname, port: opts.tlsPort, maxFrameBytes, tls: opts.tls, accept });
+      : listenSocket({ kind: "tls", ...at(opts.tlsPort, opts.inherited?.tls), maxFrameBytes, tls: opts.tls, accept });
   const ws =
     opts.wsPort === null
       ? null
@@ -109,8 +117,13 @@ export function startGateway(opts: GatewayOptions): Gateway {
       for (const [transport, n] of Object.entries(stats().connections)) r.observe(n, { transport });
     });
 
-  const ports = { tcp: tcp?.port ?? null, tls: tls?.port ?? null, ws: ws?.port ?? null };
-  opts.logger.info("irc gateway listening", ports);
+  // A listener on an inherited descriptor has no port of its own: report the configured one.
+  const ports = {
+    tcp: tcp ? (tcp.port ?? opts.tcpPort) : null,
+    tls: tls ? (tls.port ?? opts.tlsPort) : null,
+    ws: ws?.port ?? null,
+  };
+  opts.logger.info("irc gateway listening", { ...ports, socketActivated: opts.inherited !== undefined });
 
   return {
     ports,
