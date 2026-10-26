@@ -267,6 +267,7 @@ merges into the same report. Browser viewers always stay in the parent.
 | `e5-coop`        | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below).    |
 | `backup-restore` | E6: WAL-G backup of a throwaway Postgres, wipe, restore with WAL replay; triggers, protection functions, app-role grants, rows and the ledger come back, and the app role is refused every protected write (see below). |
 | `load-plan`      | E6: the load test at PLAN size, 20 streamers × 200 viewers for 120 s, sharded over processes. Not in `full`.                                                                                                            |
+| `multi-instance` | S1: two of each app service (api, chat, worker, origin); each ADR 0032 replica-safety claim checked, two instances killed and restored (see below). Skips every step unless the `multi` replicas are running.           |
 
 E1's E6 scenarios (`simulcast`, `overlay-alert`, `vod-clips`, `data-export`, `account-deletion`)
 are documented with [docs/testing/e6-selectors.md](../docs/testing/e6-selectors.md).
@@ -350,6 +351,48 @@ The load test at PLAN size (ADR 0021 §4), outside `full`; knobs in "Metrics and
 ```sh
 bun harness/src/cli.ts run load-plan
 bun harness/src/cli.ts run load-plan --set streamers=10 --set viewersPerStreamer=100 --set httpPerProcess=500
+```
+
+### `multi-instance` (S1)
+
+Stage 2 of [ADR 0032](../docs/decisions/0032-scaling-and-availability.md) rehearsed on one host.
+`harness/compose.multi-instance.yaml` adds `api-2`, `chat-2`, `worker-2` and `origin-2` under the
+compose profile `multi`, each identical to its original (as compose.yaml and the other harness
+overrides merge it) apart from its host port: `API_2_PORT` (3101), `CHAT_2_PORT` (3102),
+`ORIGIN_2_PORT` (3103), `WORKER_2_PORT` (3105). Without `--profile multi` the override starts
+nothing. The tracker stays single (in-memory swarms), so do media and MediaMTX (stage 3) and web
+(stateless). `tests/multi-compose.test.ts` fails when a replica drifts from its original.
+
+The harness talks to each instance on its host port, standing in for the load balancer: a second
+forwarding proxy for api-2, chat sockets pinned to chat-1 or chat-2. One step per claim, each
+made of soft checks so one finding does not hide the rest:
+
+| Claim                 | How it is observed                                                                                                                                                                                                  | Metrics                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Shared rate limits    | 12 auth POSTs from one simulated address alternating api-1/api-2: 10 pass, the 11th and 12th are 429                                                                                                                |                                                                                         |
+| Chat across instances | 8 messages each from a client on chat-1 and one on chat-2: each sees all 16, in the same order, each sender in order                                                                                                | `multi.chat.cross_latency_ms`, `…_max_ms`                                               |
+| Chat cache staleness  | a ban (via api-2) and slow mode (via api-1) timed per instance against the directory TTLs (30 s, 60 s); then slow mode set while chat-2 has no members of the room, applied when someone joins there                | `multi.cache_stale_ms.{ban,slow_mode}.{chat1,chat2}`, `….slow_mode.empty_room`          |
+| Outbox exactly-once   | 20 `channels.update` through both APIs plus 2,000 outbox rows; every event on `BUS.events` (Valkey) exactly once                                                                                                    | `multi.outbox.duplicates`, `multi.outbox.drain_ms`                                      |
+| Viewer counts         | 2 HTTP viewers heartbeating to each API; both APIs report 4, never more                                                                                                                                             | `multi.viewers.converge_ms`                                                             |
+| Recurring jobs        | BullMQ's completed `live-counters` and `score-sessions` runs since the scenario started: one per tick, none started twice                                                                                           | `multi.jobs.live_counters.ticks`                                                        |
+| One issuance leader   | Valkey `MONITOR` of `issuance:lock`: per tick both origins send the `SET … NX`, one releases it                                                                                                                     | `multi.issuance.double_leader_ticks`                                                    |
+| Reconnect on loss     | 3 clients on chat-2 (`src/multi/reconnecting-chat.ts`, the web client's backoff, next instance on failure); a 30-message burst on chat-2, `podman kill`; all reconnect to chat-1; every acked message is in history | `multi.reconnect_ms`, `multi.chat.lost_on_kill`, `multi.restore_ms.chat`                |
+| Worker loss           | 20,000 outbox rows; `podman kill` worker-2 after the first 400 are relayed; worker-1 relays the rest, nothing lost, repeats bounded by the dead worker's batch (at-least-once by design)                            | `multi.worker_loss.duplicates`, `multi.worker_loss.drain_ms`, `multi.restore_ms.worker` |
+
+The outbox backlogs are `channel.update` rows for the scenario's own channel written into
+`events` with `DATABASE_URL` (skipped without it). The bus, BullMQ state and `MONITOR` use the
+repo `.env`'s `VALKEY_URL` (`HARNESS_VALKEY_URL` overrides it); replica URLs can be overridden with
+`HARNESS_API_2_URL`, `HARNESS_CHAT_2_URL`, `HARNESS_ORIGIN_2_URL`, `HARNESS_CHAT_2_HEALTH_URL` and
+`HARNESS_WORKER_2_HEALTH_URL`. Killed replicas are started again and health-checked before the
+scenario ends. About 5 minutes; up to 9 when caches are stale.
+
+Until `scripts/infra.ts` learns `--multi`, start the replicas on a running harness stack with:
+
+```sh
+F="-f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml -f harness/compose.e6.yaml -f harness/compose.multi-instance.yaml"
+podman compose $F --profile harness --profile multi up -d --no-deps api-2 chat-2 worker-2 origin-2
+bun harness/src/cli.ts run multi-instance
+podman rm -f commonair_api-2_1 commonair_chat-2_1 commonair_worker-2_1 commonair_origin-2_1   # when done
 ```
 
 ### `e2e-relay` (milestone E3)
