@@ -81,7 +81,8 @@
     "fflate": "0.8.3"
   },
   "patchedDependencies": {
-    "postgres@3.4.9": "patches/postgres@3.4.9.patch"
+    "postgres@3.4.9": "patches/postgres@3.4.9.patch",
+    "hls.js@1.7.3": "patches/hls.js@1.7.3.patch"
   },
   "trustedDependencies": []
 }

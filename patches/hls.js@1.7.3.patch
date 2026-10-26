@@ -1,0 +1,34 @@
+diff --git a/dist/hls.js b/dist/hls.js
+index 5582eb1ed0457ad6e894be234ad928d79152d933..d020441fcf28bbb9ee3cd89830f06949522e8e53 100644
+--- a/dist/hls.js
++++ b/dist/hls.js
+@@ -11697,7 +11697,10 @@
+           }
+           if ('data' in reason) {
+             reason.data.frag = mediaFrag;
+-            _this5.fragmentLoader.abort();
++            // CommonAir patch: abort only this fragment's own load (see dist/hls.mjs).
++            if (!_this5.fragContextChanged(mediaFrag)) {
++              _this5.fragmentLoader.abort();
++            }
+             _this5.handleFragLoadError(reason);
+           }
+           _this5.resetFragmentLoading(mediaFrag);
+diff --git a/dist/hls.mjs b/dist/hls.mjs
+index fce9ba311355708eaf3846cc9f167a1fdd946c76..1f0a53ed3a4a96665632c32c1fe4368bbd91b267 100644
+--- a/dist/hls.mjs
++++ b/dist/hls.mjs
+@@ -10863,7 +10863,12 @@ class BaseStreamController extends TaskLoop {
+         }
+         if ('data' in reason) {
+           reason.data.frag = mediaFrag;
+-          this.fragmentLoader.abort();
++          // CommonAir patch: abort only this fragment's own load. If a later fragment is current (an
++          // EXT-X-GAP start fragment whose shared init load the next fragment aborted), its request
++          // would be cancelled, and before the first parse nothing resets FRAG_LOADING: a stuck player.
++          if (!this.fragContextChanged(mediaFrag)) {
++            this.fragmentLoader.abort();
++          }
+           this.handleFragLoadError(reason);
+         }
+         this.resetFragmentLoading(mediaFrag);
