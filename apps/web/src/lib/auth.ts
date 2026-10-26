@@ -47,6 +47,15 @@ export function signUp(input: SignUpInput): Promise<void> {
   return post(AUTH_ROUTES.signUp, { ...input, name: input.username, callbackURL: "/dashboard" });
 }
 
+/**
+ * Ask for a new verification link. better-auth answers `{ status: true }` (after a constant
+ * delay) whether or not the address exists or is already verified, so callers show one neutral
+ * confirmation and only treat a rate limit differently.
+ */
+export function resendVerificationEmail(email: string): Promise<void> {
+  return post(AUTH_ROUTES.sendVerificationEmail, { email, callbackURL: "/dashboard" });
+}
+
 export function signIn(email: string, password: string): Promise<void> {
   return post(AUTH_ROUTES.signIn, { email, password });
 }

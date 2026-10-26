@@ -13,6 +13,8 @@ export const AUTH_ROUTES = {
   signUp: `${AUTH_BASE_PATH}/sign-up/email`,
   signIn: `${AUTH_BASE_PATH}/sign-in/email`,
   signOut: `${AUTH_BASE_PATH}/sign-out`,
+  /** POST: send a new verification link; answers the same whether or not the address exists. */
+  sendVerificationEmail: `${AUTH_BASE_PATH}/send-verification-email`,
   /** Target of the verification link in the sign-up email. */
   verifyEmail: `${AUTH_BASE_PATH}/verify-email`,
 } as const;

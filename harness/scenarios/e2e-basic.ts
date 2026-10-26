@@ -7,12 +7,15 @@
  * dashboard and publishes an ffmpeg RTMP test pattern; a signed-in viewer in Chromium and an
  * anonymous viewer in WebKit watch the channel page (TTFF and glass-to-glass latency from the
  * probe); the signed-in viewer chats and everyone sees it; the stream stops and every page and
- * the API report offline. Selects only by the test ids in docs/testing/e1-selectors.md.
+ * the API report offline. Along the way the streamer asks for a second verification email and
+ * uploads an avatar from the dashboard (presigned PUT, scanning commit, theme key, `/media`).
+ * Selects only by the test ids in docs/testing/e1-selectors.md.
  */
 import { join } from "node:path";
 import type { Page } from "playwright";
 import { summarize } from "../src/metrics.ts";
 import { playerBundles } from "../src/player-server.ts";
+import { testCardPng } from "../src/png.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
 import { Streamer } from "../src/streamer.ts";
@@ -106,6 +109,16 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
     await byTestId(signup, T.signupSubmit).click(ui);
     await waitForOneOf(signup, [T.signupCheckEmail], UI_TIMEOUT_MS, signal);
   });
+  // A lost first mail (a provider blocking SMTP) must not strand the account.
+  await ctx.step("streamer: resend the verification email", async () => {
+    await byTestId(signup, T.resendVerification).click(ui);
+    await byTestId(signup, T.resendVerificationSent).waitFor(ui);
+    await waitFor(
+      "two verification emails",
+      async () => ((await p.mailpit.search(`to:"${creds.email}"`)).length >= 2 ? true : null),
+      { timeoutMs: 30_000, intervalMs: 500, signal },
+    );
+  });
 
   const link = await ctx.step("streamer: verification email", async () => {
     const message = await p.mailpit.waitForMessage(creds.email, (m) => findTokenLink(m) !== null, 30_000);
@@ -156,6 +169,30 @@ async function e2eBasic(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   });
   ctx.assert("dashboard shows an RTMP server URL", /^rtmps?:\/\//.test(server), { server });
   ctx.assert("dashboard shows the new stream key", key.length > 0);
+
+  // The dashboard's avatar upload: presigned PUT, the scanning commit, then theme.avatarKey.
+  const avatarUrl = await ctx.step("streamer: upload an avatar from the dashboard", async () => {
+    const page = await streamer.goto(ROUTES.dashboard);
+    const slot = byTestId(page, T.appearanceSlot, { purpose: "avatar" });
+    await slot
+      .locator(tid(T.appearanceFile))
+      .setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: Buffer.from(testCardPng()) }, ui);
+    return waitFor(
+      "committed avatar preview",
+      async () => {
+        if (await slot.locator(tid(T.formError)).count())
+          throw new Error(`avatar upload refused: ${await slot.locator(tid(T.formError)).innerText()}`);
+        const src = await slot.locator(tid(T.appearancePreview)).getAttribute("data-src", ui);
+        return src && !src.startsWith("blob:") && (await slot.locator(tid(T.appearanceRemove)).count()) ? src : null;
+      },
+      { timeoutMs: UI_TIMEOUT_MS, intervalMs: 250, signal },
+    );
+  });
+  const avatar = await ctx.step("the uploaded avatar is served", async () => {
+    const res = await (await streamer.page()).request.get(new URL(avatarUrl, webUrl).toString());
+    return { status: res.status(), type: res.headers()["content-type"] ?? "" };
+  });
+  ctx.assert("the avatar URL serves the PNG", avatar.status === 200 && avatar.type.startsWith("image/png"), avatar);
   // `--set ingest=harness` publishes to HARNESS_RTMP_URL when the public ingest host is not
   // reachable from the harness host.
   const shown = obsPublishUrl(server, key);

@@ -13,6 +13,7 @@ import { AltchaField, type AltchaFieldHandle } from "../../components/altcha-fie
 import { FormError } from "../../components/form-error.tsx";
 import { LegalDocumentLink, type LegalDoc } from "../../components/legal-document-link.tsx";
 import { SignUpPasswordField } from "../../components/password-fields.tsx";
+import { ResendVerification } from "../../components/resend-verification.tsx";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { signUp } from "../../lib/auth.ts";
@@ -64,11 +65,17 @@ function SignUpPage(): React.JSX.Element {
 
   if (doneEmail)
     return (
-      <PageContainer data-testid="signup-check-email" width="form" className="py-12" aria-live="polite">
+      <PageContainer
+        data-testid="signup-check-email"
+        width="form"
+        className="flex flex-col gap-6 py-12"
+        aria-live="polite"
+      >
         <PageHeader
           title={t("signup.checkEmailTitle")}
           description={t("signup.checkEmailBody", { email: doneEmail })}
         />
+        <ResendVerification email={doneEmail} />
       </PageContainer>
     );
 

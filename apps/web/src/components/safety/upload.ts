@@ -7,11 +7,16 @@
  * commit returns may be used. Every rejection is reported the same way (`rejected`), so the UI
  * cannot tell a hash-list match from any other refusal, and neither can the uploader.
  */
+import {
+  MAX_UPLOAD_BYTES,
+  UPLOAD_TYPES,
+  type UploadContentType,
+  type UploadPurpose,
+} from "@commonair/contracts/shapes";
 import { t } from "../../i18n/index.ts";
 import { api, errorCode } from "../../lib/api.ts";
 
-export type UploadPurpose = "avatar" | "banner" | "panel" | "emote" | "alert_image" | "alert_sound";
-export type UploadContentType = "image/png" | "image/jpeg" | "image/webp" | "image/gif" | "audio/mpeg" | "audio/ogg";
+export type { UploadContentType, UploadPurpose };
 
 export interface UploadClient {
   uploadUrl(input: {
@@ -36,6 +41,24 @@ export type UploadResult = { ok: true; key: string; url: string } | { ok: false;
 /** True for the generic upload rejection (`UNPROCESSABLE_CONTENT`, `upload_rejected`). */
 export function isUploadRejected(err: unknown): boolean {
   return errorCode(err) === "UNPROCESSABLE_CONTENT";
+}
+
+/** The file types a purpose accepts, for `<input accept>`. */
+export function uploadAccept(purpose: UploadPurpose): string {
+  return UPLOAD_TYPES[purpose].join(",");
+}
+
+export type UploadFileCheck =
+  | { ok: true; contentType: UploadContentType }
+  | { ok: false; reason: "type" | "size" | "empty" };
+
+/** The contract's limits, checked before asking for a presigned URL the API would refuse. */
+export function checkUploadFile(purpose: UploadPurpose, file: Blob): UploadFileCheck {
+  const contentType = UPLOAD_TYPES[purpose].find((type) => type === file.type);
+  if (!contentType) return { ok: false, reason: "type" };
+  if (file.size === 0) return { ok: false, reason: "empty" };
+  if (file.size > MAX_UPLOAD_BYTES) return { ok: false, reason: "size" };
+  return { ok: true, contentType };
 }
 
 export async function uploadChannelFile(

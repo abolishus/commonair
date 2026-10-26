@@ -4,9 +4,9 @@
 /**
  * Minimal PNG decoder for frames ffmpeg writes and screenshots Playwright takes: 8-bit gray,
  * gray+alpha, RGB and RGBA, non-interlaced. Enough to read the timestamp strip without a
- * native image dependency.
+ * native image dependency. `encodePng` writes 8-bit RGBA, for images scenarios upload.
  */
-import { inflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 
 export interface DecodedPng {
   width: number;
@@ -123,4 +123,63 @@ function toRgba(pixels: Uint8Array, count: number, channels: number): Uint8Array
     }
   }
   return out;
+}
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(bytes: Uint8Array): number {
+  let c = 0xffffffff;
+  for (const b of bytes) c = (CRC_TABLE[(c ^ b) & 0xff] ?? 0) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function chunk(type: string, body: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + body.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, body.length);
+  out.set(new TextEncoder().encode(type), 4);
+  out.set(body, 8);
+  view.setUint32(8 + body.length, crc32(out.subarray(4, 8 + body.length)));
+  return out;
+}
+
+/** 8-bit RGBA, non-interlaced, filter 0 on every row. */
+export function encodePng({ width, height, data }: DecodedPng): Uint8Array {
+  if (data.length !== width * height * 4) throw new Error("RGBA data does not match the size");
+  const ihdr = new Uint8Array(13);
+  const view = new DataView(ihdr.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  ihdr.set([8, 6, 0, 0, 0], 8);
+  const raw = new Uint8Array(height * (width * 4 + 1));
+  for (let y = 0; y < height; y++) raw.set(data.subarray(y * width * 4, (y + 1) * width * 4), y * (width * 4 + 1) + 1);
+  return Buffer.concat([
+    Uint8Array.from(SIGNATURE),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", new Uint8Array(0)),
+  ]);
+}
+
+/** A harmless test card (hue bands over a vertical fade) for scenarios that upload an image. */
+export function testCardPng(size = 128): Uint8Array {
+  const data = new Uint8Array(size * size * 4);
+  const bands = [
+    [230, 60, 60],
+    [240, 200, 40],
+    [60, 180, 90],
+    [50, 120, 230],
+  ] as const;
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const band = bands[Math.floor((x * bands.length) / size)] ?? bands[0];
+      const fade = 0.4 + (0.6 * y) / size;
+      const i = (y * size + x) * 4;
+      data.set([band[0] * fade, band[1] * fade, band[2] * fade, 255], i);
+    }
+  return encodePng({ width: size, height: size, data });
 }

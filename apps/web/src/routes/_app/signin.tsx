@@ -10,8 +10,9 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
 import { SignInPasswordField } from "../../components/password-fields.tsx";
+import { ResendVerification } from "../../components/resend-verification.tsx";
 import { t } from "../../i18n/index.ts";
-import { signIn } from "../../lib/auth.ts";
+import { AuthRequestError, signIn } from "../../lib/auth.ts";
 import { authErrorMessage } from "../../lib/form-errors.ts";
 import { field } from "../../lib/form.ts";
 
@@ -20,20 +21,25 @@ export const Route = createFileRoute("/_app/signin")({ component: SignInPage });
 function SignInPage(): React.JSX.Element {
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+  /** The address of a sign-in refused as unverified: offers a new link for it. */
+  const [unverified, setUnverified] = React.useState<string | null>(null);
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (pending) return;
     const form = new FormData(e.currentTarget);
+    const email = field(form, "email").trim();
     setPending(true);
     setError(null);
+    setUnverified(null);
     try {
-      await signIn(field(form, "email").trim(), field(form, "password"));
+      await signIn(email, field(form, "password"));
       // A full load renders the dashboard on the server with the new session cookie
       // (stays pending until the page goes away).
       window.location.assign("/dashboard");
     } catch (err) {
       setError(authErrorMessage(err));
+      if (err instanceof AuthRequestError && err.code === "EMAIL_NOT_VERIFIED") setUnverified(email);
       setPending(false);
     }
   };
@@ -56,6 +62,7 @@ function SignInPage(): React.JSX.Element {
           </Field>
           <SignInPasswordField />
           {error && <FormError>{error}</FormError>}
+          {unverified && <ResendVerification email={unverified} />}
           <Button
             data-testid="signin-submit"
             type="submit"
