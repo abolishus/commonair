@@ -35,9 +35,46 @@ back up: no container reads it whole. Each unit gets a copy of just the keys it 
 `install` and `upgrade` never overwrite a value you set, with these exceptions, which
 `install` sets from its flags every time: the public URLs and `PUBLIC_HOSTNAME`,
 `IRC_PUBLIC_HOST`, `NODE_ENV`, `TLS_MODE`, `ACME_EMAIL`, `MTX_WEBRTCADDITIONALHOSTS` (only when
-you pass `--public-ip`) and `DATABASE_URL`. The contacts (`CONTACT_EMAIL` and the others) are
-set from `--email` only while they are empty. Keys you add yourself are carried across
-upgrades.
+you pass `--public-ip`) and `DATABASE_URL`, and the object store's settings
+([below](#object-storage)). The contacts (`CONTACT_EMAIL` and the others) are set from `--email`
+only while they are empty. Keys you add yourself are carried across upgrades.
+
+## Object storage
+
+Objects (media, data exports, WAL-G backups, sealed evidence) live in Garage on the same host
+by default. `install` can point the instance at any S3-compatible store instead (DigitalOcean
+Spaces, AWS S3, Hetzner Object Storage, MinIO, a Garage cluster elsewhere), so the objects do
+not share the instance's disk. [object-storage.md](object-storage.md) says what the store needs
+and walks through Spaces. The choice is made once, at the first install: an instance never
+switches store, because nothing moves the objects already stored.
+
+| `install` flag                                           | Env key               | Default                                                                           |
+| -------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| (any `--s3-*` flag)                                      | `S3_MODE`             | unset: Garage on this host. `external` with any `--s3-*` flag                     |
+| `--s3-endpoint <url>`                                    | `S3_ENDPOINT`         | Garage: `http://garage:3900`. External: required, `https://host[:port]`           |
+| `--s3-region <region>`                                   | `S3_REGION`           | Garage: `garage`. External: required                                              |
+| `--s3-path-style true\|false`                            | `S3_FORCE_PATH_STYLE` | `true`                                                                            |
+| `--s3-public-endpoint <url>`                             | `S3_PUBLIC_ENDPOINT`  | Garage: `https://<domain>` (through Caddy). External: the endpoint                |
+| `--s3-bucket-media`, `-exports`, `-backups`, `-evidence` | `S3_BUCKET_*`         | `commonair-media`, `commonair-exports`, `commonair-backups`, `commonair-evidence` |
+| `--s3-allow-http`                                        | —                     | off: an external endpoint must be `https://`                                      |
+| (derived)                                                | `S3_CONNECT_SRC`      | external only: the origin browsers upload to, for the CSP                         |
+
+The keys are never flags, since every user on the host can read a command line. Export
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (media, exports, backups) and
+`S3_EVIDENCE_ACCESS_KEY_ID`, `S3_EVIDENCE_SECRET_ACCESS_KEY` (the evidence bucket alone) in the
+shell that runs `install`, or run it from a terminal and it asks for them. They go into
+`commonair.env` like every other secret. With Garage, `install` generates them instead.
+
+On an external store, `install --reinstall` keeps every stored value unless you pass a flag or a
+key pair again: that is how you rotate a key or move `S3_PUBLIC_ENDPOINT`. `upgrade` takes no
+`--s3-*` flag and keeps the store as it is. Passing `--s3-*` to an instance that uses Garage is
+refused (see [backups.md](backups.md) for copying objects to another store by hand).
+
+`commonair-storage-init`, a one-shot every service waits for, makes the store ready: with
+Garage it creates the layout, keys and buckets; with an external store it checks, with the
+instance's own keys, that each bucket exists and takes a write, and fails naming what is
+missing. `selfhost.sh status` shows which store is in use and, for an external one, lists each
+bucket with the instance's keys.
 
 ## How values are resolved
 
@@ -45,15 +82,17 @@ upgrades.
   error names every bad variable (`journalctl --user -u commonair-api`, see
   [troubleshooting.md](troubleshooting.md)).
 - **An empty value means unset**, so the default applies.
-- **The units set some variables themselves** (internal hostnames, ports, the S3 endpoint, the
-  OpenTelemetry endpoint, `TRUSTED_PROXY_CIDRS`). Those win over the env file, so editing them
-  there has no effect. They are marked "set in the units" below.
+- **The units set some variables themselves** (internal hostnames, ports, the OpenTelemetry
+  endpoint, `TRUSTED_PROXY_CIDRS`). Those win over the env file, so editing them there has no
+  effect. They are marked "set in the units" below. The S3 endpoint, region and path style are
+  not among them: they come from the env file, where `install` writes the store's
+  ([Object storage](#object-storage)).
 - **Each unit sees only its own keys** ([below](#which-unit-sees-which-key)). A key a unit's
   list does not name never reaches that container, so setting it there has no effect on it.
 - **Some secrets are scoped more tightly still.** Of the CommonAir services, only
   `commonair-api` sees `EVIDENCE_PRIVATE_KEY`, and only `commonair-worker` sees
-  `S3_EVIDENCE_ACCESS_KEY_ID` and `S3_EVIDENCE_SECRET_ACCESS_KEY` (`commonair-garage-init` also
-  reads them, to create that key). The other service units also set them to an empty value. The
+  `S3_EVIDENCE_ACCESS_KEY_ID` and `S3_EVIDENCE_SECRET_ACCESS_KEY` (`commonair-storage-init` also
+  reads them, to create that key in Garage or to check it on an external store). The other service units also set them to an empty value. The
   env file is still where they come from, so editing them there does take effect. They are
   marked "env file (blanked in units that must not see it)" below.
 - **`DATABASE_URL` comes from a Podman secret** (`commonair-database-url`, the least-privilege
@@ -78,14 +117,14 @@ with `MTX_`):
 - **CommonAir services** (`commonair-api`, `-chat`, `-irc`, `-media`, `-origin`, `-tracker`,
   `-web`, `-worker`): every variable their configuration schema reads, generated from the
   schemas below, except the ones the unit sets itself.
-- **Caddy**: `PUBLIC_HOSTNAME`, `TLS_MODE`, `ACME_EMAIL`, `ACME_CA`, `S3_BUCKET_MEDIA` and
-  `S3_BUCKET_EXPORTS`. No secret at all.
+- **Caddy**: `PUBLIC_HOSTNAME`, `TLS_MODE`, `ACME_EMAIL`, `ACME_CA`, `S3_MODE`, `S3_BUCKET_MEDIA`
+  and `S3_BUCKET_EXPORTS`. No secret at all.
 - **MediaMTX**: `INTERNAL_API_SECRET` (its hooks call the API) and every `MTX_*` setting.
-- **Postgres**: `POSTGRES_PASSWORD`, `POSTGRES_MAX_CONNECTIONS`, the S3 key and backup bucket
-  WAL-G uses, and every `AWS_*` and `WALG_*` setting.
+- **Postgres**: `POSTGRES_PASSWORD`, `POSTGRES_MAX_CONNECTIONS`, the S3 endpoint, region, path
+  style, key and backup bucket WAL-G uses, and every `AWS_*` and `WALG_*` setting.
 - **Garage**: `GARAGE_RPC_SECRET` and `GARAGE_ADMIN_TOKEN`. **Grafana**: every `GF_*` setting
   (its admin password is a Podman secret).
-- **The jobs** `commonair-migrate`, `commonair-garage-init` and `commonair-irc-cert`: what their
+- **The jobs** `commonair-migrate`, `commonair-storage-init` and `commonair-irc-cert`: what their
   scripts read.
 - Valkey, Loki, Tempo, Prometheus and the OpenTelemetry collector get no env file.
 
@@ -103,15 +142,17 @@ unit does not start, rather than starting without its settings. `journalctl --us
 These are read by the third-party containers or the backup scripts, not by the CommonAir
 services, so the reference below does not list them.
 
-| Variable                    | Read by          | What it does                                                                                |
-| --------------------------- | ---------------- | ------------------------------------------------------------------------------------------- |
-| `MTX_WEBRTCADDITIONALHOSTS` | MediaMTX         | Addresses advertised to WHIP clients as ICE candidates, comma-separated. `install` sets it. |
-| `AWS_ENDPOINT`              | WAL-G (Postgres) | S3 endpoint for backups, instead of the local Garage ([backups.md](backups.md))             |
-| `AWS_REGION`                | WAL-G (Postgres) | Region of that endpoint (default: `S3_REGION`)                                              |
-| `AWS_ACCESS_KEY_ID`         | WAL-G (Postgres) | Key for the backup bucket (default: `S3_ACCESS_KEY_ID`)                                     |
-| `AWS_SECRET_ACCESS_KEY`     | WAL-G (Postgres) | Secret for the backup bucket (default: `S3_SECRET_ACCESS_KEY`)                              |
-| `AWS_S3_FORCE_PATH_STYLE`   | WAL-G (Postgres) | Path-style S3 URLs (default `true`)                                                         |
-| `WALG_S3_PREFIX`            | WAL-G (Postgres) | Where backups go (default `s3://<S3_BUCKET_BACKUPS>/wal`)                                   |
+| Variable                    | Read by             | What it does                                                                                |
+| --------------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
+| `MTX_WEBRTCADDITIONALHOSTS` | MediaMTX            | Addresses advertised to WHIP clients as ICE candidates, comma-separated. `install` sets it. |
+| `S3_MODE`                   | Caddy, storage-init | `external` for an operator's store ([Object storage](#object-storage)); unset is Garage     |
+| `S3_CONNECT_SRC`            | Caddy (CSP)         | External store only: the origin browsers upload to. `install` sets it.                      |
+| `AWS_ENDPOINT`              | WAL-G (Postgres)    | S3 endpoint for backups, instead of the instance's store ([backups.md](backups.md))         |
+| `AWS_REGION`                | WAL-G (Postgres)    | Region of that endpoint (default: `S3_REGION`)                                              |
+| `AWS_ACCESS_KEY_ID`         | WAL-G (Postgres)    | Key for the backup bucket (default: `S3_ACCESS_KEY_ID`)                                     |
+| `AWS_SECRET_ACCESS_KEY`     | WAL-G (Postgres)    | Secret for the backup bucket (default: `S3_SECRET_ACCESS_KEY`)                              |
+| `AWS_S3_FORCE_PATH_STYLE`   | WAL-G (Postgres)    | Path-style S3 URLs (default: `S3_FORCE_PATH_STYLE`, or `true` with `AWS_ENDPOINT`)          |
+| `WALG_S3_PREFIX`            | WAL-G (Postgres)    | Where backups go (default `s3://<S3_BUCKET_BACKUPS>/wal`)                                   |
 
 ## Reference
 
@@ -177,19 +218,19 @@ the tables by hand. Columns:
 
 ### `storageEnv`
 
-| Variable               | Required | Default                       | Self-host        | Description                                                                                                                                                                               |
-| ---------------------- | -------- | ----------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `S3_ENDPOINT`          | yes      | —                             | set in the units | S3 endpoint the services use on the internal network (Garage by default).                                                                                                                 |
-| `S3_PUBLIC_ENDPOINT`   | no       | —                             | set by install   | S3 endpoint browsers reach for presigned uploads and export downloads (not for public media); unset means S3_ENDPOINT. Self-hosted: `https://\<host>`, routed by Caddy (ADR 0024).        |
-| `MEDIA_PUBLIC_URL`     | no       | `http://localhost:3003/media` | set by install   | Base URL of public media objects (`\<base>/\<key>`). The origin's `/media` route by default, which serves only the public key prefixes (ADR 0009); a CDN or public bucket may replace it. |
-| `S3_REGION`            | no       | `garage`                      | set in the units | S3 region used to sign requests (`garage` for Garage).                                                                                                                                    |
-| `S3_ACCESS_KEY_ID`     | yes      | —                             | generated        | S3 access key for the media, exports and backups buckets (not the evidence bucket).                                                                                                       |
-| `S3_SECRET_ACCESS_KEY` | yes      | —                             | generated        | Secret of S3_ACCESS_KEY_ID.                                                                                                                                                               |
-| `S3_FORCE_PATH_STYLE`  | no       | `true`                        | set in the units | Use path-style S3 URLs (`\<endpoint>/\<bucket>/\<key>`), as Garage needs.                                                                                                                 |
-| `S3_BUCKET_MEDIA`      | no       | `commonair-media`             | —                | Bucket for public media (avatars, thumbnails, clips, VODs) and moderation frames.                                                                                                         |
-| `S3_BUCKET_EXPORTS`    | no       | `commonair-exports`           | —                | Bucket for personal data export archives, which users download through presigned URLs.                                                                                                    |
-| `S3_BUCKET_BACKUPS`    | no       | `commonair-backups`           | —                | Bucket for WAL-G Postgres backups (prefix `wal/` unless WALG_S3_PREFIX is set).                                                                                                           |
-| `S3_BUCKET_EVIDENCE`   | no       | `commonair-evidence`          | —                | Sealed T0 evidence too large for Postgres (VOD and clip objects). Only the worker holds a key for it (`evidenceStorageEnv`); the main key has no access at all (ADR 0006 Q4).             |
+| Variable               | Required | Default                       | Self-host                        | Description                                                                                                                                                                               |
+| ---------------------- | -------- | ----------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `S3_ENDPOINT`          | yes      | —                             | set by install, set in the units | S3 endpoint the services use on the internal network (Garage by default).                                                                                                                 |
+| `S3_PUBLIC_ENDPOINT`   | no       | —                             | set by install                   | S3 endpoint browsers reach for presigned uploads and export downloads (not for public media); unset means S3_ENDPOINT. Self-hosted: `https://\<host>`, routed by Caddy (ADR 0024).        |
+| `MEDIA_PUBLIC_URL`     | no       | `http://localhost:3003/media` | set by install                   | Base URL of public media objects (`\<base>/\<key>`). The origin's `/media` route by default, which serves only the public key prefixes (ADR 0009); a CDN or public bucket may replace it. |
+| `S3_REGION`            | no       | `garage`                      | set by install, set in the units | S3 region used to sign requests (`garage` for Garage).                                                                                                                                    |
+| `S3_ACCESS_KEY_ID`     | yes      | —                             | generated                        | S3 access key for the media, exports and backups buckets (not the evidence bucket).                                                                                                       |
+| `S3_SECRET_ACCESS_KEY` | yes      | —                             | generated                        | Secret of S3_ACCESS_KEY_ID.                                                                                                                                                               |
+| `S3_FORCE_PATH_STYLE`  | no       | `true`                        | set by install, set in the units | Use path-style S3 URLs (`\<endpoint>/\<bucket>/\<key>`), as Garage needs.                                                                                                                 |
+| `S3_BUCKET_MEDIA`      | no       | `commonair-media`             | set by install                   | Bucket for public media (avatars, thumbnails, clips, VODs) and moderation frames.                                                                                                         |
+| `S3_BUCKET_EXPORTS`    | no       | `commonair-exports`           | set by install                   | Bucket for personal data export archives, which users download through presigned URLs.                                                                                                    |
+| `S3_BUCKET_BACKUPS`    | no       | `commonair-backups`           | set by install                   | Bucket for WAL-G Postgres backups (prefix `wal/` unless WALG_S3_PREFIX is set).                                                                                                           |
+| `S3_BUCKET_EVIDENCE`   | no       | `commonair-evidence`          | set by install                   | Sealed T0 evidence too large for Postgres (VOD and clip objects). Only the worker holds a key for it (`evidenceStorageEnv`); the main key has no access at all (ADR 0006 Q4).             |
 
 ### `authEnv`
 

@@ -19,8 +19,6 @@ NetworkAlias=postgres
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-postgres.env
 Environment=POSTGRES_USER=commonair
 Environment=POSTGRES_DB=commonair
-Environment=WALG_S3_ENDPOINT=http://garage:3900
-Environment=S3_REGION=garage
 Volume=commonair-postgres-data.volume:/var/lib/postgresql/data
 # Healthy = accepts connections and is out of recovery (infra/postgres/health.sh).
 HealthCmd=CMD commonair-pg-health

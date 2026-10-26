@@ -78,10 +78,14 @@ import http-{$CADDY_LISTEN:ports}
 	}
 }
 
-{$PUBLIC_HOSTNAME:localhost} {
-	import listen-{$CADDY_LISTEN:ports}
-	import tls-{$TLS_MODE:acme}
-
+# Browser access to object storage (ADR 0024), by S3_MODE (selfhost.sh writes it):
+#   garage (also when unset or empty): Garage runs on this host, and the two presigned shapes
+#     below are proxied to it on this site's own origin (S3_PUBLIC_ENDPOINT=https://<host>).
+#   external: the operator's own store; browsers reach S3_PUBLIC_ENDPOINT directly (CORS on that
+#     store, CSP connect-src for its origin). There is no Garage to proxy to, so no route: those
+#     paths fall through to the web app like any other.
+#   Any other S3_MODE fails to load ("File to import not found: s3-<mode>"), on purpose.
+(s3-garage) {
 	# Presigned object URLs (ADR 0024): https://<host>/<bucket>/<key>?X-Amz-…, forwarded to Garage
 	# with the path and Host unchanged, because both are signed. Only these two shapes; any other
 	# method, bucket, prefix or unsigned request on those paths falls through to the web app.
@@ -99,6 +103,30 @@ import http-{$CADDY_LISTEN:ports}
 		not path /{$S3_BUCKET_EXPORTS:commonair-exports}/
 		query X-Amz-Signature=*
 	}
+	# Browser uploads (avatars, banners, panels): at most the contract's 10 MB (10,000,000 bytes;
+	# Caddy's MB is decimal, like the contract's limit).
+	handle @s3-upload {
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy garage:3900
+	}
+	# Data export downloads.
+	handle @s3-export {
+		reverse_proxy garage:3900
+	}
+}
+(s3-external) {
+}
+# S3_MODE set but empty.
+(s3-) {
+	import s3-garage
+}
+
+{$PUBLIC_HOSTNAME:localhost} {
+	import listen-{$CADDY_LISTEN:ports}
+	import tls-{$TLS_MODE:acme}
+
 	# Object responses are passed through as stored: compressing would drop Content-Length and
 	# change the ETag of a signed download (exports are zip already).
 	@compressible not query X-Amz-Signature=*
@@ -119,18 +147,7 @@ import http-{$CADDY_LISTEN:ports}
 		respond 404
 	}
 
-	# Browser uploads (avatars, banners, panels): at most the contract's 10 MB (10,000,000 bytes;
-	# Caddy's MB is decimal, like the contract's limit).
-	handle @s3-upload {
-		request_body {
-			max_size 10MB
-		}
-		reverse_proxy garage:3900
-	}
-	# Data export downloads.
-	handle @s3-export {
-		reverse_proxy garage:3900
-	}
+	import s3-{$S3_MODE:garage}
 
 	# The embeddable player must be frameable by any site; everything else must not be.
 	@embed path /embed /embed/*

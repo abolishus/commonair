@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# One-shot: object storage is ready (infra/garage/storage-init.ts). With Garage on this host
+# (S3_MODE unset or garage): layout, S3 key import, buckets (idempotent). With an external store
+# (S3_MODE=external): checks with the instance's keys that every bucket exists and takes a write.
+[Unit]
+Description=CommonAir storage-init
+# With an external store selfhost.sh installs no Garage unit, and these name a unit that does not
+# exist: systemd then ignores both.
+Wants=commonair-garage.service
+After=commonair-garage.service
+# Bounded retries (see [Service]): six attempts an hour, then the unit fails for good.
+StartLimitIntervalSec=1h
+StartLimitBurst=6
+
+[Container]
+Image=localhost/commonair/tools:latest
+ContainerName=commonair-storage-init
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
+Network=commonair.network
+NetworkAlias=storage-init
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-storage-init.env
+Environment=GARAGE_ADMIN_URL=http://garage:3903
+Exec=bun infra/garage/storage-init.ts
+
+[Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-storage-init.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-storage-init.env
+Type=oneshot
+RemainAfterExit=yes
+# A transient failure (Garage still starting after a reboot, a dropped connection, an external
+# store briefly unreachable) is retried. RestartMode=direct (systemd >= 254) restarts without
+# passing through the failed state, so dependents are not failed with a dependency result, which
+# their Restart=always never retries (ADR 0023 §10). StartLimitBurst bounds it: a real failure
+# (a missing bucket, a wrong key) still fails, with the reason in the journal.
+Restart=on-failure
+RestartMode=direct
+RestartSec=10s
+RestartSteps=3
+RestartMaxDelaySec=1min
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

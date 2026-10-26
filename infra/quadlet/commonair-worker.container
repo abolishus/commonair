@@ -8,8 +8,8 @@ Description=CommonAir worker
 StartLimitIntervalSec=0
 Requires=commonair-migrate.service
 After=commonair-migrate.service
-Requires=commonair-garage-init.service
-After=commonair-garage-init.service
+Requires=commonair-storage-init.service
+After=commonair-storage-init.service
 Wants=commonair-valkey.service
 After=commonair-valkey.service
 Wants=commonair-otel-collector.service
@@ -24,9 +24,6 @@ Network=commonair.network
 NetworkAlias=worker
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-worker.env
-Environment=S3_ENDPOINT=http://garage:3900
-Environment=S3_REGION=garage
-Environment=S3_FORCE_PATH_STYLE=true
 Environment=MEDIAMTX_API_URL=http://mediamtx:9997
 Environment=MEDIAMTX_HLS_URL=http://mediamtx:8888
 Environment=MEDIAMTX_RTSP_URL=rtsp://mediamtx:8554

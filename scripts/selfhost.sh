@@ -100,8 +100,27 @@ install options:
   --yes                 As root only: allow the host preparation below. It never implies
                         --reinstall.
 
+object storage (install only; default: Garage on this host). Any of these selects an external
+S3-compatible store instead (docs/self-hosting/object-storage.md), chosen once: an instance
+never switches store (there is no --migrate-objects; see backups.md for copying objects).
+  --s3-endpoint <url>   The store's S3 endpoint, https://host[:port] (required for external).
+  --s3-region <region>  The region requests are signed for (required for external).
+  --s3-path-style true|false
+                        Path-style URLs (endpoint/bucket/key). Default true.
+  --s3-public-endpoint <url>
+                        Where browsers reach the store (presigned uploads and export
+                        downloads). Default: --s3-endpoint.
+  --s3-bucket-media <b>, --s3-bucket-exports <b>, --s3-bucket-backups <b>,
+  --s3-bucket-evidence <b>
+                        Bucket names (default commonair-media, -exports, -backups, -evidence).
+                        You create them; storage-init checks each before the services start.
+  --s3-allow-http       Accept http:// endpoints (a store on a trusted LAN or a test host).
+  Keys never go on the command line: export S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
+  S3_EVIDENCE_ACCESS_KEY_ID and S3_EVIDENCE_SECRET_ACCESS_KEY, or install prompts for them.
+  They are kept in commonair.env (mode 0600); a --reinstall without them keeps the stored ones.
+
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
-  --insecure-no-checksum.
+  --insecure-no-checksum. The object store stays as installed.
 
 A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
 upgrades use the repository recorded in the installed release.
@@ -433,6 +452,17 @@ user_args() {
   [ "$UNSUPPORTED_DISTRO" = yes ] && _out="$_out --unsupported-distro"
   # --yes was root's consent to prepare the host; reinstalling needs its own (--reinstall).
   [ "$REINSTALL" = yes ] && _out="$_out --reinstall"
+  # The S3 keys are not flags: they reach the service user's run through the environment, which
+  # runuser keeps.
+  [ -n "$S3_OPT_ENDPOINT" ] && _out="$_out --s3-endpoint $S3_OPT_ENDPOINT"
+  [ -n "$S3_OPT_REGION" ] && _out="$_out --s3-region $S3_OPT_REGION"
+  [ -n "$S3_OPT_PATH_STYLE" ] && _out="$_out --s3-path-style $S3_OPT_PATH_STYLE"
+  [ -n "$S3_OPT_PUBLIC" ] && _out="$_out --s3-public-endpoint $S3_OPT_PUBLIC"
+  [ -n "$S3_OPT_BUCKET_MEDIA" ] && _out="$_out --s3-bucket-media $S3_OPT_BUCKET_MEDIA"
+  [ -n "$S3_OPT_BUCKET_EXPORTS" ] && _out="$_out --s3-bucket-exports $S3_OPT_BUCKET_EXPORTS"
+  [ -n "$S3_OPT_BUCKET_BACKUPS" ] && _out="$_out --s3-bucket-backups $S3_OPT_BUCKET_BACKUPS"
+  [ -n "$S3_OPT_BUCKET_EVIDENCE" ] && _out="$_out --s3-bucket-evidence $S3_OPT_BUCKET_EVIDENCE"
+  [ "$S3_ALLOW_HTTP" = yes ] && _out="$_out --s3-allow-http"
   printf '%s' "$_out"
 }
 
@@ -579,8 +609,11 @@ env_set_file() {
   mv "$1.tmp" "$1"
 }
 
+# The images of the units this instance runs (an external object store needs no Garage image).
 images_of() {
-  sed -n 's/^Image=//p' "$1"/quadlet/*.container | sort -u
+  for _u in "$1"/quadlet/*.container; do
+    if unit_in_mode "$(basename "$_u")"; then sed -n 's/^Image=//p' "$_u"; fi
+  done | sort -u
 }
 
 tools_image() {
@@ -689,6 +722,7 @@ configure_env() {
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
   valkey_env
+  storage_env
 }
 
 # Valkey requires VALKEY_PASSWORD (init-env generated it in write_env, on install and, for an
@@ -716,6 +750,218 @@ backfill_env() {
   # Before Valkey had a password, VALKEY_URL was the development default; write_env generated
   # VALKEY_PASSWORD for this upgrade.
   valkey_env
+  # Releases up to rc.2 pinned Garage's endpoint, region and path style in the units, and the
+  # env file held init-env's development values for them. The units now read them from here.
+  if [ "$STORAGE_MODE" = garage ] && [ "$(env_get S3_ENDPOINT "$ENV_FILE")" != "$GARAGE_S3_ENDPOINT" ]; then
+    info "setting S3_ENDPOINT=$GARAGE_S3_ENDPOINT, S3_REGION=garage, S3_FORCE_PATH_STYLE=true (Garage on this host)"
+  fi
+  storage_env
+}
+
+# --- object storage -----------------------------------------------------------------------
+#
+# S3_MODE in commonair.env says where the objects live. Unset (or garage), the default: Garage on
+# this host, and the env file holds Garage's endpoint, region and path style like any other
+# setting (storage_env). `external`: an operator's S3-compatible store, chosen with --s3-endpoint
+# on install. Then install_units leaves Garage's unit and volumes out, commonair-storage-init
+# checks the operator's buckets instead of bootstrapping Garage, and Caddy has no S3 route
+# (infra/caddy/Caddyfile): browsers reach S3_PUBLIC_ENDPOINT directly. Only external mode writes
+# S3_MODE, so a Garage install's env file has the keys it always had. The mode never changes on an
+# existing instance: nothing here moves objects from one store to the other.
+
+GARAGE_S3_ENDPOINT="http://garage:3900"
+# Read from the environment or a prompt, never from flags (ps shows every argument).
+S3_KEY_VARS="S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY"
+
+# https://host[:port] (http:// only with --s3-allow-http); no path, no credentials in the URL.
+is_s3_url() { printf '%s' "$1" | grep -Eq '^https?://[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(:[0-9]{1,5})?$'; }
+is_s3_region() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$'; }
+# S3's bucket rules (as infra/garage/bootstrap.ts checks them): 3-63 of a-z 0-9 . -, no "..".
+is_bucket() {
+  printf '%s' "$1" | grep -Eq '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' && ! printf '%s' "$1" | grep -q '\.\.'
+}
+# Access key ids and secrets as stores issue them (base64 or hex, AWS's / + =). printf is a
+# builtin and grep reads the value on stdin, so a key never appears in a process list.
+is_s3_key() { [ "${#1}" -ge 3 ] && [ "${#1}" -le 256 ] && printf '%s' "$1" | grep -Eq '^[A-Za-z0-9/+=._~-]+$'; }
+
+# Sets STORAGE_MODE from an env file: garage (S3_MODE unset, empty or garage) or external.
+read_storage_mode() {
+  _m=$(env_get S3_MODE "$1")
+  case "$_m" in
+    "" | garage) STORAGE_MODE=garage ;;
+    external) STORAGE_MODE=external ;;
+    *) die "S3_MODE=$_m in $1 is neither garage nor external" "fix: correct the line (an instance keeps the store it was installed with)" ;;
+  esac
+}
+
+# Whether a unit file of the release belongs to this instance: Garage's only in Garage mode.
+unit_in_mode() {
+  [ "${STORAGE_MODE:-garage}" = external ] || return 0
+  case "$1" in
+    commonair-garage.container | commonair-garage-meta.volume | commonair-garage-data.volume) return 1 ;;
+  esac
+  return 0
+}
+
+# The value of KEY in the env file, if it already describes an external store (else nothing).
+stored_s3() {
+  if [ "$STORAGE_STORED" = yes ]; then env_get "$1" "$ENV_FILE"; fi
+  return 0
+}
+
+# Asks for one key on the terminal (secrets without echo). Fails without a terminal.
+prompt_s3_key() {
+  [ -t 0 ] || return 1
+  printf 'selfhost: %s: ' "$1" >&2
+  case "$1" in *SECRET*) stty -echo 2>/dev/null || true ;; esac
+  IFS= read -r _ans || _ans=""
+  case "$1" in *SECRET*) stty echo 2>/dev/null || true && printf '\n' >&2 ;; esac
+  printf '%s' "$_ans"
+}
+
+# Takes the keys from the environment (or a prompt) into S3_SET_<name>, validated, and drops
+# them from the environment so no child process inherits them. With a store already configured
+# ($1 = yes) a key not given keeps its stored value; a pair is replaced only as a pair.
+collect_s3_keys() {
+  _missing=""
+  for _pair in "S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY" "S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY"; do
+    _given=no
+    for _k in $_pair; do
+      eval "_v=\${$_k:-}"
+      [ -z "$_v" ] || _given=yes
+    done
+    if [ "$_given" = no ] && [ "$1" = yes ]; then continue; fi
+    for _k in $_pair; do
+      eval "_v=\${$_k:-}"
+      if [ -z "$_v" ]; then _v=$(prompt_s3_key "$_k") || _v=""; fi
+      if [ -z "$_v" ]; then
+        _missing="$_missing $_k"
+        continue
+      fi
+      # Never the value in the message: it may be a secret pasted into the wrong variable.
+      is_s3_key "$_v" || die "$_k is not an S3 key (3-256 of letters, digits and / + = . _ ~ -)"
+      eval "S3_SET_$_k=\$_v"
+    done
+  done
+  unset S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY
+  [ -z "$_missing" ] || die "an external object store needs its keys; missing:$_missing" \
+    "fix: run install from a terminal, which asks for them (secrets without echo), or export them in" \
+    "its environment; never as flags, which ps shows to every user. Both pairs are needed: the" \
+    "evidence key may reach only the evidence bucket, the other key only the other three" \
+    "(docs/self-hosting/object-storage.md)."
+  _main=${S3_SET_S3_ACCESS_KEY_ID:-$(stored_s3 S3_ACCESS_KEY_ID)}
+  _ev=${S3_SET_S3_EVIDENCE_ACCESS_KEY_ID:-$(stored_s3 S3_EVIDENCE_ACCESS_KEY_ID)}
+  if [ "$_main" = "$_ev" ]; then
+    die "S3_EVIDENCE_ACCESS_KEY_ID must be its own key, not S3_ACCESS_KEY_ID" \
+      "fix: create a second key limited to the evidence bucket (ADR 0006 Q4, object-storage.md)"
+  fi
+}
+
+# Decides the store for install: the current one on an existing instance, external when any
+# --s3-* flag is given. Fills S3_SET_* for storage_env. Runs before anything is downloaded.
+resolve_storage() {
+  STORAGE_STORED=no
+  _have=""
+  if [ -f "$ENV_FILE" ]; then
+    read_storage_mode "$ENV_FILE"
+    _have=$STORAGE_MODE
+  fi
+  if [ "$S3_FLAGS" = yes ]; then STORAGE_MODE=external; else STORAGE_MODE=${_have:-garage}; fi
+  if [ -n "$_have" ] && [ "$_have" != "$STORAGE_MODE" ]; then
+    die "this instance keeps its objects in Garage on this host; the --s3-* flags would move it to an external store" \
+      "selfhost.sh has no --migrate-objects: the objects already stored would stay behind in Garage." \
+      "fix: drop the --s3-* flags to keep Garage, or copy every bucket to the new store first (rclone, as in" \
+      "docs/self-hosting/backups.md, section 'Objects in Garage') and install a new instance against that store."
+  fi
+  [ "$STORAGE_MODE" = external ] || return 0
+  [ "$_have" = external ] && STORAGE_STORED=yes
+  S3_SET_ENDPOINT=${S3_OPT_ENDPOINT:-$(stored_s3 S3_ENDPOINT)}
+  [ -n "$S3_SET_ENDPOINT" ] || die "--s3-endpoint is required for an external object store" \
+    "e.g. --s3-endpoint https://nyc3.digitaloceanspaces.com --s3-region nyc3 (object-storage.md)"
+  S3_SET_REGION=${S3_OPT_REGION:-$(stored_s3 S3_REGION)}
+  [ -n "$S3_SET_REGION" ] || die "--s3-region is required with --s3-endpoint" \
+    "the region the store signs requests for: nyc3 for Spaces in NYC3, us-east-1 for AWS's, garage for a Garage"
+  S3_SET_PATH_STYLE=${S3_OPT_PATH_STYLE:-$(stored_s3 S3_FORCE_PATH_STYLE)}
+  S3_SET_PATH_STYLE=${S3_SET_PATH_STYLE:-true}
+  # A new endpoint without a public one means browsers use the new endpoint too.
+  if [ -n "$S3_OPT_PUBLIC" ]; then
+    S3_SET_PUBLIC=$S3_OPT_PUBLIC
+  elif [ -n "$S3_OPT_ENDPOINT" ]; then
+    S3_SET_PUBLIC=$S3_OPT_ENDPOINT
+  else
+    S3_SET_PUBLIC=$(stored_s3 S3_PUBLIC_ENDPOINT)
+    S3_SET_PUBLIC=${S3_SET_PUBLIC:-$S3_SET_ENDPOINT}
+  fi
+  S3_SET_BUCKET_MEDIA=${S3_OPT_BUCKET_MEDIA:-$(stored_s3 S3_BUCKET_MEDIA)}
+  S3_SET_BUCKET_MEDIA=${S3_SET_BUCKET_MEDIA:-commonair-media}
+  S3_SET_BUCKET_EXPORTS=${S3_OPT_BUCKET_EXPORTS:-$(stored_s3 S3_BUCKET_EXPORTS)}
+  S3_SET_BUCKET_EXPORTS=${S3_SET_BUCKET_EXPORTS:-commonair-exports}
+  S3_SET_BUCKET_BACKUPS=${S3_OPT_BUCKET_BACKUPS:-$(stored_s3 S3_BUCKET_BACKUPS)}
+  S3_SET_BUCKET_BACKUPS=${S3_SET_BUCKET_BACKUPS:-commonair-backups}
+  S3_SET_BUCKET_EVIDENCE=${S3_OPT_BUCKET_EVIDENCE:-$(stored_s3 S3_BUCKET_EVIDENCE)}
+  S3_SET_BUCKET_EVIDENCE=${S3_SET_BUCKET_EVIDENCE:-commonair-evidence}
+  _n=$(printf '%s\n' "$S3_SET_BUCKET_MEDIA" "$S3_SET_BUCKET_EXPORTS" "$S3_SET_BUCKET_BACKUPS" "$S3_SET_BUCKET_EVIDENCE" |
+    sort -u | wc -l | tr -d ' ')
+  [ "$_n" -eq 4 ] || die "the media, exports, backups and evidence buckets must be four different buckets"
+  collect_s3_keys "$STORAGE_STORED"
+}
+
+# Where browsers send presigned uploads: the public endpoint's origin, or with virtual-hosted
+# URLs the media bucket's own host. Caddy's CSP connect-src allows it (S3_CONNECT_SRC).
+s3_connect_src() {
+  if [ "$S3_SET_PATH_STYLE" = true ]; then
+    printf '%s' "$S3_SET_PUBLIC"
+  else
+    printf '%s://%s.%s' "${S3_SET_PUBLIC%%://*}" "$S3_SET_BUCKET_MEDIA" "${S3_SET_PUBLIC#*://}"
+  fi
+}
+
+# Writes the store's settings to the env file. Garage: its in-network endpoint, which the units
+# used to pin themselves. External: what resolve_storage decided (on upgrade, when it did not
+# run, the env file already holds it).
+storage_env() {
+  if [ "$STORAGE_MODE" != external ]; then
+    env_set S3_ENDPOINT "$GARAGE_S3_ENDPOINT"
+    env_set S3_REGION garage
+    env_set S3_FORCE_PATH_STYLE true
+    return 0
+  fi
+  [ -n "${S3_SET_ENDPOINT:-}" ] || return 0
+  env_set S3_MODE external
+  env_set S3_ENDPOINT "$S3_SET_ENDPOINT"
+  env_set S3_PUBLIC_ENDPOINT "$S3_SET_PUBLIC"
+  env_set S3_REGION "$S3_SET_REGION"
+  env_set S3_FORCE_PATH_STYLE "$S3_SET_PATH_STYLE"
+  env_set S3_BUCKET_MEDIA "$S3_SET_BUCKET_MEDIA"
+  env_set S3_BUCKET_EXPORTS "$S3_SET_BUCKET_EXPORTS"
+  env_set S3_BUCKET_BACKUPS "$S3_SET_BUCKET_BACKUPS"
+  env_set S3_BUCKET_EVIDENCE "$S3_SET_BUCKET_EVIDENCE"
+  env_set S3_CONNECT_SRC "$(s3_connect_src)"
+  for _k in $S3_KEY_VARS; do
+    eval "_v=\${S3_SET_$_k:-}"
+    if [ -n "$_v" ]; then env_set "$_k" "$_v"; fi
+  done
+  info "object storage: the external store at $S3_SET_ENDPOINT (create its buckets and CORS first: object-storage.md)"
+}
+
+# For status: each bucket of an external store, listed with the instance's keys by storage-init
+# in the tools image. The keys reach it in a 0600 env file rendered like the unit's own, never on
+# a command line, and it prints no key.
+storage_check() {
+  make_tmp
+  _f="$TMP_ROOT/storage-check.env"
+  if ! sh "$CURRENT_LINK/scripts/selfhost/render-env.sh" "$CURRENT_LINK/infra/selfhost/env/commonair-storage-init.keys" \
+    "$ENV_FILE" "$_f" 2>/dev/null; then
+    say "  (cannot read the store's settings from $ENV_FILE)"
+    return 0
+  fi
+  _rc=0
+  _out=$(podman run --rm --network commonair --env-file "$_f" "$(tools_image "$CURRENT_LINK")" \
+    bun infra/garage/storage-init.ts --check 2>&1) || _rc=$?
+  rm -f "$_f"
+  printf '%s\n' "$_out" | sed 's/^/  /'
+  if [ "$_rc" -ne 0 ]; then say "  the store is NOT ready (journalctl --user -u commonair-storage-init)"; fi
+  return 0
 }
 
 # Podman secrets the units read, re-created from the env file every time (idempotent).
@@ -784,11 +1030,25 @@ fetch_model() {
 install_units() {
   _rel=$1
   mkdir -p "$QUADLET_DIR" "$SYSTEMD_DIR"
+  # A container unit this install drops (rc.2's commonair-garage-init, now storage-init) is
+  # stopped while its generated service still exists: after the daemon-reload below systemd
+  # could no longer stop it by its unit file, and a one-shot would stay "active" forever.
+  for _f in "$QUADLET_DIR"/commonair-*.container; do
+    [ -f "$_f" ] || continue
+    _n=$(basename "$_f")
+    if [ ! -e "$_rel/quadlet/$_n" ] || ! unit_in_mode "$_n"; then
+      info "stopping ${_n%.container} (not part of this install)"
+      systemctl --user stop "${_n%.container}.service" >/dev/null 2>&1 || true
+    fi
+  done
   # Operator drop-ins (commonair-<unit>.container.d/, e.g. for a GPU) are directories and stay.
   for _f in "$QUADLET_DIR"/commonair*; do
     if [ -f "$_f" ] || [ -L "$_f" ]; then rm -f "$_f"; fi
   done
-  cp "$_rel"/quadlet/* "$QUADLET_DIR/"
+  # With an external object store, Garage and its volumes are not installed at all.
+  for _f in "$_rel"/quadlet/*; do
+    if unit_in_mode "$(basename "$_f")"; then cp "$_f" "$QUADLET_DIR/"; fi
+  done
   # Units in ~/.config/systemd/user shadow Quadlet's generated ones, so a commonair-* unit the
   # release does not ship (an older release's, or one copied by hand for a manual install) goes.
   for _f in "$SYSTEMD_DIR"/commonair-*; do
@@ -1048,6 +1308,16 @@ parse_flags() {
   UNSUPPORTED_DISTRO=no
   YES=no
   REINSTALL=no
+  S3_FLAGS=no
+  S3_OPT_ENDPOINT=""
+  S3_OPT_REGION=""
+  S3_OPT_PATH_STYLE=""
+  S3_OPT_PUBLIC=""
+  S3_OPT_BUCKET_MEDIA=""
+  S3_OPT_BUCKET_EXPORTS=""
+  S3_OPT_BUCKET_BACKUPS=""
+  S3_OPT_BUCKET_EVIDENCE=""
+  S3_ALLOW_HTTP=no
   while [ $# -gt 0 ]; do
     case "$1" in
       --version | --bundle | --sha256sums | --domain | --email | --tls | --registry | --public-ip | --model)
@@ -1068,6 +1338,28 @@ parse_flags() {
         esac
         shift 2
         ;;
+      --s3-endpoint | --s3-region | --s3-path-style | --s3-public-endpoint | --s3-bucket-media | \
+        --s3-bucket-exports | --s3-bucket-backups | --s3-bucket-evidence)
+        [ $# -ge 2 ] || die "$1 needs a value"
+        S3_FLAGS=yes
+        case "$1" in
+          --s3-endpoint) S3_OPT_ENDPOINT=${2%/} ;;
+          --s3-region) S3_OPT_REGION=$2 ;;
+          --s3-path-style) S3_OPT_PATH_STYLE=$2 ;;
+          --s3-public-endpoint) S3_OPT_PUBLIC=${2%/} ;;
+          --s3-bucket-media) S3_OPT_BUCKET_MEDIA=$2 ;;
+          --s3-bucket-exports) S3_OPT_BUCKET_EXPORTS=$2 ;;
+          --s3-bucket-backups) S3_OPT_BUCKET_BACKUPS=$2 ;;
+          --s3-bucket-evidence) S3_OPT_BUCKET_EVIDENCE=$2 ;;
+        esac
+        shift 2
+        ;;
+      --s3-allow-http) S3_ALLOW_HTTP=yes && shift ;;
+      --s3-*key* | --s3-*secret*)
+        die "S3 keys are never flags: every user on this host can read a command line (ps)" \
+          "fix: export S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_EVIDENCE_ACCESS_KEY_ID and S3_EVIDENCE_SECRET_ACCESS_KEY" \
+          "in the shell that runs install, or run it from a terminal, which prompts for them"
+        ;;
       --require-signature) REQUIRE_SIGNATURE=yes && shift ;;
       --insecure-no-checksum) INSECURE_NO_CHECKSUM=yes && shift ;;
       --unsupported-distro) UNSUPPORTED_DISTRO=yes && shift ;;
@@ -1084,6 +1376,23 @@ parse_flags() {
   case "$TLS" in "" | acme | internal) ;; *) die "--tls must be acme or internal, not $TLS" ;; esac
   if [ -n "$REGISTRY" ] && ! is_registry "$REGISTRY"; then die "not a registry: $REGISTRY"; fi
   if [ -n "$PUBLIC_IP" ] && ! is_addresses "$PUBLIC_IP"; then die "not a comma-separated address list: $PUBLIC_IP"; fi
+  for _u in "$S3_OPT_ENDPOINT" "$S3_OPT_PUBLIC"; do
+    [ -n "$_u" ] || continue
+    is_s3_url "$_u" || die "not an S3 endpoint: $_u (want https://host or https://host:port, no path)"
+    case "$_u" in
+      http://*)
+        [ "$S3_ALLOW_HTTP" = yes ] || die "$_u is plain http: objects and presigned URLs would cross the network unencrypted" \
+          "fix: use the store's https:// endpoint, or pass --s3-allow-http for a store on a trusted network (a LAN, a test host)"
+        ;;
+    esac
+  done
+  if [ -n "$S3_OPT_REGION" ] && ! is_s3_region "$S3_OPT_REGION"; then die "not an S3 region: $S3_OPT_REGION"; fi
+  case "$S3_OPT_PATH_STYLE" in "" | true | false) ;; *) die "--s3-path-style must be true or false, not $S3_OPT_PATH_STYLE" ;; esac
+  for _b in "$S3_OPT_BUCKET_MEDIA" "$S3_OPT_BUCKET_EXPORTS" "$S3_OPT_BUCKET_BACKUPS" "$S3_OPT_BUCKET_EVIDENCE"; do
+    if [ -n "$_b" ] && ! is_bucket "$_b"; then
+      die "not a bucket name: $_b (3-63 lowercase letters, digits, dots and hyphens; no '..')"
+    fi
+  done
   for _f in "$BUNDLE" "$SUMS_FILE" "$MODEL_SRC"; do
     case "$_f" in *[[:space:]]*) die "paths with spaces are not supported: $_f" ;; esac
   done
@@ -1113,6 +1422,7 @@ cmd_install() {
   if [ -z "$TLS" ]; then TLS=$(env_get TLS_MODE "$ENV_FILE"); fi
   TLS=${TLS:-acme}
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
+  resolve_storage
 
   host_checks
   if [ -z "$VERSION" ] && [ -z "$BUNDLE" ] && [ -L "$CURRENT_LINK" ]; then
@@ -1182,6 +1492,8 @@ cmd_upgrade() {
   require_instance upgrade
   _cur=$(readlink "$CURRENT_LINK")
   _curv=$(installed_version)
+  [ "$S3_FLAGS" = no ] || die "the object store is chosen at install: --s3-* flags apply to install --reinstall, not upgrade"
+  read_storage_mode "$ENV_FILE"
   resolve_repository_url
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   check_podman
@@ -1232,6 +1544,13 @@ cmd_status() {
   if [ "${_tls:-acme}" = internal ]; then say "root CA:   $(caddy_root_path)"; fi
   _exp=$(cert_expiry)
   if [ -n "$_exp" ]; then say "cert:      expires $_exp"; fi
+  read_storage_mode "$ENV_FILE"
+  if [ "$STORAGE_MODE" = external ]; then
+    say "storage:   external S3 at $(env_get S3_ENDPOINT "$ENV_FILE") (region $(env_get S3_REGION "$ENV_FILE"), path style $(env_get S3_FORCE_PATH_STYLE "$ENV_FILE"))"
+    storage_check
+  else
+    say "storage:   Garage on this host (commonair-garage)"
+  fi
   say ""
   say "units:"
   for _u in $(all_units); do
