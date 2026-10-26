@@ -504,6 +504,21 @@ describe("host checks", () => {
     expect(r.err).toContain("--yes");
     expect(h.calls()).toEqual([]);
   });
+
+  test.each(["status", "backup", "upgrade"])("%s as root points at the service user", (cmd) => {
+    const h = host();
+    writeFileSync(
+      join(h.dir, "stub/id"),
+      '#!/bin/sh\n[ "$1" = -u ] && [ $# -eq 1 ] && { echo 0; exit 0; }\necho root\n',
+    );
+    chmodSync(join(h.dir, "stub/id"), 0o755);
+    const r = h.run(cmd === "upgrade" ? ["upgrade", "--version", "v0.2.0"] : [cmd]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`${cmd} runs as the user that owns the instance, not as root`);
+    expect(r.err).toContain("log in as commonair over SSH");
+    expect(r.err).toContain(`sh ~/commonair/selfhost.sh ${cmd}`);
+    expect(h.calls()).toEqual([]);
+  });
 });
 
 describe("as root", () => {
@@ -960,6 +975,16 @@ describe("install", () => {
     expect(s.out).toContain("tls: internal");
     expect(s.out).toContain("commonair-api");
     expect(s.out).toContain("commonair-irc-cert");
+  });
+
+  // A real Debian 13 host (rc.1): `su - commonair` has no user manager, and status printed `?`
+  // for every unit instead of saying so.
+  test.each(["status", "backup", "upgrade"])("%s without a user manager is refused with the fix", (cmd) => {
+    const r = h.run(cmd === "upgrade" ? ["upgrade", "--version", "v0.2.0"] : [cmd], { STUB_NO_USER_SYSTEMD: "1" });
+    expect(r.code).toBe(1);
+    expect(r.out).not.toContain("units:");
+    expect(r.err).toContain("no systemd user manager");
+    expect(r.err).toContain("fix:");
   });
 
   test("backup runs the backup unit and lists the backups", () => {

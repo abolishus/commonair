@@ -249,7 +249,7 @@ check_systemd() {
   fi
   if ! systemctl --user show-environment >/dev/null 2>&1; then
     die "no systemd user manager for $(id -un)" \
-      "fix: log in as this user over SSH or with 'machinectl shell $(id -un)@' (su and sudo do not start one)"
+      "fix: log in as this user over SSH or with 'machinectl shell $(id -un)@' (su and sudo do not start one; Debian: apt install systemd-container for machinectl)"
   fi
 }
 
@@ -1166,15 +1166,25 @@ prune_releases() {
   done
 }
 
+# The instance lives in the service user's home and runs under its systemd user manager. Root
+# and a user reached by su/sudo (no user manager) get the fix, not an empty status.
+require_instance() {
+  if [ "$(id -u)" = 0 ]; then
+    die "$1 runs as the user that owns the instance, not as root" \
+      "fix: log in as $SERVICE_USER over SSH (install.md, step 5) and run: sh ~/commonair/selfhost.sh $1"
+  fi
+  [ -L "$CURRENT_LINK" ] || die "no instance installed here" "fix: selfhost.sh install"
+  check_systemd
+}
+
 cmd_upgrade() {
   parse_flags "$@"
-  [ -L "$CURRENT_LINK" ] || die "no instance installed here" "fix: selfhost.sh install"
+  require_instance upgrade
   _cur=$(readlink "$CURRENT_LINK")
   _curv=$(installed_version)
   resolve_repository_url
   if [ -z "$REGISTRY" ] && [ -f "$SELFHOST_CONF" ]; then REGISTRY=$(env_get REGISTRY "$SELFHOST_CONF"); fi
   check_podman
-  check_systemd
 
   # 1. download and verify
   obtain_bundle
@@ -1206,7 +1216,7 @@ cmd_upgrade() {
 }
 
 cmd_backup() {
-  [ -L "$CURRENT_LINK" ] || die "no instance installed here"
+  require_instance backup
   info "running commonair-backup.service"
   systemctl --user start commonair-backup.service || die "the backup failed" "see: journalctl --user -u commonair-backup"
   podman exec --user postgres commonair-postgres \
@@ -1214,7 +1224,7 @@ cmd_backup() {
 }
 
 cmd_status() {
-  [ -L "$CURRENT_LINK" ] || die "no instance installed here"
+  require_instance status
   say "version:   $(installed_version) ($(readlink "$CURRENT_LINK"))"
   if [ -L "$PREVIOUS_LINK" ]; then say "previous:  $(env_get COMMONAIR_VERSION "$PREVIOUS_LINK/release.env")"; fi
   _tls=$(env_get TLS_MODE "$ENV_FILE")
