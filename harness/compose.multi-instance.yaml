@@ -1,0 +1,164 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the `multi-instance` harness scenario ONLY (ADR 0032, stage 2 rehearsal):
+# a second api, chat, worker and origin next to the originals, under the `multi` profile, so this
+# file can be layered into every harness stack and starts nothing unless `--profile multi` is
+# given. The tracker is not replicated (its swarms are in memory, ADR 0032), and neither are the
+# ingest services (media, MediaMTX: stage 3). web is stateless (static files, an API proxy and
+# SSR), so a second copy would test nothing the API replicas do not.
+#
+#   bun scripts/infra.ts stack --harness --multi        (once the contract request lands)
+#
+# Why each replica is spelled out instead of `extends: { service: api }`: podman-compose 1.6
+# appends the extended service's `ports` to the replica's, so a replica would also bind the
+# original's host port and fail to start, and `ports: !override [...]` is not an option either
+# (podman-compose neither interpolates `${...}` inside it nor can it serialise a tagged list).
+# `harness/tests/multi-compose.test.ts` keeps every replica identical to its original, as merged
+# from compose.yaml and the other harness overrides, apart from the host port.
+#
+# Host ports: API_2_PORT (3101), CHAT_2_PORT (3102), ORIGIN_2_PORT (3103), WORKER_2_PORT (3105).
+
+x-multi-env-file: &env-file
+  - path: ${COMMONAIR_ENV_FILE:-.env}
+    required: false
+
+# Copied from compose.yaml (anchors do not cross files); the drift test compares them.
+x-multi-app-env: &app-env
+  DATABASE_URL: postgres://commonair_app:${POSTGRES_APP_PASSWORD:-}@postgres:5432/commonair
+  VALKEY_URL: redis://${VALKEY_PASSWORD:+:${VALKEY_PASSWORD}@}valkey:6379
+  S3_ENDPOINT: http://garage:3900
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://localhost:${GARAGE_S3_PORT:-3900}}
+  MEDIA_PUBLIC_URL: ${MEDIA_PUBLIC_URL:-http://localhost:${ORIGIN_PORT:-3003}/media}
+  S3_REGION: garage
+  S3_FORCE_PATH_STYLE: "true"
+  MEDIAMTX_API_URL: http://mediamtx:9997
+  MEDIAMTX_HLS_URL: http://mediamtx:8888
+  MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+  API_INTERNAL_URL: http://api:3001
+  CHAT_INTERNAL_URL: ws://chat:3002/ws
+  ORIGIN_INTERNAL_URL: http://origin:3003
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-10.89.42.0/24}
+  WEB_PORT: "3000"
+  API_PORT: "3001"
+  CHAT_PORT: "3002"
+  ORIGIN_PORT: "3003"
+  MEDIA_PORT: "3004"
+  WORKER_PORT: "3005"
+  TRACKER_PORT: "8000"
+  IRC_PORT: "6667"
+  IRC_TLS_PORT: "6697"
+  IRC_WS_PORT: "6680"
+  IRC_HEALTH_PORT: "6681"
+  S3_EVIDENCE_ACCESS_KEY_ID: ""
+  S3_EVIDENCE_SECRET_ACCESS_KEY: ""
+  EVIDENCE_PRIVATE_KEY: ""
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+x-multi-app-depends: &app-depends
+  migrate:
+    condition: service_completed_successfully
+  garage-init:
+    condition: service_completed_successfully
+  valkey:
+    condition: service_healthy
+  otel-collector:
+    condition: service_healthy
+
+x-multi-app-healthcheck: &app-healthcheck
+  test: ["CMD", "bun", "/opt/commonair/healthcheck.ts"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 30s
+
+services:
+  api-2:
+    profiles: [multi]
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/api:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: api
+      EVIDENCE_PRIVATE_KEY: ${EVIDENCE_PRIVATE_KEY:-}
+      MODERATION_CLASSIFIER_MODEL: /var/lib/commonair/models/model.onnx
+      # harness/compose.trust-safety.yaml
+      MODERATION_HASHLIST_CSAM: /fixtures/moderation/csam.pdq
+      MODERATION_HASHLIST_NCII: /fixtures/moderation/ncii.pdq
+      MODERATION_CLASSIFIER: "scripted"
+      MODERATION_SAMPLE_SECONDS: "2"
+      MODERATION_TEST_HOOKS: "true"
+      # harness/compose.e5-coop.yaml
+      COOP_TEST_HOOKS: "true"
+      # harness/compose.e6.yaml
+      OPS_TEST_HOOKS: "true"
+      OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true"
+    volumes:
+      - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
+      - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
+      - ${MODERATION_CLASSIFIER_MODEL:-./.cache/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx}:/var/lib/commonair/models/model.onnx:ro,Z
+      - ./packages/moderation/fixtures:/fixtures/moderation:ro,Z
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_2_PORT:-3101}:3001"]
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
+
+  chat-2:
+    profiles: [multi]
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/chat:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: chat
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${CHAT_2_PORT:-3102}:3002"]
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
+
+  origin-2:
+    profiles: [multi]
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/origin:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: origin
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${ORIGIN_2_PORT:-3103}:3003"]
+    depends_on:
+      <<: *app-depends
+      mediamtx:
+        condition: service_healthy
+    healthcheck: *app-healthcheck
+
+  worker-2:
+    profiles: [multi]
+    image: ${IMAGE_REGISTRY:-localhost/commonair}/worker:${IMAGE_TAG:-dev}
+    restart: unless-stopped
+    env_file: *env-file
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: worker
+      S3_EVIDENCE_ACCESS_KEY_ID: ${S3_EVIDENCE_ACCESS_KEY_ID:-}
+      S3_EVIDENCE_SECRET_ACCESS_KEY: ${S3_EVIDENCE_SECRET_ACCESS_KEY:-}
+      MODERATION_CLASSIFIER_MODEL: /var/lib/commonair/models/model.onnx
+      # harness/compose.trust-safety.yaml
+      MODERATION_HASHLIST_CSAM: /fixtures/moderation/csam.pdq
+      MODERATION_HASHLIST_NCII: /fixtures/moderation/ncii.pdq
+      MODERATION_CLASSIFIER: "scripted"
+      MODERATION_SAMPLE_SECONDS: "2"
+      MODERATION_TEST_HOOKS: "true"
+      # harness/compose.e5-coop.yaml
+      COOP_TEST_HOOKS: "true"
+      # harness/compose.e6.yaml
+      OPS_TEST_HOOKS: "true"
+    volumes:
+      - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
+      - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
+      - ${MODERATION_CLASSIFIER_MODEL:-./.cache/models/adamcodd-vit-base-nsfw-detector-8587de99-int8.onnx}:/var/lib/commonair/models/model.onnx:ro,Z
+      - ./packages/moderation/fixtures:/fixtures/moderation:ro,Z
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${WORKER_2_PORT:-3105}:3005"]
+    depends_on: *app-depends
+    healthcheck: *app-healthcheck
