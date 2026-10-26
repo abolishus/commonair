@@ -25,8 +25,10 @@ Garage each have one copy.
 
 ## Decisions first: ADR 0032 (scaling and availability)
 
-The number is the next free one after the planned 0026–0031; take whatever is free when it is
-written.
+Drafted 2026-10-26 as [ADR 0032](../../../docs/decisions/0032-scaling-and-availability.md)
+(proposed), with DigitalOcean's limits checked. Where it differs from this plan, the ADR wins:
+stage 2 uses a network (layer 4) load balancer rather than PROXY protocol, the tracker stays a
+single instance, and managed Valkey has no ACL users (password auth instead).
 
 1. **Targets per stage**, proposed: stage 0 at 99.5% monthly (about 3.6 hours), recovery by
    restore within the time the R0 drill measures, data loss bounded by WAL-G's archive interval;

@@ -22,9 +22,20 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
-| Unit          | Brief                                | Owns                                                                                                                                                | State                    |
-| ------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| S1-a capacity | `.claude/briefs/s1/S1-a-capacity.md` | `harness/src/load*`, `harness/src/metrics.ts` (additive), `harness/scenarios/load-{plan,sweep}.ts`, `docs/operators/capacity.md`, `scripts/load/**` | brief ready, not started |
+Batch 1 (waves and shared rules: `.claude/briefs/r0/README.md`). ADR 0032 (scaling and
+availability) is **proposed**, awaiting the user.
+
+| Unit          | Wave | Brief                                | Owns (summary)                                                                                                      | State       |
+| ------------- | ---- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ----------- |
+| R0-a irc-fds  | 1    | `.claude/briefs/r0/R0-a-irc-fds.md`  | `services/irc/**`, `infra/systemd/commonair-irc.socket`, `commonair-irc.container`, `network.test.ts`, `e2e-irc.ts` | brief ready |
+| R0-b s3-ext   | 1    | `.claude/briefs/r0/R0-b-s3-ext.md`   | `selfhost.sh` (not backup), `unit-env.ts`, S3 lines of the units, `infra/garage/**`, Caddy S3 route, `e2e-s3.ts`    | brief ready |
+| S1-a capacity | 1    | `.claude/briefs/s1/S1-a-capacity.md` | `harness/src/load*`, `metrics.ts` (additive), `load-{plan,sweep}.ts`, `docs/operators/capacity.md`, `scripts/load`  | brief ready |
+| S1-c replicas | 1    | `.claude/briefs/s1/S1-c-replicas.md` | `harness/scenarios/multi-instance.ts`, `harness/compose.multi-instance.yaml`, `harness/src/multi/**`                | brief ready |
+| S1-g IaC      | 1    | `.claude/briefs/s1/S1-g-iac.md`      | `infra/tofu/**`, the IaC section of `docs/deploy/digitalocean.md`                                                   | brief ready |
+| R0-c backups  | 2    | `.claude/briefs/r0/R0-c-backups.md`  | `selfhost.sh` backup, `docs/self-hosting/backups.md`, `e2e-backup.ts`                                               | brief ready |
+| R0-d units    | 2    | `.claude/briefs/r0/R0-d-units.md`    | unit dependency lines, `infra/postgres/health.sh`, `quadlet.test.ts`                                                | brief ready |
+| R0-e tests    | 2    | `.claude/briefs/r0/R0-e-tests.md`    | `scripts/selfhost/e2e.ts`, `stack.int.test.ts`, `quadlet-order.test.ts`                                             | brief ready |
+| R0-f docs     | 3    | `.claude/briefs/r0/R0-f-docs.md`     | `docs/self-hosting/**` (not R0-b's and R0-c's pages)                                                                | brief ready |
 
 ## Web gaps from the first real-host install (2026-10-26, branch `claude/web-gaps-resend-upload`)
 
