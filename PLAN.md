@@ -125,7 +125,7 @@ Every follow-up once `v0.1.0-rc.1` ships is a milestone with its own plan in
 `v0.1.0`), E7 (platform debts), E8 (3D interactivity and the channel bot), E9 (3C developer
 platform), W0–W3 (feature-wins waves, with corrections to that doc), N1 (notifications and PWA),
 N2 (i18n and Weblate), N3 (Twitch import), N4 (ActivityPub), M1 (money follow-ups), P1 (browser
-P2P client), L1 (first public instance). The README there holds the batch order, the gates and
+P2P client), S1 (scaling and availability on DigitalOcean), L1 (first public instance). The README there holds the batch order, the gates and
 the decisions the user owns.
 
 ## Phase two (product roadmap, not built now)

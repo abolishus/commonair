@@ -15,7 +15,7 @@ and 3D" is now "after E8" (E5 and E6 are done).
 | W3-giveaways        | E8 interact; counsel on sweepstakes rules | no purchase necessary entry path                                                                            |
 | W3-jury             | met (E5 membership)                       | advisory only, never T0, seed committed to `audit_log`                                                      |
 | W3-surge-raids      | E8 raids                                  | target-side surge protection                                                                                |
-| W3-fair-predictions | E8 predictions                            | channel points only (ADR 0025)                                                                              |
+| W3-fair-predictions | E8 predictions                            | channel points only (ADR 0026)                                                                              |
 | W3-dvr-relay        | W2-dvr; signed relay purge first          | ADR 0016 v2                                                                                                 |
 
 Seven units: run at most six; W3-dvr-relay last.

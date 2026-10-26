@@ -22,7 +22,7 @@ or WebSocket. A Twitch bot ports with a scope map and the IRC gateway.
   the EventSub WebSocket server; `packages/sdk`; a developer console; developer docs.
   `harness/src/bots/sdk-bot.ts` is a stand-in written to be replaced by the SDK.
 
-## Decisions first: ADR 0026 (OAuth and EventSub)
+## Decisions first: ADR 0027 (OAuth and EventSub)
 
 - OAuth 2.1 shape: authorization code with PKCE required for every client, no implicit grant,
   exact redirect URI match, refresh-token rotation with reuse detection, client credentials for

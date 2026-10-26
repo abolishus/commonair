@@ -19,7 +19,7 @@ web app installs as a PWA, which web push needs anyway.
 - No web manifest, no service worker, no `apps/web/public/`.
 - Discord exists only as a sign-in provider.
 
-## Decisions first: ADR 0027 (notifications)
+## Decisions first: ADR 0028 (notifications)
 
 - **Web push and AGENTS.md rule 3.** The push service is whichever one the viewer's browser
   uses (FCM for Chrome, Mozilla's for Firefox, Apple's for Safari), so push is proprietary

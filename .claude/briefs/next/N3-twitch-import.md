@@ -26,7 +26,7 @@ be copied (they are other people's accounts); they come over through W3-portabil
 - AGENTS.md rule 3: Twitch is a proprietary adapter; the instance runs without
   `TWITCH_CLIENT_ID`, and the import page explains that it is unavailable.
 
-## Decisions (ADR 0030, short)
+## Decisions (ADR 0031, short)
 
 - Scopes requested (read-only: `user:read:email` is not needed; `channel:read:*` for schedule
   and subscriptions count only if shown).

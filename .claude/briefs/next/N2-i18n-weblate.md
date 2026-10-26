@@ -21,7 +21,7 @@ opens PRs; adding a language is a catalog file, not a code change.
 - `users.locale` defaults to `"en"` (`schema/auth.ts:41`); `<html lang>` set in `__root.tsx:56`.
 - There is no `@commonair/i18n` package, though PLAN.md names it.
 
-## Decisions first: ADR 0028 (i18n)
+## Decisions first: ADR 0029 (i18n)
 
 - **Message format:** ICU MessageFormat for plurals and selects (recommended: a small in-repo
   formatter over `Intl.PluralRules`, no new dependency), keeping `{name}` placeholders so

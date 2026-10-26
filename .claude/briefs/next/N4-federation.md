@@ -18,9 +18,9 @@ the federation unit".
 
 - N1 (the `stream.online` fan-out path is reused for federated delivery).
 - W3-portability, if move links should also carry fediverse followers (optional).
-- ADR 0029.
+- ADR 0030.
 
-## Decisions first: ADR 0029 (federation)
+## Decisions first: ADR 0030 (federation)
 
 - Scope v1: channels are `Service`/`Person` actors that publish; local users do not federate
   as actors yet (no federated chat, no federated follows by local users).

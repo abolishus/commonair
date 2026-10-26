@@ -1009,7 +1009,7 @@ integration, licenses, domains, reuse, relay). All units below are merged except
 ## Next
 
 After rc.1: the milestone plans in [`.claude/briefs/next/`](.claude/briefs/next/README.md)
-(R0 first, then E7 + W0).
+(R0 first, with S1's capacity, replica and IaC units; then E7 + W0).
 
 ## Previous next steps
 

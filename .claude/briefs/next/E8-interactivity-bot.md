@@ -25,7 +25,7 @@ EventSub events.
   `overlay.alerts.tsx`. `overlay.goals.tsx` and `overlay.chat.tsx` are placeholders.
 - 29 stubs: `interact.ts` 15 (`:49-64`, `:141-143`), `bot.ts` 14 (`:9-29`).
 
-## Decisions first: ADR 0025 (interactivity policies)
+## Decisions first: ADR 0026 (interactivity policies)
 
 - **Points accrue on verified watch only** (integrity verdict `verified`), per minute, capped
   per day, so viewbots cannot farm. Spending: bot commands with `costPoints`, predictions.
