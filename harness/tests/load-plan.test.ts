@@ -4,7 +4,13 @@
 import { describe, expect, test } from "vite-plus/test";
 import { parseArgs } from "../src/args.ts";
 import { allocateViewers, plannedShards, totalViewers, viewerReportedEgress } from "../src/load.ts";
-import { LOAD_PLAN_DEFAULTS, LOAD_SMOKE_DEFAULTS, LoadParamError, parseLoadParams } from "../src/load/params.ts";
+import {
+  LOAD_PLAN_DEFAULTS,
+  LOAD_SMOKE_DEFAULTS,
+  LoadParamError,
+  parseLoadParams,
+  parseMaxHeartbeatErrors,
+} from "../src/load/params.ts";
 import { type LoadMeasurements, buildLoadReport, loadVerdict } from "../src/load/report.ts";
 import {
   DEFAULT_HTTP_PER_PROCESS,
@@ -300,5 +306,14 @@ describe("writeShardLine", () => {
   test("rejects on a write error", async () => {
     const sink: LineSink = { write: (_c, cb) => (cb(new Error("EPIPE")), false) };
     await expect(writeShardLine(sink, { type: "started", shard: 0, viewers: 1 })).rejects.toThrow("EPIPE");
+  });
+});
+
+describe("load-plan's maxHeartbeatErrors", () => {
+  test("default 0; a non-negative integer otherwise", () => {
+    expect(parseMaxHeartbeatErrors({})).toBe(0);
+    expect(parseMaxHeartbeatErrors({ maxHeartbeatErrors: "12" })).toBe(12);
+    expect(() => parseMaxHeartbeatErrors({ maxHeartbeatErrors: "-1" })).toThrow(LoadParamError);
+    expect(() => parseMaxHeartbeatErrors({ maxHeartbeatErrors: "1.5" })).toThrow(/maxHeartbeatErrors=1.5/);
   });
 });

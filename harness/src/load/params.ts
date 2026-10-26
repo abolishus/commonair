@@ -83,3 +83,11 @@ export function parseLoadParams(params: Readonly<Record<string, string>>, defaul
     httpPerProcess: int(params, "httpPerProcess", defaults.httpPerProcess ?? DEFAULT_HTTP_PER_PROCESS, 1),
   };
 }
+
+/**
+ * `--set maxHeartbeatErrors=N` (`load-plan` against a remote target): failed heartbeats above N
+ * make the run inconclusive. Default 0: any failed heartbeat invalidates the measurement.
+ */
+export function parseMaxHeartbeatErrors(params: Readonly<Record<string, string>>): number {
+  return int(params, "maxHeartbeatErrors", 0, 0);
+}
