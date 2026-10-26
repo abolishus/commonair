@@ -55,7 +55,7 @@ describe("IRC socket units", () => {
     const names = [values(plain, "FileDescriptorName")[0], values(tls, "FileDescriptorName")[0]];
     const pass = (order: (string | undefined)[]) =>
       systemdListeners({ LISTEN_PID: "7", LISTEN_FDS: "2", LISTEN_FDNAMES: order.join(":") }, 7);
-    expect(pass(names)).toEqual({ kind: "fds", tcp: 3, tls: 4 });
-    expect(pass([...names].reverse())).toEqual({ kind: "fds", tcp: 4, tls: 3 });
+    expect(pass(names)).toEqual({ kind: "fds", tcp: 3, tls: 4, fdNames: "irc:ircs" });
+    expect(pass([...names].reverse())).toEqual({ kind: "fds", tcp: 4, tls: 3, fdNames: "ircs:irc" });
   });
 });

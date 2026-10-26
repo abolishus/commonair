@@ -349,7 +349,10 @@ describe("Caddyfile", () => {
     const block = caddy.indexOf("handle @internal");
     expect(block).toBeGreaterThan(0);
     expect(caddy.slice(block, caddy.indexOf("}", block))).toContain("respond 404");
-    expect(block).toBeLessThan(caddy.indexOf("reverse_proxy"));
+    // The first route of the site; snippets (S3_MODE's Garage route) are defined above it.
+    const siteStart = caddy.indexOf("{$PUBLIC_HOSTNAME:localhost} {");
+    expect(block).toBeLessThan(caddy.indexOf("reverse_proxy", siteStart));
+    expect(block).toBeLessThan(caddy.indexOf("import s3-", siteStart));
   });
   test("routes and security headers", () => {
     for (const route of ["/api/*", "/rpc/*", "/chat", "/hls/*", "/relay-pull/*", "/cdn/*", "/tracker*"])
@@ -384,6 +387,8 @@ describe("Quadlet mirror", () => {
       .map((f) => [f.replace(/^commonair-|\.container$/g, ""), readFileSync(join(dir, f), "utf8")]),
   );
   const keys = (unit: string, key: string) => [...unit.matchAll(new RegExp(`^${key}=(.*)$`, "gm"))].map((m) => m[1]!);
+  // Compose's garage-init is the units' storage-init, which also checks an external store.
+  const unitOf = (service: string) => (service === "garage-init" ? "storage-init" : service);
   // Dev/test-only services have no production unit.
   const DEV_ONLY = new Set(["mailpit", "mock-rtmp", "stripe-mock"]);
   // Production-only units with no compose service: the timer-driven IRC certificate sync.
@@ -408,7 +413,6 @@ describe("Quadlet mirror", () => {
   // sockets instead (infra/tests/network.test.ts). Loopback ones serve an operator procedure.
   const PUBLIC_PORTS: Record<string, string[]> = {
     mediamtx: ["1935:1935", "8189:8189/udp"],
-    irc: ["6667:6667", "6697:6697"],
   };
   const LOOPBACK_PORTS: Record<string, string[]> = {
     garage: ["127.0.0.1:3900:3900"],
@@ -416,16 +420,16 @@ describe("Quadlet mirror", () => {
   };
 
   test("every production compose service has a unit, and nothing else does", () => {
-    const expected = [...services.map(([n]) => n).filter((n) => !DEV_ONLY.has(n)), ...QUADLET_ONLY];
+    const expected = [...services.map(([n]) => unitOf(n)).filter((n) => !DEV_ONLY.has(n)), ...QUADLET_ONLY];
     expect(Object.keys(units).sort()).toEqual(expected.sort());
   });
 
   test.each(services.filter(([n]) => !DEV_ONLY.has(n)))("%s: same image, alias and health as compose", (name, s) => {
-    const unit = units[name]!;
+    const unit = units[unitOf(name)]!;
     const [image] = keys(unit, "Image");
     const own = OWN_IMAGE.exec(s.image ?? "");
     expect(image).toBe(own ? `localhost/commonair/${own[1]}:latest` : s.image);
-    expect(keys(unit, "NetworkAlias")).toEqual([name]);
+    expect(keys(unit, "NetworkAlias")).toEqual([unitOf(name)]);
     expect(keys(unit, "Network")).toEqual(["commonair.network"]);
     expect(/^Type=oneshot$/m.test(unit)).toBe(ONE_SHOT.has(name));
     // The same check in the same form. Podman reads a plain HealthCmd string as CMD-SHELL, which
@@ -451,10 +455,13 @@ describe("Quadlet mirror", () => {
     // keeps schema users down); Wants= for long-running services, so a failed start there does
     // not fail this unit with result 'dependency', which Restart=always never retries.
     const deps = Object.keys(s.depends_on ?? {});
-    expect(deps.filter((d) => !keys(unit, "After").includes(`commonair-${d}.service`))).toEqual([]);
+    expect(deps.filter((d) => !keys(unit, "After").includes(`commonair-${unitOf(d)}.service`))).toEqual([]);
     const strength = (d: string) => (ONE_SHOT.has(d) ? "Requires" : "Wants");
-    expect(deps.filter((d) => !keys(unit, strength(d)).includes(`commonair-${d}.service`))).toEqual([]);
-    expect(keys(unit, "Requires").filter((r) => !ONE_SHOT.has(r.replace(/^commonair-|\.service$/g, "")))).toEqual([]);
+    expect(deps.filter((d) => !keys(unit, strength(d)).includes(`commonair-${unitOf(d)}.service`))).toEqual([]);
+    const oneShotUnits = new Set([...ONE_SHOT].map(unitOf));
+    expect(keys(unit, "Requires").filter((r) => !oneShotUnits.has(r.replace(/^commonair-|\.service$/g, "")))).toEqual(
+      [],
+    );
     const isLoopback = (p: string) => p.startsWith("127.0.0.1:");
     expect(
       keys(unit, "PublishPort")
@@ -562,8 +569,10 @@ describe("Quadlet mirror", () => {
       const list = keyList(name);
       const env = Object.keys(compose.services[name]!.environment ?? {});
       expect(env.filter((k) => !set.has(k) && !listPasses(list, k))).toEqual([]);
-      // Caddy and Garage get exactly what compose gives them.
-      expect(exact ? list : env.toSorted()).toEqual(env.toSorted());
+      // Caddy and Garage get exactly what compose gives them, but for Caddy's S3_MODE and
+      // S3_CONNECT_SRC, which only selfhost.sh writes (compose always runs Garage, the default).
+      const selfhostOnly = new Set(["S3_CONNECT_SRC", "S3_MODE"]);
+      expect(exact ? list.filter((k) => !selfhostOnly.has(k)) : env.toSorted()).toEqual(env.toSorted());
     },
   );
 
@@ -582,6 +591,9 @@ describe("Quadlet mirror", () => {
         if (k.startsWith("S3_EVIDENCE_") || k === "EVIDENCE_PRIVATE_KEY") continue;
         // Browser-facing and deployment-specific: the units read it from the operator's env file.
         if (k === "S3_PUBLIC_ENDPOINT" || k === "MEDIA_PUBLIC_URL") continue;
+        // The object store: selfhost.sh writes Garage's or an external store's to the env file
+        // (scripts/selfhost/storage-units.test.ts checks Garage mode renders these values).
+        if (k === "S3_ENDPOINT" || k === "S3_REGION" || k === "S3_FORCE_PATH_STYLE") continue;
         // It holds the Valkey password: a Podman secret in the units (infra/tests/network.test.ts).
         if (k === "VALKEY_URL") continue;
         // The units trust Caddy's fixed address (and the API also web's), not the whole subnet.

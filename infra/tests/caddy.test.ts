@@ -11,6 +11,8 @@ import { describe, expect, test } from "vite-plus/test";
 const caddy = readFileSync(new URL("../caddy/Caddyfile", import.meta.url), "utf8");
 const lines = caddy.split("\n").map((l) => l.replace(/#.*$/, "").trim());
 const site = caddy.slice(caddy.indexOf("{$PUBLIC_HOSTNAME:localhost} {"));
+/** Garage's S3 route, which the site imports in Garage mode (S3_MODE, caddy-s3-mode.test.ts). */
+const s3Garage = caddy.slice(caddy.indexOf("(s3-garage) {"), caddy.indexOf("(s3-external) {"));
 
 /** The handle blocks of the site, in order: matcher → upstream (or "respond"). */
 function handles(): [string, string][] {
@@ -28,8 +30,6 @@ describe("routing", () => {
   test("each public path reaches the service that owns it", () => {
     expect(Object.fromEntries(handles())).toEqual({
       "@internal": "respond 404",
-      "@s3-upload": "garage:3900",
-      "@s3-export": "garage:3900",
       "/api/*": "api:3001",
       "/rpc/*": "api:3001",
       "/overlay/events": "api:3001",
@@ -67,19 +67,22 @@ describe("routing", () => {
   });
 
   test("only the public services are upstreams (no Postgres, Grafana, collector)", () => {
-    const upstreams = new Set([...site.matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]!.split(":")[0]));
+    const upstreams = new Set(
+      [...`${site}${s3Garage}`.matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]!.split(":")[0]),
+    );
     expect(upstreams).toEqual(new Set(["api", "chat", "garage", "mediamtx", "origin", "tracker", "web"]));
   });
 
   test("Garage only for presigned uploads into incoming/ and presigned export reads (ADR 0024)", () => {
-    expect(site.match(/garage:/g)).toHaveLength(2);
-    expect(site).toMatch(
+    expect(site.match(/garage:/g)).toBeNull();
+    expect(s3Garage.match(/garage:/g)).toHaveLength(2);
+    expect(s3Garage).toMatch(
       /@s3-upload \{\n\t\tmethod PUT\n\t\tpath \/\{\$S3_BUCKET_MEDIA:commonair-media\}\/incoming\/\*\n(?:\t\t#[^\n]*\n)*\t\tnot path \/\{\$S3_BUCKET_MEDIA:commonair-media\}\/incoming\/\n\t\tquery X-Amz-Signature=\*\n\t\}/,
     );
-    expect(site).toMatch(
+    expect(s3Garage).toMatch(
       /@s3-export \{\n\t\tmethod GET HEAD\n\t\tpath \/\{\$S3_BUCKET_EXPORTS:commonair-exports\}\/\*\n(?:\t\t#[^\n]*\n)*\t\tnot path \/\{\$S3_BUCKET_EXPORTS:commonair-exports\}\/\n\t\tquery X-Amz-Signature=\*\n\t\}/,
     );
-    expect(site).toMatch(/handle @s3-upload \{\n\t\trequest_body \{\n\t\t\tmax_size 10MB\n\t\t\}/);
+    expect(s3Garage).toMatch(/handle @s3-upload \{\n\t\trequest_body \{\n\t\t\tmax_size 10MB\n\t\t\}/);
     // Signed responses pass through unencoded (Content-Length and ETag as Garage sent them).
     expect(site).toMatch(/@compressible not query X-Amz-Signature=\*\n\tencode @compressible zstd gzip\n/);
   });

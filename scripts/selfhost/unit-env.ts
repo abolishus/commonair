@@ -190,7 +190,16 @@ interface StaticList {
 export const STATIC_UNITS: Record<string, StaticList> = {
   caddy: {
     why: "the {$VAR} placeholders of infra/caddy/Caddyfile",
-    keys: ["ACME_CA", "ACME_EMAIL", "PUBLIC_HOSTNAME", "S3_BUCKET_EXPORTS", "S3_BUCKET_MEDIA", "S3_MODE", "TLS_MODE"],
+    keys: [
+      "ACME_CA",
+      "ACME_EMAIL",
+      "PUBLIC_HOSTNAME",
+      "S3_BUCKET_EXPORTS",
+      "S3_BUCKET_MEDIA",
+      "S3_CONNECT_SRC",
+      "S3_MODE",
+      "TLS_MODE",
+    ],
   },
   garage: {
     why: "Garage's own settings (garage.toml leaves its secrets to the environment)",

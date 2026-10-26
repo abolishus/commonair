@@ -185,9 +185,10 @@ describe("our services get what their schemas read", () => {
   test("evidence secrets reach only the units ADR 0006 Q4 allows", () => {
     const holders = (key: string) => [...lists.keys()].filter((u) => passes(listed(u), key)).sort();
     expect(holders("EVIDENCE_PRIVATE_KEY")).toEqual(["api"]);
-    // garage-init creates the evidence key; the worker is the only service that uses it.
-    expect(holders("S3_EVIDENCE_ACCESS_KEY_ID")).toEqual(["garage-init", "worker"]);
-    expect(holders("S3_EVIDENCE_SECRET_ACCESS_KEY")).toEqual(["garage-init", "worker"]);
+    // storage-init creates (Garage) or checks (external) the evidence key; the worker is the
+    // only service that uses it.
+    expect(holders("S3_EVIDENCE_ACCESS_KEY_ID")).toEqual(["storage-init", "worker"]);
+    expect(holders("S3_EVIDENCE_SECRET_ACCESS_KEY")).toEqual(["storage-init", "worker"]);
   });
 
   test("DATABASE_URL never comes from the env file: it is a Podman secret", () => {
@@ -215,15 +216,20 @@ describe("third-party images and tools-image jobs get what they read", () => {
     expect(listed("mediamtx")).toContain("MTX_*");
   });
 
-  test("garage-init: every variable optionsFromEnv reads", () => {
-    const src = read("infra/garage/bootstrap.ts");
-    const fn = src.slice(src.indexOf("export function optionsFromEnv"));
+  test("storage-init: every variable optionsFromEnv, storageMode and storeFromEnv read", () => {
+    const boot = read("infra/garage/bootstrap.ts");
+    const init = read("infra/garage/storage-init.ts");
+    const fn = [
+      boot.slice(boot.indexOf("export function optionsFromEnv")),
+      init.slice(init.indexOf("export function storageMode"), init.indexOf("export interface S3Key")),
+      init.slice(init.indexOf("export function storeFromEnv"), init.indexOf("export interface BucketClient")),
+    ].join("\n");
     const vars = new Set([
       ...[...fn.matchAll(/env\.([A-Z][A-Z0-9_]*)/g)].map((m) => m[1]!),
       ...[...fn.matchAll(/(?:need|positive)\("([A-Z][A-Z0-9_]*)"/g)].map((m) => m[1]!),
     ]);
-    const set = unitSetKeys(unitText("garage-init"));
-    expect([...vars].filter((v) => !set.has(v)).sort()).toEqual(listed("garage-init"));
+    const set = unitSetKeys(unitText("storage-init"));
+    expect([...vars].filter((v) => !set.has(v)).sort()).toEqual(listed("storage-init"));
   });
 
   test("migrate and irc-cert: what their scripts read from process.env, but the secret DATABASE_URL", () => {
@@ -428,7 +434,7 @@ describe("render-env.sh", () => {
   const SECRET_ALLOWLIST: Record<string, string[]> = {
     caddy: [],
     garage: ["GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET"],
-    "garage-init": [
+    "storage-init": [
       "GARAGE_ADMIN_TOKEN",
       "S3_ACCESS_KEY_ID",
       "S3_EVIDENCE_ACCESS_KEY_ID",

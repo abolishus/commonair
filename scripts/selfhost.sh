@@ -1127,7 +1127,7 @@ all_units() {
   done
 }
 
-# Socket units (Caddy's public ports, held by systemd and passed to the service).
+# Socket units (Caddy's and IRC's public ports, held by systemd and passed to the service).
 sockets() {
   for _u in "$SYSTEMD_DIR"/commonair-*.socket; do
     [ -f "$_u" ] && basename "$_u"

@@ -54,7 +54,7 @@ function seconds(span: string): number {
 
 describe("every container unit", () => {
   test("the expected set: services, one-shot jobs and the timer-driven certificate sync", () => {
-    expect(oneShots.map(([n]) => n)).toEqual(["commonair-garage-init", "commonair-irc-cert", "commonair-migrate"]);
+    expect(oneShots.map(([n]) => n)).toEqual(["commonair-irc-cert", "commonair-migrate", "commonair-storage-init"]);
     expect(longRunning.length).toBe(18);
   });
 
@@ -265,6 +265,6 @@ describe("the dependency graph converges (no failure propagates through a long-r
       "commonair-api.service",
       "commonair-caddy.socket",
     ]);
-    expect(values(of("garage-init"), "Wants")).toEqual(["commonair-garage.service"]);
+    expect(values(of("storage-init"), "Wants")).toEqual(["commonair-garage.service"]);
   });
 });

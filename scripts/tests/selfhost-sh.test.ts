@@ -944,7 +944,7 @@ describe("install", () => {
       at("systemctl --user start commonair-migrate.service"),
     );
     expect(calls).toContain(
-      "systemctl --user enable --now commonair-caddy.socket commonair-backup.timer commonair-irc-cert.timer",
+      "systemctl --user enable --now commonair-caddy.socket commonair-irc.socket commonair-ircs.socket commonair-backup.timer commonair-irc-cert.timer",
     );
     expect(calls).toContain("systemctl --user start commonair-irc-cert.service");
   });
