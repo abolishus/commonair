@@ -20,7 +20,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
   test (`0002_protections_hardening.sql`, ADR 0004). Tests run as a least-privilege role.
 - Secret scanning and push protection enabled on the GitHub repository.
 
-## Session thirteen (2026-10-23/26): v0.1.0-rc.1 cut, verified and installed on a real host (rc.2 upgrade pending)
+## Session thirteen (2026-10-23/26): v0.1.0-rc.1 and rc.2 released, verified, installed and upgraded on a real host (Phase 5 Part 3 done)
 
 Continues session twelve's "User to run (Part 3)". Notes on branch `phase5/release-rc1`
 (worktree `.claude/worktrees/p5-release`).
@@ -70,13 +70,35 @@ the web app never calls `uploadChannelFile`, so there is no avatar/banner upload
 devDependency); and ingest-whip's Chromium first frame timed out again, now with the diagnostics
 from `a38438f`: path mse, session up, 3.3 MB received, 0 stalls, 2 heartbeats, no decoded frame.
 
+### 6. v0.1.0-rc.2 and the upgrade (2026-10-26)
+
+- `main` `60b2206` (the fixes above): CI 40351033323 green except ingest-whip; a rerun of that job
+  passed (attempt 2), but another session had by then found the root cause, an hls.js 1.7.3
+  GAP-start wedge (`5e4ce6c`, see the note below). CI 40359523245 at `8b8a0a2`: **`ci-ok` green on
+  the first attempt**, ingest-whip included; local gate green in 526 s.
+- `v0.1.0-rc.2` → `8b8a0a2`, SSH-signed like rc.1. `release.yml` run 40380664493 **green in
+  6 min 59 s**, prerelease, 76 assets, `latest` untouched. Verified against the exact
+  `refs/tags/v0.1.0-rc.2` identity: `SHA256SUMS` signature, 74/74 checksums, 14/14 images, 6/6
+  relay binaries; the manifest names `8b8a0a2`.
+- On the droplet, as `commonair`: `selfhost.sh upgrade --version v0.1.0-rc.2 --require-signature`
+  **exit 0 in 224 s** (signature, checksum, pre-upgrade base backup, migrations, every service
+  healthy); `selfhost.sh backup` exit 0 in 1 s (four base backups listed); `status`: rc.2, previous
+  rc.1, all 18 services healthy, last backup success. The same Let's Encrypt certificate; HTTPS 200;
+  the rc.1 avatar still served (200, same bytes), so database and objects survived. As root,
+  `status` now refuses with the fix, and under `su - commonair` it names the missing user manager
+  (both from `9e4a5e4`, on the host). `podman kill commonair-worker` on rc.2: healthy in 18 s,
+  NRestarts 0 → 1.
+
 ### Left
 
 - happy-dom 21.0.4 on or after 2026-10-27 (vet, bump both package.json files, drop the exception).
-- ingest-whip: data arrives on the MSE path but no frame decodes; investigate the player/demux.
-- `v0.1.0-rc.2`, `upgrade`, `backup`, `status` on the droplet; then delete the droplet, its
-  firewall and the DNS records.
-- ADR superseding 0010: DigitalOcean for staging and production (note the SMTP egress block).
+- The droplet `commonair-rc-test`, its firewall and the `staging-stream.abolish.us` records stay up
+  until the user decides whether it becomes the staging host (ADR 0025, proposed) or is deleted.
+- ADR 0025 (DigitalOcean for staging and production, superseding 0010) is proposed, awaiting the
+  user; on acceptance: retire Railway, `docs/deploy/digitalocean.md`, mark 0010 superseded.
+- Product gaps from the real host: no "resend verification email" on the sign-in page; no avatar or
+  banner upload UI (`uploadChannelFile` is never called).
+- Not exercised on a real host: Fedora (SELinux labels) and a rollback (CI's e2e covers rollback).
 
 ## Session twelve (2026-10-22/23): validating and finishing Phase 5 (Parts 1–2 done, `ci-ok` green; release pending the user)
 
