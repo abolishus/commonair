@@ -5,8 +5,12 @@
  * `moderation.ncii-hash`: after staff decided an NCII request `removed` (the API already
  * unpublished every resolved subject), PDQ-hash the removed content into `local_hash_list` as
  * `ncii` so re-uploads match T0, and only then delete the objects (e4c spec "NCII decision").
- * VODs are sampled every effective sample interval, clips every second, upload images once; frames
- * below PDQ_MIN_QUALITY are skipped. Objects are looked up at their public key and, for requests
+ * VODs are sampled every effective sample interval, clips every second, upload images once; a
+ * removed live broadcast is every VOD and clip recorded from it plus its thumbnails (no recordings:
+ * marked done with 0 hashes, and the audit row says so). A broadcast that ended less than
+ * `BROADCAST_SETTLE_MS` ago is deferred (the job throws after the other items, so the queue retries
+ * it): the recorder may still be writing trailing segments and the final playlist. Prefixes are
+ * listed again after the delete, and late objects are deleted too. Frames below PDQ_MIN_QUALITY are skipped. Objects are looked up at their public key and, for requests
  * auto-hidden earlier, under the private hidden prefix. Idempotent: an item with `hashed_at` is
  * done (`removed_at` is the API's, set when it unpublished); hashes insert with ON CONFLICT DO NOTHING.
  */
@@ -20,13 +24,21 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
-import { nciiHiddenKey, readObject, vodPrefix } from "./objects.ts";
+import { nciiHiddenKey, readObject, thumbnailPrefix, vodPrefix } from "./objects.ts";
 import { audit } from "./records.ts";
 import { mediaStorage, moderationRuntime } from "./runtime.ts";
 import { sampleSeconds } from "./settings.ts";
 
-const { nciiRequests: requests, nciiRequestItems: items, clips, localHashList } = schema;
+const { nciiRequests: requests, nciiRequestItems: items, clips, vods, broadcasts, localHashList } = schema;
 const LUMA = MODERATION_CONSTANTS.PDQ_LUMA_SIZE;
+/** How long after a broadcast ended its recordings are taken as final (recorder flush + finalize). */
+export const BROADCAST_SETTLE_MS = 120_000;
+
+/** Whether a removed broadcast's recordings may still change. Pure. */
+export function broadcastSettling(endedAt: Date | null | undefined, now: Date): boolean {
+  if (endedAt === undefined) return false; // no row: nothing is recording it
+  return endedAt === null || now.getTime() - endedAt.getTime() < BROADCAST_SETTLE_MS;
+}
 
 export function selectVodPlaylist(keys: readonly string[]): string {
   const playlist = keys.find((k) => k.endsWith("/index.m3u8")) ?? keys.find((k) => k.endsWith(".m3u8"));
@@ -112,6 +124,52 @@ async function hashClip(ctx: WorkerContext, clipId: string, work: string): Promi
   return { hashes: usableHashes(hashes), deleteKeys };
 }
 
+/**
+ * A removed live broadcast: every VOD and clip recorded from it, and its thumbnails (the API
+ * soft-deleted the recordings, `status = 'deleted'`, when it ended the broadcast; their objects
+ * remain). All of them are hashed before the caller deletes any object; a broadcast with no
+ * recordings yields no hashes and is still marked done.
+ */
+async function hashBroadcast(ctx: WorkerContext, broadcastId: string, every: number, work: string) {
+  const [vodRows, clipRows] = await Promise.all([
+    ctx.db.select({ id: vods.id }).from(vods).where(eq(vods.broadcastId, broadcastId)),
+    ctx.db.select({ id: clips.id }).from(clips).where(eq(clips.broadcastId, broadcastId)),
+  ]);
+  const hashes: string[] = [];
+  const deleteKeys: string[] = [];
+  for (const v of vodRows) {
+    const r = await hashVod(ctx, v.id, every, work);
+    hashes.push(...r.hashes);
+    deleteKeys.push(...r.deleteKeys);
+  }
+  for (const c of clipRows) {
+    const r = await hashClip(ctx, c.id, work);
+    hashes.push(...r.hashes);
+    deleteKeys.push(...r.deleteKeys);
+  }
+  const { keys: thumbKeys } = await listWithFallback(mediaStorage(ctx), ctx.mediaBucket, thumbnailPrefix(broadcastId));
+  for (const k of thumbKeys) {
+    const r = await hashUpload(ctx, k);
+    hashes.push(...r.hashes);
+    deleteKeys.push(...r.deleteKeys);
+  }
+  return {
+    result: { hashes: [...new Set(hashes)], deleteKeys: [...new Set(deleteKeys)] } satisfies ItemResult,
+    vods: vodRows.length,
+    clips: clipRows.length,
+    thumbnails: thumbKeys.length,
+    prefixes: [...vodRows.map((v) => vodPrefix(v.id)), thumbnailPrefix(broadcastId)],
+  };
+}
+
+/** Objects that appeared under `prefixes` (public or hidden) after the item was hashed. */
+async function lateObjects(storage: ObjectStorage, bucket: string, prefixes: readonly string[]): Promise<string[]> {
+  const keys: string[] = [];
+  for (const p of prefixes)
+    for (const prefix of [p, nciiHiddenKey(p)]) for await (const o of storage.list(bucket, prefix)) keys.push(o.key);
+  return keys;
+}
+
 async function hashUpload(ctx: WorkerContext, key: string): Promise<ItemResult> {
   const rt = moderationRuntime(ctx);
   const obj = await readWithFallback(mediaStorage(ctx), ctx.mediaBucket, key);
@@ -137,13 +195,30 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
   let hashed = 0;
   let deleted = 0;
   let done = 0;
+  let deferred = 0;
   try {
     for (const i of pending) {
       let r: ItemResult = { hashes: [], deleteKeys: [] };
+      let recordings: { vods: number; clips: number; thumbnails: number } | null = null;
+      let prefixes: string[] = [];
       if (i.subjectType === "vod" && i.subjectId) r = await hashVod(ctx, i.subjectId, every, work);
       else if (i.subjectType === "clip" && i.subjectId) r = await hashClip(ctx, i.subjectId, work);
       else if (i.subjectType === "upload" && i.uploadKey) r = await hashUpload(ctx, i.uploadKey);
-      // Not on this instance (null), or not hashed yet (broadcast): left unmarked for a later run.
+      else if (i.subjectType === "broadcast" && i.subjectId) {
+        const [row] = await ctx.db
+          .select({ endedAt: broadcasts.endedAt })
+          .from(broadcasts)
+          .where(eq(broadcasts.id, i.subjectId));
+        if (broadcastSettling(row?.endedAt, ctx.now())) {
+          deferred++;
+          continue;
+        }
+        const b = await hashBroadcast(ctx, i.subjectId, every, work);
+        r = b.result;
+        recordings = { vods: b.vods, clips: b.clips, thumbnails: b.thumbnails };
+        prefixes = b.prefixes;
+      }
+      // Not on this instance (null subject): nothing to hash; left unmarked.
       else continue;
       const now = ctx.now();
       // Hashes are committed before any object is deleted; a crash in between re-hashes next time.
@@ -171,6 +246,13 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
         await storage.delete(ctx.mediaBucket, k);
         deleted++;
       }
+      // A write that raced the listing (a last segment, a rewritten playlist): it is the same
+      // content already hashed, and must not stay published.
+      const late = await lateObjects(storage, ctx.mediaBucket, prefixes);
+      for (const k of late) {
+        await storage.delete(ctx.mediaBucket, k);
+        deleted++;
+      }
       await ctx.db.transaction(async (tx) => {
         await tx
           .update(items)
@@ -189,8 +271,9 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
               subjectType: i.subjectType,
               subjectId: i.subjectId,
               hashes: r.hashes.length,
-              objectsDeleted: r.deleteKeys.length,
+              objectsDeleted: r.deleteKeys.length + late.length,
               sampleSeconds: every,
+              ...recordings,
             },
           },
           now,
@@ -202,6 +285,14 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
     await rm(work, { recursive: true, force: true });
   }
   moderationMetrics.actions.add(done, { kind: "ncii_hash" });
-  ctx.logger.info("NCII content hashed and removed", { requestId: req.id, items: done, hashes: hashed, deleted });
+  ctx.logger.info("NCII content hashed and removed", {
+    requestId: req.id,
+    items: done,
+    hashes: hashed,
+    deleted,
+    deferred,
+  });
+  // The queue retries the job (backoff); only the deferred items are left unhashed by then.
+  if (deferred > 0) throw new Error("ncii-hash: a removed broadcast's recordings are still settling; retrying");
   return { items: done, hashes: hashed, deleted };
 }

@@ -320,13 +320,13 @@ describe("appeals", () => {
       (await create(alice.client, { kind: "integrity", subjectType: "moderation_action", subjectId: aliceSession }))
         .status,
     ).toBe(400);
-    // Not wired yet.
+    // A DMCA notice or account action that does not exist (or is not the caller's) looks missing.
     expect(
       (await create(alice.client, { kind: "dmca", subjectType: "dmca_notice", subjectId: aliceSession })).status,
-    ).toBe(501);
+    ).toBe(404);
     expect(
       (await create(alice.client, { kind: "account", subjectType: "account_action", subjectId: alice.userId })).status,
-    ).toBe(501);
+    ).toBe(404);
     // Signed out.
     expect((await create(client(api), { subjectType: "user", subjectId: alice.userId })).status).toBe(401);
   });

@@ -15,7 +15,13 @@ import { usePaged } from "../money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
 import { appealQueueClient, type AppealDto, type AppealQueueClient } from "./client.ts";
-import { appealStatusBadge } from "./labels.ts";
+import {
+  appealKindLabel,
+  appealStatusBadge,
+  appealSubjectLabel,
+  overturnEffect,
+  overturnEffectLabel,
+} from "./labels.ts";
 
 export const RESOLUTION_MAX = 5000;
 
@@ -84,6 +90,8 @@ function AppealCard({
   const [pending, setPending] = React.useState(false);
   const id = React.useId();
   const badge = appealStatusBadge(appeal.status);
+  // The queue's DTO does not carry the appealed action, so the subject's general rule is shown.
+  const effect = overturnEffect(appeal.subjectType);
   const ready = status !== "" && resolution.trim() !== "";
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -103,14 +111,14 @@ function AppealCard({
       size="sm"
       data-testid="appealq-item"
       data-appeal-id={appeal.id}
+      data-kind={appeal.kind}
       data-subject-type={appeal.subjectType}
       data-status={appeal.status}
     >
       <CardHeader>
-        <CardTitle>
-          {appeal.subjectType === "content_label" ? t("safety.appeals.labelSubject") : t("safety.appeals.otherSubject")}
-        </CardTitle>
+        <CardTitle>{appealSubjectLabel(appeal.subjectType)}</CardTitle>
         <CardAction className="flex items-center gap-2">
+          <StatusBadge tone="neutral">{appealKindLabel(appeal.kind)}</StatusBadge>
           <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
           <RelativeTime date={appeal.createdAt} className="text-xs text-muted-foreground" />
         </CardAction>
@@ -118,6 +126,11 @@ function AppealCard({
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)} noValidate>
           <p className="text-sm whitespace-pre-wrap">{appeal.body}</p>
+          {effect && (
+            <p className="text-sm text-muted-foreground" data-effect={effect}>
+              {overturnEffectLabel(effect)}
+            </p>
+          )}
           {appeal.status === "open" && (
             <>
               <ChoiceToggle
