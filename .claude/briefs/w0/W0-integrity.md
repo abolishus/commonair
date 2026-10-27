@@ -147,3 +147,11 @@ CDN-assignment hook), the text the orchestrator should use to close the 2H2 row 
 and update `HANDOFF.md:451`, and the exact live commands:
 `bun harness/src/cli.ts run integrity-basic` and, on a stack with the CDN adapter configured, the
 same with the CDN step not skipped.
+
+## Contract step as landed
+
+- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
+- The next free migration number is 0030.
+- `0029_snapshot` is a copy of 0028.
+- No changes from this step beyond the base sha and migration numbers.

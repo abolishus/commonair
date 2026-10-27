@@ -266,3 +266,38 @@ and the live
 commands: `bun harness/src/cli.ts run trust-safety --set steps=11` (the "statements of reasons" step; its
 prerequisites 4-7 run with it; check the number in `harness/src/safety.ts` after the contract step) and a manual
 check of `/settings/appeals` as the T2-labelled streamer.
+
+## Contract step as landed
+
+- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
+- The next free migration number is 0030.
+- `0029_snapshot` is a copy of 0028.
+- The entity and table carry an extra `sourceAction` / `source_action` field.
+- The table columns are flat:
+  - `content_type`, `content_id`
+  - `restriction_kind`, `restriction_detail`, `restriction_ends_at`, `territorial_scope`
+  - `ground_kind`, `clause_id`, `clause_version`, `legal_basis`
+  - `guidelines_document_id`, `notice_document_id`
+  - `appeal_subject_type`, `appeal_subject_id`
+  - `created_at`, with no default
+- Deliveries have `last_error_code` and `attempts`, plus a partial index of unsent deliveries.
+- Statement CHECKs:
+  - territorial scope is `'all'`;
+  - `clause_version >= 1`;
+  - `legal_basis` only for illegal grounds;
+  - appeal subject type and id are both set or both null;
+  - `facts` has a `code`.
+- Statements are append-only and cannot be truncated (enforced in 0029).
+- The facts schema is narrower than the ADR: `moderator_review.decision` is `z.enum(MODERATION_REVIEW_DECISIONS)` and `classifier.threshold` is bounded 0..1.
+- The seed version is `ENFORCEMENT_NOTICE_SEED_VERSION` in `packages/db/src/legal/index.ts:24`. The orchestrator bumps it at merge if the skeleton reached a persistent database.
+- `seed.int` exempts the skeleton notice from the 300-word minimum. Remove that exemption when the real text lands.
+- `enforcement_notice` now appears among the optional documents on signup and in the legal-pending list.
+- Appeals:
+  - `KIND_SUBJECTS` is at `appeals.ts:89` and the `ncii_request_item` case at :227.
+  - The request's decider cannot resolve the appeal (:702).
+  - `whileSuspended` is on `appeals.create` at `router.ts:2300`.
+  - The web maps `ncii_request_item` to the generic "other subject" label.
+- The stubs are `services/api/src/routes/me-enforcement.ts`, `services/worker/src/jobs/moderation-sor.ts` (`sorJobs`, both returning `{ notBuilt: 1 }`) and `harness/src/safety-sor.ts`.
+- Step 11 is pending. Remove it from `PENDING_SAFETY_STEPS` through a contract request.
+- The export collectors (E7-dmca) have merged, so that file is free to edit.

@@ -203,3 +203,26 @@ package, branch and sha, contract requests (the `selfhost.sh` lines, any recorde
 harness hook), what is left, and the exact commands the user should run live:
 `bun harness/src/cli.ts run clock-skew --set assert=false` on `main` (baseline) and
 `bun harness/src/cli.ts run clock-skew` on your branch.
+
+## Contract step as landed
+
+- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
+- The next free migration number is 0030.
+- `0029_snapshot` is a copy of 0028.
+- `MediaContext.clock` is set at `services/media/src/service.ts:207`, not around :168.
+- `ClockAnchor` and `IDENTITY_CLOCK` are in `services/media/src/clock/anchor.ts`.
+- The recorder already calls `ctx.clock.offsetMs(broadcastId, runId)` synchronously in `stamp()` (`recorder.ts:146`). It is used in three places:
+  - `localWindow` (:153) re-stamps every local segment on each call.
+  - `pollOnce` (:181) stamps `recordingStartedAt` when it first sees a segment (:189-191).
+  - `upload` (:213) renders the VOD playlist from stamped segments.
+- `runId` is created at `recorder.ts:117`. Segments resumed from storage have `runId: null`, so they are not stamped a second time.
+- The playlist is re-rendered on every poll and uploaded only when its text changes. A side effect: a failed playlist upload is retried on the next poll.
+- **Must fix (review finding 1): the crash-recovery path ignores the anchor.**
+  - In `services/media/src/recovery.ts`, `recoverRecording` (:110) puts segments read from storage, whose times are already stamped, together with raw local run segments that it never stamps. It then orders and renders them with `segmentsToRecover` (:43).
+  - `RecoveryDeps` has no `ClockAnchor`.
+  - Fix: pass the anchor in and stamp the local run segments by `runId` before ordering and rendering, so a recovered VOD's times are not out of order. If recovery should stay raw instead, document why.
+- **Must fix (review finding 2): `recordingStartedAt` is stamped once and never updated.**
+  - The anchor interface allows a run to be re-anchored. After that happens, `localWindow` compares re-stamped segment times against a stale start time.
+  - Fix: either derive `recordingStartedAt` in `localWindow` from the stamped segments, or store the raw value with its `runId` and stamp it when read.
+- A `harness/scenarios/clock-skew.ts` stub exists with `inFull: false`.

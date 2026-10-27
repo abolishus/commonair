@@ -243,3 +243,32 @@ requests, anything left, and the live commands:
 `bun harness/src/cli.ts run trust-safety --set steps=10` (the "VOD exposure" step; check the number
 in `harness/src/safety.ts` after the contract step) and
 `bun harness/src/cli.ts run vod-clips`.
+
+## Contract step as landed
+
+- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
+- The next free migration number is 0030.
+- `0029_snapshot` is a copy of 0028.
+- Current wrapper and reader locations:
+
+| What                                                   | File:line                                            |
+| ------------------------------------------------------ | ---------------------------------------------------- |
+| `vodPrefix` wrapper                                    | `recorder.ts:26` (`VOD_PLAYLIST` re-exported at :25) |
+| Recorder resume / upload                               | :201-211 / :213                                      |
+| `vodPrefix` wrapper and retention SQL guard            | `housekeeping.ts:93` and :155                        |
+| Retention `deletePrefix`                               | `housekeeping.ts` :181, :183                         |
+| `vodPrefix` wrapper                                    | `moderation/objects.ts:45`                           |
+| `t0-media`                                             | :108                                                 |
+| `ncii-clock`                                           | :203                                                 |
+| `ncii-hash`                                            | :87 and :161                                         |
+| `account-deletion`                                     | :27 import; :371, :387, :391                         |
+| `dmca/objects.ts`                                      | :111, still checks `startsWith("vods/")`             |
+| `services/api/src/routes/vods.ts` local `VOD_PLAYLIST` | :28, still to be replaced with the contract export   |
+
+- Contract helpers are in `@commonair/contracts/storage`: `vodPrefix(id, placement)`, `vodPlacement`, `isVodOwnPrefix`, `VOD_ROUTE`, `vodTokenPath`, `VOD_TOKEN_MAX_TTL_SECONDS`, and `PUBLIC_MEDIA_PREFIXES`.
+- The recorder now contains ClockAnchor stamping; keep it.
+- Caddy routes `/vod/*` to `origin:3003`.
+- The `vod-placement` job is a stub on the retention queue, running every 60 s with data `{ vodId?: uuid }`. It is in `OPS_TICK_JOBS` and in the api `OPS_JOB_QUEUES`.
+- Its harness step is trust-safety step 10, which is in `PENDING_SAFETY_STEPS`. On landing, remove 10 from that list in `harness/src/safety.ts` and update the pending assertion in `safety.test`. That file belongs to the orchestrator, so this is a contract request.
+- Possible follow-up: reserve the username `vod` in `services/api/src/auth/identity.ts`, because Caddy's `/vod/*` would shadow sub-paths of a channel with that name.
