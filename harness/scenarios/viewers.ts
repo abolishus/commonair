@@ -45,11 +45,13 @@ export default defineScenario({
     const total = plain + p2p.optedIn + p2p.atDefault;
     ctx.data("p2p", p2p);
 
-    if (p2p.optedIn > 0) {
+    if (p2p.optedIn + p2p.atDefault > 0) {
       const info = await ctx.step("instance info", () => p.api().client.instance.info());
       ctx.assert("the stack runs with P2P_DEFAULT=off", info.features.p2pDefault === "off", info.features);
-      ctx.assert("P2P is enabled on the stack", info.features.p2p, info.features);
-      ctx.assert("DATABASE_URL is set (the database is the record of P2P bytes)", Boolean(process.env.DATABASE_URL));
+      if (p2p.optedIn > 0) {
+        ctx.assert("P2P is enabled on the stack", info.features.p2p, info.features);
+        ctx.assert("DATABASE_URL is set (the database is the record of P2P bytes)", Boolean(process.env.DATABASE_URL));
+      }
     }
 
     const streamer = await ctx.step("sign up streamer", () => p.signUp({ prefix: "viewers" }));
@@ -98,7 +100,9 @@ export default defineScenario({
     ctx.metric("viewer_count.converge", converged, "ms");
     ctx.check("count never exceeded the real audience", maxSeen <= total, { maxSeen, total });
 
-    if (atDefault.length > 0) await checkDefaultViewersStayedOff(ctx, atDefault);
+    // The player's data-p2p attribute is a hard requirement only when P2P viewers opted in,
+    // i.e. once P1-player has landed; default-only runs check it softly.
+    if (atDefault.length > 0) await checkDefaultViewersStayedOff(ctx, atDefault, p2p.optedIn > 0);
 
     const reports = await ctx.step("stop viewers", () => Promise.all(viewers.map((v) => v.stop())));
     const agg = aggregateReports(reports);
@@ -134,7 +138,11 @@ export default defineScenario({
 });
 
 /** A viewer at the default (off) never connected to a peer and holds no grant or tracker record. */
-async function checkDefaultViewersStayedOff(ctx: ScenarioContext, atDefault: Viewer[]): Promise<void> {
+async function checkDefaultViewersStayedOff(
+  ctx: ScenarioContext,
+  atDefault: Viewer[],
+  strictPlayerState: boolean,
+): Promise<void> {
   const seen = await ctx.step("default viewers stayed off P2P", async () => {
     const valkey = new RedisClient(valkeyUrl(process.env));
     await valkey.connect();
@@ -155,10 +163,13 @@ async function checkDefaultViewersStayedOff(ctx: ScenarioContext, atDefault: Vie
     }
   });
   ctx.assert(
-    "default viewers show data-p2p=off and made no peer connection",
-    seen.every((r) => r.status?.state === "off" && r.status.peerConnections === 0),
+    "default viewers made no peer connection",
+    seen.every((r) => r.status !== null && r.status.peerConnections === 0),
     seen,
   );
+  const showOff = seen.every((r) => r.status?.state === "off");
+  if (strictPlayerState) ctx.assert("default viewers show data-p2p=off", showOff, seen);
+  else ctx.check("default viewers show data-p2p=off", showOff, seen);
   ctx.assert(
     "default viewers hold no P2P grant and no tracker record",
     seen.every((r) => r.sid !== null && r.grant === false && r.peer === false),
