@@ -45,16 +45,14 @@ describe.skipIf(!storage)("NCII auto-hide object move", () => {
     for (const k of keys) await S3.put(MEDIA_BUCKET, k, `bytes of ${k}`, { contentType: "video/mp4" });
     const untouched = `${vodPrefix(bystander, "public")}index.m3u8`;
     await S3.put(MEDIA_BUCKET, untouched, "other VOD", { contentType: "video/mp4" });
-    await t.db
-      .insert(schema.vods)
-      .values({
-        id,
-        broadcastId: broadcast.id,
-        channelId: channel.id,
-        title: "v",
-        status: "ready",
-        storagePrefix: priv,
-      });
+    await t.db.insert(schema.vods).values({
+      id,
+      broadcastId: broadcast.id,
+      channelId: channel.id,
+      title: "v",
+      status: "ready",
+      storagePrefix: priv,
+    });
 
     const [req] = await t.db
       .insert(schema.nciiRequests)
