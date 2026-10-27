@@ -64,6 +64,20 @@ describe("TURN REST credentials", () => {
     // Not the credential scheme's own HMAC of the session id either.
     expect(id).not.toBe(turnPassword(SECRET, SID).slice(0, 22));
   });
+
+  test("refreshes keep one quota key: coturn drops an all-digit prefix before ':' when counting user-quota", () => {
+    // coturn 4.18 get_real_username (userdb.c): with use-auth-secret, "<digits>:<rest>" counts as <rest>.
+    const quotaKey = (u: string) => {
+      const i = u.indexOf(":");
+      return i > 0 && /^\d+$/.test(u.slice(0, i)) ? u.slice(i + 1) : u;
+    };
+    const a = turnCredentials(SECRET, SID, 3600, NOW).username;
+    const b = turnCredentials(SECRET, SID, 3600, new Date(NOW.getTime() + 61_000)).username;
+    expect(a).not.toBe(b);
+    expect(quotaKey(a)).toBe(quotaKey(b));
+    expect(quotaKey(a)).toBe(turnOpaqueId(SECRET, SID));
+    expect(quotaKey(turnCredentials(SECRET, OTHER, 3600, NOW).username)).not.toBe(quotaKey(a));
+  });
 });
 
 describe("iceServersFor", () => {

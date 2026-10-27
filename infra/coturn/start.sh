@@ -70,6 +70,9 @@ trap 'rm -f "$tmp"' EXIT
   # The public address itself stays allowed: when both viewers are relayed, each one's peer is
   # the other's relay port on this address. The relay is UDP only, and this host's other public
   # UDP ports (443, 8189) are open to everyone anyway.
+  # coturn substitutes it only for relayed addresses of the same family (turn_set_xor_relayed_addr
+  # in ns_turn_server.c), so an IPv4 value never replaces an IPv6 allocation's address, and on a
+  # host whose public address is on an interface it names that same address.
   if [ -n "$external" ]; then printf 'external-ip=%s\n' "$external"; fi
   if [ "$relay" = on ]; then
     secret=${TURN_SHARED_SECRET:-}
@@ -86,8 +89,11 @@ trap 'rm -f "$tmp"' EXIT
     printf 'use-auth-secret\n'
     printf 'static-auth-secret=%s\n' "$secret"
     printf 'min-port=%s\nmax-port=%s\n' "$min" "$max"
-    # Allocations per username. The API mints one username per session and refresh, and the
-    # player keeps at most a handful of peer connections, each needing one allocation.
+    # Allocations per session. coturn counts the quota on the username without its "<expiry>:"
+    # prefix (get_real_username in userdb.c, with use-auth-secret), so every refresh of one
+    # session shares one counter. The player keeps at most a handful of peer connections, each
+    # needing one allocation. Five sessions can still fill the default 40-port range
+    # (docs/self-hosting/p2p.md, "Limits").
     printf 'user-quota=8\n'
     # Allocations in all: 8 per viewer for 50 viewers whose peers need a relay at the same time.
     # Each holds a relay port too, so the default 40-port range is the tighter limit.

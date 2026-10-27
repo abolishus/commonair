@@ -184,8 +184,18 @@ describe("start.sh: relay off by default (STUN only)", () => {
     expect(names(r.conf).has("external-ip")).toBe(false);
   });
 
-  test("TLS 1.0/1.1, DTLS, the CLI, loopback peers and Prometheus are never switched on", () => {
-    for (const o of ["tlsv1", "tlsv1_1", "dtls", "cli", "allow-loopback-peers", "allowed-peer-ip", "prometheus"])
+  test("TLS 1.0/1.1, DTLS, the CLI, loopback peers, Prometheus, SOFTWARE and RFC 5780 are never switched on", () => {
+    for (const o of [
+      "tlsv1",
+      "tlsv1_1",
+      "dtls",
+      "cli",
+      "allow-loopback-peers",
+      "allowed-peer-ip",
+      "prometheus",
+      "software-attribute",
+      "rfc5780",
+    ])
       expect(names(r.conf).has(o), o).toBe(false);
   });
 

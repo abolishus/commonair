@@ -66,8 +66,17 @@ reinstalls until you pass the other flag. With the relay on:
   default one hour), signed with `TURN_SHARED_SECRET`, which `install` generated. The username
   holds an HMAC of the session, never the session id;
 - coturn relays UDP only, through ports 49160-49199 (`TURN_RELAY_PORT_MIN`/`MAX`), with quotas:
-  8 allocations per credential, 400 in all, and 1.25 MB/s per session;
+  8 allocations per session, 400 in all, and 1.25 MB/s per session (see "Limits" below);
 - `selfhost.sh status` shows `TURN relay on (UDP 49160-49199)`.
+
+### Limits
+
+Each relay allocation holds one port of the range, so the default 40 ports serve five sessions
+that use all 8 of their allocations, or about 40 viewers that need one each. A viewer holding
+allocations without using them (any granted session can ask for credentials) can therefore crowd
+others out of the relay; they then fall back to HTTP playback, which always works. Total relay
+bandwidth is not capped per instance: only the range and the per-session 1.25 MB/s bound it. Widen
+the range (and the firewall) for more relayed viewers, and watch the uplink.
 
 ## Never into your private network
 

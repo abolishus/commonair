@@ -7,9 +7,13 @@
 #     podman compose -f compose.yaml -f infra/coturn/compose.turn-relay.yaml up -d coturn
 #
 # (or set P2P_TURN_URLS in .env; init-env generated TURN_SHARED_SECRET.) Host and container ports
-# are equal because coturn advertises the relay port it allocated. The relay still refuses every
-# private and loopback peer (infra/coturn/turnserver.conf), so two players on this machine cannot
-# relay to each other through it; turnutils_uclient (infra/coturn/README.md) checks allocations.
+# are equal because coturn advertises the relay port it allocated. Publishing the range is not
+# enough to use a relayed address from the host: on the bridge network, with TURN_EXTERNAL_IP
+# empty, coturn announces the container's internal address. Set TURN_EXTERNAL_IP=127.0.0.1 for
+# the announced address to be reachable here. Even then the relay refuses every private and
+# loopback peer (infra/coturn/turnserver.conf), so two players on this machine cannot relay to
+# each other through it: in dev, only allocations can be tested (turnutils_uclient,
+# infra/coturn/README.md).
 services:
   coturn:
     ports:

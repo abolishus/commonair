@@ -47,8 +47,10 @@ holds no relay port and forwards nothing. No credentials exist in this mode.
 and `static-auth-secret=$TURN_SHARED_SECRET` (TURN REST credentials, minted by the API's
 `p2p.iceServers`, `services/api/src/p2p/turn.ts`), the relay range and the quotas:
 
-- `user-quota=8`: allocations per username. The API mints one username per session and refresh,
-  and the player keeps only a handful of peer connections, each needing one allocation.
+- `user-quota=8`: allocations per session. The API mints a new username per session and
+  refresh, but coturn counts the quota on the part after `<expiry>:` (its `get_real_username` in
+  `userdb.c`), which is the session's stable opaque id. The player keeps only a handful of peer
+  connections, each needing one allocation.
 - `total-quota=400`: allocations in all. The default range has 40 ports, which is the tighter
   limit; the quota matters once an operator widens the range.
 - `max-bps=1250000`: 1.25 MB/s (10 Mbit/s) per session, above any rendition's bitrate, so a
