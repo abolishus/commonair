@@ -26,8 +26,12 @@ interface Doc {
   title: string;
   body: string;
   isDraft: boolean;
+  requiresAcceptance: boolean;
   publishedAt: string;
 }
+
+const REQUIRED_KINDS = ["guidelines", "privacy", "terms"];
+const requiredIds = (docs: Doc[]) => docs.filter((d) => d.requiresAcceptance).map((d) => d.id);
 
 let api: TestApi;
 let alice: Awaited<ReturnType<typeof signUpAndSignIn>>;
@@ -61,6 +65,12 @@ describe("legal.current", () => {
     expect(dmca?.body).toContain(api.deps.site.contacts.dmca);
   });
 
+  test("says which documents require acceptance", async () => {
+    const r = await client(api).call<Doc[]>("GET", "/api/legal");
+    const flags = Object.fromEntries(r.body.map((d) => [d.kind, d.requiresAcceptance]));
+    expect(flags).toEqual({ terms: true, privacy: true, guidelines: true, cookies: false, dmca_policy: false });
+  });
+
   test("a version scheduled for the future is not current yet", async () => {
     await db()
       .insert(schema.legalDocuments)
@@ -87,6 +97,9 @@ describe("legal.get", () => {
     const byVersion = await client(api).call<Doc>("GET", `/api/legal/terms?version=${LEGAL_SEED_VERSION}`);
     expect(byVersion.status).toBe(200);
     expect(byVersion.body.id).toBe(cur.body.id);
+
+    expect((await client(api).call<Doc>("GET", "/api/legal/terms")).body.requiresAcceptance).toBe(true);
+    expect((await client(api).call<Doc>("GET", "/api/legal/cookies")).body.requiresAcceptance).toBe(false);
 
     expect((await client(api).call("GET", "/api/legal/terms?version=1999-01-01")).status).toBe(404);
     expect((await client(api).call("GET", "/api/legal/not_a_kind")).status).toBe(400);
@@ -225,14 +238,46 @@ describe("sign-up with the seeded drafts", () => {
       .from(schema.legalAcceptances)
       .innerJoin(schema.legalDocuments, eq(schema.legalDocuments.id, schema.legalAcceptances.documentId))
       .where(eq(schema.legalAcceptances.userId, user.id));
-    expect(accepted.map((a) => a.kind).sort()).toEqual(["guidelines", "privacy", "terms"]);
+    expect(accepted.map((a) => a.kind).sort()).toEqual(REQUIRED_KINDS);
   });
 
-  test("an existing user sees the new drafts as pending until accepted", async () => {
-    const me = await alice.client.call<{ pendingLegal: { kind: string; version: string }[] }>("GET", "/api/me");
-    expect(me.body.pendingLegal.map((p) => p.kind).sort()).toEqual(["guidelines", "privacy", "terms"]);
+  test("only the required ids are enough, and only they are recorded", async () => {
     const docs = (await client(api).call<Doc[]>("GET", "/api/legal")).body;
-    const accept = await alice.client.call("POST", "/api/me/legal-acceptances", { documentIds: docs.map((d) => d.id) });
+    const ids = requiredIds(docs);
+    expect(ids).toHaveLength(REQUIRED_KINDS.length);
+    const ok = await signUp(ids);
+    expect(ok.r.status, JSON.stringify(ok.r.body)).toBe(200);
+    await waitFor(() => mailTo(ok.email));
+    const [user] = await db()
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.email, ok.email));
+    if (!user) throw new Error("user not created");
+    const accepted = await db()
+      .select({ documentId: schema.legalAcceptances.documentId })
+      .from(schema.legalAcceptances)
+      .where(eq(schema.legalAcceptances.userId, user.id));
+    expect(accepted.map((a) => a.documentId).sort()).toEqual([...ids].sort());
+  });
+
+  test("optional documents alone do not satisfy the gate", async () => {
+    const docs = (await client(api).call<Doc[]>("GET", "/api/legal")).body;
+    const r = await signUp(docs.filter((d) => !d.requiresAcceptance).map((d) => d.id));
+    expect(r.r.status).toBe(400);
+    expect(JSON.stringify(r.r.body)).toContain("LEGAL_ACCEPTANCE_REQUIRED");
+  });
+
+  test("an existing user sees the new drafts as pending until the required ones are accepted", async () => {
+    const me = await alice.client.call<{ pendingLegal: { kind: string; version: string }[] }>("GET", "/api/me");
+    expect(me.body.pendingLegal.map((p) => p.kind).sort()).toEqual(REQUIRED_KINDS);
+    expect(me.body.pendingLegal.every((p) => p.version === LEGAL_SEED_VERSION)).toBe(true);
+    const docs = (await client(api).call<Doc[]>("GET", "/api/legal")).body;
+    // Optional documents are not "accepted": sent alone they match nothing.
+    const optional = await alice.client.call("POST", "/api/me/legal-acceptances", {
+      documentIds: docs.filter((d) => !d.requiresAcceptance).map((d) => d.id),
+    });
+    expect(optional.status).toBe(404);
+    const accept = await alice.client.call("POST", "/api/me/legal-acceptances", { documentIds: requiredIds(docs) });
     expect(accept.status, JSON.stringify(accept.body)).toBe(200);
     const after = await alice.client.call<{ pendingLegal: unknown[] }>("GET", "/api/me");
     expect(after.body.pendingLegal).toEqual([]);

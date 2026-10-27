@@ -3,14 +3,14 @@
 
 import { QUEUES } from "@commonair/contracts/internal";
 import { z } from "zod";
+import { deleteOldAnonymousConsent } from "../legal/consent-retention.ts";
 import { defineJob } from "../runtime/registry.ts";
 
-/** Stub from the E7 contract step; E7-legal owns this file and implements it. */
 export const job = defineJob({
   queue: QUEUES.retention,
   name: "legal-consent-retention",
-  description: "Delete old anonymous cookie-consent records in batches",
+  description: "Delete anonymous cookie-consent records older than about 13 months, in batches",
   data: z.object({}),
   schedule: { pattern: "23 3 * * *" },
-  handler: async () => ({ deleted: 0 }),
+  handler: async (_data, ctx) => deleteOldAnonymousConsent(ctx),
 });
