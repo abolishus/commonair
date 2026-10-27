@@ -21,13 +21,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, test } from "vite-plus/test";
+import { beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, bundleAssetName } from "../release/manifest.ts";
 import { buildBundle } from "./bundle.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SCRIPT = join(ROOT, "scripts/selfhost.sh");
 const TIMEOUT = 90_000;
+// Every test runs selfhost.sh in a shell; under the gate's parallel load 5 s is too short.
+vi.setConfig({ testTimeout: TIMEOUT });
 
 const digest = (seed: number, n: number) => `sha256:${(seed * 1000 + n).toString(16).padStart(64, "0")}`;
 const manifestJson = (version: string, seed: number) =>

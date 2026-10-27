@@ -24,7 +24,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, test } from "vite-plus/test";
+import { beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { SITE } from "../../packages/config/src/site.ts";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, bundleAssetName } from "../release/manifest.ts";
 import { buildBundle } from "../selfhost/bundle.ts";
@@ -33,6 +33,8 @@ import { shellcheck, shellcheckAvailable } from "./support/shellcheck.ts";
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SCRIPT = join(ROOT, "scripts/selfhost.sh");
 const TIMEOUT = 60_000;
+// Every test runs selfhost.sh in a shell; under the gate's parallel load 5 s is too short.
+vi.setConfig({ testTimeout: TIMEOUT });
 
 // --- fixtures -----------------------------------------------------------------------------
 
