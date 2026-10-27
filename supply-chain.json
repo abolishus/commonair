@@ -5,12 +5,6 @@
       "package": "esbuild",
       "reason": "esbuild 0.18.20 comes only through drizzle-kit 0.31.11 -> @esbuild-kit/core-utils, a dev-only migration generator. The advisory is about esbuild's dev server (`serve`), which drizzle-kit never starts. Remove when drizzle-kit drops @esbuild-kit.",
       "expires": "2027-01-22"
-    },
-    {
-      "id": "GHSA-834v-8h66-3h79",
-      "package": "happy-dom",
-      "reason": "happy-dom 21.0.3 is a devDependency only (the DOM for apps/web and packages/ui unit tests: packages/ui's vitest environment, a `@vitest-environment happy-dom` docblock or a direct import in apps/web tests); it never ships in an image. The advisory needs a page that runs attacker-chosen JavaScript inside happy-dom; the tests render only this repository's components. The fix, 21.0.4 (published 2026-10-20), clears the 7-day minimumReleaseAge on 2026-10-27: upgrade then and remove this exception.",
-      "expires": "2026-10-28"
     }
   ],
   "trustedDependencies": {}
