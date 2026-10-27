@@ -29,11 +29,13 @@ import { job as moderationNciiClock } from "./moderation-ncii-clock.ts";
 import { job as moderationNciiHash } from "./moderation-ncii-hash.ts";
 import { job as moderationScan } from "./moderation-scan.ts";
 import { moderationSchedules } from "./moderation-schedules.ts";
+import { sorJobs } from "./moderation-sor.ts";
 import { job as moderationT0Escalated } from "./moderation-t0-escalated.ts";
 import { job as moderationT0Media } from "./moderation-t0-media.ts";
 import { job as moderationT0 } from "./moderation-t0.ts";
 import { job as pruneWebhookDeliveries } from "./prune-webhook-deliveries.ts";
 import { job as relaysOffline } from "./relays-offline.ts";
+import { job as vodPlacement } from "./vod-placement.ts";
 import { job as vodRetention } from "./vod-retention.ts";
 import { job as webhookDeliver } from "./webhook-deliver.ts";
 import { job as webhookFanout } from "./webhook-fanout.ts";
@@ -53,6 +55,7 @@ export const JOBS = [
   expireAuthRows,
   pruneWebhookDeliveries,
   vodRetention,
+  vodPlacement,
   ...integrityJobs(),
   moneyExpirePending,
   moneyRenew,
@@ -64,6 +67,7 @@ export const JOBS = [
   moderationNciiClock,
   moderationNciiHash,
   ...moderationSchedules,
+  ...sorJobs,
   accountDeletion,
   coopMembershipSync,
   coopProposalsAdvance,

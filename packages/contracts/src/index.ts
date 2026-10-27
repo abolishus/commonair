@@ -7,6 +7,7 @@ export * from "./scopes.ts";
 export * from "./events.ts";
 export * from "./chat.ts";
 export * from "./tokens.ts";
+export * from "./storage.ts";
 export * from "./internal.ts";
 export * from "./currency.ts";
 export * from "./auth.ts";

@@ -3,6 +3,7 @@
 
 /** Housekeeping: expiry, pruning, stale-session closing, relay liveness, VOD retention. */
 import { KEYS } from "@commonair/contracts/internal";
+import { vodPrefix as contractVodPrefix } from "@commonair/contracts/storage";
 import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
@@ -85,8 +86,11 @@ export async function markRelaysOffline(ctx: WorkerContext, missedMs = 180_000) 
   });
 }
 
-/** The only object prefix a VOD may own (trailing slash: "vods/a" must never match "vods/ab…"). */
-export const vodPrefix = (vodId: string) => `vods/${vodId}/`;
+/**
+ * The only object prefix a VOD may own today (trailing slash: "vods/a" must never match "vods/ab…").
+ * A one-argument wrapper over the contract until W0-media-exposure switches callers to placements.
+ */
+export const vodPrefix = (vodId: string) => contractVodPrefix(vodId, "public");
 
 /** The only object keys a clip may own: `clips/<clip id>.<ext>` (video and thumbnail). */
 export const isOwnClipKey = (clipId: string, key: string) =>

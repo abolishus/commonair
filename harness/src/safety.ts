@@ -25,22 +25,28 @@ export const SAFETY_STEPS = {
   7: "NCII clock",
   8: "DMCA takedown and counter-notice",
   9: "overturned appeal lifts the ban",
+  10: "VOD exposure",
+  11: "statements of reasons",
 } as const;
 export type SafetyStep = keyof typeof SAFETY_STEPS;
 /** Every step number `--set steps=…` accepts. */
-export const SAFETY_STEP_NUMBERS: readonly SafetyStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+export const SAFETY_STEP_NUMBERS: readonly SafetyStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
 /**
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set steps=8`) but
  * left out of `all`, so the full harness on main stays green while they are stubs. The unit that
  * lands a step removes it from this list.
  */
-export const PENDING_SAFETY_STEPS: readonly SafetyStep[] = [];
+export const PENDING_SAFETY_STEPS: readonly SafetyStep[] = [10, 11];
 /** What `all` (and an empty selection) runs. */
 export const ALL_SAFETY_STEPS: readonly SafetyStep[] = SAFETY_STEP_NUMBERS.filter(
   (n) => !PENDING_SAFETY_STEPS.includes(n),
 );
 
-/** Step 2 deletes the account step 1 suspended, so it cannot run on its own. */
+/**
+ * Step 2 deletes the account step 1 suspended, so it cannot run on its own. Step 11 checks the
+ * statements of reasons for the audit actions steps 4–7 produce (T2 label, T1 restriction, upload
+ * rejection, NCII).
+ */
 export const STEP_PREREQUISITES: Readonly<Record<SafetyStep, readonly SafetyStep[]>> = {
   1: [],
   2: [1],
@@ -51,6 +57,8 @@ export const STEP_PREREQUISITES: Readonly<Record<SafetyStep, readonly SafetyStep
   7: [],
   8: [],
   9: [],
+  10: [],
+  11: [4, 5, 6, 7],
 };
 
 function isStep(n: number): n is SafetyStep {
@@ -73,13 +81,13 @@ export function parseSteps(value: string): SafetyStep[] {
     if (range) {
       const from = Number(range[1]);
       const to = Number(range[2]);
-      if (!isStep(from) || !isStep(to) || from > to) throw new Error(`steps: bad range "${part}" (1-9)`);
+      if (!isStep(from) || !isStep(to) || from > to) throw new Error(`steps: bad range "${part}" (1-11)`);
       for (let n = from; n <= to; n++) if (isStep(n)) out.add(n);
       continue;
     }
-    if (!/^\d+$/.test(part)) throw new Error(`steps: "${part}" is not a step number (1-9)`);
+    if (!/^\d+$/.test(part)) throw new Error(`steps: "${part}" is not a step number (1-11)`);
     const n = Number(part);
-    if (!isStep(n)) throw new Error(`steps: ${n} is not a step (1-9)`);
+    if (!isStep(n)) throw new Error(`steps: ${n} is not a step (1-11)`);
     out.add(n);
   }
   if (out.size === 0) throw new Error("steps: no step selected");

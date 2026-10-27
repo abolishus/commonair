@@ -7,6 +7,7 @@ import type { LiveEvent } from "@commonair/contracts/internal";
 import type { Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
+import type { ClockAnchor } from "./clock/anchor.ts";
 import type { DiskBudget } from "./disk.ts";
 import type { Capabilities } from "./ffmpeg/hwaccel.ts";
 import type { MediaMtxClient } from "./mediamtx.ts";
@@ -48,6 +49,8 @@ export interface MediaContext {
   transcodeSlots: SlotLimiter;
   /** Dev/test only: allow simulcast targets on loopback/private addresses. */
   simulcastAllowPrivate: boolean;
+  /** Media clock anchor (ADR 0012): shifts recorder wall-clock times onto the broadcast clock. */
+  clock: ClockAnchor;
 }
 
 /** What workers need to know about a live broadcast. */

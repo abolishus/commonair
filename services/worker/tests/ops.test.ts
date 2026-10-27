@@ -15,6 +15,7 @@ describe("operations jobs (E6)", () => {
       "account-deletion": QUEUES.deletions,
       "export-cleanup": QUEUES.exports,
       "vod-retention": QUEUES.retention,
+      "vod-placement": QUEUES.retention,
     };
     for (const name of OPS_TICK_JOBS) {
       const def = reg.get(queueOf[name])?.get(name);

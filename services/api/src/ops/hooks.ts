@@ -29,6 +29,7 @@ export const OPS_JOB_QUEUES: Record<OpsJobName, { queue: string; name: string }>
   "account-deletion": { queue: QUEUES.deletions, name: "account-deletion" },
   "export-cleanup": { queue: QUEUES.exports, name: EXPORT_JOBS.cleanup },
   "vod-retention": { queue: QUEUES.retention, name: "vod-retention" },
+  "vod-placement": { queue: QUEUES.retention, name: "vod-placement" },
 };
 
 export interface OpsTickRunner {

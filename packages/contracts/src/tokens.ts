@@ -23,6 +23,14 @@ export const PlaybackClaims = z
     sid: z.uuid(),
     /** Channel id and MediaMTX path the token is valid for. */
     cid: z.uuid(),
+    /**
+     * A MediaMTX path (`live/<…>`) for live playback, **or** `vodTokenPath(vodId)` = `vod/<id>`
+     * for a VOD token (`@commonair/contracts/storage`, ADR 0009 amendment 1: `src = "origin"`,
+     * same key, lifetime capped by `VOD_TOKEN_MAX_TTL_SECONDS`). No MediaMTX path starts `vod/`,
+     * so the live `/hls` route (`services/origin/src/auth.ts`, exact path match) and the relay
+     * (`relay/internal/tokens/playback.go` `Binding.Check`, path prefix) refuse a VOD token by
+     * path mismatch; no separate token kind, crypto or vector.
+     */
     path: z.string(),
     src: z.enum(DELIVERY_SOURCES),
     /** Relay id when src = relay. */

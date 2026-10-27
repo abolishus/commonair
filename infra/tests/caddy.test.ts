@@ -38,6 +38,7 @@ describe("routing", () => {
       "/relay-pull/*": "origin:3003",
       "/cdn/*": "origin:3003",
       "/media/*": "origin:3003",
+      "/vod/*": "origin:3003",
       "@whip": "mediamtx:8889",
       "/tracker*": "tracker:8000",
     });

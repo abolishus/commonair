@@ -190,6 +190,11 @@ import http-{$CADDY_LISTEN:ports}
 	handle /media/* {
 		reverse_proxy origin:3003
 	}
+	# VODs that are not public: token-checked, read from the private recordings/ prefix
+	# (ADR 0009 amendment 1).
+	handle /vod/* {
+		reverse_proxy origin:3003
+	}
 
 	# WHIP signaling: live/<slug>/whip and the session URLs MediaMTX returns under it. Media
 	# itself flows over ICE (UDP 8189), not through Caddy.

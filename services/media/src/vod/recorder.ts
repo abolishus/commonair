@@ -12,6 +12,7 @@
  */
 import { mkdir, rm, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { VOD_PLAYLIST, vodPrefix as contractVodPrefix } from "@commonair/contracts/storage";
 import type { BroadcastInfo, MediaContext } from "../context.ts";
 import { internalRtspUrl, recorderArgs, recorderPlaylist } from "../ffmpeg/args.ts";
 import { Supervisor } from "../ffmpeg/supervisor.ts";
@@ -20,15 +21,24 @@ import { MAX_PENDING_UPLOADS } from "../settings.ts";
 import { errorCategory } from "../moderation/logging.ts";
 import { findLiveWindow, parsePlaylist, renderPlaylist, type PlaylistSegment } from "./playlist.ts";
 
-export const vodPrefix = (vodId: string) => `vods/${vodId}/`;
-export const VOD_PLAYLIST = "index.m3u8";
+export { VOD_PLAYLIST };
+/** Today's layout (public placement); W0-media-exposure moves callers to placements and drops this wrapper. */
+export const vodPrefix = (vodId: string) => contractVodPrefix(vodId, "public");
 
 /** How long a finished broadcast's local buffer survives, for clips requested right at the end. */
 const LOCAL_GRACE_MS = 5 * 60_000;
 
+/** `startedAt` is the raw host time ffmpeg wrote; `stamp` applies the clock anchor on the way out. */
 interface LocalSegment extends PlaylistSegment {
+  /** Recorder run (the segment file prefix), whose anchor offset applies. */
+  runId: string;
   localPath: string;
   uploaded: boolean;
+}
+
+/** A VOD playlist entry. `runId` null: resumed from storage, already stamped by an earlier process. */
+interface PublishedSegment extends PlaylistSegment {
+  runId: string | null;
 }
 
 export interface LocalWindow {
@@ -47,10 +57,13 @@ export class SegmentRecorder {
   private readonly runs: string[] = [];
   private local: LocalSegment[] = [];
   private readonly known = new Set<string>();
-  /** Start of the first segment ever recorded (pruning never moves it). */
+  /** Anchored start of the first segment ever recorded (pruning never moves it). */
   private recordingStartedAt: Date | null = null;
   /** Everything already in the published VOD playlist, in order. */
-  private published: PlaylistSegment[] = [];
+  private published: PublishedSegment[] = [];
+  /** The playlist text last uploaded; re-rendered each poll so a re-anchored run is re-stamped. */
+  private lastPlaylist: string | null = null;
+  private playlistStale = false;
   private readonly uploadedInits = new Set<string>();
   private readonly dir: string;
   private readonly log;
@@ -129,9 +142,17 @@ export class SegmentRecorder {
     setTimeout(() => void rm(dir, { recursive: true, force: true }), LOCAL_GRACE_MS).unref();
   }
 
-  /** Local segments covering a wall-clock window, for live clips. */
+  /** A raw segment time on the broadcast clock (ADR 0012). */
+  private stamp(runId: string | null, at: Date | null): Date | null {
+    if (!at || runId === null) return at;
+    const offset = this.ctx.clock.offsetMs(this.b.broadcastId, runId);
+    return offset === 0 ? at : new Date(at.getTime() + offset);
+  }
+
+  /** Local segments covering a wall-clock window (broadcast clock), for live clips. */
   localWindow(start: Date, durationSeconds: number): LocalLookup {
-    const found = findLiveWindow(this.local, this.recordingStartedAt, start, durationSeconds);
+    const anchored = this.local.map((s) => ({ ...s, startedAt: this.stamp(s.runId, s.startedAt) }));
+    const found = findLiveWindow(anchored, this.recordingStartedAt, start, durationSeconds);
     if (found.status === "pending") return "pending";
     if (found.status === "outside") return null;
     const w = found.window;
@@ -167,9 +188,10 @@ export class SegmentRecorder {
         if (this.known.has(uri)) continue;
         this.known.add(uri);
         const map = s.map ? basename(s.map) : null;
-        if (s.startedAt && (!this.recordingStartedAt || s.startedAt < this.recordingStartedAt))
-          this.recordingStartedAt = s.startedAt;
-        this.local.push({ ...s, uri, map, localPath: join(this.dir, uri), uploaded: false });
+        const startedAt = this.stamp(runId, s.startedAt);
+        if (startedAt && (!this.recordingStartedAt || startedAt < this.recordingStartedAt))
+          this.recordingStartedAt = startedAt;
+        this.local.push({ ...s, uri, map, runId, localPath: join(this.dir, uri), uploaded: false });
       }
     }
     if (this.vodId) await this.upload(this.vodId, strict);
@@ -180,7 +202,7 @@ export class SegmentRecorder {
     try {
       const res = await this.ctx.storage.get(this.ctx.bucket, vodPrefix(vodId) + VOD_PLAYLIST);
       if (!res) return;
-      this.published = parsePlaylist(await res.text()).segments;
+      this.published = parsePlaylist(await res.text()).segments.map((s) => ({ ...s, runId: null }));
       for (const s of this.published) if (s.map) this.uploadedInits.add(s.map);
       this.log.info("resuming VOD recording", { segments: this.published.length });
     } catch (err) {
@@ -216,14 +238,27 @@ export class SegmentRecorder {
         durationSeconds: seg.durationSeconds,
         startedAt: seg.startedAt,
         map: seg.map,
+        runId: seg.runId,
       });
       changed = true;
     }
-    if (!changed) return;
-    await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist(this.published, { ended: false }), {
-      contentType: "application/vnd.apple.mpegurl",
-      cacheControl: "no-cache",
-    });
+    if (changed) this.playlistStale = true;
+    // Nothing new and no playlist written yet by this process: nothing to (re-)stamp.
+    if (!this.playlistStale && this.lastPlaylist === null) return;
+    const stamped = this.published.map((p) => ({
+      uri: p.uri,
+      durationSeconds: p.durationSeconds,
+      startedAt: this.stamp(p.runId, p.startedAt),
+      map: p.map,
+    }));
+    const text = renderPlaylist(stamped, { ended: false });
+    if (text !== this.lastPlaylist)
+      await storage.put(bucket, prefix + VOD_PLAYLIST, text, {
+        contentType: "application/vnd.apple.mpegurl",
+        cacheControl: "no-cache",
+      });
+    this.lastPlaylist = text;
+    this.playlistStale = false;
   }
 
   private async prune(): Promise<void> {

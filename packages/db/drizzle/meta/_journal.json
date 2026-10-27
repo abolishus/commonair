@@ -197,6 +197,20 @@
       "when": 1793111352666,
       "tag": "0027_integrity_flags_created_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793114621143,
+      "tag": "0028_enforcement_statements",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793114634640,
+      "tag": "0029_w0_protections",
+      "breakpoints": true
     }
   ]
 }
