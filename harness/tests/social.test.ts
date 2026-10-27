@@ -4,11 +4,21 @@
 /** Pure parts of the E2 social scenario (docs/testing/e2-selectors.md). */
 import { describe, expect, test } from "vite-plus/test";
 import { CHAT_LIMITS } from "@commonair/contracts/chat";
-import { DUPLICATE_MARGIN_MS, VIA, armAfterWait, duplicateWaitMs, parseVia } from "../scenarios/e2e-social.ts";
+import {
+  DUPLICATE_MARGIN_MS,
+  HELD_SETTLE_MS,
+  VIA,
+  armAfterWait,
+  duplicateWaitMs,
+  holdWord,
+  parseVia,
+} from "../scenarios/e2e-social.ts";
 import type { ApiClient } from "../src/api/client.ts";
 import type { ChatClient } from "../src/chat-client.ts";
 import {
   ApiActor,
+  HELD_POLL_MS,
+  heldListed,
   DISCOVERY_SECTIONS,
   TIMEOUT_SECONDS,
   isActiveTimeout,
@@ -96,6 +106,22 @@ function fakeChat() {
       return () => listeners.delete(l);
     },
     messages: () => frames.filter((f) => f.op === "message"),
+    next(op: string, pred: (f: Frame) => boolean, timeoutMs: number) {
+      return new Promise<Frame>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`timeout ${op}`)), timeoutMs);
+        const l = (f: Frame) => {
+          if (f.op !== op || !pred(f)) return;
+          clearTimeout(timer);
+          listeners.delete(l);
+          resolve(f);
+        };
+        listeners.add(l);
+      });
+    },
+    waitFor(op: string, pred: (f: Frame) => boolean, timeoutMs: number) {
+      const seen = frames.find((f) => f.op === op && pred(f));
+      return seen ? Promise.resolve(seen) : chat.next(op, pred, timeoutMs);
+    },
     join: async () => undefined,
     close: () => {
       closed = true;
@@ -219,5 +245,83 @@ describe("armAfterWait (reply waiters start their timeout only after the duplica
       ),
     ).rejects.toThrow("aborted");
     expect(armed).toBe(false);
+  });
+});
+
+describe("held messages (E7)", () => {
+  const MSG = "0193a1b2-0000-7000-8000-0000000000aa";
+  const signal = new AbortController().signal;
+  const message = (id: string, held?: boolean): Frame => ({
+    op: "message",
+    channel: "st",
+    message: {
+      id,
+      channelId: OWNER,
+      user: { id: FAN, username: "troll", displayName: "troll", color: null, badges: [], accountType: "human" },
+      body: "x",
+      emotes: [],
+      isAction: false,
+      replyTo: null,
+      createdAt: "2026-10-27T10:00:00.000Z",
+    },
+    ...(held === undefined ? {} : { held }),
+  });
+
+  test("holdWord is a lowercase alphanumeric word unique to the run", () => {
+    expect(holdWord("Run-2026_10-27T09:00:AbC")).toMatch(/^heldword[a-z0-9]{1,12}$/);
+    expect(holdWord("a")).not.toBe(holdWord("b"));
+    expect(HELD_SETTLE_MS).toBeGreaterThanOrEqual(1_000);
+  });
+
+  test("heldListed", () => {
+    expect(heldListed([{ id: "a" }, { id: MSG }], MSG)).toBe(true);
+    expect(heldListed([], MSG)).toBe(false);
+  });
+
+  test("hasMessageId / waitMessageId ignore held frames (moderator copies)", async () => {
+    const chat = fakeChat();
+    const a = new ApiActor("streamer", "st", OWNER, fakeApi(null), async () => chat.chat);
+    await a.openChannel("st");
+    chat.emit(message(MSG, true));
+    expect(await a.hasMessageId(MSG)).toBe(false);
+    await expect(a.waitMessageId(MSG, { timeoutMs: 30, signal })).rejects.toThrow(/timeout/);
+    const waiting = a.waitMessageId(MSG, { timeoutMs: 2_000, signal });
+    chat.emit(message(MSG));
+    await waiting;
+    expect(await a.hasMessageId(MSG)).toBe(true);
+  });
+
+  test("allowHeld polls chat.held.list until the row is stored, then resolves it", async () => {
+    let calls = 0;
+    const resolved: unknown[] = [];
+    const api = {
+      chat: {
+        held: {
+          list: async () => (++calls < 3 ? [] : [{ id: MSG }]),
+          resolve: async (input: unknown) => {
+            resolved.push(input);
+            return { ok: true };
+          },
+        },
+      },
+    } as unknown as ApiClient;
+    const chat = fakeChat();
+    const a = new ApiActor("streamer", "st", OWNER, api, async () => chat.chat);
+    await a.openChannel("st");
+    await a.allowHeld(MSG, { timeoutMs: 10 * HELD_POLL_MS, signal });
+    expect(calls).toBe(3);
+    expect(resolved).toEqual([{ channel: "st", id: MSG, allow: true }]);
+  });
+
+  test("waitClear only counts a clear that arrives after the call", async () => {
+    const chat = fakeChat();
+    const a = new ApiActor("fan", "fan", FAN, fakeApi(null), async () => chat.chat);
+    await a.openChannel("st");
+    chat.emit({ op: "clear", channel: "st" });
+    await expect(a.waitClear({ timeoutMs: 30, signal })).rejects.toThrow(/timeout/);
+    const waiting = a.waitClear({ timeoutMs: 2_000, signal });
+    chat.emit({ op: "clear", channel: "other" });
+    chat.emit({ op: "clear", channel: "st" });
+    await waiting;
   });
 });
