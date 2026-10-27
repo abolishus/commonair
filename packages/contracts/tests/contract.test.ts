@@ -62,6 +62,11 @@ describe("API contract", () => {
       for (const s of p["~orpc"].meta.scopes ?? []) expect.soft(SCOPES, name).toHaveProperty(s);
   });
 
+  test("only appeals.create is open to suspended callers (ADR 0019)", () => {
+    const open = all.filter(([, p]) => p["~orpc"].meta.whileSuspended === true).map(([name]) => name);
+    expect(open).toEqual(["appeals.create"]);
+  });
+
   test("generates a valid OpenAPI 3.1 document", async () => {
     const doc = await generateOpenApi({
       title: "Test",

@@ -53,6 +53,8 @@ export const FULL_REQUIRED = [
   "e2e-relay",
   // S1-c: two of each app service (needs `stack --harness --multi`).
   "multi-instance",
+  // E7: egress, status incidents and integrity review.
+  "e7-admin",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

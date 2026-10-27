@@ -23,7 +23,8 @@ import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from "
 import type { WorkerContext } from "../context.ts";
 import { eventNeedles, redactAnonymousTip, redactPayload, referencesUser, type DeletedIdentity } from "./references.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
-import { vodPrefix } from "../moderation/objects.ts";
+import { dmcaHiddenKey } from "../dmca/objects.ts";
+import { thumbnailPrefix, vodPrefix } from "../moderation/objects.ts";
 import { audit, endBroadcast, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
 
@@ -369,6 +370,28 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         counts.clips = clips.length;
         objectPrefixes.push(...vods.map((v) => vodPrefix(v.id)), `channels/${channel.id}/`);
         for (const c of clips) for (const k of [c.storageKey, c.thumbnailKey]) if (k) objectKeys.push(k);
+        // DMCA-hidden copies live outside the public prefixes, whatever each row's status is now.
+        const everyVod = await tx
+          .select({ id: s.vods.id, thumbnailKey: s.vods.thumbnailKey })
+          .from(s.vods)
+          .where(eq(s.vods.channelId, channel.id));
+        const everyClip = await tx
+          .select({ storageKey: s.clips.storageKey, thumbnailKey: s.clips.thumbnailKey })
+          .from(s.clips)
+          .where(eq(s.clips.channelId, channel.id));
+        const everyBroadcast = await tx
+          .select({ id: s.broadcasts.id })
+          .from(s.broadcasts)
+          .where(eq(s.broadcasts.channelId, channel.id));
+        objectPrefixes.push(
+          ...everyVod.map((v) => dmcaHiddenKey(vodPrefix(v.id))),
+          ...everyBroadcast.map((b) => dmcaHiddenKey(thumbnailPrefix(b.id))),
+        );
+        for (const v of everyVod)
+          if (v.thumbnailKey && !v.thumbnailKey.startsWith(vodPrefix(v.id)))
+            objectKeys.push(dmcaHiddenKey(v.thumbnailKey));
+        for (const c of everyClip)
+          for (const k of [c.storageKey, c.thumbnailKey]) if (k) objectKeys.push(dmcaHiddenKey(k));
         await del(
           "channel_panels",
           tx

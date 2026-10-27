@@ -203,13 +203,34 @@ create ──► pending ──health ok──► active ──health fail──
   internal readers by the `internal` user and `INTERNAL_API_SECRET` password in the body;
   the ready/not-ready hooks require the `x-internal-secret` header.
 - Appeals (`src/routes/appeals.ts`): `integrity` appeals take `session`, `user` or
-  `integrity_flag` subjects and `moderation` appeals take `moderation_action`. Each must concern
-  the appellant. `dmca_notice` and `account_action` return 501 until their tables are wired. An
-  overturned integrity appeal is an integrity allowance (`packages/integrity/src/allowance.ts`).
-  Nobody resolves their own appeal, and a moderator cannot resolve the appeal of their own mod
-  action. Overturning a moderation appeal records the decision only: it does not lift the ban or
-  timeout. Resolving writes an audit row (ids and enums only) and no outbox event: the event catalog
-  is EventSub's public surface, and appeal outcomes are private to the appellant and staff.
+  `integrity_flag` subjects; `moderation` appeals take `moderation_action`, `content_label` or
+  `moderation_case`; `account` appeals take `account_action` (a DMCA strike or repeat-infringer
+  termination, listed by `GET /appeals/account-actions`). A `dmca_notice` has no appeal: the owner
+  files a counter-notice instead (BAD_REQUEST says so). Each subject must concern the appellant;
+  one that does not, or does not exist, is NOT_FOUND. `appeals.create` is the one write a
+  suspended account may still call (`whileSuspended`, ADR 0019). Overturning undoes what it can
+  in the same transaction: an integrity allowance, a chat ban or timeout still in force, a
+  moderation suspension (never a T0 or repeat-infringer one), a T2 label or T1 restriction, or a
+  DMCA account action (reversed once, lifting the repeat-infringer suspension it caused). Nobody
+  resolves their own appeal or the appeal of their own action. Resolving writes audit rows (ids
+  and enums only) and mails the appellant after commit.
+- DMCA (`src/dmca/`, `safety.dmca.*`; operator guide `docs/operators/dmca.md`): a public notice
+  form (`POST /dmca/notices`, ALTCHA) resolves URLs into VOD, clip and broadcast items; platform
+  moderators action or reject it (`/admin/dmca`). Actioning disables access at once
+  (`removed_reason = 'dmca'`, the worker moves the objects to a private prefix), gives each owner
+  one strike per notice and tells them; at `DMCA_RULES.repeatInfringerStrikes` the account is
+  terminated and suspended. Owners counter-notify (`POST /dmca/notices/{id}/counter`), which
+  starts the restore clock unless staff record a suit. Claimant and counter-notice details stay on
+  the mutable `dmca_*` rows; audit rows, events and logs carry ids only. **No lawyer has reviewed
+  this flow, its policy text or `DMCA_RULES`.**
+- Held messages (`src/chat/held.ts`, `GET /channels/{channel}/chat/held`,
+  `POST …/held/{id}`): messages a `hold` word filter kept back, visible to the broadcaster and
+  channel moderators only. Allowing publishes exactly what a live message would (chat frame and
+  `channel.chat.message`); denying deletes it for moderators only, since viewers never saw it.
+- Chat REST (`src/routes/chat.ts`): history, modes, bans, word filters, emotes, tokens and the
+  held queue are served here. Send, delete and clear are relayed to the chat service as the
+  caller over a one-shot WebSocket (`src/chat/relay.ts`), so the chat service's rules and side
+  effects apply unchanged.
 - Playback sessions record the HTTP delivery source (`origin`, `relay`, `cdn`) as
   `assigned_source`, never `p2p`, even when the P2P loader is on. Whether P2P runs is client
   input (`p2pCapable`, `nativeHls`), and integrity expects only a 10% origin share from `p2p`

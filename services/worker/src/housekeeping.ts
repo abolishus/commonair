@@ -6,6 +6,7 @@ import { KEYS } from "@commonair/contracts/internal";
 import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
+import { dmcaHiddenKey } from "./dmca/objects.ts";
 
 const DAY = 86_400_000;
 const ago = (ctx: WorkerContext, ms: number) => new Date(ctx.now().getTime() - ms);
@@ -174,6 +175,8 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
     try {
       const held = await unlessOwnerHeld(ctx, vod.channelId, async (tx) => {
         objects += await storage.deletePrefix(ctx.mediaBucket, vodPrefix(vod.id));
+        // A DMCA takedown keeps its copy under moderation/dmca/; expiry ends that too.
+        objects += await storage.deletePrefix(ctx.mediaBucket, dmcaHiddenKey(vodPrefix(vod.id)));
         // An owner removal keeps its reason; only plain expiry is recorded as retention.
         await tx
           .update(v)

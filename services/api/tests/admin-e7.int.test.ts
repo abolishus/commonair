@@ -209,6 +209,29 @@ describe("admin.incidents", () => {
     await write(admin, { id, status: "resolved" });
   });
 
+  test("a write shows on the status page at once, not after the cache expires", async () => {
+    const read = async () => {
+      const r = await alice.client.call<Status>("GET", "/api/status");
+      expect(r.status).toBe(200);
+      return r.body;
+    };
+    // Same clock for every read: without invalidation the second and third would be cache hits.
+    const frozen = new Date();
+    api.deps.now = () => frozen;
+    try {
+      expect((await read()).components.find((c) => c.id === "postgres")?.status).toBe("operational");
+      const opened = await write(admin, {});
+      expect(opened.status).toBe(200);
+      const s = await read();
+      expect(s.incidents.find((i) => i.id === opened.body.id)?.status).toBe("investigating");
+      expect(s.components.find((c) => c.id === "postgres")?.status).toBe("degraded");
+      expect((await write(admin, { id: opened.body.id, status: "resolved" })).status).toBe(200);
+      expect((await read()).components.find((c) => c.id === "postgres")?.status).toBe("operational");
+    } finally {
+      api.deps.now = realNow;
+    }
+  });
+
   test("unknown components, unknown ids, non-admins", async () => {
     expect((await write(admin, { components: ["db"] })).status).toBe(400);
     expect((await write(admin, { id: "01900000-0000-7000-8000-000000000000" })).status).toBe(404);

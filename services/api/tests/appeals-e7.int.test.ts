@@ -6,8 +6,8 @@
  * actions (DMCA strikes and the repeat-infringer termination) are appealable and reversed once,
  * DMCA notices point to the counter-notice, and the appellant is emailed the decision.
  *
- * A suspended account cannot write through the API (`decideAccess`), so the appeals of a
- * suspension are inserted directly here (see the contract request in the E7-appeals report).
+ * A suspended account may still file an appeal (`whileSuspended`, ADR 0019); one test files it
+ * through the API, the others insert the row directly as a fixture.
  */
 import { and, desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -60,7 +60,7 @@ const appeal = (who: User, kind: string, subjectType: string, subjectId: string)
 const resolve = (who: User, id: string, status: "upheld" | "overturned") =>
   who.client.call<AppealDto>("POST", `/api/admin/appeals/${id}`, { status, resolution: "Reviewed." });
 
-/** An appeal row for an appellant who cannot write through the API (suspended). */
+/** An appeal row inserted directly (a fixture; the API path is covered once below). */
 async function insertAppeal(
   appellantId: string,
   kind: "moderation" | "account",
@@ -261,10 +261,15 @@ describe("overturned moderation_action appeals", () => {
       reason: "Spam",
     });
     expect(s.status, JSON.stringify(s.body)).toBe(200);
-    // A suspended account cannot write, so it cannot file the appeal itself today.
-    expect((await appeal(v, "moderation", "moderation_action", uuidv7())).status).toBe(403);
+    // A suspended account may still appeal (ADR 0019): past the suspension check, a made-up
+    // subject is NOT_FOUND, and its own suspension is accepted.
+    expect((await appeal(v, "moderation", "moderation_action", uuidv7())).status).toBe(404);
     const suspend = await latestModAction(v.userId, "suspend_user");
-    const a = await insertAppeal(v.userId, "moderation", "moderation_action", suspend!.id);
+    const filed = await appeal(v, "moderation", "moderation_action", suspend!.id);
+    expect(filed.status, JSON.stringify(filed.body)).toBe(200);
+    const a = filed.body;
+    // Every other write is still refused while suspended.
+    expect((await v.client.call("PUT", `/api/channels/${mod.username}/follow`, {})).status).toBe(403);
     // The moderator who suspended cannot resolve its appeal.
     expect((await resolve(mod, a.id, "overturned")).status).toBe(403);
     let res: { status: number; body: AppealDto } | null = null;

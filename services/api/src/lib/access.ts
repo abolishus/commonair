@@ -79,7 +79,9 @@ export function decideAccess(f: AccessFacts): AccessDecision {
     const t = tokenAllowed(f.meta, caller.scopes);
     if (!t.ok) return t;
   }
-  if (f.write && caller.user.suspended) return deny("FORBIDDEN", "Your account is suspended");
+  // Appeals stay open to suspended users (ADR 0019); every other write is blocked.
+  if (f.write && caller.user.suspended && f.meta.whileSuspended !== true)
+    return deny("FORBIDDEN", "Your account is suspended");
 
   const roles = PLATFORM_LEVELS[access];
   // Legal procedures (T0 cases, evidence, NCMEC drafts, holds) do not exist for anyone else

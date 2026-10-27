@@ -2265,7 +2265,7 @@ export const contract = {
 
   appeals: {
     create: user
-      .meta({ access: "user", rateLimit: "write" })
+      .meta({ access: "user", rateLimit: "write", whileSuspended: true })
       .route({
         method: "POST",
         path: "/appeals",

@@ -75,6 +75,23 @@ describe("decideAccess", () => {
     });
   });
 
+  test("suspended users may still appeal, and nothing else", () => {
+    const appeal = meta({ access: "user", rateLimit: "write", whileSuspended: true });
+    const suspended = session({ suspended: true });
+    expect(decideAccess({ meta: appeal, caller: suspended, write: true }).ok).toBe(true);
+    expect(
+      decideAccess({ meta: meta({ access: "user", rateLimit: "write" }), caller: suspended, write: true }),
+    ).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    // The flag waives the suspension check only: sign-in and bot rules still apply.
+    expect(decideAccess({ meta: appeal, caller: null, write: true })).toMatchObject({
+      ok: false,
+      code: "UNAUTHORIZED",
+    });
+    expect(
+      decideAccess({ meta: appeal, caller: session({ suspended: true, accountType: "bot" }), write: true }).ok,
+    ).toBe(false);
+  });
+
   test("bots can only use tokens", () => {
     const m = meta({ access: "user", scopes: [] });
     expect(decideAccess({ meta: m, caller: session({ accountType: "bot" }), write: false }).ok).toBe(false);

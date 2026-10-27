@@ -63,6 +63,9 @@ describe("step selection", () => {
   test("all is every step that is not pending; pending steps are still selectable", () => {
     expect(SAFETY_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(ALL_SAFETY_STEPS).toEqual(SAFETY_STEP_NUMBERS.filter((n) => !PENDING_SAFETY_STEPS.includes(n)));
+    // E7 landed steps 8 (DMCA) and 9 (appeals), so `all` runs every step.
+    expect(PENDING_SAFETY_STEPS).toEqual([]);
+    expect(ALL_SAFETY_STEPS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     for (const n of PENDING_SAFETY_STEPS) {
       expect(parseSteps("all")).not.toContain(n);
       expect(parseSteps(String(n))).toEqual([n]);

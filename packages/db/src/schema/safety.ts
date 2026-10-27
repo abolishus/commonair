@@ -63,6 +63,9 @@ export const integrityFlags = pgTable(
   (t) => [
     index("integrity_flags_subject_idx").on(t.subjectType, t.subjectId),
     index("integrity_flags_channel_idx").on(t.channelId, t.createdAt),
+    // The staff review list pages newest first (services/api/src/admin). NULLS FIRST is the
+    // default for DESC, so `order by created_at desc, id desc` can use it (NULLS LAST would not).
+    index("integrity_flags_created_idx").on(t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst()),
   ],
 );
 

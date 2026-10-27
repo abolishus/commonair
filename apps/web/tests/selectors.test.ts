@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c- and e5-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5- and e7-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -199,6 +199,70 @@ describe("e5-selectors.md", () => {
   it("every earlier id is still rendered (e1–e4c stay intact)", () => {
     for (const id of ["nav-directory", "treasury-tab-payments", "transparency-month-row", "account-treasury-link"])
       expect(rendered(id, appText)).toBe(true);
+  });
+});
+
+/**
+ * E7: the same table layout as E5 (ids in the first column and inside the meaning column, `<x>`
+ * templates kept as templates).
+ */
+function e7TestIds(): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing/e7-selectors.md"), "utf8");
+  const section = text.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  const ids = new Set<string>();
+  for (const line of section.split("\n")) {
+    if (!line.startsWith("|")) continue;
+    const first = line.split("|")[1] ?? "";
+    for (const m of first.matchAll(/`([a-z][a-z0-9-]*)`/g)) if (m[1] && !m[1].startsWith("data-")) ids.add(m[1]);
+    for (const m of line.matchAll(/`([a-z][a-z0-9]*(?:-[a-z0-9_<>]+)+)`/g))
+      if (m[1] && !m[1].startsWith("data-")) ids.add(m[1]);
+  }
+  return [...ids];
+}
+
+/** Where each E7 template id is built (`dmcaq-status-${s}` and so on). */
+const E7_TEMPLATES: Readonly<Record<string, string>> = {
+  "dmcaq-status-<status>": "`dmcaq-status-${s}`",
+  "counter-item-<itemId>": "`counter-item-${i.id}`",
+  "integrityq-subject-<type>": "`integrityq-subject-${s}`",
+  "integrityq-decision-<decision>": "`integrityq-decision-${d}`",
+  "incident-status-<status>": "`incident-status-${s}`",
+  "election-ballot-<candidateId>": "`election-ballot-${c.user.id}`",
+};
+
+/**
+ * E7 forms pass a field's id to a local helper that sets `data-testid={testId}`
+ * (`text("name", "dmca-name", …)`), and toggles and tables take it as a composition prop.
+ */
+const e7Rendered = (id: string, text: string) =>
+  onElement(id, text) ||
+  text.includes(`"data-testid": "${id}"`) ||
+  new RegExp(`\\b[a-z]+\\(\\s*"[A-Za-z]+",\\s*"${id}"`).test(text);
+
+describe("e7-selectors.md", () => {
+  const ids = e7TestIds();
+
+  it("lists the platform-debt selectors, templates included", () => {
+    expect(ids.length).toBeGreaterThan(80);
+    for (const id of [
+      "dmca-form",
+      "held-queue",
+      "integrityq-decide-allowed",
+      "incident-status-<status>",
+      "legal-pending",
+    ])
+      expect(ids).toContain(id);
+    expect(ids.some((id) => id.startsWith("data-"))).toBe(false);
+  });
+
+  it.each(ids.filter((id) => !id.includes("<")))("renders %s", (id) => {
+    expect(e7Rendered(id, appText) || onElement(id, uiText)).toBe(true);
+  });
+
+  it.each(ids.filter((id) => id.includes("<")))("builds %s from its template", (id) => {
+    const marker = E7_TEMPLATES[id];
+    expect(marker, id).toBeDefined();
+    expect(appText).toContain(marker);
   });
 });
 

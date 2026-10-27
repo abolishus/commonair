@@ -137,10 +137,10 @@ Counsel has not reviewed ADR 0019 or its notice text; nothing here says otherwis
      provider text (no addresses).
    - `audit_log_action_idx (action, created_at)` on `audit_log`.
    - Generate a named migration at the next free number after E7's. E7's contract step took
-     `0024_e7_platform_debts`, `0025_e7_protections` and `0026_e7_active_termination`, so expect
-     `0027_enforcement_statements` (unless an E7 merge added another), including the
+     `0024_e7_platform_debts`, `0025_e7_protections` and `0026_e7_active_termination`, and E7 integration took `0027_integrity_flags_created_idx`, so expect
+     `0028_enforcement_statements` (unless an E7 merge added another), including the
      `legal_document_kind` enum value. Then a hand-written protections migration (expected
-     `0028_w0_protections`) in the style of
+     `0029_w0_protections`) in the style of
      `packages/db/drizzle/0016_trust_safety_protections.sql`:
      - `enforcement_statements` append-only and no-truncate with `commonair_forbid_mutation()`
        (defined at `0001_protections.sql:25`; row-trigger pattern :100-106, no-truncate pattern
@@ -173,17 +173,9 @@ Counsel has not reviewed ADR 0019 or its notice text; nothing here says otherwis
    `services/worker/src/jobs/moderation-sor.ts` exporting `sorJobs: JobDefinition[]` (both
    schedules from decision 5: every 15 s and daily; handlers that return `{ notBuilt: 1 }`),
    registered in `services/worker/src/jobs/index.ts` (`JOBS`, :41-72). W0-sor owns the stub file.
-8. **Appeals while suspended** (ADR 0019 answer 2): exempt `appeals.create`, and nothing else,
-   from the suspended-write block at `services/api/src/lib/access.ts:82`. Add an optional
-   `whileSuspended?: true` to `ProcedureMeta` (`packages/contracts/src/api/common.ts:35-45`, with a
-   comment: only for redress), set it on `appeals.create` (`router.ts`, `appeals.create`, about
-   :2266; recheck after E7), and make the check
-   `if (f.write && caller.user.suspended && f.meta.whileSuspended !== true)`. Tests: the
-   `decideAccess` unit tests (suspended caller may create an appeal, still may not do any other
-   write), and a contract test that walks the router and asserts `appeals.create` is the only
-   procedure with `whileSuspended`. `appeals.create` is already on the `write` rate-limit bucket
-   (commit `7833a19`), so this is about the suspended check only. Whether the auth library lets a
-   suspended user sign in at all (`services/api/src/auth/index.ts:190`) is W0-sor's to check.
+8. **Appeals while suspended**: already done in E7 integration (`whileSuspended` on
+   `ProcedureMeta`, set on `appeals.create` only, honored by `decideAccess`; unit and router-walk
+   tests). Nothing to do here.
 9. **NCII appeal subject** (ADR 0019 answer 4): append `"ncii_request_item"` to `APPEAL_SUBJECTS`
    (`packages/contracts/src/enums.ts:106-118`, doc comment: an NCII request item covering content
    the appellant owns, appealing its removal or auto-hide). `appeals.subject_type` is `text`

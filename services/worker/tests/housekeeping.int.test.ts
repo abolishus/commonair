@@ -260,8 +260,9 @@ describe("housekeeping", () => {
     const elsewhere = await vod((id) => `clips/${id}/`, at(-MIN));
 
     const r = await enforceVodRetention(ctx());
-    expect(r).toEqual({ deleted: 1, failed: 7, objects: 3, held: 0, clipsDeleted: 0 });
-    expect(deletedPrefixes).toEqual([`vods/${expired.id}/`]);
+    // The public prefix and the DMCA-hidden copy (moderation/dmca/) both go.
+    expect(r).toEqual({ deleted: 1, failed: 7, objects: 3 + 3, held: 0, clipsDeleted: 0 });
+    expect(deletedPrefixes).toEqual([`vods/${expired.id}/`, `moderation/dmca/vods/${expired.id}/`]);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect(await status(expired.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
     for (const v of [broken, keep, forever, other, blank, root, noSlash, nested, elsewhere])
@@ -330,8 +331,8 @@ describe("housekeeping", () => {
 
     const r = await enforceVodRetention(ctx());
     // Held: the owner's VOD and both removed clips (and the tampered one) are counted, not deleted.
-    expect(r).toEqual({ deleted: 1, failed: 1, objects: 3 + 3, held: 1 + 3, clipsDeleted: 2 });
-    expect(deletedPrefixes).toEqual([`vods/${free.vodId}/`]);
+    expect(r).toEqual({ deleted: 1, failed: 1, objects: 3 + 3 + 3, held: 1 + 3, clipsDeleted: 2 });
+    expect(deletedPrefixes).toEqual([`vods/${free.vodId}/`, `moderation/dmca/vods/${free.vodId}/`]);
     expect(deletedKeys.sort()).toEqual(
       [`clips/${free.byOwner}.mp4`, `clips/${free.byOwner}.webp`, `clips/${free.byCreator}.mp4`].sort(),
     );
@@ -389,7 +390,7 @@ describe("housekeeping", () => {
     } finally {
       afterDeletePrefix = null;
     }
-    expect(deletedPrefixes).toEqual([`vods/${vodIds[0]}/`]);
+    expect(deletedPrefixes).toEqual([`vods/${vodIds[0]}/`, `moderation/dmca/vods/${vodIds[0]}/`]);
     expect(deletedKeys).not.toContain(`clips/${clipId}.mp4`);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect((await status(vodIds[0]!))?.status).toBe("deleted");

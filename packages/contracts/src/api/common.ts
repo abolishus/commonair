@@ -42,6 +42,11 @@ export interface ProcedureMeta {
   scopes?: Scope[];
   /** Per-caller rate limit bucket name (see services/api rate limits). */
   rateLimit?: "default" | "write" | "auth" | "chat" | "expensive" | "playback";
+  /**
+   * Suspended callers may still call this write, so they can appeal (ADR 0019). Redress only:
+   * a router test keeps `appeals.create` the sole holder.
+   */
+  whileSuspended?: true;
 }
 
 export const base = oc.$meta<ProcedureMeta>({ access: "public" }).errors({

@@ -74,6 +74,7 @@ describe("full composition", () => {
     for (const n of ["e5-coop", "trust-safety", "e2e-relay", "backup-restore", "load-smoke", "e2e-social"]) {
       expect(FULL_REQUIRED).toContain(n);
     }
+    for (const n of ["multi-instance", "e7-admin"]) expect(FULL_REQUIRED).toContain(n);
     expect(FULL_REQUIRED).not.toContain("load-plan");
   });
 

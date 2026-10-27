@@ -4,7 +4,7 @@
 /**
  * `admin.incidents`: open or update a status-page incident. `instance.status` reads the
  * `incidents` table directly (open ones mark their components degraded), so there is no outbox
- * event. The audit row carries ids and enums only, never the title or body.
+ * event; a write drops this process's cached status so it shows at once. The audit row carries ids and enums only, never the title or body.
  */
 import { eq } from "drizzle-orm";
 import type { INCIDENT_STATUSES } from "@commonair/contracts/enums";
@@ -12,6 +12,7 @@ import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { badRequest, notFound } from "../lib/errors.ts";
+import { invalidateStatus } from "../routes/instance.ts";
 
 type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 
@@ -59,7 +60,7 @@ export interface IncidentInput {
 export async function writeIncident(deps: Deps, actorId: string, input: IncidentInput): Promise<{ id: string }> {
   const components = checkComponents(input.components, statusComponentIds(deps.probes));
   const now = deps.now();
-  return deps.db.transaction(async (tx) => {
+  const written = await deps.db.transaction(async (tx) => {
     const { incidents } = schema;
     let id: string;
     let from: IncidentStatus | null = null;
@@ -103,4 +104,7 @@ export async function writeIncident(deps: Deps, actorId: string, input: Incident
     });
     return { id };
   });
+  // After commit: the next status read sees the write instead of a cached page.
+  invalidateStatus(deps);
+  return written;
 }

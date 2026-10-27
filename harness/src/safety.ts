@@ -34,7 +34,7 @@ export const SAFETY_STEP_NUMBERS: readonly SafetyStep[] = [1, 2, 3, 4, 5, 6, 7, 
  * left out of `all`, so the full harness on main stays green while they are stubs. The unit that
  * lands a step removes it from this list.
  */
-export const PENDING_SAFETY_STEPS: readonly SafetyStep[] = [8, 9];
+export const PENDING_SAFETY_STEPS: readonly SafetyStep[] = [];
 /** What `all` (and an empty selection) runs. */
 export const ALL_SAFETY_STEPS: readonly SafetyStep[] = SAFETY_STEP_NUMBERS.filter(
   (n) => !PENDING_SAFETY_STEPS.includes(n),

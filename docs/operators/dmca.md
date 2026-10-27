@@ -102,13 +102,13 @@ DMCA records are records of a legal process, so they are kept:
   legal process the claimant may still act on; the privacy policy must say so. Audit rows and
   account actions reference users by id only.
 - A user's data export includes their counter-notices and their account actions (`safety.json`).
-- Hidden files stay under `moderation/dmca/` until restored. Three deletion paths do not yet
-  reach that prefix, so their files stay private but are never deleted; remove them by hand when
-  the matter is closed (`moderation/dmca/vods/<vod id>/`, `moderation/dmca/clips/<clip id>.*`,
-  `moderation/dmca/thumbnails/<broadcast id>/`):
-  - a VOD that expires by retention while it is down;
-  - **account deletion** of the uploader (it purges `vods/<id>/` and the clip keys only);
-  - a VOD or clip a moderator removes (status `deleted`) while it is down for DMCA.
+- Hidden files stay under `moderation/dmca/` until restored. VOD retention expiry (including a
+  VOD its owner removed) and account deletion of the uploader delete the hidden copies too. Two
+  paths do not yet reach that prefix, so their files stay private but are never deleted; remove
+  them by hand when the matter is closed (`moderation/dmca/vods/<vod id>/`,
+  `moderation/dmca/clips/<clip id>.*`, `moderation/dmca/thumbnails/<broadcast id>/`):
+  - a VOD or clip a moderator removes (status `deleted`) while it is down for DMCA;
+  - a clip its owner or creator removes while it is down (the purge deletes the public keys only).
 
 Decide how long you keep these records (for example the limitation period for copyright claims,
 three years in the US) and write it into your retention policy; nothing purges them

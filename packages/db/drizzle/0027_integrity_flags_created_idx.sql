@@ -1,0 +1,1 @@
+CREATE INDEX "integrity_flags_created_idx" ON "integrity_flags" USING btree ("created_at" DESC NULLS FIRST,"id" DESC NULLS FIRST);

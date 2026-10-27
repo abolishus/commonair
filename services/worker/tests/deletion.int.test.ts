@@ -606,6 +606,50 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(await pendingOf()).toBeNull();
   });
 
+  test("DMCA-hidden copies of the channel's media are deleted too", async () => {
+    const D = await makeUser(db());
+    const [b] = await db()
+      .insert(schema.broadcasts)
+      .values({ channelId: D.channel.id, ingestProtocol: "rtmp", path: `live/${D.channel.slug}`, endedAt: new Date() })
+      .returning();
+    const vodId = uuidv7();
+    const goneVodId = uuidv7();
+    for (const [id, status] of [
+      [vodId, "ready"],
+      [goneVodId, "deleted"],
+    ] as const)
+      await db()
+        .insert(schema.vods)
+        .values({ id, broadcastId: b!.id, channelId: D.channel.id, title: "v", storagePrefix: `vods/${id}/`, status });
+    const clipId = uuidv7();
+    await db()
+      .insert(schema.clips)
+      .values({
+        id: clipId,
+        channelId: D.channel.id,
+        broadcastId: b!.id,
+        title: "c",
+        startOffset: 0,
+        durationSeconds: 10,
+        status: "ready",
+        storageKey: `clips/${clipId}.mp4`,
+        thumbnailKey: `clips/${clipId}.webp`,
+      });
+    // Hidden copies, whatever the row's status (a VOD deleted earlier keeps its hidden copy).
+    const hidden = [
+      `moderation/dmca/vods/${vodId}/index.m3u8`,
+      `moderation/dmca/vods/${goneVodId}/index.m3u8`,
+      `moderation/dmca/clips/${clipId}.mp4`,
+      `moderation/dmca/clips/${clipId}.webp`,
+      `moderation/dmca/thumbnails/${b!.id}/latest.jpg`,
+    ];
+    for (const k of hidden) await S3.put(MEDIA_BUCKET, k, new Uint8Array([35]));
+
+    await schedule(D.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+    for (const k of hidden) expect(await S3.head(MEDIA_BUCKET, k), k).toBeNull();
+  });
+
   test("on-demand ops jobs answer `skipped` while their run lock is busy", async () => {
     const meta = { id: "t", attemptsMade: 0 };
     for (const [job, key] of [

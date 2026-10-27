@@ -47,6 +47,14 @@ export const worst = (s: ComponentStatus[]): ComponentStatus =>
 
 const cache = new WeakMap<Deps, { at: number; value: Awaited<ReturnType<typeof computeStatus>> }>();
 
+/**
+ * Drop this process's cached status, so an incident write shows at once. Other API replicas keep
+ * theirs until it expires (CACHE_MS).
+ */
+export function invalidateStatus(deps: Deps): void {
+  cache.delete(deps);
+}
+
 async function computeStatus(deps: Deps) {
   const probes: Record<string, StatusProbe> = {
     postgres: async () => {

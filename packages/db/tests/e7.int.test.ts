@@ -229,6 +229,13 @@ describe("dmca protections", () => {
     ]);
   });
 
+  test("the integrity review list's index is newest first (0027)", async () => {
+    const [row] = await t.db.execute<{ indexdef: string }>(
+      sql`select indexdef from pg_indexes where indexname = 'integrity_flags_created_idx'`,
+    );
+    expect(row?.indexdef).toMatch(/\(created_at DESC, id DESC\)/);
+  });
+
   test("one unreversed termination per user; a new one is allowed after reversal (0026)", async () => {
     const userId = await makeUser();
     const first = await strike(userId, new Date(), "dmca_termination");
