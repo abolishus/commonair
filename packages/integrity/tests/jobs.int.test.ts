@@ -84,6 +84,13 @@ async function session(channelId: string, o: Partial<typeof s.playbackSessions.$
   return p!.id;
 }
 
+/**
+ * A session the scorer has already judged (`scored_at` set): stream-hour eligibility and follow
+ * prior viewing count only those, never an interim verdict from the API.
+ */
+const scored = (channelId: string, o: Partial<typeof s.playbackSessions.$inferInsert> = {}) =>
+  session(channelId, { scoredAt: new Date(NOW.getTime() - 1_000), ...o });
+
 async function humanHistory(sessionId: string, n = 6) {
   for (let i = 0; i < n; i++) {
     const sample: HeartbeatSample = {
@@ -232,7 +239,8 @@ describe("scoreActiveSessions", () => {
       verdict: "pending",
       verdictReasons: ["fetch_pattern", "media_unconfirmed"],
     });
-    expect(await sessionRow(cdn)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    // It verifies, marked as not judged on fetches (W1's gate and stream hours read the marker).
+    expect(await sessionRow(cdn)).toMatchObject({ verdict: "verified", verdictReasons: ["fetch_unjudged"] });
     expect(r.newlyExcluded).toEqual(expect.arrayContaining([known]));
     expect(r.newlyExcluded).not.toContain(dbZero);
   });
@@ -287,8 +295,12 @@ describe("scoreActiveSessions", () => {
       verdict: "pending",
       verdictReasons: ["fetch_pattern", "media_unconfirmed"],
     });
+    // Not judged yet (no proven receipt coverage): held, and marked until receipts arrive.
     for (const id of [...unproven, unaccounted, ended]) {
-      expect(await sessionRow(id), id).toMatchObject({ verdict: "pending", verdictReasons: ["media_unconfirmed"] });
+      expect(await sessionRow(id), id).toMatchObject({
+        verdict: "pending",
+        verdictReasons: ["fetch_unjudged", "media_unconfirmed"],
+      });
     }
     expect(r.newlyExcluded).toContain(relayBot);
 
@@ -601,6 +613,27 @@ describe("scoreActiveSessions", () => {
     });
   });
 
+  test("fetch_unjudged reaches sessions verified before it existed on their next re-score", async () => {
+    const { channelId } = await channel();
+    // Scored verified with no reasons by an older scorer, still live: re-scored every pass.
+    const live = await scored(channelId, { assignedSource: "cdn", verdict: "verified", verdictReasons: [] });
+    await humanHistory(live);
+    // Interim-verified by the API, never scored yet: the first pass marks it.
+    const interim = await session(channelId, { assignedSource: "cdn", verdict: "verified" });
+    await humanHistory(interim);
+    // Ended verified sessions are never candidates again: history is not rewritten.
+    const ended = await scored(channelId, {
+      assignedSource: "cdn",
+      verdict: "verified",
+      endedAt: new Date(NOW.getTime() - 60_000),
+    });
+
+    await scoreActiveSessions(app, valkey, NOW);
+    for (const id of [live, interim])
+      expect(await sessionRow(id)).toMatchObject({ verdict: "verified", verdictReasons: ["fetch_unjudged"] });
+    expect(await sessionRow(ended)).toMatchObject({ verdict: "verified", verdictReasons: [] });
+  });
+
   test("an excluded session that stays excluded still rotates (scored_at moves)", async () => {
     const { channelId } = await channel();
     const viewer = await user();
@@ -886,7 +919,7 @@ describe("excludeFollowBursts", () => {
     for (let i = 0; i < 3; i++) {
       const id = await user();
       established.push(id);
-      await session(channelId, {
+      await scored(channelId, {
         userId: id,
         startedAt: new Date(burstMinute.getTime() - 86_400_000),
         endedAt: new Date(burstMinute.getTime() - 80_000_000),
@@ -899,7 +932,7 @@ describe("excludeFollowBursts", () => {
     for (const verdict of ["excluded", "pending"] as const) {
       const id = await user();
       botted.push(id);
-      await session(channelId, {
+      await scored(channelId, {
         userId: id,
         startedAt: new Date(burstMinute.getTime() - 86_400_000),
         endedAt: new Date(burstMinute.getTime() - 80_000_000),
@@ -916,7 +949,7 @@ describe("excludeFollowBursts", () => {
     );
     // A fresh account that started watching 10 s before following (its session ran on for 30 min):
     // only the 10 s before the follow count as prior viewing.
-    await session(channelId, {
+    await scored(channelId, {
       userId: fresh[0]!,
       startedAt: new Date(burstMinute.getTime() - 10_000),
       endedAt: new Date(burstMinute.getTime() + 1_790_000),
@@ -960,6 +993,43 @@ describe("excludeFollowBursts", () => {
     const again = await excludeFollowBursts(app, NOW);
     expect(again.excluded).toEqual([]);
   });
+
+  test("prior viewing ignores CDN (fetch-unjudged) and never-scored watch time", async () => {
+    const { channelId } = await channel();
+    const burstMinute = new Date(Math.floor(NOW.getTime() / 60_000) * 60_000 - 20 * 60_000);
+    const fresh: string[] = [];
+    for (let i = 0; i < 32; i++) fresh.push(await user(new Date(burstMinute.getTime() - 3_600_000)));
+    const watched = (o: Partial<typeof s.playbackSessions.$inferInsert>) => ({
+      startedAt: new Date(burstMinute.getTime() - 86_400_000),
+      endedAt: new Date(burstMinute.getTime() - 80_000_000),
+      watchSeconds: 1800,
+      verdict: "verified" as const,
+      ...o,
+    });
+    // Old accounts, each with 30 min of verified prior viewing of a different kind.
+    const judged = await user();
+    await scored(channelId, watched({ userId: judged }));
+    const viaCdn = await user();
+    await scored(channelId, watched({ userId: viaCdn, assignedSource: "cdn", verdictReasons: ["fetch_unjudged"] }));
+    const unscored = await user();
+    await session(channelId, watched({ userId: unscored }));
+    await app.insert(s.follows).values(
+      [...fresh, judged, viaCdn, unscored].map((followerId, i) => ({
+        followerId,
+        channelId,
+        createdAt: new Date(burstMinute.getTime() + i * 1000),
+      })),
+    );
+
+    const r = await excludeFollowBursts(app, NOW);
+    const ours = r.excluded.filter((e) => e.channelId === channelId).map((e) => e.followerId);
+    expect(ours.sort()).toEqual([...fresh, viaCdn, unscored].sort());
+    const flags = await app
+      .select()
+      .from(s.integrityFlags)
+      .where(and(eq(s.integrityFlags.channelId, channelId), eq(s.integrityFlags.subjectType, "follow")));
+    expect(flags.find((f) => f.subjectId === viaCdn)!.details).toMatchObject({ priorViewingSeconds: 0 });
+  });
 });
 
 describe("markEligibleStreamHours", () => {
@@ -979,16 +1049,16 @@ describe("markEligibleStreamHours", () => {
       endedAt: new Date(hour(h).getTime() + 1_800_000),
     });
     // Hour -3: only the streamer, signed in, and the same device signed out.
-    await session(st.channelId, { userId: st.ownerId, deviceHash: "owner-device", verdict: "verified", ...span(3) });
-    await session(st.channelId, { userId: null, deviceHash: "owner-device", verdict: "verified", ...span(3) });
+    await scored(st.channelId, { userId: st.ownerId, deviceHash: "owner-device", verdict: "verified", ...span(3) });
+    await scored(st.channelId, { userId: null, deviceHash: "owner-device", verdict: "verified", ...span(3) });
     // Hour -2: two real viewers (one anonymous), one excluded bot, one pending.
     const viewer = await user();
-    await session(st.channelId, { userId: viewer, verdict: "verified", ...span(2) });
-    await session(st.channelId, { userId: null, deviceHash: "anon-device", verdict: "verified", ...span(2) });
-    await session(st.channelId, { verdict: "excluded", ...span(2) });
-    await session(st.channelId, { verdict: "pending", ...span(2) });
+    await scored(st.channelId, { userId: viewer, verdict: "verified", ...span(2) });
+    await scored(st.channelId, { userId: null, deviceHash: "anon-device", verdict: "verified", ...span(2) });
+    await scored(st.channelId, { verdict: "excluded", ...span(2) });
+    await scored(st.channelId, { verdict: "pending", ...span(2) });
     // Hour -1: one viewer whose session spans into it from hour -2 (counted in both).
-    await session(st.channelId, {
+    await scored(st.channelId, {
       userId: viewer,
       verdict: "verified",
       startedAt: new Date(hour(2).getTime() + 3_000_000),
@@ -1043,9 +1113,9 @@ describe("markEligibleStreamHours", () => {
     const oldStudioIp = `oldstudio-${crypto.randomUUID()}`;
     // The streamer watched (another channel, signed in) from home during the hour: that address is theirs then.
     const elsewhere = await channel();
-    await session(elsewhere.channelId, { userId: st.ownerId, ipHash: homeIp, ...inHour });
+    await scored(elsewhere.channelId, { userId: st.ownerId, ipHash: homeIp, ...inHour });
     // …and from another address six hours earlier: not aligned with this hour.
-    await session(elsewhere.channelId, {
+    await scored(elsewhere.channelId, {
       userId: st.ownerId,
       ipHash: oldHomeIp,
       startedAt: new Date(hourStart.getTime() - 6 * 3_600_000),
@@ -1069,10 +1139,10 @@ describe("markEligibleStreamHours", () => {
       },
     ]);
     // Sock puppets: fresh devices and accounts on the streamer's aligned addresses.
-    await session(st.channelId, { ipHash: homeIp, ...inHour });
-    await session(st.channelId, { userId: await user(), ipHash: studioIp, ...inHour });
+    await scored(st.channelId, { ipHash: homeIp, ...inHour });
+    await scored(st.channelId, { userId: await user(), ipHash: studioIp, ...inHour });
     // One genuine viewer.
-    await session(st.channelId, { userId: await user(), ...inHour });
+    await scored(st.channelId, { userId: await user(), ...inHour });
 
     const count = async () =>
       (await app.select().from(s.streamHours).where(eq(s.streamHours.broadcastId, st.broadcastId)))[0]!;
@@ -1080,9 +1150,41 @@ describe("markEligibleStreamHours", () => {
     expect(await count()).toMatchObject({ verifiedOtherViewers: 1, eligible: false });
 
     // Viewers who merely share an address the streamer used at another time do count.
-    await session(st.channelId, { userId: await user(), ipHash: oldHomeIp, ...inHour });
-    await session(st.channelId, { userId: null, ipHash: oldStudioIp, ...inHour });
+    await scored(st.channelId, { userId: await user(), ipHash: oldHomeIp, ...inHour });
+    await scored(st.channelId, { userId: null, ipHash: oldStudioIp, ...inHour });
     await markEligibleStreamHours(app, NOW);
     expect(await count()).toMatchObject({ verifiedOtherViewers: 3, eligible: true });
+  });
+
+  test("a CDN (fetch-unjudged) or never-scored session does not make an hour eligible; a judged one does", async () => {
+    const st = await channel();
+    const hourStart = new Date(Math.floor(NOW.getTime() / 3_600_000) * 3_600_000 - 2 * 3_600_000);
+    await app
+      .insert(s.streamHours)
+      .values({ broadcastId: st.broadcastId, channelId: st.channelId, hourStart, liveSeconds: 3600 });
+    const inHour = {
+      verdict: "verified" as const,
+      startedAt: new Date(hourStart.getTime() + 60_000),
+      endedAt: new Date(hourStart.getTime() + 1_800_000),
+    };
+    const row = async () =>
+      (await app.select().from(s.streamHours).where(eq(s.streamHours.broadcastId, st.broadcastId)))[0]!;
+    // One judged viewer, two CDN viewers the scorer marked, one the API promoted that was never scored.
+    await scored(st.channelId, { userId: await user(), ...inHour });
+    for (let i = 0; i < 2; i++)
+      await scored(st.channelId, {
+        userId: await user(),
+        assignedSource: "cdn",
+        verdictReasons: ["fetch_unjudged"],
+        ...inHour,
+      });
+    await session(st.channelId, { userId: await user(), ...inHour });
+    await markEligibleStreamHours(app, NOW);
+    expect(await row()).toMatchObject({ verifiedOtherViewers: 1, eligible: false });
+
+    // A second judged viewer (other reasons do not matter) makes it eligible.
+    await scored(st.channelId, { userId: await user(), verdictReasons: ["datacenter_ip"], ...inHour });
+    await markEligibleStreamHours(app, NOW);
+    expect(await row()).toMatchObject({ verifiedOtherViewers: 2, eligible: true });
   });
 });

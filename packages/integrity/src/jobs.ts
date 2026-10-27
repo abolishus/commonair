@@ -23,7 +23,7 @@ import { scoreSession } from "./score.ts";
 import { claimedSecondsUntil } from "./signals/fetch.ts";
 import { readEvidence } from "./store.ts";
 import { loadMinVerifiedViewers, loadThresholds } from "./thresholds.ts";
-import type { FetchEvidence, SessionFacts, SessionScore, Verdict } from "./types.ts";
+import { FETCH_UNJUDGED, type FetchEvidence, type SessionFacts, type SessionScore, type Verdict } from "./types.ts";
 
 type Row = Record<string, unknown>;
 const rows = (r: unknown) => r as Row[];
@@ -34,6 +34,19 @@ const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
 const textOrNull = (v: unknown) => (typeof v === "string" ? v : null);
 const date = (v: unknown) => (v instanceof Date ? v : new Date(String(v)));
 const dateOrNull = (v: unknown) => (v === null || v === undefined ? null : date(v));
+
+/**
+ * `gateEligible` (score.ts) as SQL on the `playback_sessions` alias `ps`: verified, its fetches
+ * judged, and scored at least once. The API promotes a session to verified on heartbeat before
+ * the scorer runs; such a session has no reasons yet, and one that ends before the next pass
+ * is never scored (the scorer takes only live or pending sessions), so without `scored_at`
+ * an unjudged CDN session would count forever. `verdict_reasons` is `text[] not null`; the
+ * coalesce keeps the filter safe if that ever changes. The extra conditions only filter rows
+ * the existing joins already found, so the indexes the plans use are unchanged.
+ */
+export const GATE_ELIGIBLE: SQL = sql.raw(
+  `(ps.verdict = 'verified' and ps.scored_at is not null and not ('${FETCH_UNJUDGED}' = any(coalesce(ps.verdict_reasons, '{}'))))`,
+);
 
 type FlagInsert = typeof schema.integrityFlags.$inferInsert;
 type AuditInsert = typeof schema.auditLog.$inferInsert;
@@ -641,7 +654,8 @@ export interface FollowBurstJobResult {
 
 /**
  * Exclude low-quality follows that arrived in bursts (`follows.excluded_at`; rows are kept).
- * Prior viewing counts verified sessions only: a botted session cannot vouch for a follow.
+ * Prior viewing counts gate-eligible sessions only (`GATE_ELIGIBLE`): a botted session, or one
+ * whose fetches were never judged (CDN), cannot vouch for a follow.
  */
 export async function excludeFollowBursts(
   db: Database,
@@ -663,7 +677,7 @@ export async function excludeFollowBursts(
                                           greatest(0, extract(epoch from (f.created_at - ps.started_at)))))
                            from playback_sessions ps
                           where ps.user_id = f.follower_id and ps.channel_id = f.channel_id
-                            and ps.verdict = 'verified' and ps.started_at < f.created_at), 0) as prior_seconds
+                            and ${GATE_ELIGIBLE} and ps.started_at < f.created_at), 0) as prior_seconds
           from follows f join users u on u.id = f.follower_id
          where f.created_at >= ${tsz(from)} and f.created_at < ${tsz(now)}`),
     ).map((r) => ({
@@ -744,7 +758,8 @@ export interface StreamHoursResult {
 /**
  * Recompute `stream_hours.verified_other_viewers` and `eligible` for recent hours. An hour
  * is eligible when at least `membership.classes.streamer.minVerifiedViewers` distinct
- * viewers (account, else device) with a verified session overlapped it, none of them the
+ * viewers (account, else device) with a gate-eligible session (`GATE_ELIGIBLE`: verified, scored,
+ * fetches judged; a CDN session is not) overlapped it, none of them the
  * streamer. The streamer is recognised by user id, by the devices the streamer watched from
  * while signed in during the last 30 days, and by network, time-aligned so a shared address
  * (a campus, a café) only counts against viewers while the streamer is there:
@@ -778,7 +793,7 @@ export async function markEligibleStreamHours(
                  count(distinct coalesce(ps.user_id::text, 'device:' || ps.device_hash)) as n
             from hours h
             join playback_sessions ps
-              on ps.channel_id = h.channel_id and ps.verdict = 'verified'
+              on ps.channel_id = h.channel_id and ${GATE_ELIGIBLE}
              and ps.started_at < h.hour_start + interval '1 hour'
              and coalesce(ps.ended_at, ps.last_heartbeat_at, ps.started_at) > h.hour_start
            where ps.user_id is distinct from h.owner_id

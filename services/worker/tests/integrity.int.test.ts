@@ -66,7 +66,7 @@ describe("scoring through the scheduled job", () => {
   let t: TestDatabase;
   let w: WorkerHandle;
   let channelId: string;
-  const ids = { honest: "", fetchless: "", poller: "" };
+  const ids = { honest: "", fetchless: "", poller: "", cdn: "" };
 
   beforeAll(async () => {
     t = await testDb();
@@ -77,7 +77,7 @@ describe("scoring through the scheduled job", () => {
     const broadcast = await makeBroadcast(t.db, channelId, new Date(Date.now() - 300_000));
     const now = Date.now();
 
-    const session = async (verdict: "pending" | "verified") => {
+    const session = async (verdict: "pending" | "verified", assignedSource: "origin" | "cdn" = "origin") => {
       const [s] = await t.db
         .insert(schema.playbackSessions)
         .values({
@@ -93,6 +93,7 @@ describe("scoring through the scheduled job", () => {
           heartbeats: 6,
           watchSeconds: 60,
           verdict,
+          assignedSource,
         })
         .returning();
       // Six human-looking heartbeats (jittered, visible, buffer moving) in the API's history.
@@ -114,6 +115,8 @@ describe("scoring through the scheduled job", () => {
     // Promoted by the API's heartbeat check before the scorer ran: the scorer's verdict wins.
     ids.fetchless = await session("verified");
     ids.poller = await session("verified");
+    // Delivered by the CDN, which never pulled anything through its token for this session.
+    ids.cdn = await session("verified", "cdn");
 
     // What the origin logged: the honest viewer fetched 60 distinct segments (plus a re-request)
     // and its playlists, the poller only playlists, the fetch-less session nothing at all.
@@ -204,6 +207,9 @@ describe("scoring through the scheduled job", () => {
     expect(fetchless.verdictReasons).toContain("media_unconfirmed");
     expect(poller.verdict).toBe("excluded");
     expect(poller.verdictReasons).toContain("fetch_pattern");
+    // Not judged on fetches: verified on the other signals, and the worker stores the marker.
+    expect(rows.get(ids.cdn)).toMatchObject({ verdict: "verified", verdictReasons: ["fetch_unjudged"] });
+    for (const judged of [honest, fetchless, poller]) expect(judged.verdictReasons).not.toContain("fetch_unjudged");
 
     const flags = await t.db
       .select()
@@ -216,19 +222,20 @@ describe("scoring through the scheduled job", () => {
     const others = await t.db
       .select()
       .from(schema.integrityFlags)
-      .where(inArray(schema.integrityFlags.subjectId, [ids.honest, ids.fetchless]));
+      .where(inArray(schema.integrityFlags.subjectId, [ids.honest, ids.fetchless, ids.cdn]));
     expect(others).toEqual([]);
   });
 
-  test("the published verified count is republished at once and counts only the honest viewer", async () => {
+  test("the published verified count is republished at once: the honest and the CDN viewer, no bot", async () => {
+    // fetch_unjudged does not change the verdict, so public counts keep CDN viewers (ADR 0015 is W1's).
     const count = await waitFor(
       async () => {
         const v = await w.ctx.valkey.get(KEYS.viewerCount(channelId));
-        return v === "1" && v;
+        return v === "2" && v;
       },
-      { label: "viewer count 1" },
+      { label: "viewer count 2" },
     );
-    expect(count).toBe("1");
+    expect(count).toBe("2");
   });
 
   test("exclusions are sticky across later runs", async () => {

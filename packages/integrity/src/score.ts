@@ -13,6 +13,8 @@
  * Reasons list every signal that fired (strongest first), so even a verified session
  * shows what was noticed about it. Signals covered by an allowance (an overturned appeal
  * or an admin `allowed` decision) are left out and the reason `allowed_on_appeal` is added.
+ * A session whose fetches the delivery path could not judge (CDN, or no per-session
+ * accounting) carries `fetch_unjudged` whatever its verdict; the verdict does not change.
  */
 import type { NetworkClassifier } from "./network.ts";
 import { noisyOr } from "./signals/combine.ts";
@@ -22,6 +24,7 @@ import { heartbeatSignal } from "./signals/heartbeat.ts";
 import { concurrencySignal, datacenterSignal } from "./signals/network.ts";
 import {
   ALLOWED_ON_APPEAL,
+  FETCH_UNJUDGED,
   type FetchEvidence,
   type HeartbeatSample,
   INSUFFICIENT_HEARTBEATS,
@@ -30,6 +33,7 @@ import {
   type SessionFacts,
   type SessionScore,
   type Signal,
+  type Verdict,
 } from "./types.ts";
 
 export const MIN_HEARTBEATS_TO_VERIFY = 3;
@@ -69,14 +73,27 @@ export function scoreSession(
   const score = noisyOr(signals.map((s) => s.score));
   const reasons: string[] = signals.map((s) => s.code);
   if (allowedSome) reasons.push(ALLOWED_ON_APPEAL);
+  const media = fetchChecks(session, fetches, context);
+  // Not a signal, so no allowance removes it: it records what was not checked.
+  if (media.skipped !== null) reasons.push(FETCH_UNJUDGED);
   const beats = Math.max(session.heartbeats, heartbeats.length);
   if (score > context.sessionExcludeScore) return { verdict: "excluded", score, reasons, signals };
   if (beats < MIN_HEARTBEATS_TO_VERIFY) {
     return { verdict: "pending", score, reasons: [...reasons, INSUFFICIENT_HEARTBEATS], signals };
   }
-  const media = fetchChecks(session, fetches, context);
   if (media.mediaUnconfirmed && !covered.has("fetch_pattern")) {
     return { verdict: "pending", score, reasons: [...reasons, MEDIA_UNCONFIRMED], signals };
   }
   return { verdict: "verified", score, reasons, signals };
+}
+
+/**
+ * Whether a session may earn something that needs verified watching (stream-hour eligibility,
+ * follow prior viewing, the W1 verified-watch gate): verified, and its fetches were judged.
+ * Takes the verdict and reasons as stored. A session the API promoted on heartbeat before the
+ * scorer ran has no reasons yet, so database readers also require `scored_at is not null`
+ * (`GATE_ELIGIBLE` in `jobs.ts` is the SQL form).
+ */
+export function gateEligible(session: { verdict: Verdict; reasons: readonly string[] | null }): boolean {
+  return session.verdict === "verified" && !(session.reasons ?? []).includes(FETCH_UNJUDGED);
 }
