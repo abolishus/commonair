@@ -1542,7 +1542,24 @@ async function stepRejoin(run: Run): Promise<void> {
   const how = (web: string, api: string) => (run.via === "web" ? web : api);
   const channel = people.s1.me.channelSlug ?? people.s1.username;
   const min = minSubscriptionCents(await ctx.platform.api().client.coop.settings());
-  const tiers = await v.api.client.money.tiers({ channel });
+  let tiers = await v.api.client.money.tiers({ channel });
+  if (qualifyingTier(tiers, min) === null) {
+    // Only the owner sets prices; S1 is a fresh streamer with no tiers yet.
+    const { currency } = await people.s1.api.client.money.support({ channel });
+    const cents = [Math.max(min, 500), Math.max(min, 1000) * 2, Math.max(min, 1000) * 5];
+    await ctx.step(t("S1 sets three tiers, the first at least the viewer minimum"), () =>
+      people.s1.api.client.money.setTiers({
+        channel,
+        tiers: cents.map((c, i) => ({
+          tier: (i + 1) as 1 | 2 | 3,
+          name: `Tier ${i + 1}`,
+          benefits: "",
+          price: { cents: c, currency },
+        })),
+      }),
+    );
+    tiers = await v.api.client.money.tiers({ channel });
+  }
   const tier = qualifyingTier(tiers, min);
   ctx.assert(`S1 has a subscription tier of at least ${min} cents`, tier !== null, {
     tiers: tiers.map((x) => ({ tier: x.tier, cents: x.price.cents })),

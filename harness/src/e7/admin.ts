@@ -9,7 +9,7 @@
  * scorer would not write on its own, and reading back the flag and audit rows. Nothing personal is
  * read or written: ids, enums and the admin's own reason text.
  */
-import { createDb } from "@commonair/db";
+import { createDb, uuidv7 } from "@commonair/db";
 import type { Page } from "playwright";
 import { waitFor } from "../wait.ts";
 import { E7_ID_PATTERNS, E7_TEST_IDS as E, byE7Id } from "./selectors.ts";
@@ -93,8 +93,8 @@ export async function seedPendingFlag(
   return withDb(databaseUrl, async (sql) => {
     const details = { network: "hosting:harness-e7-admin", asn: 64512 };
     const [row] = await sql<{ id: string }[]>`
-      insert into integrity_flags (subject_type, subject_id, channel_id, signal, score, details, decision)
-      values ('session', ${input.sessionId}, ${input.channelId}, ${SEEDED_SIGNAL}, 0.6,
+      insert into integrity_flags (id, subject_type, subject_id, channel_id, signal, score, details, decision)
+      values (${uuidv7()}, 'session', ${input.sessionId}, ${input.channelId}, ${SEEDED_SIGNAL}, 0.6,
               ${JSON.stringify(details)}::jsonb, 'pending_review')
       returning id`;
     if (!row) throw new Error("integrity flag insert returned no row");
