@@ -74,6 +74,32 @@ describe("published ports: an explicit allowlist", () => {
   });
 });
 
+describe("coturn is on the host network (STUN must see each client's own address)", () => {
+  const coturn = unit("coturn");
+
+  test("it publishes nothing: on the host network 3478/udp and the relay range need no mapping", () => {
+    // Through rootlessport (PublishPort=) every client would reach STUN from one internal address
+    // and learn a wrong one for itself; a systemd socket cannot hold the relay's run-time ports.
+    expect(values(coturn, "Network")).toEqual(["host"]);
+    expect(values(coturn, "PublishPort")).toEqual([]);
+    expect(values(coturn, "NetworkAlias")).toEqual([]);
+    expect(values(coturn, "IP")).toEqual([]);
+    // The port it listens on is fixed (the health check and the URLs selfhost.sh writes use it).
+    expect(values(coturn, "Environment")).toContain("TURN_PORT=3478");
+  });
+
+  test("sharing the host's loopback is safe only because the relay refuses it and private ranges", () => {
+    const conf = read("infra/coturn/turnserver.conf");
+    for (const range of ["127.0.0.0-127.255.255.255", "10.0.0.0-10.255.255.255", "::-::ffff:ffff"])
+      expect(conf).toContain(`\ndenied-peer-ip=${range}\n`);
+    expect(code(conf)).not.toMatch(/^allow-loopback-peers|^allowed-peer-ip/m);
+  });
+
+  test("compose keeps it on the stack network, published on BIND_ADDRESS like the rest", () => {
+    expect(compose.services.coturn?.ports).toEqual(["${BIND_ADDRESS:-127.0.0.1}:${TURN_PORT:-3478}:3478/udp"]);
+  });
+});
+
 describe("Caddy's public ports are systemd sockets (client addresses survive rootless Podman)", () => {
   const caddy = unit("caddy");
 

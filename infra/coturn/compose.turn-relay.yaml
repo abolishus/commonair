@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Development only: publishes coturn's UDP relay range, for trying the TURN relay locally.
+#
+#   P2P_TURN_URLS='turn:localhost:3478?transport=udp' \
+#     podman compose -f compose.yaml -f infra/coturn/compose.turn-relay.yaml up -d coturn
+#
+# (or set P2P_TURN_URLS in .env; init-env generated TURN_SHARED_SECRET.) Host and container ports
+# are equal because coturn advertises the relay port it allocated. The relay still refuses every
+# private and loopback peer (infra/coturn/turnserver.conf), so two players on this machine cannot
+# relay to each other through it; turnutils_uclient (infra/coturn/README.md) checks allocations.
+services:
+  coturn:
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${TURN_RELAY_PORT_MIN:-49160}-${TURN_RELAY_PORT_MAX:-49199}:${TURN_RELAY_PORT_MIN:-49160}-${TURN_RELAY_PORT_MAX:-49199}/udp"

@@ -200,14 +200,14 @@ describe("instance and routes", () => {
     expect(r.body.features).toMatchObject({ p2p: true, p2pDefault: "off" });
   });
 
-  test("p2p.iceServers is registered (stub until P1-turn)", async () => {
+  test("p2p.iceServers is registered (P1-turn implements it; p2p.int.test.ts covers it)", async () => {
     const st = await liveStreamer();
     const s = await start(client(api), st.username, { p2pCapable: true });
-    const r = await client(api).call<{ code: string }>("POST", "/api/playback/ice-servers", {
+    const r = await client(api).call<{ iceServers: unknown[] }>("POST", "/api/playback/ice-servers", {
       sessionId: s.sessionId,
       token: s.token,
     });
-    expect(r.status).toBe(501);
-    expect(r.body.code).toBe("NOT_IMPLEMENTED");
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.iceServers)).toBe(true);
   });
 });

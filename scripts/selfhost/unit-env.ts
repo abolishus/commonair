@@ -205,6 +205,17 @@ export const STATIC_UNITS: Record<string, StaticList> = {
       "TLS_MODE",
     ],
   },
+  coturn: {
+    why: "the variables infra/coturn/start.sh renders turnserver.conf from (TURN_PORT is fixed in the unit)",
+    keys: [
+      "P2P_TURN_URLS",
+      "PUBLIC_HOSTNAME",
+      "TURN_EXTERNAL_IP",
+      "TURN_RELAY_PORT_MAX",
+      "TURN_RELAY_PORT_MIN",
+      "TURN_SHARED_SECRET",
+    ],
+  },
   garage: {
     why: "Garage's own settings (garage.toml leaves its secrets to the environment)",
     keys: ["GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET"],

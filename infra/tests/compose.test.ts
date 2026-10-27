@@ -221,6 +221,7 @@ describe("compose.yaml: lifecycle", () => {
       "garage-init",
       "mailpit",
       "mediamtx",
+      "coturn",
       "mock-rtmp",
       "api",
       "chat",
@@ -429,8 +430,10 @@ describe("Quadlet mirror", () => {
     const [image] = keys(unit, "Image");
     const own = OWN_IMAGE.exec(s.image ?? "");
     expect(image).toBe(own ? `localhost/commonair/${own[1]}:latest` : s.image);
-    expect(keys(unit, "NetworkAlias")).toEqual([unitOf(name)]);
-    expect(keys(unit, "Network")).toEqual(["commonair.network"]);
+    // coturn runs on the host network, so STUN sees each client's own address (its unit says why).
+    const hostNetwork = name === "coturn";
+    expect(keys(unit, "NetworkAlias")).toEqual(hostNetwork ? [] : [unitOf(name)]);
+    expect(keys(unit, "Network")).toEqual([hostNetwork ? "host" : "commonair.network"]);
     expect(/^Type=oneshot$/m.test(unit)).toBe(ONE_SHOT.has(name));
     // The same check in the same form. Podman reads a plain HealthCmd string as CMD-SHELL, which
     // needs /bin/sh; Garage's image has none and Loki, Tempo and the collector only a static
@@ -557,6 +560,7 @@ describe("Quadlet mirror", () => {
     ["garage", true],
     ["grafana", false],
     ["mediamtx", false],
+    ["coturn", false],
     ["postgres", false],
   ] as const)(
     "%s: the compose environment is covered by the unit's key list or its own settings (exactly: %s)",
