@@ -63,6 +63,19 @@ const SELF_WRITABLE_USER_FIELDS = new Set(["name", "image", "updatedAt"]);
 const SIGN_UP_PATH = AUTH_ROUTES.signUp.slice(AUTH_BASE_PATH.length);
 const bad = (code: string, message: string) => new APIError("BAD_REQUEST", { code, message });
 
+/**
+ * Social sign-in only proves identity; nothing reads the provider's tokens afterwards, so they are
+ * never stored (the `accounts_discard_provider_tokens` trigger enforces the same in Postgres).
+ */
+export const PROVIDER_TOKEN_FIELDS = ["accessToken", "refreshToken", "idToken"] as const;
+export function withoutProviderTokens<T extends Record<string, unknown>>(account: T): T {
+  const out: Record<string, unknown> = { ...account };
+  for (const k of PROVIDER_TOKEN_FIELDS) if (k in out) out[k] = null;
+  return out as T;
+}
+/** better-auth endpoints that return or use stored provider tokens; with none stored, they are closed. */
+export const PROVIDER_TOKEN_PATHS = new Set(["/get-access-token", "/refresh-token", "/account-info"]);
+
 export function createAuth(deps: Deps) {
   const { env, db, site, mailer, logger } = deps;
   const minAge = env.AUTH_MIN_AGE;
@@ -128,6 +141,8 @@ export function createAuth(deps: Deps) {
       },
     },
     session: { expiresIn: 30 * 86_400, updateAge: 86_400 },
+    // Provider tokens are discarded (withoutProviderTokens), so there is nothing to refresh on sign-in.
+    account: { updateAccountOnSignIn: false },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -190,7 +205,8 @@ export function createAuth(deps: Deps) {
         // The admin plugin stays for its schema and banned-user sign-in checks, but its endpoints
         // (ban, set-role, impersonate, remove-user, …) skip our audit log and safeguards such as
         // "never remove the last administrator". Staff use the audited /api/admin procedures.
-        if (ctx.path.startsWith("/admin/")) throw new APIError("NOT_FOUND", { message: "Not found" });
+        if (ctx.path.startsWith("/admin/") || PROVIDER_TOKEN_PATHS.has(ctx.path))
+          throw new APIError("NOT_FOUND", { message: "Not found" });
         if (ctx.path !== SIGN_UP_PATH) return;
         const body = bodyOf(ctx);
         const altcha = await verifyAltcha(body[ALTCHA_FIELD], { hmacKey: env.ALTCHA_HMAC_KEY, valkey: deps.valkey });
@@ -280,7 +296,8 @@ export function createAuth(deps: Deps) {
               .select({ id: schema.users.id, username: schema.users.username, name: schema.users.name })
               .from(schema.users)
               .where(eq(schema.users.id, account.userId));
-            if (!user) return;
+            const data = withoutProviderTokens(account);
+            if (!user) return { data };
             await ensureChannel(tx, user);
             const ids = bodyOf(ctx).acceptedDocumentIds;
             if (Array.isArray(ids))
@@ -290,7 +307,11 @@ export function createAuth(deps: Deps) {
                 ids.filter((i): i is string => typeof i === "string"),
                 deps.now(),
               );
+            return { data };
           },
+        },
+        update: {
+          before: async (data) => ({ data: withoutProviderTokens(data) }),
         },
       },
     },
