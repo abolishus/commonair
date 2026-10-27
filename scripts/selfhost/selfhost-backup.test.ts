@@ -15,6 +15,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -66,6 +67,7 @@ const REAL_TOOLS = [
   "grep",
   "head",
   "id",
+  "ln",
   "mkdir",
   "mktemp",
   "mv",
@@ -105,6 +107,16 @@ esac
 exit 0
 `,
   rclone: String.raw`
+if [ "$1" = lsf ]; then
+  # Every place lists one object, except those named in STUB_EMPTY (nothing), STUB_LSF_MISSING
+  # (rclone's "directory not found", exit 3) and STUB_LSF_FAIL (an error).
+  case " \${STUB_LSF_FAIL:-} " in *" $4 "*) echo "ERROR : AccessDenied" >&2; exit 1 ;; esac
+  case " \${STUB_LSF_MISSING:-} " in *" $4 "*) echo "ERROR : directory not found" >&2; exit 3 ;; esac
+  case " \${STUB_EMPTY:-} " in *" $4 "*) exit 0 ;; esac
+  echo "avatars/"
+  exit 0
+fi
+[ -z "\${STUB_HOLD:-}" ] || : >"$STUB_STATE/lock-seen-$(readlink "$HOME/.local/state/commonair/object-backup.lock")"
 n=$(ls "$STUB_STATE" | grep -c '^rclone-env-' || true)
 env | grep '^RCLONE_' | sort > "$STUB_STATE/rclone-env-$((n + 1))"
 [ "$2" != "\${STUB_RCLONE_FAIL_ON:-none}" ] || { echo "ERROR : AccessDenied" >&2; exit 7; }
@@ -258,7 +270,11 @@ const EXTERNAL_ENV = {
 };
 
 const expectOk = (r: Run) => expect(r.code, `${r.out}\n${r.err}`).toBe(0);
-const rcloneCalls = (h: Host) => h.calls().filter((c) => c.startsWith("rclone "));
+/** The copies (sync, copy), not the listings that check for an empty bucket first. */
+const rcloneCalls = (h: Host) => h.calls().filter((c) => /^rclone (sync|copy) /.test(c));
+const lsfCalls = (h: Host) => h.calls().filter((c) => c.startsWith("rclone lsf "));
+const lockFile = (h: Host) => join(h.home, ".local/state/commonair/object-backup.lock");
+const restoreMark = (h: Host) => join(h.home, ".local/state/commonair/object-restore-incomplete");
 const stateFile = (h: Host) => join(h.home, ".local/state/commonair/object-backup");
 const noSecretIn = (text: string) => {
   for (const s of SECRETS) expect(text).not.toContain(s);
@@ -314,6 +330,11 @@ describe("flags", () => {
     [["--bwlimit"], "--bwlimit needs a value"],
     [["--bwlimit", "10M"], "--bwlimit applies to --objects and --restore-objects only"],
     [["--database", "--bwlimit", "10M"], "--bwlimit applies to --objects and --restore-objects only"],
+    [["--max-delete"], "--max-delete needs a value"],
+    [["--max-delete", "5"], "--max-delete applies to --objects only"],
+    [["--restore-objects", "--max-delete", "5"], "--max-delete applies to --objects only"],
+    [["--allow-empty-source"], "--allow-empty-source applies to --objects only"],
+    [["--restore-objects", "--allow-empty-source"], "--allow-empty-source applies to --objects only"],
   ])("%j is refused before anything runs", (args, message) => {
     const h = host({ ...GARAGE_ENV, ...REMOTE });
     const r = h.run(["backup", ...args]);
@@ -326,7 +347,15 @@ describe("flags", () => {
     const h = host(GARAGE_ENV);
     const r = h.run(["backup", "--help"]);
     expectOk(r);
-    for (const flag of ["--database", "--objects", "--restore-objects", "--bwlimit"]) expect(r.out).toContain(flag);
+    for (const flag of [
+      "--database",
+      "--objects",
+      "--restore-objects",
+      "--bwlimit",
+      "--max-delete",
+      "--allow-empty-source",
+    ])
+      expect(r.out).toContain(flag);
   });
 });
 
@@ -379,8 +408,8 @@ describe("--objects with Garage on this host", () => {
     const h = host({ ...GARAGE_ENV, ...REMOTE });
     expectOk(h.run(["backup", "--objects"]));
     expect(rcloneCalls(h)).toEqual([
-      "rclone sync cainstance:commonair-media caoffsite:ca-objects/prod/media --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE",
-      "rclone sync cainstance:commonair-evidence caoffsite:ca-objects/prod/evidence --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE",
+      "rclone sync cainstance:commonair-media caoffsite:ca-objects/prod/media --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE --max-delete=1000",
+      "rclone sync cainstance:commonair-evidence caoffsite:ca-objects/prod/evidence --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE --max-delete=1000",
     ]);
   });
 
@@ -526,6 +555,8 @@ describe("the offsite store's configuration", () => {
     [{ BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID: "k" }, "BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID is not an S3 key"],
     [{ BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY: "secret with spaces" }, "SECRET_ACCESS_KEY is not an S3 key"],
     [{ BACKUP_OBJECTS_BWLIMIT: "10M;rm" }, "not an rclone bandwidth limit"],
+    [{ BACKUP_OBJECTS_MAX_DELETE: "-1" }, "not a deletion limit: -1"],
+    [{ BACKUP_OBJECTS_MAX_DELETE: "10;rm" }, "not a deletion limit"],
   ])("%j is refused", (bad, message) => {
     const h = host({ ...GARAGE_ENV, ...REMOTE, ...bad });
     const r = h.run(["backup", "--objects"]);
@@ -648,6 +679,171 @@ describe("--restore-objects", () => {
     const r = h.run(["backup", "--restore-objects"]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("no offsite store for objects");
+  });
+});
+
+describe("an empty bucket and mass deletions", () => {
+  const MEDIA_SRC = "cainstance:commonair-media";
+  const MEDIA_DST = "caoffsite:ca-objects/prod/media";
+  const EVIDENCE_SRC = "cainstance:commonair-evidence";
+  const EVIDENCE_DST = "caoffsite:ca-objects/prod/evidence";
+
+  test("both buckets are listed, source and copy, before anything is copied", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    expectOk(h.run(["backup", "--objects"]));
+    const calls = h.calls().filter((c) => c.startsWith("rclone "));
+    expect(calls.slice(0, 2)).toEqual([
+      `rclone lsf --max-depth 1 ${MEDIA_SRC}`,
+      `rclone lsf --max-depth 1 ${EVIDENCE_SRC}`,
+    ]);
+    // A bucket that is not empty needs no look at its copy.
+    expect(lsfCalls(h).length).toBe(2);
+    expect(calls.slice(2).every((c) => c.startsWith("rclone sync "))).toBe(true);
+  });
+
+  test.each([
+    ["the media bucket", `${MEDIA_SRC}`, "commonair-media"],
+    ["the evidence bucket", `${EVIDENCE_SRC}`, "commonair-evidence"],
+  ])("%s empty, its copy not (a lost Garage volume): refused, nothing copied, no state, exit 1", (_, src, bucket) => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const r = h.run(["backup", "--objects"], { STUB_EMPTY: src });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`${bucket} is empty but its offsite copy is not: refusing to empty the copy`);
+    expect(r.err).toContain("selfhost.sh backup --restore-objects");
+    expect(r.err).toContain("--allow-empty-source");
+    expect(rcloneCalls(h)).toEqual([]);
+    expect(existsSync(stateFile(h))).toBe(false);
+    expect(h.calls().some((c) => c.includes("enable"))).toBe(false);
+    expect(existsSync(lockFile(h))).toBe(false);
+  });
+
+  test("the same with an external store (a bucket emptied by mistake)", () => {
+    const h = host({ ...EXTERNAL_ENV, ...REMOTE });
+    const r = h.run(["backup", "--objects"], { STUB_EMPTY: "cainstance:ca-evidence" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("ca-evidence is empty but its offsite copy is not");
+    expect(rcloneCalls(h)).toEqual([]);
+  });
+
+  test("an empty bucket with an empty or never-written copy (a new instance) is copied", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    expectOk(
+      h.run(["backup", "--objects"], {
+        STUB_EMPTY: `${MEDIA_SRC} ${MEDIA_DST} ${EVIDENCE_SRC}`,
+        STUB_LSF_MISSING: EVIDENCE_DST,
+      }),
+    );
+    expect(rcloneCalls(h).length).toBe(2);
+    expect(existsSync(stateFile(h))).toBe(true);
+  });
+
+  test("--allow-empty-source copies it anyway, with a warning", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const r = h.run(["backup", "--objects", "--allow-empty-source"], { STUB_EMPTY: MEDIA_SRC });
+    expectOk(r);
+    expect(r.err).toContain("commonair-media is empty: its offsite copy will be emptied too (--allow-empty-source)");
+    expect(rcloneCalls(h).length).toBe(2);
+  });
+
+  test("a listing that fails stops the run: never read as empty", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const r = h.run(["backup", "--objects"], { STUB_LSF_FAIL: MEDIA_SRC });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("could not list commonair-media: ERROR : AccessDenied");
+    expect(rcloneCalls(h)).toEqual([]);
+    const h2 = host({ ...GARAGE_ENV, ...REMOTE });
+    const r2 = h2.run(["backup", "--objects"], { STUB_EMPTY: MEDIA_SRC, STUB_LSF_FAIL: MEDIA_DST });
+    expect(r2.code).toBe(1);
+    expect(r2.err).toContain("could not list the offsite copy of commonair-media");
+    expect(rcloneCalls(h2)).toEqual([]);
+  });
+
+  test("--max-delete: 1000 by default, from the env file, a flag overrides it, off drops it", () => {
+    const limits = (h: Host) => rcloneCalls(h).map((c) => /--max-delete=(\d+)/.exec(c)?.[1] ?? "none");
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    expectOk(h.run(["backup", "--objects"]));
+    expect(limits(h)).toEqual(["1000", "1000"]);
+    const h2 = host({ ...GARAGE_ENV, ...REMOTE, BACKUP_OBJECTS_MAX_DELETE: "50" });
+    expectOk(h2.run(["backup", "--objects"]));
+    expect(limits(h2)).toEqual(["50", "50"]);
+    const h3 = host({ ...GARAGE_ENV, ...REMOTE, BACKUP_OBJECTS_MAX_DELETE: "50" });
+    expectOk(h3.run(["backup", "--objects", "--max-delete", "off"]));
+    expect(limits(h3)).toEqual(["none", "none"]);
+    // copy deletes nothing: a restore takes no limit.
+    const h4 = host({ ...GARAGE_ENV, ...REMOTE });
+    expectOk(h4.run(["backup", "--restore-objects"]));
+    expect(limits(h4)).toEqual(["none", "none"]);
+  });
+
+  test("a run rclone stops at the limit fails and says how to go on", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const r = h.run(["backup", "--objects"], { STUB_RCLONE_FAIL_ON: MEDIA_SRC });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("If rclone stopped at --max-delete (1000)");
+    expect(r.err).toContain("--max-delete off");
+  });
+});
+
+describe("one run at a time, and an unfinished restore", () => {
+  test("a lock held by a running process refuses --objects and --restore-objects", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    mkdirSync(join(h.home, ".local/state/commonair"), { recursive: true });
+    symlinkSync(String(process.pid), lockFile(h));
+    for (const args of [["--objects"], ["--restore-objects"]]) {
+      const r = h.run(["backup", ...args]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`another object backup or restore is running (pid ${process.pid})`);
+    }
+    expect(rcloneCalls(h)).toEqual([]);
+    expect(lsfCalls(h)).toEqual([]);
+    expect(existsSync(stateFile(h))).toBe(false);
+    expect(existsSync(restoreMark(h))).toBe(false);
+    // Not its lock: it stays.
+    expect(readlinkSync(lockFile(h))).toBe(String(process.pid));
+  });
+
+  test("the lock is held during the copy and released after success and after failure", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    expectOk(h.run(["backup", "--objects"], { STUB_HOLD: "1" }));
+    expect(readdirSync(h.state).filter((f) => f.startsWith("lock-seen-")).length).toBe(1);
+    expect(readdirSync(h.state).some((f) => f === "lock-seen-")).toBe(false);
+    expect(existsSync(lockFile(h))).toBe(false);
+    expect(h.run(["backup", "--objects"], { STUB_RCLONE_FAIL_ON: "cainstance:commonair-media" }).code).toBe(1);
+    expect(existsSync(lockFile(h))).toBe(false);
+    expectOk(h.run(["backup", "--restore-objects"], { STUB_HOLD: "1" }));
+    expect(existsSync(lockFile(h))).toBe(false);
+  });
+
+  test("a lock whose process is gone (killed, a reboot) is taken over", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    mkdirSync(join(h.home, ".local/state/commonair"), { recursive: true });
+    symlinkSync("999999", lockFile(h));
+    const r = h.run(["backup", "--objects"]);
+    expectOk(r);
+    expect(r.err).toContain("taking over the lock of an object backup that is no longer running (pid 999999)");
+    expect(existsSync(lockFile(h))).toBe(false);
+  });
+
+  test("a restore that failed blocks --objects (the timer too) until a restore succeeds", () => {
+    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const failed = h.run(["backup", "--restore-objects"], {
+      STUB_RCLONE_FAIL_ON: "caoffsite:ca-objects/prod/evidence",
+    });
+    expect(failed.code).toBe(1);
+    expect(failed.err).toContain("until it succeeds, backup --objects is refused");
+    expect(readFileSync(restoreMark(h), "utf8")).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n$/);
+
+    const blocked = h.run(["backup", "--objects"]);
+    expect(blocked.code).toBe(1);
+    expect(blocked.err).toContain("a backup --restore-objects started on");
+    expect(blocked.err).toContain("has not finished");
+    expect(rcloneCalls(h).filter((c) => c.startsWith("rclone sync"))).toEqual([]);
+    expect(existsSync(stateFile(h))).toBe(false);
+
+    expectOk(h.run(["backup", "--restore-objects"]));
+    expect(existsSync(restoreMark(h))).toBe(false);
+    expectOk(h.run(["backup", "--objects"]));
+    expect(rcloneCalls(h).filter((c) => c.startsWith("rclone sync")).length).toBe(2);
   });
 });
 

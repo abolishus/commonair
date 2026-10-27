@@ -78,6 +78,10 @@ sh ~/commonair/selfhost.sh backup --restore-objects  # the offsite copy back int
 - **`--bwlimit <rate>`** limits the bandwidth of `--objects` and `--restore-objects`, in rclone's
   syntax: `20M` (bytes per second), or a timetable such as `"08:00,4M 23:00,off"`. Without it,
   `BACKUP_OBJECTS_BWLIMIT` in the env file applies, if set.
+- **`--max-delete <n|off>`** (with `--objects`) overrides `BACKUP_OBJECTS_MAX_DELETE` for this
+  run ([Guards](#guards-against-emptying-the-copy)).
+- **`--allow-empty-source`** (with `--objects`) copies a bucket that is empty although its
+  offsite copy is not, which empties the copy. Without it, that run is refused.
 
 The exit status is 0 when everything asked for succeeded and 1 otherwise, with the reason on
 stderr. `selfhost.sh status` shows when the last base backup ran and whether it succeeded, and
@@ -122,15 +126,34 @@ the server by default, or an external store ([object-storage.md](object-storage.
 
 `rclone sync` makes the copy match the bucket, so an object deleted on the instance (a removed
 VOD, or the media of a deleted account) leaves the copy at the next run too. That is what
-account deletion promises; it also means the copy is not an archive of everything ever stored.
-If you want deleted objects kept for a while, turn on versioning with an expiry rule at the
-offsite store.
+account deletion promises; it also means the copy is not an archive of everything ever stored,
+and that objects deleted on the instance by mistake leave the copy at the next daily run unless
+a guard below stops it. **Turn on versioning, with an expiry rule, at the offsite store** (on
+Spaces, through its S3 API; most providers offer it): it is what keeps a deleted object
+recoverable for a while, whatever deleted it.
 
 **With an external store** (`S3_MODE=external`) the objects already live off the server, and
 the provider keeps them durable. `--objects` copies them bucket to bucket all the same, to a
-store in another region or at another provider, so that losing the account, the region or a
-bucket by mistake does not lose them. Versioning at the provider is the alternative, or an
-addition; which you rely on is your choice.
+store in another region or at another provider, so that losing the account or the region does
+not lose them. Against a bucket emptied or thinned out by mistake, rely on versioning at the
+provider (on the instance's store, the offsite one, or both): the guards below catch only a
+bucket emptied completely or a deletion larger than the limit.
+
+#### Guards against emptying the copy
+
+A lost Garage volume (the instance starts again with empty buckets), a bucket emptied by
+mistake, or `--objects` typed on a new server where `--restore-objects` was meant all look the
+same to `rclone sync`: an empty bucket, and a copy to make match it. So `--objects`:
+
+- **lists both buckets first** and refuses, before copying anything, when a bucket is empty but
+  its offsite copy is not. The error says to restore ([Restore objects](#restore-objects)). If
+  the bucket is empty on purpose, run `selfhost.sh backup --objects --allow-empty-source` once.
+- **stops at a deletion limit**: rclone's `--max-delete`, by default 1000 objects per bucket and
+  run (`BACKUP_OBJECTS_MAX_DELETE`). A run that reaches it fails, with what it deleted up to
+  then, and `status` keeps the previous success. If the deletions are expected (many accounts
+  or VODs removed at once), run `selfhost.sh backup --objects --max-delete off` once.
+- **refuses to run during a restore**, or after a `--restore-objects` that did not finish
+  ([Restore objects](#restore-objects)).
 
 ### What runs where
 
@@ -214,6 +237,7 @@ Every setting:
 | `BACKUP_OBJECTS_REMOTE_PATH_STYLE`        | `true` (default) or `false`: path-style or virtual-hosted URLs. Spaces accepts both     |
 | `BACKUP_OBJECTS_REMOTE_ALLOW_HTTP`        | `true` accepts an `http://` endpoint, for a store on a trusted network. Default refused |
 | `BACKUP_OBJECTS_BWLIMIT`                  | rclone's bandwidth limit for every run, as for `--bwlimit`. Default: none               |
+| `BACKUP_OBJECTS_MAX_DELETE`               | Most objects a run may delete from each bucket's copy, or `off`. Default: 1000          |
 | `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID`     | The key that reads the instance's buckets (Garage: created by the first run)            |
 | `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY` | Its secret                                                                              |
 | `BACKUP_OBJECTS_SOURCE_ENDPOINT`          | External store only: where the server reaches it, if not at `S3_ENDPOINT`               |
@@ -232,6 +256,16 @@ and evidence buckets, with the instance's own keys, which can write (the backup 
 main S3 key for media, the evidence key for evidence. It uses `rclone copy`, not `sync`, so it
 deletes nothing on the instance, and running it again copies only what is still missing or
 different.
+
+Only one `--objects` or `--restore-objects` runs at a time: each takes a lock
+(`~/.local/state/commonair/object-backup.lock`), and the other, the daily timer's run included,
+is refused while it is held. A lock left by a run that was killed is taken over. From the start
+of a restore until it succeeds, `--objects` is refused too
+(`~/.local/state/commonair/object-restore-incomplete`): the instance may still lack objects the
+copy has, and a sync would delete them from the copy. If a restore fails, run it again until it
+succeeds. You need not stop the timer for a restore, though on a server that lost objects you
+may want to anyway: `systemctl --user stop commonair-object-backup.timer`, and `start` it again
+afterwards.
 
 On a new server, run it after the [restore onto a new server](#onto-a-new-server), once the
 instance runs: its Garage then has both buckets and the keys from your env file, which also

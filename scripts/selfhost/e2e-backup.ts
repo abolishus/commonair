@@ -13,8 +13,10 @@
  *       bucket; `selfhost.sh backup --objects`; both are offsite, byte for byte; the state file,
  *       `status` and the enabled timer say so; the media object is deleted from the instance and
  *       `selfhost.sh backup --restore-objects` (the documented restore) brings it back, byte for
- *       byte; a deletion reaches the copy at the next backup (rclone sync). Returns the times.
- *   objectBackupTeardown(inHost)  disables the timer and removes the settings again.
+ *       byte; deletions in both buckets reach the copy at the next backup (rclone sync). Returns the
+ *       times.
+ *   objectBackupTeardown(inHost)  disables the timer, deletes the instance's backup key in Garage
+ *       and removes the settings again.
  *
  * Works on a Garage instance and on an external one (e2e-s3.ts): the e2e's helper scripts read
  * the instance's store and keys from its env file, as selfhost.sh does. The second store's S3 port
@@ -45,7 +47,8 @@ const offsiteEnv = (): Record<string, string> => ({
 });
 
 const ENV_FILE = "$HOME/.config/commonair/commonair.env";
-const STATE_FILE = "$HOME/.local/state/commonair/object-backup";
+const STATE_DIR = "$HOME/.local/state/commonair";
+const STATE_FILE = `${STATE_DIR}/object-backup`;
 
 /** As root on the e2e host: the offsite bucket and its key on the second Garage, and rclone. */
 export function offsiteSetupScript(): string {
@@ -166,6 +169,9 @@ export function deleteScript(role: "media" | "evidence", run: string): string {
   return [remotesPrelude(role), `rclone deletefile "inst:$bucket/${objectKey(run)}"`, 'rm -f "$conf"'].join("\n");
 }
 
+/** The run id of the object that keeps each bucket non-empty while the test object is deleted. */
+export const keepRun = (run: string) => `${run}-keep`;
+
 /** Bigger than one S3 part would be for a small client, smaller than rclone's multipart cutoff. */
 export const OBJECT_BYTES = 512 * 1024;
 
@@ -191,6 +197,10 @@ export function checkObjectBackup(inHost: InHost, expectThat: Expect): ObjectBac
   const media = inHost(putScript("media", run, OBJECT_BYTES), asUser).trim();
   const evidence = inHost(putScript("evidence", run, 4096), asUser).trim();
   expectThat(/^[0-9a-f]{64}$/.test(media) && /^[0-9a-f]{64}$/.test(evidence), "test objects are in media and evidence");
+  // A second object in each bucket, so that deleting the first below never empties a bucket (on a
+  // fresh instance it may be the only one): --objects refuses to copy an empty bucket over a copy
+  // that is not, and that guard is not what this check is about.
+  for (const role of ["media", "evidence"] as const) inHost(putScript(role, keepRun(run), 16), asUser);
 
   const backup = result(inHost(timed("backup --objects"), asUser));
   expectThat(backup.code === 0, `selfhost.sh backup --objects succeeds (exit ${backup.code})`);
@@ -239,15 +249,31 @@ export function checkObjectBackup(inHost: InHost, expectThat: Expect): ObjectBac
     inHost(shaScript("media", run), asUser).trim() === "missing missing",
     "a media object deleted on the instance leaves the copy at the next backup",
   );
+  expectThat(
+    inHost(shaScript("evidence", run), asUser).trim() === "missing missing",
+    "an evidence object deleted on the instance leaves the copy at the next backup",
+  );
+  for (const role of ["media", "evidence"] as const) inHost(deleteScript(role, keepRun(run)), asUser);
   return { backupSeconds: backup.seconds, restoreSeconds: restore.seconds };
 }
 
-/** Disables the timer and drops the settings (the store itself goes with externalStoreTeardown). */
+/**
+ * As the instance user: disables the timer, deletes the read-only key the first --objects run
+ * created in the instance's Garage (so runs do not pile up keys of the same name), drops the
+ * settings and the state. The second store goes with externalStoreTeardown.
+ */
+export function teardownScript(envFile = ENV_FILE): string {
+  return [
+    "systemctl --user disable --now commonair-object-backup.timer >/dev/null 2>&1 || true",
+    `f="${envFile}"`,
+    `id=$(sed -n 's/^BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID=//p' "$f" | head -n 1)`,
+    `if [ -n "$id" ] && ! grep -q '^S3_MODE=external$' "$f"; then podman exec commonair-garage /garage key delete --yes "$id" >/dev/null 2>&1 || true; fi`,
+    `grep -v '^BACKUP_OBJECTS_' "$f" > "$f.tmp" || true`,
+    `chmod 600 "$f.tmp"; mv "$f.tmp" "$f"`,
+    `rm -f ${STATE_FILE} ${STATE_DIR}/object-backup.lock ${STATE_DIR}/object-restore-incomplete`,
+  ].join("\n");
+}
+
 export function objectBackupTeardown(inHost: InHost): void {
-  inHost(
-    "systemctl --user disable --now commonair-object-backup.timer >/dev/null 2>&1; " +
-      `f="${ENV_FILE}"; grep -v '^BACKUP_OBJECTS_' "$f" > "$f.tmp"; chmod 600 "$f.tmp"; mv "$f.tmp" "$f"; ` +
-      `rm -f ${STATE_FILE}`,
-    { user: true, allowFail: true },
-  );
+  inHost(teardownScript(), { user: true, allowFail: true });
 }

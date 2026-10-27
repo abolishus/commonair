@@ -133,6 +133,12 @@ backup options (no option: --database):
                         nothing on the instance is deleted). On its own only.
   --bwlimit <rate>      rclone's bandwidth limit for --objects and --restore-objects, e.g. 20M
                         (bytes/s) or "08:00,4M 23:00,off". Default: BACKUP_OBJECTS_BWLIMIT.
+  --max-delete <n|off>  With --objects: stop and fail once a bucket's copy would lose more than
+                        n objects in one run. Default: BACKUP_OBJECTS_MAX_DELETE, else 1000.
+  --allow-empty-source  With --objects: copy a bucket that is empty although its offsite copy
+                        is not, which empties the copy. Refused without it.
+  --objects is refused while another --objects or --restore-objects runs, and after a
+  --restore-objects that did not finish, until a re-run of it succeeds.
   Exit status 0 on success, 1 on any failure. A successful --objects run records its time in
   ~/.local/state/commonair/object-backup, which status shows.
 
@@ -1606,12 +1612,20 @@ OBJECT_TIMER="commonair-object-backup.timer"
 # Garage's S3 port, published on the loopback only (commonair-garage.container).
 GARAGE_HOST_ENDPOINT="http://127.0.0.1:3900"
 OBJECT_BACKUP_KEY_NAME="commonair-object-backup"
+# A symlink whose target is the holder's pid: ln -s creates it atomically, pid and all.
+OBJECT_LOCK="$OBJECT_STATE_DIR/object-backup.lock"
+# Present from the start of a --restore-objects until it succeeds: the instance may lack objects
+# the copy still has, and a sync then would delete them from the copy.
+OBJECT_RESTORE_MARK="$OBJECT_STATE_DIR/object-restore-incomplete"
+OBJECT_MAX_DELETE_DEFAULT=1000
 
 parse_backup_flags() {
   BACKUP_DATABASE=no
   BACKUP_OBJECTS=no
   RESTORE_OBJECTS=no
   OBJ_BWLIMIT=""
+  OBJ_MAX_DELETE=""
+  ALLOW_EMPTY_SOURCE=no
   while [ $# -gt 0 ]; do
     case "$1" in
       --database) BACKUP_DATABASE=yes && shift ;;
@@ -1623,12 +1637,23 @@ parse_backup_flags() {
         [ -n "$OBJ_BWLIMIT" ] || die "--bwlimit needs a value"
         shift 2
         ;;
+      --max-delete)
+        [ $# -ge 2 ] || die "--max-delete needs a value"
+        OBJ_MAX_DELETE=$2
+        [ -n "$OBJ_MAX_DELETE" ] || die "--max-delete needs a value"
+        shift 2
+        ;;
+      --allow-empty-source) ALLOW_EMPTY_SOURCE=yes && shift ;;
       -h | --help) usage && exit 0 ;;
       *) die "unknown backup option: $1" "see: selfhost.sh --help" ;;
     esac
   done
   if [ "$RESTORE_OBJECTS" = yes ] && { [ "$BACKUP_DATABASE" = yes ] || [ "$BACKUP_OBJECTS" = yes ]; }; then
     die "--restore-objects runs on its own, not with --database or --objects"
+  fi
+  if [ "$BACKUP_OBJECTS" = no ]; then
+    [ -z "$OBJ_MAX_DELETE" ] || die "--max-delete applies to --objects only"
+    [ "$ALLOW_EMPTY_SOURCE" = no ] || die "--allow-empty-source applies to --objects only"
   fi
   if [ "$BACKUP_OBJECTS" = no ] && [ "$RESTORE_OBJECTS" = no ]; then
     [ -z "$OBJ_BWLIMIT" ] || die "--bwlimit applies to --objects and --restore-objects only"
@@ -1686,6 +1711,10 @@ object_remote() {
   if [ -n "$OBJ_BWLIMIT" ] && ! is_bwlimit "$OBJ_BWLIMIT"; then
     die "not an rclone bandwidth limit: $OBJ_BWLIMIT (e.g. 20M, or \"08:00,4M 23:00,off\")"
   fi
+  if [ -z "$OBJ_MAX_DELETE" ]; then OBJ_MAX_DELETE=$(env_get BACKUP_OBJECTS_MAX_DELETE "$ENV_FILE"); fi
+  OBJ_MAX_DELETE=${OBJ_MAX_DELETE:-$OBJECT_MAX_DELETE_DEFAULT}
+  printf '%s' "$OBJ_MAX_DELETE" | grep -Eq '^([0-9]{1,9}|off)$' ||
+    die "not a deletion limit: $OBJ_MAX_DELETE (a number of objects, or off)"
   return 0
 }
 
@@ -1765,7 +1794,7 @@ garage_backup_key() {
 # inherits the keys. The empty config file keeps an operator's own rclone.conf (a manual setup
 # from before the script) out of it. no_check_bucket on both: a key limited to one bucket cannot
 # create buckets, and rclone would otherwise try.
-rclone_run() {
+rclone_with_remotes() {
   make_tmp
   : >"$TMP_ROOT/rclone.conf"
   (
@@ -1782,11 +1811,56 @@ rclone_run() {
     export RCLONE_CONFIG_CAOFFSITE_FORCE_PATH_STYLE="$OBJ_DST_PATH_STYLE"
     export RCLONE_CONFIG_CAOFFSITE_ACCESS_KEY_ID="$OBJ_DST_KEY"
     export RCLONE_CONFIG_CAOFFSITE_SECRET_ACCESS_KEY="$OBJ_DST_SECRET"
-    # --checksum compares hash and size, which S3 listings carry, instead of a HEAD per object for
-    # its modification time; an object without a hash both sides share is compared by size.
-    exec rclone "$1" "$2" "$3" --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE \
-      ${OBJ_BWLIMIT:+"--bwlimit=$OBJ_BWLIMIT"}
+    exec rclone "$@"
   )
+}
+
+# sync or copy, $2 to $3. --max-delete only for sync (copy deletes nothing); rclone's own limit
+# fails the run once reached, so a mass deletion on the instance never empties the copy silently.
+rclone_run() {
+  _maxdel=""
+  if [ "$1" = sync ] && [ "$OBJ_MAX_DELETE" != off ]; then _maxdel="--max-delete=$OBJ_MAX_DELETE"; fi
+  # --checksum compares hash and size, which S3 listings carry, instead of a HEAD per object for
+  # its modification time; an object without a hash both sides share is compared by size.
+  rclone_with_remotes "$1" "$2" "$3" --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE \
+    ${_maxdel:+"$_maxdel"} ${OBJ_BWLIMIT:+"--bwlimit=$OBJ_BWLIMIT"}
+}
+
+# True when the remote path $1 holds nothing. Exit 3 is rclone's "directory not found": a prefix
+# no object was ever written under. Any other failure stops the run ($2 names the place).
+remote_is_empty() {
+  make_tmp
+  if _ls=$(rclone_with_remotes lsf --max-depth 1 "$1" 2>"$TMP_ROOT/rclone-lsf.err"); then
+    :
+  else
+    _rc=$?
+    [ "$_rc" -eq 3 ] || die "could not list $2: $(tail -n 1 "$TMP_ROOT/rclone-lsf.err")" \
+      "fix: check the store's endpoint and keys in $ENV_FILE, then re-run"
+    _ls=""
+  fi
+  [ -z "$_ls" ]
+}
+
+# One --objects or --restore-objects at a time (the daily timer and a run by hand). A lock whose
+# holder is gone (killed, the server rebooted) is taken over.
+object_lock() {
+  mkdir -p "$OBJECT_STATE_DIR"
+  if ! ln -s "$$" "$OBJECT_LOCK" 2>/dev/null; then
+    _holder=$(readlink "$OBJECT_LOCK" 2>/dev/null || true)
+    if [ -n "$_holder" ] && kill -0 "$_holder" 2>/dev/null; then
+      die "another object backup or restore is running (pid $_holder)" \
+        "wait for it to finish (systemctl --user status commonair-object-backup.service), then re-run"
+    fi
+    info "taking over the lock of an object backup that is no longer running (pid ${_holder:-unknown})"
+    rm -f "$OBJECT_LOCK"
+    ln -s "$$" "$OBJECT_LOCK" 2>/dev/null || die "another object backup or restore just started" "re-run once it is done"
+  fi
+  trap 'object_unlock; cleanup' EXIT
+  trap 'exit 1' INT TERM
+}
+
+object_unlock() {
+  if [ "$(readlink "$OBJECT_LOCK" 2>/dev/null || true)" = "$$" ]; then rm -f "$OBJECT_LOCK"; fi
 }
 
 require_rclone() {
@@ -1801,30 +1875,63 @@ backup_database() {
     sh -c '. /usr/local/lib/commonair/walg-env.sh && wal-g backup-list'
 }
 
+# The source keys for bucket role $1. Garage: the read-only key (garage_backup_key). External: a
+# read-only key if the operator made one (BACKUP_OBJECTS_SOURCE_*), else each bucket's own instance
+# key (sync never writes to its source).
+backup_source_keys() {
+  [ "$STORAGE_MODE" = external ] || return 0
+  if [ -n "$(env_get BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID "$ENV_FILE")" ]; then
+    use_source_keys BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY
+  elif [ "$1" = media ]; then
+    use_source_keys S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
+  else
+    use_source_keys S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY
+  fi
+}
+
+role_bucket() { if [ "$1" = media ]; then printf '%s' "$OBJ_MEDIA"; else printf '%s' "$OBJ_EVIDENCE"; fi; }
+
 backup_objects() {
   require_rclone
   object_remote
   object_source
+  object_lock
+  if [ -e "$OBJECT_RESTORE_MARK" ]; then
+    die "a backup --restore-objects started on $(cat "$OBJECT_RESTORE_MARK" 2>/dev/null || true) has not finished:" \
+      "the instance may lack objects its offsite copy still has, and copying now would delete them there" \
+      "fix: run selfhost.sh backup --restore-objects until it succeeds; or, if the instance has" \
+      "everything it should, rm $OBJECT_RESTORE_MARK"
+  fi
   _first=yes
   [ ! -f "$OBJECT_STATE" ] || _first=no
-  # Garage: one read-only key for both buckets. External: a read-only key if the operator made
-  # one (BACKUP_OBJECTS_SOURCE_*), else each bucket's own instance key (sync never writes there).
   if [ "$STORAGE_MODE" != external ]; then garage_backup_key; fi
+  # An empty bucket whose copy is not is what a lost Garage volume, a bucket emptied by mistake or
+  # --objects typed for --restore-objects looks like: sync would empty the copy. Checked for both
+  # buckets before either is copied, so a refusal changes nothing.
   for _role in media evidence; do
-    if [ "$_role" = media ]; then _bucket=$OBJ_MEDIA; else _bucket=$OBJ_EVIDENCE; fi
-    if [ "$STORAGE_MODE" = external ]; then
-      if [ -n "$(env_get BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID "$ENV_FILE")" ]; then
-        use_source_keys BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY
-      elif [ "$_role" = media ]; then
-        use_source_keys S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
+    _bucket=$(role_bucket "$_role")
+    backup_source_keys "$_role"
+    if remote_is_empty "cainstance:$_bucket" "$_bucket" &&
+      ! remote_is_empty "$(offsite_path "$_role")" "the offsite copy of $_bucket"; then
+      if [ "$ALLOW_EMPTY_SOURCE" = yes ]; then
+        warn "$_bucket is empty: its offsite copy will be emptied too (--allow-empty-source)"
       else
-        use_source_keys S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY
+        die "$_bucket is empty but its offsite copy is not: refusing to empty the copy" \
+          "fix: if the instance lost its objects, restore them: selfhost.sh backup --restore-objects" \
+          "(docs/self-hosting/backups.md, 'Restore objects'). If the bucket is empty on purpose:" \
+          "selfhost.sh backup --objects --allow-empty-source"
       fi
     fi
+  done
+  for _role in media evidence; do
+    _bucket=$(role_bucket "$_role")
+    backup_source_keys "$_role"
     info "copying $_bucket to $OBJ_DST_ENDPOINT, $(offsite_path "$_role" | sed 's/^caoffsite://')"
     rclone_run sync "cainstance:$_bucket" "$(offsite_path "$_role")" ||
       die "copying $_bucket offsite failed" \
-        "see the rclone lines above; selfhost.sh status still shows the last successful run"
+        "see the rclone lines above; selfhost.sh status still shows the last successful run." \
+        "If rclone stopped at --max-delete ($OBJ_MAX_DELETE): more objects left the instance than the limit." \
+        "If that is right, re-run with --max-delete off or a higher number; if not, restore them first."
   done
   record_object_backup
   say "object backup done: $OBJ_MEDIA and $OBJ_EVIDENCE copied to $(object_remote_name)"
@@ -1866,6 +1973,9 @@ restore_objects() {
   require_rclone
   object_remote
   object_source
+  object_lock
+  # Until every bucket is back, --objects (the daily timer included) is refused.
+  if [ ! -e "$OBJECT_RESTORE_MARK" ]; then date -u +%Y-%m-%dT%H:%M:%SZ >"$OBJECT_RESTORE_MARK"; fi
   for _role in media evidence; do
     if [ "$_role" = media ]; then
       _bucket=$OBJ_MEDIA
@@ -1876,8 +1986,10 @@ restore_objects() {
     fi
     info "restoring $_bucket from $OBJ_DST_ENDPOINT, $(offsite_path "$_role" | sed 's/^caoffsite://')"
     rclone_run copy "$(offsite_path "$_role")" "cainstance:$_bucket" ||
-      die "restoring $_bucket failed" "see the rclone lines above; re-running it is safe (it copies only what is missing or different)"
+      die "restoring $_bucket failed" "see the rclone lines above; re-running it is safe (it copies only what is missing or different)" \
+        "until it succeeds, backup --objects is refused so that it cannot delete what is not restored yet"
   done
+  rm -f "$OBJECT_RESTORE_MARK"
   say "objects restored into $OBJ_MEDIA and $OBJ_EVIDENCE from $(object_remote_name)"
   say "sealed evidence opens only with the EVIDENCE_PRIVATE_KEY it was sealed with (this env file's, if restored from your copy)"
 }
