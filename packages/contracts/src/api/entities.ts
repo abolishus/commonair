@@ -838,6 +838,75 @@ export const Appeal = z.object({
   createdAt: Timestamp,
   resolvedAt: Timestamp.nullable(),
 });
+
+/**
+ * Art. 17(3)(b) facts of a statement of reasons (ADR 0019 decision 4). Ids, enums and times only:
+ * never an exact score (`threshold` is the governance threshold in force), never free text, never
+ * the NCII requester's identity, never a hash, match distance or provider identifier.
+ */
+export const EnforcementFacts = z.discriminatedUnion("code", [
+  z.object({
+    code: z.literal("classifier"),
+    category: z.enum(E.MODERATION_CATEGORIES),
+    tier: z.enum(["t1", "t2"]),
+    threshold: z.number().min(0).max(1),
+    capturedAt: Timestamp,
+  }),
+  z.object({
+    code: z.literal("moderator_review"),
+    caseId: Id,
+    caseOrigin: z.enum(["classifier", "human"]),
+    decision: z.enum(E.MODERATION_REVIEW_DECISIONS),
+  }),
+  z.object({ code: z.literal("ncii_notice"), requestId: Id, receivedAt: Timestamp, deadlineAt: Timestamp }),
+  /** T0 NCII-list matches only: a CSAM-list match never produces a statement. */
+  z.object({ code: z.literal("hash_match"), listCategory: z.literal("ncii"), capturedAt: Timestamp }),
+]);
+export type EnforcementFacts = z.infer<typeof EnforcementFacts>;
+
+/**
+ * A statement of reasons (ADR 0019 decision 4, DSA Art. 17(3)), as stored: append-only, built by
+ * the worker from the `audit_log` row that applied the action. Wording comes from the pinned
+ * `enforcement_notice` document; the clause catalog lives in `@commonair/moderation`.
+ */
+export const EnforcementStatement = z.object({
+  id: Id,
+  /** The `audit_log` row that applied the action. */
+  sourceAuditId: Id,
+  /** Its action, one of `ENFORCEMENT_SOURCE_ACTIONS` (for filtering and the UI's test ids). */
+  sourceAction: z.enum(E.ENFORCEMENT_SOURCE_ACTIONS),
+  /** The account notified: the case's user, or the channel owner. */
+  recipientUserId: Id,
+  channelId: Id.nullable(),
+  content: z.object({ type: z.enum(E.ENFORCEMENT_CONTENT_TYPES), id: Id }),
+  /** 17(3)(a). `endsAt` null: indefinite, or not applicable. No geo-scoped actions exist. */
+  restriction: z.object({
+    kind: z.enum(E.ENFORCEMENT_RESTRICTION_KINDS),
+    detail: z.enum(E.ENFORCEMENT_RESTRICTION_DETAILS),
+    endsAt: Timestamp.nullable(),
+    territorialScope: z.literal("all"),
+  }),
+  facts: EnforcementFacts,
+  source: z.enum(E.ENFORCEMENT_SOURCES),
+  /** 17(3)(c). */
+  automatedDetection: z.boolean(),
+  automatedDecision: z.enum(E.ENFORCEMENT_AUTOMATED_DECISIONS),
+  /** 17(3)(d)/(e). `legalBasis`: a catalog code, illegal grounds only. */
+  ground: z.object({
+    kind: z.enum(E.ENFORCEMENT_GROUNDS),
+    clauseId: z.string().min(1).max(100),
+    clauseVersion: z.number().int().min(1),
+    legalBasis: z.string().min(1).max(100).nullable(),
+  }),
+  /** The `legal_documents` rows the statement was rendered against. */
+  documents: z.object({ guidelinesId: Id, noticeId: Id }),
+  /** 17(3)(f): what to pass to `appeals.create`; null when no internal appeal applies (T0 NCII list). */
+  appeal: z.object({ kind: z.literal("moderation"), subjectType: z.enum(E.APPEAL_SUBJECTS), subjectId: Id }).nullable(),
+  /** The audit row's time: when the restriction applied. */
+  createdAt: Timestamp,
+});
+export type EnforcementStatement = z.infer<typeof EnforcementStatement>;
+
 export const Report = z.object({
   id: Id,
   subjectType: z.enum(E.REPORT_SUBJECTS),

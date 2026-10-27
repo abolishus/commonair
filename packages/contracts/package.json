@@ -11,6 +11,7 @@
     "./events": "./src/events.ts",
     "./chat": "./src/chat.ts",
     "./tokens": "./src/tokens.ts",
+    "./storage": "./src/storage.ts",
     "./scopes": "./src/scopes.ts",
     "./api": "./src/api/router.ts",
     "./dto": "./src/api/entities.ts",

@@ -154,6 +154,8 @@ const APPEAL_SUBJECT_KEYS: Record<Of<typeof APPEAL_SUBJECTS>, MessageKey> = {
   account_action: "appeals.account.subject.account_action",
   content_label: "safety.appeals.labelSubject",
   moderation_case: "safety.appeals.otherSubject",
+  // W0-sor may give NCII removals their own label with the statements list.
+  ncii_request_item: "safety.appeals.otherSubject",
 };
 /** What an appeal is about; `subjectType` is a plain string on the wire. */
 export function appealSubjectLabel(subjectType: string): string {

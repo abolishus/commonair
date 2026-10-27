@@ -16,6 +16,13 @@ export type LegalDocumentKind = (typeof LEGAL_DOCUMENT_KINDS)[number];
 /** The draft set shipped with the software, pending lawyer review. */
 export const LEGAL_SEED_VERSION = "2026-10-18-draft";
 /**
+ * `enforcement_notice` has its own seed version (ADR 0019): a published version is immutable and
+ * the seed never rewrites a row, so the skeleton seeded before W0-sor's text must not share a
+ * version with that text. Bump this (not `LEGAL_SEED_VERSION`, which would make everyone re-accept
+ * the terms) when the shipped notice changes and an older one may have reached a database.
+ */
+export const ENFORCEMENT_NOTICE_SEED_VERSION = "2026-10-27-skeleton";
+/**
  * Fixed rather than the seed's clock: the migrate job and the API run on different hosts,
  * and a database clock ahead of the API's would hide fresh rows (`publishedAt <= now`).
  */
@@ -52,12 +59,23 @@ export interface LegalSeedDocument {
   publishedAt: Date;
 }
 
-const SEED_META: readonly Omit<LegalSeedDocument, "body" | "version" | "isDraft" | "publishedAt">[] = [
+type SeedMeta = Omit<LegalSeedDocument, "body" | "version" | "isDraft" | "publishedAt"> & {
+  /** Defaults to `LEGAL_SEED_VERSION`. */
+  version?: string;
+};
+
+const SEED_META: readonly SeedMeta[] = [
   { kind: "terms", title: "Terms of service", requiresAcceptance: true },
   { kind: "privacy", title: "Privacy policy", requiresAcceptance: true },
   { kind: "guidelines", title: "Community guidelines", requiresAcceptance: true },
   { kind: "cookies", title: "Cookie and storage policy", requiresAcceptance: false },
   { kind: "dmca_policy", title: "Copyright (DMCA) policy", requiresAcceptance: false },
+  {
+    kind: "enforcement_notice",
+    title: "Statements of reasons",
+    requiresAcceptance: false,
+    version: ENFORCEMENT_NOTICE_SEED_VERSION,
+  },
 ];
 
 /** Drop the leading SPDX comment: licensing metadata, not document text. */
@@ -74,7 +92,7 @@ function readBody(kind: LegalDocumentKind): string {
 export function legalSeedDocuments(): LegalSeedDocument[] {
   return SEED_META.map((m) => ({
     ...m,
-    version: LEGAL_SEED_VERSION,
+    version: m.version ?? LEGAL_SEED_VERSION,
     isDraft: true,
     publishedAt: LEGAL_SEED_PUBLISHED_AT,
     body: readBody(m.kind),

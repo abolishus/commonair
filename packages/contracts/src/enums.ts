@@ -114,6 +114,11 @@ export const APPEAL_SUBJECTS = [
   "content_label",
   /** A T1 moderation case decided by a moderator. */
   "moderation_case",
+  /**
+   * An NCII request item (`ncii_request_items`) covering content the appellant owns, appealing its
+   * removal or auto-hide (ADR 0019 answer 4). The requester is never told who appealed.
+   */
+  "ncii_request_item",
 ] as const;
 export const APPEAL_STATUSES = ["open", "upheld", "overturned"] as const;
 export const ACTOR_TYPES = ["user", "moderator", "admin", "system", "bot", "app"] as const;
@@ -182,7 +187,18 @@ export const DMCA_ITEM_SUBJECTS = ["vod", "clip", "broadcast"] as const;
  */
 export const DMCA_RULES = { restoreWeekdays: 12, repeatInfringerStrikes: 3, strikeWindowDays: 365 } as const;
 
-export const LEGAL_DOCUMENT_KINDS = ["terms", "privacy", "guidelines", "cookies", "dmca_policy"] as const;
+/**
+ * `enforcement_notice` (ADR 0019 decision 2): the operator-editable wording of statements of
+ * reasons, one section per clause; never needs acceptance. A published version is immutable.
+ */
+export const LEGAL_DOCUMENT_KINDS = [
+  "terms",
+  "privacy",
+  "guidelines",
+  "cookies",
+  "dmca_policy",
+  "enforcement_notice",
+] as const;
 export const EXPORT_KINDS = ["account", "channel"] as const;
 export const JOB_STATUSES = ["queued", "running", "ready", "failed", "expired"] as const;
 export const DELETION_STATUSES = ["scheduled", "canceled", "completed"] as const;
@@ -251,3 +267,46 @@ export const NCMEC_REPORT_STATUSES = ["draft", "filed", "withdrawn"] as const;
 export const NCII_RELATIONSHIPS = ["self", "representative"] as const;
 export const NCII_STATUSES = ["received", "removed", "rejected", "auto_hidden"] as const;
 export const NCII_DECISIONS = ["removed", "rejected"] as const;
+
+// Statements of reasons (ADR 0019, DSA Art. 17; docs/testing/w0-selectors.md) ----------------
+
+/** What a statement is about. */
+export const ENFORCEMENT_CONTENT_TYPES = ["broadcast", "vod", "clip", "upload", "channel", "account"] as const;
+/** Art. 17(3)(a): the kind of restriction. `warning` restricts nothing (kept for a complete record). */
+export const ENFORCEMENT_RESTRICTION_KINDS = ["visibility", "service", "account", "warning"] as const;
+export const ENFORCEMENT_RESTRICTION_DETAILS = [
+  "removed",
+  "disabled",
+  "restricted",
+  "age_gated",
+  "suspended",
+  "none",
+] as const;
+/** Art. 17(3)(b): the provider's own initiative, or an Art. 16 notice (NCII requests). */
+export const ENFORCEMENT_SOURCES = ["own_initiative", "notice_art16"] as const;
+/** Art. 17(3)(c): how far automated means took the decision. */
+export const ENFORCEMENT_AUTOMATED_DECISIONS = ["fully", "partially", "not"] as const;
+/** Art. 17(3)(d)/(e): a terms (contractual) or an illegal-content ground. */
+export const ENFORCEMENT_GROUNDS = ["terms", "illegal"] as const;
+/** The `facts.code` discriminator of `EnforcementFacts`. */
+export const ENFORCEMENT_FACT_CODES = ["classifier", "moderator_review", "ncii_notice", "hash_match"] as const;
+export const ENFORCEMENT_DELIVERY_CHANNELS = ["email", "in_app"] as const;
+/**
+ * The audit actions that may produce a statement (ADR 0019 decision 3); the builder selects
+ * `audit_log` rows by exactly these names. Channel-moderator actions never write any of them.
+ * `moderation.case.suspend` yields one statement per target; `ncii.decide` yields statements
+ * only when the decision is `removed`, one per affected owner. The builder and the coverage sweep keep
+ * only NCII-list `moderation.t0.match` rows (`details.listCategory = 'ncii'`): a CSAM-list match
+ * never produces a statement (accepted answer 1, counsel to confirm).
+ */
+export const ENFORCEMENT_SOURCE_ACTIONS = [
+  "moderation.t1.restrict",
+  "moderation.t2.label",
+  "moderation.t1.upload_reject",
+  "moderation.case.warn",
+  "moderation.case.end_stream",
+  "moderation.case.suspend",
+  "ncii.decide",
+  "ncii.auto_hide",
+  "moderation.t0.match",
+] as const;

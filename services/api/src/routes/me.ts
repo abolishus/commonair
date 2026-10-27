@@ -31,6 +31,7 @@ import {
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { appUrl, sendNotice } from "../mail.ts";
 import { createExport, listExports } from "../privacy/exports.ts";
+import { meEnforcement } from "./me-enforcement.ts";
 
 const { users, channels, follows, memberships, notifications, oauthTokens } = schema;
 
@@ -258,6 +259,7 @@ export const me = {
       removedAt: isoOrNull(l.removedAt),
     }));
   }),
+  enforcement: meEnforcement,
   exports: {
     create: os.me.exports.create.handler(async ({ context, input }) => {
       const caller = requireCaller(context);

@@ -61,10 +61,10 @@ describe("step selection", () => {
   });
 
   test("all is every step that is not pending; pending steps are still selectable", () => {
-    expect(SAFETY_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(SAFETY_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(ALL_SAFETY_STEPS).toEqual(SAFETY_STEP_NUMBERS.filter((n) => !PENDING_SAFETY_STEPS.includes(n)));
-    // E7 landed steps 8 (DMCA) and 9 (appeals), so `all` runs every step.
-    expect(PENDING_SAFETY_STEPS).toEqual([]);
+    // W0's steps 10 (VOD exposure) and 11 (statements of reasons) are stubs until their units merge.
+    expect(PENDING_SAFETY_STEPS).toEqual([10, 11]);
     expect(ALL_SAFETY_STEPS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     for (const n of PENDING_SAFETY_STEPS) {
       expect(parseSteps("all")).not.toContain(n);
@@ -77,12 +77,15 @@ describe("step selection", () => {
     expect(parseSteps("6-7,1")).toEqual([1, 6, 7]);
     expect(parseSteps("4-4")).toEqual([4]);
     expect(parseSteps("8-9")).toEqual([8, 9]);
+    expect(parseSteps("9-11")).toEqual([9, 10, 11]);
   });
 
   test("anything else is refused rather than running fewer checks", () => {
-    for (const bad of ["0", "10", "1,x", "3-1", "1-10", "-1", "1.5", ",", "two"])
+    for (const bad of ["0", "12", "1,x", "3-1", "1-12", "-1", "1.5", ",", "two"])
       expect(() => parseSteps(bad)).toThrow(/steps/);
-    expect(() => parseSteps("10")).toThrow(/\(1-9\)/);
+    expect(() => parseSteps("12")).toThrow(/\(1-11\)/);
+    expect(() => parseSteps("x")).toThrow(/\(1-11\)/);
+    expect(() => parseSteps("1-12")).toThrow(/\(1-11\)/);
   });
 
   test("step 2 pulls in step 1", () => {
@@ -94,6 +97,12 @@ describe("step selection", () => {
   test("the E7 steps 8 and 9 run on their own", () => {
     expect(withPrerequisites([8])).toEqual({ steps: [8], added: [] });
     expect(withPrerequisites([9])).toEqual({ steps: [9], added: [] });
+  });
+
+  test("W0: step 10 runs on its own; step 11 pulls in the steps whose actions it checks", () => {
+    expect(withPrerequisites([10])).toEqual({ steps: [10], added: [] });
+    expect(withPrerequisites([11])).toEqual({ steps: [4, 5, 6, 7, 11], added: [4, 5, 6, 7] });
+    expect(withPrerequisites([5, 11])).toEqual({ steps: [4, 5, 6, 7, 11], added: [4, 6, 7] });
   });
 });
 

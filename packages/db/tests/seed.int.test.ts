@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test"
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { PROTECTED_LITERALS } from "@commonair/config/site";
 import {
+  ENFORCEMENT_NOTICE_SEED_VERSION,
   LEGAL_PLACEHOLDERS,
   LEGAL_SEED_VERSION,
   PLACEHOLDER_PATTERN,
@@ -24,26 +25,43 @@ vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 describe("legal seed documents", () => {
   const docs = legalSeedDocuments();
 
-  test("one draft per kind, at the seed version", () => {
+  test("one draft per kind, at the seed version (the enforcement notice at its own)", () => {
     expect(docs.map((d) => d.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
     for (const d of docs) {
-      expect(d.version).toBe(LEGAL_SEED_VERSION);
+      expect(d.version, d.kind).toBe(
+        d.kind === "enforcement_notice" ? ENFORCEMENT_NOTICE_SEED_VERSION : LEGAL_SEED_VERSION,
+      );
       expect(d.isDraft).toBe(true);
     }
+    expect(ENFORCEMENT_NOTICE_SEED_VERSION).not.toBe(LEGAL_SEED_VERSION);
   });
 
-  test("terms, privacy and guidelines require acceptance; cookies and DMCA do not", () => {
+  test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {
     const required = Object.fromEntries(docs.map((d) => [d.kind, d.requiresAcceptance]));
-    expect(required).toEqual({ terms: true, privacy: true, guidelines: true, cookies: false, dmca_policy: false });
+    expect(required).toEqual({
+      terms: true,
+      privacy: true,
+      guidelines: true,
+      cookies: false,
+      dmca_policy: false,
+      enforcement_notice: false,
+    });
   });
 
   test("each opens with the draft notice and has a reasonable length", () => {
     for (const d of docs) {
       expect(d.body.startsWith("> **Draft pending lawyer review.**"), d.kind).toBe(true);
       const words = d.body.split(/\s+/).filter(Boolean).length;
-      expect(words, d.kind).toBeGreaterThanOrEqual(300);
+      // The enforcement notice is a skeleton (banner, placeholders, headings) until W0-sor writes it.
+      const min = d.kind === "enforcement_notice" ? 0 : 300;
+      expect(words, d.kind).toBeGreaterThanOrEqual(min);
       expect(words, d.kind).toBeLessThanOrEqual(900);
     }
+  });
+
+  test("the enforcement notice has its redress section", () => {
+    const notice = docs.find((d) => d.kind === "enforcement_notice");
+    expect(notice?.body).toContain("## How to challenge this decision");
   });
 
   test("no SPDX header, identity literal or unknown placeholder in a body", () => {
@@ -72,18 +90,24 @@ describe("seedLegalDocuments", () => {
     await t?.drop();
   });
 
-  test("seeding twice inserts each document once", async () => {
-    await seedLegalDocuments(t.db);
-    expect(await seedLegalDocuments(t.db)).toBe(0);
-    const rows = await t.db.select().from(legalDocuments).where(eq(legalDocuments.version, LEGAL_SEED_VERSION));
-    expect(rows.map((r) => r.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
-    for (const r of rows) expect(r.isDraft).toBe(true);
+  // A published row is immutable (0029), so the operator's own version of a seeded (kind, version)
+  // is inserted before the first seed rather than edited after it.
+  test("an existing row is never rewritten", async () => {
+    const terms = legalSeedDocuments().find((d) => d.kind === "terms");
+    if (!terms) throw new Error("no terms seed");
+    await t.db.insert(legalDocuments).values({ ...terms, title: "Edited by an operator" });
+    expect(await seedLegalDocuments(t.db)).toBe(LEGAL_DOCUMENT_KINDS.length - 1);
+    const [row] = await t.db.select().from(legalDocuments).where(eq(legalDocuments.kind, "terms"));
+    expect(row?.title).toBe("Edited by an operator");
   });
 
-  test("an existing row is never rewritten", async () => {
-    await t.db.update(legalDocuments).set({ title: "Edited by an operator" }).where(eq(legalDocuments.kind, "terms"));
+  test("seeding again inserts nothing; one row per kind", async () => {
     expect(await seedLegalDocuments(t.db)).toBe(0);
-    const [terms] = await t.db.select().from(legalDocuments).where(eq(legalDocuments.kind, "terms"));
-    expect(terms?.title).toBe("Edited by an operator");
+    const rows = await t.db.select().from(legalDocuments);
+    expect(rows.map((r) => r.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
+    const notice = rows.find((r) => r.kind === "enforcement_notice");
+    expect(notice?.version).toBe(ENFORCEMENT_NOTICE_SEED_VERSION);
+    expect(notice?.requiresAcceptance).toBe(false);
+    for (const r of rows) expect(r.isDraft).toBe(true);
   });
 });

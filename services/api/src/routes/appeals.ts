@@ -32,6 +32,11 @@
  *     (audit `moderation.label.remove`, event `channel.update`). On `moderation_case` (a T1 case
  *     about them or their channel; never T0): overturning clears the case and lifts any
  *     restriction it still holds; suspensions are lifted by a moderator as usual.
+ *   - `moderation` on `ncii_request_item` (an NCII request item whose broadcast, VOD, clip or
+ *     upload is on a channel they own, or a clip they made, and that was removed or auto-hidden;
+ *     ADR 0019 answer 4). Overturning records the decision only, as for `moderation_action`:
+ *     restoring content is a manual staff step, and hashed items have no objects left to restore.
+ *     The requester is never told who appealed, and the request's decider cannot resolve it.
  *   - `account` on `account_action` (a DMCA strike or repeat-infringer termination of theirs):
  *     overturning reverses it once (`appeal_overturned`, event `account.action.reversed`, audit
  *     `account.action.reverse`). A reversed termination lifts the repeat-infringer suspension
@@ -72,6 +77,7 @@ import { os, requireCaller } from "../lib/orpc.ts";
 
 const { appeals: appealsT, playbackSessions, integrityFlags, channels, modActions, users, chatBans } = schema;
 const { contentLabels, moderationCases, broadcasts, accountActions, dmcaNoticeItems } = schema;
+const { nciiRequestItems, nciiRequests, vods, clips } = schema;
 type AppealRow = typeof appealsT.$inferSelect;
 type Kind = (typeof APPEAL_KINDS)[number];
 type Status = (typeof APPEAL_STATUSES)[number];
@@ -80,7 +86,7 @@ type Subject = (typeof APPEAL_SUBJECTS)[number];
 /** Subject types each kind accepts. */
 export const KIND_SUBJECTS: Record<Kind, readonly Subject[]> = {
   integrity: ["session", "user", "integrity_flag"],
-  moderation: ["moderation_action", "content_label", "moderation_case"],
+  moderation: ["moderation_action", "content_label", "moderation_case", "ncii_request_item"],
   dmca: ["dmca_notice"],
   account: ["account_action"],
 };
@@ -217,6 +223,43 @@ async function subjectConcerns(deps: Deps, type: Subject, id: string, userId: st
         .where(and(eq(accountActions.id, id), eq(accountActions.userId, userId)))
         .limit(1);
       return r !== undefined;
+    }
+    case "ncii_request_item": {
+      // Only an item that restricted something (removed or auto-hidden) can be appealed, by the
+      // owner of the channel it is on, or the clip's creator.
+      const ownsChannel = (channelId: SQL) =>
+        sql`exists (select 1 from ${channels} where ${channels.id} = ${channelId} and ${channels.ownerId} = ${userId})`;
+      const [i] = await db
+        .select({ id: nciiRequestItems.id })
+        .from(nciiRequestItems)
+        .where(
+          and(
+            eq(nciiRequestItems.id, id),
+            or(sql`${nciiRequestItems.removedAt} is not null`, sql`${nciiRequestItems.hiddenAt} is not null`),
+            or(
+              and(
+                eq(nciiRequestItems.subjectType, "broadcast"),
+                ownsChannel(
+                  sql`(select ${broadcasts.channelId} from ${broadcasts} where ${broadcasts.id} = ${nciiRequestItems.subjectId})`,
+                ),
+              ),
+              and(
+                eq(nciiRequestItems.subjectType, "vod"),
+                ownsChannel(
+                  sql`(select ${vods.channelId} from ${vods} where ${vods.id} = ${nciiRequestItems.subjectId})`,
+                ),
+              ),
+              and(
+                eq(nciiRequestItems.subjectType, "clip"),
+                sql`exists (select 1 from ${clips} where ${clips.id} = ${nciiRequestItems.subjectId} and (${clips.creatorId} = ${userId} or exists (select 1 from ${channels} where ${channels.id} = ${clips.channelId} and ${channels.ownerId} = ${userId})))`,
+              ),
+              // Upload items name the channel the upload belongs to.
+              and(eq(nciiRequestItems.subjectType, "upload"), ownsChannel(sql`${nciiRequestItems.subjectId}`)),
+            ),
+          ),
+        )
+        .limit(1);
+      return i !== undefined;
     }
     case "dmca_notice": {
       const [i] = await db
@@ -655,6 +698,14 @@ export const appeals = {
           .from(accountActions)
           .where(eq(accountActions.id, a.subjectId));
         if (r?.actorId === caller.user.id) throw forbidden("You cannot resolve an appeal of your own decision");
+      }
+      if (a.subjectType === "ncii_request_item") {
+        const [r] = await tx
+          .select({ decidedById: nciiRequests.decidedById })
+          .from(nciiRequestItems)
+          .innerJoin(nciiRequests, eq(nciiRequests.id, nciiRequestItems.requestId))
+          .where(eq(nciiRequestItems.id, a.subjectId));
+        if (r?.decidedById === caller.user.id) throw forbidden("You cannot resolve an appeal of your own decision");
       }
       const [updated] = await tx
         .update(appealsT)

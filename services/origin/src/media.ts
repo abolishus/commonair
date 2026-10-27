@@ -6,15 +6,14 @@
  * bucket with the service key (ADR 0009). Garage's S3 API serves no anonymous reads, and a
  * website-enabled bucket would publish every key, including the private prefixes (`incoming/`
  * unscanned uploads, `moderation/` review frames and NCII-hidden objects). Only the allowlisted
- * prefixes below are served; anything else is a 404 whether or not it exists.
+ * prefixes (`PUBLIC_MEDIA_PREFIXES`, `@commonair/contracts/storage`) are served; anything else is a
+ * 404 whether or not it exists.
  */
+import { PUBLIC_MEDIA_PREFIXES } from "@commonair/contracts/storage";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
 
 export const MEDIA_ROUTE = "/media/";
-
-/** First key segments that hold published objects. Everything else is private. */
-export const PUBLIC_MEDIA_PREFIXES: readonly string[] = ["channels", "clips", "thumbnails", "vods"];
 
 export interface MediaDeps {
   storage: Pick<ObjectStorage, "get">;

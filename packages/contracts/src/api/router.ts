@@ -189,6 +189,38 @@ export const contract = {
         ...tag("Moderation"),
       })
       .output(z.array(D.ContentLabel)),
+    enforcement: {
+      /**
+       * Statements of reasons about the caller (ADR 0019 decision 8), newest first, keyset cursor
+       * on `(created_at, id)`. A GET, so a suspended user can still read it.
+       */
+      list: user
+        .route({
+          method: "GET",
+          path: "/me/enforcement",
+          summary: "Statements of reasons about you",
+          ...tag("Users"),
+        })
+        .input(PageInput)
+        .output(
+          page(
+            D.EnforcementStatement.extend({
+              /** The clause's plain-language title, from the i18n catalog. */
+              clauseTitle: z.string(),
+              /** The clause's section of the pinned `enforcement_notice` document. */
+              explanation: z.string(),
+              /** The notice text was an unreviewed draft when the statement was made. */
+              noticeIsDraft: z.boolean(),
+              /** Joined from `moderation_cases.resolution_note` on read; never stored in the statement. */
+              moderatorNote: z.string().nullable(),
+              /** An existing appeal against the same subject. */
+              appealId: Id.nullable(),
+              /** Computed on read: the case cleared or an appeal overturned it. */
+              reversedAt: Timestamp.nullable(),
+            }),
+          ),
+        ),
+    },
     exports: {
       create: user
         .meta({ access: "user", rateLimit: "expensive" })

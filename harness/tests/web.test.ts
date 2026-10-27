@@ -309,14 +309,17 @@ describe("selectors match docs/testing/e4c-selectors.md", () => {
       expect(ROUTE_PATTERNS).toContain(r);
   });
 
-  test("the scenario section lists steps 1-7; E7 adds 8 and 9 (docs/testing/e7-selectors.md)", async () => {
+  test("the scenario section lists steps 1-7; E7 adds 8 and 9, W0 10 and 11 (e7-, w0-selectors.md)", async () => {
     const { SAFETY_STEPS } = await import("../src/safety.ts");
     const steps = section(doc, "Scenario `trust-safety`").filter((l) => /^\d+\. \*\*/.test(l));
     expect(steps).toHaveLength(7);
-    expect(Object.keys(SAFETY_STEPS)).toHaveLength(9);
+    expect(Object.keys(SAFETY_STEPS)).toHaveLength(11);
     const e7 = readFileSync(fileURLToPath(new URL("../../docs/testing/e7-selectors.md", import.meta.url)), "utf8");
     expect(e7).toContain("**`trust-safety` step 8 (DMCA).**");
     expect(e7).toContain("**`trust-safety` step 9 (appeal lifts the ban).**");
+    const w0 = readFileSync(fileURLToPath(new URL("../../docs/testing/w0-selectors.md", import.meta.url)), "utf8");
+    expect(w0).toContain("**`trust-safety` step 10 (VOD exposure).**");
+    expect(w0).toContain("**`trust-safety` step 11 (statements of reasons).**");
   });
 
   test("the documented hook routes and env are what the harness uses", async () => {

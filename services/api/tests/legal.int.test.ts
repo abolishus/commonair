@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
 // Not exported from @commonair/db yet (contract request).
-import { LEGAL_SEED_VERSION, seedLegalDocuments } from "@commonair/db";
+import { ENFORCEMENT_NOTICE_SEED_VERSION, LEGAL_SEED_VERSION, seedLegalDocuments } from "@commonair/db";
 import {
   client,
   mailTo,
@@ -53,7 +53,9 @@ describe("legal.current", () => {
     expect(r.status).toBe(200);
     expect(r.body.map((d) => d.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
     for (const d of r.body) {
-      expect(d.version).toBe(LEGAL_SEED_VERSION);
+      expect(d.version, d.kind).toBe(
+        d.kind === "enforcement_notice" ? ENFORCEMENT_NOTICE_SEED_VERSION : LEGAL_SEED_VERSION,
+      );
       expect(d.isDraft).toBe(true);
       expect(d.body, d.kind).not.toContain("{{");
       expect(d.title).not.toContain("{{");
@@ -68,7 +70,14 @@ describe("legal.current", () => {
   test("says which documents require acceptance", async () => {
     const r = await client(api).call<Doc[]>("GET", "/api/legal");
     const flags = Object.fromEntries(r.body.map((d) => [d.kind, d.requiresAcceptance]));
-    expect(flags).toEqual({ terms: true, privacy: true, guidelines: true, cookies: false, dmca_policy: false });
+    expect(flags).toEqual({
+      terms: true,
+      privacy: true,
+      guidelines: true,
+      cookies: false,
+      dmca_policy: false,
+      enforcement_notice: false,
+    });
   });
 
   test("a version scheduled for the future is not current yet", async () => {

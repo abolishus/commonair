@@ -16,6 +16,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { EnforcementFacts } from "@commonair/contracts/dto";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
 import {
@@ -28,6 +29,13 @@ import {
   deletionStatus,
   dmcaItemSubject,
   dmcaStatus,
+  enforcementAutomatedDecision,
+  enforcementContentType,
+  enforcementDeliveryChannel,
+  enforcementGround,
+  enforcementRestrictionDetail,
+  enforcementRestrictionKind,
+  enforcementSource,
   exportKind,
   id,
   incidentStatus,
@@ -88,6 +96,93 @@ export const auditLog = pgTable(
     index("audit_log_subject_idx").on(t.subjectType, t.subjectId),
     index("audit_log_channel_idx").on(t.channelId, t.createdAt),
     index("audit_log_actor_idx").on(t.actorId, t.createdAt),
+    // The statements-of-reasons builder and coverage sweep select by action (ADR 0019 decision 5).
+    index("audit_log_action_idx").on(t.action, t.createdAt),
+  ],
+);
+
+/**
+ * Statements of reasons (ADR 0019 decisions 4 and 6, DSA Art. 17), built by the worker from the
+ * `audit_log` row that applied the action. Append-only for every role (trigger), and ids, enums,
+ * times and catalog codes only, so account deletion has nothing to rewrite. No foreign keys to
+ * `users` or `channels`: deleting an account never reaches the record.
+ */
+export const enforcementStatements = pgTable(
+  "enforcement_statements",
+  {
+    id: id(),
+    sourceAuditId: uuid()
+      .notNull()
+      .references(() => auditLog.id, { onDelete: "restrict" }),
+    /** The audit action, one of `ENFORCEMENT_SOURCE_ACTIONS`. */
+    sourceAction: text().notNull(),
+    recipientUserId: uuid().notNull(),
+    channelId: uuid(),
+    contentType: enforcementContentType().notNull(),
+    contentId: uuid().notNull(),
+    restrictionKind: enforcementRestrictionKind().notNull(),
+    restrictionDetail: enforcementRestrictionDetail().notNull(),
+    /** Null: indefinite, or not applicable. */
+    restrictionEndsAt: ts(),
+    /** No geo-scoped actions exist; the column records that it was considered. */
+    territorialScope: text().notNull().default("all"),
+    /** `EnforcementFacts` (validated by the shared Zod schema before insert). */
+    facts: jsonb().$type<EnforcementFacts>().notNull(),
+    source: enforcementSource().notNull(),
+    automatedDetection: boolean().notNull(),
+    automatedDecision: enforcementAutomatedDecision().notNull(),
+    groundKind: enforcementGround().notNull(),
+    clauseId: text().notNull(),
+    clauseVersion: integer().notNull(),
+    /** A catalog code; illegal grounds only. */
+    legalBasis: text(),
+    guidelinesDocumentId: uuid()
+      .notNull()
+      .references(() => legalDocuments.id, { onDelete: "restrict" }),
+    noticeDocumentId: uuid()
+      .notNull()
+      .references(() => legalDocuments.id, { onDelete: "restrict" }),
+    /** What to pass to `appeals.create` (kind `moderation`); both null when no internal appeal applies. */
+    appealSubjectType: text(),
+    appealSubjectId: uuid(),
+    /** The audit row's time: when the restriction applied. */
+    createdAt: ts().notNull(),
+  },
+  (t) => [
+    uniqueIndex("enforcement_statements_source_recipient_uq").on(t.sourceAuditId, t.recipientUserId),
+    index("enforcement_statements_recipient_idx").on(t.recipientUserId, t.createdAt, t.id),
+    check("enforcement_statements_territorial_scope_ck", sql`${t.territorialScope} = 'all'`),
+    check("enforcement_statements_clause_version_ck", sql`${t.clauseVersion} >= 1`),
+    check("enforcement_statements_legal_basis_ck", sql`${t.legalBasis} is null or ${t.groundKind} = 'illegal'`),
+    check("enforcement_statements_appeal_ck", sql`(${t.appealSubjectType} is null) = (${t.appealSubjectId} is null)`),
+    check(
+      "enforcement_statements_facts_ck",
+      sql`jsonb_typeof(${t.facts}) = 'object' and ${t.facts} ->> 'code' is not null`,
+    ),
+  ],
+);
+
+/** Delivery state of a statement per channel (mutable, unlike the statement). Codes only, never provider text. */
+export const enforcementStatementDeliveries = pgTable(
+  "enforcement_statement_deliveries",
+  {
+    id: id(),
+    statementId: uuid()
+      .notNull()
+      .references(() => enforcementStatements.id, { onDelete: "restrict" }),
+    channel: enforcementDeliveryChannel().notNull(),
+    sentAt: ts(),
+    attempts: integer().notNull().default(0),
+    /** Why the last attempt failed or was skipped (`no_email`, `account_deleted`, `smtp_rejected`, …). */
+    lastErrorCode: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("enforcement_statement_deliveries_uq").on(t.statementId, t.channel),
+    // The builder retries unsent deliveries.
+    index("enforcement_statement_deliveries_unsent_idx")
+      .on(t.createdAt)
+      .where(sql`${t.sentAt} is null`),
   ],
 );
 

@@ -297,6 +297,10 @@ export const MODERATION_JOBS = {
   incomingCleanup: "incoming-cleanup",
   dmcaDisable: "dmca-disable",
   dmcaRestore: "dmca-restore",
+  /** Statements of reasons (ADR 0019 decision 5): build from `audit_log` every 15 s. */
+  sorBuild: "sor-build",
+  /** Daily: allowlisted audit rows older than 5 minutes without a statement raise an alert. */
+  sorCoverage: "sor-coverage",
 } as const;
 
 /** 64 hex characters (a PDQ hash or a sha256). */
@@ -514,7 +518,7 @@ export type ExportBuildJob = z.infer<typeof ExportBuildJob>;
 export const exportObjectKey = (userId: string, exportId: string) => `exports/${userId}/${exportId}.zip`;
 
 /** Jobs the ops test hook can run now. Each already runs on its own schedule. */
-export const OPS_TICK_JOBS = ["account-deletion", "export-cleanup", "vod-retention"] as const;
+export const OPS_TICK_JOBS = ["account-deletion", "export-cleanup", "vod-retention", "vod-placement"] as const;
 /** Body of `INTERNAL_ROUTES.opsTick`; the response is the job's result (counts only). */
 export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });
 export type OpsTickBody = z.infer<typeof OpsTickBody>;

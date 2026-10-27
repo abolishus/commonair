@@ -13,6 +13,7 @@ import type { Logger } from "@commonair/observability";
 import { createLogger } from "@commonair/observability";
 import { createValkey, valkeyCheck, type ReadinessCheck } from "@commonair/service";
 import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
+import { IDENTITY_CLOCK } from "./clock/anchor.ts";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
 import { DiskBudget } from "./disk.ts";
@@ -202,6 +203,8 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     diskBudget,
     transcodeSlots,
     simulcastAllowPrivate: env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
+    // ADR 0012: W0-clock replaces the identity anchor.
+    clock: IDENTITY_CLOCK,
   };
   coordinator = new LiveCoordinator(ctx);
   const live = coordinator;
