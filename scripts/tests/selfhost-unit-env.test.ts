@@ -216,6 +216,19 @@ describe("third-party images and tools-image jobs get what they read", () => {
     expect(listed("mediamtx")).toContain("MTX_*");
   });
 
+  test("coturn: exactly the variables infra/coturn/start.sh reads, minus what its unit sets (TURN_PORT)", () => {
+    const script = code(read("infra/coturn/start.sh"));
+    const set = unitSetKeys(unitText("coturn"));
+    expect(set.has("TURN_PORT")).toBe(true);
+    // COTURN_BASE_CONF and COTURN_CONF move the files for tests; they are no operator settings.
+    const vars = new Set(
+      [...script.matchAll(/\$\{?([A-Z][A-Z0-9_]*)/g)]
+        .map((m) => m[1]!)
+        .filter((v) => !v.startsWith("COTURN_") && !set.has(v)),
+    );
+    expect(listed("coturn")).toEqual([...vars].sort());
+  });
+
   test("storage-init: every variable optionsFromEnv, storageMode and storeFromEnv read", () => {
     const boot = read("infra/garage/bootstrap.ts");
     const init = read("infra/garage/storage-init.ts");
@@ -433,6 +446,8 @@ describe("render-env.sh", () => {
   // What a compromise of each non-service container would leak: only these secrets.
   const SECRET_ALLOWLIST: Record<string, string[]> = {
     caddy: [],
+    // coturn's static-auth-secret when the TURN relay is on.
+    coturn: ["TURN_SHARED_SECRET"],
     garage: ["GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET"],
     "storage-init": [
       "GARAGE_ADMIN_TOKEN",

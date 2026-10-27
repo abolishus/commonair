@@ -78,7 +78,7 @@ function seconds(span: string): number {
 describe("every container unit", () => {
   test("the expected set: services, one-shot jobs and the timer-driven certificate sync", () => {
     expect(oneShots.map(([n]) => n)).toEqual(["commonair-irc-cert", "commonair-migrate", "commonair-storage-init"]);
-    expect(longRunning.length).toBe(18);
+    expect(longRunning.length).toBe(19);
   });
 
   // No exceptions: catatonit is bind-mounted from the host and static, so it runs in every

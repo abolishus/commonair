@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# coturn: STUN for P2P playback on 3478/udp, and the TURN relay when the operator turned it on
+# (selfhost.sh --turn-relay writes P2P_TURN_URLS; docs/self-hosting/p2p.md).
+#
+# Host networking, not PublishPort= and not a systemd socket. STUN answers with the address it
+# sees a request come from, and through rootlessport every client would come from one internal
+# address (commonair-mediamtx.container says the same of ICE), so every viewer would learn a
+# wrong address for itself. A socket-activated 3478/udp would fix STUN alone: the relay allocates
+# its ports at run time (TURN_RELAY_PORT_MIN-MAX), and systemd cannot hand those over. On the host
+# network coturn sees each client's real address on every port; rootless, it can bind only ports
+# from 1024 up, and 3478 and the relay range are. It needs nothing on the commonair network.
+# The price: coturn shares the host's loopback, where Valkey's, Garage's (3900) and Grafana's
+# (3030) ports are. The relay refuses every loopback, private and special-purpose peer
+# (denied-peer-ip in infra/coturn/turnserver.conf), relays UDP only, and is off unless the
+# operator turns it on; STUN alone sends nothing anywhere but back to the client.
+# Nothing is published, so there is no PublishPort=; the host firewall decides who reaches 3478.
+[Unit]
+Description=CommonAir coturn
+# Never give up on a crash loop: RestartSteps below throttles it instead (ADR 0023 §10).
+StartLimitIntervalSec=0
+
+[Container]
+Image=docker.io/coturn/coturn:4.18.0-trixie@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3
+ContainerName=commonair-coturn
+# catatonit as PID 1 reaps orphans and forwards signals (ADR 0023 §10).
+RunInit=true
+Network=host
+# Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
+EnvironmentFile=%h/.config/commonair/unit-env/commonair-coturn.env
+# Fixed: the health check below and P2P_STUN_URLS/P2P_TURN_URLS (selfhost.sh) use 3478.
+Environment=TURN_PORT=3478
+# start.sh renders turnserver.conf from the env file and runs turnserver on it.
+Entrypoint=/bin/sh
+Exec=/etc/coturn/commonair/start.sh
+Volume=%h/commonair/infra/coturn/turnserver.conf:/etc/coturn/commonair/turnserver.conf:ro,Z
+Volume=%h/commonair/infra/coturn/start.sh:/etc/coturn/commonair/start.sh:ro,Z
+# A STUN binding request to itself; exits 1 when no answer comes within 3 s.
+HealthCmd=CMD turnutils_stunclient 127.0.0.1
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=10
+HealthStartPeriod=30s
+# An unhealthy container is killed, and Restart= below starts a fresh one.
+HealthOnFailure=kill
+# Dependents start only once this container reports healthy.
+Notify=healthy
+
+[Service]
+# Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
+# (scripts/selfhost/cgroup-reset.sh says why).
+ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh
+# Renders that env file from commonair.env, so an edit there applies on the next restart. It
+# fails closed: an unreadable commonair.env leaves no env file, and the unit does not start.
+ExecStartPre=/bin/sh %h/commonair/scripts/selfhost/render-env.sh %h/commonair/infra/selfhost/env/commonair-coturn.keys %h/.config/commonair/commonair.env %h/.config/commonair/unit-env/commonair-coturn.env
+Restart=always
+RestartMode=direct
+RestartSec=5
+# Back off 5 s → 5 min over ten consecutive restarts, so a crash loop is throttled.
+RestartSteps=10
+RestartMaxDelaySec=5min
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

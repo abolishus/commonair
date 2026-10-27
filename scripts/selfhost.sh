@@ -315,7 +315,9 @@ check_rootless() {
   fi
 }
 
-# Public ports: Caddy 80/443 (+443/udp HTTP/3), RTMP 1935, IRC 6667/6697, WebRTC ICE 8189/udp.
+# Public ports: Caddy 80/443 (+443/udp HTTP/3), RTMP 1935, IRC 6667/6697, WebRTC ICE 8189/udp,
+# coturn's STUN (and TURN) 3478/udp. The TURN relay's range is not checked: coturn takes a free
+# port from it for each allocation.
 check_ports() {
   have ss || { warn "ss not found; skipping the free-port check"; return 0; }
   _busy=""
@@ -324,7 +326,7 @@ check_ports() {
   for _p in 80 443 1935 6667 6697; do
     if printf '%s\n' "$_tcp" | grep -qx "$_p"; then _busy="$_busy $_p/tcp"; fi
   done
-  for _p in 443 8189; do
+  for _p in 443 8189 3478; do
     if printf '%s\n' "$_udp" | grep -qx "$_p"; then _busy="$_busy $_p/udp"; fi
   done
   if [ -n "$_busy" ]; then
@@ -334,11 +336,20 @@ check_ports() {
 }
 
 firewall_hints() {
+  _turn_relay=""
+  if turn_relay_on; then _turn_relay=$(turn_relay_range); fi
   if have firewall-cmd && firewall-cmd --state >/dev/null 2>&1; then
     info "firewalld is running; open the public ports (IPv4 and IPv6):"
-    info "  sudo firewall-cmd --permanent --add-port={80,443,1935,6667,6697}/tcp --add-port={443,8189}/udp && sudo firewall-cmd --reload"
+    info "  sudo firewall-cmd --permanent --add-port={80,443,1935,6667,6697}/tcp --add-port={443,8189,3478}/udp && sudo firewall-cmd --reload"
+    if [ -n "$_turn_relay" ]; then
+      info "and the TURN relay's range: sudo firewall-cmd --permanent --add-port=$_turn_relay/udp && sudo firewall-cmd --reload"
+    fi
   elif have nft; then
-    info "if an nftables ruleset filters input, allow tcp dports {80,443,1935,6667,6697} and udp dports {443,8189}, for IPv4 and IPv6 (an inet table covers both)"
+    info "if an nftables ruleset filters input, allow tcp dports {80,443,1935,6667,6697} and udp dports {443,8189,3478}, for IPv4 and IPv6 (an inet table covers both)"
+    if [ -n "$_turn_relay" ]; then info "and, for the TURN relay, udp dport $_turn_relay"; fi
+  fi
+  if [ -n "$_turn_relay" ]; then
+    warn "the TURN relay is on: open UDP $_turn_relay in your provider's firewall by hand as well; DigitalOcean's cloud firewall (infra/tofu) opens single ports only, so it blocks the range (docs/self-hosting/p2p.md)"
   fi
 }
 
@@ -708,6 +719,65 @@ local_addresses() {
   fi
 }
 
+# --- P2P: coturn (STUN always; the TURN relay only with --turn-relay) -------------------------
+#
+# The relay switch is P2P_TURN_URLS in commonair.env: non-empty, the API hands out TURN
+# credentials and coturn allocates relays (infra/coturn/start.sh). --turn-relay sets it,
+# --no-turn-relay empties it, and without either, install and upgrade keep what is there.
+
+TURN_URL_SUFFIX=":3478?transport=udp"
+
+# Whether the relay is on, or will be with this run's flags.
+turn_relay_on() {
+  case "${TURN_RELAY:-}" in
+    on) return 0 ;;
+    off) return 1 ;;
+  esac
+  [ -n "$(env_get P2P_TURN_URLS "$ENV_FILE")" ]
+}
+
+# The relay's UDP range as min-max, from commonair.env or the defaults.
+turn_relay_range() {
+  _turn_min=$(env_get TURN_RELAY_PORT_MIN "$ENV_FILE")
+  _turn_max=$(env_get TURN_RELAY_PORT_MAX "$ENV_FILE")
+  printf '%s-%s' "${_turn_min:-49160}" "${_turn_max:-49199}"
+}
+
+# The one address coturn advertises: the first IPv4 entry of an address list (MediaMTX's
+# MTX_WEBRTCADDITIONALHOSTS may hold IPv4 and IPv6 addresses and host names), else its first
+# IPv6 entry, else nothing. (Shell variables are global: these helpers use _turn_* names only,
+# so they never clobber a caller's, e.g. cmd_upgrade's _cur.)
+turn_address() {
+  _turn_v6=""
+  for _turn_a in $(printf '%s' "$1" | tr ',' ' '); do
+    if printf '%s' "$_turn_a" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+      printf '%s' "$_turn_a"
+      return 0
+    fi
+    if [ -z "$_turn_v6" ] && printf '%s' "$_turn_a" | grep -Eq '^[0-9A-Fa-f:]*:[0-9A-Fa-f:]*$'; then
+      _turn_v6=$_turn_a
+    fi
+  done
+  printf '%s' "$_turn_v6"
+}
+
+# P2P_TURN_URLS from the switch ($1: the hostname, $2: the previous one). Without --turn-relay
+# or --no-turn-relay, a relay URL this script wrote follows a new hostname; an operator's own
+# value stays.
+turn_env() {
+  _turn_url="turn:$1$TURN_URL_SUFFIX"
+  _turn_cur=$(env_get P2P_TURN_URLS "$ENV_FILE")
+  case "${TURN_RELAY:-}" in
+    on) env_set P2P_TURN_URLS "$_turn_url" ;;
+    off) env_set P2P_TURN_URLS "" ;;
+    *) if [ -n "$2" ] && [ "$_turn_cur" = "turn:$2$TURN_URL_SUFFIX" ]; then env_set P2P_TURN_URLS "$_turn_url"; fi ;;
+  esac
+  if [ -n "$(env_get P2P_TURN_URLS "$ENV_FILE")" ] && [ -z "$(env_get TURN_SHARED_SECRET "$ENV_FILE")" ]; then
+    die "the TURN relay is on but $ENV_FILE has no TURN_SHARED_SECRET" \
+      "fix: delete the TURN_SHARED_SECRET line (install and upgrade generate a new one), then re-run"
+  fi
+}
+
 configure_env() {
   _host=$DOMAIN
   _old_host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
@@ -740,6 +810,16 @@ configure_env() {
   else
     warn "no global address found: set MTX_WEBRTCADDITIONALHOSTS in $ENV_FILE or WHIP ingest will fail remotely"
   fi
+  # P2P: this instance's own STUN server (never a public one), and the address coturn
+  # advertises, the one MediaMTX uses. A new --public-ip replaces it; otherwise a value stays.
+  env_set P2P_STUN_URLS "stun:$_host:3478"
+  _turn_ip=$(turn_address "$_ips")
+  if [ -n "$PUBLIC_IP" ] && [ -n "$_turn_ip" ]; then
+    env_set TURN_EXTERNAL_IP "$_turn_ip"
+  elif [ -n "$_turn_ip" ]; then
+    env_default TURN_EXTERNAL_IP "$_turn_ip"
+  fi
+  turn_env "$_host" "$_old_host"
   # The app-role URL; the services get it as a podman secret as well (create_secrets).
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
@@ -772,6 +852,17 @@ backfill_env() {
   # Before Valkey had a password, VALKEY_URL was the development default; write_env generated
   # VALKEY_PASSWORD for this upgrade.
   valkey_env
+  # Before coturn (P1), write_env's merge just added init-env's development STUN URL and an empty
+  # TURN_EXTERNAL_IP. The relay stays as it was unless --turn-relay or --no-turn-relay says.
+  case "$(env_get P2P_STUN_URLS "$ENV_FILE")" in
+    "" | "stun:localhost:3478")
+      info "setting P2P_STUN_URLS=stun:$_host:3478 (this instance's coturn)"
+      env_set P2P_STUN_URLS "stun:$_host:3478"
+      ;;
+  esac
+  _turn_ip=$(turn_address "$(env_get MTX_WEBRTCADDITIONALHOSTS "$ENV_FILE")")
+  if [ -n "$_turn_ip" ]; then env_default TURN_EXTERNAL_IP "$_turn_ip"; fi
+  turn_env "$_host" "$_host"
   # Releases up to rc.2 pinned Garage's endpoint, region and path style in the units, and the
   # env file held init-env's development values for them. The units now read them from here.
   if [ "$STORAGE_MODE" = garage ] && [ "$(env_get S3_ENDPOINT "$ENV_FILE")" != "$GARAGE_S3_ENDPOINT" ]; then
@@ -1387,6 +1478,8 @@ parse_flags() {
   S3_OPT_BUCKET_BACKUPS=""
   S3_OPT_BUCKET_EVIDENCE=""
   S3_ALLOW_HTTP=no
+  # The TURN relay: on, off, or empty (keep what commonair.env says; off on a first install).
+  TURN_RELAY=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --version | --bundle | --sha256sums | --domain | --email | --tls | --registry | --public-ip | --model)
@@ -1424,6 +1517,10 @@ parse_flags() {
         shift 2
         ;;
       --s3-allow-http) S3_ALLOW_HTTP=yes && shift ;;
+      # coturn's TURN relay (docs/self-hosting/p2p.md). Kept in commonair.env, so it persists
+      # across upgrades and reinstalls until the opposite flag.
+      --turn-relay) TURN_RELAY=on && shift ;;
+      --no-turn-relay) TURN_RELAY=off && shift ;;
       --s3-*key* | --s3-*secret*)
         die "S3 keys are never flags: every user on this host can read a command line (ps)" \
           "fix: export S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_EVIDENCE_ACCESS_KEY_ID and S3_EVIDENCE_SECRET_ACCESS_KEY" \
@@ -2028,6 +2125,14 @@ cmd_status() {
   else
     say "storage:   Garage on this host (commonair-garage)"
   fi
+  # Whether coturn runs and the relay is on; never the secret or the credentials.
+  _coturn=$(systemctl --user show commonair-coturn.service --property=ActiveState --value 2>/dev/null || true)
+  if [ -n "$(env_get P2P_TURN_URLS "$ENV_FILE")" ]; then
+    _turn_relay="on (UDP $(turn_relay_range))"
+  else
+    _turn_relay="off"
+  fi
+  say "p2p:       coturn ${_coturn:-?} (STUN 3478/udp), TURN relay $_turn_relay"
   say ""
   say "units:"
   for _u in $(all_units); do

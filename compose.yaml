@@ -242,6 +242,35 @@ services:
       # The control API sits behind the auth hook (api may not be up yet): probe RTMP instead.
       test: ["CMD-SHELL", "nc -z 127.0.0.1 1935"]
 
+  # The instance's own STUN server for P2P playback; the TURN relay stays off unless P2P_TURN_URLS
+  # is set (ADR 0005 amendment 1, decision 2; docs/self-hosting/p2p.md). infra/coturn/start.sh
+  # renders the configuration from these variables. Here, through the port mapping, coturn sees
+  # every client from one internal address, which is fine for development (the Quadlet unit uses
+  # the host network instead). The relay range is published only by
+  # infra/coturn/compose.turn-relay.yaml (podman compose -f compose.yaml -f …).
+  coturn:
+    image: docker.io/coturn/coturn:4.18.0-trixie@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/coturn/commonair/start.sh"]
+    environment:
+      # Container-side port, fixed like the other services': the host port is TURN_PORT below.
+      TURN_PORT: "3478"
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:-localhost}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      P2P_TURN_URLS: ${P2P_TURN_URLS:-}
+      TURN_SHARED_SECRET: ${TURN_SHARED_SECRET:-}
+      TURN_RELAY_PORT_MIN: ${TURN_RELAY_PORT_MIN:-49160}
+      TURN_RELAY_PORT_MAX: ${TURN_RELAY_PORT_MAX:-49199}
+    ports: ["${BIND_ADDRESS:-127.0.0.1}:${TURN_PORT:-3478}:3478/udp"]
+    volumes:
+      - ./infra/coturn/turnserver.conf:/etc/coturn/commonair/turnserver.conf:ro,Z
+      - ./infra/coturn/start.sh:/etc/coturn/commonair/start.sh:ro,Z
+    healthcheck:
+      <<: *healthcheck
+      # A STUN binding request to itself; exits 1 when no answer comes within 3 s.
+      test: ["CMD", "turnutils_stunclient", "127.0.0.1"]
+      timeout: 5s
+
   mock-rtmp:
     profiles: [harness]
     image: docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95

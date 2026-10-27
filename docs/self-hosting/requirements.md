@@ -68,15 +68,22 @@ Open these inbound, in the host firewall and in any provider firewall in front o
 | 443  | UDP      | HTTP/3                                                  |
 | 1935 | TCP      | RTMP ingest (OBS)                                       |
 | 8189 | UDP      | WebRTC ICE for WHIP ingest (signaling itself is on 443) |
+| 3478 | UDP      | STUN for P2P playback (coturn; [p2p.md](p2p.md))        |
 | 6697 | TCP      | IRC over TLS                                            |
 | 6667 | TCP      | plain IRC, if you offer it                              |
 | 22   | TCP      | SSH, ideally restricted to your own addresses           |
+
+Only if you turn the TURN relay on (`--turn-relay`, off by default): UDP 49160-49199
+(`TURN_RELAY_PORT_MIN`-`MAX`), the relay's range. DigitalOcean's cloud firewall from the
+Terraform module opens single ports only, so open the range there by hand ([p2p.md](p2p.md)).
 
 Each public port listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6). Ports 80 and
 443 are held by systemd (`commonair-caddy.socket`) and handed to Caddy, and 6667 and 6697 the
 same way (`commonair-irc.socket`, `commonair-ircs.socket`) to the IRC gateway, so the instance
 sees each HTTPS and IRC client's own address. RTMP (1935) and WebRTC (8189/udp) go through
 rootless Podman's port forwarding, so MediaMTX sees every encoder at one internal address.
+coturn (3478/udp and the relay range) runs on the host network instead, because STUN must see
+each viewer's own address.
 
 Nothing else is reachable from outside the containers, except two ports on the host's
 `127.0.0.1`: Garage's S3 API (3900, with Garage only, for `selfhost.sh backup --objects`, the
