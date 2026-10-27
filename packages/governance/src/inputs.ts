@@ -120,11 +120,15 @@ export async function contributionInputs(
   );
   for (const r of relay) get(String(r.user_id)).relayBytes = num(r.bytes);
 
+  // Gate-eligible sessions only (`GATE_ELIGIBLE` in @commonair/integrity): an unjudged CDN
+  // session earns no eligibility.
   const viewers = rowsOf(
     await db.execute(sql`
       select c.owner_id as user_id, sum(s.watch_seconds) / 3600.0 as hours
         from playback_sessions s join channels c on c.id = s.channel_id
-       where s.verdict = 'verified' and s.started_at >= ${tsz(from)} and s.started_at < ${tsz(to)}
+       where s.verdict = 'verified' and s.scored_at is not null
+         and not ('fetch_unjudged' = any(coalesce(s.verdict_reasons, '{}')))
+         and s.started_at >= ${tsz(from)} and s.started_at < ${tsz(to)}
        group by c.owner_id`),
   );
   for (const r of viewers) get(String(r.user_id)).viewerHours = num(r.hours);

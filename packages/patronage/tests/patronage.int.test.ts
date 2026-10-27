@@ -96,6 +96,7 @@ async function session(
   userId: string | null,
   watchSeconds: number,
   verdict: "verified" | "excluded",
+  opts: { scored?: boolean; reasons?: string[] } = {},
 ) {
   await db.insert(s.playbackSessions).values({
     channelId,
@@ -104,6 +105,8 @@ async function session(
     ipHash: uuidv7(),
     watchSeconds,
     verdict,
+    verdictReasons: opts.reasons ?? [],
+    scoredAt: opts.scored === false ? null : new Date(day2 + 2 * HOUR),
     startedAt: new Date(day2 + HOUR),
   });
 }
@@ -187,6 +190,10 @@ beforeAll(async () => {
   await session(channels.a, null, 1800, "excluded");
   await session(channels.a, ids.a, 3600, "verified");
   await session(channels.b, ids.v, 3600, "verified");
+  // Not gate-eligible, so they earn nothing: verified by the API but never scored, and a CDN
+  // session the origin never fetch-judged.
+  await session(channels.a, null, 3600, "verified", { scored: false });
+  await session(channels.a, null, 3600, "verified", { reasons: ["fetch_unjudged"] });
 
   // Revenue: A $100 then a $20 refund; B $50.
   const pa = paymentSucceeded({
@@ -276,7 +283,7 @@ describe("inputs", () => {
     expect(await relayBytesVerified(db, ids.a, period)).toBe(0);
   });
 
-  test("viewer-hours count verified sessions except self-views; excluded hours are reported", async () => {
+  test("viewer-hours count gate-eligible verified sessions except self-views; excluded hours are reported", async () => {
     expect(await viewerHours(db, ids.a, period)).toEqual({ verified: 3, excluded: 0.5 });
     expect(await viewerHours(db, ids.b, period)).toEqual({ verified: 1, excluded: 0 });
   });

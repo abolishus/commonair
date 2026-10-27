@@ -85,8 +85,10 @@ export async function relayBytesByMember(
 }
 
 /**
- * Viewer-hours per channel owner: verified sessions (the owner watching themselves never
- * counts) and, for the statement, excluded sessions.
+ * Viewer-hours per channel owner: gate-eligible verified sessions (scored at least once and
+ * fetch-judged, the same rule as `GATE_ELIGIBLE` in @commonair/integrity, so an unjudged CDN
+ * session earns nothing; the owner watching themselves never counts) and, for the statement,
+ * excluded sessions.
  */
 export async function viewerHoursByMember(
   db: Executor,
@@ -98,7 +100,9 @@ export async function viewerHoursByMember(
   const rows = await db.execute<{ user_id: string; verified: number | string; excluded: number | string }>(sql`
     select c.owner_id as user_id,
       (coalesce(sum(ps.watch_seconds) filter (
-        where ps.verdict = 'verified' and ps.user_id is distinct from c.owner_id), 0) / 3600.0)::float8 as verified,
+        where ps.verdict = 'verified' and ps.scored_at is not null
+          and not ('fetch_unjudged' = any(coalesce(ps.verdict_reasons, '{}')))
+          and ps.user_id is distinct from c.owner_id), 0) / 3600.0)::float8 as verified,
       (coalesce(sum(ps.watch_seconds) filter (where ps.verdict = 'excluded'), 0) / 3600.0)::float8 as excluded
     from playback_sessions ps join channels c on c.id = ps.channel_id
     where ps.started_at >= ${iso(period.start)} and ps.started_at < ${iso(period.end)}

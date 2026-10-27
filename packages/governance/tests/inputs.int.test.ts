@@ -10,7 +10,12 @@ import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema as s, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
-import { eligibleHoursByUser, eligibleHoursForUsers, eligibleHoursForUsersSql } from "../src/inputs.ts";
+import {
+  contributionInputs,
+  eligibleHoursByUser,
+  eligibleHoursForUsers,
+  eligibleHoursForUsersSql,
+} from "../src/inputs.ts";
 
 let t: TestDatabase;
 let app: Database;
@@ -137,5 +142,27 @@ describe("eligibleHoursForUsers", () => {
       return rows.map((r) => Object.values(r)[0]).join("\n");
     });
     expect(plan).toContain("stream_hours_channel_idx");
+  });
+});
+
+describe("contributionInputs viewer hours", () => {
+  test("count gate-eligible verified sessions only: never-scored and fetch-unjudged ones earn nothing", async () => {
+    const o = await owner();
+    const session = (watchSeconds: number, extra: { scoredAt?: Date | null; verdictReasons?: string[] }) =>
+      app.insert(s.playbackSessions).values({
+        channelId: o.channelId,
+        deviceHash: `d${++seq}`,
+        ipHash: `i${seq}`,
+        watchSeconds,
+        verdict: "verified",
+        startedAt: at(1, 1),
+        scoredAt: at(1, 2),
+        ...extra,
+      });
+    await session(3600, {});
+    await session(7200, { scoredAt: null });
+    await session(10_800, { verdictReasons: ["fetch_unjudged"] });
+    const inputs = await contributionInputs(app, at(0), at(5), CAP);
+    expect(inputs.get(o.userId)?.viewerHours).toBe(1);
   });
 });
