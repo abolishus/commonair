@@ -251,7 +251,11 @@ export async function resolveIncidentOnPage(page: Page, incidentId: string, b: U
   await byE7Id(page, E.incidentRow, { "incident-id": incidentId, status: "resolved" }).waitFor(ui);
 }
 
-/** `/admin/integrity`: show every decision for the channel, then decide one flag with a reason. */
+/**
+ * `/admin/integrity`: list the channel's pending-review flags (the seeded flag's decision; also the
+ * page default, and re-clicking a chosen toggle keeps it), then decide one flag with a reason. The
+ * decided card stays listed with its new decision until the list loads again.
+ */
 export async function decideFlagOnPage(
   page: Page,
   input: { flagId: string; channel: string; decision: "allowed" | "excluded"; reason: string },

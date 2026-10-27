@@ -152,6 +152,13 @@ describe("integrity details allow-list", () => {
     expect(safeString("10.0.0.1")).toBe(false);
     expect(safeString("::1")).toBe(false);
     expect(safeString("[2001:db8::1]")).toBe(false);
+    expect(safeString("[2001:db8::1]:443")).toBe(false);
+    expect(safeString("2001:db8::/32")).toBe(false);
+    expect(safeString("fe80::1%eth0")).toBe(false);
+    expect(safeString("::ffff:192.0.2.1")).toBe(false);
+    // Hex-and-colons values that are not addresses stay.
+    expect(safeString("12:00:00")).toBe(true);
+    expect(safeString("ab:cd:ef")).toBe(true);
   });
   test("never allows obvious personal keys", () => {
     for (const k of ["ip", "ipHash", "userAgent", "fingerprint", "deviceHash", "email", "userId"])

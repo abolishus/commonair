@@ -53,23 +53,48 @@ const draftOf = (i: IncidentDto): IncidentDraft => ({
   previous: i.status,
 });
 
-/** Merge locally written incidents over the (briefly cached) status page answer, newest first. */
+/**
+ * How long a status answer may still predate a write: `instance.status` is cached for 10 s on the
+ * server, plus a margin for the round trip.
+ */
+export const STATUS_STALE_MS = 12_000;
+
+/** An incident saved from this tab, and when (client clock) the API acknowledged it. */
+export interface WrittenIncident {
+  incident: IncidentDto;
+  at: number;
+}
+
+/** A written copy still beats a status answer requested at `requestedAt` (it may predate the write). */
+export const writtenIsNewer = (w: WrittenIncident, requestedAt: number): boolean =>
+  requestedAt < w.at + STATUS_STALE_MS;
+
+/**
+ * Merge incidents written in this tab over a status answer requested at `requestedAt`, newest
+ * first. A written copy only counts while that answer could still be the cached one from before
+ * the write; after that the server's row wins, so another admin's later edit shows here too.
+ */
 export function mergeIncidents(
   loaded: readonly IncidentDto[],
-  written: ReadonlyMap<string, IncidentDto>,
+  written: ReadonlyMap<string, WrittenIncident>,
+  requestedAt: number,
 ): IncidentDto[] {
-  const out = loaded.map((i) => written.get(i.id) ?? i);
-  for (const [id, i] of written) if (!loaded.some((l) => l.id === id)) out.push(i);
+  const fresh = new Map([...written].filter(([, w]) => writtenIsNewer(w, requestedAt)));
+  const out = loaded.map((i) => fresh.get(i.id)?.incident ?? i);
+  for (const [id, w] of fresh) if (!loaded.some((l) => l.id === id)) out.push(w.incident);
   return out.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
 }
 
 /** `/admin/incidents`: open and recent incidents (from `instance.status`), and the form to open or update one. */
 export function IncidentsPage({ client: clientProp }: { client?: IncidentsClient }): React.JSX.Element {
   const [client] = React.useState(() => clientProp ?? incidentsClient());
-  const status = useLoad("status", () => client.status());
-  const [written, setWritten] = React.useState<Map<string, IncidentDto>>(() => new Map());
+  const status = useLoad("status", async () => {
+    const requestedAt = Date.now();
+    return { ...(await client.status()), requestedAt };
+  });
+  const [written, setWritten] = React.useState<Map<string, WrittenIncident>>(() => new Map());
   const [draft, setDraft] = React.useState<IncidentDraft | null>(null);
-  const incidents = status.data ? mergeIncidents(status.data.incidents, written) : null;
+  const incidents = status.data ? mergeIncidents(status.data.incidents, written, status.data.requestedAt) : null;
   const known = status.data?.components.map((c) => c.id) ?? [];
 
   const save = async (d: IncidentDraft) => {
@@ -82,17 +107,24 @@ export function IncidentsPage({ client: clientProp }: { client?: IncidentsClient
     };
     const { id } = await client.write(input);
     const now = new Date().toISOString();
-    const before = d.id ? (written.get(d.id) ?? status.data?.incidents.find((i) => i.id === d.id)) : undefined;
+    const mine = d.id ? written.get(d.id) : undefined;
+    const before = d.id
+      ? ((mine && status.data && writtenIsNewer(mine, status.data.requestedAt) ? mine.incident : undefined) ??
+        status.data?.incidents.find((i) => i.id === d.id))
+      : undefined;
     const resolvedAt = input.status === "resolved" ? (before?.resolvedAt ?? now) : null;
     setWritten((prev) =>
       new Map(prev).set(id, {
-        id,
-        title: input.title,
-        status: input.status,
-        components: input.components,
-        body: input.body,
-        startedAt: before?.startedAt ?? now,
-        resolvedAt,
+        at: Date.now(),
+        incident: {
+          id,
+          title: input.title,
+          status: input.status,
+          components: input.components,
+          body: input.body,
+          startedAt: before?.startedAt ?? now,
+          resolvedAt,
+        },
       }),
     );
     setDraft(null);

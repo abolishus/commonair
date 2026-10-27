@@ -6,6 +6,7 @@
  * (`packages/integrity/src/jobs.ts`). An `allowed` decision on a session or account flag is an
  * allowance the scorer honours from `decided_at` on (`packages/integrity/src/allowance.ts`).
  */
+import { isIPv6 } from "node:net";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { INTEGRITY_DECISIONS, INTEGRITY_SUBJECTS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
@@ -87,14 +88,24 @@ export const DETAIL_KEYS: ReadonlySet<string> = new Set([
 
 /** An IPv4 address anywhere in the string (also CIDRs and `ip:port`). */
 const IPV4 = /(?:^|[^\d.])\d{1,3}(?:\.\d{1,3}){3}(?:$|[^\d.])/;
-/** A bare IPv6 address (hex and colons, optionally with an embedded IPv4 or a prefix length). */
-const IPV6 = /^\[?[0-9a-f:]*:[0-9a-f:]*:[0-9a-f:.]*\]?(?:\/\d{1,3})?$/i;
+/**
+ * An IPv6 address, bracketed (with an optional port), with a prefix length or a zone. Parsed with
+ * `node:net` rather than a hex-and-colons pattern, which would also drop values like `12:00:00`.
+ */
+function isIPv6Like(v: string): boolean {
+  const bare = v
+    .trim()
+    .replace(/^\[([^\]]*)\](?::\d{1,5})?$/, "$1")
+    .replace(/\/\d{1,3}$/, "")
+    .replace(/%[\w.-]+$/, "");
+  return isIPv6(bare);
+}
 const MAX_STRING = 200;
 const MAX_DEPTH = 3;
 
 /** A string that is safe to show: short, and not an address even under an allowed key. */
 export function safeString(v: string): boolean {
-  return v.length <= MAX_STRING && !IPV4.test(v) && !IPV6.test(v);
+  return v.length <= MAX_STRING && !IPV4.test(v) && !isIPv6Like(v);
 }
 
 function clean(v: unknown, depth: number): unknown {
@@ -151,8 +162,10 @@ export async function listFlags(deps: Deps, input: FlagsInput) {
     if (!c) return { items: [], nextCursor: null };
     channelId = c.id;
   }
+  // The cursor carries the exact microsecond value: a JS Date keeps only milliseconds, and the
+  // jobs insert whole batches sharing one `now()`, so a truncated cursor would skip rows.
   const rows = await deps.db
-    .select()
+    .select({ row: f, t: sql<string>`to_char(${f.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')` })
     .from(f)
     .where(
       and(
@@ -164,7 +177,12 @@ export async function listFlags(deps: Deps, input: FlagsInput) {
     )
     .orderBy(desc(f.createdAt), desc(f.id))
     .limit(input.limit + 1);
-  return pageOf(rows, input.limit, toFlag, (last) => encodeCursor({ t: iso(last.createdAt), id: last.id }));
+  return pageOf(
+    rows,
+    input.limit,
+    (r) => toFlag(r.row),
+    (last) => encodeCursor({ t: last.t, id: last.row.id }),
+  );
 }
 
 /**

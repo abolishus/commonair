@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** E7-admin over HTTP: egress report, status-page incidents, integrity flags and decisions. */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema } from "@commonair/db";
 import { scoreActiveSessions } from "@commonair/integrity";
@@ -289,6 +289,51 @@ describe("integrity.flags and integrity.decide", () => {
     expect((await list(admin, "subjectType=relay")).body.items).toHaveLength(1);
     expect((await list(admin, "channel=nobody_here")).body).toEqual({ items: [], nextCursor: null });
     expect((await list(admin, "cursor=garbage")).status).toBe(400);
+  });
+
+  test("keyset paging keeps microsecond ties across a page boundary", async () => {
+    // The jobs insert batches sharing one `now()`, which Postgres keeps to the microsecond.
+    const carol = await signUpAndSignIn(api);
+    const chan = await channelId(carol.username);
+    const at = (t: string) => sql`${t}::timestamptz`;
+    const seeded: string[] = [];
+    for (const t of [
+      "2026-08-01T00:00:00.123456Z",
+      "2026-08-01T00:00:00.123456Z",
+      "2026-08-01T00:00:00.123456Z",
+      // Between the millisecond truncation (.123) and the batch (.123456).
+      "2026-08-01T00:00:00.1232Z",
+      "2026-08-01T00:00:00.122Z",
+    ]) {
+      const [f] = await db()
+        .insert(schema.integrityFlags)
+        .values({
+          subjectType: "session",
+          subjectId: crypto.randomUUID(),
+          signal: "datacenter_ip",
+          score: 0.6,
+          details: {},
+          channelId: chan,
+          createdAt: at(t),
+        })
+        .returning({ id: schema.integrityFlags.id });
+      if (!f) throw new Error("no flag");
+      seeded.push(f.id);
+    }
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 5; i++) {
+      const r: Awaited<ReturnType<typeof list>> = await list(
+        admin,
+        `channel=${carol.username}&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+      );
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      seen.push(...r.body.items.map((f) => f.id));
+      cursor = r.body.nextCursor;
+      if (!cursor) break;
+    }
+    const batch = seeded.slice(0, 3).sort((a, b) => b.localeCompare(a));
+    expect(seen).toEqual([...batch, seeded[3], seeded[4]]);
   });
 
   test("details leave the API without personal data", async () => {

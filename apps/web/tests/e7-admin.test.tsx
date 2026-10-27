@@ -26,7 +26,7 @@ import {
   parseComponents,
   toUtcInput,
 } from "../src/components/admin/forms.ts";
-import { IncidentsPage, mergeIncidents } from "../src/components/admin/incidents.tsx";
+import { IncidentsPage, STATUS_STALE_MS, mergeIncidents } from "../src/components/admin/incidents.tsx";
 import { IntegrityPage, flagFilters } from "../src/components/admin/integrity.tsx";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
@@ -259,15 +259,17 @@ describe("incidents page", () => {
   it("merges written incidents over the loaded ones, newest first", () => {
     const newer = { ...incident, id: "n", startedAt: "2026-10-27T11:30:00.000Z" };
     const edited = { ...incident, status: "monitoring" as const };
-    expect(
-      mergeIncidents(
-        [incident],
-        new Map([
-          [incident.id, edited],
-          ["n", newer],
-        ]),
-      ),
-    ).toEqual([newer, edited]);
+    const at = 1_000_000;
+    const written = new Map([
+      [incident.id, { incident: edited, at }],
+      ["n", { incident: newer, at }],
+    ]);
+    // An answer that may still be the cached one from before the write: the written copies win.
+    expect(mergeIncidents([incident], written, at + 1_000)).toEqual([newer, edited]);
+    expect(mergeIncidents([incident], written, at + STATUS_STALE_MS - 1)).toEqual([newer, edited]);
+    // A newer answer is authoritative, e.g. after another admin resolved it.
+    const resolvedElsewhere = { ...incident, status: "resolved" as const, resolvedAt: "2026-10-27T12:00:00.000Z" };
+    expect(mergeIncidents([resolvedElsewhere], written, at + STATUS_STALE_MS)).toEqual([resolvedElsewhere]);
   });
 });
 
@@ -323,6 +325,17 @@ describe("integrity page", () => {
     await waitFor(() => expect(flags).toHaveBeenLastCalledWith({ subjectType: "relay", channel: "alice" }, undefined), {
       timeout: 2000,
     });
+  });
+
+  it("hides the list while the channel filter is invalid", async () => {
+    const flags = vi.fn<IntegrityClient["flags"]>(async () => ({ items: [flag], nextCursor: null }));
+    wrap(<IntegrityPage client={{ flags, decide: vi.fn<IntegrityClient["decide"]>() }} />);
+    await screen.findByTestId("integrityq-item");
+    fireEvent.change(tid("integrityq-channel"), { target: { value: "a b" } });
+    expect(await screen.findByText("Not a channel name.")).toBeTruthy();
+    expect(screen.queryByTestId("integrityq-item")).toBeNull();
+    fireEvent.change(tid("integrityq-channel"), { target: { value: "" } });
+    expect(await screen.findByTestId("integrityq-item")).toBeTruthy();
   });
 
   it("decides with a required reason and shows the new decision", async () => {

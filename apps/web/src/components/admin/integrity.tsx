@@ -118,21 +118,26 @@ export function IntegrityPage({ client: clientProp }: { client?: IntegrityClient
           )}
         </Field>
       </div>
-      <FlagList
-        flags={items}
-        failed={flags.failed}
-        onRetry={flags.reload}
-        onDecide={async (flag, to, reason) => {
-          const updated = await client.decide({ id: flag.id, decision: to, reason });
-          setDecided((prev) => new Map(prev).set(updated.id, updated));
-        }}
-      />
-      {flags.hasMore && (
-        <div>
-          <Button variant="ghost" size="sm" disabled={flags.loadingMore} onClick={flags.loadMore}>
-            {t("admin.integrity.loadMore")}
-          </Button>
-        </div>
+      {/* An invalid channel would otherwise leave the previous channel's flags on screen. */}
+      {channelCheck.ok && (
+        <>
+          <FlagList
+            flags={items}
+            failed={flags.failed}
+            onRetry={flags.reload}
+            onDecide={async (flag, to, reason) => {
+              const updated = await client.decide({ id: flag.id, decision: to, reason });
+              setDecided((prev) => new Map(prev).set(updated.id, updated));
+            }}
+          />
+          {flags.hasMore && (
+            <div>
+              <Button variant="ghost" size="sm" disabled={flags.loadingMore} onClick={flags.loadMore}>
+                {t("admin.integrity.loadMore")}
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
