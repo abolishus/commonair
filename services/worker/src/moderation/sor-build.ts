@@ -16,7 +16,7 @@ import { EnforcementStatement } from "@commonair/contracts/dto";
 import { REPORT_REASONS, type MODERATION_SUBJECTS, type ModerationCategory } from "@commonair/contracts/enums";
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import { groundFor, parseThresholds, type ClauseInput, type Thresholds } from "@commonair/moderation";
-import { and, asc, desc, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNotNull, lte, notInArray, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
 import { allowlisted, expectsStatement, isSourceAction, SOR_DETAILS, type SorDetails } from "./sor-schemas.ts";
@@ -259,6 +259,9 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
     case "moderation.case.end_stream":
     case "moderation.case.suspend": {
       const x = d as SorDetails["moderation.case.warn" | "moderation.case.end_stream" | "moderation.case.suspend"];
+      // The writer ends a stream only for a live broadcast case: otherwise nothing was restricted.
+      if (x.decision === "end_stream" && !(d as SorDetails["moderation.case.end_stream"]).streamEnded)
+        return { kind: "none", reason: "no_restriction" };
       const c = await l.moderationCase(x.caseId);
       if (!c) return { kind: "invalid", reason: "case" };
       const human = c.origin === "human";
@@ -301,29 +304,39 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
         };
       }
       const s = d as SorDetails["moderation.case.suspend"];
-      const endsAt = s.durationSeconds ? iso(new Date(row.createdAt.getTime() + s.durationSeconds * 1000)) : null;
+      const wantsUser = s.suspendTarget !== "channel" && s.userSuspended !== false;
+      const wantsChannel = s.suspendTarget !== "user" && s.channelSuspended !== false;
+      if (!wantsUser && !wantsChannel) return { kind: "none", reason: "no_restriction" };
       const out: Statement[] = [];
-      const userTarget = s.suspendTarget !== "channel" ? subject : null;
+      const userTarget = wantsUser ? subject : null;
       if (userTarget)
         out.push(
           statement(base, {
             recipientUserId: userTarget,
             channelId,
             content: { type: "account", id: userTarget },
-            restriction: { kind: "account", detail: "suspended", endsAt },
+            // The account ban carries the duration (`users.ban_expires`).
+            restriction: {
+              kind: "account",
+              detail: "suspended",
+              endsAt: s.durationSeconds ? iso(new Date(row.createdAt.getTime() + s.durationSeconds * 1000)) : null,
+            },
           }),
         );
-      if (s.suspendTarget !== "user" && channelId) {
+      if (wantsChannel && channelId) {
         const owner = await l.channelOwner(channelId);
-        // One statement per recipient (unique per audit row): when the account and the channel
-        // belong to the same person, the account statement covers both.
+        // One statement per recipient (unique per audit row and recipient): when the account and
+        // the channel belong to the same person only the account statement fits, so the channel
+        // suspension goes unstated until the key includes the content (contract request).
         if (owner && owner !== userTarget)
           out.push(
             statement(base, {
               recipientUserId: owner,
               channelId,
               content: { type: "channel", id: channelId },
-              restriction: { kind: "service", detail: "suspended", endsAt },
+              // A moderation channel suspension has no expiry (`channels.suspended_at` only):
+              // the requested duration is not an end date anything enforces.
+              restriction: { kind: "service", detail: "suspended", endsAt: null },
             }),
           );
       }
@@ -581,38 +594,72 @@ export function toRow(s: Statement): typeof enforcementStatements.$inferInsert {
   };
 }
 
+/**
+ * A keyset position at the database's own precision: `created_at` as timestamptz text, since a
+ * JS `Date` drops the microseconds `now()` stores and would re-select rows across a boundary.
+ */
+export interface AuditCursor {
+  at: string;
+  id: string;
+}
+export type PendingRow = AuditRow & { cursor: AuditCursor };
+
 /** Allowlisted, expected-statement audit rows with no statement yet, oldest first, after a keyset cursor. */
 export async function pendingAuditRows(
   db: Executor,
-  opts: { limit: number; after?: { createdAt: Date; id: string }; olderThan?: Date },
-): Promise<AuditRow[]> {
+  opts: {
+    limit: number;
+    after?: AuditCursor;
+    olderThan?: Date;
+    /** Only rows written at or after this (the builder's window). */
+    since?: Date;
+    /** Audit ids to leave out (rows the builder already found unreadable). */
+    exclude?: readonly string[];
+  },
+): Promise<PendingRow[]> {
   const a = auditLog;
-  return db
-    .select({ id: a.id, action: a.action, channelId: a.channelId, details: a.details, createdAt: a.createdAt })
+  const rows = await db
+    .select({
+      id: a.id,
+      action: a.action,
+      channelId: a.channelId,
+      details: a.details,
+      createdAt: a.createdAt,
+      cursorAt: sql<string>`${a.createdAt}::text`,
+    })
     .from(a)
     .where(
       and(
         allowlisted(a),
-        expectsStatement(a),
-        sql`not exists (select 1 from ${enforcementStatements} s where s.source_audit_id = ${a.id})`,
+        opts.since ? gte(a.createdAt, opts.since) : undefined,
         opts.olderThan ? lte(a.createdAt, opts.olderThan) : undefined,
         opts.after
-          ? or(
-              gt(a.createdAt, opts.after.createdAt),
-              and(eq(a.createdAt, opts.after.createdAt), gt(a.id, opts.after.id)),
-            )
+          ? sql`(${a.createdAt}, ${a.id}) > (${opts.after.at}::timestamptz, ${opts.after.id}::uuid)`
           : undefined,
+        opts.exclude && opts.exclude.length > 0 ? notInArray(a.id, [...opts.exclude]) : undefined,
+        expectsStatement(a),
+        sql`not exists (select 1 from ${enforcementStatements} s where s.source_audit_id = ${a.id})`,
       ),
     )
     .orderBy(asc(a.createdAt), asc(a.id))
     .limit(opts.limit);
+  return rows.map(({ cursorAt, ...r }) => ({ ...r, cursor: { at: cursorAt, id: r.id } }));
 }
 
 /**
- * Audit ids already logged as unreadable by this process: a bad row is re-selected every run
- * (the coverage sweep keeps reporting it), but logged and counted once per process.
+ * How far back each run looks. Older gaps are the coverage sweep's to report: without a bound
+ * every run re-reads the whole allowlisted history, and grows with it.
  */
-const reported = new Set<string>();
+export const BUILD_WINDOW_MS = 7 * 24 * 60 * 60_000;
+/** How long an unreadable row is left out of runs before this process tries it again. */
+export const UNREADABLE_RETRY_MS = 60 * 60_000;
+
+/**
+ * Audit ids this process found unreadable, with when it last tried them. A bad row is logged and
+ * counted once per process, and left out of runs for `UNREADABLE_RETRY_MS`, so a pile of them
+ * cannot keep newer rows out of a run's batches.
+ */
+const unreadable = new Map<string, number>();
 
 export interface BuildResult {
   scanned: number;
@@ -649,9 +696,11 @@ export async function buildStatements(
     return out;
   }
   const lookup = dbLookup(ctx.db, { guidelinesId, noticeId });
-  let after: { createdAt: Date; id: string } | undefined;
+  const since = new Date(now.getTime() - BUILD_WINDOW_MS);
+  const exclude = [...unreadable].flatMap(([id, at]) => (now.getTime() - at < UNREADABLE_RETRY_MS ? [id] : []));
+  let after: AuditCursor | undefined;
   for (let i = 0; i < maxBatches; i++) {
-    const rows = await pendingAuditRows(ctx.db, { limit: batch, ...(after ? { after } : {}) });
+    const rows = await pendingAuditRows(ctx.db, { limit: batch, since, exclude, ...(after ? { after } : {}) });
     for (const row of rows) {
       out.scanned += 1;
       let plan: Plan;
@@ -663,8 +712,7 @@ export async function buildStatements(
       }
       if (plan.kind === "invalid") {
         out.failures += 1;
-        if (!reported.has(row.id)) {
-          reported.add(row.id);
+        if (!unreadable.has(row.id)) {
           moderationMetrics.sorBuildFailures.add(1, { action: row.action });
           ctx.logger.error("statement of reasons not built for an audit row", {
             alert: "sor_build_failed",
@@ -673,8 +721,10 @@ export async function buildStatements(
             reason: plan.reason,
           });
         }
+        unreadable.set(row.id, now.getTime());
         continue;
       }
+      unreadable.delete(row.id);
       if (plan.kind === "none") {
         out.none += 1;
         continue;
@@ -683,7 +733,7 @@ export async function buildStatements(
     }
     const last = rows.at(-1);
     if (!last || rows.length < batch) break;
-    after = { createdAt: last.createdAt, id: last.id };
+    after = last.cursor;
   }
   if (out.inserted > 0) moderationMetrics.sorStatements.add(out.inserted);
   return out;

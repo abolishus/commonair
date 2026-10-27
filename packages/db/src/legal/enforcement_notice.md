@@ -15,8 +15,8 @@ Statements made under an unreviewed draft of this notice say so.
 ## About this statement
 
 A statement is a record of one decision. It is sent by email and is listed on your account's
-appeals page ({{publicUrl}}/settings/appeals), which you can read even while your account is
-suspended. It says:
+appeals page ({{publicUrl}}/settings/appeals). A suspended account cannot sign in again, so
+the page then works only where you are still signed in. It says:
 
 - **what we restricted**: the content or account, the kind of restriction (removed, disabled,
   hidden behind the mature label, limited, suspended, or a warning with no restriction) and when
@@ -100,6 +100,13 @@ Harassment, threats, stalking and encouraging others to target someone are not a
 
 Attacking people for who they are is not allowed.
 
+<!-- clause: decency.intimate-images -->
+
+### Intimate images without consent (our guidelines)
+
+Sharing intimate images of a person without their consent is not allowed. A decision under this
+rule applies our guidelines; it is not a finding by a court.
+
 <!-- clause: honesty.impersonation -->
 
 ### Impersonation
@@ -140,8 +147,8 @@ you who made the request.
 <!-- section: redress -->
 
 If you think we got it wrong, you can appeal from your account's appeals page
-({{publicUrl}}/settings/appeals), also while your account is suspended. Someone other than the
-person who made the decision reviews your appeal when possible. You can also write to
-{{contacts.abuse}}. If you live in the European Union, you may be able to take the dispute to a
+({{publicUrl}}/settings/appeals) while you are signed in. If you cannot reach it, write to
+{{contacts.abuse}} and quote your statement's reference. Someone other than the person who made the decision reviews
+your appeal when possible. If you live in the European Union, you may be able to take the dispute to a
 certified out-of-court dispute settlement body; the operator of {{instanceName}} names the body
 it works with here once it has chosen one. You can always go to the courts.

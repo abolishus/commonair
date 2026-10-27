@@ -13,5 +13,6 @@
   { "id": "honesty.spam", "version": 1, "ground": "terms", "legalBasis": null },
   { "id": "creative.copyright", "version": 1, "ground": "terms", "legalBasis": null },
   { "id": "guidelines.general", "version": 1, "ground": "terms", "legalBasis": null },
-  { "id": "illegal.ncii", "version": 1, "ground": "illegal", "legalBasis": "us.take-it-down" }
+  { "id": "illegal.ncii", "version": 1, "ground": "illegal", "legalBasis": "us.take-it-down" },
+  { "id": "decency.intimate-images", "version": 1, "ground": "terms", "legalBasis": null }
 ]

@@ -64,7 +64,7 @@ const CATEGORY_CLAUSES: Record<string, string> = {
 
 /**
  * What the selectors table says an audit row's statements look like, or null when it produces
- * none (`ncii.decide` rejected, a CSAM-list T0 match). Pure, so the harness tests check it
+ * none (`ncii.decide` rejected, a CSAM-list T0 match, a decision that restricted nothing). Pure, so the harness tests check it
  * against the table.
  */
 export function expectedStatement(row: AuditRow): Expected | null {
@@ -93,13 +93,18 @@ export function expectedStatement(row: AuditRow): Expected | null {
     case "moderation.case.warn":
       return { restrictions: ["warning/none"], clauseIds: "any", appealSubjectType: "moderation_case" };
     case "moderation.case.end_stream":
-      return { restrictions: ["visibility/removed"], clauseIds: "any", appealSubjectType: "moderation_case" };
-    case "moderation.case.suspend":
-      return {
-        restrictions: ["account/suspended", "service/suspended"],
-        clauseIds: "any",
-        appealSubjectType: "moderation_case",
-      };
+      // The writer ends a stream only on a live broadcast case; otherwise nothing was restricted.
+      return d.streamEnded === false
+        ? null
+        : { restrictions: ["visibility/removed"], clauseIds: "any", appealSubjectType: "moderation_case" };
+    case "moderation.case.suspend": {
+      const user = d.suspendTarget !== "channel" && d.userSuspended !== false;
+      const channel = d.suspendTarget !== "user" && d.channelSuspended !== false;
+      const restrictions = [...(user ? ["account/suspended"] : []), ...(channel ? ["service/suspended"] : [])];
+      return restrictions.length === 0
+        ? null
+        : { restrictions, clauseIds: "any", appealSubjectType: "moderation_case" };
+    }
     case "ncii.decide":
       return d.decision === "removed"
         ? { restrictions: ["visibility/removed"], clauseIds: ["illegal.ncii"], appealSubjectType: "ncii_request_item" }

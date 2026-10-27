@@ -112,17 +112,15 @@ async function statement(
 ): Promise<string> {
   const auditId = uuidv7();
   const action = s.action ?? "moderation.t1.restrict";
-  await db()
-    .insert(schema.auditLog)
-    .values({
-      id: auditId,
-      actorType: "system",
-      action,
-      subjectType: "test",
-      subjectId: auditId,
-      details: {},
-      createdAt: at,
-    });
+  await db().insert(schema.auditLog).values({
+    id: auditId,
+    actorType: "system",
+    action,
+    subjectType: "test",
+    subjectId: auditId,
+    details: {},
+    createdAt: at,
+  });
   const id = uuidv7();
   const appeal = s.appeal === undefined ? { type: "moderation_case", id: uuidv7() } : s.appeal;
   const [kind, detail] = s.restriction ?? ["visibility", "restricted"];
@@ -266,6 +264,29 @@ describe("me.enforcement.list", () => {
       clauseTitle: en.enforcementStatement["clause.illegal.ncii"],
     });
     expect(JSON.stringify(s)).not.toContain(t0);
+  });
+  test("a T1 statement whose case was escalated to T0 since offers no appeal (appeals would refuse it)", async () => {
+    const caseId = await makeCase(alice.userId);
+    const id = await statement(alice.userId, new Date(), { appeal: { type: "moderation_case", id: caseId } });
+    expect((await list(alice, undefined, 50)).body.items.find((x) => x.id === id)?.appeal).toEqual({
+      kind: "moderation",
+      subjectType: "moderation_case",
+      subjectId: caseId,
+    });
+    // `moderation.review` with `escalate_legal` moves the case to T0.
+    await db()
+      .update(schema.moderationCases)
+      .set({ tier: "t0", origin: "human" })
+      .where(eq(schema.moderationCases.id, caseId));
+    const s = (await list(alice, undefined, 50)).body.items.find((x) => x.id === id)!;
+    expect(s).toMatchObject({ appeal: null, moderatorNote: null, reversedAt: null });
+    const filed = await alice.client.call("POST", "/api/appeals", {
+      kind: "moderation",
+      subjectType: "moderation_case",
+      subjectId: caseId,
+      body: "This should not be offered.",
+    });
+    expect(filed.status).toBe(404);
   });
 });
 

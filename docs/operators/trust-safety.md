@@ -194,7 +194,16 @@ The application role and governance votes cannot release a hold.
     T0 match on an NCII hash list, produces one statement per affected user (for NCII, one per
     owner of the affected content; never the requester). A T0 match on a CSAM list produces none,
     and a channel moderator's chat ban, timeout or message deletion never does (counsel to confirm
-    the CSAM answer). Report resolutions and admin suspensions get statements in a later release.
+    the CSAM answer). A decision that restricted nothing gets none either: an "end stream" on a
+    case that is not a live stream. Report resolutions and admin suspensions get statements in a
+    later release.
+  - **Known limits, for counsel.** A statement names one piece of content, and there is one per
+    action and person. So an NCII owner with several affected items gets one statement naming
+    their first item (the others are restricted too but not listed, and are appealed by writing
+    to the contact address). When a case suspends both an account and a channel that belong to
+    the same person, the statement covers the account suspension only. A suspended channel has
+    no end date (moderation channel suspensions do not expire on their own), so its statement
+    gives none, whatever duration the moderator chose.
   - **What it says.** The restriction and its end, that it applies everywhere, the facts (the
     governance threshold in force for automated decisions, never the classifier's score; for
     NCII the request id and its times, never who sent it), whether it followed a notice or your
@@ -204,9 +213,11 @@ The application role and governance votes cannot release a hold.
     whose cases are hidden from appeals), the out-of-court body your notice names, and the courts.
   - **How it is delivered.** The worker's `sor-build` job builds statements from `audit_log`
     every 15 seconds, then sends an in-app notification and an email in the user's language.
-    The email carries every element on its own (see the sign-in note below). Users read their
-    statements on `/settings/appeals` and through `GET /me/enforcement`, also while suspended,
-    and file an appeal from there. Each statement is in the user's data export
+    The email carries every element on its own (see the sign-in note below). A failed email is
+    retried with exponential backoff (1, 3, 7, 15 … minutes after it was built, 12 attempts over
+    about 34 hours), then logged with `alert: sor_delivery_exhausted`. Users read their
+    statements on `/settings/appeals` and through `GET /me/enforcement`, and file an appeal from
+    there (a suspended user only from a session that is still signed in). Each statement is in the user's data export
     (`enforcement_statements.json`).
   - **What you review.** The `enforcement_notice` text (the seeded one is an unreviewed draft, and
     every statement records the notice version it was sent under, so you can list the ones sent
@@ -218,13 +229,17 @@ The application role and governance votes cannot release a hold.
   - **Monitoring.** `sor_missing_statements` (daily `sor-coverage` sweep: actions older than five
     minutes with no statement; the target is 0, and a non-zero value logs the audit ids with
     `alert: sor_coverage`), `sor_build_failures_total{action}` (an action whose audit details the
-    builder cannot read: a code change in an action writer) and `sor_deliveries_total`.
+    builder cannot read: a code change in an action writer) and `sor_deliveries_total`. The
+    builder only looks at the last seven days; an older action without a statement is reported
+    by the sweep and not built automatically.
   - **Suspended users and sign-in.** The auth library's banned-user check refuses sign-in for a
     suspended account (`moderation`, `t0_hash_match` or DMCA suspension): the user cannot start a
     new session, and only a session created before the suspension can still read
     `/settings/appeals` and file an appeal. For a user without such a session, **the statement
-    email is their only channel**, which is why it is complete on its own and why your notice's
-    redress section should give a contact address.
+    email is their only channel**, which is why it is complete on its own and, for an account
+    suspension, tells the user to write to your abuse address when they cannot sign in. Keep a
+    contact address in your notice's redress section, and treat a message quoting a statement
+    reference as an appeal.
   - **DSA Transparency Database.** Online platforms must also submit statements to the
     Commission's database (Art. 24(5)). The adapter for it does not exist; it would be optional
     and off by default. Until then, submitting is your manual task if it applies to you.

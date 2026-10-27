@@ -289,7 +289,11 @@ export const en = {
     groundIllegal: "Illegal content: {clause} ({ref}), under {legalBasis}",
     explanationLabel: "What the rule says",
     redressHeading: "How to challenge this decision",
-    appeal: "You can appeal on your appeals page, also while your account is suspended.",
+    appeal:
+      "You can appeal on your appeals page while you are signed in. If you cannot reach it, write to {contact} and quote the reference above.",
+    // A suspended account cannot start a new session: only one still signed in reaches the page.
+    appealSuspended:
+      "Your account is suspended, so you may not be able to sign in. If you are still signed in on a device, you can appeal on your appeals page. Otherwise, write to {contact} and quote the reference above.",
     noAppeal: "This decision cannot be appealed on the appeals page. If you think it is wrong, write to {contact}.",
     courts:
       "You can also take the dispute to an out-of-court dispute settlement body where one is available to you, or to the courts.",
@@ -327,6 +331,7 @@ export const en = {
     "clause.safety.illegal-activity": "Illegal activity",
     "clause.decency.harassment": "Harassment",
     "clause.decency.hate": "Hateful conduct",
+    "clause.decency.intimate-images": "Intimate images shared without consent",
     "clause.honesty.impersonation": "Impersonation",
     "clause.honesty.spam": "Spam and scams",
     "clause.creative.copyright": "Other people's creative work",

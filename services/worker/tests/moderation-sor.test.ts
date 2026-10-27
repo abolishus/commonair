@@ -19,7 +19,7 @@ import {
   type SorLookup,
   type Statement,
 } from "../src/moderation/sor-build.ts";
-import { statementMail, statementRef } from "../src/moderation/sor-deliver.ts";
+import { MAX_DELIVERY_ATTEMPTS, nextAttemptAt, statementMail, statementRef } from "../src/moderation/sor-deliver.ts";
 
 const id = () => uuidv7();
 const AT = new Date("2026-10-27T12:00:00Z");
@@ -303,9 +303,29 @@ describe("decision 3, row by row", () => {
     });
   });
 
-  test("moderation.case.suspend, channel, indefinite → service/suspended on the channel, to its owner", async () => {
+  test("moderation.case.end_stream that ended no stream (a clip case) → no statement", async () => {
     const w = world();
-    const d = caseRow("suspend", { suspendTarget: "channel", durationSeconds: null });
+    const d = caseRow("end_stream", { streamEnded: false });
+    w.cases.set(d.caseId, {
+      origin: "human",
+      category: null,
+      subjectType: "clip",
+      subjectId: id(),
+      userId: owner,
+      channelId,
+    });
+    expect(await planStatements(row("moderation.case.end_stream", d), lookup(w))).toEqual({
+      kind: "none",
+      reason: "no_restriction",
+    });
+    // The writer always records `streamEnded`; a row without it is drift, not "nothing happened".
+    const { streamEnded: _, ...drifted } = caseRow("end_stream");
+    expect((await planStatements(row("moderation.case.end_stream", drifted), lookup(w))).kind).toBe("invalid");
+  });
+
+  test("moderation.case.suspend, channel, with a duration → service/suspended with no end date (the writer sets none)", async () => {
+    const w = world();
+    const d = caseRow("suspend", { suspendTarget: "channel", durationSeconds: 3600 });
     w.cases.set(d.caseId, {
       origin: "classifier",
       category: "sexual",
@@ -354,6 +374,36 @@ describe("decision 3, row by row", () => {
     });
     const one = statements(await planStatements(row("moderation.case.suspend", same), lookup(w)));
     expect(one.map((s) => s.restriction.kind)).toEqual(["account"]);
+    // The account ban carries the duration; the channel suspension never ends on its own.
+    expect(out.find((s) => s.restriction.kind === "account")?.restriction.endsAt).toBe(
+      new Date(AT.getTime() + 60_000).toISOString(),
+    );
+    expect(out.find((s) => s.restriction.kind === "service")?.restriction.endsAt).toBeNull();
+  });
+
+  test("moderation.case.suspend: a target the writer skipped gets no statement", async () => {
+    const w = world();
+    const facts = {
+      origin: "classifier" as const,
+      category: "weapons" as const,
+      subjectType: "broadcast" as const,
+      subjectId: id(),
+      userId: owner,
+      channelId,
+    };
+    // An account under a T0 ban is not re-suspended: only the channel suspension is stated, and
+    // with the account statement gone the owner gets that one.
+    const t0 = caseRow("suspend", { suspendTarget: "both", durationSeconds: 60, userSuspended: false });
+    w.cases.set(t0.caseId, facts);
+    const out = statements(await planStatements(row("moderation.case.suspend", t0), lookup(w)));
+    expect(out.map((s) => [s.recipientUserId, s.restriction.kind])).toEqual([[owner, "service"]]);
+    // Nothing applied at all → no statement.
+    const none = caseRow("suspend", { suspendTarget: "user", durationSeconds: null, userSuspended: false });
+    w.cases.set(none.caseId, facts);
+    expect(await planStatements(row("moderation.case.suspend", none), lookup(w))).toEqual({
+      kind: "none",
+      reason: "no_restriction",
+    });
   });
 
   test("moderation.case.clear and moderation.case.escalate_legal → not allowlisted", async () => {
@@ -559,5 +609,17 @@ describe("the mail of a stored statement", () => {
       facts: { code: "classifier", threshold: 0.93 },
     });
     expect(mail.statementRef).toMatch(/^SR-[0-9A-F]{8}$/);
+  });
+});
+
+describe("delivery backoff", () => {
+  test("retries back off exponentially from the row's creation, and span hours, not seconds", () => {
+    const minutes = (n: number) => (nextAttemptAt(AT, n).getTime() - AT.getTime()) / 60_000;
+    expect([0, 1, 2, 3, 4].map(minutes)).toEqual([0, 1, 3, 7, 15]);
+    // The last allowed attempt is more than a day after the first: an SMTP outage of hours
+    // does not use up the attempts (a suspended user may have no other channel).
+    expect(minutes(MAX_DELIVERY_ATTEMPTS - 1)).toBeGreaterThan(24 * 60);
+    // The 15 s job cannot burn through them: five runs in the first 75 s reach attempt 2 at most.
+    expect(minutes(2)).toBeGreaterThan(75 / 60);
   });
 });

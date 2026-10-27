@@ -107,6 +107,18 @@ describe("mappings", () => {
     for (const r of REPORT_REASONS) expect(currentClause(REPORT_REASON_CLAUSES[r]), r).toBeDefined();
   });
 
+  test("a moderator decision on a report cites the guidelines, never an illegal ground", () => {
+    // `illegal` and `ncii` reports included: only the NCII request process and NCII-list matches
+    // assert the law.
+    for (const r of REPORT_REASONS) expect(currentClause(REPORT_REASON_CLAUSES[r])?.ground, r).toBe("terms");
+    expect(groundFor({ action: "moderation.case.end_stream", category: null, reportReason: "ncii" })).toEqual({
+      kind: "terms",
+      clauseId: "decency.intimate-images",
+      clauseVersion: 1,
+      legalBasis: null,
+    });
+  });
+
   test("per source action", () => {
     expect(clauseFor({ action: "moderation.t1.restrict", category: "weapons" }).id).toBe("safety.weapons");
     expect(clauseFor({ action: "moderation.t1.upload_reject", category: "sexual" }).id).toBe("safety.sexual-explicit");

@@ -11,7 +11,7 @@
  */
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
-import { pendingAuditRows } from "./sor-build.ts";
+import { pendingAuditRows, type AuditCursor } from "./sor-build.ts";
 
 export const COVERAGE_GRACE_MS = 5 * 60_000;
 /** Ids logged per run; the count is exact either way. */
@@ -30,18 +30,22 @@ export async function sorCoverage(
   const olderThan = new Date(ctx.now().getTime() - COVERAGE_GRACE_MS);
   const byAction: Record<string, number> = {};
   const ids: string[] = [];
+  // Belt and braces with the exact cursor: a row is counted once however batches fall.
+  const seen = new Set<string>();
   let missing = 0;
-  let after: { createdAt: Date; id: string } | undefined;
+  let after: AuditCursor | undefined;
   for (;;) {
     const rows = await pendingAuditRows(ctx.db, { limit: batch, olderThan, ...(after ? { after } : {}) });
     for (const r of rows) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
       missing += 1;
       byAction[r.action] = (byAction[r.action] ?? 0) + 1;
       if (ids.length < LOGGED_IDS) ids.push(r.id);
     }
     const last = rows.at(-1);
     if (!last || rows.length < batch) break;
-    after = { createdAt: last.createdAt, id: last.id };
+    after = last.cursor;
   }
   moderationMetrics.sorMissing.record(missing);
   if (missing > 0) {

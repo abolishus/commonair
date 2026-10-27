@@ -5,8 +5,9 @@
  * Statement delivery (ADR 0019 decision 7): an in-app `notifications` row (payload ids only, as
  * `services/api/src/moderation/notify.ts` requires) and the `enforcementStatement` email in the
  * recipient's locale, each recorded in `enforcement_statement_deliveries`. A sent channel is
- * never sent again (`sent_at`); a failure is retried by the next run up to
- * `MAX_DELIVERY_ATTEMPTS`; a deleted account or one without an address is skipped with a code.
+ * never sent again (`sent_at`); a failure is retried with exponential backoff
+ * (`nextAttemptAt`) up to `MAX_DELIVERY_ATTEMPTS`, so an outage of hours does not use them up;
+ * a deleted account or one without an address is skipped with a code.
  * Delivery rows and logs carry ids and codes only, never an address or provider text.
  */
 import { sourceLink, type InstanceSite } from "@commonair/config/site";
@@ -20,7 +21,17 @@ import { safeErrorCode } from "./records.ts";
 
 const { enforcementStatements: st, enforcementStatementDeliveries: dl, legalDocuments, notifications, users } = schema;
 
-export const MAX_DELIVERY_ATTEMPTS = 5;
+/** With `RETRY_BASE_SECONDS` the last attempt comes about 34 hours after the first. */
+export const MAX_DELIVERY_ATTEMPTS = 12;
+export const RETRY_BASE_SECONDS = 60;
+
+/**
+ * When a delivery that has failed `attempts` times is next due: `base · (2^attempts − 1)` after
+ * the row was created (0, 1, 3, 7, 15 … minutes). Counted from `created_at` because the table
+ * has no per-attempt timestamp; a run that comes late only makes the next wait shorter.
+ */
+export const nextAttemptAt = (createdAt: Date, attempts: number): Date =>
+  new Date(createdAt.getTime() + RETRY_BASE_SECONDS * 1000 * (2 ** attempts - 1));
 /** Final outcomes: never retried. */
 export const SKIP_CODES = ["account_deleted", "no_email"] as const;
 /** Where the statement is listed (`apps/web/src/routes/_app/settings.appeals.tsx`). */
@@ -115,6 +126,10 @@ export async function deliverStatements(
   opts: { limit?: number } = {},
 ): Promise<DeliveryResult> {
   const out: DeliveryResult = { sent: 0, failed: 0, skipped: 0 };
+  const now = ctx.now();
+  // Without a mailer (tests, tools) email deliveries wait for a worker that has one; leaving
+  // them out of the page keeps a backlog of them from crowding out in-app deliveries.
+  const canMail = Boolean(ctx.mailer && ctx.site);
   const rows = await ctx.db
     .select({ d: dl, s: st })
     .from(dl)
@@ -124,6 +139,13 @@ export async function deliverStatements(
         isNull(dl.sentAt),
         lt(dl.attempts, MAX_DELIVERY_ATTEMPTS),
         or(isNull(dl.lastErrorCode), notInArray(dl.lastErrorCode, [...SKIP_CODES])),
+        // `nextAttemptAt`, in SQL. A first attempt is always due: `created_at` is the database's
+        // clock, which may run a little ahead of the worker's.
+        or(
+          eq(dl.attempts, 0),
+          sql`${dl.createdAt} + make_interval(secs => ${RETRY_BASE_SECONDS} * (power(2, ${dl.attempts}) - 1)) <= ${now.toISOString()}::timestamptz`,
+        ),
+        canMail ? undefined : eq(dl.channel, "in_app"),
       ),
     )
     .orderBy(asc(dl.createdAt), asc(dl.id))
@@ -154,18 +176,17 @@ export async function deliverStatements(
     }
     try {
       if (d.channel === "in_app") {
-        const now = ctx.now();
+        const at = ctx.now();
         await ctx.db.transaction(async (tx) => {
           await tx.insert(notifications).values({
             userId: s.recipientUserId,
             type: "moderation",
             payload: { kind: "enforcement_statement", statementId: s.id },
-            createdAt: now,
+            createdAt: at,
           });
-          await finish(tx, d.id, { sent: now });
+          await finish(tx, d.id, { sent: at });
         });
       } else {
-        // Without a mailer (tests, tools) email deliveries wait for a worker that has one.
         if (!ctx.mailer || !ctx.site) continue;
         const n = await notice(s.noticeDocumentId);
         if (!n) throw Object.assign(new Error("notice missing"), { code: "NOTICE_MISSING" });

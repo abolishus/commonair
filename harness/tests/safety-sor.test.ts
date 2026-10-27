@@ -44,6 +44,13 @@ describe("expectedStatement follows the selectors table", () => {
   test("no statement for a rejected NCII request, a CSAM-list match, or anything not allowlisted", () => {
     expect(expectedStatement(row("ncii.decide", { decision: "rejected" }))).toBeNull();
     expect(expectedStatement(row("moderation.t0.match", { listCategory: "csam" }))).toBeNull();
+    expect(expectedStatement(row("moderation.case.end_stream", { streamEnded: false }))).toBeNull();
+    expect(
+      expectedStatement(row("moderation.case.suspend", { suspendTarget: "user", userSuspended: false })),
+    ).toBeNull();
+    expect(
+      expectedStatement(row("moderation.case.suspend", { suspendTarget: "both", userSuspended: false }))?.restrictions,
+    ).toEqual(["service/suspended"]);
     for (const a of ["moderation.t1.flag", "moderation.case.clear", "moderation.case.escalate_legal", "chat.ban"])
       expect(expectedStatement(row(a))).toBeNull();
   });

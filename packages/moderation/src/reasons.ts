@@ -65,6 +65,9 @@ export const CLAUSES: readonly Clause[] = [
     legalBasis: "us.take-it-down",
     titleKey: "clause.illegal.ncii",
   },
+  // A moderator's decision on an `ncii` report: the guidelines' rule, not the illegal ground
+  // `illegal.ncii` reserves for the NCII request process and NCII-list matches.
+  terms("decency.intimate-images", "be-decent-to-people"),
 ];
 
 /** Every legal-basis code a clause may carry (the message catalogs label each). */
@@ -113,7 +116,9 @@ export const REPORT_REASON_CLAUSES: Readonly<Record<ReportReason, string>> = {
   impersonation: "honesty.impersonation",
   copyright: "creative.copyright",
   unlabeled_mature: "mature.unlabelled",
-  ncii: "illegal.ncii",
+  // Like `illegal`: a moderator applies the guidelines; the law is asserted only by the NCII
+  // request process (`NCII_CLAUSE_ID`).
+  ncii: "decency.intimate-images",
   other: "guidelines.general",
 };
 

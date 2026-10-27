@@ -13,14 +13,21 @@ import { loadEnv, mailEnv } from "@commonair/config";
 import { schema, seedLegalDocuments, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createMailer, type Mailer } from "@commonair/email";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
 import { sorBuildRun } from "../src/jobs/moderation-sor.ts";
 import { applyT1, applyT2 } from "../src/moderation/scan.ts";
-import { buildStatements, currentDocumentId } from "../src/moderation/sor-build.ts";
+import {
+  BUILD_WINDOW_MS,
+  buildStatements,
+  currentDocumentId,
+  pendingAuditRows,
+  UNREADABLE_RETRY_MS,
+  type AuditCursor,
+} from "../src/moderation/sor-build.ts";
 import { sorCoverage } from "../src/moderation/sor-coverage.ts";
-import { deliverStatements, MAX_DELIVERY_ATTEMPTS } from "../src/moderation/sor-deliver.ts";
+import { deliverStatements, MAX_DELIVERY_ATTEMPTS, nextAttemptAt } from "../src/moderation/sor-deliver.ts";
 import { mailTo, siteAt } from "./e6-fixtures.ts";
 import { makeBroadcast, makeUser } from "./fixtures.ts";
 
@@ -234,7 +241,10 @@ describe("delivery", () => {
       close: async () => {},
     };
     lines.length = 0;
-    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS + 2; i++) await deliverStatements(ctx({ mailer: failing }));
+    // Each run a day later, so every retry is due.
+    const later = (i: number) => () => new Date(Date.now() + (i + 1) * 86_400_000);
+    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS + 2; i++)
+      await deliverStatements(ctx({ mailer: failing, now: later(i) }));
     const rows = await owner()
       .select()
       .from(schema.enforcementStatementDeliveries)
@@ -246,6 +256,63 @@ describe("delivery", () => {
     expect(inApp?.sentAt).not.toBeNull();
     expect(lines.some((l) => l.fields.alert === "sor_delivery_exhausted")).toBe(true);
     expect(JSON.stringify(lines)).not.toContain(r.email);
+  });
+
+  test("a failed email waits out its backoff before the next attempt", async () => {
+    const r = await restrict();
+    await buildStatements(ctx());
+    const [s] = await statementsFor(r.userId);
+    const failing: Mailer = {
+      send: () => Promise.reject(Object.assign(new Error("down"), { code: "ECONNREFUSED" })),
+      close: async () => {},
+    };
+    const email = async () =>
+      (
+        await owner()
+          .select()
+          .from(schema.enforcementStatementDeliveries)
+          .where(
+            and(
+              eq(schema.enforcementStatementDeliveries.statementId, s!.id),
+              eq(schema.enforcementStatementDeliveries.channel, "email"),
+            ),
+          )
+      )[0]!;
+    const created = (await email()).createdAt;
+    const at =
+      (n: number, deltaMs = 0) =>
+      () =>
+        new Date(nextAttemptAt(created, n).getTime() + deltaMs);
+    await deliverStatements(ctx({ mailer: failing, now: at(0) }));
+    expect((await email()).attempts).toBe(1);
+    // The 15 s job runs again: not due yet.
+    for (const ms of [15_000, 30_000, 45_000])
+      await deliverStatements(ctx({ mailer: failing, now: () => new Date(created.getTime() + ms) }));
+    expect((await email()).attempts).toBe(1);
+    await deliverStatements(ctx({ mailer: failing, now: at(1, 1000) }));
+    expect((await email()).attempts).toBe(2);
+    await deliverStatements(ctx({ mailer: failing, now: at(2, -1000) }));
+    expect((await email()).attempts).toBe(2);
+    // The mail server is back: the due attempt sends it.
+    await deliverStatements(ctx({ now: at(2, 1000) }));
+    expect(await email()).toMatchObject({ attempts: 3, lastErrorCode: null });
+    expect((await email()).sentAt).not.toBeNull();
+  });
+
+  test("without a mailer, a backlog of email rows does not keep in-app deliveries from going out", async () => {
+    const r = await restrict();
+    await buildStatements(ctx());
+    const [s] = await statementsFor(r.userId);
+    // A page of one: before the fix the older email row filled it.
+    await deliverStatements(ctx({ mailer: undefined, site: undefined }), { limit: 1 });
+    const rows = await owner()
+      .select()
+      .from(schema.enforcementStatementDeliveries)
+      .where(eq(schema.enforcementStatementDeliveries.statementId, s!.id));
+    expect(rows.find((d) => d.channel === "in_app")?.sentAt).not.toBeNull();
+    expect(rows.find((d) => d.channel === "email")).toMatchObject({ sentAt: null, attempts: 0 });
+    // Drain it so later tests start clean.
+    await deliverStatements(ctx());
   });
 
   test("a deleted account is skipped with a code and never retried", async () => {
@@ -272,6 +339,13 @@ describe("coverage", () => {
     const bad = await audit("moderation.t1.restrict", { caseId: "nope" }, old);
     await audit("moderation.t0.match", { caseId: uuidv7(), listCategory: "csam", userId: uuidv7() }, old);
     await audit("ncii.decide", { requestId: uuidv7(), decision: "rejected" }, old);
+    // Decisions that restricted nothing: a clip case's end_stream, a suspension the writer skipped.
+    await audit("moderation.case.end_stream", { caseId: uuidv7(), decision: "end_stream", streamEnded: false }, old);
+    await audit(
+      "moderation.case.suspend",
+      { caseId: uuidv7(), decision: "suspend", suspendTarget: "user", durationSeconds: null, userSuspended: false },
+      old,
+    );
     // Too recent to count.
     await audit("moderation.t1.restrict", { caseId: "nope" });
     lines.length = 0;
@@ -282,6 +356,69 @@ describe("coverage", () => {
     expect(cov.byAction["moderation.t1.restrict"]).toBeGreaterThanOrEqual(1);
     const alert = lines.find((l) => l.fields.alert === "sor_coverage");
     expect(alert?.fields.auditIds).toContain(bad);
+  });
+});
+
+describe("selection", () => {
+  test("the keyset cursor keeps microseconds: rows in one millisecond are each read once", async () => {
+    const ids = [uuidv7(), uuidv7(), uuidv7()];
+    // Same millisecond, different microseconds: a JS Date cursor re-selects the later ones.
+    for (const [i, us] of ["123456", "123789", "123999"].entries())
+      await owner()
+        .insert(schema.auditLog)
+        .values({
+          id: ids[i]!,
+          actorType: "system",
+          action: "moderation.t1.restrict",
+          subjectType: "test",
+          subjectId: ids[i]!,
+          details: { caseId: "nope" },
+          createdAt: sql`${`2026-01-02T03:04:05.${us}Z`}::timestamptz` as unknown as Date,
+        });
+    const seen: string[] = [];
+    let after: AuditCursor | undefined;
+    for (;;) {
+      const rows = await pendingAuditRows(app(), { limit: 1, ...(after ? { after } : {}) });
+      seen.push(...rows.map((r) => r.id));
+      const last = rows.at(-1);
+      if (!last) break;
+      after = last.cursor;
+    }
+    for (const id of ids) expect(seen.filter((x) => x === id)).toHaveLength(1);
+    expect(new Set(seen).size).toBe(seen.length);
+  });
+
+  test("the builder reads a recent window; older gaps are left to the coverage sweep", async () => {
+    const stale = await audit(
+      "moderation.t1.restrict",
+      { caseId: "nope" },
+      new Date(Date.now() - BUILD_WINDOW_MS - 60_000),
+    );
+    const since = new Date(Date.now() - BUILD_WINDOW_MS);
+    const windowed = await pendingAuditRows(app(), { limit: 10_000, since });
+    expect(windowed.map((r) => r.id)).not.toContain(stale);
+    lines.length = 0;
+    await buildStatements(ctx());
+    expect(lines.some((l) => l.fields.auditId === stale)).toBe(false);
+    const cov = await sorCoverage(ctx());
+    expect(cov.missing).toBeGreaterThanOrEqual(1);
+    expect(lines.find((l) => l.fields.alert === "sor_coverage")?.fields.auditIds).toContain(stale);
+  });
+
+  test("an unreadable row is logged once and left out of runs until its retry time", async () => {
+    await buildStatements(ctx());
+    const bad = await audit("moderation.t2.label", { caseId: "nope" });
+    lines.length = 0;
+    const first = await buildStatements(ctx());
+    expect(first.failures).toBeGreaterThanOrEqual(1);
+    expect(lines.filter((l) => l.fields.auditId === bad)).toHaveLength(1);
+    // The next runs do not plan it again, so bad rows cannot crowd newer ones out of a run.
+    const next = await buildStatements(ctx());
+    expect(next.failures).toBe(0);
+    // After the retry time it is planned again, but not logged or counted a second time.
+    const retried = await buildStatements(ctx({ now: () => new Date(Date.now() + UNREADABLE_RETRY_MS + 1000) }));
+    expect(retried.failures).toBeGreaterThanOrEqual(1);
+    expect(lines.filter((l) => l.fields.auditId === bad)).toHaveLength(1);
   });
 });
 

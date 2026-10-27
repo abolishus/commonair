@@ -162,9 +162,12 @@ export const meEnforcement = {
             legalBasis: r.legalBasis,
           },
           documents: { guidelinesId: r.guidelinesDocumentId, noticeId: r.noticeDocumentId },
-          appeal: subject
-            ? { kind: "moderation" as const, subjectType: subject.type as AppealSubject, subjectId: subject.id }
-            : null,
+          // A case escalated to T0 since is hidden from appeals (`appeals.create` answers
+          // NOT_FOUND), so the statement stops offering one.
+          appeal:
+            subject && !(c !== undefined && c.tier === "t0")
+              ? { kind: "moderation" as const, subjectType: subject.type as AppealSubject, subjectId: subject.id }
+              : null,
           createdAt: iso(r.createdAt),
           clauseTitle: clauseTitle(r.clauseId, r.clauseVersion),
           explanation: explanation(r),

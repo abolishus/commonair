@@ -12,6 +12,7 @@ import { testSite } from "./fixtures.ts";
 const site = testSite();
 const base = sampleData(site.publicUrl).enforcementStatement;
 const m = en.enforcementStatement;
+const withContact = (text: string) => text.replace("{contact}", site.contacts.abuse);
 const render = (data: Partial<SampleData["enforcementStatement"]> = {}) =>
   renderEmail("enforcementStatement", { ...base, ...data }, { site });
 
@@ -33,7 +34,7 @@ describe("enforcementStatement", () => {
       "safety.weapons@1",
       base.explanation,
       m.redressHeading,
-      m.appeal,
+      withContact(m.appeal),
       base.redress,
       m.courts,
       `${site.publicUrl}/settings/appeals`,
@@ -63,14 +64,29 @@ describe("enforcementStatement", () => {
     expect(mail.text).toContain(m["clause.illegal.ncii"]);
     expect(mail.text).toContain(m["legalBasis.us.take-it-down"]);
     expect(mail.text).toContain(m["restriction.account.suspended"]);
-    expect(mail.text).not.toContain(m.appeal);
+    expect(mail.text).not.toContain(withContact(m.appeal));
+    expect(mail.text).not.toContain(withContact(m.appealSuspended));
     expect(mail.text).toContain(site.contacts.abuse);
     expect(mail.text).toContain(m.courts);
   });
 
+  test("a suspended account is told it may not sign in, and given the contact address to appeal", async () => {
+    const mail = await render({
+      restrictionKind: "account",
+      restrictionDetail: "suspended",
+      facts: { code: "moderator_review", caseRef: "MC-0001", decision: "suspend" },
+      automatedDecision: "not",
+    });
+    expect(mail.text).toContain(withContact(m.appealSuspended));
+    expect(mail.text).not.toContain(withContact(m.appeal));
+    expect(mail.text).toContain(site.contacts.abuse);
+    // Other restrictions also name the contact next to the appeals page.
+    expect((await render()).text).toContain(site.contacts.abuse);
+  });
+
   test("a timed suspension shows its end; a warning restricts nothing", async () => {
     const timed = await render({
-      restrictionKind: "service",
+      restrictionKind: "account",
       restrictionDetail: "suspended",
       endsAt: "2026-10-25T14:30:00Z",
       facts: { code: "moderator_review", caseRef: "MC-0001", decision: "suspend" },

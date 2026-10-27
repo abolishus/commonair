@@ -297,7 +297,11 @@ export const enforcementStatement = defineTemplate("enforcementStatement", {
         <P>
           <strong>{ctx.t(m.redressHeading)}</strong>
         </P>
-        <P>{d.appealable ? ctx.t(m.appeal) : ctx.t(m.noAppeal, { contact: ctx.contact("abuse") })}</P>
+        <P>
+          {ctx.t(d.appealable ? (d.restrictionKind === "account" ? m.appealSuspended : m.appeal) : m.noAppeal, {
+            contact: ctx.contact("abuse"),
+          })}
+        </P>
         {d.redress.trim() === "" ? null : <P>{d.redress}</P>}
         <P>{ctx.t(m.courts)}</P>
         <Action ctx={ctx} href={d.appealsUrl} label={m.action} />
