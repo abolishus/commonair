@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
+import type { Executor } from "@commonair/db";
 import {
   computeIssuance,
   dirBytes,
   dirObjects,
   issuanceBucket,
+  IssuanceRunner,
   recomputeBuckets,
   sessionAllowance,
 } from "../src/issuance.ts";
-import { type ChannelMinute, type DirProduction } from "../src/production.ts";
+import { ISSUANCE_KEYS, type ChannelMinute, type DirProduction, type ProductionStore } from "../src/production.ts";
 
 const R1 = "0190a0a0-0000-7000-8000-0000000000a1";
 const R2 = "0190a0a0-0000-7000-8000-0000000000a2";
@@ -124,4 +126,70 @@ test("issuanceBucket is the last complete minute", () => {
 
 test("each tick recomputes the last N closed minutes, oldest first", () => {
   expect(recomputeBuckets(10 * 60_000 + 10_000, 5)).toEqual([5, 6, 7, 8, 9].map((m) => m * 60_000));
+});
+
+/** Valkey's SET NX PX and the two lock scripts, on a clock the test moves. */
+function fakeValkey() {
+  let clock = 0;
+  const keys = new Map<string, { value: string; expiresAt: number }>();
+  const live = (k: string) => {
+    const e = keys.get(k);
+    return e && e.expiresAt > clock ? e : undefined;
+  };
+  return {
+    advance(ms: number) {
+      clock += ms;
+    },
+    holder: () => live(ISSUANCE_KEYS.lock)?.value ?? null,
+    async set(key: string, value: string, _px: "PX", ttl: number, _nx: "NX") {
+      if (live(key)) return null;
+      keys.set(key, { value, expiresAt: clock + ttl });
+      return "OK";
+    },
+    async eval(script: string, _n: number, key: string, id: string) {
+      if (live(key)?.value !== id) return 0;
+      if (script.includes("DEL")) keys.delete(key);
+      return 1;
+    },
+  };
+}
+
+describe("IssuanceRunner leader lock", () => {
+  const production = { read: async () => new Map() } as unknown as ProductionStore;
+  const runner = (valkey: ReturnType<typeof fakeValkey>, lookbackMinutes: number, db = {} as Executor) =>
+    new IssuanceRunner({ db, production, valkey: valkey as never, lookbackMinutes, lockTtlMs: 50_000 });
+
+  test("the winner keeps the lock, so a replica whose timer fires later in the minute skips", async () => {
+    const valkey = fakeValkey();
+    const a = runner(valkey, 0);
+    const b = runner(valkey, 0);
+    expect(await a.tick()).toEqual([]);
+    expect(valkey.holder()).not.toBeNull();
+    for (const late of [1, 16, 30, 49_000]) {
+      valkey.advance(late);
+      expect(await b.tick()).toBeNull();
+    }
+  });
+
+  test("the lock expires before the next tick, so the next minute has a leader again", async () => {
+    const valkey = fakeValkey();
+    const a = runner(valkey, 0);
+    const b = runner(valkey, 0);
+    expect(await a.tick()).toEqual([]);
+    valkey.advance(50_000);
+    expect(await b.tick()).toEqual([]);
+    expect(await a.tick()).toBeNull();
+  });
+
+  test("a failed tick releases the lock so another replica can retry it", async () => {
+    const valkey = fakeValkey();
+    const down = {
+      select() {
+        throw new Error("database down");
+      },
+    } as unknown as Executor;
+    await expect(runner(valkey, 1, down).tick()).rejects.toThrow("database down");
+    expect(valkey.holder()).toBeNull();
+    expect(await runner(valkey, 0).tick()).toEqual([]);
+  });
 });

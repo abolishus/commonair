@@ -39,7 +39,9 @@
  * Every tick (60 s, 10 s after the minute boundary, and once on shutdown) recomputes
  * the last 5 closed minutes, so late production writes and heartbeats are picked up.
  * Rows are recomputed, not added, so recomputation is idempotent. A Valkey leader
- * lock makes exactly one replica compute per tick.
+ * lock makes exactly one replica compute per tick: the winner keeps it for its whole
+ * lifetime (shorter than the tick interval), so a replica whose timer fires later in the
+ * same minute finds it taken. It is released early only when the computation fails.
  */
 import { and, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { Executor } from "@commonair/db";
@@ -171,6 +173,8 @@ export async function runIssuance(
 }
 
 const RELEASE_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
+/** After a successful tick: confirms the holder and keeps the lock until its TTL runs out. */
+const HOLD_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then return 1 end return 0`;
 
 export interface IssuanceRunnerOptions {
   db: Executor;
@@ -196,14 +200,18 @@ export class IssuanceRunner {
   async tick(): Promise<IssuanceRow[] | null> {
     const lock = await this.opts.valkey.set(ISSUANCE_KEYS.lock, this.id, "PX", this.opts.lockTtlMs ?? 50_000, "NX");
     if (lock !== "OK") return null;
+    let ok = false;
     try {
       const rows: IssuanceRow[] = [];
       for (const bucket of recomputeBuckets(this.now(), this.opts.lookbackMinutes ?? 5))
         rows.push(...(await runIssuance(this.opts.db, this.opts.production, bucket)));
+      ok = true;
       return rows;
     } finally {
+      // Releasing after success would let a replica whose timer fires later compute the same
+      // tick again; a failed tick releases so another replica can retry it.
       await this.opts.valkey
-        .eval(RELEASE_SCRIPT, 1, ISSUANCE_KEYS.lock, this.id)
+        .eval(ok ? HOLD_SCRIPT : RELEASE_SCRIPT, 1, ISSUANCE_KEYS.lock, this.id)
         .catch((err: unknown) => this.opts.logger?.warn("issuance lock release failed", { err }));
     }
   }
