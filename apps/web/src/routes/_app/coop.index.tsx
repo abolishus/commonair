@@ -3,7 +3,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
-import { CoopLoadGate } from "../../components/coop/load-error.tsx";
+import { CoopLoadError, CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { CoopOverview } from "../../components/coop/overview.tsx";
 import { coopLoads, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
@@ -28,13 +28,15 @@ function CoopPage(): React.JSX.Element {
   const council = useCoopLoad("council", () => api().coop.council());
   const months = useCoopLoad("months", () => api().coop.transparency({ months: 3 }));
   return (
-    <CoopLoadGate status={coopLoads([membership, open, council, months])} tab="overview">
+    // The caller's membership only feeds the card: its failure shows there, not over the public page.
+    <CoopLoadGate status={coopLoads([open, council, months])} tab="overview">
       <CoopOverview
         signedIn={me !== null}
         membership={membership.data}
         openProposals={open.data}
         council={council.data}
         months={months.data}
+        membershipError={membership.failed ? <CoopLoadError onRetry={membership.reload} /> : null}
       />
     </CoopLoadGate>
   );

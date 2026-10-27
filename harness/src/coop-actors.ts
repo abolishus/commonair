@@ -345,7 +345,6 @@ async function visible(locator: Locator, timeoutMs: number): Promise<boolean> {
   }
 }
 
-/** Click, and confirm when the action opens the shared `ConfirmDialog`. */
 /** Wait until the page's `membership-row` for `cls` shows a status `done` accepts (the refreshed view). */
 async function waitForMembershipRow(
   page: Page,
@@ -364,6 +363,7 @@ async function waitForMembershipRow(
   );
 }
 
+/** Click, and confirm when the action opens the shared `ConfirmDialog`. */
 async function clickConfirming(page: Page, target: Locator, b: WaitBudget): Promise<void> {
   await target.click({ timeout: b.timeoutMs });
   const confirm = byCoopId(page, CONFIRM_DIALOG_CONFIRM).first();

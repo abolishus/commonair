@@ -30,7 +30,7 @@ export function activeMemberClasses(view: Pick<MembershipViewDto, "memberships">
 }
 
 export type ElectionRole =
-  /** Signed out, or the election is closed: read-only. */
+  /** Signed out, membership not known yet, or the election is closed: read-only. */
   | { kind: "none" }
   /** Signed in but not a member of the election's class. */
   | { kind: "notMember" }
@@ -45,9 +45,11 @@ export type ElectionRole =
 export function electionRole(
   e: Pick<ElectionDto, "class" | "status" | "candidates">,
   meId: string | null,
-  classes: readonly MemberClass[],
+  classes: readonly MemberClass[] | null,
 ): ElectionRole {
-  if (meId === null || (e.status !== "nominating" && e.status !== "voting")) return { kind: "none" };
+  // Unknown classes (membership loading or failed): no role yet rather than a wrong "not a member".
+  if (meId === null || classes === null || (e.status !== "nominating" && e.status !== "voting"))
+    return { kind: "none" };
   if (!classes.includes(e.class)) return { kind: "notMember" };
   if (e.status === "voting") return { kind: "canVote" };
   return e.candidates.some((c) => c.user.id === meId) ? { kind: "standing" } : { kind: "canNominate" };

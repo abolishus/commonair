@@ -5,7 +5,7 @@ import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { CouncilPage } from "../../components/coop/council.tsx";
-import { CoopLoadGate } from "../../components/coop/load-error.tsx";
+import { CoopLoadError, CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { activeMemberClasses } from "../../components/coop/rules.ts";
 import { coopLoads, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { t } from "../../i18n/index.ts";
@@ -22,13 +22,16 @@ function CouncilRoute(): React.JSX.Element {
   const elections = useCoopLoad("elections", () => api().coop.elections.list());
   const membership = useMyMembership(me);
   return (
-    <CoopLoadGate status={coopLoads([council, board, elections, membership])} tab="council">
+    // Public page: the caller's membership only decides who may stand and vote, so its failure
+    // shows inline in the elections section.
+    <CoopLoadGate status={coopLoads([council, board, elections])} tab="council">
       <CouncilPage
         council={council.data}
         board={board.data}
         elections={elections.data}
         meId={me?.id ?? null}
-        classes={activeMemberClasses(membership.data)}
+        classes={membership.state === "loaded" ? activeMemberClasses(membership.data) : null}
+        membershipError={membership.failed ? <CoopLoadError onRetry={membership.reload} /> : null}
         onNominate={async (id, statement) => {
           await api().coop.elections.nominate({ id, statement });
           toast.success(t("coop.elections.nominated"));

@@ -42,6 +42,7 @@ import {
   leaksIn,
   missed,
   missingAudit,
+  heldQualifyingSubscription,
   minSubscriptionCents,
   missingEvents,
   nextSpotlightSlots,
@@ -751,6 +752,29 @@ describe("rejoin helpers (E7)", () => {
     expect(qualifyingTier(tiers, 1999)).toBe(3);
     expect(qualifyingTier(tiers, 2000)).toBeNull();
     expect(qualifyingTier([], 0)).toBeNull();
+  });
+
+  test("heldQualifyingSubscription: reuses a holding, qualifying subscription to that channel", () => {
+    const sub = (over: Partial<{ channelSlug: string; tier: number; status: string }>) => ({
+      channelSlug: "s1",
+      tier: 2,
+      status: "active",
+      ...over,
+    });
+    expect(heldQualifyingSubscription([sub({})], "s1", tiers, 300)).toEqual(sub({}));
+    expect(heldQualifyingSubscription([sub({ status: "past_due" })], "s1", tiers, 300)).not.toBeNull();
+    // Pending, ended, another channel, a tier below the minimum or unknown: not reusable.
+    for (const s of [
+      sub({ status: "incomplete" }),
+      sub({ status: "canceled" }),
+      sub({ status: "expired" }),
+      sub({ channelSlug: "s2" }),
+      sub({ tier: 1 }),
+      sub({ tier: 9 }),
+    ])
+      expect(heldQualifyingSubscription([s], "s1", tiers, 300)).toBeNull();
+    expect(heldQualifyingSubscription([sub({ tier: 1 }), sub({ tier: 3 })], "s1", tiers, 300)?.tier).toBe(3);
+    expect(heldQualifyingSubscription([], "s1", tiers, 0)).toBeNull();
   });
 
   test("minSubscriptionCents: from membership.classes, else the seeded default", () => {

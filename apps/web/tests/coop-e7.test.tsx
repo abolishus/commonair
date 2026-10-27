@@ -35,6 +35,8 @@ const session = vi.hoisted(() => ({ me: null as SessionUser | null }));
 /** API methods that reject (once per name, or every call while `always` has it). */
 const failing = vi.hoisted(() => ({ names: new Set<string>(), code: "INTERNAL_SERVER_ERROR" }));
 const calls = vi.hoisted(() => ({ counts: new Map<string, number>() }));
+/** The status `coop.proposals.get` answers with. */
+const fixture = vi.hoisted(() => ({ proposalStatus: "discussion" as "discussion" | "council_review" }));
 
 vi.mock("../src/lib/bootstrap.ts", () => ({
   useBootstrap: () => ({
@@ -68,7 +70,7 @@ vi.mock("../src/lib/api.ts", async (importOriginal) => {
       elections: { list: answer("elections", () => f.elections) },
       proposals: {
         list: answer("proposals", () => page([f.proposal({ status: "discussion" })])),
-        get: answer("proposal", () => f.proposal({ status: "discussion" })),
+        get: answer("proposal", () => f.proposal({ status: fixture.proposalStatus })),
         comments: answer("comments", () => page(f.comments)),
       },
       patronage: {
@@ -131,19 +133,18 @@ beforeEach(() => {
   failing.names.clear();
   failing.code = "INTERNAL_SERVER_ERROR";
   calls.counts.clear();
+  fixture.proposalStatus = "discussion";
 });
 afterEach(cleanup);
 
 describe("a failed load shows coop-load-error; coop-retry loads it again in place", () => {
   const cases: [keyof typeof routes, string, string][] = [
     ["overview", "transparency", "coop"],
-    ["overview", "membership", "coop"],
     ["membership", "membership", "membership"],
     ["membership", "settings", "membership"],
     ["proposals", "proposals", "proposals"],
     ["newProposal", "settings", "proposal-form"],
     ["proposal", "proposal", "proposal"],
-    ["proposal", "comments", "proposal"],
     ["edit", "proposal", "proposal-form"],
     ["council", "council", "council"],
     ["council", "elections", "council"],
@@ -165,6 +166,31 @@ describe("a failed load shows coop-load-error; coop-retry loads it again in plac
     fireEvent.click(within(error).getByTestId("coop-retry"));
     expect(await screen.findByTestId(pageId)).toBeTruthy();
     expect(screen.queryByTestId("coop-load-error")).toBeNull();
+    expect(calls.counts.get(failingCall)).toBe(before + 1);
+  });
+
+  // Loads that feed only part of a public page: the page renders and the retry sits inline.
+  const inline: [keyof typeof routes, string, string][] = [
+    ["overview", "membership", "coop"],
+    ["proposal", "comments", "proposal"],
+    ["proposal", "membership", "proposal"],
+    ["proposal", "council", "proposal"],
+    ["council", "membership", "council"],
+  ];
+  it.each(inline)("%s when %s fails: the page stays, the retry is inline", async (route, failingCall, pageId) => {
+    // The council only matters (and its retry only shows) where it may respond.
+    if (failingCall === "council") fixture.proposalStatus = "council_review";
+    failing.names.add(failingCall);
+    const Page = component(routes[route]);
+    wrap(<Page />);
+    const error = await screen.findByTestId("coop-load-error");
+    const page = await screen.findByTestId(pageId);
+    expect(page.contains(error)).toBe(true);
+    const before = calls.counts.get(failingCall) ?? 0;
+    failing.names.clear();
+    fireEvent.click(within(error).getByTestId("coop-retry"));
+    await waitFor(() => expect(screen.queryByTestId("coop-load-error")).toBeNull());
+    expect(screen.getByTestId(pageId)).toBeTruthy();
     expect(calls.counts.get(failingCall)).toBe(before + 1);
   });
 
@@ -369,6 +395,47 @@ describe("rules: elections", () => {
     expect(electionRefusal(new Error("network"))).toBe("other");
     expect(electionRefusalText("tooMany", 2)).toBe("Approve at most 2 candidates.");
     expect(electionRefusalText("other", 1)).toBe(en["coop.elections.errorFailed"]);
+  });
+
+  it("electionRefusal matches every refusal message the API's nominate and vote handlers throw", async () => {
+    // The mapping reads the API's English text, so a reworded message must fail here, not silently
+    // turn into "closed" or "other" in the page.
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const source = await readFile(join(import.meta.dirname, "../../../services/api/src/coop/council.ts"), "utf8");
+    const start = source.indexOf("nominate: os.coop.elections.nominate");
+    const voteAt = source.indexOf("vote: os.coop.elections.vote");
+    const end = source.indexOf("os.coop.", voteAt + "vote: os.coop.elections.vote".length);
+    expect(start).toBeGreaterThan(-1);
+    expect(voteAt).toBeGreaterThan(start);
+    const thrown = [
+      ...source
+        .slice(start, end === -1 ? undefined : end)
+        .matchAll(/(conflict|forbidden|badRequest)\((["`])(.*?)\2\)/g),
+    ].map((m) => `${m[1]}: ${m[3]}`);
+    const expected: Record<string, ReturnType<typeof electionRefusal>> = {
+      "conflict: Nominations are closed": "closed",
+      "conflict: You are already a candidate": "alreadyCandidate",
+      "conflict: Voting is closed": "closed",
+      "conflict: You already voted in this election": "alreadyVoted",
+      "forbidden: Only members of that class can stand": "notMember",
+      "forbidden: Only members of that class can vote": "notMember",
+      "badRequest: Approve each candidate once": "other",
+      "badRequest: Approve at most ${e.seats} candidates": "tooMany",
+      "badRequest: Approve only this election's candidates": "other",
+    };
+    expect(thrown.toSorted()).toEqual(Object.keys(expected).toSorted());
+    const codes = { conflict: "CONFLICT", forbidden: "FORBIDDEN", badRequest: "BAD_REQUEST" } as const;
+    for (const [key, refusal] of Object.entries(expected)) {
+      const [fn, message] = key.split(": ") as [keyof typeof codes, string];
+      const err = Object.assign(new Error(message.replace("${e.seats}", "2")), { code: codes[fn] });
+      expect([key, electionRefusal(err)]).toEqual([key, refusal]);
+    }
+  });
+
+  it("electionRole: unknown classes (membership loading or failed) show no role", () => {
+    expect(electionRole(nominating, ME, null)).toEqual({ kind: "none" });
+    expect(electionRole(voting(), ME, null)).toEqual({ kind: "none" });
   });
 
   it("activeMemberClasses", () => {

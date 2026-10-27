@@ -413,6 +413,26 @@ export function qualifyingTier<T extends 1 | 2 | 3>(
   return ok[0]?.tier ?? null;
 }
 
+/**
+ * A subscription to `channel` that already holds (active or past due) and whose tier is priced at
+ * or above the viewer minimum, or null. The manual adapter never ends a subscription by itself
+ * (cancelling only sets cancel-at-period-end), so a subscription from an earlier run persists and
+ * `money.subscribe` would refuse a second one.
+ */
+export function heldQualifyingSubscription<S extends { channelSlug: string; tier: number; status: string }>(
+  subs: readonly S[],
+  channel: string,
+  tiers: readonly { tier: number; price: { cents: number } }[],
+  minSubscriptionCents: number,
+): S | null {
+  for (const s of subs) {
+    if (s.channelSlug !== channel || (s.status !== "active" && s.status !== "past_due")) continue;
+    const price = tiers.find((t) => t.tier === s.tier)?.price.cents;
+    if (price !== undefined && price >= minSubscriptionCents) return s;
+  }
+  return null;
+}
+
 /** `membership.classes.viewer.minSubscriptionCents` from `coop.settings`, else the seeded default. */
 export function minSubscriptionCents(settings: readonly { key: string; value: unknown }[]): number {
   const v = settings.find((s) => s.key === "membership.classes")?.value as

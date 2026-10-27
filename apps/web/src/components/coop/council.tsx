@@ -44,8 +44,10 @@ export interface CouncilPageProps extends Partial<ElectionActions> {
   elections: ElectionDto[] | null;
   /** The signed-in caller (null: elections are read-only). */
   meId?: string | null;
-  /** The caller's active membership classes (who may stand and vote). */
-  classes?: readonly MemberClass[];
+  /** The caller's active membership classes (who may stand and vote); null while unknown. */
+  classes?: readonly MemberClass[] | null;
+  /** Shown above the elections when the caller's membership failed to load. */
+  membershipError?: React.ReactNode;
 }
 
 /** Only reachable signed in, where the route passes the real actions. */
@@ -60,6 +62,7 @@ export function CouncilPage({
   elections,
   meId = null,
   classes = [],
+  membershipError = null,
   onNominate = refuse,
   onVote = refuse,
 }: CouncilPageProps): React.JSX.Element {
@@ -120,6 +123,7 @@ export function CouncilPage({
               )}
             </Section>
             <Section heading={t("coop.elections.title")} description={t("coop.elections.intro")}>
+              {membershipError}
               {elections === null ? (
                 <Loading />
               ) : elections.length === 0 ? (

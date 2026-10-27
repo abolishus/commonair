@@ -68,6 +68,12 @@ export interface ProposalPageProps {
   onComment: (body: string) => Promise<void>;
   onVote: (choice: VoteChoice) => Promise<void>;
   onCouncilRespond: (value: { stance: CouncilStance; body: string }) => Promise<void>;
+  /** Shown in the discussion when the comments failed to load (the proposal itself still shows). */
+  commentsError?: React.ReactNode;
+  /** Shown in place of the comment form when the caller's membership failed to load. */
+  memberError?: React.ReactNode;
+  /** Shown in place of the council response form when the council failed to load. */
+  councilError?: React.ReactNode;
 }
 
 function tallyLabels(): React.ComponentProps<typeof TallyTable>["labels"] {
@@ -111,6 +117,9 @@ export function ProposalPage({
   onComment,
   onVote,
   onCouncilRespond,
+  commentsError = null,
+  memberError = null,
+  councilError = null,
 }: ProposalPageProps): React.JSX.Element {
   const { locale } = useLocale();
   const [comment, setComment] = React.useState("");
@@ -276,43 +285,45 @@ export function ProposalPage({
             ) : null}
             {p.status === "council_review" &&
               !p.councilResponse &&
-              (councilMember ? (
-                <CouncilRespondForm
-                  data-testid="council-respond"
-                  title={t("coop.council.respondTitle")}
-                  description={t("coop.council.respondHint")}
-                  stanceLabel={t("coop.council.stance")}
-                  stances={stanceOptions()}
-                  stance={stance}
-                  onStanceChange={setStance}
-                  bodyLabel={t("coop.council.respondBody")}
-                  bodyHint={t("coop.council.respondBodyHint")}
-                  body={response}
-                  onBodyChange={setResponse}
-                  maxLength={COUNCIL_RESPONSE_MAX}
-                  submitLabel={t("coop.council.respondSubmit")}
-                  pending={responding}
-                  onSubmit={(value) => {
-                    const chosen = parseStance(value.stance);
-                    if (!chosen || responding) return;
-                    void busy(setResponding, () => onCouncilRespond({ stance: chosen, body: value.body })).catch(
-                      onActionError,
-                    );
-                  }}
-                  stanceProps={{ "data-testid": "council-respond-stance" }}
-                  stanceItemProps={(value) => ({ "data-testid": `council-respond-stance-${value}` })}
-                  bodyProps={{ "data-testid": "council-respond-body" }}
-                  submitProps={{ "data-testid": "council-respond-submit" }}
-                />
-              ) : (
-                <AlertCallout
-                  tone="info"
-                  title={t("coop.council.inReviewTitle")}
-                  description={t("coop.council.inReviewHint")}
-                />
-              ))}
+              (councilError ??
+                (councilMember ? (
+                  <CouncilRespondForm
+                    data-testid="council-respond"
+                    title={t("coop.council.respondTitle")}
+                    description={t("coop.council.respondHint")}
+                    stanceLabel={t("coop.council.stance")}
+                    stances={stanceOptions()}
+                    stance={stance}
+                    onStanceChange={setStance}
+                    bodyLabel={t("coop.council.respondBody")}
+                    bodyHint={t("coop.council.respondBodyHint")}
+                    body={response}
+                    onBodyChange={setResponse}
+                    maxLength={COUNCIL_RESPONSE_MAX}
+                    submitLabel={t("coop.council.respondSubmit")}
+                    pending={responding}
+                    onSubmit={(value) => {
+                      const chosen = parseStance(value.stance);
+                      if (!chosen || responding) return;
+                      void busy(setResponding, () => onCouncilRespond({ stance: chosen, body: value.body })).catch(
+                        onActionError,
+                      );
+                    }}
+                    stanceProps={{ "data-testid": "council-respond-stance" }}
+                    stanceItemProps={(value) => ({ "data-testid": `council-respond-stance-${value}` })}
+                    bodyProps={{ "data-testid": "council-respond-body" }}
+                    submitProps={{ "data-testid": "council-respond-submit" }}
+                  />
+                ) : (
+                  <AlertCallout
+                    tone="info"
+                    title={t("coop.council.inReviewTitle")}
+                    description={t("coop.council.inReviewHint")}
+                  />
+                )))}
             {p.status !== "draft" && (
               <Section heading={t("coop.discussion.title")}>
+                {commentsError}
                 {comments === null ? null : comments.length === 0 ? (
                   <p>{t("coop.discussion.empty")}</p>
                 ) : (
@@ -338,7 +349,9 @@ export function ProposalPage({
                     </Button>
                   </div>
                 )}
-                {commentsOpen && member ? (
+                {commentsOpen && memberError ? (
+                  memberError
+                ) : commentsOpen && member ? (
                   <CommentComposer
                     label={t("coop.discussion.add")}
                     placeholder={t("coop.discussion.placeholder")}

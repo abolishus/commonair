@@ -43,6 +43,8 @@ export interface CoopOverviewProps {
   council: CouncilDto | null;
   /** Newest month first (member counts, recent decisions). */
   months: CoopMonthDto[] | null;
+  /** Shown in place of the membership card when the caller's membership failed to load. */
+  membershipError?: React.ReactNode;
 }
 
 function Loading(): React.JSX.Element {
@@ -60,6 +62,7 @@ export function CoopOverview({
   openProposals,
   council,
   months,
+  membershipError = null,
 }: CoopOverviewProps): React.JSX.Element {
   const { locale } = useLocale();
   const counts = membersByClass(months);
@@ -73,40 +76,41 @@ export function CoopOverview({
         main={
           <div className="flex flex-col gap-6">
             {signedIn &&
-              (membership ? (
-                <Card data-testid="coop-membership-card" data-classes={classes.join(",")}>
-                  <CardHeader>
-                    <CardTitle>{t("coop.card.title")}</CardTitle>
-                    <CardDescription className="flex flex-wrap items-center gap-2">
-                      {classes.length === 0
-                        ? t("coop.card.none")
-                        : classes.map((c) => (
-                            <StatusBadge key={c} tone="success">
-                              {classLabel(c)}
-                            </StatusBadge>
-                          ))}
-                    </CardDescription>
-                    <CardAction>
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        nativeButton={false}
-                        render={
-                          <Link
-                            to="/coop/membership"
-                            aria-label={t("coop.card.manage")}
-                            data-testid="coop-membership-link"
-                          />
-                        }
-                      >
-                        {classes.length === 0 ? t("coop.card.join") : t("coop.card.manageShort")}
-                      </Button>
-                    </CardAction>
-                  </CardHeader>
-                </Card>
-              ) : (
-                <Loading />
-              ))}
+              (membershipError ??
+                (membership ? (
+                  <Card data-testid="coop-membership-card" data-classes={classes.join(",")}>
+                    <CardHeader>
+                      <CardTitle>{t("coop.card.title")}</CardTitle>
+                      <CardDescription className="flex flex-wrap items-center gap-2">
+                        {classes.length === 0
+                          ? t("coop.card.none")
+                          : classes.map((c) => (
+                              <StatusBadge key={c} tone="success">
+                                {classLabel(c)}
+                              </StatusBadge>
+                            ))}
+                      </CardDescription>
+                      <CardAction>
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          nativeButton={false}
+                          render={
+                            <Link
+                              to="/coop/membership"
+                              aria-label={t("coop.card.manage")}
+                              data-testid="coop-membership-link"
+                            />
+                          }
+                        >
+                          {classes.length === 0 ? t("coop.card.join") : t("coop.card.manageShort")}
+                        </Button>
+                      </CardAction>
+                    </CardHeader>
+                  </Card>
+                ) : (
+                  <Loading />
+                )))}
             <Section
               heading={t("coop.open.title")}
               action={

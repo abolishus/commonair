@@ -6,16 +6,9 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { CoopLoadGate } from "../../components/coop/load-error.tsx";
+import { CoopLoadError, CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { ProposalPage } from "../../components/coop/proposal.tsx";
-import {
-  coopLoads,
-  isNotFound,
-  pagedLoad,
-  toastCoopError,
-  useCoopLoad,
-  useMyMembership,
-} from "../../components/coop/use-coop.ts";
+import { coopLoads, isNotFound, toastCoopError, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { NotFoundState } from "../../components/money/not-found.tsx";
 import { usePaged } from "../../components/money/use-load.ts";
 import { t } from "../../i18n/index.ts";
@@ -67,7 +60,11 @@ function ProposalView({ id }: { id: string }): React.JSX.Element {
   }, [status, reload]);
 
   if (isNotFound(proposal)) return <NotFoundState />;
-  const loads = coopLoads([proposal, pagedLoad(comments), membership, council]);
+  // Only the proposal gates the page: comments, membership and council feed parts of it, and
+  // their failures show inline next to those parts.
+  const loads = coopLoads([proposal]);
+  const inline = (load: { failed: boolean; reload: () => void }) =>
+    load.failed ? <CoopLoadError onRetry={load.reload} /> : null;
   const p = proposal.data;
   if (!p || loads.failed)
     return (
@@ -103,6 +100,9 @@ function ProposalView({ id }: { id: string }): React.JSX.Element {
         now={now}
         votingClosed={closedNotice && p.status === "voting"}
         onActionError={toastCoopError}
+        commentsError={inline(comments)}
+        memberError={inline(membership)}
+        councilError={inline(council)}
         onSubmitProposal={() => after(() => api().coop.proposals.submit({ id }), t("coop.proposal.submitted"))}
         onWithdraw={() => after(() => api().coop.proposals.withdraw({ id }), t("coop.proposal.withdrawn"))}
         onComment={async (body) => {

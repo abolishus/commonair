@@ -30,8 +30,8 @@ export interface ElectionItemProps extends ElectionActions {
   election: ElectionDto;
   /** null when signed out (read-only). */
   meId: string | null;
-  /** The caller's active membership classes. */
-  classes: readonly MemberClass[];
+  /** The caller's active membership classes; null while unknown (no role shown). */
+  classes: readonly MemberClass[] | null;
 }
 
 /**

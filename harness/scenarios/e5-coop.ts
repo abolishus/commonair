@@ -66,6 +66,7 @@ import {
   missingEvents,
   parseCoopSteps,
   preflightGovernance,
+  heldQualifyingSubscription,
   qualifyingTier,
   rankingChange,
   reached,
@@ -1530,7 +1531,9 @@ async function stepExit(run: Run): Promise<void> {
  * rejoins the viewer class on the subscription. As a member by subscription only, V exits
  * (`membership-exit-viewer`), a membership-sync tick does not re-enrol V (the exit is respected),
  * and `membership-rejoin-viewer` (`coop.join` with `--set via=api`) makes the viewer row active by
- * subscription again. V leaves once more (API) so later runs start clean.
+ * subscription again. V leaves once more (API) so later runs start clean. V's S1 subscription is
+ * not ended (the manual adapter has no way to end one early): it persists across runs, and a later
+ * run reuses it instead of subscribing and paying again.
  */
 async function stepRejoin(run: Run): Promise<void> {
   const { ctx, people, driver, ui } = run;
@@ -1545,19 +1548,33 @@ async function stepRejoin(run: Run): Promise<void> {
     tiers: tiers.map((x) => ({ tier: x.tier, cents: x.price.cents })),
   });
   if (tier === null) return;
-  const sub = await ctx.step(t(`V subscribes to S1 (tier ${tier}, manual adapter)`), () =>
-    v.api.client.money.subscribe({ channel, tier, returnPath: ROUTES.channel(channel) }),
-  );
-  ctx.assert("the subscription gives manual instructions", sub.kind === "instructions", { kind: sub.kind });
-  if (sub.kind !== "instructions") return;
-  await ctx.step(t("T1 confirms V's subscription"), async () => {
-    await waitFor(
-      `treasurer finds ${sub.reference}`,
-      () => run.treasurer.find(sub.reference, { ...ui, timeoutMs: 5_000 }),
-      { timeoutMs: UI_TIMEOUT_MS, intervalMs: 500, signal: ctx.signal },
+  // V's S1 subscription persists across runs (the manual adapter never ends it), so a later run
+  // (for example `--set via=api` after a web run) reuses it instead of subscribing again.
+  const held = heldQualifyingSubscription(await v.api.client.money.mySubscriptions(), channel, tiers, min);
+  if (held) {
+    ctx.skipStep(t("V subscribes to S1 (manual adapter)"), `V already subscribes (tier ${held.tier}, earlier run)`);
+  } else {
+    const sub = await ctx.step(t(`V subscribes to S1 (tier ${tier}, manual adapter)`), () =>
+      v.api.client.money.subscribe({ channel, tier, returnPath: ROUTES.channel(channel) }),
     );
-    await run.treasurer.confirm(sub.reference, ui);
-  });
+    ctx.assert("the subscription gives manual instructions", sub.kind === "instructions", { kind: sub.kind });
+    if (sub.kind !== "instructions") return;
+    await ctx.step(t("T1 confirms V's subscription"), async () => {
+      await waitFor(
+        `treasurer finds ${sub.reference}`,
+        () => run.treasurer.find(sub.reference, { ...ui, timeoutMs: 5_000 }),
+        { timeoutMs: UI_TIMEOUT_MS, intervalMs: 500, signal: ctx.signal },
+      );
+      await run.treasurer.confirm(sub.reference, ui);
+    });
+    run.audit.push({
+      action: "payment.confirm",
+      actorType: "admin",
+      actorId: people.t1.id,
+      mentions: sub.paymentId,
+      label: "T1 confirms V's subscription",
+    });
+  }
   const qualified = await settle(
     "V qualifies for the viewer class by subscription",
     () => apiMembership(v.api.client),
@@ -1632,13 +1649,6 @@ async function stepRejoin(run: Run): Promise<void> {
     actorId: v.id,
     mentions: second,
     label: "V exits again",
-  });
-  run.audit.push({
-    action: "payment.confirm",
-    actorType: "admin",
-    actorId: people.t1.id,
-    mentions: sub.paymentId,
-    label: "T1 confirms V's subscription",
   });
 }
 
