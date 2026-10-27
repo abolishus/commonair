@@ -26,6 +26,7 @@ const calls = vi.hoisted(() => ({
   signUp: vi.fn<(input: { acceptedDocumentIds: string[] }) => Promise<void>>(),
   acceptLegal: vi.fn<(input: { documentIds: string[] }) => Promise<{ ok: true }>>(),
   meGet: vi.fn<() => Promise<{ pendingLegal: PendingLegal[] }>>(),
+  legalCurrent: vi.fn<() => Promise<LegalDoc[]>>(),
   toastError: vi.fn<(message: string) => void>(),
 }));
 
@@ -43,7 +44,7 @@ vi.mock("../src/lib/bootstrap.ts", () => ({
 vi.mock("../src/lib/api.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/lib/api.ts")>();
   const client = {
-    legal: { current: async () => state.docs },
+    legal: { current: () => calls.legalCurrent() },
     me: {
       get: () => calls.meGet(),
       acceptLegal: (input: { documentIds: string[] }) => calls.acceptLegal(input),
@@ -119,6 +120,7 @@ beforeEach(() => {
     return { ok: true };
   });
   calls.meGet.mockReset().mockImplementation(async () => ({ pendingLegal: state.pending }));
+  calls.legalCurrent.mockReset().mockImplementation(async () => state.docs);
   calls.toastError.mockReset();
 });
 afterEach(cleanup);
@@ -151,9 +153,12 @@ function SignUpPage(): React.JSX.Element {
   return <C />;
 }
 
-async function submitSignUp(check: boolean) {
+async function submitSignUp(check: boolean, { waitForDocs = true } = {}) {
   const { container } = wrap(<SignUpPage />);
-  await waitFor(() => expect(container.querySelector("[data-legal-kind]")).not.toBeNull());
+  const loaded = () => {
+    if (!container.querySelector("[data-legal-kind]")) throw new Error("documents not listed yet");
+  };
+  if (waitForDocs) await waitFor(loaded);
   const form = container.querySelector("form");
   if (!form) throw new Error("no form");
   for (const [name, value] of [
@@ -196,6 +201,19 @@ describe("sign-up", () => {
     expect(links.hasBox).toBe(false);
     expect(links.all).toEqual(["cookies", "dmca_policy"]);
     expect(input?.acceptedDocumentIds).toEqual([]);
+  });
+
+  it("when the list failed to load, a ticked box still sends the required ids (fetched on submit)", async () => {
+    calls.legalCurrent.mockRejectedValueOnce(new Error("offline"));
+    const { links, input } = await submitSignUp(true, { waitForDocs: false });
+    expect(links.hasBox).toBe(true);
+    expect(links.all).toEqual([]);
+    expect(calls.legalCurrent).toHaveBeenCalledTimes(2);
+    expect(input?.acceptedDocumentIds).toEqual([
+      "id-terms-2026-10-01",
+      "id-privacy-2026-10-01",
+      "id-guidelines-2026-10-01",
+    ]);
   });
 });
 
@@ -247,13 +265,17 @@ describe("LegalPending", () => {
     expect(screen.getByTestId("legal-pending").getAttribute("data-kinds")).toBe("guidelines");
   });
 
-  it("does not accept a version the user was not shown", async () => {
+  it("does not accept a version the user was not shown, and shows what is pending now without an error", async () => {
     state.me = ALICE;
     state.pending = [{ kind: "terms", version: "2026-09-01" }];
     wrap(<LegalPending />);
     fireEvent.click(await screen.findByTestId("legal-pending-accept"));
-    await waitFor(() => expect(calls.toastError).toHaveBeenCalled());
+    // A newer terms version was published meanwhile: the refresh shows it.
+    state.pending = [{ kind: "terms", version: "2026-10-01" }];
+    await waitFor(() => expect(calls.meGet).toHaveBeenCalledTimes(2));
+    const banner = await screen.findByTestId("legal-pending");
+    await waitFor(() => expect(banner.querySelector('[data-legal-kind="terms"]')?.textContent ?? "").not.toBe(""));
     expect(calls.acceptLegal).not.toHaveBeenCalled();
-    expect(screen.getByTestId("legal-pending")).toBeTruthy();
+    expect(calls.toastError).not.toHaveBeenCalled();
   });
 });

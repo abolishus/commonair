@@ -47,14 +47,20 @@ function SignUpPage(): React.JSX.Element {
     setPending(true);
     setError(null);
     try {
+      // Only documents that require acceptance are accepted; the others are linked for reading.
+      // If the list never loaded (or is still loading) the box was shown anyway: fetch it now, so
+      // a ticked box is not sent as an empty acceptance.
+      const accepting = form.get("legal") === "on";
+      const requiredIds = accepting
+        ? splitByAcceptance(docs ?? (await api().legal.current())).required.map((d) => d.id)
+        : [];
       await signUp({
         email,
         username: field(form, "username").trim().toLowerCase(),
         password: field(form, "password"),
         birthDate: field(form, "birthDate"),
         altcha,
-        // Only documents that require acceptance are accepted; the others are linked for reading.
-        acceptedDocumentIds: form.get("legal") === "on" ? required.map((d) => d.id) : [],
+        acceptedDocumentIds: requiredIds,
       });
       setDoneEmail(email);
     } catch (err) {

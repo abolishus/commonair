@@ -283,3 +283,46 @@ describe("sign-up with the seeded drafts", () => {
     expect(after.body.pendingLegal).toEqual([]);
   });
 });
+
+// Last in the file: it publishes versions that change what every later test would see as current.
+describe("sign-up when no current document requires acceptance", () => {
+  test("is accepted with no ids, and records no acceptance", async () => {
+    const publishedAt = new Date(Date.now() - 500);
+    await db()
+      .insert(schema.legalDocuments)
+      .values(
+        REQUIRED_KINDS.map((kind) => ({
+          kind: kind as (typeof LEGAL_DOCUMENT_KINDS)[number],
+          version: "optional-only-1",
+          title: "Optional",
+          body: "Optional",
+          isDraft: false,
+          requiresAcceptance: false,
+          publishedAt,
+        })),
+      );
+    const docs = (await client(api).call<Doc[]>("GET", "/api/legal")).body;
+    expect(requiredIds(docs)).toEqual([]);
+
+    const username = uniqueName();
+    const email = `${username}@test.invalid`;
+    const r = await client(api).call("POST", "/api/auth/sign-up/email", {
+      email,
+      password: `pw-${crypto.randomUUID()}`,
+      name: username,
+      username,
+      birthDate: "1990-05-05",
+      altcha: await solveAltcha(api),
+      acceptedDocumentIds: [],
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    await waitFor(() => mailTo(email));
+    const [user] = await db().select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.email, email));
+    if (!user) throw new Error("user not created");
+    const accepted = await db()
+      .select()
+      .from(schema.legalAcceptances)
+      .where(eq(schema.legalAcceptances.userId, user.id));
+    expect(accepted).toEqual([]);
+  });
+});

@@ -7,5 +7,6 @@ export const e7LegalMessages = {
   "legal.pending.body": "Please read and accept the updated documents.",
   "legal.pending.accept": "Accept updated documents",
   "legal.pending.failed": "Could not record your acceptance. Try again.",
+  // Also the sign-up page's label before the documents that need no acceptance (cookies, DMCA).
   "legal.pending.optional": "Also see",
 } as const;

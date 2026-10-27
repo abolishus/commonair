@@ -73,8 +73,8 @@ function LegalPendingBanner(): React.JSX.Element | null {
     try {
       // Resolve ids at click time: a version published since the page loaded is not accepted unseen.
       const ids = matchPending(pending, await api().legal.current()).map((d) => d.id);
-      if (ids.length === 0) throw new Error("no current document matches");
-      await api().me.acceptLegal({ documentIds: ids });
+      // Nothing failed: the documents changed since the banner loaded. Show the new ones instead.
+      if (ids.length > 0) await api().me.acceptLegal({ documentIds: ids });
       await refresh();
     } catch {
       toast.error(t("legal.pending.failed"));
