@@ -13,9 +13,13 @@
  *      (not owner) on it alone, and make sure the main key has no permission there at all
  *      (ADR 0006 Q4: the API and media hold the main key and must not even list evidence)
  *
+ *   7. with GARAGE_CORS_ORIGINS (compose only), a CORS rule on the media bucket (cors.ts)
+ *
  * An existing key with a different secret is a hard error: Garage never lets a deleted
  * key id be reused, so rotation is an operator action (see infra/README.md).
  */
+
+import { corsFromEnv, putBucketCors } from "./cors.ts";
 
 export interface GarageBootstrapOptions {
   adminUrl: string;
@@ -318,6 +322,11 @@ if (import.meta.main) {
   try {
     const opts = optionsFromEnv(process.env);
     const r = await bootstrapGarage({ ...opts, log: (m) => console.warn(`garage-init: ${m}`) });
+    const cors = corsFromEnv(process.env);
+    if (cors) {
+      await putBucketCors(cors);
+      console.warn(`garage-init: CORS on ${cors.bucket} for ${cors.origins.join(", ")}`);
+    }
     console.warn(
       `garage-init: done (layout ${r.layoutApplied ? "applied" : "unchanged"}, key ${r.keyImported ? "imported" : "present"}, ` +
         `buckets created: ${r.bucketsCreated.join(", ") || "none"}, evidence key ${r.evidenceKeyImported ? "imported" : "present"}, ` +

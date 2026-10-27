@@ -203,6 +203,9 @@ services:
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       S3_EVIDENCE_ACCESS_KEY_ID: ${S3_EVIDENCE_ACCESS_KEY_ID:-}
       S3_EVIDENCE_SECRET_ACCESS_KEY: ${S3_EVIDENCE_SECRET_ACCESS_KEY:-}
+      # Dev only: the browser on PUBLIC_URL uploads to Garage's own port, a cross-origin PUT.
+      # Production goes through Caddy on one origin and never sets this (infra/garage/cors.ts).
+      GARAGE_CORS_ORIGINS: ${PUBLIC_URL:-http://localhost:3000}
     depends_on:
       garage:
         condition: service_healthy
