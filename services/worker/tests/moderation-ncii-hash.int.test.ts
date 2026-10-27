@@ -16,7 +16,7 @@ import type { ObjectInfo, ObjectStorage } from "@commonair/storage";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
-import { hashRemovedContent } from "../src/moderation/ncii-hash.ts";
+import { BROADCAST_SETTLE_MS, broadcastSettling, hashRemovedContent } from "../src/moderation/ncii-hash.ts";
 import { makeBroadcast, makeUser } from "./fixtures.ts";
 
 const BUCKET = "media";
@@ -235,6 +235,16 @@ function workerCtx(storage: ObjectStorage): WorkerContext {
   } as unknown as WorkerContext;
 }
 
+/** A broadcast the API ended long enough ago that its recordings are final. */
+async function endedBroadcast(channelId: string, endedAgoMs = BROADCAST_SETTLE_MS + 1000) {
+  const b = await makeBroadcast(t.db, channelId);
+  await t.db
+    .update(schema.broadcasts)
+    .set({ endedAt: new Date(Date.now() - endedAgoMs) })
+    .where(eq(schema.broadcasts.id, b.id));
+  return b;
+}
+
 async function broadcastItem(requestId: string, broadcastId: string) {
   await t.db.insert(schema.nciiRequestItems).values({
     requestId,
@@ -245,9 +255,17 @@ async function broadcastItem(requestId: string, broadcastId: string) {
   });
 }
 
-test("a removed broadcast: its VOD and clip are hashed, then their objects deleted, once", async () => {
+test("broadcastSettling: live or just ended is settling; ended long ago or missing is not", () => {
+  const now = new Date(1_000_000_000);
+  expect(broadcastSettling(null, now)).toBe(true);
+  expect(broadcastSettling(new Date(now.getTime() - BROADCAST_SETTLE_MS + 1), now)).toBe(true);
+  expect(broadcastSettling(new Date(now.getTime() - BROADCAST_SETTLE_MS), now)).toBe(false);
+  expect(broadcastSettling(undefined, now)).toBe(false);
+});
+
+test("a removed broadcast: its VOD, clip and thumbnails are hashed, then their objects deleted, once", async () => {
   const { user, channel } = await makeUser(t.db);
-  const b = await makeBroadcast(t.db, channel.id);
+  const b = await endedBroadcast(channel.id);
   const vodId = uuidv7();
   const clipId = uuidv7();
   // What the API's NCII decision leaves: the broadcast ended, its recordings deleted, objects kept.
@@ -276,6 +294,7 @@ test("a removed broadcast: its VOD and clip are hashed, then their objects delet
   for (const [k, v] of await syntheticVod(`vods/${vodId}/`)) storage.objects.set(k, v);
   storage.objects.set(`clips/${clipId}.mp4`, await syntheticClip());
   storage.objects.set(`clips/${clipId}.jpg`, await testImage());
+  storage.objects.set(`thumbnails/${b.id}/latest.png`, await testImage());
   const unrelated = `vods/${uuidv7()}/index.m3u8`;
   storage.objects.set(unrelated, new Uint8Array([1]));
   const mediaKeys = [...storage.objects.keys()].filter((k) => k !== unrelated);
@@ -314,7 +333,15 @@ test("a removed broadcast: its VOD and clip are hashed, then their objects delet
   const audits = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.subjectId, requestId));
   expect(audits).toHaveLength(1);
   expect(audits[0]?.action).toBe("ncii.hash_removed");
-  expect(audits[0]?.details).toMatchObject({ subjectType: "broadcast", vods: 1, clips: 1, hashes: first.hashes });
+  expect(audits[0]?.details).toMatchObject({
+    subjectType: "broadcast",
+    vods: 1,
+    clips: 1,
+    thumbnails: 1,
+  });
+  // The audit counts usable hashes; `first.hashes` counts new rows (the thumbnail's test pattern
+  // is already on the list from the first test).
+  expect(Number(audits[0]?.details?.hashes)).toBeGreaterThanOrEqual(first.hashes);
 
   // Idempotent: a retry finds nothing left to do.
   expect(await hashRemovedContent(ctx, { requestId })).toEqual({ items: 0, hashes: 0, deleted: 0 });
@@ -322,7 +349,7 @@ test("a removed broadcast: its VOD and clip are hashed, then their objects delet
 
 test("a removed broadcast without recordings is marked hashed with 0 hashes", async () => {
   const { user, channel } = await makeUser(t.db);
-  const b = await makeBroadcast(t.db, channel.id);
+  const b = await endedBroadcast(channel.id);
   const requestId = await removedRequest(user.id);
   await broadcastItem(requestId, b.id);
   const ctx = workerCtx(memoryStorage());
@@ -340,6 +367,60 @@ test("a removed broadcast without recordings is marked hashed with 0 hashes", as
     objectsDeleted: 0,
     vods: 0,
     clips: 0,
+    thumbnails: 0,
   });
   expect(await hashRemovedContent(ctx, { requestId })).toEqual({ items: 0, hashes: 0, deleted: 0 });
 });
+
+test("a broadcast that just ended is deferred: nothing hashed or deleted, the job throws to retry", async () => {
+  const { user, channel } = await makeUser(t.db);
+  const b = await endedBroadcast(channel.id, 1000);
+  const thumb = `thumbnails/${b.id}/latest.png`;
+  const storage = memoryStorage();
+  storage.objects.set(thumb, await testImage());
+  const requestId = await removedRequest(user.id);
+  await broadcastItem(requestId, b.id);
+  const ctx = workerCtx(storage);
+  await expect(hashRemovedContent(ctx, { requestId })).rejects.toThrow(/settling/);
+  expect(storage.objects.has(thumb)).toBe(true);
+  const [item] = await t.db
+    .select()
+    .from(schema.nciiRequestItems)
+    .where(eq(schema.nciiRequestItems.requestId, requestId));
+  expect(item?.hashedAt).toBeNull();
+
+  // Once settled, the retry does it.
+  await t.db
+    .update(schema.broadcasts)
+    .set({ endedAt: new Date(Date.now() - BROADCAST_SETTLE_MS - 1000) })
+    .where(eq(schema.broadcasts.id, b.id));
+  const r = await hashRemovedContent(ctx, { requestId });
+  expect(r).toMatchObject({ items: 1, deleted: 1 });
+  expect(storage.objects.has(thumb)).toBe(false);
+}, 60_000);
+
+test("objects written under the broadcast's prefixes while it was hashed are deleted too", async () => {
+  const { user, channel } = await makeUser(t.db);
+  const b = await endedBroadcast(channel.id);
+  const thumb = `thumbnails/${b.id}/latest.png`;
+  const late = `thumbnails/${b.id}/999.png`;
+  const storage = memoryStorage();
+  storage.objects.set(thumb, await testImage());
+  const requestId = await removedRequest(user.id);
+  await broadcastItem(requestId, b.id);
+  // A write that lands after the listing, while the first object is being deleted.
+  const del = storage.delete.bind(storage);
+  let raced = false;
+  storage.delete = async (bucket, key) => {
+    if (!raced) {
+      raced = true;
+      storage.objects.set(late, new Uint8Array([1]));
+    }
+    await del(bucket, key);
+  };
+  const r = await hashRemovedContent(workerCtx(storage), { requestId });
+  expect(r).toMatchObject({ items: 1, deleted: 2 });
+  expect(storage.objects.has(late)).toBe(false);
+  const audits = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.subjectId, requestId));
+  expect(audits[0]?.details).toMatchObject({ objectsDeleted: 2, thumbnails: 1 });
+}, 60_000);

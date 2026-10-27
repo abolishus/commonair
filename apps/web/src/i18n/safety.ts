@@ -227,8 +227,7 @@ export const safetyMessages = {
   "safety.modq.nciiFailed": "The request could not be decided. Try again.",
 
   "safety.appealq.title": "Appeals queue",
-  "safety.appealq.intro":
-    "Open appeals, oldest first. Overturning undoes what it can: a mature label is removed, a ban or suspension in force is lifted, an account action is reversed.",
+  "safety.appealq.intro": "Open appeals, oldest first. Overturning a mature label removes it.",
   "safety.appealq.loading": "Loading appeals…",
   "safety.appealq.loadFailed": "The appeals could not be loaded. Reload to try again.",
   "safety.appealq.loadMoreFailed": "Could not load more appeals. Try again.",

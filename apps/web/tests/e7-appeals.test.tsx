@@ -115,9 +115,10 @@ describe("account actions on /settings/appeals", () => {
       [strike.id, "dmca_strike", "false"],
       [reversed.id, "dmca_strike", "true"],
     ]);
-    // Pending appeal: the button is there but disabled; a reversed action has none.
-    const pending = within(rows[0]!).getByTestId("account-action-appeal-open");
-    expect(pending.hasAttribute("disabled") || pending.getAttribute("aria-disabled") === "true").toBe(true);
+    // Only unreversed actions without an open appeal carry the control (e7-selectors).
+    expect(within(rows[0]!).queryByTestId("account-action-appeal-open")).toBeNull();
+    expect(rows[0]!.textContent).toContain(en["appeals.account.appealPending"]);
+    expect(within(rows[1]!).getByTestId("account-action-appeal-open")).toBeTruthy();
     expect(within(rows[2]!).queryByTestId("account-action-appeal-open")).toBeNull();
     expect(rows[2]!.textContent).toContain(en["appeals.account.reversal.counter_notice_restored"]);
   });
@@ -181,8 +182,8 @@ describe("account actions on /settings/appeals", () => {
     expect(appeal).toHaveBeenCalledWith(strike.id, "This strike is about a video I own.");
     const rows = screen.getAllByTestId("appeal-row");
     expect(rows[0]!.dataset).toMatchObject({ kind: "account", subjectType: "account_action", status: "open" });
-    const button = screen.getByTestId("account-action-appeal-open");
-    expect(button.textContent).toBe(en["appeals.account.appealPending"]);
+    expect(screen.queryByTestId("account-action-appeal-open")).toBeNull();
+    expect(screen.getByTestId("account-action").textContent).toContain(en["appeals.account.appealPending"]);
   });
 
   it("MyAppeals: a failed account-action load says so and keeps the appeals", async () => {

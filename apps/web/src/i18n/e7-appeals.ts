@@ -3,6 +3,8 @@
 
 /** E7-appeals: account actions and their appeals (appeals.account.*). That unit owns this file. */
 export const e7AppealsMessages = {
+  "appeals.account.queueIntro":
+    "Open appeals, oldest first. Overturning undoes what it can: a mature label is removed, a ban or suspension in force is lifted, an account action is reversed.",
   "appeals.account.title": "Account actions",
   "appeals.account.intro":
     "Copyright strikes and suspensions recorded on your account. If one is wrong, appeal it and a moderator will review it.",

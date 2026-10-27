@@ -287,15 +287,16 @@ export function AccountActionList({ actions, appeals, onAppeal }: AccountActionL
                 {reversed && action.reversedAt && (
                   <RelativeTime date={action.reversedAt} className="text-xs text-muted-foreground" />
                 )}
-                {!reversed && (
+                {!reversed && pending && <StatusBadge tone="info">{t("appeals.account.appealPending")}</StatusBadge>}
+                {/* Only an action that can still be appealed carries the open control (e7-selectors). */}
+                {!reversed && !pending && (
                   <Button
                     data-testid="account-action-appeal-open"
                     variant="outline"
                     size="sm"
-                    disabled={pending}
                     onClick={() => setAppealing(action)}
                   >
-                    {pending ? t("appeals.account.appealPending") : t("appeals.account.appeal")}
+                    {t("appeals.account.appeal")}
                   </Button>
                 )}
               </ItemActions>

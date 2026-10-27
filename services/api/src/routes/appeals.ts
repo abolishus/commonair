@@ -19,9 +19,12 @@
  *       - platform `suspend_user`/`suspend_channel`: unsuspends as `safety.suspend` does
  *         (`unsuspend_*` mod action, `user.unsuspend`/`channel.unsuspend` audit), but only a
  *         moderation suspension: a repeat-infringer (DMCA) suspension stays, and a T0 suspension
- *         refuses (FORBIDDEN, the whole resolve rolls back);
- *       - a ban or suspension that is no longer in force, or was superseded by a later action of
- *         the same kind, is left alone (`lifted: false` in the appeal's audit details);
+ *         refuses (FORBIDDEN, the whole resolve rolls back). A moderation suspension laid over an
+ *         unreversed DMCA termination hands the account back to the repeat-infringer suspension
+ *         (`dmcaSuspensionRestored`) instead of unsuspending it;
+ *       - a ban, timeout or suspension that is no longer in force (lifted, expired), or was
+ *         superseded by a later action of the same kind, is left alone (`lifted: false` in the
+ *         appeal's audit details);
  *       - every other action (`delete_message`, `warn`, `end_stream`, chat modes, role changes, …)
  *         is recorded only: there is nothing to undo.
  *   - `moderation` on `content_label` (a T2 mature label on a channel they own): overturning
@@ -45,6 +48,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import type { APPEAL_KINDS, APPEAL_SUBJECTS, APPEAL_STATUSES } from "@commonair/contracts/enums";
 import {
+  activeAccountAction,
   lockAccountActions,
   reconcileDmcaTerminationInTx,
   reverseAccountActionInTx,
@@ -58,7 +62,7 @@ import { audit } from "../events/audit.ts";
 import { broadcasterFields, emit } from "../events/outbox.ts";
 import { publishControl, publishUserControl } from "../lib/control.ts";
 import { appUrl, sendNotice } from "../mail.ts";
-import { liftChatBanInTx } from "../moderation/chat-bans.ts";
+import { isActiveBan, liftChatBanInTx } from "../moderation/chat-bans.ts";
 import { liftRestrictionInTx } from "../moderation/restriction.ts";
 import { setSuspension } from "../moderation/suspension.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
@@ -66,7 +70,7 @@ import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 
-const { appeals: appealsT, playbackSessions, integrityFlags, channels, modActions, users } = schema;
+const { appeals: appealsT, playbackSessions, integrityFlags, channels, modActions, users, chatBans } = schema;
 const { contentLabels, moderationCases, broadcasts, accountActions, dmcaNoticeItems } = schema;
 type AppealRow = typeof appealsT.$inferSelect;
 type Kind = (typeof APPEAL_KINDS)[number];
@@ -360,6 +364,13 @@ async function overturnModAction(
       .from(users)
       .where(eq(users.id, targetId));
     if (!channel || !target) return { after: NOTHING, details: { effect, lifted: false } };
+    // Only a ban still in force is lifted: `liftChatBanInTx` also stamps expired rows lifted, which
+    // would credit the resolver with a lift that never happened.
+    const unlifted = await tx
+      .select()
+      .from(chatBans)
+      .where(and(eq(chatBans.channelId, channel.id), eq(chatBans.userId, target.id), isNull(chatBans.liftedAt)));
+    if (!unlifted.some((b) => isActiveBan(b, now))) return { after: NOTHING, details: { effect, lifted: false } };
     const lifted = await liftChatBanInTx(tx, { channel, target, actor: staff, now, appealId });
     return {
       after: lifted ? { chatUnban: { channelId: channel.id, userId: target.id }, userUnsuspended: null } : NOTHING,
@@ -373,7 +384,7 @@ async function overturnModAction(
     if (await supersededBy(tx, { ...m, channelId: null }, family))
       return { after: NOTHING, details: { effect, lifted: false } };
     const [u] = await tx
-      .select({ banned: users.banned, banReason: users.banReason })
+      .select({ banned: users.banned, banReason: users.banReason, banExpires: users.banExpires })
       .from(users)
       .where(eq(users.id, targetId));
     const [ch] = await tx
@@ -384,9 +395,25 @@ async function overturnModAction(
     // is appealed as an account action. T0 is attempted so that its trigger refuses (FORBIDDEN).
     const liftable =
       kind === "user"
-        ? u?.banned === true && LIFTABLE_SUSPENSIONS.includes(u.banReason)
+        ? u?.banned === true &&
+          LIFTABLE_SUSPENSIONS.includes(u.banReason) &&
+          // A timed suspension past its end is no longer in force.
+          (u.banExpires === null || u.banExpires > now)
         : ch !== undefined && ch.suspendedAt !== null && LIFTABLE_SUSPENSIONS.includes(ch.suspendedReason);
     if (!liftable) return { after: NOTHING, details: { effect, lifted: false } };
+    if (kind === "user" && u?.banReason === "moderation") {
+      // A moderation suspension overwrites the repeat-infringer one (`setSuspension` with reason
+      // `moderation`), so lifting it would drop a DMCA termination still in force: hand the
+      // account back to that suspension instead (permanent, as the termination imposed it).
+      await lockAccountActions(tx, targetId);
+      if (await activeAccountAction(tx, targetId, "dmca_termination")) {
+        await tx
+          .update(users)
+          .set({ banned: true, banReason: DMCA_SUSPENSION_REASON, banExpires: null })
+          .where(eq(users.id, targetId));
+        return { after: NOTHING, details: { effect, lifted: false, dmcaSuspensionRestored: true } };
+      }
+    }
     const s = await setSuspension(tx, { userId: targetId, channelId: ch?.id ?? null }, kind, false, now, undefined);
     if (!s.changed) return { after: NOTHING, details: { effect, lifted: false } };
     // The rows `safety.suspend` writes for an unsuspension.
@@ -485,25 +512,33 @@ async function overturnAccountAction(
 
 /** After commit: tell the appellant (a notice: a failed send never fails the resolve). */
 async function emailAppellant(deps: Deps, a: AppealRow, outcome: Exclude<Status, "open">, decidedAt: Date) {
-  const [u] = await deps.db
-    .select({ email: users.email, locale: users.locale, deletedAt: users.deletedAt })
-    .from(users)
-    .where(eq(users.id, a.appellantId));
-  if (!u || u.deletedAt) return;
-  await sendNotice(deps.logger, "appealDecided", () =>
-    deps.mailer.send(
-      "appealDecided",
-      {
-        appealRef: appealRef(a.id),
-        kind: a.kind,
-        outcome,
-        decidedAt,
-        decisionUrl: appUrl(deps.site, APPEALS_PATH),
-        locale: u.locale,
-      },
-      u.email,
-    ),
-  );
+  try {
+    const [u] = await deps.db
+      .select({ email: users.email, locale: users.locale, deletedAt: users.deletedAt })
+      .from(users)
+      .where(eq(users.id, a.appellantId));
+    if (!u || u.deletedAt) return;
+    await sendNotice(deps.logger, "appealDecided", () =>
+      deps.mailer.send(
+        "appealDecided",
+        {
+          appealRef: appealRef(a.id),
+          kind: a.kind,
+          outcome,
+          decidedAt,
+          decisionUrl: appUrl(deps.site, APPEALS_PATH),
+          locale: u.locale,
+        },
+        u.email,
+      ),
+    );
+  } catch (err) {
+    // The resolve has committed: a 500 here would turn the client's retry into a 409. Ids only.
+    deps.logger.warn("appealDecided: appellant lookup failed", {
+      appealId: a.id,
+      error: err instanceof Error ? err.name : "unknown",
+    });
+  }
 }
 
 export const appeals = {

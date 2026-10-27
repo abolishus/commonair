@@ -337,6 +337,95 @@ describe("overturned moderation_action appeals", () => {
     expect(r!.details).toMatchObject({ effect: "suspension", lifted: false });
   });
 
+  test("an expired timeout is left alone: its row is not stamped lifted by the resolver", async () => {
+    const v = await viewer();
+    const timeout = await chanBan(v, 60);
+    await db()
+      .update(schema.chatBans)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(and(eq(schema.chatBans.channelId, channelId), eq(schema.chatBans.userId, v.userId)));
+    const created = await appeal(v, "moderation", "moderation_action", timeout.id);
+    expect((await resolve(mod, created.body.id, "overturned")).status).toBe(200);
+    const rows = await activeBans(v.userId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.liftedBy).toBeNull();
+    expect(await latestModAction(v.userId, "untimeout")).toBeUndefined();
+    const [r] = await auditOf(created.body.id, "appeal.resolve");
+    expect(r!.details).toMatchObject({ effect: "chat_ban", lifted: false });
+  });
+
+  test("a timed suspension past its end is not lifted again", async () => {
+    const v = await viewer();
+    const [m] = await db()
+      .insert(schema.modActions)
+      .values({ scope: "platform", moderatorId: mod.userId, targetUserId: v.userId, action: "suspend_user" })
+      .returning();
+    await db()
+      .update(schema.users)
+      .set({ banned: true, banReason: "moderation", banExpires: new Date(Date.now() - 1000) })
+      .where(eq(schema.users.id, v.userId));
+    const a = await insertAppeal(v.userId, "moderation", "moderation_action", m!.id);
+    expect((await resolve(mod2, a.id, "overturned")).status).toBe(200);
+    expect(await latestModAction(v.userId, "unsuspend_user")).toBeUndefined();
+    expect(await auditOf(v.userId, "user.unsuspend")).toEqual([]);
+    const [r] = await auditOf(a.id, "appeal.resolve");
+    expect(r!.details).toMatchObject({ effect: "suspension", lifted: false });
+  });
+
+  test("a moderation suspension over an unreversed DMCA termination hands back the DMCA suspension", async () => {
+    const v = await viewer();
+    const { termination } = await repeatInfringer(v.userId, "dmca_repeat_infringer");
+    // `safety.suspend` overwrites the repeat-infringer reason with `moderation`.
+    const s = await mod.client.call("POST", `/api/admin/users/${v.username}/suspension`, {
+      target: "user",
+      suspended: true,
+      durationSeconds: 3600,
+      reason: "Spam",
+    });
+    expect(s.status, JSON.stringify(s.body)).toBe(200);
+    expect(await banOf(v.userId)).toEqual({ banned: true, banReason: "moderation" });
+    const suspend = await latestModAction(v.userId, "suspend_user");
+    const a = await insertAppeal(v.userId, "moderation", "moderation_action", suspend!.id);
+    expect((await resolve(mod2, a.id, "overturned")).status).toBe(200);
+    const [u] = await db()
+      .select({ banned: schema.users.banned, banReason: schema.users.banReason, banExpires: schema.users.banExpires })
+      .from(schema.users)
+      .where(eq(schema.users.id, v.userId));
+    expect(u).toEqual({ banned: true, banReason: "dmca_repeat_infringer", banExpires: null });
+    expect((await accountRow(termination)).reversedAt).toBeNull();
+    expect(await latestModAction(v.userId, "unsuspend_user")).toBeUndefined();
+    const [r] = await auditOf(a.id, "appeal.resolve");
+    expect(r!.details).toMatchObject({ effect: "suspension", lifted: false, dmcaSuspensionRestored: true });
+  });
+
+  test("a channel suspension is lifted as safety.suspend lifts it", async () => {
+    const v = await viewer();
+    const [ch] = await db().select().from(schema.channels).where(eq(schema.channels.ownerId, v.userId));
+    const s = await mod.client.call("POST", `/api/admin/users/${v.username}/suspension`, {
+      target: "channel",
+      suspended: true,
+      reason: "Spam",
+    });
+    expect(s.status, JSON.stringify(s.body)).toBe(200);
+    const suspend = await latestModAction(v.userId, "suspend_channel");
+    const a = await insertAppeal(v.userId, "moderation", "moderation_action", suspend!.id);
+    expect((await resolve(mod2, a.id, "overturned")).status).toBe(200);
+    const [after] = await db()
+      .select({ at: schema.channels.suspendedAt, reason: schema.channels.suspendedReason })
+      .from(schema.channels)
+      .where(eq(schema.channels.id, ch!.id));
+    expect(after).toEqual({ at: null, reason: null });
+    expect(await latestModAction(v.userId, "unsuspend_channel")).toMatchObject({
+      moderatorId: mod2.userId,
+      channelId: ch!.id,
+    });
+    const [audit] = await auditOf(ch!.id, "channel.unsuspend");
+    expect(audit).toMatchObject({ actorId: mod2.userId });
+    expect(audit!.details).toMatchObject({ appealId: a.id });
+    const [r] = await auditOf(a.id, "appeal.resolve");
+    expect(r!.details).toMatchObject({ effect: "suspension", lifted: true });
+  });
+
   test("an action with nothing to undo is recorded only", async () => {
     const v = await viewer();
     const [m] = await db()
