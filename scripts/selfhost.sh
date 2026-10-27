@@ -143,7 +143,9 @@ backup options (no option: --database):
   ~/.local/state/commonair/object-backup, which status shows.
 
 A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
-upgrades use the repository recorded in the installed release.
+upgrades use the repository recorded in the installed release. A fork whose code still
+carries upstream's SITE.repository.url records upstream's, so set the variable on every
+upgrade too (docs/self-hosting/upgrades.md, "A fork's releases").
 
 Run install as the user that will own the instance. Run it as root on a fresh server and it
 installs Podman, creates the `commonair` user, enables linger, lowers the unprivileged-port
@@ -885,7 +887,7 @@ refuse_repoint() {
     die "this instance keeps its objects at $1=$_stored; $3 $2 would point it at other objects" \
       "selfhost.sh has no --migrate-objects: the objects already stored would stay behind." \
       "fix: drop $3 to keep the store, or copy every bucket to the new place first (rclone, as in" \
-      "docs/self-hosting/backups.md, section 'Objects in Garage') and install a new instance against it."
+      "docs/self-hosting/backups.md, section 'Without the script') and install a new instance against it."
   fi
   return 0
 }
@@ -914,7 +916,7 @@ resolve_storage_settings() {
     die "this instance keeps its objects in Garage on this host; the --s3-* flags would move it to an external store" \
       "selfhost.sh has no --migrate-objects: the objects already stored would stay behind in Garage." \
       "fix: drop the --s3-* flags to keep Garage, or copy every bucket to the new store first (rclone, as in" \
-      "docs/self-hosting/backups.md, section 'Objects in Garage') and install a new instance against that store."
+      "docs/self-hosting/backups.md, section 'Without the script') and install a new instance against that store."
   fi
   [ "$STORAGE_MODE" = external ] || return 0
   [ "$_have" = external ] && STORAGE_STORED=yes

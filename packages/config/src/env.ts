@@ -399,7 +399,7 @@ export const infraEnv = z.object({
     .string()
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
-  /** Bearer token for Garage's admin API, used by garage-init to create buckets and keys. */
+  /** Bearer token for Garage's admin API, used by commonair-storage-init (compose: garage-init) to create buckets and keys. */
   GARAGE_ADMIN_TOKEN: z.string().min(32).optional(),
   /** Password of Grafana's `admin` user; Grafana refuses to start without it. */
   GRAFANA_ADMIN_PASSWORD: z.string().min(16).optional(),
