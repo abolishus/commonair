@@ -25,7 +25,8 @@ bill arrives before the port fills.
 - `MODERATION_SAMPLE_SECONDS` (default 10): the frame-sampling interval. The governance setting
   can only make it shorter.
 
-**Disk.** VODs and clips live in Garage on the local disk. Recording scratch space is
+**Disk.** With Garage, VODs and clips live on the local disk (with an external store,
+[object-storage.md](object-storage.md), they do not). Recording scratch space is
 `MEDIA_WORK_DIR_MAX_BYTES` (20 GiB by default), and new recordings stop when the disk has less
 than `MEDIA_WORK_DIR_MIN_FREE_BYTES` free. `selfhost.sh status` shows each volume's size.
 
@@ -39,8 +40,9 @@ instance (ADR 0025; the scaling milestone, S1):
 
 1. **Move state off the host.** Postgres and Valkey go to their own servers, or to managed
    services, so the database stops competing with FFmpeg for CPU and memory and can fail over.
-   Objects go to an external S3 store. `selfhost.sh` will accept an external Postgres, Valkey
-   and S3 from any provider (S1-b), so a self-hosted instance can use the same managed products
+   Objects go to an external S3 store, which `selfhost.sh install --s3-*` already sets up with
+   any provider ([object-storage.md](object-storage.md)). `selfhost.sh` will accept an external
+   Postgres and Valkey too (S1-b), so a self-hosted instance can use the same managed products
    as ours; a managed Postgres must let a non-superuser owner create the protection triggers and
    the non-owner app role (ADR 0004).
 2. **Add app servers** (API, chat, web, worker, origin, tracker) behind a load balancer.
@@ -53,10 +55,11 @@ instance (ADR 0025; the scaling milestone, S1):
 5. **A CDN last**, and only as an optional burst adapter (`CDN_PROVIDER=origin-pull`). The
    platform never requires one.
 
-Steps 1 to 3 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
+Apart from the object store, steps 1 to 3 are not scripted yet: `selfhost.sh` manages one host. Doing them by hand means
 running the same images with the same env file on another host, pointing `DATABASE_URL`,
 `VALKEY_URL` and the internal URLs at it, and keeping the internal ports off the public
 internet. Plan that work with the project before you need it.
 
 The E6 load test (`load-plan` in the harness) measures origin egress, CPU and p95 latency for
-N streamers × M viewers, and is how the thresholds for each step will be set.
+N streamers × M viewers, and is how the thresholds for each step will be set. To measure your
+own host the same way, see [the capacity runbook](../operators/capacity.md).

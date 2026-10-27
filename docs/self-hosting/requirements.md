@@ -10,8 +10,12 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **Debian 13 (trixie)** or **Fedora 42 or newer**. `selfhost.sh` refuses other distributions
   unless you pass `--unsupported-distro`, and then you are on your own.
 - **Podman 5** with `catatonit`. Both distributions ship it. Run as root, `selfhost.sh` installs
-  it for you (`podman catatonit uidmap passt dbus-user-session curl ca-certificates` on Debian,
-  `podman catatonit passt curl` on Fedora).
+  it for you when it or a helper is missing (`podman catatonit uidmap passt aardvark-dns nftables
+  dbus-user-session curl ca-certificates rclone` on Debian, `podman catatonit passt aardvark-dns
+  nftables curl rclone` on Fedora).
+- **rclone**, from the distribution, only for the object backups
+  ([backups.md](backups.md#objects)). `selfhost.sh` installs it with Podman; if Podman was
+  already there, install it yourself (`apt-get install rclone` or `dnf install rclone`).
 - **systemd 254 or newer**, for `RestartSteps=` in the units. Both distributions have it.
 - **amd64 or arm64.** Every release image is built for both.
 
@@ -26,10 +30,14 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 The full stack is about 20 containers. Transcoding, frame sampling and the moderation
 classifier run on the CPU, so CPU is what runs out first when streamers go live. Recordings and
 clips need scratch space (`MEDIA_WORK_DIR_MAX_BYTES`, 20 GiB by default), and Garage keeps every
-VOD and clip on the local disk.
+VOD and clip on the local disk. With an external object store
+([object-storage.md](object-storage.md)), the host's disk holds no objects: size it for
+Postgres, the scratch space, the images and the logs.
 
 The E6 load test (`load-plan`: 20 streamers × 200 viewers) is how the project sizes a server.
-Its results are not published yet, so every row above except the last is an estimate. The
+Its results are not published yet, so every row above except the last is an estimate. They will
+go into [the capacity runbook](../operators/capacity.md), which also says how to measure a host
+yourself. The
 production row is the minimum the co-op chose in
 [ADR 0010](../decisions/0010-production-hosting.md), also before the load test.
 
@@ -65,12 +73,14 @@ Open these inbound, in the host firewall and in any provider firewall in front o
 | 22   | TCP      | SSH, ideally restricted to your own addresses           |
 
 Each public port listens on IPv6 and IPv4 (IPv4 alone on a host without IPv6). Ports 80 and
-443 are held by systemd (`commonair-caddy.socket`) and handed to Caddy, so the instance sees
-each HTTPS client's own address; the others go through rootless Podman's port forwarding.
+443 are held by systemd (`commonair-caddy.socket`) and handed to Caddy, and 6667 and 6697 the
+same way (`commonair-irc.socket`, `commonair-ircs.socket`) to the IRC gateway, so the instance
+sees each HTTPS and IRC client's own address. RTMP (1935) and WebRTC (8189/udp) go through
+rootless Podman's port forwarding, so MediaMTX sees every encoder at one internal address.
 
 Nothing else is reachable from outside the containers, except two ports on the host's
-`127.0.0.1`: Garage's S3 API (3900, for the [off-host object copy](backups.md)) and Grafana
-(3030). Postgres, Valkey, Prometheus, the collector and the services are reachable only inside
+`127.0.0.1`: Garage's S3 API (3900, with Garage only, for `selfhost.sh backup --objects`, the
+[off-host object copy](backups.md#objects)) and Grafana (3030). Postgres, Valkey, Prometheus, the collector and the services are reachable only inside
 the instance's container network. Reach Grafana through an SSH tunnel:
 
 ```sh
@@ -90,7 +100,8 @@ The server must reach, over HTTPS:
 - `huggingface.co` once, for the moderation model (or pass `--model` with a verified copy);
 - the ACME CA (Let's Encrypt by default);
 - Sigstore's public services, if you verify signatures with cosign (recommended);
-- your SMTP relay.
+- your SMTP relay;
+- an external object store and the offsite store for backups, if you use them.
 
 To avoid the image registries, run your own mirror ([mirroring.md](mirroring.md)).
 
@@ -109,9 +120,15 @@ the block.
 
 ## Optional: off-host object storage
 
-Backups go to the local Garage by default, which does not survive the loss of the server. For a
-real instance, point WAL-G at an S3-compatible bucket somewhere else: DigitalOcean Spaces, Hetzner Object
-Storage, a Garage node on a second host, or any other S3 service. See [backups.md](backups.md).
+Objects and backups go to the local Garage by default, which does not survive the loss of the
+server. For a real instance, you need an S3-compatible bucket somewhere else: DigitalOcean
+Spaces, Hetzner Object Storage, a Garage node on a second host, or any other S3 service.
+
+- **Backups.** Point WAL-G at it, and copy the media and evidence there daily with
+  `selfhost.sh backup --objects` ([backups.md](backups.md)).
+- **The objects themselves**, optionally: install against an external store instead of Garage
+  ([object-storage.md](object-storage.md)). Decide before the first install; an instance never
+  switches store.
 
 ## Accounts and access
 

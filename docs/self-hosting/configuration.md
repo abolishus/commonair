@@ -69,7 +69,8 @@ On an external store, `install --reinstall` keeps every stored value unless you 
 key pair again: that is how you rotate a key or move `S3_PUBLIC_ENDPOINT`. A different
 `--s3-endpoint` or bucket name is refused, like a switch of store. `upgrade` takes no
 `--s3-*` flag and keeps the store as it is. Passing `--s3-*` to an instance that uses Garage is
-refused (see [backups.md](backups.md) for copying objects to another store by hand).
+refused (see [backups.md](backups.md#without-the-script) for copying objects to another store
+by hand).
 
 `commonair-storage-init`, a one-shot every service waits for, makes the store ready: with
 Garage it creates the layout, keys and buckets; with an external store it checks, with the
@@ -154,6 +155,13 @@ services, so the reference below does not list them.
 | `AWS_SECRET_ACCESS_KEY`     | WAL-G (Postgres)    | Secret for the backup bucket (default: `S3_SECRET_ACCESS_KEY`)                              |
 | `AWS_S3_FORCE_PATH_STYLE`   | WAL-G (Postgres)    | Path-style S3 URLs (default: `S3_FORCE_PATH_STYLE`, or `true` with `AWS_ENDPOINT`)          |
 | `WALG_S3_PREFIX`            | WAL-G (Postgres)    | Where backups go (default `s3://<S3_BUCKET_BACKUPS>/wal`)                                   |
+
+The object backups' settings, `BACKUP_OBJECTS_REMOTE_*` (`ENDPOINT`, `REGION`, `BUCKET`,
+`PREFIX`, `PATH_STYLE`, `ALLOW_HTTP`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`),
+`BACKUP_OBJECTS_BWLIMIT`, `BACKUP_OBJECTS_MAX_DELETE` (default 1000, or `off`) and
+`BACKUP_OBJECTS_SOURCE_*` (`ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `ENDPOINT`), are read by
+`selfhost.sh backup` alone and given to no unit. [backups.md](backups.md#set-it-up-digitalocean-spaces)
+lists every one.
 
 ## Reference
 
