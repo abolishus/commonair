@@ -61,8 +61,9 @@ Once after the first real release:
 
 ## Cutting `v0.1.0-rc.1`
 
-1. **Main is green.** The last `ci` run on `main` passed, including `release dry run` and both
-   `self-host e2e` jobs (they run on pushes to main and nightly).
+1. **Main is green.** The last `ci` run on `main` passed, including `release dry run` and all three
+   `self-host e2e (<distro>, <storage>)` jobs: Debian and Fedora with Garage, and Debian with an
+   external S3 store (they run on pushes to main and nightly).
 
    ```sh
    gh run list --workflow ci.yml --branch main --limit 3
@@ -121,7 +122,12 @@ that version. On a fork, the same works with the fork's own runners; add
 
 To test the bundle on a host before tagging, `bun scripts/selfhost/e2e.ts` builds all images
 locally, installs, upgrades and rolls back on a Debian 13 (or `--distro fedora`) container;
-see its header for requirements.
+see its header for requirements. `--storage external` installs against an external S3 store
+instead of Garage, and `--keep` leaves the containers running for debugging. Locally,
+third-party images come through a Zot pull-through cache in `.cache/selfhost-e2e-mirror/`
+(delete the directory to empty it); `--no-mirror` pulls from upstream, and `--mirror` turns the
+cache on under CI, where it is off by default. If the mirror container does not stay up, the
+step "start the pull-through mirror" fails with Zot's log; rerun with `--no-mirror`.
 
 ## Verifying the published release yourself
 

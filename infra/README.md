@@ -30,7 +30,7 @@ rootless). Nothing needs root, `privileged`, host ports below 1024 or the Podman
 | `migrate`         | built: `tools`                                                                                                      | one-shot: migrations as the owner, then the `commonair_app` role                                                                                                                                           |
 | `valkey`          | `ghcr.io/valkey-io/valkey:9.1.2-trixie`                                                                             | ephemeral state: presence, rate limits, caches, pub/sub, BullMQ                                                                                                                                            |
 | `garage`          | `dxflrs/garage:v2.4.1`                                                                                              | S3 object storage (single node)                                                                                                                                                                            |
-| `garage-init`     | built: `tools`                                                                                                      | one-shot: layout, key import, buckets (`garage/bootstrap.ts`, idempotent)                                                                                                                                  |
+| `garage-init`     | built: `tools`                                                                                                      | one-shot: layout, key import, buckets (`garage/bootstrap.ts`, idempotent); in production the Quadlet unit `commonair-storage-init`                                                                         |
 | `mailpit`         | `ghcr.io/axllent/mailpit:v1.31.6`                                                                                   | development SMTP sink (production uses a real SMTP server)                                                                                                                                                 |
 | `mediamtx`        | `bluenviron/mediamtx:1.21.2-ffmpeg`                                                                                 | RTMP/WHIP ingest, LL-HLS, RTSP (config: `mediamtx/mediamtx.yml`, media unit); gets `INTERNAL_API_SECRET`, which it expands in its hooks; healthcheck probes RTMP because its API sits behind the auth hook |
 | `api` … `tracker` | built: `containers/service.Containerfile`                                                                           | `api` (+FFmpeg), `chat`, `irc`, `origin`, `media` (+FFmpeg), `worker` (+FFmpeg), `tracker`                                                                                                                 |
@@ -217,6 +217,12 @@ web app and gets a 404. Signed responses are not compressed, so Garage's `Conten
 external S3 store with its own public endpoint instead needs CORS for the site's origin and that
 origin in the CSP's `connect-src`.
 
+Installing against an external S3 store instead of Garage is scripted:
+`selfhost.sh install --s3-endpoint … --s3-region …` and the other `--s3-*` flags
+([docs/self-hosting/object-storage.md](../docs/self-hosting/object-storage.md)). The instance then
+has no Garage unit, and `commonair-storage-init` checks the operator's buckets instead of
+creating them.
+
 Public media (avatars, thumbnails, clips, VODs) is read at `MEDIA_PUBLIC_URL`, by default the
 origin's `/media` route (`http://localhost:3003/media`; `https://<host>/media` behind Caddy). The
 origin reads the media bucket with the service key and serves only the public prefixes
@@ -229,8 +235,10 @@ the whole bucket (ADR 0009).
 The Postgres image adds WAL-G (glibc build for Ubuntu 24.04, which runs on Debian trixie;
 SHA-256 for amd64 and arm64 pinned in the Containerfile and verified at build time) and runs
 with `archive_mode=on`, `archive_command='timeout 20 wal-g wal-push %p'`, `archive_timeout=60`.
-`postgres/walg-env.sh` maps `S3_*` to WAL-G's `AWS_*` settings and sets
-`WALG_S3_PREFIX=s3://commonair-backups/wal`. If Garage starts later than Postgres, archiving
+`postgres/walg-env.sh` maps `S3_*` to WAL-G's `AWS_*` settings unless `AWS_*` are set. The
+endpoint is the first of `AWS_ENDPOINT`, `WALG_S3_ENDPOINT`, `S3_ENDPOINT` and
+`http://garage:3900`, and `WALG_S3_PREFIX` defaults to `s3://${S3_BUCKET_BACKUPS}/wal`
+(`s3://commonair-backups/wal`). If Garage starts later than Postgres, archiving
 fails and Postgres retries; segments stay in `pg_wal` until archived, so nothing is lost (watch
 disk usage if Garage stays down).
 
@@ -331,7 +339,13 @@ Rules every unit follows (ADR 0023 §10, checked by `infra/tests/quadlet.test.ts
 - Long-running units: `Restart=always`, `RestartMode=direct`, back-off from 5 s to 5 min
   (`RestartSteps=`, `RestartMaxDelaySec=`, systemd 254+), `StartLimitIntervalSec=0`, a health
   check with `HealthOnFailure=kill` and `Notify=healthy`.
-- `Requires=` + `After=` only on the one-shots (`commonair-migrate`, `commonair-garage-init`,
+- Every `RestartMode=direct` unit has `ExecStopPost=-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh`
+  as its first `ExecStopPost=`, and Quadlet appends its own `podman rm` after it. The reset leaves
+  the unit's cgroup as the next start needs it (the script's header says why);
+  `infra/tests/quadlet-order.test.ts` and the e2e check that order in the generated units.
+- `Requires=` + `After=` only on the one-shots (`commonair-migrate`; `commonair-storage-init`,
+  which creates Garage's layout, key and buckets, or with an external store checks that its
+  buckets exist and take a write; the compose service keeps the name `garage-init`;
   `Type=oneshot`, `RemainAfterExit=yes`, bounded retries). Long-running dependencies are
   `Wants=` + `After=`, so a failed start there does not fail dependents with result
   `dependency`, which `Restart=` never retries.
@@ -359,6 +373,8 @@ addresses in `MTX_WEBRTCADDITIONALHOSTS` as ICE candidates. `mailpit`, `mock-rtm
 `IRC_PUBLIC_HOST` to the IRC unit's TLS mount (`irc/sync-cert.ts`, run in the `tools` image)
 and restarts IRC when it changed. `systemd/` holds the plain user units Quadlet does not
 generate: `commonair-backup.service` and `.timer` (daily WAL-G base backup),
+`commonair-object-backup.service` and `.timer` (`selfhost.sh backup --objects`: the media and
+evidence buckets copied offsite with rclone, daily once the first run has succeeded),
 `commonair-irc-cert.timer` (runs the sync daily), `commonair-caddy.socket` (Caddy's public
 ports, below) and `commonair-irc.socket` and `commonair-ircs.socket` (IRC's, below).
 
@@ -476,6 +492,15 @@ systemctl --user enable --now commonair-caddy.socket commonair-backup.timer comm
 unprivileged-port sysctl, as in [requirements.md](../docs/self-hosting/requirements.md). To test
 the release path itself (render, bundle, install, upgrade, rollback) on a throwaway systemd
 container instead, run `bun scripts/selfhost/e2e.ts` (its header lists what it needs).
+
+Its options: `--distro debian|fedora`, `--storage garage|external` (an external S3 store, a
+second Garage on the outer host, instead of the instance's own), `--no-mirror` / `--mirror` and
+`--keep` (leave the containers running). Locally, third-party images come through a Zot
+pull-through cache in `.cache/selfhost-e2e-mirror/` (delete the directory to empty it); it is off
+on CI unless `--mirror`. If the mirror container does not stay up, the step "start the
+pull-through mirror" fails with Zot's log; rerun with `--no-mirror`. CI runs three jobs,
+`self-host e2e (<distro>, <storage>)`: Debian and Fedora with Garage, and Debian with an
+external store.
 
 ## Tests
 

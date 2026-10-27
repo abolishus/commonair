@@ -115,6 +115,22 @@ rule (member-wide supermajority AND a streamer-class majority). Admin roles cann
   Losing Valkey loses no durable data.
 - Object storage (S3 API) holds VODs, clips, thumbnails, exports, uploads and WAL archives.
 
+## Running more than one instance
+
+ADR 0032 runs the app services as replicas from stage 2; the `multi-instance` harness scenario
+rehearses it. Known bounds:
+
+- **Relay issuance** takes a Valkey leader lock per tick (`services/origin/src/issuance.ts`). The
+  winner keeps it until its TTL, shorter than the tick, so one replica computes per tick; a
+  failed tick releases it for a retry.
+- **Chat caches** (channel 60 s, profile 15 s, standing 30 s; `services/chat/src/directory.ts`)
+  are invalidated over the room's control channel, which an instance subscribes to only while it
+  has local members in the room. After the last one leaves it keeps its caches, so a ban or
+  settings change made meanwhile reaches it only when the entry expires.
+- **Chat acknowledges messages before storing them**: `MessageWriter` flushes every 250 ms.
+  SIGTERM closes and flushes it; SIGKILL can lose acknowledged messages from the last interval,
+  so rolling upgrades drain chat with SIGTERM.
+
 ## Observability
 
 Every service initializes `@commonair/observability` first: OTLP traces and metrics to the

@@ -29,9 +29,12 @@ Production uses General Purpose or CPU-Optimized droplets: shared-CPU droplets s
 latency under load. The S1-a load test sets the size
 ([S1](../../.claude/briefs/next/S1-scaling.md)). The region is still open (ADR 0025).
 
-Staging today is `commonair-rc-test` (`staging-stream.abolish.us`, Debian 13, 4 shared vCPU,
-8 GB), the host that ran v0.1.0-rc.1 and the upgrade to rc.2. It is recreated from OpenTofu once
-those definitions exist.
+Staging today is the hand-made `commonair-rc-test`; how it is replaced by the OpenTofu
+definitions is in the tofu README,
+[Adopting the staging droplet](../../infra/tofu/README.md#adopting-the-staging-droplet).
+Staging has no uptime monitoring of its own: `envs/staging` sets
+`enable_monitoring_droplet = false` because production's monitoring droplet watches it, so until
+that droplet exists nothing watches staging from outside.
 
 ## 1. Create the droplet (operator, once per host)
 
@@ -120,6 +123,19 @@ sh ~/commonair/selfhost.sh install --reinstall
 sh ~/commonair/selfhost.sh backup
 ```
 
+Objects (avatars, clips, VODs, sealed evidence) go to a Spaces bucket in another region with
+`selfhost.sh backup --objects`, which then runs daily (`commonair-object-backup.timer`); the
+steps are in
+[Set it up: DigitalOcean Spaces](../self-hosting/backups.md#set-it-up-digitalocean-spaces).
+Turn on versioning with an expiry rule on that bucket, so an object deleted on the instance by
+mistake stays recoverable for a while
+([Guards against emptying the copy](../self-hosting/backups.md#guards-against-emptying-the-copy)).
+
+Versioning covers accidental overwrites and deletes only. A key that can write a bucket can
+also delete its old versions and suspend versioning, so a stolen backup key (from a compromised
+droplet) can erase every copy: see
+[Gaps in the provider and platform](../../infra/tofu/README.md#gaps-in-the-provider-and-platform).
+
 Before launch, **restore once onto a second droplet**
 ([the restore drill](../self-hosting/backups.md#the-restore-drill)), check the data is there,
 and record how long it took: that time is the recovery target at launch. An untested backup does
@@ -190,13 +206,15 @@ The [tofu README](../../infra/tofu/README.md) has the commands, from creating th
 
 Closed: public binds for RTMP, ICE and IRC over IPv4 and IPv6; WHIP through Caddy; the ICE
 public address; real client addresses for HTTP (proved over the internet on the rc droplet);
-the daily base backup and IRC certificate timers; signed releases and the one-command install
+the daily base backup and IRC certificate timers; the daily object backup
+(`selfhost.sh backup --objects`); signed releases and the one-command install
 and upgrade. Still open:
 
-- IRC and MediaMTX (RTMP, ICE) still see one client address under rootless Podman; IRC's fix is
-  socket activation (R0-a), MediaMTX has none ([infra/README.md](../../infra/README.md)).
+- MediaMTX (RTMP, ICE) still sees one client address under rootless Podman, and has no fix;
+  IRC now gets real client addresses through socket activation
+  ([infra/README.md](../../infra/README.md#ports-and-client-addresses)).
 - IRC over WebSocket (6680, what tmi.js uses) stays on `127.0.0.1`. tmi.js connects to `/` on
   its own hostname, so it needs a separate Caddy site, not a path on the main one.
-- Objects in Garage (VODs, clips, evidence) are not backed up automatically; backups.md has
-  an rclone recipe ([backups](../self-hosting/backups.md#objects-in-garage)), and R0-c scripts it.
+- Off-host backups can be erased by whoever holds the droplet's backup keys; versioning does
+  not stop that ([tofu README, Gaps](../../infra/tofu/README.md#gaps-in-the-provider-and-platform)).
 - The restore onto a second droplet has not been run yet (R0).

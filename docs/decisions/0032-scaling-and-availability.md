@@ -28,7 +28,10 @@ The code is mostly safe to run as replicas already:
 - the worker outbox claims rows with `FOR UPDATE SKIP LOCKED` (`services/worker/src/outbox.ts:7`);
 - recurring jobs are BullMQ job schedulers, one run per tick cluster-wide, and integrity jobs
   take a Valkey run lock;
-- relay issuance elects one leader per tick in Valkey (`services/origin/src/issuance.ts:197`);
+- relay issuance elects one leader per tick in Valkey (`services/origin/src/issuance.ts`): the
+  winner keeps the lock for its whole TTL, shorter than the tick interval, so a replica whose
+  timer fires later in the same minute skips the tick; a failed tick releases the lock early for
+  a retry;
 - chat fans out over Valkey pub/sub;
 - the API's rate limits live in Valkey;
 - viewer counts come from Postgres and are cached in Valkey.
@@ -39,7 +42,9 @@ Three things are not replica-safe:
   trackers split them.
 - **Chat's per-instance caches** (channel 60 s, profile 15 s, standing 30 s) are invalidated over
   at-most-once pub/sub, so a replica can be stale until the cache entry expires.
-- **The harness never runs two of anything.**
+- **The harness never ran two of anything.** S1-c's `multi-instance` scenario now runs two of
+  api, chat, worker and origin on one host (`harness/compose.multi-instance.yaml`); its findings
+  are under [Notes from S1-c](#notes-from-s1-c).
 
 Nothing measures host CPU, Postgres CPU or Valkey today. Prometheus scrapes only the OTel
 collector, Garage, Loki, Tempo and itself, and the collector has no host or database receivers.
@@ -184,8 +189,36 @@ and images go through ADR 0002 and ADR 0022 like any dependency.
   client that uses libpq (WAL-G, `pg_dump` in the tools image). Standard edition with a
   downloaded CA works with any version. Our instance starts on Standard unless S1-d finds a
   reason not to.
+- Stage 2's rolling upgrades and planned instance replacement drain chat with SIGTERM (which
+  closes the message writer and flushes it), never SIGKILL, which can lose acknowledged messages
+  from the last flush interval ([Notes from S1-c](#notes-from-s1-c)). An unplanned host loss can
+  still lose that interval.
+- A chat instance with no local members in a room can serve that room's bans and settings
+  stale for up to the cache TTL (30 s standing, 60 s channel) to the next member who joins there.
 - New work: S1-b, S1-d and S1-h for stage 1, S1-f and S1-c for stage 2, S1-e for stage 3
   (`.claude/briefs/next/S1-scaling.md`), and the exporters in decision 6.
+
+### Notes from S1-c
+
+The `multi-instance` scenario (`harness/scenarios/multi-instance.ts`) checked the replica-safety
+claims above with two of each app service. What it found, and what the code does now:
+
+- **Relay issuance ran twice in a minute.** The leader released its lock at the end of a tick,
+  so a replica whose minute timer fired later took it and computed the same tick again. Since
+  commit `87479c8` the winner keeps the lock until its TTL runs out and only a failed tick
+  releases it early, so one replica computes per tick.
+- **Chat's caches bound staleness only while an instance has members in the room.** A chat
+  instance subscribes to a room's control channel while it has local members there. When the
+  last one leaves, `part()` (`services/chat/src/rooms.ts`) unsubscribes but keeps the directory's
+  cached channel and standings (`services/chat/src/directory.ts`: 60 s channel, 30 s standing).
+  A ban or a settings change made meanwhile never reaches that instance, so a member who joins
+  there before the entry expires can see the old state for up to that TTL. This is a known
+  bound, not a bug to fix before stage 2: the TTLs are the bound for every missed invalidation.
+- **Chat acknowledges a message before it is stored.** The `MessageWriter`
+  (`services/chat/src/persistence.ts`) batches rows and flushes every 250 ms. SIGTERM closes it
+  and flushes what is queued (up to 5 s); SIGKILL loses messages acknowledged but not yet
+  flushed. The scenario's instance-loss step kills chat-2 with SIGKILL and checks history
+  for every message acknowledged before the kill.
 
 ## Open questions
 
