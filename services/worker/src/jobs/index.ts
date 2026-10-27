@@ -15,9 +15,12 @@ import { job as coopElectionsAdvance } from "./coop-elections-advance.ts";
 import { job as coopMembershipSync } from "./coop-membership-sync.ts";
 import { job as coopProposalsAdvance } from "./coop-proposals-advance.ts";
 import { job as coopStreamHours } from "./coop-stream-hours.ts";
+import { job as dmcaDisable } from "./dmca-disable.ts";
+import { job as dmcaRestore } from "./dmca-restore.ts";
 import { job as expireAuthRows } from "./expire-auth-rows.ts";
 import { job as exportBuild } from "./export-build.ts";
 import { job as exportCleanup } from "./export-cleanup.ts";
+import { job as legalConsentRetention } from "./legal-consent-retention.ts";
 import { job as liveCounters } from "./live-counters.ts";
 import { job as moneyExpirePending } from "./money-expire-pending.ts";
 import { job as moneyReleaseHolds } from "./money-release-holds.ts";
@@ -69,4 +72,7 @@ export const JOBS = [
   coopStreamHours,
   exportBuild,
   exportCleanup,
+  dmcaDisable,
+  dmcaRestore,
+  legalConsentRetention,
 ] as readonly JobDefinition[];

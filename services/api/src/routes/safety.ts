@@ -20,9 +20,10 @@ import { audit } from "../events/audit.ts";
 import { publishControl, publishUserControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor, pageOf } from "../lib/cursor.ts";
 import { iso, userByUsername } from "../lib/dto.ts";
-import { badRequest, conflict, forbidden, notFound, notImplemented, pgCode } from "../lib/errors.ts";
+import { badRequest, conflict, forbidden, notFound, notImplemented } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
-import { afterBroadcastEnded, endBroadcastInTx, endLiveInTx, type EndedBroadcast } from "../moderation/live.ts";
+import { afterBroadcastEnded, endBroadcastInTx, type EndedBroadcast } from "../moderation/live.ts";
+import { setSuspension } from "../moderation/suspension.ts";
 import { notifyRoles } from "../moderation/notify.ts";
 import { staffActorType } from "../moderation/review.ts";
 
@@ -115,58 +116,6 @@ async function toReports(db: Executor, rows: ReportRow[]) {
     createdAt: iso(r.createdAt),
     resolution: r.resolution,
   }));
-}
-
-/** Suspend or unsuspend; the T0 trigger refuses lifting a T0 suspension (→ FORBIDDEN). */
-async function setSuspension(
-  tx: Executor,
-  target: { userId: string; channelId: string | null },
-  kind: "user" | "channel",
-  suspended: boolean,
-  now: Date,
-  durationSeconds: number | undefined,
-): Promise<{ changed: boolean; ended: EndedBroadcast | null }> {
-  try {
-    if (kind === "user") {
-      const rows = await tx
-        .update(users)
-        .set(
-          suspended
-            ? {
-                banned: true,
-                banReason: "moderation",
-                banExpires: durationSeconds ? new Date(now.getTime() + durationSeconds * 1000) : null,
-              }
-            : { banned: false, banReason: null, banExpires: null },
-        )
-        .where(
-          and(
-            eq(users.id, target.userId),
-            suspended ? sql`not (${users.banned} and ${users.banReason} = 't0_hash_match')` : eq(users.banned, true),
-          ),
-        )
-        .returning({ id: users.id });
-      return { changed: rows.length > 0, ended: null };
-    }
-    if (!target.channelId) throw badRequest("This account has no channel");
-    const rows = await tx
-      .update(channels)
-      .set(
-        suspended ? { suspendedAt: now, suspendedReason: "moderation" } : { suspendedAt: null, suspendedReason: null },
-      )
-      .where(
-        and(
-          eq(channels.id, target.channelId),
-          suspended ? isNull(channels.suspendedAt) : sql`${channels.suspendedAt} is not null`,
-        ),
-      )
-      .returning({ id: channels.id });
-    const ended = suspended ? await endLiveInTx(tx, target.channelId, now) : null;
-    return { changed: rows.length > 0, ended };
-  } catch (err) {
-    if (pgCode(err) === "42501") throw forbidden("A suspension from a T0 match is lifted only by dismissing its case");
-    throw err;
-  }
 }
 
 export const safety = {
@@ -481,6 +430,8 @@ export const safety = {
     counter: os.safety.dmca.counter.handler(notImplemented),
     queue: os.safety.dmca.queue.handler(notImplemented),
     action: os.safety.dmca.action.handler(notImplemented),
+    mine: os.safety.dmca.mine.handler(notImplemented),
+    suitFiled: os.safety.dmca.suitFiled.handler(notImplemented),
   },
 
   suspend: os.safety.suspend.handler(async ({ context, input }) => {

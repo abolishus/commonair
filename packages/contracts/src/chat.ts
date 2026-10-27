@@ -8,7 +8,8 @@
  */
 import { z } from "zod";
 import { ChatMessage } from "./api/entities.ts";
-import { ChannelChatSettings } from "./shapes.ts";
+import type { EventPayload } from "./events.ts";
+import { ChannelChatSettings, type EmoteRange } from "./shapes.ts";
 
 const channel = z.string().min(3).max(25);
 
@@ -176,3 +177,71 @@ export const ChatFanout = z.object({
   frame: ServerFrame,
 });
 export type ChatFanout = z.infer<typeof ChatFanout>;
+
+type ChatMessageEventPayload = EventPayload<"channel.chat.message">;
+type Fragment = ChatMessageEventPayload["message"]["fragments"][number];
+
+/** A mention is a whole word: "@" and a username. */
+export const MENTION = /^@[a-z0-9_]{3,25}$/i;
+
+/** Split a body into text / emote / mention fragments (Twitch EventSub shape). */
+export function fragmentsOf(body: string, emotes: readonly EmoteRange[]): Fragment[] {
+  const out: Fragment[] = [];
+  let text = "";
+  const flush = () => {
+    if (text) out.push({ type: "text", text, emote: null });
+    text = "";
+  };
+  const sorted = [...emotes].sort((a, b) => a.start - b.start);
+  let pos = 0;
+  const pushText = (segment: string) => {
+    // Mentions are whole words starting with "@"; whitespace stays inside text fragments.
+    for (const part of segment.split(/(\s+)/u)) {
+      if (MENTION.test(part)) {
+        flush();
+        out.push({ type: "mention", text: part, emote: null });
+      } else text += part;
+    }
+  };
+  for (const e of sorted) {
+    if (e.start < pos) continue;
+    pushText(body.slice(pos, e.start));
+    flush();
+    out.push({ type: "emote", text: body.slice(e.start, e.end), emote: { id: e.emoteId } });
+    pos = e.end;
+  }
+  pushText(body.slice(pos));
+  flush();
+  return out;
+}
+
+/**
+ * The `channel.chat.message` payload for an accepted message. The chat service and the API (an
+ * allowed held message) both publish it, so they must build it here. `broadcaster_user_login` is
+ * the channel slug, which is always the owner's username.
+ */
+export function chatMessageEventPayload(
+  channel: { ownerId: string; slug: string; displayName: string },
+  message: ChatMessage,
+): ChatMessageEventPayload {
+  return {
+    broadcaster_user_id: channel.ownerId,
+    broadcaster_user_login: channel.slug,
+    broadcaster_user_name: channel.displayName,
+    chatter_user_id: message.user.id,
+    chatter_user_login: message.user.username,
+    chatter_user_name: message.user.displayName,
+    message_id: message.id,
+    message: { text: message.body, fragments: fragmentsOf(message.body, message.emotes) },
+    badges: message.user.badges.map((b) => ({ set_id: b.type, id: String(b.tier ?? 1) })),
+    color: message.user.color ?? "",
+    reply: message.replyTo
+      ? {
+          parent_message_id: message.replyTo.id,
+          parent_user_login: message.replyTo.username,
+          parent_message_body: message.replyTo.body,
+        }
+      : null,
+    is_bot: message.user.accountType === "bot",
+  };
+}

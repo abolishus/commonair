@@ -25,7 +25,7 @@ import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
-import { badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
+import { badRequest, conflict, notFound, notImplemented, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
@@ -372,6 +372,8 @@ export const membershipHandlers = {
     );
     return membershipView(deps, userId);
   }),
+
+  join: os.coop.join.handler(notImplemented),
 
   appointWorker: os.coop.appointWorker.handler(async ({ context, input }) => {
     const { deps } = context;

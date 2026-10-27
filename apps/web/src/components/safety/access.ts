@@ -32,7 +32,16 @@ export function isLegal(me: MaybeUser): boolean {
   return roleOf(me) === "legal";
 }
 
-export type AdminPage = "treasury" | "moderation" | "appeals" | "legal" | "coop";
+export type AdminPage =
+  | "treasury"
+  | "moderation"
+  | "appeals"
+  | "legal"
+  | "coop"
+  | "dmca"
+  | "egress"
+  | "incidents"
+  | "integrity";
 
 /** Which platform-tools page a path is (`null` for anything else). Trailing slashes do not matter. */
 export function adminPageFor(pathname: string): AdminPage | null {
@@ -47,6 +56,14 @@ export function adminPageFor(pathname: string): AdminPage | null {
       return "legal";
     case "/admin/coop":
       return "coop";
+    case "/admin/dmca":
+      return "dmca";
+    case "/admin/egress":
+      return "egress";
+    case "/admin/incidents":
+      return "incidents";
+    case "/admin/integrity":
+      return "integrity";
     default:
       return null;
   }
@@ -64,6 +81,14 @@ export function mayOpenAdminPage(page: AdminPage | null, me: MaybeUser): boolean
       return isLegal(me);
     // Co-op administration (appointing workers): admins only.
     case "coop":
+      return roleOf(me) === "admin";
+    // The DMCA queue: platform moderators and admins.
+    case "dmca":
+      return isPlatformModerator(me);
+    // Integrity flags, egress and status-page incidents: admins only.
+    case "egress":
+    case "incidents":
+    case "integrity":
       return roleOf(me) === "admin";
     case null:
       return false;

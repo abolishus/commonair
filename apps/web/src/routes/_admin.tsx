@@ -3,10 +3,14 @@
 
 import { AppShell, AdminShell, type NavItem } from "@commonair/ui/layouts";
 import {
+  Alert02Icon,
   BankIcon,
+  Chart01Icon,
+  CopyrightIcon,
   JusticeScale01Icon,
   LegalDocument01Icon,
   Shield01Icon,
+  ShieldUserIcon,
   UserGroupIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -30,8 +34,8 @@ import { adminNav, type AdminEntry } from "../lib/nav.ts";
 
 /**
  * Platform tools: the treasury (treasurers), the mod queue (moderators, admins, `legal`), the
- * appeals queue (moderators, admins), the legal queue (`legal` only) and co-op administration
- * (admins). Anyone without the page's
+ * appeals and DMCA queues (moderators, admins), the legal queue (`legal` only), and co-op
+ * administration, integrity flags, egress and incidents (admins). Anyone without the page's
  * role, signed out included, gets the not-found page, decided in `beforeLoad` (on the server
  * during SSR) so neither the tools nor their sidebar ever render for them.
  */
@@ -68,6 +72,14 @@ function adminItem(entry: AdminEntry): NavItem {
         icon: icon(JusticeScale01Icon),
         render: <Link to="/admin/appeals" />,
       };
+    case "dmca":
+      return {
+        id: entry.id,
+        label: t("nav.adminDmca"),
+        current: entry.current,
+        icon: icon(CopyrightIcon),
+        render: <Link to="/admin/dmca" />,
+      };
     case "legal":
       return {
         id: entry.id,
@@ -83,6 +95,30 @@ function adminItem(entry: AdminEntry): NavItem {
         current: entry.current,
         icon: icon(UserGroupIcon),
         render: <Link to="/admin/coop" />,
+      };
+    case "integrity":
+      return {
+        id: entry.id,
+        label: t("nav.adminIntegrity"),
+        current: entry.current,
+        icon: icon(ShieldUserIcon),
+        render: <Link to="/admin/integrity" />,
+      };
+    case "egress":
+      return {
+        id: entry.id,
+        label: t("nav.adminEgress"),
+        current: entry.current,
+        icon: icon(Chart01Icon),
+        render: <Link to="/admin/egress" />,
+      };
+    case "incidents":
+      return {
+        id: entry.id,
+        label: t("nav.adminIncidents"),
+        current: entry.current,
+        icon: icon(Alert02Icon),
+        render: <Link to="/admin/incidents" />,
       };
   }
 }

@@ -5,6 +5,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -18,11 +19,14 @@ import {
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
 import {
+  accountAction,
+  accountActionReversal,
   actorType,
   appealKind,
   appealStatus,
   createdAt,
   deletionStatus,
+  dmcaItemSubject,
   dmcaStatus,
   exportKind,
   id,
@@ -156,6 +160,35 @@ export const appeals = pgTable(
   ],
 );
 
+/** Platform decisions about an account outside `mod_actions` (DMCA strikes, repeat-infringer suspension). */
+export const accountActions = pgTable(
+  "account_actions",
+  {
+    id: id(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    action: accountAction().notNull(),
+    sourceType: text(),
+    sourceId: uuid(),
+    actorType: actorType().notNull(),
+    actorId: uuid(),
+    createdAt: createdAt(),
+    reversedAt: ts(),
+    reversedById: uuid(),
+    reversedReason: accountActionReversal(),
+    reversalAppealId: uuid(),
+  },
+  (t) => [
+    index("account_actions_user_idx").on(t.userId, t.createdAt),
+    index("account_actions_source_idx").on(t.sourceType, t.sourceId),
+    index("account_actions_active_idx")
+      .on(t.userId, t.action)
+      .where(sql`${t.reversedAt} is null`),
+    check("account_actions_reversal_ck", sql`(${t.reversedAt} is null) = (${t.reversedReason} is null)`),
+  ],
+);
+
 export const dmcaNotices = pgTable(
   "dmca_notices",
   {
@@ -163,39 +196,85 @@ export const dmcaNotices = pgTable(
     claimantName: text().notNull(),
     claimantEmail: text().notNull(),
     claimantAddress: text().notNull(),
+    claimantPhone: text(),
     copyrightedWork: text().notNull(),
     infringingUrls: text().array().notNull(),
-    subjectType: text(),
-    subjectId: uuid(),
     goodFaithStatement: boolean().notNull(),
     accuracyStatement: boolean().notNull(),
     signature: text().notNull(),
     status: dmcaStatus().notNull().default("received"),
     handledById: uuid(),
+    /** The moderator's `action` note (mutable row only, never copied into audit or events). */
+    decisionNote: text(),
     createdAt: createdAt(),
     actionedAt: ts(),
   },
   (t) => [index("dmca_notices_status_idx").on(t.status, t.createdAt)],
 );
 
-export const dmcaCounterNotices = pgTable("dmca_counter_notices", {
-  id: id(),
-  noticeId: uuid()
-    .notNull()
-    .references(() => dmcaNotices.id, { onDelete: "cascade" }),
-  userId: uuid()
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  fullName: text().notNull(),
-  address: text().notNull(),
-  statement: text().notNull(),
-  consentToJurisdiction: boolean().notNull(),
-  signature: text().notNull(),
-  /** Content is restored after this date (10–14 business days) unless the claimant files suit. */
-  restoreAfter: ts().notNull(),
-  restoredAt: ts(),
-  createdAt: createdAt(),
-});
+export const dmcaCounterNotices = pgTable(
+  "dmca_counter_notices",
+  {
+    id: id(),
+    noticeId: uuid()
+      .notNull()
+      .references(() => dmcaNotices.id, { onDelete: "cascade" }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fullName: text().notNull(),
+    address: text().notNull(),
+    phone: text().notNull(),
+    /** The `dmca_notice_items` this counter-notice covers (§ 512(g)(3)(B)). */
+    itemIds: uuid().array().notNull(),
+    statement: text().notNull(),
+    goodFaithStatement: boolean().notNull(),
+    consentToJurisdiction: boolean().notNull(),
+    signature: text().notNull(),
+    /** Content is restored after this date (10–14 business days) unless the claimant files suit. */
+    restoreAfter: ts().notNull(),
+    restoredAt: ts(),
+    /** The claimant filed suit (§ 512(g)(2)(C)): the content stays down. */
+    suitFiledAt: ts(),
+    suitRecordedById: uuid(),
+    suitNote: text(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("dmca_counter_notices_notice_user_uq").on(t.noticeId, t.userId),
+    // The dmca-restore job's due scan.
+    index("dmca_counter_notices_due_idx")
+      .on(t.restoreAfter)
+      .where(sql`${t.restoredAt} is null and ${t.suitFiledAt} is null`),
+  ],
+);
+
+/** One infringing URL of a notice and what it resolved to; removal and restore are set once each. */
+export const dmcaNoticeItems = pgTable(
+  "dmca_notice_items",
+  {
+    id: id(),
+    noticeId: uuid()
+      .notNull()
+      .references(() => dmcaNotices.id, { onDelete: "restrict" }),
+    url: text().notNull(),
+    subjectType: dmcaItemSubject(),
+    subjectId: uuid(),
+    /** The channel owner (the uploader for the purposes of § 512(g)). */
+    ownerId: uuid().references(() => users.id, { onDelete: "restrict" }),
+    channelId: uuid().references(() => channels.id, { onDelete: "restrict" }),
+    removedAt: ts(),
+    /** Objects moved to the private DMCA prefix (worker `dmca-disable`). */
+    objectsHiddenAt: ts(),
+    restoredAt: ts(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("dmca_notice_items_notice_idx").on(t.noticeId),
+    index("dmca_notice_items_owner_idx").on(t.ownerId, t.createdAt),
+    index("dmca_notice_items_subject_idx").on(t.subjectType, t.subjectId),
+  ],
+);
 
 export const legalDocuments = pgTable(
   "legal_documents",
@@ -238,7 +317,14 @@ export const consentRecords = pgTable(
     policyVersion: text().notNull(),
     createdAt: createdAt(),
   },
-  (t) => [index("consent_records_user_idx").on(t.userId), index("consent_records_anon_idx").on(t.anonymousId)],
+  (t) => [
+    index("consent_records_user_idx").on(t.userId),
+    index("consent_records_anon_idx").on(t.anonymousId),
+    // The legal consent-retention job deletes old anonymous rows in batches; without this every run scans the table.
+    index("consent_records_anon_created_idx")
+      .on(t.createdAt)
+      .where(sql`${t.userId} is null`),
+  ],
 );
 
 export const dataExports = pgTable(

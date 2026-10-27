@@ -30,6 +30,7 @@ function toDto(deps: Deps, row: LegalRow) {
     title: renderLegalText(row.title, vars),
     body: renderLegalText(row.body, vars),
     isDraft: row.isDraft,
+    requiresAcceptance: row.requiresAcceptance,
     publishedAt: iso(row.publishedAt),
   };
 }

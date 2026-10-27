@@ -19,6 +19,7 @@ export interface AccountEntry {
     | "relays"
     | "subscriptions"
     | "appeals"
+    | "copyright"
     | "privacy"
     | "coop"
     | "treasury"
@@ -32,6 +33,7 @@ export interface AccountEntry {
     | "/relays"
     | "/settings/subscriptions"
     | "/settings/appeals"
+    | "/settings/copyright"
     | "/settings/privacy"
     | "/coop/membership"
     | "/treasury"
@@ -55,8 +57,8 @@ export interface StudioEntry {
 }
 
 export interface FooterEntry {
-  id: "transparency" | "takedown";
-  to: "/transparency" | "/takedown";
+  id: "transparency" | "takedown" | "dmca";
+  to: "/transparency" | "/takedown" | "/dmca";
 }
 
 export interface AccountMenuOptions {
@@ -71,8 +73,17 @@ export interface AccountMenuOptions {
 }
 
 export interface AdminEntry {
-  id: "treasury" | "moderation" | "appeals" | "legal" | "coop";
-  to: "/treasury" | "/admin/moderation" | "/admin/appeals" | "/admin/legal" | "/admin/coop";
+  id: "treasury" | "moderation" | "appeals" | "dmca" | "legal" | "coop" | "integrity" | "egress" | "incidents";
+  to:
+    | "/treasury"
+    | "/admin/moderation"
+    | "/admin/appeals"
+    | "/admin/dmca"
+    | "/admin/legal"
+    | "/admin/coop"
+    | "/admin/integrity"
+    | "/admin/egress"
+    | "/admin/incidents";
   current: boolean;
 }
 
@@ -80,10 +91,10 @@ export interface AdminNavOptions {
   treasurer?: boolean;
   /** Moderators, admins and `legal`: the mod queue. */
   safetyStaff?: boolean;
-  /** Moderators and admins: the appeals queue. */
+  /** Moderators and admins: the appeals and DMCA queues. */
   platformModerator?: boolean;
   legal?: boolean;
-  /** Admins: co-op administration (appoint workers). */
+  /** Admins: co-op administration (appoint workers), integrity flags, egress and incidents. */
   admin?: boolean;
 }
 
@@ -121,6 +132,7 @@ export function accountMenu(
       { id: "relays", to: "/relays" },
       { id: "subscriptions", to: "/settings/subscriptions" },
       { id: "appeals", to: "/settings/appeals" },
+      { id: "copyright", to: "/settings/copyright" },
       { id: "privacy", to: "/settings/privacy" },
       { id: "coop", to: "/coop/membership" },
       ...staff,
@@ -150,6 +162,7 @@ export function footerNav(): FooterEntry[] {
   return [
     { id: "transparency", to: "/transparency" },
     { id: "takedown", to: "/takedown" },
+    { id: "dmca", to: "/dmca" },
   ];
 }
 
@@ -160,8 +173,16 @@ export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry
     ...(options.treasurer === true ? [{ id: "treasury", to: "/treasury" } as const] : []),
     ...(options.safetyStaff === true ? [{ id: "moderation", to: "/admin/moderation" } as const] : []),
     ...(options.platformModerator === true ? [{ id: "appeals", to: "/admin/appeals" } as const] : []),
+    ...(options.platformModerator === true ? [{ id: "dmca", to: "/admin/dmca" } as const] : []),
     ...(options.legal === true ? [{ id: "legal", to: "/admin/legal" } as const] : []),
-    ...(options.admin === true ? [{ id: "coop", to: "/admin/coop" } as const] : []),
+    ...(options.admin === true
+      ? ([
+          { id: "coop", to: "/admin/coop" },
+          { id: "integrity", to: "/admin/integrity" },
+          { id: "egress", to: "/admin/egress" },
+          { id: "incidents", to: "/admin/incidents" },
+        ] as const)
+      : []),
   ];
   return entries.map((entry) => ({ ...entry, current: path === entry.to }));
 }

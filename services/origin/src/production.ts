@@ -13,20 +13,17 @@
  * its creation, so a 120 s claim is enough to deduplicate them; the per-replica cache
  * prevents re-pulls in between.
  */
+import { KEYS } from "@commonair/contracts/internal";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { MINUTE_MS } from "./accounting.ts";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
 import type { MediaKind } from "./paths.ts";
 
-// CONTRACT-REQUEST: lift these key builders into @commonair/contracts/internal KEYS once the worker owns issuance.
 export const ISSUANCE_KEYS = {
-  /** HASH `<dir>|<metric>` → integer, for the minute starting at epochMinute × 60 s. */
-  production: (epochMinute: number) => `issuance:production:${epochMinute}`,
-  /** Claim marking a media object as counted (`<dir>/<file>`). */
-  seen: (object: string) => `issuance:seen:${object}`,
-  /** Leader lock: the replica holding it computes relay issuance. */
-  lock: "issuance:lock",
+  production: KEYS.issuanceProduction,
+  seen: KEYS.issuanceSeen,
+  lock: KEYS.issuanceLock,
 } as const;
 
 /** Production hashes outlive the 5-minute recompute window comfortably. */

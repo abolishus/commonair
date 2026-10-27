@@ -7,6 +7,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { en } from "../src/i18n/en.ts";
 import { t } from "../src/i18n/index.ts";
 import { coopMessages } from "../src/i18n/coop.ts";
+import { e7AdminMessages } from "../src/i18n/e7-admin.ts";
+import { e7AppealsMessages } from "../src/i18n/e7-appeals.ts";
+import { e7ChatMessages } from "../src/i18n/e7-chat.ts";
+import { e7DmcaMessages } from "../src/i18n/e7-dmca.ts";
+import { e7LegalMessages } from "../src/i18n/e7-legal.ts";
 import { moneyMessages } from "../src/i18n/money.ts";
 import { opsMessages } from "../src/i18n/ops.ts";
 import { safetyMessages } from "../src/i18n/safety.ts";
@@ -98,6 +103,47 @@ describe("message catalog", () => {
       .map(([, text]) => text)
       .join("\n");
     expect(ops.filter((k) => !used.includes(`"${k}"`))).toEqual([]);
+  });
+
+  it("keeps the E7 unit catalogs disjoint from every other catalog and the inline keys, and uses all of them", () => {
+    const inline = [...readFileSync(join(SRC, "i18n/en.ts"), "utf8").matchAll(/^\s+"([^"]+)":/gm)].map((m) => m[1]);
+    const catalogs: Record<string, Record<string, string>> = {
+      e7Chat: e7ChatMessages,
+      e7Dmca: e7DmcaMessages,
+      e7Admin: e7AdminMessages,
+      e7Appeals: e7AppealsMessages,
+      e7Legal: e7LegalMessages,
+      coop: coopMessages,
+      ops: opsMessages,
+      safety: safetyMessages,
+      money: moneyMessages,
+      support: supportMessages,
+    };
+    const e7 = ["e7Chat", "e7Dmca", "e7Admin", "e7Appeals", "e7Legal"];
+    const used = files
+      .filter(([f]) => !f.startsWith(join(SRC, "i18n/")))
+      .map(([, text]) => text)
+      .join("\n");
+    const enText = readFileSync(join(SRC, "i18n/en.ts"), "utf8");
+    for (const name of e7) {
+      const keys = Object.keys(catalogs[name] ?? {});
+      for (const [other, catalog] of Object.entries(catalogs)) {
+        if (other === name) continue;
+        expect(
+          keys.filter((k) => k in catalog),
+          `${name} overlaps ${other}`,
+        ).toEqual([]);
+      }
+      expect(
+        inline.filter((k) => k !== undefined && keys.includes(k)),
+        `${name} overlaps inline keys`,
+      ).toEqual([]);
+      expect(enText).toContain(`...${name}Messages`);
+      expect(
+        keys.filter((k) => !used.includes(`"${k}"`)),
+        `${name} has unused keys`,
+      ).toEqual([]);
+    }
   });
 
   it("maps every auth error code to a catalog key", () => {

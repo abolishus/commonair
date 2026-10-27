@@ -169,6 +169,20 @@
       "when": 1792651704439,
       "tag": "0023_deletion_pending_objects",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793104557887,
+      "tag": "0024_e7_platform_debts",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793104575208,
+      "tag": "0025_e7_protections",
+      "breakpoints": true
     }
   ]
 }

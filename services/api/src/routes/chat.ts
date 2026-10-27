@@ -19,6 +19,7 @@ import { channelBySlug, iso, isoOrNull, mediaUrl, userByUsername } from "../lib/
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented } from "../lib/errors.ts";
+import { liftChatBanInTx } from "../moderation/chat-bans.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
 import { unsafeFilterRegexReason } from "@commonair/safe-regex";
 
@@ -121,10 +122,6 @@ async function badgesFor(deps: Deps, c: ChannelRow, userIds: string[]) {
   }
   for (const s of subs) out.get(s.userId)?.push({ type: "subscriber", tier: s.tier });
   return out;
-}
-
-function isActiveBan(b: typeof chatBans.$inferSelect, now: Date) {
-  return b.liftedAt === null && (b.expiresAt === null || b.expiresAt > now);
 }
 
 async function toBanDtos(deps: Deps, rows: (typeof chatBans.$inferSelect)[]) {
@@ -403,34 +400,13 @@ export const chat = {
       if (!target) throw notFound("User not found");
       const now = deps.now();
       await deps.db.transaction(async (tx) => {
-        const lifted = await tx
-          .update(chatBans)
-          .set({ liftedAt: now, liftedBy: caller.user.id })
-          .where(and(eq(chatBans.channelId, c.id), eq(chatBans.userId, target.id), isNull(chatBans.liftedAt)))
-          .returning();
-        const active = lifted.find((b) => isActiveBan({ ...b, liftedAt: null }, now));
+        const active = await liftChatBanInTx(tx, {
+          channel: c,
+          target,
+          actor: { id: caller.user.id, actorType: "moderator" },
+          now,
+        });
         if (!active) throw notFound("This user is not banned or timed out");
-        await tx.insert(modActions).values({
-          scope: "channel",
-          channelId: c.id,
-          moderatorId: caller.user.id,
-          targetUserId: target.id,
-          action: active.expiresAt ? "untimeout" : "unban",
-        });
-        await audit(tx, {
-          actorType: "moderator",
-          actorId: caller.user.id,
-          action: active.expiresAt ? "chat.untimeout" : "chat.unban",
-          subjectType: "user",
-          subjectId: target.id,
-          channelId: c.id,
-          details: { banId: active.id },
-        });
-        await emit(tx, "channel.unban", c.id, {
-          ...broadcasterFields(c),
-          ...userFields(target),
-          ...moderatorFields(await actorRow(tx, caller.user.id)),
-        });
       });
       await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
       return { ok: true as const };

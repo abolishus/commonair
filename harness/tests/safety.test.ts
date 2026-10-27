@@ -52,27 +52,34 @@ describe("ffmpeg failure reporting", () => {
 describe("step selection", () => {
   test("all, empty and lists", () => {
     expect(parseSteps("all")).toEqual([...ALL_SAFETY_STEPS]);
-    expect(parseSteps("")).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(parseSteps("")).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(parseSteps("1,2,5")).toEqual([1, 2, 5]);
     expect(parseSteps(" 5 , 1,5,2 ")).toEqual([1, 2, 5]);
-    expect(parseSteps("ALL")).toHaveLength(7);
+    expect(parseSteps("ALL")).toHaveLength(9);
   });
 
   test("ranges", () => {
     expect(parseSteps("1-3")).toEqual([1, 2, 3]);
     expect(parseSteps("6-7,1")).toEqual([1, 6, 7]);
     expect(parseSteps("4-4")).toEqual([4]);
+    expect(parseSteps("8-9")).toEqual([8, 9]);
   });
 
   test("anything else is refused rather than running fewer checks", () => {
-    for (const bad of ["0", "8", "1,x", "3-1", "1-9", "-1", "1.5", ",", "two"])
+    for (const bad of ["0", "10", "1,x", "3-1", "1-10", "-1", "1.5", ",", "two"])
       expect(() => parseSteps(bad)).toThrow(/steps/);
+    expect(() => parseSteps("10")).toThrow(/\(1-9\)/);
   });
 
   test("step 2 pulls in step 1", () => {
     expect(withPrerequisites([2, 5])).toEqual({ steps: [1, 2, 5], added: [1] });
     expect(withPrerequisites([1, 2])).toEqual({ steps: [1, 2], added: [] });
     expect(withPrerequisites([7])).toEqual({ steps: [7], added: [] });
+  });
+
+  test("the E7 steps 8 and 9 run on their own", () => {
+    expect(withPrerequisites([8])).toEqual({ steps: [8], added: [] });
+    expect(withPrerequisites([9])).toEqual({ steps: [9], added: [] });
   });
 });
 

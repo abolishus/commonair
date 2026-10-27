@@ -86,6 +86,8 @@ describe("events", () => {
 
   test("internal trust & safety and co-op events are never offered to apps or put on the bus", () => {
     expect(INTERNAL_EVENT_TYPES.toSorted()).toEqual([
+      "account.action.recorded",
+      "account.action.reversed",
       "coop.council.recomputed",
       "coop.council.response",
       "coop.election.update",
@@ -94,6 +96,11 @@ describe("events", () => {
       "coop.proposal.comment",
       "coop.share.update",
       "coop.vote.cast",
+      "dmca.content.restored",
+      "dmca.counter.received",
+      "dmca.counter.suit_filed",
+      "dmca.notice.decided",
+      "dmca.notice.received",
       "legal.hold.placed",
       "moderation.case.resolved",
       "moderation.flagged",

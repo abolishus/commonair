@@ -10,6 +10,8 @@
 import { z } from "zod";
 import type { Scope } from "./scopes.ts";
 import {
+  ACCOUNT_ACTIONS,
+  ACCOUNT_ACTION_REVERSALS,
   HASH_LIST_CATEGORIES,
   LEGAL_HOLD_REASONS,
   MODERATION_CASE_ORIGINS,
@@ -626,6 +628,73 @@ export const EVENTS = {
     internal: true,
     description: "Internal: an NCMEC CyberTipline report draft awaits filing by the legal role",
     payload: { report_id: id, case_id: id, hold_id: id },
+  }),
+  "dmca.notice.received": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a DMCA notice arrived",
+    payload: { notice_id: id, items: z.number().int(), resolved_items: z.number().int() },
+  }),
+  "dmca.notice.decided": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a DMCA notice was actioned or rejected",
+    payload: { notice_id: id, decision: z.enum(["actioned", "rejected"]), removed_items: z.number().int() },
+  }),
+  "dmca.counter.received": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a counter-notice arrived (the restore clock started)",
+    payload: { notice_id: id, counter_notice_id: id, restore_after: ts, items: z.number().int() },
+  }),
+  "dmca.counter.suit_filed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: the claimant filed suit; the content stays down",
+    payload: { notice_id: id, counter_notice_id: id },
+  }),
+  "dmca.content.restored": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: countered content was restored after the waiting period",
+    payload: { notice_id: id, counter_notice_id: id, restored_items: z.number().int() },
+  }),
+  "account.action.recorded": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an account action (DMCA strike or termination) was recorded",
+    payload: {
+      account_action_id: id,
+      user_id: id,
+      action: z.enum(ACCOUNT_ACTIONS),
+      source_type: z.string().nullable(),
+      source_id: id.nullable(),
+    },
+  }),
+  "account.action.reversed": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: an account action was reversed",
+    payload: {
+      account_action_id: id,
+      user_id: id,
+      action: z.enum(ACCOUNT_ACTIONS),
+      reversal: z.enum(ACCOUNT_ACTION_REVERSALS),
+    },
   }),
 } as const;
 

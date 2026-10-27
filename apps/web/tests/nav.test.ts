@@ -7,6 +7,7 @@ import { en } from "../src/i18n/en.ts";
 import { healthBadge } from "../src/lib/stream-health.ts";
 import { isTreasurer } from "../src/lib/money.ts";
 import { accountMenu, adminNav, footerNav, siteNav, studioNav } from "../src/lib/nav.ts";
+import { adminPageFor, mayOpenAdminPage } from "../src/components/safety/access.ts";
 
 describe("site nav", () => {
   it("links the directory and marks it current only on /", () => {
@@ -34,13 +35,14 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, appeals, privacy, co-op, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, appeals, copyright, privacy, co-op, then sign out after a separator", () => {
     const items = accountMenu(true);
     expect(items.map((i) => i.id)).toEqual([
       "dashboard",
       "relays",
       "subscriptions",
       "appeals",
+      "copyright",
       "privacy",
       "coop",
       "signOut",
@@ -50,12 +52,13 @@ describe("account menu", () => {
       "/relays",
       "/settings/subscriptions",
       "/settings/appeals",
+      "/settings/copyright",
       "/settings/privacy",
       "/coop/membership",
       undefined,
     ]);
-    expect(items[6]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 6).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[7]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 7).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
   });
 
   it("adds co-op administration for admins only, before sign out", () => {
@@ -67,6 +70,7 @@ describe("account menu", () => {
       "relays",
       "subscriptions",
       "appeals",
+      "copyright",
       "privacy",
       "coop",
       "moderation",
@@ -84,6 +88,7 @@ describe("account menu", () => {
       "relays",
       "subscriptions",
       "appeals",
+      "copyright",
       "privacy",
       "coop",
       "treasury",
@@ -122,6 +127,7 @@ describe("account menu", () => {
         "/relays",
         "/settings/subscriptions",
         "/settings/appeals",
+        "/settings/copyright",
         "/settings/privacy",
         "/coop/membership",
         "/treasury",
@@ -168,10 +174,11 @@ describe("studio nav", () => {
 });
 
 describe("footer nav", () => {
-  it("links public transparency and takedown pages", () => {
+  it("links public transparency, takedown and DMCA pages", () => {
     expect(footerNav()).toEqual([
       { id: "transparency", to: "/transparency" },
       { id: "takedown", to: "/takedown" },
+      { id: "dmca", to: "/dmca" },
     ]);
   });
 });
@@ -181,15 +188,56 @@ describe("trust and safety navigation", () => {
     const legal = { safetyStaff: true, legal: true, platformModerator: false };
     const moderator = { safetyStaff: true, legal: false, platformModerator: true };
     expect(adminNav("/admin/legal", legal).map((entry) => entry.id)).toEqual(["moderation", "legal"]);
-    expect(adminNav("/admin/appeals", moderator).map((entry) => entry.id)).toEqual(["moderation", "appeals"]);
+    expect(adminNav("/admin/appeals", moderator).map((entry) => entry.id)).toEqual(["moderation", "appeals", "dmca"]);
     expect(accountMenu(true, legal).map((entry) => entry.id)).toContain("legal");
     expect(accountMenu(true, legal).map((entry) => entry.id)).toContain("moderation");
     expect(accountMenu(true, moderator).map((entry) => entry.id)).toContain("moderation");
     expect(accountMenu(true, moderator).map((entry) => entry.id)).not.toContain("legal");
     expect(adminNav("/admin/coop", { admin: true }).map((entry) => entry)).toEqual([
       { id: "coop", to: "/admin/coop", current: true },
+      { id: "integrity", to: "/admin/integrity", current: false },
+      { id: "egress", to: "/admin/egress", current: false },
+      { id: "incidents", to: "/admin/incidents", current: false },
     ]);
     expect(adminNav("/admin/coop", moderator).map((entry) => entry.id)).not.toContain("coop");
+  });
+
+  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents", () => {
+    const everything = { treasurer: false, safetyStaff: true, platformModerator: true, legal: true, admin: true };
+    expect(adminNav("/admin/dmca", everything).map((entry) => [entry.id, entry.current])).toEqual([
+      ["moderation", false],
+      ["appeals", false],
+      ["dmca", true],
+      ["legal", false],
+      ["coop", false],
+      ["integrity", false],
+      ["egress", false],
+      ["incidents", false],
+    ]);
+    const moderator = { safetyStaff: true, platformModerator: true };
+    for (const id of ["integrity", "egress", "incidents", "coop"])
+      expect(adminNav("/admin/moderation", moderator).map((entry) => entry.id)).not.toContain(id);
+  });
+});
+
+describe("E7 platform tools access", () => {
+  const as = (role: string) => ({ id: "u", username: "a", displayName: "A", channelSlug: null, role });
+  it("maps the four E7 admin paths", () => {
+    expect(adminPageFor("/admin/dmca")).toBe("dmca");
+    expect(adminPageFor("/admin/egress/")).toBe("egress");
+    expect(adminPageFor("/admin/incidents")).toBe("incidents");
+    expect(adminPageFor("/admin/integrity")).toBe("integrity");
+  });
+  it("opens the DMCA queue to platform moderators and the other three to admins only", () => {
+    expect(mayOpenAdminPage("dmca", as("moderator"))).toBe(true);
+    expect(mayOpenAdminPage("dmca", as("admin"))).toBe(true);
+    expect(mayOpenAdminPage("dmca", as("legal"))).toBe(false);
+    expect(mayOpenAdminPage("dmca", as("user"))).toBe(false);
+    for (const page of ["egress", "incidents", "integrity"] as const) {
+      expect(mayOpenAdminPage(page, as("admin"))).toBe(true);
+      expect(mayOpenAdminPage(page, as("moderator"))).toBe(false);
+      expect(mayOpenAdminPage(page, null)).toBe(false);
+    }
   });
 });
 

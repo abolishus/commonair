@@ -13,6 +13,7 @@ export const coop = {
   buyShare: membershipHandlers.buyShare,
   shares: membershipHandlers.shares,
   exit: membershipHandlers.exit,
+  join: membershipHandlers.join,
   appointWorker: membershipHandlers.appointWorker,
   settings: councilHandlers.settings,
   proposals: proposalHandlers,

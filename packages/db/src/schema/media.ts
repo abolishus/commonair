@@ -189,7 +189,11 @@ export const clips = pgTable(
     removedReason: text(),
     createdAt: createdAt(),
   },
-  (t) => [index("clips_channel_idx").on(t.channelId, t.createdAt)],
+  (t) => [
+    index("clips_channel_idx").on(t.channelId, t.createdAt),
+    // NCII broadcast hashing and DMCA broadcast items look clips up by broadcast.
+    index("clips_broadcast_idx").on(t.broadcastId),
+  ],
 );
 
 export const simulcastTargets = pgTable(

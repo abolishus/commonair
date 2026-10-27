@@ -84,6 +84,8 @@ export const INTERNAL_ROUTES = {
    * `POST` an `OpsTickBody`: the API enqueues that job, waits for it (60 s) and returns its result.
    */
   opsTick: "/internal/ops/tick",
+  /** POST a DmcaTickBody: run the dmca-restore job once as of that time (test hooks only). */
+  dmcaTick: "/internal/moderation/dmca-tick",
 } as const;
 
 /**
@@ -188,6 +190,12 @@ export const KEYS = {
   moderationFrame: (frameId: string) => `moderation:frame:${frameId}`,
   /** JSON `ModerationScores` for the scripted classifier (test hooks only). */
   moderationScript: (channelId: string) => `moderation:script:${channelId}`,
+  /** HASH `<dir>|<metric>` → integer, for the minute starting at epochMinute × 60 s. */
+  issuanceProduction: (epochMinute: number) => `issuance:production:${epochMinute}`,
+  /** Claim marking a media object as counted (`<dir>/<file>`). */
+  issuanceSeen: (object: string) => `issuance:seen:${object}`,
+  /** Leader lock: the replica holding it computes relay issuance. */
+  issuanceLock: "issuance:lock",
 } as const;
 
 /**
@@ -287,6 +295,8 @@ export const MODERATION_JOBS = {
   holdEligibility: "hold-eligibility",
   frameRetention: "frame-retention",
   incomingCleanup: "incoming-cleanup",
+  dmcaDisable: "dmca-disable",
+  dmcaRestore: "dmca-restore",
 } as const;
 
 /** 64 hex characters (a PDQ hash or a sha256). */
@@ -389,6 +399,21 @@ export type NciiHashJob = z.infer<typeof NciiHashJob>;
 export const ModerationScriptBody = z.object({ channelId: z.uuid(), scores: ModerationScores });
 /** Body of `INTERNAL_ROUTES.nciiTick`; the response is `NciiClockResult`. */
 export const NciiTickBody = z.object({ asOf: z.iso.datetime({ offset: true }) });
+
+/**
+ * `MODERATION_JOBS.dmcaDisable`: after `dmca.action` → `actioned` (the API already unpublished every
+ * resolved item in its transaction), move the items' objects to the private DMCA prefix. Idempotent.
+ */
+export const DmcaDisableJob = z.object({ noticeId: z.uuid() });
+export type DmcaDisableJob = z.infer<typeof DmcaDisableJob>;
+/** `MODERATION_JOBS.dmcaRestore`: restore countered content whose waiting period ended (as of `asOf`, default now). */
+export const DmcaRestoreJob = z.object({ asOf: z.iso.datetime({ offset: true }).optional() });
+export type DmcaRestoreJob = z.infer<typeof DmcaRestoreJob>;
+export const DmcaRestoreResult = z.object({ restored: z.number().int(), counters: z.number().int() });
+export type DmcaRestoreResult = z.infer<typeof DmcaRestoreResult>;
+/** Body of `INTERNAL_ROUTES.dmcaTick`; the response is `DmcaRestoreResult`. */
+export const DmcaTickBody = z.object({ asOf: z.iso.datetime({ offset: true }) });
+export type DmcaTickBody = z.infer<typeof DmcaTickBody>;
 
 /**
  * Chat connection token, issued by the API (`chat.connectToken`) and verified by the

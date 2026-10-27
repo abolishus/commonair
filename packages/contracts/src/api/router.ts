@@ -1946,6 +1946,16 @@ export const contract = {
       })
       .input(z.object({ class: z.enum(E.MEMBER_CLASSES) }))
       .output(D.MembershipView),
+    join: user
+      .meta({ access: "user", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/coop/membership/{class}/join",
+        summary: "Rejoin the viewer class (a qualifying subscription, no new share)",
+        ...tag("Co-op"),
+      })
+      .input(z.object({ class: z.literal("viewer") }))
+      .output(D.MembershipView),
     appointWorker: admin
       .route({
         method: "POST",
@@ -2274,6 +2284,14 @@ export const contract = {
     mine: user
       .route({ method: "GET", path: "/appeals", summary: "Your appeals", ...tag("Appeals") })
       .output(z.array(D.Appeal)),
+    accountActions: user
+      .route({
+        method: "GET",
+        path: "/appeals/account-actions",
+        summary: "Account actions about you (appealable)",
+        ...tag("Appeals"),
+      })
+      .output(z.array(D.AccountAction)),
     queue: platformMod
       .route({ method: "GET", path: "/admin/appeals", summary: "Appeals queue", ...tag("Appeals") })
       .input(PageInput.extend({ status: z.enum(E.APPEAL_STATUSES).default("open") }))
@@ -2384,6 +2402,8 @@ export const contract = {
             claimantName: z.string().min(1).max(200),
             claimantEmail: z.email(),
             claimantAddress: z.string().min(1).max(500),
+            /** § 512(c)(3)(A)(iv): "such as … telephone number". */
+            claimantPhone: z.string().min(5).max(40).optional(),
             copyrightedWork: z.string().min(1).max(5000),
             infringingUrls: z.array(z.url()).min(1).max(50),
             goodFaithStatement: z.literal(true),
@@ -2394,6 +2414,7 @@ export const contract = {
         )
         .output(z.object({ id: Id })),
       counter: user
+        .meta({ access: "user", rateLimit: "write" })
         .route({
           method: "POST",
           path: "/dmca/notices/{id}/counter",
@@ -2405,12 +2426,30 @@ export const contract = {
             id: Id,
             fullName: z.string().min(1).max(200),
             address: z.string().min(1).max(500),
+            /** § 512(g)(3)(D) requires a telephone number. */
+            phone: z.string().min(5).max(40),
+            /** § 512(g)(3)(B): which removed material the counter-notice covers. */
+            itemIds: z.array(Id).min(1).max(50),
             statement: z.string().min(1).max(5000),
+            /** § 512(g)(3)(C): good-faith belief of mistake or misidentification, under penalty of perjury. */
+            goodFaithStatement: z.literal(true),
+            /**
+             * § 512(g)(3)(D): consent to the jurisdiction of the federal district court and acceptance of
+             * service of process from the claimant; one checkbox covers both.
+             */
             consentToJurisdiction: z.literal(true),
             signature: z.string().min(1).max(200),
           }),
         )
         .output(z.object({ restoreAfter: Timestamp })),
+      mine: user
+        .route({
+          method: "GET",
+          path: "/dmca/mine",
+          summary: "Copyright notices about your content",
+          ...tag("DMCA"),
+        })
+        .output(z.array(D.DmcaNoticeForOwner)),
       queue: platformMod
         .route({ method: "GET", path: "/admin/dmca", summary: "DMCA notices", ...tag("DMCA") })
         .input(PageInput.extend({ status: z.enum(E.DMCA_STATUSES).optional() }))
@@ -2429,6 +2468,15 @@ export const contract = {
             note: z.string().max(2000),
           }),
         )
+        .output(D.DmcaNotice),
+      suitFiled: platformMod
+        .route({
+          method: "POST",
+          path: "/admin/dmca/counter-notices/{id}/suit",
+          summary: "Record that the claimant filed suit (blocks the restore)",
+          ...tag("DMCA"),
+        })
+        .input(z.object({ id: Id, note: z.string().max(2000) }))
         .output(D.DmcaNotice),
     },
     suspend: platformMod

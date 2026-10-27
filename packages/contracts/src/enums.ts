@@ -162,6 +162,25 @@ export const MOD_ACTIONS = [
 ] as const;
 export const MOD_SCOPES = ["channel", "platform"] as const;
 export const DMCA_STATUSES = ["received", "actioned", "rejected", "countered", "restored"] as const;
+/** Platform decisions about an account that are not channel or platform mod actions (`account_actions`). */
+export const ACCOUNT_ACTIONS = ["dmca_strike", "dmca_termination"] as const;
+/** Why an account action was reversed. */
+export const ACCOUNT_ACTION_REVERSALS = [
+  "appeal_overturned",
+  "counter_notice_restored",
+  "strikes_below_threshold",
+] as const;
+/** What a DMCA notice URL can resolve to (anything else stays unresolved; staff handle it by hand). */
+export const DMCA_ITEM_SUBJECTS = ["vod", "clip", "broadcast"] as const;
+/**
+ * DMCA policy constants (17 U.S.C. § 512; not reviewed by a lawyer). `restoreWeekdays`: content
+ * comes back 12 weekdays after a counter-notice, which is never fewer than 10 nor more than 14
+ * business days even with two federal holidays in the window (§ 512(g)(2)(C)). Repeat infringers:
+ * `repeatInfringerStrikes` unreversed strikes within `strikeWindowDays` suspend the account
+ * (an `account_actions` `dmca_termination`, appealable); 0 turns the automatic suspension off
+ * (moderators are notified only).
+ */
+export const DMCA_RULES = { restoreWeekdays: 12, repeatInfringerStrikes: 3, strikeWindowDays: 365 } as const;
 
 export const LEGAL_DOCUMENT_KINDS = ["terms", "privacy", "guidelines", "cookies", "dmca_policy"] as const;
 export const EXPORT_KINDS = ["account", "channel"] as const;

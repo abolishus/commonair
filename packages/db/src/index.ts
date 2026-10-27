@@ -4,6 +4,7 @@
 export * from "./client.ts";
 export * from "./ids.ts";
 export * from "./hold-lock.ts";
+export * from "./account-actions.ts";
 export * as schema from "./schema/index.ts";
 export { runMigrations, MIGRATIONS_DIR } from "./migrate.ts";
 export { DEFAULT_GOVERNANCE_SETTINGS, seedGovernanceSettings, seedLegalDocuments } from "./seed.ts";

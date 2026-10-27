@@ -15,6 +15,7 @@ import { Route as StudioRouteImport } from './routes/_studio'
 import { Route as AdminTreasuryRouteImport } from './routes/_admin/treasury'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
+import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
@@ -30,6 +31,10 @@ import { Route as OverlayChatRouteImport } from './routes/overlay.chat'
 import { Route as OverlayGoalsRouteImport } from './routes/overlay.goals'
 import { Route as AdminAdminAppealsRouteImport } from './routes/_admin/admin.appeals'
 import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
+import { Route as AdminAdminDmcaRouteImport } from './routes/_admin/admin.dmca'
+import { Route as AdminAdminEgressRouteImport } from './routes/_admin/admin.egress'
+import { Route as AdminAdminIncidentsRouteImport } from './routes/_admin/admin.incidents'
+import { Route as AdminAdminIntegrityRouteImport } from './routes/_admin/admin.integrity'
 import { Route as AdminAdminLegalRouteImport } from './routes/_admin/admin.legal'
 import { Route as AdminAdminModerationRouteImport } from './routes/_admin/admin.moderation'
 import { Route as AppCoopIndexRouteImport } from './routes/_app/coop.index'
@@ -37,6 +42,7 @@ import { Route as AppCoopCouncilRouteImport } from './routes/_app/coop.council'
 import { Route as AppCoopMembershipRouteImport } from './routes/_app/coop.membership'
 import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
+import { Route as AppSettingsCopyrightRouteImport } from './routes/_app/settings.copyright'
 import { Route as AppSettingsPrivacyRouteImport } from './routes/_app/settings.privacy'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
 import { Route as AppCoopPatronageIndexRouteImport } from './routes/_app/coop.patronage.index'
@@ -71,6 +77,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppChannelRoute = AppChannelRouteImport.update({
   id: '/$channel',
   path: '/$channel',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDmcaRoute = AppDmcaRouteImport.update({
+  id: '/dmca',
+  path: '/dmca',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSigninRoute = AppSigninRouteImport.update({
@@ -148,6 +159,26 @@ const AdminAdminCoopRoute = AdminAdminCoopRouteImport.update({
   path: '/admin/coop',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminDmcaRoute = AdminAdminDmcaRouteImport.update({
+  id: '/admin/dmca',
+  path: '/admin/dmca',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminEgressRoute = AdminAdminEgressRouteImport.update({
+  id: '/admin/egress',
+  path: '/admin/egress',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminIncidentsRoute = AdminAdminIncidentsRouteImport.update({
+  id: '/admin/incidents',
+  path: '/admin/incidents',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminIntegrityRoute = AdminAdminIntegrityRouteImport.update({
+  id: '/admin/integrity',
+  path: '/admin/integrity',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminLegalRoute = AdminAdminLegalRouteImport.update({
   id: '/admin/legal',
   path: '/admin/legal',
@@ -181,6 +212,11 @@ const AppCoopSettingsRoute = AppCoopSettingsRouteImport.update({
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
   id: '/settings/appeals',
   path: '/settings/appeals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsCopyrightRoute = AppSettingsCopyrightRouteImport.update({
+  id: '/settings/copyright',
+  path: '/settings/copyright',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsPrivacyRoute = AppSettingsPrivacyRouteImport.update({
@@ -230,6 +266,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
+  '/dmca': typeof AppDmcaRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -245,12 +282,17 @@ export interface FileRoutesByFullPath {
   '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
   '/admin/coop': typeof AdminAdminCoopRoute
+  '/admin/dmca': typeof AdminAdminDmcaRoute
+  '/admin/egress': typeof AdminAdminEgressRoute
+  '/admin/incidents': typeof AdminAdminIncidentsRoute
+  '/admin/integrity': typeof AdminAdminIntegrityRoute
   '/admin/legal': typeof AdminAdminLegalRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
   '/coop/council': typeof AppCoopCouncilRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
+  '/settings/copyright': typeof AppSettingsCopyrightRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/coop/': typeof AppCoopIndexRoute
@@ -265,6 +307,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
+  '/dmca': typeof AppDmcaRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
@@ -280,12 +323,17 @@ export interface FileRoutesByTo {
   '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
   '/admin/coop': typeof AdminAdminCoopRoute
+  '/admin/dmca': typeof AdminAdminDmcaRoute
+  '/admin/egress': typeof AdminAdminEgressRoute
+  '/admin/incidents': typeof AdminAdminIncidentsRoute
+  '/admin/integrity': typeof AdminAdminIntegrityRoute
   '/admin/legal': typeof AdminAdminLegalRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
   '/coop/council': typeof AppCoopCouncilRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
+  '/settings/copyright': typeof AppSettingsCopyrightRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/coop': typeof AppCoopIndexRoute
@@ -303,6 +351,7 @@ export interface FileRoutesById {
   '/_studio': typeof StudioRouteWithChildren
   '/_admin/treasury': typeof AdminTreasuryRoute
   '/_app/$channel': typeof AppChannelRoute
+  '/_app/dmca': typeof AppDmcaRoute
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
   '/_app/takedown': typeof AppTakedownRoute
@@ -319,12 +368,17 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_admin/admin/appeals': typeof AdminAdminAppealsRoute
   '/_admin/admin/coop': typeof AdminAdminCoopRoute
+  '/_admin/admin/dmca': typeof AdminAdminDmcaRoute
+  '/_admin/admin/egress': typeof AdminAdminEgressRoute
+  '/_admin/admin/incidents': typeof AdminAdminIncidentsRoute
+  '/_admin/admin/integrity': typeof AdminAdminIntegrityRoute
   '/_admin/admin/legal': typeof AdminAdminLegalRoute
   '/_admin/admin/moderation': typeof AdminAdminModerationRoute
   '/_app/coop/council': typeof AppCoopCouncilRoute
   '/_app/coop/membership': typeof AppCoopMembershipRoute
   '/_app/coop/settings': typeof AppCoopSettingsRoute
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
+  '/_app/settings/copyright': typeof AppSettingsCopyrightRoute
   '/_app/settings/privacy': typeof AppSettingsPrivacyRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/_app/coop/': typeof AppCoopIndexRoute
@@ -341,6 +395,7 @@ export interface FileRouteTypes {
     | '/'
     | '/treasury'
     | '/$channel'
+    | '/dmca'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -356,12 +411,17 @@ export interface FileRouteTypes {
     | '/overlay/goals'
     | '/admin/appeals'
     | '/admin/coop'
+    | '/admin/dmca'
+    | '/admin/egress'
+    | '/admin/incidents'
+    | '/admin/integrity'
     | '/admin/legal'
     | '/admin/moderation'
     | '/coop/council'
     | '/coop/membership'
     | '/coop/settings'
     | '/settings/appeals'
+    | '/settings/copyright'
     | '/settings/privacy'
     | '/settings/subscriptions'
     | '/coop/'
@@ -376,6 +436,7 @@ export interface FileRouteTypes {
     | '/'
     | '/treasury'
     | '/$channel'
+    | '/dmca'
     | '/signin'
     | '/signup'
     | '/takedown'
@@ -391,12 +452,17 @@ export interface FileRouteTypes {
     | '/overlay/goals'
     | '/admin/appeals'
     | '/admin/coop'
+    | '/admin/dmca'
+    | '/admin/egress'
+    | '/admin/incidents'
+    | '/admin/integrity'
     | '/admin/legal'
     | '/admin/moderation'
     | '/coop/council'
     | '/coop/membership'
     | '/coop/settings'
     | '/settings/appeals'
+    | '/settings/copyright'
     | '/settings/privacy'
     | '/settings/subscriptions'
     | '/coop'
@@ -413,6 +479,7 @@ export interface FileRouteTypes {
     | '/_studio'
     | '/_admin/treasury'
     | '/_app/$channel'
+    | '/_app/dmca'
     | '/_app/signin'
     | '/_app/signup'
     | '/_app/takedown'
@@ -429,12 +496,17 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_admin/admin/appeals'
     | '/_admin/admin/coop'
+    | '/_admin/admin/dmca'
+    | '/_admin/admin/egress'
+    | '/_admin/admin/incidents'
+    | '/_admin/admin/integrity'
     | '/_admin/admin/legal'
     | '/_admin/admin/moderation'
     | '/_app/coop/council'
     | '/_app/coop/membership'
     | '/_app/coop/settings'
     | '/_app/settings/appeals'
+    | '/_app/settings/copyright'
     | '/_app/settings/privacy'
     | '/_app/settings/subscriptions'
     | '/_app/coop/'
@@ -498,6 +570,13 @@ declare module '@tanstack/react-router' {
       path: '/$channel'
       fullPath: '/$channel'
       preLoaderRoute: typeof AppChannelRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dmca': {
+      id: '/_app/dmca'
+      path: '/dmca'
+      fullPath: '/dmca'
+      preLoaderRoute: typeof AppDmcaRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/signin': {
@@ -605,6 +684,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminCoopRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/dmca': {
+      id: '/_admin/admin/dmca'
+      path: '/admin/dmca'
+      fullPath: '/admin/dmca'
+      preLoaderRoute: typeof AdminAdminDmcaRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/egress': {
+      id: '/_admin/admin/egress'
+      path: '/admin/egress'
+      fullPath: '/admin/egress'
+      preLoaderRoute: typeof AdminAdminEgressRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/incidents': {
+      id: '/_admin/admin/incidents'
+      path: '/admin/incidents'
+      fullPath: '/admin/incidents'
+      preLoaderRoute: typeof AdminAdminIncidentsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/integrity': {
+      id: '/_admin/admin/integrity'
+      path: '/admin/integrity'
+      fullPath: '/admin/integrity'
+      preLoaderRoute: typeof AdminAdminIntegrityRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/legal': {
       id: '/_admin/admin/legal'
       path: '/admin/legal'
@@ -652,6 +759,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/appeals'
       fullPath: '/settings/appeals'
       preLoaderRoute: typeof AppSettingsAppealsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/copyright': {
+      id: '/_app/settings/copyright'
+      path: '/settings/copyright'
+      fullPath: '/settings/copyright'
+      preLoaderRoute: typeof AppSettingsCopyrightRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/privacy': {
@@ -717,6 +831,10 @@ interface AdminRouteChildren {
   AdminTreasuryRoute: typeof AdminTreasuryRoute
   AdminAdminAppealsRoute: typeof AdminAdminAppealsRoute
   AdminAdminCoopRoute: typeof AdminAdminCoopRoute
+  AdminAdminDmcaRoute: typeof AdminAdminDmcaRoute
+  AdminAdminEgressRoute: typeof AdminAdminEgressRoute
+  AdminAdminIncidentsRoute: typeof AdminAdminIncidentsRoute
+  AdminAdminIntegrityRoute: typeof AdminAdminIntegrityRoute
   AdminAdminLegalRoute: typeof AdminAdminLegalRoute
   AdminAdminModerationRoute: typeof AdminAdminModerationRoute
 }
@@ -725,6 +843,10 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminTreasuryRoute: AdminTreasuryRoute,
   AdminAdminAppealsRoute: AdminAdminAppealsRoute,
   AdminAdminCoopRoute: AdminAdminCoopRoute,
+  AdminAdminDmcaRoute: AdminAdminDmcaRoute,
+  AdminAdminEgressRoute: AdminAdminEgressRoute,
+  AdminAdminIncidentsRoute: AdminAdminIncidentsRoute,
+  AdminAdminIntegrityRoute: AdminAdminIntegrityRoute,
   AdminAdminLegalRoute: AdminAdminLegalRoute,
   AdminAdminModerationRoute: AdminAdminModerationRoute,
 }
@@ -733,6 +855,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
+  AppDmcaRoute: typeof AppDmcaRoute
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
   AppTakedownRoute: typeof AppTakedownRoute
@@ -742,6 +865,7 @@ interface AppRouteChildren {
   AppCoopMembershipRoute: typeof AppCoopMembershipRoute
   AppCoopSettingsRoute: typeof AppCoopSettingsRoute
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
+  AppSettingsCopyrightRoute: typeof AppSettingsCopyrightRoute
   AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
   AppCoopIndexRoute: typeof AppCoopIndexRoute
@@ -755,6 +879,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
+  AppDmcaRoute: AppDmcaRoute,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
   AppTakedownRoute: AppTakedownRoute,
@@ -764,6 +889,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopMembershipRoute: AppCoopMembershipRoute,
   AppCoopSettingsRoute: AppCoopSettingsRoute,
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
+  AppSettingsCopyrightRoute: AppSettingsCopyrightRoute,
   AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
   AppCoopIndexRoute: AppCoopIndexRoute,

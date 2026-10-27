@@ -11,6 +11,7 @@
  * MONITOR costs Valkey some throughput while it runs; the scenario keeps one open for its
  * duration and only keeps the lines that mention the issuance lock.
  */
+import { KEYS } from "@commonair/contracts/internal";
 import { errorMessage } from "../redact.ts";
 
 export interface MonitorEntry {
@@ -38,7 +39,7 @@ export function parseMonitorLine(line: string): MonitorEntry | null {
   return args.length === 0 ? null : { at, client, args };
 }
 
-export const ISSUANCE_LOCK_KEY = "issuance:lock";
+export const ISSUANCE_LOCK_KEY = KEYS.issuanceLock;
 
 /** Each origin ticks once a minute (services/origin/src/origin.ts `setInterval`). */
 export const ISSUANCE_INTERVAL_MS = 60_000;

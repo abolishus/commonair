@@ -52,6 +52,7 @@ const EXPECTED: Record<string, ProcedureMeta["access"]> = {
   "coop.shares.list": "treasurer",
   "coop.shares.refund": "treasurer",
   "coop.exit": "user",
+  "coop.join": "user",
   "coop.appointWorker": "admin",
   "coop.settings": "public",
   "coop.proposals.list": "public",

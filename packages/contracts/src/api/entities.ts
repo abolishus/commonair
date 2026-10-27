@@ -874,14 +874,78 @@ export const AuditEntry = z.object({
   details: z.record(z.string(), z.unknown()),
   createdAt: Timestamp,
 });
+export const DmcaNoticeItem = z.object({
+  id: Id,
+  url: z.string(),
+  subjectType: z.enum(E.DMCA_ITEM_SUBJECTS).nullable(),
+  subjectId: Id.nullable(),
+  ownerId: Id.nullable(),
+  removedAt: Timestamp.nullable(),
+  restoredAt: Timestamp.nullable(),
+});
+/** Staff view (platform moderators): the claimant's contact details are on it, never in logs or events. */
+export const DmcaCounterNotice = z.object({
+  id: Id,
+  noticeId: Id,
+  user: UserPublic.pick({ id: true, username: true }),
+  itemIds: z.array(Id),
+  fullName: z.string(),
+  address: z.string(),
+  phone: z.string(),
+  statement: z.string(),
+  restoreAfter: Timestamp,
+  restoredAt: Timestamp.nullable(),
+  suitFiledAt: Timestamp.nullable(),
+  suitNote: z.string().nullable(),
+  createdAt: Timestamp,
+});
 export const DmcaNotice = z.object({
   id: Id,
   status: z.enum(E.DMCA_STATUSES),
+  claimantName: z.string(),
+  claimantEmail: z.string(),
+  claimantAddress: z.string(),
+  claimantPhone: z.string().nullable(),
   copyrightedWork: z.string(),
   infringingUrls: z.array(z.string()),
+  signature: z.string(),
+  items: z.array(DmcaNoticeItem),
+  counters: z.array(DmcaCounterNotice),
+  /** Unreversed strikes in the window per item owner id, for the repeat-infringer policy. */
+  ownerStrikes: z.record(Id, z.number().int()),
+  handledBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  decisionNote: z.string().nullable(),
   createdAt: Timestamp,
   actionedAt: Timestamp.nullable(),
 });
+/** What the owner of removed content sees: the claimant's name only, never their contact details. */
+export const DmcaNoticeForOwner = z.object({
+  id: Id,
+  status: z.enum(E.DMCA_STATUSES),
+  claimantName: z.string(),
+  copyrightedWork: z.string(),
+  items: z.array(DmcaNoticeItem),
+  counter: z
+    .object({ id: Id, restoreAfter: Timestamp, restoredAt: Timestamp.nullable(), suitFiledAt: Timestamp.nullable() })
+    .nullable(),
+  createdAt: Timestamp,
+  actionedAt: Timestamp.nullable(),
+});
+export const AccountAction = z.object({
+  id: Id,
+  action: z.enum(E.ACCOUNT_ACTIONS),
+  /** The decision that caused it, e.g. `dmca_notice` + the notice id. */
+  sourceType: z.string().nullable(),
+  sourceId: Id.nullable(),
+  createdAt: Timestamp,
+  reversedAt: Timestamp.nullable(),
+  reversedReason: z.enum(E.ACCOUNT_ACTION_REVERSALS).nullable(),
+});
+export type DmcaNoticeItem = z.infer<typeof DmcaNoticeItem>;
+export type DmcaCounterNotice = z.infer<typeof DmcaCounterNotice>;
+export type DmcaNotice = z.infer<typeof DmcaNotice>;
+export type DmcaNoticeForOwner = z.infer<typeof DmcaNoticeForOwner>;
+export type AccountAction = z.infer<typeof AccountAction>;
 
 export const ExportJob = z.object({
   id: Id,
@@ -906,6 +970,7 @@ export const LegalDocument = z.object({
   title: z.string(),
   body: z.string(),
   isDraft: z.boolean(),
+  requiresAcceptance: z.boolean(),
   publishedAt: Timestamp,
 });
 

@@ -33,7 +33,7 @@ import { broadcasterFields, emit } from "../events/outbox.ts";
 import { liftRestrictionInTx } from "../moderation/restriction.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
-import { badRequest, conflict, forbidden, isUniqueViolation, notFound } from "../lib/errors.ts";
+import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 
 const { appeals: appealsT, playbackSessions, integrityFlags, channels, modActions } = schema;
@@ -260,6 +260,8 @@ export const appeals = {
       .limit(MINE_LIMIT);
     return rows.map(toAppeal);
   }),
+
+  accountActions: os.appeals.accountActions.handler(notImplemented),
 
   queue: os.appeals.queue.handler(async ({ context, input }) => {
     const { deps } = context;

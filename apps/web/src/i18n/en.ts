@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { coopMessages } from "./coop.ts";
+import { e7AdminMessages } from "./e7-admin.ts";
+import { e7AppealsMessages } from "./e7-appeals.ts";
+import { e7ChatMessages } from "./e7-chat.ts";
+import { e7DmcaMessages } from "./e7-dmca.ts";
+import { e7LegalMessages } from "./e7-legal.ts";
 import { moneyMessages } from "./money.ts";
 import { opsMessages } from "./ops.ts";
 import { safetyMessages } from "./safety.ts";
@@ -14,6 +19,11 @@ export const en = {
   ...safetyMessages,
   ...coopMessages,
   ...opsMessages,
+  ...e7ChatMessages,
+  ...e7DmcaMessages,
+  ...e7AdminMessages,
+  ...e7AppealsMessages,
+  ...e7LegalMessages,
   "app.title": "Live streaming, owned by the people who make it",
 
   "nav.account": "Account",
@@ -27,6 +37,11 @@ export const en = {
   "nav.skipToContent": "Skip to content",
   "nav.main": "Main",
   "nav.directory": "Browse",
+  "nav.copyright": "Copyright notices",
+  "nav.adminDmca": "DMCA notices",
+  "nav.adminIntegrity": "Integrity flags",
+  "nav.adminEgress": "Egress",
+  "nav.adminIncidents": "Incidents",
 
   "studio.nav": "Creator studio",
   "studio.streamManager": "Stream manager",
@@ -36,6 +51,7 @@ export const en = {
 
   "footer.source": "Source",
   "footer.license": "Free software under the AGPL-3.0",
+  "footer.dmca": "Copyright (DMCA)",
 
   "home.title": "Welcome to {name}",
   "home.tagline": "A member-owned cooperative for live streaming.",

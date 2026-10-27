@@ -23,9 +23,11 @@ export const SAFETY_STEPS = {
   5: "T1 blur, queue, clear",
   6: "upload rejected",
   7: "NCII clock",
+  8: "DMCA takedown and counter-notice",
+  9: "overturned appeal lifts the ban",
 } as const;
 export type SafetyStep = keyof typeof SAFETY_STEPS;
-export const ALL_SAFETY_STEPS: readonly SafetyStep[] = [1, 2, 3, 4, 5, 6, 7];
+export const ALL_SAFETY_STEPS: readonly SafetyStep[] = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /** Step 2 deletes the account step 1 suspended, so it cannot run on its own. */
 export const STEP_PREREQUISITES: Readonly<Record<SafetyStep, readonly SafetyStep[]>> = {
@@ -36,6 +38,8 @@ export const STEP_PREREQUISITES: Readonly<Record<SafetyStep, readonly SafetyStep
   5: [],
   6: [],
   7: [],
+  8: [],
+  9: [],
 };
 
 function isStep(n: number): n is SafetyStep {
@@ -57,13 +61,13 @@ export function parseSteps(value: string): SafetyStep[] {
     if (range) {
       const from = Number(range[1]);
       const to = Number(range[2]);
-      if (!isStep(from) || !isStep(to) || from > to) throw new Error(`steps: bad range "${part}" (1-7)`);
+      if (!isStep(from) || !isStep(to) || from > to) throw new Error(`steps: bad range "${part}" (1-9)`);
       for (let n = from; n <= to; n++) if (isStep(n)) out.add(n);
       continue;
     }
-    if (!/^\d+$/.test(part)) throw new Error(`steps: "${part}" is not a step number (1-7)`);
+    if (!/^\d+$/.test(part)) throw new Error(`steps: "${part}" is not a step number (1-9)`);
     const n = Number(part);
-    if (!isStep(n)) throw new Error(`steps: ${n} is not a step (1-7)`);
+    if (!isStep(n)) throw new Error(`steps: ${n} is not a step (1-9)`);
     out.add(n);
   }
   if (out.size === 0) throw new Error("steps: no step selected");

@@ -8,6 +8,7 @@ import { SiteFooter, SiteHeader, UserMenu, type NavItem, type UserMenuItem } fro
 import { toast } from "@commonair/ui/toast";
 import {
   BankIcon,
+  CopyrightIcon,
   CreditCardIcon,
   UserGroupIcon,
   DashboardSquare01Icon,
@@ -74,6 +75,13 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("nav.appeals"),
         icon: icon(JusticeScale01Icon),
         render: <Link data-testid="account-appeals-link" to="/settings/appeals" />,
+      };
+    case "copyright":
+      return {
+        id: entry.id,
+        label: t("nav.copyright"),
+        icon: icon(CopyrightIcon),
+        render: <Link data-testid="account-copyright-link" to="/settings/copyright" />,
       };
     case "privacy":
       return {
@@ -239,6 +247,8 @@ function footerLink(entry: FooterEntry): { label: string; render: React.ReactEle
       };
     case "takedown":
       return { label: t("footer.takedown"), render: <Link data-testid="footer-takedown-link" to="/takedown" /> };
+    case "dmca":
+      return { label: t("footer.dmca"), render: <Link data-testid="footer-dmca-link" to="/dmca" /> };
   }
 }
 

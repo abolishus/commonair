@@ -12,6 +12,7 @@
  */
 import type { Logger } from "@commonair/observability";
 import {
+  DmcaRestoreResult,
   INTERNAL_ROUTES,
   INTERNAL_SECRET_HEADER,
   type ModerationScores,
@@ -54,7 +55,10 @@ export class TestHooksOff extends Error {
   }
 }
 
-/** `PUT /internal/moderation/script` and `POST /internal/moderation/ncii-tick`, straight to the API. */
+/**
+ * `PUT /internal/moderation/script`, `POST /internal/moderation/ncii-tick` and
+ * `POST /internal/moderation/dmca-tick`, straight to the API.
+ */
 export class ModerationHooks {
   constructor(
     private readonly apiUrl: string,
@@ -85,6 +89,12 @@ export class ModerationHooks {
   async nciiTick(asOf: string): Promise<NciiClockResult> {
     const res = await this.call("POST", INTERNAL_ROUTES.nciiTick, { asOf }, 45_000);
     return NciiClockResult.parse(await res.json());
+  }
+
+  /** Run the dmca-restore job as of `asOf` and return what it did (the API waits up to 30 s). */
+  async dmcaTick(asOf: string): Promise<DmcaRestoreResult> {
+    const res = await this.call("POST", INTERNAL_ROUTES.dmcaTick, { asOf }, 45_000);
+    return DmcaRestoreResult.parse(await res.json());
   }
 }
 
