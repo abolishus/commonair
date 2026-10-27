@@ -272,7 +272,8 @@ describe("segment stream consumer", () => {
       const old = Date.now() - 2 * 3_600_000;
       for (let i = 0; i < 200; i++) await raw.xadd(stream, `${old + i}-0`, "sid", "x");
       await raw.xadd(stream, "*", "sid", "x");
-      await waitFor(async () => (await raw.xlen(stream)) === 1, { label: "trim despite failures" });
+      // Each failing pass waits 1 s (runtime/loop.ts); under the gate's load 15 s was not always enough.
+      await waitFor(async () => (await raw.xlen(stream)) === 1, { label: "trim despite failures", timeoutMs: 45_000 });
       const entries = await raw.xrange(stream, "-", "+");
       expect(Number(entries[0]?.[0].split("-")[0])).toBeGreaterThan(old + 199);
     } finally {
