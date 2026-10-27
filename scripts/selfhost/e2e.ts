@@ -4,7 +4,7 @@
 /**
  * Self-host end to end (ADR 0023 §7 and §9): what we test is what we ship.
  *
- *   bun scripts/selfhost/e2e.ts [--distro debian|fedora] [--keep]
+ *   bun scripts/selfhost/e2e.ts [--distro debian|fedora] [--storage garage|external] [--no-mirror] [--keep]
  *
  * 1. Builds the 14 release images from this checkout (an image already built for this commit,
  *    by its label, is reused), pushes them to a throwaway Zot registry and writes a release
@@ -30,6 +30,18 @@
  * 5. Upgrades to a deliberately broken release (an api that never gets healthy) and checks
  *    that it rolls back to 0.0.0-e2e.2 and stays healthy.
  *
+ * After the install and again after the upgrade it also checks IRC's socket-activated client
+ * addresses (e2e-irc.ts) and that every RestartMode=direct unit as Quadlet generated it runs
+ * cgroup-reset.sh as its first ExecStopPost=, before Quadlet's own `podman rm`.
+ *
+ * --storage external installs against an external S3 store (e2e-s3.ts: a second Garage in a
+ * rootful container on the host) instead of the instance's own Garage, and checks uploads and
+ * downloads against it instead of through Caddy. CI runs it on Debian only.
+ *
+ * Locally, third-party images come through a pull-through Zot mirror kept in
+ * .cache/selfhost-e2e-mirror/ (e2e-mirror.ts), against Docker Hub's rate limit; --no-mirror
+ * pulls from upstream. Off on CI (the CI variable), unless --mirror.
+ *
  * Needs podman 4.9 or newer on the outer host (CI: `sudo bun scripts/selfhost/e2e.ts` on
  * ubuntu-24.04, rootful Podman 4.9; locally: a podman machine that allows --privileged) and
  * network access for the base images and the third-party images the units pull. The outer
@@ -41,10 +53,31 @@
  * --keep leaves the containers running for debugging. Exits non-zero on failure.
  */
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES, type ReleaseImage, bundleAssetName } from "../release/manifest.ts";
 import { REPO_ROOT, buildBundle } from "./bundle.ts";
+import { checkIrcClientAddresses } from "./e2e-irc.ts";
+import {
+  MIRROR_CONF_PATH,
+  MIRROR_CONTAINER,
+  MIRROR_DIR,
+  mirrorRegistriesConf,
+  mirrorRunArgs,
+  mirrorWanted,
+  mirrorZotConfig,
+} from "./e2e-mirror.ts";
+import {
+  E2E_STORE,
+  checkExternalStore,
+  externalInstallEnv,
+  externalInstallFlags,
+  externalStoreSetup,
+} from "./e2e-s3.ts";
+// R0-c hook: scripts/selfhost/e2e-backup.ts has not landed yet. Once it has, import its check
+// here (signature `(inHost: InHost, expectThat: Expect) => void`, the shapes e2e-irc.ts and
+// e2e-s3.ts export) and enable the backup step in main(), marked "R0-c hook" as well.
+// import { checkBackups } from "./e2e-backup.ts";
 
 // Test-only images (ADR 0022: digest-pinned, licensed in infra/image-licenses.json).
 export const ZOT_IMAGE =
@@ -141,6 +174,48 @@ async function step<T>(name: string, fn: () => T | Promise<T>): Promise<T> {
 function expectThat(ok: boolean, what: string): void {
   log(`${ok ? "ok" : "FAIL"}: ${what}`);
   if (!ok) throw new StepError(what);
+}
+
+/** The timings of every step as a table, the slowest phase easy to spot. */
+export function timingsTable(rows: readonly (readonly [string, number])[]): string {
+  const width = Math.max(4, ...rows.map(([name]) => name.length));
+  const total = rows.reduce((sum, [, s]) => sum + s, 0);
+  const line = (name: string, s: number) => `${name.padEnd(width)}  ${s.toFixed(1).padStart(7)} s`;
+  return [...rows.map(([name, s]) => line(name, s)), line("total", total)].join("\n");
+}
+
+// --- options ------------------------------------------------------------------------------
+
+export type Storage = "garage" | "external";
+export interface E2eOptions {
+  distro: Distro;
+  storage: Storage;
+  keep: boolean;
+  /** undefined: the default (mirrorWanted). */
+  mirror: boolean | undefined;
+}
+
+/**
+ * The command line, by option name (`--<name> <value>`, `--<flag>`, `--no-<flag>`). An unknown
+ * option is an error rather than ignored, so a typo cannot quietly run the default variant.
+ */
+export function e2eOptions(argv: readonly string[]): E2eOptions {
+  const opts: E2eOptions = { distro: "debian", storage: "garage", keep: false, mirror: undefined };
+  const valued = { distro: Object.keys(HOST_IMAGES), storage: ["garage", "external"] } as const;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] ?? "";
+    const name = a.startsWith("--") ? a.slice(2) : "";
+    if (name === "distro" || name === "storage") {
+      const v = argv[++i] ?? "";
+      if (!(valued[name] as readonly string[]).includes(v))
+        throw new Error(`${a} must be ${valued[name].join(" or ")}, not ${v || "nothing"}`);
+      if (name === "distro") opts.distro = v as Distro;
+      else opts.storage = v as Storage;
+    } else if (name === "keep") opts.keep = true;
+    else if (name === "mirror" || name === "no-mirror") opts.mirror = name === "mirror";
+    else throw new Error(`unknown option ${a}`);
+  }
+  return opts;
 }
 
 // --- images -------------------------------------------------------------------------------
@@ -415,7 +490,9 @@ function removeStaleImages(commit: string): void {
 }
 
 function cleanup(): void {
-  for (const c of [HOST, ZOT]) podman(["rm", "-f", "-t", "5", c], { allowFail: true, quiet: true });
+  // The mirror's container goes too (its cache stays in MIRROR_DIR): the network cannot be
+  // removed while a container is on it.
+  for (const c of [HOST, ZOT, MIRROR_CONTAINER]) podman(["rm", "-f", "-t", "5", c], { allowFail: true, quiet: true });
   podman(["network", "rm", "-f", NETWORK], { allowFail: true, quiet: true });
 }
 
@@ -679,8 +756,23 @@ export function judgedListeners(ssOutput: string): string {
     .join("\n");
 }
 
+/**
+ * Ports of the e2e's own fixtures on the host, never the instance's: with --storage external,
+ * the second store (a rootful container root starts) publishes its S3 port on every address.
+ */
+const fixturePorts = new Set<number>();
+
+/** `ss` lines without the listeners on `ports`. */
+export function withoutPorts(ssOutput: string, ports: ReadonlySet<number>): string {
+  const local = (l: string) => l.trim().split(/\s+/)[3] ?? "";
+  return ssOutput
+    .split("\n")
+    .filter((l) => !ports.has(Number(local(l).slice(local(l).lastIndexOf(":") + 1))))
+    .join("\n");
+}
+
 function checkListeners(): void {
-  const ss = judgedListeners(inHost("ss -Hltne"));
+  const ss = withoutPorts(judgedListeners(inHost("ss -Hltne")), fixturePorts);
   const extra = unexpectedListeners(ss);
   expectThat(
     extra.length === 0,
@@ -780,6 +872,103 @@ function checkValkeyAuth(): void {
   expectThat(shown === "0", `no process in commonair-valkey shows the password on its command line (${shown})`);
 }
 
+// --- ExecStopPost= order in the generated units ---------------------------------------------
+
+/**
+ * Every RestartMode=direct unit resets its cgroup after a stop (scripts/selfhost/cgroup-reset.sh,
+ * `ffb3bc7`); without it a direct restart can fail for good with "Device or resource busy".
+ * Our .container files carry one ExecStopPost= for it, and Quadlet appends its own
+ * `podman rm -v -f -i …` after ours. Observed in `quadlet -dryrun -user` output on Debian 13
+ * (Podman 5.4.2: `--cidfile=%t/%N.cid`), Fedora 42 (Podman 5.8.2) and Fedora CoreOS (Podman
+ * 6.1.4: the container name), all as [cgroup-reset.sh, podman rm]. The reset was proved with
+ * that order; a Podman release that reorders or drops either one must fail here first.
+ */
+export const CGROUP_RESET_STOP_POST = "-/bin/sh %h/commonair/scripts/selfhost/cgroup-reset.sh";
+/** Quadlet's own clean-up: `-/usr/bin/podman rm -v -f -i --cidfile=%t/%N.cid` or `… -i <name>`. */
+export const QUADLET_RM_STOP_POST = /^-\S*\/podman rm -v -f -i (--cidfile=\S+|[\w.-]+)$/;
+
+/**
+ * The effective ExecStopPost= commands of `systemctl cat` output (or one unit file), in order:
+ * every fragment and drop-in, [Service] sections only, an empty assignment clearing the list
+ * as systemd does. Continuation lines (a trailing backslash) are joined.
+ */
+export function execStopPosts(unitText: string): string[] {
+  const lines = unitText.replace(/\\\n/g, " ").split("\n");
+  let section = "";
+  let out: string[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#") || line.startsWith(";")) continue;
+    const header = /^\[(.+)\]$/.exec(line);
+    if (header) {
+      section = header[1] ?? "";
+      continue;
+    }
+    if (section !== "Service") continue;
+    const m = /^ExecStopPost\s*=\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const value = (m[1] ?? "").trim();
+    out = value === "" ? [] : [...out, value];
+  }
+  return out;
+}
+
+/** What is wrong with a unit's ExecStopPost= list: the order the cgroup reset relies on. */
+export function stopPostProblems(entries: readonly string[]): string[] {
+  const shape = entries.map((e) =>
+    e === CGROUP_RESET_STOP_POST ? "reset" : QUADLET_RM_STOP_POST.test(e) ? "quadlet-rm" : `other(${e})`,
+  );
+  if (shape.join(",") === "reset,quadlet-rm") return [];
+  return [`ExecStopPost= is [${shape.join(", ") || "none"}], not [reset, quadlet-rm]`];
+}
+
+/** Splits output of units printed after `@@unit <name>` marker lines. */
+export function splitUnits(output: string): Map<string, string> {
+  const units = new Map<string, string>();
+  let name = "";
+  for (const line of output.split("\n")) {
+    const m = /^@@unit (\S+)$/.exec(line);
+    if (m) {
+      name = m[1] ?? "";
+      units.set(name, "");
+    } else if (name) units.set(name, `${units.get(name)}${line}\n`);
+  }
+  return units;
+}
+
+/** Source units with RestartMode=direct, by name (`commonair-worker`). */
+export function directUnits(quadletDir = join(REPO_ROOT, "infra/quadlet")): string[] {
+  return readdirSync(quadletDir)
+    .filter((f) => f.endsWith(".container"))
+    .filter((f) => /^RestartMode=direct$/m.test(readFileSync(join(quadletDir, f), "utf8")))
+    .map((f) => f.replace(/\.container$/, ""))
+    .sort();
+}
+
+/** The generated units on the host, as systemd loaded them (`systemctl --user cat`). */
+function checkStopPostOrder(): void {
+  const installed = new Set(
+    inHost("ls ~/.config/containers/systemd", { user: true })
+      .split("\n")
+      .filter((f) => f.endsWith(".container"))
+      .map((f) => f.replace(/\.container$/, "")),
+  );
+  const expected = directUnits().filter((u) => installed.has(u));
+  expectThat(expected.length > 0, `RestartMode=direct units are installed (${expected.length})`);
+  const out = inHost(expected.map((u) => `echo '@@unit ${u}'; systemctl --user cat ${u}.service 2>&1`).join("; "), {
+    user: true,
+    allowFail: true,
+  });
+  const units = splitUnits(out);
+  const problems = expected.flatMap((u) =>
+    stopPostProblems(execStopPosts(units.get(u) ?? "")).map((p) => `${u}: ${p}`),
+  );
+  expectThat(
+    problems.length === 0,
+    `every RestartMode=direct unit (${expected.length}) runs cgroup-reset.sh, then Quadlet's podman rm, after a stop: ${problems.join("; ") || "ok"}`,
+  );
+}
+
 function installedVersion(): string {
   return /version:\s+(\S+)/.exec(inHost("sh ~/commonair/selfhost.sh status", { user: true }))?.[1] ?? "";
 }
@@ -868,15 +1057,77 @@ async function checkRestart(service: string): Promise<void> {
 
 // --- main ---------------------------------------------------------------------------------
 
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(name);
-  return i === -1 ? undefined : process.argv[i + 1];
+/** Starts the mirror on the test network and returns its address there. */
+async function startMirror(): Promise<string> {
+  mkdirSync(join(MIRROR_DIR, "data"), { recursive: true });
+  writeFileSync(join(MIRROR_DIR, "config.json"), mirrorZotConfig());
+  podman(mirrorRunArgs(ZOT_IMAGE, NETWORK));
+  const address = podman([
+    "inspect",
+    "--format",
+    `{{(index .NetworkSettings.Networks "${NETWORK}").IPAddress}}`,
+    MIRROR_CONTAINER,
+  ]).trim();
+  if (!address) throw new StepError(`no address for ${MIRROR_CONTAINER} on ${NETWORK}`);
+  await mirrorStaysUp();
+  return address;
 }
 
+/**
+ * Zot refuses a bad config by exiting at start. Without this, every pull would quietly fall back
+ * to upstream and the rate-limit protection would be gone, so a mirror that does not stay up
+ * fails the step instead.
+ */
+async function mirrorStaysUp(): Promise<void> {
+  const state = () =>
+    podman(["inspect", "--format", "{{.State.Status}}", MIRROR_CONTAINER], { allowFail: true, quiet: true }).trim();
+  let upFor = 0;
+  for (let i = 0; i < 40 && upFor < 6; i++) {
+    await Bun.sleep(500);
+    upFor = state() === "running" ? upFor + 1 : 0;
+  }
+  if (upFor >= 6) return;
+  // Zot logs to stderr, which run() returns no part of.
+  const r = Bun.spawnSync(["podman", "logs", MIRROR_CONTAINER], { stdout: "pipe", stderr: "pipe" });
+  const logs = (r.stdout.toString() + r.stderr.toString()).slice(-2000);
+  throw new StepError(
+    `the pull-through mirror ${MIRROR_CONTAINER} is ${state() || "gone"}, not running ` +
+      `(rerun with --no-mirror to pull from upstream directly)\n${logs}`,
+  );
+}
+
+/** What the mirror holds now (logged only: a pull that fell back to upstream is not a failure). */
+function logMirrorContents(): void {
+  // An OCI layout per repository: the directories that hold an index.json.
+  const repos: string[] = [];
+  const walk = (dir: string, rel: string, depth: number) => {
+    if (depth > 4) return;
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "index.json" && rel) repos.push(rel);
+      if (e.isDirectory() && !e.name.startsWith(".") && e.name !== "blobs")
+        walk(join(dir, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1);
+    }
+  };
+  try {
+    walk(join(MIRROR_DIR, "data"), "", 0);
+  } catch (e) {
+    log(`mirror: cannot list ${MIRROR_DIR}: ${(e as Error).message}`);
+  }
+  log(`mirror holds: ${repos.sort().join(", ") || "nothing"}`);
+}
+
+/** Podman on the host before the install, which the external store's setup needs (e2e-s3.ts). */
+const PODMAN_FIRST = {
+  debian:
+    "DEBIAN_FRONTEND=noninteractive apt-get update -q && " +
+    "DEBIAN_FRONTEND=noninteractive apt-get install -y -q podman",
+  fedora: "dnf install -y -q podman",
+} as const;
+
 async function main(): Promise<void> {
-  const distro = (arg("--distro") ?? "debian") as Distro;
-  if (!(distro in HOST_IMAGES)) throw new Error(`--distro must be debian or fedora, not ${distro}`);
-  const keep = process.argv.includes("--keep");
+  const { distro, storage, keep, mirror: mirrorFlag } = e2eOptions(process.argv.slice(2));
+  const mirror = mirrorWanted(mirrorFlag, process.env);
+  const external = storage === "external";
   rmSync(LOG_DIR, { recursive: true, force: true });
   mkdirSync(LOG_DIR, { recursive: true });
   const commit = run(["git", "rev-parse", "HEAD"]).trim();
@@ -906,6 +1157,7 @@ async function main(): Promise<void> {
       ZOT,
     ]).trim();
     if (!zotAddress) throw new StepError(`no address for ${ZOT} on ${NETWORK}`);
+    const mirrorAddress = mirror ? await step("start the pull-through mirror", startMirror) : null;
 
     const v1 = "0.0.0-e2e.1";
     const v2 = "0.0.0-e2e.2";
@@ -917,22 +1169,44 @@ async function main(): Promise<void> {
         push(v1, (n) => `${LOCAL}/${n}:${commit.slice(0, 12)}`, port),
       ),
     );
-    await step(`start a ${distro} host`, () => startHost(distro, model, zotAddress));
+    await step(`start a ${distro} host`, async () => {
+      await startHost(distro, model, zotAddress);
+      // Before anything in the host pulls: root's podman and the instance user's read it alike.
+      if (mirrorAddress) inHost(`cat > ${MIRROR_CONF_PATH} <<'EOF'\n${mirrorRegistriesConf(mirrorAddress)}EOF`);
+    });
 
-    await step(`install ${v1}`, () => {
+    if (external)
+      await step("start the external S3 store", () => {
+        // The store runs in Podman on the host, so Podman comes first here; selfhost.sh then
+        // installs only the helpers it still misses.
+        inHost(PODMAN_FIRST[distro]);
+        externalStoreSetup(inHost, expectThat);
+        fixturePorts.add(E2E_STORE.s3Port);
+      });
+
+    await step(`install ${v1}${external ? " (external S3 store)" : ""}`, () => {
       const bundle = `/e2e/releases/${v1}/${bundleAssetName(v1)}`;
       inHost(
         `${sh} install --bundle ${bundle} --tls internal --domain ${DOMAIN} --email ops@${DOMAIN} ` +
-          `--registry ${MIRROR} --public-ip 127.0.0.1 ${model ? `--model /e2e/${MODEL_FILE} ` : ""}--yes`,
+          `--registry ${MIRROR} --public-ip 127.0.0.1 ${model ? `--model /e2e/${MODEL_FILE} ` : ""}` +
+          `${external ? `${externalInstallFlags()} ` : ""}--yes`,
+        // The store's keys go in the environment, never on the command line.
+        { env: external ? externalInstallEnv() : {} },
       );
       expectThat(installedVersion() === v1, `status reports ${v1}`);
       checkHttps();
-      checkBrowserStorage("install");
+      if (external) {
+        checkExternalStore(inHost, expectThat);
+      } else {
+        checkBrowserStorage("install");
+      }
       checkUnitEnv();
       checkValkeyAuth();
       checkClientAddresses();
+      checkIrcClientAddresses(inHost, expectThat);
       checkIpv6();
       checkListeners();
+      checkStopPostOrder();
     });
 
     await step(`release ${v2} (new digests) and upgrade`, async () => {
@@ -947,15 +1221,30 @@ async function main(): Promise<void> {
       expectThat(installedVersion() === v2, `status reports ${v2}`);
       checkMigrateFirst(before);
       checkHttps();
-      checkBrowserStorage("upgrade");
+      if (external) {
+        // The upgrade keeps the store the install chose.
+        checkExternalStore(inHost, expectThat);
+      } else {
+        checkBrowserStorage("upgrade");
+      }
       checkUnitEnv();
       checkValkeyAuth();
       checkListeners();
+      checkIrcClientAddresses(inHost, expectThat);
+      checkStopPostOrder();
     });
 
     // The session-ten bug: a crashed worker stayed down under compose. Under Quadlet, systemd
     // restarts it.
     await step("a killed worker comes back by itself", () => checkRestart("worker"));
+
+    // R0-c hook: once scripts/selfhost/e2e-backup.ts lands (see the import at the top), its
+    // backup phase runs here, before the rollback: a database backup, `backup --objects` to an
+    // offsite remote, an object restore. Its own step, so its time is in the timings table.
+    // With --storage external the second Garage (E2E_STORE) is already the instance's store:
+    // a check that calls externalStoreSetup again would replace it (the setup starts with
+    // `podman rm -f` of that container), so it needs a store of its own there.
+    // await step("backups: database, objects offsite, object restore", () => checkBackups(inHost, expectThat));
 
     await step(`broken release ${v3} rolls back to ${v2}`, async () => {
       relabel(commit, v3, ["api"]);
@@ -977,9 +1266,14 @@ async function main(): Promise<void> {
     collectLogs();
     throw e;
   } finally {
+    if (mirror) logMirrorContents();
     writeFileSync(join(LOG_DIR, "timings.json"), JSON.stringify(Object.fromEntries(timings), null, 2));
+    console.log(`\n${timingsTable(timings)}`);
     if (!keep) cleanup();
-    else console.log(`--keep: ${HOST} and ${ZOT} are still running (podman exec -it ${HOST} bash)`);
+    else {
+      if (external) log(`--keep: the external store is ${E2E_STORE.container} in ${HOST}`);
+      console.log(`--keep: ${HOST} and ${ZOT} are still running (podman exec -it ${HOST} bash)`);
+    }
   }
 }
 
