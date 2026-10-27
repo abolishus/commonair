@@ -6,6 +6,7 @@
  * found in review and asserts the database refuses it.
  */
 import { and, eq, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 
 // Governance flows wait out real (shortened) review and voting windows.
@@ -237,7 +238,7 @@ describe("governance", () => {
   });
 
   type Status = (typeof s.proposals.$inferSelect)["status"];
-  const setStatus = (id: string, status: Status, extra: Partial<typeof s.proposals.$inferInsert> = {}) =>
+  const setStatus = (id: string, status: Status, extra: PgUpdateSetSource<typeof s.proposals> = {}) =>
     app
       .update(s.proposals)
       .set({ status, ...extra })
@@ -261,6 +262,9 @@ describe("governance", () => {
     return p!.id;
   }
 
+  const votingEnd = (ms: number) =>
+    sql<Date>`clock_timestamp() + make_interval(secs => ${ms / 1000}::double precision)`;
+
   /** Draft → discussion → council review (1 s) → voting with a window of `windowMs`. */
   async function openVote(
     changes: { key: string; value: unknown }[],
@@ -271,7 +275,9 @@ describe("governance", () => {
     await setStatus(id, "discussion");
     await setStatus(id, "council_review");
     await sleep(1100);
-    await setStatus(id, "voting", { rules, votingEndsAt: new Date(Date.now() + windowMs) });
+    // The end on the database's clock, as the window trigger measures it: a host-side
+    // Date.now() went stale by the time a loaded gate ran the statement.
+    await setStatus(id, "voting", { rules, votingEndsAt: votingEnd(windowMs) });
     return id;
   }
 

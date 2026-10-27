@@ -131,7 +131,9 @@ describe("protected decision and tallies", () => {
     await set("discussion");
     await set("council_review");
     await sleep(1100);
-    await set("voting", { rules: protectedRules, votingEndsAt: new Date(Date.now() + 1500) });
+    // The end on the database's clock, as the window trigger measures it: a host-side
+    // Date.now() went stale by the time a loaded gate ran the statement.
+    await set("voting", { rules: protectedRules, votingEndsAt: sql<Date>`clock_timestamp() + interval '1.5 seconds'` });
     // Member-wide 4 of 5 yes (80% ≥ 2/3); streamer class 1 of 2 (not a majority).
     await app.insert(s.votes).values([
       { proposalId: id, userId: viewers[0]!, choice: "yes" },
