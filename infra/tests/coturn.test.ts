@@ -320,7 +320,11 @@ describe("compose and Quadlet run the same coturn", () => {
     expect(svc.image).toBe(IMAGE);
     expect(values(unit, "Image")).toEqual([IMAGE]);
     const licenses = JSON.parse(read("infra/image-licenses.json")) as Record<string, { license: string; tag: string }>;
-    expect(licenses["docker.io/coturn/coturn"]).toMatchObject({ license: "BSD-3-Clause", tag: "4.18.0-trixie" });
+    // The license file keys images by name (no tag or digest).
+    expect(licenses[IMAGE.slice(0, IMAGE.indexOf(":"))]).toMatchObject({
+      license: "BSD-3-Clause",
+      tag: "4.18.0-trixie",
+    });
   });
 
   test("in the default profile, the same entrypoint, files and health check", () => {
