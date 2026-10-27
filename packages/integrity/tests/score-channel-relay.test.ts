@@ -4,7 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { chatToViewerAnomaly, followBurst, percentile, raidIntegrity, type FollowFact } from "../src/channel.ts";
 import { checkReceipt, relayStanding } from "../src/relay.ts";
-import { scoreSession } from "../src/score.ts";
+import { gateEligible, scoreSession } from "../src/score.ts";
 import type { FetchSummary, HeartbeatSample, ScoringContext, SessionFacts } from "../src/types.ts";
 
 const CHROME =
@@ -196,10 +196,11 @@ describe("scoreSession: fetch-less heartbeat bots never verify", () => {
       verdict: "verified",
       reasons: [],
     });
-    // No proven receipt coverage yet: held pending, never verified on heartbeats alone.
+    // No proven receipt coverage yet: held pending, never verified on heartbeats alone, and
+    // marked as not judged on fetches.
     expect(scoreSession(relay, beats(6), null, ctx())).toMatchObject({
       verdict: "pending",
-      reasons: ["media_unconfirmed"],
+      reasons: ["fetch_unjudged", "media_unconfirmed"],
     });
     expect(scoreSession(relay, beats(6), { relayObjects: null, claimedSeconds: 60 }, ctx()).verdict).toBe("pending");
     // Origin counters do not vouch for a relay session either.
@@ -210,6 +211,98 @@ describe("scoreSession: fetch-less heartbeat bots never verify", () => {
     const cdn = session({ assignedSource: "cdn" });
     expect(scoreSession(cdn, beats(6), null, ctx()).verdict).toBe("verified");
     expect(scoreSession(cdn, beats(6), { playlists: 0, segments: 0, parts: 0 }, ctx()).verdict).toBe("verified");
+  });
+});
+
+describe("scoreSession: fetch_unjudged marks sessions the delivery path could not judge", () => {
+  const cdn = session({ assignedSource: "cdn" });
+
+  test("a CDN session verifies on the other signals, marked fetch_unjudged", () => {
+    expect(scoreSession(cdn, beats(6), null, ctx())).toEqual({
+      verdict: "verified",
+      score: 0,
+      reasons: ["fetch_unjudged"],
+      signals: [],
+    });
+  });
+
+  test("an origin session with no accounting at all is marked too", () => {
+    expect(scoreSession(session(), beats(6), null, ctx())).toMatchObject({
+      verdict: "verified",
+      reasons: ["fetch_unjudged"],
+    });
+  });
+
+  test("it is added for every verdict and never changes it", () => {
+    const pending = scoreSession({ ...cdn, heartbeats: 2 }, beats(2), null, ctx());
+    expect(pending).toMatchObject({ verdict: "pending", reasons: ["fetch_unjudged", "insufficient_heartbeats"] });
+    const excluded = scoreSession(
+      { ...cdn, datacenter: "Example Cloud", fingerprint: { webdriver: true } },
+      beats(6),
+      null,
+      ctx(),
+    );
+    expect(excluded).toMatchObject({ verdict: "excluded", reasons: ["datacenter_ip", "headless", "fetch_unjudged"] });
+    // Same verdict and score as the reason-free computation: only the marker is new.
+    const judged = scoreSession(session({ datacenter: "Example Cloud" }), beats(6), fetches, ctx());
+    const unjudged = scoreSession({ ...cdn, datacenter: "Example Cloud" }, beats(6), null, ctx());
+    expect({ verdict: unjudged.verdict, score: unjudged.score }).toEqual({
+      verdict: judged.verdict,
+      score: judged.score,
+    });
+    expect(unjudged.reasons).toEqual([...judged.reasons, "fetch_unjudged"]);
+  });
+
+  test("judged origin, relay and evidenced p2p sessions never carry it", () => {
+    expect(scoreSession(session(), beats(6), fetches, ctx()).reasons).not.toContain("fetch_unjudged");
+    // Database counter only is still a judgement (it can hold the session).
+    const db = scoreSession(session(), beats(6), { playlists: null, segments: 0, parts: null }, ctx());
+    expect(db.reasons).toEqual(["media_unconfirmed"]);
+    const relay = session({ assignedSource: "relay" });
+    for (const f of [
+      { relayObjects: 300, claimedSeconds: 60 },
+      { relayObjects: 10, claimedSeconds: 60 },
+      { relayObjects: 0, claimedSeconds: 60 },
+    ])
+      expect(scoreSession(relay, beats(6), f, ctx()).reasons).not.toContain("fetch_unjudged");
+    const p2p = { evidenced: true, linkedNetworks: 2, linkedWithinCap: 2, sameNetworkPeers: 1, announces: 9 };
+    const evidenced = scoreSession(session({ assignedSource: "p2p" }), beats(6), fetches, ctx({ p2p }));
+    expect(evidenced).toMatchObject({ verdict: "verified", reasons: [] });
+  });
+
+  test("it survives an allowance, even one listing it", () => {
+    const early = { ...cdn, startedAt: new Date(0), datacenter: "Example Cloud", fingerprint: { webdriver: true } };
+    const allowance = { since: 1_000_000, codes: ["datacenter_ip", "headless", "fetch_pattern", "fetch_unjudged"] };
+    expect(scoreSession(early, beats(6), null, ctx({ allowance }))).toMatchObject({
+      verdict: "verified",
+      reasons: ["allowed_on_appeal", "fetch_unjudged"],
+    });
+  });
+});
+
+describe("gateEligible", () => {
+  test.each([
+    ["pending", [], false],
+    ["pending", ["fetch_unjudged"], false],
+    ["excluded", ["fetch_pattern"], false],
+    ["excluded", ["datacenter_ip", "fetch_unjudged"], false],
+    ["verified", [], true],
+    ["verified", ["datacenter_ip"], true],
+    ["verified", ["fetch_unjudged"], false],
+    ["verified", ["allowed_on_appeal", "fetch_unjudged"], false],
+  ] as const)("%s with %j → %s", (verdict, reasons, expected) => {
+    expect(gateEligible({ verdict, reasons })).toBe(expected);
+  });
+
+  test("an unscored session (no reasons stored yet) reads as its verdict", () => {
+    expect(gateEligible({ verdict: "verified", reasons: null })).toBe(true);
+    expect(gateEligible({ verdict: "pending", reasons: null })).toBe(false);
+  });
+
+  test("agrees with scoreSession for CDN and origin sessions", () => {
+    const cdnScore = scoreSession(session({ assignedSource: "cdn" }), beats(6), null, ctx());
+    expect(gateEligible(cdnScore)).toBe(false);
+    expect(gateEligible(scoreSession(session(), beats(6), fetches, ctx()))).toBe(true);
   });
 });
 

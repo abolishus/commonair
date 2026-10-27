@@ -42,6 +42,11 @@ Each signal returns a strength in [0, 1]. Strengths combine as a noisy-OR,
   never verifies
 - otherwise → **verified** (reasons still list any weak signals that fired)
 
+Whatever the verdict, a session whose fetches the delivery path could not judge (`fetchChecks`
+skipped it: `cdn`, or `no_accounting`) carries the reason **`fetch_unjudged`**. It is not a signal:
+it adds nothing to the score, no allowance removes it, and it never changes the verdict. See
+"Gate eligibility" under `fetch_pattern`.
+
 Exclusions are sticky: rescoring never turns an excluded session back into a verified one; only an
 allowance (below) does. A verified session can become excluded, or go back to pending, as evidence
 accumulates.
@@ -152,7 +157,41 @@ assigned source never lower what is expected. Only server-side P2P evidence does
 - **cdn**: no per-session accounting. **Known limitation:** CDN pulls are tokenless and cached, so
   the origin cannot attribute them to a session; CDN-delivered sessions are never judged on
   fetches (the other signals still apply). Closing this needs CDN log ingestion keyed by playback
-  token, or a token-bearing edge.
+  token, or a token-bearing edge. Until then such sessions carry `fetch_unjudged` (below).
+
+#### Gate eligibility: `fetch_unjudged` and `gateEligible`
+
+A session `fetchChecks` skipped (`cdn`; or `no_accounting`: an origin session with no accounting
+at all when a caller passes none, or a relay session without verified receipt coverage, which is
+also held pending) gets the reason `fetch_unjudged` on every verdict. Public viewer counts, the
+dashboard breakdown and the verdict itself ignore it: a CDN viewer still counts as a viewer (the
+W1 gate policy belongs to ADR 0015). What it changes is what a verified session **earns**:
+
+- `gateEligible({ verdict, reasons })` (pure, `score.ts`): verified and not `fetch_unjudged`. This
+  is the marker W1-watch-gate reads. It takes the verdict and reasons **as stored**.
+- `GATE_ELIGIBLE` (`jobs.ts`): the same as SQL on the alias `ps`, plus `ps.scored_at is not null`.
+  The API promotes a session to verified on heartbeat before the scorer has run
+  (`services/api/src/routes/playback.ts`); such a session has **no reasons yet**, and one that ends
+  before the next scoring pass (every 15 s) is never scored, because the scorer takes only live or
+  pending sessions. Without `scored_at` a CDN session would count until scored, or forever.
+- Stream-hour eligibility and follow prior viewing count only gate-eligible sessions. Patronage and
+  governance inputs still count every verified session (a policy question for the co-op).
+
+The reason reaches existing rows the next time the scorer touches them: live sessions are
+re-scored every pass, so a CDN session already verified gains it within a pass or two. Ended
+verified sessions are never re-scored and keep the reasons they had; no migration rewrites them.
+A CDN session that ended before this change and was scored then still counts toward the stream
+hours of its last 48 hours (the recompute window) until it ages out.
+
+**Known cost of `scored_at`:** the scorer's candidates (`ended_at is null or verdict = 'pending'`,
+the predicate of `playback_sessions_scoring_idx`) leave out a session that the API promoted and
+that ended before its first pass. Such an honest session (about 15 s of watching after promotion,
+longer when scoring is backlogged) is never scored, so it earns no stream-hour or follow credit.
+On deploy the 48 h stream-hour recompute applies the new rule to past hours too, so an hour that
+was eligible only through such sessions (or through CDN sessions still live and re-marked) can
+flip to ineligible. Closing this needs ended, verified, never-scored sessions inside the finalize
+window among the candidates, which changes the index predicate (a migration, owned by the
+orchestrator).
 
 Expected segments = claimed watch seconds / segment duration (1 s) × the HTTP share, judged only
 when at least 10 are expected. The HTTP share is 10 % (`P2P_HTTP_SHARE`) for a **P2P-evidenced**
@@ -242,7 +281,8 @@ verified:
 - `follow_burst` (`followBurst`, job `excludeFollowBursts`): in any clock minute with more than
   `followBurstPerMinute` follows on a channel, follows from accounts younger than 7 days or that
   never watched the channel before following are excluded (`follows.excluded_at`; rows kept).
-  Prior viewing counts **verified** sessions only, and only watch time **before the follow**
+  Prior viewing counts **gate-eligible** sessions only (`GATE_ELIGIBLE`: verified, scored, not
+  `fetch_unjudged`), and only watch time **before the follow**
   (min(watch seconds, follow time − session start)). Established viewers following in the same
   minute are kept.
 - `raid_overstated` (`raidIntegrity`): a raid carries at most the source channel's verified viewers.
@@ -277,8 +317,9 @@ reinstatement count toward standing.
 ## Streaming-hour eligibility (job `markEligibleStreamHours`)
 
 An hour of `stream_hours` is eligible when at least `membership.classes.streamer.minVerifiedViewers`
-(default 2) distinct viewers (account, or device for anonymous sessions) with a **verified**
-session overlapped it, none of them the streamer. The streamer is recognised by user id, by the
+(default 2) distinct viewers (account, or device for anonymous sessions) with a **gate-eligible**
+session (`GATE_ELIGIBLE`: verified, scored, not `fetch_unjudged`, so CDN viewers do not count)
+overlapped it, none of them the streamer. The streamer is recognised by user id, by the
 devices the streamer watched from while signed in during the last 30 days, and by network,
 time-aligned so a shared address (a campus, a café) only counts against viewers while the streamer
 is there:

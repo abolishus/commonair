@@ -29,6 +29,12 @@ export const INSUFFICIENT_HEARTBEATS = "insufficient_heartbeats";
 export const MEDIA_UNCONFIRMED = "media_unconfirmed";
 /** Non-signal reason: signals an appeal or an admin decision allowed were ignored for this session. */
 export const ALLOWED_ON_APPEAL = "allowed_on_appeal";
+/**
+ * Non-signal reason: the delivery path could not judge the session's fetches (CDN pulls are
+ * tokenless, or no per-session accounting exists), so its verdict rests on the other signals
+ * alone. It never changes the verdict; `gateEligible` reads it.
+ */
+export const FETCH_UNJUDGED = "fetch_unjudged";
 
 export const CHANNEL_SIGNALS = ["chat_viewer_anomaly", "follow_burst", "raid_overstated"] as const;
 export const RELAY_SIGNALS = ["relay_over_report", "relay_suspended", "relay_issuance_unknown"] as const;
