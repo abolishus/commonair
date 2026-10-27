@@ -15,7 +15,8 @@ import type { ObjectStorage } from "@commonair/storage";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
-import { evidenceKey, readObject, sealedDigestOf, sha256Hex, thumbnailPrefix, vodPrefix } from "./objects.ts";
+import { evidenceKey, readObject, sealedDigestOf, sha256Hex, thumbnailPrefix } from "./objects.ts";
+import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { alert, audit, emit, safeErrorCode } from "./records.ts";
 import { mediaStorage, moderationRuntime } from "./runtime.ts";
 import { plaintextSha256 } from "@commonair/moderation";
@@ -104,14 +105,17 @@ export async function collectTargets(
       .from(clips)
       .where(eq(clips.id, subject.id));
   }
+  // Both of a VOD's own prefixes, whatever its row says: a placement move in flight has copies
+  // under each, and evidence must find every one (ADR 0009 amendment 1).
   for (const vodId of vodIds)
-    for await (const o of storage.list(ctx.mediaBucket, vodPrefix(vodId)))
-      out.push({
-        key: o.key,
-        kind: /thumbnail\.[a-z]+$/.test(o.key) ? "thumbnail" : "vod_object",
-        sourceType: "vod",
-        sourceId: vodId,
-      });
+    for (const prefix of vodObjectPrefixes(vodId, null))
+      for await (const o of storage.list(ctx.mediaBucket, prefix))
+        out.push({
+          key: o.key,
+          kind: /thumbnail\.[a-z]+$/.test(o.key) ? "thumbnail" : "vod_object",
+          sourceType: "vod",
+          sourceId: vodId,
+        });
   out.push(...(await collectClipTargets(storage, ctx.mediaBucket, clipRows)));
   return out;
 }

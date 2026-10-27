@@ -23,7 +23,8 @@ import { T0_REASON, type Hit, type MediaModeration } from "./moderation/moderati
 import { assembleFromStorage, concatFiles } from "./vod/assemble.ts";
 import { imageExt, imageType } from "./vod/finalize.ts";
 import { findWindow, parsePlaylist } from "./vod/playlist.ts";
-import { VOD_PLAYLIST, vodPrefix, type LocalLookup } from "./vod/recorder.ts";
+import { VOD_PLAYLIST, type LocalLookup } from "./vod/recorder.ts";
+import { isVodOwnPrefix, vodPrefix } from "@commonair/contracts/storage";
 
 export const ClipJob = z.object({ clipId: z.uuid() });
 export type ClipJob = z.infer<typeof ClipJob>;
@@ -123,9 +124,9 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
     } else {
       vodId ??= await findVod(db, clip.broadcastId);
       if (!vodId) throw new ClipUnavailableError("broadcast is not live here and has no VOD");
-      const prefix = vodPrefix(vodId);
-      const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
-      if (!res) throw new ClipUnavailableError("VOD playlist missing");
+      const found = await vodPlaylist(db, storage, bucket, vodId);
+      if (!found) throw new ClipUnavailableError("VOD playlist missing");
+      const { prefix, res } = found;
       const w = findWindow(parsePlaylist(await res.text()).segments, start, clip.durationSeconds);
       const first = w?.segments[0];
       if (!w || !first?.map) throw new ClipUnavailableError("clip window is outside the recording");
@@ -223,6 +224,29 @@ async function removeForT0(deps: ClipDeps, clipId: string, channelId: string, hi
   await deps.moderation.t0Prepublish("clip", clipId, channelId, hit);
   await markClipRemoved(deps.db, clipId);
   return "removed";
+}
+
+/**
+ * The VOD's playlist under its `storage_prefix`, or under its other own prefix when a placement move
+ * committed meanwhile (ADR 0009 amendment 1). Null when the row or the playlist is missing.
+ */
+async function vodPlaylist(
+  db: Database,
+  storage: ObjectStorage,
+  bucket: string,
+  vodId: string,
+): Promise<{ prefix: string; res: Response } | null> {
+  const [row] = await db
+    .select({ prefix: schema.vods.storagePrefix })
+    .from(schema.vods)
+    .where(eq(schema.vods.id, vodId));
+  if (!row || !isVodOwnPrefix(vodId, row.prefix)) return null;
+  const other = row.prefix === vodPrefix(vodId, "public") ? vodPrefix(vodId, "private") : vodPrefix(vodId, "public");
+  for (const prefix of [row.prefix, other]) {
+    const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
+    if (res) return { prefix, res };
+  }
+  return null;
 }
 
 async function findVod(db: Database, broadcastId: string): Promise<string | null> {

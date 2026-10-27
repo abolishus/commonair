@@ -424,3 +424,42 @@ test("objects written under the broadcast's prefixes while it was hashed are del
   const audits = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.subjectId, requestId));
   expect(audits[0]?.details).toMatchObject({ objectsDeleted: 2, thumbnails: 1 });
 }, 60_000);
+
+test("a removed VOD item: objects under recordings/ are hashed, and a stray vods/ copy is deleted too", async () => {
+  const { user, channel } = await makeUser(t.db);
+  const b = await endedBroadcast(channel.id);
+  const vodId = uuidv7();
+  // A private VOD (ADR 0009 amendment 1); an interrupted placement move left a vods/ copy.
+  await t.db.insert(schema.vods).values({
+    id: vodId,
+    broadcastId: b.id,
+    channelId: channel.id,
+    title: "v",
+    storagePrefix: `recordings/${vodId}/`,
+    status: "deleted",
+    removedReason: "ncii",
+  });
+  const storage = memoryStorage();
+  for (const [k, v] of await syntheticVod(`recordings/${vodId}/`)) storage.objects.set(k, v);
+  const stray = `vods/${vodId}/index.m3u8`;
+  storage.objects.set(stray, new Uint8Array([35]));
+  const requestId = await removedRequest(user.id);
+  await t.db.insert(schema.nciiRequestItems).values({
+    requestId,
+    url: "https://example.test/v",
+    subjectType: "vod",
+    subjectId: vodId,
+    removedAt: new Date(),
+  });
+
+  const keys = [...storage.objects.keys()].filter((k) => k.includes(vodId));
+  const r = await hashRemovedContent(workerCtx(storage), { requestId });
+  // The same synthetic pattern was hashed above, so its hashes are already listed (deduplicated).
+  expect(r).toMatchObject({ items: 1, deleted: keys.length });
+  expect([...storage.objects.keys()].filter((k) => k.includes(vodId))).toEqual([]);
+  const [item] = await t.db
+    .select()
+    .from(schema.nciiRequestItems)
+    .where(eq(schema.nciiRequestItems.requestId, requestId));
+  expect(item?.hashedAt).not.toBeNull();
+}, 60_000);

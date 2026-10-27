@@ -7,12 +7,16 @@
  *
  * - a rolling ~90 s buffer for live clips (always), and
  * - VOD recording (when the channel has VODs enabled): each finished segment, then the
- *   playlist, is uploaded to `vods/<vodId>/` as soon as ffmpeg closes it, so a crash loses at
- *   most the segment being written. A restart resumes the same VOD with a discontinuity.
+ *   playlist, is uploaded under the VOD's `storage_prefix` as soon as ffmpeg closes it, so a crash
+ *   loses at most the segment being written. New VODs record under the private
+ *   `recordings/<vodId>/` (ADR 0009 amendment 1); a VOD resumed across the upgrade keeps its old
+ *   `vods/<vodId>/` and finalize moves it. A restart resumes the same VOD with a discontinuity.
  */
 import { mkdir, rm, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { VOD_PLAYLIST, vodPrefix as contractVodPrefix } from "@commonair/contracts/storage";
+import { eq } from "drizzle-orm";
+import { isVodOwnPrefix, VOD_PLAYLIST } from "@commonair/contracts/storage";
+import { schema } from "@commonair/db";
 import type { BroadcastInfo, MediaContext } from "../context.ts";
 import { internalRtspUrl, recorderArgs, recorderPlaylist } from "../ffmpeg/args.ts";
 import { Supervisor } from "../ffmpeg/supervisor.ts";
@@ -22,8 +26,6 @@ import { errorCategory } from "../moderation/logging.ts";
 import { findLiveWindow, parsePlaylist, renderPlaylist, type PlaylistSegment } from "./playlist.ts";
 
 export { VOD_PLAYLIST };
-/** Today's layout (public placement); W0-media-exposure moves callers to placements and drops this wrapper. */
-export const vodPrefix = (vodId: string) => contractVodPrefix(vodId, "public");
 
 /** How long a finished broadcast's local buffer survives, for clips requested right at the end. */
 const LOCAL_GRACE_MS = 5 * 60_000;
@@ -70,12 +72,18 @@ export class SegmentRecorder {
   private polling: Promise<void> = Promise.resolve();
   private refused = false;
   private stopping = false;
+  /** The VOD's `storage_prefix`, read once; nothing is uploaded until it is known. */
+  private prefix: string | null;
+  private resumed = false;
 
   constructor(
     private readonly ctx: MediaContext,
     private readonly b: BroadcastInfo,
     private readonly vodId: string | null,
+    /** The VOD row's `storage_prefix` when the caller has it; otherwise read from the row at start. */
+    storagePrefix: string | null = null,
   ) {
+    this.prefix = storagePrefix;
     this.dir = join(ctx.workDir, "broadcasts", b.broadcastId);
     this.log = ctx.logger.child({ broadcastId: b.broadcastId, vodId, worker: "recorder" });
   }
@@ -87,7 +95,7 @@ export class SegmentRecorder {
 
   async start(): Promise<void> {
     await mkdir(this.dir, { recursive: true });
-    if (this.vodId) await this.resumePublished(this.vodId);
+    if (this.vodId) await this.vodTarget(this.vodId);
     await this.startRecording();
     this.loop = every(this.ctx.timings.recorderPollMs, () => this.poll(), { logger: this.log, name: "recorder-poll" });
   }
@@ -194,13 +202,43 @@ export class SegmentRecorder {
         this.local.push({ ...s, uri, map, runId, localPath: join(this.dir, uri), uploaded: false });
       }
     }
-    if (this.vodId) await this.upload(this.vodId, strict);
+    if (this.vodId) {
+      const prefix = await this.vodTarget(this.vodId);
+      if (prefix) await this.upload(prefix, strict);
+      // Strict quiescence must not report success with segments still only on local disk.
+      else if (strict) throw new Error("VOD storage prefix unknown; segments not uploaded");
+    }
     await this.prune();
   }
 
-  private async resumePublished(vodId: string): Promise<void> {
+  /**
+   * The VOD's object prefix, read from its row (retried on each poll until it succeeds), and the
+   * already published playlist resumed from it once. Null while unknown: segments wait locally.
+   */
+  private async vodTarget(vodId: string): Promise<string | null> {
+    if (!this.prefix) {
+      try {
+        const [row] = await this.ctx.db
+          .select({ prefix: schema.vods.storagePrefix })
+          .from(schema.vods)
+          .where(eq(schema.vods.id, vodId));
+        // Only the VOD's own prefixes: a tampered row must never make the recorder write elsewhere.
+        if (row && isVodOwnPrefix(vodId, row.prefix)) this.prefix = row.prefix;
+        else this.log.error("VOD storage prefix missing or unexpected; not uploading");
+      } catch (err) {
+        this.log.warn("could not read the VOD storage prefix; will retry", { error: errorCategory(err) });
+      }
+    }
+    if (this.prefix && !this.resumed) {
+      this.resumed = true;
+      await this.resumePublished(this.prefix);
+    }
+    return this.prefix;
+  }
+
+  private async resumePublished(prefix: string): Promise<void> {
     try {
-      const res = await this.ctx.storage.get(this.ctx.bucket, vodPrefix(vodId) + VOD_PLAYLIST);
+      const res = await this.ctx.storage.get(this.ctx.bucket, prefix + VOD_PLAYLIST);
       if (!res) return;
       this.published = parsePlaylist(await res.text()).segments.map((s) => ({ ...s, runId: null }));
       for (const s of this.published) if (s.map) this.uploadedInits.add(s.map);
@@ -210,9 +248,8 @@ export class SegmentRecorder {
     }
   }
 
-  private async upload(vodId: string, strict: boolean): Promise<void> {
+  private async upload(prefix: string, strict: boolean): Promise<void> {
     const { storage, bucket } = this.ctx;
-    const prefix = vodPrefix(vodId);
     let changed = false;
     for (const seg of this.local) {
       if (seg.uploaded) continue;

@@ -10,7 +10,8 @@
 import { schema, type Executor } from "@commonair/db";
 import type { ObjectStorage } from "@commonair/storage";
 import { eq, or } from "drizzle-orm";
-import { moveObject, thumbnailPrefix, vodPrefix } from "../moderation/objects.ts";
+import { moveObject, thumbnailPrefix } from "../moderation/objects.ts";
+import { vodObjectPrefixes } from "../vod/prefixes.ts";
 
 const { vods, clips } = schema;
 
@@ -108,9 +109,10 @@ export function objectsOf(c: Covered, skip: { vodIds?: Set<string>; clipIds?: Se
   const prefixes = [...c.prefixes];
   for (const v of c.vods) {
     if (v.status === "deleted" || skip.vodIds?.has(v.id)) continue;
-    const prefix = v.storagePrefix.startsWith("vods/") ? v.storagePrefix : vodPrefix(v.id);
-    prefixes.push(prefix);
-    if (v.thumbnailKey && !v.thumbnailKey.startsWith(prefix)) keys.push(v.thumbnailKey);
+    // The VOD's `storage_prefix`, and its other own prefix (a placement move may be in flight).
+    const own = vodObjectPrefixes(v.id, v.storagePrefix);
+    prefixes.push(...own);
+    if (v.thumbnailKey && !own.some((p) => v.thumbnailKey?.startsWith(p))) keys.push(v.thumbnailKey);
   }
   for (const x of c.clips) {
     if (x.status === "deleted" || skip.clipIds?.has(x.id)) continue;

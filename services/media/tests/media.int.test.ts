@@ -42,7 +42,9 @@ import { runCommand } from "../src/ffmpeg/run.ts";
 import { MediaMtxClient } from "../src/mediamtx.ts";
 import { createMediaService, type MediaService } from "../src/service.ts";
 import { finalizeVod } from "../src/vod/finalize.ts";
-import { VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
+import { VOD_PLAYLIST } from "../src/vod/recorder.ts";
+import { vodPrefix } from "@commonair/contracts/storage";
+import { moveVodObjects } from "@commonair/storage";
 import {
   podmanAvailable,
   publishTestPattern,
@@ -442,15 +444,19 @@ describe("media pipeline", () => {
     const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.broadcastId, broadcastId));
     expect(vod?.status).toBe("recording");
     vodId = vod?.id ?? "";
-    expect(vod?.storagePrefix).toBe(vodPrefix(vodId));
+    // A recording is private (ADR 0009 amendment 1): nothing of it is under the public `vods/`.
+    expect(vod?.storagePrefix).toBe(vodPrefix(vodId, "private"));
     const keys = await waitFor("uploaded segments", async () => {
       const ks: string[] = [];
-      for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vodId))) ks.push(o.key);
+      for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vodId, "private"))) ks.push(o.key);
       return ks.filter((k) => k.endsWith(".m4s")).length >= 3 ? ks : null;
     });
     expect(keys.some((k) => /init_r[0-9a-z]+\.mp4$/.test(k))).toBe(true);
-    expect(keys).toContain(`${vodPrefix(vodId)}${VOD_PLAYLIST}`);
-    const playlist = await (await media.ctx.storage.get(BUCKET, `${vodPrefix(vodId)}${VOD_PLAYLIST}`))?.text();
+    expect(keys).toContain(`${vodPrefix(vodId, "private")}${VOD_PLAYLIST}`);
+    for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vodId, "public"))) expect.unreachable(o.key);
+    const playlist = await (
+      await media.ctx.storage.get(BUCKET, `${vodPrefix(vodId, "private")}${VOD_PLAYLIST}`)
+    )?.text();
     expect(playlist).toContain("#EXT-X-PLAYLIST-TYPE:EVENT");
     expect(playlist).not.toContain("#EXT-X-ENDLIST");
   }, 60_000);
@@ -517,8 +523,17 @@ describe("media pipeline", () => {
     const days = ((vod.expiresAt?.getTime() ?? 0) - Date.now()) / 86_400_000;
     expect(days).toBeGreaterThan(13.9);
     expect(days).toBeLessThan(14.1);
-    const playlist = await (await media.ctx.storage.get(BUCKET, `${vodPrefix(vodId)}${VOD_PLAYLIST}`))?.text();
+    // Public and playable: copied to `vods/` before `ready`, the private copy deleted after.
+    expect(vod.storagePrefix).toBe(vodPrefix(vodId, "public"));
+    expect(vod.thumbnailKey).toMatch(new RegExp(`^vods/${vodId}/thumbnail\\.(webp|jpg)$`));
+    const playlist = await (
+      await media.ctx.storage.get(BUCKET, `${vodPrefix(vodId, "public")}${VOD_PLAYLIST}`)
+    )?.text();
     expect(playlist?.trimEnd().endsWith("#EXT-X-ENDLIST")).toBe(true);
+    let size = 0;
+    for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vodId, "public"))) size += o.size;
+    expect(size).toBe(vod.sizeBytes);
+    for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(vodId, "private"))) expect.unreachable(o.key);
     expect(media.coordinator.session(broadcastId)).toBeUndefined();
   }, 90_000);
 
@@ -532,6 +547,42 @@ describe("media pipeline", () => {
     expect(duration).toBeLessThan(5.6);
     expect(clip.thumbnailKey).toMatch(new RegExp(`^clips/${id}\\.(webp|jpg)$`));
   }, 60_000);
+
+  test("a subscribers VOD recorded under the old public prefix finalizes into the private one", async () => {
+    // A recording resumed across the upgrade keeps `vods/<id>/`; finalize moves it like any other.
+    const id = uuidv7();
+    const bid = uuidv7();
+    await moveVodObjects(media.ctx.storage, BUCKET, vodPrefix(vodId, "public"), vodPrefix(id, "public"));
+    const at = new Date(Date.now() - 60_000);
+    await tdb.db.insert(schema.broadcasts).values({
+      id: bid,
+      channelId,
+      ingestProtocol: "rtmp",
+      path: `live/${SLUG}`,
+      title: "legacy",
+      startedAt: at,
+      endedAt: new Date(at.getTime() + 30_000),
+    });
+    await tdb.db.insert(schema.vods).values({
+      id,
+      broadcastId: bid,
+      channelId,
+      title: "legacy",
+      status: "recording",
+      visibility: "subscribers",
+      storagePrefix: vodPrefix(id, "public"),
+    });
+    await media.jobs.enqueueVodFinalize(id);
+    const vod = await waitFor("legacy VOD ready", async () => {
+      const [v] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+      return v?.status === "ready" ? v : null;
+    });
+    expect(vod.storagePrefix).toBe(vodPrefix(id, "private"));
+    expect((vod.thumbnailKey ?? vodPrefix(id, "private")).startsWith(vodPrefix(id, "private"))).toBe(true);
+    const text = await (await media.ctx.storage.get(BUCKET, vodPrefix(id, "private") + VOD_PLAYLIST))?.text();
+    expect(text?.trimEnd().endsWith("#EXT-X-ENDLIST")).toBe(true);
+    for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(id, "public"))) expect.unreachable(o.key);
+  }, 90_000);
 
   test("a clip outside any recording fails without retries", async () => {
     const id = await createClip(100_000, 5);
@@ -552,10 +603,12 @@ describe("media pipeline", () => {
     expect(t0).toMatchObject({ subjectType: "vod", subjectId: id, channelId, listCategory: "csam" });
     await expectEvidenceOpens(t0);
     // The playlist was never closed (not published) and no thumbnail was written.
-    const playlist = await (await media.ctx.storage.get(BUCKET, vodPrefix(id) + VOD_PLAYLIST))?.text();
+    const playlist = await (await media.ctx.storage.get(BUCKET, vodPrefix(id, "private") + VOD_PLAYLIST))?.text();
     expect(playlist).not.toContain("#EXT-X-ENDLIST");
-    expect(await media.ctx.storage.head(BUCKET, `${vodPrefix(id)}thumbnail.webp`)).toBeNull();
-    expect(await media.ctx.storage.head(BUCKET, `${vodPrefix(id)}thumbnail.jpg`)).toBeNull();
+    expect(await media.ctx.storage.head(BUCKET, `${vodPrefix(id, "private")}thumbnail.webp`)).toBeNull();
+    expect(await media.ctx.storage.head(BUCKET, `${vodPrefix(id, "private")}thumbnail.jpg`)).toBeNull();
+    // Nothing of it was ever public.
+    for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(id, "public"))) expect.unreachable(o.key);
   }, 90_000);
 
   test("T0 deletion between VOD read and processing CAS cannot be overwritten or republished", async () => {
@@ -591,14 +644,14 @@ describe("media pipeline", () => {
       .update(schema.vods)
       .set({ status: "deleted", removedReason: "t0_hash_match" })
       .where(eq(schema.vods.id, id));
-    await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id));
+    await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id, "private"));
     releaseBudget();
 
     expect(await finalizing).toBe("removed");
     const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
     expect(vod?.status).toBe("deleted");
     const remaining: string[] = [];
-    for await (const obj of media.ctx.storage.list(BUCKET, vodPrefix(id))) remaining.push(obj.key);
+    for await (const obj of media.ctx.storage.list(BUCKET, vodPrefix(id, "private"))) remaining.push(obj.key);
     expect(remaining).toEqual([]);
   }, 60_000);
 
@@ -608,7 +661,7 @@ describe("media pipeline", () => {
     let releasePlaylist: () => void = () => {};
     const reachedBarrier = new Promise<void>((resolve) => (enterPlaylist = resolve));
     const waitAtBarrier = new Promise<void>((resolve) => (releasePlaylist = resolve));
-    const playlistKey = vodPrefix(id) + VOD_PLAYLIST;
+    const playlistKey = vodPrefix(id, "private") + VOD_PLAYLIST;
     const storage = new Proxy(media.ctx.storage, {
       get(target, property) {
         if (property === "get")
@@ -644,7 +697,7 @@ describe("media pipeline", () => {
       .update(schema.vods)
       .set({ status: "deleted", removedReason: "t0_hash_match" })
       .where(eq(schema.vods.id, id));
-    await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id));
+    await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id, "private"));
     releasePlaylist();
 
     expect(await finalizing).toBe("removed");
@@ -820,13 +873,18 @@ async function uploadPatternVod(): Promise<{ vodId: string; broadcastId: string 
     );
     const text = await Bun.file(`${dir}/${VOD_PLAYLIST}`).text();
     // A recording in progress has no ENDLIST; finalize closes it only when it publishes.
-    await media.ctx.storage.put(BUCKET, vodPrefix(id) + VOD_PLAYLIST, text.replace("#EXT-X-ENDLIST", ""), {
+    await media.ctx.storage.put(BUCKET, vodPrefix(id, "private") + VOD_PLAYLIST, text.replace("#EXT-X-ENDLIST", ""), {
       contentType: "application/vnd.apple.mpegurl",
     });
     for (const name of ["init.mp4", ...text.split("\n").filter((l) => l.endsWith(".m4s"))])
-      await media.ctx.storage.put(BUCKET, vodPrefix(id) + name, await Bun.file(`${dir}/${name.trim()}`).bytes(), {
-        contentType: "video/mp4",
-      });
+      await media.ctx.storage.put(
+        BUCKET,
+        vodPrefix(id, "private") + name,
+        await Bun.file(`${dir}/${name.trim()}`).bytes(),
+        {
+          contentType: "video/mp4",
+        },
+      );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -847,7 +905,7 @@ async function uploadPatternVod(): Promise<{ vodId: string; broadcastId: string 
     channelId,
     title: "pattern vod",
     status: "recording",
-    storagePrefix: vodPrefix(id),
+    storagePrefix: vodPrefix(id, "private"),
   });
   return { vodId: id, broadcastId: bid };
 }

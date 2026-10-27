@@ -14,7 +14,8 @@ import { IDENTITY_CLOCK, type ClockAnchor } from "../src/clock/anchor.ts";
 import type { BroadcastInfo, MediaContext } from "../src/context.ts";
 import { recorderInit, recorderPlaylist } from "../src/ffmpeg/args.ts";
 import { parsePlaylist } from "../src/vod/playlist.ts";
-import { SegmentRecorder, VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
+import { SegmentRecorder, VOD_PLAYLIST } from "../src/vod/recorder.ts";
+import { vodPrefix } from "@commonair/contracts/storage";
 import { captureLogger } from "./helpers/moderation.ts";
 
 const BROADCAST = "0192f3a4-5b6c-7d8e-9f01-000000000001";
@@ -63,7 +64,7 @@ function recorder(clock: ClockAnchor, vodId: string | null = VOD) {
       },
     },
   } as unknown as MediaContext;
-  const rec = new SegmentRecorder(ctx, broadcast, vodId);
+  const rec = new SegmentRecorder(ctx, broadcast, vodId, vodId ? vodPrefix(vodId, "private") : null);
   return { rec, internals: rec as unknown as RecorderInternals };
 }
 
@@ -81,7 +82,7 @@ async function writeRun(runId: string, startMs: number, count: number) {
   await writeFile(join(dir, recorderPlaylist(runId)), `${lines.join("\n")}\n`);
 }
 
-const vodPlaylist = () => parsePlaylist(puts.get(vodPrefix(VOD) + VOD_PLAYLIST) ?? "").segments;
+const vodPlaylist = () => parsePlaylist(puts.get(vodPrefix(VOD, "private") + VOD_PLAYLIST) ?? "").segments;
 
 describe("recorder clock anchor", () => {
   test("identity anchor: playlist times are the raw times", async () => {

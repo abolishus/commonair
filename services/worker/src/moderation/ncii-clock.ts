@@ -17,7 +17,8 @@ import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { withRunLock } from "../integrity/lock.ts";
 import { moderationMetrics } from "./metrics.ts";
-import { moveObject, nciiHiddenKey, vodPrefix } from "./objects.ts";
+import { moveObject, nciiHiddenKey } from "./objects.ts";
+import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import {
   alert,
   audit,
@@ -31,7 +32,7 @@ import {
 } from "./records.ts";
 import { publishLiveEnded } from "./t0.ts";
 
-const { nciiRequests: requests, nciiRequestItems: items, clips } = schema;
+const { nciiRequests: requests, nciiRequestItems: items, clips, vods } = schema;
 const HOUR = 3_600_000;
 
 export const NCII_CLOCK_LOCK = "worker:lock:moderation:ncii-clock";
@@ -199,8 +200,12 @@ export async function moveHiddenObjects(ctx: WorkerContext, requestId: string): 
     .where(and(eq(items.requestId, requestId), isNotNull(items.hiddenAt), isNull(items.removedAt)));
   const keys: string[] = [];
   for (const i of rows) {
-    if (i.subjectType === "vod" && i.subjectId)
-      for await (const o of storage.list(ctx.mediaBucket, vodPrefix(i.subjectId))) keys.push(o.key);
+    if (i.subjectType === "vod" && i.subjectId) {
+      const [v] = await ctx.db.select({ prefix: vods.storagePrefix }).from(vods).where(eq(vods.id, i.subjectId));
+      // The row's prefix first, then the other own one (a placement move may have been in flight).
+      for (const prefix of vodObjectPrefixes(i.subjectId, v?.prefix))
+        for await (const o of storage.list(ctx.mediaBucket, prefix)) keys.push(o.key);
+    }
     if (i.subjectType === "clip" && i.subjectId) {
       const [c] = await ctx.db
         .select({ s: clips.storageKey, t: clips.thumbnailKey })

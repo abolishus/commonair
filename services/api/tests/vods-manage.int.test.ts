@@ -9,6 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
+import { setVodPlacementQueue } from "../src/media/vod-placement-queue.ts";
 import { client, signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -19,6 +20,8 @@ let sub: User;
 
 beforeAll(async () => {
   api = await startApi();
+  // Re-scoping and removal enqueue `vod-placement` (vods-exposure.int.test.ts covers it).
+  setVodPlacementQueue(api.deps, { async enqueue() {}, async close() {} });
   [s, v, sub] = await Promise.all([signUpAndSignIn(api), signUpAndSignIn(api), signUpAndSignIn(api)]);
   const c = await channelOf(s.username);
   await db().insert(schema.subscriptions).values({

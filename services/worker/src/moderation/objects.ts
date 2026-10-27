@@ -5,7 +5,6 @@
  * Object-storage helpers for moderation: reading whole (small) objects, the evidence key scheme
  * and the private prefix NCII auto-hide moves public objects to. Object keys never reach a log.
  */
-import { vodPrefix as contractVodPrefix } from "@commonair/contracts/storage";
 import type { ObjectStorage } from "@commonair/storage";
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -40,9 +39,7 @@ export function sealedDigestOf(key: string): string | null {
 export const NCII_HIDDEN_PREFIX = "moderation/ncii-hidden/";
 export const nciiHiddenKey = (key: string) => `${NCII_HIDDEN_PREFIX}${key}`;
 
-/** Keys of the media objects a VOD, clip or broadcast owns (the media unit's layout). */
-// One-argument wrapper over the contract (public placement) until W0-media-exposure moves callers.
-export const vodPrefix = (vodId: string) => contractVodPrefix(vodId, "public");
+/** Keys of the live thumbnails a broadcast owns (the media unit's layout). VOD prefixes: `../vod/prefixes.ts`. */
 export const thumbnailPrefix = (broadcastId: string) => `thumbnails/${broadcastId}/`;
 
 /** Copy an object to another key, then delete the original. Returns false when the source is gone. */

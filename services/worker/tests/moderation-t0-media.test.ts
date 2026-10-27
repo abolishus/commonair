@@ -6,6 +6,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { WorkerContext } from "../src/context.ts";
 import {
   collectClipTargets,
+  collectTargets,
   markT0MediaComplete,
   nextT0MediaSweep,
   preserveOne,
@@ -185,6 +186,32 @@ describe("T0 clip object recovery", () => {
 
     // Once a full pass finds no public objects, the durable chain can stop.
     expect(nextT0MediaSweep(CASE_ID, secondSweep?.jobId, 0)).toBeNull();
+  });
+
+  test("a VOD's objects are found under both of its own prefixes (a placement move in flight)", async () => {
+    const vodId = "0193e6a0-0000-7000-8000-0000000000aa";
+    const listed: string[] = [];
+    const storage = {
+      async *list(_bucket: string, prefix: string) {
+        listed.push(prefix);
+        const keys: Record<string, string[]> = {
+          [`vods/${vodId}/`]: [`vods/${vodId}/index.m3u8`],
+          [`recordings/${vodId}/`]: [`recordings/${vodId}/index.m3u8`, `recordings/${vodId}/thumbnail.webp`],
+        };
+        for (const key of keys[prefix] ?? []) yield object(key);
+      },
+    } as unknown as ObjectStorage;
+    const db = { select: () => ({ from: () => ({ where: async () => [] }) }) };
+    const targets = await collectTargets({ db, mediaBucket: "media" } as unknown as WorkerContext, storage, {
+      type: "vod",
+      id: vodId,
+    });
+    expect(listed).toEqual([`vods/${vodId}/`, `recordings/${vodId}/`]);
+    expect(targets).toEqual([
+      { key: `vods/${vodId}/index.m3u8`, kind: "vod_object", sourceType: "vod", sourceId: vodId },
+      { key: `recordings/${vodId}/index.m3u8`, kind: "vod_object", sourceType: "vod", sourceId: vodId },
+      { key: `recordings/${vodId}/thumbnail.webp`, kind: "thumbnail", sourceType: "vod", sourceId: vodId },
+    ]);
   });
 
   test("lists deterministic clip prefixes and classifies orphan MP4 and image objects", async () => {

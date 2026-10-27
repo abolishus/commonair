@@ -6,12 +6,29 @@
  * `media/visibility.ts`. The owner renames, re-scopes and removes them (docs/testing/e6-selectors.md
  * "VODs and clips"): a removal hides the VOD and its broadcast's clips at once; the worker's
  * `vod-retention` deletes the objects later, unless the owner is under a legal hold.
+ *
+ * Playback URLs (ADR 0009 amendment 1): a VOD that is public and playable, with its objects under
+ * the public `vods/` prefix, plays from `/media`. Any other VOD the caller may see (the owner, an
+ * active subscriber, or a public VOD whose objects are still moving) gets a token-checked `/vod/`
+ * URL on the origin, valid for its duration plus an hour (capped at 12 h, no refresh). A
+ * re-scope or removal enqueues `vod-placement` after commit so its objects move at once.
  */
 import { and, desc, eq, isNull, lt, ne, or, type SQL } from "drizzle-orm";
 import type { z } from "zod";
 import { VOD_FAILED_REASONS } from "@commonair/contracts/enums";
 import type { dto } from "@commonair/contracts";
-import { schema } from "@commonair/db";
+import {
+  VOD_PLAYLIST,
+  VOD_ROUTE,
+  VOD_TOKEN_MAX_TTL_SECONDS,
+  vodPlacement,
+  vodPrefix,
+  vodTokenPath,
+  type VodPlacementState,
+} from "@commonair/contracts/storage";
+import type { PlaybackClaims } from "@commonair/contracts/tokens";
+import { schema, uuidv7 } from "@commonair/db";
+import { signPlaybackToken } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { channelBySlug, iso, isoOrNull, mediaUrl } from "../lib/dto.ts";
@@ -20,19 +37,82 @@ import { channelAuthority, type Caller, type ChannelRole } from "../lib/access.t
 import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
 import { urlsWithheld, viewerAudience, vodShown, vodVisible } from "../media/visibility.ts";
+import { requestVodPlacement } from "../media/vod-placement-queue.ts";
 
 const { broadcasts, channelRoles, channels, clips: clipsT, vods: vodsT } = schema;
 type VodRow = typeof vodsT.$inferSelect;
 
-/** Media writes the HLS playlist under the VOD's storage prefix (services/media vod/recorder.ts). */
-const VOD_PLAYLIST = "index.m3u8";
-
 const failedReason = (r: string | null) =>
   (VOD_FAILED_REASONS as readonly string[]).includes(r ?? "") ? (r as (typeof VOD_FAILED_REASONS)[number]) : null;
 
-/** `withheld`: a mature VOD shown to someone who may not play it (`media/visibility.ts`). */
-function toVod(deps: Deps, v: VodRow, channelSlug: string, withheld: boolean): z.infer<typeof dto.Vod> {
-  const playable = v.status === "ready" && !withheld;
+/** What else decides a VOD's placement besides its own row. */
+interface VodSurroundings {
+  channelId: string;
+  channelSuspended: boolean;
+  broadcastRestricted: boolean;
+}
+
+/**
+ * The VOD's placement inputs. NCII- and DMCA-hidden VODs never reach `toVod` (`vodShown` refuses a
+ * deleted VOD and a `dmca` removal), so those two are false here.
+ */
+const placementState = (v: VodRow, s: VodSurroundings): VodPlacementState => ({
+  status: v.status,
+  visibility: v.visibility,
+  removedReason: v.removedReason,
+  broadcastRestricted: s.broadcastRestricted,
+  channelSuspended: s.channelSuspended,
+  nciiHidden: false,
+  dmcaHidden: false,
+});
+
+/** The origin's `/vod/` serves a ready VOD nothing removed, restricted or suspended (`services/origin/src/vod.ts`). */
+const vodRouteServable = (s: VodPlacementState) =>
+  s.status === "ready" && s.removedReason === null && !s.broadcastRestricted && !s.channelSuspended;
+
+/** A VOD token (ADR 0009 amendment 1): the VOD's duration plus an hour, capped at 12 h. */
+export async function mintVodToken(deps: Deps, v: VodRow, channelId: string): Promise<string> {
+  const iat = Math.floor(deps.now().getTime() / 1000);
+  const claims: PlaybackClaims = {
+    v: 1,
+    sid: uuidv7(),
+    cid: channelId,
+    path: vodTokenPath(v.id),
+    src: "origin",
+    iat,
+    exp: iat + Math.min(Math.ceil(v.durationSeconds) + 3600, VOD_TOKEN_MAX_TTL_SECONDS),
+  };
+  return signPlaybackToken(deps.signingKey, claims);
+}
+
+/**
+ * The DTO. `withheld`: a mature VOD shown to someone who may not play it (`media/visibility.ts`).
+ * Callers only pass VODs `vodShown` admits for the caller.
+ */
+async function toVod(
+  deps: Deps,
+  v: VodRow,
+  channelSlug: string,
+  withheld: boolean,
+  around: VodSurroundings,
+): Promise<z.infer<typeof dto.Vod>> {
+  const state = placementState(v, around);
+  let thumbnailUrl: string | null = null;
+  let playlistUrl: string | null = null;
+  if (!withheld) {
+    if (vodPlacement(state) === "public" && v.storagePrefix === vodPrefix(v.id, "public")) {
+      thumbnailUrl = mediaUrl(deps, v.thumbnailKey);
+      playlistUrl = mediaUrl(deps, `${v.storagePrefix}${VOD_PLAYLIST}`);
+    } else if (vodRouteServable(state)) {
+      const t = encodeURIComponent(await mintVodToken(deps, v, around.channelId));
+      const base = `${deps.env.PLAYBACK_PUBLIC_URL.replace(/\/+$/, "")}${VOD_ROUTE}${v.id}/`;
+      playlistUrl = `${base}${VOD_PLAYLIST}?t=${t}`;
+      const thumbFile = v.thumbnailKey?.startsWith(v.storagePrefix)
+        ? v.thumbnailKey.slice(v.storagePrefix.length)
+        : null;
+      if (thumbFile) thumbnailUrl = `${base}${thumbFile.split("/").map(encodeURIComponent).join("/")}?t=${t}`;
+    }
+  }
   return {
     id: v.id,
     channelSlug,
@@ -40,8 +120,8 @@ function toVod(deps: Deps, v: VodRow, channelSlug: string, withheld: boolean): z
     status: v.status,
     visibility: v.visibility,
     durationSeconds: v.durationSeconds,
-    thumbnailUrl: withheld ? null : mediaUrl(deps, v.thumbnailKey),
-    playlistUrl: playable ? mediaUrl(deps, `${v.storagePrefix.replace(/\/?$/, "/")}${VOD_PLAYLIST}`) : null,
+    thumbnailUrl,
+    playlistUrl: v.status === "ready" ? playlistUrl : null,
     createdAt: iso(v.createdAt),
     expiresAt: isoOrNull(v.expiresAt),
     failedReason: v.status === "failed" ? failedReason(v.failedReason) : null,
@@ -62,7 +142,10 @@ export const vods = {
       after = or(lt(vodsT.createdAt, t), and(eq(vodsT.createdAt, t), lt(vodsT.id, cur.id)));
     }
     const rows = await deps.db
-      .select({ v: vodsT, b: { mature: broadcasts.mature, categoryId: broadcasts.categoryId } })
+      .select({
+        v: vodsT,
+        b: { mature: broadcasts.mature, categoryId: broadcasts.categoryId, restrictedAt: broadcasts.restrictedAt },
+      })
       .from(vodsT)
       .innerJoin(broadcasts, eq(broadcasts.id, vodsT.broadcastId))
       .where(and(eq(vodsT.channelId, channel.id), vodVisible(audience), after))
@@ -74,11 +157,21 @@ export const vods = {
       channel,
       rows.map((r) => r.b),
     );
-    const indexed = rows.map((r, i) => ({ ...r, withheld: withheld[i] ?? true }));
+    // DTOs (and VOD tokens) only for the page itself, not the look-ahead row.
+    const items = await Promise.all(
+      rows.slice(0, input.limit).map((r, i) =>
+        toVod(deps, r.v, channel.slug, withheld[i] ?? true, {
+          channelId: channel.id,
+          channelSuspended: channel.suspendedAt !== null,
+          broadcastRestricted: r.b.restrictedAt !== null,
+        }),
+      ),
+    );
+    const indexed = rows.map((r, i) => ({ ...r, dto: items[i] as z.infer<typeof dto.Vod> }));
     return pageOf(
       indexed,
       input.limit,
-      (r) => toVod(deps, r.v, channel.slug, r.withheld),
+      (r) => r.dto,
       (last) => encodeCursor({ t: iso(last.v.createdAt), id: last.v.id }),
     );
   }),
@@ -98,7 +191,7 @@ export const vods = {
     )
       throw notFound("VOD not found");
     const [withheld] = await urlsWithheld(deps, context.caller, row.channel, [row.b]);
-    return toVod(deps, row.v, row.channel.slug, withheld ?? true);
+    return toVod(deps, row.v, row.channel.slug, withheld ?? true, surroundings(row.channel, row.b.restrictedAt));
   }),
 
   update: os.vods.update.handler(async ({ context, input }) => {
@@ -110,7 +203,8 @@ export const vods = {
     const set: Partial<typeof vodsT.$inferInsert> = {};
     if (title !== undefined) set.title = title;
     if (input.visibility !== undefined) set.visibility = input.visibility;
-    if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false);
+    const around = surroundings(row.channel, row.restrictedAt);
+    if (Object.keys(set).length === 0) return toVod(deps, row.v, row.channel.slug, false, around);
     const updated = await deps.db.transaction(async (tx) => {
       const [v] = await tx
         .update(vodsT)
@@ -130,7 +224,10 @@ export const vods = {
       });
       return v;
     });
-    return toVod(deps, updated, row.channel.slug, false);
+    // After commit: the objects follow the new visibility now, not at the next sweep.
+    if (input.visibility !== undefined && input.visibility !== row.v.visibility)
+      await requestVodPlacement(deps, updated.id);
+    return toVod(deps, updated, row.channel.slug, false, around);
   }),
 
   remove: os.vods.remove.handler(async ({ context, input }) => {
@@ -167,9 +264,17 @@ export const vods = {
         details: { clips: removedClips.length },
       });
     });
+    // After commit: the objects leave the public prefix now (the origin already refuses them).
+    await requestVodPlacement(deps, row.v.id);
     return { ok: true as const };
   }),
 };
+
+const surroundings = (channel: { id: string; suspendedAt: Date | null }, restrictedAt: Date | null) => ({
+  channelId: channel.id,
+  channelSuspended: channel.suspendedAt !== null,
+  broadcastRestricted: restrictedAt !== null,
+});
 
 /**
  * A VOD the caller may manage (the channel owner or an editor). Anything else, including a removed

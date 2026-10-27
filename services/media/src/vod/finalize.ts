@@ -8,15 +8,22 @@
  * channel's retention. A hash match → `moderation.t0` for the VOD, which is never published. A
  * scan that cannot complete throws, so the job retries and nothing is published (fail closed).
  * Idempotent: a finished VOD is left alone.
+ *
+ * Placement (ADR 0009 amendment 1): the recording lives under the private `recordings/<id>/`.
+ * Once the scan passes, the VOD's placement as it will be once ready decides where it ends up: a
+ * public VOD is copied to `vods/<id>/` before the `ready` transaction (which also switches
+ * `storage_prefix`), and the private copy is deleted after commit; anything else stays private. A
+ * crash between copy and commit leaves both copies; the rerun finishes the move.
  */
 
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { isVodOwnPrefix, vodPlacement, vodPrefix, type VodPlacementState } from "@commonair/contracts/storage";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
-import type { ObjectStorage } from "@commonair/storage";
+import { moveVodObjects, type ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "../disk.ts";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
@@ -25,7 +32,7 @@ import { errorCategory } from "../moderation/logging.ts";
 import { ActiveScratch } from "../recovery.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
-import { VOD_PLAYLIST, vodPrefix } from "./recorder.ts";
+import { VOD_PLAYLIST } from "./recorder.ts";
 
 export const VodFinalizeJob = z.object({ vodId: z.uuid() });
 export type VodFinalizeJob = z.infer<typeof VodFinalizeJob>;
@@ -79,6 +86,29 @@ export function scanChunks(segments: readonly PlaylistSegment[], maxSeconds = SC
   return out;
 }
 
+/**
+ * The VOD's placement inputs as they will be once it is `ready`: visibility, removal, the
+ * broadcast's T1 restriction, the channel's suspension, and the NCII and DMCA flows that own the
+ * objects' keys while they run (same rules as the worker's `vod-placement` and the origin).
+ */
+export async function placementOnceReady(db: Database, vodId: string): Promise<VodPlacementState | null> {
+  const v = schema.vods;
+  const [row] = await db
+    .select({
+      visibility: v.visibility,
+      removedReason: v.removedReason,
+      broadcastRestricted: sql<boolean>`${schema.broadcasts.restrictedAt} is not null`,
+      channelSuspended: sql<boolean>`${schema.channels.suspendedAt} is not null`,
+      nciiHidden: sql<boolean>`exists (select 1 from ${schema.nciiRequestItems} i where i.subject_type = 'vod' and i.subject_id = ${v.id} and (i.hidden_at is not null or i.removed_at is not null))`,
+      dmcaHidden: sql<boolean>`exists (select 1 from ${schema.dmcaNoticeItems} d where ((d.subject_type = 'vod' and d.subject_id = ${v.id}) or (d.subject_type = 'broadcast' and d.subject_id = ${v.broadcastId})) and d.removed_at is not null and d.restored_at is null)`,
+    })
+    .from(v)
+    .innerJoin(schema.broadcasts, eq(schema.broadcasts.id, v.broadcastId))
+    .innerJoin(schema.channels, eq(schema.channels.id, v.channelId))
+    .where(eq(v.id, vodId));
+  return row ? { ...row, status: "ready" } : null;
+}
+
 /** Mark a VOD removed by T0 (never published). Conditional, so a finished VOD is not overwritten. */
 async function markRemoved(db: Database, vodId: string): Promise<void> {
   await db
@@ -99,6 +129,7 @@ export async function finalizeVod(
       status: schema.vods.status,
       channelId: schema.vods.channelId,
       broadcastId: schema.vods.broadcastId,
+      storagePrefix: schema.vods.storagePrefix,
       retentionDays: schema.channels.vodRetentionDays,
     })
     .from(schema.vods)
@@ -129,7 +160,9 @@ export async function finalizeVod(
     return current?.status === "deleted" ? "removed" : "skipped";
   }
 
-  const prefix = vodPrefix(vodId);
+  const prefix = vod.storagePrefix;
+  // Only the VOD's own prefixes are ever read, copied or deleted here.
+  if (!isVodOwnPrefix(vodId, prefix)) throw new Error("unexpected VOD storage prefix; not finalizing");
   const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
   const segments = res ? parsePlaylist(await res.text()).segments : [];
   if (segments.length === 0) {
@@ -195,16 +228,20 @@ export async function finalizeVod(
     await scratches.release(scratch);
   }
 
-  let thumbnailKey: string | null = null;
-  if (thumbnail) {
-    thumbnailKey = `${prefix}thumbnail.${imageExt(deps.imageFormat)}`;
-  }
   const now = deps.now?.() ?? new Date();
   // A T0 job that landed while we scanned (another sample, the worker) wins over publishing.
   if (await moderation.broadcastTainted(vod.broadcastId)) {
     await markRemoved(db, vodId);
     return "removed";
   }
+  const state = await placementOnceReady(db, vodId);
+  const placement = state ? vodPlacement(state) : "private";
+  // `leave`: another flow (NCII, DMCA) owns the keys; the objects stay where they are.
+  const target = placement === "leave" ? prefix : vodPrefix(vodId, placement);
+  const moving = target !== prefix;
+  // Copy (never delete) before `ready`: a ready VOD never points at missing objects.
+  if (moving) await moveVodObjects(storage, bucket, prefix, target);
+  const thumbnailKey = thumbnail ? `${target}thumbnail.${imageExt(deps.imageFormat)}` : null;
   const size = await db.transaction(async (tx) => {
     const [current] = await tx
       .select({ status: schema.vods.status })
@@ -215,18 +252,19 @@ export async function finalizeVod(
     // Keep T0 cleanup serialized with publication through the ready transition. If cleanup
     // committed first, no final objects are written; if this transaction wins, cleanup runs
     // afterwards and removes the completed public media.
-    await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
+    await storage.put(bucket, target + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
       contentType: "application/vnd.apple.mpegurl",
       cacheControl: "public, max-age=3600",
     });
     if (thumbnail && thumbnailKey)
       await storage.put(bucket, thumbnailKey, thumbnail, { contentType: imageType(deps.imageFormat) });
     let totalSize = 0;
-    for await (const obj of storage.list(bucket, prefix)) totalSize += obj.size;
+    for await (const obj of storage.list(bucket, target)) totalSize += obj.size;
     const changed = await tx
       .update(schema.vods)
       .set({
         status: "ready",
+        storagePrefix: target,
         durationSeconds: totalDuration(segments),
         sizeBytes: totalSize,
         expiresAt: new Date(now.getTime() + vod.retentionDays * DAY_MS),
@@ -236,9 +274,31 @@ export async function finalizeVod(
       .returning({ id: schema.vods.id });
     return changed.length > 0 ? totalSize : null;
   });
-  if (size === null) return "removed";
-  log.info("VOD ready", { segments: segments.length, sizeBytes: size });
+  if (size === null) {
+    // Not ours to publish any more: removed meanwhile (T0, NCII), or a concurrent run of this job
+    // already published it. The copies made here go only when the row does not point at them
+    // (the source is intact; T0 evidence lists both prefixes).
+    if (moving) {
+      const [current] = await db
+        .select({ prefix: schema.vods.storagePrefix })
+        .from(schema.vods)
+        .where(eq(schema.vods.id, vodId));
+      if (current && current.prefix !== target) await deleteQuietly(deps, target, log);
+    }
+    return "removed";
+  }
+  if (moving) await deleteQuietly(deps, prefix, log);
+  log.info("VOD ready", { segments: segments.length, sizeBytes: size, placement });
   return "ready";
+}
+
+/** Delete a VOD prefix after the database no longer points at it; a failure is logged, never thrown. */
+async function deleteQuietly(deps: FinalizeDeps, prefix: string, log: Logger): Promise<void> {
+  try {
+    await deps.storage.deletePrefix(deps.bucket, prefix);
+  } catch (err) {
+    log.error("could not delete the VOD's previous prefix", { error: errorCategory(err) });
+  }
 }
 
 async function sampleFrame(

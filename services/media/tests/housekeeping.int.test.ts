@@ -24,7 +24,8 @@ import { ActiveScratch, BROADCASTS_DIR, recoverWorkDir, sweepWorkDir } from "../
 import { pruneThumbnails, thumbnailPrefix } from "../src/thumbnails.ts";
 import { VOD_EMPTY_REASON } from "../src/vod/finalize.ts";
 import { parsePlaylist, renderPlaylist, totalDuration } from "../src/vod/playlist.ts";
-import { VOD_PLAYLIST, vodPrefix } from "../src/vod/recorder.ts";
+import { VOD_PLAYLIST } from "../src/vod/recorder.ts";
+import { vodPrefix, type VodPlacement } from "@commonair/contracts/storage";
 import { reconcileVods, VOD_STALLED_REASON } from "../src/vod/reconcile.ts";
 import { podmanAvailable, startGarage, type Garage } from "./helpers/containers.ts";
 import { makeModeration } from "./helpers/moderation.ts";
@@ -78,11 +79,16 @@ async function broadcast(endedAgoMs: number | null): Promise<string> {
   return id;
 }
 
-async function vod(broadcastId: string, status: "recording" | "processing"): Promise<string> {
+/** `placement`: where the row says its objects are (`public` = a recording from before the private prefix). */
+async function vod(
+  broadcastId: string,
+  status: "recording" | "processing",
+  placement: VodPlacement = "private",
+): Promise<string> {
   const id = uuidv7();
   await tdb.db
     .insert(schema.vods)
-    .values({ id, broadcastId, channelId, title: "t", status, storagePrefix: vodPrefix(id) });
+    .values({ id, broadcastId, channelId, title: "t", status, storagePrefix: vodPrefix(id, placement) });
   return id;
 }
 
@@ -198,14 +204,15 @@ describe("crash recovery and stale VODs", () => {
 
   test("startup recovery uploads what a crashed recorder left behind and discards the rest", async () => {
     crashedBroadcast = await broadcast(HOUR);
-    crashedVod = await vod(crashedBroadcast, "processing");
+    // Recorded before the private prefix existed: recovery and finalize follow `storage_prefix`.
+    crashedVod = await vod(crashedBroadcast, "processing", "public");
     const dir = join(workDir, BROADCASTS_DIR, crashedBroadcast);
     await recordRun(dir, "r1", 12);
     const local = parsePlaylist(await Bun.file(join(dir, "r1.m3u8")).text()).segments;
     expect(local.length).toBeGreaterThanOrEqual(5);
     localDuration = totalDuration(local);
     // The dead process had uploaded the init segment and the first two media segments.
-    const prefix = vodPrefix(crashedVod);
+    const prefix = vodPrefix(crashedVod, "public");
     await storage.put(BUCKET, `${prefix}init_r1.mp4`, await Bun.file(join(dir, "init_r1.mp4")).bytes());
     for (const s of local.slice(0, 2))
       await storage.put(BUCKET, prefix + s.uri, await Bun.file(join(dir, s.uri)).bytes());
@@ -279,8 +286,11 @@ describe("crash recovery and stale VODs", () => {
       90_000,
     );
     expect(ready.durationSeconds).toBeCloseTo(localDuration, 1);
-    const text = await (await storage.get(BUCKET, vodPrefix(crashedVod) + VOD_PLAYLIST))?.text();
+    // Public and playable: it stays under (and is published at) its public prefix.
+    expect(ready.storagePrefix).toBe(vodPrefix(crashedVod, "public"));
+    const text = await (await storage.get(BUCKET, vodPrefix(crashedVod, "public") + VOD_PLAYLIST))?.text();
     expect(text?.trimEnd().endsWith("#EXT-X-ENDLIST")).toBe(true);
+    for await (const o of storage.list(BUCKET, vodPrefix(crashedVod, "private"))) expect.unreachable(o.key);
   }, 120_000);
 
   test("a finished job is replaced on re-queue (BullMQ would otherwise ignore the duplicate id)", async () => {
@@ -331,10 +341,11 @@ describe("periodic sweep", () => {
     expect(existsSync(join(root, processingB))).toBe(true);
     expect(existsSync(join(root, ownedB))).toBe(true);
     const published = parsePlaylist(
-      (await (await storage.get(BUCKET, vodPrefix(recordingVod) + VOD_PLAYLIST))?.text()) ?? "",
+      (await (await storage.get(BUCKET, vodPrefix(recordingVod, "private") + VOD_PLAYLIST))?.text()) ?? "",
     );
     expect(published.segments.map((s) => s.uri)).toEqual(local.map((s) => s.uri));
-    expect(await storage.head(BUCKET, `${vodPrefix(recordingVod)}init_r1.mp4`)).not.toBeNull();
+    expect(await storage.head(BUCKET, `${vodPrefix(recordingVod, "private")}init_r1.mp4`)).not.toBeNull();
+    expect(await storage.head(BUCKET, `${vodPrefix(recordingVod, "public")}init_r1.mp4`)).toBeNull();
     rmSync(join(root, processingB), { recursive: true, force: true });
     rmSync(join(root, ownedB), { recursive: true, force: true });
   }, 120_000);

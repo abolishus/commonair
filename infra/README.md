@@ -226,9 +226,18 @@ creating them.
 Public media (avatars, thumbnails, clips, VODs) is read at `MEDIA_PUBLIC_URL`, by default the
 origin's `/media` route (`http://localhost:3003/media`; `https://<host>/media` behind Caddy). The
 origin reads the media bucket with the service key and serves only the public prefixes
-(`channels/`, `clips/`, `thumbnails/`, `vods/`), never `incoming/` or `moderation/`. Garage
-refuses anonymous reads on its S3 API, and its web endpoint stays off because it would publish
-the whole bucket (ADR 0009).
+(`channels/`, `clips/`, `thumbnails/`, `vods/`), never `incoming/`, `recordings/` or
+`moderation/`. Garage refuses anonymous reads on its S3 API, and its web endpoint stays off
+because it would publish the whole bucket (ADR 0009).
+
+Only VODs that are public and playable live under `vods/<id>/`; every other VOD (recording,
+processing, `subscribers` or `private`, removed, on a restricted broadcast or a suspended channel)
+lives under the private `recordings/<id>/` (ADR 0009 amendment 1). The origin also checks a VOD's
+state before serving `/media/vods/…` (cached 5 s per instance), so a removal or re-scope answers
+404 at once, and the worker's `vod-placement` job moves the objects within a minute. Non-public
+VODs play through the origin's token-checked `/vod/<id>/<file>?t=…` route (Caddy `handle /vod/*`),
+with `cache-control: private`. Point a CDN or a store's public policy at `vods/` only, never at
+`recordings/`.
 
 ## Backups (WAL-G)
 

@@ -7,9 +7,13 @@
  * "every clip of the broadcast" has more than one); 2 S renames it and makes it private on
  * `/content`, after which V can neither see nor change it (`NOT_FOUND`, no existence leak); 3 S
  * deletes V's clip, and `vod-retention` (ops tick) deletes its objects; 4 S deletes the VOD, its
- * clips go with it, and `vod-retention` leaves nothing under `vods/<id>/`; 5 a VOD of a held
- * channel owner is hidden but every one of its objects survives the tick (`held` above the
- * baseline counted just before the removal).
+ * clips go with it, and `vod-retention` leaves nothing under either of its prefixes; 5 a VOD of a
+ * held channel owner is hidden but every one of its objects survives the tick (`held` above the
+ * baseline counted just before the removal), wherever `vod-placement` moved it.
+ *
+ * VOD objects follow ADR 0009 amendment 1: a private VOD lives under `recordings/<id>/` once
+ * `vod-placement` (ops tick) has moved it, a public one under `vods/<id>/`; the row's
+ * `storage_prefix` says which.
  *
  * `--set via=api` drives `/content` through `vods.*` and `clips.*`. Object checks read the media
  * bucket with the repo `.env` credentials (`S3_*`).
@@ -20,6 +24,7 @@ import { clipRow, vodRow } from "../src/e6/db.ts";
 import { type Kit, UI_TIMEOUT_MS, setupKit, staffAccount } from "../src/e6/kit.ts";
 import { E6_ROUTES, E6_TEST_IDS as E, byE6Id } from "../src/e6/selectors.ts";
 import { chooseOption, confirmDialog } from "../src/e6/web.ts";
+import { isVodOwnPrefix, vodPrefix } from "@commonair/contracts/storage";
 import { listMediaKeys, mediaBucketConfig, mediaKeyExists } from "../src/safety-io.ts";
 import { apiError, errorOf, isNotFound } from "../src/safety.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
@@ -31,6 +36,7 @@ const HELD_STREAM_SECONDS = 20;
 const VOD_READY_TIMEOUT_MS = 5 * 60_000;
 const CLIP_READY_TIMEOUT_MS = 3 * 60_000;
 const RETENTION_TIMEOUT_MS = 2 * 60_000;
+const PLACEMENT_TIMEOUT_MS = 2 * 60_000;
 /** Listing cap for the held VOD's objects (a 20 s VOD has a handful of segments). */
 const MAX_HELD_KEYS = 1_000;
 
@@ -170,6 +176,23 @@ async function vodClips(ctx: ScenarioContext, kit: Kit): Promise<void> {
   );
   const anonGet = await errorOf(() => kit.anon().vods.get({ id: vod.id }));
   ctx.assert("2 an anonymous vods.get is NOT_FOUND", isNotFound(anonGet), { code: apiError(anonGet).code });
+  // vods.update enqueued vod-placement; the ops tick runs the sweep too.
+  const placed = await ctx.step("2 ops tick vod-placement moves the private VOD to recordings/<id>/", () =>
+    kit.ops.tickUntil(
+      "vod-placement",
+      "the VOD under recordings/<id>/",
+      async () => {
+        const r = await vodRow(kit.databaseUrl, vod.id);
+        if (r.storage !== vodPrefix(vod.id, "private")) return null;
+        return (await listMediaKeys(bucket, vodPrefix(vod.id, "public"), 5)).length === 0 ? r : null;
+      },
+      { timeoutMs: PLACEMENT_TIMEOUT_MS },
+    ),
+  );
+  ctx.assert(
+    "2 nothing of the private VOD is left under vods/<id>/",
+    placed.value.storage === vodPrefix(vod.id, "private"),
+  );
 
   // ------------------------------------------------------------ 3. S deletes V's clip
   const vClipKeys = await clipRow(kit.databaseUrl, vClip.id);
@@ -218,8 +241,10 @@ async function vodClips(ctx: ScenarioContext, kit: Kit): Promise<void> {
 
   // ------------------------------------------------------------ 4. S deletes the VOD
   const vodKeys = await vodRow(kit.databaseUrl, vod.id);
-  const prefix = vodKeys.storage ?? `vods/${vod.id}/`;
-  ctx.assert("4 the VOD's prefix is vods/<id>/", prefix === `vods/${vod.id}/`);
+  const prefix = vodKeys.storage ?? vodPrefix(vod.id, "private");
+  ctx.assert("4 the private VOD's storage_prefix is recordings/<id>/", prefix === vodPrefix(vod.id, "private"), {
+    ownPrefix: isVodOwnPrefix(vod.id, prefix),
+  });
   const before = await listMediaKeys(bucket, prefix, 5);
   ctx.assert("4 the VOD has objects before deletion", before.length > 0, { objects: before.length });
   const sClipKeys = await clipRow(kit.databaseUrl, sClip.id);
@@ -264,8 +289,13 @@ async function vodClips(ctx: ScenarioContext, kit: Kit): Promise<void> {
   ctx.assert("4 its clip's removed_reason is owner", vodGone.value.clip.removedReason === "owner", {
     removedReason: vodGone.value.clip.removedReason,
   });
-  const vodLeft = await listMediaKeys(bucket, prefix, 5);
-  ctx.assert("4 no object is left under vods/<id>/", vodLeft.length === 0, { left: vodLeft.length });
+  const vodLeft = [
+    ...(await listMediaKeys(bucket, vodPrefix(vod.id, "public"), 5)),
+    ...(await listMediaKeys(bucket, vodPrefix(vod.id, "private"), 5)),
+  ];
+  ctx.assert("4 no object is left under vods/<id>/ or recordings/<id>/", vodLeft.length === 0, {
+    left: vodLeft.length,
+  });
   const sClipObjects = [sClipKeys.storage, sClipKeys.thumbnailKey].filter((k): k is string => k !== null);
   const sClipLeft = await Promise.all(sClipObjects.map((k) => mediaKeyExists(bucket, k)));
   ctx.assert(
@@ -297,12 +327,19 @@ async function heldVod(
   );
   const vod = await streamVod(ctx, "S2", s2, HELD_STREAM_SECONDS);
   ctx.data("heldVodId", vod.id);
-  const prefix = `vods/${vod.id}/`;
+  const prefixes = [vodPrefix(vod.id, "public"), vodPrefix(vod.id, "private")];
+  /** Object names relative to the VOD's prefix: a hold never stops `vod-placement` moving them. */
+  const relativeKeys = async () => {
+    const out = new Set<string>();
+    for (const p of prefixes) for (const k of await listMediaKeys(bucket, p, MAX_HELD_KEYS)) out.add(k.slice(p.length));
+    return out;
+  };
   // Every object of the held VOD, recorded before the removal: each one must survive.
   const keptBefore = await ctx.step("5 record the held VOD's objects", async () => {
     const row = await vodRow(kit.databaseUrl, vod.id);
-    const keys = new Set(await listMediaKeys(bucket, prefix, MAX_HELD_KEYS));
-    if (row.thumbnailKey) keys.add(row.thumbnailKey);
+    const keys = await relativeKeys();
+    const own = prefixes.find((p) => row.thumbnailKey?.startsWith(p));
+    if (row.thumbnailKey && own) keys.add(row.thumbnailKey.slice(own.length));
     return [...keys];
   });
   ctx.assert(
@@ -348,11 +385,8 @@ async function heldVod(
     results.some((r) => (r.held ?? 0) > baselineHeld),
     { baseline: baselineHeld, held: results.map((r) => r.held ?? 0) },
   );
-  const listed = new Set(await listMediaKeys(bucket, prefix, MAX_HELD_KEYS));
-  const missing: string[] = [];
-  for (const key of keptBefore) {
-    if (!listed.has(key) && !(await mediaKeyExists(bucket, key))) missing.push(key);
-  }
+  const listed = await relativeKeys();
+  const missing = keptBefore.filter((key) => !listed.has(key));
   ctx.assert("5 every object of the held VOD still exists", missing.length === 0, {
     objects: keptBefore.length,
     missing: missing.length,

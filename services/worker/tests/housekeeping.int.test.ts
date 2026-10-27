@@ -17,6 +17,7 @@ import {
   pruneWebhookDeliveries,
 } from "../src/housekeeping.ts";
 import { JOBS } from "../src/jobs/index.ts";
+import { vodPlacementLockKey } from "../src/vod/placement.ts";
 import { defineJob } from "../src/runtime/registry.ts";
 import { makeBroadcast, makeSubscription, makeUser, setup, waitFor, type TestEnv } from "./fixtures.ts";
 
@@ -246,26 +247,62 @@ describe("housekeeping", () => {
       return v!;
     };
     const own = (id: string) => `vods/${id}/`;
-    const expired = await vod(own, at(-MIN));
+    const expired = await vod(own, at(-2 * MIN));
+    // A VOD under the private prefix (ADR 0009 amendment 1) is the VOD's own too.
+    const expiredPrivate = await vod((id) => `recordings/${id}/`, at(-MIN - 1000));
     const broken = await vod(own, at(-MIN));
     failingPrefixes.add(`vods/${broken.id}/`);
     const keep = await vod(own, at(60 * MIN));
     const forever = await vod(own, null);
-    // Prefixes that are not exactly vods/<own id>/ are refused, never passed to storage.
+    // Prefixes other than exactly vods/<own id>/ or recordings/<own id>/ are refused, never
+    // passed to storage.
     const other = await vod(() => `vods/${keep.id}/`, at(-MIN));
+    const otherPrivate = await vod(() => `recordings/${keep.id}/`, at(-MIN));
     const blank = await vod(() => "", at(-MIN));
     const root = await vod(() => "vods/", at(-MIN));
+    const privateRoot = await vod(() => "recordings/", at(-MIN));
     const noSlash = await vod((id) => `vods/${id}`, at(-MIN));
+    const privateNoSlash = await vod((id) => `recordings/${id}`, at(-MIN));
     const nested = await vod((id) => `vods/${id}/../`, at(-MIN));
+    const privateNested = await vod((id) => `recordings/${id}/../`, at(-MIN));
     const elsewhere = await vod((id) => `clips/${id}/`, at(-MIN));
 
     const r = await enforceVodRetention(ctx());
-    // The public prefix and the DMCA-hidden copy (moderation/dmca/) both go.
-    expect(r).toEqual({ deleted: 1, failed: 7, objects: 3 + 3, held: 0, clipsDeleted: 0 });
-    expect(deletedPrefixes).toEqual([`vods/${expired.id}/`, `moderation/dmca/vods/${expired.id}/`]);
+    // Both own prefixes (a placement move may have been interrupted) and the DMCA-hidden copy of
+    // each (moderation/dmca/) go.
+    expect(r).toEqual({ deleted: 2, failed: 11, objects: 2 * 4 * 3, held: 0, clipsDeleted: 0 });
+    const everyCopy = (id: string) => [
+      `vods/${id}/`,
+      `moderation/dmca/vods/${id}/`,
+      `recordings/${id}/`,
+      `moderation/dmca/recordings/${id}/`,
+    ];
+    expect(deletedPrefixes).toEqual([
+      ...everyCopy(expired.id),
+      // The row's own prefix first.
+      `recordings/${expiredPrivate.id}/`,
+      `moderation/dmca/recordings/${expiredPrivate.id}/`,
+      `vods/${expiredPrivate.id}/`,
+      `moderation/dmca/vods/${expiredPrivate.id}/`,
+    ]);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect(await status(expired.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
-    for (const v of [broken, keep, forever, other, blank, root, noSlash, nested, elsewhere])
+    expect(await status(expiredPrivate.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
+    for (const v of [
+      broken,
+      keep,
+      forever,
+      other,
+      otherPrivate,
+      blank,
+      root,
+      privateRoot,
+      noSlash,
+      privateNoSlash,
+      nested,
+      privateNested,
+      elsewhere,
+    ])
       expect((await status(v.id))?.status).toBe("ready");
 
     // The storage failure is retried on the next run and then succeeds.
@@ -331,8 +368,13 @@ describe("housekeeping", () => {
 
     const r = await enforceVodRetention(ctx());
     // Held: the owner's VOD and both removed clips (and the tampered one) are counted, not deleted.
-    expect(r).toEqual({ deleted: 1, failed: 1, objects: 3 + 3 + 3, held: 1 + 3, clipsDeleted: 2 });
-    expect(deletedPrefixes).toEqual([`vods/${free.vodId}/`, `moderation/dmca/vods/${free.vodId}/`]);
+    expect(r).toEqual({ deleted: 1, failed: 1, objects: 4 * 3 + 3, held: 1 + 3, clipsDeleted: 2 });
+    expect(deletedPrefixes).toEqual([
+      `vods/${free.vodId}/`,
+      `moderation/dmca/vods/${free.vodId}/`,
+      `recordings/${free.vodId}/`,
+      `moderation/dmca/recordings/${free.vodId}/`,
+    ]);
     expect(deletedKeys.sort()).toEqual(
       [`clips/${free.byOwner}.mp4`, `clips/${free.byOwner}.webp`, `clips/${free.byCreator}.mp4`].sort(),
     );
@@ -345,6 +387,34 @@ describe("housekeeping", () => {
     expect(await vod(held.vodId)).toMatchObject({ status: "ready", removedReason: "owner" });
     for (const id of [held.byOwner, held.byCreator, held.live, held.tampered])
       expect((await clip(id))?.status).toBe("ready");
+  });
+
+  test("a VOD whose placement move is running is skipped and retried on the next run", async () => {
+    deletedPrefixes.length = 0;
+    const { channel } = await makeUser(env.t.db);
+    const b = await makeBroadcast(env.t.db, channel.id);
+    const id = uuidv7();
+    await env.t.db.insert(schema.vods).values({
+      id,
+      broadcastId: b.id,
+      channelId: channel.id,
+      title: "v",
+      storagePrefix: `recordings/${id}/`,
+      status: "ready",
+      expiresAt: at(-MIN),
+    });
+    await ctx().valkey.set(vodPlacementLockKey(id), "someone", "PX", 30_000);
+    try {
+      // Counted as failed (earlier tests' refused rows add to that count too).
+      const r = await enforceVodRetention(ctx());
+      expect(r.deleted).toBe(0);
+      expect(r.failed).toBeGreaterThanOrEqual(1);
+      expect(deletedPrefixes).toEqual([]);
+    } finally {
+      await ctx().valkey.del(vodPlacementLockKey(id));
+    }
+    expect(await enforceVodRetention(ctx())).toMatchObject({ deleted: 1 });
+    expect(deletedPrefixes[0]).toBe(`recordings/${id}/`);
   });
 
   test("a legal hold placed while retention is mid-batch stops the rest of the owner's media", async () => {
@@ -390,7 +460,12 @@ describe("housekeeping", () => {
     } finally {
       afterDeletePrefix = null;
     }
-    expect(deletedPrefixes).toEqual([`vods/${vodIds[0]}/`, `moderation/dmca/vods/${vodIds[0]}/`]);
+    expect(deletedPrefixes).toEqual([
+      `vods/${vodIds[0]}/`,
+      `moderation/dmca/vods/${vodIds[0]}/`,
+      `recordings/${vodIds[0]}/`,
+      `moderation/dmca/recordings/${vodIds[0]}/`,
+    ]);
     expect(deletedKeys).not.toContain(`clips/${clipId}.mp4`);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect((await status(vodIds[0]!))?.status).toBe("deleted");

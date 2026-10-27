@@ -24,7 +24,8 @@ import type { WorkerContext } from "../context.ts";
 import { eventNeedles, redactAnonymousTip, redactPayload, referencesUser, type DeletedIdentity } from "./references.ts";
 import { moderationMetrics } from "../moderation/metrics.ts";
 import { dmcaHiddenKey } from "../dmca/objects.ts";
-import { thumbnailPrefix, vodPrefix } from "../moderation/objects.ts";
+import { thumbnailPrefix } from "../moderation/objects.ts";
+import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { audit, endBroadcast, safeErrorCode, type EndedBroadcast } from "../moderation/records.ts";
 import { publishLiveEnded } from "../moderation/t0.ts";
 
@@ -360,7 +361,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .update(s.vods)
           .set({ status: "deleted", removedReason: DELETED_REASON })
           .where(and(eq(s.vods.channelId, channel.id), ne(s.vods.status, "deleted")))
-          .returning({ id: s.vods.id });
+          .returning({ id: s.vods.id, storagePrefix: s.vods.storagePrefix });
         const clips = await tx
           .update(s.clips)
           .set({ status: "deleted", removedReason: DELETED_REASON })
@@ -368,11 +369,15 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .returning({ id: s.clips.id, storageKey: s.clips.storageKey, thumbnailKey: s.clips.thumbnailKey });
         counts.vods = vods.length;
         counts.clips = clips.length;
-        objectPrefixes.push(...vods.map((v) => vodPrefix(v.id)), `channels/${channel.id}/`);
+        // Both of a VOD's own prefixes: a placement move may have been interrupted.
+        objectPrefixes.push(
+          ...vods.flatMap((v) => vodObjectPrefixes(v.id, v.storagePrefix)),
+          `channels/${channel.id}/`,
+        );
         for (const c of clips) for (const k of [c.storageKey, c.thumbnailKey]) if (k) objectKeys.push(k);
         // DMCA-hidden copies live outside the public prefixes, whatever each row's status is now.
         const everyVod = await tx
-          .select({ id: s.vods.id, thumbnailKey: s.vods.thumbnailKey })
+          .select({ id: s.vods.id, storagePrefix: s.vods.storagePrefix, thumbnailKey: s.vods.thumbnailKey })
           .from(s.vods)
           .where(eq(s.vods.channelId, channel.id));
         const everyClip = await tx
@@ -384,11 +389,11 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .from(s.broadcasts)
           .where(eq(s.broadcasts.channelId, channel.id));
         objectPrefixes.push(
-          ...everyVod.map((v) => dmcaHiddenKey(vodPrefix(v.id))),
+          ...everyVod.flatMap((v) => vodObjectPrefixes(v.id, v.storagePrefix).map(dmcaHiddenKey)),
           ...everyBroadcast.map((b) => dmcaHiddenKey(thumbnailPrefix(b.id))),
         );
         for (const v of everyVod)
-          if (v.thumbnailKey && !v.thumbnailKey.startsWith(vodPrefix(v.id)))
+          if (v.thumbnailKey && !vodObjectPrefixes(v.id, v.storagePrefix).some((p) => v.thumbnailKey?.startsWith(p)))
             objectKeys.push(dmcaHiddenKey(v.thumbnailKey));
         for (const c of everyClip)
           for (const k of [c.storageKey, c.thumbnailKey]) if (k) objectKeys.push(dmcaHiddenKey(k));
