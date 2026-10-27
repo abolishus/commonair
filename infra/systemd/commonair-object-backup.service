@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Copies the media and evidence buckets to the offsite store (selfhost.sh backup --objects,
+# docs/self-hosting/backups.md). rclone runs on the host; selfhost.sh passes it the keys from
+# commonair.env through its environment only.
+[Unit]
+Description=CommonAir object backup (media and evidence, offsite)
+# After, not Requires: an external store has no Garage unit, and a timer must never start
+# Garage that an operator stopped.
+After=commonair-garage.service commonair-backup.service
+
+[Service]
+Type=oneshot
+# Background work: it yields the CPU and the disk to the instance.
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/bin/sh %h/commonair/selfhost.sh backup --objects

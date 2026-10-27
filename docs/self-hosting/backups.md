@@ -17,6 +17,9 @@ Postgres is backed up with [WAL-G](https://github.com/wal-g/wal-g), which ships 
 A restore takes the newest base backup and replays the archived WAL after it, so you lose at
 most the last minute or so of writes.
 
+The objects (avatars, thumbnails, clips, VODs, sealed evidence) are copied to another S3 store
+by `selfhost.sh backup --objects`, daily once you have set it up ([Objects](#objects)).
+
 ## Where backups go
 
 By default, to the `commonair-backups` bucket of the local Garage, under `wal/`. That protects
@@ -39,9 +42,8 @@ AWS_SECRET_ACCESS_KEY=<secret>
 WALG_S3_PREFIX=s3://<bucket>/wal
 ```
 
-That example is DigitalOcean Spaces in Amsterdam; pick a region other than the server's, and
-check the endpoint form against your provider's documentation (Hetzner Object Storage, for one,
-uses `https://<location>.your-objectstorage.com`). A second Garage node on another
+That example is DigitalOcean Spaces in Amsterdam: pick a region other than the server's, and
+check the endpoint form against your provider's documentation. A second Garage node on another
 host works the same way, with its own endpoint, region (`garage` unless you changed it) and a
 key that has read and write access to the bucket. `AWS_S3_FORCE_PATH_STYLE` defaults to `true`,
 which both accept.
@@ -60,18 +62,40 @@ backup bucket only all the same.
 ## `selfhost.sh backup`
 
 ```sh
-sh ~/commonair/selfhost.sh backup
+sh ~/commonair/selfhost.sh backup                    # the database (same as --database)
+sh ~/commonair/selfhost.sh backup --objects          # media and evidence, offsite
+sh ~/commonair/selfhost.sh backup --database --objects
+sh ~/commonair/selfhost.sh backup --restore-objects  # the offsite copy back into the buckets
 ```
 
-It runs `commonair-backup.service` now (a base backup, then the retention cleanup) and lists
-every base backup with its name and time. `selfhost.sh status` shows when the last backup ran
-and whether it succeeded. `upgrade` takes one before it changes anything.
+- **`--database`** (the default) runs `commonair-backup.service` now (a base backup, then the
+  retention cleanup) and lists every base backup with its name and time. `upgrade` takes one
+  before it changes anything.
+- **`--objects`** copies the media and evidence buckets to the offsite store
+  ([Objects](#objects)). With `--database` too, the database goes first.
+- **`--restore-objects`** copies the offsite copy back ([Restore objects](#restore-objects)). It
+  runs on its own.
+- **`--bwlimit <rate>`** limits the bandwidth of `--objects` and `--restore-objects`, in rclone's
+  syntax: `20M` (bytes per second), or a timetable such as `"08:00,4M 23:00,off"`. Without it,
+  `BACKUP_OBJECTS_BWLIMIT` in the env file applies, if set.
+
+The exit status is 0 when everything asked for succeeded and 1 otherwise, with the reason on
+stderr. `selfhost.sh status` shows when the last base backup ran and whether it succeeded, and
+when the last object backup succeeded and where to:
+
+```text
+last backup: Mon 2026-10-26 03:12:40 UTC (success)
+last object backup: 2026-10-26T04:21:07Z (to https://ams3.digitaloceanspaces.com/stream-example-org-offsite/objects)
+```
+
+The object backup's time comes from `~/.local/state/commonair/object-backup`, which a run
+rewrites only when every bucket was copied. A monitor can read its `LAST_SUCCESS=` line and alert
+when it is older than a day and a half.
 
 ## What is not backed up
 
-- **Objects in Garage**: avatars, thumbnails, clips, VODs, data exports and sealed evidence.
-  `selfhost.sh` does not copy them anywhere. To keep them when the server is lost, copy them
-  off the server yourself: [Objects in Garage](#objects-in-garage) has a recipe.
+- **Data exports** (`S3_BUCKET_EXPORTS`). Each expires after 7 days, and a member can request a
+  new one, so `--objects` leaves them out.
 - **The env file**, `~/.config/commonair/commonair.env`. It holds every secret: the database
   passwords, the S3 keys, the session and signing keys, and `EVIDENCE_PRIVATE_KEY`, without
   which sealed evidence cannot be read. Keep an offline copy somewhere safe, and update it when
@@ -79,27 +103,152 @@ and whether it succeeded. `upgrade` takes one before it changes anything.
   `~/.config/commonair/unit-env/` need no backup: each unit writes its own from this file
   whenever it starts.
 - **Valkey.** It holds only presence, caches and queues, and starts empty by design.
+- **Objects**, until you set up an offsite store for them ([Objects](#objects)). Until then
+  `status` says `last object backup: not configured`.
 
-## Objects in Garage
+## Objects
 
-This recipe copies the buckets that matter to another S3 location once a day with
-[rclone](https://rclone.org/), from the distribution's packages (`apt install rclone` on
-Debian 13, `dnf install rclone` on Fedora). It reads through a Garage key that can read those
-buckets and nothing else.
+Avatars, panels, thumbnails, clips, VODs and sealed evidence live in the object store: Garage on
+the server by default, or an external store ([object-storage.md](object-storage.md)).
+`selfhost.sh backup --objects` copies them to another S3 store with [rclone](https://rclone.org/)
+`sync`, and once it has succeeded, does so daily.
 
-| Bucket (env variable, default name)        | Holds                                    | Copy it?                                                                        |
-| ------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------- |
-| `S3_BUCKET_MEDIA`, `commonair-media`       | avatars, panels, thumbnails, clips, VODs | Yes                                                                             |
-| `S3_BUCKET_EVIDENCE`, `commonair-evidence` | sealed moderation evidence               | Yes. It is encrypted: reading it needs `EVIDENCE_PRIVATE_KEY` from the env file |
-| `S3_BUCKET_EXPORTS`, `commonair-exports`   | members' data exports                    | No. Each expires after 7 days, and members can request a new one                |
-| `S3_BUCKET_BACKUPS`, `commonair-backups`   | WAL-G's Postgres backups                 | No. Send WAL-G off the server instead ([Off-host S3](#off-host-s3))             |
+| Bucket (env variable, default name)        | Holds                                    | Copied by `--objects`?                                                        |
+| ------------------------------------------ | ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `S3_BUCKET_MEDIA`, `commonair-media`       | avatars, panels, thumbnails, clips, VODs | Yes, to `<bucket>/<prefix>/media`                                             |
+| `S3_BUCKET_EVIDENCE`, `commonair-evidence` | sealed moderation evidence               | Yes, to `<bucket>/<prefix>/evidence`. Reading it needs `EVIDENCE_PRIVATE_KEY` |
+| `S3_BUCKET_EXPORTS`, `commonair-exports`   | members' data exports                    | No. Each expires after 7 days, and members can request a new one              |
+| `S3_BUCKET_BACKUPS`, `commonair-backups`   | WAL-G's Postgres backups                 | No. Send WAL-G off the server instead ([Off-host S3](#off-host-s3))           |
 
-The commands below use the default bucket names. If your env file sets other names, use those.
+`rclone sync` makes the copy match the bucket, so an object deleted on the instance (a removed
+VOD, or the media of a deleted account) leaves the copy at the next run too. That is what
+account deletion promises; it also means the copy is not an archive of everything ever stored.
+If you want deleted objects kept for a while, turn on versioning with an expiry rule at the
+offsite store.
 
-### Set it up
+**With an external store** (`S3_MODE=external`) the objects already live off the server, and
+the provider keeps them durable. `--objects` copies them bucket to bucket all the same, to a
+store in another region or at another provider, so that losing the account, the region or a
+bucket by mistake does not lose them. Versioning at the provider is the alternative, or an
+addition; which you rely on is your choice.
 
-As `commonair`, create the read-only key in the local Garage and allow it to read the two
-buckets:
+### What runs where
+
+rclone runs on the server, from the distribution's packages: as root, `apt install rclone`
+(Debian 13) or `dnf install rclone` (Fedora). `selfhost.sh` gives it its settings through
+environment variables (`RCLONE_CONFIG_*`) for that run only: no key is on a command line, where
+any user of the server could read it, and none is written to an rclone config file. An
+`~/.config/rclone/rclone.conf` of your own is ignored.
+
+#### Objects in Garage
+
+rclone reads Garage on `127.0.0.1:3900`, the port Garage publishes on the loopback for this,
+with a key that can read the media and evidence buckets and nothing else. The first `--objects`
+run creates that key in Garage (`commonair-object-backup`) and keeps it in the env file as
+`BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID` and `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY`. If the env
+file names a key that Garage does not know (an env file restored onto a new server), it creates
+a new one.
+
+#### Objects in an external store
+
+rclone reads the store at `S3_ENDPOINT` with the instance's own keys, the main key for media and
+the evidence key for evidence (`sync` never writes to its source). Better, create a key that can
+only read those two buckets and set it as `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID` and
+`BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY`. If the server reaches the store at another address
+than the containers do, set `BACKUP_OBJECTS_SOURCE_ENDPOINT`.
+
+#### Comparison and encryption
+
+rclone compares objects by hash and size (`--checksum`): S3 listings carry an MD5 for most
+objects, so it needs no request per object to decide what changed. Objects uploaded in parts
+have no MD5 both sides share, and rclone compares those by size.
+
+`--objects` does not encrypt media on the way. If you do not trust the offsite store with it,
+copy by hand ([Without the script](#without-the-script)) through an
+[rclone crypt](https://rclone.org/crypt/) remote instead. Sealed evidence is encrypted either way.
+
+### Set it up: DigitalOcean Spaces
+
+An example for an instance on a droplet in `NYC3`, with the copy in Amsterdam:
+
+1. **A bucket.** In the control panel, create a Spaces bucket in `AMS3` (a region other than the
+   droplet's), with file listing restricted and no CDN, say `stream-example-org-offsite`. It can
+   hold the WAL-G backups too, under another prefix (`WALG_S3_PREFIX=s3://<bucket>/wal`).
+2. **A key limited to it.** Under Spaces Object Storage, Access Keys, create a key with limited
+   access: read, write and delete on that bucket only. The secret is shown once.
+3. **The settings.** As `commonair`, add to `~/.config/commonair/commonair.env`:
+
+   ```sh
+   BACKUP_OBJECTS_REMOTE_ENDPOINT=https://ams3.digitaloceanspaces.com
+   BACKUP_OBJECTS_REMOTE_REGION=ams3
+   BACKUP_OBJECTS_REMOTE_BUCKET=stream-example-org-offsite
+   BACKUP_OBJECTS_REMOTE_PREFIX=objects
+   BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID=<Spaces access key>
+   BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY=<Spaces secret key>
+   ```
+
+4. **rclone.** As root: `apt install rclone` (Debian) or `dnf install rclone` (Fedora).
+5. **The first copy**, as `commonair`:
+
+   ```sh
+   sh ~/commonair/selfhost.sh backup --objects
+   ```
+
+   The first run copies everything and can take a while; later runs copy only what changed. Its
+   success turns on `commonair-object-backup.timer`, which runs the same command daily at 04:00
+   UTC (an hour after the base backup, so the two do not compete for the disk), and at the next
+   boot if the server was off then. `systemctl --user list-timers` shows the next run. A failed
+   run shows in `systemctl --user status commonair-object-backup.service` and its journal, and
+   `status` keeps showing the last success.
+
+Every setting:
+
+| Key                                       | Meaning                                                                                 |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| `BACKUP_OBJECTS_REMOTE_ENDPOINT`          | The offsite store's S3 endpoint, `https://host[:port]`. Required                        |
+| `BACKUP_OBJECTS_REMOTE_REGION`            | The region it signs requests for (`ams3`, or `garage` for a Garage). Required           |
+| `BACKUP_OBJECTS_REMOTE_BUCKET`            | Its bucket. Required                                                                    |
+| `BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID`     | A key for that bucket with read, write and delete. Required                             |
+| `BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY` | Its secret. Required                                                                    |
+| `BACKUP_OBJECTS_REMOTE_PREFIX`            | A path inside the bucket. Default: none (`<bucket>/media`, `<bucket>/evidence`)         |
+| `BACKUP_OBJECTS_REMOTE_PATH_STYLE`        | `true` (default) or `false`: path-style or virtual-hosted URLs. Spaces accepts both     |
+| `BACKUP_OBJECTS_REMOTE_ALLOW_HTTP`        | `true` accepts an `http://` endpoint, for a store on a trusted network. Default refused |
+| `BACKUP_OBJECTS_BWLIMIT`                  | rclone's bandwidth limit for every run, as for `--bwlimit`. Default: none               |
+| `BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID`     | The key that reads the instance's buckets (Garage: created by the first run)            |
+| `BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY` | Its secret                                                                              |
+| `BACKUP_OBJECTS_SOURCE_ENDPOINT`          | External store only: where the server reaches it, if not at `S3_ENDPOINT`               |
+
+No container receives these keys: only `selfhost.sh` reads them. A
+second Garage node works as the offsite store as well, with its own endpoint, region `garage` and
+a key with read and write on its bucket.
+
+To stop the daily copy: `systemctl --user disable --now commonair-object-backup.timer`. A later
+`backup --objects` by hand leaves it off.
+
+### Restore objects
+
+`selfhost.sh backup --restore-objects` copies the offsite copy back into the instance's media
+and evidence buckets, with the instance's own keys, which can write (the backup key cannot): the
+main S3 key for media, the evidence key for evidence. It uses `rclone copy`, not `sync`, so it
+deletes nothing on the instance, and running it again copies only what is still missing or
+different.
+
+On a new server, run it after the [restore onto a new server](#onto-a-new-server), once the
+instance runs: its Garage then has both buckets and the keys from your env file, which also
+holds the `BACKUP_OBJECTS_REMOTE_*` settings. Install rclone first.
+
+```sh
+sh ~/commonair/selfhost.sh backup --restore-objects
+```
+
+Sealed evidence is readable again only with the `EVIDENCE_PRIVATE_KEY` of the env file it was
+sealed with. With an external store, you need this only if the store itself lost the objects.
+
+### Without the script
+
+The same copy by hand, for a store `selfhost.sh` does not handle or to add an rclone crypt
+layer. As `commonair`, create the read-only key in the local Garage and allow it to read the two
+buckets (with your bucket names, if the env file sets others):
 
 ```sh
 podman exec commonair-garage /garage key create commonair-object-backup
@@ -111,9 +260,8 @@ The first command prints the `Key ID` and the `Secret key`. To see them again, r
 `podman exec commonair-garage /garage key info --show-secret commonair-object-backup`. Each
 command also logs two `INFO` lines about its connection to the node, which you can ignore.
 
-Create a bucket and a key at the other location, as for [off-host WAL-G](#off-host-s3) (a
-separate bucket, or a prefix of the same one). Then write `~/.config/rclone/rclone.conf` with
-one remote for each side, and make it readable only by `commonair` (`chmod 600`):
+Write `~/.config/rclone/rclone.conf` with one remote for each side, readable only by `commonair`
+(`chmod 600`):
 
 ```ini
 [garage]
@@ -124,92 +272,31 @@ region = garage
 force_path_style = true
 access_key_id = <Key ID of commonair-object-backup>
 secret_access_key = <its Secret key>
+no_check_bucket = true
 
 [offsite]
 type = s3
 provider = Other
-endpoint = https://fsn1.your-objectstorage.com
-region = fsn1
+endpoint = https://ams3.digitaloceanspaces.com
+region = ams3
 force_path_style = true
 access_key_id = <key>
 secret_access_key = <secret>
 no_check_bucket = true
 ```
 
-`garage` reaches the local Garage on the port it publishes on `127.0.0.1`. `no_check_bucket`
-stops rclone from trying to create the bucket, which a key limited to one bucket cannot do.
-Take a first copy by hand, with your bucket name in place of `<bucket>`:
+`no_check_bucket` on both stops rclone from trying to create a bucket, which a key limited to
+one bucket cannot do. Copy, with your bucket name in place of `<bucket>`:
 
 ```sh
-rclone sync garage:commonair-media offsite:<bucket>/media
-rclone sync garage:commonair-evidence offsite:<bucket>/evidence
+rclone sync --checksum garage:commonair-media offsite:<bucket>/media
+rclone sync --checksum garage:commonair-evidence offsite:<bucket>/evidence
 ```
 
-`rclone sync` makes the copy match the bucket, so an object deleted on the instance (a removed
-VOD, or the media of a deleted account) leaves the copy at the next run too. Use `rclone copy`
-instead if you would rather keep everything, but then deleted members' media stays in your
-backups.
-
-Media is not encrypted at rest. If you do not trust the other location with it, wrap the
-`offsite` remote in an [rclone crypt](https://rclone.org/crypt/) remote, and keep its password
-with your offline copy of the env file.
-
-### Run it daily
-
-Create two systemd user units in `~/.config/systemd/user/`. Do not start their names with
-`commonair-`: `selfhost.sh install` and `upgrade` remove every `commonair-*` unit there that the
-release does not ship.
-
-`object-backup.service`:
-
-```ini
-[Unit]
-Description=Copy CommonAir objects off the server
-After=commonair-garage.service
-
-[Service]
-Type=oneshot
-Nice=10
-IOSchedulingClass=idle
-ExecStart=/usr/bin/rclone sync garage:commonair-media offsite:<bucket>/media
-ExecStart=/usr/bin/rclone sync garage:commonair-evidence offsite:<bucket>/evidence
-```
-
-`object-backup.timer`:
-
-```ini
-[Unit]
-Description=Copy CommonAir objects off the server daily
-
-[Timer]
-OnCalendar=*-*-* 04:00:00 UTC
-RandomizedDelaySec=30min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable the timer, then run the service once and read its log:
-
-```sh
-systemctl --user daemon-reload
-systemctl --user enable --now object-backup.timer
-systemctl --user start object-backup.service
-journalctl --user -u object-backup.service
-```
-
-`systemctl --user list-timers` shows the next run. The timer starts an hour after the base
-backup, so the two do not compete for the disk. A failed run shows in
-`systemctl --user status object-backup.service`; `selfhost.sh status` does not know about it.
-
-### Restore objects
-
-On a new server, restore objects after the [restore onto a new server](#onto-a-new-server), once
-the instance runs: its Garage then has both buckets and the keys from your env file. Write the
-same `rclone.conf` (its `garage` key does not exist on the new Garage yet, and these commands do
-not need it). Writing needs keys that can write, so the commands take them from the env file
-for this run only: the main S3 key for media, the evidence key for evidence.
+Run those from a systemd user unit and timer of your own. Do not start their names with
+`commonair-`: `selfhost.sh install` and `upgrade` remove every `commonair-*` unit in
+`~/.config/systemd/user/` that the release does not ship. To restore by hand, give the `garage`
+remote keys that can write, from the env file, for that run only:
 
 ```sh
 ENV=~/.config/commonair/commonair.env
@@ -220,10 +307,6 @@ RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID=$(sed -n 's/^S3_EVIDENCE_ACCESS_KEY_ID=//p' "
 RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY=$(sed -n 's/^S3_EVIDENCE_SECRET_ACCESS_KEY=//p' "$ENV") \
   rclone copy offsite:<bucket>/evidence garage:commonair-evidence
 ```
-
-Sealed evidence is readable again only with the `EVIDENCE_PRIVATE_KEY` of the env file it was
-sealed with. Then create the `commonair-object-backup` key on the new Garage as in
-[Set it up](#set-it-up), put its ID and secret in `rclone.conf` and enable the timer.
 
 ## Restore
 
@@ -295,9 +378,14 @@ When the old server is gone:
 1. Install the **same version** on the new server ([install.md](install.md)), with the same
    `--domain`.
 2. As `commonair`, replace `~/.config/commonair/commonair.env` with your offline copy. It holds
-   the database passwords the restored database expects and the `AWS_*` settings of your
-   off-host backups.
+   the database passwords the restored database expects, the `AWS_*` settings of your off-host
+   backups and the `BACKUP_OBJECTS_REMOTE_*` settings of your object backups.
 3. Run the [restore](#restore) from step 1 on.
+4. As root, install rclone; then, as `commonair`, restore the objects
+   ([Restore objects](#restore-objects)):
+   `sh ~/commonair/selfhost.sh backup --restore-objects`.
+5. Once the restore checks out, take a first object backup from the new server
+   (`selfhost.sh backup --objects`), which turns its daily timer on.
 
 Then point DNS at the new server.
 
@@ -311,15 +399,26 @@ production's local Garage listens only on its own `127.0.0.1`. The drill runs a 
 production: real accounts, queued notifications and simulcast targets. Keep it from reaching
 anyone, and keep it from writing to your backups.
 
-### A read-only key for the drill
+### Read-only keys for the drill
 
-Create a key that can read the backup bucket and do nothing else. On a second Garage node that
-runs as a `commonair-garage` container, as `commonair` there (use the bucket of your
-`WALG_S3_PREFIX`):
+Create keys that can read the backups and do nothing else: one for the WAL-G bucket (the bucket
+of your `WALG_S3_PREFIX`) and, if the object copy is in another bucket, one for that
+(`BACKUP_OBJECTS_REMOTE_BUCKET`). On production, as `commonair`, this prints both:
 
 ```sh
+ENV=~/.config/commonair/commonair.env
+sed -n 's|^WALG_S3_PREFIX=s3://\([^/]*\).*|\1|p' "$ENV"
+sed -n 's/^BACKUP_OBJECTS_REMOTE_BUCKET=//p' "$ENV"
+```
+
+With DigitalOcean Spaces, create a key with limited access and only read permission on that
+bucket (or those buckets). On a second Garage node that runs as a `commonair-garage` container,
+as `commonair` there, with the bucket printed above:
+
+```sh
+BUCKET=<the WAL-G bucket>
 podman exec commonair-garage /garage key create commonair-restore-drill
-podman exec commonair-garage /garage bucket allow --read commonair-backups --key commonair-restore-drill
+podman exec commonair-garage /garage bucket allow --read "$BUCKET" --key commonair-restore-drill
 ```
 
 The first command prints the `Key ID` and the `Secret key` (later:
@@ -328,17 +427,24 @@ key for the next drill, or delete it afterwards with
 `podman exec commonair-garage /garage key delete --yes commonair-restore-drill`. With another
 provider, create a key with read access to the bucket only, if it offers one. If it does not,
 the drill uses your production key, and only the steps below that turn off archiving and the
-backup timer protect your backups: do not skip them.
+backup timers protect your backups: do not skip them.
 
 ### Run the drill
 
-1. Install the same version on a throwaway server or VM, with `--tls internal` and a hostname
-   of its own, such as `drill.example.org`. Turn off its daily backup at once, before it can
-   run with the settings you are about to copy in:
+Write down the time at each step marked **(time)**: the drill's record is how long the database
+restore, the object restore and the whole drill took.
+
+1. **(time: start)** Install the same version on a throwaway server or VM, with `--tls internal`
+   and a hostname of its own, such as `drill.example.org`. Turn off its daily backup at once,
+   before it can run with the settings you are about to copy in:
    `systemctl --user disable --now commonair-backup.timer`. Its retention cleanup deletes old
    base backups, and with your production settings those would be production's.
 2. Copy your env file over the new one, then change it before anything starts:
-   - Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the drill's read-only key.
+   - Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to the drill's read-only key, and
+     `BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID` and `BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY` to the
+     read-only key of the object copy's bucket. Never run `selfhost.sh backup --objects` on the
+     drill: `rclone sync` would make production's copy match the drill's buckets, deleting
+     whatever the drill lacks. With a read-only key it cannot.
    - Point mail nowhere: `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_USER=` and
      `SMTP_PASSWORD=` (nothing listens there, so sending fails). Otherwise the worker sends
      queued notifications to real members with your production credentials.
@@ -362,22 +468,34 @@ backup timer protect your backups: do not skip them.
    `selfhost.sh install` keeps drop-in directories, so this one stays through the reinstall
    below.
 
-4. Run the [restore](#restore) from step 1 on, but replace its step 5 with a reinstall that
-   keeps the drill's hostname and TLS mode (the copied env file holds production's):
+4. **(time: database restore starts)** Run the [restore](#restore) from step 1 on, but replace
+   its step 5 with a reinstall that keeps the drill's hostname and TLS mode (the copied env file
+   holds production's):
 
    ```sh
    sh ~/commonair/selfhost.sh install --reinstall --domain drill.example.org --tls internal
    ```
 
-   The reinstall enables the daily backup again, so turn it off again:
+   **(time: database restore done)** when it reports the instance running. The reinstall
+   enables the daily base backup again, so turn it off again:
    `systemctl --user disable --now commonair-backup.timer`. If you only need to look at data,
    also stop the worker: `systemctl --user stop commonair-worker.service`.
 
-5. Sign in on the drill instance (trust its root first, [tls.md](tls.md#internal-ca)) and check
-   recent data: the newest accounts, streams and ledger entries. Do not go live on it: the
-   restored simulcast targets would push the stream to real third-party platforms.
-6. Write down the date, the backup restored, how long it took, and anything that went wrong.
-   Then delete the server.
+5. **(time: object restore starts)** As root, install rclone; then, as `commonair`:
+
+   ```sh
+   sh ~/commonair/selfhost.sh backup --restore-objects
+   ```
+
+   **(time: object restore done)** when it returns. `commonair-object-backup.timer` stays off:
+   only a successful `backup --objects` turns it on.
+
+6. Sign in on the drill instance (trust its root first, [tls.md](tls.md#internal-ca)) and check
+   recent data: the newest accounts, streams and ledger entries, and that recent avatars,
+   thumbnails and VODs load. Do not go live on it: the restored simulcast targets would push
+   the stream to real third-party platforms. **(time: end)**
+7. Write down the date, the base backup restored, the three times (database restore, object
+   restore, total from start to end), and anything that went wrong. Then delete the server.
 
 Contributors can run the automated drill against a development stack with
 `bun harness/src/cli.ts run backup-restore` (see `harness/README.md`).

@@ -71,7 +71,8 @@ Commands:
   install    Install a CommonAir release on this host and start it.
   upgrade    Upgrade to another release: verify, pull by digest, back up, migrate first,
              restart, wait for health; roll back to the previous release if health fails.
-  backup     Take a WAL-G base backup now and list the backups.
+  backup     Take a WAL-G base backup now and list the backups; with --objects, copy the media
+             and evidence buckets to the offsite store (docs/self-hosting/backups.md).
   status     Show the installed version, every unit's state and health, TLS, backups, disk use.
   --help     Show this help.
 
@@ -121,6 +122,19 @@ never switches store (there is no --migrate-objects; see backups.md for copying 
 
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
   --insecure-no-checksum. The object store stays as installed.
+
+backup options (no option: --database):
+  --database            A WAL-G base backup of Postgres now, then the list of base backups.
+  --objects             Copy the media and evidence buckets to the offsite S3 store set by the
+                        BACKUP_OBJECTS_REMOTE_* keys of commonair.env (rclone sync). Together
+                        with --database, the database goes first. The first success enables
+                        commonair-object-backup.timer (daily).
+  --restore-objects     Copy the offsite copy back into this instance's buckets (rclone copy:
+                        nothing on the instance is deleted). On its own only.
+  --bwlimit <rate>      rclone's bandwidth limit for --objects and --restore-objects, e.g. 20M
+                        (bytes/s) or "08:00,4M 23:00,off". Default: BACKUP_OBJECTS_BWLIMIT.
+  Exit status 0 on success, 1 on any failure. A successful --objects run records its time in
+  ~/.local/state/commonair/object-backup, which status shows.
 
 A fork's releases: set COMMONAIR_REPOSITORY_URL=https://… for the first install; later
 upgrades use the repository recorded in the installed release.
@@ -1570,14 +1584,315 @@ cmd_upgrade() {
   info "upgraded to $(installed_version)"
 }
 
-cmd_backup() {
-  require_instance backup
+# --- backups ------------------------------------------------------------------------------
+#
+# `backup` takes a WAL-G base backup (--database, the default) and copies the media and evidence
+# buckets to an offsite S3 store (--objects); `backup --restore-objects` copies them back. Exports
+# are not copied: each expires after 7 days and a member can request a new one. The backups bucket
+# is not either: WAL-G sends it off the host itself (WALG_S3_PREFIX, backups.md).
+#
+# rclone runs on the host, from the distribution's package: a container would need its own pinned
+# image, and rclone would then reach Garage over the commonair network instead of the loopback
+# port Garage already publishes for this. Its configuration reaches it only through
+# RCLONE_CONFIG_<REMOTE>_* variables, in a subshell, never on its command line or in a file.
+#
+# With an external store (S3_MODE=external) the objects already live off the host; --objects
+# copies them bucket to bucket all the same, so losing the provider account or region does not
+# lose them. Versioning at the provider is the operator's choice on top of that.
+
+OBJECT_STATE_DIR="$HOME/.local/state/commonair"
+OBJECT_STATE="$OBJECT_STATE_DIR/object-backup"
+OBJECT_TIMER="commonair-object-backup.timer"
+# Garage's S3 port, published on the loopback only (commonair-garage.container).
+GARAGE_HOST_ENDPOINT="http://127.0.0.1:3900"
+OBJECT_BACKUP_KEY_NAME="commonair-object-backup"
+
+parse_backup_flags() {
+  BACKUP_DATABASE=no
+  BACKUP_OBJECTS=no
+  RESTORE_OBJECTS=no
+  OBJ_BWLIMIT=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --database) BACKUP_DATABASE=yes && shift ;;
+      --objects) BACKUP_OBJECTS=yes && shift ;;
+      --restore-objects) RESTORE_OBJECTS=yes && shift ;;
+      --bwlimit)
+        [ $# -ge 2 ] || die "--bwlimit needs a value"
+        OBJ_BWLIMIT=$2
+        [ -n "$OBJ_BWLIMIT" ] || die "--bwlimit needs a value"
+        shift 2
+        ;;
+      -h | --help) usage && exit 0 ;;
+      *) die "unknown backup option: $1" "see: selfhost.sh --help" ;;
+    esac
+  done
+  if [ "$RESTORE_OBJECTS" = yes ] && { [ "$BACKUP_DATABASE" = yes ] || [ "$BACKUP_OBJECTS" = yes ]; }; then
+    die "--restore-objects runs on its own, not with --database or --objects"
+  fi
+  if [ "$BACKUP_OBJECTS" = no ] && [ "$RESTORE_OBJECTS" = no ]; then
+    [ -z "$OBJ_BWLIMIT" ] || die "--bwlimit applies to --objects and --restore-objects only"
+    BACKUP_DATABASE=yes
+  fi
+  return 0
+}
+
+# rclone's --bwlimit syntax: a rate (20M), up:down rates, or a timetable ("08:00,4M 23:00,off").
+is_bwlimit() { printf '%s' "$1" | grep -Eq '^[0-9A-Za-z.:,| -]{1,200}$'; }
+# A path below the offsite bucket: segments of letters, digits and . _ -, never "..".
+is_prefix() {
+  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$' && ! printf '%s' "$1" | grep -Eq '(^|/)\.\.?(/|$)'
+}
+
+# Reads the offsite store from the env file into OBJ_DST_*: refuses one that is missing or
+# incomplete, and never prints a key.
+object_remote() {
+  _om=""
+  for _k in ENDPOINT REGION BUCKET ACCESS_KEY_ID SECRET_ACCESS_KEY; do
+    [ -n "$(env_get "BACKUP_OBJECTS_REMOTE_$_k" "$ENV_FILE")" ] || _om="$_om BACKUP_OBJECTS_REMOTE_$_k"
+  done
+  [ -z "$_om" ] || die "no offsite store for objects: $ENV_FILE lacks$_om" \
+    "fix: create a bucket and a key limited to it at a store in another region, add the" \
+    "BACKUP_OBJECTS_REMOTE_* settings to $ENV_FILE (docs/self-hosting/backups.md, 'Objects')," \
+    "then re-run. Keys go in that file (mode 0600), never on the command line."
+  OBJ_DST_ENDPOINT=$(env_get BACKUP_OBJECTS_REMOTE_ENDPOINT "$ENV_FILE")
+  OBJ_DST_ENDPOINT=${OBJ_DST_ENDPOINT%/}
+  OBJ_DST_REGION=$(env_get BACKUP_OBJECTS_REMOTE_REGION "$ENV_FILE")
+  OBJ_DST_BUCKET=$(env_get BACKUP_OBJECTS_REMOTE_BUCKET "$ENV_FILE")
+  OBJ_DST_PREFIX=$(env_get BACKUP_OBJECTS_REMOTE_PREFIX "$ENV_FILE" | sed 's|^/*||; s|/*$||')
+  OBJ_DST_PATH_STYLE=$(env_get BACKUP_OBJECTS_REMOTE_PATH_STYLE "$ENV_FILE")
+  OBJ_DST_PATH_STYLE=${OBJ_DST_PATH_STYLE:-true}
+  OBJ_DST_KEY=$(env_get BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID "$ENV_FILE")
+  OBJ_DST_SECRET=$(env_get BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY "$ENV_FILE")
+  is_s3_url "$OBJ_DST_ENDPOINT" ||
+    die "BACKUP_OBJECTS_REMOTE_ENDPOINT is not an S3 endpoint: $OBJ_DST_ENDPOINT (want https://host or https://host:port, no path)"
+  case "$OBJ_DST_ENDPOINT" in
+    http://*)
+      [ "$(env_get BACKUP_OBJECTS_REMOTE_ALLOW_HTTP "$ENV_FILE")" = true ] ||
+        die "BACKUP_OBJECTS_REMOTE_ENDPOINT is plain http: the objects would cross the network unencrypted" \
+          "fix: use the store's https:// endpoint, or set BACKUP_OBJECTS_REMOTE_ALLOW_HTTP=true for a store on a trusted network"
+      ;;
+  esac
+  is_s3_region "$OBJ_DST_REGION" || die "BACKUP_OBJECTS_REMOTE_REGION is not an S3 region: $OBJ_DST_REGION"
+  is_bucket "$OBJ_DST_BUCKET" || die "BACKUP_OBJECTS_REMOTE_BUCKET is not a bucket name: $OBJ_DST_BUCKET"
+  if [ -n "$OBJ_DST_PREFIX" ] && ! is_prefix "$OBJ_DST_PREFIX"; then
+    die "BACKUP_OBJECTS_REMOTE_PREFIX is not a path: $OBJ_DST_PREFIX (letters, digits, . _ - and /, no '..')"
+  fi
+  case "$OBJ_DST_PATH_STYLE" in true | false) ;; *) die "BACKUP_OBJECTS_REMOTE_PATH_STYLE must be true or false" ;; esac
+  # Never the value in the message: it may be a secret pasted into the wrong line.
+  is_s3_key "$OBJ_DST_KEY" || die "BACKUP_OBJECTS_REMOTE_ACCESS_KEY_ID is not an S3 key"
+  is_s3_key "$OBJ_DST_SECRET" || die "BACKUP_OBJECTS_REMOTE_SECRET_ACCESS_KEY is not an S3 key"
+  if [ -z "$OBJ_BWLIMIT" ]; then OBJ_BWLIMIT=$(env_get BACKUP_OBJECTS_BWLIMIT "$ENV_FILE"); fi
+  if [ -n "$OBJ_BWLIMIT" ] && ! is_bwlimit "$OBJ_BWLIMIT"; then
+    die "not an rclone bandwidth limit: $OBJ_BWLIMIT (e.g. 20M, or \"08:00,4M 23:00,off\")"
+  fi
+  return 0
+}
+
+# Where a bucket's copy lives offsite: <bucket>[/<prefix>]/media or …/evidence, whatever the
+# instance's own bucket names, so a restore into differently named buckets works.
+offsite_path() { printf 'caoffsite:%s/%s%s' "$OBJ_DST_BUCKET" "${OBJ_DST_PREFIX:+$OBJ_DST_PREFIX/}" "$1"; }
+
+# This instance's store, as rclone on the host reaches it, into OBJ_SRC_* and OBJ_MEDIA/OBJ_EVIDENCE.
+object_source() {
+  read_storage_mode "$ENV_FILE"
+  OBJ_MEDIA=$(env_get S3_BUCKET_MEDIA "$ENV_FILE")
+  OBJ_MEDIA=${OBJ_MEDIA:-commonair-media}
+  OBJ_EVIDENCE=$(env_get S3_BUCKET_EVIDENCE "$ENV_FILE")
+  OBJ_EVIDENCE=${OBJ_EVIDENCE:-commonair-evidence}
+  if [ "$STORAGE_MODE" = external ]; then
+    # S3_ENDPOINT is how the containers reach the store; the host may need another address.
+    OBJ_SRC_ENDPOINT=$(env_get BACKUP_OBJECTS_SOURCE_ENDPOINT "$ENV_FILE")
+    OBJ_SRC_ENDPOINT=${OBJ_SRC_ENDPOINT:-$(env_get S3_ENDPOINT "$ENV_FILE")}
+    OBJ_SRC_REGION=$(env_get S3_REGION "$ENV_FILE")
+    OBJ_SRC_PATH_STYLE=$(env_get S3_FORCE_PATH_STYLE "$ENV_FILE")
+    OBJ_SRC_PATH_STYLE=${OBJ_SRC_PATH_STYLE:-true}
+    is_s3_url "${OBJ_SRC_ENDPOINT%/}" || die "the instance's S3 endpoint is not usable from this host: $OBJ_SRC_ENDPOINT" \
+      "fix: set BACKUP_OBJECTS_SOURCE_ENDPOINT=https://… in $ENV_FILE"
+  else
+    OBJ_SRC_ENDPOINT=$GARAGE_HOST_ENDPOINT
+    OBJ_SRC_REGION=garage
+    OBJ_SRC_PATH_STYLE=true
+  fi
+  return 0
+}
+
+# Sets OBJ_SRC_KEY/OBJ_SRC_SECRET to the env file's pair named $1 and $2, or fails.
+use_source_keys() {
+  OBJ_SRC_KEY=$(env_get "$1" "$ENV_FILE")
+  OBJ_SRC_SECRET=$(env_get "$2" "$ENV_FILE")
+  if [ -z "$OBJ_SRC_KEY" ] || [ -z "$OBJ_SRC_SECRET" ]; then die "$ENV_FILE lacks $1 or $2"; fi
+  return 0
+}
+
+garage_cli() { podman exec commonair-garage /garage "$@"; }
+
+# Garage: a key that can read the media and evidence buckets and nothing else, created on the
+# first --objects run and kept in the env file. The secret comes from garage's output through a
+# pipe, never an argument. A stored key this Garage does not know (an env file restored onto a
+# new server) is replaced.
+garage_backup_key() {
+  _id=$(env_get BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID "$ENV_FILE")
+  _secret=$(env_get BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY "$ENV_FILE")
+  if [ -z "$_id" ] || [ -z "$_secret" ] || ! garage_cli key info "$_id" >/dev/null 2>&1; then
+    [ -z "$_id" ] || info "this Garage has no key $_id (a restored env file?): creating a new one"
+    info "creating the read-only Garage key $OBJECT_BACKUP_KEY_NAME"
+    make_tmp
+    _out=$(garage_cli key create "$OBJECT_BACKUP_KEY_NAME" 2>"$TMP_ROOT/garage.err") ||
+      die "could not create a Garage key: $(tail -n 1 "$TMP_ROOT/garage.err")" \
+        "fix: is commonair-garage running? (selfhost.sh status)"
+    _id=$(printf '%s\n' "$_out" | sed -n 's/^Key ID:[[:space:]]*//p' | head -n 1)
+    _secret=$(printf '%s\n' "$_out" | sed -n 's/^Secret key:[[:space:]]*//p' | head -n 1)
+    if ! is_s3_key "$_id" || ! is_s3_key "$_secret"; then
+      die "could not read the new key from garage's output" \
+        "fix: create it by hand (backups.md, 'Without the script') and set BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID" \
+        "and BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY in $ENV_FILE"
+    fi
+    env_set BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID "$_id"
+    env_set BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY "$_secret"
+  fi
+  # Idempotent, so a run interrupted between create and allow repairs itself.
+  for _b in "$OBJ_MEDIA" "$OBJ_EVIDENCE"; do
+    garage_cli bucket allow --read "$_b" --key "$_id" >/dev/null 2>&1 ||
+      die "could not let the key $_id read $_b" "fix: is commonair-garage running? (selfhost.sh status)"
+  done
+  OBJ_SRC_KEY=$_id
+  OBJ_SRC_SECRET=$_secret
+}
+
+# Runs rclone with two remotes defined in its environment only: `cainstance`, this instance's
+# store (OBJ_SRC_*), and `caoffsite` (OBJ_DST_*). A subshell, so nothing else this script starts
+# inherits the keys. The empty config file keeps an operator's own rclone.conf (a manual setup
+# from before the script) out of it. no_check_bucket on both: a key limited to one bucket cannot
+# create buckets, and rclone would otherwise try.
+rclone_run() {
+  make_tmp
+  : >"$TMP_ROOT/rclone.conf"
+  (
+    export RCLONE_CONFIG="$TMP_ROOT/rclone.conf"
+    export RCLONE_CONFIG_CAINSTANCE_TYPE=s3 RCLONE_CONFIG_CAINSTANCE_PROVIDER=Other
+    export RCLONE_CONFIG_CAINSTANCE_ENV_AUTH=false RCLONE_CONFIG_CAINSTANCE_NO_CHECK_BUCKET=true
+    export RCLONE_CONFIG_CAINSTANCE_ENDPOINT="$OBJ_SRC_ENDPOINT" RCLONE_CONFIG_CAINSTANCE_REGION="$OBJ_SRC_REGION"
+    export RCLONE_CONFIG_CAINSTANCE_FORCE_PATH_STYLE="$OBJ_SRC_PATH_STYLE"
+    export RCLONE_CONFIG_CAINSTANCE_ACCESS_KEY_ID="$OBJ_SRC_KEY"
+    export RCLONE_CONFIG_CAINSTANCE_SECRET_ACCESS_KEY="$OBJ_SRC_SECRET"
+    export RCLONE_CONFIG_CAOFFSITE_TYPE=s3 RCLONE_CONFIG_CAOFFSITE_PROVIDER=Other
+    export RCLONE_CONFIG_CAOFFSITE_ENV_AUTH=false RCLONE_CONFIG_CAOFFSITE_NO_CHECK_BUCKET=true
+    export RCLONE_CONFIG_CAOFFSITE_ENDPOINT="$OBJ_DST_ENDPOINT" RCLONE_CONFIG_CAOFFSITE_REGION="$OBJ_DST_REGION"
+    export RCLONE_CONFIG_CAOFFSITE_FORCE_PATH_STYLE="$OBJ_DST_PATH_STYLE"
+    export RCLONE_CONFIG_CAOFFSITE_ACCESS_KEY_ID="$OBJ_DST_KEY"
+    export RCLONE_CONFIG_CAOFFSITE_SECRET_ACCESS_KEY="$OBJ_DST_SECRET"
+    # --checksum compares hash and size, which S3 listings carry, instead of a HEAD per object for
+    # its modification time; an object without a hash both sides share is compared by size.
+    exec rclone "$1" "$2" "$3" --checksum --stats=1m --stats-one-line --stats-log-level=NOTICE \
+      ${OBJ_BWLIMIT:+"--bwlimit=$OBJ_BWLIMIT"}
+  )
+}
+
+require_rclone() {
+  have rclone || die "rclone is not installed (it copies the objects)" \
+    "fix: as root, apt install rclone (Debian) or dnf install rclone (Fedora), then re-run"
+}
+
+backup_database() {
   info "running commonair-backup.service"
   systemctl --user start commonair-backup.service || die "the backup failed" "see: journalctl --user -u commonair-backup"
   podman exec --user postgres commonair-postgres \
     sh -c '. /usr/local/lib/commonair/walg-env.sh && wal-g backup-list'
 }
 
+backup_objects() {
+  require_rclone
+  object_remote
+  object_source
+  _first=yes
+  [ ! -f "$OBJECT_STATE" ] || _first=no
+  # Garage: one read-only key for both buckets. External: a read-only key if the operator made
+  # one (BACKUP_OBJECTS_SOURCE_*), else each bucket's own instance key (sync never writes there).
+  if [ "$STORAGE_MODE" != external ]; then garage_backup_key; fi
+  for _role in media evidence; do
+    if [ "$_role" = media ]; then _bucket=$OBJ_MEDIA; else _bucket=$OBJ_EVIDENCE; fi
+    if [ "$STORAGE_MODE" = external ]; then
+      if [ -n "$(env_get BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID "$ENV_FILE")" ]; then
+        use_source_keys BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY
+      elif [ "$_role" = media ]; then
+        use_source_keys S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
+      else
+        use_source_keys S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY
+      fi
+    fi
+    info "copying $_bucket to $OBJ_DST_ENDPOINT, $(offsite_path "$_role" | sed 's/^caoffsite://')"
+    rclone_run sync "cainstance:$_bucket" "$(offsite_path "$_role")" ||
+      die "copying $_bucket offsite failed" \
+        "see the rclone lines above; selfhost.sh status still shows the last successful run"
+  done
+  record_object_backup
+  say "object backup done: $OBJ_MEDIA and $OBJ_EVIDENCE copied to $(object_remote_name)"
+  # The first success turns on the daily run; later runs leave the timer as the operator set it.
+  if [ "$_first" = yes ]; then
+    if systemctl --user enable --now "$OBJECT_TIMER" >/dev/null 2>&1; then
+      info "daily object backup on ($OBJECT_TIMER); turn it off with: systemctl --user disable --now $OBJECT_TIMER"
+    else
+      warn "could not enable $OBJECT_TIMER: run 'systemctl --user enable --now $OBJECT_TIMER' for daily copies"
+    fi
+  fi
+}
+
+# The offsite copy's place, without keys: endpoint/bucket[/prefix].
+object_remote_name() { printf '%s/%s%s' "$OBJ_DST_ENDPOINT" "$OBJ_DST_BUCKET" "${OBJ_DST_PREFIX:+/$OBJ_DST_PREFIX}"; }
+
+# Only after every bucket copied: the time and the place, for status and monitoring.
+record_object_backup() {
+  mkdir -p "$OBJECT_STATE_DIR"
+  printf 'LAST_SUCCESS=%s\nREMOTE=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(object_remote_name)" >"$OBJECT_STATE.tmp"
+  mv "$OBJECT_STATE.tmp" "$OBJECT_STATE"
+}
+
+# For status: when the last object backup succeeded and where to, or why there is none.
+object_backup_summary() {
+  if [ -f "$OBJECT_STATE" ]; then
+    printf '%s (to %s)' "$(env_get LAST_SUCCESS "$OBJECT_STATE")" "$(env_get REMOTE "$OBJECT_STATE")"
+  elif [ -n "$(env_get BACKUP_OBJECTS_REMOTE_BUCKET "$ENV_FILE")" ]; then
+    printf 'never (selfhost.sh backup --objects)'
+  else
+    printf 'not configured (docs/self-hosting/backups.md)'
+  fi
+}
+
+# The offsite copy back into the instance's buckets, with the instance's own keys (they can
+# write): the main key for media, the evidence key for evidence. rclone copy, not sync: an object
+# the instance has and the copy lacks stays.
+restore_objects() {
+  require_rclone
+  object_remote
+  object_source
+  for _role in media evidence; do
+    if [ "$_role" = media ]; then
+      _bucket=$OBJ_MEDIA
+      use_source_keys S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
+    else
+      _bucket=$OBJ_EVIDENCE
+      use_source_keys S3_EVIDENCE_ACCESS_KEY_ID S3_EVIDENCE_SECRET_ACCESS_KEY
+    fi
+    info "restoring $_bucket from $OBJ_DST_ENDPOINT, $(offsite_path "$_role" | sed 's/^caoffsite://')"
+    rclone_run copy "$(offsite_path "$_role")" "cainstance:$_bucket" ||
+      die "restoring $_bucket failed" "see the rclone lines above; re-running it is safe (it copies only what is missing or different)"
+  done
+  say "objects restored into $OBJ_MEDIA and $OBJ_EVIDENCE from $(object_remote_name)"
+  say "sealed evidence opens only with the EVIDENCE_PRIVATE_KEY it was sealed with (this env file's, if restored from your copy)"
+}
+
+cmd_backup() {
+  parse_backup_flags "$@"
+  require_instance backup
+  if [ "$RESTORE_OBJECTS" = yes ]; then
+    restore_objects
+    return 0
+  fi
+  if [ "$BACKUP_DATABASE" = yes ]; then backup_database; fi
+  if [ "$BACKUP_OBJECTS" = yes ]; then backup_objects; fi
+  return 0
+}
 cmd_status() {
   require_instance status
   say "version:   $(installed_version) ($(readlink "$CURRENT_LINK"))"
@@ -1612,6 +1927,7 @@ cmd_status() {
   _last=$(systemctl --user show commonair-backup.service --property=ExecMainExitTimestamp --value 2>/dev/null || true)
   _res=$(systemctl --user show commonair-backup.service --property=Result --value 2>/dev/null || true)
   say "last backup: ${_last:-never} (${_res:-?})"
+  say "last object backup: $(object_backup_summary)"
   say ""
   say "volumes:"
   for _v in $(podman volume ls --quiet --filter name=commonair- 2>/dev/null); do
@@ -1631,7 +1947,7 @@ main() {
   case "$_cmd" in
     install) cmd_install "$@" ;;
     upgrade) cmd_upgrade "$@" ;;
-    backup) cmd_backup ;;
+    backup) cmd_backup "$@" ;;
     status) cmd_status ;;
     -h | --help | help) usage ;;
     *) die "unknown command: $_cmd" "see: selfhost.sh --help" ;;
