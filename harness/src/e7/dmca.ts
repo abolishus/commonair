@@ -502,7 +502,7 @@ export async function stepDmca(run: Run): Promise<void> {
   await ctx.step(t("G got the contentRestored mail"), () =>
     ctx.platform.mailpit.waitForMessage(g.user.email, (m) => m.subject.startsWith("Your content is available again")),
   );
-  const audit = await staff.mod.api.client.safety.auditLog({
+  const audit = await staff.admin.api.client.safety.auditLog({
     subjectType: "dmca_notice",
     subjectId: noticeId,
     limit: 100,
