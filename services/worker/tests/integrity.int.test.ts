@@ -444,9 +444,12 @@ describe("scheduling across replicas", () => {
     expect(failed.opts.attempts).toBe(3);
     expect(failed.opts.backoff).toEqual({ type: "exponential", delay: 10_000 });
     expect(failed.failedReason).toMatch(/follows/);
-    // Scoring kept running meanwhile (its first run happens at registration).
-    const done = await q.getJobs(["completed"], 0, 100);
-    expect(done.some((j) => j.name === INTEGRITY_JOBS.scoreSessions)).toBe(true);
+    // Scoring keeps running meanwhile (its first run happens at registration; under load it may
+    // still be in flight when the failed attempt shows up, so wait for it rather than sample once).
+    await waitFor(
+      async () => (await q.getJobs(["completed"], 0, 100)).find((j) => j.name === INTEGRITY_JOBS.scoreSessions) ?? null,
+      { label: "score-sessions completed alongside", timeoutMs: 20_000, intervalMs: 200 },
+    );
     await t.sql`alter table follows_gone rename to follows`;
   }, 60_000);
 });
