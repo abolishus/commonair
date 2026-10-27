@@ -74,10 +74,7 @@ import {
   externalInstallFlags,
   externalStoreSetup,
 } from "./e2e-s3.ts";
-// R0-c hook: scripts/selfhost/e2e-backup.ts has not landed yet. Once it has, import its check
-// here (signature `(inHost: InHost, expectThat: Expect) => void`, the shapes e2e-irc.ts and
-// e2e-s3.ts export) and enable the backup step in main(), marked "R0-c hook" as well.
-// import { checkBackups } from "./e2e-backup.ts";
+import { checkObjectBackup, objectBackupSetup, objectBackupTeardown } from "./e2e-backup.ts";
 
 // Test-only images (ADR 0022: digest-pinned, licensed in infra/image-licenses.json).
 export const ZOT_IMAGE =
@@ -1238,13 +1235,16 @@ async function main(): Promise<void> {
     // restarts it.
     await step("a killed worker comes back by itself", () => checkRestart("worker"));
 
-    // R0-c hook: once scripts/selfhost/e2e-backup.ts lands (see the import at the top), its
-    // backup phase runs here, before the rollback: a database backup, `backup --objects` to an
-    // offsite remote, an object restore. Its own step, so its time is in the timings table.
-    // With --storage external the second Garage (E2E_STORE) is already the instance's store:
-    // a check that calls externalStoreSetup again would replace it (the setup starts with
-    // `podman rm -f` of that container), so it needs a store of its own there.
-    // await step("backups: database, objects offsite, object restore", () => checkBackups(inHost, expectThat));
+    // R0-c: `backup --objects` to an offsite bucket on the second Garage (E2E_STORE), then an
+    // object restore, before the rollback. Its own step, so its time is in the timings table.
+    // With --storage external that Garage is already the instance's store: objectBackupSetup
+    // reuses a running one rather than calling externalStoreSetup (which removes it first).
+    await step("backups: objects offsite and an object restore", () => {
+      objectBackupSetup(inHost, expectThat);
+      const t = checkObjectBackup(inHost, expectThat);
+      console.log(`e2e: object backup ${t.backupSeconds}s, object restore ${t.restoreSeconds}s`);
+      objectBackupTeardown(inHost);
+    });
 
     await step(`broken release ${v3} rolls back to ${v2}`, async () => {
       relabel(commit, v3, ["api"]);

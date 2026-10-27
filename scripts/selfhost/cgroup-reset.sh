@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2026 CommonAir contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# cgroup-reset.sh: the last ExecStopPost= of every container unit with RestartMode=direct.
+# cgroup-reset.sh: the first ExecStopPost= of every container unit with RestartMode=direct (Quadlet
+# appends its own `podman rm -v -f -i` after it; infra/tests/quadlet-order.test.ts and the e2e check that order).
 #
 # Leaves the unit's cgroup as systemd expects to find it at the next start: no sub-cgroups but
 # its own .control, and no controllers enabled for children. Without this, a restart can fail for

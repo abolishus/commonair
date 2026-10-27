@@ -629,7 +629,7 @@ exit 0`,
       expect(r.code, r.err).toBe(0);
       const install = h.calls().find((c) => c.startsWith("apt-get install"));
       expect(install).toBeDefined();
-      for (const pkg of ["podman", "catatonit", "aardvark-dns", "nftables", "passt", "uidmap"])
+      for (const pkg of ["podman", "catatonit", "aardvark-dns", "nftables", "passt", "uidmap", "rclone"])
         expect(install!.split(" ")).toContain(pkg);
     },
     TIMEOUT,

@@ -376,11 +376,11 @@ root_prepare() {
       debian)
         info "installing podman and its helpers (apt)"
         DEBIAN_FRONTEND=noninteractive apt-get update -q
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -q podman catatonit uidmap passt aardvark-dns nftables dbus-user-session curl ca-certificates
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q podman catatonit uidmap passt aardvark-dns nftables dbus-user-session curl ca-certificates rclone
         ;;
       fedora)
         info "installing podman and its helpers (dnf)"
-        dnf install -y -q podman catatonit passt aardvark-dns nftables curl
+        dnf install -y -q podman catatonit passt aardvark-dns nftables curl rclone
         ;;
       *) die "cannot install podman on ${_osid:-this distribution}" "fix: install Podman 5, catatonit, aardvark-dns and nftables, then re-run" ;;
     esac

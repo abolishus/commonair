@@ -85,6 +85,32 @@ readers to read `data.verdict.outcome`.
   monitoring until production's monitoring droplet exists; region/size slugs need `doctl`.
 - S1-c: not run live; S1-a: droplet sweep not run.
 
+### Wave 2 (2026-10-26): merged on main, gate pending the user
+
+Base `265f4c7` (wave 1, pushed). Implement, independent review, fix pass in the same worktree.
+
+| Unit | Commits (branch)                      | What landed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Targeted tests                          |
+| ---- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| R0-c | `e526c88`, `219a062` (`r0/c-backups`) | `selfhost.sh backup [--database] [--objects] [--restore-objects] [--bwlimit] [--max-delete] [--allow-empty-source]`: rclone (host package) syncs media and evidence offsite (`BACKUP_OBJECTS_REMOTE_*`), restore copies back without deleting. Guards: an emptied source is refused, `--max-delete` (default 1000), a lock, an unfinished-restore marker. Garage read-only backup key created by the script. `commonair-object-backup.{service,timer}` daily 04:00 UTC, enabled by the first successful run. `status` shows the last object backup. backups.md rewritten. `e2e-backup.ts`. | selfhost-backup 68, e2e-backup 12       |
+| R0-d | `dbdcb3a`, `318ec6b` (`r0/d-units`)   | Observability no longer holds back the apps (`Wants=` + `After=` on start, not health). Drop-in directories (incl. symlinked) survive install/upgrade; dangling drop-in symlinks removed. `commonair-pg-health` state in `/run`, SIGKILL after a grace when SIGQUIT/SIGTERM does not stop a stuck postmaster.                                                                                                                                                                                                                                                                              | infra 254 unit; pg-health int SIGKILL 2 |
+| R0-e | `06417e8`, `6c88fd1` (`r0/e-tests`)   | e2e: `--storage garage\|external`, `--keep`, a Zot pull-through mirror locally (`--no-mirror`), R0-a's IRC and R0-b's S3 checks wired, ExecStopPost= order check; CI third job (Debian, external store). `quadlet-order.test.ts`, `selfhost-e2e-variants.test.ts`, migrate timing in `stack.int.test.ts`.                                                                                                                                                                                                                                                                                  | 85                                      |
+
+**Contract requests applied (integration commit after the merges):** R0-c's object-backup timer
+in compose.test's timer list; `rclone` in root_prepare's apt and dnf installs (and the install
+test); R0-e's `cgroup-reset.sh` header (it is the _first_ ExecStopPost=, Quadlet's `podman rm`
+follows); the unused `--distro`/`--keep` flag allowlist entries dropped; R0-c's checks wired into
+the e2e's backup step (setup, check, teardown, never `externalStoreSetup` again) and the variants
+test updated to match. Targeted: infra unit 659, scripts unit 778, tsc clean.
+
+**Not applied:** R0-d's optional compose.yaml change (dev stack depends_on the collector
+`service_started` instead of `service_healthy`), to keep the dev gate unchanged; worth doing later.
+
+**Open findings (accepted):** R0-d: a collector container that cannot start at all can still hold
+back the apps through After= with RestartMode=direct; drop the apps' After= on the collector if
+the droplet shows it matters. R0-e: the migrate test limits (150 s/160 s) come from one 76 s run;
+time it during the gate. R0-c: object backups do not encrypt (rclone crypt is the manual path);
+the e2e checks only full-bucket emptying, not partial thinning (provider versioning covers that).
+
 ## Web gaps from the first real-host install (2026-10-26, branch `claude/web-gaps-resend-upload`)
 
 The two product gaps session thirteen found on staging-stream.abolish.us, closed in the web app:

@@ -250,11 +250,16 @@ describe("wiring of the other units' checks", () => {
     }
   });
 
-  test("R0-c's backup phase has a marked hook before the rollback step", () => {
-    const hook = E2E.lastIndexOf("R0-c hook");
-    expect(hook).toBeGreaterThan(E2E.indexOf('await step("a killed worker comes back by itself"'));
-    expect(hook).toBeLessThan(E2E.indexOf("await step(`broken release"));
-    expect(E2E).toContain("checkBackups(inHost, expectThat)");
+  test("R0-c's object backup runs between the worker restart and the rollback, set up and torn down", () => {
+    const step = E2E.indexOf('await step("backups: objects offsite and an object restore"');
+    expect(step).toBeGreaterThan(E2E.indexOf('await step("a killed worker comes back by itself"'));
+    expect(step).toBeLessThan(E2E.indexOf("await step(`broken release"));
+    const body = stepBody("backups: objects offsite");
+    const order = ["objectBackupSetup(", "checkObjectBackup(", "objectBackupTeardown("].map((c) => body.indexOf(c));
+    expect(order.every((i) => i > 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // With --storage external the second Garage is the instance's store: never set it up again.
+    expect(body).not.toContain("externalStoreSetup");
   });
 });
 

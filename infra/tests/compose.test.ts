@@ -618,7 +618,11 @@ describe("systemd timers (infra/systemd)", () => {
 
   test("every timer starts its own oneshot service and survives downtime", () => {
     const timers = readdirSync(dir).filter((f) => f.endsWith(".timer"));
-    expect(timers.sort()).toEqual(["commonair-backup.timer", "commonair-irc-cert.timer"]);
+    expect(timers.sort()).toEqual([
+      "commonair-backup.timer",
+      "commonair-irc-cert.timer",
+      "commonair-object-backup.timer",
+    ]);
     for (const t of timers) {
       const service = t.replace(/\.timer$/, ".service");
       expect(keys(unit(t), "Unit"), t).toEqual([service]);
