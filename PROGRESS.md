@@ -987,8 +987,8 @@ Open:
   broadcast and deletes its VODs/clips, but their objects stay and no hashes are added); those
   items stay without `hashed_at` so a later fix picks them up. Requests decided before migration
   0018 need a one-off `ncii-hash` re-enqueue (none exist on a real instance yet).
-- vods/clips `update/remove` remain 501 (E6). `vods.broadcast_id` has no index (the clip backstop
-  subquery uses it).
+- vods/clips `update/remove` remain 501 (E6). ~~`vods.broadcast_id` has no index~~ closed: indexed in
+  0022; `clips.broadcast_id` indexed in the E7 contract step (0024).
 
 ## E4b validation (2026-10-21)
 

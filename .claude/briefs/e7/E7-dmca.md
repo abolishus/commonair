@@ -23,7 +23,7 @@ statute summary and report the disagreement.
 
 ## Why
 
-`safety.dmca.*` answers 501 (`services/api/src/routes/safety.ts:479-484`), yet the footer, the
+`safety.dmca.*` answers 501 (`services/api/src/routes/safety.ts:428-435` after the contract step), yet the footer, the
 DMCA policy and `docs/operators/trust-safety.md:158` ("The copyright notice and counter-notice flow
 is already built") promise it. Without a working notice-and-takedown flow, a designated agent and
 a repeat-infringer policy, an instance has no § 512(c) safe harbor for its users' VODs and clips.
@@ -70,8 +70,8 @@ a repeat-infringer policy, an instance has no § 512(c) safe harbor for its user
 
 ## You own (write only these)
 
-- `services/api/src/routes/safety.ts`: only the `dmca:` block (:479-484 plus the two stubs the
-  contract step adds) and the header comment (:4-7). Put logic in `services/api/src/dmca/**`.
+- `services/api/src/routes/safety.ts`: only the `dmca:` block (:428-435 at `3bacecb`, including the two stubs
+  the contract step added) and the header comment (:4-7). Put logic in `services/api/src/dmca/**`.
 - `services/api/src/dmca/**` (new): notice intake and URL resolution, decisions, counter-notices,
   strikes and the repeat-infringer hook, `restoreAfter` business-day maths, DTOs, emails.
 - `services/api/src/media/visibility.ts`: only the removed-reason handling (:26-28, :67, :78,
@@ -135,8 +135,9 @@ request** with the exact diff.
 
 ## What is there today (verified at `9c51c93`)
 
-- `safety.ts:479-484`: the four `dmca` handlers are `notImplemented`; the header (:6-7) says DMCA
-  is not part of E4c. `safety.suspend` (:486-…) shows the platform-suspension pattern (mod row +
+- `safety.ts:428-435` (line numbers in this file are at `9c51c93` unless noted; these two are at
+  `3bacecb`): the six `dmca` handlers are `notImplemented`; the header (:6-7) says DMCA
+  is not part of E4c. `safety.suspend` (:437-…) shows the platform-suspension pattern (mod row +
   audit + `afterBroadcastEnded` + `publishUserControl` after commit).
 - The NCII flow is your template: `services/api/src/routes/ncii.ts` (public submit with
   `verifyAltcha` :180, URL resolution with `resolveContentUrl` from
@@ -181,9 +182,12 @@ request** with the exact diff.
    `dmca_strike` `account_actions` row (source `dmca_notice`/notice id, actor the moderator) +
    `account.action.recorded`; then the repeat-infringer check per owner (`activeDmcaStrikes`; at or
    over the threshold and no `activeAccountAction(…, "dmca_termination")`: insert one, `setSuspension(tx, …, "user", true, now,
-   undefined, "dmca_repeat_infringer")` only when the user is not already banned (an existing
-   moderation or T0 suspension is left as it is, so that a later reversal of the termination never
-   lifts it; record the termination anyway), event, audit `account.dmca_termination`, notify moderators);
+   undefined, "dmca_repeat_infringer")`, which itself refuses to take over a user suspension still
+   in force (an existing moderation or T0 suspension is left as it is, so that a later reversal of
+   the termination never lifts it): `changed: false` means "already suspended for another reason",
+   record the termination anyway; the partial unique index `account_actions_active_termination_uq`
+   (0026) allows one unreversed termination per user, so check `activeAccountAction` under the lock
+   first rather than relying on the unique violation), event, audit `account.dmca_termination`, notify moderators);
    audit `dmca.notice.action`; event `dmca.notice.decided`. After commit: enqueue `dmca-disable`,
    `afterBroadcastEnded`, `publishUserControl` for a suspension, and email each owner
    `dmcaNoticeReceived` (`noticeUrl` `/settings/copyright?notice=<id>`, the content title, the
@@ -237,7 +241,9 @@ request** with the exact diff.
    and propose privacy-policy wording in your final message (the seeded text is not yours).
 9. **Harness step 8** (`harness/src/e7/dmca.ts`, `stepDmca(run: Run)` with `Run` from
    `harness/src/safety-run.ts`): exactly the `trust-safety` step 8 in `e7-selectors.md`, web and
-   `--set via=api`, the restore through `run.hooks.dmcaTick(asOf)` (contract step), emails read
+   `--set via=api`, the restore through `run.hooks.dmcaTick(asOf)` (contract step). Step 8 is in
+   `PENDING_SAFETY_STEPS` (`harness/src/safety.ts`), so `all` skips it until your unit merges; run
+   it with `--set steps=8`, and the orchestrator removes it from that list at integration. emails read
    from Mailpit (`harness/src/mailpit.ts`), the claimant's email added
    to `run.emails` (log needles). Never print claimant details in the report.
 10. **Docs.** `docs/operators/dmca.md`: the designated agent and its registration, what the

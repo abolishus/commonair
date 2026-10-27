@@ -16,7 +16,12 @@ const { users, channels } = schema;
 /** Written to `users.ban_reason` and `channels.suspended_reason`. */
 export type SuspensionReason = "moderation" | "dmca_repeat_infringer";
 
-/** Suspend or unsuspend; the T0 trigger refuses lifting a T0 suspension (→ FORBIDDEN). */
+/**
+ * Suspend or unsuspend; the T0 trigger refuses lifting a T0 suspension (→ FORBIDDEN). A
+ * non-moderation suspension (DMCA) never takes over a user suspension that is still in force:
+ * otherwise a timed moderation ban would turn permanent, and lifting the DMCA suspension later
+ * would drop it. `changed: false` then means "already suspended for another reason".
+ */
 export async function setSuspension(
   tx: Executor,
   target: { userId: string; channelId: string | null },
@@ -43,6 +48,9 @@ export async function setSuspension(
           and(
             eq(users.id, target.userId),
             suspended ? sql`not (${users.banned} and ${users.banReason} = 't0_hash_match')` : eq(users.banned, true),
+            suspended && reason !== "moderation"
+              ? sql`(not ${users.banned} or (${users.banExpires} is not null and ${users.banExpires} <= ${now.toISOString()}::timestamptz))`
+              : undefined,
           ),
         )
         .returning({ id: users.id });

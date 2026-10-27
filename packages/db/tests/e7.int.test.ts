@@ -228,6 +228,19 @@ describe("dmca protections", () => {
       "dmca_counter_notices_due_idx",
     ]);
   });
+
+  test("one unreversed termination per user; a new one is allowed after reversal (0026)", async () => {
+    const userId = await makeUser();
+    const first = await strike(userId, new Date(), "dmca_termination");
+    await expectPgError(strike(userId, new Date(), "dmca_termination"), /account_actions_active_termination_uq/);
+    await strike(userId); // strikes are not limited
+    await strike(userId);
+    expect(
+      await reverseAccountActionInTx(app, { id: first.id, now: new Date(), byId: null, reason: "appeal_overturned" }),
+    ).not.toBeNull();
+    const second = await strike(userId, new Date(), "dmca_termination");
+    expect((await activeAccountAction(app, userId, "dmca_termination"))?.id).toBe(second.id);
+  });
 });
 
 describe("account-actions helpers", () => {

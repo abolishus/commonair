@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "account_actions_active_termination_uq" ON "account_actions" USING btree ("user_id") WHERE "account_actions"."action" = 'dmca_termination' and "account_actions"."reversed_at" is null;

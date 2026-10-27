@@ -438,10 +438,11 @@ Staging: set `HARNESS_*` URLs from `railway domain list` and `HARNESS_MAILPIT_AU
     helpers are copied into `services/tracker/src/ip.ts` (move into `@commonair/service`).
   - Info hashes are still client-chosen (the per-channel cap makes that harmless for evidence);
     deriving the allowed set from the channel's swarm ids would also stop junk swarms.
-  - Legal: `LegalDocument` DTO lacks `requiresAcceptance` (clients send every id); no retention job
-    for anonymous consent rows.
-- **Contract requests still open:** `CidrClassifier` public `size` getter; `WordFilter` DTO
-  `invalid`/`invalidReason`; `appeals.create` on the `write` bucket; `ISSUANCE_KEYS` into contracts.
+  - Legal: no retention job for anonymous consent rows (`LegalDocument.requiresAcceptance` landed
+    in the E7 contract step).
+- **Contract requests:** all four are closed. Done before E7: the `CidrClassifier` `size` getter,
+  and (`7833a19`) the `WordFilter` DTO `invalid`/`invalidReason` and `appeals.create` on the
+  `write` bucket. `ISSUANCE_KEYS` moved into contracts in the E7 contract step.
 - Overturning a moderation appeal records the decision only (does not lift the ban).
 - IP canonicalization changed `ip_hash` for clients Bun reported as `::ffff:a.b.c.d`: owner-IP
   exclusion for broadcasts live across that deploy compares the old `last_used_ip_hash` until the

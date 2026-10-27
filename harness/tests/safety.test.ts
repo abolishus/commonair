@@ -8,6 +8,8 @@ import { PROTECTED_TABLES, isoOrNull } from "../src/safety-db.ts";
 import { ffmpegFailure, internalSecret } from "../src/safety-io.ts";
 import {
   ALL_SAFETY_STEPS,
+  PENDING_SAFETY_STEPS,
+  SAFETY_STEP_NUMBERS,
   DEADLINE_SLACK_MS,
   GENERIC_NEEDLES,
   NCII_DEADLINE_MS,
@@ -52,10 +54,19 @@ describe("ffmpeg failure reporting", () => {
 describe("step selection", () => {
   test("all, empty and lists", () => {
     expect(parseSteps("all")).toEqual([...ALL_SAFETY_STEPS]);
-    expect(parseSteps("")).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(parseSteps("")).toEqual([...ALL_SAFETY_STEPS]);
     expect(parseSteps("1,2,5")).toEqual([1, 2, 5]);
     expect(parseSteps(" 5 , 1,5,2 ")).toEqual([1, 2, 5]);
-    expect(parseSteps("ALL")).toHaveLength(9);
+    expect(parseSteps("ALL")).toEqual([...ALL_SAFETY_STEPS]);
+  });
+
+  test("all is every step that is not pending; pending steps are still selectable", () => {
+    expect(SAFETY_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(ALL_SAFETY_STEPS).toEqual(SAFETY_STEP_NUMBERS.filter((n) => !PENDING_SAFETY_STEPS.includes(n)));
+    for (const n of PENDING_SAFETY_STEPS) {
+      expect(parseSteps("all")).not.toContain(n);
+      expect(parseSteps(String(n))).toEqual([n]);
+    }
   });
 
   test("ranges", () => {

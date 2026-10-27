@@ -78,7 +78,7 @@ helper file if needed) so it merges cleanly.
   No outbox row by decision (:337-338); the audit row carries ids and enums only.
 - Chat ban lifting is `chat.bans.unban` (`services/api/src/routes/chat.ts:398-436`), extracted to
   `liftChatBanInTx` by the contract step. Platform suspension is `safety.suspend`
-  (`safety.ts:486-…`) via `setSuspension` (moved to `moderation/suspension.ts`). A T0 suspension
+  (`safety.ts:437-…` at `3bacecb`) via `setSuspension` (moved to `moderation/suspension.ts`). A T0 suspension
   cannot be lifted (`pgCode 42501` → `FORBIDDEN`, the `users_t0_guard` trigger).
 - `services/worker/src/moderation/ncii-hash.ts:132-…` hashes `vod`, `clip` and `upload` items and
   skips `broadcast` items (:146 "not hashed yet (broadcast): left unmarked for a later run"). The
@@ -135,7 +135,9 @@ helper file if needed) so it merges cleanly.
    suspension", "records only"). Selectors exactly as `e7-selectors.md`.
 7. **Harness step 9** (`harness/src/e7/appeal-ban.ts`, `stepAppealLiftsBan(run: Run)` with `Run`
    from `harness/src/safety-run.ts`): exactly `trust-safety` step 9 in `e7-selectors.md`, web and
-   `--set via=api`; the moderator who resolves is `run.staff.mod`, never the banning streamer.
+   `--set via=api`; the moderator who resolves is `run.staff.mod`, never the banning streamer. Step 9 is in
+   `PENDING_SAFETY_STEPS` (`harness/src/safety.ts`), so `all` skips it until your unit merges; run
+   it with `--set steps=9`, and the orchestrator removes it from that list at integration.
 
 ## Tests you must add
 

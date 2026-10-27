@@ -185,6 +185,10 @@ export const accountActions = pgTable(
     index("account_actions_active_idx")
       .on(t.userId, t.action)
       .where(sql`${t.reversedAt} is null`),
+    // At most one live termination per user, so reversing "the" termination lifts it for good.
+    uniqueIndex("account_actions_active_termination_uq")
+      .on(t.userId)
+      .where(sql`${t.action} = 'dmca_termination' and ${t.reversedAt} is null`),
     check("account_actions_reversal_ck", sql`(${t.reversedAt} is null) = (${t.reversedReason} is null)`),
   ],
 );
