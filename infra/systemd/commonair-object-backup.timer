@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Off by default: the first successful `selfhost.sh backup --objects` enables it, so it never
+# runs on an instance without an offsite store.
+[Unit]
+Description=Daily CommonAir object backup
+
+[Timer]
+# An hour after the base backup (commonair-backup.timer), so the two do not compete for the disk.
+OnCalendar=*-*-* 04:00:00 UTC
+RandomizedDelaySec=30m
+# Runs at the next boot if the server was off at 04:00.
+Persistent=true
+Unit=commonair-object-backup.service
+
+[Install]
+WantedBy=timers.target
