@@ -4,7 +4,9 @@
 /**
  * Who may see a VOD or clip. Every removal (T0, NCII, account deletion, retention) sets
  * `status = 'deleted'`; an owner or creator removal (E6) sets `removed_reason` at once and the
- * worker deletes the objects later; a T1-restricted broadcast's VODs and clips stay unlisted until
+ * worker deletes the objects later; a DMCA takedown (E7) sets `removed_reason = 'dmca'` and keeps
+ * the objects (a counter-notice can restore them), and also hides clips of a DMCA-removed VOD; a
+ * T1-restricted broadcast's VODs and clips stay unlisted until
  * its case is cleared (docs/testing/e4c-selectors.md "T1 live"). None of these is shown to anyone,
  * the owner included. Beyond that the owner sees their own processing, failed, private and
  * subscriber-only items; an active subscriber also sees the channel's ready `subscribers` VODs (and
@@ -25,7 +27,13 @@ export type Audience = "owner" | "subscriber" | "public";
 
 /** `removed_reason` of a VOD or clip its channel owner or its creator deleted (E6). */
 export const OWNER_REMOVED_REASONS = ["owner", "creator"] as const;
-const ownerRemoved = (reason: string | null) => (OWNER_REMOVED_REASONS as readonly string[]).includes(reason ?? "");
+/**
+ * Every `removed_reason` that hides a VOD or clip whose status is not `deleted`: owner/creator
+ * removal (objects purged later) and a DMCA takedown (E7; reversible, objects kept in a private
+ * prefix until a counter-notice restores them). Hidden from everyone, the owner included.
+ */
+export const HIDDEN_REMOVED_REASONS = [...OWNER_REMOVED_REASONS, "dmca"] as const;
+const removedHidden = (reason: string | null) => (HIDDEN_REMOVED_REASONS as readonly string[]).includes(reason ?? "");
 
 /** Owner or not, without a database read: enough wherever subscriber-only VODs play no part. */
 export function audienceOf(caller: Caller | null, channel: { ownerId: string }): Audience {
@@ -64,7 +72,7 @@ export function vodVisible(audience: Audience): SQL {
   const always = and(
     ne(vods.status, "deleted"),
     isNull(broadcasts.restrictedAt),
-    sql`coalesce(${vods.removedReason}, '') not in ('owner', 'creator')`,
+    sql`coalesce(${vods.removedReason}, '') not in ('owner', 'creator', 'dmca')`,
   ) as SQL;
   if (audience === "owner") return always;
   return and(always, eq(vods.status, "ready"), inArray(vods.visibility, [...VIEWABLE[audience]])) as SQL;
@@ -75,7 +83,7 @@ export function vodVisible(audience: Audience): SQL {
  * from) was removed for anything but retention, the clip is hidden too. Removal paths delete such
  * clips themselves; this also covers clips cut from the live buffer, which have no `vod_id`.
  */
-const sourceRemoved = sql`exists (select 1 from ${vods} where (${vods.id} = ${clips.vodId} or ${vods.broadcastId} = ${clips.broadcastId}) and ((${vods.status} = 'deleted' and ${vods.removedReason} is distinct from 'retention') or ${vods.removedReason} in ('owner', 'creator')))`;
+const sourceRemoved = sql`exists (select 1 from ${vods} where (${vods.id} = ${clips.vodId} or ${vods.broadcastId} = ${clips.broadcastId}) and ((${vods.status} = 'deleted' and ${vods.removedReason} is distinct from 'retention') or ${vods.removedReason} in ('owner', 'creator', 'dmca')))`;
 
 /**
  * A clip is no more visible than its source: hidden from this audience when the VOD it was cut
@@ -90,7 +98,7 @@ export function clipVisible(audience: Audience): SQL {
   const always = and(
     ne(clips.status, "deleted"),
     isNull(broadcasts.restrictedAt),
-    sql`coalesce(${clips.removedReason}, '') not in ('owner', 'creator')`,
+    sql`coalesce(${clips.removedReason}, '') not in ('owner', 'creator', 'dmca')`,
     sql`not ${sourceRemoved}`,
   ) as SQL;
   if (audience === "owner") return always;
@@ -104,7 +112,7 @@ export function vodShown(
   channel: { suspendedAt: Date | null },
   restrictedAt: Date | null,
 ): boolean {
-  if (v.status === "deleted" || ownerRemoved(v.removedReason) || restrictedAt !== null) return false;
+  if (v.status === "deleted" || removedHidden(v.removedReason) || restrictedAt !== null) return false;
   if (audience === "owner") return true;
   return (
     channel.suspendedAt === null &&

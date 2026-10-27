@@ -207,6 +207,29 @@ const appealFields = {
   resolvedAt: s.appeals.resolvedAt,
 };
 
+/** The user's own DMCA counter-notices (their text, as filed; never the claimant's notice). */
+const counterNoticeFields = {
+  noticeId: s.dmcaCounterNotices.noticeId,
+  fullName: s.dmcaCounterNotices.fullName,
+  address: s.dmcaCounterNotices.address,
+  phone: s.dmcaCounterNotices.phone,
+  itemIds: s.dmcaCounterNotices.itemIds,
+  statement: s.dmcaCounterNotices.statement,
+  restoreAfter: s.dmcaCounterNotices.restoreAfter,
+  restoredAt: s.dmcaCounterNotices.restoredAt,
+  suitFiledAt: s.dmcaCounterNotices.suitFiledAt,
+  createdAt: s.dmcaCounterNotices.createdAt,
+};
+
+/** DMCA strikes and terminations about the user. */
+const accountActionFields = {
+  action: s.accountActions.action,
+  sourceType: s.accountActions.sourceType,
+  createdAt: s.accountActions.createdAt,
+  reversedAt: s.accountActions.reversedAt,
+  reversedReason: s.accountActions.reversedReason,
+};
+
 const labelFields = {
   label: s.contentLabels.label,
   appliedAt: s.contentLabels.appliedAt,
@@ -616,6 +639,24 @@ export const EXPORT_FILES: readonly ExportFile[] = [
             .from(s.appeals)
             .where(eq(s.appeals.appellantId, userId))
             .orderBy(asc(s.appeals.createdAt)),
+      },
+      dmcaCounterNotices: {
+        fields: counterNoticeFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(counterNoticeFields)
+            .from(s.dmcaCounterNotices)
+            .where(eq(s.dmcaCounterNotices.userId, userId))
+            .orderBy(asc(s.dmcaCounterNotices.createdAt)),
+      },
+      accountActions: {
+        fields: accountActionFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(accountActionFields)
+            .from(s.accountActions)
+            .where(eq(s.accountActions.userId, userId))
+            .orderBy(asc(s.accountActions.createdAt)),
       },
       labels: {
         fields: labelFields,

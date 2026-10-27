@@ -199,6 +199,92 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`dmcaCounterNoticeForwarded > renders accessible HTML and a plain-text alternative 1`] = `
+"Counter-notice received for your copyright notice DMCA-2026-0091
+
+Example Air https://air.example.test
+
+
+The uploader sent a counter-notice
+
+The person whose material was removed under your copyright (DMCA) notice DMCA-2026-0091 sent the counter-notice below. We are forwarding it to you as the law requires.
+
+Name
+
+Ada
+
+Address
+
+1 Example Street, Springfield
+
+Telephone
+
++1 555 0100
+
+Their statement
+
+I recorded this performance myself and hold the rights to it.
+
+Material the counter-notice covers
+
+https://air.example.test/ada_plays/clip/sample
+
+Counter-notice received
+
+October 18, 2026 at 2:30 PM UTC
+
+Material will be restored after
+
+November 3, 2026 at 2:30 PM UTC
+
+The sender stated, under penalty of perjury, that they believe in good faith the material was removed by mistake or misidentification. They consented to the jurisdiction of the federal district court for their address (or, outside the United States, any judicial district in which we may be found) and agreed to accept service of process from you or your agent.
+
+We will restore the material after November 3, 2026 at 2:30 PM UTC unless, before then, you tell our designated agent at dmca@air.example.test that you have filed a court action seeking to restrain the sender from the infringing activity.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dmcaNoticeDecided > renders accessible HTML and a plain-text alternative 1`] = `
+"Your copyright notice DMCA-2026-0091 could not be actioned
+
+Example Air https://air.example.test
+
+
+We could not act on your copyright notice
+
+We reviewed your copyright (DMCA) notice DMCA-2026-0091 and could not act on it as it stands. The note below says what is missing or wrong.
+
+Notice reference
+
+DMCA-2026-0091
+
+Decided
+
+October 18, 2026 at 2:30 PM UTC
+
+Note from our team
+
+The notice does not identify the copyrighted work.
+
+You can send a new, complete notice at any time.
+
+Questions about copyright? Write to our designated agent at dmca@air.example.test.
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
 exports[`dmcaNoticeReceived > renders accessible HTML and a plain-text alternative 1`] = `
 "Copyright notice about Speedrun night, part 2
 
@@ -219,7 +305,7 @@ October 18, 2026 at 2:30 PM UTC
 
 If you believe the notice is a mistake or you have the rights to this content, you can send a counter-notice.
 
-Review the notice https://air.example.test/settings/copyright/notices/sample
+Review the notice https://air.example.test/settings/copyright?notice=sample
 
 Questions about copyright? Write to dmca@air.example.test.
 

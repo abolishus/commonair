@@ -3,13 +3,15 @@
 
 /**
  * The API's producer on `QUEUES.moderation` (ADR 0006): `t0` for rejected uploads,
- * `t0-escalated` after a legal confirmation, `ncii-hash` after an NCII removal, and the
- * `ncii-clock` run of the test hook. The worker owns every T0 transaction; the API only enqueues.
+ * `t0-escalated` after a legal confirmation, `ncii-hash` after an NCII removal, `dmca-disable`
+ * after a DMCA notice is actioned, and the `ncii-clock` / `dmca-restore` runs of the test hooks. The worker owns every T0 transaction; the API only enqueues.
  * Payloads are validated against the contract before they leave, and job ids collapse retries.
  */
 import { Queue, QueueEvents } from "bullmq";
 import { Valkey } from "iovalkey";
 import {
+  DmcaDisableJob,
+  DmcaRestoreResult,
   MODERATION_JOBS,
   ModerationT0EscalatedJob,
   ModerationT0Job,
@@ -25,6 +27,10 @@ export interface ModerationQueue {
   nciiHash(job: NciiHashJob): Promise<void>;
   /** Run the NCII clock once as of `asOf` and wait for the worker's result (test hooks only). */
   nciiClock(asOf: string, timeoutMs?: number): Promise<NciiClockResult>;
+  /** Move an actioned DMCA notice's objects to the private prefix (durable, one job per notice). */
+  dmcaDisable(job: DmcaDisableJob): Promise<void>;
+  /** Run the DMCA restore once as of `asOf` and wait for the worker's result (test hooks only). */
+  dmcaRestoreTick(asOf: string, timeoutMs?: number): Promise<DmcaRestoreResult>;
   close(): Promise<void>;
 }
 
@@ -39,6 +45,7 @@ export const DURABLE_JOB = {
 /** BullMQ allows a `:` in custom ids only as `a:b:c`; our other ids use `-`. */
 export const t0EscalatedJobId = (caseId: string) => `t0-escalated-${caseId}`;
 export const nciiHashJobId = (requestId: string) => `ncii-hash-${requestId}`;
+export const dmcaDisableJobId = (noticeId: string) => `dmca-disable-${noticeId}`;
 
 export async function createModerationQueue(valkeyUrl: string, prefix: string): Promise<ModerationQueue> {
   // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
@@ -72,6 +79,15 @@ export async function createModerationQueue(valkeyUrl: string, prefix: string): 
       const job = await queue.add(MODERATION_JOBS.nciiClock, { asOf }, { removeOnComplete: 100, removeOnFail: 100 });
       return NciiClockResult.parse(await job.waitUntilFinished(ev, timeoutMs));
     },
+    async dmcaDisable(job) {
+      const data = DmcaDisableJob.parse(job);
+      await queue.add(MODERATION_JOBS.dmcaDisable, data, { ...DURABLE_JOB, jobId: dmcaDisableJobId(data.noticeId) });
+    },
+    async dmcaRestoreTick(asOf, timeoutMs = 30_000) {
+      const ev = await queueEvents();
+      const job = await queue.add(MODERATION_JOBS.dmcaRestore, { asOf }, { removeOnComplete: 100, removeOnFail: 100 });
+      return DmcaRestoreResult.parse(await job.waitUntilFinished(ev, timeoutMs));
+    },
     async close() {
       await queue.close();
       conn.disconnect();
@@ -86,13 +102,18 @@ export async function createModerationQueue(valkeyUrl: string, prefix: string): 
 
 /**
  * A queue that validates and records jobs in memory. Integration tests of the API use it (the
- * worker's own tests consume the real queue); `nciiClock` answers with `clockResult`.
+ * worker's own tests consume the real queue); `nciiClock` answers with `clockResult`, and
+ * `dmcaRestoreTick` with `restoreResult`.
  */
-export function recordingQueue(clockResult: NciiClockResult = { escalated24: 0, escalated36: 0, autoHidden: 0 }) {
+export function recordingQueue(
+  clockResult: NciiClockResult = { escalated24: 0, escalated36: 0, autoHidden: 0 },
+  restoreResult: DmcaRestoreResult = { restored: 0, counters: 0 },
+) {
   const jobs: { name: string; id: string; data: unknown }[] = [];
-  const q: ModerationQueue & { jobs: typeof jobs; clockCalls: string[] } = {
+  const q: ModerationQueue & { jobs: typeof jobs; clockCalls: string[]; restoreCalls: string[] } = {
     jobs,
     clockCalls: [],
+    restoreCalls: [],
     async t0(job) {
       const data = ModerationT0Job.parse(job);
       jobs.push({ name: MODERATION_JOBS.t0, id: t0JobId(data.subjectType, data.subjectId), data });
@@ -108,6 +129,14 @@ export function recordingQueue(clockResult: NciiClockResult = { escalated24: 0, 
     async nciiClock(asOf) {
       q.clockCalls.push(asOf);
       return clockResult;
+    },
+    async dmcaDisable(job) {
+      const data = DmcaDisableJob.parse(job);
+      jobs.push({ name: MODERATION_JOBS.dmcaDisable, id: dmcaDisableJobId(data.noticeId), data });
+    },
+    async dmcaRestoreTick(asOf) {
+      q.restoreCalls.push(asOf);
+      return restoreResult;
     },
     async close() {},
   };

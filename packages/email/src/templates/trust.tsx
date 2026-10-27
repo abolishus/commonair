@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Trust & safety: copyright notices, restorations, appeal decisions. */
+/**
+ * Trust & safety: copyright notices, restorations, appeal decisions. The DMCA mails follow
+ * 17 U.S.C. § 512 as the platform reads it; NOT REVIEWED BY A LAWYER (docs/operators/dmca.md).
+ */
 import type { APPEAL_KINDS, APPEAL_STATUSES } from "@commonair/contracts/enums";
 import type { DateInput } from "../format.ts";
-import { Action, defineTemplate, Facts, H1, Muted, P } from "../template.tsx";
+import { Action, defineTemplate, Facts, H1, Muted, Notice, P } from "../template.tsx";
 
 export interface DmcaNoticeReceivedData {
   contentTitle: string;
@@ -31,6 +34,84 @@ export const dmcaNoticeReceived = defineTemplate("dmcaNoticeReceived", {
         <P>{ctx.t(m.counter)}</P>
         <Action ctx={ctx} href={d.noticeUrl} label={m.action} />
         <Muted>{ctx.t(m.policy, { contact: ctx.contact("dmca") })}</Muted>
+      </>
+    );
+  },
+});
+
+export interface DmcaNoticeDecidedData {
+  noticeRef: string;
+  decision: "actioned" | "rejected";
+  decidedAt: DateInput;
+  /** The moderator's note (for a rejection: what the notice lacks, § 512(c)(3)(B)(ii)). */
+  note: string;
+}
+
+/** To the claimant: the notice was actioned, or rejected with what was missing. */
+export const dmcaNoticeDecided = defineTemplate("dmcaNoticeDecided", {
+  links: [],
+  subject: (ctx, d: DmcaNoticeDecidedData) =>
+    ctx.text(d.decision === "actioned" ? ctx.messages.subjectActioned : ctx.messages.subjectRejected, {
+      noticeRef: d.noticeRef,
+    }),
+  body: (ctx, d: DmcaNoticeDecidedData) => {
+    const m = ctx.messages;
+    const actioned = d.decision === "actioned";
+    const facts: [string, string][] = [
+      [m.noticeLabel, d.noticeRef],
+      [m.decidedLabel, ctx.dateTime(d.decidedAt)],
+    ];
+    if (d.note.trim() !== "") facts.push([m.noteLabel, d.note]);
+    return (
+      <>
+        <H1>{ctx.t(actioned ? m.headingActioned : m.headingRejected)}</H1>
+        <P>{ctx.t(actioned ? m.bodyActioned : m.bodyRejected, { noticeRef: <strong>{d.noticeRef}</strong> })}</P>
+        <Facts items={facts} />
+        {actioned ? null : <P>{ctx.t(m.resubmit)}</P>}
+        <Muted>{ctx.t(m.policy, { contact: ctx.contact("dmca") })}</Muted>
+      </>
+    );
+  },
+});
+
+export interface DmcaCounterNoticeForwardedData {
+  noticeRef: string;
+  /** The counter-notifier's details, which § 512(g)(2)(B) requires the claimant to receive. */
+  fullName: string;
+  address: string;
+  phone: string;
+  statement: string;
+  /** The locations of the removed material the counter-notice covers (rendered as text). */
+  items: readonly string[];
+  receivedAt: DateInput;
+  restoreAfter: DateInput;
+}
+
+/** To the claimant: a copy of the counter-notice and when the material comes back (§ 512(g)(2)(B)). */
+export const dmcaCounterNoticeForwarded = defineTemplate("dmcaCounterNoticeForwarded", {
+  links: [],
+  subject: (ctx, d: DmcaCounterNoticeForwardedData) => ctx.text(ctx.messages.subject, { noticeRef: d.noticeRef }),
+  body: (ctx, d: DmcaCounterNoticeForwardedData) => {
+    const m = ctx.messages;
+    return (
+      <>
+        <H1>{ctx.t(m.heading)}</H1>
+        <P>{ctx.t(m.body, { noticeRef: <strong>{d.noticeRef}</strong> })}</P>
+        <Facts
+          items={[
+            [m.nameLabel, d.fullName],
+            [m.addressLabel, d.address],
+            [m.phoneLabel, d.phone],
+            [m.statementLabel, d.statement],
+            [m.itemsLabel, d.items.join(", ")],
+            [m.receivedLabel, ctx.dateTime(d.receivedAt)],
+            [m.restoreLabel, ctx.dateTime(d.restoreAfter)],
+          ]}
+        />
+        <P>{ctx.t(m.statements)}</P>
+        <Notice>
+          {ctx.t(m.restore, { restoreAfter: ctx.dateTime(d.restoreAfter), contact: ctx.contact("dmca") })}
+        </Notice>
       </>
     );
   },

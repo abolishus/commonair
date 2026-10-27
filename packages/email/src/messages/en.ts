@@ -182,6 +182,39 @@ export const en = {
     action: "Review the notice",
     policy: "Questions about copyright? Write to {contact}.",
   },
+  dmcaNoticeDecided: {
+    subjectActioned: "Your copyright notice {noticeRef} was actioned",
+    subjectRejected: "Your copyright notice {noticeRef} could not be actioned",
+    preview: "A decision was made on your copyright (DMCA) notice.",
+    headingActioned: "We acted on your copyright notice",
+    headingRejected: "We could not act on your copyright notice",
+    bodyActioned:
+      "We reviewed your copyright (DMCA) notice {noticeRef} and disabled access to the material it identified.",
+    bodyRejected:
+      "We reviewed your copyright (DMCA) notice {noticeRef} and could not act on it as it stands. The note below says what is missing or wrong.",
+    noticeLabel: "Notice reference",
+    decidedLabel: "Decided",
+    noteLabel: "Note from our team",
+    resubmit: "You can send a new, complete notice at any time.",
+    policy: "Questions about copyright? Write to our designated agent at {contact}.",
+  },
+  dmcaCounterNoticeForwarded: {
+    subject: "Counter-notice received for your copyright notice {noticeRef}",
+    preview: "The uploader sent a counter-notice; here is a copy.",
+    heading: "The uploader sent a counter-notice",
+    body: "The person whose material was removed under your copyright (DMCA) notice {noticeRef} sent the counter-notice below. We are forwarding it to you as the law requires.",
+    nameLabel: "Name",
+    addressLabel: "Address",
+    phoneLabel: "Telephone",
+    statementLabel: "Their statement",
+    itemsLabel: "Material the counter-notice covers",
+    receivedLabel: "Counter-notice received",
+    restoreLabel: "Material will be restored after",
+    statements:
+      "The sender stated, under penalty of perjury, that they believe in good faith the material was removed by mistake or misidentification. They consented to the jurisdiction of the federal district court for their address (or, outside the United States, any judicial district in which we may be found) and agreed to accept service of process from you or your agent.",
+    restore:
+      "We will restore the material after {restoreAfter} unless, before then, you tell our designated agent at {contact} that you have filed a court action seeking to restrain the sender from the infringing activity.",
+  },
   contentRestored: {
     subject: "Your content is available again: {content}",
     preview: "Content that was taken down has been restored.",

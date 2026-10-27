@@ -8,7 +8,13 @@ import { councilReviewRequested, governanceResultPublished, governanceVoteOpened
 import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
 import { accountDeletionCompleted, accountDeletionScheduled, dataExportReady } from "./templates/privacy.tsx";
 import { newSignIn, streamKeyRevoked, twoFactorDisabled, twoFactorEnabled } from "./templates/security.tsx";
-import { appealDecided, contentRestored, dmcaNoticeReceived } from "./templates/trust.tsx";
+import {
+  appealDecided,
+  contentRestored,
+  dmcaCounterNoticeForwarded,
+  dmcaNoticeDecided,
+  dmcaNoticeReceived,
+} from "./templates/trust.tsx";
 
 /** Every email the platform sends, by id. The catalog has one message block per id. */
 export const templates = {
@@ -28,6 +34,8 @@ export const templates = {
   governanceResultPublished,
   councilReviewRequested,
   dmcaNoticeReceived,
+  dmcaNoticeDecided,
+  dmcaCounterNoticeForwarded,
   contentRestored,
   appealDecided,
 } satisfies {
