@@ -2,27 +2,36 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The tracker in-process on an ephemeral port against the real Valkey: authenticated sockets,
- * offer/answer relay between two sessions on two networks, evidence in Valkey, and refusals.
+ * The tracker in-process on an ephemeral port against the real Valkey: authenticated and granted
+ * sockets, server-derived info hashes, offer/answer relay between two sessions on two networks,
+ * evidence in Valkey, and refusals. Frames use the pinned client's shapes (`tests/fixtures.ts`).
  */
 import { connect as tcpConnect, type Socket } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { KEYS, p2pSwarmId } from "@commonair/contracts/internal";
+import { KEYS, p2pStreamSwarmId, p2pSwarmId, type P2PStreamType } from "@commonair/contracts/internal";
 import { createLogger } from "@commonair/observability";
 import { createValkey, type ValkeyClient } from "@commonair/service";
 import { generateSigningKey, randomSecret, signPlaybackToken, type SigningKey } from "@commonair/tokens";
 import { Evidence } from "../src/evidence.ts";
+import { computeInfoHash } from "../src/infohash.ts";
 import { binaryToHex, LIMITS } from "../src/protocol.ts";
 import { startTracker, type Tracker } from "../src/tracker.ts";
 import { Peer, upgradeStatus } from "./client.ts";
+import { answer, periodicNoOffers, startedWithOffers, stopped } from "./fixtures.ts";
 import { answerSdp, binaryId, offerSdp } from "./helpers.ts";
 
 const VALKEY_URL = process.env.VALKEY_URL ?? "redis://localhost:6379";
 const SECRET = randomSecret("", 32);
 const MAX_AGE = 3600;
 const CHANNEL = crypto.randomUUID();
-const HASH = binaryId(42);
-const SWARM = p2pSwarmId(CHANNEL, binaryToHex(HASH));
+/** The grant's swarm id (the broadcast id) most sessions share. */
+const BROADCAST = crypto.randomUUID();
+/** A derived info hash: what the client announces for one rendition of a granted broadcast. */
+const derived = (rendition: string, broadcast = BROADCAST, type: P2PStreamType = "main") =>
+  computeInfoHash(p2pStreamSwarmId(broadcast, type, rendition));
+const swarmOf = (hash: string) => p2pSwarmId(CHANNEL, binaryToHex(hash));
+const HASH = derived("720p");
+const SWARM = swarmOf(HASH);
 const NET_A = "198.51.100.10";
 const NET_B = "203.0.113.20";
 
@@ -32,6 +41,7 @@ let tracker: Tracker;
 let wsBase: string;
 const peers: Peer[] = [];
 const sessions: string[] = [];
+const extraKeys: string[] = [];
 
 const nowS = () => Math.floor(Date.now() / 1000);
 const token = (sid: string, opts: { iat?: number; signer?: SigningKey } = {}) => {
@@ -46,11 +56,13 @@ const token = (sid: string, opts: { iat?: number; signer?: SigningKey } = {}) =>
     exp: iat + 120,
   });
 };
-/** A session with a fresh heartbeat. */
-const session = async (heartbeatAgeMs = 0) => {
+/** A session with a fresh heartbeat and, unless `grant` is null, a P2P grant for `grant`. */
+const session = async (opts: { heartbeatAgeMs?: number; grant?: string | null } = {}) => {
   const sid = crypto.randomUUID();
   sessions.push(sid);
-  await valkey.zadd(KEYS.viewers(CHANNEL), Date.now() - heartbeatAgeMs, sid);
+  await valkey.zadd(KEYS.viewers(CHANNEL), Date.now() - (opts.heartbeatAgeMs ?? 0), sid);
+  const grant = opts.grant === undefined ? BROADCAST : opts.grant;
+  if (grant !== null) await valkey.set(KEYS.p2pGrant(sid), grant, "EX", 600);
   return sid;
 };
 const connect = async (sid: string, ip: string, iat?: number) => {
@@ -82,7 +94,7 @@ beforeAll(async () => {
     internalSecret: SECRET,
     // The test client connects from loopback: treat it as the reverse proxy.
     trustedProxies: ["127.0.0.0/8", "::1/128"],
-    limits: { maxConnections: 100, maxConnectionsPerIp: 10, maxNumwant: 20, tokenMaxAgeSeconds: MAX_AGE },
+    limits: { maxConnections: 100, maxConnectionsPerIp: 50, maxNumwant: 20, tokenMaxAgeSeconds: MAX_AGE },
     // Re-check the heartbeat on every announce so a lapse is observable at once.
     heartbeatRecheckMs: 0,
   });
@@ -95,7 +107,8 @@ afterAll(async () => {
   await valkey.del(
     KEYS.viewers(CHANNEL),
     KEYS.p2pSwarm(SWARM),
-    ...sessions.flatMap((s) => [KEYS.p2pPeer(s), KEYS.p2pLinks(s)]),
+    ...sessions.flatMap((s) => [KEYS.p2pPeer(s), KEYS.p2pLinks(s), KEYS.p2pGrant(s)]),
+    ...extraKeys,
   );
   valkey.disconnect();
 });
@@ -234,11 +247,19 @@ describe("signalling and evidence", () => {
 
   test("p2pChannelNet counts one network across all of the channel's swarms", async () => {
     const net = "192.0.2.";
-    const sids = [await session(), await session(), await session()];
+    const broadcast = crypto.randomUUID();
+    const sids = [
+      await session({ grant: broadcast }),
+      await session({ grant: broadcast }),
+      await session({ grant: broadcast }),
+    ];
     const ps = await Promise.all(sids.map((sid, i) => connect(sid, `${net}${10 + i}`)));
-    // Three private swarms (client-chosen hashes), one network.
+    // Three renditions (three swarms) of one broadcast, one network.
+    const renditions = ["source", "1080p", "480p"];
     for (const [i, p] of ps.entries()) {
-      p.send({ action: "announce", info_hash: binaryId(200 + i), peer_id: binaryId(210 + i) });
+      const hash = derived(renditions[i] ?? "", broadcast);
+      extraKeys.push(KEYS.p2pSwarm(swarmOf(hash)));
+      p.send({ action: "announce", info_hash: hash, peer_id: binaryId(210 + i) });
       await p.next((m) => m.interval !== undefined);
     }
     const key = KEYS.p2pChannelNet(CHANNEL, await new Evidence(valkey, SECRET).networkHash(`${net}1`));
@@ -254,7 +275,7 @@ describe("signalling and evidence", () => {
     const sidB = await session();
     const a = await connect(sidA, NET_A);
     const b = await connect(sidB, NET_B);
-    const hash = binaryId(88);
+    const hash = derived("480p");
     a.send({ action: "announce", info_hash: hash, peer_id: binaryId(4) });
     await a.next((m) => m.interval !== undefined);
     b.send({ action: "announce", info_hash: hash, peer_id: binaryId(5) });
@@ -276,11 +297,257 @@ describe("signalling and evidence", () => {
   test("a peer id taken by another session in the swarm is refused", async () => {
     const a = await connect(await session(), NET_A);
     const b = await connect(await session(), NET_B);
-    const hash = binaryId(77);
+    const hash = derived("1080p", BROADCAST, "secondary");
     a.send({ action: "announce", info_hash: hash, peer_id: binaryId(9) });
     await a.next((m) => m.interval !== undefined);
     b.send({ action: "announce", info_hash: hash, peer_id: binaryId(9) });
     expect(await b.next((m) => "failure reason" in m)).toMatchObject({ "failure reason": "peer_id in use" });
+  });
+});
+
+describe("grants and derived info hashes", () => {
+  test("no grant: 403 p2p_not_granted", async () => {
+    const sid = await session({ grant: null });
+    const before = tracker.stats().refused.p2p_not_granted ?? 0;
+    expect(await upgradeStatus(tracker.url, `/?t=${await token(sid)}`)).toBe(403);
+    expect(tracker.stats().refused.p2p_not_granted).toBe(before + 1);
+    // An empty grant is no grant.
+    await valkey.set(KEYS.p2pGrant(sid), "", "EX", 600);
+    expect(await upgradeStatus(tracker.url, `/?t=${await token(sid)}`)).toBe(403);
+    // Granted afterwards (P2P switched on): the same token now connects.
+    await valkey.set(KEYS.p2pGrant(sid), BROADCAST, "EX", 600);
+    expect(await upgradeStatus(tracker.url, `/?t=${await token(sid)}`)).toBe(101);
+  });
+
+  test("the pinned client's frames on derived hashes: offer, answer, evidence as before", async () => {
+    const sidA = await session();
+    const sidB = await session();
+    const a = await connect(sidA, NET_A);
+    const b = await connect(sidB, NET_B);
+    const hash = derived("1080p");
+    const swarm = swarmOf(hash);
+    extraKeys.push(KEYS.p2pSwarm(swarm));
+    const peerA = "-PM0400-aaaaaaaaaaaa";
+    const peerB = "-PM0400-bbbbbbbbbbbb";
+
+    a.send(periodicNoOffers(hash, peerA));
+    expect(await a.next((m) => m.interval !== undefined)).toEqual({
+      action: "announce",
+      interval: LIMITS.announceInterval,
+      info_hash: hash,
+      complete: 0,
+      incomplete: 1,
+    });
+    const started = startedWithOffers(hash, peerB);
+    b.send(started);
+    await b.next((m) => m.interval !== undefined);
+    const offer = await a.next((m) => m.offer !== undefined);
+    const offerId = started.offers[0]?.offer_id ?? "";
+    expect(offer).toEqual({
+      action: "announce",
+      offer: started.offers[0]?.offer,
+      offer_id: offerId,
+      peer_id: peerB,
+      info_hash: hash,
+    });
+    a.send(answer(hash, peerA, peerB, offerId));
+    expect(await b.next((m) => m.answer !== undefined)).toMatchObject({
+      peer_id: peerA,
+      offer_id: offerId,
+      info_hash: hash,
+    });
+
+    const evidence = new Evidence(valkey, SECRET);
+    await eventually(async () => {
+      expect(await valkey.hget(KEYS.p2pPeer(sidA), "swarm")).toBe(swarm);
+      expect(await valkey.hget(KEYS.p2pPeer(sidA), "announces")).toBe("2");
+      expect(await valkey.hget(KEYS.p2pPeer(sidB), "announces")).toBe("1");
+      expect((await valkey.zrange(KEYS.p2pSwarm(swarm), 0, -1)).sort()).toEqual([sidA, sidB].sort());
+      expect(await valkey.zrange(KEYS.p2pLinks(sidA), 0, -1)).toEqual([await evidence.networkHash(NET_B)]);
+      expect(await valkey.zrange(KEYS.p2pLinks(sidB), 0, -1)).toEqual([await evidence.networkHash(NET_A)]);
+    });
+    // The swarm id carries 40 hex characters of the ASCII hash, as for binary ones.
+    expect(swarm).toMatch(/:[0-9a-f]{40}$/);
+    a.send(stopped(hash, peerA));
+    b.send(stopped(hash, peerB));
+    await eventually(async () => expect(await valkey.zcard(KEYS.p2pSwarm(swarm))).toBe(0));
+  });
+
+  test("announce and scrape outside the grant: failure reason, nothing recorded", async () => {
+    const sid = await session();
+    const p = await connect(sid, NET_A);
+    const before = tracker.stats().hashesRefused;
+    const foreign = [
+      binaryId(42), // an arbitrary 20-byte hash
+      derived("720p", crypto.randomUUID()), // another broadcast's derived hash
+      derived("360p"), // a rendition name outside P2P_STREAM_RENDITIONS
+    ];
+    for (const h of foreign) {
+      p.send(periodicNoOffers(h, binaryId(70)));
+      expect(await p.next((m) => "failure reason" in m)).toEqual({
+        "failure reason": "info_hash not allowed",
+        info_hash: h,
+      });
+      p.send(startedWithOffers(h, binaryId(70)));
+      expect(await p.next((m) => "failure reason" in m)).toEqual({
+        "failure reason": "info_hash not allowed",
+        info_hash: h,
+      });
+    }
+    // A scrape naming any foreign hash is refused with that hash; allowed ones alone are fine.
+    p.send({ action: "scrape", info_hash: [derived("source"), foreign[1]] });
+    expect(await p.next((m) => "failure reason" in m)).toEqual({
+      "failure reason": "info_hash not allowed",
+      info_hash: foreign[1],
+    });
+    p.send({ action: "scrape", info_hash: derived("source") });
+    expect(await p.next((m) => m.action === "scrape")).toMatchObject({ files: { [derived("source")]: {} } });
+    expect(tracker.stats().hashesRefused).toBe(before + 7);
+    expect(p.closed).toBeNull();
+
+    await Bun.sleep(100);
+    const net = await new Evidence(valkey, SECRET).networkHash(NET_A);
+    expect(await valkey.exists(KEYS.p2pPeer(sid))).toBe(0);
+    for (const h of foreign) expect(await valkey.exists(KEYS.p2pSwarm(swarmOf(h)))).toBe(0);
+    expect(await valkey.zscore(KEYS.p2pChannelNet(CHANNEL, net), sid)).toBeNull();
+  });
+
+  test("a grant deleted under an open socket closes it with 1008 at the next re-check", async () => {
+    const sid = await session();
+    const p = await connect(sid, NET_A);
+    const hash = derived("source", BROADCAST, "secondary");
+    extraKeys.push(KEYS.p2pSwarm(swarmOf(hash)));
+    p.send(periodicNoOffers(hash, binaryId(80)));
+    await p.next((m) => m.interval !== undefined);
+    const before = tracker.stats().revoked.p2p_not_granted ?? 0;
+    await valkey.del(KEYS.p2pGrant(sid));
+    p.send(periodicNoOffers(hash, binaryId(80)));
+    expect(await p.waitClosed()).toEqual({ code: 1008, reason: "p2p not granted" });
+    expect(tracker.stats().revoked.p2p_not_granted).toBe(before + 1);
+  });
+
+  test("a grant that now names another swarm id closes the socket too", async () => {
+    const sid = await session();
+    const p = await connect(sid, NET_A);
+    await valkey.set(KEYS.p2pGrant(sid), crypto.randomUUID(), "EX", 600);
+    p.send(periodicNoOffers(derived("480p", BROADCAST, "secondary"), binaryId(81)));
+    expect((await p.waitClosed()).code).toBe(1008);
+  });
+
+  test("stopped skips the re-check, so a revoked session can still leave", async () => {
+    const sid = await session();
+    const p = await connect(sid, NET_A);
+    const hash = derived("720p", BROADCAST, "secondary");
+    extraKeys.push(KEYS.p2pSwarm(swarmOf(hash)));
+    p.send(periodicNoOffers(hash, binaryId(82)));
+    await p.next((m) => m.interval !== undefined);
+    await valkey.del(KEYS.p2pGrant(sid));
+    p.send(stopped(hash, binaryId(82)));
+    await p.next((m) => m.interval !== undefined);
+    await eventually(async () => expect(await valkey.zscore(KEYS.p2pSwarm(swarmOf(hash)), sid)).toBeNull());
+    expect(p.closed).toBeNull();
+  });
+
+  test("a level switch: stopped leaves, the new rendition joins; all ten derived swarms fit", async () => {
+    const broadcast = crypto.randomUUID();
+    const sid = await session({ grant: broadcast });
+    const p = await connect(sid, NET_A);
+    const peerId = "-PM0400-cccccccccccc";
+    const hashes = (["main", "secondary"] as const).flatMap((type) =>
+      ["source", "1080p", "720p", "480p", "audio"].map((r) => derived(r, broadcast, type)),
+    );
+    extraKeys.push(...hashes.map((h) => KEYS.p2pSwarm(swarmOf(h))));
+    const h480 = derived("480p", broadcast);
+    const h720 = derived("720p", broadcast);
+
+    // hls.js starts low and switches up; the old rendition's loader sends `stopped`.
+    p.send(startedWithOffers(h480, peerId));
+    await p.next((m) => m.interval !== undefined && m.info_hash === h480);
+    p.send(startedWithOffers(h720, peerId));
+    await p.next((m) => m.interval !== undefined && m.info_hash === h720);
+    p.send(stopped(h480, peerId));
+    await p.next((m) => m.interval !== undefined && m.info_hash === h480);
+    await eventually(async () => {
+      expect(await valkey.zscore(KEYS.p2pSwarm(swarmOf(h480)), sid)).toBeNull();
+      expect(await valkey.zscore(KEYS.p2pSwarm(swarmOf(h720)), sid)).not.toBeNull();
+      expect(await valkey.hget(KEYS.p2pPeer(sid), "swarm")).toBe(swarmOf(h720));
+    });
+
+    // Without `stopped` (the loader keeps an inactive rendition for 30 s), every derived swarm of
+    // the grant still fits on the socket.
+    for (const h of hashes) {
+      p.send(periodicNoOffers(h, peerId));
+      expect(await p.next((m) => m.info_hash === h)).toMatchObject({ interval: LIMITS.announceInterval });
+    }
+    await eventually(async () => {
+      for (const h of hashes) expect(await valkey.zscore(KEYS.p2pSwarm(swarmOf(h)), sid)).not.toBeNull();
+      // Still one evidence record for the session, on its latest swarm.
+      expect(await valkey.hget(KEYS.p2pPeer(sid), "swarm")).toBe(swarmOf(hashes.at(-1) ?? ""));
+    });
+  });
+});
+
+describe("Valkey errors on the grant", () => {
+  let flaky: Tracker;
+  let failGet = false;
+  beforeAll(() => {
+    // The real client, with `get` (only the grant reads use it) failing on demand.
+    const proxied = new Proxy(valkey, {
+      get(target, prop) {
+        if (prop === "get" && failGet) return () => Promise.reject(new Error("valkey down"));
+        const v: unknown = Reflect.get(target, prop);
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    flaky = startTracker({
+      port: 0,
+      hostname: "127.0.0.1",
+      logger: createLogger({ service: "tracker-int-flaky", level: "fatal" }),
+      valkey: proxied,
+      publicKey: key.publicKey,
+      internalSecret: SECRET,
+      trustedProxies: ["127.0.0.0/8", "::1/128"],
+      limits: { maxConnections: 100, maxConnectionsPerIp: 10, maxNumwant: 20, tokenMaxAgeSeconds: MAX_AGE },
+      heartbeatRecheckMs: 0,
+    });
+  });
+  afterAll(async () => {
+    failGet = false;
+    await flaky.stop();
+  });
+
+  test("at upgrade: 503 unavailable", async () => {
+    const sid = await session();
+    failGet = true;
+    try {
+      expect(await upgradeStatus(flaky.url, `/?t=${await token(sid)}`)).toBe(503);
+      expect(flaky.stats().refused.unavailable).toBe(1);
+    } finally {
+      failGet = false;
+    }
+    expect(await upgradeStatus(flaky.url, `/?t=${await token(sid)}`)).toBe(101);
+  });
+
+  test("at a re-check: the socket stays open and signalling goes on", async () => {
+    const sid = await session();
+    const p = await Peer.open(`ws://127.0.0.1:${flaky.url.port}/?t=${await token(sid)}`, {
+      "x-forwarded-for": NET_A,
+    });
+    peers.push(p);
+    const hash = derived("audio", BROADCAST, "secondary");
+    extraKeys.push(KEYS.p2pSwarm(swarmOf(hash)));
+    failGet = true;
+    try {
+      p.send(periodicNoOffers(hash, binaryId(83)));
+      expect(await p.next((m) => m.interval !== undefined)).toMatchObject({ info_hash: hash });
+    } finally {
+      failGet = false;
+    }
+    expect(p.closed).toBeNull();
+    // The failed check was not recorded: the next announce re-checks and finds the grant gone.
+    await valkey.del(KEYS.p2pGrant(sid));
+    p.send(periodicNoOffers(hash, binaryId(83)));
+    expect((await p.waitClosed()).code).toBe(1008);
   });
 });
 
@@ -305,7 +572,7 @@ describe("refusals", () => {
   });
 
   test("session not heartbeating", async () => {
-    const stale = await session(60_000);
+    const stale = await session({ heartbeatAgeMs: 60_000 });
     expect(await upgradeStatus(tracker.url, `/?t=${await token(stale)}`)).toBe(401);
     const unknown = crypto.randomUUID();
     expect(await upgradeStatus(tracker.url, `/?t=${await token(unknown)}`)).toBe(401);
@@ -322,7 +589,7 @@ describe("refusals", () => {
 
   test("a newer iat replaces the session's socket and reclaims its peer id", async () => {
     const sid = await session();
-    const hash = binaryId(90);
+    const hash = derived("source", BROADCAST, "secondary");
     const peerId = binaryId(91);
     const old = await connect(sid, NET_A, nowS() - 60);
     old.send({ action: "announce", info_hash: hash, peer_id: peerId });
@@ -334,7 +601,7 @@ describe("refusals", () => {
     expect(tracker.stats().replaced).toBe(replaced + 1);
     fresh.send({ action: "announce", info_hash: hash, peer_id: peerId });
     expect(await fresh.next((m) => m.interval !== undefined)).toMatchObject({ incomplete: 1 });
-    const swarm = p2pSwarmId(CHANNEL, binaryToHex(hash));
+    const swarm = swarmOf(hash);
     await eventually(async () => expect(await valkey.zrange(KEYS.p2pSwarm(swarm), 0, -1)).toEqual([sid]));
     await valkey.del(KEYS.p2pSwarm(swarm));
   });
@@ -359,11 +626,12 @@ describe("refusals", () => {
   test("a lapsed heartbeat closes the socket with 1008 on the next announce", async () => {
     const sid = await session();
     const p = await connect(sid, NET_A);
-    p.send({ action: "announce", info_hash: binaryId(60), peer_id: binaryId(61) });
+    p.send({ action: "announce", info_hash: derived("audio"), peer_id: binaryId(61) });
     await p.next((m) => m.interval !== undefined);
     await valkey.zadd(KEYS.viewers(CHANNEL), Date.now() - 60_000, sid);
-    p.send({ action: "announce", info_hash: binaryId(60), peer_id: binaryId(61) });
+    p.send({ action: "announce", info_hash: derived("audio"), peer_id: binaryId(61) });
     expect((await p.waitClosed()).code).toBe(1008);
+    expect(tracker.stats().revoked.not_watching).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -429,7 +697,7 @@ describe("limits", () => {
   });
 
   test("a socket that stops reading is closed at the backpressure limit", async () => {
-    const hash = binaryId(150);
+    const hash = derived("source");
     const slow = await rawSocket(small.url, `/?t=${await token(await session())}`);
     slow.write(textFrame(JSON.stringify({ action: "announce", info_hash: hash, peer_id: binaryId(151) })));
     await eventually(async () => expect(small.stats().swarms).toBe(1));

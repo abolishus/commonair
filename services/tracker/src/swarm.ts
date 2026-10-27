@@ -4,8 +4,9 @@
 /**
  * In-memory swarms and the announce/scrape semantics, independent of sockets so it can be
  * unit tested. A swarm is keyed by `p2pSwarmId(channelId, hex(info_hash))`: the playback token
- * binds a socket to one channel, so sockets of different channels never meet even when they
- * announce the same info hash.
+ * binds a socket to one channel, so sockets of different channels never meet. The info hash is
+ * server-derived from the session's grant (`src/infohash.ts`); the tracker refuses any other
+ * before a frame reaches the registry.
  */
 import { p2pSwarmId } from "@commonair/contracts/internal";
 import { PendingExchanges } from "./exchanges.ts";
