@@ -59,7 +59,8 @@ export function subscriptionQualifies(
  * member left within this window (ADR 0020, "within that class's window"). The streamer class
  * uses its membership window `streamer.windowDays`. The viewer class has no window, so a viewer
  * exit is respected indefinitely: the job never re-enrols a viewer who left, who rejoins only by
- * an explicit action (a new share confirmed by the treasurer inserts the membership).
+ * an explicit action (a new share confirmed by the treasurer, or `coop.join` on a qualifying
+ * subscription, inserts an active row; the job then manages it like any other).
  */
 export const exitWindowDays = (cls: "streamer" | "viewer", rules: Pick<MembershipClasses, "streamer">): number =>
   cls === "streamer" ? rules.streamer.windowDays : Number.POSITIVE_INFINITY;

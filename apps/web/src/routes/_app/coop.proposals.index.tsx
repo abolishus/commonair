@@ -3,11 +3,10 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
+import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { ProposalList } from "../../components/coop/proposals.tsx";
-import { toastCoopError, useMyMembership } from "../../components/coop/use-coop.ts";
-import { FormError } from "../../components/form-error.tsx";
+import { coopLoads, pagedLoad, toastCoopError, useMyMembership } from "../../components/coop/use-coop.ts";
 import { usePaged } from "../../components/money/use-load.ts";
-import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { isMember, type ProposalFilter } from "../../lib/coop.ts";
@@ -28,10 +27,9 @@ function ProposalsPage(): React.JSX.Element {
     toastCoopError,
   );
   return (
-    <>
-      {proposals.failed && <FormError>{t("coop.loadFailed")}</FormError>}
+    <CoopLoadGate status={coopLoads([pagedLoad(proposals), membership])} tab="proposals">
       <ProposalList
-        proposals={proposals.items ?? (proposals.failed ? [] : null)}
+        proposals={proposals.items}
         filter={filter}
         onFilterChange={setFilter}
         member={isMember(membership.data)}
@@ -39,6 +37,6 @@ function ProposalsPage(): React.JSX.Element {
         loadingMore={proposals.loadingMore}
         onLoadMore={proposals.loadMore}
       />
-    </>
+    </CoopLoadGate>
   );
 }

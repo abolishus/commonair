@@ -3,9 +3,9 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { CoopLoadError, CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { CoopOverview } from "../../components/coop/overview.tsx";
-import { useMyMembership } from "../../components/coop/use-coop.ts";
-import { useLoad } from "../../components/money/use-load.ts";
+import { coopLoads, useCoopLoad, useMyMembership } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 
@@ -17,7 +17,7 @@ const OPEN_LIMIT = 20;
 function CoopPage(): React.JSX.Element {
   const { me } = useBootstrap();
   const membership = useMyMembership(me);
-  const open = useLoad("open", async () => {
+  const open = useCoopLoad("open", async () => {
     const pages = await Promise.all(
       (["voting", "council_review", "discussion"] as const).map((status) =>
         api().coop.proposals.list({ status, limit: OPEN_LIMIT }),
@@ -25,15 +25,19 @@ function CoopPage(): React.JSX.Element {
     );
     return pages.flatMap((page) => page.items);
   });
-  const council = useLoad("council", () => api().coop.council());
-  const months = useLoad("months", () => api().coop.transparency({ months: 3 }));
+  const council = useCoopLoad("council", () => api().coop.council());
+  const months = useCoopLoad("months", () => api().coop.transparency({ months: 3 }));
   return (
-    <CoopOverview
-      signedIn={me !== null}
-      membership={membership.data}
-      openProposals={open.data ?? (open.failed ? [] : null)}
-      council={council.data}
-      months={months.data ?? (months.failed ? [] : null)}
-    />
+    // The caller's membership only feeds the card: its failure shows there, not over the public page.
+    <CoopLoadGate status={coopLoads([open, council, months])} tab="overview">
+      <CoopOverview
+        signedIn={me !== null}
+        membership={membership.data}
+        openProposals={open.data}
+        council={council.data}
+        months={months.data}
+        membershipError={membership.failed ? <CoopLoadError onRetry={membership.reload} /> : null}
+      />
+    </CoopLoadGate>
   );
 }

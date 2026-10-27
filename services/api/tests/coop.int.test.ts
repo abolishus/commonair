@@ -16,7 +16,14 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test"
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, QUEUES } from "@commonair/contracts/internal";
 import { type Database, schema } from "@commonair/db";
 import { FAST_GOVERNANCE } from "@commonair/db/testing";
-import { loadSettings, rulesFor } from "@commonair/governance";
+import {
+  contributionWeightsOf,
+  eligibleHoursByUser,
+  loadSettings,
+  membershipClassesOf,
+  rulesFor,
+  syncMemberships,
+} from "@commonair/governance";
 import { closeCoopTickRunner } from "../src/coop/hooks.ts";
 import { createApp } from "../src/index.ts";
 import { VALKEY_URL, signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
@@ -954,5 +961,174 @@ describe("coop test hook", () => {
       await w.close();
       conn.disconnect();
     }
+  });
+});
+
+// Rejoin (E7) -------------------------------------------------------------------------------------
+
+describe("rejoin the viewer class (coop.join)", () => {
+  let creator: Account; // owns the channel everyone subscribes to; streams for the hours check
+  let channelId = "";
+  let broadcastId = "";
+  let sub: Account; // a viewer member by subscription only: exits, then rejoins
+  let plain: Account; // exits and never rejoins: the sync keeps respecting that
+  let cheap: Account; // a subscription below viewer.minSubscriptionCents
+  let subMembershipId = "";
+  let rejoinedId = "";
+  const join = (as: Account | null) => call<MembershipView & Err>(as, "POST", "/api/coop/membership/viewer/join");
+  const viewerRows = (userId: string) =>
+    owner()
+      .select()
+      .from(schema.memberships)
+      .where(and(eq(schema.memberships.userId, userId), eq(schema.memberships.class, "viewer")));
+  const subscribe = (subscriberId: string, priceCents: number) =>
+    app()
+      .insert(schema.subscriptions)
+      .values({
+        subscriberId,
+        channelId,
+        tier: 1,
+        status: "active",
+        provider: "manual",
+        priceCents,
+        currency: "usd",
+        currentPeriodEnd: new Date(Date.now() + 30 * 86_400_000),
+      });
+
+  beforeAll(async () => {
+    [creator, sub, plain, cheap] = await Promise.all([
+      signUpAndSignIn(api),
+      signUpAndSignIn(api),
+      signUpAndSignIn(api),
+      signUpAndSignIn(api),
+    ]);
+    // Sign-up made the creator's channel.
+    const [ch] = await owner()
+      .select({ id: schema.channels.id })
+      .from(schema.channels)
+      .where(eq(schema.channels.ownerId, creator.userId));
+    channelId = ch!.id;
+    const [b] = await app()
+      .insert(schema.broadcasts)
+      .values({ channelId, ingestProtocol: "rtmp", path: `live/${creator.username}`, startedAt: new Date() })
+      .returning({ id: schema.broadcasts.id });
+    broadcastId = b!.id;
+    await subscribe(sub.userId, 499);
+    await subscribe(plain.userId, 499);
+    await subscribe(cheap.userId, 100);
+    // Both start as viewer members by subscription, as the sync would have made them.
+    const rows = await app()
+      .insert(schema.memberships)
+      .values([sub, plain].map((a) => ({ userId: a.userId, class: "viewer" as const, basis: "subscription" as const })))
+      .returning({ id: schema.memberships.id, userId: schema.memberships.userId });
+    subMembershipId = rows.find((r) => r.userId === sub.userId)?.id ?? "";
+  }, 60_000);
+
+  test("signed out → 401; with an active viewer membership → 409", async () => {
+    expect((await join(null)).status).toBe(401);
+    expect((await join(sub)).status).toBe(409);
+    expect(await viewerRows(sub.userId)).toHaveLength(1);
+  });
+
+  test("a member by subscription exits; the sync does not re-enrol them", async () => {
+    for (const a of [sub, plain]) {
+      const r = await call<MembershipView>(a, "POST", "/api/coop/membership/viewer/exit");
+      expect(r.status).toBe(200);
+      expect(r.body.memberships.find((m) => m.class === "viewer")).toMatchObject({ status: "exited" });
+    }
+    const result = await syncMemberships(app(), new Date());
+    expect(result.activated.map((x) => x.userId)).not.toContain(sub.userId);
+    expect((await viewerRows(sub.userId)).map((m) => m.status)).toEqual(["exited"]);
+  });
+
+  test("no qualifying subscription → 403 saying what is needed; nothing written", async () => {
+    for (const a of [outsider, cheap]) {
+      const r = await join(a);
+      expect(r.status).toBe(403);
+      expect(r.body.message).toMatch(/subscription of at least 300 cents/);
+      expect(await viewerRows(a.userId)).toEqual([]);
+    }
+  });
+
+  test("join after exit: an active viewer row by subscription, audited, with its event and history", async () => {
+    const r = await join(sub);
+    expect(r.status).toBe(200);
+    const viewer = r.body.memberships.find((m) => m.class === "viewer");
+    expect(viewer).toMatchObject({ status: "active", basis: "subscription" });
+    rejoinedId = viewer?.id ?? "";
+    expect(rejoinedId).not.toBe(subMembershipId);
+    expect((await viewerRows(sub.userId)).map((m) => m.status).toSorted()).toEqual(["active", "exited"]);
+
+    const [a] = await auditOf("membership.join", rejoinedId);
+    expect(a).toMatchObject({ actorType: "user", actorId: sub.userId, subjectType: "membership" });
+    expect(a?.details).toEqual({ class: "viewer", basis: "subscription", userId: sub.userId });
+    expect(
+      await eventsOf("coop.membership.update", {
+        membership_id: rejoinedId,
+        user_id: sub.userId,
+        status: "active",
+        basis: "subscription",
+      }),
+    ).toHaveLength(1);
+    const history = await owner()
+      .select()
+      .from(schema.membershipHistory)
+      .where(eq(schema.membershipHistory.membershipId, rejoinedId));
+    expect(history.map((h) => h.status)).toContain("active");
+    // Join never touches shares.
+    expect(
+      await owner().select().from(schema.membershipShares).where(eq(schema.membershipShares.userId, sub.userId)),
+    ).toEqual([]);
+  });
+
+  test("joining twice → 409, still one active row", async () => {
+    expect((await join(sub)).status).toBe(409);
+    expect((await viewerRows(sub.userId)).filter((m) => m.status === "active")).toHaveLength(1);
+  });
+
+  test("the sync keeps the rejoined viewer and still respects the plain exit", async () => {
+    const result = await syncMemberships(app(), new Date());
+    expect(result.lapsed.map((x) => x.membershipId)).not.toContain(rejoinedId);
+    expect(result.activated.map((x) => x.userId)).not.toContain(plain.userId);
+    const [kept] = (await viewerRows(sub.userId)).filter((m) => m.status === "active");
+    expect(kept?.id).toBe(rejoinedId);
+    expect((await viewerRows(plain.userId)).map((m) => m.status)).toEqual(["exited"]);
+  });
+
+  test("the membership view's streaming hours equal the sync's computation", async () => {
+    const HOUR = 3_600_000;
+    const DAY = 86_400_000;
+    const today = Math.floor(Date.now() / DAY) * DAY;
+    const row = (start: number, i: number, eligible = true, liveSeconds = 3600) => ({
+      broadcastId,
+      channelId,
+      hourStart: new Date(start + i * HOUR),
+      liveSeconds,
+      eligible,
+      verifiedOtherViewers: eligible ? 1 : 0,
+    });
+    // Two days back: 12 eligible hours (over the daily cap) and 3 ineligible; yesterday 2.5 hours.
+    await app()
+      .insert(schema.streamHours)
+      .values([
+        ...Array.from({ length: 12 }, (_, i) => row(today - 2 * DAY, i)),
+        ...Array.from({ length: 3 }, (_, i) => row(today - 2 * DAY, 12 + i, false)),
+        row(today - DAY, 0),
+        row(today - DAY, 1),
+        row(today - DAY, 2, true, 1800),
+      ]);
+    const settings = await loadSettings(owner());
+    const windowDays = membershipClassesOf(settings).streamer.windowDays;
+    const cap = contributionWeightsOf(settings).dailyStreamingHourCap;
+    const now = new Date();
+    const old = await eligibleHoursByUser(owner(), new Date(now.getTime() - windowDays * DAY), now, cap);
+    const expected = Math.round((old.get(creator.userId) ?? 0) * 100) / 100;
+    expect(expected).toBeGreaterThan(0);
+    const view = await call<{ eligibility: { class: string; progress: { have: number } | null }[] }>(
+      creator,
+      "GET",
+      "/api/coop/membership",
+    );
+    expect(view.body.eligibility.find((e) => e.class === "streamer")?.progress?.have).toBe(expected);
   });
 });

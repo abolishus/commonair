@@ -3,9 +3,10 @@
 
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { StatementPage } from "../../components/coop/statements.tsx";
+import { coopLoads, isNotFound, useCoopLoad } from "../../components/coop/use-coop.ts";
 import { NotFoundState } from "../../components/money/not-found.tsx";
-import { useLoad } from "../../components/money/use-load.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
@@ -19,9 +20,13 @@ export const Route = createFileRoute("/_app/coop/patronage/$periodId")({
 function StatementRoute(): React.JSX.Element {
   const { periodId } = Route.useParams();
   const { me } = useBootstrap();
-  const statement = useLoad(periodId, () => api().coop.patronage.statement({ periodId }));
+  const statement = useCoopLoad(periodId, () => api().coop.patronage.statement({ periodId }));
   if (!me) return <Navigate to="/signin" replace />;
   // Not yours, not approved, or no such period: the API answers NOT_FOUND alike.
-  if (statement.failed && !statement.data) return <NotFoundState />;
-  return <StatementPage statement={statement.data} />;
+  if (isNotFound(statement)) return <NotFoundState />;
+  return (
+    <CoopLoadGate status={coopLoads([statement])} tab="patronage">
+      <StatementPage statement={statement.data} />
+    </CoopLoadGate>
+  );
 }

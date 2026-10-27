@@ -3,10 +3,9 @@
 
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { StatementsPage } from "../../components/coop/statements.tsx";
-import { FormError } from "../../components/form-error.tsx";
-import { useLoad } from "../../components/money/use-load.ts";
-import { t } from "../../i18n/index.ts";
+import { coopLoads, useCoopLoad } from "../../components/coop/use-coop.ts";
 import { api } from "../../lib/api.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
@@ -19,12 +18,11 @@ export const Route = createFileRoute("/_app/coop/patronage/")({
 
 function PatronageRoute(): React.JSX.Element {
   const { me } = useBootstrap();
-  const statements = useLoad(me ? `statements|${me.id}` : "statements|-", () => api().coop.patronage.statements());
+  const statements = useCoopLoad(me ? `statements|${me.id}` : "statements|-", () => api().coop.patronage.statements());
   if (!me) return <Navigate to="/signin" replace />;
   return (
-    <>
-      {statements.failed && <FormError>{t("coop.loadFailed")}</FormError>}
-      <StatementsPage statements={statements.data ?? (statements.failed ? [] : null)} />
-    </>
+    <CoopLoadGate status={coopLoads([statements])} tab="patronage">
+      <StatementsPage statements={statements.data} />
+    </CoopLoadGate>
   );
 }

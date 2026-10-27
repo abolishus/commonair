@@ -13,7 +13,7 @@ import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import {
   contributionWeightsOf,
-  eligibleHoursByUser,
+  eligibleHoursForUsers,
   loadSettings,
   membershipClassesOf,
   subscriptionQualifies,
@@ -25,7 +25,7 @@ import { audit } from "../events/audit.ts";
 import { emit } from "../events/outbox.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
-import { badRequest, conflict, notFound, notImplemented, precondition } from "../lib/errors.ts";
+import { badRequest, conflict, forbidden, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { withCoopErrors, withCoopErrorsRetrying } from "./errors.ts";
 import { MEMBER, STAFF, money, unknownUser, userPicks } from "./shared.ts";
@@ -79,6 +79,34 @@ async function activate(
   return row ?? null;
 }
 
+/** Whether one of the user's active subscriptions qualifies for viewer membership under `rules` now. */
+async function hasQualifyingSubscription(
+  db: Executor,
+  userId: string,
+  now: Date,
+  rules: ReturnType<typeof membershipClassesOf>,
+): Promise<boolean> {
+  const subs = await db
+    .select({ s: schema.subscriptions, ownerId: schema.channels.ownerId })
+    .from(schema.subscriptions)
+    .innerJoin(schema.channels, eq(schema.channels.id, schema.subscriptions.channelId))
+    .where(and(eq(schema.subscriptions.subscriberId, userId), eq(schema.subscriptions.status, "active")));
+  return subs.some((r) =>
+    subscriptionQualifies(
+      {
+        status: r.s.status,
+        priceCents: r.s.priceCents,
+        provider: r.s.provider,
+        currentPeriodEnd: r.s.currentPeriodEnd,
+        giftedById: r.s.giftedById,
+        ownChannel: r.ownerId === userId,
+      },
+      now,
+      rules,
+    ),
+  );
+}
+
 async function membershipView(deps: Deps, userId: string): Promise<MembershipViewDto> {
   const db = deps.db;
   const now = deps.now();
@@ -93,12 +121,8 @@ async function membershipView(deps: Deps, userId: string): Promise<MembershipVie
       .where(eq(membershipShares.userId, userId))
       .orderBy(desc(membershipShares.createdAt))
       .limit(1),
-    eligibleHoursByUser(db, new Date(now.getTime() - rules.streamer.windowDays * DAY_MS), now, cap),
-    db
-      .select({ s: schema.subscriptions, ownerId: schema.channels.ownerId })
-      .from(schema.subscriptions)
-      .innerJoin(schema.channels, eq(schema.channels.id, schema.subscriptions.channelId))
-      .where(and(eq(schema.subscriptions.subscriberId, userId), eq(schema.subscriptions.status, "active"))),
+    eligibleHoursForUsers(db, [userId], new Date(now.getTime() - rules.streamer.windowDays * DAY_MS), now, cap),
+    hasQualifyingSubscription(db, userId, now, rules),
   ]);
   // Current memberships first (every active one, then the latest ended one per class).
   const shown = new Map<string, MembershipRow>();
@@ -138,20 +162,7 @@ async function membershipView(deps: Deps, userId: string): Promise<MembershipVie
       rules,
       streamingHours: hours.get(userId) ?? 0,
       heldShareCents: share?.status === "held" ? share.amountCents : null,
-      qualifyingSubscription: subs.some((r) =>
-        subscriptionQualifies(
-          {
-            status: r.s.status,
-            priceCents: r.s.priceCents,
-            provider: r.s.provider,
-            currentPeriodEnd: r.s.currentPeriodEnd,
-            giftedById: r.s.giftedById,
-            ownChannel: r.ownerId === userId,
-          },
-          now,
-          rules,
-        ),
-      ),
+      qualifyingSubscription: subs,
       activeWorker: rows.some((m) => m.class === "worker" && m.status === "active"),
     }),
     share: share
@@ -373,7 +384,48 @@ export const membershipHandlers = {
     return membershipView(deps, userId);
   }),
 
-  join: os.coop.join.handler(notImplemented),
+  /**
+   * Rejoin the viewer class on a qualifying subscription (ADR 0020): the sync respects a viewer
+   * exit forever, so this explicit action is how a subscriber comes back. It never creates a share;
+   * a member by share rejoins by buying one (`buyShare`).
+   */
+  join: os.coop.join.handler(async ({ context, input }) => {
+    const { deps } = context;
+    const caller = requireCaller(context);
+    const userId = caller.user.id;
+    await withCoopErrors(() =>
+      deps.db.transaction(async (tx) => {
+        const now = deps.now();
+        const rules = membershipClassesOf(await loadSettings(tx));
+        // The exit path's lock: the user's rows in the class, so a concurrent exit or join waits.
+        const rows = await tx
+          .select({ id: memberships.id, status: memberships.status })
+          .from(memberships)
+          .where(and(eq(memberships.userId, userId), eq(memberships.class, input.class)))
+          .for("update");
+        if (rows.some((m) => m.status === "active")) throw conflict("You are already a viewer member");
+        if (!rules.viewer.activeSubscriptionQualifies)
+          throw forbidden("On this co-op only a member share makes you a viewer member");
+        if (!(await hasQualifyingSubscription(tx, userId, now, rules)))
+          throw forbidden(
+            `Rejoining needs an active paid subscription of at least ${rules.viewer.minSubscriptionCents} cents to someone else's channel (not a gift)`,
+          );
+        const m = await activate(tx, userId, input.class, "subscription", now);
+        // A concurrent activation (the sync, a share confirm) won the unique index.
+        if (!m) throw conflict("You are already a viewer member");
+        await audit(tx, {
+          actorType: MEMBER,
+          actorId: userId,
+          action: "membership.join",
+          subjectType: "membership",
+          subjectId: m.id,
+          details: { class: m.class, basis: m.basis, userId },
+        });
+        await membershipEvent(tx, m, now);
+      }),
+    );
+    return membershipView(deps, userId);
+  }),
 
   appointWorker: os.coop.appointWorker.handler(async ({ context, input }) => {
     const { deps } = context;

@@ -18,6 +18,7 @@ import {
   byCoopId,
 } from "./coop-selectors.ts";
 import { type Choice, type MemberClass, datetimeLocalUtc, utcMonthOf } from "./coop.ts";
+import { E7_TEST_IDS as T7 } from "./e7/selectors.ts";
 import { parseCents } from "./money.ts";
 import type { WaitBudget } from "./social.ts";
 import type { SignedInUser } from "./users.ts";
@@ -114,6 +115,10 @@ export interface CoopDriver {
   buyShare(user: SignedInUser, b: WaitBudget): Promise<ShareCheckout>;
   membership(user: SignedInUser, b: WaitBudget): Promise<MembershipSnapshot>;
   appointWorker(admin: SignedInUser, username: string, minute: string, b: WaitBudget): Promise<void>;
+  /** Leave a class (`membership-exit-<class>` → confirm; `coop.exit`). */
+  exit(user: SignedInUser, cls: MemberClass, b: WaitBudget): Promise<void>;
+  /** Rejoin the viewer class on a subscription (`membership-rejoin-viewer` → confirm; `coop.join`). */
+  rejoinViewer(user: SignedInUser, b: WaitBudget): Promise<void>;
   /** Save the draft, then submit it (`draft → discussion`). */
   draftAndSubmit(author: SignedInUser, input: ProposalInput, b: WaitBudget): Promise<DraftResult>;
   vote(user: SignedInUser, proposalId: string, choice: Choice, b: WaitBudget): Promise<{ myVote: string | null }>;
@@ -148,6 +153,14 @@ export class ApiCoop implements CoopDriver {
 
   async appointWorker(admin: SignedInUser, username: string, minute: string): Promise<void> {
     await admin.api.client.coop.appointWorker({ username, boardMinuteRef: minute });
+  }
+
+  async exit(user: SignedInUser, cls: MemberClass): Promise<void> {
+    await user.api.client.coop.exit({ class: cls });
+  }
+
+  async rejoinViewer(user: SignedInUser): Promise<void> {
+    await user.api.client.coop.join({ class: "viewer" });
   }
 
   async draftAndSubmit(author: SignedInUser, input: ProposalInput): Promise<DraftResult> {
@@ -332,6 +345,24 @@ async function visible(locator: Locator, timeoutMs: number): Promise<boolean> {
   }
 }
 
+/** Wait until the page's `membership-row` for `cls` shows a status `done` accepts (the refreshed view). */
+async function waitForMembershipRow(
+  page: Page,
+  cls: MemberClass,
+  done: (status: string) => boolean,
+  b: WaitBudget,
+): Promise<void> {
+  await waitFor(
+    `membership-row ${cls}`,
+    async () => {
+      const row = byCoopId(page, T.membershipRow, { class: cls }).first();
+      const status = (await row.count()) > 0 ? await row.getAttribute("data-status") : null;
+      return status !== null && done(status) ? true : null;
+    },
+    { timeoutMs: b.timeoutMs, intervalMs: 250, signal: b.signal },
+  );
+}
+
 /** Click, and confirm when the action opens the shared `ConfirmDialog`. */
 async function clickConfirming(page: Page, target: Locator, b: WaitBudget): Promise<void> {
   await target.click({ timeout: b.timeoutMs });
@@ -447,6 +478,20 @@ export class WebCoop implements CoopDriver {
     await byCoopId(page, T.appointWorkerUsername).fill(username, ui);
     await byCoopId(page, T.appointWorkerMinute).fill(minute, ui);
     await clickConfirming(page, byCoopId(page, T.appointWorkerSubmit), b);
+  }
+
+  async exit(user: SignedInUser, cls: MemberClass, b: WaitBudget): Promise<void> {
+    const page = await this.openAs(user, R.membership);
+    await byCoopId(page, T.membership).waitFor({ timeout: b.timeoutMs });
+    await clickConfirming(page, byCoopId(page, TT.membershipExit(cls)).first(), b);
+    await waitForMembershipRow(page, cls, (status) => status !== "active", b);
+  }
+
+  async rejoinViewer(user: SignedInUser, b: WaitBudget): Promise<void> {
+    const page = await this.openAs(user, R.membership);
+    await byCoopId(page, T.membership).waitFor({ timeout: b.timeoutMs });
+    await clickConfirming(page, byCoopId(page, T7.membershipRejoinViewer).first(), b);
+    await waitForMembershipRow(page, "viewer", (status) => status === "active", b);
   }
 
   async draftAndSubmit(author: SignedInUser, input: ProposalInput, b: WaitBudget): Promise<DraftResult> {
