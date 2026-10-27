@@ -805,7 +805,7 @@ unit_in_mode() {
 
 # The value of KEY in the env file, if it already describes an external store (else nothing).
 stored_s3() {
-  if [ "$STORAGE_STORED" = yes ]; then env_get "$1" "$ENV_FILE"; fi
+  if [ "$STORAGE_STORED" = yes ]; then env_get "$1" "$STORAGE_ENV"; fi
   return 0
 }
 
@@ -881,10 +881,12 @@ resolve_storage() {
 # The part of resolve_storage that needs no key: the mode, the endpoint and the buckets, checked
 # against $ENV_FILE. cmd_install also runs it as root, before preparing the host.
 resolve_storage_settings() {
+  # The env file to check: the argument (root's precheck), else this run's.
+  STORAGE_ENV=${1:-$ENV_FILE}
   STORAGE_STORED=no
   _have=""
-  if [ -f "$ENV_FILE" ]; then
-    read_storage_mode "$ENV_FILE"
+  if [ -f "$STORAGE_ENV" ]; then
+    read_storage_mode "$STORAGE_ENV"
     _have=$STORAGE_MODE
   fi
   if [ "$S3_FLAGS" = yes ]; then STORAGE_MODE=external; else STORAGE_MODE=${_have:-garage}; fi
@@ -935,7 +937,7 @@ resolve_storage_settings() {
 # As root, before root_prepare: the same checks against the service user's env file, if it has
 # one, so a refused store choice changes nothing on the host. Keys are left to the user's run.
 # A symlinked env file is skipped (root does not follow links the service user controls); that
-# run checks it anyway. A subshell keeps root's ENV_FILE and STORAGE_* as they were.
+# run checks it anyway. A subshell keeps root's STORAGE_* and S3_SET_* as they were.
 precheck_storage_as_root() {
   _env=/nonexistent
   if id -u "$SERVICE_USER" >/dev/null 2>&1; then
@@ -943,10 +945,7 @@ precheck_storage_as_root() {
     _cand="$_uhome/.config/commonair/commonair.env"
     if [ -n "$_uhome" ] && [ -f "$_cand" ] && [ ! -L "$_cand" ]; then _env=$_cand; fi
   fi
-  (
-    ENV_FILE=$_env
-    resolve_storage_settings
-  ) || exit 1
+  (resolve_storage_settings "$_env") || exit 1
 }
 
 # Where browsers send presigned uploads: the public endpoint's origin, or with virtual-hosted
