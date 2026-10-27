@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { DmcaRestoreJob, type DmcaRestoreResult, MODERATION_JOBS, QUEUES } from "@commonair/contracts/internal";
+import { DmcaRestoreJob, MODERATION_JOBS, QUEUES } from "@commonair/contracts/internal";
+import { dmcaRestore } from "../dmca/restore.ts";
 import { defineJob } from "../runtime/registry.ts";
 
-/** Stub from the E7 contract step; E7-dmca owns this file and implements it. */
+/** E7-dmca: every 15 minutes, and on demand from the `dmca-tick` test hook (`asOf`). */
 export const job = defineJob({
   queue: QUEUES.moderation,
   name: MODERATION_JOBS.dmcaRestore,
@@ -12,5 +13,5 @@ export const job = defineJob({
   data: DmcaRestoreJob,
   schedule: { every: 900_000 },
   attempts: 3,
-  handler: async (): Promise<DmcaRestoreResult> => ({ restored: 0, counters: 0 }),
+  handler: async (data, ctx) => dmcaRestore(ctx, data),
 });

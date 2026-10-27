@@ -43,6 +43,8 @@ test("the registry covers every notice the platform sends", () => {
       "governanceResultPublished",
       "councilReviewRequested",
       "dmcaNoticeReceived",
+      "dmcaNoticeDecided",
+      "dmcaCounterNoticeForwarded",
       "contentRestored",
       "appealDecided",
     ].toSorted(),
@@ -146,6 +148,9 @@ function cyrillicSamples(origin: string): SampleData {
     device: "Фаерфокс",
     location: "Лиссабон",
     foundIn: "публичный репозиторий",
+    decisionNote: "В уведомлении не указано произведение",
+    address: "Улица Примерная, 1",
+    statement: "Я сам записал это выступление",
   });
   const refs = JSON.stringify(data).replace(/"(reference|noticeRef|appealRef)":"[^"]*"/g, '"$1":"№ 1207"');
   return JSON.parse(refs) as SampleData;
@@ -320,4 +325,64 @@ test("every storageLinks field is also a declared link", async () => {
   for (const def of Object.values(templates) as { links: readonly string[]; storageLinks?: readonly string[] }[]) {
     for (const key of def.storageLinks ?? []) expect(def.links).toContain(key);
   }
+});
+
+describe("DMCA mail (17 U.S.C. § 512; not reviewed by a lawyer)", () => {
+  test("a rejection tells the claimant what is missing; an actioned notice says access was disabled", async () => {
+    const rejected = await render("dmcaNoticeDecided");
+    expect(rejected.subject).toBe("Your copyright notice DMCA-2026-0091 could not be actioned");
+    expect(rejected.text).toContain(samples.dmcaNoticeDecided.note);
+    expect(rejected.text).toContain(en.dmcaNoticeDecided.resubmit);
+    const actioned = await render("dmcaNoticeDecided", {
+      ...samples.dmcaNoticeDecided,
+      decision: "actioned",
+      note: "",
+      removedItems: 2,
+      totalItems: 2,
+    });
+    expect(actioned.text).toContain("disabled access to the material it identified");
+    expect(actioned.subject).toBe("Your copyright notice DMCA-2026-0091 was actioned");
+    expect(actioned.text).toContain(en.dmcaNoticeDecided.headingActioned);
+    expect(actioned.text).not.toContain(en.dmcaNoticeDecided.noteLabel);
+    expect(actioned.text).not.toContain(en.dmcaNoticeDecided.resubmit);
+    // The designated agent's address is the way to answer.
+    expect(actioned.html).toContain(`mailto:${site.contacts.dmca}`);
+  });
+
+  test("an actioned notice that disabled only some, or none, of its locations says so", async () => {
+    const base = { ...samples.dmcaNoticeDecided, decision: "actioned" as const, note: "" };
+    const partial = await render("dmcaNoticeDecided", { ...base, removedItems: 1, totalItems: 3 });
+    expect(partial.text).toContain("at 1 of the 3 locations");
+    expect(partial.text).not.toContain("disabled access to the material it identified");
+    const none = await render("dmcaNoticeDecided", { ...base, removedItems: 0, totalItems: 2 });
+    expect(none.text).toContain("so nothing was removed");
+    expect(none.text).not.toContain("disabled access");
+  });
+
+  test("the forwarded counter-notice carries every § 512(g)(3) element and the restore date", async () => {
+    const d = samples.dmcaCounterNoticeForwarded;
+    const mail = await render("dmcaCounterNoticeForwarded");
+    for (const part of [d.fullName, d.address, d.phone, d.statement, d.signature, ...d.items])
+      expect(mail.text).toContain(part);
+    expect(mail.text).toContain(en.dmcaCounterNoticeForwarded.signatureLabel);
+    expect(mail.text).toContain(en.dmcaCounterNoticeForwarded.restoreLabel);
+    expect(mail.html).toContain(`mailto:${site.contacts.dmca}`);
+    // The item URLs are text, never links.
+    for (const u of d.items) expect(mail.html).not.toContain(`href="${u}"`);
+  });
+
+  test("counter-notice text is escaped and cannot break the subject", async () => {
+    const mail = await render("dmcaCounterNoticeForwarded", {
+      ...samples.dmcaCounterNoticeForwarded,
+      statement: "<script>alert(1)</script>",
+      noticeRef: "Evil\r\nBcc: x@example.test",
+    });
+    expect(mail.html).not.toContain("<script>");
+    expect(mail.subject).not.toMatch(/[\r\n]/);
+  });
+
+  test("the uploader's notice links to the copyright settings page", async () => {
+    const mail = await render("dmcaNoticeReceived");
+    expect(mail.html).toContain("/settings/copyright?notice=sample");
+  });
 });

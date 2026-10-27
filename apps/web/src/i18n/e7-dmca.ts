@@ -1,5 +1,190 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** E7-dmca: the DMCA notice form, your content and the DMCA queue (dmca.*, copyright.*, dmcaq.*). That unit owns this file. */
-export const e7DmcaMessages = {} as const;
+/**
+ * E7-dmca: the DMCA notice form, your content and the DMCA queue (dmca.*, copyright.*, dmcaq.*).
+ * That unit owns this file. The statutory statements follow 17 U.S.C. § 512(c)(3)(A) and
+ * § 512(g)(3); they have not been reviewed by a lawyer.
+ */
+export const e7DmcaMessages = {
+  // /dmca
+  "dmca.title": "Report copyright infringement (DMCA)",
+  "dmca.intro":
+    "If material on this service infringes a copyright you own or are authorised to act for, send a takedown notice here. No account is needed.",
+  "dmca.howTitle": "How a notice is handled",
+  "dmca.how1":
+    "A complete notice has every element the US Digital Millennium Copyright Act asks for: your signature, the work, where the material is on this service, your contact details and the two statements below.",
+  "dmca.how2":
+    "Our team reviews it and, if it is complete, disables access to the material and tells the person who posted it. An incomplete notice gets a reply saying what is missing.",
+  "dmca.how3":
+    "The person who posted it can send a counter-notice. We then forward it to you, including their contact details, and restore the material after 10 to 14 business days unless you tell us you have filed a court action.",
+  "dmca.how4":
+    "Knowingly misrepresenting that material is infringing can make you liable for damages. Consider fair use before you send a notice.",
+  "dmca.policyLink": "Read the full policy:",
+  "dmca.name": "Your full name",
+  "dmca.email": "Email address",
+  "dmca.emailHint": "We write to you here about the notice and forward any counter-notice.",
+  "dmca.address": "Postal address",
+  "dmca.phone": "Telephone number (optional)",
+  "dmca.phoneHint": "Recommended: the law asks for contact information such as an address and a telephone number.",
+  "dmca.work": "The copyrighted work",
+  "dmca.workHint":
+    "Identify the work you say is infringed, or a representative list if there are several. For long videos, add timestamps.",
+  "dmca.urls": "Where the material is on this service",
+  "dmca.urlsHint": "One URL per line (up to {max}): the channel, video or clip page.",
+  "dmca.goodFaith":
+    "I have a good faith belief that use of the material in the manner complained of is not authorised by the copyright owner, its agent, or the law.",
+  "dmca.accuracy":
+    "The information in this notice is accurate, and under penalty of perjury, I am the owner, or authorised to act on behalf of the owner, of an exclusive right that is allegedly infringed.",
+  "dmca.signature": "Signature",
+  "dmca.signatureHint": "Type your full name as your electronic signature.",
+  "dmca.falseNotice":
+    "Your name and the work you identify are shown to the person whose material is removed; your email, address and phone are not.",
+  "dmca.submit": "Send notice",
+  "dmca.receipt.title": "Notice received",
+  "dmca.receipt.body":
+    "Thank you. Our team will review your notice, and we will write to you at the address you gave when it is decided.",
+  "dmca.receipt.received": "Received",
+  "dmca.receipt.reference": "Reference: {id}",
+  "dmca.error.name": "Enter your full name.",
+  "dmca.error.email": "Enter a valid email address.",
+  "dmca.error.address": "Enter your postal address.",
+  "dmca.error.phone": "A telephone number has {min} to {max} characters.",
+  "dmca.error.work": "Identify the copyrighted work.",
+  "dmca.error.urlInvalid": "Each line must be a web address starting with https:// or http://.",
+  "dmca.error.urlMissing": "List at least one address where the material appears.",
+  "dmca.error.urlTooMany": "List at most {max} addresses per notice.",
+  "dmca.error.goodFaith": "The good faith statement is required.",
+  "dmca.error.accuracy": "The accuracy statement is required.",
+  "dmca.error.signature": "Sign the notice by typing your full name.",
+  "dmca.error.rejected": "The notice could not be accepted. Check the fields and try again.",
+  "dmca.error.failed": "The notice could not be sent. Try again in a moment.",
+
+  // /settings/copyright
+  "copyright.title": "Copyright notices",
+  "copyright.intro":
+    "Copyright (DMCA) notices about your content. If material was removed by mistake or misidentification, you can send a counter-notice.",
+  "copyright.loading": "Loading copyright notices",
+  "copyright.loadFailed": "Your copyright notices could not be loaded.",
+  "copyright.retry": "Try again",
+  "copyright.empty": "No copyright notices",
+  "copyright.emptyBody": "When someone sends a copyright notice about your content and we act on it, it appears here.",
+  "copyright.notice.from": "Notice from {name}",
+  "copyright.notice.work": "Copyrighted work they identified",
+  "copyright.notice.repeat":
+    "Each notice we act on counts as one strike against your account. Repeated strikes can suspend it; a strike is removed when a counter-notice restores the content or an appeal overturns it.",
+  "copyright.subject.vod": "Video",
+  "copyright.subject.clip": "Clip",
+  "copyright.subject.broadcast": "Live broadcast",
+  "copyright.subject.unresolved": "Address",
+  "copyright.item.removed": "removed",
+  "copyright.item.restored": "restored",
+  "copyright.item.notRemoved": "not removed",
+  "copyright.item.unresolved": "not found on this service",
+  "copyright.counter.open": "Send a counter-notice",
+  "copyright.counter.title": "Counter-notice",
+  "copyright.counter.description":
+    "Send this only if you believe the material was removed by mistake or misidentification. Every field is required by law.",
+  "copyright.counter.name": "Your full name",
+  "copyright.counter.address": "Postal address",
+  "copyright.counter.phone": "Telephone number",
+  "copyright.counter.items": "Removed material this counter-notice covers",
+  "copyright.counter.statement": "Why the removal was a mistake",
+  "copyright.counter.statementHint":
+    "Explain, in your own words, why you believe the material was misidentified or is not infringing.",
+  "copyright.counter.goodFaith":
+    "I swear, under penalty of perjury, that I have a good faith belief that the material was removed or disabled as a result of mistake or misidentification of the material to be removed or disabled.",
+  "copyright.counter.jurisdiction":
+    "I consent to the jurisdiction of the Federal District Court for the judicial district in which my address is located or, if my address is outside the United States, for any judicial district in which this service may be found, and I will accept service of process from the person who sent the notice or an agent of that person.",
+  "copyright.counter.signature": "Signature",
+  "copyright.counter.signatureHint": "Type your full name as your electronic signature.",
+  "copyright.counter.submit": "Review and send",
+  "copyright.counter.confirmTitle": "Send your contact details to the claimant?",
+  "copyright.counter.confirmBody":
+    "The law requires us to forward your counter-notice to the person who sent the notice, including your name, address and telephone number, so they can take legal action if they choose. The material is restored after 10 to 14 business days unless they tell us they have filed a court action.",
+  "copyright.counter.confirm": "Send counter-notice",
+  "copyright.counter.done": "Counter-notice sent.",
+  "copyright.counter.failed": "The counter-notice could not be sent. Try again in a moment.",
+  "copyright.counter.conflict": "A counter-notice was already sent for this notice.",
+  "copyright.counter.error.name": "Enter your full name.",
+  "copyright.counter.error.address": "Enter your postal address.",
+  "copyright.counter.error.phone": "Enter a telephone number of {min} to {max} characters.",
+  "copyright.counter.error.items": "Choose at least one removed item.",
+  "copyright.counter.error.statement": "Explain why the removal was a mistake.",
+  "copyright.counter.error.goodFaith": "The statement under penalty of perjury is required.",
+  "copyright.counter.error.jurisdiction": "Consent to jurisdiction and service of process is required.",
+  "copyright.counter.error.signature": "Sign the counter-notice by typing your full name.",
+  "copyright.receipt.title": "Counter-notice sent",
+  "copyright.receipt.restoreAfter": "Your material is restored after",
+  "copyright.receipt.restored": "Restored",
+  "copyright.receipt.suit": "The claimant told us they filed a court action, so the material stays down.",
+
+  // /admin/dmca
+  "dmcaq.title": "DMCA notices",
+  "dmcaq.intro":
+    "Copyright notices and counter-notices. Act on a complete notice, reject an incomplete one with a note saying what is missing, and record a court action when the claimant reports one.",
+  "dmcaq.statusFilter": "Status",
+  "dmcaq.status.received": "New",
+  "dmcaq.status.actioned": "Actioned",
+  "dmcaq.status.rejected": "Rejected",
+  "dmcaq.status.countered": "Countered",
+  "dmcaq.status.restored": "Restored",
+  "dmcaq.loading": "Loading DMCA notices",
+  "dmcaq.loadFailed": "DMCA notices could not be loaded.",
+  "dmcaq.loadMoreFailed": "More notices could not be loaded.",
+  "dmcaq.loadMore": "Load more",
+  "dmcaq.retry": "Try again",
+  "dmcaq.empty": "No notices with this status",
+  "dmcaq.itemCount": "{items} URLs, {resolved} found",
+  "dmcaq.detail.title": "Notice from {name}",
+  "dmcaq.detail.email": "Email",
+  "dmcaq.detail.phone": "Telephone",
+  "dmcaq.detail.none": "Not given",
+  "dmcaq.detail.address": "Address",
+  "dmcaq.detail.signature": "Signature",
+  "dmcaq.detail.work": "Copyrighted work",
+  "dmcaq.detail.received": "Received",
+  "dmcaq.detail.handledBy": "Decided by",
+  "dmcaq.detail.note": "Decision note",
+  "dmcaq.detail.items": "Infringing material",
+  "dmcaq.strikes.title": "Owners' strikes",
+  "dmcaq.strikes.count": "{strikes} active strikes (policy threshold {threshold})",
+  "dmcaq.strikes.repeat": "Repeat infringer",
+  "dmcaq.decision": "Decision",
+  "dmcaq.decision.actioned": "Disable access",
+  "dmcaq.decision.rejected": "Reject",
+  "dmcaq.note": "Note",
+  "dmcaq.noteHint": "Kept on the notice for staff; the claimant receives it with the decision.",
+  "dmcaq.noteHintRejected": "Say what the notice is missing: the claimant receives this note.",
+  "dmcaq.submit": "Decide",
+  "dmcaq.confirmTitle": "Disable access to this material?",
+  "dmcaq.confirmBody":
+    "Every found item is hidden at once (a live broadcast ends), its files move out of public reach, each owner gets one strike and is told, and the claimant hears the decision.",
+  "dmcaq.confirm": "Disable access",
+  "dmcaq.actionedDone": "Notice actioned.",
+  "dmcaq.rejectedDone": "Notice rejected.",
+  "dmcaq.decided": "This notice is already decided.",
+  "dmcaq.ownContent": "You cannot decide a notice about your own content.",
+  "dmcaq.failed": "The decision could not be saved.",
+  "dmcaq.counter.title": "Counter-notices",
+  "dmcaq.counter.user": "Account",
+  "dmcaq.counter.name": "Name",
+  "dmcaq.counter.address": "Address",
+  "dmcaq.counter.phone": "Telephone",
+  "dmcaq.counter.statement": "Statement",
+  "dmcaq.counter.items": "Items covered",
+  "dmcaq.counter.restoreAfter": "Restore after",
+  "dmcaq.counter.restoredAt": "Restored",
+  "dmcaq.counter.suitFiledAt": "Court action recorded",
+  "dmcaq.counter.suitNoteLabel": "Court action note",
+  "dmcaq.counter.suitNote": "Court action note",
+  "dmcaq.counter.suitHint": "For example the court and case number. Kept on the counter-notice only.",
+  "dmcaq.counter.suitFiled": "Record court action",
+  "dmcaq.counter.suitConfirmTitle": "Record that the claimant filed a court action?",
+  "dmcaq.counter.suitConfirmBody":
+    "The material then stays down and is not restored automatically. Record this only after the claimant told the designated agent they filed an action to restrain the uploader.",
+  "dmcaq.counter.suitConfirm": "Record court action",
+  "dmcaq.counter.suitDone": "Court action recorded.",
+  "dmcaq.counter.suitConflict": "A court action is already recorded, or the material was restored.",
+  "dmcaq.counter.suitFailed": "The court action could not be recorded.",
+} as const;

@@ -18,6 +18,12 @@ export interface SampleValues {
   device: string;
   location: string;
   foundIn: string;
+  /** A moderator's note on a DMCA decision. */
+  decisionNote: string;
+  /** A postal address (DMCA counter-notice). */
+  address: string;
+  /** A counter-notice statement. */
+  statement: string;
 }
 
 export const ENGLISH_SAMPLE_VALUES: SampleValues = {
@@ -28,6 +34,9 @@ export const ENGLISH_SAMPLE_VALUES: SampleValues = {
   device: "Firefox on Linux",
   location: "Lisbon, Portugal",
   foundIn: "a public code repository",
+  decisionNote: "The notice does not identify the copyrighted work.",
+  address: "1 Example Street, Springfield",
+  statement: "I recorded this performance myself and hold the rights to it.",
 };
 
 export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_VALUES): SampleData {
@@ -91,7 +100,26 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       contentTitle: v.contentTitle,
       noticeRef: "DMCA-2026-0091",
       receivedAt: at,
-      noticeUrl: url("/settings/copyright/notices/sample"),
+      noticeUrl: url("/settings/copyright?notice=sample"),
+    },
+    dmcaNoticeDecided: {
+      noticeRef: "DMCA-2026-0091",
+      decision: "rejected",
+      decidedAt: at,
+      note: v.decisionNote,
+      removedItems: 0,
+      totalItems: 2,
+    },
+    dmcaCounterNoticeForwarded: {
+      noticeRef: "DMCA-2026-0091",
+      fullName: v.displayName,
+      address: v.address,
+      phone: "+1 555 0100",
+      statement: v.statement,
+      signature: `/s/ ${v.displayName}`,
+      items: [url("/ada_plays/clip/sample")],
+      receivedAt: at,
+      restoreAfter: "2026-11-03T14:30:00Z",
     },
     contentRestored: { contentTitle: v.contentTitle, restoredAt: at, contentUrl: url("/videos/sample") },
     appealDecided: {

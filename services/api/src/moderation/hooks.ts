@@ -4,9 +4,10 @@
 /**
  * Harness-only test hooks (`/internal/moderation/*`, docs/testing/e4c-selectors.md). They exist
  * only while `MODERATION_TEST_HOOKS=true`; otherwise every path answers 404 as if it were unknown,
- * so a public instance cannot script classifier scores or move the NCII clock.
+ * so a public instance cannot script classifier scores, move the NCII clock or shorten the DMCA
+ * waiting period (`dmca-tick` is the only way to run the restore early, and only here).
  */
-import { INTERNAL_ROUTES, KEYS, ModerationScriptBody, NciiTickBody } from "@commonair/contracts/internal";
+import { DmcaTickBody, INTERNAL_ROUTES, KEYS, ModerationScriptBody, NciiTickBody } from "@commonair/contracts/internal";
 import type { Deps } from "../deps.ts";
 import { moderationRuntime } from "./runtime.ts";
 
@@ -14,7 +15,7 @@ import { moderationRuntime } from "./runtime.ts";
 const SCRIPT_TTL_SECONDS = 86_400;
 
 export const isTestHookPath = (path: string) =>
-  path === INTERNAL_ROUTES.moderationScript || path === INTERNAL_ROUTES.nciiTick;
+  path === INTERNAL_ROUTES.moderationScript || path === INTERNAL_ROUTES.nciiTick || path === INTERNAL_ROUTES.dmcaTick;
 
 /**
  * Serve one hook for a caller that already passed the internal-secret check. `body` is the parsed
@@ -32,6 +33,17 @@ export async function testHook(deps: Deps, path: string, method: string, body: u
     return new Response(null, { status: 204 });
   }
   if (method !== "POST") return new Response(null, { status: 405 });
+  if (path === INTERNAL_ROUTES.dmcaTick) {
+    const tick = DmcaTickBody.safeParse(body);
+    if (!tick.success) return new Response(null, { status: 400 });
+    const rt = await moderationRuntime(deps);
+    try {
+      return Response.json(await rt.queue.dmcaRestoreTick(tick.data.asOf));
+    } catch (err) {
+      deps.logger.warn("dmca-tick test hook failed", { err: (err as Error).name });
+      return new Response(null, { status: 504 });
+    }
+  }
   const parsed = NciiTickBody.safeParse(body);
   if (!parsed.success) return new Response(null, { status: 400 });
   const rt = await moderationRuntime(deps);

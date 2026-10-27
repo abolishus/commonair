@@ -3,8 +3,9 @@
 
 /**
  * `safety.*`: user reports, the report queue and its resolution, platform suspensions, the
- * audit log and the channel mod log (docs/testing/e4c-selectors.md "Reports"). DMCA procedures
- * are not part of E4c and stay unimplemented.
+ * audit log and the channel mod log (docs/testing/e4c-selectors.md "Reports"), and the DMCA
+ * notice-and-takedown procedures (`safety.dmca.*`, logic in `../dmca/`; E7-dmca,
+ * docs/testing/e7-selectors.md; not reviewed by a lawyer).
  *
  * - One open report per reporter and subject (serialized per pair with an advisory lock).
  * - `minor_safety` and `ncii` reports get `URGENT_REPORT_PRIORITY` and notify every `legal` user;
@@ -20,7 +21,8 @@ import { audit } from "../events/audit.ts";
 import { publishControl, publishUserControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor, pageOf } from "../lib/cursor.ts";
 import { iso, userByUsername } from "../lib/dto.ts";
-import { badRequest, conflict, forbidden, notFound, notImplemented } from "../lib/errors.ts";
+import * as dmca from "../dmca/notices.ts";
+import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { afterBroadcastEnded, endBroadcastInTx, type EndedBroadcast } from "../moderation/live.ts";
 import { setSuspension } from "../moderation/suspension.ts";
@@ -426,12 +428,18 @@ export const safety = {
   }),
 
   dmca: {
-    submit: os.safety.dmca.submit.handler(notImplemented),
-    counter: os.safety.dmca.counter.handler(notImplemented),
-    queue: os.safety.dmca.queue.handler(notImplemented),
-    action: os.safety.dmca.action.handler(notImplemented),
-    mine: os.safety.dmca.mine.handler(notImplemented),
-    suitFiled: os.safety.dmca.suitFiled.handler(notImplemented),
+    submit: os.safety.dmca.submit.handler(({ context, input }) => dmca.submitNotice(context.deps, input)),
+    counter: os.safety.dmca.counter.handler(({ context, input }) =>
+      dmca.fileCounter(context.deps, requireCaller(context), input),
+    ),
+    queue: os.safety.dmca.queue.handler(({ context, input }) => dmca.queueNotices(context.deps, input)),
+    action: os.safety.dmca.action.handler(({ context, input }) =>
+      dmca.decideNotice(context.deps, requireCaller(context), input),
+    ),
+    mine: os.safety.dmca.mine.handler(({ context }) => dmca.myNotices(context.deps, requireCaller(context))),
+    suitFiled: os.safety.dmca.suitFiled.handler(({ context, input }) =>
+      dmca.recordSuit(context.deps, requireCaller(context), input),
+    ),
   },
 
   suspend: os.safety.suspend.handler(async ({ context, input }) => {

@@ -155,7 +155,9 @@ The application role and governance votes cannot release a hold.
   built to it: the clock starts at receipt, the queue is alerted at 24 hours and escalated at
   36, and **at 48 hours undecided content is hidden automatically**. Removed content is hashed
   into the local block list so re-uploads match. See the [FTC's business guidance](https://www.ftc.gov/business-guidance/resources/complying-take-it-down-act).
-- **DMCA.** The copyright notice and counter-notice flow is already built.
+- **DMCA.** The notice (`/dmca`), takedown, counter-notice, restore and repeat-infringer flow is
+  built; the safe harbor also needs a designated agent registered with the US Copyright Office
+  and a published policy. See [DMCA notice and takedown](dmca.md) (not reviewed by a lawyer).
 - Section 230 does not cover federal criminal law.
 
 ## United Kingdom (Online Safety Act)
