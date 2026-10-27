@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { FULL_SHARDS } from "../../harness/src/shards.ts";
-import { GROUPS, fullScenarioArg, infraUpCmd, selectGroups, shardError, steps } from "../verify.ts";
+import { GROUPS, fullScenarioArg, infraUpCmd, phases, selectGroups, shardError, steps } from "../verify.ts";
 
 describe("selectGroups", () => {
   test("every group without --only", () => {
@@ -60,6 +60,41 @@ describe("steps", () => {
     expect(infraUpCmd(false)).toEqual(["bun", "scripts/infra.ts", "test"]);
     // This test runs without --full or --scenario: the plain gate starts the plain data services.
     expect(steps.find((s) => s.name === "infra up")?.cmd).toEqual(infraUpCmd(false));
+  });
+});
+
+describe("phases", () => {
+  const names = (p: (typeof steps)[number][][][]) => p.map((lanes) => lanes.map((l) => l.map((s) => s.name)));
+
+  const phaseOf = (name: string) =>
+    phases(steps).findIndex((lanes) => lanes.some((l) => l.some((s) => s.name === name)));
+
+  test("the quick static checks first, beside relay; unit, policy checks and infra up next", () => {
+    for (const n of ["format", "lint", "typecheck", "relay: vet + test"]) expect(phaseOf(n), n).toBe(0);
+    for (const n of ["unit tests", "reuse lint", "supply chain", "infra up", "migrations"])
+      expect(phaseOf(n), n).toBe(1);
+    expect(phaseOf("integration tests")).toBe(2);
+    expect(phaseOf("platform up")).toBe(3);
+    expect(phaseOf("harness: full scenario")).toBe(3);
+  });
+
+  // Type-aware lint beside the unit run took 8x as long and timed unit tests out.
+  test("lint, typecheck, unit, integration and the harness never share a phase", () => {
+    const at = ["lint", "unit tests", "integration tests", "harness: full scenario"].map(phaseOf);
+    expect(new Set(at).size).toBe(at.length);
+    expect(phaseOf("typecheck")).toBe(phaseOf("lint"));
+  });
+
+  test("a lane keeps its steps in order: migrations after infra up, static checks as listed", () => {
+    const named = names(phases(steps));
+    expect(named[0]![0]).toEqual(["format", "lint", "typecheck"]);
+    expect(named[1]!.find((l) => l.includes("infra up"))).toEqual(["infra up", "migrations"]);
+  });
+
+  test("one selected group is one lane per phase, so it streams as before", () => {
+    for (const g of GROUPS)
+      for (const lanes of phases(steps.filter((s) => s.group === g))) expect(lanes).toHaveLength(1);
+    expect(phases([])).toEqual([]);
   });
 });
 

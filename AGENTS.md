@@ -48,6 +48,7 @@ they are the source of truth across sessions. Architecture: [docs/architecture.m
 | `bun scripts/vet-package.ts <name>[@ver]`               | Vet a package **before** `bun add`: age, advisories, license, install scripts, provenance, publisher                                  |
 | `bun scripts/pin-images.ts [--write]`                   | Report (or write) digest pins for every third-party container image                                                                   |
 | `bun run verify --quick`                                | Same without integration tests (inner loop only, never the commit gate)                                                               |
+| `bun run verify --serial`                               | One step at a time, streaming (by default independent groups run side by side, logs printed per step)                                 |
 | `bun run verify --only static,unit`                     | Only those step groups (static, unit, integration, relay, harness); CI runs one job per group                                         |
 | `bun run verify --scenario <name>`                      | Gate plus a named harness scenario                                                                                                    |
 | `bun run verify:full`                                   | Gate plus the full harness scenario (end of every phase)                                                                              |

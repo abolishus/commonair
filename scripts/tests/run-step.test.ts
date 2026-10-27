@@ -34,6 +34,27 @@ describe("runStep", () => {
     expect(r).toMatchObject({ ok: false, timedOut: false, exitCode: 3 });
   });
 
+  test("logFile gets stdout and stderr in the order they were written", async () => {
+    const logFile = `${process.env.TMPDIR ?? "/tmp"}/run-step-${crypto.randomUUID()}.log`;
+    const r = await runStep(["sh", "-c", "echo one; echo two >&2; echo three"], {
+      timeoutMs: 10_000,
+      logFile,
+      log: () => {},
+    });
+    expect(r.ok).toBe(true);
+    expect(await Bun.file(logFile).text()).toBe("one\ntwo\nthree\n");
+  });
+
+  test("an abort kills the step and reports it cancelled, not failed by its own doing", async () => {
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 100);
+    const r = await runStep(["sleep", "30"], { timeoutMs: 10_000, signal: abort.signal, ...quiet });
+    expect(r).toMatchObject({ ok: false, cancelled: true, timedOut: false });
+    expect(r.ms).toBeLessThan(5_000);
+    const late = await runStep(["true"], { timeoutMs: 10_000, signal: abort.signal, ...quiet });
+    expect(late).toMatchObject({ ok: false, cancelled: true, exitCode: null });
+  });
+
   test("a step past its deadline fails as timed out", async () => {
     const r = await runStep(["sleep", "30"], { timeoutMs: 200, killGraceMs: 200, ...quiet });
     expect(r.ok).toBe(false);

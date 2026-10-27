@@ -22,13 +22,27 @@
  *
  * Every step has a hard timeout (minutes, scaled by VERIFY_TIMEOUT_SCALE, e.g. 2 on a slow
  * machine): a hung step fails the gate with its name instead of leaving it running forever.
+ *
+ * Steps run in phases; within a phase each group is a lane, and lanes run side by side:
+ *   1. format, lint, typecheck (seconds, the commonest failures) | relay
+ *   2. unit tests | the light repo-policy checks | infra up, migrations
+ *   3. integration tests
+ *   4. harness
+ * No two CPU- or memory-heavy steps share a phase: type-aware lint beside the unit run took
+ * eight times as long and pushed timing-sensitive unit tests past their timeouts. Side-by-side
+ * steps write to log files, printed as each finishes; the first failure cancels the rest. A lone
+ * lane (CI's one group per job) streams to the terminal as before. `--serial` runs one step at
+ * a time, streaming.
  */
-import { existsSync } from "node:fs";
-import { killCurrentStep, runStep } from "./run-step.ts";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { killCurrentStep, runStep, type StepResult } from "./run-step.ts";
 
 const args = process.argv.slice(2);
 const full = args.includes("--full");
 const quick = args.includes("--quick");
+const serial = args.includes("--serial");
 const scenarios = args.flatMap((a, i) => (a === "--scenario" && args[i + 1] ? [args[i + 1]!] : []));
 const shard = fullScenarioArg(args);
 
@@ -54,7 +68,21 @@ interface Step {
   cwd?: string;
   /** Hard limit in minutes before the step's process tree is killed. */
   timeoutMin: number;
+  /** Phases run in order (default 1); steps of one phase and group run in order, groups side by side. */
+  phase?: number;
   when?: () => boolean;
+}
+
+/** Phases in order, each a list of lanes (one per group, in first-seen order) of steps in order. */
+export function phases(selected: readonly Step[]): Step[][][] {
+  const byPhase = new Map<number, Map<Group, Step[]>>();
+  for (const s of selected) {
+    const p = s.phase ?? 1;
+    const lanes = byPhase.get(p) ?? new Map<Group, Step[]>();
+    byPhase.set(p, lanes);
+    lanes.set(s.group, [...(lanes.get(s.group) ?? []), s]);
+  }
+  return [...byPhase.entries()].sort(([a], [b]) => a - b).map(([, lanes]) => [...lanes.values()]);
 }
 
 /** The harness name the full step runs: `full`, or `full:<shard>` with `--shard <shard>`. */
@@ -81,13 +109,14 @@ export const steps: Step[] = [
   { name: "format", group: "static", timeoutMin: 5, cmd: ["vp", "fmt", "--check"] },
   { name: "lint", group: "static", timeoutMin: 10, cmd: ["vp", "lint", "--deny-warnings"] },
   { name: "typecheck", group: "static", timeoutMin: 10, cmd: ["vp", "run", "--no-cache", "-r", "typecheck"] },
-  { name: "unit tests", group: "unit", timeoutMin: 15, cmd: ["vp", "run", "--no-cache", "-r", "test"] },
+  { name: "unit tests", group: "unit", phase: 2, timeoutMin: 15, cmd: ["vp", "run", "--no-cache", "-r", "test"] },
   {
     // With harness scenarios to follow, the data services start with the harness overrides: the
     // E5 governance bootstrap applies only at the volume's first migration (ADR 0020), and this
     // migrate runs before platform up's.
     name: "infra up",
     group: "integration",
+    phase: 2,
     timeoutMin: 10,
     cmd: infraUpCmd(full || scenarios.length > 0),
     when: () => !quick && process.env.VERIFY_INFRA !== "external",
@@ -95,6 +124,7 @@ export const steps: Step[] = [
   {
     name: "migrations",
     group: "integration",
+    phase: 2,
     timeoutMin: 3,
     cmd: ["bun", "run", "--filter", "@commonair/db", "migrate"],
     when: () => !quick && existsSync("packages/db/package.json"),
@@ -102,18 +132,19 @@ export const steps: Step[] = [
   {
     name: "integration tests",
     group: "integration",
+    phase: 3,
     timeoutMin: 30,
     cmd: ["vp", "run", "--no-cache", "-r", "test:int"],
     when: () => !quick,
   },
-  { name: "licenses", group: "static", timeoutMin: 5, cmd: ["bun", "scripts/check-licenses.ts"] },
+  { name: "licenses", group: "static", phase: 2, timeoutMin: 5, cmd: ["bun", "scripts/check-licenses.ts"] },
   // Pins, cooldown, install scripts, advisories, action SHAs, image digests (ADR 0022). Needs the network.
-  { name: "supply chain", group: "static", timeoutMin: 5, cmd: ["bun", "scripts/check-supply-chain.ts"] },
-  { name: "stray domains", group: "static", timeoutMin: 5, cmd: ["bun", "scripts/check-domains.ts"] },
-  { name: "reuse lint", group: "static", timeoutMin: 5, cmd: ["reuse", "lint", "--quiet"] },
+  { name: "supply chain", group: "static", phase: 2, timeoutMin: 5, cmd: ["bun", "scripts/check-supply-chain.ts"] },
+  { name: "stray domains", group: "static", phase: 2, timeoutMin: 5, cmd: ["bun", "scripts/check-domains.ts"] },
+  { name: "reuse lint", group: "static", phase: 2, timeoutMin: 5, cmd: ["reuse", "lint", "--quiet"] },
   // OpenTofu fmt, validate and mocked-provider tests; check.sh skips with a message without
   // tofu, and CI sets REQUIRE_TOFU=1 so it cannot skip there.
-  { name: "tofu", group: "static", timeoutMin: 10, cmd: ["bash", "infra/tofu/check.sh"] },
+  { name: "tofu", group: "static", phase: 2, timeoutMin: 10, cmd: ["bash", "infra/tofu/check.sh"] },
   {
     name: "relay: gofmt",
     group: "relay",
@@ -144,6 +175,7 @@ export const steps: Step[] = [
     // stack fails half of `full`.
     name: "platform up",
     group: "harness",
+    phase: 4,
     timeoutMin: 25,
     // --multi: the second api/chat/worker/origin the `multi-instance` scenario needs (S1-c).
     cmd: ["bun", "scripts/infra.ts", "stack", "--harness", "--multi"],
@@ -152,6 +184,7 @@ export const steps: Step[] = [
   {
     name: "harness: browsers",
     group: "harness",
+    phase: 4,
     timeoutMin: 10,
     cmd: ["bun", "run", "--filter", "@commonair/harness", "browsers"],
     when: () => full || scenarios.length > 0,
@@ -159,12 +192,14 @@ export const steps: Step[] = [
   ...scenarios.map((s) => ({
     name: `harness: ${s}`,
     group: "harness" as const,
+    phase: 4,
     timeoutMin: 30,
     cmd: ["bun", "harness/src/cli.ts", "run", s],
   })),
   {
     name: shard === "full" ? "harness: full scenario" : `harness: ${shard}`,
     group: "harness",
+    phase: 4,
     timeoutMin: 45,
     cmd: ["bun", "harness/src/cli.ts", "run", shard],
     when: () => full,
@@ -191,35 +226,72 @@ if (import.meta.main) {
     });
 
   const started = performance.now();
-  const results: { name: string; ms: number; ok: boolean | "skipped"; timedOut?: boolean }[] = [];
-  for (const step of steps) {
-    if (!only.has(step.group)) continue;
+  const selected = steps.filter((s) => only.has(s.group));
+  const results = new Map<Step, { ms: number; ok: boolean | "skipped"; timedOut?: boolean; cancelled?: boolean }>();
+  const logDir = mkdtempSync(join(tmpdir(), "commonair-verify-"));
+  const slug = (name: string) => name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "");
+  const elapsed = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
+
+  async function run(step: Step, sideBySide: boolean, signal: AbortSignal): Promise<boolean> {
     if (step.when && !step.when()) {
-      results.push({ name: step.name, ms: 0, ok: "skipped" });
-      continue;
+      results.set(step, { ms: 0, ok: "skipped" });
+      return true;
     }
     const timeoutMs = step.timeoutMin * scale * 60_000;
+    const logFile = sideBySide ? join(logDir, `${slug(step.name)}.log`) : undefined;
     console.log(`\n\x1b[1m▶ ${step.name}\x1b[0m  ${step.cmd.join(" ")}  (limit ${step.timeoutMin * scale}m)`);
-    let r = { ok: false, timedOut: false, ms: 0 };
+    let r: StepResult = { ok: false, timedOut: false, cancelled: false, exitCode: null, ms: 0 };
     try {
-      r = await runStep(step.cmd, { cwd: step.cwd, timeoutMs, heartbeatMs: 60_000 });
+      r = await runStep(step.cmd, {
+        cwd: step.cwd,
+        timeoutMs,
+        heartbeatMs: 60_000,
+        logFile,
+        signal,
+        log: sideBySide ? (l) => console.log(`  [${step.name}]${l.replace(/^ +/, " ")}`) : undefined,
+      });
     } catch (e) {
       console.error(`could not run ${step.cmd[0]}: ${(e as Error).message} (is it installed and on PATH?)`);
     }
-    results.push({ name: step.name, ms: r.ms, ok: r.ok, timedOut: r.timedOut });
-    if (!r.ok) break;
+    results.set(step, { ms: r.ms, ok: r.ok, timedOut: r.timedOut, cancelled: r.cancelled });
+    if (logFile && !r.cancelled) {
+      const out = existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
+      // A pass shows its tail (the counts); a failure shows everything.
+      const shown = r.ok ? out.trimEnd().split("\n").slice(-12).join("\n") : out;
+      const mark = r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
+      console.log(`\n${mark} \x1b[1m${step.name}\x1b[0m ${elapsed(r.ms)}  (${logFile})\n${shown}`);
+    }
+    return r.ok;
+  }
+
+  for (const lanes of phases(selected)) {
+    const sideBySide = !serial && lanes.length > 1;
+    const abort = new AbortController();
+    const runLane = async (lane: Step[]) => {
+      for (const step of lane) {
+        if (abort.signal.aborted) return;
+        if (!(await run(step, sideBySide, abort.signal))) return abort.abort();
+      }
+    };
+    if (sideBySide) await Promise.all(lanes.map(runLane));
+    else for (const lane of lanes) await runLane(lane);
+    if (abort.signal.aborted) break;
   }
 
   console.log("\n\x1b[1mverify summary\x1b[0m");
-  for (const r of results) {
-    const mark = r.ok === "skipped" ? "–" : r.ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m";
-    console.log(
-      `  ${mark} ${r.name.padEnd(28)} ${r.ok === "skipped" ? "skipped" : `${(r.ms / 1000).toFixed(1)}s`}${r.timedOut ? " (timed out)" : ""}`,
-    );
+  for (const step of selected) {
+    const r = results.get(step);
+    if (!r) continue;
+    const mark = r.ok === "skipped" ? "–" : r.ok ? "\x1b[32m✓\x1b[0m" : r.cancelled ? "–" : "\x1b[31m✗\x1b[0m";
+    const time = r.ok === "skipped" ? "skipped" : r.cancelled ? "cancelled" : elapsed(r.ms);
+    console.log(`  ${mark} ${step.name.padEnd(28)} ${time}${r.timedOut ? " (timed out)" : ""}`);
   }
-  const failed = results.some((r) => r.ok === false);
+  const failed = [...results.values()].some((r) => r.ok === false && !r.cancelled);
   console.log(
     `\n${failed ? "\x1b[31mRED\x1b[0m" : "\x1b[32mGREEN\x1b[0m"} in ${((performance.now() - started) / 1000).toFixed(1)}s`,
   );
+  // Logs of a red run stay for reading; a green run's go.
+  if (failed) console.log(`step logs: ${logDir}`);
+  else rmSync(logDir, { recursive: true, force: true });
   process.exit(failed ? 1 : 0);
 }
