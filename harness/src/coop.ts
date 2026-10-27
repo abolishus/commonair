@@ -397,6 +397,39 @@ export function utcMonthOf(d: Date | string): string {
   return new Date(d).toISOString().slice(0, 7);
 }
 
+// ---------------------------------------------------------------- rejoin (E7)
+
+/**
+ * The cheapest subscription tier whose price makes its holder eligible for viewer membership
+ * (`membership.classes.viewer.minSubscriptionCents`), or null when no tier is enough.
+ */
+export function qualifyingTier<T extends 1 | 2 | 3>(
+  tiers: readonly { tier: T; price: { cents: number } }[],
+  minSubscriptionCents: number,
+): T | null {
+  const ok = tiers
+    .filter((t) => t.price.cents >= minSubscriptionCents)
+    .toSorted((a, b) => a.price.cents - b.price.cents);
+  return ok[0]?.tier ?? null;
+}
+
+/** `membership.classes.viewer.minSubscriptionCents` from `coop.settings`, else the seeded default. */
+export function minSubscriptionCents(settings: readonly { key: string; value: unknown }[]): number {
+  const v = settings.find((s) => s.key === "membership.classes")?.value as
+    | { viewer?: { minSubscriptionCents?: unknown } }
+    | undefined;
+  const cents = v?.viewer?.minSubscriptionCents;
+  return typeof cents === "number" && Number.isFinite(cents)
+    ? cents
+    : MEMBERSHIP_CLASSES_DEFAULTS.viewer.minSubscriptionCents;
+}
+
+/** The viewer row the membership view shows (the active one, else the latest), as `status/basis`. */
+export function viewerState(rows: readonly { class: string; status: string; basis: string }[]): string {
+  const row = rows.find((r) => r.class === "viewer");
+  return row ? `${row.status}/${row.basis}` : "none";
+}
+
 // ---------------------------------------------------------------- audit and outbox
 
 export interface AuditRow {

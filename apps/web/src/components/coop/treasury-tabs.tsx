@@ -15,9 +15,10 @@ import {
   runWindowErrorText,
   type ShareStatus,
 } from "../../lib/coop.ts";
-import { FormError } from "../form-error.tsx";
-import { useLoad, usePaged } from "../money/use-load.ts";
+import { usePaged } from "../money/use-load.ts";
+import { CoopLoadError } from "./load-error.tsx";
 import { PatronagePanel, SharesPanel, type PatronageRunResultDto } from "./treasury.tsx";
+import { coopLoads, pagedLoad, useCoopLoad } from "./use-coop.ts";
 
 const PAGE = 50;
 
@@ -29,11 +30,13 @@ export function CoopSharesTab(): React.JSX.Element {
     (cursor) => api().coop.shares.list({ status, limit: PAGE, cursor }),
     (err) => toastActionError(err, t("treasury.loadMoreFailed")),
   );
+  const loads = coopLoads([pagedLoad(shares)]);
+  if (loads.failed) return <CoopLoadError onRetry={loads.retry} />;
   return (
     <>
-      {shares.failed && <FormError>{t("coop.loadFailed")}</FormError>}
+      {loads.stale && <CoopLoadError onRetry={loads.retry} />}
       <SharesPanel
-        shares={shares.items ?? (shares.failed ? [] : null)}
+        shares={shares.items}
         status={status}
         onStatusChange={setStatus}
         hasMore={shares.hasMore}
@@ -75,7 +78,7 @@ export function CoopPatronageTab({ meId, currency }: { meId: string; currency: s
   const [running, setRunning] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<PatronageRunResultDto | null>(null);
-  const periods = useLoad("patronage-periods", () => api().coop.patronage.periods());
+  const periods = useCoopLoad("patronage-periods", () => api().coop.patronage.periods());
 
   const run = async (submission: PatronageRunSubmission) => {
     if (running) return;
@@ -102,9 +105,11 @@ export function CoopPatronageTab({ meId, currency }: { meId: string; currency: s
     }
   };
 
+  const loads = coopLoads([periods]);
+  if (loads.failed) return <CoopLoadError onRetry={loads.retry} />;
   return (
     <>
-      {periods.failed && <FormError>{t("coop.loadFailed")}</FormError>}
+      {loads.stale && <CoopLoadError onRetry={loads.retry} />}
       <PatronagePanel
         meId={meId}
         currency={currency}
@@ -117,7 +122,7 @@ export function CoopPatronageTab({ meId, currency }: { meId: string; currency: s
         running={running}
         runError={error}
         result={result}
-        periods={periods.data ?? (periods.failed ? [] : null)}
+        periods={periods.data}
         onApprove={async (period) => {
           await api().coop.patronage.approve({ periodId: period.id });
           toast.success(t("coop.periods.approved"));

@@ -42,10 +42,12 @@ import {
   leaksIn,
   missed,
   missingAudit,
+  minSubscriptionCents,
   missingEvents,
   nextSpotlightSlots,
   parseCoopSteps,
   preflightGovernance,
+  qualifyingTier,
   rankingChange,
   reached,
   rowLeaks,
@@ -55,6 +57,7 @@ import {
   summarizeLogLeaks,
   tallyMismatches,
   utcMonthOf,
+  viewerState,
 } from "../src/coop.ts";
 
 const root = (p: string) => fileURLToPath(new URL(`../../${p}`, import.meta.url));
@@ -731,5 +734,41 @@ describe("council seating outlook (step 2 on a long-lived stack)", () => {
     expect(councilSeatingProblem({ size: 7, activeStreamers: ["s1"], seated: [], wanted })).toMatch(
       /not active streamer members/,
     );
+  });
+});
+
+describe("rejoin helpers (E7)", () => {
+  const tiers = [
+    { tier: 1 as const, price: { cents: 299 } },
+    { tier: 3 as const, price: { cents: 1999 } },
+    { tier: 2 as const, price: { cents: 999 } },
+  ];
+
+  test("qualifyingTier: the cheapest tier at or above the minimum", () => {
+    expect(qualifyingTier(tiers, 300)).toBe(2);
+    expect(qualifyingTier(tiers, 299)).toBe(1);
+    expect(qualifyingTier(tiers, 0)).toBe(1);
+    expect(qualifyingTier(tiers, 1999)).toBe(3);
+    expect(qualifyingTier(tiers, 2000)).toBeNull();
+    expect(qualifyingTier([], 0)).toBeNull();
+  });
+
+  test("minSubscriptionCents: from membership.classes, else the seeded default", () => {
+    const at = (viewer: unknown) => [{ key: "membership.classes", value: { viewer } }];
+    expect(minSubscriptionCents(at({ minSubscriptionCents: 450 }))).toBe(450);
+    expect(minSubscriptionCents(at({ minSubscriptionCents: 0 }))).toBe(0);
+    expect(minSubscriptionCents(at({}))).toBe(MEMBERSHIP_CLASSES_DEFAULTS.viewer.minSubscriptionCents);
+    expect(minSubscriptionCents(at({ minSubscriptionCents: "450" }))).toBe(300);
+    expect(minSubscriptionCents([])).toBe(300);
+  });
+
+  test("viewerState: the viewer row the view shows, or none", () => {
+    expect(viewerState([])).toBe("none");
+    expect(
+      viewerState([
+        { class: "streamer", status: "active", basis: "streaming_hours" },
+        { class: "viewer", status: "exited", basis: "subscription" },
+      ]),
+    ).toBe("exited/subscription");
   });
 });

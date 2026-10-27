@@ -1,9 +1,19 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { EmptyState, RelativeTime, Skeleton, SkeletonGroup, formatMoney, formatNumber, useLocale } from "@commonair/ui";
+import {
+  ConfirmDialog,
+  EmptyState,
+  RelativeTime,
+  Skeleton,
+  SkeletonGroup,
+  formatMoney,
+  formatNumber,
+  useLocale,
+} from "@commonair/ui";
 import { EligibilityList, MembershipList, ShareCard, ShareInstructions } from "@commonair/ui/blocks/coop";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
+import { Button } from "@commonair/ui/components/button";
 import { PageContainer, SplitLayout } from "@commonair/ui/layouts";
 import { UserGroupIcon } from "@hugeicons/core-free-icons";
 import type * as React from "react";
@@ -20,6 +30,7 @@ import {
   type MembershipViewDto,
 } from "../../lib/coop.ts";
 import { CoopTabs } from "./nav.tsx";
+import { canRejoinViewer } from "./rules.ts";
 
 /** What `coop.buyShare` returned with the manual provider. */
 export interface ShareInstructionsDto {
@@ -42,6 +53,9 @@ export interface MembershipPanelProps {
   onBuy: () => void | Promise<void>;
   onExit: (cls: MemberClass) => Promise<void>;
   onExitError: (err: unknown) => void;
+  /** `coop.join({ class: "viewer" })`, then a refreshed view; omitted: no rejoin offered. */
+  onRejoin?: () => Promise<void>;
+  onRejoinError?: (err: unknown) => void;
 }
 
 function progressText(e: EligibilityDto, currency: string, locale: string): string {
@@ -67,6 +81,8 @@ export function MembershipPanel({
   onBuy,
   onExit,
   onExitError,
+  onRejoin,
+  onRejoinError,
 }: MembershipPanelProps): React.JSX.Element {
   const { locale } = useLocale();
   const share = view?.share ?? null;
@@ -155,6 +171,23 @@ export function MembershipPanel({
                         : undefined,
                   }))}
                 />
+                {onRejoin && canRejoinViewer(view) && (
+                  <div className="flex flex-col items-start gap-2">
+                    <p className="text-sm text-muted-foreground">{t("coop.rejoin.hint")}</p>
+                    <ConfirmDialog
+                      trigger={
+                        <Button data-testid="membership-rejoin-viewer" variant="outline" size="sm">
+                          {t("coop.rejoin.label")}
+                        </Button>
+                      }
+                      title={t("coop.rejoin.title")}
+                      description={t("coop.rejoin.description")}
+                      confirmLabel={t("coop.rejoin.confirm")}
+                      onConfirm={onRejoin}
+                      onError={onRejoinError}
+                    />
+                  </div>
+                )}
               </Section>
               <Section heading={t("coop.eligibility.title")} description={t("coop.eligibility.intro")}>
                 <EligibilityList

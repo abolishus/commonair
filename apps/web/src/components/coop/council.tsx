@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { EmptyState, RelativeTime, Skeleton, SkeletonGroup, formatNumber, useLocale } from "@commonair/ui";
-import { ElectionCard, GovernanceSettingsList, SeatList, formatSettingValue } from "@commonair/ui/blocks/coop";
+import { GovernanceSettingsList, SeatList, formatSettingValue } from "@commonair/ui/blocks/coop";
 import { KeyValueList, type KeyValueRow } from "@commonair/ui/blocks/data";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
 import { PageHeader, Section } from "@commonair/ui/blocks/headers";
@@ -14,12 +14,13 @@ import type * as React from "react";
 import { t } from "../../i18n/index.ts";
 import {
   classLabel,
-  electionStatusLabel,
   type BoardSeatDto,
   type CouncilDto,
   type ElectionDto,
+  type MemberClass,
   type SettingDto,
 } from "../../lib/coop.ts";
+import { ElectionItem, type ElectionActions } from "./elections.tsx";
 import { CoopTabs } from "./nav.tsx";
 
 function Loading(): React.JSX.Element {
@@ -37,14 +38,31 @@ function methodValue(value: unknown, locale: string): string {
   return formatSettingValue(value);
 }
 
-export interface CouncilPageProps {
+export interface CouncilPageProps extends Partial<ElectionActions> {
   council: CouncilDto | null;
   board: BoardSeatDto[] | null;
   elections: ElectionDto[] | null;
+  /** The signed-in caller (null: elections are read-only). */
+  meId?: string | null;
+  /** The caller's active membership classes (who may stand and vote). */
+  classes?: readonly MemberClass[];
 }
 
-/** `/coop/council`: the current creator council and how it was seated, board seats, elections (read-only). */
-export function CouncilPage({ council, board, elections }: CouncilPageProps): React.JSX.Element {
+/** Only reachable signed in, where the route passes the real actions. */
+const refuse = async (): Promise<void> => {
+  throw new Error("signed out");
+};
+
+/** `/coop/council`: the current creator council and how it was seated, board seats, and board elections. */
+export function CouncilPage({
+  council,
+  board,
+  elections,
+  meId = null,
+  classes = [],
+  onNominate = refuse,
+  onVote = refuse,
+}: CouncilPageProps): React.JSX.Element {
   const { locale } = useLocale();
   const method: KeyValueRow[] = Object.entries(council?.method ?? {}).map(([key, value]) => ({
     term: key,
@@ -109,37 +127,13 @@ export function CouncilPage({ council, board, elections }: CouncilPageProps): Re
               ) : (
                 <ResponsiveGrid cols={2}>
                   {elections.map((e) => (
-                    <ElectionCard
+                    <ElectionItem
                       key={e.id}
-                      data-testid="election-item"
-                      electionId={e.id}
-                      memberClass={e.class}
-                      status={e.status}
-                      statusLabel={electionStatusLabel(e.status)}
-                      title={t("coop.elections.seat", { class: classLabel(e.class) })}
-                      details={[
-                        { term: t("coop.elections.seats"), value: formatNumber(e.seats, locale) },
-                        {
-                          term: t("coop.elections.nominationsClose"),
-                          value: <RelativeTime date={e.nominationsCloseAt} />,
-                        },
-                        { term: t("coop.elections.votingEnds"), value: <RelativeTime date={e.votingEndsAt} /> },
-                      ]}
-                      candidates={e.candidates.map((c) => ({
-                        userId: c.user.id,
-                        name: c.user.displayName,
-                        statement: c.statement || undefined,
-                        votes:
-                          c.votes === null
-                            ? undefined
-                            : t("coop.elections.votes", { count: formatNumber(c.votes, locale) }),
-                        elected: c.elected,
-                      }))}
-                      labels={{
-                        candidates: t("coop.elections.candidates"),
-                        elected: t("coop.elections.elected"),
-                        noCandidates: t("coop.elections.noCandidates"),
-                      }}
+                      election={e}
+                      meId={meId}
+                      classes={classes}
+                      onNominate={onNominate}
+                      onVote={onVote}
                     />
                   ))}
                 </ResponsiveGrid>

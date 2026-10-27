@@ -6,10 +6,18 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
+import { CoopLoadGate } from "../../components/coop/load-error.tsx";
 import { ProposalPage } from "../../components/coop/proposal.tsx";
-import { toastCoopError, useMyMembership } from "../../components/coop/use-coop.ts";
+import {
+  coopLoads,
+  isNotFound,
+  pagedLoad,
+  toastCoopError,
+  useCoopLoad,
+  useMyMembership,
+} from "../../components/coop/use-coop.ts";
 import { NotFoundState } from "../../components/money/not-found.tsx";
-import { useLoad, usePaged } from "../../components/money/use-load.ts";
+import { usePaged } from "../../components/money/use-load.ts";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
@@ -35,14 +43,14 @@ function ProposalRoute(): React.JSX.Element {
 
 function ProposalView({ id }: { id: string }): React.JSX.Element {
   const { me } = useBootstrap();
-  const proposal = useLoad(id, () => api().coop.proposals.get({ id }));
+  const proposal = useCoopLoad(id, () => api().coop.proposals.get({ id }));
   const comments = usePaged(
     `comments|${id}`,
     (cursor) => api().coop.proposals.comments({ id, limit: COMMENTS_PAGE, cursor }),
     toastCoopError,
   );
   const membership = useMyMembership(me);
-  const council = useLoad("council", () => api().coop.council());
+  const council = useCoopLoad("council", () => api().coop.council());
   const [now, setNow] = React.useState(() => Date.now());
   const [closedNotice, setClosedNotice] = React.useState(false);
 
@@ -58,18 +66,21 @@ function ProposalView({ id }: { id: string }): React.JSX.Element {
     return () => clearInterval(timer);
   }, [status, reload]);
 
-  if (proposal.failed && !proposal.data) return <NotFoundState />;
+  if (isNotFound(proposal)) return <NotFoundState />;
+  const loads = coopLoads([proposal, pagedLoad(comments), membership, council]);
   const p = proposal.data;
-  if (!p)
+  if (!p || loads.failed)
     return (
-      <PageContainer width="wide" className="py-8">
-        <SkeletonGroup label={t("coop.loading")}>
-          <div className="flex flex-col gap-4">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-48 w-full" />
-          </div>
-        </SkeletonGroup>
-      </PageContainer>
+      <CoopLoadGate status={loads} tab="proposals">
+        <PageContainer width="wide" className="py-8">
+          <SkeletonGroup label={t("coop.loading")}>
+            <div className="flex flex-col gap-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-48 w-full" />
+            </div>
+          </SkeletonGroup>
+        </PageContainer>
+      </CoopLoadGate>
     );
 
   const after = async (run: () => Promise<unknown>, done?: string) => {
@@ -79,44 +90,46 @@ function ProposalView({ id }: { id: string }): React.JSX.Element {
   };
 
   return (
-    <ProposalPage
-      proposal={p}
-      comments={comments.items ?? (comments.failed ? [] : null)}
-      hasMoreComments={comments.hasMore}
-      loadingMoreComments={comments.loadingMore}
-      onLoadMoreComments={comments.loadMore}
-      meId={me?.id ?? null}
-      member={isMember(membership.data)}
-      councilMember={me !== null && (council.data?.members.some((m) => m.user.id === me.id) ?? false)}
-      now={now}
-      votingClosed={closedNotice && p.status === "voting"}
-      onActionError={toastCoopError}
-      onSubmitProposal={() => after(() => api().coop.proposals.submit({ id }), t("coop.proposal.submitted"))}
-      onWithdraw={() => after(() => api().coop.proposals.withdraw({ id }), t("coop.proposal.withdrawn"))}
-      onComment={async (body) => {
-        await api().coop.proposals.comment({ id, body });
-        comments.reload();
-      }}
-      onCouncilRespond={(value: { stance: CouncilStance; body: string }) =>
-        after(() => api().coop.proposals.councilRespond({ id, ...value }), t("coop.council.responded"))
-      }
-      onVote={async (choice: VoteChoice) => {
-        try {
-          await after(() => api().coop.proposals.vote({ id, choice }), t("coop.vote.recorded"));
-        } catch (err) {
-          const refusal = voteRefusal(err);
-          if (refusal === "voting_closed") {
-            // The window closed under the open page: drop the ballot and fetch the new state.
-            setClosedNotice(true);
-            setNow(Date.now());
-            toast.error(t("coop.vote.closedToast"));
-            proposal.reload();
-          } else if (refusal === "not_in_electorate") {
-            toast.error(t("coop.vote.notInElectorate"));
-            proposal.reload();
-          } else throw err;
+    <CoopLoadGate status={loads} tab="proposals">
+      <ProposalPage
+        proposal={p}
+        comments={comments.items}
+        hasMoreComments={comments.hasMore}
+        loadingMoreComments={comments.loadingMore}
+        onLoadMoreComments={comments.loadMore}
+        meId={me?.id ?? null}
+        member={isMember(membership.data)}
+        councilMember={me !== null && (council.data?.members.some((m) => m.user.id === me.id) ?? false)}
+        now={now}
+        votingClosed={closedNotice && p.status === "voting"}
+        onActionError={toastCoopError}
+        onSubmitProposal={() => after(() => api().coop.proposals.submit({ id }), t("coop.proposal.submitted"))}
+        onWithdraw={() => after(() => api().coop.proposals.withdraw({ id }), t("coop.proposal.withdrawn"))}
+        onComment={async (body) => {
+          await api().coop.proposals.comment({ id, body });
+          comments.reload();
+        }}
+        onCouncilRespond={(value: { stance: CouncilStance; body: string }) =>
+          after(() => api().coop.proposals.councilRespond({ id, ...value }), t("coop.council.responded"))
         }
-      }}
-    />
+        onVote={async (choice: VoteChoice) => {
+          try {
+            await after(() => api().coop.proposals.vote({ id, choice }), t("coop.vote.recorded"));
+          } catch (err) {
+            const refusal = voteRefusal(err);
+            if (refusal === "voting_closed") {
+              // The window closed under the open page: drop the ballot and fetch the new state.
+              setClosedNotice(true);
+              setNow(Date.now());
+              toast.error(t("coop.vote.closedToast"));
+              proposal.reload();
+            } else if (refusal === "not_in_electorate") {
+              toast.error(t("coop.vote.notInElectorate"));
+              proposal.reload();
+            } else throw err;
+          }
+        }}
+      />
+    </CoopLoadGate>
   );
 }

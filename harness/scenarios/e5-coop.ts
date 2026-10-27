@@ -10,7 +10,9 @@
  * and the database refuses every way around that. 6 a patronage run needs a second approver and
  * explains each member's statement; the ledger balances. 7 `/transparency` shows the outcomes.
  * 8 every action has its audit and outbox row, and nothing leaks a ballot, a comment or an email.
- * 9 everyone exits and the share is refunded, so later runs start from a clean electorate.
+ * 9 everyone exits and the share is refunded, so later runs start from a clean electorate; V then
+ * subscribes, rejoins the viewer class on the subscription, exits as a member by subscription only,
+ * is not re-enrolled by the sync, and rejoins (`membership-rejoin-viewer`, E7).
  *
  * Governance windows run on the database clock: every wait is on state (`coop.proposals.get`)
  * with a deadline, ticking `proposals-advance` through the test hook. `--set via=api` drives
@@ -60,9 +62,11 @@ import {
   governancePeriods,
   missed,
   missingAudit,
+  minSubscriptionCents,
   missingEvents,
   parseCoopSteps,
   preflightGovernance,
+  qualifyingTier,
   rankingChange,
   reached,
   rowLeaks,
@@ -71,6 +75,7 @@ import {
   summarizeLogLeaks,
   tallyMismatches,
   utcMonthOf,
+  viewerState,
 } from "../src/coop.ts";
 import { ApiTreasurer, type Treasurer, WebTreasurer } from "../src/money-actors.ts";
 import { grantRole } from "../src/money-db.ts";
@@ -1457,6 +1462,8 @@ async function stepExit(run: Run): Promise<void> {
   );
   ctx.assert("the share's transactions sum to zero", unbalancedTransactions(ledger).length === 0);
 
+  await stepRejoin(run);
+
   const leavers: [string, SignedInUser, MemberClass][] = [
     ["S1", people.s1, "streamer"],
     ["S2", people.s2, "streamer"],
@@ -1516,6 +1523,123 @@ async function stepExit(run: Run): Promise<void> {
   // Every expectation so far, now including the exits and the refund.
   await verifyRows(run, t, "steps 1–9");
   await scanLogs(run, t("service logs stay clean through the exits"));
+}
+
+/**
+ * E7 (docs/testing/e7-selectors.md, `e5-coop`): V, whose share was refunded, subscribes to S1 and
+ * rejoins the viewer class on the subscription. As a member by subscription only, V exits
+ * (`membership-exit-viewer`), a membership-sync tick does not re-enrol V (the exit is respected),
+ * and `membership-rejoin-viewer` (`coop.join` with `--set via=api`) makes the viewer row active by
+ * subscription again. V leaves once more (API) so later runs start clean.
+ */
+async function stepRejoin(run: Run): Promise<void> {
+  const { ctx, people, driver, ui } = run;
+  const t = (w: string) => title(9, w);
+  const v = people.v;
+  const how = (web: string, api: string) => (run.via === "web" ? web : api);
+  const channel = people.s1.me.channelSlug ?? people.s1.username;
+  const min = minSubscriptionCents(await ctx.platform.api().client.coop.settings());
+  const tiers = await v.api.client.money.tiers({ channel });
+  const tier = qualifyingTier(tiers, min);
+  ctx.assert(`S1 has a subscription tier of at least ${min} cents`, tier !== null, {
+    tiers: tiers.map((x) => ({ tier: x.tier, cents: x.price.cents })),
+  });
+  if (tier === null) return;
+  const sub = await ctx.step(t(`V subscribes to S1 (tier ${tier}, manual adapter)`), () =>
+    v.api.client.money.subscribe({ channel, tier, returnPath: ROUTES.channel(channel) }),
+  );
+  ctx.assert("the subscription gives manual instructions", sub.kind === "instructions", { kind: sub.kind });
+  if (sub.kind !== "instructions") return;
+  await ctx.step(t("T1 confirms V's subscription"), async () => {
+    await waitFor(
+      `treasurer finds ${sub.reference}`,
+      () => run.treasurer.find(sub.reference, { ...ui, timeoutMs: 5_000 }),
+      { timeoutMs: UI_TIMEOUT_MS, intervalMs: 500, signal: ctx.signal },
+    );
+    await run.treasurer.confirm(sub.reference, ui);
+  });
+  const qualified = await settle(
+    "V qualifies for the viewer class by subscription",
+    () => apiMembership(v.api.client),
+    (m) => m.eligibility.find((e) => e.class === "viewer")?.basis === "subscription",
+    { timeoutMs: SETTLE_MS, signal: ctx.signal },
+  );
+  ctx.assert(
+    "V's subscription qualifies for the viewer class",
+    qualified.eligibility.find((e) => e.class === "viewer")?.basis === "subscription",
+    { eligibility: qualified.eligibility.find((e) => e.class === "viewer") },
+  );
+
+  const syncKeepsExit = async (label: string, expected: string) => {
+    await ctx.step(t(`a membership-sync tick does not re-enrol V (${label})`), () =>
+      run.hooks.tickRan("membership-sync"),
+    );
+    const state = viewerState((await apiMembership(v.api.client)).rows);
+    ctx.assert(`V's viewer row stays ${expected} after the sync (${label})`, state === expected, { state });
+  };
+  // V's latest viewer row is the share exit above.
+  await syncKeepsExit("the share exit", "exited/share");
+
+  const rejoin = async (label: string): Promise<string> => {
+    await ctx.step(t(`V rejoins on the subscription, ${label} (${how("membership-rejoin-viewer", "coop.join")})`), () =>
+      driver.rejoinViewer(v, ui),
+    );
+    const m = await apiMembership(v.api.client);
+    const state = viewerState(m.rows);
+    ctx.assert(`V's viewer row is active with basis subscription (${label})`, state === "active/subscription", {
+      state,
+    });
+    const id = activeIn(m, "viewer")?.id ?? "";
+    run.audit.push({
+      action: "membership.join",
+      actorType: "user",
+      actorId: v.id,
+      mentions: id,
+      label: `V rejoins (${label})`,
+    });
+    run.events.push({
+      type: "coop.membership.update",
+      mentions: id,
+      where: { status: "active", basis: "subscription" },
+      label: `V rejoined (${label})`,
+    });
+    return id;
+  };
+
+  const first = await rejoin("first");
+  await ctx.step(t(`V, a member by subscription only, exits (${how("membership-exit-viewer", "coop.exit")})`), () =>
+    driver.exit(v, "viewer", ui),
+  );
+  const left = viewerState((await apiMembership(v.api.client)).rows);
+  ctx.assert("V's viewer row is exited (subscription)", left === "exited/subscription", { state: left });
+  run.audit.push({
+    action: "membership.exit",
+    actorType: "user",
+    actorId: v.id,
+    mentions: first,
+    label: "V exits (subscription)",
+  });
+  await syncKeepsExit("the subscription exit", "exited/subscription");
+
+  const second = await rejoin("again");
+  ctx.assert("the rejoin is a new membership row", second !== "" && second !== first, { first, second });
+  await ctx.step(t("V leaves the viewer class again (API, clean electorate)"), () =>
+    v.api.client.coop.exit({ class: "viewer" }),
+  );
+  run.audit.push({
+    action: "membership.exit",
+    actorType: "user",
+    actorId: v.id,
+    mentions: second,
+    label: "V exits again",
+  });
+  run.audit.push({
+    action: "payment.confirm",
+    actorType: "admin",
+    actorId: people.t1.id,
+    mentions: sub.paymentId,
+    label: "T1 confirms V's subscription",
+  });
 }
 
 /**

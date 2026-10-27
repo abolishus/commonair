@@ -47,6 +47,41 @@ export async function eligibleHoursByUser(
   return new Map(rows.map((r) => [String(r.user_id), num(r.hours)]));
 }
 
+/** A uuid[] parameter. Ids must be uuids (callers pass database ids); a malformed one fails the cast. */
+const uuidArray = (ids: readonly string[]) => sql`${`{${ids.join(",")}}`}::uuid[]`;
+
+/**
+ * The query behind `eligibleHoursForUsers`, exported so a test can `explain` it. It starts from
+ * the owners' channels (`channels.owner_id` is unique) and range-scans `stream_hours_channel_idx`
+ * per channel instead of aggregating every owner's hours.
+ */
+export const eligibleHoursForUsersSql = (userIds: readonly string[], from: Date, to: Date, dailyCap: number) => sql`
+  select d.user_id, sum(least(d.day_seconds / 3600.0, ${dailyCap}::float8)) as hours
+    from (select c.owner_id as user_id, sh.channel_id, date_trunc('day', sh.hour_start, 'UTC') as day,
+                 sum(sh.live_seconds) as day_seconds
+            from channels c
+            join stream_hours sh on sh.channel_id = c.id
+           where c.owner_id = any(${uuidArray(userIds)})
+             and sh.eligible and sh.hour_start >= ${tsz(from)} and sh.hour_start < ${tsz(to)}
+           group by 1, 2, 3) d
+   group by d.user_id`;
+
+/**
+ * `eligibleHoursByUser` restricted to `userIds`: the same per-day cap and window, for a caller that
+ * needs a few users (the membership view) rather than every channel owner (the sync).
+ */
+export async function eligibleHoursForUsers(
+  db: Executor,
+  userIds: readonly string[],
+  from: Date,
+  to: Date,
+  dailyCap: number,
+): Promise<Map<string, number>> {
+  if (userIds.length === 0) return new Map();
+  const rows = rowsOf(await db.execute(eligibleHoursForUsersSql(userIds, from, to, dailyCap)));
+  return new Map(rows.map((r) => [String(r.user_id), num(r.hours)]));
+}
+
 /** Every contribution component per user in [from, to). Users with no contribution are absent. */
 export async function contributionInputs(
   db: Executor,
