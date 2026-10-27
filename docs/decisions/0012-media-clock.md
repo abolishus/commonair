@@ -136,6 +136,53 @@ the media image's Debian ffmpeg (`infra/containers/service.Containerfile:87`) an
 - The audio rung and the AAC-copy path get the same flags and must be covered by the same unit
   tests even though the scenario cannot read a strip from audio.
 
+#### Spike result and choice: variant A2 (2026-10-27)
+
+The spike ran on 2026-10-27 with the media image's ffmpeg 7.1.5 and MediaMTX 1.21.2; commands,
+versions and numbers are in [`services/media/src/clock/README.md`](../../services/media/src/clock/README.md).
+
+- **Option A as written fails on point 2, so point 4 fails.** Points 1 and 3 hold (MediaMTX sends
+  sender reports to RTSP readers; it honours `useAbsoluteTimestamp` for an RTSP publisher, −1 ms on
+  every segment). But each RTSP reader session gets its own time origin (the first sender report
+  that session received), the ffmpeg CLI does not carry it to the output, and nothing prints it.
+  `-copyts` alone left rungs 1.5 s to 3 s late; guessing `-start_time_realtime` from the spawn time
+  gave +5 to −72 ms on an idle host and −950 ms in a container. Neither is anchoring.
+- **Variant A2 passes.** The ladder reads the source over **SRT** instead of RTSP. MediaMTX gives
+  SRT readers MPEG-TS on the path's own stream timeline, which is the same for every reader
+  session, and its LL-HLS muxer writes `tfdt` from that timeline plus a fixed 10 s. Media computes
+  the source's wall-clock epoch from one LL-HLS segment,
+  `W0 = PDT(segment) − (tfdt(segment) / timescale − 10 s)`, reads with `-copyts`, and passes
+  `-start_time_realtime W0·1000` on every RTSP output; the rendition paths set
+  `useAbsoluteTimestamp`. Measured: rung − source = **+12 ms on every segment**, the same across
+  three ladder starts.
+- **The maintainer chose A2 on 2026-10-27.** Option B is not needed. Points 1 to 3 above stay true
+  of A2 except that the anchor comes from W0, not from the reader's sender reports.
+
+**Consequences of A2** (in addition to the ones above, which still apply):
+
+- **SRT on, unpublished.** `mediamtx.yml` sets `srt: yes` (today `srt: false`). The SRT port (8890/udp)
+  stays unpublished in `compose.yaml` and the Quadlet unit, so only the internal network reaches it.
+  The auth hook is protocol-agnostic (`services/api/src/media/auth.ts`): reads need the internal
+  credentials, and publishing `live/<slug>` over SRT would need the stream key, as RTMP does.
+  Media needs the SRT address as configuration (`MEDIAMTX_SRT_URL`, beside `MEDIAMTX_RTSP_URL`).
+- **The internal secret moves into the SRT `streamid`** (`streamid=read:live/<slug>:internal:<secret>`).
+  `redact()` masks URL userinfo by pattern but not a `streamid`; the redaction pattern learns that
+  form, and a test asserts it is masked even when the caller does not list the secret.
+- **Version coupling.** A2 depends on two MediaMTX internals: one MPEG-TS timeline shared by all SRT
+  reader sessions, and the 10 s offset between that timeline and LL-HLS `tfdt`. An integration test
+  against the pinned MediaMTX image asserts both, so an upgrade that changes either fails the gate.
+- **PTS wrap.** MPEG-TS PTS wraps at 2^33 / 90 kHz (about 26.5 h). ffmpeg unwraps within one
+  session, but W0 is rebased (computed modulo the wrap period) for every ffmpeg start, so a ladder
+  started after a wrap is still anchored. Covered by unit tests on both sides of the wrap.
+- **Latency.** SRT adds its receive latency (default 120 ms, configurable on the internal network)
+  to rung latency. It does not move PDT.
+- **Opus over MPEG-TS is untested.** WHIP sources carry Opus; the AAC copy and the audio rung would
+  read it over SRT. W0-clock proves it before relying on it; if Opus does not survive, the unit
+  stops and the choice is revisited.
+- **The recorder can be exact without keyframe matching.** A recorder reading SRT with `-copyts`
+  writes fMP4 whose `tfdt` is the shared timeline, so its exact PDT is `W0 + tfdt`. This may
+  simplify or replace R1 (decision 4); the W0-clock brief decides which.
+
 ### 4. The recorder is re-anchored to the source clock
 
 **Context.** The recorder's PDT is wrong at start (anchored after input probing) and drifts. The
@@ -165,6 +212,14 @@ step lands the hook (an injected `ClockAnchor` with an identity default) so both
 disjoint files. Segments uploaded before the first match are re-stamped when the playlist is next
 rendered (`renderPlaylist` rewrites the whole playlist, `playlist.ts:53-76`). Existing VODs keep
 their old PDT; nothing is migrated.
+
+**Update with A2 (2026-10-27).** The W0-clock brief replaces R1 with the exact derivation A2 makes
+possible (call it R4): the recorder reads SRT with `-copyts` like the ladder, and each run's
+offset is `W0 + tfdt(first sample) − recorderPDT(first segment)`, applied through the same
+`ClockAnchor` seam, with no keyframe hashing and no drift re-matching. The brief's first step
+checks that the recorder's `tfdt` really is the shared timeline; if not, R1 stays the plan as
+written above. The recorder, recovery and finalize files are W0-clock's in its wave, so the hook
+is no longer split across units.
 
 ### 5. Targets and how they are measured
 
@@ -200,7 +255,9 @@ their old PDT; nothing is migrated.
 - W0-clock's paths stay as planned (`args.ts`, `clock/**`, `mediamtx.yml`) plus two requests
   outside them: the `recorder.ts` hook (contract step) and the `selfhost.sh` sync check (R0/S1
   owner). If the spike picks B, W0-clock also needs `services/origin/src/playlist.ts`, which moves
-  the origin into W0's file plan.
+  the origin into W0's file plan. With A2 (decision 3, 2026-10-27) the origin stays out; W0-clock
+  also needs the SRT reader inputs in the transcode and recorder code, and a `MEDIAMTX_SRT_URL`
+  setting from the config owner.
 - The Spine, DVR and captions can treat PDT as authoritative media time. Clip cuts by wall clock
   (`recorder.ts:132`) become accurate to the source.
 - Relays and the CDN need no change: they pass PDT through.
@@ -235,3 +292,11 @@ draft, the text above was updated to match.
 
 The `ClockAnchor` hook in `services/media/src/vod/recorder.ts` (decision 4) lands in the W0
 contract step, as drafted.
+
+## History
+
+- 2026-10-27: part 1 proposed and accepted (see [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)).
+- 2026-10-27: decision 3 amended after the W0-clock spike: option A as written failed (RTSP
+  readers have per-session time origins); the maintainer chose variant A2 (SRT input, W0 from
+  LL-HLS `tfdt`). Decision 4 notes that the W0-clock brief replaces R1 with the exact W0 + `tfdt`
+  derivation, keeping R1 as the fallback.

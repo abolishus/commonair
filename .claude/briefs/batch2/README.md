@@ -32,7 +32,7 @@ At most six units at a time; two agents never write the same file at the same ti
 | ---- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1    | E7-chat-http, E7-dmca, E7-admin, E7-appeals, E7-coop, E7-legal                                              | the E7 contract-step commit                                      | ungated; disjoint by the split in `e7/contract-step.md` §9                                                                                                                      |
 | 2    | W0-clock, W0-integrity, W0-media-exposure, W0-sor, P1-tracker, P1-turn (each only once its ADR is accepted) | wave 1 merged, then the W0 and P1 contract steps (in that order) | W0's step and W0-sor/W0-media-exposure need E7-appeals and E7-dmca merged (worker `moderation/**`, trust email, trust-safety steps); P1's step edits files W0's step also edits |
-| 3    | P1-player (plus any wave 2 unit whose ADR came late)                                                        | wave 2 merged                                                    | needs P1-tracker's grant checks and P1-turn's ICE handler                                                                                                                       |
+| 3    | P1-player, W0-clock (re-briefed for ADR 0012 A2 after its spike)                                            | wave 2 merged, its contract requests and `MEDIAMTX_SRT_URL`      | P1-player needs P1-tracker's grant checks and P1-turn's ICE handler; W0-clock's spike rejected option A, the user chose A2 (SRT) on 2026-10-27                                  |
 
 ## Path conflicts and how they are resolved
 
@@ -41,11 +41,11 @@ At most six units at a time; two agents never write the same file at the same ti
   instead of editing the action writers. W0-media-exposure edits only the VOD-prefix reads there.
 - **`services/tracker/src/ip.ts` helpers into `@commonair/service`**: the P1 contract step does it
   (not E7, not P1-tracker).
-- **`services/media`**: W0-clock owns `ffmpeg/args.ts`, `clock/**`, the `ctx.clock` line in
-  `service.ts` and the health payload in `main.ts`; W0-media-exposure owns `vod/recorder.ts`,
-  `vod/finalize.ts` and the prefix code in `clips.ts`, `recovery.ts`, `lifecycle.ts`. The W0
-  contract step adds the `ClockAnchor` hook in `recorder.ts`. Nobody edits `session.ts` or
-  `transcode/**`.
+- **`services/media`**: in wave 2 W0-media-exposure owned `vod/recorder.ts`, `vod/finalize.ts`
+  and the prefix code in `clips.ts`, `recovery.ts`, `lifecycle.ts`; the W0 contract step added the
+  `ClockAnchor` hook in `recorder.ts`. W0-clock moved to wave 3 and owns the files its re-brief
+  lists (args, redact, `clock/**`, the clock lines in context/service, the input lines in
+  transcode, recorder, recovery, finalize, `mediamtx.yml`); P1-player owns nothing there.
 - **compose / Quadlet / `selfhost.sh`**: P1-turn only in wave 2 (coturn, offered to every
   operator by `selfhost.sh`, per the self-host parity rule). W0-clock's NTP check and anything
   else there arrive as contract requests, applied after P1-turn merges. `infra/mediamtx` is
