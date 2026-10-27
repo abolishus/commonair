@@ -3,7 +3,7 @@
 
 /** E7 schema (0024, 0025): account actions, DMCA items and counter-notices, and their protections. */
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import {
   activeAccountAction,
   activeDmcaStrikes,
@@ -16,6 +16,9 @@ import {
 import type { Database } from "../src/client.ts";
 import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
+
+// Building the migrated template database can take longer than 10 s under the gate's load.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 const DAY_MS = 86_400_000;
 

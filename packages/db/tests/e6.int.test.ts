@@ -3,11 +3,14 @@
 
 /** E6 schema (0022, ADR 0021): one active overlay token per channel, and the new indexes. */
 import { eq, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import * as s from "../src/schema/index.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
 import { lockLegalHold } from "../src/hold-lock.ts";
 import type { Database } from "../src/client.ts";
+
+// Building the migrated template database can take longer than 10 s under the gate's load.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let app: Database;

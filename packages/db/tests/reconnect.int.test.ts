@@ -7,10 +7,13 @@
  * 3.4.9 let the transaction's next statement write to the closed socket from a timer, an
  * uncaught TypeError that took the worker down (patches/postgres@3.4.9.patch).
  */
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vite-plus/test";
 import type postgres from "postgres";
 import { createDb, type DbHandle } from "../src/client.ts";
 import { createTestDatabase, type TestDatabase } from "../src/testing.ts";
+
+// Building the migrated template database can take longer than 10 s under the gate's load.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 
 let t: TestDatabase;
 let db: DbHandle;
