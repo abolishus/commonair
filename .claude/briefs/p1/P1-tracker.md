@@ -3,17 +3,15 @@ SPDX-FileCopyrightText: 2026 CommonAir contributors
 SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
-# P1-tracker: derived info hashes and the P2P grant
+# P1-tracker: derived info hashes, the P2P grant and origin segment digests
 
 You are implementing unit P1-tracker for CommonAir (repo: /Users/joshe/Repos/bcon). Read AGENTS.md,
 PLAN.md and docs/architecture.md first, then `.claude/briefs/next/P1-p2p-client.md`,
 `.claude/briefs/p1/contract-step.md` (what the orchestrator already committed),
-[ADR 0005](../../../docs/decisions/0005-p2p-tracker.md) and its amendment, and
-`services/tracker/README.md`. Do not look outside the repository, except the pinned
+[ADR 0005](../../../docs/decisions/0005-p2p-tracker.md) and its amendment 1 (accepted 2026-10-27;
+decisions 5 and 7 are yours), and `services/tracker/README.md`. Do not look outside the repository, except the pinned
 `p2p-media-loader-*` packages under `node_modules` (read-only, to check what the client sends).
 Work in your own git worktree on a branch named `p1/tracker`, from the P1 contract commit.
-
-If the ADR 0005 amendment changes at acceptance, the orchestrator updates this brief before launch.
 
 ## Why
 
@@ -26,14 +24,25 @@ client: ADR 0005:60-62 left the interop check with it as a follow-up. Your job i
 tracker enforce the grant and the derived hashes, and to fix what the pinned client sends that the
 tracker does not yet accept, before P1-player integrates.
 
+A peer could also serve altered media to other viewers. The amendment (decision 7) closes that
+with per-segment digests: the origin serves the SHA-256 of each segment at `/p2p-digest/…`, and
+the player checks every P2P-delivered segment against it. You build the origin side.
+
 ## You own (write only these)
 
 - `services/tracker/**` (source, tests, README). `src/ip.ts` and `tests/ip.test.ts` are gone:
   the contract step moved them into `@commonair/service` (`packages/service/src/ip.ts`).
+- `services/origin/src/p2p-digest.ts` (the contract step's stub) and any new
+  `services/origin/src/p2p-digest-*.ts` you split out; new `services/origin/tests/p2p-digest.test.ts`
+  and `services/origin/tests/p2p-digest.int.test.ts`. The contract step's 501 assertion lives in
+  `p2p-digest.test.ts`; replace it.
 
 Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
 `packages/integrity/**` (W0-integrity's in this wave), `services/api/**`, `compose.yaml`,
-`infra/**`, `harness/**`. Changes there are contract requests.
+`infra/**`, `harness/**`, and in the origin not `origin.ts` (the contract step already wired your
+handler; W0-media-exposure owns the dispatch this wave), `media.ts`, `vod.ts` (W0-media-exposure),
+`paths.ts`, `handler.ts`, `content.ts`, `auth.ts`, `metrics.ts` or any other existing origin file.
+Changes there are contract requests.
 
 ## Contracts you must honor (read-only for you)
 
@@ -48,9 +57,8 @@ Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
   the unchanged `KEYS.p2pPeer`/`p2pLinks`/`p2pSwarm`/`p2pChannelNet`, `P2P_EVIDENCE`,
   `p2pSwarmId` (:155-223 at `9c51c93`, shifted by the contract step).
 - `packages/contracts/src/tokens.ts:19-34` `PlaybackClaims` (`sid`, `cid`, `path`, `src`, `iat`,
-  `exp`): no broadcast id in the token, which is why the grant carries the swarm id. (The
-  amendment draft proposes `bid`/`p2p` claims instead of the grant; if that wins at acceptance the
-  orchestrator rewrites Build 1 and 3 to read the verified claims.)
+  `exp`): no broadcast id in the token, which is why the grant carries the swarm id. The accepted
+  amendment (decision 5) keeps it that way: no `bid`/`p2p` claims, no Go or vector change.
 - `@commonair/service`: `canonicalIp`, `clientIp`, `connectionKey`, `isValidCidr`,
   `networkPrefix` (moved unchanged from the tracker).
 - `trackerEnv` (`packages/config/src/env.ts:492-504`): `TRACKER_MAX_CONNECTIONS`,
@@ -64,8 +72,20 @@ Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
 - AGENTS.md: no IPs, tokens, peer ids or SDP in logs or metric labels (refusal reasons only, as
   `refuse` does today, `src/tracker.ts:148-153`). The tracker writes no database rows, so no
   `events` or `audit_log` rows apply.
+- The digest seam (contract step 6): `services/origin/src/p2p-digest.ts` exports
+  `P2P_DIGEST_ROUTE = "/p2p-digest/"` and `createP2PDigestHandler(deps: P2PDigestDeps):
+  P2PDigestFetch` with `P2PDigestDeps = { publicKey, store: ContentStore, metrics?, logger?, now? }`
+  and `P2PDigestFetch = (req, rawPath) => Promise<Response>`. `origin.ts` builds and dispatches it;
+  keep both signatures (a change is a contract request). Caddy routes `/p2p-digest/*` to the
+  origin. `PlaybackStart.p2p.digestUrl` is `${PLAYBACK_PUBLIC_URL}/p2p-digest`; the player
+  requests `<digestUrl>/live/<slug>[/<rendition>]/<file>?t=<token>`.
+- Origin internals you call but do not change: `parseMediaPath` (`src/paths.ts`, it accepts only
+  the `ROUTES` prefixes), `ContentStore.get(ref)` (`src/content.ts`), `verifyPlaybackToken` from
+  `@commonair/tokens`, `OriginMetrics.request(route, kind, source, status)` (route is a free
+  string), the CORS headers the HLS handler uses (`src/handler.ts:57-63`; copy them, do not
+  export them).
 - Harness: the `viewers` scenario and every `harness/**` file are the orchestrator's (contract
-  step 10). You add no harness scenario; put what it should assert in your final message.
+  step 11). You add no harness scenario; put what it should assert in your final message.
 
 ## What is there today (verified at `9c51c93`)
 
@@ -94,7 +114,7 @@ Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
    existing pattern at :184-194). Store the swarm id on `SocketData`.
 2. **Derived info hashes.** `src/infohash.ts`: from a swarm id, the set of allowed info hashes:
    `p2pAllowedStreamSwarmIds(swarmId)` through the loader's hash recipe, reimplemented in a few
-   lines (read it in the pinned `p2p-media-loader-core`; the amendment draft cites
+   lines (read it in the pinned `p2p-media-loader-core`; the amendment cites
    `stream-identity.ts:125-127`). Do not import the browser library into the tracker. Cache per
    swarm id (a small bounded LRU: many sockets share one). An announce or scrape with any other
    `info_hash` gets
@@ -107,9 +127,9 @@ Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
 4. **Interop with the pinned client.** Read the pinned `p2p-media-loader-core` (and the
    tracker-client package it uses) under `node_modules` and list every frame it sends and every
    field it reads back. Fix mismatches in the tracker, keeping the ADR 0005 subset tight. Check at
-   least (the amendment draft's reading of 4.0.0 is in brackets; the file:line citations are the
-   draft's and were not checkable at `9c51c93`, because `node_modules` did not have the library
-   yet; confirm each against the code):
+   least (the amendment's reading of 4.0.0 is in brackets; the file:line citations are the
+   amendment's and were not checkable at `9c51c93`, because `node_modules` did not have the
+   library yet; confirm each against the code):
    - **sockets per session** [pooled per tracker URL, `webtorrent-socket-pool/index.ts:31-35`,
      so one socket per session]: if it is not, the one-socket-per-session rule (409
      `duplicate_session`) breaks it; then allow one socket per derived stream swarm, keep "a newer
@@ -135,6 +155,28 @@ Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
    "client-chosen", and replace `podman compose --profile p2p up` (:128): the contract step
    removed the profile, so the tracker runs in every stack. Update the `src/evidence.ts:13-16` and
    `src/swarm.ts:5-10` comments likewise.
+6. **Origin segment digests** (`services/origin/src/p2p-digest.ts`, amendment decision 7):
+   - `GET|HEAD /p2p-digest/live/<slug>[/<rendition>]/<file>?t=<token>`. Strip the route prefix
+     and parse the rest with `parseMediaPath("/hls/" + rest)`; anything outside the grammar, a
+     `playlist` or a `part` → 404 without touching upstream. `OPTIONS` answers the CORS
+     preflight like the HLS handler.
+   - Token: `verifyPlaybackToken` (signature, expiry) and `claims.path === channelPath`, with
+     **any** `src` (unlike `authorizeViewer`, which refuses `relay`): relay- and CDN-served
+     viewers validate against the origin too. Any token failure → 403 `forbidden: <reason>`, as
+     the HLS handler answers viewers (`src/handler.ts:94`).
+   - Bytes: `store.get({ upstreamPath, file, kind: "segment" })`, the same cache and coalescing
+     as `/hls/`, so at most one upstream fetch. Upstream 404 → 404; other upstream errors → 502
+     as the HLS handler maps them (`src/handler.ts:174`, `:220`). Hash with `crypto.subtle.digest("SHA-256", body)`; memoize
+     digests in a small bounded LRU keyed by `upstreamPath/file` (media objects never change).
+   - Response: `200 text/plain; charset=utf-8`, body 64 lowercase hex characters,
+     `cache-control: private, max-age=120`, the CORS headers; `HEAD` without a body.
+   - Accounting: write **no** `SegmentFetch` (a digest is not a segment fetch; integrity's counts
+     must not change) and no production record beyond what `ContentStore` already does for an
+     upstream fetch. Count `metrics.request("p2p_digest", "segment", claims.src, status)` and
+     `metrics.egress("p2p_digest", bytes)`. No IPs, tokens or paths in logs or labels.
+   - Document the endpoint in `services/origin/README.md`'s route list **as a contract request**
+     (not your file), and in `services/tracker/README.md` next to the grant (why: amendment
+     decision 7).
 
 ## Tests you must add
 
@@ -150,19 +192,34 @@ Nothing else. In particular not `packages/contracts/**`, `packages/service/**`,
   or more than four swarms) behaves as you decided in step 4; the multi-socket rule if you
   changed it (limit, replacement per stream, still one evidence record per session).
 - Existing tests keep passing with grants set up in their fixtures.
+- `services/origin/tests/p2p-digest.test.ts` (unit, a fake `ContentStore` is fine here): the
+  digest equals an independently computed SHA-256 (`node:crypto`) of the served bytes; lowercase
+  hex, 64 characters; memoized (one hash per object); playlists, parts, bad grammar → 404 with no
+  store call; missing, expired, wrong-path tokens refused; a `relay` or `cdn` token accepted;
+  `HEAD` has no body; no `SegmentFetch` is recorded.
+- `services/origin/tests/p2p-digest.int.test.ts` (real Postgres and Valkey, `createTestDatabase()`):
+  `createOrigin` against a local `Bun.serve` stand-in for MediaMTX that serves the
+  `tests/fixtures.ts` playlists and fixed segment bytes (no podman: `origin.int.test.ts` needs a
+  real MediaMTX and is not yours to run); `/p2p-digest/` returns the SHA-256 of exactly what
+  `/hls/` returns for the same segment with the same token; a second request makes no second
+  upstream fetch; the `segments` stream gets no entry for digest requests.
+- The tamper path (a peer serving altered bytes) is P1-player's unit test; no harness tamperer.
 
 ## Done means
 
 Follow `.claude/briefs/_done-means.md`. This batch the orchestrator runs the gate: run only
 `bun run --filter @commonair/tracker test`, `bun run --filter @commonair/tracker test:int` (the data
 services are up at the `.env.example` defaults; do not run other packages' `test:int` at the same
-time), `bunx tsc -p services/tracker --noEmit`, `vp lint --deny-warnings services/tracker`,
-`vp fmt services/tracker`. Never run `bun run verify`, `podman`, `scripts/infra.ts` or harness
-scenarios. `git status` shows only `services/tracker/**`. Commit in your worktree
+time), `bun run --filter @commonair/origin test`, `bun --bun vp test run
+services/origin/tests/p2p-digest.int.test.ts` (never the origin's whole `test:int`: it starts
+MediaMTX under podman), `bunx tsc -p services/tracker --noEmit`, `bunx tsc -p services/origin
+--noEmit`, and `vp lint --deny-warnings` and `vp fmt` on your paths. Never run `bun run verify`, `podman`, `scripts/infra.ts` or harness
+scenarios. `git status` shows only `services/tracker/**` and your `services/origin` files. Commit in your worktree
 (`git commit -s`, Conventional Commits, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
 
 Final message: what you built, test counts (unit, int), branch and sha, the frame list from step 4
-with what you changed, contract requests (exact changes in files you do not own, e.g. a contracts
-doc that the multi-socket change contradicts, or a vector that disagrees with the library), what is
+with what you changed, the digest endpoint's behavior and test counts, contract requests (exact
+changes in files you do not own, e.g. a contracts doc that the multi-socket change contradicts, a
+vector that disagrees with the library, the `services/origin/README.md` route line), what is
 left undone, and the commands the user should run live (the `viewers` scenario with `--set p2p=10`
 once P1-player merges).

@@ -12,16 +12,17 @@ line numbers in `packages/contracts/src/api/router.ts`, `enums.ts`, `entities.ts
 `harness/src/safety.ts`, `harness/scenarios/trust-safety.ts` and `services/worker/src/moderation/**`
 against the E7 merge commit before editing.
 
-Written against three ADRs as proposed on 2026-10-27:
-[ADR 0012](../../../docs/decisions/0012-media-clock.md) (part 1),
+Matches three ADRs as accepted on 2026-10-27 (each records its answers under "Decisions at
+acceptance"): [ADR 0012](../../../docs/decisions/0012-media-clock.md) (part 1),
 [ADR 0019](../../../docs/decisions/0019-statement-of-reasons.md) and
 [ADR 0009 amendment 1](../../../docs/decisions/0009-public-media-route.md#amendment-1-vod-objects-stay-private-until-published).
-If an ADR is amended at acceptance, update this file and the matching unit brief before launch.
+Counsel has not reviewed ADR 0019 or its notice text; nothing here says otherwise.
 
 ## Order
 
-1. All three ADRs accepted (their open questions answered; record the answers in the ADRs).
-2. E7's contract step is merged, and **E7-appeals and E7-dmca are merged**. E7-appeals owns
+1. All three ADRs accepted (done 2026-10-27; answers recorded in each ADR).
+2. E7's contract step is merged (it is, `3bacecb` and `66e95da`; its migrations end at
+   `0026_e7_active_termination`), and **E7-appeals and E7-dmca are merged**. E7-appeals owns
    `services/worker/src/moderation/**` in wave 1 (lift ban on overturn, `ncii-hash` hashes
    `broadcast` items); W0-media-exposure edits four files there (VOD prefix lines only), W0-sor adds
    `sor-*` files there, and this step touches `moderation/objects.ts:43`. E7-dmca uses the trust
@@ -33,7 +34,9 @@ If an ADR is amended at acceptance, update this file and the matching unit brief
    step and may still be in flight; if E7-legal is, leave `packages/db/src/legal/index.ts` (B.6)
    until it merges or confirm it does not touch that file.
 3. This contract step, one commit, `bun run verify` green.
-4. Launch W0-clock, W0-integrity, W0-media-exposure, W0-sor (with P1-tracker and P1-turn: six).
+4. Launch W0-clock, W0-integrity, W0-media-exposure, W0-sor (with P1-tracker and P1-turn: six)
+   only once all of E7 has merged (wave 2 starts after wave 1; W0-sor also edits
+   `services/worker/src/exports/collectors.ts`, E7-dmca's in wave 1).
    Record each under "In flight" in `PROGRESS.md` with its owned paths (from each brief).
 
 ## A. Storage layout (ADR 0009 amendment, decisions 1, 2 and 4)
@@ -53,15 +56,16 @@ If an ADR is amended at acceptance, update this file and the matching unit brief
      `channelSuspended`, `nciiHidden`, `dmcaHidden`) and the pure
      `vodPlacement(state): VodPlacement | "leave"`: `public` only when ready, `visibility = public`,
      no `removed_reason`, broadcast not restricted and channel not suspended; `"leave"` when a hidden
-     NCII item covers the VOD (ADR decision 3), when a DMCA item covering it has its objects hidden
-     and not restored (E7-dmca's `dmca-disable` moves them to `moderation/dmca/<original key>` and
-     `dmca-restore` moves them back to the same keys, so placement must not move them meanwhile; the
-     ADR predates E7-dmca), and when `status = 'deleted'` (nothing left to move); `private`
-     otherwise. Unit tests cover every row (`packages/contracts/tests/storage.test.ts`).
+     NCII item covers the VOD, when a DMCA item covering it has its objects hidden and not restored
+     (E7-dmca's `dmca-disable` moves them to `moderation/dmca/<original key>` and `dmca-restore`
+     moves them back to the same keys, so placement must not move them meanwhile), and when
+     `status = 'deleted'` (nothing left to move); `private` otherwise, including any
+     `removed_reason` (`dmca` too). These are ADR 0009 amendment 1 decision 3's rules as accepted.
+     Unit tests cover every row (`packages/contracts/tests/storage.test.ts`).
    - `VOD_ROUTE = "/vod/"`, `vodTokenPath(vodId) = "vod/<vodId>"` (the `PlaybackClaims.path` a VOD
      token carries; no MediaMTX path can equal it, they all start `live/`), and
-     `VOD_TOKEN_MAX_TTL_SECONDS = 12 * 60 * 60`. A constant, not an env variable (the ADR says
-     "new"; if acceptance makes it an env variable, add it to `packages/config` and `.env.example`).
+     `VOD_TOKEN_MAX_TTL_SECONDS = 12 * 60 * 60`. A constant, not an env variable (accepted: 12 h,
+     no refresh).
    - Document the token reuse in the `PlaybackClaims` comment (`packages/contracts/src/tokens.ts:19-34`):
      `path` is a MediaMTX path **or** `vod/<id>`; the relay and the live `/hls` route refuse the
      latter by path mismatch (`services/origin/src/auth.ts:44`, `relay/internal/tokens/playback.go:179`). No crypto or vector change.
@@ -95,17 +99,21 @@ If an ADR is amended at acceptance, update this file and the matching unit brief
 1. **Enums** (`packages/contracts/src/enums.ts`): `"enforcement_notice"` appended to
    `LEGAL_DOCUMENT_KINDS` (:166). New: `ENFORCEMENT_CONTENT_TYPES`, `ENFORCEMENT_RESTRICTION_KINDS`,
    `ENFORCEMENT_RESTRICTION_DETAILS`, `ENFORCEMENT_SOURCES`, `ENFORCEMENT_AUTOMATED_DECISIONS`,
-   `ENFORCEMENT_GROUNDS`, `ENFORCEMENT_FACT_CODES`, `ENFORCEMENT_DELIVERY_CHANNELS` (`email`,
-   `in_app`) with the values of ADR 0019 decision 4, and `ENFORCEMENT_SOURCE_ACTIONS`: the audit
-   actions that produce a statement (decision 3 table: `moderation.t1.restrict`,
-   `moderation.t2.label`, `moderation.t1.upload_reject`, `moderation.case.warn`,
-   `moderation.case.end_stream`, `moderation.case.suspend`, `ncii.decide`, `ncii.auto_hide`; plus
-   `moderation.t0.match` only if open question 1 is answered "NCII T0 yes", in which case the builder
-   filters by list). A unit test in `packages/contracts/tests` asserts none of them is a
-   `MOD_ACTIONS` value used with `scope = 'channel'`.
+   `ENFORCEMENT_GROUNDS`, `ENFORCEMENT_FACT_CODES` (`classifier`, `moderator_review`,
+   `ncii_notice`, `hash_match`), `ENFORCEMENT_DELIVERY_CHANNELS` (`email`, `in_app`) with the
+   values of ADR 0019 decision 4, and `ENFORCEMENT_SOURCE_ACTIONS`: the audit actions that may
+   produce a statement (decision 3 table: `moderation.t1.restrict`, `moderation.t2.label`,
+   `moderation.t1.upload_reject`, `moderation.case.warn`, `moderation.case.end_stream`,
+   `moderation.case.suspend`, `ncii.decide`, `ncii.auto_hide`, `moderation.t0.match`). The doc
+   comment says the builder (and the coverage sweep) keep only NCII-list `moderation.t0.match`
+   rows (`details.listCategory = 'ncii'`): a CSAM-list match never produces a statement (accepted
+   answer 1, counsel to confirm). Do **not** add a test comparing these strings with `MOD_ACTIONS`
+   (the two vocabularies never overlap, so it proves nothing; ADR 0019 decision 3). The channel
+   exclusion is proved by W0-sor's builder tests and the `trust-safety` step.
 2. **Entity** in `packages/contracts/src/api/entities.ts` (next to `Appeal`, :830):
-   `EnforcementFacts` (discriminated union on `code`) and `EnforcementStatement`, exactly the
-   decision 4 shape (`content.type`, `restriction.{kind,detail,endsAt,territorialScope:"all"}`,
+   `EnforcementFacts` (discriminated union on `code`, including
+   `{ code: "hash_match", listCategory: z.literal("ncii"), capturedAt }` for T0 NCII-list matches)
+   and `EnforcementStatement`, exactly the decision 4 shape (`content.type`, `restriction.{kind,detail,endsAt,territorialScope:"all"}`,
    `facts`, `source`, `automatedDetection`, `automatedDecision`,
    `ground.{kind,clauseId,clauseVersion,legalBasis}`, `documents.{guidelinesId,noticeId}`,
    `appeal: {kind:"moderation",subjectType,subjectId} | null`, `createdAt`). `clauseId` is
@@ -128,10 +136,11 @@ If an ADR is amended at acceptance, update this file and the matching unit brief
      attempts, last_error_code)`, unique `(statement_id, channel)`; `last_error_code` is a code, never
      provider text (no addresses).
    - `audit_log_action_idx (action, created_at)` on `audit_log`.
-   - Generate a named migration at the next free number after E7's. E7's contract step takes
-     `0024_e7_platform_debts` and `0025_e7_protections`, so expect `0026_enforcement_statements`,
-     including the `legal_document_kind` enum value. Then a hand-written protections migration
-     (expected `0027_w0_protections`) in the style of
+   - Generate a named migration at the next free number after E7's. E7's contract step took
+     `0024_e7_platform_debts`, `0025_e7_protections` and `0026_e7_active_termination`, so expect
+     `0027_enforcement_statements` (unless an E7 merge added another), including the
+     `legal_document_kind` enum value. Then a hand-written protections migration (expected
+     `0028_w0_protections`) in the style of
      `packages/db/drizzle/0016_trust_safety_protections.sql`:
      - `enforcement_statements` append-only and no-truncate with `commonair_forbid_mutation()`
        (defined at `0001_protections.sql:25`; row-trigger pattern :100-106, no-truncate pattern
@@ -150,8 +159,8 @@ If an ADR is amended at acceptance, update this file and the matching unit brief
    from a new `packages/db/src/legal/enforcement_notice.md` holding only the draft banner, the
    placeholders and one heading per section; `requiresAcceptance: false`, `isDraft: true`. W0-sor
    owns that one `.md` file afterwards and writes the text.
-   **Seed version.** `seedLegalDocuments` (`packages/db/src/seed.ts:167-178`) inserts by
-   `(kind, version)` with `on conflict do nothing`, and every kind shares
+   **Seed version** (settled at ADR 0019 acceptance). `seedLegalDocuments`
+   (`packages/db/src/seed.ts:167-178`) inserts by `(kind, version)` with `on conflict do nothing`, and every kind shares
    `LEGAL_SEED_VERSION = "2026-10-18-draft"` with a past `publishedAt`. A database migrated between
    this step and W0-sor's merge (a dev database, the rc droplet) would keep the skeleton for ever,
    and B.5's guard would make it immutable. So give `enforcement_notice` its own version constant
@@ -164,16 +173,35 @@ If an ADR is amended at acceptance, update this file and the matching unit brief
    `services/worker/src/jobs/moderation-sor.ts` exporting `sorJobs: JobDefinition[]` (both
    schedules from decision 5: every 15 s and daily; handlers that return `{ notBuilt: 1 }`),
    registered in `services/worker/src/jobs/index.ts` (`JOBS`, :41-72). W0-sor owns the stub file.
-8. **Open question 2** (appeals while suspended): if the user says yes, exempt `appeals.create` from
-   the suspended-write block at `services/api/src/lib/access.ts:82` here, with a test.
-   `appeals.create` is already on the `write` rate-limit bucket (`router.ts:2258`, commit `7833a19`;
-   E7's contract step lists it as done), so this exemption is about the suspended check only.
-   E7-appeals owns `services/api/src/routes/appeals.ts`; the change belongs in `access.ts`.
+8. **Appeals while suspended** (ADR 0019 answer 2): exempt `appeals.create`, and nothing else,
+   from the suspended-write block at `services/api/src/lib/access.ts:82`. Add an optional
+   `whileSuspended?: true` to `ProcedureMeta` (`packages/contracts/src/api/common.ts:35-45`, with a
+   comment: only for redress), set it on `appeals.create` (`router.ts`, `appeals.create`, about
+   :2266; recheck after E7), and make the check
+   `if (f.write && caller.user.suspended && f.meta.whileSuspended !== true)`. Tests: the
+   `decideAccess` unit tests (suspended caller may create an appeal, still may not do any other
+   write), and a contract test that walks the router and asserts `appeals.create` is the only
+   procedure with `whileSuspended`. `appeals.create` is already on the `write` rate-limit bucket
+   (commit `7833a19`), so this is about the suspended check only. Whether the auth library lets a
+   suspended user sign in at all (`services/api/src/auth/index.ts:190`) is W0-sor's to check.
+9. **NCII appeal subject** (ADR 0019 answer 4): append `"ncii_request_item"` to `APPEAL_SUBJECTS`
+   (`packages/contracts/src/enums.ts:106-118`, doc comment: an NCII request item covering content
+   the appellant owns, appealing its removal or auto-hide). `appeals.subject_type` is `text`
+   (`packages/db/src/schema/safety.ts:144`), so no migration. E7-appeals has merged, so this step
+   edits `services/api/src/routes/appeals.ts`: add it to `KIND_SUBJECTS.moderation`, and a
+   `subjectConcerns` case (the item exists, and its `subject_type`/`subject_id` names a broadcast,
+   VOD, clip or upload whose channel or uploader is the appellant; the requester is never told who
+   appealed). Overturning records the decision only, as for `moderation_action`: restoring content
+   is a manual staff step, and `hashed_at` items have no objects left to restore. Update the file's
+   doc comment, and add int tests (own item accepted, someone else's item NOT_FOUND, open-appeal
+   uniqueness). W0-sor's statements name this subject for `ncii.decide` (removed) and
+   `ncii.auto_hide`; a T0 NCII-list statement has a null `appeal`.
 
 ## C. VOD placement job (ADR 0009 amendment, decision 3)
 
 1. New stub `services/worker/src/jobs/vod-placement.ts` (`defineJob` on `QUEUES.retention`, name
-   `vod-placement`, data `{ vodId?: uuid }`, schedule every minute; handler returns `{ notBuilt: 1 }`),
+   `vod-placement`, data `{ vodId?: uuid }`, schedule every minute: the accepted one-minute
+   database-state sweep, no outbox events from other writers; handler returns `{ notBuilt: 1 }`),
    registered in `services/worker/src/jobs/index.ts`. W0-media-exposure owns the file.
 2. Add `"vod-placement"` to `OPS_TICK_JOBS` (`packages/contracts/src/internal.ts:492`) so the ops
    test hook can run a sweep on demand, as for `vod-retention`.
@@ -219,6 +247,10 @@ extending e1–e7. Contents:
   DMCA hidden, deleted)
   with its placement and what `/media/vods/…` and `/vod/…` answer.
 - **Routes:** `GET|HEAD /vod/<vodId>/<file>?t=<token>`; `GET /me/enforcement`.
+- **Appeals:** `ncii_request_item` subject (B.9); `appeals.create` allowed while suspended (B.8).
+- **Data export:** the user export gains an `enforcement_statements` section (the decision 4
+  columns, the requester's own statements only, no joined moderator note), W0-sor's after E7
+  merges; add the row next to e6-selectors' "Data export".
 - **Test ids** on `/settings/appeals`: `enforcement-list` (wrapper; `enforcement-empty`
   `<EmptyState>`), `enforcement-statement` (`data-statement-id`, `data-source-action`,
   `data-restriction-kind`, `data-restriction-detail`, `data-clause-id`, `data-clause-version`,
@@ -232,8 +264,14 @@ extending e1–e7. Contents:
 
 ## F. Not in this step (owned by units or later)
 
-- `selfhost.sh` NTP check (ADR 0012 decision 2): P1-turn owns `scripts/selfhost.sh` in wave 2.
-  W0-clock sends the exact lines as a contract request; apply them after P1-turn merges.
+- `selfhost.sh` NTP check (ADR 0012 decision 2, accepted as **warn, do not refuse**): P1-turn owns
+  `scripts/selfhost.sh` in wave 2. W0-clock sends the exact lines as a contract request; apply them
+  after P1-turn merges.
+- Statements for report resolutions and admin suspensions (`services/api/src/routes/safety.ts`):
+  W2, with a required `clauseId` (ADR 0019 answer 3).
+- A production rung-skew gauge: not before W1 (ADR 0012 answer 6).
+- Follow-ups recorded in ADR 0009 amendment 1: mature-labelled public VODs under `vods/`, clips of
+  `subscribers`/`private` VODs public at `clips/`.
 - `PROGRESS.md` 2H2 row (`PROGRESS.md:1153`) and `HANDOFF.md:451` ("CDN-delivered sessions not
   fetch-judged"): the orchestrator updates both when W0-integrity merges.
 - Patronage and governance inputs that count `verdict = 'verified'` sessions

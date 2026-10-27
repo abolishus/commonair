@@ -13,10 +13,13 @@ PLAN.md and docs/architecture.md first, then `.claude/briefs/next/W0-prerequisit
 repository. Work in your own git worktree on a branch named `w0/clock`, starting from the W0
 contract-step commit.
 
-Written against ADR 0012 as proposed on 2026-10-27: the media clock is the ingest wall clock
-(decision 1), rungs carry it through the transcoder (option A, spike-gated, decision 3), and the
-recorder is re-anchored by keyframe match (R1, decision 4). If the ADR is amended at acceptance,
-the orchestrator updates this brief before launch.
+Matches ADR 0012 part 1 as accepted on 2026-10-27 (its "Decisions at acceptance" section): the
+media clock is the ingest wall clock (decision 1), rungs carry it through the transcoder (option A,
+decided by your one-day spike; if A fails you stop and the orchestrator re-briefs for B,
+decision 3), and the recorder is re-anchored by keyframe match (R1, decision 4). The pass
+statistic is p95; the audio-only rung is not measured by `clock-skew`; `selfhost.sh` only warns on
+an unsynced host; no production rung-skew gauge is required (the recorder offset gauge and the
+harness suffice until DVR).
 
 ## Why
 
@@ -106,8 +109,9 @@ selfhost edit.
    3. MediaMTX honours `useAbsoluteTimestamp: true` for an RTSP publisher and stamps HLS PDT from it;
    4. a ladder started mid-broadcast yields rung PDT equal to source PDT within a frame.
       Write the findings (commands, versions, measured numbers) into `services/media/src/clock/README.md`.
-      **If any point fails, stop, commit the README and report**: the orchestrator decides on option B
-      (it needs `services/origin/src/playlist.ts` and a Valkey key, outside your paths).
+      **If any point fails, stop, commit the README and report**: do not start option B. The
+      orchestrator re-briefs this unit for B (it needs `services/origin/src/playlist.ts` and a
+      Valkey key, outside your paths, and where that origin change lands is decided then).
 1. **Rungs carry the source clock** (`ladderArgs`, `aacCopyArgs`): `-copyts` and the sender-report
    anchoring the spike found, for every video rung, the audio rung and the AAC copy. Fix the
    keyframe expression so `-copyts` does not force every frame (ADR consequence: make it relative to
@@ -131,7 +135,8 @@ selfhost edit.
 4. **Gauge**: export the recorder offset as an OpenTelemetry instrument from `meter()` (new
    `services/media/src/clock/metrics.ts`), `media_clock_recorder_offset_ms` (no ids in attributes; a
    histogram of `|offset|` is fine), and a counter of failed matches. This is
-   the production skew gauge ADR 0012 asks for; rung skew stays in the harness.
+   the production skew gauge ADR 0012 asks for; rung skew stays in the harness (no production
+   rung-skew gauge, accepted answer 6).
 5. **Host clock signal**: the health payload cannot carry an informational field (see "What is
    there today"), and a readiness check would fail `/readyz`. Instead, if the container can read the
    kernel's NTP sync status without new privileges or dependencies, export it as an observable gauge
@@ -139,10 +144,12 @@ selfhost edit.
    and log a warning once when it reads 0. Never fail health on it. If it is unreadable, say so in
    your final message; if you think it belongs in `/healthz`, send the `packages/service` change as
    a contract request.
-6. **`selfhost.sh` NTP check** (ADR decision 2): not your file this wave. Put the exact lines
-   (a `timedatectl show -p NTPSynchronized --value` check in the install preflight, refusing or
-   warning per the ADR's answer to open question 5, and an override flag) in your final message as
-   a contract request.
+6. **`selfhost.sh` NTP check** (ADR decision 2): not your file this wave (P1-turn owns it). Put
+   the exact lines in your final message as a contract request, applied after P1-turn merges: a
+   `timedatectl show -p NTPSynchronized --value` check in the install preflight that **warns and
+   continues** (accepted answer 5: never refuse), names the operator guide's time-sync
+   requirement, stays silent when the value is `yes`, says it could not check when `timedatectl`
+   is absent, and needs no override flag since it never blocks.
 7. **`clock-skew` scenario** (ADR decision 5) in `harness/scenarios/clock-skew.ts`, helpers in new
    `harness/src/clock-skew*.ts`:
    - A strip-burning streamer (`p.streamerFor`, as `integrity-basic.ts:41` does) publishes over
@@ -151,7 +158,8 @@ selfhost edit.
      wait out hysteresis, rise again) and one recorder restart mid-broadcast (find a way the harness
      already has to restart a media process; if none exists, report the hook you need).
    - One `HttpViewer` per video rendition (source and each rung) through the origin, with
-     `decodeStripEvery: 1`; for each decoded segment `e = PDT − strip`.
+     `decodeStripEvery: 1`; for each decoded segment `e = PDT − strip`. The audio-only rung is
+     not measured (no strip in audio; no tone markers); its flags are covered by `args.test.ts`.
    - Cross-rendition skew per capture instant = `max(e) − min(e)` across renditions paired by
      strip time. Pass: p95 < 100 ms with every rendition present for ≥ 2 minutes, including the
      minute after the ladder restart.

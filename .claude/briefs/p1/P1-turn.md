@@ -8,13 +8,12 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 You are implementing unit P1-turn for CommonAir (repo: /Users/joshe/Repos/bcon). Read AGENTS.md,
 PLAN.md and docs/architecture.md first, then `.claude/briefs/next/P1-p2p-client.md`,
 `.claude/briefs/p1/contract-step.md` (what the orchestrator already committed),
-[ADR 0005](../../../docs/decisions/0005-p2p-tracker.md) amendment 1 (decision 2 is yours),
+[ADR 0005](../../../docs/decisions/0005-p2p-tracker.md) amendment 1 (accepted 2026-10-27;
+decision 2 is yours),
 [ADR 0023](../../../docs/decisions/0023-release-and-self-hosting.md) (rootless Podman, Quadlet,
 `selfhost.sh`) and [ADR 0025](../../../docs/decisions/0025-hosting-on-digitalocean.md). Do not
 look outside the repository, except coturn's documentation for the pinned version. Work in your
 own git worktree on a branch named `p1/turn`, from the P1 contract commit.
-
-If the ADR 0005 amendment changes at acceptance, the orchestrator updates this brief before launch.
 
 ## Why
 
@@ -153,8 +152,9 @@ not `services/api/src/routes/playback.ts`, `router.ts` or `env.ts`, not `package
 5. **API credentials** (`services/api/src/p2p/turn.ts` + `routes/p2p.ts`), TURN REST scheme:
    `username = "<expiry epoch s>:<opaque id>"`, `credential = base64(HMAC-SHA1(TURN_SHARED_SECRET,
    username))`, expiry = now + `TURN_CREDENTIAL_TTL_SECONDS`. The opaque id is **not** the raw
-   session id (the amendment draft says `<sessionId>`; coturn can log usernames, so use an HMAC of
-   it under a subkey, truncated, and tell the orchestrator so the ADR matches). Handler: verify the
+   session id: it is a truncated HMAC of the session id under a subkey of `TURN_SHARED_SECRET`
+   (amendment decision 2, because coturn can log usernames). Pick the subkey label and the
+   truncation length (at least 16 bytes, base64url) and document both in `p2p/turn.ts`. Handler: verify the
    token for `sessionId`, `CONFLICT` for an ended session, `PRECONDITION_FAILED` reason `p2p`
    without `KEYS.p2pGrant(sid)`, then one entry with the `stun:` URLs (no credentials) and, only
    when `P2P_TURN_URLS` is set, one with the `turn:` URLs and credentials. `expiresAt` is `null`
@@ -166,7 +166,10 @@ not `services/api/src/routes/playback.ts`, `router.ts` or `env.ts`, not `package
    STUN, why the relay is off by default and when to turn it on (its egress cost), ports and
    firewalls (host and DigitalOcean), the private-range denial, and how to check it works
    (`turnutils_stunclient` / `turnutils_uclient` from the image, with credentials from the API).
-   `configuration.md`: the keys.
+   Also `P2P_DEFAULT` (amendment decision 3): P2P is opt-in by default (`off`); an operator may set
+   `on` only with a lawful basis for showing viewers' IP addresses to other viewers (in the EU,
+   counsel has not reviewed one for the reference instance), and even then phones, metered
+   connections and data mode stay off. `configuration.md`: the keys.
 
 ## Tests you must add
 
@@ -200,7 +203,7 @@ scripts/tests/config-reference.test.ts` (never the `infra/tests` int files:
 Commit in your worktree (`git commit -s`, Conventional Commits,
 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
 
-Harness: no scenario is yours. `viewers` (contract step 10) runs with the relay off, and any TURN
+Harness: no scenario is yours. `viewers` (contract step 11) runs with the relay off, and any TURN
 check against the live stack goes in your final message as a command for the user.
 
 AGENTS.md: no IPs, tokens, credentials, TURN usernames or session ids in logs or metric labels.
@@ -210,7 +213,7 @@ row applies. Every new file carries an SPDX header (`reuse lint`).
 
 Final message: the networking decision and why, the STUN-only mechanism, the relay quotas, test
 counts, branch and sha, contract requests (`"coturn"` in `STACK_HEALTHY_SERVICES`; `udp/3478` for
-`infra/tofu/**`; the `infra/README.md` Ports-table rows; the ADR wording on the username),
+`infra/tofu/**`; the `infra/README.md` Ports-table rows),
 what is left undone (TURNS), and the commands the user should run live:
 `bun scripts/infra.ts stack --harness`, `turnutils_stunclient localhost` against the dev coturn,
 and the self-host e2e with and without `--turn-relay`.

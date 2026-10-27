@@ -5,7 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0012: One media clock (part 1: alignment and skew targets)
 
-- Status: proposed (2026-10-27)
+- Status: accepted (2026-10-27; part 1 only, the six questions answered by the maintainer, see
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
 - Date: 2026-10-27 (code checked at `9c51c93`)
 - Scope: the first half of the ADR 0012 candidate in
   [feature-wins.md §7](../product/feature-wins.md#7-decisions-needed), which gates W0-clock
@@ -79,14 +80,17 @@ their clocks must agree to well under the 100 ms budget.
 **Options.** (a) Require chrony (or systemd-timesyncd) and check sync at install and in health.
 (b) Measure per-host offsets in the application. (c) Do nothing until multi-host.
 
-**Recommendation: (a).** `selfhost.sh` refuses to install when the host reports no NTP sync
-(`timedatectl show -p NTPSynchronized`), the operator guide requires it, and the media health
-endpoint reports the host's sync state. Budget: host offset < 10 ms, an order of magnitude inside
+**Recommendation: (a).** `selfhost.sh` warns at install, and does not refuse, when the host
+reports no NTP sync (`timedatectl show -p NTPSynchronized`); the operator guide requires sync, and
+the media service reports the host's sync state (a metric and a logged warning, never a failed
+health check). Budget: host offset < 10 ms, an order of magnitude inside
 the skew target. (b) re-implements NTP; (c) leaves a silent failure for self-hosters who split
 hosts first.
 
-**Consequences.** A small `selfhost.sh` change outside W0-clock's paths (a request to the R0/S1
-owner). Monitoring alarms on unsynced hosts with the S1 host metrics (ADR 0032 §6).
+**Consequences.** A small `selfhost.sh` change outside W0-clock's paths: W0-clock sends the exact
+lines as a contract request, and the orchestrator applies them after P1-turn (which owns
+`selfhost.sh` in that wave) merges. Monitoring alarms on unsynced hosts with the S1 host metrics
+(ADR 0032 §6).
 
 ### 3. Rungs carry the source clock (spike-gated)
 
@@ -109,8 +113,9 @@ has to keep LL-HLS (the origin depends on MediaMTX's LL-HLS, `services/origin/sr
   (`-var_stream_map`), so PDT is aligned by construction. Rejected: ffmpeg has no LL-HLS parts, so
   this gives up the 200 ms parts and blocking reloads.
 
-**Recommendation: A, decided by a one-day spike before W0-clock starts; B if the spike fails.** A
-adds no moving parts at runtime and fixes the error where it is created. The spike must show, with
+**Recommendation: A, decided by a one-day spike at the start of W0-clock; B if the spike fails.**
+If any point below fails, W0-clock stops after the spike and the orchestrator re-briefs the unit
+for B (and decides then where the origin change lands). A adds no moving parts at runtime and fixes the error where it is created. The spike must show, with
 the media image's Debian ffmpeg (`infra/containers/service.Containerfile:87`) and MediaMTX 1.21.2:
 
 1. MediaMTX sends sender reports to RTSP readers that carry its receipt clock for the source path.
@@ -181,6 +186,10 @@ their old PDT; nothing is migrated.
 - **Live-to-VOD skew** = `|e_vod − e_source|` for the same strip times, read from the published VOD
   playlist after the broadcast ends, across the recorder restart's discontinuity. Pass: p95
   < 250 ms.
+- The statistic is p95, not every sample: one late frame right after a restart does not fail
+  the gate.
+- The audio-only rung is not measured (it carries no strip). Its flags, and the AAC-copy path's,
+  are covered by unit tests (decision 3).
 - Resolution is one frame (33 ms at 30 fps), well inside both budgets.
 - Unit tests in `services/media` cover the keyframe-expression fix, the anchor arithmetic, drift
   re-anchoring and the audio-only match. The scenario also records today's baseline on its first
@@ -197,7 +206,8 @@ their old PDT; nothing is migrated.
 - Relays and the CDN need no change: they pass PDT through.
 - A production skew gauge (feature-wins §6) is cheap for the recorder (the R1 offset is the gauge)
   and costly for rungs (frame matching across a re-encode). This ADR asks only for the recorder
-  gauge; the harness carries rung skew.
+  gauge; the harness carries rung skew. No production rung-skew gauge is required before W1; it is
+  reconsidered with DVR (ADR 0016).
 
 ## Deferred to W1 (part 2: Timeline Spine)
 
@@ -206,14 +216,22 @@ Settled in an amendment to this ADR before the W1 contract step, not here: the `
 without `mediaTs`, and **chat retention and replay** (the retention period, replay exclusions and
 blocks, the disclosure that live chat is replayed). W1-spine starts after both halves are accepted.
 
-## Open questions
+## Decisions at acceptance (2026-10-27)
 
-1. Accept a spike-gated choice (A, else B), or decide A versus B now without the spike?
-2. If B is needed, may W0-clock write `services/origin/src/playlist.ts`, or does the origin change
-   go to the contract step?
-3. Is p95 the right statistic, or must every sample meet the target (a stricter gate that one bad
-   frame after a restart can fail)?
-4. Is excluding the audio-only rung from the scenario acceptable (no strip in audio), or should the
-   harness streamer gain timed tone markers?
-5. Should `selfhost.sh` refuse to install on an unsynced host, or only warn?
-6. Is a rung skew gauge in production required for W1, or is the harness enough until DVR?
+The maintainer accepted part 1 with the recommended answers. Where an answer differs from the
+draft, the text above was updated to match.
+
+1. **Spike-gated choice.** Accepted: option A, decided by a one-day spike at the start of
+   W0-clock. If the spike fails, the unit stops and the orchestrator re-briefs it for B.
+2. **Where B's origin change goes.** Not decided now: it is settled in that re-brief, if B is
+   needed.
+3. **Statistic.** p95, as drafted.
+4. **Audio-only rung.** Left out of `clock-skew`; no tone markers. Unit tests cover its flags.
+5. **`selfhost.sh` on an unsynced host.** Warns, does not refuse. This differs from the draft,
+   which had it refuse; decision 2 now says warn. The check arrives as a contract request from
+   W0-clock, applied after P1-turn merges.
+6. **Production rung-skew gauge.** Not required before W1. The harness and the recorder offset
+   gauge suffice until DVR.
+
+The `ClockAnchor` hook in `services/media/src/vod/recorder.ts` (decision 4) lands in the W0
+contract step, as drafted.

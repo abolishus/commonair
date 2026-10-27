@@ -14,10 +14,14 @@ handling). Do not look outside the repository. Work in your own git worktree on 
 `w0/media-exposure`, starting from the W0 contract-step commit (which already contains E7-appeals
 and E7-dmca).
 
-Written against ADR 0009 amendment 1 as proposed on 2026-10-27: one private `recordings/<vodId>/`
-prefix, a token-checked `/vod/` origin route for restricted VODs, a per-request state check on
-both routes, and one placement job that moves objects to match state. If the ADR is amended at
-acceptance, the orchestrator updates this brief before launch.
+Matches ADR 0009 amendment 1 as accepted on 2026-10-27 (its "Decisions at acceptance" section):
+one private `recordings/<vodId>/` prefix, a token-checked `/vod/` origin route for restricted VODs
+(12 h token cap, no refresh), a per-request state check on both routes (5 s per-instance cache, no
+cross-instance invalidation), and one placement job that moves objects to match state, driven by
+a one-minute database-state sweep plus direct enqueues from `vods.update` and `vods.remove` (no
+outbox events from other writers). Existing objects move by that sweep. Mature-labelled public
+VODs stay under `vods/` and clips of restricted VODs stay public at `clips/` (recorded
+follow-ups, not yours).
 
 ## Why
 
@@ -29,6 +33,10 @@ is a trust & safety exposure and the prerequisite for DVR (W2-dvr builds on your
 Done when in-progress and removed VOD segments answer 404 via `/media` and `trust-safety` asserts it.
 
 ## You own (write only these)
+
+P1-tracker works in `services/origin` in the same wave: keep the `P2P_DIGEST_ROUTE` dispatch
+line the P1 contract step adds to `services/origin/src/origin.ts` `fetchHandler`, and create no
+file named `p2p-digest*`.
 
 - `services/media/src/vod/recorder.ts` (except the `ClockAnchor` calls the contract step added:
   keep them working), `services/media/src/vod/finalize.ts`, and the VOD-prefix code in
@@ -125,8 +133,10 @@ make it: put the exact change in your final message as a contract request.
    (S3 CopyObject, server side; content type and cache-control preserved). Garage is the default
    store and ADR 0033 proposes SeaweedFS. `packages/storage` has no integration test today: add
    `tests/s3.int.test.ts` against the infra store at the `.env.example` defaults, reaching it (and
-   skipping) the way `services/media/tests/media.int.test.ts` does, and say which stores you
-   proved. Add `moveVodObjects(storage, bucket, fromPrefix,
+   skipping) the way `services/media/tests/media.int.test.ts` does. ADR 0009 amendment 1 requires
+   this test to prove CopyObject against the pinned Garage image, and against SeaweedFS too if
+   ADR 0033 has been accepted and the infra store switched by the time you start; say which stores
+   you proved. Add `moveVodObjects(storage, bucket, fromPrefix,
    toPrefix)` (copy every object, verify each copy by size and ETag or a HEAD, return counts; never
    delete here) wherever it is shared by media and worker without a new dependency edge
    (`packages/storage` is fine).
@@ -151,12 +161,12 @@ make it: put the exact change in your final message as a contract request.
    whose `storage_prefix` does not match `vodPlacement` of their state (in SQL, in batches) and
    enqueue each, logging counts only (never keys). The first sweeps also migrate every existing
    non-public VOD from `vods/` to `recordings/` (ADR decision 5); no schema migration.
-   **Deviation to report:** the ADR text has each writer emit an outbox row and an hourly sweep.
-   This brief uses a one-minute state-driven sweep plus direct enqueues from the two writers you
-   own (step 6), so T1 restriction and clearing (`moderation/scan.ts`, `routes/moderation.ts`,
-   `moderation/restriction.ts`) and channel suspension (`routes/moderation.ts`, `routes/admin.ts`)
-   need no edits by you; exposure in the meantime is closed by the state check (step 5). Say so in
-   your final message so the orchestrator can align the ADR at acceptance.
+   This is the accepted mechanism (ADR 0009 amendment 1 decision 3): a one-minute state-driven
+   sweep plus direct enqueues from the two writers you own (step 6). T1 restriction and clearing
+   (`moderation/scan.ts`, `routes/moderation.ts`, `moderation/restriction.ts`), channel
+   suspension (`routes/moderation.ts`, `routes/admin.ts`) and the DMCA and NCII flows need no edits
+   by you and emit no outbox events for placement; exposure in the meantime is closed by the state
+   check (step 5).
 5. **Origin: state check and the VOD route.**
    - `/media/vods/<id>/…`: before touching storage, look up the VOD's state (one query joining
      `vods`, `broadcasts`, `channels`, and NCII hidden items; cached per VOD for 5 s in a
@@ -229,8 +239,7 @@ for each and for `harness`; `vp lint --deny-warnings` and `vp fmt` on your paths
 worktree (`git commit -s`, Conventional Commits, message ending with
 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). Final message: what you
 built, test counts per package, branch and sha, the stores `copy` was proven against, contract
-requests, the sweep deviation from the ADR text, anything left (clips of restricted VODs stay
-public: ADR open question 2), and the live commands:
+requests, anything left, and the live commands:
 `bun harness/src/cli.ts run trust-safety --set steps=10` (the "VOD exposure" step; check the number
 in `harness/src/safety.ts` after the contract step) and
 `bun harness/src/cli.ts run vod-clips`.

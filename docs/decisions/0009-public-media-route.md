@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0009: Public media through the origin's `/media` route
 
-- Status: accepted (2026-10-21); amendment 1 proposed (2026-10-27)
+- Status: accepted (2026-10-21); amendment 1 accepted (2026-10-27)
 - Date: 2026-10-21
 
 ## Context
@@ -20,7 +20,9 @@ The media bucket also holds objects that must never be public:
 
 - `incoming/`: presigned uploads that have not been scanned yet (ADR 0006 Q6);
 - `moderation/<case>/<flag>.jpg`: review frames;
-- `moderation/ncii-hidden/`: objects hidden by the NCII 48-hour deadline.
+- `moderation/ncii-hidden/`: objects hidden by the NCII 48-hour deadline;
+- `moderation/dmca/`: objects disabled by a DMCA notice (E7-dmca; added by amendment 1);
+- `recordings/`: VOD objects that are not publicly playable (amendment 1).
 
 T0 media is moved to the separate evidence bucket and deleted from the media bucket, so no T0
 object stays in it.
@@ -75,7 +77,8 @@ prefix policies can also serve the public prefixes itself. Nothing requires eith
 
 ## Amendment 1: VOD objects stay private until published
 
-- Status: proposed (2026-10-27)
+- Status: accepted (2026-10-27; the four questions answered by the maintainer, see
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
 - Date: 2026-10-27 (code checked at `9c51c93`)
 - Gates: W0-media-exposure (`.claude/briefs/next/W0-prerequisites.md:29`)
 
@@ -126,7 +129,7 @@ Options:
    already rejected moving private prefixes to a second bucket for the same churn.
 3. **A private prefix in the same bucket** that the allowlist does not name.
 
-Recommendation: option 3. The prefix is **`recordings/<vodId>/`**. It holds a VOD's objects while
+Decision: option 3. The prefix is **`recordings/<vodId>/`**. It holds a VOD's objects while
 it records and processes, and whenever its effective state is not "public and playable": ready,
 `visibility = public`, no `removed_reason`, broadcast not restricted, channel not suspended. Only
 then do the objects live under `vods/<vodId>/`. The allowlist is unchanged, since it already fails
@@ -152,7 +155,7 @@ Options:
    the live route does (`handler.ts:115`). It returns `cache-control: private` and records no
    integrity or receipt samples. Caddy gains `handle /vod/*` → origin.
 
-Recommendation: option 3. `toVod` (`vods.ts:34`–`:49`) mints the token only when `vodShown` already
+Decision: option 3. `toVod` (`vods.ts:34`–`:49`) mints the token only when `vodShown` already
 admits the caller. The token lifetime is the VOD's duration plus one hour, capped by a new
 `VOD_TOKEN_MAX_TTL_SECONDS` (12 h). The VOD playlist is loaded once, so the 120 s live TTL
 (`tokens.ts:36`) would cut playback off. Thumbnails of restricted VODs use the same route.
@@ -172,22 +175,44 @@ immediate. Options:
    playable", `/vod/<id>/…` requires "not removed, not restricted" plus the token. The move then
    brings storage in line, so a CDN or a direct store read is also covered.
 
-Recommendation: option 2. One idempotent worker job, `vod-placement {vodId}`, computes where a VOD's
-objects belong and moves them there. Finalize, `vods.update` (visibility), `vods.remove`, T1
-restriction and clearing, channel suspension and reinstatement each enqueue it through an
-`events` outbox row in their transaction. An hourly sweep re-queues mismatches. A move:
+Decision: option 2. One idempotent worker job, `vod-placement {vodId}`, computes where a VOD's
+objects belong and moves them there. Finalize moves a VOD itself before it is `ready` (below).
+`vods.update` (visibility) and `vods.remove` enqueue the job directly after commit. Every other
+state change (T1 restriction and clearing, channel suspension and reinstatement, the DMCA and
+NCII flows) is picked up by a sweep that runs **every minute**, selects VODs whose
+`storage_prefix` does not match `vodPlacement` of their current database state, and enqueues
+them in batches.
+
+The draft had every writer emit an `events` outbox row in its transaction, with an hourly sweep.
+That was changed at acceptance: those writers (`moderation/scan.ts`, `routes/moderation.ts`,
+`moderation/restriction.ts`, `routes/admin.ts`, the DMCA and NCII jobs) belong to other units,
+and the origin state check below closes the exposure within 5 s whether or not the objects have
+moved yet. The move only brings storage in line for a CDN or a direct store read, so a one-minute
+reconciler over database state is enough and touches no other unit's files. A move:
 
 1. server-side copies each object (a new `copy(bucket, from, to)` on the storage port, S3
-   CopyObject; Garage and SeaweedFS both document it, and the storage unit's integration test
-   proves it against the pinned images);
+   CopyObject; Garage and SeaweedFS both document it, and W0-media-exposure's integration test in
+   `packages/storage` must prove it against the pinned Garage image, and against SeaweedFS too if
+   ADR 0033 is accepted before that unit lands);
 2. updates `vods.storage_prefix` and `thumbnail_key` in one transaction;
 3. deletes the source prefix.
 
 A crash between steps leaves both copies, and a rerun finishes the move. Finalize runs the move to
 `vods/` _before_ its `ready` transaction (`finalize.ts:208`–`:238`), so a VOD is never `ready` with
-its objects missing. NCII-hidden objects (`moderation/ncii-hidden/`,
-`services/worker/src/moderation/ncii-clock.ts:193`–`:216`) are left where they are: placement
-skips a VOD with a hidden NCII item.
+its objects missing.
+
+`vodPlacement(state)` returns `public`, `private` or `leave`. `public` needs status `ready`,
+`visibility = public`, no `removed_reason` (any reason, including `dmca`), broadcast not
+restricted and channel not suspended; otherwise `private`, except that it returns `leave` (do not
+move anything) when:
+
+- a hidden NCII item covers the VOD: its objects are in `moderation/ncii-hidden/`
+  (`services/worker/src/moderation/ncii-clock.ts:193`–`:216`);
+- a DMCA item covering it has its objects hidden and not restored (`dmcaHidden`): E7-dmca's
+  `dmca-disable` moves them to the private `moderation/dmca/<original key>` and `dmca-restore`
+  moves them back to the same keys, so placement must not move them meanwhile. The VOD carries
+  `removed_reason = 'dmca'` while disabled, which also keeps it from being `public`;
+- `status = 'deleted'`: nothing is left to move.
 
 Consequences: removal answers 404 within 5 s on every origin instance. A CDN in front of `/media`
 keeps a copy up to the 300 s TTL (`media.ts:94`), as ADR 0009 already accepts for hidden
@@ -199,22 +224,24 @@ recovery (`services/media/src/recovery.ts:107`).
 
 ### Decision 4: the layout lives in `@commonair/contracts/storage`
 
-Recommendation: a new `packages/contracts/src/storage.ts`, exported as `./storage`, holding
+Decision: a new `packages/contracts/src/storage.ts`, exported as `./storage`, holding
 `PUBLIC_MEDIA_PREFIXES` (moved from `media.ts:17`), `VOD_PUBLIC_PREFIX = "vods/"`,
-`VOD_PRIVATE_PREFIX = "recordings/"`, `vodPrefix(id, "public" | "private")`, `VOD_PLAYLIST`, and a
-pure `vodPlacement(state)` used by the worker job and the origin check. The four local copies are
+`VOD_PRIVATE_PREFIX = "recordings/"`, `vodPrefix(id, "public" | "private")`, `isVodOwnPrefix`,
+`VOD_PLAYLIST`, `VodPlacementState` (with `nciiHidden` and `dmcaHidden`), a pure
+`vodPlacement(state)` used by the worker job and the origin check, `VOD_ROUTE`, `vodTokenPath` and
+`VOD_TOKEN_MAX_TTL_SECONDS` (a constant, not an env variable). The four local copies are
 deleted. The alternative, `@commonair/config`, holds env and identity, not wire layout. This is
 the contract step listed for W0 (`.claude/briefs/next/README.md:38`, under W0's "Contract step").
 
 ### Decision 5: migrating existing objects
 
-Recommendation: deploy in one release, safe in either order:
+Decision: deploy in one release, safe in either order:
 
 1. The origin state check (Decision 3) closes the exposure at deploy, before any object moves.
 2. New recordings start under `recordings/`. A `recording` VOD resumed across the upgrade keeps
    its `storage_prefix` (`services/media/src/lifecycle.ts:196`–`:212`), and finalize moves it like
    any other.
-3. The first `vod-placement` sweep moves every existing non-public VOD from `vods/` to
+3. The first `vod-placement` sweeps move every existing non-public VOD from `vods/` to
    `recordings/`, in batches, logging counts only (never keys).
 
 `vods.storage_prefix` already exists (`packages/db/src/schema/media.ts:152`), so no schema
@@ -233,14 +260,29 @@ an operator step, and a crash mid-run still needs the sweep's idempotence.
 - The origin reads Postgres on the `/media/vods/` path, at most one query per VOD per 5 s per
   instance.
 - Clips are unchanged: `clips/<id>.*` stays public even when the source VOD is restricted
-  (`visibility.ts:85`–`:86` hides only the listing). See the open questions.
+  (`visibility.ts:85`–`:86` hides only the listing). A follow-up, not this amendment (answer 2).
+- Mature-labelled public VODs stay under `vods/` (answer 1).
 
-### Open questions for the maintainers
+### Decisions at acceptance (2026-10-27)
 
-1. Should mature-labelled public VODs also count as "not public"? Their URLs are already
-   withheld from non-adults (`visibility.ts:123`–`:147`), but their objects stay under `vods/`.
-2. Should clips of a restricted VOD move with it? That needs a matching clip prefix.
-3. Is a 12 h cap on VOD tokens acceptable, or should playback refresh tokens like live heartbeats
-   do?
-4. Is 5 s an acceptable bound for "immediately", or must removal also invalidate caches across
-   instances (Valkey pub/sub)?
+The maintainer accepted amendment 1 with the recommended answers. Where an answer differs from
+the draft, the text above was updated to match.
+
+1. **Mature-labelled public VODs** stay under `vods/`; their URLs stay withheld from non-adults by
+   the API (`visibility.ts:123`–`:147`). Moving them is a recorded follow-up.
+2. **Clips of `subscribers` or `private` VODs** stay public at `clips/`. Recorded as a follow-up
+   (it needs a matching private clip prefix and a clip placement rule).
+3. **VOD token cap**: 12 h, accepted. No refresh.
+4. **"Immediately" = 5 s**, the per-instance state-cache window, accepted. No cross-instance
+   invalidation.
+
+Also settled at acceptance:
+
+- Existing objects move by the worker sweep (decision 5), not a one-shot script.
+- The writers do not emit outbox events: a one-minute database-state sweep plus direct enqueues
+  from `vods.update` and `vods.remove` (decision 3 says why). This differs from the draft.
+- E7-dmca's private `moderation/dmca/` prefix, the `dmca` `removed_reason`, the `dmcaHidden`
+  `leave` rule and the `status = 'deleted'` `leave` rule are part of this amendment (decision 3).
+  The draft predated E7-dmca.
+- `copy` (S3 CopyObject) must be proven by an integration test in W0-media-exposure against Garage,
+  and against SeaweedFS if ADR 0033 lands first.

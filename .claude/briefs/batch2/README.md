@@ -12,17 +12,17 @@ orchestrator lands (one verified commit) before its units start.
 
 ## Gates
 
-| Milestone | Gated on                                                                                                   | State (2026-10-27) |
-| --------- | ---------------------------------------------------------------------------------------------------------- | ------------------ |
-| E7        | nothing                                                                                                    | running            |
-| W0        | ADR 0012 part 1 (W0-clock), ADR 0019 (W0-sor), ADR 0009 amendment 1 (W0-media-exposure); W0-integrity none | ADRs proposed      |
-| P1        | ADR 0005 amendment 1                                                                                       | proposed           |
+| Milestone | Gated on                                                                                                   | State (2026-10-27)  |
+| --------- | ---------------------------------------------------------------------------------------------------------- | ------------------- |
+| E7        | nothing                                                                                                    | running             |
+| W0        | ADR 0012 part 1 (W0-clock), ADR 0019 (W0-sor), ADR 0009 amendment 1 (W0-media-exposure); W0-integrity none | accepted 2026-10-27 |
+| P1        | ADR 0005 amendment 1                                                                                       | accepted 2026-10-27 |
 
-If an ADR is amended at acceptance, the orchestrator updates the matching brief and contract step
-before launch. Known gaps between drafts and briefs to settle then: ADR 0005 (iceServers on
-`PlaybackStart` vs a `p2p.iceServers` endpoint; token claims `bid`/`p2p` vs a per-session Valkey
-grant; TURN username), ADR 0009 (outbox events from every writer vs a one-minute sweep plus direct
-enqueues; the E7 `moderation/dmca/` prefix and `dmca` removed reason).
+All four were accepted on 2026-10-27 with the orchestrator's recommended answers; the
+briefs and contract steps match them. Notable answers: P2P ships opt-in (`P2P_DEFAULT=off`,
+operator-changeable) until counsel confirms an EU lawful basis; per-segment digests from the
+origin are in P1's scope; ICE servers come from a `p2p.iceServers` endpoint and swarm access from
+a per-session Valkey grant; VOD placement uses a one-minute sweep plus direct enqueues.
 
 ## Waves
 
@@ -74,12 +74,13 @@ At most six units at a time; two agents never write the same file at the same ti
 - E7: `grep -c '.handler(notImplemented)' services/api/src/routes/*.ts` leaves only interact, bot,
   developer and `integrity.channelSummary`; `trust-safety`, `e2e-social`, `e5-coop`, `e7-admin`.
 - W0: `clock-skew`, `integrity-basic`, `trust-safety`.
-- P1: `viewers` with ten opted-in Chromium viewers (`bytesP2p` > 0, origin egress drops, counts and
-  verdicts unchanged, an opted-out viewer never connects to peers).
+- P1: `viewers` with ten opted-in Chromium viewers plus one at the default (off): `bytesP2p` > 0,
+  origin egress drops, counts and verdicts unchanged, digests fetched and none rejected, the
+  default viewer never connects to peers.
 - End of batch: `bun run verify:full` and CI green.
 
 ## After the batch (not code)
 
-Counsel: DMCA flow and policy numbers, the DSA statement template, EU lawful basis for default-on
-P2P. The user: ADR decisions, the US Copyright Office designated agent before any public launch,
+Counsel: DMCA flow and policy numbers, the DSA statement template, EU lawful basis before
+any instance turns `P2P_DEFAULT` on. The user: the US Copyright Office designated agent before any public launch,
 S1's `udp/3478` firewall rule on real droplets.

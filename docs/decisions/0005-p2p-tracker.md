@@ -6,7 +6,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR 0005: Native WebTorrent tracker and server-side P2P evidence
 
 - Status: accepted (amends ADR 0003 decision 10 and PLAN open decision D2); amendment 1 (the
-  browser P2P client) proposed 2026-10-27, below
+  browser P2P client) accepted 2026-10-27, below
 - Date: 2026-10-18
 
 ## Context
@@ -76,8 +76,11 @@ changed when the P2P slice was designed:
 
 ## Amendment 1: the browser P2P client (P1)
 
-- Status: proposed (2026-10-27)
+- Status: accepted (2026-10-27), with decision 3 changed from the draft (opt-in by default) and
+  per-segment digests (decision 7) brought into P1; see "Decisions at acceptance"
 - Date: 2026-10-27 (package and image facts checked on 2026-10-27)
+- Counsel has not reviewed the EU lawful basis for showing a viewer's IP address to other
+  viewers. Until counsel confirms one, P2P ships off by default (decision 3).
 
 ### Context
 
@@ -85,8 +88,9 @@ The tracker exists; the player does not use it. `apps/web/src/player/controller.
 `p2pCapable: false` and `:180` reports `bytesP2p: 0`. The API already hands out a tracker URL
 carrying the playback token (`services/api/src/routes/playback.ts:46-50`, `:178`) and uses the
 broadcast id as `swarmId`. Until P1 ships, every viewer without a relay is served from the
-origin, and DigitalOcean meters that egress (ADR 0025). P1 (`.claude/briefs/next/P1-p2p-client.md`)
-needs six decisions first. Library line numbers below are from the published 4.0.0 tarballs.
+origin, and DigitalOcean meters that egress (ADR 0025). P1 (`.claude/briefs/next/P1-p2p-client.md`,
+unit briefs in `.claude/briefs/p1/`) needed these decisions first. Library line numbers below are
+from the published 4.0.0 tarballs.
 
 ### 1. Client library: p2p-media-loader 4.0.0, pinned
 
@@ -131,7 +135,7 @@ needs six decisions first. Library line numbers below are from the published 4.0
 
 **Options.**
 
-- **A. p2p-media-loader-core + -hlsjs 4.0.0, exact pins (recommended).** It is the client the
+- **A. p2p-media-loader-core + -hlsjs 4.0.0, exact pins (chosen).** It is the client the
   tracker was written for. It already does segment scheduling against the hls.js buffer, the
   peer protocol, churn and HTTP fallback. It exposes `swarmId`, `streamSwarmIdBuilder`,
   `validateP2PSegment` and a runtime `isP2PDisabled`.
@@ -153,97 +157,136 @@ ranges (`infra/tofu/digitalocean/modules/instance/tests/stage0.tftest.hcl:46-59`
 proxy UDP. **A TURN relay saves no egress:** a relayed peer's bytes cross our droplet twice (in
 and out), while the origin sends a segment out only once.
 
-**Decision (recommended).**
+**Decision.**
 
 - **coturn ships in compose and Quadlet as `commonair-coturn`**, pinned like every image:
   `docker.io/coturn/coturn:4.18.0-trixie@sha256:…`, written by `bun scripts/pin-images.ts --write`,
   with an `infra/image-licenses.json` entry. The license is BSD-3-Clause and the source is
   `https://github.com/coturn/coturn/blob/4.18.0/LICENSE`. The notes record the Debian trixie base
   and the linked client libraries (OpenSSL, libevent, hiredis, libpq and others), which P1-turn
-  checks in the image.
+  checks in the image. `selfhost.sh` offers it to every operator.
 - **STUN always, on 3478/udp**, so the firewall and its test gain one single port. No public
   STUN anywhere: the client's `rtcConfig.iceServers` holds only the instance's own URLs.
 - **The TURN relay is off by default** (`P2P_TURN_URLS` empty). Peers that cannot connect
   directly fall back to HTTP, the same bytes and price as without P2P. When an operator turns
-  TURN on, coturn runs with `use-auth-secret`, `static-auth-secret`, `denied-peer-ip` for every
-  private and loopback range, `no-multicast-peers`, `user-quota`, `total-quota` and `max-bps`.
-  A relay port range also needs an operator-chosen firewall rule.
-- **Time-limited credentials (TURN REST API).** The API mints them for each playback session:
-  `username = "<expiry epoch s>:<sessionId>"` and
+  TURN on (`selfhost.sh --turn-relay`), coturn runs with `use-auth-secret`, `static-auth-secret`,
+  `denied-peer-ip` for every private, loopback and special-purpose range, `no-multicast-peers`,
+  `user-quota`, `total-quota` and `max-bps`. A relay port range also needs an operator-chosen
+  firewall rule.
+- **ICE servers come from their own endpoint**, `p2p.iceServers` (`POST /playback/ice-servers`,
+  input `{ sessionId, token }`, output `{ iceServers, expiresAt | null }`), not from
+  `PlaybackStart`. Only sessions holding a P2P grant (decision 5) get an answer; others get
+  `PRECONDITION_FAILED` (`requirement: "p2p"`). Sessions without P2P never pay for minting
+  credentials, and the endpoint can be called again to refresh.
+- **Time-limited credentials (TURN REST API)**, only when the relay is on:
+  `username = "<expiry epoch s>:<opaque id>"` and
   `credential = base64(HMAC-SHA1(TURN_SHARED_SECRET, username))`, with
-  `TURN_CREDENTIAL_TTL_SECONDS` (default 3 600). The heartbeat response re-mints them in the last
-  quarter of their life, and the player applies them through the runtime `rtcConfig`
-  (`types.ts:135`). New connections pick up the fresh credentials. coturn checks the expiry on
-  allocation refresh, so an old relayed connection drops when its credentials expire, and the
-  loader falls back to HTTP.
+  `TURN_CREDENTIAL_TTL_SECONDS` (default 3 600). The opaque id is a truncated HMAC of the session
+  id under a subkey of `TURN_SHARED_SECRET`, never the session id itself, because coturn can log
+  usernames. The player calls `p2p.iceServers` again at about 80 % of the TTL and applies the
+  answer through the runtime `rtcConfig` (`types.ts:135`). New connections pick up the fresh
+  credentials. coturn checks the expiry on allocation refresh, so an old relayed connection
+  drops when its credentials expire, and the loader falls back to HTTP. With the relay off,
+  `expiresAt` is `null` and the answer holds only `stun:` URLs.
 
 **Alternatives.** (a) TURN on by default: more peers connect, but it costs egress and a firewall
 range for no saving. That is useful only for future features where peers need each other, not
 the origin (W3 watch rooms). (b) STUN only, with no TURN support at all: simpler, but a later
 TURN user would need a new ADR. (c) Public STUN: rejected, it is a third party learning every
-viewer's address (against AGENTS.md non-negotiables 3 and 4).
+viewer's address (against AGENTS.md non-negotiables 3 and 4). (d) ICE servers and credentials on
+`PlaybackStart.p2p` with a heartbeat refresh (the draft): no extra round trip, but it mints
+credentials for every session and widens two hot contracts; rejected at acceptance.
 
-### 3. Defaults: on for desktop, off when metered, never for gated streams
+### 3. Defaults: opt-in, an operator default, never for gated streams
 
-- **On by default** where the device is not a phone or tablet (`matchMedia("(pointer: fine)")`),
-  `navigator.connection.saveData` is not true and `navigator.connection.type` is not
-  `"cellular"`. Where `navigator.connection` is missing (Firefox, Safari), the pointer test
-  decides. **Off** on touch-primary devices, on metered connections and whenever W1b data mode is
-  on. Native HLS (WebKit) already gets no P2P (`playback.ts:152-153`).
+- **Off by default.** P2P runs only for viewers who turn it on, until counsel confirms an EU
+  lawful basis for showing a viewer's IP address to other viewers. An operator can change the
+  default with `P2P_DEFAULT=off|on` (`packages/config` `playbackEnv`, default `off`), published to
+  the web app as `instance.info` `features.p2pDefault`.
+- **The player's policy**, per device:
+  - preference `off`: never;
+  - preference `on` (the viewer opted in): yes, unless the path is native HLS or W1b data mode is
+    on;
+  - no preference: the operator default. With `P2P_DEFAULT=off` that is off. With
+    `P2P_DEFAULT=on` it is on only where the device is not touch-primary
+    (`matchMedia("(pointer: fine)")`), `navigator.connection.saveData` is not true,
+    `navigator.connection.type` is not `"cellular"` and data mode is off. Where
+    `navigator.connection` is missing (Firefox, Safari), the pointer test decides. So metered
+    connections and data mode stay off even when the operator default is on.
+  - Native HLS (WebKit) never gets P2P (`playback.ts:152-153`).
+- The player sends `p2pCapable: true` only when this policy allows P2P, so a viewer who has not
+  opted in never gets a grant or a tracker URL. `PlaybackStart.p2p.available` tells the player
+  whether P2P is possible for this session at all (`P2P_ENABLED`, hls.js, not gated), so it can
+  offer the opt-in switch. Opting in during a session takes effect at the next playback start;
+  turning it off takes effect at once (`isP2PDisabled`, `types.ts:125`, no reload).
 - The viewer's choice is per device (`localStorage`, wrapped in try/catch), because "metered"
-  depends on the device. The toggle is in the player's settings menu and on `/settings/privacy`.
-  Turning it off sets `isP2PDisabled` at runtime (`types.ts:125`), with no reload.
-- **Visible indicator** while P2P is active: a player chip with peers and bytes shared, with
+  depends on the device. The switch is in the player's P2P dialog and on `/settings/privacy`.
+- **Visible indicator** while P2P is on: a player chip with peers and bytes shared, with
   strings in the catalog.
 - **Never for gated streams, enforced on the server.** `p2pEnabled` (`playback.ts:153`) also
-  requires `!gated(...)` (`:117-125`, 18+, mature category, T1 restriction). The tracker enforces
-  it too, through the token claim in decision 5, so a confirmed adult cannot build the URL by hand
-  from the playlist token. Private and subscriber-only live streams do not exist yet (`visibility`
-  is only on media rows, `packages/db/src/schema/media.ts:150`). The rule binds whoever adds them.
+  requires `!gated(...)` (`:117-125`, 18+, mature category, T1 restriction), and only then does
+  the API write the grant the tracker checks (decision 5). A stream that becomes gated
+  mid-session loses the grant at the next heartbeat. Private and subscriber-only live streams do
+  not exist yet (`visibility` is only on media rows, `packages/db/src/schema/media.ts:150`). The
+  rule binds whoever adds them.
 
-**Alternative.** Strict opt-in (off until the viewer turns it on): cleaner for privacy, but most
-viewers never change defaults, so it would save little egress. The choice depends on 4.
+**Alternative.** Default on for desktop (the draft): it would save more egress, because most
+viewers never change defaults, but it shows addresses to peers before any lawful basis is
+confirmed. Changed at acceptance; an operator who has that basis sets `P2P_DEFAULT=on`.
 
 ### 4. Peers see each other's IP address
 
 WebRTC candidates carry the public (server-reflexive) address. The tracker relays them inside
-the SDP; it never stores them (decision 3 keeps only an HMAC of the prefix).
+the SDP; it never stores them (decision 3 of the base ADR keeps only an HMAC of the prefix).
 
-- **Recommended.** The first time P2P would start on a device, the player shows a one-line
-  dismissible notice ("Sharing with other viewers shows them your IP address") with the off
-  switch in it. P2P starts only after that notice has shown. The instance's `privacy` legal
-  document (`LEGAL_DOCUMENT_KINDS`, `packages/contracts/src/enums.ts:166`) gains a P2P section,
-  and the operator guide says so. Turning it off is one click, in the notice and in the menu.
-- **Alternatives.** (a) Strict opt-in (decision 3's alternative). (b) Relay-only ICE
-  (`iceTransportPolicy: "relay"`) hides addresses, but it is TURN for everyone, which is
-  decision 2's egress cost. Rejected.
+- **P2P never starts before the viewer has seen the disclosure.** Opting in happens in the
+  player's P2P dialog or the `/settings/privacy` section, and both state it next to the switch
+  ("Sharing with other viewers shows them your IP address"). Where the operator default is on
+  and the viewer has made no choice, the player shows a one-line dismissible notice with the off
+  switch the first time P2P would start on the device, and P2P starts only after it has shown.
+  Turning it off is one click, in the notice, the dialog and the settings section.
+- The instance's `privacy` legal document (`LEGAL_DOCUMENT_KINDS`,
+  `packages/contracts/src/enums.ts:166`) gains a P2P section, and the operator guide
+  (`docs/self-hosting/p2p.md`) explains `P2P_DEFAULT` and the counsel question.
+- **Alternatives.** (a) Default on with only the notice (the draft). Changed at acceptance (decision
+  3). (b) Relay-only ICE (`iceTransportPolicy: "relay"`) hides addresses, but it is TURN for
+  everyone, which is decision 2's egress cost. Rejected.
 
-### 5. Allowed info hashes are derived on the server
+### 5. Who may join, and allowed info hashes, are decided on the server
 
 Closes the "client-chosen info hashes" note (`HANDOFF.md:439-440`).
 
-- **Client.** It sets `swarmId` to `PlaybackStart.p2p.swarmId` (the broadcast id) and a
-  `streamSwarmIdBuilder` that returns `ca1:<swarmId>:<main|secondary>:<rendition>`. The rendition
-  comes from the variant playlist URL (`runtimeId`, `p2p-media-loader-hlsjs`
-  `segment-manager.ts:27`), whose directory names it (`services/origin/src/paths.ts:19`; no
-  directory means `source`), and audio tracks use `audio`. The library's default derivation
-  hashes bitrate, codecs and frame rate, which the server cannot reproduce for the encoder-chosen
-  source rendition.
-- **Tracker.** It computes the allowed set as `computeInfoHash("ca1:<bid>:<type>:<r>")` for r in
-  `source`, `KEYS.renditions(cid)` (`packages/contracts/src/internal.ts:137`) and `audio`. The
-  ASCII hash recipe is reimplemented in a few lines, with a vector test against the library's
-  exported `computeInfoHash` (`index.ts:8`). An announce or scrape outside the set is refused
-  (`"failure reason": "unknown swarm"`).
-- **Contract.** `PlaybackClaims` (`packages/contracts/src/tokens.ts:19-33`) gains an optional
-  `bid` (broadcast id) and `p2p: true`, minted only when `p2pEnabled`. The tracker refuses a
-  token without `p2p`, so gated, opted-out and native-HLS sessions cannot join, and a token from
-  a previous broadcast cannot join the next broadcast's swarms. Like W1b's `dataMode`, the change
-  goes into the Go mirror (`relay/internal/tokens/playback.go`) and the `packages/tokens`
-  vectors.
+- **A per-session grant.** At `playback.start`, only when P2P is enabled for the session
+  (decision 3), the API writes `KEYS.p2pGrant(sessionId)` = the session's swarm id (the broadcast
+  id), with TTL `P2P_GRANT_TTL_SECONDS` (43 200, the default `TRACKER_TOKEN_MAX_AGE_SECONDS`).
+  Each committed heartbeat refreshes it. The heartbeat deletes it instead when the stream has
+  become gated, and `playback.end` deletes it. The tracker refuses a socket whose session has no
+  grant (`403 p2p_not_granted`) and closes an open socket at its periodic re-check when the
+  grant is gone. `p2p.iceServers` answers only granted sessions. Gated, opted-out and native-HLS
+  sessions cannot join, and since a session belongs to one broadcast, a session from a previous
+  broadcast cannot join the next broadcast's swarms.
+- **Client.** It sets `swarmId` to `PlaybackStart.p2p.swarmId` and a `streamSwarmIdBuilder` that
+  returns `p2pStreamSwarmId(swarmId, type, rendition)` =
+  `ca1:<swarmId>:<main|secondary>:<rendition>` (from the browser-safe
+  `@commonair/contracts/p2p` entry). The rendition comes from the variant playlist URL
+  (`runtimeId`, `p2p-media-loader-hlsjs` `segment-manager.ts:27`), whose directory names it
+  (`services/origin/src/paths.ts:19`; no directory means `source`), and audio tracks use `audio`.
+  The library's default derivation hashes bitrate, codecs and frame rate, which the server
+  cannot reproduce for the encoder-chosen source rendition.
+- **Tracker.** It computes the allowed set from the grant's swarm id:
+  `computeInfoHash(id)` for every id in `p2pAllowedStreamSwarmIds(swarmId)` (both types × every
+  name in `P2P_STREAM_RENDITIONS` = `RENDITIONS` + `audio`, a fixed small set, so no
+  `KEYS.renditions` read). The ASCII hash recipe is reimplemented in a few lines and tested
+  against `P2P_INFOHASH_VECTORS`, generated with the library's exported `computeInfoHash`
+  (`index.ts:8`). An announce or scrape outside the set is refused
+  (`"failure reason": "info_hash not allowed"`) and records nothing.
+- **No token change.** `PlaybackClaims`, the Go mirror (`relay/internal/tokens/playback.go`) and
+  `packages/tokens/vectors.json` stay as they are.
 
-**Alternative.** A Valkey key holding each channel's live broadcast id, read by the tracker,
-with no claim change. That costs one more lookup per upgrade and does not close the gated-stream
-hole.
+**Alternatives.** (a) `bid` and `p2p: true` claims in `PlaybackClaims` (the draft): it changes the
+Go mirror and the vectors, and a claim cannot be withdrawn when a stream becomes gated
+mid-session. Rejected at acceptance. (b) A Valkey key holding each channel's live broadcast id:
+it does not close the gated-stream hole.
 
 ### 6. P2P bytes pay nothing
 
@@ -251,46 +294,103 @@ Heartbeat `bytesP2p` is stored (`services/api/src/routes/playback.ts:215`,
 `packages/db/src/schema/delivery.ts:84`) and loaded into integrity's session stats
 (`packages/integrity/src/jobs.ts:236`), and no rule, payout, patronage or egress credit reads it
 today. The decision makes that permanent: `bytesP2p` and anything a client reports about P2P
-are informational (stats, the indicator, capacity planning). They never count toward relay
-payouts, patronage, viewer-hour or egress credit, or integrity verdicts. The receipt cross-check
-stays based on the origin and relays, and the only P2P input integrity takes is tracker evidence
-(`P2P_EVIDENCE`, `internal.ts:195`). A unit test in `packages/integrity` pins that a session's
-verdict is unchanged when only `bytesP2p` changes. **Alternative:** credit verified P2P upload
-(a "seeding" reward). Rejected: it cannot be verified server-side and would be the easiest thing
-to farm.
+(`bytesP2pUp`, `p2pPeers`, `p2pRejected`) are informational (stats, the indicator, capacity
+planning). They never count toward relay payouts, patronage, viewer-hour or egress credit, or
+integrity verdicts. The receipt cross-check stays based on the origin and relays, and the only
+P2P input integrity takes is tracker evidence (`P2P_EVIDENCE`, `internal.ts:195`). A unit test in
+`packages/integrity` pins that a session's verdict is unchanged when only `bytesP2p` changes.
+**Alternative:** credit verified P2P upload (a "seeding" reward). Rejected: it cannot be verified
+server-side and would be the easiest thing to farm.
+
+### 7. Segments from peers are checked against origin digests
+
+A peer in the same swarm could otherwise serve altered media to other viewers (a moderation risk,
+not an integrity one). P1 closes it.
+
+- **Transport: a digest endpoint on the origin.**
+  `GET|HEAD /p2p-digest/live/<slug>[/<rendition>]/<file>?t=<token>` takes the same path grammar as
+  `/hls/` (`parseMediaPath` on the rest of the path) and answers only for `segment` objects
+  (playlists and LL-HLS parts get 404). The body is the SHA-256 of the exact bytes `/hls/` serves
+  for that object, as 64 lowercase hex characters (`text/plain`,
+  `cache-control: private, max-age=120`: media objects never change). The bytes come from the
+  origin's `ContentStore` (same cache and coalescing, so at most one upstream fetch), and digests
+  are memoized in a small bounded LRU. The token check is the signature, the expiry and the
+  channel path, with any delivery `src`, so relay- and CDN-served viewers validate against the
+  origin too. A digest request writes no `SegmentFetch` (it is not a segment fetch, so integrity
+  is unchanged) and is counted as `origin.requests{route="p2p_digest"}`.
+- **Only the origin serves digests**, never relays or the CDN: it is the trust anchor. Caddy
+  routes `/p2p-digest/*` to the origin, and `PlaybackStart.p2p.digestUrl` is
+  `${PLAYBACK_PUBLIC_URL}/p2p-digest`.
+- **Player.** `validateP2PSegment(url, byteRange, data)` (`types.ts:524`) fetches the digest with
+  the current token and compares it with `crypto.subtle.digest("SHA-256", data)`. A mismatch, a
+  byte range, or a failed digest fetch returns `false` (fail closed): the loader drops the bytes
+  and refetches the segment over HTTP. The peer that served a bad segment is disconnected. The
+  player counts rejections in the heartbeat's informational `p2pRejected`, which the API exports
+  as the metric `playback.p2p.rejected`.
+- **Why not a playlist tag.** Tagging digests into the media playlist would make the origin fetch
+  and hash every new segment before serving each LL-HLS playlist update (every 200 ms part),
+  adding latency on the HTTP path for every viewer, P2P or not. The endpoint costs one ~64-byte
+  response per P2P-delivered segment, only for P2P sessions.
+- **Tests.** Unit tests for digest computation (origin) and validation (player, with tampered
+  bytes). An origin integration test that the endpoint serves the right digest and refuses bad
+  tokens, parts and playlists. The tampering case is unit-level in the player: a harness peer
+  that serves altered segments would need a second implementation of the loader's peer protocol.
+  The `viewers` scenario instead asserts that digests were fetched and nothing was rejected.
 
 ### What the P1 contract step lands (orchestrator)
 
-- `PlaybackStart.p2p` gains `iceServers: { urls: string[]; username?: string; credential?: string }[]`
-  and `credentialExpiresAt: Timestamp | null`. Credentials ride on playback start, with no separate
-  endpoint or extra round trip. The heartbeat response gains an optional `p2p.iceServers` refresh.
-  The `entities.ts:245-248` comment is corrected as described under decision 1.
-- `PlaybackClaims` gains `bid?` and `p2p?: true`, in TS, Go and vectors (decision 5).
-- `Heartbeat` keeps `bytesP2p` (`entities.ts:263`) and gains `bytesP2pUp` (non-negative integer)
-  for the indicator and capacity numbers, documented as informational under decision 6. The route
+The full list is `.claude/briefs/p1/contract-step.md`. In short:
+
+- Env (`packages/config`, `.env.example`): `P2P_DEFAULT` (`off|on`, default `off`) in
+  `playbackEnv`; a new `turnEnv` for the API with `P2P_STUN_URLS`, `P2P_TURN_URLS` (empty by
+  default), `TURN_SHARED_SECRET` (generated by `init-env.ts`, required when `P2P_TURN_URLS` is
+  set) and `TURN_CREDENTIAL_TTL_SECONDS`; `TURN_PORT`, `TURN_RELAY_PORT_MIN`/`MAX` and
+  `TURN_EXTERNAL_IP` in `infraEnv`.
+- Contracts: `PlaybackStart.p2p` gains `available` and `digestUrl`, and its doc is corrected for
+  decision 1 (a reconnect after `TRACKER_TOKEN_MAX_AGE_SECONDS` falls back to HTTP); `IceServers`
+  and the `p2p.iceServers` procedure; `Heartbeat` gains optional `bytesP2pUp`, `p2pPeers` and
+  `p2pRejected` (informational under decision 6); `InstanceInfo.features.p2pDefault`; the route
   input's `p2pCapable` default (`packages/contracts/src/api/router.ts:655`, currently `true`)
-  flips to `false`, so an old or third-party client never gets a tracker URL by accident.
-- Env, in `packages/config` and `.env.example`: `P2P_STUN_URLS` (defaults to the instance's own
-  host on 3478), `P2P_TURN_URLS` (empty by default), `TURN_SHARED_SECRET` (generated by
-  `init-env.ts`), `TURN_CREDENTIAL_TTL_SECONDS`.
+  flips to `false`, so an old or third-party client never gets a tracker URL by accident;
+  `KEYS.p2pGrant`, `P2P_GRANT_TTL_SECONDS`, and the browser-safe `@commonair/contracts/p2p` entry
+  (`p2pStreamSwarmId`, `p2pAllowedStreamSwarmIds`, `P2P_STREAM_RENDITIONS`,
+  `P2P_INFOHASH_VECTORS`). No `PlaybackClaims` change.
+- Wiring: the grant in `playback.ts`, the `p2p` router stub, the `/p2p-digest/` dispatch line in
+  the origin with a stub handler, the Caddy route, the tracker in every compose stack.
 - Contract requests to other owners: `infra/tofu/**` (S1) adds `udp/3478` to the firewall and
-  its test; `infra/caddy` is unchanged.
+  its test.
 
 ### Consequences of the amendment
 
-- P1 can switch `p2pCapable` on, and `viewers` can show real `bytesP2p` with unchanged verdicts.
+- P1 can switch `p2pCapable` on for viewers who opt in, and `viewers` can show real `bytesP2p`
+  with unchanged verdicts.
+- With P2P opt-in, the egress saving is smaller than the draft expected until an operator sets
+  `P2P_DEFAULT=on` or counsel clears the default.
 - Two new client dependencies are pinned and vetted. coturn adds one image and one UDP port.
-- **Segments from peers are not verified against the origin.** A malicious peer in the same
-  swarm could serve altered media to other viewers (a moderation risk, not an integrity one).
-  The swarm is limited to authenticated, heartbeating sessions of one broadcast, which limits
-  this but does not stop it. The fix is `validateP2PSegment` (`types.ts:524`) checking a
-  per-segment digest from the origin. That is open question 3.
+- Segments from peers are verified against origin digests (decision 7), at the cost of one small
+  origin request per P2P-delivered segment.
 
-### Open questions (amendment 1)
+### Decisions at acceptance (2026-10-27)
 
-1. Default on for desktop (with the first-run IP notice) or strict opt-in? It needs counsel's
-   view for EU viewers: sharing an IP with other users is processing that needs a lawful basis.
-2. TURN relay off by default (recommended), or on for our own instance with quotas?
-3. Does P1 include per-segment digests for `validateP2PSegment` (origin publishes a SHA-256 per
-   segment, the player checks it), or does P2P ship first with the risk recorded?
-4. Accept the 12-hour tracker reconnect limit, or patch the socket pool now?
+The user accepted the amendment with the orchestrator's recommended answers. Where an answer
+differs from the draft, the text above was updated to match.
+
+1. **Library:** `p2p-media-loader-core` and `p2p-media-loader-hlsjs` pinned at 4.0.0
+   (Apache-2.0). As drafted.
+2. **ICE:** the instance's own coturn, STUN only; the TURN relay off by default; no public STUN.
+   As drafted.
+3. **Default:** **changed from the draft.** P2P ships opt-in (off by default), with an operator
+   setting `P2P_DEFAULT=off|on`, until counsel confirms an EU lawful basis for showing a viewer's
+   IP address to peers. Still never for 18+ or gated streams, a visible indicator, the
+   IP-disclosure notice before P2P first starts, one-click off, and off on metered connections
+   and in data mode even when the operator default is on. Counsel has not reviewed this.
+4. **Per-segment digests:** **in P1 scope** (the draft left it open). The origin publishes a
+   SHA-256 per segment through `/p2p-digest/`, the player validates every P2P-delivered segment
+   and refetches over HTTP on a mismatch, and bad peers are disconnected (decision 7).
+5. **Tracker reconnect:** the 12-hour limit is accepted; a reconnect after it falls back to HTTP.
+   As drafted.
+6. **Draft vs briefs:** the briefs' design wins. **Changed from the draft:** a separate
+   `p2p.iceServers` endpoint instead of fields on `PlaybackStart` and a heartbeat refresh; a
+   per-session Valkey grant `KEYS.p2pGrant` instead of `bid`/`p2p` token claims, so no Go or
+   vector change; the TURN username's id is an HMAC of the session id, not the session id.
+7. **P2P bytes pay nothing.** As drafted.

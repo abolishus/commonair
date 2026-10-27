@@ -15,13 +15,17 @@ append-only rows). Do not look outside the repository. Work in your own git work
 named `w0/sor`, starting from the W0 contract-step commit (which already contains E7-appeals and
 E7-dmca).
 
-Written against ADR 0019 as proposed on 2026-10-27: a typed clause catalog in
+Matches ADR 0019 as accepted on 2026-10-27 (its "Decisions at acceptance" section): a typed
+clause catalog in
 `packages/moderation/src/reasons.ts`, wording in an operator-editable `enforcement_notice` legal
 document shipped as an unreviewed draft, a statement for every platform T1/T2/NCII action and
 never for channel-moderator actions, built by a worker job from `audit_log`, stored append-only,
-delivered by email and on `/settings/appeals`, read through `me.enforcement.list`. Counsel has not
-reviewed any of it and you must not present it as reviewed. If the ADR is amended at acceptance
-(its open questions 1-6), the orchestrator updates this brief before launch.
+delivered by email and on `/settings/appeals`, read through `me.enforcement.list`, and included in
+the user's data export. Counsel has not reviewed any of it and you must not present it as
+reviewed. Settled at acceptance: T0 CSAM-list matches produce no statement and T0 NCII-list
+matches produce one under `illegal.ncii` (both for counsel to confirm); a suspended user can file
+an appeal (contract step); NCII removals are appealed as `ncii_request_item` (contract step);
+report resolutions and admin suspensions wait for W2; statements are kept as long as `audit_log`.
 
 ## Why
 
@@ -49,6 +53,9 @@ channel-moderator action (feature-wins §6 target: 100% coverage, measured by jo
   subject, the `safety.enforcement.*` keys in `apps/web/src/i18n/safety.ts`, web tests for them
 - `docs/operators/trust-safety.md`: the "European Union (Digital Services Act)" section (:182-193)
   and a new short subsection on publishing your own `enforcement_notice` version
+- `services/worker/src/exports/collectors.ts`: one new `enforcement_statements` section only (E7-dmca
+  edits this file in wave 1; it has merged before you start), and its cases in
+  `services/worker/tests/export-collectors.test.ts` and `exports.int.test.ts`
 - `harness/src/safety-sor.ts` (stub from the contract step), new `harness/tests/safety-sor*.test.ts`
 
 Not yours: the action writers (`services/worker/src/moderation/{scan,ncii-clock,ncii-hash,t0}.ts`,
@@ -59,7 +66,8 @@ lines W0-media-exposure edits in `moderation/{objects,t0-media,ncii-clock,ncii-h
 `packages/db/**` except the one `.md` (and not `packages/db/src/legal/index.ts`: the notice's seed
 version is the orchestrator's, contract step B.6), `services/api/src/routes/me.ts` (the contract
 step wired your file), `services/api/src/lib/access.ts`, `harness/src/safety-run.ts`,
-`apps/web/src/i18n/en.ts` and `index.ts`, the notifications UI. Need a change outside your paths?
+`apps/web/src/i18n/en.ts` and `index.ts`, the notifications UI, `services/api/src/auth/**`. Need a
+change outside your paths?
 Do not make it: put the exact change in your final message as a contract request.
 
 ## Contracts you must honor (read-only for you)
@@ -76,8 +84,9 @@ Do not make it: put the exact change in your final message as a contract request
   through your stub in `services/worker/src/jobs/index.ts`.
 - `docs/testing/w0-selectors.md`: the source-action table and the `enforcement-*` test ids.
 - Appeals: `KIND_SUBJECTS` (`services/api/src/routes/appeals.ts:46-51` at `9c51c93`; E7 wires
-  `dmca_notice` and `account_action`). The statement's `appeal` names a subject `appeals.create`
-  already accepts, or is null.
+  `dmca_notice` and `account_action`, and the W0 contract step adds `ncii_request_item` under
+  `moderation`). The statement's `appeal` names a subject `appeals.create` accepts, or is null.
+  `appeals.create` carries `whileSuspended: true` (contract step), so a suspended user can file it.
 - Rows hold ids, enums, timestamps and catalog codes only: no free text, no exact classifier score,
   no NCII requester identity, no email (ADR 0004; AGENTS.md "Code style"). Logs carry statement and
   audit ids, never addresses.
@@ -108,8 +117,15 @@ Do not make it: put the exact change in your final message as a contract request
   (`services/worker/src/exports/build.ts:183-188`).
 - Moderation jobs are scheduled with a Valkey run lock (`services/worker/src/jobs/moderation-schedules.ts`
   `scheduled(...)`, :22-50); copy that pattern.
-- A suspended user can read but not write (`services/api/src/lib/access.ts:82`); whether
-  `appeals.create` is exempted is ADR 0019 open question 2, applied (or not) by the contract step.
+- A suspended user can read but not write (`services/api/src/lib/access.ts:82`), except
+  `appeals.create`, which the contract step exempts (`ProcedureMeta.whileSuspended`). The auth
+  library's admin plugin keeps its banned-user sign-in check (`services/api/src/auth/index.ts:186-190`);
+  whether that refuses a suspended user's sign-in is unverified (Build 9).
+- T0 matches write `moderation.t0.match` (`t0.ts:281-302`) with `details.listCategory`
+  (`csam` or `ncii`), `userId`, `subjectType`, `subjectId`, and suspend the account indefinitely
+  (`suspendForT0`, `t0.ts:96`).
+- The user data export (`services/worker/src/exports/collectors.ts`) lists each section's columns
+  explicitly and filters by the requester's id; copy that pattern.
 
 ## Build
 
@@ -132,12 +148,18 @@ Do not make it: put the exact change in your final message as a contract request
    times only), `source` (`notice_art16` for NCII and report-origin cases, else `own_initiative`),
    automation flags (decision 4 list), ground from the catalog, the current published
    `guidelines` and `enforcement_notice` document ids, and the appeal subject (T2 → `content_label`,
-   T1 and case decisions → `moderation_case`, NCII → null unless open question 4 added a subject).
+   T1 and case decisions → `moderation_case`, `ncii.decide` removed and `ncii.auto_hide` →
+   `ncii_request_item` with the affected item's id).
    Insert with `on conflict do nothing`; `createdAt` = the audit row's time. A statement records an
    action already audited, so the builder writes no new `audit_log` row and no `events` row (it has
    no consumer outside this job); say so in a comment. A row whose details do
-   not parse is skipped, counted (`sor_build_failures_total{action}`) and logged by audit id. T0:
-   follow the ADR's answer to open question 1 (default: no statement for CSAM matches).
+   not parse is skipped, counted (`sor_build_failures_total{action}`) and logged by audit id. T0
+   (ADR 0019 answer 1): a `moderation.t0.match` with `listCategory = 'csam'` never produces a
+   statement (and is not counted as missing); one with `listCategory = 'ncii'` produces one for
+   `details.userId`: content `details.subjectType`/`subjectId`, restriction `account`/`suspended`
+   with `endsAt` null, facts `{ code: "hash_match", listCategory: "ncii", capturedAt }` (never the
+   distance, provider identifiers or hash), source `own_initiative`, automation `true`/`fully`,
+   ground `illegal.ncii`, `appeal` null (the T0 case is hidden from appeals).
 3. **Delivery** (`sor-deliver.ts`, run after insert in the same job): an in-app `notifications` row
    (`type: "moderation"`, payload `{ kind: "enforcement_statement", statementId }`, ids only as
    `services/api/src/moderation/notify.ts:5-6` requires) and the
@@ -148,14 +170,17 @@ Do not make it: put the exact change in your final message as a contract request
    explanation, redress: internal appeal, the out-of-court body the notice names, courts) because a
    suspended user may not be able to sign in, and says when the notice text is an unreviewed draft.
 4. **Coverage sweep** (`sor-coverage.ts`, daily): count allowlisted audit rows older than 5 minutes
-   with no statement for an expected recipient; export a gauge and log ids at error level when
+   with no statement for an expected recipient (excluding CSAM-list T0 rows and the decision 3
+   "no" rows, by the same predicate the builder uses); export a gauge and log ids at error level when
    non-zero. This is the 100% metric.
 5. **`me.enforcement.list`** (`me-enforcement.ts`): the caller's statements, newest first, keyset
    cursor on `(created_at, id)` like `me.notifications`; `clauseTitle` from the catalog's title key,
    `explanation` from the clause's section of the pinned `enforcement_notice` row, `noticeIsDraft`
    from that row, `moderatorNote` joined from `moderation_cases.resolution_note` on read (never
    stored), `appealId` of an existing appeal on the same subject, `reversedAt` when the case was
-   cleared or the appeal overturned. T0 cases never appear. Readable while suspended.
+   cleared or the appeal overturned. T0 NCII-list statements appear, but never join the T0 case
+   (no `moderatorNote`, no `reversedAt` from it); CSAM-list matches have no statement. Readable
+   while suspended.
 6. **Notice draft** (`enforcement_notice.md`): the Art. 17 framing, one section per clause id, the
    redress paragraph, the same placeholders and "draft pending lawyer review" banner as
    `guidelines.md`. Plain language, no claims of legal sufficiency.
@@ -170,10 +195,23 @@ Do not make it: put the exact change in your final message as a contract request
    "Appeal" control that opens the existing appeal dialog prefilled from `appeal` (hidden when
    `appeal` is null or `appealId` is set). House primitives: `<EmptyState>`, `<Skeleton*>`,
    `<RelativeTime>`, `<IconButton tooltip>`; keyboard and screen-reader friendly; 320 px.
-9. **Operator docs**: replace the Art. 17 bullet (`docs/operators/trust-safety.md:186-187`) with what
-   the platform now sends, what the operator must review (the notice text, the clause mapping, the
-   out-of-court body), how to publish their own `enforcement_notice` version with the owner-role `db`
-   CLI, and that the DSA Transparency Database adapter does not exist (off by default, not built).
+9. **Operator docs and the sign-in check**: replace the Art. 17 bullet
+   (`docs/operators/trust-safety.md:186-187`) with what the platform now sends, what the operator
+   must review (the notice text, the clause mapping, the out-of-court body; counsel has not
+   reviewed the defaults), that statements are kept as long as the audit log, and that the DSA
+   Transparency Database adapter does not exist (off by default, not built). Add the subsection on
+   publishing an operator's own `enforcement_notice` version: there is no admin route yet and no
+   `db` CLI for it, so document one command run as the database **owner** role (on the self-host
+   bundle, `psql` inside the Postgres container with the owner credentials) that inserts a new
+   `legal_documents` row (`kind = 'enforcement_notice'`, a new `version`, the body, `is_draft`,
+   `published_at`), and say that published rows cannot be edited (the immutability guard). Prove the
+   exact documented SQL in an integration test (`services/worker/tests/moderation-sor*.int.test.ts`:
+   run it as the owner, then the next statement the builder writes pins the new id). If a script turns out to be
+   necessary, it lives in `packages/db` and is a contract request. Then check whether the auth
+   library's banned-user check (`services/api/src/auth/index.ts:186-190`) refuses sign-in for a
+   suspended user (an int test signing in as a `banned` user), and record the result in the same
+   operator section (if sign-in is refused, email is the user's only channel) and in your final
+   message.
 10. **Harness** (`harness/src/safety-sor.ts`, `runStatementsStep(run: Run)` with `Run` from
     `harness/src/safety-run.ts`, wired by the contract step as step 11 with prerequisites 4-7: T2
     label, T1 restriction, upload rejection, NCII): for every `ENFORCEMENT_SOURCE_ACTIONS` audit row the run produced
@@ -183,20 +221,31 @@ Do not make it: put the exact change in your final message as a contract request
     channel-moderator ban and timeout and assert no statement; check the web list via
     `data-statement-id` when `via=web`.
 
+11. **Data export**: add an `enforcement_statements` section to the user export
+    (`services/worker/src/exports/collectors.ts`), the requester's own statements by
+    `recipient_user_id`, the decision 4 columns named explicitly (no joined moderator note, no
+    delivery rows), oldest first. Update the section list in `docs/testing/w0-selectors.md` only
+    if the contract step left it out (then it is a contract request).
+
 ## Tests you must add
 
 - `packages/moderation`: catalog snapshot and immutability; every category maps to a clause; mapping
   per source action; no channel-scope action in the allowlist.
 - `services/worker` (unit): one builder test per row of ADR 0019 decision 3 (statement or none,
-  restriction, facts, automation flags, appeal subject), using fixtures of each writer's current
-  `details`; parse failure is skipped and counted; NCII fan-out per owner with no requester data.
+  restriction, facts, automation flags, appeal subject), including a T0 CSAM-list match (no
+  statement, not counted missing) and a T0 NCII-list match (statement, `hash_match`, null appeal),
+  using fixtures of each writer's current `details`; a channel ban and a timeout produce no
+  statement; parse failure is skipped and counted; NCII fan-out per owner with no requester data
+  and the `ncii_request_item` appeal subject; the export section's columns and requester filter
+  (`export-collectors.test.ts`).
 - `services/worker` (int, `createTestDatabase()`): build idempotence (rerun inserts nothing), the
   append-only trigger refuses an update, delivery rows and retry bounds, coverage counts a missing
   statement, the email goes to Mailpit with no PII in logs.
 - `services/api` (int): `me.enforcement.list` paging, ownership (another user's statements never
-  returned), suspended caller can read (with a session created before the suspension; whether the
-  auth layer lets a suspended user sign in at all, `services/api/src/auth/index.ts:190`, is ADR 0019
-  open question 2: report what you find), `reversedAt` after an overturned appeal, T0 excluded.
+  returned), suspended caller can read (with a session created before the suspension) and can
+  file an appeal from a statement's `appeal`, whether a suspended user can sign in at all (Build
+  9), `reversedAt` after an overturned appeal, a T0 NCII statement listed without its case.
+- `services/worker` (int) also: the documented owner-role publish command (Build 9).
 - `packages/email`: the template renders every Art. 17(3) element and the draft notice.
 - `apps/web`: the list, empty state, appeal prefill, draft banner (component tests).
 - Harness pure helpers in `harness/tests/safety-sor*.test.ts`.
@@ -212,7 +261,8 @@ your paths. Commit in your worktree (`git commit -s`, Conventional Commits, mess
 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
 Final message: what you built, test counts per package, branch and sha, contract requests (any
 `details` field a writer must add for the builder, any appeal subject), the string-catalog choice,
-anything left (report resolutions and admin suspensions: ADR open question 3), and the live
+the sign-in finding, anything left (report resolutions and admin suspensions are W2, not yours),
+and the live
 commands: `bun harness/src/cli.ts run trust-safety --set steps=11` (the "statements of reasons" step; its
 prerequisites 4-7 run with it; check the number in `harness/src/safety.ts` after the contract step) and a manual
 check of `/settings/appeals` as the T2-labelled streamer.

@@ -5,10 +5,12 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0019: Clause catalog and statements of reasons
 
-- Status: Proposed (2026-10-27)
+- Status: Accepted (2026-10-27; the six questions answered by the maintainer, see
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
 - Date: 2026-10-27 (code checked at `9c51c93`)
 
-**Counsel has not reviewed this ADR, the record shape or the notice text.** It ships the
+**Counsel has not reviewed this ADR, the record shape or the notice text**, and acceptance does
+not change that: the maintainer accepted the mechanism, not the legal wording. It ships the
 mechanism. The wording that is meant to satisfy DSA Art. 17 lives in an operator-editable draft
 document (decision 2), labelled as unreviewed, and reviewing it is on the L1 launch checklist.
 This is not legal advice.
@@ -115,8 +117,11 @@ the operator can later list every statement sent under the unreviewed draft.
 (`packages/contracts/src/enums.ts:166`) with its enum migration; `requiresAcceptance` is false.
 Pinning only works if published versions cannot change, so `legal_documents` gets an
 update/delete guard trigger (immutable once `publishedAt <= now()`). Operators need a way to
-publish their own version; until an admin route exists, the operator guide documents a
-`db` CLI command run as the owner.
+publish their own version; until an admin route exists, the operator guide documents a command
+run as the database owner role that inserts a new `enforcement_notice` version (W0-sor writes the
+guide section and proves the command in a test). The seed gives `enforcement_notice` its own seed
+version, so the contract step's skeleton never collides with W0-sor's text and the shared
+`LEGAL_SEED_VERSION` (which would force everyone to re-accept the terms) is not bumped.
 
 ### 3. Which actions produce a statement: platform T1/T2/NCII, never channel moderation
 
@@ -133,20 +138,26 @@ publish their own version; until an admin route exists, the operator guide docum
 | `ncii.decide` with `removed` (`ncii.ts:324`)            | yes, one per affected owner | visibility: removed                    |
 | `ncii.decide` with `rejected`                           | no                          | nothing restricted                     |
 | `ncii.auto_hide` (`ncii-clock.ts:167`)                  | yes, one per affected owner | visibility: disabled                   |
-| `moderation.t0.match` (`t0.ts:284`)                     | no (open question 1)        | —                                      |
+| `moderation.t0.match`, CSAM list (`t0.ts:284`)          | no (counsel to confirm)     | —                                      |
+| `moderation.t0.match`, NCII list (`t0.ts:284`)          | yes, under `illegal.ncii`   | account suspension, indefinite         |
 | any `mod_actions` row with `scope = 'channel'`          | never                       | —                                      |
 
 **Options.** A: the brief's set above (recommended). B: every platform `mod_actions` row,
 including report resolutions (`services/api/src/routes/safety.ts:346`) and admin suspensions
 (`:505`). Art. 17 does cover those, but they carry only free-text reasons today, so they need a
 clause picker in the staff UI and a required `clauseId` in two contract inputs. That is the right
-next step (open question 3), not a W0 prerequisite.
+next step, not a W0 prerequisite: it lands in W2, with the enforcement report.
 
 Warnings are not Art. 17 restrictions; they get a statement anyway so a user's record is
 complete and the W2 per-clause statistics count them. Channel-moderator actions enforce the
 channel's own rules (`guidelines.md:59-63`) and stay out of statements and platform statistics.
 Selection is by audit action name, which the builder's allowlist fixes; `scope = 'channel'`
-rows never write a platform audit action, and a unit test asserts the allowlist contains none.
+rows never write a platform audit action. `moderation.t0.match` is allowlisted, and the builder
+keeps only rows whose hash list is an NCII list; a CSAM-list match never produces a statement.
+The builder's tests prove the channel exclusion end to end (a channel ban or timeout yields no
+statement), and the `trust-safety` step checks it against the running stack. A string comparison
+between audit action names and `MOD_ACTIONS` values proves nothing (the two vocabularies never
+overlap by construction), so there is no such test.
 
 ### 4. Record shape: Art. 17(3), structured, ids and enums only
 
@@ -181,7 +192,8 @@ Facts =
   | { code: "classifier"; category: ModerationCategory; tier: "t1" | "t2";
       threshold: number; capturedAt: Timestamp }        // threshold in force, never the score
   | { code: "moderator_review"; caseId: Id; caseOrigin: "classifier" | "human"; decision: string }
-  | { code: "ncii_notice"; requestId: Id; receivedAt: Timestamp; deadlineAt: Timestamp };
+  | { code: "ncii_notice"; requestId: Id; receivedAt: Timestamp; deadlineAt: Timestamp }
+  | { code: "hash_match"; listCategory: "ncii"; capturedAt: Timestamp };  // T0 NCII list only
 ```
 
 - **No exact scores.** Notices show the governance threshold
@@ -194,9 +206,13 @@ Facts =
 - **Automation flags** follow from the source: T1/T2/upload rejections are `true`/`fully`; a
   moderator decision on a classifier case is `true`/`not`; on a human-origin case `false`/`not`;
   an NCII removal `false`/`not`; an NCII auto-hide `false`/`fully` (a deadline, not a model,
-  decided).
+  decided); a T0 NCII-list match `true`/`fully`. A `hash_match` fact never carries the match
+  distance, the provider's identifiers or the matched hash.
 - **Appeal subject.** T2 label → `content_label`; T1 restriction and case decisions →
-  `moderation_case`; NCII → none until a subject exists (open question 4). The statement
+  `moderation_case`; NCII removal and auto-hide → `ncii_request_item` (a new subject the W0
+  contract step adds). A T0 NCII-list match has no request item and its T0 case is hidden from
+  appeals (`appeals.ts:124-131`), so its `appeal` is null for now and its redress line names the
+  out-of-court body and courts only (for counsel with answer 1). The statement
   carries what to pass to `appeals.create`, so the client never guesses.
 - The enums are modelled on the Commission's DSA Transparency Database fields, so the optional
   adapter (`feature-wins.md` §4.7, off by default) is a mapping. Field names are to be verified
@@ -243,7 +259,9 @@ record. Append-only for every role with the existing `commonair_forbid_mutation(
 `enforcement_statement_deliveries (statement_id, channel, sent_at, attempts, last_error)` table.
 
 Because the row holds only ids, enums, timestamps and catalog codes, ADR 0004 pseudonymization has
-nothing to rewrite. Statements are kept as long as `audit_log` rows (open question 6).
+nothing to rewrite. Statements are kept as long as `audit_log` rows (indefinitely today), with no
+separate retention period. A user's statements are part of their data export (GDPR Art. 15/20),
+alongside the other moderation records the export already collects.
 
 **Alternative.** Derive statements on read from `audit_log` with no table. Rejected: the
 statement would change whenever the catalog mapping or recipient resolution changed, and Art. 17
@@ -284,42 +302,64 @@ me.enforcement.list: user                     // session or token, user's own da
 Newest first, keyset cursor on `(created_at, id)`, same pattern as `me.notifications`
 (`packages/contracts/src/api/router.ts:156-172`). A GET, so it stays readable while suspended
 (`access.ts:32`). `reversedAt` is computed on read; the statement row itself never changes.
-T0 cases never appear, consistent with appeals hiding them (`appeals.ts:124-131`).
+A CSAM-list T0 match has no statement, so it never appears. A T0 NCII-list statement appears, but
+the T0 case behind it is never joined (no `moderatorNote`, no case id beyond the statement's own
+fields), consistent with appeals hiding T0 cases (`appeals.ts:124-131`).
 
 ## Consequences
 
 - **Contract step (orchestrator):** the `EnforcementStatement` entity and `me.enforcement.list`;
   `enforcement_notice` in `LEGAL_DOCUMENT_KINDS`; migration for `enforcement_statements`,
   `enforcement_statement_deliveries`, their triggers, the `legal_documents` immutability guard and
-  `audit_log_action_idx`; `docs/testing/w0-selectors.md` rows for each source action.
+  `audit_log_action_idx`; `docs/testing/w0-selectors.md` rows for each source action; the
+  `appeals.create` exemption from the suspended-write block (`access.ts:82`); and the
+  `ncii_request_item` appeal subject (`APPEAL_SUBJECTS`, wired in `appeals.ts`).
 - **W0-sor** then owns the catalog, the builder and coverage jobs, the email template, the seeded
-  notice draft and the page section, with a builder unit test per row of decision 3 (channel-scope
-  exclusion included) and the `trust-safety` assertion.
+  notice draft, the page section, the operator guide's publish command and the statements in the
+  user data export, with a builder unit test per row of decision 3 (channel-scope exclusion
+  included) and the `trust-safety` assertion. W0-sor also checks whether the auth library's
+  banned-user check (`services/api/src/auth/index.ts:190`) stops a suspended user signing in, and
+  records the answer in the operator guide.
 - **Shipped unreviewed.** The seeded notice is `isDraft: true` with the same banner as the
   guidelines; every statement records which notice version it used. The L1 checklist gains
   "counsel reviews `enforcement_notice` and the clause mapping". Statements sent before that review
   can be listed and, if counsel asks, re-sent under the reviewed text.
-- **The redress line is only as good as appeals.** Until a suspended user can appeal and NCII has
-  an appeal subject, the statement offers redress the platform does not deliver for those cases
-  (open questions 2 and 4).
+- **The redress line is only as good as appeals.** The W0 contract step lets a suspended user file
+  an appeal and gives NCII removals an appeal subject, so every statement's redress line names a
+  route that works. If the auth library refuses a suspended user's sign-in, email is the only way
+  they learn of the statement, which is why the email is complete on its own (decision 7).
 - W2's `rule_ref` and enforcement report reuse this catalog and table; they add nothing parallel.
 
-## Open questions for the user
+## Decisions at acceptance (2026-10-27)
 
-1. **T0 CSAM matches**: no statement by default (tipping off a suspect; Art. 17 may not require
-   it where a law-enforcement duty applies), and what does the suspended account see? **T0 NCII
-   list matches**: send a statement under `illegal.ncii`? Recommended: CSAM no, NCII yes; both
-   for counsel.
-2. **Appeals while suspended**: exempt `appeals.create` (and nothing else) from the suspended-write
-   block at `access.ts:82` in the W0 contract step? Recommended yes. Also unverified: whether the
-   auth library's banned-user check (`services/api/src/auth/index.ts:190`) stops a suspended user
-   signing in at all, in which case email is the only channel.
-3. **Report resolutions and admin suspensions** (`safety.ts:346`, `:505`): add a required
-   `clauseId` and statements in E7, or leave them out until W2?
-4. **NCII appeals**: add an `ncii_request_item` appeal subject (contract change, wired by
-   E7-appeals), or make the statement itself the appeal subject for every action?
-5. **Counsel**: the notice wording, the legal-basis codes, which out-of-court body the default
-   text names, and whether our instance must submit to the DSA Transparency Database (our reading:
-   Art. 17 applies to every hosting service, while the Art. 24(5) submission falls under the
-   Art. 19 micro and small enterprise exemption; counsel to confirm).
-6. **Retention**: keep statements as long as `audit_log` (indefinitely), or set a period?
+The maintainer accepted this ADR with the recommended answers. Where an answer differs from the
+draft, the text above was updated to match. **Counsel has still not reviewed it**: answers 1 and
+5 are marked for counsel, and the L1 checklist item stands.
+
+1. **T0 matches.** CSAM-list matches produce **no** statement; NCII-list matches produce one under
+   `illegal.ncii`. Both are to be confirmed by counsel. What a suspended account sees after a CSAM
+   match is unchanged by this ADR. The draft left T0 out of the record shape, so acceptance adds
+   a `hash_match` fact (T0 NCII list only, no distance or hash), the restriction (indefinite
+   account suspension, as `t0.ts` applies it) and a null appeal for those statements (decisions 3
+   and 4).
+2. **Appeals while suspended.** Yes: the W0 contract step exempts `appeals.create`, and nothing
+   else, from the suspended-write block (`services/api/src/lib/access.ts:82`). W0-sor checks
+   whether the auth library's banned-user check (`services/api/src/auth/index.ts:190`) blocks
+   sign-in and records the answer in the operator guide.
+3. **Report resolutions and admin suspensions.** Statements for these come in W2, not now (not in
+   E7 as the draft offered), with a required `clauseId` in both staff inputs.
+4. **NCII appeals.** NCII removals get their own appeal subject, `ncii_request_item`, added in the W0
+   contract step (not by E7-appeals, as the draft said: E7 had already launched).
+5. **Counsel.** Unchanged: the notice wording, the legal-basis codes, the out-of-court body the
+   default text names and the Transparency Database question go to counsel before launch.
+6. **Retention.** Statements are kept as long as `audit_log`, with no separate period.
+
+Also settled at acceptance:
+
+- Until an admin route exists, the operator guide documents an owner-run command that publishes a
+  new `enforcement_notice` version; W0-sor writes it.
+- `enforcement_notice` has its own seed version; the shared `LEGAL_SEED_VERSION` is not bumped.
+- A user's statements are added to their data export (`services/worker/src/exports/collectors.ts`),
+  as W0-sor scope once E7 has merged.
+- The contract step does not compare audit action strings with `MOD_ACTIONS` (decision 3 says why);
+  the channel exclusion is proved by the builder's tests and `trust-safety`.
