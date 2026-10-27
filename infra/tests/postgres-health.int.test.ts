@@ -138,7 +138,7 @@ beforeAll(() => {
 }, 25 * 60_000);
 
 afterAll(() => {
-  for (const role of [
+  const roles = [
     "primary",
     "slow",
     "stuck",
@@ -152,8 +152,10 @@ afterAll(() => {
     "noquit",
     "noterm",
     "quits",
-  ])
-    podman(["rm", "-f", "-t", "0", name(role)]);
+  ].map(name);
+  // One call for all of them: thirteen sequential removals outlasted this hook under the gate's
+  // load and left postgres containers running.
+  podman(["rm", "-f", "-i", "-t", "0", ...roles], 100_000);
   podman(["volume", "rm", "-f", VOLUME]);
   podman(["rmi", "-f", IMAGE]);
 }, 120_000);

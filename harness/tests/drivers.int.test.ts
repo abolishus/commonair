@@ -55,13 +55,17 @@ beforeAll(async () => {
   nativeHls.webkit = (await fleet.expectedPlaybackPath("webkit")) === "native";
 }, 120_000);
 
+/** Teardown under load can stall (a browser or ffmpeg slow to exit): bound each step on its own. */
+const bounded = (p: Promise<unknown> | undefined, ms = 15_000) =>
+  Promise.race([Promise.resolve(p).catch(() => undefined), Bun.sleep(ms)]);
+
 afterAll(async () => {
-  for (const c of cleanups.reverse()) await c().catch(() => undefined);
-  await fleet?.close();
-  await server?.stop();
-  await rtmp?.stop();
-  await mtx?.stop();
-}, 60_000);
+  for (const c of cleanups.reverse()) await bounded(c());
+  await bounded(fleet?.close());
+  await bounded(server?.stop());
+  await bounded(rtmp?.stop());
+  await bounded(mtx?.stop());
+}, 120_000);
 
 async function collectLatency(viewer: Viewer, samples: number): Promise<number[]> {
   return waitFor(
