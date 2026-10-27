@@ -39,4 +39,17 @@ export const moderationMetrics = {
     description: "Internal (trust & safety) outbox events marked handled without publishing",
   }),
   deletions: m.createCounter("account_deletions_total", { description: "Account deletions completed, by outcome" }),
+  /** Statements of reasons (ADR 0019): attributes are audit action names, channels and outcomes only. */
+  sorStatements: m.createCounter("sor_statements_total", {
+    description: "Statements of reasons inserted by the builder",
+  }),
+  sorBuildFailures: m.createCounter("sor_build_failures_total", {
+    description: "Allowlisted audit rows the builder could not turn into a statement, by action (once per process)",
+  }),
+  sorDeliveries: m.createCounter("sor_deliveries_total", {
+    description: "Statement deliveries by channel (email, in_app) and outcome (sent, failed, skipped)",
+  }),
+  sorMissing: m.createGauge("sor_missing_statements", {
+    description: "Allowlisted audit rows older than 5 minutes with no statement (the coverage target is 0)",
+  }),
 };

@@ -2,10 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Trust & safety: copyright notices, restorations, appeal decisions. The DMCA mails follow
+ * Trust & safety: copyright notices, restorations, appeal decisions, statements of reasons. The DMCA mails follow
  * 17 U.S.C. § 512 as the platform reads it; NOT REVIEWED BY A LAWYER (docs/operators/dmca.md).
  */
-import type { APPEAL_KINDS, APPEAL_STATUSES } from "@commonair/contracts/enums";
+import type {
+  APPEAL_KINDS,
+  APPEAL_STATUSES,
+  ENFORCEMENT_AUTOMATED_DECISIONS,
+  ENFORCEMENT_CONTENT_TYPES,
+  ENFORCEMENT_GROUNDS,
+  ENFORCEMENT_RESTRICTION_DETAILS,
+  ENFORCEMENT_RESTRICTION_KINDS,
+  ENFORCEMENT_SOURCES,
+  ModerationCategory,
+  MODERATION_REVIEW_DECISIONS,
+} from "@commonair/contracts/enums";
+import type * as React from "react";
 import type { DateInput } from "../format.ts";
 import { Action, defineTemplate, Facts, H1, Muted, Notice, P } from "../template.tsx";
 
@@ -156,6 +168,143 @@ export const contentRestored = defineTemplate("contentRestored", {
         <P>{ctx.t(m.body, { content: <strong>{d.contentTitle}</strong> })}</P>
         <Facts items={[[m.restoredLabel, ctx.dateTime(d.restoredAt)]]} />
         <Action ctx={ctx} href={d.contentUrl} label={m.action} />
+      </>
+    );
+  },
+});
+
+type EnforcementFactsData =
+  | { code: "classifier"; category: ModerationCategory; tier: "t1" | "t2"; threshold: number; capturedAt: DateInput }
+  | { code: "moderator_review"; caseRef: string; decision: (typeof MODERATION_REVIEW_DECISIONS)[number] }
+  | { code: "ncii_notice"; requestRef: string; receivedAt: DateInput; deadlineAt: DateInput }
+  | { code: "hash_match"; capturedAt: DateInput };
+
+/**
+ * A statement of reasons (ADR 0019 decision 7, DSA Art. 17(3)). Complete on its own: a suspended
+ * user may not be able to sign in, so every element is in the mail, not behind the link. Ids,
+ * enums and catalog keys come from the stored statement; `explanation` and `redress` are the
+ * pinned `enforcement_notice` sections, rendered as text. NOT REVIEWED BY COUNSEL.
+ */
+export interface EnforcementStatementData {
+  statementRef: string;
+  appliedAt: DateInput;
+  contentType: (typeof ENFORCEMENT_CONTENT_TYPES)[number];
+  restrictionKind: (typeof ENFORCEMENT_RESTRICTION_KINDS)[number];
+  restrictionDetail: (typeof ENFORCEMENT_RESTRICTION_DETAILS)[number];
+  /** Null: indefinite, or (a warning) not applicable. */
+  endsAt: DateInput | null;
+  facts: EnforcementFactsData;
+  source: (typeof ENFORCEMENT_SOURCES)[number];
+  automatedDetection: boolean;
+  automatedDecision: (typeof ENFORCEMENT_AUTOMATED_DECISIONS)[number];
+  groundKind: (typeof ENFORCEMENT_GROUNDS)[number];
+  /** The clause's `titleKey` in this catalog block (`clause.<id>`). */
+  clauseTitleKey: string;
+  /** `id@version`, quoted so the user can cite it. */
+  clauseRef: string;
+  legalBasis: string | null;
+  explanation: string;
+  redress: string;
+  /** False when no internal appeal applies (a T0 NCII-list match). */
+  appealable: boolean;
+  noticeIsDraft: boolean;
+  appealsUrl: string;
+}
+
+/** A catalog key looked up at render time (the clause, restriction and label keys). */
+const keyed = (m: object, key: string): string | undefined => {
+  const v = (m as Record<string, unknown>)[key];
+  return typeof v === "string" ? v : undefined;
+};
+
+export const enforcementStatement = defineTemplate("enforcementStatement", {
+  links: ["appealsUrl"],
+  subject: (ctx, d: EnforcementStatementData) =>
+    ctx.text(ctx.messages.subject, {
+      restriction:
+        keyed(ctx.messages, `restriction.${d.restrictionKind}.${d.restrictionDetail}`) ?? ctx.messages.restrictionOther,
+    }),
+  body: (ctx, d: EnforcementStatementData) => {
+    const m = ctx.messages;
+    const label = (key: string) => keyed(m, key) ?? key;
+    const restriction = keyed(m, `restriction.${d.restrictionKind}.${d.restrictionDetail}`) ?? m.restrictionOther;
+    const clause = keyed(m, d.clauseTitleKey) ?? d.clauseRef;
+    const ends =
+      d.restrictionKind === "warning"
+        ? m.endsNotApplicable
+        : d.endsAt === null
+          ? m.endsIndefinite
+          : ctx.dateTime(d.endsAt);
+    const f = d.facts;
+    let facts: React.ReactNode;
+    switch (f.code) {
+      case "classifier":
+        facts = ctx.t(f.tier === "t1" ? m.factsClassifierT1 : m.factsClassifierT2, {
+          category: label(`category.${f.category}`),
+          capturedAt: ctx.dateTime(f.capturedAt),
+          threshold: ctx.percent(f.threshold),
+        });
+        break;
+      case "moderator_review":
+        facts = ctx.t(m.factsReview, { caseRef: f.caseRef, decision: label(`decision.${f.decision}`) });
+        break;
+      case "ncii_notice":
+        facts = ctx.t(m.factsNcii, {
+          receivedAt: ctx.dateTime(f.receivedAt),
+          requestRef: f.requestRef,
+          deadlineAt: ctx.dateTime(f.deadlineAt),
+        });
+        break;
+      case "hash_match":
+        facts = ctx.t(m.factsHash, { capturedAt: ctx.dateTime(f.capturedAt) });
+        break;
+    }
+    const decision = { fully: m.decisionFully, partially: m.decisionPartially, not: m.decisionNot }[
+      d.automatedDecision
+    ];
+    const ground =
+      d.groundKind === "illegal"
+        ? ctx.t(m.groundIllegal, {
+            clause,
+            ref: d.clauseRef,
+            legalBasis: d.legalBasis ? label(`legalBasis.${d.legalBasis}`) : "",
+          })
+        : ctx.t(m.groundTerms, { clause, ref: d.clauseRef });
+    return (
+      <>
+        <H1>{ctx.t(m.heading)}</H1>
+        {d.noticeIsDraft ? <Notice>{ctx.t(m.draft)}</Notice> : null}
+        <P>
+          {ctx.t(m.body, {
+            appliedAt: ctx.dateTime(d.appliedAt),
+            content: label(`content.${d.contentType}`),
+          })}
+        </P>
+        <Facts
+          items={[
+            [m.refLabel, d.statementRef],
+            [m.restrictionLabel, restriction],
+            [m.endsLabel, ends],
+            [m.scopeLabel, ctx.t(m.scopeAll)],
+            [m.factsLabel, facts],
+            [m.sourceLabel, d.source === "notice_art16" ? m.sourceNotice : m.sourceOwn],
+            [m.automationLabel, `${d.automatedDetection ? m.detectionYes : m.detectionNo} ${decision}`],
+            [m.groundLabel, ground],
+            // An operator's notice may lack a clause's section; the title above still names it.
+            ...(d.explanation.trim() === "" ? [] : [[m.explanationLabel, d.explanation] as [string, string]]),
+          ]}
+        />
+        <P>
+          <strong>{ctx.t(m.redressHeading)}</strong>
+        </P>
+        <P>
+          {ctx.t(d.appealable ? (d.restrictionKind === "account" ? m.appealSuspended : m.appeal) : m.noAppeal, {
+            contact: ctx.contact("abuse"),
+          })}
+        </P>
+        {d.redress.trim() === "" ? null : <P>{d.redress}</P>}
+        <P>{ctx.t(m.courts)}</P>
+        <Action ctx={ctx} href={d.appealsUrl} label={m.action} />
       </>
     );
   },

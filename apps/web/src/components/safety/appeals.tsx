@@ -79,7 +79,7 @@ export function LabelNotice({ label, appealPending, onAppeal }: LabelNoticeProps
   );
 }
 
-interface AppealFormText {
+export interface AppealFormText {
   title: string;
   description: string;
   body: string;
@@ -89,8 +89,8 @@ interface AppealFormText {
   failed: string;
 }
 
-/** The appeal body form shared by the label and account-action dialogs (10–5000 characters). */
-function AppealBodyForm({
+/** The appeal body form shared by the label, account-action and statement-of-reasons dialogs (10–5000 characters). */
+export function AppealBodyForm({
   renderBody,
   renderSubmit,
   text,

@@ -129,5 +129,27 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       decidedAt: at,
       decisionUrl: url("/settings/appeals/sample"),
     },
+    enforcementStatement: {
+      statementRef: "SR-3F9A21C7",
+      appliedAt: at,
+      contentType: "broadcast",
+      restrictionKind: "visibility",
+      restrictionDetail: "restricted",
+      endsAt: null,
+      facts: { code: "classifier", category: "weapons", tier: "t1", threshold: 0.95, capturedAt: at },
+      source: "own_initiative",
+      automatedDetection: true,
+      automatedDecision: "fully",
+      groundKind: "terms",
+      clauseTitleKey: "clause.safety.weapons",
+      clauseRef: "safety.weapons@1",
+      legalBasis: null,
+      explanation:
+        "Content that shows weapons in a way that threatens people or puts them at serious risk is not allowed.",
+      redress: "If you think we got it wrong, you can appeal from your account's appeals page.",
+      appealable: true,
+      noticeIsDraft: true,
+      appealsUrl: url("/settings/appeals"),
+    },
   };
 }

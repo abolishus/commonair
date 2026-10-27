@@ -1,0 +1,18 @@
+[
+  { "id": "mature.unlabelled", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.sexual-explicit", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.graphic-violence", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.weapons", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.self-harm", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.violence", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.minors", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "safety.illegal-activity", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "decency.harassment", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "decency.hate", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "honesty.impersonation", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "honesty.spam", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "creative.copyright", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "guidelines.general", "version": 1, "ground": "terms", "legalBasis": null },
+  { "id": "illegal.ncii", "version": 1, "ground": "illegal", "legalBasis": "us.take-it-down" },
+  { "id": "decency.intimate-images", "version": 1, "ground": "terms", "legalBasis": null }
+]

@@ -185,8 +185,64 @@ The application role and governance votes cannot release a hold.
 
 - Points of contact (Arts. 11–12), and a legal representative if you are outside the EU (Art. 13).
 - Notice and action (Art. 16): the report and NCII forms are built to it.
-- Statements of reasons to the affected user (Art. 17), and for online platforms, submission to
-  the Commission's DSA Transparency Database.
+- Statements of reasons to the affected user (Art. 17, [ADR 0019](../decisions/0019-statement-of-reasons.md)).
+  **Counsel has not reviewed any of this: the notice text, the clause mapping, the legal-basis
+  codes or the out-of-court wording. Have yours review them before launch.** What the platform
+  does today:
+  - **Which actions.** Every platform T1 restriction, T2 mature label, upload rejection, moderator
+    case decision (warning, ended stream, suspension), NCII removal and NCII auto-hide, and every
+    T0 match on an NCII hash list, produces one statement per affected user (for NCII, one per
+    owner of the affected content; never the requester). A T0 match on a CSAM list produces none,
+    and a channel moderator's chat ban, timeout or message deletion never does (counsel to confirm
+    the CSAM answer). A decision that restricted nothing gets none either: an "end stream" on a
+    case that is not a live stream. Report resolutions and admin suspensions get statements in a
+    later release.
+  - **Known limits, for counsel.** A statement names one piece of content, and there is one per
+    action and person. So an NCII owner with several affected items gets one statement naming
+    their first item (the others are restricted too but not listed, and are appealed by writing
+    to the contact address). When a case suspends both an account and a channel that belong to
+    the same person, the statement covers the account suspension only. A suspended channel has
+    no end date (moderation channel suspensions do not expire on their own), so its statement
+    gives none, whatever duration the moderator chose.
+  - **What it says.** The restriction and its end, that it applies everywhere, the facts (the
+    governance threshold in force for automated decisions, never the classifier's score; for
+    NCII the request id and its times, never who sent it), whether it followed a notice or your
+    own initiative, how far software detected and decided it, the clause of your guidelines or
+    the law relied on (`@commonair/moderation` `reasons.ts`), the clause's explanation from your
+    `enforcement_notice` document, and redress: the internal appeal (not offered for T0 matches,
+    whose cases are hidden from appeals), the out-of-court body your notice names, and the courts.
+  - **How it is delivered.** The worker's `sor-build` job builds statements from `audit_log`
+    every 15 seconds, then sends an in-app notification and an email in the user's language.
+    The email carries every element on its own (see the sign-in note below). A failed email is
+    retried with exponential backoff (1, 3, 7, 15 … minutes after it was built, 12 attempts over
+    about 34 hours), then logged with `alert: sor_delivery_exhausted`. Users read their
+    statements on `/settings/appeals` and through `GET /me/enforcement`, and file an appeal from
+    there (a suspended user only from a session that is still signed in). Each statement is in the user's data export
+    (`enforcement_statements.json`).
+  - **What you review.** The `enforcement_notice` text (the seeded one is an unreviewed draft, and
+    every statement records the notice version it was sent under, so you can list the ones sent
+    under the draft), the clause each action maps to, and the out-of-court body: the draft names
+    none. Publish your own version as described below.
+  - **Records.** Statements are append-only and kept as long as the audit log (today,
+    indefinitely). They hold ids, enums, times and catalog codes, so account deletion has nothing
+    to rewrite. Deliveries are recorded per channel with an error code.
+  - **Monitoring.** `sor_missing_statements` (daily `sor-coverage` sweep: actions older than five
+    minutes with no statement; the target is 0, and a non-zero value logs the audit ids with
+    `alert: sor_coverage`), `sor_build_failures_total{action}` (an action whose audit details the
+    builder cannot read: a code change in an action writer) and `sor_deliveries_total`. The
+    builder only looks at the last seven days; an older action without a statement is reported
+    by the sweep and not built automatically.
+  - **Suspended users and sign-in.** The auth library's banned-user check refuses sign-in for a
+    suspended account (`moderation`, `t0_hash_match` or DMCA suspension): the user cannot start a
+    new session, and only a session created before the suspension can still read
+    `/settings/appeals` and file an appeal. For a user without such a session, **the statement
+    email is their only channel**, which is why it is complete on its own and, for an account
+    suspension, tells the user to write to your abuse address when they cannot sign in. Keep a
+    contact address in your notice's redress section, and treat a message quoting a statement
+    reference as an appeal.
+  - **DSA Transparency Database.** Online platforms must also submit statements to the
+    Commission's database (Art. 24(5)). The adapter for it does not exist; it would be optional
+    and off by default. Until then, submitting is your manual task if it applies to you.
 - Internal complaints (Art. 20: appeals) and out-of-court dispute settlement (Art. 21).
 - Notifying authorities of threats to life or safety (Art. 18).
 - Transparency reports (Arts. 15 and 24, on the harmonised templates). The platform keeps the
@@ -194,6 +250,64 @@ The application role and governance votes cannot release a hold.
 - The micro and small enterprise exemption (Art. 19) may apply to you.
 
 See the [Digital Services Act text](https://eur-lex.europa.eu/eli/reg/2022/2065/oj).
+
+### Publishing your own statement-of-reasons notice
+
+The wording of every statement comes from the newest published `enforcement_notice` legal
+document. There is no admin page or `db` command for it yet, so you publish a version with one
+SQL statement run as the database **owner** role (the application role is not meant to change
+legal documents). Start from `packages/db/src/legal/enforcement_notice.md`: keep each
+`<!-- clause: … -->` marker, since the statement quotes the section after its clause's marker,
+and the `<!-- section: redress -->` marker; write `{{instanceName}}`, `{{publicUrl}}` and
+`{{contacts.abuse}}` style placeholders as in the seeded text. Name your out-of-court dispute
+settlement body in the redress section. Then save a file like this as `publish-notice.sql`, with
+your text between the `$notice$` markers and a new `version`:
+
+```sql
+-- Publish an enforcement_notice version (operator guide, trust-safety.md). Run as the owner role.
+INSERT INTO legal_documents (id, kind, version, title, body, is_draft, requires_acceptance, published_at)
+VALUES (
+  gen_random_uuid(),
+  'enforcement_notice',
+  '2026-11-01-operator',
+  'Statements of reasons',
+  $notice$
+When {{instanceName}} restricts your content or your account, we send you a statement of reasons.
+
+## Clauses
+
+<!-- clause: mature.unlabelled -->
+
+### Mature content without the mature label
+
+Mature content must carry the mature label.
+
+## How to challenge this decision
+
+<!-- section: redress -->
+
+Appeal from {{publicUrl}}/settings/appeals, write to {{contacts.abuse}}, or contact the
+out-of-court dispute settlement body we work with. You can always go to the courts.
+$notice$,
+  false,
+  false,
+  now()
+);
+```
+
+On the self-host bundle, run it inside the Postgres container with the owner credentials:
+
+```sh
+podman exec -i commonair-postgres psql -U commonair -d commonair -v ON_ERROR_STOP=1 < publish-notice.sql
+```
+
+The next statement the worker builds pins the new version (statements already sent keep the
+version they were sent under). `is_draft = false` stops statements from saying the text is an
+unreviewed draft, so set it only once your counsel has reviewed the text. A published version
+(`published_at` in the past) **cannot be edited or deleted** by any role: the database refuses
+it, so that a statement always names the text it was sent under. To correct a published text,
+publish a newer version. A version with a future `published_at` can still be fixed by the owner
+until it takes effect.
 
 ## Other jurisdictions
 

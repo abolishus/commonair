@@ -47,6 +47,7 @@ test("the registry covers every notice the platform sends", () => {
       "dmcaCounterNoticeForwarded",
       "contentRestored",
       "appealDecided",
+      "enforcementStatement",
     ].toSorted(),
   );
   expect(
@@ -152,8 +153,18 @@ function cyrillicSamples(origin: string): SampleData {
     address: "Улица Примерная, 1",
     statement: "Я сам записал это выступление",
   });
-  const refs = JSON.stringify(data).replace(/"(reference|noticeRef|appealRef)":"[^"]*"/g, '"$1":"№ 1207"');
-  return JSON.parse(refs) as SampleData;
+  const refs = JSON.stringify(data).replace(
+    /"(reference|noticeRef|appealRef|statementRef|clauseRef|caseRef|requestRef)":"[^"]*"/g,
+    '"$1":"№ 1207"',
+  );
+  const out = JSON.parse(refs) as SampleData;
+  // The notice sections are operator text in the recipient's language, passed as data.
+  out.enforcementStatement = {
+    ...out.enforcementStatement,
+    explanation: "Оружие, которое угрожает людям, запрещено.",
+    redress: "Вы можете обжаловать решение.",
+  };
+  return out;
 }
 
 /** Visible text with URLs, mail addresses and the UTC zone label removed. */
