@@ -246,7 +246,7 @@ jobs:
       id-token: write
 
   selfhost-e2e:
-    name: self-host e2e (${{ matrix.distro }})
+    name: self-host e2e (${{ matrix.distro }}, ${{ matrix.storage }})
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -256,6 +256,12 @@ jobs:
       fail-fast: false
       matrix:
         distro: [debian, fedora]
+        storage: [garage]
+        # The external S3 store (selfhost.sh --s3-*) on Debian only, the droplets' distribution:
+        # a full run of its own, in parallel, so it adds runner minutes but no wall time.
+        include:
+          - distro: debian
+            storage: external
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -282,11 +288,12 @@ jobs:
         timeout-minutes: 105
         env:
           DISTRO: ${{ matrix.distro }}
-        run: sudo --preserve-env=CI,GITHUB_ACTIONS "$(command -v bun)" scripts/selfhost/e2e.ts --distro "$DISTRO"
+          STORAGE: ${{ matrix.storage }}
+        run: sudo --preserve-env=CI,GITHUB_ACTIONS "$(command -v bun)" scripts/selfhost/e2e.ts --distro "$DISTRO" --storage "$STORAGE"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: selfhost-e2e-${{ matrix.distro }}-${{ github.run_attempt }}
+          name: selfhost-e2e-${{ matrix.distro }}-${{ matrix.storage }}-${{ github.run_attempt }}
           path: .cache/selfhost-e2e/
           retention-days: 5
           if-no-files-found: ignore

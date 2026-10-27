@@ -245,13 +245,22 @@ describe("compose data stack", () => {
     });
   });
 
+  // The whole job again (both steps, as an upgrade re-runs it), not a cheaper role check: its
+  // idempotence is the point. The work itself is quick (2026-10-26, M-series workstation with
+  // other suites running: migrate.ts on a migrated database 0.03 s, 0.1 s with 16 busy loops in
+  // the podman machine; the tools container starting and loading both scripts 0.3-0.6 s), but
+  // `podman start -a` of the compose container once took 76 s at load 12 (and the 60 s limit
+  // failed it). The limit is about twice that worst case; the process limit sits below it, so a
+  // hang fails with the job's own output instead of vitest's bare timeout.
   test("re-running migrate keeps the role working (idempotent)", async () => {
     const id = container("migrate");
-    const r = run(["podman", "start", "-a", id], { allowFail: true });
-    expect(r.code, r.out).toBe(0);
+    const started = performance.now();
+    const r = run(["podman", "start", "-a", id], { allowFail: true, timeoutMs: 150_000 });
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    expect(r.code, `${r.out}\n(after ${seconds} s)`).toBe(0);
     const [row] = await app`select 1 as ok`;
     expect(row?.ok).toBe(1);
-  }, 60_000);
+  }, 160_000);
 
   test("WAL segments are archived to the backups bucket", async () => {
     await owner`create table if not exists it_wal (id serial primary key, at timestamptz default now())`;
