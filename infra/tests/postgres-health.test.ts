@@ -65,6 +65,28 @@ describe("commonair-postgres.container health", () => {
     expect(scriptDefault("COMMONAIR_PG_START_SECONDS")).toBe(120);
   });
 
+  test("a stop that does not take is escalated to SIGKILL after a 30 s grace, by a detached watcher", () => {
+    expect(scriptDefault("COMMONAIR_PG_KILL_GRACE_SECONDS")).toBe(30);
+    expect(script).toMatch(/kill -QUIT "\$pid"/);
+    expect(script).toMatch(/kill -9 "\$pid"/);
+    expect(script).toMatch(/kill -9 -1/);
+    // Detached with its output away from the exec session, so the check still returns in time:
+    // the grace is longer than HealthStartupTimeout.
+    expect(script).toMatch(/\) <\/dev\/null >\/dev\/null 2>&1 &\nexit 2\n$/);
+    expect(scriptDefault("COMMONAIR_PG_KILL_GRACE_SECONDS")).toBeGreaterThan(seconds(one("HealthStartupTimeout")));
+    // The escalation does not outlast the next startup check by much, and fits the restart.
+    expect(scriptDefault("COMMONAIR_PG_KILL_GRACE_SECONDS")).toBeLessThan(scriptDefault("COMMONAIR_PG_START_SECONDS"));
+  });
+
+  test("the state lives in /run, keyed to this container run", () => {
+    expect(script).toMatch(/state="\$\{COMMONAIR_PG_HEALTH_STATE:-\/run\/commonair-pg-health\.state\}"/);
+    expect(script).not.toMatch(/\/tmp\//);
+    // The marker starts with the boot id and PID 1's start time, so an earlier run's file never matches.
+    expect(script).toMatch(/^marker="run=\$\(instance\) /m);
+    expect(script).toContain("/proc/sys/kernel/random/boot_id");
+    expect(script).toContain("/proc/1/stat");
+  });
+
   test("the start timeout is only a backstop, far beyond the script's bounds", () => {
     const timeout = seconds(one("TimeoutStartSec"));
     expect(timeout).toBeGreaterThanOrEqual(6 * 3600);

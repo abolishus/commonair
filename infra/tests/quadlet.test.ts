@@ -16,6 +16,16 @@
  * must keep schema users off an old schema); long-running dependencies are Wants= + After=
  * (same ordering, no failure propagation), each retries on its own Restart=always, and
  * RestartMode=direct keeps those auto-restarts from cycling dependents.
+ *
+ * Observability never holds back the app. After= a Notify=healthy unit waits for its health, and
+ * RestartMode=direct keeps a looping unit's start job open, so a collector that never got healthy
+ * held every app service back (rc droplet). The units others order after (collector, Loki, Tempo,
+ * Prometheus) therefore have no Notify=healthy: they are ready once their container runs, while
+ * their health check still kills and restarts them. After= stays, so the apps start once the
+ * collector runs and stop before it (their last telemetry is flushed to it). The OTel SDK copes
+ * with a collector that does not listen yet: its OTLP exporters retry connection refused and DNS
+ * failures with backoff and the batch processors buffer meanwhile, never blocking a request
+ * (packages/observability/src/sdk.ts). compose.yaml still waits for their health (dev only).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -42,6 +52,14 @@ function section(unit: string, name: string): string {
 const oneShot = (unit: string) => /^Type=oneshot$/m.test(unit);
 const longRunning = units.filter(([, u]) => !oneShot(u));
 const oneShots = units.filter(([, u]) => oneShot(u));
+// Optional services: nothing may wait for their health (see the header).
+const OBSERVABILITY = new Set(
+  ["otel-collector", "loki", "tempo", "prometheus", "grafana"].map((n) => `commonair-${n}.service`),
+);
+// The ones another unit orders After=: ready as soon as their container runs (no Notify=healthy).
+const OBSERVABILITY_ORDERED = new Set(
+  ["otel-collector", "loki", "tempo", "prometheus"].map((n) => `commonair-${n}.service`),
+);
 // Units that read the schema: they get the database URL secret.
 const schemaUsers = units.filter(([, u]) => /^Secret=commonair-database-url,/m.test(u));
 
@@ -117,11 +135,12 @@ describe("long-running units restart for real", () => {
     expect(values(unit, "StartLimitBurst")).toEqual([]);
   });
 
-  test.each(longRunning)("%s: health check, and an unhealthy container is killed and restarted", (_, unit) => {
+  test.each(longRunning)("%s: health check, and an unhealthy container is killed and restarted", (name, unit) => {
     const container = section(unit, "Container");
     expect(values(container, "HealthCmd")).toHaveLength(1);
     expect(values(container, "HealthOnFailure")).toEqual(["kill"]);
-    expect(values(container, "Notify")).toEqual(["healthy"]);
+    // Ready once healthy, except the observability units others order after (see the header).
+    expect(values(container, "Notify")).toEqual(OBSERVABILITY_ORDERED.has(`${name}.service`) ? [] : ["healthy"]);
     // Startup must outlast the health check's own start period and retries.
     const startPeriod = seconds(values(container, "HealthStartPeriod")[0] ?? "0");
     expect(seconds(values(section(unit, "Service"), "TimeoutStartSec")[0] ?? "0")).toBeGreaterThan(startPeriod);
@@ -250,6 +269,31 @@ describe("the dependency graph converges (no failure propagates through a long-r
     const wants = values(unit, "Wants");
     expect(wants.filter((w) => !longRunningServices.has(w) && !SOCKETS.has(w))).toEqual([]);
     expect(wants.filter((w) => !values(unit, "After").includes(w))).toEqual([]);
+  });
+
+  test.each(units)("%s: never waits for an observability unit's health", (_, unit) => {
+    // An After= edge to observability is only to a unit that is ready without being healthy.
+    const ordered = values(unit, "After").filter((a) => OBSERVABILITY.has(a));
+    for (const a of ordered) {
+      const target = units.find(([n]) => `${n}.service` === a)![1];
+      expect(values(target, "Notify"), a).toEqual([]);
+    }
+    expect(values(unit, "Requires").filter((r) => OBSERVABILITY.has(r))).toEqual([]);
+  });
+
+  test("the observability edges that stay: the apps after the collector, it after Loki and Tempo, Grafana after all three", () => {
+    const of = (n: string) => units.find(([u]) => u === `commonair-${n}`)![1];
+    for (const app of ["api", "chat", "irc", "media", "origin", "tracker", "worker"])
+      expect(values(of(app), "After"), app).toContain("commonair-otel-collector.service");
+    expect(values(of("otel-collector"), "After")).toEqual(["commonair-loki.service", "commonair-tempo.service"]);
+    expect(values(of("grafana"), "After")).toEqual([
+      "commonair-prometheus.service",
+      "commonair-loki.service",
+      "commonair-tempo.service",
+    ]);
+    // Exactly the units something orders after: no other unit lost its Notify=healthy.
+    const orderedAfter = new Set(units.flatMap(([, u]) => values(u, "After")).filter((a) => OBSERVABILITY.has(a)));
+    expect([...orderedAfter].sort()).toEqual([...OBSERVABILITY_ORDERED].sort());
   });
 
   test("no unit BindsTo= or Requisite= anything (both propagate failures too)", () => {

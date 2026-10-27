@@ -10,6 +10,8 @@
  * the health flags the Quadlet unit generates, driven by `podman healthcheck run`, to check that
  * Podman itself never kills an advancing replay. Last, commonair-wal-fetch (the restore_command
  * commonair-restore writes) must stop recovery when the bucket fails instead of promoting early.
+ * Also: where the startup check keeps its state, that a stale state file from an earlier run of
+ * the container is ignored, and the SIGKILL escalation of a stop that does not take.
  * Needs podman.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -136,7 +138,20 @@ beforeAll(() => {
 }, 25 * 60_000);
 
 afterAll(() => {
-  for (const role of ["primary", "slow", "stuck", "nostart", "pslow", "pstuck", "fetchfail", "walfetch"])
+  for (const role of [
+    "primary",
+    "slow",
+    "stuck",
+    "nostart",
+    "pslow",
+    "pstuck",
+    "fetchfail",
+    "walfetch",
+    "state",
+    "stale",
+    "noquit",
+    "noterm",
+  ])
     podman(["rm", "-f", "-t", "0", name(role)]);
   podman(["volume", "rm", "-f", VOLUME]);
   podman(["rmi", "-f", IMAGE]);
@@ -296,6 +311,100 @@ describe("under Podman's health checks (the Quadlet unit's flags)", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(5000);
     expect(podman(["logs", c]).out).toMatch(/immediate shutdown request/);
   }, 180_000);
+});
+
+describe("the startup check's state and its stop", () => {
+  const STATE = "/run/commonair-pg-health.state";
+  /** A container where Postgres never starts: the start bound applies, PID 1 is catatonit. */
+  function idle(role: string, entrypoint = ["sleep", "3600"]): string {
+    const c = name(role);
+    ok(["run", "-d", "--init", "--name", c, ...env, "--entrypoint", entrypoint[0]!, IMAGE, ...entrypoint.slice(1)]);
+    return c;
+  }
+  const exists = (c: string, path: string) => podman(["exec", c, "test", "-e", path]).code === 0;
+
+  test("the state lives in /run, not the world-writable /tmp", () => {
+    const c = idle("state");
+    expect(health(c, ["--startup"], ["-e", "COMMONAIR_PG_START_SECONDS=100"]).code).toBe(1);
+    expect(exists(c, STATE)).toBe(true);
+    expect(ok(["exec", c, "ls", "-A", "/tmp"]).trim()).toBe("");
+    // The regular check (not ready either) leaves it alone.
+    expect(health(c).code).toBe(1);
+    expect(exists(c, STATE)).toBe(true);
+  }, 60_000);
+
+  test("a marker left by an earlier run of the container does not make a fresh start look stalled", async () => {
+    const c = idle("stale");
+    const bound = ["-e", "COMMONAIR_PG_START_SECONDS=4"];
+    expect(health(c, ["--startup"], bound).code).toBe(1);
+    await sleep(5000);
+    // A restart keeps the writable layer, so the old run's state file (with no postmaster, the
+    // same "pm= title=" as now) is still there and already past the bound.
+    ok(["restart", "-t", "0", c]);
+    expect(exists(c, STATE)).toBe(true);
+    expect(health(c, ["--startup"], bound).code).toBe(1);
+    // The bound still applies to this run: the same check fails once it has passed.
+    await sleep(5000);
+    expect(health(c, ["--startup"], bound).code).toBe(2);
+    await until("container to exit", 30_000, () => (running(c) ? undefined : true));
+  }, 120_000);
+
+  test("a postmaster that ignores SIGQUIT gets SIGKILL after the grace period", async () => {
+    const c = idle("noquit");
+    // A process named postgres (argv[0]) that ignores SIGQUIT, recorded in a postmaster.pid.
+    ok([
+      "exec",
+      "-d",
+      c,
+      "sh",
+      "-c",
+      'mkdir -p /tmp/fake /tmp/pgdata && ln -sf /bin/sleep /tmp/fake/postgres && trap "" QUIT && ' +
+        "PATH=/tmp/fake:$PATH && { postgres 3600 & echo $! > /tmp/pgdata/postmaster.pid; wait; }",
+    ]);
+    const pid = await until("fake postmaster", 10_000, () => {
+      const r = podman(["exec", c, "cat", "/tmp/pgdata/postmaster.pid"]);
+      return r.code === 0 && /^\d+\n/.test(r.out) ? r.out.trim() : undefined;
+    });
+    const alive = () => podman(["exec", c, "test", "-d", `/proc/${pid}`]).code === 0;
+    const run = [
+      "-e",
+      "PGDATA=/tmp/pgdata",
+      "-e",
+      "COMMONAIR_PG_START_SECONDS=0",
+      "-e",
+      "COMMONAIR_PG_KILL_GRACE_SECONDS=3",
+    ];
+    const started = Date.now();
+    const r = health(c, ["--startup"], run);
+    // The check returns at once with its usual code; the watcher does the waiting.
+    expect(r.code).toBe(2);
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(alive()).toBe(true);
+    await until("SIGKILL", 20_000, () => (alive() ? undefined : true));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(3000);
+    expect(podman(["logs", c]).out).toMatch(/postmaster \d+ still running 3s after SIGQUIT; sending SIGKILL/);
+    // Only the postmaster: the container (catatonit's sleep) is untouched.
+    expect(running(c)).toBe(true);
+  }, 60_000);
+
+  test("an entrypoint that ignores SIGTERM is killed after the grace period, so the container exits", async () => {
+    const c = idle("noterm", ["sh", "-c", 'trap "" TERM; while :; do sleep 1; done']);
+    const run = ["-e", "COMMONAIR_PG_START_SECONDS=0", "-e", "COMMONAIR_PG_KILL_GRACE_SECONDS=3"];
+    const started = Date.now();
+    expect(health(c, ["--startup"], run).code).toBe(2);
+    expect(Date.now() - started).toBeLessThan(3000);
+    expect(running(c)).toBe(true);
+    await until("container to exit", 30_000, () => (running(c) ? undefined : true));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(3000);
+    expect(podman(["logs", c]).out).toMatch(/container still running 3s after SIGTERM; sending SIGKILL/);
+  }, 60_000);
+
+  test("a postmaster that does stop gets no SIGKILL", async () => {
+    // The stuck replay above stopped on SIGQUIT; its watcher died with the container.
+    const logs = podman(["logs", name("stuck")]).out;
+    expect(logs).toMatch(/immediate shutdown request/);
+    expect(logs).not.toMatch(/sending SIGKILL/);
+  });
 });
 
 describe("commonair-wal-fetch", () => {

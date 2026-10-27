@@ -1083,8 +1083,10 @@ install_units() {
       systemctl --user stop "${_n%.container}.service" >/dev/null 2>&1 || true
     fi
   done
-  # Operator drop-ins (commonair-<unit>.container.d/, e.g. for a GPU) are directories and stay.
+  # Operator drop-ins (commonair-<unit>.container.d/, e.g. for a GPU) are directories and stay,
+  # also when the directory is a symlink (-d follows it); a symlink to a unit file goes.
   for _f in "$QUADLET_DIR"/commonair*; do
+    [ -d "$_f" ] && continue
     if [ -f "$_f" ] || [ -L "$_f" ]; then rm -f "$_f"; fi
   done
   # With an external object store, Garage and its volumes are not installed at all.
@@ -1095,7 +1097,7 @@ install_units() {
   # release does not ship (an older release's, or one copied by hand for a manual install) goes.
   for _f in "$SYSTEMD_DIR"/commonair-*; do
     [ -e "$_f" ] || [ -L "$_f" ] || continue
-    [ -d "$_f" ] && [ ! -L "$_f" ] && continue # a commonair-*.service.d drop-in
+    [ -d "$_f" ] && continue # a commonair-*.service.d drop-in (or a symlink to one)
     _n=$(basename "$_f")
     [ -e "$_rel/systemd/$_n" ] && continue
     case "$_n" in *.timer | *.socket) systemctl --user disable --now "$_n" >/dev/null 2>&1 || true ;; esac

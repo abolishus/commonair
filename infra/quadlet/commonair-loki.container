@@ -24,8 +24,10 @@ HealthRetries=10
 HealthStartPeriod=30s
 # An unhealthy container is killed, and Restart= below starts a fresh one.
 HealthOnFailure=kill
-# Dependents start only once this container reports healthy.
-Notify=healthy
+# No Notify=healthy: optional observability is active once its container runs. The collector
+# orders After= it but must not wait for its health: one that never got healthy held it back
+# for good, as RestartMode=direct keeps its start job open across restarts. What it sends
+# before it listens fails and is retried. The health check still runs, and still kills it.
 
 [Service]
 # Leaves the cgroup as the next start needs it: RestartMode=direct skips systemd's own cleanup
