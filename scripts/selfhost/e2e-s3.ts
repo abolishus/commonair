@@ -118,6 +118,12 @@ export function setupScript(instanceOrigin: string): string {
   return [
     "set -eu",
     "command -v podman >/dev/null || { echo 'podman is not installed on the host yet' >&2; exit 1; }",
+    // The outer Podman wrote its own host.containers.internal (the machine outside this host) into
+    // the host's /etc/hosts, and the instance's Podman copies /etc/hosts into every container, so
+    // the name would never reach this host. Without the entry the instance's Podman adds its own.
+    // /etc/hosts is a bind mount: rewrite it in place, never rename over it.
+    "grep -v 'host\\.containers\\.internal' /etc/hosts > /tmp/hosts.e2e || true",
+    "cat /tmp/hosts.e2e > /etc/hosts && rm -f /tmp/hosts.e2e",
     `mkdir -p ${s.dir}`,
     `cat > ${s.dir}/garage.toml <<'EOF'\n${garageToml()}EOF`,
     `cat > ${s.dir}/cors.xml <<'EOF'\n${corsXml(instanceOrigin)}\nEOF`,

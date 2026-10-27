@@ -27,7 +27,11 @@ export const IRC_DEFAULTS = { maxPerIp: 50, connectBurstPerIp: 20, connectPerSec
 export const IRC_E2E_DOMAIN = "selfhost.test";
 const ROOT_CA =
   '"$(podman volume inspect commonair-caddy-data --format "{{.Mountpoint}}")/caddy/pki/authorities/local/root.crt"';
-export const IRC_IMAGE = "localhost/commonair/irc:latest";
+/**
+ * The image the running gateway uses: an installed host pulls images by registry digest, so
+ * no `localhost/commonair/irc:latest` tag exists there. It has Bun, which the probe needs.
+ */
+export const IRC_IMAGE = '"$(podman container inspect --format "{{.Image}}" commonair-irc)"';
 /** Sources on the host: `held` fills its cap, `other` and `tls` are different clients. */
 export const IRC_SOURCES = { held: "127.0.0.2", other: "127.0.0.3", tls: "127.0.0.4" } as const;
 /** The text of the per-address refusal (services/irc/src/admission.ts REFUSAL_TEXT). */
