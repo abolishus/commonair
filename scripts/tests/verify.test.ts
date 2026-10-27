@@ -50,7 +50,7 @@ describe("steps", () => {
   test("platform up starts the harness stack, with every harness override", () => {
     const up = steps.find((s) => s.name === "platform up");
     expect(up?.group).toBe("harness");
-    expect(up?.cmd).toEqual(["bun", "scripts/infra.ts", "stack", "--harness"]);
+    expect(up?.cmd).toEqual(["bun", "scripts/infra.ts", "stack", "--harness", "--multi"]);
   });
 
   // Review of that fix (HIGH): on a fresh volume, infra up's migrate seeded default governance

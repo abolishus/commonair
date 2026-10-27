@@ -130,6 +130,28 @@ export const TOOLS = {
       },
     },
   },
+  // OpenTofu for infra/tofu (check.sh). 1.13.2 (2026-10-21) was inside the cooldown when pinned.
+  // Hashes from tofu_1.13.1_SHA256SUMS, whose cosign signature names the v1.13 release workflow.
+  tofu: {
+    version: "1.13.1",
+    license: "MPL-2.0",
+    binary: "tofu",
+    archive: true,
+    assets: {
+      "linux/amd64": {
+        url: gh("opentofu/opentofu", "v1.13.1", "tofu_1.13.1_linux_amd64.tar.gz"),
+        sha256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69",
+      },
+      "linux/arm64": {
+        url: gh("opentofu/opentofu", "v1.13.1", "tofu_1.13.1_linux_arm64.tar.gz"),
+        sha256: "9c1ef375aa1852db0b2888aa921b640c71f8140d4682aa4fec99378a64fa7dc3",
+      },
+      "darwin/arm64": {
+        url: gh("opentofu/opentofu", "v1.13.1", "tofu_1.13.1_darwin_arm64.tar.gz"),
+        sha256: "be78f659f04ef06a9dbd9b3934d46af95d787a3aa38396d459dea395261816a9",
+      },
+    },
+  },
 } as const satisfies Record<string, Tool>;
 export type ToolName = keyof typeof TOOLS;
 

@@ -142,7 +142,8 @@ export const steps: Step[] = [
     name: "platform up",
     group: "harness",
     timeoutMin: 25,
-    cmd: ["bun", "scripts/infra.ts", "stack", "--harness"],
+    // --multi: the second api/chat/worker/origin the `multi-instance` scenario needs (S1-c).
+    cmd: ["bun", "scripts/infra.ts", "stack", "--harness", "--multi"],
     when: () => (full || scenarios.length > 0) && process.env.VERIFY_INFRA !== "external",
   },
   {

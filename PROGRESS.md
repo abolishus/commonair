@@ -25,17 +25,65 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 Batch 1 (waves and shared rules: `.claude/briefs/r0/README.md`). ADR 0032 (scaling and
 availability) is **proposed**, awaiting the user.
 
-| Unit          | Wave | Brief                                | Owns (summary)                                                                                                      | State       |
-| ------------- | ---- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ----------- |
-| R0-a irc-fds  | 1    | `.claude/briefs/r0/R0-a-irc-fds.md`  | `services/irc/**`, `infra/systemd/commonair-irc.socket`, `commonair-irc.container`, `network.test.ts`, `e2e-irc.ts` | brief ready |
-| R0-b s3-ext   | 1    | `.claude/briefs/r0/R0-b-s3-ext.md`   | `selfhost.sh` (not backup), `unit-env.ts`, S3 lines of the units, `infra/garage/**`, Caddy S3 route, `e2e-s3.ts`    | brief ready |
-| S1-a capacity | 1    | `.claude/briefs/s1/S1-a-capacity.md` | `harness/src/load*`, `metrics.ts` (additive), `load-{plan,sweep}.ts`, `docs/operators/capacity.md`, `scripts/load`  | brief ready |
-| S1-c replicas | 1    | `.claude/briefs/s1/S1-c-replicas.md` | `harness/scenarios/multi-instance.ts`, `harness/compose.multi-instance.yaml`, `harness/src/multi/**`                | brief ready |
-| S1-g IaC      | 1    | `.claude/briefs/s1/S1-g-iac.md`      | `infra/tofu/**`, the IaC section of `docs/deploy/digitalocean.md`                                                   | brief ready |
-| R0-c backups  | 2    | `.claude/briefs/r0/R0-c-backups.md`  | `selfhost.sh` backup, `docs/self-hosting/backups.md`, `e2e-backup.ts`                                               | brief ready |
-| R0-d units    | 2    | `.claude/briefs/r0/R0-d-units.md`    | unit dependency lines, `infra/postgres/health.sh`, `quadlet.test.ts`                                                | brief ready |
-| R0-e tests    | 2    | `.claude/briefs/r0/R0-e-tests.md`    | `scripts/selfhost/e2e.ts`, `stack.int.test.ts`, `quadlet-order.test.ts`                                             | brief ready |
-| R0-f docs     | 3    | `.claude/briefs/r0/R0-f-docs.md`     | `docs/self-hosting/**` (not R0-b's and R0-c's pages)                                                                | brief ready |
+| Unit          | Wave | Brief                                | Owns (summary)                                                                                                      | State                        |
+| ------------- | ---- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| R0-a irc-fds  | 1    | `.claude/briefs/r0/R0-a-irc-fds.md`  | `services/irc/**`, `infra/systemd/commonair-irc.socket`, `commonair-irc.container`, `network.test.ts`, `e2e-irc.ts` | merged `c22eb96`             |
+| R0-b s3-ext   | 1    | `.claude/briefs/r0/R0-b-s3-ext.md`   | `selfhost.sh` (not backup), `unit-env.ts`, S3 lines of the units, `infra/garage/**`, Caddy S3 route, `e2e-s3.ts`    | merged `c3b48b4`             |
+| S1-a capacity | 1    | `.claude/briefs/s1/S1-a-capacity.md` | `harness/src/load*`, `metrics.ts` (additive), `load-{plan,sweep}.ts`, `docs/operators/capacity.md`, `scripts/load`  | merged `5cc5da8`             |
+| S1-c replicas | 1    | `.claude/briefs/s1/S1-c-replicas.md` | `harness/scenarios/multi-instance.ts`, `harness/compose.multi-instance.yaml`, `harness/src/multi/**`                | merged `eb13e10`             |
+| S1-g IaC      | 1    | `.claude/briefs/s1/S1-g-iac.md`      | `infra/tofu/**`, the IaC section of `docs/deploy/digitalocean.md`                                                   | merged `1b43869`; tofu unrun |
+| R0-c backups  | 2    | `.claude/briefs/r0/R0-c-backups.md`  | `selfhost.sh` backup, `docs/self-hosting/backups.md`, `e2e-backup.ts`                                               | brief ready                  |
+| R0-d units    | 2    | `.claude/briefs/r0/R0-d-units.md`    | unit dependency lines, `infra/postgres/health.sh`, `quadlet.test.ts`                                                | brief ready                  |
+| R0-e tests    | 2    | `.claude/briefs/r0/R0-e-tests.md`    | `scripts/selfhost/e2e.ts`, `stack.int.test.ts`, `quadlet-order.test.ts`                                             | brief ready                  |
+| R0-f docs     | 3    | `.claude/briefs/r0/R0-f-docs.md`     | `docs/self-hosting/**` (not R0-b's and R0-c's pages)                                                                | brief ready                  |
+
+### Wave 1 (2026-10-26): merged on main, gate pending the user
+
+Each unit ran in its own worktree, got an independent review, then a fix pass. All five merged
+locally; targeted tests only (the user runs the gate).
+
+| Unit | Commits (branch)                       | What landed                                                                                                                                                                                                                                                                                                                                                                                    | Targeted tests                                                                  |
+| ---- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| R0-a | `3c550de`, `f29edd8` (`r0/a-irc-fds`)  | IRC on systemd sockets (`commonair-irc.socket` 6667 `irc`, `commonair-ircs.socket` 6697 `ircs`; two units because `FileDescriptorName=` names every fd of a unit). Bun listens on inherited fds (proved first). `LISTEN_PID=1` accepted when ppid is catatonit. Log line shows `fdNames`. `e2e-irc.ts` probe (50 held from 127.0.0.2, one more refused, other sources admitted, TLS verified). | irc 270 unit, 21 int; infra 581                                                 |
+| R0-b | `a86086e`, `c1017c8` (`r0/b-s3-ext`)   | `selfhost.sh --s3-*`: external S3 store or Garage (default). `garage-init` → `storage-init` (creates or checks buckets/keys). Caddy S3 route as snippets per `S3_MODE`; CSP `connect-src` takes `S3_CONNECT_SRC`. Mode switch and endpoint/bucket repoint refused; storage validated before host prep as root. `docs/self-hosting/object-storage.md`. `e2e-s3.ts`.                             | selfhost-s3 53                                                                  |
+| S1-a | `01ff7ec`, `8526667` (`s1/a-capacity`) | Remote capacity tooling: SSH host sampling (/proc, podman stats), generator shards over SSH, `load-sweep` scenario (step up until a limit breaks; heartbeat errors make a step inconclusive; streams axis at 1080p/6000k), `docs/operators/capacity.md` runbook (Bun from the digest-pinned image).                                                                                            | harness load-* 117                                                              |
+| S1-c | `78c86a7`, `85b5229` (`s1/c-replicas`) | `multi-instance` scenario + `harness/compose.multi-instance.yaml` (`multi` profile: api-2, chat-2, worker-2, origin-2): nine ADR 0032 replica claims, two kills/restores, claim time budget.                                                                                                                                                                                                   | harness multi-* 123                                                             |
+| S1-g | `d6d69dc`, `504c597` (`s1/g-iac`)      | `infra/tofu/` DigitalOcean stages 0–2 (OpenTofu 1.13.1, provider 2.106.0), mocked-provider tests, encrypted state, firewall, backups, monitoring droplet, README with gaps.                                                                                                                                                                                                                    | **tofu fmt/validate/test never ran** (agents may not run the downloaded binary) |
+
+Integration commits: `a1e08cf` (playback rate-limit bucket, below), `fdcb287` (R0-a/R0-b
+contract requests), the S1 contract-request commit after the S1 merges.
+
+**Contract requests applied:**
+
+- R0-a: IRC drops out of compose.test `PUBLIC_PORTS`; the install's `enable --now` lists both IRC
+  sockets; selfhost.sh socket comment; `irc-socket.test.ts` expects `fdNames`.
+- R0-b: the IRC unit's `storage-init` dependency and S3 lines removed; caddy/compose/quadlet/
+  selfhost-unit-env tests for the rename and the snippets; CSP `connect-src 'self'
+  {$S3_CONNECT_SRC:}` and `S3_CONNECT_SRC` in Caddy's keys; config reference regenerated.
+- S1-a request 2 (user approved): `playback` rate-limit bucket (3000/min per address) for
+  `playback.start/heartbeat/end` instead of `default` (120/min, about 20 viewers per address).
+  Contracts `ProcedureMeta.rateLimit` gains `playback`. Test in `platform.int.test.ts`.
+- S1-c: `multi-instance` in `FULL_REQUIRED`; `scripts/infra.ts stack --harness --multi`; the
+  gate's stack step now starts the replicas (`verify.ts`).
+- S1-g: `REUSE.toml` annotation for `.terraform.lock.hcl`, `check-licenses.ts` OpenTofu
+  provider check (`infra/tofu/provider-licenses.json`), `scripts/release/tools.ts` OpenTofu
+  1.13.1, `tofu-licenses.test.ts`.
+
+**Held:** S1-g's `verify.ts` tofu step and CI change, until the user has run
+`REQUIRE_TOFU=1 bash infra/tofu/check.sh` (h1: lock hashes were computed by hand). S1-a request 1
+(move `HARNESS_LOAD_*` from `harness/src/load/env.ts` into `harness/src/env.ts`) and request 3
+(an `inconclusive` scenario status) deferred: the code works without them; capacity.md tells
+readers to read `data.verdict.outcome`.
+
+**Open findings (accepted, not fixed):**
+
+- R0-a: no `IRC_LISTEN=systemd` opt-in (would need a config env var); a pid mismatch falls back
+  to binding inside the container. The e2e plain/TLS checks are the guard. Whether Podman passes
+  `LISTEN_FDNAMES` and how catatonit sets `LISTEN_PID` is unverified until the e2e runs.
+- S1-g: backups versioning does not stop a stolen readwrite key (documented as accepted risk with
+  options); Spaces lifecycle rule with only abort-multipart unconfirmed; staging has no uptime
+  monitoring until production's monitoring droplet exists; region/size slugs need `doctl`.
+- S1-c: not run live; S1-a: droplet sweep not run.
 
 ## Web gaps from the first real-host install (2026-10-26, branch `claude/web-gaps-resend-upload`)
 

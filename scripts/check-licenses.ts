@@ -4,7 +4,8 @@
 /**
  * Fails on any dependency whose license is not on the OSI allowlist.
  * Covers: every installed npm package (all workspaces, dev included), the Go
- * relay's modules, and every container image referenced by compose.yaml.
+ * relay's modules, every container image referenced by compose.yaml, and every
+ * OpenTofu provider in a .terraform.lock.hcl under infra/tofu.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -174,14 +175,95 @@ export function checkGo(relayDir: string): { checked: number; findings: Finding[
   return { checked, findings };
 }
 
+type ProviderRegistry = Record<string, { license: string; source: string }>;
+
+function isProviderRegistry(value: unknown): value is ProviderRegistry {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.values(value).every(
+    (entry: unknown) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      "license" in entry &&
+      typeof entry.license === "string" &&
+      "source" in entry &&
+      typeof entry.source === "string",
+  );
+}
+
+function* lockFiles(dir: string, depth = 0): Generator<string> {
+  if (depth > 8 || !existsSync(dir)) return;
+  for (const entry of readdirSync(dir)) {
+    // `tofu init` downloads providers into .terraform; only the committed lock files count.
+    if (entry === ".terraform") continue;
+    const full = join(dir, entry);
+    let st;
+    try {
+      st = statSync(full);
+    } catch {
+      continue; // dangling symlink
+    }
+    if (st.isDirectory()) yield* lockFiles(full, depth + 1);
+    else if (entry === ".terraform.lock.hcl") yield full;
+  }
+}
+
+/** Every provider pinned in a lock file must be listed in infra/tofu/provider-licenses.json. */
+export function checkTofu(tofuDir: string, registryPath: string): { checked: number; findings: Finding[] } {
+  if (!existsSync(tofuDir)) return { checked: 0, findings: [] };
+  const findings: Finding[] = [];
+  let registry: ProviderRegistry = {};
+  if (existsSync(registryPath)) {
+    const parsed: unknown = JSON.parse(readFileSync(registryPath, "utf8"));
+    if (!isProviderRegistry(parsed))
+      return {
+        checked: 0,
+        findings: [
+          {
+            name: registryPath,
+            version: "",
+            license: "",
+            reason: "must map each provider address to { license: string, source: string }",
+            where: registryPath,
+          },
+        ],
+      };
+    registry = parsed;
+  }
+  const seen = new Set<string>();
+  for (const lock of lockFiles(tofuDir)) {
+    const text = readFileSync(lock, "utf8");
+    for (const match of text.matchAll(/^provider\s+"([^"]+)"\s*\{[^}]*?^\s*version\s*=\s*"([^"]+)"/gm)) {
+      const [, address, version] = match;
+      if (address === undefined || version === undefined) continue;
+      seen.add(`${address}@${version}`);
+      const entry = registry[address];
+      const verdict = entry
+        ? evaluate(entry.license)
+        : { ok: false as const, reason: "not listed in infra/tofu/provider-licenses.json" };
+      if (!verdict.ok)
+        findings.push({
+          name: address,
+          version,
+          license: entry?.license ?? "UNKNOWN",
+          reason: verdict.reason,
+          where: lock,
+        });
+    }
+  }
+  return { checked: seen.size, findings };
+}
+
 if (import.meta.main) {
   const npm = checkNpm(["."]);
   const images = checkImages("compose.yaml", "infra/image-licenses.json");
   const go = checkGo("relay");
-  const findings = [...npm.findings, ...images.findings, ...go.findings];
+  const tofu = checkTofu("infra/tofu", "infra/tofu/provider-licenses.json");
+  const findings = [...npm.findings, ...images.findings, ...go.findings, ...tofu.findings];
   for (const f of findings)
     console.error(`✗ ${f.name}${f.version ? `@${f.version}` : ""} [${f.license}] ${f.reason}\n    ${f.where}`);
-  console.log(`check-licenses: ${npm.checked} npm packages, ${images.checked} images, ${go.checked} Go modules`);
+  console.log(
+    `check-licenses: ${npm.checked} npm packages, ${images.checked} images, ${go.checked} Go modules, ${tofu.checked} OpenTofu providers`,
+  );
   if (findings.length > 0) {
     console.error(`\n${findings.length} license violation(s). See docs/decisions/0002-license-policy.md.`);
     process.exit(1);

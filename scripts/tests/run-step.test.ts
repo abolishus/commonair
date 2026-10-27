@@ -10,6 +10,7 @@ import {
   foreignContainers,
   HARNESS_OVERRIDES,
   stackFiles,
+  stackProfiles,
   staleImageContainers,
   staleTestResources,
 } from "../infra.ts";
@@ -165,7 +166,17 @@ describe("stackFiles", () => {
     const files = stackFiles(["--harness"]).filter((a) => a !== "-f");
     expect(files).toHaveLength(1 + HARNESS_OVERRIDES.length);
     expect(files.slice(1).map((f) => f.slice(f.indexOf("/harness/") + 1))).toEqual([...HARNESS_OVERRIDES]);
-    expect(stackFiles(["harness/compose.e6.yaml", "--harness"]).filter((a) => a === "-f")).toHaveLength(5);
+    expect(stackFiles(["harness/compose.e6.yaml", "--harness"]).filter((a) => a === "-f")).toHaveLength(
+      2 + HARNESS_OVERRIDES.length,
+    );
+  });
+
+  test("--multi adds the multi profile, only on top of --harness, and is not a file", () => {
+    expect(stackProfiles(["--harness"])).toEqual(["harness"]);
+    expect(stackProfiles(["--harness", "--multi"])).toEqual(["harness", "multi"]);
+    expect(() => stackProfiles(["--multi"])).toThrow(/needs --harness/);
+    expect(stackFiles(["--harness", "--multi"])).toEqual(stackFiles(["--harness"]));
+    expect(HARNESS_OVERRIDES).toContain("harness/compose.multi-instance.yaml");
   });
 
   test("refuses a missing file or an option instead of starting the wrong stack", () => {

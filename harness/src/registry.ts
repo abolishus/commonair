@@ -51,6 +51,8 @@ export const FULL_REQUIRED = [
   // E6 (this unit).
   "backup-restore",
   "e2e-relay",
+  // S1-c: two of each app service (needs `stack --harness --multi`).
+  "multi-instance",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

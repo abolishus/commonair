@@ -8,7 +8,9 @@
  *   bun scripts/infra.ts stack [--harness] [override.yaml...]
  *                               build and start the whole platform (+ harness profile), wait for health;
  *                               override files are layered over compose.yaml (e.g.
- *                               harness/compose.trust-safety.yaml for the `trust-safety` scenario)
+ *                               harness/compose.trust-safety.yaml for the `trust-safety` scenario);
+ *                               --multi (with --harness) also starts the `multi` replicas
+ *                               (api-2, chat-2, worker-2, origin-2) for `multi-instance`
  *   bun scripts/infra.ts down   stop everything (volumes kept)
  *   bun scripts/infra.ts reset  stop everything and delete volumes
  */
@@ -385,13 +387,24 @@ export const HARNESS_OVERRIDES = [
   "harness/compose.trust-safety.yaml",
   "harness/compose.e5-coop.yaml",
   "harness/compose.e6.yaml",
+  // Starts nothing unless the `multi` profile is on (`stack --harness --multi`).
+  "harness/compose.multi-instance.yaml",
 ] as const;
+
+/** The `multi` profile's replicas (harness/compose.multi-instance.yaml, scenario `multi-instance`). */
+export const MULTI_REPLICAS = ["api-2", "chat-2", "worker-2", "origin-2"];
+
+/** Compose profiles `stack` enables: `harness` always, `multi` with `--multi` (needs `--harness`). */
+export function stackProfiles(args: readonly string[]): string[] {
+  if (!args.includes("--multi")) return ["harness"];
+  if (!args.includes("--harness")) throw new Error("--multi needs --harness (the replicas are a harness override)");
+  return ["harness", "multi"];
+}
 
 /** `-f` arguments for `stack`: none for the plain stack, else compose.yaml plus each override. */
 export function stackFiles(args: readonly string[]): string[] {
-  const overrides = args.includes("--harness")
-    ? [...HARNESS_OVERRIDES, ...args.filter((a) => a !== "--harness")]
-    : args;
+  const rest = args.filter((a) => a !== "--harness" && a !== "--multi");
+  const overrides = args.includes("--harness") ? [...HARNESS_OVERRIDES, ...rest] : rest;
   if (overrides.length === 0) return [];
   for (const o of overrides) {
     if (o.startsWith("-")) throw new Error(`unknown option ${o}; stack takes override file paths`);
@@ -459,14 +472,22 @@ export function startPlan(
 }
 
 /** The merged compose configuration `stack` starts (after overrides). */
-function composeConfig(files: string[]): Record<string, ComposeService> {
-  const proc = Bun.spawnSync(["podman", "compose", ...files, "--profile", "harness", "config"], {
+function composeConfig(files: string[], profileArgs: string[]): Record<string, ComposeService> {
+  const proc = Bun.spawnSync(["podman", "compose", ...files, ...profileArgs, "config"], {
     stderr: "pipe",
   });
   if (proc.exitCode !== 0) throw new Error(`podman compose config failed:\n${proc.stderr.toString()}`);
   // The provider banner ("Executing external compose provider…") goes to stderr; stdout is YAML.
   const parsed = Bun.YAML.parse(proc.stdout.toString()) as { services?: Record<string, ComposeService> };
   return parsed.services ?? {};
+}
+
+/** `down` reads compose.yaml alone, which does not know the `multi` replicas: remove them first. */
+function removeReplicas(): void {
+  const names = projectContainers()
+    .filter((r) => MULTI_REPLICAS.includes(r.service))
+    .map((r) => r.name);
+  if (names.length > 0) Bun.spawnSync(["podman", "rm", "-f", ...names], { timeout: 60_000 });
 }
 
 async function waitConditions(wait: Record<string, Condition>): Promise<void> {
@@ -508,14 +529,16 @@ if (import.meta.main) {
     } else if (cmd === "stack") {
       preflight();
       const files = stackFiles(process.argv.slice(3));
-      compose([...files, "--profile", "harness", "build"], 20 * 60_000);
+      const profiles = stackProfiles(process.argv.slice(3));
+      const profileArgs = profiles.flatMap((p) => ["--profile", p]);
+      compose([...files, ...profileArgs, "build"], 20 * 60_000);
       removeStaleImageContainers();
-      const plan = startPlan(composeConfig(files), new Set(["harness"]), ONE_SHOT_SERVICES);
-      composeUp([...files, "--profile", "harness", "up", "-d", ...plan.first], 10 * 60_000);
+      const plan = startPlan(composeConfig(files, profileArgs), new Set(profiles), ONE_SHOT_SERVICES);
+      composeUp([...files, ...profileArgs, "up", "-d", ...plan.first], 10 * 60_000);
       await waitExited(ONE_SHOT_SERVICES);
       for (const wave of plan.waves) {
         await waitConditions(wave.wait);
-        composeUp([...files, "--profile", "harness", "up", "-d", "--no-deps", ...wave.services], 10 * 60_000);
+        composeUp([...files, ...profileArgs, "up", "-d", "--no-deps", ...wave.services], 10 * 60_000);
       }
       // podman can keep a one-shot container (migrate) whose dependents block its removal, and
       // compose then reuses it: the stack would run without the new migrations. Fail loudly.
@@ -525,15 +548,20 @@ if (import.meta.main) {
           `still on an old image: ${still.map((r) => r.name).join(", ")}; ` +
             `run \`podman rm -f --depend ${still.map((r) => r.name).join(" ")}\` and \`stack\` again`,
         );
-      await waitHealthy(STACK_HEALTHY_SERVICES, 300_000);
+      await waitHealthy(
+        profiles.includes("multi") ? [...STACK_HEALTHY_SERVICES, ...MULTI_REPLICAS] : STACK_HEALTHY_SERVICES,
+        300_000,
+      );
       console.log("infra: platform healthy");
     } else if (cmd === "down") {
+      removeReplicas();
       compose(["down"], 5 * 60_000);
     } else if (cmd === "reset") {
+      removeReplicas();
       compose(["down", "-v"], 5 * 60_000);
     } else {
       console.error(
-        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | stack [--harness] [override.yaml...] | down | reset",
+        "usage: bun scripts/infra.ts test [--harness] [override.yaml...] | stack [--harness [--multi]] [override.yaml...] | down | reset",
       );
       process.exit(2);
     }
