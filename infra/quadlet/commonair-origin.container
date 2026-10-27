@@ -29,6 +29,7 @@ EnvironmentFile=%h/.config/commonair/unit-env/commonair-origin.env
 Environment=MEDIAMTX_API_URL=http://mediamtx:9997
 Environment=MEDIAMTX_HLS_URL=http://mediamtx:8888
 Environment=MEDIAMTX_RTSP_URL=rtsp://mediamtx:8554
+Environment=MEDIAMTX_SRT_URL=srt://mediamtx:8890
 Environment=API_INTERNAL_URL=http://api:3001
 Environment=CHAT_INTERNAL_URL=ws://chat:3002/ws
 Environment=ORIGIN_INTERNAL_URL=http://origin:3003

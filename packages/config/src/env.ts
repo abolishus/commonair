@@ -237,6 +237,8 @@ export const mediaEnv = z.object({
   MEDIAMTX_HLS_URL: z.url().default("http://localhost:8888"),
   /** MediaMTX RTSP server media reads streams from and publishes renditions to. */
   MEDIAMTX_RTSP_URL: z.string().default("rtsp://localhost:8554"),
+  /** MediaMTX SRT server the ladder and recorder read from (one timeline for every reader, ADR 0012). Internal only. */
+  MEDIAMTX_SRT_URL: z.string().default("srt://localhost:8890"),
   /** Public RTMP ingest URL shown to streamers (the server URL in OBS). */
   INGEST_RTMP_PUBLIC_URL: z.string().default("rtmp://localhost:1935/live"),
   /** Public WHIP ingest base shown to streamers; `/<channel>/whip` is appended. */

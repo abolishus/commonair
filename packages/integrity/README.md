@@ -175,8 +175,9 @@ W1 gate policy belongs to ADR 0015). What it changes is what a verified session 
   live, pending and never-scored sessions, so one that ends before the next scoring pass (every
   15 s) is still scored once inside the finalize window. Without `scored_at` a CDN session would
   count until scored, or forever.
-- Stream-hour eligibility and follow prior viewing count only gate-eligible sessions. Patronage and
-  governance inputs still count every verified session (a policy question for the co-op).
+- Stream-hour eligibility, follow prior viewing, patronage viewer-hours and governance contribution
+  inputs count only gate-eligible sessions (patronage and governance since 2026-10-27, by the
+  user's decision).
 
 The reason reaches existing rows the next time the scorer touches them: live sessions are
 re-scored every pass, so a CDN session already verified gains it within a pass or two. Ended

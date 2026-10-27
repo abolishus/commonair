@@ -35,6 +35,7 @@ x-multi-app-env: &app-env
   MEDIAMTX_API_URL: http://mediamtx:9997
   MEDIAMTX_HLS_URL: http://mediamtx:8888
   MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554
+  MEDIAMTX_SRT_URL: srt://mediamtx:8890
   API_INTERNAL_URL: http://api:3001
   CHAT_INTERNAL_URL: ws://chat:3002/ws
   ORIGIN_INTERNAL_URL: http://origin:3003
