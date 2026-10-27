@@ -16,15 +16,16 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test, vi } from "vite-plus/test";
+import { afterAll, describe, expect, test, vi } from "vite-plus/test";
+import { linkExecutables } from "../tests/support/exec-cache.ts";
 
-// Each run starts a few dozen processes (every real tool is wrapped to log its argv): seconds
-// apiece, more under load.
+// Each run starts a few dozen processes: seconds apiece, more under load.
 vi.setConfig({ testTimeout: 60_000 });
 
 const ROOT = new URL("../../", import.meta.url).pathname;
@@ -136,7 +137,7 @@ interface Host {
   run(args: string[], env?: Record<string, string>): Run;
   /** Every stub call (podman, systemctl, rclone) as "name args". */
   calls(): string[];
-  /** Every real tool's argv, as ps would show it. */
+  /** Every real tool's argv, as ps would show it (only with `recordArgv`). */
   argv(): string;
   /** The RCLONE_* environment of each rclone call, in order. */
   rcloneEnvs(): Record<string, string>[];
@@ -152,9 +153,20 @@ const parseEnv = (text: string) =>
       .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
   );
 
-/** An installed instance as far as `backup` can tell: a current release and an env file. */
-function host(env: Record<string, string>, opts: { rclone?: boolean } = {}): Host {
+/** Hosts made by this file, removed after it. */
+const hosts: string[] = [];
+afterAll(() => {
+  for (const d of hosts.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+/**
+ * An installed instance as far as `backup` can tell: a current release and an env file.
+ * `recordArgv` wraps every real tool but sh to log its argv first; that triples the run time,
+ * so only the tests that read `argv()` turn it on.
+ */
+function host(env: Record<string, string>, opts: { rclone?: boolean; recordArgv?: boolean } = {}): Host {
   const dir = mkdtempSync(join(tmpdir(), "commonair-backup-host-"));
+  hosts.push(dir);
   const home = join(dir, "home");
   const stub = join(dir, "stub");
   const bin = join(dir, "bin");
@@ -188,7 +200,7 @@ function host(env: Record<string, string>, opts: { rclone?: boolean } = {}): Hos
   for (const tool of REAL_TOOLS) {
     const path = Bun.which(tool);
     if (!path) continue;
-    if (tool === "sh") symlinkSync(path, join(bin, tool));
+    if (!opts.recordArgv || tool === "sh") symlinkSync(path, join(bin, tool));
     else {
       writeFileSync(join(bin, tool), `#!/bin/sh\nprintf '%s\\n' "${tool} $*" >> "${argvLog}"\nexec ${path} "$@"\n`);
       chmodSync(join(bin, tool), 0o755);
@@ -201,11 +213,9 @@ function host(env: Record<string, string>, opts: { rclone?: boolean } = {}): Hos
   }
   for (const [name, body] of Object.entries(STUBS)) {
     if (name === "rclone" && opts.rclone === false) continue;
-    writeFileSync(
-      join(stub, name),
-      `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> "$STUB_LOG"\n${body.replaceAll("\\${", "${")}\n`,
-    );
-    chmodSync(join(stub, name), 0o755);
+    linkExecutables(stub, {
+      [name]: `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> "$STUB_LOG"\n${body.replaceAll("\\${", "${")}\n`,
+    });
   }
   const base: Record<string, string> = {
     PATH: `${stub}:${bin}`,
@@ -443,7 +453,7 @@ describe("--objects with Garage on this host", () => {
   });
 
   test("no key ever reaches a command line, and none is printed", () => {
-    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const h = host({ ...GARAGE_ENV, ...REMOTE }, { recordArgv: true });
     const r = h.run(["backup", "--objects"]);
     expectOk(r);
     expect(h.argv()).not.toBe("");
@@ -616,13 +626,16 @@ describe("--objects with an external store", () => {
   });
 
   test("a read-only key and a host-side endpoint of the operator's, when set", () => {
-    const h = host({
-      ...EXTERNAL_ENV,
-      ...REMOTE,
-      BACKUP_OBJECTS_SOURCE_ENDPOINT: "https://nyc3.example.net",
-      BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID: "DO00READONLYSOURCE01",
-      BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY: "SrcSecret/OnlyInEnv+0123456789",
-    });
+    const h = host(
+      {
+        ...EXTERNAL_ENV,
+        ...REMOTE,
+        BACKUP_OBJECTS_SOURCE_ENDPOINT: "https://nyc3.example.net",
+        BACKUP_OBJECTS_SOURCE_ACCESS_KEY_ID: "DO00READONLYSOURCE01",
+        BACKUP_OBJECTS_SOURCE_SECRET_ACCESS_KEY: "SrcSecret/OnlyInEnv+0123456789",
+      },
+      { recordArgv: true },
+    );
     const r = h.run(["backup", "--objects"]);
     expectOk(r);
     for (const e of h.rcloneEnvs())
@@ -638,7 +651,7 @@ describe("--objects with an external store", () => {
 
 describe("--restore-objects", () => {
   test("copies (never syncs) the offsite copy back, with the instance's own write keys", () => {
-    const h = host({ ...GARAGE_ENV, ...REMOTE });
+    const h = host({ ...GARAGE_ENV, ...REMOTE }, { recordArgv: true });
     const r = h.run(["backup", "--restore-objects"]);
     expectOk(r);
     expect(rcloneCalls(h).map((c) => c.split(" ").slice(1, 4).join(" "))).toEqual([

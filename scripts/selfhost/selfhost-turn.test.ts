@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import { DEFAULT_REGISTRY, RELEASE_IMAGES } from "../release/manifest.ts";
 import { buildBundle } from "./bundle.ts";
+import { linkExecutables } from "../tests/support/exec-cache.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SCRIPT = join(ROOT, "scripts/selfhost.sh");
@@ -205,8 +206,7 @@ function host(): Host {
     ? `exec ${realSha} "$@"`
     : `[ "$1" = -c ] && exec ${Bun.which("shasum")} -a 256 -c -s "$3"; exec ${Bun.which("shasum")} -a 256 "$@"`;
   for (const [name, body] of Object.entries(stubs)) {
-    writeFileSync(join(stub, name), `#!/bin/sh\n${body.replaceAll("\\${", "${")}\n`);
-    chmodSync(join(stub, name), 0o755);
+    linkExecutables(stub, { [name]: `#!/bin/sh\n${body.replaceAll("\\${", "${")}\n` });
   }
   const env: Record<string, string> = {
     PATH: `${stub}:${bin}`,
