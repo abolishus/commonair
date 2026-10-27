@@ -211,6 +211,20 @@
       "when": 1793114634640,
       "tag": "0029_w0_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793128724287,
+      "tag": "0030_scoring_idx_unscored",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793128889882,
+      "tag": "0031_enforcement_statements_content_uq",
+      "breakpoints": true
     }
   ]
 }

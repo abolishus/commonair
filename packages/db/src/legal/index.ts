@@ -21,7 +21,7 @@ export const LEGAL_SEED_VERSION = "2026-10-18-draft";
  * version with that text. Bump this (not `LEGAL_SEED_VERSION`, which would make everyone re-accept
  * the terms) when the shipped notice changes and an older one may have reached a database.
  */
-export const ENFORCEMENT_NOTICE_SEED_VERSION = "2026-10-27-skeleton";
+export const ENFORCEMENT_NOTICE_SEED_VERSION = "2026-10-27-draft";
 /**
  * `privacy` and `cookies` gained the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, so they take their own versions. A new privacy version

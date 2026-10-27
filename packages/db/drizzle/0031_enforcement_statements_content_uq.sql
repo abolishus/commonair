@@ -1,0 +1,2 @@
+DROP INDEX "enforcement_statements_source_recipient_uq";--> statement-breakpoint
+CREATE UNIQUE INDEX "enforcement_statements_source_recipient_content_uq" ON "enforcement_statements" USING btree ("source_audit_id","recipient_user_id","content_type","content_id");

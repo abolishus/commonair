@@ -21,11 +21,14 @@ MediaMTX reachable) come from `@commonair/service`.
 
 ## Routes
 
-| Route                           | Who           | Auth                                                        | Playlist URIs                                      |
-| ------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------------------- |
-| `GET /hls/live/<slug>/…`        | viewers       | `?t=<playback token>`, `src` = `origin` or `cdn`            | per-viewer, `?t=` appended (relative, or CDN base) |
-| `GET /relay-pull/live/<slug>/…` | member relays | `Authorization: Bearer <relay token>`                       | relative, no token                                 |
-| `GET /cdn/live/<slug>/…`        | CDN pull      | `x-cdn-auth: <HMAC>` (only when `CDN_PROVIDER=origin-pull`) | relative, no token                                 |
+| Route                                                    | Who                        | Auth                                                        | Playlist URIs                                      |
+| -------------------------------------------------------- | -------------------------- | ----------------------------------------------------------- | -------------------------------------------------- |
+| `GET /hls/live/<slug>/…`                                 | viewers                    | `?t=<playback token>`, `src` = `origin` or `cdn`            | per-viewer, `?t=` appended (relative, or CDN base) |
+| `GET /relay-pull/live/<slug>/…`                          | member relays              | `Authorization: Bearer <relay token>`                       | relative, no token                                 |
+| `GET /cdn/live/<slug>/…`                                 | CDN pull                   | `x-cdn-auth: <HMAC>` (only when `CDN_PROVIDER=origin-pull`) | relative, no token                                 |
+| `GET\|HEAD /p2p-digest/live/<slug>[/<rendition>]/<file>` | P2P players                | `?t=<playback token>`                                       | none (segments only)                               |
+| `GET\|HEAD /vod/<vodId>/<file>`                          | viewers of non-public VODs | `?t=<VOD playback token>`                                   | `?t=` appended to every URI                        |
+| `GET\|HEAD /media/<key>`                                 | anyone                     | none (public key prefixes only, ADR 0009)                   | none                                               |
 
 `…` is `index.m3u8`, a media playlist, `init.mp4`, a segment or an LL-HLS part, optionally under
 a rendition directory (`1080p`, `720p`, `480p`, `audio`). Paths are validated strictly: known
@@ -33,6 +36,21 @@ route, `live/<slug>` with a valid slug, at most one known rendition directory, o
 name with a known extension (`m3u8 mp4 m4s m4a m4v ts aac vtt`). Dot segments,
 percent-encoding, backslashes and nested directories are rejected with 404 before anything
 else happens.
+
+**`/p2p-digest/`** (ADR 0005 amendment 1) answers with the SHA-256 of the segment `/hls/` would
+serve for the same path, as 64 lowercase hex characters, `cache-control: private, max-age=120`.
+P2P players check every peer-delivered segment against it. It takes the same `?t=` playback token
+and resolves the source through the same channel directory as `/hls/` (the AAC copy while one is
+live, `503 starting` while it starts; `404 offline`; `403 forbidden: wrong_channel` for another
+channel's token). Only segments have digests: playlists, parts, `init.mp4` and anything else are
+refused with 404 and counted in the request metric as `kind="other"`. Only the origin serves it,
+never a relay or the CDN.
+
+**`/vod/`** (ADR 0009 amendment 1) serves VODs that are not public: a VOD playback token for that
+VOD (`src = origin`), then the VOD's state (ready, not removed, broadcast not restricted, channel
+not suspended), cached per VOD for 5 s so a removal revokes every token within 5 s. Objects are
+read from the VOD's storage prefix; the playlist is rewritten so every URI carries the token;
+`cache-control: private`. No integrity samples, segment log or receipts.
 
 ## Request flow
 

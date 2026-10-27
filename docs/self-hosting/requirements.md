@@ -19,6 +19,14 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 - **systemd 254 or newer**, for `RestartSteps=` in the units. Both distributions have it.
 - **amd64 or arm64.** Every release image is built for both.
 
+## Time synchronization
+
+The host clock must be NTP-synchronized (ADR 0012 decision 2). Live and VOD segment timestamps
+come from it, so an unsynchronized clock makes them drift. Debian and Fedora both ship a client:
+enable `systemd-timesyncd` (`timedatectl set-ntp true`) or `chrony`. Check with
+`timedatectl show -p NTPSynchronized --value`, which should print `yes`. `selfhost.sh` warns at
+install time if it is not, and never blocks.
+
 ## Hardware
 
 | Instance                      | CPU                         | RAM   | Disk                        | Source                   |

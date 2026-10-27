@@ -7,7 +7,7 @@
  * appeal and reversal computed on read; readable (and appealable) while suspended; a T0 NCII
  * statement listed without its case. Also records whether a suspended user can sign in at all.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { en } from "@commonair/email";
 import { legalSeedDocuments, schema, uuidv7 } from "@commonair/db";
@@ -331,5 +331,68 @@ describe("while suspended", () => {
     expect(res.status).toBe(403);
     expect(fresh.jar.cookies.size).toBe(0);
     expect((await fresh.call("GET", "/api/me/enforcement")).status).toBe(401);
+  });
+});
+
+describe("moderation.review suspend audit details", () => {
+  /** An open T1 case about a fresh user's own channel. */
+  async function suspendCase(u: User) {
+    const [c] = await db().select().from(schema.channels).where(eq(schema.channels.ownerId, u.userId));
+    const id = uuidv7();
+    await db().insert(schema.moderationCases).values({
+      id,
+      tier: "t1",
+      status: "open",
+      origin: "classifier",
+      subjectType: "broadcast",
+      subjectId: uuidv7(),
+      channelId: c!.id,
+      userId: u.userId,
+      category: "weapons",
+    });
+    return { caseId: id, channelId: c!.id };
+  }
+  const review = (caseId: string) =>
+    staff.client.call("POST", `/api/admin/moderation/cases/${caseId}/review`, {
+      decision: "suspend",
+      note: "Repeated weapons sales.",
+      suspendTarget: "both",
+      durationSeconds: 3600,
+    });
+  const suspendDetails = async (caseId: string) => {
+    const [row] = await db()
+      .select({ details: schema.auditLog.details })
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.subjectId, caseId), eq(schema.auditLog.action, "moderation.case.suspend")));
+    return row?.details as Record<string, unknown> | undefined;
+  };
+
+  test("records which suspensions were applied, so the statement builder states only those", async () => {
+    const erin = await signUpAndSignIn(api);
+    const applied = await suspendCase(erin);
+    const res = await review(applied.caseId);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(await suspendDetails(applied.caseId)).toMatchObject({
+      decision: "suspend",
+      suspendTarget: "both",
+      durationSeconds: 3600,
+      userSuspended: true,
+      channelSuspended: true,
+    });
+
+    // An account under a T0 ban and a channel already suspended are left as they are.
+    const frank = await signUpAndSignIn(api);
+    const skipped = await suspendCase(frank);
+    await db()
+      .update(schema.users)
+      .set({ banned: true, banReason: "t0_hash_match", banExpires: null })
+      .where(eq(schema.users.id, frank.userId));
+    await db()
+      .update(schema.channels)
+      .set({ suspendedAt: new Date(), suspendedReason: "t0_hash_match" })
+      .where(eq(schema.channels.id, skipped.channelId));
+    const res2 = await review(skipped.caseId);
+    expect(res2.status, JSON.stringify(res2.body)).toBe(200);
+    expect(await suspendDetails(skipped.caseId)).toMatchObject({ userSuspended: false, channelSuspended: false });
   });
 });

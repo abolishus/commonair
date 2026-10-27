@@ -171,27 +171,28 @@ W1 gate policy belongs to ADR 0015). What it changes is what a verified session 
   is the marker W1-watch-gate reads. It takes the verdict and reasons **as stored**.
 - `GATE_ELIGIBLE` (`jobs.ts`): the same as SQL on the alias `ps`, plus `ps.scored_at is not null`.
   The API promotes a session to verified on heartbeat before the scorer has run
-  (`services/api/src/routes/playback.ts`); such a session has **no reasons yet**, and one that ends
-  before the next scoring pass (every 15 s) is never scored, because the scorer takes only live or
-  pending sessions. Without `scored_at` a CDN session would count until scored, or forever.
+  (`services/api/src/routes/playback.ts`); such a session has **no reasons yet**. The scorer takes
+  live, pending and never-scored sessions, so one that ends before the next scoring pass (every
+  15 s) is still scored once inside the finalize window. Without `scored_at` a CDN session would
+  count until scored, or forever.
 - Stream-hour eligibility and follow prior viewing count only gate-eligible sessions. Patronage and
   governance inputs still count every verified session (a policy question for the co-op).
 
 The reason reaches existing rows the next time the scorer touches them: live sessions are
 re-scored every pass, so a CDN session already verified gains it within a pass or two. Ended
-verified sessions are never re-scored and keep the reasons they had; no migration rewrites them.
+verified sessions that were scored are never re-scored and keep the reasons they had; no migration rewrites them.
 A CDN session that ended before this change and was scored then still counts toward the stream
 hours of its last 48 hours (the recompute window) until it ages out.
 
-**Known cost of `scored_at`:** the scorer's candidates (`ended_at is null or verdict = 'pending'`,
-the predicate of `playback_sessions_scoring_idx`) leave out a session that the API promoted and
-that ended before its first pass. Such an honest session (about 15 s of watching after promotion,
-longer when scoring is backlogged) is never scored, so it earns no stream-hour or follow credit.
-On deploy the 48 h stream-hour recompute applies the new rule to past hours too, so an hour that
-was eligible only through such sessions (or through CDN sessions still live and re-marked) can
-flip to ineligible. Closing this needs ended, verified, never-scored sessions inside the finalize
-window among the candidates, which changes the index predicate (a migration, owned by the
-orchestrator).
+**Known cost of `scored_at`:** the scorer's candidates (`ended_at is null or verdict = 'pending' or
+scored_at is null`, the predicate of `playback_sessions_scoring_idx`, migration
+`0030_scoring_idx_unscored`) include a session that the API promoted and that ended before its first
+pass, as long as it ended inside the finalize window (`finalizeSeconds`, 3600). It is scored once,
+from whatever heartbeat and fetch history is still in Valkey, and earns stream-hour and follow
+credit from then on. A session that ended before the finalize window and was never scored (for
+example one that ended while the scorer was down for more than an hour) stays unscored and earns
+no such credit. On deploy the 48 h stream-hour recompute applies the rule to past hours too, so an
+hour that was eligible only through CDN sessions still live and re-marked can flip to ineligible.
 
 Expected segments = claimed watch seconds / segment duration (1 s) × the HTTP share, judged only
 when at least 10 are expected. The HTTP share is 10 % (`P2P_HTTP_SHARE`) for a **P2P-evidenced**

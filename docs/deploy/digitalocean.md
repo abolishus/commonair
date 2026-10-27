@@ -154,6 +154,7 @@ inbound, over IPv4 and IPv6:
 | 443     | UDP      | HTTP/3                                          |
 | 1935    | TCP      | RTMP ingest                                     |
 | 8189    | UDP      | WebRTC ICE (WHIP signaling itself is on 443)    |
+| 3478    | UDP      | coturn STUN for P2P playback                    |
 | 6697    | TCP      | IRC over TLS                                    |
 | 6667    | TCP      | plain IRC, if you offer it                      |
 

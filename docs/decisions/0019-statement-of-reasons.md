@@ -125,22 +125,22 @@ version, so the contract step's skeleton never collides with W0-sor's text and t
 
 ### 3. Which actions produce a statement: platform T1/T2/NCII, never channel moderation
 
-| Source audit action                                     | Statement                   | Restriction                            |
-| ------------------------------------------------------- | --------------------------- | -------------------------------------- |
-| `moderation.t1.restrict` (`scan.ts:213`)                | yes                         | visibility: restricted                 |
-| `moderation.t1.flag` (`scan.ts:213`, case already open) | no                          | adds a flag only                       |
-| `moderation.t2.label` (`scan.ts:326`)                   | yes                         | visibility: age-gated                  |
-| `moderation.t1.upload_reject` (`uploads.ts:182`)        | yes                         | visibility: removed                    |
-| `moderation.case.warn` (`moderation.ts:218`)            | yes                         | warning (no restriction)               |
-| `moderation.case.end_stream`                            | yes                         | visibility: removed                    |
-| `moderation.case.suspend` (user, channel or both)       | yes, one per target         | account / service suspension, with end |
-| `moderation.case.clear`, `.escalate_legal`              | no                          | a lift, or a hand-off to T0            |
-| `ncii.decide` with `removed` (`ncii.ts:324`)            | yes, one per affected owner | visibility: removed                    |
-| `ncii.decide` with `rejected`                           | no                          | nothing restricted                     |
-| `ncii.auto_hide` (`ncii-clock.ts:167`)                  | yes, one per affected owner | visibility: disabled                   |
-| `moderation.t0.match`, CSAM list (`t0.ts:284`)          | no (counsel to confirm)     | —                                      |
-| `moderation.t0.match`, NCII list (`t0.ts:284`)          | yes, under `illegal.ncii`   | account suspension, indefinite         |
-| any `mod_actions` row with `scope = 'channel'`          | never                       | —                                      |
+| Source audit action                                     | Statement                  | Restriction                            |
+| ------------------------------------------------------- | -------------------------- | -------------------------------------- |
+| `moderation.t1.restrict` (`scan.ts:213`)                | yes                        | visibility: restricted                 |
+| `moderation.t1.flag` (`scan.ts:213`, case already open) | no                         | adds a flag only                       |
+| `moderation.t2.label` (`scan.ts:326`)                   | yes                        | visibility: age-gated                  |
+| `moderation.t1.upload_reject` (`uploads.ts:182`)        | yes                        | visibility: removed                    |
+| `moderation.case.warn` (`moderation.ts:218`)            | yes                        | warning (no restriction)               |
+| `moderation.case.end_stream`                            | yes                        | visibility: removed                    |
+| `moderation.case.suspend` (user, channel or both)       | yes, one per target        | account / service suspension, with end |
+| `moderation.case.clear`, `.escalate_legal`              | no                         | a lift, or a hand-off to T0            |
+| `ncii.decide` with `removed` (`ncii.ts:324`)            | yes, one per affected item | visibility: removed                    |
+| `ncii.decide` with `rejected`                           | no                         | nothing restricted                     |
+| `ncii.auto_hide` (`ncii-clock.ts:167`)                  | yes, one per affected item | visibility: disabled                   |
+| `moderation.t0.match`, CSAM list (`t0.ts:284`)          | no (counsel to confirm)    | —                                      |
+| `moderation.t0.match`, NCII list (`t0.ts:284`)          | yes, under `illegal.ncii`  | account suspension, indefinite         |
+| any `mod_actions` row with `scope = 'channel'`          | never                      | —                                      |
 
 **Options.** A: the brief's set above (recommended). B: every platform `mod_actions` row,
 including report resolutions (`services/api/src/routes/safety.ts:346`) and admin suspensions
@@ -229,8 +229,8 @@ do not already reproduce, given decision 2's immutability trigger.
 - **A. A worker job reads `audit_log`** (recommended). `services/worker/src/moderation/sor-build.ts`
   runs on a BullMQ scheduler every 15 s, selects allowlisted audit rows with no statement, parses
   each row's `details` with a per-action Zod schema, resolves the recipient and the appeal
-  subject, and inserts the statements. A unique index on `(source_audit_id, recipient_user_id)`
-  makes reruns no-ops. A daily `sor-coverage` sweep counts allowlisted audit rows older than
+  subject, and inserts the statements. A unique index on `(source_audit_id, recipient_user_id,
+  content_type, content_id)` makes reruns no-ops. A daily `sor-coverage` sweep counts allowlisted audit rows older than
   5 minutes without a statement and raises an alert and a metric (the `feature-wins.md:903`
   target is 100%).
 - **B. Inline in each action's transaction.** Atomic, but it touches six files across api and

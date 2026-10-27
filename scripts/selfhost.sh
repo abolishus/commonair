@@ -90,6 +90,11 @@ install options:
   --public-ip <a,b>     Addresses WebRTC (WHIP) clients reach this host on. Default: this
                         host's global interface addresses (never a "what is my IP" service).
   --model <path>        Use a local copy of the moderation model instead of downloading it.
+  --turn-relay          Turn on coturn's TURN relay for P2P viewers behind strict NATs
+                        (docs/self-hosting/p2p.md): opens the relay UDP range. STUN on
+                        3478/udp is always on. Kept in commonair.env until --no-turn-relay.
+  --no-turn-relay       Turn the TURN relay off. Without either flag the setting is kept
+                        (off on a first install).
   --require-signature   Fail unless cosign verifies SHA256SUMS against the release workflow.
   --insecure-no-checksum
                         Offline only: accept a --bundle with no SHA256SUMS. Its integrity is
@@ -121,7 +126,7 @@ never switches store (there is no --migrate-objects; see backups.md for copying 
   They are kept in commonair.env (mode 0600); a --reinstall without them keeps the stored ones.
 
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
-  --insecure-no-checksum. The object store stays as installed.
+  --insecure-no-checksum, --turn-relay | --no-turn-relay. The object store stays as installed.
 
 backup options (no option: --database):
   --database            A WAL-G base backup of Postgres now, then the list of base backups.
@@ -364,6 +369,23 @@ ipv6_hint() {
   fi
 }
 
+# ADR 0012 decision 2: live and VOD segment timestamps come from the host clock, so it must be
+# NTP-synchronized. A warning only: the instance runs either way, and some hosts (containers,
+# minimal images) cannot answer the question at all.
+check_time_sync() {
+  _ntp_doc="docs/self-hosting/requirements.md#time-synchronization"
+  _ntp=""
+  if have timedatectl; then _ntp=$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true); fi
+  case "$_ntp" in
+    yes) ;;
+    no)
+      warn "the host clock is not NTP-synchronized, so live and VOD segment timestamps drift with it" \
+        "(enable systemd-timesyncd with 'sudo timedatectl set-ntp true', or chrony; $_ntp_doc)"
+      ;;
+    *) warn "could not check that the host clock is NTP-synchronized (timedatectl gave no answer; $_ntp_doc)" ;;
+  esac
+}
+
 host_checks() {
   check_distro
   check_podman
@@ -373,6 +395,7 @@ host_checks() {
   if ! instance_exists; then check_ports; fi
   firewall_hints
   ipv6_hint
+  check_time_sync
 }
 
 # --- root preparation ---------------------------------------------------------------------

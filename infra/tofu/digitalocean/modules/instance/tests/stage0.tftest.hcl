@@ -44,13 +44,18 @@ run "firewall_allows_exactly_the_documented_ports" {
 
   assert {
     condition = toset([for r in digitalocean_firewall.app.inbound_rule : "${r.protocol}/${r.port_range}"]) == toset([
-      "tcp/22", "tcp/80", "tcp/443", "udp/443", "tcp/1935", "udp/8189", "tcp/6697",
+      "tcp/22", "tcp/80", "tcp/443", "udp/443", "tcp/1935", "udp/8189", "udp/3478", "tcp/6697",
     ])
-    error_message = "The app firewall must open exactly 22, 80, 443/tcp, 443/udp, 1935, 8189/udp and 6697."
+    error_message = "The app firewall must open exactly 22, 80, 443/tcp, 443/udp, 1935, 8189/udp, 3478/udp and 6697."
   }
 
   assert {
-    condition     = length(digitalocean_firewall.app.inbound_rule) == 7
+    condition     = contains([for r in digitalocean_firewall.app.inbound_rule : "${r.protocol}/${r.port_range}"], "udp/3478")
+    error_message = "coturn's STUN port (3478/udp) is open for P2P playback."
+  }
+
+  assert {
+    condition     = length(digitalocean_firewall.app.inbound_rule) == 8
     error_message = "One inbound rule per documented port, no duplicates."
   }
 
@@ -126,7 +131,7 @@ run "plain_irc_is_behind_a_flag" {
   }
 
   assert {
-    condition     = length(digitalocean_firewall.app.inbound_rule) == 8
+    condition     = length(digitalocean_firewall.app.inbound_rule) == 9
     error_message = "irc_plaintext adds only 6667."
   }
 }

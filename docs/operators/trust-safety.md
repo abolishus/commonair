@@ -192,16 +192,15 @@ The application role and governance votes cannot release a hold.
   - **Which actions.** Every platform T1 restriction, T2 mature label, upload rejection, moderator
     case decision (warning, ended stream, suspension), NCII removal and NCII auto-hide, and every
     T0 match on an NCII hash list, produces one statement per affected user (for NCII, one per
-    owner of the affected content; never the requester). A T0 match on a CSAM list produces none,
+    affected item, to the content's owner; never the requester). A T0 match on a CSAM list produces none,
     and a channel moderator's chat ban, timeout or message deletion never does (counsel to confirm
     the CSAM answer). A decision that restricted nothing gets none either: an "end stream" on a
     case that is not a live stream. Report resolutions and admin suspensions get statements in a
     later release.
   - **Known limits, for counsel.** A statement names one piece of content, and there is one per
-    action and person. So an NCII owner with several affected items gets one statement naming
-    their first item (the others are restricted too but not listed, and are appealed by writing
-    to the contact address). When a case suspends both an account and a channel that belong to
-    the same person, the statement covers the account suspension only. A suspended channel has
+    action, person and piece of content: an NCII owner with several affected items gets one
+    statement per item (each appealable on its own), and a case that suspends both an account
+    and a channel of the same person gives that person both statements. A suspended channel has
     no end date (moderation channel suspensions do not expire on their own), so its statement
     gives none, whatever duration the moderator chose.
   - **What it says.** The restriction and its end, that it applies everywhere, the facts (the

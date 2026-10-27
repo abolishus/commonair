@@ -132,16 +132,23 @@ describe("enforcement_statements", () => {
     expect(await privileges("enforcement_statement_deliveries")).toEqual(["SELECT", "INSERT", "UPDATE", "DELETE"]);
   });
 
-  test("one statement per (audit row, recipient)", async () => {
+  test("one statement per (audit row, recipient, content)", async () => {
     const auditId = await auditRow();
     const recipientUserId = uuidv7();
-    await app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId }));
+    const contentId = uuidv7();
+    await app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId, contentId }));
     await expectPgError(
-      app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId })),
-      /enforcement_statements_source_recipient_uq/,
+      app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId, contentId })),
+      /enforcement_statements_source_recipient_content_uq/,
     );
     // A second target of the same action (suspend user and channel owner) is a second statement.
-    await app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId: uuidv7() }));
+    await app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId: uuidv7(), contentId }));
+    // So is a second piece of content for the same person: another NCII item, or the channel
+    // alongside the account.
+    await app.insert(s.enforcementStatements).values(statement(auditId, { recipientUserId }));
+    await app
+      .insert(s.enforcementStatements)
+      .values(statement(auditId, { recipientUserId, contentType: "channel", contentId }));
   });
 
   test("checks: legal basis only on illegal grounds, scope all, appeal pair, version, facts code", async () => {

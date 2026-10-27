@@ -4,7 +4,7 @@
 /**
  * Statements of reasons (ADR 0019 decisions 3–6, docs/testing/w0-selectors.md "Statements of
  * reasons"): turn allowlisted `audit_log` rows into append-only `enforcement_statements`, one per
- * recipient. `planStatements` is the mapping (one case per row of decision 3) over a lookup
+ * recipient and piece of content. `planStatements` is the mapping (one case per row of decision 3) over a lookup
  * interface, so unit tests run it on writer fixtures without a database; `buildStatements` is
  * the job body.
  *
@@ -325,10 +325,9 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
         );
       if (wantsChannel && channelId) {
         const owner = await l.channelOwner(channelId);
-        // One statement per recipient (unique per audit row and recipient): when the account and
-        // the channel belong to the same person only the account statement fits, so the channel
-        // suspension goes unstated until the key includes the content (contract request).
-        if (owner && owner !== userTarget)
+        // Unique per audit row, recipient and content: when the account and the channel belong to
+        // the same person they get both statements, one per restriction.
+        if (owner)
           out.push(
             statement(base, {
               recipientUserId: owner,
@@ -351,15 +350,18 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
       if (!req) return { kind: "invalid", reason: "request" };
       const removal = row.action === "ncii.decide";
       const items = await l.nciiItems(x.requestId, removal ? "removed" : "hidden");
-      // One statement per affected owner, naming their first item (its id is the appeal subject).
-      const byOwner = new Map<string, { item: NciiItem; channelId: string }>();
+      // One statement per affected item, to its owner (the item id is the appeal subject). Two
+      // items naming the same content would collide on the unique key: the first one states it.
+      const affected = new Map<string, { ownerId: string; item: NciiItem; channelId: string }>();
       for (const item of items) {
         const owner = await l.itemOwner(item);
-        if (owner && !byOwner.has(owner.ownerId)) byOwner.set(owner.ownerId, { item, channelId: owner.channelId });
+        const key = `${owner?.ownerId}/${item.subjectType}/${item.subjectId}`;
+        if (owner && !affected.has(key))
+          affected.set(key, { ownerId: owner.ownerId, item, channelId: owner.channelId });
       }
       // The selection only picks requests with restricted items, so no owner means the content's
       // channel no longer resolves: report it rather than drop it silently.
-      if (byOwner.size === 0) return { kind: "invalid", reason: "recipient" };
+      if (affected.size === 0) return { kind: "invalid", reason: "recipient" };
       const base = common(
         row,
         l,
@@ -381,7 +383,7 @@ export async function planStatements(row: AuditRow, l: SorLookup): Promise<Plan>
       );
       return {
         kind: "statements",
-        statements: [...byOwner].map(([ownerId, { item, channelId }]) =>
+        statements: [...affected.values()].map(({ ownerId, item, channelId }) =>
           statement(base, {
             recipientUserId: ownerId,
             channelId,
@@ -739,7 +741,10 @@ export async function buildStatements(
   return out;
 }
 
-/** Insert statements and their pending deliveries; a rerun inserts nothing (unique per audit row and recipient). */
+/**
+ * Insert statements and their pending deliveries; a rerun inserts nothing (unique per audit row,
+ * recipient and content).
+ */
 export async function insertStatements(db: Executor, statements: readonly Statement[]): Promise<number> {
   if (statements.length === 0) return 0;
   return db.transaction(async (tx) => {

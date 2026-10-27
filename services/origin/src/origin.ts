@@ -108,10 +108,12 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     if (!parsed) opts.logger?.warn("ignoring invalid TRUSTED_PROXY_CIDRS entry");
     return parsed ? [parsed] : [];
   }) satisfies Cidr[];
+  // One directory for /hls/ and /p2p-digest/, so a digest resolves the same source /hls/ serves.
+  const channels = new ChannelDirectory({ db: opts.db, valkey: opts.valkey, logger: opts.logger });
   const hlsHandler = createHandler({
     publicKey: signingKey.publicKey,
     store,
-    channels: new ChannelDirectory({ db: opts.db, valkey: opts.valkey, logger: opts.logger }),
+    channels,
     relays: new RelayAuth({ db: opts.db }),
     segments,
     refresher: new TokenRefresher({ key: signingKey, db: opts.db, now: () => Math.floor(now() / 1000) }),
@@ -135,6 +137,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
   const digestHandler = createP2PDigestHandler({
     publicKey: signingKey.publicKey,
     store,
+    channels,
     metrics,
     logger: opts.logger,
     now,

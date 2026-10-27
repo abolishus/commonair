@@ -7,7 +7,6 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { sourceAacPath } from "@commonair/contracts/internal";
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import type { Executor } from "@commonair/db";
-import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { generateSigningKey, signPlaybackToken, type SigningKey } from "@commonair/tokens";
 import type { SourceAacState } from "../src/channels.ts";
@@ -87,11 +86,23 @@ function recordingMetrics(): OriginMetrics & Recorded {
   };
 }
 
+/** A channel directory: `test` is live as `id` (null: offline) with the source AAC copy in `aac`. */
+const channels = (aac: SourceAacState, id: string | null = CID) => ({
+  lookup: (slug: string) => Promise.resolve(id ? { id, slug, broadcastId: RID } : null),
+  sourceAac: () => Promise.resolve(aac),
+});
+
 function setup(extra: Partial<P2PDigestDeps> = {}) {
   const fake = fakeStore();
   fake.objects.set(`live/test/${SEG}`, obj(BYTES));
   const metrics = recordingMetrics();
-  const handler = createP2PDigestHandler({ publicKey: key.publicKey, store: fake.store, metrics, ...extra });
+  const handler = createP2PDigestHandler({
+    publicKey: key.publicKey,
+    store: fake.store,
+    channels: channels("off"),
+    metrics,
+    ...extra,
+  });
   const call = (path: string, init?: RequestInit) => {
     const req = new Request(`http://o${path}`, init);
     return handler(req, path.split("?")[0] ?? path);
@@ -282,11 +293,6 @@ describe("p2p digest", () => {
   });
 
   describe("with the channel directory", () => {
-    const channels = (aac: SourceAacState, id: string | null = CID) => ({
-      lookup: (slug: string) => Promise.resolve(id ? { id, slug, broadcastId: RID } : null),
-      sourceAac: () => Promise.resolve(aac),
-    });
-
     test("the source while an AAC copy is live hashes the copy, as /hls/ serves it", async () => {
       const s = setup({ channels: channels("live") });
       const copy = new Uint8Array([9, 9, 9]);
@@ -296,23 +302,6 @@ describe("p2p digest", () => {
       // Renditions never use the copy.
       s.objects.set("live/test/720p/seg9.m4s", obj(BYTES));
       expect(await (await s.call(`/p2p-digest/live/test/720p/seg9.m4s?t=${await token()}`)).text()).toBe(sha256(BYTES));
-    });
-
-    test("a handler built without the directory warns once; with it, never", () => {
-      const warned: string[] = [];
-      const logger: Logger = {
-        trace() {},
-        debug() {},
-        info() {},
-        warn: (msg: string) => void warned.push(msg),
-        error() {},
-        fatal() {},
-        child: () => logger,
-      };
-      setup({ logger });
-      expect(warned).toEqual(["p2p digest without a channel directory"]);
-      setup({ logger, channels: channels("off") });
-      expect(warned).toHaveLength(1);
     });
 
     test("pending copy 503, offline 404, another channel's token 403", async () => {

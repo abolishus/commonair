@@ -59,8 +59,8 @@ const caseSuspend = z.object({
   decision: z.literal("suspend"),
   suspendTarget: z.enum(["user", "channel", "both"]),
   durationSeconds: z.number().int().positive().nullable(),
-  // Not written yet (contract request): false when the writer skipped that update (an account
-  // under a T0 ban, a channel already suspended). Absent reads as applied.
+  // False when the writer skipped that update (an account under a T0 ban, a channel already
+  // suspended). Absent (rows written before the API recorded them) reads as applied.
   userSuspended: z.boolean().optional(),
   channelSuspended: z.boolean().optional(),
 });

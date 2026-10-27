@@ -15,6 +15,7 @@ locals {
       { protocol = "udp", port_range = "443" },  # HTTP/3
       { protocol = "tcp", port_range = "1935" }, # RTMP ingest
       { protocol = "udp", port_range = "8189" }, # WebRTC ICE
+      { protocol = "udp", port_range = "3478" }, # coturn STUN for P2P playback (UDP only)
       { protocol = "tcp", port_range = "6697" }, # IRC over TLS
     ],
     var.irc_plaintext ? [{ protocol = "tcp", port_range = "6667" }] : [],

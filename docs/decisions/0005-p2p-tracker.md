@@ -115,13 +115,17 @@ from the published 4.0.0 tarballs.
   `uploaded`, `downloaded`, `offers`, `event` and an echoed `trackerid`, and answers with
   `to_peer_id`/`offer_id` (`webtorrent-client/index.ts:545-570`, `:608-616`). That is the subset
   `services/tracker/src/protocol.ts:107-146` parses; `trackerid` is ignored. Its info hash is
-  **20 ASCII characters** (Base64 of 15 SHA-1 bytes, `stream-identity.ts:125-127`), not 20 raw
+  **20 ASCII characters** (Base64 of 15 SHA-1 bytes, `stream-identity.ts:124-126`), not 20 raw
   bytes. That still passes `isBinaryId` (`protocol.ts:66-70`: 20 chars, codes ≤ 255).
 - **One socket per URL.** The client pools sockets by tracker URL
   (`webtorrent-socket-pool/index.ts:31-35`), so one session opens one socket, which the tracker's
   one-socket-per-session rule needs. Each rendition and audio track is its own swarm; a session
-  holds at most `LIMITS.maxSwarmsPerSocket` = 4 (`protocol.ts:14`, refused at `swarm.ts:142`),
-  so the client must leave a swarm (`event: "stopped"`) on a level switch. The interop test checks this.
+  holds at most `LIMITS.maxSwarmsPerSocket` = 10 (the grant's allowed set, `ALLOWED_PER_GRANT`;
+  `protocol.ts:22`, refused at `swarm.ts:143`). It is the whole set rather than a handful because a
+  loader that stored segments waits `p2pInactiveLoaderDestroyTimeoutMs` (30 s) after a level switch
+  before it sends `stopped`, and audio is a swarm of its own, so a session briefly holds more than
+  one video swarm. The client still leaves a swarm (`event: "stopped"`) on a level switch; the
+  interop test checks this.
 - **Token refresh does not fit.** `announceTrackers` is fixed at construction (it is not in
   `DynamicCoreConfig`, `types.ts:120-135`), and a reconnect reuses the same URL
   (`websocket-client/index.ts:74`). The contract comment at

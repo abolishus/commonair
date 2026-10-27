@@ -97,7 +97,7 @@ describe("bundle contents", () => {
     const systemd = readdirSync(join(ROOT, "infra/systemd")).map((f) => `systemd/${f}`);
     // Every unit with an env file renders it from its key list at start (unit-env.ts).
     const keyLists = readdirSync(join(ROOT, "infra/selfhost/env")).map((f) => `infra/selfhost/env/${f}`);
-    expect(keyLists).toHaveLength(17);
+    expect(keyLists).toHaveLength(18);
     const expected = [
       "selfhost.sh",
       "release-manifest.json",
@@ -106,6 +106,8 @@ describe("bundle contents", () => {
       ...systemd,
       // Config the units mount from %h/commonair/ (a new mount must show up here).
       "infra/caddy/Caddyfile",
+      "infra/coturn/start.sh",
+      "infra/coturn/turnserver.conf",
       "infra/garage/garage.toml",
       "infra/grafana/dashboards/README.md",
       "infra/grafana/provisioning/dashboards/dashboards.yaml",
@@ -140,7 +142,7 @@ describe("bundle contents", () => {
 
   test("every Volume= source the units mount from the release is in the bundle", () => {
     const fromRelease = volumeSources().filter((s) => s.startsWith("%h/commonair/"));
-    expect(fromRelease).toHaveLength(9);
+    expect(fromRelease).toHaveLength(11);
     for (const src of fromRelease) {
       const path = `${TOP}/${src.slice("%h/commonair/".length)}`;
       const present = files.has(path) || [...files.keys()].some((f) => f.startsWith(`${path}/`));

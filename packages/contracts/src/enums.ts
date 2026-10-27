@@ -295,7 +295,7 @@ export const ENFORCEMENT_DELIVERY_CHANNELS = ["email", "in_app"] as const;
  * The audit actions that may produce a statement (ADR 0019 decision 3); the builder selects
  * `audit_log` rows by exactly these names. Channel-moderator actions never write any of them.
  * `moderation.case.suspend` yields one statement per target; `ncii.decide` yields statements
- * only when the decision is `removed`, one per affected owner. The builder and the coverage sweep keep
+ * only when the decision is `removed`, one per affected item (to its owner). The builder and the coverage sweep keep
  * only NCII-list `moderation.t0.match` rows (`details.listCategory = 'ncii'`): a CSAM-list match
  * never produces a statement (accepted answer 1, counsel to confirm).
  */

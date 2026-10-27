@@ -33,6 +33,8 @@ export const STACK_HEALTHY_SERVICES = [
   "media",
   "worker",
   "tracker",
+  // STUN for P2P playback; its healthcheck is a binding request to itself (turnutils_stunclient).
+  "coturn",
   "web",
   "otel-collector",
   "prometheus",

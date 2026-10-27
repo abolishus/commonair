@@ -101,10 +101,11 @@ export const playbackSessions = pgTable(
     index("playback_sessions_device_idx").on(t.deviceHash, t.startedAt),
     index("playback_sessions_user_idx").on(t.userId, t.startedAt),
     index("playback_sessions_relay_idx").on(t.relayId, t.startedAt),
-    // Integrity scans: sessions still to score, and live sessions by heartbeat age.
+    // Integrity scans: sessions still to score, and live sessions by heartbeat age. A session the
+    // API promoted that ended before its first scoring pass is still a candidate (scored_at null).
     index("playback_sessions_scoring_idx")
       .on(t.scoredAt.asc().nullsFirst())
-      .where(sql`${t.endedAt} is null or ${t.verdict} = 'pending'`),
+      .where(sql`${t.endedAt} is null or ${t.verdict} = 'pending' or ${t.scoredAt} is null`),
     index("playback_sessions_live_hb_idx")
       .on(t.lastHeartbeatAt)
       .where(sql`${t.endedAt} is null`),

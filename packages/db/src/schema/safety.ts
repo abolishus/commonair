@@ -149,7 +149,14 @@ export const enforcementStatements = pgTable(
     createdAt: ts().notNull(),
   },
   (t) => [
-    uniqueIndex("enforcement_statements_source_recipient_uq").on(t.sourceAuditId, t.recipientUserId),
+    // One statement per action, recipient and piece of content: an NCII owner gets one per item,
+    // and a suspension of an account and a channel of the same person gets both.
+    uniqueIndex("enforcement_statements_source_recipient_content_uq").on(
+      t.sourceAuditId,
+      t.recipientUserId,
+      t.contentType,
+      t.contentId,
+    ),
     index("enforcement_statements_recipient_idx").on(t.recipientUserId, t.createdAt, t.id),
     check("enforcement_statements_territorial_scope_ck", sql`${t.territorialScope} = 'all'`),
     check("enforcement_statements_clause_version_ck", sql`${t.clauseVersion} >= 1`),

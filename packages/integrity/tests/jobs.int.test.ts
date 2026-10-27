@@ -150,8 +150,13 @@ describe("scoreActiveSessions", () => {
       });
     }
     for (let i = 0; i < 60; i++) await recordFetch(valkey, { sid: bot, kind: "playlist" });
-    // Ended and already verified: not rescored.
-    const ended = await session(channelId, { endedAt: new Date(NOW.getTime() - 60_000), verdict: "verified" });
+    // Ended, verified and already scored: not rescored.
+    const endedScoredAt = new Date(NOW.getTime() - 90_000);
+    const ended = await scored(channelId, {
+      endedAt: new Date(NOW.getTime() - 60_000),
+      verdict: "verified",
+      scoredAt: endedScoredAt,
+    });
 
     const r = await scoreActiveSessions(app, valkey, NOW);
 
@@ -171,7 +176,7 @@ describe("scoreActiveSessions", () => {
     const botRow = await sessionRow(bot);
     expect(botRow.verdict).toBe("excluded");
     expect(botRow.verdictReasons).toEqual(["fetch_pattern", "heartbeat_inconsistent"]);
-    expect((await sessionRow(ended)).scoredAt).toBeNull();
+    expect((await sessionRow(ended)).scoredAt?.getTime()).toBe(endedScoredAt.getTime());
     expect(r.newlyExcluded.sort()).toEqual([dc, multi[0]!, multi[1]!, bot].sort());
 
     const dcFlags = await flagsFor(dc);
@@ -192,6 +197,32 @@ describe("scoreActiveSessions", () => {
       .from(s.playbackSessions)
       .where(eq(s.playbackSessions.channelId, channelId))) as [{ n: number }];
     expect(n).toBe(11);
+  });
+
+  test("an ended, verified, never-scored session inside the finalize window is scored once", async () => {
+    const { channelId } = await channel();
+    // The API promoted it to verified on heartbeat; it ended before the scorer's first pass.
+    const promoted = await session(channelId, { endedAt: new Date(NOW.getTime() - 30_000), verdict: "verified" });
+    await humanHistory(promoted);
+    // Same, but ended before the finalize window (default 3600 s): left alone.
+    const old = await session(channelId, {
+      startedAt: new Date(NOW.getTime() - 7_300_000),
+      lastHeartbeatAt: new Date(NOW.getTime() - 7_200_000),
+      endedAt: new Date(NOW.getTime() - 7_200_000),
+      verdict: "verified",
+    });
+
+    await scoreActiveSessions(app, valkey, NOW);
+
+    const row = await sessionRow(promoted);
+    expect(row.scoredAt?.getTime()).toBe(NOW.getTime());
+    expect(row).toMatchObject({ verdict: "verified", verdictReasons: [] });
+    expect((await sessionRow(old)).scoredAt).toBeNull();
+
+    // Now scored and ended: a later pass no longer takes it.
+    const later = new Date(NOW.getTime() + 15_000);
+    await scoreActiveSessions(app, valkey, later);
+    expect((await sessionRow(promoted)).scoredAt?.getTime()).toBe(NOW.getTime());
   });
 
   test("fetch-less heartbeat sessions never verify; part-only and CDN sessions are fine", async () => {

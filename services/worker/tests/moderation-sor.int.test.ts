@@ -97,6 +97,8 @@ async function restrict(): Promise<{ userId: string; email: string; channelId: s
   return { userId: user.id, email: user.email, channelId: channel.id, caseId: out.caseId };
 }
 
+const byText = (a: string, b: string) => a.localeCompare(b);
+
 const statementsFor = (userId: string) =>
   owner().select().from(schema.enforcementStatements).where(eq(schema.enforcementStatements.recipientUserId, userId));
 
@@ -161,6 +163,87 @@ describe("build", () => {
       .from(schema.enforcementStatementDeliveries)
       .where(eq(schema.enforcementStatementDeliveries.statementId, s1!.id));
     expect(d.map((x) => x.channel).toSorted()).toEqual(["email", "in_app"]);
+  });
+
+  test("a suspension of one person's account and channel yields both statements; a rerun inserts nothing", async () => {
+    const { user, channel } = await makeUser(owner());
+    const b = await makeBroadcast(owner(), channel.id);
+    const [c] = await owner()
+      .insert(schema.moderationCases)
+      .values({
+        tier: "t1",
+        origin: "classifier",
+        category: "weapons",
+        subjectType: "broadcast",
+        subjectId: b.id,
+        channelId: channel.id,
+        userId: user.id,
+      })
+      .returning({ id: schema.moderationCases.id });
+    await audit("moderation.case.suspend", {
+      caseId: c!.id,
+      decision: "suspend",
+      suspendTarget: "both",
+      durationSeconds: 3600,
+      userSuspended: true,
+      channelSuspended: true,
+    });
+
+    await buildStatements(ctx());
+    const rows = await statementsFor(user.id);
+    expect(rows.map((r) => `${r.contentType}/${r.contentId}/${r.restrictionKind}`).toSorted(byText)).toEqual(
+      [`account/${user.id}/account`, `channel/${channel.id}/service`].toSorted(byText),
+    );
+    expect((await buildStatements(ctx())).inserted).toBe(0);
+    expect(await statementsFor(user.id)).toHaveLength(2);
+  });
+
+  test("an NCII owner with several removed items gets one statement per item; a rerun inserts nothing", async () => {
+    const { user, channel } = await makeUser(owner());
+    const b = await makeBroadcast(owner(), channel.id);
+    const [req] = await owner()
+      .insert(schema.nciiRequests)
+      .values({
+        requesterName: "Requester",
+        requesterEmail: "requester@example.test",
+        relationship: "self",
+        contentUrls: ["https://example.test/a", "https://example.test/b"],
+        description: "test",
+        goodFaith: true,
+        signature: "Requester",
+        deadlineAt: new Date(Date.now() + 48 * 3_600_000),
+      })
+      .returning({ id: schema.nciiRequests.id });
+    const items = await owner()
+      .insert(schema.nciiRequestItems)
+      .values(
+        // A broadcast and an upload (upload items name their channel), both on the same channel.
+        (
+          [
+            ["broadcast", b.id],
+            ["upload", channel.id],
+          ] as const
+        ).map(([subjectType, subjectId]) => ({
+          requestId: req!.id,
+          url: `https://example.test/${subjectType}`,
+          subjectType,
+          subjectId,
+          removedAt: new Date(),
+        })),
+      )
+      .returning({ id: schema.nciiRequestItems.id, subjectId: schema.nciiRequestItems.subjectId });
+    await audit("ncii.decide", { requestId: req!.id, decision: "removed" });
+
+    await buildStatements(ctx());
+    const rows = await statementsFor(user.id);
+    expect(rows.map((r) => `${r.contentId}/${r.appealSubjectId}`).toSorted(byText)).toEqual(
+      items.map((i) => `${i.subjectId}/${i.id}`).toSorted(byText),
+    );
+    expect(rows.every((r) => r.restrictionDetail === "removed" && r.appealSubjectType === "ncii_request_item")).toBe(
+      true,
+    );
+    expect((await buildStatements(ctx())).inserted).toBe(0);
+    expect(await statementsFor(user.id)).toHaveLength(2);
   });
 
   test("channel moderation (a ban and a timeout) produces no statement", async () => {

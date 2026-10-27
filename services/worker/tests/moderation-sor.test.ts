@@ -362,7 +362,7 @@ describe("decision 3, row by row", () => {
       [clipper, "account", "account"],
       [owner, "service", "channel"],
     ]);
-    // Same person for both targets: the account statement covers both (unique per recipient).
+    // Same person for both targets: one statement per restriction (unique per recipient and content).
     const same = caseRow("suspend", { suspendTarget: "both", durationSeconds: 60 });
     w.cases.set(same.caseId, {
       origin: "classifier",
@@ -372,8 +372,11 @@ describe("decision 3, row by row", () => {
       userId: owner,
       channelId,
     });
-    const one = statements(await planStatements(row("moderation.case.suspend", same), lookup(w)));
-    expect(one.map((s) => s.restriction.kind)).toEqual(["account"]);
+    const both = statements(await planStatements(row("moderation.case.suspend", same), lookup(w)));
+    expect(both.map((s) => [s.recipientUserId, s.restriction.kind, s.content.type, s.content.id])).toEqual([
+      [owner, "account", "account", owner],
+      [owner, "service", "channel", channelId],
+    ]);
     // The account ban carries the duration; the channel suspension never ends on its own.
     expect(out.find((s) => s.restriction.kind === "account")?.restriction.endsAt).toBe(
       new Date(AT.getTime() + 60_000).toISOString(),
@@ -421,18 +424,21 @@ describe("decision 3, row by row", () => {
       { id: u, subjectType: "upload", subjectId: otherChannel },
     ];
     w.itemChannels.set(b, channelId).set(v, channelId).set(c, otherChannel).set(u, otherChannel);
-    return { w, first: b, otherFirst: c };
+    return { w, items: w.items };
   }
 
-  test("ncii.decide removed → one statement per affected owner, never the requester, ncii_request_item appeal", async () => {
-    const { w, first, otherFirst } = nciiWorld();
+  test("ncii.decide removed → one statement per affected item to its owner, never the requester, ncii_request_item appeal", async () => {
+    const { w, items } = nciiWorld();
     const requestId = id();
     const d = { requestId, decision: "removed", items: 4, removedItems: 4 };
     const out = statements(await planStatements(row("ncii.decide", d, null), lookup(w)));
-    expect(out).toHaveLength(2);
-    expect(out.map((s) => [s.recipientUserId, s.channelId, s.appeal?.subjectId])).toEqual([
-      [owner, channelId, first],
-      [otherOwner, otherChannel, otherFirst],
+    expect(out).toHaveLength(4);
+    // An owner with several items gets one statement per item, each naming it and appealing it.
+    expect(out.map((s) => [s.recipientUserId, s.channelId, s.content, s.appeal?.subjectId])).toEqual([
+      [owner, channelId, { type: "broadcast", id: items[0]!.subjectId }, items[0]!.id],
+      [owner, channelId, { type: "vod", id: items[1]!.subjectId }, items[1]!.id],
+      [otherOwner, otherChannel, { type: "clip", id: items[2]!.subjectId }, items[2]!.id],
+      [otherOwner, otherChannel, { type: "upload", id: otherChannel }, items[3]!.id],
     ]);
     for (const s of out) {
       expect(s).toMatchObject({
@@ -454,6 +460,21 @@ describe("decision 3, row by row", () => {
     }
   });
 
+  test("ncii: two items naming the same content get one statement (unique per content)", async () => {
+    const w = world();
+    const vod = id();
+    w.items = [
+      { id: id(), subjectType: "vod", subjectId: vod },
+      { id: id(), subjectType: "vod", subjectId: vod },
+    ];
+    for (const item of w.items) w.itemChannels.set(item.id, channelId);
+    const d = { requestId: id(), decision: "removed", items: 2, removedItems: 2 };
+    const out = statements(await planStatements(row("ncii.decide", d, null), lookup(w)));
+    expect(out.map((s) => [s.recipientUserId, s.content.id, s.appeal?.subjectId])).toEqual([
+      [owner, vod, w.items[0]!.id],
+    ]);
+  });
+
   test("ncii.decide rejected → no statement", async () => {
     const { w } = nciiWorld();
     const p = await planStatements(
@@ -463,7 +484,7 @@ describe("decision 3, row by row", () => {
     expect(p).toEqual({ kind: "none", reason: "rejected" });
   });
 
-  test("ncii.auto_hide → visibility/disabled per owner, false/fully", async () => {
+  test("ncii.auto_hide → visibility/disabled per item, false/fully", async () => {
     const { w } = nciiWorld();
     const d = {
       requestId: id(),
@@ -476,7 +497,7 @@ describe("decision 3, row by row", () => {
       deadlineAt: "2026-10-27T12:00:00.000Z",
     };
     const out = statements(await planStatements(row("ncii.auto_hide", d, null), lookup(w)));
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(4);
     for (const s of out)
       expect(s).toMatchObject({
         restriction: { kind: "visibility", detail: "disabled" },

@@ -63,9 +63,10 @@ describe("step selection", () => {
   test("all is every step that is not pending; pending steps are still selectable", () => {
     expect(SAFETY_STEP_NUMBERS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(ALL_SAFETY_STEPS).toEqual(SAFETY_STEP_NUMBERS.filter((n) => !PENDING_SAFETY_STEPS.includes(n)));
-    // W0's steps 10 (VOD exposure) and 11 (statements of reasons) are stubs until their units merge.
-    expect(PENDING_SAFETY_STEPS).toEqual([10, 11]);
-    expect(ALL_SAFETY_STEPS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    // W0's steps 10 (VOD exposure) and 11 (statements of reasons) have landed: nothing is pending.
+    expect(PENDING_SAFETY_STEPS).toEqual([]);
+    expect(ALL_SAFETY_STEPS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(parseSteps("all")).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     for (const n of PENDING_SAFETY_STEPS) {
       expect(parseSteps("all")).not.toContain(n);
       expect(parseSteps(String(n))).toEqual([n]);

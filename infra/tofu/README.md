@@ -75,7 +75,7 @@ bash infra/tofu/check.sh
 `check.sh` skips with a message when `tofu` is missing, and fails under `REQUIRE_TOFU=1` (CI).
 The tests in `modules/instance/tests/` plan against a mocked provider and check that:
 
-- the app firewall opens exactly 22, 80, 443/tcp, 443/udp, 1935, 8189/udp and 6697 over IPv4
+- the app firewall opens exactly 22, 80, 443/tcp, 443/udp, 1935, 8189/udp, 3478/udp and 6697 over IPv4
   and IPv6, 6667 only with `irc_plaintext`, and outbound stays open;
 - SSH comes only from `operator_cidrs`, and `0.0.0.0/0` or `::/0` is rejected;
 - stage 1 and stage 2 resources are absent by default;

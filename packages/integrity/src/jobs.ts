@@ -197,14 +197,16 @@ export async function scoreActiveSessions(
     p2p: { evidenced: 0, errors: 0 },
   };
 
-  // `(ended_at is null or verdict = 'pending')` and the order match `playback_sessions_scoring_idx`.
+  // `(ended_at is null or verdict = 'pending' or scored_at is null)` and the order match
+  // `playback_sessions_scoring_idx`. `scored_at is null` keeps a session the API promoted to
+  // verified that ended before its first pass: it is scored once, inside the finalize window.
   const candidates = rows(
     await db.execute(sql`
       select p.id, p.channel_id, p.user_id, p.device_hash, p.asn, p.datacenter, p.user_agent, p.fingerprint,
              p.assigned_source, p.relay_id, p.started_at, p.last_heartbeat_at, p.ended_at, p.heartbeats,
              p.watch_seconds, p.segments_fetched, p.bytes_http, p.bytes_p_2p, p.verdict
         from playback_sessions p
-       where (p.ended_at is null or p.verdict = 'pending')
+       where (p.ended_at is null or p.verdict = 'pending' or p.scored_at is null)
          and (p.ended_at is null or p.ended_at > ${tsz(finalize)})
          and p.started_at <= ${tsz(now)}
          and (p.verdict <> 'excluded' or ${HAS_ALLOWANCE})

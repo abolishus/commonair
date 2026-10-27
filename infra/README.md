@@ -95,27 +95,29 @@ Host ports bind to `BIND_ADDRESS` (default `127.0.0.1`) and are all variables, s
 stack can run next to the first (`podman compose -p other …` with shifted ports; the
 integration test does exactly that with +20000). Inside the network, ports are fixed.
 
-| Variable                                    | Default            | Service                                               |
-| ------------------------------------------- | ------------------ | ----------------------------------------------------- |
-| `POSTGRES_PORT`                             | 5432               | postgres                                              |
-| `VALKEY_PORT`                               | 6379               | valkey                                                |
-| `GARAGE_S3_PORT`                            | 3900               | garage S3 API (admin :3903 internal)                  |
-| `MAILPIT_SMTP_PORT` / `MAILPIT_HTTP_PORT`   | 1025 / 8025        | mailpit                                               |
-| `MEDIAMTX_RTMP_PORT`                        | 1935               | RTMP ingest                                           |
-| `MEDIAMTX_WEBRTC_PORT`                      | 8889               | WHIP/WebRTC                                           |
-| `MEDIAMTX_ICE_UDP_PORT`                     | 8189/udp           | WebRTC ICE (keep equal to 8189)                       |
-| `MOCK_RTMP_PORT`                            | 1936               | mock-rtmp (harness)                                   |
-| `WEB_PORT`                                  | 3000               | web                                                   |
-| `API_PORT`                                  | 3001               | api                                                   |
-| `CHAT_PORT`                                 | 3002               | chat                                                  |
-| `ORIGIN_PORT`                               | 3003               | origin                                                |
-| `IRC_PORT` / `IRC_TLS_PORT` / `IRC_WS_PORT` | 6667 / 6697 / 6680 | irc                                                   |
-| `TRACKER_PORT`                              | 8000               | tracker                                               |
-| `OTLP_HTTP_PORT`                            | 4318               | collector (for services run on host)                  |
-| `PROMETHEUS_PORT`                           | 9090               | prometheus                                            |
-| `GRAFANA_PORT`                              | 3030               | grafana                                               |
-| `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT`      | 8080 / 8443        | caddy (binds `CADDY_BIND_ADDRESS`, default `0.0.0.0`) |
-| `STRIPE_MOCK_PORT`                          | 12111              | stripe-mock                                           |
+| Variable                                      | Default            | Service                                                                                                                                      |
+| --------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_PORT`                               | 5432               | postgres                                                                                                                                     |
+| `VALKEY_PORT`                                 | 6379               | valkey                                                                                                                                       |
+| `GARAGE_S3_PORT`                              | 3900               | garage S3 API (admin :3903 internal)                                                                                                         |
+| `MAILPIT_SMTP_PORT` / `MAILPIT_HTTP_PORT`     | 1025 / 8025        | mailpit                                                                                                                                      |
+| `MEDIAMTX_RTMP_PORT`                          | 1935               | RTMP ingest                                                                                                                                  |
+| `MEDIAMTX_WEBRTC_PORT`                        | 8889               | WHIP/WebRTC                                                                                                                                  |
+| `MEDIAMTX_ICE_UDP_PORT`                       | 8189/udp           | WebRTC ICE (keep equal to 8189)                                                                                                              |
+| `MOCK_RTMP_PORT`                              | 1936               | mock-rtmp (harness)                                                                                                                          |
+| `WEB_PORT`                                    | 3000               | web                                                                                                                                          |
+| `API_PORT`                                    | 3001               | api                                                                                                                                          |
+| `CHAT_PORT`                                   | 3002               | chat                                                                                                                                         |
+| `ORIGIN_PORT`                                 | 3003               | origin                                                                                                                                       |
+| `IRC_PORT` / `IRC_TLS_PORT` / `IRC_WS_PORT`   | 6667 / 6697 / 6680 | irc                                                                                                                                          |
+| `TRACKER_PORT`                                | 8000               | tracker                                                                                                                                      |
+| `TURN_PORT`                                   | 3478/udp           | coturn STUN (and TURN when the relay is on); UDP only                                                                                        |
+| `TURN_RELAY_PORT_MIN` … `TURN_RELAY_PORT_MAX` | 49160–49199/udp    | coturn relay range, only when the relay is on: `selfhost.sh --turn-relay`, or in compose the `infra/coturn/compose.turn-relay.yaml` override |
+| `OTLP_HTTP_PORT`                              | 4318               | collector (for services run on host)                                                                                                         |
+| `PROMETHEUS_PORT`                             | 9090               | prometheus                                                                                                                                   |
+| `GRAFANA_PORT`                                | 3030               | grafana                                                                                                                                      |
+| `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT`        | 8080 / 8443        | caddy (binds `CADDY_BIND_ADDRESS`, default `0.0.0.0`)                                                                                        |
+| `STRIPE_MOCK_PORT`                            | 12111              | stripe-mock                                                                                                                                  |
 
 Not published: MediaMTX RTSP 8554, HLS 8888, API 9997, metrics 9998; media 3004 and worker
 3005 (health only); IRC health 6681; Loki, Tempo, Garage admin.

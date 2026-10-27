@@ -29,12 +29,11 @@ export interface P2PDigestDeps {
   publicKey: CryptoKey;
   store: ContentStore;
   /**
-   * The HLS handler's channel directory. With it, a digest resolves the source path the way `/hls/`
-   * does (media's AAC copy while one is live, `503 starting` while it starts) and checks that the
-   * channel is live and is the token's. Without it, the source is hashed from its own path, which
-   * differs from what `/hls/` serves while an AAC copy is live (the player then fails closed).
+   * The HLS handler's channel directory: a digest resolves the source path the way `/hls/` does
+   * (media's AAC copy while one is live, `503 starting` while it starts) and checks that the
+   * channel is live and is the token's.
    */
-  channels?: Pick<ChannelDirectory, "lookup" | "sourceAac">;
+  channels: Pick<ChannelDirectory, "lookup" | "sourceAac">;
   metrics?: OriginMetrics;
   logger?: Logger;
   now?: () => number;
@@ -101,9 +100,6 @@ export function createP2PDigestHandler(deps: P2PDigestDeps): P2PDigestFetch {
   const metrics = deps.metrics ?? noopMetrics;
   const now = deps.now ?? Date.now;
   const memo = new DigestMemo(deps.memoEntries ?? 4096, DEFAULT_TTLS.mediaMs, now);
-  // Without the directory a source digest can differ from what `/hls/` serves (AAC copy) and skips
-  // the liveness and token-channel checks; say so once so a missing wiring is visible in the logs.
-  if (!deps.channels) deps.logger?.warn("p2p digest without a channel directory", { channels: false });
 
   const fail = (status: number, error: string, headers: Record<string, string> = {}) => {
     const res = Response.json({ error }, { status, headers: { ...CORS, ...headers } });
@@ -148,7 +144,6 @@ export function createP2PDigestHandler(deps: P2PDigestDeps): P2PDigestFetch {
 
   /** The upstream object `/hls/` would serve for `mr`, or a refusal. */
   async function resolve(mr: MediaRequest, cid: string): Promise<ObjectRef | Response> {
-    if (!deps.channels) return { upstreamPath: mr.upstreamPath, file: mr.file, kind: "segment" };
     const channel = await deps.channels.lookup(mr.slug);
     if (!channel) return fail(404, "offline");
     if (channel.id !== cid) return fail(403, "forbidden: wrong_channel");

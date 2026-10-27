@@ -20,6 +20,7 @@ import { closeOpsTickRunner } from "./ops/hooks.ts";
 import { closeOverlayHub } from "./overlay/stream.ts";
 import { closeExportQueue } from "./privacy/export-queue.ts";
 import { closeClipQueue } from "./media/clip-queue.ts";
+import { closeVodPlacementQueue } from "./media/vod-placement-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
@@ -105,6 +106,9 @@ export async function buildDeps(
       );
       await closeClipQueue(deps).catch((err: unknown) =>
         logger.warn("clip queue close failed", { err: (err as Error).name }),
+      );
+      await closeVodPlacementQueue(deps).catch((err: unknown) =>
+        logger.warn("vod placement queue close failed", { err: (err as Error).name }),
       );
       await closeCoopTickRunner(deps).catch((err: unknown) =>
         logger.warn("coop queue close failed", { err: (err as Error).name }),

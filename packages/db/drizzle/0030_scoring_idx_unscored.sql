@@ -1,0 +1,2 @@
+DROP INDEX "playback_sessions_scoring_idx";--> statement-breakpoint
+CREATE INDEX "playback_sessions_scoring_idx" ON "playback_sessions" USING btree ("scored_at" NULLS FIRST) WHERE "playback_sessions"."ended_at" is null or "playback_sessions"."verdict" = 'pending' or "playback_sessions"."scored_at" is null;

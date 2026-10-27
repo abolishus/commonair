@@ -18,6 +18,18 @@ test("usernames follow slug rules and avoid reserved names", () => {
   expect(usernameProblem("admin_bob")).toBe("reserved");
 });
 
+test("names Caddy routes away from the web app are reserved", () => {
+  // /vod/*, /hls/*, /cdn/*, /media/* and /p2p-digest/* go to the origin; /tracker* to the tracker.
+  for (const r of ["vod", "VOD", "hls", "cdn", "media", "p2p", "tracker", "trackerfan", "tracker_1"])
+    expect(usernameProblem(r)).toBe("reserved");
+  // A hyphenated route segment can never be a username in the first place.
+  expect(usernameProblem("p2p-digest")).toBe("format");
+  expect(usernameProblem("relay-pull")).toBe("format");
+  // Only exact names (and the tracker prefix): neighbours stay available.
+  for (const name of ["vods_fan", "vodka", "p2p_fan", "mediafan", "my_tracker"])
+    expect(usernameProblem(name)).toBeNull();
+});
+
 test("the demo fixture prefix is reserved for every sign-up and bot", () => {
   for (const name of ["demo_streamer1", "DEMO_viewer2", "demo_bot", "demo_x"])
     expect(usernameProblem(name)).toBe("reserved");

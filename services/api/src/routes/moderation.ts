@@ -157,6 +157,9 @@ export const moderation = {
       if (plan.endStream && c.subjectType === "broadcast" && c.channelId)
         ended = await endBroadcastInTx(tx, c.channelId, c.subjectId, now);
       let suspendedUser = false;
+      // Whether each update changed a row: an account under a T0 ban and a channel already
+      // suspended are left as they are, and the statement of reasons skips what was not applied.
+      let suspendedChannel = false;
       if (plan.suspend) {
         const target = input.suspendTarget;
         const expires = input.durationSeconds ? new Date(now.getTime() + input.durationSeconds * 1000) : null;
@@ -180,10 +183,12 @@ export const moderation = {
           });
         }
         if ((target === "channel" || target === "both") && c.channelId) {
-          await tx
+          const rows = await tx
             .update(channels)
             .set({ suspendedAt: now, suspendedReason: "moderation" })
-            .where(and(eq(channels.id, c.channelId), isNull(channels.suspendedAt)));
+            .where(and(eq(channels.id, c.channelId), isNull(channels.suspendedAt)))
+            .returning({ id: channels.id });
+          suspendedChannel = rows.length > 0;
           await tx.insert(modActions).values({
             scope: "platform",
             channelId: c.channelId,
@@ -228,7 +233,12 @@ export const moderation = {
           restrictionLifted: lifted,
           streamEnded: ended !== null,
           ...(plan.suspend
-            ? { suspendTarget: input.suspendTarget, durationSeconds: input.durationSeconds ?? null }
+            ? {
+                suspendTarget: input.suspendTarget,
+                durationSeconds: input.durationSeconds ?? null,
+                userSuspended: suspendedUser,
+                channelSuspended: suspendedChannel,
+              }
             : {}),
         },
       });

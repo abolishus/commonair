@@ -70,9 +70,7 @@ describe("legal seed documents", () => {
     for (const d of docs) {
       expect(d.body.startsWith("> **Draft pending lawyer review.**"), d.kind).toBe(true);
       const words = d.body.split(/\s+/).filter(Boolean).length;
-      // The enforcement notice is a skeleton (banner, placeholders, headings) until W0-sor writes it.
-      const min = d.kind === "enforcement_notice" ? 0 : 300;
-      expect(words, d.kind).toBeGreaterThanOrEqual(min);
+      expect(words, d.kind).toBeGreaterThanOrEqual(300);
       expect(words, d.kind).toBeLessThanOrEqual(900);
     }
   });

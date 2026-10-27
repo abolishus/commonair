@@ -18,6 +18,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -195,6 +196,8 @@ esac
 exit 0
 `,
   loginctl: `echo "\${STUB_LINGER:-yes}"`,
+  // Unset: synchronized; STUB_NTP=no or an empty value for the other answers.
+  timedatectl: `echo "\${STUB_NTP-yes}"`,
   ss: String.raw`
 case "$1" in
   -Hltn) for p in \${STUB_TCP_PORTS:-22}; do echo "LISTEN 0 4096 0.0.0.0:$p 0.0.0.0:*"; done ;;
@@ -348,6 +351,8 @@ describe("arguments", () => {
       "--yes",
       "--reinstall",
       "--unsupported-distro",
+      "--turn-relay",
+      "--no-turn-relay",
     ])
       expect(r.out).toContain(flag);
     expect(host().run(["install", "--help"]).out).toContain("Usage: selfhost.sh");
@@ -401,6 +406,36 @@ describe("host checks", () => {
     expect(h.calls().filter((c) => c.startsWith("curl"))).toEqual([]);
     expect(existsSync(join(h.home, "commonair"))).toBe(false);
   });
+
+  test(
+    "an unsynchronized clock warns and never blocks; an unanswerable one says it could not check",
+    () => {
+      const doc = "docs/self-hosting/requirements.md#time-synchronization";
+      const synced = host().run(INSTALL);
+      expectOk(synced);
+      expect(synced.err).not.toContain("NTP-synchronized");
+
+      const off = host();
+      const r = off.run(INSTALL, { STUB_NTP: "no" });
+      expectOk(r);
+      expect(r.err).toContain("WARNING: the host clock is not NTP-synchronized");
+      expect(r.err).toContain(doc);
+      expect(off.calls()).toContain("timedatectl show -p NTPSynchronized --value");
+
+      const empty = host().run(INSTALL, { STUB_NTP: "" });
+      expectOk(empty);
+      expect(empty.err).toContain("WARNING: could not check that the host clock is NTP-synchronized");
+      expect(empty.err).not.toContain("not NTP-synchronized");
+
+      const missing = host();
+      rmSync(join(missing.dir, "stub/timedatectl"));
+      const m = missing.run(INSTALL);
+      expectOk(m);
+      expect(m.err).toContain("could not check that the host clock is NTP-synchronized");
+      expect(m.err).toContain(doc);
+    },
+    TIMEOUT * 2,
+  );
 
   test(
     "accepts Fedora 42 and later",

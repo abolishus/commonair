@@ -8,6 +8,8 @@ import { DEMO_FIXTURES } from "@commonair/contracts/fixtures";
 /**
  * Names that would collide with routes, impersonate staff or confuse users.
  * Compared after lowercasing; prefixes in RESERVED_PREFIXES block whole families.
+ * Caddy sends /hls/*, /cdn/*, /media/*, /vod/* and /p2p-digest/* to the origin before the web
+ * app sees them, so those names are reserved too (`p2p-digest` itself can never be a slug).
  */
 export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "admin",
@@ -20,6 +22,7 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "billing",
   "blog",
   "bot",
+  "cdn",
   "categories",
   "category",
   "channel",
@@ -41,12 +44,14 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "everyone",
   "following",
   "help",
+  "hls",
   "here",
   "internal",
   "legal",
   "live",
   "login",
   "logout",
+  "media",
   "mod",
   "moderator",
   "moderators",
@@ -56,6 +61,7 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "official",
   "overlay",
   "overlays",
+  "p2p",
   "payments",
   "privacy",
   "relay",
@@ -71,19 +77,31 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "status",
   "support",
   "system",
+  "takedown",
   "terms",
   "transparency",
   "treasurer",
   "undefined",
+  "vod",
   "videos",
   "vods",
   "www",
 ]);
 /**
+ * `tracker`: Caddy's `handle_path /tracker*` matches any path that merely starts with it
+ * (`/trackerfan` included), so the whole family is shadowed.
  * `demo_` belongs to the demo seed (`packages/db` `demo:seed`, which writes rows directly): no
  * sign-up or bot may take it, so `demo:clear` can never match a real account by that anchor.
  */
-const RESERVED_PREFIXES = ["admin_", "staff_", "mod_", "official_", "support_", DEMO_FIXTURES.usernamePrefix];
+const RESERVED_PREFIXES = [
+  "tracker",
+  "admin_",
+  "staff_",
+  "mod_",
+  "official_",
+  "support_",
+  DEMO_FIXTURES.usernamePrefix,
+];
 
 export type UsernameProblem = "format" | "reserved";
 
