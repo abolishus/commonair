@@ -111,8 +111,9 @@ key may not use it, the unit fails, the services do not start, and the journal s
 journalctl --user -u commonair-storage-init
 ```
 
-Fix it at the store, then `systemctl --user restart commonair-storage-init` (the services follow),
-or run `sh ~/commonair/selfhost.sh install --reinstall`.
+The unit retries six times an hour, then fails for good, and the services that need it fail
+with it. Fix it at the store, then run `sh ~/commonair/selfhost.sh install --reinstall`: it
+clears the failed state, starts the stack again and waits for it to be healthy.
 
 `--s3-public-endpoint` is where browsers reach the store, if not at `--s3-endpoint` (a CDN
 hostname in front of it, say). The presigned URLs use it.

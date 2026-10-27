@@ -78,8 +78,11 @@ Common causes:
 - **The object store is not ready.** Every service waits for `commonair-storage-init`. With
   Garage it creates the buckets and keys; with an external store it checks each bucket with the
   instance's keys, and fails naming the missing bucket or the key that was denied:
-  `journalctl --user -u commonair-storage-init`. Fix it at the store (create the bucket, widen the
-  key), then `systemctl --user restart commonair-storage-init`; the services follow
+  `journalctl --user -u commonair-storage-init`. It retries six times an hour, then fails for
+  good, and the services that need it fail with it and do not start again on their own. Fix it at
+  the store (create the bucket, widen the key), then run
+  `sh ~/commonair/selfhost.sh install --reinstall`, which clears the failed state, starts the
+  stack again and waits for it to be healthy
   ([object-storage.md](object-storage.md#install-against-it)).
 - **An observability service in a crash loop.** It does not hold the app back: units that
   depend on the OpenTelemetry collector, Loki, Tempo or Prometheus wait only for its container
@@ -206,12 +209,16 @@ The IRC ports come from systemd: `commonair-irc.socket` holds 6667 and `commonai
 the gateway sees each client's own address, IPv4 or IPv6, and its per-address limits count
 each client separately.
 
-**"Too many connections from your address"** means that one real client address has more than
-`IRC_MAX_CONNECTIONS_PER_IP` (50) connections open, or opened more than a burst of
-`IRC_CONNECT_BURST_PER_IP` (20) new ones (refilled at `IRC_CONNECT_PER_SECOND_PER_IP`, 2 a
-second). Many users behind one NAT, or a bouncer that connects for all of them, look like that.
-If that address is legitimate, raise those limits in the env file (`IRC_MAX_CONNECTIONS` still
-caps the total), then `systemctl --user restart commonair-irc`.
+**"Too many connections from your address"** means that one real client address already has
+`IRC_MAX_CONNECTIONS_PER_IP` (50) connections open. Raise that limit.
+
+**"Reconnecting too fast"** means that one address has used up its burst of new connections:
+`IRC_CONNECT_BURST_PER_IP` (20), refilled at `IRC_CONNECT_PER_SECOND_PER_IP` (2 a second). Raise
+those.
+
+Many users behind one NAT, or a bouncer that connects for all of them, look like either. If that
+address is legitimate, raise the limit in the env file (`IRC_MAX_CONNECTIONS` still caps the
+total), then `systemctl --user restart commonair-irc`.
 
 **The gateway does not come up at all:**
 

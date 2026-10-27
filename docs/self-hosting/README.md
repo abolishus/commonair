@@ -114,7 +114,7 @@ The supported way to change a unit is a **drop-in**, never an edit of the unit f
 Then `systemctl --user daemon-reload` and restart the unit. `install`, `upgrade` and a rollback
 keep drop-in directories, including a drop-in directory that is a symlink; a drop-in symlink
 whose target no longer exists is removed. (Releases up to 0.1.0-rc.2 deleted symlinked drop-in
-directories under `~/.config/systemd/user/`.) A drop-in for a unit that a later release removes
+directories, in both `~/.config/containers/systemd/` and `~/.config/systemd/user/`.) A drop-in for a unit that a later release removes
 stays behind, unused.
 
 ## Known limitations
@@ -138,8 +138,9 @@ These are true of the current release. Each one is tracked for a later release.
   (`127.0.0.1:3030`, behind its admin login). Nothing else is reachable from the host, and Valkey
   requires a password.
 - **Object backups need rclone and a second store.** WAL-G backs up Postgres. Media and sealed
-  evidence are copied by `selfhost.sh backup --objects`, daily, once you set the
-  `BACKUP_OBJECTS_REMOTE_*` keys and rclone is installed; until then they are not backed up
+  evidence are copied by `selfhost.sh backup --objects` once you set the
+  `BACKUP_OBJECTS_REMOTE_*` keys, install rclone and run it by hand once; its first success
+  turns on the daily timer. Until then they are not backed up
   ([backups.md](backups.md#objects)). Data exports are never copied.
 - **The observability services do not hold back the app while they run.** Units that depend on
   the OpenTelemetry collector, Loki, Tempo or Prometheus wait only for its container to start,

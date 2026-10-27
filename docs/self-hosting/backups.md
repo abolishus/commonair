@@ -423,6 +423,13 @@ When the old server is gone:
 4. As root, install rclone; then, as `commonair`, restore the objects
    ([Restore objects](#restore-objects)):
    `sh ~/commonair/selfhost.sh backup --restore-objects`.
+
+   With an external store (`S3_MODE=external`), install in step 1 **without** the `--s3-*`
+   flags: the new server then archives its WAL to its own Garage, not into the old server's
+   backups bucket. The env file of step 2 carries `S3_MODE=external` and the store's keys, and
+   the restore's `install --reinstall` switches the instance to the store and drops Garage's
+   unit. Skip `--restore-objects` while the store still holds the buckets.
+
 5. Once the restore checks out, take a first object backup from the new server
    (`selfhost.sh backup --objects`), which turns its daily timer on.
 
