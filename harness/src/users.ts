@@ -149,7 +149,7 @@ export class UserFactory {
           username: creds.username,
           birthDate: creds.birthDate,
           altcha,
-          acceptedDocumentIds: documents.map((d) => d.id),
+          acceptedDocumentIds: documents.filter((d) => d.requiresAcceptance).map((d) => d.id),
         }),
       }),
     );
