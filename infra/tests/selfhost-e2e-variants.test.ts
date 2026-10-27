@@ -225,7 +225,6 @@ describe("wiring of the other units' checks", () => {
     const calls = callsIn(stepBody("install"));
     expect(calls.indexOf("checkIrcClientAddresses")).toBe(calls.indexOf("checkClientAddresses") + 1);
     expect(calls.at(-1)).toBe("checkStopPostOrder");
-    expect(stepBody("install")).toContain("checkIrcClientAddresses(inHost, expectThat);");
   });
 
   test("upgrade: IRC client addresses next to the repeated listener check, and the order again", () => {

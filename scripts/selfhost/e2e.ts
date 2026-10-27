@@ -203,7 +203,7 @@ export function e2eOptions(argv: readonly string[]): E2eOptions {
   const opts: E2eOptions = { distro: "debian", storage: "garage", keep: false, mirror: undefined };
   const valued = { distro: Object.keys(HOST_IMAGES), storage: ["garage", "external"] } as const;
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]!;
+    const a = argv[i] ?? "";
     const name = a.startsWith("--") ? a.slice(2) : "";
     if (name === "distro" || name === "storage") {
       const v = argv[++i] ?? "";
@@ -901,13 +901,13 @@ export function execStopPosts(unitText: string): string[] {
     if (line === "" || line.startsWith("#") || line.startsWith(";")) continue;
     const header = /^\[(.+)\]$/.exec(line);
     if (header) {
-      section = header[1]!;
+      section = header[1] ?? "";
       continue;
     }
     if (section !== "Service") continue;
     const m = /^ExecStopPost\s*=\s*(.*)$/.exec(line);
     if (!m) continue;
-    const value = m[1]!.trim();
+    const value = (m[1] ?? "").trim();
     out = value === "" ? [] : [...out, value];
   }
   return out;
@@ -929,7 +929,7 @@ export function splitUnits(output: string): Map<string, string> {
   for (const line of output.split("\n")) {
     const m = /^@@unit (\S+)$/.exec(line);
     if (m) {
-      name = m[1]!;
+      name = m[1] ?? "";
       units.set(name, "");
     } else if (name) units.set(name, `${units.get(name)}${line}\n`);
   }
@@ -1069,7 +1069,31 @@ async function startMirror(): Promise<string> {
     MIRROR_CONTAINER,
   ]).trim();
   if (!address) throw new StepError(`no address for ${MIRROR_CONTAINER} on ${NETWORK}`);
+  await mirrorStaysUp();
   return address;
+}
+
+/**
+ * Zot refuses a bad config by exiting at start. Without this, every pull would quietly fall back
+ * to upstream and the rate-limit protection would be gone, so a mirror that does not stay up
+ * fails the step instead.
+ */
+async function mirrorStaysUp(): Promise<void> {
+  const state = () =>
+    podman(["inspect", "--format", "{{.State.Status}}", MIRROR_CONTAINER], { allowFail: true, quiet: true }).trim();
+  let upFor = 0;
+  for (let i = 0; i < 40 && upFor < 6; i++) {
+    await Bun.sleep(500);
+    upFor = state() === "running" ? upFor + 1 : 0;
+  }
+  if (upFor >= 6) return;
+  // Zot logs to stderr, which run() returns no part of.
+  const r = Bun.spawnSync(["podman", "logs", MIRROR_CONTAINER], { stdout: "pipe", stderr: "pipe" });
+  const logs = (r.stdout.toString() + r.stderr.toString()).slice(-2000);
+  throw new StepError(
+    `the pull-through mirror ${MIRROR_CONTAINER} is ${state() || "gone"}, not running ` +
+      `(rerun with --no-mirror to pull from upstream directly)\n${logs}`,
+  );
 }
 
 /** What the mirror holds now (logged only: a pull that fell back to upstream is not a failure). */
