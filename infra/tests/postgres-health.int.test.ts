@@ -151,6 +151,7 @@ afterAll(() => {
     "stale",
     "noquit",
     "noterm",
+    "quits",
   ])
     podman(["rm", "-f", "-t", "0", name(role)]);
   podman(["volume", "rm", "-f", VOLUME]);
@@ -400,11 +401,41 @@ describe("the startup check's state and its stop", () => {
   }, 60_000);
 
   test("a postmaster that does stop gets no SIGKILL", async () => {
-    // The stuck replay above stopped on SIGQUIT; its watcher died with the container.
-    const logs = podman(["logs", name("stuck")]).out;
-    expect(logs).toMatch(/immediate shutdown request/);
+    // Self-contained: the container outlives the grace period, so the watcher runs to its
+    // is_postgres check and must find the postmaster gone.
+    const c = idle("quits");
+    // A process named postgres that dies on SIGQUIT (sleep's default action). exec, not `&`: a
+    // non-interactive shell starts background jobs with SIGQUIT ignored.
+    ok([
+      "exec",
+      "-d",
+      c,
+      "sh",
+      "-c",
+      "mkdir -p /tmp/fake /tmp/pgdata && ln -sf /bin/sleep /tmp/fake/postgres && " +
+        "echo $$ > /tmp/pgdata/postmaster.pid && PATH=/tmp/fake:$PATH exec postgres 3600",
+    ]);
+    const pid = await until("fake postmaster", 10_000, () => {
+      const r = podman(["exec", c, "cat", "/tmp/pgdata/postmaster.pid"]);
+      return r.code === 0 && /^\d+\n/.test(r.out) ? r.out.trim() : undefined;
+    });
+    const alive = () => podman(["exec", c, "test", "-d", `/proc/${pid}`]).code === 0;
+    const run = [
+      "-e",
+      "PGDATA=/tmp/pgdata",
+      "-e",
+      "COMMONAIR_PG_START_SECONDS=0",
+      "-e",
+      "COMMONAIR_PG_KILL_GRACE_SECONDS=3",
+    ];
+    expect(health(c, ["--startup"], run).code).toBe(2);
+    await until("SIGQUIT to stop it", 10_000, () => (alive() ? undefined : true));
+    // Past the grace period, with margin for the watcher to have run its check.
+    await sleep(6000);
+    expect(running(c)).toBe(true);
+    const logs = podman(["logs", c]).out;
     expect(logs).not.toMatch(/sending SIGKILL/);
-  });
+  }, 60_000);
 });
 
 describe("commonair-wal-fetch", () => {

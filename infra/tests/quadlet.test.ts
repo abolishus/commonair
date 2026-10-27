@@ -26,6 +26,11 @@
  * with a collector that does not listen yet: its OTLP exporters retry connection refused and DNS
  * failures with backoff and the batch processors buffer meanwhile, never blocking a request
  * (packages/observability/src/sdk.ts). compose.yaml still waits for their health (dev only).
+ *
+ * Known limit: a collector that runs but is unhealthy no longer delays the apps; one whose
+ * container cannot start at all (a missing image, a failing ExecStartPre=) still can, because
+ * After= waits for its start job and RestartMode=direct keeps that job open while it loops. If the
+ * droplet shows this matters, drop the apps' After= on the collector (and lose its stop order).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";

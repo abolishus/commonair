@@ -147,6 +147,18 @@ describe("install_units keeps operator drop-ins", () => {
     expect(existsSync(join(h.quadlet, "commonair-tracker.container"))).toBe(false);
   });
 
+  test("a dangling drop-in symlink (its target was removed) is cleaned up", () => {
+    const h = host();
+    const v1 = release(h.home, "v1");
+    h.install(v1);
+    const gone = join(h.home, "gone");
+    symlinkSync(gone, join(h.quadlet, "commonair-media.container.d"));
+    symlinkSync(gone, join(h.systemd, "commonair-backup.service.d"));
+    h.install(v1);
+    expect(files(h.quadlet)).toEqual(files(join(v1, "quadlet")));
+    expect(files(h.systemd)).toEqual(files(join(v1, "systemd")));
+  });
+
   test("a symlinked unit file (not a drop-in) is still replaced by the release's copy", () => {
     const h = host();
     const elsewhere = join(h.home, "hand-made.container");
