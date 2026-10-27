@@ -47,7 +47,14 @@ describe.skipIf(!storage)("NCII auto-hide object move", () => {
     await S3.put(MEDIA_BUCKET, untouched, "other VOD", { contentType: "video/mp4" });
     await t.db
       .insert(schema.vods)
-      .values({ id, broadcastId: broadcast.id, channelId: channel.id, title: "v", status: "ready", storagePrefix: priv });
+      .values({
+        id,
+        broadcastId: broadcast.id,
+        channelId: channel.id,
+        title: "v",
+        status: "ready",
+        storagePrefix: priv,
+      });
 
     const [req] = await t.db
       .insert(schema.nciiRequests)
@@ -76,8 +83,7 @@ describe.skipIf(!storage)("NCII auto-hide object move", () => {
       expect(await moveHiddenObjects(ctx, req.id)).toBe(keys.length);
       expect(await list(priv)).toEqual([]);
       expect(await list(pub)).toEqual([]);
-      for (const k of keys)
-        expect(await (await S3.get(MEDIA_BUCKET, nciiHiddenKey(k)))?.text()).toBe(`bytes of ${k}`);
+      for (const k of keys) expect(await (await S3.get(MEDIA_BUCKET, nciiHiddenKey(k)))?.text()).toBe(`bytes of ${k}`);
       expect(await S3.head(MEDIA_BUCKET, untouched)).not.toBeNull();
       // Safe to repeat: nothing is left to move.
       expect(await moveHiddenObjects(ctx, req.id)).toBe(0);
