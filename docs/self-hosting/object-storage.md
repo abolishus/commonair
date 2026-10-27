@@ -9,7 +9,8 @@ CommonAir keeps four kinds of objects in S3 buckets: public media (avatars, pane
 clips, VODs), members' data exports, WAL-G's Postgres backups, and sealed moderation evidence.
 By default they live in [Garage](https://garagehq.deuxfleurs.fr/), which `selfhost.sh` runs on
 the same host. That needs nothing from you, but the objects share the server's disk: if the disk
-dies, they go with it (unless you copy them off the server, see [backups.md](backups.md)).
+dies, they go with it, unless you copy them off the server with `selfhost.sh backup --objects`
+([backups.md](backups.md#objects)).
 
 Instead, `install` can point the instance at any S3-compatible store: DigitalOcean Spaces, AWS
 S3, Hetzner Object Storage, MinIO, a Garage cluster on other hosts. No provider is special-cased;
@@ -17,8 +18,8 @@ the requirements below are all that matters. Then no Garage runs on the host at 
 
 Choose at the first install. An instance never switches store: `install` refuses `--s3-*` on an
 instance that uses Garage, because nothing would move the objects already stored. To move one,
-copy its buckets with rclone (as in [backups.md](backups.md#objects-in-garage)) and install a
-new instance against the new store.
+copy all its buckets with rclone by hand (as in [backups.md](backups.md#without-the-script)) and
+install a new instance against the new store.
 
 ## What the store must support
 
@@ -169,13 +170,18 @@ What to know about Spaces:
 - It supports only the `private` and `public-read` canned ACLs. CommonAir sets no ACL, so every
   object is private.
 - Its only server-side encryption is SSE-C (keys supplied with each request), which CommonAir
-  does not use. The evidence is sealed before it is stored, and an rclone copy of the buckets can
-  be encrypted on the way ([backups.md](backups.md#objects-in-garage)).
+  does not use. The evidence is sealed before it is stored. `selfhost.sh backup --objects` does
+  not encrypt its copy; a copy by hand through an rclone crypt remote can
+  ([backups.md](backups.md#without-the-script)).
 - A droplet that resolves the Spaces endpoint through the VPC's resolver reaches Spaces over
   DigitalOcean's internal network, and that transfer is not billed. Check the droplet's resolver
   (`resolvectl status`) if you rely on it.
 - Keep backups in another region: set `AWS_*` and `WALG_S3_PREFIX` for a bucket in, say,
-  `fra1` ([backups.md](backups.md#off-host-s3)).
+  `fra1` ([backups.md](backups.md#off-host-s3)), and copy the media and evidence there with
+  `selfhost.sh backup --objects` ([backups.md](backups.md#set-it-up-digitalocean-spaces)).
+- Turn on versioning, with an expiry rule, on the instance's buckets, the offsite one, or both:
+  it is what brings back objects deleted or overwritten by mistake
+  ([backups.md](backups.md#guards-against-emptying-the-copy)).
 
 ## Other stores
 

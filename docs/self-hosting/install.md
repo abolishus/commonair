@@ -44,6 +44,16 @@ proves that `SHA256SUMS` itself came from the project.
 You do not need to install Podman or create a user. `selfhost.sh` does that when you run it as
 root.
 
+**rclone** copies the media and evidence buckets off the server
+([backups.md](backups.md#objects)). When `selfhost.sh` installs Podman, it installs rclone with
+it. If Podman and its helpers were already on the server, it installs nothing, so install
+rclone yourself, as root, before you set up object backups:
+
+```sh
+apt-get install -y rclone     # Debian
+dnf install -y rclone         # Fedora
+```
+
 ## 2. Download and verify the release
 
 Never pipe a download into a shell. Download the bundle, its checksums and their signature,
@@ -113,16 +123,43 @@ the same checks. Other options:
 
 Run `sh selfhost.sh --help` for the full list.
 
-A fork's releases: set `COMMONAIR_REPOSITORY_URL=https://…` (the fork's repository URL) in the
-environment of every `selfhost.sh` run. It decides where releases are downloaded from and which
-workflow identity their signature must carry.
+**Object storage.** By default the objects (media, data exports, WAL-G backups, sealed evidence)
+live in Garage on this server, and `install` needs nothing for it. To keep them in an
+S3-compatible store instead (DigitalOcean Spaces, AWS S3, MinIO, …), create the buckets and keys
+first and add the `--s3-*` flags to this command. **Choose now**: an instance never switches
+store later. The keys never go on the command line; export them, or let `install` prompt for
+them:
+
+```sh
+read -rs S3_ACCESS_KEY_ID && export S3_ACCESS_KEY_ID
+read -rs S3_SECRET_ACCESS_KEY && export S3_SECRET_ACCESS_KEY
+read -rs S3_EVIDENCE_ACCESS_KEY_ID && export S3_EVIDENCE_ACCESS_KEY_ID
+read -rs S3_EVIDENCE_SECRET_ACCESS_KEY && export S3_EVIDENCE_SECRET_ACCESS_KEY
+sh "commonair-selfhost_$VERSION/selfhost.sh" install --yes \
+  --bundle "$PWD/commonair-selfhost_$VERSION.tar.gz" \
+  --domain stream.example.org --email ops@example.org --require-signature \
+  --s3-endpoint https://s3.example.net --s3-region eu-central-1 --s3-path-style false \
+  --s3-bucket-media stream-example-org-media --s3-bucket-exports stream-example-org-exports \
+  --s3-bucket-backups stream-example-org-backups --s3-bucket-evidence stream-example-org-evidence
+```
+
+`read -rs` is bash syntax. Run as root with `--yes`, the keys reach the `commonair` user's run
+through the environment. [object-storage.md](object-storage.md) says what the store must support
+and walks through Spaces.
+
+**A fork's releases.** To install a fork's release, set `COMMONAIR_REPOSITORY_URL` to the fork's
+repository URL for this command. It decides where releases are downloaded from and which
+workflow identity their signature must carry. Read
+[upgrades.md](upgrades.md#a-forks-releases) first: whether later upgrades need it again depends
+on the fork.
 
 ## 4. What it checks and writes
 
 ### As root (host preparation)
 
 1. Refuses anything but Debian 13 or Fedora 42+ (unless `--unsupported-distro`).
-2. Installs Podman, catatonit and their helpers if they are missing.
+2. If Podman, catatonit, aardvark-dns or nftables is missing, installs Podman and its helpers,
+   and rclone with them (`apt-get` or `dnf`).
 3. Creates the `commonair` user (with `/etc/subuid` and `/etc/subgid` ranges) if it does not
    exist.
 4. Enables linger for `commonair`, so its units keep running without a login.
@@ -150,17 +187,19 @@ Then it:
 4. sets the public URLs from `--domain`, `NODE_ENV=production`, `TLS_MODE`, the contacts from
    `--email`, and `MTX_WEBRTCADDITIONALHOSTS` from `--public-ip` or the server's global
    addresses;
-5. creates the Podman secrets `commonair-database-url`, `commonair-owner-database-url` and
-   `commonair-grafana-admin-password` from the env file;
+5. creates the Podman secrets `commonair-database-url`, `commonair-owner-database-url`,
+   `commonair-valkey-url` and `commonair-grafana-admin-password` from the env file;
 6. points the symlink `~/commonair` at the release, and records a `--registry` mirror in
    `~/.config/commonair/selfhost.conf`;
 7. creates the moderation hash lists `~/.local/share/commonair/moderation/csam.pdq` and
    `ncii.pdq` (empty, with a warning) and downloads the moderation model to
    `~/.local/share/commonair/models/`, checked against its pinned sha256;
-8. copies the Quadlet units to `~/.config/containers/systemd/` and the timers to
-   `~/.config/systemd/user/`;
-9. runs the database migrations to completion, starts every service, enables the backup and
-   IRC certificate timers, and waits until every service is healthy (up to 15 minutes);
+8. copies the Quadlet units to `~/.config/containers/systemd/` and the sockets, timers and
+   backup services to `~/.config/systemd/user/` (keeping your drop-ins,
+   [README.md](README.md#customizing-a-unit)); with an external store, Garage's unit is left out;
+9. runs the database migrations to completion, starts every service, enables the public-port
+   sockets and the backup and IRC certificate timers, and waits until every service is healthy
+   (up to 15 minutes);
 10. copies Caddy's certificate to IRC. Without DNS yet, there is no certificate; the install
     finishes without IRC and the daily timer retries ([tls.md](tls.md#the-irc-certificate)).
 
@@ -171,6 +210,12 @@ It ends with the instance URL and the next steps. The empty hash lists mean know
 Keep an offline copy of `~/.config/commonair/commonair.env`. It holds every secret, including
 the evidence private key, without which sealed evidence cannot be read, and you need it to
 restore onto a new server ([backups.md](backups.md)).
+
+The daily base backup goes to the instance's own store until you send it elsewhere, and objects
+are not copied anywhere until you set it up: `selfhost.sh backup --objects` copies the media and
+evidence buckets to another S3 store, `selfhost.sh backup --restore-objects` copies them back,
+and `status` shows the `last object backup:` ([backups.md](backups.md#objects)). Set both up
+before the instance holds anything you would miss.
 
 ## 5. The first admin account
 

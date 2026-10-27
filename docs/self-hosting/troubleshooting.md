@@ -15,11 +15,14 @@ sh ~/commonair/selfhost.sh status
 ```
 
 It shows the installed and previous version, the hostname and TLS mode (and the internal CA's
-root path), the certificate's expiry, every unit with its state, sub-state and container
-health, the last backup and its result, and the size of every volume.
+root path), the certificate's expiry, the object store (with an external one, each bucket and
+whether it is ready), every unit with its state, sub-state and container health, the socket
+units, the last base backup and its result, the last object backup, and the size of every
+volume.
 
-A healthy instance has every long-running unit `active running healthy`. The one-shots
-(`commonair-migrate`, `commonair-garage-init`) show `active exited`, and
+A healthy instance has every long-running unit `active running healthy` and every socket
+(`commonair-caddy.socket`, `commonair-irc.socket`, `commonair-ircs.socket`) `active listening`.
+The one-shots (`commonair-migrate`, `commonair-storage-init`) show `active exited`, and
 `commonair-irc-cert` shows `inactive dead` between runs.
 
 ## Logs
@@ -72,13 +75,21 @@ Common causes:
   and every service that needs the database stays down. Its log has the error. After fixing the
   cause, `sh ~/commonair/selfhost.sh install --reinstall` clears the failed state and starts
   over.
-- **An observability service in a crash loop.** App units start after the OpenTelemetry
-  collector, so a collector that never gets healthy holds them back. Check
-  `commonair-otel-collector`, `commonair-loki` and `commonair-tempo`.
+- **The object store is not ready.** Every service waits for `commonair-storage-init`. With
+  Garage it creates the buckets and keys; with an external store it checks each bucket with the
+  instance's keys, and fails naming the missing bucket or the key that was denied:
+  `journalctl --user -u commonair-storage-init`. Fix it at the store (create the bucket, widen the
+  key), then `systemctl --user restart commonair-storage-init`; the services follow
+  ([object-storage.md](object-storage.md#install-against-it)).
+- **An observability service in a crash loop.** It does not hold the app back: units that
+  depend on the OpenTelemetry collector, Loki, Tempo or Prometheus wait only for its container
+  to start, not for its health. Only a container that cannot start at all (a missing image, say)
+  delays them. Check `commonair-otel-collector`, `commonair-loki` and `commonair-tempo`.
 - **`Failed to spawn executor: Device or resource busy`** on every restart. The unit's cgroup
   was not cleaned up after its container died, a gap in systemd 257 with in-place restarts.
-  Every unit now cleans it up itself after each stop (`scripts/selfhost/cgroup-reset.sh`). On
-  an instance installed before that, `systemctl --user restart <unit>` clears it.
+  Every unit now cleans it up itself after each stop (`scripts/selfhost/cgroup-reset.sh`, the
+  unit's first `ExecStopPost=`, before Quadlet's own `podman rm`). On an instance installed
+  before that, `systemctl --user restart <unit>` clears it.
 
 To restart one service by hand: `systemctl --user restart commonair-worker`.
 
@@ -135,9 +146,9 @@ RTMP (TCP 1935) has none of these requirements and is the fallback.
 
 ## Image uploads or export downloads fail
 
-Channel images and data exports go from the browser to `https://<host>/<bucket>/…` with a
-presigned URL, which Caddy forwards to Garage ([tls.md](tls.md#uploads-and-export-downloads)).
-When they fail:
+With Garage, channel images and data exports go from the browser to `https://<host>/<bucket>/…`
+with a presigned URL, which Caddy forwards to Garage
+([tls.md](tls.md#uploads-and-export-downloads)). When they fail:
 
 1. **`S3_PUBLIC_ENDPOINT`** in the env file is `https://<host>`, the same host as
    `PUBLIC_HOSTNAME`. Empty, or an address like `http://garage:3900`, makes the browser call a
@@ -151,6 +162,21 @@ When they fail:
    front of Caddy rewrote the `Host` header or the path.
 4. **413** means the file is over the 10 MB upload limit.
 5. With `--tls internal`, the browser must trust Caddy's root, as for the site itself.
+
+With an external store ([object-storage.md](object-storage.md)), the browser talks to the store
+itself, and Caddy has no part in it. The browser's console names the cause:
+
+1. **A CORS error.** The media bucket needs a CORS rule that allows `PUT` and `GET` from
+   `https://<host>` with any header
+   ([object-storage.md](object-storage.md#buckets-and-keys)). Exports need none.
+2. **A Content-Security-Policy error** (`connect-src`). `S3_CONNECT_SRC` in the env file must be
+   the origin the presigned URLs point at: the public endpoint with path-style URLs, or
+   `https://<media bucket>.<endpoint host>` with virtual-hosted ones. `install` works it out;
+   after changing the endpoint or path style, run `install --reinstall`.
+3. **The browser cannot reach the host.** `S3_PUBLIC_ENDPOINT` (from `--s3-public-endpoint`,
+   else `--s3-endpoint`) must be an address browsers can reach, not a private one.
+4. **403 from the store**: the signature does not match (an expired URL, or a proxy that rewrote
+   the request), or the main key may not write to the media bucket.
 
 ## Linger is missing
 
@@ -175,15 +201,32 @@ sysctl --system
 
 ## IRC clients are refused
 
-Rootless Podman forwards the IRC ports (6667, 6697) so that every client appears to come from
-the same internal address. The IRC gateway's per-address limits then apply to all clients
-together: after `IRC_MAX_CONNECTIONS_PER_IP` (50) connections, or a burst of
-`IRC_CONNECT_BURST_PER_IP` (20) new ones, everyone is refused. Until IRC gets its ports from
-systemd as Caddy does, raise both in the env file to what the whole instance should allow
-(`IRC_MAX_CONNECTIONS` still caps the total), then `systemctl --user restart commonair-irc`. A
-single client can otherwise use up the shared count and lock every other IRC user out. HTTPS
-clients (the tracker included) are not affected: Caddy sees each one's own
-address.
+The IRC ports come from systemd: `commonair-irc.socket` holds 6667 and `commonair-ircs.socket`
+6697, as `commonair-caddy.socket` holds 80 and 443, and both are handed to `commonair-irc`. So
+the gateway sees each client's own address, IPv4 or IPv6, and its per-address limits count
+each client separately.
+
+**"Too many connections from your address"** means that one real client address has more than
+`IRC_MAX_CONNECTIONS_PER_IP` (50) connections open, or opened more than a burst of
+`IRC_CONNECT_BURST_PER_IP` (20) new ones (refilled at `IRC_CONNECT_PER_SECOND_PER_IP`, 2 a
+second). Many users behind one NAT, or a bouncer that connects for all of them, look like that.
+If that address is legitimate, raise those limits in the env file (`IRC_MAX_CONNECTIONS` still
+caps the total), then `systemctl --user restart commonair-irc`.
+
+**The gateway does not come up at all:**
+
+```sh
+systemctl --user status commonair-irc.socket commonair-ircs.socket
+journalctl --user -u commonair-irc -n 100 --no-pager
+```
+
+Both sockets must be `active (listening)`. A socket that failed usually means something else
+holds the port (`sudo ss -ltnp 'sport = :6667'`). The gateway refuses to bind the ports itself:
+`systemd socket activation failed; not starting` in its journal means the descriptors were
+missing or unusable; start the sockets, then the service. When it does start, its
+`irc gateway listening` line shows `fdNames`: `irc:ircs` (or `ircs:irc`) when it found both sockets by name, `unnamed,
+fd-order fallback` otherwise. Without a TLS certificate yet, IRC does not start either
+([tls.md](tls.md#the-irc-certificate)).
 
 ## Valkey
 
@@ -205,15 +248,44 @@ journalctl --user -u commonair-postgres -n 200 --no-pager
 podman exec -it commonair-postgres psql -U commonair -d commonair
 ```
 
-- **WAL piles up in `pg_wal`.** Archiving to S3 is failing (Garage down, or wrong `AWS_*`
-  settings). Postgres keeps the segments until archiving works, so nothing is lost, but the
+- **WAL piles up in `pg_wal`.** Archiving to S3 is failing (Garage or the external store
+  unreachable, or wrong `AWS_*` settings). Postgres keeps the segments until archiving works, so nothing is lost, but the
   disk fills. `podman exec commonair-postgres psql -U commonair -c 'select * from pg_stat_archiver'`
   shows the last failure.
 - **"too many clients".** Raise `POSTGRES_MAX_CONNECTIONS` (or lower `DATABASE_POOL_MAX`) and
   reinstall.
 - **A failed backup.** `journalctl --user -u commonair-backup` has the WAL-G error.
+- **A start that hangs is stopped hard.** When Postgres does not come up in time, its health
+  check stops it (SIGQUIT to the postmaster, or SIGTERM to the container when there is no
+  postmaster yet) so the unit restarts. If it is still running `COMMONAIR_PG_KILL_GRACE_SECONDS`
+  (30) later, the check sends SIGKILL and logs `commonair-pg-health: … sending SIGKILL` in the
+  container's log. A server that stops in time
+  gets no SIGKILL. The check keeps its state in `/run/commonair-pg-health.state` inside the
+  container.
 
 To restore, see [backups.md](backups.md#restore).
+
+## Object backups
+
+`selfhost.sh backup --objects` and its daily timer copy the media and evidence buckets offsite
+([backups.md](backups.md#objects)). `status` shows the `last object backup:`, which only a run
+that copied every bucket updates.
+
+- **A failed daily copy** shows in `systemctl --user status commonair-object-backup.service`
+  and in `journalctl --user -u commonair-object-backup`, while `status` keeps the last success.
+  To stop the daily copy: `systemctl --user disable --now commonair-object-backup.timer`.
+- **`rclone is not installed`.** As root: `apt-get install rclone` or `dnf install rclone`.
+- **`<bucket> is empty but its offsite copy is not`.** The run refused to empty the copy. If the
+  instance lost its objects, restore them: `selfhost.sh backup --restore-objects`. If the bucket
+  is empty on purpose, run `selfhost.sh backup --objects --allow-empty-source` once.
+- **A run stopped at `--max-delete`.** More objects left the instance than the limit (1000 per
+  bucket unless `BACKUP_OBJECTS_MAX_DELETE` says otherwise). If the deletions are expected, run
+  `selfhost.sh backup --objects --max-delete off` once; if not, restore first.
+- **`another object backup or restore is running (pid N)`.** Wait for it to finish. A lock left
+  by a run that was killed is taken over by the next run.
+- **`a backup --restore-objects … has not finished`.** Run `selfhost.sh backup --restore-objects`
+  again until it succeeds. If the instance has everything it should, remove the marker instead:
+  `rm ~/.local/state/commonair/object-restore-incomplete`.
 
 ## Disk full
 
@@ -229,8 +301,8 @@ podman system df
   time they run, and the previous release's images, which a rollback would then have to pull
   again. Run it only while the stack is up, or it removes the current release's images too.
 - **`pg_wal`** growing: archiving is failing (above).
-- **Garage**: VODs and clips. VODs expire after their channel's retention period (at most 60
-  days).
+- **Garage** (when the objects live on this host): VODs and clips. VODs expire after their
+  channel's retention period (at most 60 days).
 - **The journal**: `journalctl --vacuum-size=1G` as root.
 
 Postgres stops accepting writes when its disk is full. Free space first, then check that every

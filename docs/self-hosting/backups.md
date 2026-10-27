@@ -22,14 +22,15 @@ by `selfhost.sh backup --objects`, daily once you have set it up ([Objects](#obj
 
 ## Where backups go
 
-By default, to the `commonair-backups` bucket of the local Garage, under `wal/`. That protects
-against a broken database, not against losing the server. **For a real instance, send backups
+By default, to the `commonair-backups` bucket of the local Garage, under `wal/`, or of the
+external store when the instance uses one ([object-storage.md](object-storage.md)). On Garage
+that protects against a broken database, not against losing the server. **For a real instance, send backups
 off the server.**
 
 ### Off-host S3
 
 WAL-G reads `AWS_*` settings before the platform's `S3_*` ones, so pointing it elsewhere takes
-only env-file entries. The services keep using the local Garage for media.
+only env-file entries. The services keep using the instance's own store for media.
 
 Create a bucket and a key at the other location, then add to
 `~/.config/commonair/commonair.env`:
@@ -281,7 +282,10 @@ sealed with. With an external store, you need this only if the store itself lost
 ### Without the script
 
 The same copy by hand, for a store `selfhost.sh` does not handle or to add an rclone crypt
-layer. As `commonair`, create the read-only key in the local Garage and allow it to read the two
+layer. With an external store there is no `commonair-garage` container: create a read-only key
+for the two buckets at your provider, and point the source remote below at the store's
+endpoint, region and path style instead. With Garage, as `commonair`, create the read-only key in
+the local Garage and allow it to read the two
 buckets (with your bucket names, if the env file sets others):
 
 ```sh
@@ -351,7 +355,8 @@ It refuses a data directory that is not empty.
 These steps replace the database of the instance you run them on. As `commonair`:
 
 ```sh
-# 1. Stop everything, then start only Garage (needed when backups are in the local Garage).
+# 1. Stop everything, then start only Garage (needed when backups are in the local Garage;
+#    skip the second command on an instance with an external store).
 systemctl --user stop 'commonair-*'
 systemctl --user start commonair-garage.service
 
@@ -361,14 +366,14 @@ podman volume rm commonair-postgres-data
 podman volume create commonair-postgres-data
 
 # 3. Restore the newest base backup into it, with the keys the Postgres unit gets from the env
-#    file (written fresh, so a just-replaced env file counts).
+#    file (written fresh, so a just-replaced env file counts). They name the store WAL-G reads:
+#    Garage, the external store, or your AWS_* location.
 PG_IMAGE=$(sed -n 's/^Image=//p' ~/commonair/quadlet/commonair-postgres.container)
 PG_ENV=~/.config/commonair/unit-env/commonair-postgres.env
 sh ~/commonair/scripts/selfhost/render-env.sh ~/commonair/infra/selfhost/env/commonair-postgres.keys \
   ~/.config/commonair/commonair.env "$PG_ENV"
 podman run --rm --network commonair \
   --env-file "$PG_ENV" \
-  -e WALG_S3_ENDPOINT=http://garage:3900 -e S3_REGION=garage \
   -v commonair-postgres-data:/var/lib/postgresql/data \
   "$PG_IMAGE" commonair-restore
 
