@@ -8,6 +8,8 @@ import { toast } from "@commonair/ui/toast";
 import { Message01Icon, UserBlock01Icon } from "@hugeicons/core-free-icons";
 import { Link } from "@tanstack/react-router";
 import * as React from "react";
+import { HeldQueue } from "../components/mod/held-queue.tsx";
+import { EMPTY_HELD, heldReducer } from "../components/mod/held-state.ts";
 import { t } from "../i18n/index.ts";
 import { toastActionError } from "../lib/action-error.ts";
 import { api } from "../lib/api.ts";
@@ -40,6 +42,7 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
   const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
   const [canChat, setCanChat] = React.useState(false);
   const [canModerate, setCanModerate] = React.useState(false);
+  const [held, heldDispatch] = React.useReducer(heldReducer, EMPTY_HELD);
   // The target outlives `open` so the dialog title keeps its name while it animates closed.
   const [banDialog, setBanDialog] = React.useState<{ open: boolean; target: ModTarget | null }>({
     open: false,
@@ -50,6 +53,7 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
   const noticeSeq = React.useRef(0);
 
   React.useEffect(() => {
+    heldDispatch({ type: "reset" });
     const conn = new ChatConnection(
       channel,
       {
@@ -62,10 +66,21 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
           setCanChat(me.canChat);
           setCanModerate(me.canModerate);
         },
-        onMessage: (message) => dispatch({ type: "message", message }),
-        onDelete: (messageId) => dispatch({ type: "delete", messageId }),
+        onMessage: (message) => {
+          dispatch({ type: "message", message });
+          // An allowed held message comes back as an ordinary one.
+          heldDispatch({ type: "remove", id: message.id });
+        },
+        onHeld: (message) => heldDispatch({ type: "held", message }),
+        onDelete: (messageId) => {
+          dispatch({ type: "delete", messageId });
+          heldDispatch({ type: "remove", id: messageId });
+        },
         onClear: () => dispatch({ type: "clear" }),
-        onBan: (userId, username) => dispatch({ type: "ban", userId, username }),
+        onBan: (userId, username) => {
+          dispatch({ type: "ban", userId, username });
+          heldDispatch({ type: "removeUser", userId });
+        },
         // Notices answer something the viewer did, so they belong inline; socket errors stay toasts.
         onNotice: (code, kind) => {
           if (kind === "error") toast.error(errorMessage(code));
@@ -119,9 +134,12 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
       logLabel={t("chat.log")}
       newMessagesLabel={t("chat.newMessages")}
       viewersAction={
-        <StatusBadge tone={statusView.tone} aria-live="polite">
-          {statusView.label}
-        </StatusBadge>
+        <>
+          {canModerate && <HeldQueue channel={channel} state={held} dispatch={heldDispatch} />}
+          <StatusBadge tone={statusView.tone} aria-live="polite">
+            {statusView.label}
+          </StatusBadge>
+        </>
       }
       className={className}
       footer={

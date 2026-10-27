@@ -2,31 +2,35 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Chat REST: history, modes, bans, word filters, emotes, connection tokens.
- * Live messaging and in-chat moderation commands are the chat service's; these
- * endpoints write the same tables and broadcast on BUS.chatControl.
+ * Chat REST: history, modes, bans, word filters, emotes, connection tokens, the held queue.
+ * Live messaging and in-chat moderation commands are the chat service's: REST send, delete and
+ * clear are relayed to it as the caller (`chat/relay.ts`) so its rules and side effects apply
+ * unchanged. The other endpoints write the same tables and broadcast on BUS.chatControl.
  */
 import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { CHAT_TOKEN_TTL_SECONDS } from "@commonair/contracts/internal";
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
-import type { Scope } from "@commonair/contracts/scopes";
 import { schema, type Executor } from "@commonair/db";
-import { signChatToken } from "@commonair/tokens";
+import { listHeld, resolveHeld } from "../chat/held.ts";
+import { messageDtos } from "../chat/messages.ts";
+import { outcomeError, relayToChat, unavailable, type RelayRequest } from "../chat/relay.ts";
+import { chatTokenFor } from "../chat/token.ts";
 import type { Deps } from "../deps.ts";
+import type { Caller } from "../lib/access.ts";
 import { audit } from "../events/audit.ts";
 import { broadcasterFields, emit, moderatorFields, userFields } from "../events/outbox.ts";
 import { channelBySlug, iso, isoOrNull, mediaUrl, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, conflict, forbidden, isUniqueViolation, notFound, notImplemented } from "../lib/errors.ts";
+import { badRequest, conflict, forbidden, isUniqueViolation, notFound } from "../lib/errors.ts";
 import { liftChatBanInTx } from "../moderation/chat-bans.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
 import { unsafeFilterRegexReason } from "@commonair/safe-regex";
 
-const { chatMessages, chatBans, channelRoles, users, wordFilters, emotes, modActions, channels, subscriptions } =
-  schema;
+const { chatMessages, chatBans, channelRoles, users, wordFilters, emotes, modActions, channels } = schema;
 type ChannelRow = typeof channels.$inferSelect;
-const CHAT_SCOPES: Scope[] = ["chat:read", "chat:edit", "moderator:manage:chat"];
+/** The relay's chat token only has to outlive one call. */
+const RELAY_TOKEN_TTL_SECONDS = 60;
 const MAX_FILTERS = 200;
 const MAX_EMOTES = 100;
 
@@ -82,48 +86,6 @@ function filterDto(f: typeof wordFilters.$inferSelect) {
   };
 }
 
-async function badgesFor(deps: Deps, c: ChannelRow, userIds: string[]) {
-  const ids = [...new Set(userIds)];
-  const out = new Map<
-    string,
-    { type: "broadcaster" | "moderator" | "vip" | "subscriber" | "bot" | "staff"; tier?: number }[]
-  >();
-  if (ids.length === 0) return out;
-  const [roles, subs, people] = await Promise.all([
-    deps.db
-      .select()
-      .from(channelRoles)
-      .where(and(eq(channelRoles.channelId, c.id), inArray(channelRoles.userId, ids))),
-    deps.db
-      .select({ userId: subscriptions.subscriberId, tier: subscriptions.tier })
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.channelId, c.id),
-          eq(subscriptions.status, "active"),
-          inArray(subscriptions.subscriberId, ids),
-        ),
-      ),
-    deps.db
-      .select({ id: users.id, role: users.role, accountType: users.accountType })
-      .from(users)
-      .where(inArray(users.id, ids)),
-  ]);
-  for (const id of ids) out.set(id, []);
-  for (const p of people) {
-    const b = out.get(p.id) ?? [];
-    if (p.id === c.ownerId) b.push({ type: "broadcaster" });
-    if (p.role === "admin" || p.role === "moderator") b.push({ type: "staff" });
-    if (p.accountType === "bot") b.push({ type: "bot" });
-  }
-  for (const r of roles) {
-    if (r.role === "moderator") out.get(r.userId)?.push({ type: "moderator" });
-    if (r.role === "vip") out.get(r.userId)?.push({ type: "vip" });
-  }
-  for (const s of subs) out.get(s.userId)?.push({ type: "subscriber", tier: s.tier });
-  return out;
-}
-
 async function toBanDtos(deps: Deps, rows: (typeof chatBans.$inferSelect)[]) {
   const ids = [...new Set(rows.flatMap((r) => [r.userId, ...(r.moderatorId ? [r.moderatorId] : [])]))];
   const people = ids.length
@@ -177,50 +139,56 @@ export const chat = {
       )
       .orderBy(desc(chatMessages.createdAt))
       .limit(input.limit);
-    const replyIds = rows.map((r) => r.m.replyToId).filter((x): x is string => x !== null);
-    const replies = replyIds.length
-      ? await deps.db
-          .select({
-            id: chatMessages.id,
-            body: chatMessages.body,
-            deletedAt: chatMessages.deletedAt,
-            username: users.username,
-          })
-          .from(chatMessages)
-          .innerJoin(users, eq(users.id, chatMessages.userId))
-          .where(inArray(chatMessages.id, replyIds))
-      : [];
-    const replyBy = new Map(replies.map((r) => [r.id, r]));
-    const badges = await badgesFor(
-      deps,
-      c,
-      rows.map((r) => r.u.id),
-    );
-    return rows.reverse().map(({ m, u }) => {
-      const reply = m.replyToId ? replyBy.get(m.replyToId) : undefined;
-      return {
-        id: m.id,
-        channelId: m.channelId,
-        user: {
-          id: u.id,
-          username: u.username,
-          displayName: u.name,
-          color: null,
-          badges: badges.get(u.id) ?? [],
-          accountType: u.accountType,
-        },
-        body: m.body,
-        emotes: m.emotes,
-        isAction: m.isAction,
-        replyTo: reply ? { id: reply.id, username: reply.username, body: reply.deletedAt ? "" : reply.body } : null,
-        createdAt: iso(m.createdAt),
-      };
-    });
+    return messageDtos(deps, c, rows.reverse());
   }),
 
-  send: os.chat.send.handler(notImplemented),
-  deleteMessage: os.chat.deleteMessage.handler(notImplemented),
-  clear: os.chat.clear.handler(notImplemented),
+  send: os.chat.send.handler(async ({ context, input }) => {
+    const caller = requireCaller(context);
+    // Chat runs "/…" text as a command; REST moderation has its own endpoints ("//" is literal text).
+    if (input.body.startsWith("/") && !input.body.startsWith("//"))
+      throw badRequest("Chat commands are not accepted here; use the moderation endpoints");
+    const c = await channelBySlug(context.deps, input.channel);
+    if (!c) throw notFound("Channel not found");
+    const o = await relay(context.deps, caller, {
+      op: "send",
+      channel: c.slug,
+      body: input.body,
+      replyToId: input.replyToId,
+    });
+    if (o.type !== "ack") throw outcomeError(o);
+    // Chat has no accept-then-drop path today: a message is acked (maybe held) or refused.
+    return { id: o.id, held: o.held, dropReason: null };
+  }),
+
+  deleteMessage: os.chat.deleteMessage.handler(async ({ context, input }) => {
+    const c = requireChannel(context);
+    const o = await relay(context.deps, requireCaller(context), {
+      op: "command",
+      channel: c.slug,
+      command: "delete",
+      args: [input.id],
+    });
+    if (o.type === "notice" && o.code === "cmd_success") return { ok: true as const };
+    // Chat answers an unknown, foreign-channel or already deleted id with msg_rejected, but also a
+    // command that threw. A live row means the latter: retryable, not gone.
+    if (o.type === "notice" && o.code === "msg_rejected") {
+      if (await liveMessageExists(context.deps, c.id, input.id)) throw unavailable();
+      throw notFound("Message not found");
+    }
+    throw o.type === "ack" ? new Error("chat acked a command") : outcomeError(o);
+  }),
+
+  clear: os.chat.clear.handler(async ({ context }) => {
+    const c = requireChannel(context);
+    const o = await relay(context.deps, requireCaller(context), {
+      op: "command",
+      channel: c.slug,
+      command: "clear",
+      args: [],
+    });
+    if (o.type === "notice" && o.code === "cmd_success") return { ok: true as const };
+    throw o.type === "ack" ? new Error("chat acked a command") : outcomeError(o);
+  }),
 
   settings: os.chat.settings.handler(async ({ context: { deps }, input }) => {
     const c = await channelBySlug(deps, input.channel);
@@ -488,8 +456,18 @@ export const chat = {
   },
 
   held: {
-    list: os.chat.held.list.handler(notImplemented),
-    resolve: os.chat.held.resolve.handler(notImplemented),
+    list: os.chat.held.list.handler(async ({ context }) => listHeld(context.deps, requireChannel(context))),
+
+    resolve: os.chat.held.resolve.handler(async ({ context, input }) => {
+      const caller = requireCaller(context);
+      await resolveHeld(context.deps, {
+        channel: requireChannel(context),
+        messageId: input.id,
+        allow: input.allow,
+        moderatorId: caller.user.id,
+      });
+      return { ok: true as const };
+    }),
   },
 
   emotes: {
@@ -562,20 +540,23 @@ export const chat = {
 
   connectToken: os.chat.connectToken.handler(async ({ context }) => {
     const { deps, caller } = context;
-    const exp = Math.floor(deps.now().getTime() / 1000) + CHAT_TOKEN_TTL_SECONDS;
-    let scopes: Scope[] = ["chat:read"];
-    if (caller && !caller.user.suspended)
-      scopes =
-        caller.kind === "session"
-          ? CHAT_SCOPES
-          : CHAT_SCOPES.filter((s) => s === "chat:read" || caller.scopes.includes(s));
-    const token = await signChatToken(deps.env.INTERNAL_API_SECRET, {
-      v: 1,
-      uid: caller?.user.id ?? null,
-      app: caller?.kind === "token" ? caller.appId : null,
-      scopes,
-      exp,
-    });
+    const { token, exp } = await chatTokenFor(deps, caller, CHAT_TOKEN_TTL_SECONDS);
     return { token, url: deps.env.CHAT_PUBLIC_URL, expiresAt: iso(new Date(exp * 1000)) };
   }),
 };
+
+/** Whether `id` is a stored, undeleted message of `channelId` (one primary-key lookup). */
+async function liveMessageExists(deps: Pick<Deps, "db">, channelId: string, id: string): Promise<boolean> {
+  const [row] = await deps.db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(and(eq(chatMessages.id, id), eq(chatMessages.channelId, channelId), isNull(chatMessages.deletedAt)))
+    .limit(1);
+  return row !== undefined;
+}
+
+/** Relay one request to the chat service as `caller`. */
+async function relay(deps: Deps, caller: Caller, request: RelayRequest) {
+  const { token } = await chatTokenFor(deps, caller, RELAY_TOKEN_TTL_SECONDS);
+  return relayToChat({ url: deps.env.CHAT_INTERNAL_URL, token, request });
+}

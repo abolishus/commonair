@@ -33,6 +33,8 @@ export interface ChatEvents {
   onStatus: (status: ChatStatus) => void;
   onJoined: (me: { canChat: boolean; canModerate: boolean }) => void;
   onMessage: (message: ChatMessageFrame) => void;
+  /** A message a word filter held (sent to moderators only), for the held queue; never shown in chat. */
+  onHeld?: (message: ChatMessageFrame) => void;
   onDelete: (messageId: string) => void;
   onClear: () => void;
   /** A user was banned or timed out: their messages are removed for everyone in the room. */
@@ -157,7 +159,9 @@ export class ChatConnection {
         this.events.onJoined({ canChat: f.me.canChat, canModerate: f.me.canModerate });
         return;
       case "message":
-        if (f.channel === this.channel && !f.held) this.events.onMessage(f.message);
+        if (f.channel !== this.channel) return;
+        if (f.held) this.events.onHeld?.(f.message);
+        else this.events.onMessage(f.message);
         return;
       case "delete":
         if (f.channel === this.channel) this.events.onDelete(f.messageId);

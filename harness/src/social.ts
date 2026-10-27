@@ -11,6 +11,7 @@
 import type { Page } from "playwright";
 import type { ApiClient } from "./api/client.ts";
 import type { ChatClient } from "./chat-client.ts";
+import { E7_TEST_IDS as E7, e7tid } from "./e7/selectors.ts";
 import { TimeoutError, waitFor } from "./wait.ts";
 import { LIVE_DIRECTORY_SECTIONS, type LiveDirectorySection, ROUTES, TEST_IDS as T, tid } from "./web/selectors.ts";
 import { byTestId } from "./web/session.ts";
@@ -55,6 +56,14 @@ export function timeoutDurationOk(seconds: number | null, expected = TIMEOUT_SEC
   return seconds !== null && seconds <= expected && seconds >= expected - slackSeconds;
 }
 
+/** How often the API actor polls `chat.held.list` (chat stores held rows in 250 ms batches). */
+export const HELD_POLL_MS = 250;
+
+/** Whether `held.list` holds the message `id` (E7: the moderator's held queue). */
+export function heldListed(list: readonly { id: string }[], id: string): boolean {
+  return list.some((m) => m.id === id);
+}
+
 /** A ban row that is a timeout still in force. */
 export function isActiveTimeout(ban: { expiresAt: string | null }, now = Date.now()): boolean {
   return ban.expiresAt !== null && Date.parse(ban.expiresAt) > now;
@@ -90,6 +99,12 @@ export interface SocialActor {
   send(text: string, b: WaitBudget): Promise<void>;
   /** Wait for a message by `author` containing `text`; returns its id (empty when not exposed). */
   waitMessage(author: string, text: string, b: WaitBudget): Promise<string>;
+  /** Whether a chat message with this id is shown (web) or was delivered as a visible message (API). */
+  hasMessageId(messageId: string): Promise<boolean>;
+  /** Wait until a visible chat message with this id arrives. */
+  waitMessageId(messageId: string, b: WaitBudget): Promise<void>;
+  /** Moderator (E7): wait for a held message in the held queue and allow it. */
+  allowHeld(messageId: string, b: WaitBudget): Promise<void>;
   /** Wait for a message to be shown as removed by moderation. */
   waitDeleted(messageId: string, author: string, text: string, b: WaitBudget): Promise<void>;
   waitNotice(code: string, b: WaitBudget): Promise<void>;
@@ -213,6 +228,43 @@ export class WebActor implements SocialActor {
     return (await row.getAttribute("data-id", { timeout: 1_000 })) ?? "";
   }
 
+  async hasMessageId(messageId: string): Promise<boolean> {
+    return (await this.page.locator(tid(T.chatMessage, { id: messageId })).count()) > 0;
+  }
+
+  async waitMessageId(messageId: string, b: WaitBudget): Promise<void> {
+    await this.page
+      .locator(tid(T.chatMessage, { id: messageId }))
+      .first()
+      .waitFor({ timeout: b.timeoutMs });
+  }
+
+  async allowHeld(messageId: string, b: WaitBudget): Promise<void> {
+    const page = this.page;
+    const queue = page.locator(e7tid(E7.heldQueue));
+    const row = page.locator(e7tid(E7.heldMessage, { id: messageId }));
+    const deadline = Date.now() + b.timeoutMs;
+    // The live held frame usually puts it there; otherwise reopening reloads chat.held.list.
+    await waitFor(
+      `${E7.heldMessage}[data-id=${messageId}] in ${E7.heldQueue}`,
+      async () => {
+        if (!(await queue.isVisible()))
+          await page.locator(e7tid(E7.heldQueueOpen)).click({ timeout: remainingMs(deadline) });
+        const found = await row
+          .waitFor({ timeout: remainingMs(deadline, 2_000) })
+          .then(() => true)
+          .catch(() => false);
+        if (found) return true;
+        await page.keyboard.press("Escape");
+        return null;
+      },
+      { timeoutMs: b.timeoutMs, intervalMs: 0, signal: b.signal },
+    );
+    await row.locator(e7tid(E7.heldAllow)).click({ timeout: remainingMs(deadline) });
+    await row.waitFor({ state: "detached", timeout: remainingMs(deadline) });
+    await page.keyboard.press("Escape");
+  }
+
   async waitDeleted(messageId: string, author: string, _text: string, b: WaitBudget): Promise<void> {
     // The row stays but its text is replaced, so select by id when the page exposes it.
     const target = messageId
@@ -323,6 +375,36 @@ export class ApiActor implements SocialActor {
       b.timeoutMs,
     );
     return f.message.id;
+  }
+
+  async hasMessageId(messageId: string): Promise<boolean> {
+    return this.socket.messages(this.channel).some((m) => m.message.id === messageId && !m.held);
+  }
+
+  async waitMessageId(messageId: string, b: WaitBudget): Promise<void> {
+    const channel = this.channel;
+    await this.socket.waitFor(
+      "message",
+      (m) => m.channel === channel && m.message.id === messageId && !m.held,
+      b.timeoutMs,
+    );
+  }
+
+  async allowHeld(messageId: string, b: WaitBudget): Promise<void> {
+    const channel = this.channel;
+    // Chat acks before its batching writer stores the row: poll until the queue lists it.
+    await waitFor(
+      `${messageId} in chat.held.list`,
+      async () => heldListed(await this.api.chat.held.list({ channel }), messageId) || null,
+      { timeoutMs: b.timeoutMs, intervalMs: HELD_POLL_MS, signal: b.signal },
+    );
+    await this.api.chat.held.resolve({ channel, id: messageId, allow: true });
+  }
+
+  /** Wait for a `clear` frame for the channel that arrives after this call. */
+  async waitClear(b: WaitBudget): Promise<void> {
+    const channel = this.channel;
+    await this.socket.next("clear", (f) => f.channel === channel, b.timeoutMs);
   }
 
   async waitDeleted(messageId: string, author: string, _text: string, b: WaitBudget): Promise<void> {

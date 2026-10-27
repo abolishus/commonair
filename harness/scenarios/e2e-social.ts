@@ -7,7 +7,9 @@
  * unmodified tmi.js bot owned by the streamer answers `!ping` through the IRC gateway, and so
  * does an SDK bot on the chat WebSocket (E6), its reply carrying the bot badge; the
  * streamer times a troll out from the chat menu and everyone (web and IRC) sees it; the timeout
- * is lifted, the fan unfollows and the stream stops.
+ * is lifted; a message a `hold` word filter keeps back (sent over REST `chat.send`) stays hidden
+ * from the fan until the streamer allows it from the held queue (E7); the fan unfollows and the
+ * stream stops. In `--set via=api` REST `chat.deleteMessage` and `chat.clear` run as well.
  *
  * `--set via=api` drives the three people through the API and chat socket instead of the web app
  * (same steps, same assertions), to tell backend failures from web ones.
@@ -33,6 +35,17 @@ import { sleep, waitFor } from "../src/wait.ts";
 import { signInViaUi } from "../src/web/flows.ts";
 import { ROUTES, TEST_IDS as T, tid } from "../src/web/selectors.ts";
 import { WebSession, byTestId } from "../src/web/session.ts";
+
+/** How long the fan must not see a held message (e7-selectors: the settle window). */
+export const HELD_SETTLE_MS = 2_000;
+
+/** A word only this run's hold filter matches (filters match case-insensitive substrings). */
+export function holdWord(runId: string): string {
+  return `heldword${runId
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase()
+    .slice(-12)}`;
+}
 
 /** Bounds from the brief: the directory refreshes on an interval, chat is near real time. */
 export const DIRECTORY_TIMEOUT_MS = 60_000;
@@ -79,7 +92,7 @@ export function parseVia(value: string): Via {
 export default defineScenario({
   name: "e2e-social",
   description:
-    "RTMP live → directory discovery → follow (+ following section) → tmi.js bot !ping via IRC → SDK bot !ping with the bot badge → chat timeout from the menu seen on web and IRC → unban, unfollow, offline",
+    "RTMP live → directory discovery → follow (+ following section) → tmi.js bot !ping via IRC → SDK bot !ping with the bot badge → chat timeout from the menu seen on web and IRC → unban → held message allowed from the queue (REST send; via=api also REST delete and clear) → unfollow, offline",
   needs: ["api", "web", "chat", "irc", "media", "origin", "ffmpeg", "browser"],
   timeoutMs: 6 * 60_000,
   async run(ctx) {
@@ -361,6 +374,9 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
   );
   ctx.metric("unban_to_chat", performance.now() - unbanned, "ms");
 
+  // 5b. E7: a hold filter keeps the troll's REST message back until the streamer allows it.
+  await heldMessage(ctx, { channel, streamer, troll, fanUser: fan, fan: F, mod: S, chat, signal, via });
+
   const unfollowed = await ctx.step("fan: unfollow", () => F.toggleFollow(ui));
   ctx.assert("follow-button data-following=false", !unfollowed.following, unfollowed);
   check("follower-count back to where it started", unfollowed.count === before.count, { before, unfollowed });
@@ -371,4 +387,70 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
     await ctx.step("channel goes offline (API)", () => p.waitForLive(channel, false, OFFLINE_TIMEOUT_MS)),
     "ms",
   );
+}
+
+/** E7 (e7-selectors "Held messages"): hold filter → REST send held → hidden → allowed → seen. */
+async function heldMessage(
+  ctx: ScenarioContext,
+  o: {
+    channel: string;
+    streamer: SignedInUser;
+    troll: SignedInUser;
+    fanUser: SignedInUser;
+    fan: SocialActor;
+    mod: SocialActor;
+    chat: WaitBudget;
+    signal: AbortSignal;
+    via: Via;
+  },
+): Promise<void> {
+  const { channel, streamer, troll, fan, chat } = o;
+  const word = holdWord(ctx.runId);
+  const filter = await ctx.step("streamer: add a hold word filter (chat.filters.create)", () =>
+    streamer.api.client.chat.filters.create({
+      channel,
+      pattern: word,
+      isRegex: false,
+      action: "hold",
+      replacement: null,
+    }),
+  );
+  let removed = false;
+  const removeFilter = async () => {
+    if (removed) return;
+    removed = true;
+    await streamer.api.client.chat.filters.remove({ channel, id: filter.id });
+  };
+  ctx.defer(removeFilter);
+  const sent = await ctx.step("troll: REST chat.send a matching message", () =>
+    troll.api.client.chat.send({ channel, body: `please hold ${word} ${ctx.runId}` }),
+  );
+  ctx.assert("chat.send answers held: true", sent.held, { held: sent.held, dropReason: sent.dropReason });
+  await ctx.step(`fan: does not see it within ${HELD_SETTLE_MS} ms`, () => sleep(HELD_SETTLE_MS, o.signal));
+  ctx.assert("the fan does not see the held message", !(await fan.hasMessageId(sent.id)), { id: sent.id });
+  const allowed = performance.now();
+  await ctx.step(
+    o.via === "web" ? "streamer: held-queue-open → held-allow" : "streamer: chat.held.list → chat.held.resolve",
+    () => o.mod.allowHeld(sent.id, chat),
+  );
+  await ctx.step("fan: sees the released chat-message with that data-id", () => fan.waitMessageId(sent.id, chat));
+  ctx.metric("held_allow_to_chat", performance.now() - allowed, "ms");
+
+  if (o.via === "api" && fan instanceof ApiActor) {
+    const text = `delete me ${ctx.runId}`;
+    // The fan's own message: the troll's earlier timeout frame would already "remove" the troll's.
+    const victim = await ctx.step("fan: REST chat.send a message to delete", () =>
+      o.fanUser.api.client.chat.send({ channel, body: text }),
+    );
+    await ctx.step("fan: sees it", () => fan.waitMessageId(victim.id, chat));
+    await ctx.step("streamer: REST chat.deleteMessage", () =>
+      streamer.api.client.chat.deleteMessage({ channel, id: victim.id }),
+    );
+    await ctx.step("fan: the socket sees the delete", () => fan.waitDeleted(victim.id, o.fanUser.username, text, chat));
+    const cleared = fan.waitClear(chat);
+    cleared.catch(() => undefined);
+    await ctx.step("streamer: REST chat.clear", () => streamer.api.client.chat.clear({ channel }));
+    await ctx.step("fan: the socket sees the clear", () => cleared);
+  }
+  await ctx.step("streamer: remove the hold filter", removeFilter);
 }
