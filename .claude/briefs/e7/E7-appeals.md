@@ -170,3 +170,11 @@ Commits, ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
 what you built, test counts per package, branch and sha, contract requests (exact diffs), the
 proposed `services/api/README.md` appeals text (:205-212 today) and PROGRESS wording for the
 closed NCII gap, and anything left undone.
+
+## Contract step as landed (`66e95da`)
+
+Your base is `66e95da` (`feat(e7): contract step` + review fixes), not `9c51c93`; recheck line numbers against it.
+
+- DMCA suspensions go through `setSuspension(…, "dmca_repeat_infringer")` (`services/api/src/moderation/suspension.ts`) and are lifted only through `liftDmcaSuspensionInTx` or `reconcileDmcaTerminationInTx` (`packages/db/src/account-actions.ts`), which takes the account-actions lock itself.
+- `liftChatBanInTx` (`services/api/src/moderation/chat-bans.ts`) takes an actor with `actorType` `"moderator"` or `"admin"` and returns `null` when there is no active ban; the caller then throws or rolls back.
+- trust-safety step 9 is in `PENDING_SAFETY_STEPS`; run it with `--set steps=9`. The orchestrator takes it off that list at merge.

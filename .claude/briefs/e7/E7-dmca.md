@@ -284,3 +284,11 @@ Commits, ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`).
 what you built, test counts per package, branch and sha, contract requests (exact diffs), the
 proposed `services/api/README.md` and privacy/DMCA policy wording, the statement that no lawyer
 reviewed the flow, and anything left undone.
+
+## Contract step as landed (`66e95da`)
+
+Your base is `66e95da` (`feat(e7): contract step` + review fixes), not `9c51c93`; recheck line numbers against it.
+
+- DMCA suspensions go through `setSuspension(…, "dmca_repeat_infringer")` (`services/api/src/moderation/suspension.ts`) and are lifted only through `liftDmcaSuspensionInTx` or `reconcileDmcaTerminationInTx` (`packages/db/src/account-actions.ts`), which takes the account-actions lock itself.
+- `setSuspension` with the DMCA reason does not take over a user suspension still in force; `changed: false` means record the termination anyway. One unreversed `dmca_termination` per user (migration 0026): check `activeAccountAction(…, "dmca_termination")` under `lockAccountActions` before inserting.
+- trust-safety step 8 is in `PENDING_SAFETY_STEPS` (`harness/src/safety.ts`); run it with `--set steps=8`. The orchestrator takes it off that list at merge.

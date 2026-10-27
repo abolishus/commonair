@@ -119,3 +119,10 @@ your paths. Commit in your worktree (`git commit -s`, Conventional Commits, endi
 `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). Final message: what you built, test
 counts per package, branch and sha, contract requests (exact diffs), proposed legal-text and
 README wording, the retention period as a decision for the user, and anything left undone.
+
+## Contract step as landed (`66e95da`)
+
+Your base is `66e95da` (`feat(e7): contract step` + review fixes), not `9c51c93`; recheck line numbers against it.
+
+- DMCA suspensions go through `setSuspension(…, "dmca_repeat_infringer")` (`services/api/src/moderation/suspension.ts`) and are lifted only through `liftDmcaSuspensionInTx` or `reconcileDmcaTerminationInTx` (`packages/db/src/account-actions.ts`), which takes the account-actions lock itself.
+- `LegalPending` is mounted in `_app.tsx`, which also wraps signed-out pages: it must render nothing when nobody is signed in.

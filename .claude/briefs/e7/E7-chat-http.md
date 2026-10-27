@@ -159,3 +159,10 @@ user the exact `bun harness/src/cli.ts run e2e-social` commands (web and `--set 
 Commits, ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). Final message:
 what you built, test counts per package, branch and sha, contract requests (exact diffs), the
 `services/api/README.md` text you propose for chat REST and the held queue, and anything left.
+
+## Contract step as landed (`66e95da`)
+
+Your base is `66e95da` (`feat(e7): contract step` + review fixes), not `9c51c93`; recheck line numbers against it.
+
+- DMCA suspensions go through `setSuspension(…, "dmca_repeat_infringer")` (`services/api/src/moderation/suspension.ts`) and are lifted only through `liftDmcaSuspensionInTx` or `reconcileDmcaTerminationInTx` (`packages/db/src/account-actions.ts`), which takes the account-actions lock itself.
+- Build the released message payload with `chatMessageEventPayload` from `@commonair/contracts/chat`. `isActiveBan` now lives in `services/api/src/moderation/chat-bans.ts`.
