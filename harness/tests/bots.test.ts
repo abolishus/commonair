@@ -182,7 +182,7 @@ describe("SDK bot", () => {
     const fake = startFakeChat({ requireBearer: "bot-token" });
     const sdk: BotSdk = {
       api: {
-        channels: { get: async () => ({ live: { startedAt: new Date(Date.now() - 65_000).toISOString() } }) },
+        channels: { get: async () => ({ live: { startedAt: new Date(Date.now() - 65_500).toISOString() } }) },
       } as never,
       async connectChat(): Promise<BotChatConnection> {
         const chat = await ChatClient.connect({ url: fake.url, bearer: "bot-token" });
