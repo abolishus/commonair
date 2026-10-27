@@ -17,6 +17,7 @@
     "./dto": "./src/api/entities.ts",
     "./openapi": "./src/openapi.ts",
     "./internal": "./src/internal.ts",
+    "./p2p": "./src/p2p.ts",
     "./currency": "./src/currency.ts",
     "./auth": "./src/auth.ts",
     "./fixtures": "./src/fixtures.ts"

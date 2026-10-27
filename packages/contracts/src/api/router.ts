@@ -684,7 +684,12 @@ export const contract = {
         ChannelRef.extend({
           deviceId: z.string().min(16).max(64),
           embed: z.boolean().default(false),
-          p2pCapable: z.boolean().default(true),
+          /**
+           * The player's P2P opt-in (ADR 0005 amendment 1): true only when the viewer chose P2P, or
+           * has not chosen and the operator default (`instance.info` `features.p2pDefault`) is on.
+           * Omitted means no P2P, so an old or third-party client never gets a tracker URL.
+           */
+          p2pCapable: z.boolean().default(false),
           nativeHls: z.boolean().default(false),
         }),
       )
@@ -720,6 +725,21 @@ export const contract = {
       })
       .input(z.object({ sessionId: Id, token: z.string() }))
       .output(Ok),
+  },
+
+  p2p: {
+    iceServers: base
+      .meta({ access: "public", rateLimit: "playback" })
+      .route({
+        method: "POST",
+        path: "/playback/ice-servers",
+        summary: "ICE servers and time-limited TURN credentials for a P2P playback session",
+        description:
+          "Only for a session that holds a P2P grant (`playback.start` returned `p2p.enabled`). Refusals as `playback.heartbeat`: UNAUTHORIZED for a bad token or one for another session, NOT_FOUND for an unknown session, CONFLICT for an ended one; PRECONDITION_FAILED (`requirement: p2p`) for a session without a grant. STUN only unless the operator turned the TURN relay on; TURN credentials are TURN REST credentials that expire at `expiresAt`.",
+        ...tag("Playback"),
+      })
+      .input(z.object({ sessionId: Id, token: z.string() }))
+      .output(D.IceServers),
   },
 
   vods: {

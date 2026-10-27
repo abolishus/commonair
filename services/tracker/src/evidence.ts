@@ -16,8 +16,7 @@
  * leave.
  */
 import { KEYS, P2P_EVIDENCE } from "@commonair/contracts/internal";
-import type { ValkeyClient } from "@commonair/service";
-import { networkPrefix } from "./ip.ts";
+import { networkPrefix, type ValkeyClient } from "@commonair/service";
 
 const enc = new TextEncoder();
 const toHex = (b: ArrayBuffer) => Buffer.from(b).toString("hex");

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from "vite-plus/test";
-import { trustedProxies } from "../src/env.ts";
 import { canonicalIp, clientIp, connectionKey, isValidCidr, networkPrefix } from "../src/ip.ts";
 
 describe("connectionKey", () => {
@@ -65,6 +64,5 @@ describe("clientIp / canonicalIp", () => {
     expect(isValidCidr("10.0.0.0/33")).toBe(false);
     expect(isValidCidr("10.0.0.0/x")).toBe(false);
     expect(isValidCidr("nope/8")).toBe(false);
-    expect(() => trustedProxies(["10.0.0.0/8", "bad"])).toThrow(/invalid CIDR/);
   });
 });

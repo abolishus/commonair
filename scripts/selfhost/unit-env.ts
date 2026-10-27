@@ -120,6 +120,10 @@ const CANDIDATES = [
   "0".repeat(64),
   X25519_PUBLIC,
   X25519_PRIVATE,
+  "off",
+  "stun:localhost:1",
+  "turn:localhost:1",
+  "127.0.0.1",
 ];
 
 /** A valid value for every variable of every schema, so a loader's output lists every key it reads. */

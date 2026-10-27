@@ -19,6 +19,7 @@
 #   PUBLIC_URL=https://<host>  API_PUBLIC_URL=https://<host>  PLAYBACK_PUBLIC_URL=https://<host>
 #   CHAT_PUBLIC_URL=wss://<host>/chat  P2P_TRACKER_URL=wss://<host>/tracker
 #   MEDIA_PUBLIC_URL=https://<host>/media
+#   (P2P segment digests are at PLAYBACK_PUBLIC_URL/p2p-digest; no variable of their own.)
 #   INGEST_WHIP_PUBLIC_URL=https://<host>/live  INGEST_RTMP_PUBLIC_URL=rtmp://<host>/live
 #   S3_PUBLIC_ENDPOINT=https://<host>  (presigned uploads and export downloads, ADR 0024)
 # The bucket names come from S3_BUCKET_MEDIA and S3_BUCKET_EXPORTS (defaults as in .env.example).
@@ -178,6 +179,11 @@ import http-{$CADDY_LISTEN:ports}
 	}
 
 	handle /hls/* {
+		reverse_proxy origin:3003
+	}
+	# Per-segment SHA-256 digests that P2P players check peer-delivered segments against; only
+	# the origin serves them, never a relay or the CDN (ADR 0005 amendment 1).
+	handle /p2p-digest/* {
 		reverse_proxy origin:3003
 	}
 	handle /relay-pull/* {

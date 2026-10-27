@@ -4,7 +4,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { RENDITIONS } from "@commonair/contracts/enums";
-import { KEYS, mediaPath } from "@commonair/contracts/internal";
+import { KEYS, mediaPath, P2P_GRANT_TTL_SECONDS } from "@commonair/contracts/internal";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
 import { recordHeartbeat } from "@commonair/integrity";
@@ -15,6 +15,7 @@ import { apiError, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
 import { viewerCount } from "../lib/viewers.ts";
 import { assignSource, RelayEntry, type Assignment } from "../playback/delivery.ts";
+import { recordP2PHeartbeat } from "../playback/metrics.ts";
 import { MIN_HEARTBEAT_WALL_SECONDS, nextVerdict, type VerifyState } from "../playback/verify.ts";
 import { confirmedAdult } from "./me.ts";
 
@@ -125,6 +126,17 @@ async function gated(
   );
 }
 
+/** `gated` for a session's broadcast as it stands now (false for a session without one). */
+async function sessionGated(deps: Deps, broadcastId: string | null): Promise<boolean> {
+  if (!broadcastId) return false;
+  const [row] = await deps.db
+    .select({ b: broadcasts, c: { mature: schema.channels.mature, categoryId: schema.channels.categoryId } })
+    .from(broadcasts)
+    .innerJoin(schema.channels, eq(schema.channels.id, broadcasts.channelId))
+    .where(eq(broadcasts.id, broadcastId));
+  return row ? gated(deps, row.b, row.c) : false;
+}
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -135,7 +147,8 @@ export const playback = {
       ? await deps.db.select().from(broadcasts).where(eq(broadcasts.id, c.liveBroadcastId))
       : [];
     if (!b || b.endedAt) throw precondition("live", "This channel is offline");
-    if ((await gated(deps, b, c)) && !(await confirmedAdult(deps, caller?.user.id))) throw matureGate();
+    const isGated = await gated(deps, b, c);
+    if (isGated && !(await confirmedAdult(deps, caller?.user.id))) throw matureGate();
 
     const sid = uuidv7();
     const path = mediaPath(c.slug);
@@ -149,8 +162,14 @@ export const playback = {
       channelVerifiedViewers: await viewerCount(deps, c.id),
     });
     const network = deps.classifier.classify(req.ip);
-    // Native HLS (WebKit) cannot run the P2P loader.
-    const p2pEnabled = deps.env.P2P_ENABLED && input.p2pCapable && !input.nativeHls;
+    // P2P shows the viewer's address to peers (ADR 0005 amendment 1), so 18+, mature-category and
+    // T1-restricted streams never get it, and native HLS (WebKit) cannot run the loader.
+    // `p2pCapable` is the player's opt-in policy: it applies the operator default
+    // (`instance.info` `features.p2pDefault`), so a viewer who has not opted in never gets a grant.
+    // There are no private or subscriber-only live streams yet (`visibility` is VOD only); whoever
+    // adds one excludes it here.
+    const p2pAvailable = deps.env.P2P_ENABLED && !input.nativeHls && !isGated;
+    const p2pEnabled = p2pAvailable && input.p2pCapable;
     await deps.db.insert(playbackSessions).values({
       id: sid,
       channelId: c.id,
@@ -169,13 +188,21 @@ export const playback = {
       startedAt: deps.now(),
       fingerprint: { embed: input.embed, nativeHls: input.nativeHls },
     });
+    // The grant is what the tracker and `p2p.iceServers` check; the swarm id is the broadcast id.
+    if (p2pEnabled) await deps.valkey.set(KEYS.p2pGrant(sid), b.id, "EX", P2P_GRANT_TTL_SECONDS);
     const { token, claims } = await signFor(deps, sid, c.id, path, assignment);
     return {
       sessionId: sid,
       token,
       playlistUrl: playlistUrl(playlistBase(deps, assignment), path, token),
       source: assignment.source,
-      p2p: { enabled: p2pEnabled, trackerUrls: p2pEnabled ? [trackerUrl(deps, token)] : [], swarmId: b.id },
+      p2p: {
+        enabled: p2pEnabled,
+        available: p2pAvailable,
+        trackerUrls: p2pEnabled ? [trackerUrl(deps, token)] : [],
+        swarmId: b.id,
+        digestUrl: `${deps.env.PLAYBACK_PUBLIC_URL.replace(/\/+$/, "")}/p2p-digest`,
+      },
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       expiresAt: iso(new Date(claims.exp * 1000)),
       renditions: await renditionsFor(deps, c.id),
@@ -251,6 +278,7 @@ export const playback = {
             )
             .returning({ id: playbackSessions.id })
         ).length > 0;
+    recordP2PHeartbeat(input);
     // Evidence for the integrity scorer (worker), which takes over verdicts from verify.ts.
     await recordHeartbeat(deps.valkey, s.id, {
       at: now.getTime(),
@@ -263,11 +291,21 @@ export const playback = {
       bytesP2p: input.bytesP2p,
       ...(input.fingerprint ? { fingerprint: input.fingerprint } : {}),
     });
+    // A stream that became gated mid-session (T1 restriction, mature flag, mature category) loses
+    // P2P: the grant goes, and the tracker closes the socket at its next re-check. Only sessions
+    // holding a grant pay for the gate query.
+    let gate: boolean | undefined;
+    const granted = (await deps.valkey.exists(KEYS.p2pGrant(s.id))) === 1;
+    if (granted) gate = await sessionGated(deps, s.broadcastId);
     const tx = deps.valkey
       .multi()
       .hset(verifyKey(s.id), { consistent: String(v.state.consistent), engaged: v.state.engaged ? "1" : "0" })
       .expire(verifyKey(s.id), VERIFY_STATE_TTL_SECONDS)
       .zadd(KEYS.viewers(s.channelId), now.getTime(), s.id);
+    if (granted) {
+      if (gate) tx.del(KEYS.p2pGrant(s.id));
+      else tx.expire(KEYS.p2pGrant(s.id), P2P_GRANT_TTL_SECONDS);
+    }
     // A newly verified viewer should show up without waiting for the cache to expire.
     if (promoted) tx.del(KEYS.viewerCount(s.channelId));
     await tx.exec();
@@ -302,14 +340,8 @@ export const playback = {
           ? { source: "cdn" }
           : { source: "origin" });
     // A label or restriction that arrived mid-stream applies at the next refresh.
-    const [gate] = s.broadcastId
-      ? await deps.db
-          .select({ b: broadcasts, c: { mature: schema.channels.mature, categoryId: schema.channels.categoryId } })
-          .from(broadcasts)
-          .innerJoin(schema.channels, eq(schema.channels.id, broadcasts.channelId))
-          .where(eq(broadcasts.id, s.broadcastId))
-      : [];
-    if (gate && (await gated(deps, gate.b, gate.c)) && !(await confirmedAdult(deps, s.userId ?? undefined)))
+    gate ??= await sessionGated(deps, s.broadcastId);
+    if (gate && !(await confirmedAdult(deps, s.userId ?? undefined)))
       throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
     const { token } = await signFor(deps, s.id, s.channelId, claims.path, a);
     return {
@@ -332,6 +364,8 @@ export const playback = {
         .multi()
         .zrem(KEYS.viewers(s.channelId), input.sessionId)
         .del(verifyKey(input.sessionId), KEYS.viewerCount(s.channelId))
+        // The tracker closes an ended session's socket at its next re-check.
+        .del(KEYS.p2pGrant(input.sessionId))
         .exec();
     return { ok: true as const };
   }),

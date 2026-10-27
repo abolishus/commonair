@@ -10,10 +10,13 @@ import {
   coreEnv,
   evidenceOpenEnv,
   evidenceSealEnv,
+  infraEnv,
   instanceSite,
   loadEnv,
   moderationEnv,
   paymentsEnv,
+  playbackEnv,
+  turnEnv,
 } from "../src/env.ts";
 import { SITE, sourceLink } from "../src/site.ts";
 
@@ -76,6 +79,29 @@ describe("env", () => {
       loadEnv(moderationEnv, { MODERATION_CLASSIFIER: "scripted", MODERATION_TEST_HOOKS: "true" })
         .MODERATION_CLASSIFIER,
     ).toBe("scripted");
+  });
+
+  test("P2P: opt in by default, STUN only, a relay without its secret refuses to start", () => {
+    expect(loadEnv(playbackEnv, { PLAYBACK_SIGNING_KEY: "k" }).P2P_DEFAULT).toBe("off");
+    expect(loadEnv(playbackEnv, { PLAYBACK_SIGNING_KEY: "k", P2P_DEFAULT: "on" }).P2P_DEFAULT).toBe("on");
+    expect(() => loadEnv(playbackEnv, { PLAYBACK_SIGNING_KEY: "k", P2P_DEFAULT: "true" })).toThrow(EnvError);
+
+    expect(loadEnv(turnEnv, {})).toEqual({ P2P_STUN_URLS: [], P2P_TURN_URLS: [], TURN_CREDENTIAL_TTL_SECONDS: 3600 });
+    expect(loadEnv(turnEnv, { P2P_STUN_URLS: "stun:a:3478, stun:b:3478" }).P2P_STUN_URLS).toEqual([
+      "stun:a:3478",
+      "stun:b:3478",
+    ]);
+    expect(() => loadEnv(turnEnv, { P2P_STUN_URLS: "turn:a:3478" })).toThrow(EnvError);
+    expect(() => loadEnv(turnEnv, { P2P_TURN_URLS: "stun:a:3478" })).toThrow(EnvError);
+    expect(() => loadEnv(turnEnv, { P2P_TURN_URLS: "turn:a:3478" })).toThrow(/TURN_SHARED_SECRET/);
+    const relay = loadEnv(turnEnv, { P2P_TURN_URLS: "turn:a:3478,turns:a:5349", TURN_SHARED_SECRET: "s".repeat(32) });
+    expect(relay.P2P_TURN_URLS).toEqual(["turn:a:3478", "turns:a:5349"]);
+    expect(() => loadEnv(turnEnv, { TURN_SHARED_SECRET: "short" })).toThrow(EnvError);
+    for (const v of ["299", "86401", "1.5"])
+      expect(() => loadEnv(turnEnv, { TURN_CREDENTIAL_TTL_SECONDS: v })).toThrow(EnvError);
+
+    expect(loadEnv(infraEnv, { TURN_EXTERNAL_IP: "203.0.113.7" }).TURN_EXTERNAL_IP).toBe("203.0.113.7");
+    expect(() => loadEnv(infraEnv, { TURN_EXTERNAL_IP: "203.0.113.7,2001:db8::1" })).toThrow(EnvError);
   });
 
   test("evidence keys must be a real X25519 keypair encoding", async () => {

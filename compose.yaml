@@ -10,7 +10,7 @@
 # second stack can run alongside (`-p <name>` plus shifted ports).
 #
 # Profiles: (default) full platform incl. observability · harness: + mock-rtmp ·
-# stripe: + stripe-mock · tls: + caddy · p2p: + tracker (not built yet).
+# stripe: + stripe-mock · tls: + caddy. The P2P tracker runs by default (viewers opt in to P2P).
 #
 # Secrets come from .env (`bun scripts/init-env.ts`); nothing secret has a default here.
 
@@ -376,9 +376,9 @@ services:
     depends_on: *app-depends
     healthcheck: *app-healthcheck
 
-  # WebTorrent tracker (ADR 0005); opt in with `--profile p2p`.
+  # WebTorrent tracker (ADR 0005). Always on: P2P_ENABLED offers P2P, and players that opt in
+  # get tracker URLs.
   tracker:
-    profiles: [p2p]
     image: ${IMAGE_REGISTRY:-localhost/commonair}/tracker:${IMAGE_TAG:-dev}
     build:
       <<: *service-build

@@ -25,6 +25,8 @@
     "@tanstack/react-start": "1.168.60",
     "altcha": "3.2.4",
     "hls.js": "1.7.3",
+    "p2p-media-loader-core": "4.0.0",
+    "p2p-media-loader-hlsjs": "4.0.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zod": "catalog:"

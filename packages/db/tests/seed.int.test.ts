@@ -7,11 +7,14 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test"
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { PROTECTED_LITERALS } from "@commonair/config/site";
 import {
+  COOKIES_SEED_VERSION,
   ENFORCEMENT_NOTICE_SEED_VERSION,
   LEGAL_PLACEHOLDERS,
   LEGAL_SEED_VERSION,
   PLACEHOLDER_PATTERN,
+  PRIVACY_SEED_VERSION,
   legalSeedDocuments,
+  legalSeedVersion,
   stripSpdxHeader,
 } from "../src/legal/index.ts";
 import { legalDocuments } from "../src/schema/safety.ts";
@@ -25,15 +28,30 @@ vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 describe("legal seed documents", () => {
   const docs = legalSeedDocuments();
 
-  test("one draft per kind, at the seed version (the enforcement notice at its own)", () => {
+  test("one draft per kind, at the seed version (the enforcement notice, privacy and cookies at their own)", () => {
     expect(docs.map((d) => d.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
+    const own: Record<string, string> = {
+      enforcement_notice: ENFORCEMENT_NOTICE_SEED_VERSION,
+      privacy: PRIVACY_SEED_VERSION,
+      cookies: COOKIES_SEED_VERSION,
+    };
     for (const d of docs) {
-      expect(d.version, d.kind).toBe(
-        d.kind === "enforcement_notice" ? ENFORCEMENT_NOTICE_SEED_VERSION : LEGAL_SEED_VERSION,
-      );
+      expect(d.version, d.kind).toBe(own[d.kind] ?? LEGAL_SEED_VERSION);
+      expect(legalSeedVersion(d.kind)).toBe(d.version);
       expect(d.isDraft).toBe(true);
     }
-    expect(ENFORCEMENT_NOTICE_SEED_VERSION).not.toBe(LEGAL_SEED_VERSION);
+    for (const v of Object.values(own)) expect(v).not.toBe(LEGAL_SEED_VERSION);
+    // Same publishedAt: the newer version must sort after the one users already accepted.
+    expect(PRIVACY_SEED_VERSION > LEGAL_SEED_VERSION).toBe(true);
+    expect(COOKIES_SEED_VERSION > LEGAL_SEED_VERSION).toBe(true);
+  });
+
+  test("privacy and cookies describe peer-to-peer sharing", () => {
+    const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
+    expect(body("privacy")).toMatch(/## Peer-to-peer sharing/);
+    expect(body("privacy")).toMatch(/see your IP address/);
+    expect(body("privacy")).toMatch(/off unless you turn it\s+on/);
+    expect(body("cookies")).toMatch(/\*\*essential\*\*/);
   });
 
   test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {

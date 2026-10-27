@@ -35,6 +35,7 @@ describe("routing", () => {
       "/overlay/events": "api:3001",
       "/chat": "chat:3002",
       "/hls/*": "origin:3003",
+      "/p2p-digest/*": "origin:3003",
       "/relay-pull/*": "origin:3003",
       "/cdn/*": "origin:3003",
       "/media/*": "origin:3003",

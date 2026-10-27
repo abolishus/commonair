@@ -43,6 +43,17 @@ Batch 2 (E7 + W0 + P1; waves and shared rules: `.claude/briefs/batch2/README.md`
 | P1-turn           | 2    | `.claude/briefs/p1/P1-turn.md`           | brief ready; ADR 0005 amd |
 | P1-player         | 3    | `.claude/briefs/p1/P1-player.md`         | brief ready; ADR 0005 amd |
 
+P1 contract step (branch `p1/contract-step`, ADR 0005 amendment 1 accepted 2026-10-27): deps
+`p2p-media-loader-core`/`-hlsjs` 4.0.0, coturn pinned, `turnEnv` + `P2P_DEFAULT=off`,
+`PlaybackStart.p2p.available`/`digestUrl`, `IceServers` + `p2p.iceServers` stub, `KEYS.p2pGrant`
+(written at start, refreshed or revoked by heartbeats, deleted at end), `@commonair/contracts/p2p`
+with info hash vectors, the origin `/p2p-digest/` seam, `ip.ts` in `@commonair/service`, the tracker
+in every stack, the P1 web seams and the harness `viewers --set p2p` (default 0). **Legal:** the
+privacy and cookie policies gained P2P sections under their own seed versions
+(`2026-10-27-p2p-draft`); privacy requires acceptance, so every existing user is asked to accept
+the new privacy version (pending in `me.pendingLegal`) once the seed runs. Counsel has not reviewed
+the text.
+
 Environment note: the podman VM's chrony has no time source; its clock drifted ~150 ms behind
 the host and failed the governance tests' 100 ms margin. Reset with
 `podman machine ssh 'sudo date -u -s @<host epoch>'`.

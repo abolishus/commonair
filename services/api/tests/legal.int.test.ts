@@ -6,8 +6,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
-// Not exported from @commonair/db yet (contract request).
-import { ENFORCEMENT_NOTICE_SEED_VERSION, LEGAL_SEED_VERSION, seedLegalDocuments } from "@commonair/db";
+import { COOKIES_SEED_VERSION, LEGAL_SEED_VERSION, legalSeedVersion, seedLegalDocuments } from "@commonair/db";
 import {
   client,
   mailTo,
@@ -53,9 +52,7 @@ describe("legal.current", () => {
     expect(r.status).toBe(200);
     expect(r.body.map((d) => d.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
     for (const d of r.body) {
-      expect(d.version, d.kind).toBe(
-        d.kind === "enforcement_notice" ? ENFORCEMENT_NOTICE_SEED_VERSION : LEGAL_SEED_VERSION,
-      );
+      expect(d.version, d.kind).toBe(legalSeedVersion(d.kind as (typeof LEGAL_DOCUMENT_KINDS)[number]));
       expect(d.isDraft).toBe(true);
       expect(d.body, d.kind).not.toContain("{{");
       expect(d.title).not.toContain("{{");
@@ -150,14 +147,14 @@ describe("legal.consent", () => {
     c.call<{ ok?: boolean; code?: string }>("POST", "/api/consent", body);
 
   test("stored for a signed-in user, essential forced on", async () => {
-    const r = await consent(alice.client, { choices: { preferences: true }, policyVersion: LEGAL_SEED_VERSION });
+    const r = await consent(alice.client, { choices: { preferences: true }, policyVersion: COOKIES_SEED_VERSION });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body).toEqual({ ok: true });
     const rows = await db().select().from(schema.consentRecords).where(eq(schema.consentRecords.userId, alice.userId));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       anonymousId: null,
-      policyVersion: LEGAL_SEED_VERSION,
+      policyVersion: COOKIES_SEED_VERSION,
       choices: { essential: true, preferences: true },
     });
   });
@@ -167,7 +164,7 @@ describe("legal.consent", () => {
     const r = await consent(client(api), {
       anonymousId,
       choices: { preferences: false },
-      policyVersion: LEGAL_SEED_VERSION,
+      policyVersion: COOKIES_SEED_VERSION,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const rows = await db()
@@ -184,9 +181,9 @@ describe("legal.consent", () => {
       (await consent(client(api), { anonymousId, choices: { preferences: true }, policyVersion: "2020-01-01" })).status,
     ).toBe(400);
     expect(
-      (await consent(alice.client, { choices: { analytics: true }, policyVersion: LEGAL_SEED_VERSION })).status,
+      (await consent(alice.client, { choices: { analytics: true }, policyVersion: COOKIES_SEED_VERSION })).status,
     ).toBe(400);
-    expect((await consent(client(api), { choices: {}, policyVersion: LEGAL_SEED_VERSION })).status).toBe(400);
+    expect((await consent(client(api), { choices: {}, policyVersion: COOKIES_SEED_VERSION })).status).toBe(400);
     const rows = await db()
       .select()
       .from(schema.consentRecords)
@@ -199,7 +196,7 @@ describe("legal.consent", () => {
     const r = await consent(alice.client, {
       anonymousId,
       choices: { preferences: false },
-      policyVersion: LEGAL_SEED_VERSION,
+      policyVersion: COOKIES_SEED_VERSION,
     });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const linked = await db()
@@ -279,7 +276,11 @@ describe("sign-up with the seeded drafts", () => {
   test("an existing user sees the new drafts as pending until the required ones are accepted", async () => {
     const me = await alice.client.call<{ pendingLegal: { kind: string; version: string }[] }>("GET", "/api/me");
     expect(me.body.pendingLegal.map((p) => p.kind).sort()).toEqual(REQUIRED_KINDS);
-    expect(me.body.pendingLegal.every((p) => p.version === LEGAL_SEED_VERSION)).toBe(true);
+    expect(
+      me.body.pendingLegal.every(
+        (p) => p.version === legalSeedVersion(p.kind as (typeof LEGAL_DOCUMENT_KINDS)[number]),
+      ),
+    ).toBe(true);
     const docs = (await client(api).call<Doc[]>("GET", "/api/legal")).body;
     // Optional documents are not "accepted": sent alone they match nothing.
     const optional = await alice.client.call("POST", "/api/me/legal-acceptances", {

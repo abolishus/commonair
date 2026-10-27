@@ -351,6 +351,12 @@ export const playbackEnv = z.object({
   PLAYBACK_PUBLIC_URL: z.url().default("http://localhost:3003"),
   /** Offer peer-to-peer segment sharing to players that support it (not native HLS). */
   P2P_ENABLED: bool.default(true),
+  /**
+   * P2P for viewers who have not chosen (ADR 0005 amendment 1): `off` (default) shares only for
+   * viewers who opt in. Set `on` only once counsel confirms a lawful basis for showing a viewer's
+   * IP address to other peers; the player still shows a notice first and never shares on 18+ streams.
+   */
+  P2P_DEFAULT: z.enum(["off", "on"]).default("off"),
   /** Tracker base URL handed to players (the API appends `?t=<playback token>`). */
   P2P_TRACKER_URL: z.url({ protocol: /^wss?$/ }).default("ws://localhost:8000"),
   /** Optional burst CDN (origin-pull). Disabled by default. */
@@ -363,6 +369,35 @@ export const playbackEnv = z.object({
   ORIGIN_CACHE_MB: z.coerce.number().int().positive().default(512),
   /** Compute relay issuance on this origin; replicas elect one leader per tick through Valkey. */
   ORIGIN_ISSUANCE_ENABLED: bool.default(true),
+});
+
+/** A comma list of ICE server URIs, each matching `scheme` (empty: none). */
+const iceUrls = (scheme: RegExp, what: string) =>
+  csv.refine((urls) => urls.every((u) => scheme.test(u)), `every entry must be a ${what} URI`);
+
+const turnShape = z.object({
+  /** STUN URIs handed to P2P players (the instance's own coturn), comma separated; empty: none. */
+  P2P_STUN_URLS: iceUrls(/^stun:/, "stun:").default([]),
+  /**
+   * TURN URIs (`turn:`/`turns:`), comma separated. Empty (default) keeps the relay off: a relayed
+   * peer's bytes cross the server twice, so TURN saves no egress (ADR 0005 amendment 1).
+   */
+  P2P_TURN_URLS: iceUrls(/^turns?:/, "turn: or turns:").default([]),
+  /** TURN REST shared secret, also coturn's `static-auth-secret`; required when P2P_TURN_URLS is set. */
+  TURN_SHARED_SECRET: secret.optional(),
+  /** Lifetime of the TURN credentials `p2p.iceServers` hands out, in seconds. */
+  TURN_CREDENTIAL_TTL_SECONDS: z.coerce.number().int().min(300).max(86_400).default(3600),
+});
+
+/** ICE servers for P2P playback. API only: the origin gets `playbackEnv`, never the TURN secret. */
+export const turnEnv = turnShape.superRefine((env, ctx) => {
+  // Fail closed: a relay without its secret would hand out credentials coturn cannot check.
+  if (env.P2P_TURN_URLS.length > 0 && !env.TURN_SHARED_SECRET)
+    ctx.addIssue({
+      code: "custom",
+      path: ["TURN_SHARED_SECRET"],
+      message: "P2P_TURN_URLS is set: the TURN relay needs TURN_SHARED_SECRET",
+    });
 });
 
 export const integrityEnv = z.object({
@@ -437,6 +472,17 @@ export const infraEnv = z.object({
   COMPOSE_SUBNET: z.string().optional(),
   /** Compose only: path of the env file our own images read; third-party services do not (default `.env`). */
   COMMONAIR_ENV_FILE: z.string().optional(),
+  /** coturn's listening port, UDP and TCP: STUN always, TURN when the relay is on (default 3478). */
+  TURN_PORT: port.optional(),
+  /** Lowest UDP port of coturn's relay range; used only when the relay is on (P2P_TURN_URLS set). */
+  TURN_RELAY_PORT_MIN: port.optional(),
+  /** Highest UDP port of coturn's relay range; used only when the relay is on. */
+  TURN_RELAY_PORT_MAX: port.optional(),
+  /**
+   * The one public address coturn advertises (empty: none). MTX_WEBRTCADDITIONALHOSTS may list
+   * several hosts (IPv4,IPv6); this takes one, normally its first IPv4 entry.
+   */
+  TURN_EXTERNAL_IP: z.union([z.ipv4(), z.ipv6()]).optional(),
 });
 
 export const servicePorts = z.object({
@@ -562,6 +608,7 @@ export const ALL_ENV_SCHEMAS = {
   evidenceOpenEnv,
   evidenceStorageEnv,
   playbackEnv,
+  turnEnv: turnShape,
   integrityEnv,
   developerEnv,
   workerEnv,

@@ -4,10 +4,11 @@
 /**
  * Client address resolution and network prefixes.
  *
- * `parseIp`, `inCidr`, `clientIp` and `canonicalIp` are copied from services/api/src/lib/ip.ts
- * and services/api/src/lib/netrange.ts so the tracker resolves and spells addresses exactly as
- * the API does (contract request: move them into @commonair/service). `networkPrefix` is the
- * tracker's own.
+ * `parseIp`, `inCidr`, `clientIp` and `canonicalIp` match services/api/src/lib/ip.ts and
+ * services/api/src/lib/netrange.ts, so the tracker resolves and spells addresses exactly as the
+ * API does; moved here from services/tracker at the P1 contract step. `networkPrefix` and
+ * `connectionKey` are the tracker's. Do not merge `connectionKey` with the API's
+ * `rateLimitSubjectIp`: they spell an IPv6 /64 differently, and both are stored as subjects.
  */
 
 function ipv4ToBigInt(ip: string): bigint | null {

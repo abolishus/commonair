@@ -16,7 +16,7 @@ import type { PlayerInfo } from "../player/player.ts";
 import type { ProbeVideoStats } from "../player/probe.ts";
 import type { PlayerServer } from "./player-server.ts";
 import { type Viewer, type ViewerReport, type ViewerTarget, emptyReport } from "./viewer.ts";
-import { webEmbedUrl } from "./web/selectors.ts";
+import { P2P_NOTICE_KEY, P2P_PREFERENCE_KEY, webEmbedUrl } from "./web/selectors.ts";
 import { TimeoutError, waitFor } from "./wait.ts";
 
 export type BrowserEngine = "chromium" | "webkit";
@@ -52,6 +52,45 @@ if (!navigator.languages || navigator.languages.length === 0) {
 }
 `;
 
+/**
+ * Init script for P2P viewers (P1): counts `RTCPeerConnection` constructions into
+ * `window.__harnessPeerConnections`, so a scenario can prove a viewer never connected to peers.
+ */
+export const PEER_CONNECTION_COUNTER_SCRIPT = `
+(() => {
+  window.__harnessPeerConnections = 0;
+  const Native = window.RTCPeerConnection;
+  if (typeof Native !== "function") return;
+  const Counted = function (...args) {
+    window.__harnessPeerConnections++;
+    return new Native(...args);
+  };
+  Counted.prototype = Native.prototype;
+  Object.setPrototypeOf(Counted, Native);
+  window.RTCPeerConnection = Counted;
+})();
+`;
+
+/**
+ * Init script for an opted-in P2P viewer (docs/testing/p1-selectors.md): chooses P2P and marks the
+ * IP disclosure seen before the app loads, as a viewer who opted in earlier would have.
+ */
+export const P2P_OPT_IN_SCRIPT = `
+try {
+  localStorage.setItem(${JSON.stringify(P2P_PREFERENCE_KEY)}, "on");
+  localStorage.setItem(${JSON.stringify(P2P_NOTICE_KEY)}, "seen");
+} catch {}
+`;
+
+/** P2P mode of a web viewer: `optedIn` (storage says on) or `default` (no storage keys at all). */
+export type P2PViewerMode = "optedIn" | "default";
+
+/** What a web viewer's page says about P2P: the player's `data-p2p` and peer connections made. */
+export interface P2PStatus {
+  state: string | null;
+  peerConnections: number;
+}
+
 export interface BrowserFleetOptions {
   headless?: boolean;
   log?: Logger;
@@ -76,6 +115,9 @@ export class BrowserFleet {
                 "--autoplay-policy=no-user-gesture-required",
                 "--disable-blink-features=AutomationControlled",
                 "--mute-audio",
+                // P2P viewers are pages of one browser: host candidates must be real addresses,
+                // not mDNS names the other pages cannot resolve.
+                "--disable-features=WebRtcHideLocalIpsWithMdns",
               ]
             : [],
       });
@@ -145,6 +187,8 @@ export interface OpenBrowserViewersOptions {
   humanize?: boolean;
   /** Simulated client address per page. */
   clientIp?: (pageIndex: number) => string | undefined;
+  /** Web player only: P2P viewers (peer-connection counter; `optedIn` also chooses P2P). */
+  p2p?: P2PViewerMode;
   log?: Logger;
 }
 
@@ -193,6 +237,14 @@ class ViewerPage {
     await this.page.mouse.click(1, 1).catch(() => undefined);
   }
 
+  async p2pStatus(): Promise<P2PStatus> {
+    if (this.closed) return { state: null, peerConnections: 0 };
+    return this.page.evaluate(() => ({
+      state: document.querySelector('[data-testid="player"]')?.getAttribute("data-p2p") ?? null,
+      peerConnections: (window as { __harnessPeerConnections?: number }).__harnessPeerConnections ?? 0,
+    }));
+  }
+
   async stopPlayer(id: string): Promise<void> {
     if (this.closed || this.stoppedIds.has(id)) return;
     this.stoppedIds.add(id);
@@ -205,6 +257,11 @@ class ViewerPage {
       await this.context.close().catch(() => undefined);
     }
   }
+}
+
+/** A web viewer's P2P status (`data-p2p`, peer connections), or null for any other viewer. */
+export function viewerP2PStatus(viewer: Viewer): Promise<P2PStatus> | null {
+  return viewer instanceof BrowserViewer ? viewer.p2pStatus() : null;
 }
 
 class BrowserViewer implements Viewer {
@@ -283,6 +340,10 @@ class BrowserViewer implements Viewer {
     }
   }
 
+  p2pStatus(): Promise<P2PStatus> {
+    return this.host.p2pStatus();
+  }
+
   async stop(): Promise<ViewerReport> {
     if (this.stopped) return this.last;
     const final = await this.report();
@@ -307,6 +368,11 @@ export async function openBrowserViewers(opts: OpenBrowserViewersOptions): Promi
     });
     await context.addInitScript({ content: opts.probeScript });
     if (opts.humanize !== false) await context.addInitScript({ content: HUMANIZE_SCRIPT });
+    if (opts.p2p) {
+      if (player !== "web") throw new Error("P2P viewers need the web player");
+      await context.addInitScript({ content: PEER_CONNECTION_COUNTER_SCRIPT });
+      if (opts.p2p === "optedIn") await context.addInitScript({ content: P2P_OPT_IN_SCRIPT });
+    }
     const page = await context.newPage();
     page.on("pageerror", (err) => opts.log?.warn("viewer page error", { engine: opts.engine, error: err.message }));
     const ip = opts.clientIp?.(p);

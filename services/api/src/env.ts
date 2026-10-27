@@ -19,6 +19,7 @@ import {
   playbackEnv,
   servicePorts,
   storageEnv,
+  turnEnv,
   valkeyEnv,
   workerEnv,
 } from "@commonair/config/env";
@@ -39,6 +40,8 @@ const SCHEMAS = [
   paymentsEnv,
   mediaEnv,
   playbackEnv,
+  // P2P ICE servers (ADR 0005 amendment 1): a relay without its secret refuses to start.
+  turnEnv,
   servicePorts,
   developerEnv,
   // Trust & safety (ADR 0006): missing or invalid configuration refuses to start (fail closed).
@@ -60,6 +63,7 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof paymentsEnv> &
   z.output<typeof mediaEnv> &
   z.output<typeof playbackEnv> &
+  z.output<typeof turnEnv> &
   z.output<typeof servicePorts> &
   z.output<typeof developerEnv> &
   z.output<typeof moderationEnv> &

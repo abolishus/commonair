@@ -9,11 +9,18 @@
 import type { Server, ServerWebSocket } from "bun";
 import { KEYS } from "@commonair/contracts/internal";
 import { meter, type Logger } from "@commonair/observability";
-import { runService, valkeyCheck, type RunningService, type ValkeyClient } from "@commonair/service";
+import {
+  canonicalIp,
+  clientIp,
+  connectionKey,
+  runService,
+  valkeyCheck,
+  type RunningService,
+  type ValkeyClient,
+} from "@commonair/service";
 import { heartbeatFresh, verifyTrackerToken } from "./auth.ts";
 import { Evidence } from "./evidence.ts";
 import { PendingExchanges } from "./exchanges.ts";
-import { canonicalIp, clientIp, connectionKey } from "./ip.ts";
 import { LIMITS, parseFrame } from "./protocol.ts";
 import { TokenBucket } from "./ratelimit.ts";
 import { SwarmRegistry, type Conn } from "./swarm.ts";

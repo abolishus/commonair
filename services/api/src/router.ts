@@ -20,6 +20,7 @@ import { me } from "./routes/me.ts";
 import { moderation } from "./routes/moderation.ts";
 import { money } from "./routes/money.ts";
 import { ncii } from "./routes/ncii.ts";
+import { p2p } from "./routes/p2p.ts";
 import { playback } from "./routes/playback.ts";
 import { relays } from "./routes/relays.ts";
 import { safety } from "./routes/safety.ts";
@@ -36,6 +37,7 @@ export const router = base.router({
   channels: channelsRoutes,
   stream,
   playback,
+  p2p,
   vods,
   clips,
   chat,

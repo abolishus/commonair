@@ -97,6 +97,8 @@ services:
       # harness/compose.e6.yaml
       OPS_TEST_HOOKS: "true"
       OUTBOUND_ALLOW_PRIVATE_NETWORKS: "true"
+      # harness/compose.p2p.yaml
+      P2P_TRACKER_URL: ws://localhost:${HARNESS_TRACKER_PROXY_PORT:-8010}
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z

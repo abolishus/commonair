@@ -166,7 +166,7 @@ describe("P2P sessions", () => {
     const env = api.deps.env as { P2P_ENABLED: boolean };
     env.P2P_ENABLED = false;
     try {
-      const s = await startPlayback(client(api));
+      const s = await startPlayback(client(api), { p2pCapable: true });
       expect(s.p2p.enabled).toBe(false);
       expect((await sessionRow(s.sessionId)).assignedSource).toBe("origin");
     } finally {

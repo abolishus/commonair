@@ -22,7 +22,7 @@ import { HttpViewer } from "./http-viewer.ts";
 import { Mailpit, mailpitEndpoint } from "./mailpit.ts";
 import { type PlayerServer, startPlayerServer } from "./player-server.ts";
 import { podmanAvailable } from "./testing/mediamtx.ts";
-import { type ForwardingProxy, startForwardingProxy } from "./proxy.ts";
+import { type ForwardingProxy, startForwardingProxy, startTrackerProxy } from "./proxy.ts";
 import { relayReadiness } from "./relay.ts";
 import type { Need } from "./scenario.ts";
 import { type StreamerOptions, Streamer, rtmpPublishUrl, whipPublishTarget } from "./streamer.ts";
@@ -38,6 +38,12 @@ export interface ViewerMix {
   perPage?: number;
   /** Decode the strip in HTTP viewers every N segments (0 = PDT latency only). */
   httpStripEvery?: number;
+  /**
+   * P1: web Chromium viewers, whatever HARNESS_PLAYER says. `optedIn` chose P2P (storage set
+   * before load) and reach the tracker through the harness tracker proxy; `atDefault` have no
+   * storage keys at all, like a first-time visitor (the operator default applies).
+   */
+  p2p?: { optedIn: number; atDefault: number };
 }
 
 /** True when a TCP connection to host:port succeeds within `timeoutMs`. */
@@ -66,6 +72,7 @@ export class Platform {
   readonly mailpit: Mailpit;
   readonly users: UserFactory;
   private proxy: ForwardingProxy | null = null;
+  private trackerProxy: ForwardingProxy | null = null;
   private playerServerPromise: Promise<PlayerServer> | null = null;
   private fleetInstance: BrowserFleet | null = null;
   private probes = new Map<Need, Promise<string | null>>();
@@ -189,6 +196,7 @@ export class Platform {
         })),
       );
     }
+    if (mix.p2p) viewers.push(...(await this.openP2PViewers(channel, mix.p2p)));
     const http = Array.from(
       { length: mix.http ?? 0 },
       () =>
@@ -206,6 +214,39 @@ export class Platform {
       await Bun.sleep(20 + Math.random() * 60);
     }
     return viewers;
+  }
+
+  /**
+   * The tracker proxy on its fixed port (harness/compose.p2p.yaml points the API's
+   * P2P_TRACKER_URL at it): each session reaches the tracker from its own residential /24.
+   */
+  trackerProxyUrl(): string {
+    this.trackerProxy ??= startTrackerProxy({
+      target: this.env.HARNESS_TRACKER_URL,
+      port: this.env.HARNESS_TRACKER_PROXY_PORT,
+      cidrs: this.residential.cidrs,
+    });
+    return this.trackerProxy.url;
+  }
+
+  private async openP2PViewers(channel: string, p2p: NonNullable<ViewerMix["p2p"]>): Promise<Viewer[]> {
+    if (p2p.optedIn > 0) this.trackerProxyUrl();
+    const { probe } = await import("./player-server.ts").then((m) => m.playerBundles());
+    const open = (count: number, mode: "optedIn" | "default") =>
+      count === 0
+        ? Promise.resolve([])
+        : openBrowserViewers({
+            fleet: this.fleet,
+            engine: "chromium",
+            target: { channel },
+            count,
+            player: "web",
+            webUrl: this.env.HARNESS_WEB_URL,
+            probeScript: probe,
+            p2p: mode,
+            log: this.log,
+          });
+    return [...(await open(p2p.optedIn, "optedIn")), ...(await open(p2p.atDefault, "default"))];
   }
 
   /** Chat client for a signed-in user (or anonymous when `user` is omitted). */
@@ -335,5 +376,7 @@ export class Platform {
     if (server) await (await server).stop().catch(() => undefined);
     await this.proxy?.stop();
     this.proxy = null;
+    await this.trackerProxy?.stop();
+    this.trackerProxy = null;
   }
 }

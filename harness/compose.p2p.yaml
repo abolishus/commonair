@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the P2P harness runs ONLY (P1, docs/testing/p1-selectors.md). Never use it
+# on a public instance: it hands players a tracker URL on the harness host's loopback, where the
+# harness tracker proxy (harness/src/proxy.ts, HARNESS_TRACKER_PROXY_PORT) gives every playback
+# session its own residential address before forwarding to the tracker. P2P_DEFAULT stays `off`.
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      P2P_TRACKER_URL: ws://localhost:${HARNESS_TRACKER_PROXY_PORT:-8010}

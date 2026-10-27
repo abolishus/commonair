@@ -41,9 +41,14 @@ the server as part of their account, not in this category.
 
 ## Peer-to-peer delivery
 
-Peer-to-peer video sharing is not a cookie, but it is a choice: you can switch it off in your
-settings. When it is on, your browser connects to other viewers of the same stream through our own
-tracker; see the terms of service for details.
+Peer-to-peer video sharing is not a cookie, but it is a choice, and it is off unless you turn it
+on (or the instance's operator made it the default, in which case a notice tells you first). When
+it is on, your browser connects to other viewers of the same stream through our own tracker, and
+they can see your IP address; see the privacy policy.
+
+Your choice (on or off) and the fact that you have seen that notice are kept in your browser's
+storage. They are **essential**: they record a privacy choice, like the consent record, so they
+are kept even if you decline preferences, and "off" holds either way.
 
 ## Your choices are recorded
 

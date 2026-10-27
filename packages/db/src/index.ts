@@ -10,9 +10,12 @@ export { runMigrations, MIGRATIONS_DIR } from "./migrate.ts";
 export { DEFAULT_GOVERNANCE_SETTINGS, seedGovernanceSettings, seedLegalDocuments } from "./seed.ts";
 export {
   CONSENT_CATEGORIES,
+  COOKIES_SEED_VERSION,
   ENFORCEMENT_NOTICE_SEED_VERSION,
   LEGAL_PLACEHOLDERS,
   LEGAL_SEED_VERSION,
   PLACEHOLDER_PATTERN,
+  PRIVACY_SEED_VERSION,
   legalSeedDocuments,
+  legalSeedVersion,
 } from "./legal/index.ts";

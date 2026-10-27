@@ -67,7 +67,8 @@ than run less. Naming scenarios explicitly is unaffected.
 its own stack. CI runs one job per shard (`bun run verify --full --only harness --shard <name>`).
 
 `full` runs on the harness stack: `compose.yaml` with every harness override layered
-(`harness/compose.trust-safety.yaml`, `harness/compose.e5-coop.yaml`, `harness/compose.e6.yaml`),
+(`harness/compose.trust-safety.yaml`, `harness/compose.e5-coop.yaml`, `harness/compose.e6.yaml`,
+`harness/compose.p2p.yaml`),
 on a Postgres volume created once with the E5 bootstrap (ADR 0020: `harness/compose.e5-coop.yaml`
 gives `migrate` the short governance periods in `GOVERNANCE_BOOTSTRAP_JSON`, which apply at the
 database's first migration only; see `e5-coop` below).
@@ -194,6 +195,35 @@ small sample of published hosting-provider ranges (ADR 0003, decision 8). Browse
 address to the player server, which forwards the same way. Media requests go straight to the
 origin (sessions are identified by token, not address). IPv4 only.
 
+### P2P viewers (`src/p2p.ts`, `src/proxy.ts`, `harness/compose.p2p.yaml`; P1)
+
+Only `--player web` Chromium viewers can run P2P (the harness player has no P2P loader), so
+`ViewerMix.p2p = { optedIn, atDefault }` always opens web Chromium pages, whatever `HARNESS_PLAYER`
+says. Opted-in pages get an init script that sets `commonair:p2p=on` and
+`commonair:p2p-notice=seen` before the app loads ([docs/testing/p1-selectors.md](../docs/testing/p1-selectors.md));
+default pages get no storage keys at all, like a first-time visitor, and the stack keeps
+`P2P_DEFAULT=off`. Every P2P page counts `RTCPeerConnection` constructions into
+`window.__harnessPeerConnections`, and Chromium runs with
+`--disable-features=WebRtcHideLocalIpsWithMdns`, so pages of one browser see each other's host
+candidates.
+
+All pages share the harness host's address, but integrity lowers the expected HTTP share only for
+a session linked to a peer on another network (ADR 0005 decision 4). So the API's
+`P2P_TRACKER_URL` points at the **tracker proxy** on `HARNESS_TRACKER_PROXY_PORT` (default 8010,
+`harness/compose.p2p.yaml`): it reads `sid` from the socket's `t` token and forwards to
+`HARNESS_TRACKER_URL` with `x-forwarded-for` set to that session's own residential /24
+(`sessionAddress`, deterministic), through the same trust path as the API proxy.
+
+`viewers --set p2p=10` then asserts: every viewer starts and the verified count converges to
+exactly N; `sum(bytes_p2p) > 0` over the opted-in sessions (Postgres, `DATABASE_URL`); the origin
+served digests (`origin_requests_total{route="p2p_digest",status="200"}`) and players rejected none
+(`playback_p2p_rejected_total`), both from `HARNESS_PROMETHEUS_URL`; opted-in sessions' HTTP bytes
+per watched second are at least 20 % below the default viewers' (`P2P_EGRESS_MARGIN`, a soft check
+to tune from the first runs), with `origin.egress.bytes` recorded; after scoring every session is
+`verified` with no fetch reason; and each default viewer shows `data-p2p="off"`, made no peer
+connection, and has neither `p2p:grant:<sid>` nor `p2p:peer:<sid>` in Valkey. A tampering peer is
+not simulated: that is a P1-player unit test.
+
 ### Viewbots (`src/viewbot.ts`)
 
 Designed to be caught; each behaviour produces one signal: datacenter addresses, headless
@@ -283,23 +313,23 @@ into SIGINT. Only the instance URLs (`HARNESS_API_URL`, `HARNESS_WEB_URL`, `HARN
 
 ## Scenarios
 
-| Scenario         | What it proves                                                                                                                                                                                                          |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `smoke`          | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                                                                                         |
-| `ingest-rtmp`    | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                                                                                    |
-| `ingest-whip`    | The same over WHIP.                                                                                                                                                                                                     |
-| `viewers`        | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave.                                                                 |
-| `load-smoke`     | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                                                                                    |
-| `e2e-basic`      | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline.                                                              |
-| `e2e-social`     | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                                                                                   |
-| `e2e-relay`      | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).                                                                       |
-| `e4b-money`      | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                                                                                  |
-| `trust-safety`   | Milestone E4c: T0 live, evidence through deletion, two-reviewer dismissal, T2 label + appeal, T1 queue, upload rejection, NCII clock (see below).                                                                       |
-| `e5-coop`        | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below).    |
-| `backup-restore` | E6: WAL-G backup of a throwaway Postgres, wipe, restore with WAL replay; triggers, protection functions, app-role grants, rows and the ledger come back, and the app role is refused every protected write (see below). |
-| `load-plan`      | E6: the load test at PLAN size, 20 streamers × 200 viewers for 120 s, sharded over processes. Not in `full`.                                                                                                            |
-| `load-sweep`     | S1-a: steps viewers (or live streams) up until latency, TTFF, stalls, errors, target CPU or NIC breaks; one row per step, or inconclusive when the generator was the limit. Not in `full`.                              |
-| `multi-instance` | S1: two of each app service (api, chat, worker, origin); each ADR 0032 replica-safety claim checked, two instances killed and restored (see below). Skips every step unless the `multi` replicas are running.           |
+| Scenario         | What it proves                                                                                                                                                                                                                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `smoke`          | API up; sign-up through ALTCHA + email verification; sign in with a fresh session; the member's channel exists.                                                                                                                                                                                                               |
+| `ingest-rtmp`    | RTMP publish → live via `channels.get` → Chromium + WebKit play through the origin (TTFF, glass-to-glass) → offline.                                                                                                                                                                                                          |
+| `ingest-whip`    | The same over WHIP.                                                                                                                                                                                                                                                                                                           |
+| `viewers`        | N viewers (`--set viewers=10 --set browserViewers=2`); the verified viewer count converges to exactly N, never overshoots, and decays after they leave. With `--set p2p=<n>` (P1; 0 until P1-player merges, then 10) also opted-in P2P web viewers and `p2pDefault` (default 1) left at the default (off); see "P2P viewers". |
+| `load-smoke`     | The load test at 2 streamers × 10 viewers for 30 s, with thresholds.                                                                                                                                                                                                                                                          |
+| `e2e-basic`      | Milestone E1 through the real web app: web sign-up + email link → dashboard key → RTMP → Chromium (signed in) + WebKit (anonymous) watch → chat → offline.                                                                                                                                                                    |
+| `e2e-social`     | Milestone E2: directory → follow → tmi.js bot via IRC → chat timeout seen on web and IRC (see below).                                                                                                                                                                                                                         |
+| `e2e-relay`      | Milestone E3: a member's Go relay serves viewers, receipts verify, viewbots excluded, a 5× liar relay is suspended, drain and retire (see below).                                                                                                                                                                             |
+| `e4b-money`      | Milestone E4b: manual payments, chat events, revenue figures, refund + chargeback, payout threshold, transparency, ledger (see below).                                                                                                                                                                                        |
+| `trust-safety`   | Milestone E4c: T0 live, evidence through deletion, two-reviewer dismissal, T2 label + appeal, T1 queue, upload rejection, NCII clock (see below).                                                                                                                                                                             |
+| `e5-coop`        | Milestone E5: share, streamer and worker memberships, council, an ordinary decision applied, a protected decision rejected by the streamer class, patronage with two people, transparency, audit/outbox (see below).                                                                                                          |
+| `backup-restore` | E6: WAL-G backup of a throwaway Postgres, wipe, restore with WAL replay; triggers, protection functions, app-role grants, rows and the ledger come back, and the app role is refused every protected write (see below).                                                                                                       |
+| `load-plan`      | E6: the load test at PLAN size, 20 streamers × 200 viewers for 120 s, sharded over processes. Not in `full`.                                                                                                                                                                                                                  |
+| `load-sweep`     | S1-a: steps viewers (or live streams) up until latency, TTFF, stalls, errors, target CPU or NIC breaks; one row per step, or inconclusive when the generator was the limit. Not in `full`.                                                                                                                                    |
+| `multi-instance` | S1: two of each app service (api, chat, worker, origin); each ADR 0032 replica-safety claim checked, two instances killed and restored (see below). Skips every step unless the `multi` replicas are running.                                                                                                                 |
 
 E1's E6 scenarios (`simulcast`, `overlay-alert`, `vod-clips`, `data-export`, `account-deletion`)
 are documented with [docs/testing/e6-selectors.md](../docs/testing/e6-selectors.md).

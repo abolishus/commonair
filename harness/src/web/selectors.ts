@@ -303,6 +303,33 @@ export const TEST_IDS = {
 export const PLAYER_SOURCES = ["origin", "relay", "cdn"] as const;
 export type PlayerSource = (typeof PLAYER_SOURCES)[number];
 
+/** P1 (ADR 0005 amendment 1, docs/testing/p1-selectors.md): P2P controls and indicator. */
+export const P1_TEST_IDS = {
+  /** Indicator on the player while P2P is on; carries the state as `data-p2p` on `player`. */
+  playerP2p: "player-p2p",
+  /** First-run notice that peers see the viewer's IP address (operator default `on` only). */
+  playerP2pNotice: "player-p2p-notice",
+  playerP2pDialog: "player-p2p-dialog",
+  playerP2pToggle: "player-p2p-toggle",
+  /** The switch in the P2P section of `/settings/privacy`. */
+  privacyP2pToggle: "privacy-p2p-toggle",
+} as const;
+
+/**
+ * `data-p2p` values of `player`: `off` (no P2P), `on` (P2P loader running, no peer yet),
+ * `sharing` (exchanging segments with at least one peer).
+ */
+export const P2P_STATES = ["off", "on", "sharing"] as const;
+export type P2PState = (typeof P2P_STATES)[number];
+
+/**
+ * localStorage key of the viewer's P2P choice, `on` or `off`. Absent: the operator default
+ * (`instance.info` `features.p2pDefault`, `off` unless the operator set `P2P_DEFAULT=on`).
+ */
+export const P2P_PREFERENCE_KEY = "commonair:p2p";
+/** localStorage key set to `seen` once the viewer has seen the IP disclosure. */
+export const P2P_NOTICE_KEY = "commonair:p2p-notice";
+
 /** `data-section` values of `directory-section` whose cards are live `stream-card`s. */
 export const LIVE_DIRECTORY_SECTIONS = ["spotlight", "new", "live", "following"] as const;
 export type LiveDirectorySection = (typeof LIVE_DIRECTORY_SECTIONS)[number];
