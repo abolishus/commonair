@@ -5,8 +5,9 @@
  * `moderation.ncii-hash`: after staff decided an NCII request `removed` (the API already
  * unpublished every resolved subject), PDQ-hash the removed content into `local_hash_list` as
  * `ncii` so re-uploads match T0, and only then delete the objects (e4c spec "NCII decision").
- * VODs are sampled every effective sample interval, clips every second, upload images once; frames
- * below PDQ_MIN_QUALITY are skipped. Objects are looked up at their public key and, for requests
+ * VODs are sampled every effective sample interval, clips every second, upload images once; a
+ * removed live broadcast is every VOD and clip recorded from it (no recordings: marked done with 0
+ * hashes, and the audit row says so). Frames below PDQ_MIN_QUALITY are skipped. Objects are looked up at their public key and, for requests
  * auto-hidden earlier, under the private hidden prefix. Idempotent: an item with `hashed_at` is
  * done (`removed_at` is the API's, set when it unpublished); hashes insert with ON CONFLICT DO NOTHING.
  */
@@ -25,7 +26,7 @@ import { audit } from "./records.ts";
 import { mediaStorage, moderationRuntime } from "./runtime.ts";
 import { sampleSeconds } from "./settings.ts";
 
-const { nciiRequests: requests, nciiRequestItems: items, clips, localHashList } = schema;
+const { nciiRequests: requests, nciiRequestItems: items, clips, vods, localHashList } = schema;
 const LUMA = MODERATION_CONSTANTS.PDQ_LUMA_SIZE;
 
 export function selectVodPlaylist(keys: readonly string[]): string {
@@ -112,6 +113,35 @@ async function hashClip(ctx: WorkerContext, clipId: string, work: string): Promi
   return { hashes: usableHashes(hashes), deleteKeys };
 }
 
+/**
+ * A removed live broadcast: every VOD and clip recorded from it (the API deleted their rows when
+ * it ended the broadcast; their objects remain). All of them are hashed before the caller deletes
+ * any object; a broadcast with no recordings yields no hashes and is still marked done.
+ */
+async function hashBroadcast(ctx: WorkerContext, broadcastId: string, every: number, work: string) {
+  const [vodRows, clipRows] = await Promise.all([
+    ctx.db.select({ id: vods.id }).from(vods).where(eq(vods.broadcastId, broadcastId)),
+    ctx.db.select({ id: clips.id }).from(clips).where(eq(clips.broadcastId, broadcastId)),
+  ]);
+  const hashes: string[] = [];
+  const deleteKeys: string[] = [];
+  for (const v of vodRows) {
+    const r = await hashVod(ctx, v.id, every, work);
+    hashes.push(...r.hashes);
+    deleteKeys.push(...r.deleteKeys);
+  }
+  for (const c of clipRows) {
+    const r = await hashClip(ctx, c.id, work);
+    hashes.push(...r.hashes);
+    deleteKeys.push(...r.deleteKeys);
+  }
+  return {
+    result: { hashes: [...new Set(hashes)], deleteKeys: [...new Set(deleteKeys)] } satisfies ItemResult,
+    vods: vodRows.length,
+    clips: clipRows.length,
+  };
+}
+
 async function hashUpload(ctx: WorkerContext, key: string): Promise<ItemResult> {
   const rt = moderationRuntime(ctx);
   const obj = await readWithFallback(mediaStorage(ctx), ctx.mediaBucket, key);
@@ -140,10 +170,16 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
   try {
     for (const i of pending) {
       let r: ItemResult = { hashes: [], deleteKeys: [] };
+      let recordings: { vods: number; clips: number } | null = null;
       if (i.subjectType === "vod" && i.subjectId) r = await hashVod(ctx, i.subjectId, every, work);
       else if (i.subjectType === "clip" && i.subjectId) r = await hashClip(ctx, i.subjectId, work);
       else if (i.subjectType === "upload" && i.uploadKey) r = await hashUpload(ctx, i.uploadKey);
-      // Not on this instance (null), or not hashed yet (broadcast): left unmarked for a later run.
+      else if (i.subjectType === "broadcast" && i.subjectId) {
+        const b = await hashBroadcast(ctx, i.subjectId, every, work);
+        r = b.result;
+        recordings = { vods: b.vods, clips: b.clips };
+      }
+      // Not on this instance (null subject): nothing to hash; left unmarked.
       else continue;
       const now = ctx.now();
       // Hashes are committed before any object is deleted; a crash in between re-hashes next time.
@@ -191,6 +227,7 @@ export async function hashRemovedContent(ctx: WorkerContext, job: NciiHashJob) {
               hashes: r.hashes.length,
               objectsDeleted: r.deleteKeys.length,
               sampleSeconds: every,
+              ...recordings,
             },
           },
           now,

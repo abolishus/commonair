@@ -2,4 +2,48 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** E7-appeals: account actions and their appeals (appeals.account.*). That unit owns this file. */
-export const e7AppealsMessages = {} as const;
+export const e7AppealsMessages = {
+  "appeals.account.title": "Account actions",
+  "appeals.account.intro":
+    "Copyright strikes and suspensions recorded on your account. If one is wrong, appeal it and a moderator will review it.",
+  "appeals.account.loading": "Loading your account actions…",
+  "appeals.account.loadFailed": "Your account actions could not be loaded. Reload to try again.",
+  "appeals.account.empty": "No account actions",
+  "appeals.account.emptyHint": "Nothing has been recorded against your account.",
+  "appeals.account.action.dmca_strike": "Copyright strike",
+  "appeals.account.action.dmca_termination": "Suspended as a repeat infringer",
+  "appeals.account.inEffect": "In effect",
+  "appeals.account.reversal.appeal_overturned": "Reversed on appeal",
+  "appeals.account.reversal.counter_notice_restored": "Reversed after your counter-notice",
+  "appeals.account.reversal.strikes_below_threshold": "Reversed: below the strike limit",
+  "appeals.account.recorded": "Recorded",
+  "appeals.account.appeal": "Appeal",
+  "appeals.account.appealPending": "Appeal waiting for review",
+  "appeals.account.appealTitle": "Appeal this account action",
+  "appeals.account.appealDescription":
+    "Tell the moderators why this is wrong. To dispute the removal of the content itself, file a counter-notice under Copyright.",
+  "appeals.account.appealBody": "Why this is wrong",
+  "appeals.account.appealBodyHint": "Between {min} and {max} characters.",
+  "appeals.account.appealSubmit": "Send appeal",
+  "appeals.account.appealDone": "Your appeal was sent.",
+  "appeals.account.appealFailed": "Your appeal could not be sent. Try again.",
+  "appeals.account.subject.session": "Playback session",
+  "appeals.account.subject.user": "Your account",
+  "appeals.account.subject.integrity_flag": "Integrity flag",
+  "appeals.account.subject.dmca_notice": "Copyright notice",
+  "appeals.account.subject.account_action": "Account action",
+  "appeals.account.kind.integrity": "Integrity",
+  "appeals.account.kind.moderation": "Moderation",
+  "appeals.account.kind.dmca": "Copyright",
+  "appeals.account.kind.account": "Account",
+  "appeals.account.effect.liftsBan": "Overturning lifts the chat ban.",
+  "appeals.account.effect.liftsSuspension": "Overturning lifts the suspension.",
+  "appeals.account.effect.recordsOnly": "Overturning records the decision only.",
+  "appeals.account.effect.moderationAction":
+    "Overturning lifts the chat ban, timeout or suspension while it is in force. Any other action is recorded only.",
+  "appeals.account.effect.reversesStrike":
+    "Overturning reverses the strike, and the repeat-infringer suspension if the account drops below the limit.",
+  "appeals.account.effect.reversesTermination": "Overturning reverses the termination and lifts the suspension.",
+  "appeals.account.effect.accountAction":
+    "Overturning reverses the strike or termination. A reversed termination lifts the repeat-infringer suspension.",
+} as const;

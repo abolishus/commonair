@@ -3,6 +3,7 @@
 
 import { EmptyState, RelativeTime, SkeletonGroup, SkeletonText, StatusBadge } from "@commonair/ui";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
+import { Section } from "@commonair/ui/blocks/headers";
 import { Button } from "@commonair/ui/components/button";
 import {
   Dialog,
@@ -16,13 +17,21 @@ import { Field, FieldDescription, FieldLabel } from "@commonair/ui/components/fi
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@commonair/ui/components/item";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { toast } from "@commonair/ui/toast";
-import { JusticeScale01Icon } from "@hugeicons/core-free-icons";
+import { JusticeScale01Icon, UserShield01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { FormError } from "../form-error.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
-import { appealsClient, type AppealDto, type AppealsClient, type ContentLabelDto } from "./client.ts";
-import { appealStatusBadge } from "./labels.ts";
+import {
+  accountActionsClient,
+  appealsClient,
+  type AccountActionDto,
+  type AccountActionsClient,
+  type AppealDto,
+  type AppealsClient,
+  type ContentLabelDto,
+} from "./client.ts";
+import { accountActionLabel, appealStatusBadge, appealSubjectLabel, reversalLabel } from "./labels.ts";
 
 export const APPEAL_BODY_MIN = 10;
 export const APPEAL_BODY_MAX = 5000;
@@ -31,6 +40,15 @@ export const APPEAL_BODY_MAX = 5000;
 export function hasOpenAppeal(label: ContentLabelDto, appeals: readonly AppealDto[]): boolean {
   return appeals.some((a) => a.subjectType === "content_label" && a.subjectId === label.id && a.status === "open");
 }
+
+/** An appeal of this account action is waiting for a moderator. */
+export function hasOpenAccountAppeal(action: AccountActionDto, appeals: readonly AppealDto[]): boolean {
+  return appeals.some((a) => a.subjectType === "account_action" && a.subjectId === action.id && a.status === "open");
+}
+
+/** An account action can be appealed while it is in effect and no appeal of it is open. */
+export const mayAppealAccountAction = (action: AccountActionDto, appeals: readonly AppealDto[]): boolean =>
+  action.reversedAt === null && !hasOpenAccountAppeal(action, appeals);
 
 export interface LabelNoticeProps {
   label: ContentLabelDto;
@@ -61,8 +79,29 @@ export function LabelNotice({ label, appealPending, onAppeal }: LabelNoticeProps
   );
 }
 
-/** `label-appeal-dialog`: why the label is wrong, 10–5000 characters. */
-export function LabelAppealForm({ onSubmit }: { onSubmit: (body: string) => Promise<void> }): React.JSX.Element {
+interface AppealFormText {
+  title: string;
+  description: string;
+  body: string;
+  hint: string;
+  submit: string;
+  done: string;
+  failed: string;
+}
+
+/** The appeal body form shared by the label and account-action dialogs (10–5000 characters). */
+function AppealBodyForm({
+  renderBody,
+  renderSubmit,
+  text,
+  onSubmit,
+}: {
+  /** The textarea and button carry their literal test ids (the selector tests read the source). */
+  renderBody: (props: React.ComponentProps<typeof Textarea>) => React.JSX.Element;
+  renderSubmit: (props: React.ComponentProps<typeof Button>) => React.JSX.Element;
+  text: AppealFormText;
+  onSubmit: (body: string) => Promise<void>;
+}): React.JSX.Element {
   const [body, setBody] = React.useState("");
   const [pending, setPending] = React.useState(false);
   const id = React.useId();
@@ -74,9 +113,9 @@ export function LabelAppealForm({ onSubmit }: { onSubmit: (body: string) => Prom
     setPending(true);
     try {
       await onSubmit(body.trim());
-      toast.success(t("safety.label.appealDone"));
+      toast.success(text.done);
     } catch (err) {
-      toastActionError(err, t("safety.label.appealFailed"));
+      toastActionError(err, text.failed);
     } finally {
       setPending(false);
     }
@@ -84,35 +123,70 @@ export function LabelAppealForm({ onSubmit }: { onSubmit: (body: string) => Prom
   return (
     <form className="flex flex-col gap-4" onSubmit={(e) => void submit(e)} noValidate>
       <DialogHeader>
-        <DialogTitle>{t("safety.label.appealTitle")}</DialogTitle>
-        <DialogDescription>{t("safety.label.appealDescription")}</DialogDescription>
+        <DialogTitle>{text.title}</DialogTitle>
+        <DialogDescription>{text.description}</DialogDescription>
       </DialogHeader>
       <Field>
-        <FieldLabel htmlFor={id}>{t("safety.label.appealBody")}</FieldLabel>
-        <Textarea
-          id={id}
-          data-testid="label-appeal-body"
-          rows={5}
-          minLength={APPEAL_BODY_MIN}
-          maxLength={APPEAL_BODY_MAX}
-          value={body}
-          onChange={(e) => setBody(e.currentTarget.value)}
-        />
-        <FieldDescription>
-          {t("safety.label.appealBodyHint", { min: APPEAL_BODY_MIN, max: APPEAL_BODY_MAX })}
-        </FieldDescription>
+        <FieldLabel htmlFor={id}>{text.body}</FieldLabel>
+        {renderBody({
+          id,
+          rows: 5,
+          minLength: APPEAL_BODY_MIN,
+          maxLength: APPEAL_BODY_MAX,
+          value: body,
+          onChange: (e) => setBody(e.currentTarget.value),
+        })}
+        <FieldDescription>{text.hint}</FieldDescription>
       </Field>
       <DialogFooter>
-        <Button
-          data-testid="label-appeal-submit"
-          type="submit"
-          disabled={!valid || pending}
-          aria-busy={pending || undefined}
-        >
-          {t("safety.label.appealSubmit")}
-        </Button>
+        {renderSubmit({
+          type: "submit",
+          disabled: !valid || pending,
+          "aria-busy": pending || undefined,
+          children: text.submit,
+        })}
       </DialogFooter>
     </form>
+  );
+}
+
+/** `label-appeal-dialog`: why the label is wrong, 10–5000 characters. */
+export function LabelAppealForm({ onSubmit }: { onSubmit: (body: string) => Promise<void> }): React.JSX.Element {
+  return (
+    <AppealBodyForm
+      renderBody={(p) => <Textarea data-testid="label-appeal-body" {...p} />}
+      renderSubmit={(p) => <Button data-testid="label-appeal-submit" {...p} />}
+      onSubmit={onSubmit}
+      text={{
+        title: t("safety.label.appealTitle"),
+        description: t("safety.label.appealDescription"),
+        body: t("safety.label.appealBody"),
+        hint: t("safety.label.appealBodyHint", { min: APPEAL_BODY_MIN, max: APPEAL_BODY_MAX }),
+        submit: t("safety.label.appealSubmit"),
+        done: t("safety.label.appealDone"),
+        failed: t("safety.label.appealFailed"),
+      }}
+    />
+  );
+}
+
+/** `account-appeal-dialog`: why the account action is wrong, 10–5000 characters. */
+export function AccountAppealForm({ onSubmit }: { onSubmit: (body: string) => Promise<void> }): React.JSX.Element {
+  return (
+    <AppealBodyForm
+      renderBody={(p) => <Textarea data-testid="account-appeal-body" {...p} />}
+      renderSubmit={(p) => <Button data-testid="account-appeal-submit" {...p} />}
+      onSubmit={onSubmit}
+      text={{
+        title: t("appeals.account.appealTitle"),
+        description: t("appeals.account.appealDescription"),
+        body: t("appeals.account.appealBody"),
+        hint: t("appeals.account.appealBodyHint", { min: APPEAL_BODY_MIN, max: APPEAL_BODY_MAX }),
+        submit: t("appeals.account.appealSubmit"),
+        done: t("appeals.account.appealDone"),
+        failed: t("appeals.account.appealFailed"),
+      }}
+    />
   );
 }
 
@@ -153,6 +227,102 @@ export function LabelNotices({ labels, appeals, onAppeal }: LabelNoticesProps): 
   );
 }
 
+export interface AccountActionListProps {
+  /** `null` while loading. */
+  actions: readonly AccountActionDto[] | null;
+  appeals: readonly AppealDto[];
+  onAppeal: (action: AccountActionDto, body: string) => Promise<void>;
+}
+
+/** "Account actions" on `/settings/appeals`: each `account-action`, its state and its appeal. */
+export function AccountActionList({ actions, appeals, onAppeal }: AccountActionListProps): React.JSX.Element {
+  const [appealing, setAppealing] = React.useState<AccountActionDto | null>(null);
+  let content: React.ReactNode;
+  if (actions === null)
+    content = (
+      <SkeletonGroup label={t("appeals.account.loading")}>
+        <SkeletonText lines={2} />
+      </SkeletonGroup>
+    );
+  else if (actions.length === 0)
+    content = (
+      <EmptyState
+        icon={UserShield01Icon}
+        title={t("appeals.account.empty")}
+        description={t("appeals.account.emptyHint")}
+        headingLevel={3}
+      />
+    );
+  else
+    content = (
+      <ItemGroup>
+        {actions.map((action) => {
+          const reversed = action.reversedAt !== null;
+          const pending = hasOpenAccountAppeal(action, appeals);
+          return (
+            <Item
+              key={action.id}
+              data-testid="account-action"
+              data-action-id={action.id}
+              data-action={action.action}
+              data-reversed={reversed ? "true" : "false"}
+              variant="outline"
+              size="sm"
+            >
+              <ItemContent>
+                <ItemTitle>{accountActionLabel(action.action)}</ItemTitle>
+                <ItemDescription>
+                  {t("appeals.account.recorded")} <RelativeTime date={action.createdAt} />
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions className="flex-col items-end gap-1">
+                {reversed ? (
+                  // The database pairs `reversed_at` with a reason (check constraint).
+                  action.reversedReason && (
+                    <StatusBadge tone="success">{reversalLabel(action.reversedReason)}</StatusBadge>
+                  )
+                ) : (
+                  <StatusBadge tone="warning">{t("appeals.account.inEffect")}</StatusBadge>
+                )}
+                {reversed && action.reversedAt && (
+                  <RelativeTime date={action.reversedAt} className="text-xs text-muted-foreground" />
+                )}
+                {!reversed && (
+                  <Button
+                    data-testid="account-action-appeal-open"
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => setAppealing(action)}
+                  >
+                    {pending ? t("appeals.account.appealPending") : t("appeals.account.appeal")}
+                  </Button>
+                )}
+              </ItemActions>
+            </Item>
+          );
+        })}
+      </ItemGroup>
+    );
+  return (
+    <Section heading={t("appeals.account.title")} description={t("appeals.account.intro")}>
+      {content}
+      <Dialog open={appealing !== null} onOpenChange={(open) => !open && setAppealing(null)}>
+        {appealing && (
+          <DialogContent data-testid="account-appeal-dialog" data-action-id={appealing.id} className="sm:max-w-lg">
+            <AccountAppealForm
+              onSubmit={async (body) => {
+                await onAppeal(appealing, body);
+                setAppealing(null);
+              }}
+            />
+          </DialogContent>
+        )}
+      </Dialog>
+    </Section>
+  );
+}
+
 /** One appeal of the viewer (`appeal-row`). */
 export function AppealList({ appeals }: { appeals: readonly AppealDto[] | null }): React.JSX.Element {
   if (appeals === null)
@@ -180,17 +350,14 @@ export function AppealList({ appeals }: { appeals: readonly AppealDto[] | null }
             key={appeal.id}
             data-testid="appeal-row"
             data-appeal-id={appeal.id}
+            data-kind={appeal.kind}
             data-subject-type={appeal.subjectType}
             data-status={appeal.status}
             variant="outline"
             size="sm"
           >
             <ItemContent>
-              <ItemTitle>
-                {appeal.subjectType === "content_label"
-                  ? t("safety.appeals.labelSubject")
-                  : t("safety.appeals.otherSubject")}
-              </ItemTitle>
+              <ItemTitle>{appealSubjectLabel(appeal.subjectType)}</ItemTitle>
               <ItemDescription>{appeal.resolution ?? appeal.body}</ItemDescription>
             </ItemContent>
             <ItemActions className="flex-col items-end gap-1">
@@ -209,6 +376,8 @@ interface AppealsData {
   appeals: AppealDto[] | null;
   failed: boolean;
   appeal: (label: ContentLabelDto, body: string) => Promise<void>;
+  /** A new appeal from elsewhere on the page (an account action) joins the list. */
+  add: (appeal: AppealDto) => void;
 }
 
 /** `me.labels` and `appeals.mine`, loaded together; a new appeal is added to the list. */
@@ -232,24 +401,66 @@ export function useAppeals(client: AppealsClient): AppealsData {
       live = false;
     };
   }, []);
+  const add = (created: AppealDto) => setAppeals((list) => [created, ...(list ?? [])]);
   return {
     labels,
     appeals,
     failed,
+    add,
     appeal: async (label, body) => {
-      const created = await clientRef.current.appealLabel(label.id, body);
-      setAppeals((list) => [created, ...(list ?? [])]);
+      add(await clientRef.current.appealLabel(label.id, body));
     },
   };
 }
 
-/** `/settings/appeals` content: label notices on top, then every appeal. */
-export function MyAppeals({ client = appealsClient() }: { client?: AppealsClient }): React.JSX.Element {
+/** `appeals.accountActions`, loaded once; `null` while loading. */
+export function useAccountActions(client: AccountActionsClient): {
+  actions: AccountActionDto[] | null;
+  failed: boolean;
+} {
+  const [actions, setActions] = React.useState<AccountActionDto[] | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  const clientRef = React.useRef(client);
+  React.useEffect(() => {
+    let live = true;
+    clientRef.current
+      .list()
+      .then((a) => {
+        if (live) setActions(a);
+      })
+      .catch(() => {
+        if (live) setFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return { actions, failed };
+}
+
+/** `/settings/appeals` content: label notices on top, account actions, then every appeal. */
+export function MyAppeals({
+  client = appealsClient(),
+  accountClient = accountActionsClient(),
+}: {
+  client?: AppealsClient;
+  accountClient?: AccountActionsClient;
+}): React.JSX.Element {
   const data = useAppeals(client);
+  const account = useAccountActions(accountClient);
   if (data.failed) return <FormError>{t("safety.appeals.loadFailed")}</FormError>;
   return (
     <>
       <LabelNotices labels={data.labels ?? []} appeals={data.appeals ?? []} onAppeal={data.appeal} />
+      {account.failed ? (
+        <FormError>{t("appeals.account.loadFailed")}</FormError>
+      ) : (
+        <AccountActionList
+          actions={data.appeals === null ? null : account.actions}
+          appeals={data.appeals ?? []}
+          onAppeal={async (action, body) => data.add(await accountClient.appeal(action.id, body))}
+        />
+      )}
       <AppealList appeals={data.appeals} />
     </>
   );

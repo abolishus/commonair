@@ -20,6 +20,7 @@ import { api, errorCode } from "../../lib/api.ts";
 export type AppealDto = z.infer<typeof D.Appeal>;
 export type ReportDto = z.infer<typeof D.Report>;
 export type ContentLabelDto = D.ContentLabel;
+export type AccountActionDto = D.AccountAction;
 export type ModerationCaseDto = D.ModerationCase;
 export type ModerationCaseDetailDto = D.ModerationCaseDetail;
 export type LegalCaseDto = D.LegalCase;
@@ -102,6 +103,17 @@ export const appealsClient = (): AppealsClient => ({
   mine: () => api().appeals.mine(),
   appealLabel: (labelId, body) =>
     api().appeals.create({ kind: "moderation", subjectType: "content_label", subjectId: labelId, body }),
+});
+
+/** DMCA strikes and the repeat-infringer termination about the viewer, appealable as `account`. */
+export interface AccountActionsClient {
+  list(): Promise<AccountActionDto[]>;
+  appeal(actionId: string, body: string): Promise<AppealDto>;
+}
+export const accountActionsClient = (): AccountActionsClient => ({
+  list: () => api().appeals.accountActions(),
+  appeal: (actionId, body) =>
+    api().appeals.create({ kind: "account", subjectType: "account_action", subjectId: actionId, body }),
 });
 
 // ── Staff ────────────────────────────────────────────────────────────────────────────────────

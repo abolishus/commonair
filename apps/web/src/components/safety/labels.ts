@@ -6,7 +6,11 @@
  * entry fails the type check (the i18n test allows dynamic `t()` in this file only for that reason).
  */
 import type {
+  ACCOUNT_ACTION_REVERSALS,
+  ACCOUNT_ACTIONS,
+  APPEAL_KINDS,
   APPEAL_STATUSES,
+  APPEAL_SUBJECTS,
   EVIDENCE_KINDS,
   LEGAL_HOLD_REASONS,
   MODERATION_CASE_STATUSES,
@@ -117,3 +121,81 @@ export function ncmecStatusBadge(status: Of<typeof NCMEC_REPORT_STATUSES>): { la
   const entry = NCMEC_STATUS[status];
   return { label: t(entry.key), tone: entry.tone };
 }
+
+// ── Appeals (E7) ─────────────────────────────────────────────────────────────────────────────
+
+const ACCOUNT_ACTION_KEYS: Record<Of<typeof ACCOUNT_ACTIONS>, MessageKey> = {
+  dmca_strike: "appeals.account.action.dmca_strike",
+  dmca_termination: "appeals.account.action.dmca_termination",
+};
+export const accountActionLabel = (a: Of<typeof ACCOUNT_ACTIONS>): string => t(ACCOUNT_ACTION_KEYS[a]);
+
+const REVERSAL_KEYS: Record<Of<typeof ACCOUNT_ACTION_REVERSALS>, MessageKey> = {
+  appeal_overturned: "appeals.account.reversal.appeal_overturned",
+  counter_notice_restored: "appeals.account.reversal.counter_notice_restored",
+  strikes_below_threshold: "appeals.account.reversal.strikes_below_threshold",
+};
+export const reversalLabel = (r: Of<typeof ACCOUNT_ACTION_REVERSALS>): string => t(REVERSAL_KEYS[r]);
+
+const APPEAL_KIND_KEYS: Record<Of<typeof APPEAL_KINDS>, MessageKey> = {
+  integrity: "appeals.account.kind.integrity",
+  moderation: "appeals.account.kind.moderation",
+  dmca: "appeals.account.kind.dmca",
+  account: "appeals.account.kind.account",
+};
+export const appealKindLabel = (k: Of<typeof APPEAL_KINDS>): string => t(APPEAL_KIND_KEYS[k]);
+
+const APPEAL_SUBJECT_KEYS: Record<Of<typeof APPEAL_SUBJECTS>, MessageKey> = {
+  session: "appeals.account.subject.session",
+  user: "appeals.account.subject.user",
+  integrity_flag: "appeals.account.subject.integrity_flag",
+  moderation_action: "safety.appeals.otherSubject",
+  dmca_notice: "appeals.account.subject.dmca_notice",
+  account_action: "appeals.account.subject.account_action",
+  content_label: "safety.appeals.labelSubject",
+  moderation_case: "safety.appeals.otherSubject",
+};
+/** What an appeal is about; `subjectType` is a plain string on the wire. */
+export function appealSubjectLabel(subjectType: string): string {
+  const key = (APPEAL_SUBJECT_KEYS as Partial<Record<string, MessageKey>>)[subjectType];
+  return t(key ?? "safety.appeals.otherSubject");
+}
+
+export type OverturnEffect =
+  | "liftsBan"
+  | "liftsSuspension"
+  | "recordsOnly"
+  | "moderationAction"
+  | "reversesStrike"
+  | "reversesTermination"
+  | "accountAction";
+const EFFECT_KEYS: Record<OverturnEffect, MessageKey> = {
+  liftsBan: "appeals.account.effect.liftsBan",
+  liftsSuspension: "appeals.account.effect.liftsSuspension",
+  recordsOnly: "appeals.account.effect.recordsOnly",
+  moderationAction: "appeals.account.effect.moderationAction",
+  reversesStrike: "appeals.account.effect.reversesStrike",
+  reversesTermination: "appeals.account.effect.reversesTermination",
+  accountAction: "appeals.account.effect.accountAction",
+};
+
+/**
+ * What overturning an appeal will do (the API's rules in `services/api/src/routes/appeals.ts`),
+ * for `moderation_action` and `account_action` subjects; `null` for the others. `action` is the
+ * mod or account action when known; without it the general rule for the subject is shown.
+ */
+export function overturnEffect(subjectType: string, action?: string | null): OverturnEffect | null {
+  if (subjectType === "moderation_action") {
+    if (!action) return "moderationAction";
+    if (action === "ban" || action === "timeout") return "liftsBan";
+    if (action === "suspend_user" || action === "suspend_channel") return "liftsSuspension";
+    return "recordsOnly";
+  }
+  if (subjectType === "account_action") {
+    if (action === "dmca_strike") return "reversesStrike";
+    if (action === "dmca_termination") return "reversesTermination";
+    return "accountAction";
+  }
+  return null;
+}
+export const overturnEffectLabel = (e: OverturnEffect): string => t(EFFECT_KEYS[e]);
