@@ -124,7 +124,8 @@ describe("scenario registry", () => {
     for (const n of ["smoke", "ingest-rtmp", "ingest-whip", "viewers", "load-smoke"]) expect(names).toContain(n);
     expect(names).not.toContain("_ingest");
     expect(r.get("ingest-whip")?.needs).toContain("whip");
-  });
+    // The first load imports every scenario module (the later tests reuse them): over 5 s on CI.
+  }, 30_000);
 
   test("e2e-social is registered, in full, and needs the web app, IRC and a browser", async () => {
     const r = await loadRegistry();
