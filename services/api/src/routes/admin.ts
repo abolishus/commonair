@@ -3,20 +3,24 @@
 
 import { and, eq, ne, sql } from "drizzle-orm";
 import { lockLegalHold, schema } from "@commonair/db";
+import { egressRange, egressReport } from "../admin/egress.ts";
+import { writeIncident } from "../admin/incidents.ts";
 import { emit } from "../events/outbox.ts";
 import { toHold } from "../moderation/cases.ts";
 import { lockUser, scheduledDeletion, toDeletion } from "../moderation/deletion.ts";
 import { audit } from "../events/audit.ts";
 import { publishUserControl } from "../lib/control.ts";
 import { userByUsername } from "../lib/dto.ts";
-import { badRequest, forbidden, notFound, notImplemented } from "../lib/errors.ts";
+import { badRequest, forbidden, notFound } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { toCategory } from "./directory.ts";
 
 const { categories, users, channels } = schema;
 
 export const admin = {
-  egress: os.admin.egress.handler(notImplemented),
+  egress: os.admin.egress.handler(({ context, input }) =>
+    egressReport(context.deps.db, egressRange(input.from, input.to)),
+  ),
 
   categories: os.admin.categories.handler(async ({ context, input }) => {
     const { deps } = context;
@@ -74,7 +78,9 @@ export const admin = {
     return { ok: true as const };
   }),
 
-  incidents: os.admin.incidents.handler(notImplemented),
+  incidents: os.admin.incidents.handler(({ context, input }) =>
+    writeIncident(context.deps, requireCaller(context).user.id, input),
+  ),
   /** A manual hold (legal role). It can only be placed here; release needs the operator CLI. */
   legalHold: os.admin.legalHold.handler(async ({ context, input }) => {
     const { deps } = context;
