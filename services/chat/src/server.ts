@@ -126,7 +126,11 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   let core: ChatCore | undefined;
   const rooms = new Rooms(
     bus,
-    { onChat: (id, raw) => core?.onChat(id, raw), onControl: (id, raw) => core?.onControl(id, raw) },
+    {
+      onChat: (id, raw) => core?.onChat(id, raw),
+      onControl: (id, raw) => core?.onControl(id, raw),
+      onRelease: (id) => directory.evictChannel(id),
+    },
     frameWriter,
   );
   const moderation = new Moderation({

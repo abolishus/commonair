@@ -193,8 +193,8 @@ and images go through ADR 0002 and ADR 0022 like any dependency.
   closes the message writer and flushes it), never SIGKILL, which can lose acknowledged messages
   from the last flush interval ([Notes from S1-c](#notes-from-s1-c)). An unplanned host loss can
   still lose that interval.
-- A chat instance with no local members in a room can serve that room's bans and settings
-  stale for up to the cache TTL (30 s standing, 60 s channel) to the next member who joins there.
+- A chat instance drops a room's cached settings and standings when its last local member there
+  leaves, so the next member to join reads them fresh ([Notes from S1-c](#notes-from-s1-c)).
 - New work: S1-b, S1-d and S1-h for stage 1, S1-f and S1-c for stage 2, S1-e for stage 3
   (`.claude/briefs/next/S1-scaling.md`), and the exporters in decision 6.
 
@@ -212,13 +212,15 @@ claims above with two of each app service. What it found, and what the code does
   last one leaves, `part()` (`services/chat/src/rooms.ts`) unsubscribes but keeps the directory's
   cached channel and standings (`services/chat/src/directory.ts`: 60 s channel, 30 s standing).
   A ban or a settings change made meanwhile never reaches that instance, so a member who joins
-  there before the entry expires can see the old state for up to that TTL. This is a known
-  bound, not a bug to fix before stage 2: the TTLs are the bound for every missed invalidation.
+  there before the entry expires could see the old state for up to that TTL. `part()` now
+  calls `Directory.evictChannel` when the room empties, so a join after that reads Postgres; the
+  TTLs remain the bound for an invalidation missed while the instance is subscribed.
 - **Chat acknowledges a message before it is stored.** The `MessageWriter`
   (`services/chat/src/persistence.ts`) batches rows and flushes every 250 ms. SIGTERM closes it
   and flushes what is queued (up to 5 s); SIGKILL loses messages acknowledged but not yet
-  flushed. The scenario's instance-loss step kills chat-2 with SIGKILL and checks history
-  for every message acknowledged before the kill.
+  flushed. The scenario's instance-loss step kills chat-2 with SIGKILL during a paced burst and
+  checks history for every message acknowledged more than 1 s before the kill; what was lost
+  within the last interval is reported (`multi.chat.lost_on_kill`), not failed.
 
 ## Open questions
 

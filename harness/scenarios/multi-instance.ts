@@ -16,7 +16,8 @@
  * - recurring jobs: a BullMQ scheduler's ticks run once each with two workers;
  * - one issuance leader: one origin computes relay issuance per tick (Valkey MONITOR);
  * - reconnect on instance loss: chat-2 is killed, its clients reconnect to chat-1 with the web
- *   client's backoff, and no message acknowledged before the kill is missing from history;
+ *   client's backoff, and no message acknowledged before chat-2's last flush interval is missing
+ *   from history (chat acks before it stores, ADR 0032);
  * - worker loss: worker-2 is killed mid-backlog, worker-1 drains it.
  *
  * Every claim gets its weighted share of the time left (`ClaimBudget`), so one claim at its worst
@@ -29,6 +30,7 @@ import type { Api } from "../src/api/client.ts";
 import { createApi } from "../src/api/client.ts";
 import { CookieJar } from "../src/api/cookies.ts";
 import { ChatClient } from "../src/chat-client.ts";
+import { HUMAN_TIMING } from "../src/fingerprint.ts";
 import { HttpViewer } from "../src/http-viewer.ts";
 import { percentile } from "../src/metrics.ts";
 import { ClaimBudget } from "../src/multi/budget.ts";
@@ -85,6 +87,25 @@ export const SCENARIO_TIMEOUT_MS = 10 * 60_000;
 export const TEARDOWN_RESERVE_MS = 45_000;
 /** In-claim restore of a killed replica; the defer retries with longer if it is still down. */
 const RESTORE_MS = 30_000;
+/**
+ * Chat's MessageWriter flushes every 250 ms (services/chat/src/persistence.ts); a message acked
+ * this long before a SIGKILL has been through at least one flush and its insert.
+ */
+export const CHAT_FLUSH_GRACE_MS = 1_000;
+/** The reconnect claim's burst on chat-2: 30 messages over about 3 s. */
+const BURST_MESSAGES = 30;
+const BURST_PACE_MS = 100;
+/**
+ * How long after the sessions start every viewer counts: 3 consistent heartbeats 10 s apart with
+ * jitter (services/api/src/playback/verify.ts, packages/integrity MIN_HEARTBEATS_TO_VERIFY), a
+ * score-sessions tick (15 s) and the 5 s count cache (services/api/src/lib/viewers.ts).
+ */
+export const VIEWER_VERIFY_MS = 70_000;
+/**
+ * Human jitter without the occasional late beat (10–30 s): across 4 viewers one is likely, and it
+ * would test the scorer's patience rather than counting across two APIs.
+ */
+const VIEWER_TIMING = { ...HUMAN_TIMING, lateProbability: 0 };
 /** Rows in the worker-loss backlog. */
 export const WORKER_LOSS_BACKLOG = 10_000;
 /**
@@ -97,10 +118,10 @@ export const CLAIM_WEIGHTS_MS = [
   20_000, // chat across: 10 s delivery wait
   CHANNEL_TTL_MS + 15_000, // cache staleness: ban, slow mode and empty room run side by side
   55_000, // outbox: 45 s drain + 2 s repeats
-  115_000, // viewers: 40 s live + 30 s first frame + 40 s converge
+  115_000, // viewers: 40 s live + 70 s first frames and converge (VIEWER_VERIFY_MS)
   10_000, // recurring jobs: reads only
   30_000, // issuance: the monitor has watched since the start; tops up to 75 s observed
-  70_000, // reconnect: 20 s reconnect + 10 s live + 2 s flush + 30 s restore
+  70_000, // reconnect: 3 s burst + 20 s reconnect + 10 s live + 2 s flush + 30 s restore
   135_000, // worker loss: 20 s start + 75 s drain + 2 s repeats + 30 s restore
 ] as const satisfies readonly number[];
 
@@ -513,10 +534,11 @@ async function slowModeStaleness(
 
 /**
  * An instance unsubscribes from a room's control channel when its last local member leaves
- * (services/chat/src/rooms.ts `part`), but keeps the room's cached settings until their TTL. A
- * change made while it has no members is never heard there: the next member to join that
- * instance gets the old settings until the cache expires. Owner `host`, chatter `guest`, in the
- * host's own channel so no other step keeps chat-2 subscribed to it.
+ * (services/chat/src/rooms.ts `part`), so it never hears a change made while it has no members.
+ * It drops the room's cached settings and standings at that point (`Directory.evictChannel`), so
+ * the next member to join there must get the new settings at once, not after the cache TTL.
+ * Owner `host`, chatter `guest`, in the host's own channel so no other step keeps chat-2
+ * subscribed to it.
  */
 async function emptyRoomStaleness(kit: Kit, host: SignedInUser, guest: SignedInUser): Promise<void> {
   const { ctx, urls } = kit;
@@ -660,7 +682,8 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
   const viewers = [
     ...Array.from({ length: perApi }, () => p.api()),
     ...Array.from({ length: perApi }, () => kit.api2()),
-  ].map((api) => new HttpViewer({ target: { channel }, api: api.client, log: ctx.log }));
+  ].map((api) => new HttpViewer({ target: { channel }, api: api.client, log: ctx.log, timing: VIEWER_TIMING }));
+  const sessionsAt = Date.now();
   for (const v of viewers) {
     ctx.defer(() => v.stop());
     await v.start();
@@ -683,7 +706,12 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
       samples.push({ api1: c1, api2: c2 });
       return c1 === started && c2 === started;
     },
-    { timeoutMs: kit.budget.cap(40_000, 2_000), intervalMs: 2_000, signal: ctx.signal },
+    // From the sessions' start, not the first frame: verification itself takes most of it.
+    {
+      timeoutMs: kit.budget.cap(Math.max(0, sessionsAt + VIEWER_VERIFY_MS - Date.now()), 2_000),
+      intervalMs: 2_000,
+      signal: ctx.signal,
+    },
   ).then(
     () => true,
     () => false,
@@ -692,6 +720,14 @@ async function viewerCounts(kit: Kit, channel: string, streamer: SignedInUser): 
   const max = Math.max(0, ...samples.flatMap((x) => [x.api1, x.api2]));
   const disagreed = samples.filter((x) => x.api1 !== x.api2).length;
   ctx.data("viewerSamples", samples.slice(-20));
+  ctx.data(
+    "viewerReports",
+    (await Promise.all(viewers.map((v) => v.report()))).map((r, i) => ({
+      api: i < perApi ? "api-1" : "api-2",
+      heartbeats: r.heartbeats,
+      heartbeatErrors: r.heartbeatErrors,
+    })),
+  );
   ctx.check(`both APIs count the ${started} viewers (two heartbeating to each)`, converged, { last: samples.at(-1) });
   ctx.check("no viewer counted twice (never above the audience)", max <= started, { max, started });
   ctx.metric("multi.viewers.disagreeing_samples", disagreed);
@@ -789,14 +825,17 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
     watchers.every((w) => w.endpoint === "chat-2"),
   );
 
-  // A burst on chat-2 acknowledged right up to the kill (the owner's limit is 100 per 30 s).
+  // A burst on chat-2 acknowledged right up to the kill (the owner's limit is 100 per 30 s),
+  // paced so most of it was acknowledged well before the last flush interval.
   const burst = await connectOn(streamer.api, urls.chat2, ctx.log);
   await burst.join(channel);
-  const acked: string[] = [];
-  for (let i = 0; i < 30; i++) {
+  const acked: { id: string; at: number }[] = [];
+  for (let i = 0; i < BURST_MESSAGES; i++) {
+    if (i > 0) await sleep(BURST_PACE_MS, ctx.signal);
     const ack = await burst.send(channel, `k:${kit.tag}:${i}`);
-    if (ack.id) acked.push(ack.id);
+    if (ack.id) acked.push({ id: ack.id, at: Date.now() });
   }
+  const killSentAt = Date.now();
   const killedAt = await killContainer(chat2.name);
   ctx.defer(() => restoreContainer(chat2.name, urls.chat2Health).catch(() => undefined));
   burst.close();
@@ -835,13 +874,24 @@ async function reconnectOnLoss(kit: Kit, channel: string, streamer: SignedInUser
   await sleep(2_000, ctx.signal);
   const history = await ctx.platform.api().client.chat.history({ channel, limit: 200 });
   const kept = new Set(history.map((m) => m.id));
-  const lost = acked.filter((id) => !kept.has(id));
+  const lost = acked.filter((m) => !kept.has(m.id));
+  // Chat acks before it stores (ADR 0032): SIGKILL may lose what was acked within the last flush
+  // interval, never anything older.
+  const flushedBy = killSentAt - CHAT_FLUSH_GRACE_MS;
+  const older = acked.filter((m) => m.at < flushedBy);
+  const lostOlder = lost.filter((m) => m.at < flushedBy);
   ctx.metric("multi.chat.lost_on_kill", lost.length);
-  ctx.check("no message acknowledged before the kill is missing from history", lost.length === 0, {
-    acked: acked.length,
-    lost: lost.length,
-    sample: lost.slice(0, 5),
-  });
+  ctx.check(
+    `no message acknowledged more than ${CHAT_FLUSH_GRACE_MS} ms before the kill is missing from history`,
+    older.length > 0 && lostOlder.length === 0,
+    {
+      acked: acked.length,
+      ackedBeforeLastFlush: older.length,
+      lost: lostOlder.length,
+      lostInLastFlush: lost.length - lostOlder.length,
+      sample: lostOlder.slice(0, 5).map((m) => ({ id: m.id, msBeforeKill: killSentAt - m.at })),
+    },
+  );
 
   const restored = await restoreContainer(chat2.name, urls.chat2Health, kit.budget.cap(RESTORE_MS, 15_000));
   ctx.metric("multi.restore_ms.chat", restored, "ms");

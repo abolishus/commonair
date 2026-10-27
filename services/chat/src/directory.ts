@@ -88,6 +88,16 @@ export class Directory {
     this.globalEmotes.clear();
   }
 
+  /**
+   * Forget a room's channel and standings (no members left here, so no invalidations will arrive
+   * for it); the next join reads Postgres instead of state that may have changed meanwhile.
+   */
+  evictChannel(channelId: string): void {
+    const slug = this.slugById.get(channelId);
+    if (slug) this.bySlug.delete(slug);
+    this.standings.deleteWhere((k) => k.startsWith(`${channelId}:`));
+  }
+
   invalidateStanding(channelId: string, userId?: string): void {
     if (userId) this.standings.delete(`${channelId}:${userId}`);
     else this.standings.deleteWhere((k) => k.startsWith(`${channelId}:`));

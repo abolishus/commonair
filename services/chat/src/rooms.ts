@@ -29,6 +29,11 @@ export interface Room {
 export interface RoomHandlers {
   onChat(channelId: string, raw: string): void;
   onControl(channelId: string, raw: string): void;
+  /**
+   * The last local member left: this instance stops hearing the room's control channel, so
+   * whatever it cached about the room can no longer be invalidated and must be dropped.
+   */
+  onRelease?(channelId: string): void;
 }
 
 const RECENT_LIMIT = 500;
@@ -75,7 +80,10 @@ export class Rooms {
   async part(ws: ChatSocket, channelId: string): Promise<void> {
     const room = this.rooms.get(channelId);
     if (!room?.members.delete(ws)) return;
-    if (room.members.size === 0) this.rooms.delete(channelId);
+    if (room.members.size === 0) {
+      this.rooms.delete(channelId);
+      this.handlers.onRelease?.(channelId);
+    }
     await Promise.all([
       this.bus.release(this.bus.names.chat(channelId)),
       this.bus.release(this.bus.names.control(channelId)),

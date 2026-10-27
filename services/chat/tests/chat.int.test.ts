@@ -462,6 +462,30 @@ describe("moderation commands", () => {
   });
 });
 
+describe("an instance with no members left in a room", () => {
+  test("drops the room's cached settings and standings, so a later join sees changes made meanwhile", async () => {
+    const { mod, viewer, ch } = await room();
+    const modClient = await connect(a, mod.id);
+    await modClient.join(ch.slug);
+    const viewerClient = await connect(b, viewer.id);
+    // Caches the channel and the viewer's standing on B.
+    expect((await viewerClient.say(ch.slug, "warm")).notice).toBeNull();
+    viewerClient.send({ op: "part", channel: ch.slug });
+    await viewerClient.waitFor((f) => f.op === "parted" && f.channel === ch.slug, 3000, { includePast: false });
+    viewerClient.joined.delete(ch.slug);
+
+    // B hears neither change: it left the room's control channel with its last member.
+    expect((await modClient.say(ch.slug, "/slow 30")).notice?.code).toBe("slow_on");
+    expect((await modClient.command(ch.slug, "timeout", [viewer.username, "120"])).code).toBe("cmd_success");
+
+    const joined = await viewerClient.join(ch.slug);
+    expect(joined.settings.slowModeSeconds).toBe(30);
+    const blocked = await viewerClient.say(ch.slug, "after");
+    expect(blocked.ack.id).toBeNull();
+    expect(blocked.notice?.code).toBe("msg_timedout");
+  });
+});
+
 describe("joined frame", () => {
   test("badges are type or type/tier strings", async () => {
     const { viewer, ch } = await room();
