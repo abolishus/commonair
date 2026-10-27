@@ -22,6 +22,33 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+Batch 2 (E7 + W0 + P1; waves and shared rules: `.claude/briefs/batch2/README.md`), started
+2026-10-27. ADR drafts (proposed, awaiting the user): 0005 amendment 1 (P1), 0012 part 1
+(W0-clock), 0019 (W0-sor), 0009 amendment 1 (W0-media-exposure). E7 contract step `3bacecb` +
+`66e95da`, gate green at `ebe61b0` (pushed).
+
+| Unit              | Wave | Brief                                    | State                     |
+| ----------------- | ---- | ---------------------------------------- | ------------------------- |
+| E7-chat-http      | 1    | `.claude/briefs/e7/E7-chat-http.md`      | running (base `ebe61b0`)  |
+| E7-dmca           | 1    | `.claude/briefs/e7/E7-dmca.md`           | running                   |
+| E7-admin          | 1    | `.claude/briefs/e7/E7-admin.md`          | running                   |
+| E7-appeals        | 1    | `.claude/briefs/e7/E7-appeals.md`        | running                   |
+| E7-coop           | 1    | `.claude/briefs/e7/E7-coop.md`           | running                   |
+| E7-legal          | 1    | `.claude/briefs/e7/E7-legal.md`          | running                   |
+| W0-clock          | 2    | `.claude/briefs/w0/W0-clock.md`          | brief ready; ADR 0012     |
+| W0-integrity      | 2    | `.claude/briefs/w0/W0-integrity.md`      | brief ready               |
+| W0-media-exposure | 2    | `.claude/briefs/w0/W0-media-exposure.md` | brief ready; ADR 0009 amd |
+| W0-sor            | 2    | `.claude/briefs/w0/W0-sor.md`            | brief ready; ADR 0019     |
+| P1-tracker        | 2    | `.claude/briefs/p1/P1-tracker.md`        | brief ready; ADR 0005 amd |
+| P1-turn           | 2    | `.claude/briefs/p1/P1-turn.md`           | brief ready; ADR 0005 amd |
+| P1-player         | 3    | `.claude/briefs/p1/P1-player.md`         | brief ready; ADR 0005 amd |
+
+Environment note: the podman VM's chrony has no time source; its clock drifted ~150 ms behind
+the host and failed the governance tests' 100 ms margin. Reset with
+`podman machine ssh 'sudo date -u -s @<host epoch>'`.
+
+### Batch 1 (R0 + S1)
+
 Batch 1 (waves and shared rules: `.claude/briefs/r0/README.md`): **all nine units merged and
 verified** (2026-10-27; see "Wave 3 and verification" below). ADR 0032 (scaling and availability)
 is **proposed**, awaiting the user.
