@@ -57,7 +57,7 @@ jobs:
         run: zizmor --format plain .github
       - name: shellcheck (self-host and Postgres image scripts)
         run: |
-          mapfile -t files < <(git ls-files 'scripts/selfhost.sh' 'scripts/selfhost/*.sh' 'infra/postgres/*.sh')
+          mapfile -t files < <(git ls-files 'scripts/selfhost.sh' 'scripts/selfhost/*.sh' 'infra/postgres/*.sh' 'infra/tofu/*.sh')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "no self-host shell scripts yet"
           else
@@ -138,10 +138,19 @@ jobs:
           playwright-deps: ${{ matrix.playwright-deps }}
           browsers: ${{ matrix.browsers }}
           model: ${{ matrix.model }}
+      - name: OpenTofu
+        # The static group's `tofu` step (infra/tofu/check.sh); pinned and checksummed in tools.ts.
+        if: matrix.group == 'static'
+        run: |
+          bun scripts/release/tools.ts install --dir "$RUNNER_TEMP/bin" tofu
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: Verify
         # Below the job's limit so a hung gate fails this step and leaves time to collect logs;
         # a job-level timeout cancels the job and diagnostics would be lost.
         timeout-minutes: ${{ matrix.step-timeout }}
+        env:
+          # check.sh may skip without tofu locally, never in CI.
+          REQUIRE_TOFU: ${{ matrix.group == 'static' && '1' || '0' }}
         run: |
           export PATH="$PWD/node_modules/.bin:$PATH"
           bun scripts/verify.ts --only "$GROUP" 2>&1 | tee verify.log

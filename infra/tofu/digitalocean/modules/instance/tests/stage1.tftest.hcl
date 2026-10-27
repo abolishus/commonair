@@ -4,6 +4,19 @@
 # Stage 1 (managed state) with a mocked provider.
 
 mock_provider "digitalocean" {
+  # The provider's droplet ids are numbers (reserved IP and volume attachments take one); the
+  # mock's default is a random string.
+  mock_resource "digitalocean_droplet" {
+    defaults = {
+      id = "100001"
+    }
+  }
+  mock_resource "digitalocean_reserved_ip" {
+    defaults = {
+      ip_address = "192.0.2.10"
+    }
+  }
+
   mock_data "digitalocean_ssh_keys" {
     defaults = {
       ssh_keys = [{
@@ -18,7 +31,7 @@ mock_provider "digitalocean" {
 
 variables {
   environment          = "production"
-  region               = "nyc1"
+  region               = "nyc3"
   backup_region        = "ams3"
   monitoring_region    = "fra1"
   droplet_size         = "g-4vcpu-16gb"
@@ -36,7 +49,7 @@ run "managed_postgres_and_valkey_with_a_standby" {
       digitalocean_database_cluster.pg[0].engine == "pg" &&
       digitalocean_database_cluster.pg[0].version == "17" &&
       digitalocean_database_cluster.pg[0].node_count == 2 &&
-      digitalocean_database_cluster.pg[0].region == "nyc1"
+      digitalocean_database_cluster.pg[0].region == "nyc3"
     )
     error_message = "Postgres 17 by default, one standby, in the app's region."
   }
@@ -78,7 +91,7 @@ run "instance_buckets_and_cors" {
   }
 
   assert {
-    condition     = alltrue([for b in digitalocean_spaces_bucket.instance : b.acl == "private" && b.region == "nyc1"])
+    condition     = alltrue([for b in digitalocean_spaces_bucket.instance : b.acl == "private" && b.region == "nyc3"])
     error_message = "Instance buckets are private and in the app's region."
   }
 

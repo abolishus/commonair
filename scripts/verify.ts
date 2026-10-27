@@ -111,6 +111,9 @@ export const steps: Step[] = [
   { name: "supply chain", group: "static", timeoutMin: 5, cmd: ["bun", "scripts/check-supply-chain.ts"] },
   { name: "stray domains", group: "static", timeoutMin: 5, cmd: ["bun", "scripts/check-domains.ts"] },
   { name: "reuse lint", group: "static", timeoutMin: 5, cmd: ["reuse", "lint", "--quiet"] },
+  // OpenTofu fmt, validate and mocked-provider tests; check.sh skips with a message without
+  // tofu, and CI sets REQUIRE_TOFU=1 so it cannot skip there.
+  { name: "tofu", group: "static", timeoutMin: 10, cmd: ["bash", "infra/tofu/check.sh"] },
   {
     name: "relay: gofmt",
     group: "relay",

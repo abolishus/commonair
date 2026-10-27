@@ -4,6 +4,19 @@
 # Stage 2 (app tier behind a network load balancer) with a mocked provider.
 
 mock_provider "digitalocean" {
+  # The provider's droplet ids are numbers (reserved IP and volume attachments take one); the
+  # mock's default is a random string.
+  mock_resource "digitalocean_droplet" {
+    defaults = {
+      id = "100001"
+    }
+  }
+  mock_resource "digitalocean_reserved_ip" {
+    defaults = {
+      ip_address = "192.0.2.10"
+    }
+  }
+
   mock_data "digitalocean_ssh_keys" {
     defaults = {
       ssh_keys = [{
@@ -18,7 +31,7 @@ mock_provider "digitalocean" {
 
 variables {
   environment          = "production"
-  region               = "nyc1"
+  region               = "nyc3"
   backup_region        = "ams3"
   monitoring_region    = "fra1"
   droplet_size         = "g-4vcpu-16gb"
