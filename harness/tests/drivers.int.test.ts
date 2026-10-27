@@ -108,7 +108,10 @@ describe("RTMP streamer → MediaMTX → browser viewers", () => {
       // Native HLS where the engine has it (WebKit on macOS, as Safari/iOS), else hls.js over MSE.
       expect(report.playbackPath).toBe(nativeHls[engine] ? "native" : "mse");
       expect(report.latencyMethod).toBe("strip");
-      expect(report.errors.filter((e) => !e.startsWith("hls.js"))).toEqual([]);
+      // WebKit sometimes refuses muted autoplay; the viewer then presses play (waitForFirstFrame),
+      // and the frame and latency checks above show playback went on.
+      const unexpected = report.errors.filter((e) => !e.startsWith("hls.js") && !e.startsWith("play: NotAllowedError"));
+      expect(unexpected).toEqual([]);
       // hls.js reports bytes; native HLS hides them from the page.
       expect(report.bytesHttp > 0 || nativeHls[engine]).toBe(true);
     }, 120_000);
