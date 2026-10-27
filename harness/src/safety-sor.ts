@@ -182,7 +182,7 @@ async function runAuditRows(run: Run, scope: RunScope): Promise<AuditRow[]> {
            rc as (select id from channels where owner_id in (select id from ru))
       select a.id, a.action, a.details from audit_log a
       where a.action = any(${[...ENFORCEMENT_SOURCE_ACTIONS]})
-        and a.created_at >= ${scope.since}
+        and a.created_at >= ${scope.since.toISOString()}::timestamptz
         and (
           a.channel_id in (select id from rc)
           or (a.details ->> 'userId') in (select id::text from ru)
