@@ -55,38 +55,13 @@ const v4String = (n: bigint) => {
   return [x >>> 24, (x >>> 16) & 255, (x >>> 8) & 255, x & 255].join(".");
 };
 
-/** RFC 5952 text form: lower-case, no leading zeros, the longest run (2+) of zero groups as "::". */
-function v6String(n: bigint): string {
-  const groups = [112n, 96n, 80n, 64n, 48n, 32n, 16n, 0n].map((s) => Number((n >> s) & 0xffffn));
-  let best = { at: -1, len: 0 };
-  for (let i = 0; i < 8;) {
-    if (groups[i] !== 0) {
-      i++;
-      continue;
-    }
-    let j = i;
-    while (j < 8 && groups[j] === 0) j++;
-    // Strictly longer wins, so the first of equal runs is the one compressed.
-    if (j - i > best.len) best = { at: i, len: j - i };
-    i = j;
-  }
-  const hex = (gs: number[]) => gs.map((g) => g.toString(16)).join(":");
-  if (best.len < 2) return hex(groups);
-  return `${hex(groups.slice(0, best.at))}::${hex(groups.slice(best.at + best.len))}`;
-}
-
 /**
  * One spelling per address, so the same client hashes the same way on every path (playback
  * `ip_hash`, rate limits, `stream_keys.last_used_ip_hash`; integrity compares them): IPv4-mapped
  * IPv6 becomes IPv4, IPv6 is RFC 5952 (lower-case, compressed), zone ids and brackets are
- * dropped. Unparseable input is returned trimmed and lower-cased.
+ * dropped. Unparseable input is returned trimmed and lower-cased. Shared with the tracker.
  */
-export function canonicalIp(ip: string): string {
-  const raw = ip.trim().replace(/^\[(.*)\]$/, "$1");
-  const parsed = parseIp(raw);
-  if (!parsed) return raw.toLowerCase();
-  return parsed.v === 4 ? v4String(parsed.n) : v6String(parsed.n);
-}
+export { canonicalIp } from "@commonair/service";
 
 /**
  * The rate-limit subject for an address: IPv4 as is, IPv6 by its /64 (one subscriber usually

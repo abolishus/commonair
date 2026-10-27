@@ -136,5 +136,11 @@
     "source": "https://github.com/microsoft/playwright/blob/v1.64.1/LICENSE",
     "tag": "v1.64.1-noble",
     "notes": "Matches @playwright/test 1.64.1. Ubuntu 24.04 base; bundled browsers: Chromium (BSD-3-Clause), Firefox (MPL-2.0), WebKit (LGPL-2.0-or-later/BSD-2-Clause). CI/test only."
+  },
+  "docker.io/coturn/coturn": {
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/coturn/coturn/blob/4.18.0/LICENSE",
+    "tag": "4.18.0-trixie",
+    "notes": "Official image (coturn project), STUN/TURN for P2P playback (ADR 0005 amendment 1). Debian trixie base; links OpenSSL (Apache-2.0), libevent (BSD-3-Clause), hiredis (BSD-3-Clause) and libpq (PostgreSQL). Run unmodified as a separate service."
   }
 }

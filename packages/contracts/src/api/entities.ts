@@ -242,11 +242,29 @@ export const PlaybackStart = z.object({
   playlistUrl: z.string(),
   source: z.enum(E.DELIVERY_SOURCES),
   /**
-   * `trackerUrls` carry the playback token as `?t=`. The tracker accepts a token up to
-   * TRACKER_TOKEN_MAX_AGE_SECONDS old, so on a tracker reconnect clients replace `t` with the latest
-   * token from `playback.heartbeat`.
+   * Peer-to-peer delivery (ADR 0005 amendment 1). `available`: P2P is possible for this session at
+   * all (P2P_ENABLED, not native HLS, not 18+, mature or restricted), whatever the client asked,
+   * so the player can offer its opt-in switch. `enabled`: the server wrote the session's P2P grant
+   * (`available` and the player sent `p2pCapable`); only then are `trackerUrls` non-empty.
+   *
+   * `swarmId` is server chosen (the broadcast id) and is the loader's `swarmId`; stream swarm ids
+   * and info hashes derive from it (`p2pStreamSwarmId`, `@commonair/contracts/p2p`), and the tracker
+   * refuses any other. `trackerUrls` carry the playback token as `?t=`; the tracker accepts a token
+   * up to TRACKER_TOKEN_MAX_AGE_SECONDS old. The loader's tracker list is fixed at construction, so
+   * a reconnect after that age fails and the player falls back to HTTP.
+   *
+   * `digestUrl` is the origin's digest base (`${PLAYBACK_PUBLIC_URL}/p2p-digest`), also when
+   * `enabled` is false: `GET <digestUrl>/live/<slug>[/<rendition>]/<file>?t=<token>` answers 64
+   * lowercase hex characters, the SHA-256 of the segment exactly as `/hls/` serves it. Only the
+   * origin serves it; the player checks every peer-delivered segment against it.
    */
-  p2p: z.object({ enabled: z.boolean(), trackerUrls: z.array(z.string()), swarmId: z.string() }),
+  p2p: z.object({
+    enabled: z.boolean(),
+    available: z.boolean(),
+    trackerUrls: z.array(z.string()),
+    swarmId: z.string(),
+    digestUrl: z.string(),
+  }),
   heartbeatIntervalMs: z.number().int(),
   expiresAt: Timestamp,
   renditions: z.array(z.enum(E.RENDITIONS)),
@@ -261,6 +279,15 @@ export const Heartbeat = z.object({
   stalls: z.number().int().min(0),
   bytesHttp: z.number().int().min(0),
   bytesP2p: z.number().int().min(0),
+  /**
+   * P2P diagnostics, informational only: nothing that counts, pays or verifies reads them (ADR 0005
+   * amendment 1). `bytesP2pUp`: bytes sent to peers since the previous heartbeat. `p2pPeers`: open
+   * peer connections now. `p2pRejected`: peer-delivered segments that failed digest validation
+   * since the previous heartbeat.
+   */
+  bytesP2pUp: z.number().int().min(0).optional(),
+  p2pPeers: z.number().int().min(0).max(64).optional(),
+  p2pRejected: z.number().int().min(0).optional(),
   rendition: z.enum(E.RENDITIONS),
   latencySeconds: z.number().min(0).nullable(),
   ttffMs: z.number().int().min(0).nullable(),
@@ -276,6 +303,18 @@ export const Heartbeat = z.object({
     .record(z.string().max(32), z.union([z.string().max(200), z.number(), z.boolean(), z.null()]))
     .refine((f) => Object.keys(f).length <= 32, "too many fingerprint keys")
     .optional(),
+});
+
+/** ICE servers for a P2P playback session; `expiresAt` is null when nothing expires (STUN only). */
+export const IceServers = z.object({
+  iceServers: z.array(
+    z.object({
+      urls: z.array(z.string()).min(1),
+      username: z.string().optional(),
+      credential: z.string().optional(),
+    }),
+  ),
+  expiresAt: Timestamp.nullable(),
 });
 
 export const ChatBadge = z.enum(["broadcaster", "moderator", "vip", "subscriber", "bot", "staff", "member"]);
@@ -1109,6 +1148,8 @@ export const InstanceInfo = z.object({
     payments: z.enum(E.PAYMENT_PROVIDERS),
     oauthProviders: z.array(z.enum(["discord", "twitch", "github"])),
     p2p: z.boolean(),
+    /** The operator's P2P_DEFAULT: P2P for viewers who have not chosen (`off` means opt in). */
+    p2pDefault: z.enum(["off", "on"]),
     cdn: z.boolean(),
     vod: z.boolean(),
   }),

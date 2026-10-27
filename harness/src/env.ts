@@ -43,6 +43,13 @@ export const harnessEnvSchema = z.object({
   HARNESS_WORKER_HEALTH_URL: z.url().default("http://localhost:3005/healthz"),
   /** stripe-mock (only probed for scenarios that need Stripe). */
   HARNESS_STRIPE_MOCK_URL: z.url().default("http://localhost:12111"),
+  /** The tracker's WebSocket URL (P2P viewers reach it through the harness tracker proxy). */
+  HARNESS_TRACKER_URL: z.string().default("ws://localhost:8000"),
+  /**
+   * Fixed loopback port of the harness tracker proxy; harness/compose.p2p.yaml points the API's
+   * P2P_TRACKER_URL at it.
+   */
+  HARNESS_TRACKER_PROXY_PORT: z.coerce.number().int().min(1024).max(65535).default(8010),
   /** `harness` = the harness player page; `web` = the web app's `/embed/<channel>` route. */
   HARNESS_PLAYER: z.enum(["harness", "web"]).default("harness"),
   /** Prometheus HTTP API for load-test metrics; unset = skip Prometheus queries. */
@@ -104,6 +111,7 @@ export function localDefaults(source: Record<string, string | undefined>): Recor
     HARNESS_IRC_HEALTH_URL: `http://localhost:${port("IRC_HEALTH_PORT", 6681)}/healthz`,
     HARNESS_WORKER_HEALTH_URL: `http://localhost:${port("WORKER_PORT", 3005)}/healthz`,
     HARNESS_STRIPE_MOCK_URL: `http://localhost:${port("STRIPE_MOCK_PORT", 12111)}`,
+    HARNESS_TRACKER_URL: `ws://localhost:${port("TRACKER_PORT", 8000)}`,
   };
 }
 

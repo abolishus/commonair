@@ -50,6 +50,18 @@ accounting, and their actions are logged. We use service providers (hosting, ema
 if enabled, payments) under contracts that limit them to processing on our behalf. We disclose
 data to authorities only when the law requires it, and we tell you unless the law forbids it.
 
+## Peer-to-peer sharing
+
+Your browser can exchange parts of a live stream with other viewers of it, so the co-op serves
+less traffic. This is **off unless you turn it on**. If the operator made it the default, a notice
+tells you before it first starts.
+
+While it is on, **other viewers of that stream can see your IP address**: their browsers connect
+to yours. They do not see your account, and our tracker keeps only keyed hashes. It is never used
+on 18+ or restricted streams, and stays off on metered connections, phones and tablets, and in
+data-saving mode unless you turn it on yourself. Switch it off at any time from the player or
+your privacy settings; playback continues without it.
+
 ## How long we keep it
 
 - Playback sessions and integrity signals: only as long as needed to compute verified viewer

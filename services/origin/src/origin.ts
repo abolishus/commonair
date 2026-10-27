@@ -16,6 +16,7 @@ import { createHandler, type OriginFetch } from "./handler.ts";
 import { createMediaHandler, MEDIA_ROUTE, type MediaDeps } from "./media.ts";
 import { IssuanceRunner, runIssuance, type IssuanceRow } from "./issuance.ts";
 import { noopMetrics, type OriginMetrics } from "./metrics.ts";
+import { createP2PDigestHandler, P2P_DIGEST_ROUTE } from "./p2p-digest.ts";
 import { rawPathOf } from "./paths.ts";
 import { ProductionStore } from "./production.ts";
 import { TokenRefresher } from "./refresh.ts";
@@ -124,9 +125,17 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     now,
   });
   const mediaHandler = opts.media ? createMediaHandler({ ...opts.media, logger: opts.logger }) : undefined;
+  const digestHandler = createP2PDigestHandler({
+    publicKey: signingKey.publicKey,
+    store,
+    metrics,
+    logger: opts.logger,
+    now,
+  });
   const fetchHandler: OriginFetch = (req, peerIp) => {
     const rawPath = rawPathOf(req.url);
     if (mediaHandler && rawPath.startsWith(MEDIA_ROUTE)) return mediaHandler(req, rawPath);
+    if (rawPath.startsWith(P2P_DIGEST_ROUTE)) return digestHandler(req, rawPath);
     return hlsHandler(req, peerIp);
   };
 

@@ -65,7 +65,7 @@ not `services/api/src/routes/playback.ts`, `router.ts` or `env.ts`, not `package
 ## Contracts you must honor (read-only for you)
 
 - The coturn image, pinned by the orchestrator with its `infra/image-licenses.json` entry:
-  `docker.io/coturn/coturn:4.18.0-trixie@sha256:<digest filled in at the contract step>`. Use
+  `docker.io/coturn/coturn:4.18.0-trixie@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3`. Use
   exactly this string in compose and Quadlet.
 - `packages/contracts/src/api/router.ts`: `p2p.iceServers` (`POST /playback/ice-servers`, input
   `{ sessionId, token }`, output `IceServers` = `{ iceServers: [{ urls[], username?, credential? }],

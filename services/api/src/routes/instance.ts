@@ -116,6 +116,7 @@ export const instance = {
         payments: env.PAYMENTS_PROVIDER,
         oauthProviders,
         p2p: env.P2P_ENABLED,
+        p2pDefault: env.P2P_DEFAULT,
         cdn: env.CDN_PROVIDER !== "none" && Boolean(env.CDN_BASE_URL),
         vod: true,
       },

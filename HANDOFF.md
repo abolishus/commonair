@@ -403,7 +403,6 @@ the harness against Railway staging.
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set via=api
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-relay --set liar=false --set drain=false
-podman compose --profile p2p up -d tracker                   # P2P tracker
 bun scripts/infra.ts stack                                   # rebuild + start everything
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-social
 HARNESS_WEB_URL=http://localhost:3100 bun harness/src/cli.ts run e2e-social --set via=api   # backend only
@@ -434,8 +433,8 @@ Staging: set `HARNESS_*` URLs from `railway domain list` and `HARNESS_MAILPIT_AU
     heartbeat response so the player stops decoding the token's `src` claim for display.
   - Harness: `e2e-relay` is not in `full`; the liar's 5× served bytes is ~1.25× issuance on a
     multi-rendition ladder (still suspended as "repeated"; `--set liarFactor` raises it).
-  - Tracker: no test with a real p2p-media-loader client yet; `clientIp`/`canonicalIp`/netrange
-    helpers are copied into `services/tracker/src/ip.ts` (move into `@commonair/service`).
+  - Tracker: no test with a real p2p-media-loader client yet (P1). The address helpers now live in
+    `@commonair/service` (`packages/service/src/ip.ts`, P1 contract step).
   - Info hashes are still client-chosen (the per-channel cap makes that harmless for evidence);
     deriving the allowed set from the channel's swarm ids would also stop junk swarms.
   - Legal: no retention job for anonymous consent rows (`LegalDocument.requiresAcceptance` landed

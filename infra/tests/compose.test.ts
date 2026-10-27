@@ -207,9 +207,9 @@ describe("compose.yaml: lifecycle", () => {
     expect(compose.services["mock-rtmp"]?.profiles).toEqual(["harness"]);
     expect(compose.services["stripe-mock"]?.profiles).toEqual(["stripe"]);
     expect(compose.services.caddy?.profiles).toEqual(["tls"]);
-    expect(compose.services.tracker?.profiles).toEqual(["p2p"]);
+    expect(compose.services.tracker?.profiles).toBeUndefined();
     const optional = services.filter(([, s]) => s.profiles).map(([n]) => n);
-    expect(optional.sort()).toEqual(["caddy", "mock-rtmp", "stripe-mock", "tracker"]);
+    expect(optional.sort()).toEqual(["caddy", "mock-rtmp", "stripe-mock"]);
   });
 
   test("every platform service is present", () => {

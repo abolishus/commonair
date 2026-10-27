@@ -17,6 +17,9 @@ import {
   RENDITIONS,
 } from "./enums.ts";
 
+// Browser-safe P2P identifiers, re-exported so the tracker can use either entry.
+export * from "./p2p.ts";
+
 export const INTERNAL_SECRET_HEADER = "x-internal-secret";
 
 /** Username MediaMTX accepts for internal readers/publishers (origin, media); password = MEDIA_INTERNAL_PASSWORD. */
@@ -178,10 +181,18 @@ export const KEYS = {
    * ZSET sessionId → last announce (epoch ms) of every session on network `net` that announced to
    * any swarm of `channelId`. Unlike `p2pSwarm`, a `stopped` announce or a closed socket never
    * removes a member (leaving must not dodge the cap); members are trimmed to the TTL window and
-   * the key gets the same TTL on every write. Client-chosen info hashes make per-swarm counts
-   * meaningless, so the per-network cap is counted here, per channel.
+   * the key gets the same TTL on every write. A session may hold several of its broadcast's stream
+   * swarms (`p2pAllowedStreamSwarmIds`), so the per-network cap is counted here, per channel.
    */
   p2pChannelNet: (channelId: string, net: string) => `p2p:chnet:${channelId}:${net}`,
+  /**
+   * STRING: the session's P2P swarm id (the broadcast id), ADR 0005 amendment 1. Written by the
+   * API at `playback.start` only when P2P is enabled for the session, TTL `P2P_GRANT_TTL_SECONDS`,
+   * refreshed by each committed heartbeat, deleted by a heartbeat that finds the stream gated and
+   * by `playback.end`. Read by the tracker (no grant, no socket; allowed info hashes derive from
+   * it) and by `p2p.iceServers`. Absent means no P2P for that session, whatever the client says.
+   */
+  p2pGrant: (sessionId: string) => `p2p:grant:${sessionId}`,
   /**
    * Raw RGB 384×384 bytes of one sampled live frame for the classifier (media writes, the
    * worker's `moderation.scan` reads). TTL `MODERATION_FRAME_TTL_SECONDS`; never written anywhere
@@ -227,7 +238,14 @@ export const P2P_EVIDENCE = {
   exchangeTimeoutMs: 60_000,
 } as const;
 
-/** Swarm id used in `KEYS.p2pSwarm` and `p2pPeer.swarm`. `infoHash` is 40 lowercase hex characters. */
+/** TTL of `KEYS.p2pGrant`, in seconds: the default TRACKER_TOKEN_MAX_AGE_SECONDS. */
+export const P2P_GRANT_TTL_SECONDS = 43_200;
+
+/**
+ * Swarm id used in `KEYS.p2pSwarm` and `p2pPeer.swarm`. `infoHash` is 40 lowercase hex characters
+ * (the hex of the announced 20-character info hash), one of those the tracker derives from the
+ * session's grant (`p2pAllowedStreamSwarmIds`); clients cannot choose others.
+ */
 export const p2pSwarmId = (channelId: string, infoHash: string) => `${channelId}:${infoHash.toLowerCase()}`;
 
 /** Valkey streams (XADD) consumed by the worker. */

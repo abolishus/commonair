@@ -32,6 +32,7 @@ export const STACK_HEALTHY_SERVICES = [
   "origin",
   "media",
   "worker",
+  "tracker",
   "web",
   "otel-collector",
   "prometheus",
@@ -387,6 +388,7 @@ export const HARNESS_OVERRIDES = [
   "harness/compose.trust-safety.yaml",
   "harness/compose.e5-coop.yaml",
   "harness/compose.e6.yaml",
+  "harness/compose.p2p.yaml",
   // Starts nothing unless the `multi` profile is on (`stack --harness --multi`).
   "harness/compose.multi-instance.yaml",
 ] as const;

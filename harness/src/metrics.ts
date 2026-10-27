@@ -102,6 +102,16 @@ export class Prometheus {
 export const ORIGIN_EGRESS_QUERY = (windowSeconds: number) =>
   `sum by (source) (increase(origin_egress_bytes_total[${Math.max(1, Math.round(windowSeconds))}s]))`;
 
+const win = (windowSeconds: number) => `${Math.max(1, Math.round(windowSeconds))}s`;
+
+/** PromQL: P2P digests the origin served successfully over a window (P1, ADR 0005 amendment 1). */
+export const P2P_DIGEST_SERVED_QUERY = (windowSeconds: number) =>
+  `sum(increase(origin_requests_total{route="p2p_digest",status="200"}[${win(windowSeconds)}]))`;
+
+/** PromQL: peer-delivered segments players reported failing digest validation over a window. */
+export const P2P_REJECTED_QUERY = (windowSeconds: number) =>
+  `sum(increase(playback_p2p_rejected_total[${win(windowSeconds)}]))`;
+
 export interface ContainerCpuSample {
   name: string;
   cpuPercent: number;

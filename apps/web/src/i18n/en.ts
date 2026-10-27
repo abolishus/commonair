@@ -9,6 +9,7 @@ import { e7DmcaMessages } from "./e7-dmca.ts";
 import { e7LegalMessages } from "./e7-legal.ts";
 import { moneyMessages } from "./money.ts";
 import { opsMessages } from "./ops.ts";
+import { p2pMessages } from "./p2p.ts";
 import { safetyMessages } from "./safety.ts";
 import { supportMessages } from "./support.ts";
 
@@ -24,6 +25,7 @@ export const en = {
   ...e7AdminMessages,
   ...e7AppealsMessages,
   ...e7LegalMessages,
+  ...p2pMessages,
   "app.title": "Live streaming, owned by the people who make it",
 
   "nav.account": "Account",
