@@ -25,9 +25,11 @@
  *
  * The CDN step runs when the CDN adapter is configured (`CDN_PROVIDER=origin-pull`,
  * `CDN_BASE_URL`; skipped under `--profile no-proprietary`). The API sends a session to the CDN
- * only while the channel's verified viewers exceed `CDN_BURST_VIEWER_THRESHOLD`, so the stack
- * needs that threshold below the honest audience (e.g. 1); otherwise the step is skipped with that
- * reason. Its stream-hour check runs the stream-hours pass through the co-op test hook
+ * only while the channel's verified viewers exceed `CDN_BURST_VIEWER_THRESHOLD`, so the stack needs
+ * that threshold one below the honest audience: 6 with the defaults (household + hidden tab + 3).
+ * Every other session starts together before anyone is verified and the scenario fails if one of
+ * them lands on the CDN anyway; with a higher threshold the CDN step is skipped with that reason.
+ * Its stream-hour check runs the stream-hours pass through the co-op test hook
  * (`harness/compose.e5-coop.yaml`, `COOP_TEST_HOOKS=true`) and is skipped without it.
  */
 import { CoopHooks, CoopHooksOff } from "../src/coop-io.ts";
@@ -39,6 +41,8 @@ import {
   fetchlessHeld,
   gateEligible,
   honestAudience,
+  onCdn,
+  type Placement,
 } from "../src/integrity-viewers.ts";
 import { internalSecret } from "../src/safety-io.ts";
 import { defineScenario, excludedNeeds } from "../src/scenario.ts";
@@ -71,6 +75,66 @@ async function sessionRows(url: string, ids: readonly string[]): Promise<Session
   }
 }
 
+interface HourCounts {
+  hour_start: Date;
+  /** `stream_hours.verified_other_viewers` as the job wrote it. */
+  n: number;
+  /** Viewers counted under the job's rule (`GATE_ELIGIBLE`), recomputed here. */
+  gate: number;
+  /** The same without the fetch-judged condition (verified and scored only). */
+  scored: number;
+  /** 1 when the bot's session passes everything but the fetch-judged condition. */
+  botCandidate: number;
+}
+
+/**
+ * The latest hour of the bot's broadcast, recounted with the stream-hours rule of
+ * `markEligibleStreamHours` (packages/integrity/src/jobs.ts) twice: with `GATE_ELIGIBLE` and
+ * with only its verified-and-scored part. Mirrors that query; keep the two in step.
+ */
+async function hourCounts(url: string, botSession: string): Promise<HourCounts | null> {
+  const sql = new Bun.SQL(url);
+  try {
+    const [r] = (await sql`
+      with h as (
+        select sh.broadcast_id, sh.hour_start, sh.channel_id, c.owner_id, sh.verified_other_viewers as n
+          from stream_hours sh join channels c on c.id = sh.channel_id
+         where sh.broadcast_id = (select broadcast_id from playback_sessions where id = ${botSession}::uuid)
+         order by sh.hour_start desc limit 1
+      ),
+      cand as (
+        select coalesce(ps.user_id::text, 'device:' || ps.device_hash) as who,
+               not ('fetch_unjudged' = any(coalesce(ps.verdict_reasons, '{}'))) as judged,
+               ps.id = ${botSession}::uuid as is_bot
+          from h join playback_sessions ps
+            on ps.channel_id = h.channel_id and ps.verdict = 'verified' and ps.scored_at is not null
+           and ps.started_at < h.hour_start + interval '1 hour'
+           and coalesce(ps.ended_at, ps.last_heartbeat_at, ps.started_at) > h.hour_start
+         where ps.user_id is distinct from h.owner_id
+           and not exists (select 1 from playback_sessions od
+                            where od.user_id = h.owner_id and od.device_hash = ps.device_hash
+                              and od.started_at >= now() - interval '32 days')
+           and not exists (select 1 from playback_sessions o
+                            where o.user_id = h.owner_id and o.ip_hash = ps.ip_hash
+                              and o.started_at < h.hour_start + interval '2 hours'
+                              and coalesce(o.ended_at, o.last_heartbeat_at, o.started_at)
+                                  > h.hour_start - interval '1 hour')
+           and not exists (select 1 from stream_keys sk join broadcasts b on b.id = h.broadcast_id
+                            where sk.channel_id = h.channel_id and sk.last_used_ip_hash = ps.ip_hash
+                              and sk.last_used_at >= b.started_at - interval '10 minutes'
+                              and sk.last_used_at <= coalesce(b.ended_at, now()))
+      )
+      select h.hour_start, h.n::int as n,
+             (select count(distinct who) from cand where judged)::int as gate,
+             (select count(distinct who) from cand)::int as scored,
+             (select count(*) from cand where is_bot)::int as "botCandidate"
+        from h`) as HourCounts[];
+    return r ?? null;
+  } finally {
+    await sql.close();
+  }
+}
+
 const row = (r: SessionRow) => ({ verdict: r.verdict, reasons: r.verdict_reasons });
 
 export default defineScenario({
@@ -97,46 +161,55 @@ export default defineScenario({
     await ctx.step("publish", () => s.start());
     await ctx.step("channel goes live", () => p.waitForLive(channel, true, 30_000));
 
-    // Every honest viewer starts before any is verified, so none is sent to a burst CDN.
-    const plain = await ctx.step(`open ${PLAIN} honest viewers`, () =>
-      p.openViewers(channel, { chromium: browsers, http: PLAIN - browsers }),
-    );
-    for (const v of plain) ctx.defer(() => v.stop());
+    // Every session of the origin cases starts at once, before any viewer can be verified (about
+    // three beats, 30 s): the API sends a session to a burst CDN only once the channel's verified
+    // viewers exceed CDN_BURST_VIEWER_THRESHOLD, so none of these can land there. Checked below.
     const householdIp = p.residential.next();
-    const household = await ctx.step(`open a household of ${householdCount} viewers behind one address`, async () => {
-      const out: HttpViewer[] = [];
-      for (let i = 0; i < householdCount; i++) {
-        const v = new HttpViewer({
+    const household = Array.from(
+      { length: householdCount },
+      (_, i) =>
+        new HttpViewer({
           id: `household-${i}`,
           target: { channel },
           api: p.api({ clientIp: householdIp }).client,
           log: p.log,
-        });
-        ctx.defer(() => v.stop());
-        await v.start();
-        out.push(v);
-      }
-      return out;
-    });
+        }),
+    );
     const hidden = new HiddenTabViewer({ id: "hidden-tab", api: p.api().client, channel, log: p.log });
-    ctx.defer(() => hidden.stop());
-    await ctx.step("open a viewer whose tab will be hidden", () => hidden.start());
-    const honest: Viewer[] = [...plain, ...household, hidden];
-
     const swarm = new ViewbotSwarm({ channel, sessions: bots }, p.datacenter, (o) => p.api(o), p.log);
-    ctx.defer(() => swarm.stop());
-    await ctx.step(`start ${bots} viewbots`, () => swarm.start());
-    const fetchless = await ctx.step(`start ${fetchlessCount} fetch-less bots on residential addresses`, async () => {
-      const out: HeartbeatOnlyViewer[] = [];
-      for (let i = 0; i < fetchlessCount; i++) {
-        // Each bot its own address (p.api picks a fresh residential one) and device.
-        const v = new HeartbeatOnlyViewer({ id: `fetchless-${i}`, api: p.api().client, channel, log: p.log });
-        ctx.defer(() => v.stop());
-        await v.start();
-        out.push(v);
-      }
-      return out;
-    });
+    // Each fetch-less bot its own address (p.api picks a fresh residential one) and device.
+    const fetchless = Array.from(
+      { length: fetchlessCount },
+      (_, i) => new HeartbeatOnlyViewer({ id: `fetchless-${i}`, api: p.api().client, channel, log: p.log }),
+    );
+    for (const v of [...household, hidden, swarm, ...fetchless]) ctx.defer(() => v.stop());
+    const [plain] = await ctx.step(
+      `open ${PLAIN} honest viewers, a household of ${householdCount}, a hidden tab, ${bots} viewbots and ${fetchlessCount} fetch-less bots together`,
+      () =>
+        Promise.all([
+          p.openViewers(channel, { chromium: browsers, http: PLAIN - browsers }).then((vs) => {
+            for (const v of vs) ctx.defer(() => v.stop());
+            return vs;
+          }),
+          ...household.map((v) => v.start()),
+          hidden.start(),
+          swarm.start(),
+          ...fetchless.map((v) => v.start()),
+        ]),
+    );
+    const honest: Viewer[] = [...plain, ...household, hidden];
+    const placements: Placement[] = [
+      ...(await Promise.all(plain.map(async (v) => ({ id: v.id, source: (await v.report()).source })))),
+      ...[...household, ...swarm.members].map((v) => ({ id: v.id, source: v.assignment?.source ?? null })),
+      { id: hidden.id, source: hidden.assignment?.source ?? null },
+      ...fetchless.map((v) => ({ id: v.id, source: v.assignment?.source ?? null })),
+    ];
+    ctx.data("placements", placements);
+    ctx.assert(
+      "no session of the origin cases was sent to the CDN (they started before any viewer was verified?)",
+      onCdn(placements).length === 0,
+      { onCdn: onCdn(placements), hint: `CDN_BURST_VIEWER_THRESHOLD should be ${expected - 1} for this scenario` },
+    );
 
     const firstFrames = await ctx.step("honest first frames", () =>
       Promise.allSettled(honest.map((v) => v.waitForFirstFrame(60_000))),
@@ -151,10 +224,6 @@ export default defineScenario({
       "every fetch-less bot opened a session",
       fetchless.every((f) => f.sessionId !== null),
       fetchless.map((f) => f.sessionId),
-    );
-    ctx.data(
-      "fetchless.assignments",
-      fetchless.map((f) => f.assignment?.source ?? null),
     );
 
     let maxSeen = 0;
@@ -297,7 +366,7 @@ export default defineScenario({
     if (cdnBot === null) {
       ctx.skipStep(
         verdictStep,
-        `no session was assigned cdn in ${cdnAttempts} tries: the API sends sessions to the CDN only while the channel's verified viewers exceed CDN_BURST_VIEWER_THRESHOLD (set it below ${expected} on the stack under test)`,
+        `no session was assigned cdn in ${cdnAttempts} tries: the API sends sessions to the CDN only while the channel's verified viewers exceed CDN_BURST_VIEWER_THRESHOLD (set it to ${expected - 1} on the stack under test)`,
       );
     } else if (cdnBot && !url) {
       ctx.skipStep(verdictStep, "DATABASE_URL not set: the CDN bot's reasons cannot be read");
@@ -333,34 +402,44 @@ export default defineScenario({
         ctx.skipStep(hoursStep, "INTERNAL_API_SECRET not set: cannot run the stream-hours pass through the test hook");
       } else {
         const hooks = new CoopHooks(ctx.env.HARNESS_API_URL, secret, ctx.signal);
-        try {
-          await hooks.tickRan("stream-hours");
-        } catch (err) {
-          if (!(err instanceof CoopHooksOff)) throw err;
-        }
-        const ran = hooks.ticks.some((t) => t.result !== null && (t.result.skipped ?? 0) === 0);
-        if (!ran) {
+        const tick = async (): Promise<boolean> => {
+          const before = hooks.ticks.length;
+          try {
+            await hooks.tickRan("stream-hours");
+          } catch (err) {
+            if (!(err instanceof CoopHooksOff)) throw err;
+          }
+          return hooks.ticks.slice(before).some((t) => t.result !== null && (t.result.skipped ?? 0) === 0);
+        };
+        if (!(await tick())) {
           ctx.skipStep(hoursStep, "the co-op test hook is off (harness/compose.e5-coop.yaml, COOP_TEST_HOOKS=true)");
         } else {
           await ctx.step(hoursStep, async () => {
-            const sql = new Bun.SQL(url);
-            try {
-              const [h] = (await sql`
-                select sh.verified_other_viewers::int as n, sh.hour_start
-                  from stream_hours sh
-                 where sh.broadcast_id = (select broadcast_id from playback_sessions where id = ${sid}::uuid)
-                 order by sh.hour_start desc limit 1`) as { n: number; hour_start: Date }[];
-              ctx.assert("the broadcast has a stream_hours row", h !== undefined);
-              ctx.data("cdn.stream_hour", h);
-              // Every honest viewer is gate-eligible; the CDN bot (its own device) would make it one more.
-              ctx.assert("the CDN bot is not counted among the hour's verified viewers", (h?.n ?? 0) <= expected, {
-                n: h?.n,
-                expected,
-              });
-              ctx.check("the hour counts exactly the honest viewers", h?.n === expected, { n: h?.n, expected });
-            } finally {
-              await sql.close();
+            // The job's count is an aggregate, so the bot is proved out by difference: the same
+            // count with and without the fetch-judged condition, recomputed here, must match the
+            // job's figure and exceed it by exactly the bot. A scoring pass (every 15 s) between
+            // the job and this read can move a session, so a mismatch reruns the job first.
+            let hour: HourCounts | null = null;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              if (attempt > 0) await tick();
+              hour = await hourCounts(url, sid);
+              if (hour && hour.gate === hour.n) break;
             }
+            ctx.data("cdn.stream_hour", hour);
+            ctx.assert("the broadcast has a stream_hours row", hour !== null);
+            if (!hour) return;
+            ctx.assert(
+              "the CDN bot would count without the marker (verified, scored, overlaps the hour, not the streamer's network)",
+              hour.botCandidate === 1,
+              hour,
+            );
+            ctx.assert("the recomputed gate-eligible count matches the job's figure", hour.gate === hour.n, hour);
+            ctx.assert(
+              "the CDN bot is not counted among the hour's verified viewers (exactly it is left out)",
+              hour.scored === hour.n + 1,
+              hour,
+            );
+            ctx.check("the hour counts exactly the honest viewers", hour.n === expected, { n: hour.n, expected });
           });
         }
       }

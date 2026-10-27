@@ -16,6 +16,7 @@ import {
   gateEligible,
   hiddenHeartbeatDelay,
   honestAudience,
+  onCdn,
 } from "../src/integrity-viewers.ts";
 import type { HeartbeatInput } from "../src/viewer.ts";
 
@@ -65,6 +66,20 @@ describe("honestAudience and claimedBytes", () => {
     expect(claimedBytes(1000, 1500)).toBe(187_500);
     expect(claimedBytes(0, 1500)).toBe(0);
     expect(claimedBytes(-5, 1500)).toBe(0);
+  });
+});
+
+describe("onCdn", () => {
+  test("lists only sessions the API sent to the CDN; unknown and other sources pass", () => {
+    expect(
+      onCdn([
+        { id: "a", source: "origin" },
+        { id: "b", source: "cdn" },
+        { id: "c", source: null },
+        { id: "d", source: "relay" },
+      ]),
+    ).toEqual([{ id: "b", source: "cdn" }]);
+    expect(onCdn([])).toEqual([]);
   });
 });
 
@@ -187,5 +202,49 @@ describe("HiddenTabViewer", () => {
     for (const b of beats) expect(b.muted).toBe(false);
     expect(report.heartbeats).toBe(beats.length);
     expect(report.playedSeconds).toBeGreaterThan(0);
+  });
+
+  test("hidden beats are held to the background cadence; show() releases a held beat; other calls pass through", async () => {
+    const { api, beats, ended } = fakeApi("origin", 300);
+    const at: number[] = [];
+    const timed = new Proxy(api, {
+      get: (t, k, r) =>
+        k === "playback"
+          ? new Proxy(api.playback, {
+              get: (pt, pk, pr) =>
+                pk === "heartbeat"
+                  ? async (input: HeartbeatInput) => {
+                      at.push(Date.now());
+                      return api.playback.heartbeat(input);
+                    }
+                  : Reflect.get(pt, pk, pr),
+            })
+          : Reflect.get(t, k, r),
+    });
+    const fakeFetch = (async (input: string) =>
+      new URL(input).pathname.endsWith(".m3u8")
+        ? new Response(MEDIA(0))
+        : new Response(new Uint8Array(64))) as unknown as typeof fetch;
+    const v = new HiddenTabViewer({ api: timed, channel: "c", fetch: fakeFetch, random: seededRandom(5) });
+    await v.start();
+    expect(v.assignment).toEqual({ source: "origin", relayId: null });
+    await new Promise((r) => setTimeout(r, 700));
+    v.hide();
+    const hiddenFrom = beats.length;
+    await new Promise((r) => setTimeout(r, 3_200));
+    const hiddenGaps = at.slice(hiddenFrom).map((t, i) => t - (at[hiddenFrom + i - 1] ?? t));
+    // hiddenHeartbeatDelay(300 ms) is at least one whole second; visible beats come every ~300 ms.
+    expect(beats.length - hiddenFrom).toBeGreaterThanOrEqual(2);
+    for (const gap of hiddenGaps) expect(gap).toBeGreaterThanOrEqual(950);
+    // A beat held while hidden goes out promptly, as visible, once the tab is shown.
+    v.show();
+    const shownAt = Date.now();
+    const before = beats.length;
+    await new Promise((r) => setTimeout(r, 450));
+    expect(beats.length).toBeGreaterThan(before);
+    expect((at[before] ?? Infinity) - shownAt).toBeLessThan(450);
+    expect(beats.at(-1)?.visible).toBe(true);
+    await v.stop();
+    expect(ended).toEqual(["s1"]);
   });
 });

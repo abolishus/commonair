@@ -183,6 +183,16 @@ verified sessions are never re-scored and keep the reasons they had; no migratio
 A CDN session that ended before this change and was scored then still counts toward the stream
 hours of its last 48 hours (the recompute window) until it ages out.
 
+**Known cost of `scored_at`:** the scorer's candidates (`ended_at is null or verdict = 'pending'`,
+the predicate of `playback_sessions_scoring_idx`) leave out a session that the API promoted and
+that ended before its first pass. Such an honest session (about 15 s of watching after promotion,
+longer when scoring is backlogged) is never scored, so it earns no stream-hour or follow credit.
+On deploy the 48 h stream-hour recompute applies the new rule to past hours too, so an hour that
+was eligible only through such sessions (or through CDN sessions still live and re-marked) can
+flip to ineligible. Closing this needs ended, verified, never-scored sessions inside the finalize
+window among the candidates, which changes the index predicate (a migration, owned by the
+orchestrator).
+
 Expected segments = claimed watch seconds / segment duration (1 s) × the HTTP share, judged only
 when at least 10 are expected. The HTTP share is 10 % (`P2P_HTTP_SHARE`) for a **P2P-evidenced**
 session and 100 % for every other session. It applies to `no_media_fetched` and

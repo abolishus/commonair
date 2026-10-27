@@ -24,10 +24,9 @@ import {
   nextHeartbeatDelay,
   realisticFingerprint,
 } from "./fingerprint.ts";
-import { type MediaPlaylist, lowestVariant, parsePlaylist, resolveUri, withToken } from "./hls.ts";
-import { BufferModel } from "./http-viewer.ts";
-import { type Viewer, type ViewerReport, PlaybackSession, emptyReport } from "./viewer.ts";
-import { TimeoutError, sleep } from "./wait.ts";
+import { HttpViewer } from "./http-viewer.ts";
+import { type Viewer, type ViewerReport, PlaybackSession } from "./viewer.ts";
+import { sleep } from "./wait.ts";
 
 // Reason codes as stored in `playback_sessions.verdict_reasons` (packages/integrity/src/types.ts;
 // the harness does not depend on @commonair/integrity, so the strings are mirrored here).
@@ -66,6 +65,21 @@ export function fetchlessHeld(row: VerdictRow): boolean {
 export function cdnBotSettled(row: VerdictRow): boolean {
   const reasons = row.reasons ?? [];
   return reasons.includes(FETCH_UNJUDGED) && !reasons.includes("insufficient_heartbeats");
+}
+
+export interface Placement {
+  id: string;
+  /** The source the API assigned (null when the viewer cannot tell, e.g. before a browser reports). */
+  source: string | null;
+}
+
+/**
+ * Sessions the API sent to the CDN. The origin cases (household, hidden tab, bots judged on their
+ * fetches) mean nothing there: the CDN is never judged on fetches, and a bogus `CDN_BASE_URL`
+ * serves no media. The scenario fails when any of them lands there.
+ */
+export function onCdn(placements: readonly Placement[]): Placement[] {
+  return placements.filter((p) => p.source === "cdn");
 }
 
 /** Honest viewers the public count must show: the plain ones, a household, and the hidden tab. */
@@ -210,48 +224,47 @@ export interface HiddenTabOptions {
   random?: () => number;
 }
 
-interface Track {
-  url: string;
-  lastSequence: number;
-  mapFetched: string | null;
-  isVideo: boolean;
-}
-
 /**
- * An honest HTTP viewer whose tab can be hidden (`hide()` / `show()`). Media keeps flowing while
- * hidden; the beats say `visible: false` and come at the background cadence. Tokens are refreshed
- * from heartbeats, so it can watch for longer than one token's lifetime.
+ * An honest HTTP viewer whose tab can be hidden (`hide()` / `show()`). It is an `HttpViewer`
+ * (playlist, segments, buffer, token refresh, source switches) with steady visible timing, seen
+ * through an API client whose heartbeat call is wrapped: while hidden, a beat says
+ * `visible: false` and is held until the background cadence (`hiddenHeartbeatDelay` after the
+ * previous beat) is due. Media keeps flowing while hidden, as audio would keep playing.
  */
 export class HiddenTabViewer implements Viewer {
   readonly id: string;
   readonly kind = "http" as const;
-  private readonly f: typeof fetch;
-  private session: PlaybackSession | null = null;
-  private readonly state: ViewerReport;
-  private buffer: BufferModel | null = null;
-  private abort = new AbortController();
-  private loops: Promise<void>[] = [];
+  private readonly inner: HttpViewer;
   private hidden = false;
   private hiddenBeats = 0;
-  private firstFrame: { resolve: (ms: number) => void; reject: (e: Error) => void; promise: Promise<number> };
+  private lastBeatAt: number | null = null;
+  /** The session's visible heartbeat interval (from `playback.start`). */
+  private intervalMs = 10_000;
+  /** Wakes a held beat early: on `show()` and on `stop()`. */
+  private wake = new AbortController();
+  private readonly stopping = new AbortController();
 
   constructor(private readonly opts: HiddenTabOptions) {
     this.id = opts.id ?? `hidden-tab-${crypto.randomUUID().slice(0, 8)}`;
-    this.state = emptyReport(this.id, "http", "http");
-    this.state.playbackPath = "http";
-    this.f = opts.fetch ?? fetch;
-    let resolve: (ms: number) => void = () => undefined;
-    let reject: (e: Error) => void = () => undefined;
-    const promise = new Promise<number>((res, rej) => {
-      resolve = res;
-      reject = rej;
+    this.inner = new HttpViewer({
+      id: this.id,
+      target: { channel: opts.channel },
+      api: this.wrapApi(opts.api),
+      deviceId: opts.deviceId ?? newDeviceId(),
+      fingerprint: opts.fingerprint ?? realisticFingerprint(opts.random),
+      timing: STEADY_TIMING,
+      log: opts.log,
+      fetch: opts.fetch,
     });
-    promise.catch(() => undefined);
-    this.firstFrame = { resolve, reject, promise };
   }
 
   get sessionId(): string | null {
-    return this.state.sessionId;
+    return this.inner.sessionId;
+  }
+
+  /** Where the API sent the session (from the playback token). */
+  get assignment(): PlaybackAssignment | null {
+    return this.inner.assignment;
   }
 
   /** Beats sent while hidden. */
@@ -265,200 +278,54 @@ export class HiddenTabViewer implements Viewer {
 
   show(): void {
     this.hidden = false;
+    this.wake.abort();
+    this.wake = new AbortController();
   }
 
-  async start(): Promise<void> {
-    this.state.startedAt = Date.now();
-    this.session = new PlaybackSession(this.opts.api, {
-      channel: this.opts.channel,
-      deviceId: this.opts.deviceId ?? newDeviceId(),
-      nativeHls: false,
-      p2pCapable: false,
-      fingerprint: this.opts.fingerprint ?? realisticFingerprint(this.opts.random),
-    });
-    const started = await this.session.start();
-    this.state.sessionId = started.sessionId;
-    this.state.source = started.source;
-    this.buffer = new BufferModel(1, this.state.startedAt);
-    const tracks = await this.resolveTracks(started.playlistUrl);
-    for (const t of tracks) this.loops.push(this.follow(t).catch((err) => this.fail(err)));
-    this.loops.push(this.heartbeatLoop(started.heartbeatIntervalMs));
-  }
-
-  private fail(err: unknown): void {
-    if (this.abort.signal.aborted) return;
-    const message = err instanceof Error ? err.message : String(err);
-    this.state.errors.push(message);
-    this.opts.log?.warn("hidden-tab viewer error", { viewer: this.id, error: message });
-    this.firstFrame.reject(new Error(message));
-  }
-
-  /** The URL with the session's current token (heartbeats refresh it). */
-  private current(url: string): string {
-    return this.session?.token ? withToken(url, this.session.token) : url;
-  }
-
-  private async get(url: string): Promise<Response> {
-    return this.f(this.current(url), {
-      signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(30_000)]),
-    });
-  }
-
-  private async playlistText(url: string): Promise<string> {
-    const res = await this.get(url);
-    const body = await res.text();
-    this.state.bytesHttp += body.length;
-    if (!res.ok) throw new Error(`playlist HTTP ${res.status}`);
-    return body;
-  }
-
-  private async resolveTracks(url: string): Promise<Track[]> {
-    // A fresh live stream 404s until the muxer has segments; players retry.
-    let body: string | null = null;
-    for (let i = 0; i < 45 && body === null; i++) {
-      try {
-        body = await this.playlistText(url);
-      } catch (err) {
-        if (this.abort.signal.aborted || i === 44) throw err;
-        await sleep(1_000, this.abort.signal);
+  /** The caller's client with `playback.heartbeat` replaced; everything else passes through. */
+  private wrapApi(api: ApiClient): ApiClient {
+    const heartbeat: ApiClient["playback"]["heartbeat"] = async (input, ...rest) => {
+      if (this.hidden) {
+        const due = (this.lastBeatAt ?? Date.now()) + hiddenHeartbeatDelay(this.intervalMs, this.opts.random);
+        const wait = due - Date.now();
+        if (wait > 0)
+          await sleep(wait, AbortSignal.any([this.wake.signal, this.stopping.signal])).catch(() => undefined);
       }
-    }
-    const playlist = parsePlaylist(body ?? "");
-    if (playlist.kind === "media") return [{ url, lastSequence: -1, mapFetched: null, isVideo: true }];
-    const variant = lowestVariant(playlist);
-    if (!variant) throw new Error("multivariant playlist has no variants");
-    const tracks: Track[] = [{ url: resolveUri(variant.uri, url), lastSequence: -1, mapFetched: null, isVideo: true }];
-    const audio = playlist.renditions.find((r) => r.type === "AUDIO" && r.groupId === variant.audioGroup && r.uri);
-    if (audio?.uri)
-      tracks.push({ url: resolveUri(audio.uri, url), lastSequence: -1, mapFetched: null, isVideo: false });
-    return tracks;
-  }
-
-  private async follow(track: Track): Promise<void> {
-    let failures = 0;
-    while (!this.abort.signal.aborted) {
-      let playlist: MediaPlaylist;
-      try {
-        const parsed = parsePlaylist(await this.playlistText(track.url));
-        if (parsed.kind !== "media") throw new Error("expected a media playlist");
-        playlist = parsed;
-        failures = 0;
-      } catch (err) {
-        if (this.abort.signal.aborted) return;
-        if (++failures >= 10) throw err;
-        await sleep(1_000, this.abort.signal).catch(() => undefined);
-        continue;
-      }
-      // Join three segments behind the live edge, like hls.js.
-      const fresh =
-        track.lastSequence < 0
-          ? playlist.segments.slice(-3)
-          : playlist.segments.filter((s) => s.sequence > track.lastSequence);
-      for (const segment of fresh) {
-        if (this.abort.signal.aborted) return;
-        track.lastSequence = segment.sequence;
-        try {
-          if (segment.map && track.mapFetched !== segment.map) {
-            const init = await this.get(resolveUri(segment.map, track.url));
-            this.state.bytesHttp += (await init.arrayBuffer()).byteLength;
-            track.mapFetched = segment.map;
-          }
-          const res = await this.get(resolveUri(segment.uri, track.url));
-          this.state.bytesHttp += (await res.arrayBuffer()).byteLength;
-          if (!res.ok) throw new Error(`segment HTTP ${res.status}`);
-        } catch (err) {
-          if (this.abort.signal.aborted) return;
-          this.state.skippedSegments++;
-          this.opts.log?.debug("hidden-tab viewer: segment skipped", {
-            viewer: this.id,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          continue;
-        }
-        if (track.isVideo && this.buffer?.append(segment.duration, Date.now())) {
-          this.state.ttffMs = Date.now() - this.state.startedAt;
-          this.firstFrame.resolve(this.state.ttffMs);
-        }
-      }
-      if (playlist.ended) return;
-      const wait = fresh.length > 0 ? playlist.targetDuration : playlist.targetDuration / 2;
-      await sleep(Math.max(250, wait * 1000), this.abort.signal).catch(() => undefined);
-    }
-  }
-
-  private async heartbeatLoop(intervalMs: number): Promise<void> {
-    const signal = this.abort.signal;
-    while (!signal.aborted) {
-      const delay = this.hidden
-        ? hiddenHeartbeatDelay(intervalMs, this.opts.random)
-        : nextHeartbeatDelay(intervalMs, STEADY_TIMING, this.opts.random);
-      await sleep(delay, signal).catch(() => undefined);
-      if (signal.aborted) return;
-      const session = this.session;
-      const buffer = this.buffer;
-      if (!session || !buffer) return;
-      buffer.tick(Date.now());
-      const visible = !this.hidden;
-      try {
-        await session.heartbeat({
-          playedSeconds: buffer.playedSeconds,
-          bufferSeconds: buffer.buffered,
-          stalls: buffer.stalls,
-          bytesHttp: this.state.bytesHttp,
-          bytesP2p: 0,
-          latencySeconds: null,
-          ttffMs: this.state.ttffMs,
-          visible,
-          muted: false,
-        });
-        this.state.heartbeats++;
-        if (!visible) this.hiddenBeats++;
-      } catch (err) {
-        this.state.heartbeatErrors++;
-        this.opts.log?.warn("hidden-tab viewer: heartbeat failed", {
-          viewer: this.id,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-  }
-
-  async waitForFirstFrame(timeoutMs = 45_000): Promise<number> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        this.firstFrame.promise,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new TimeoutError(`first segment for ${this.id}`, timeoutMs)), timeoutMs);
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async report(): Promise<ViewerReport> {
-    const now = Date.now();
-    this.buffer?.tick(now);
-    return {
-      ...this.state,
-      stalls: this.buffer?.stalls ?? 0,
-      stallMs: this.buffer?.totalStallMs(now) ?? 0,
-      playedSeconds: this.buffer?.playedSeconds ?? 0,
-      latencyMs: [],
-      errors: [...this.state.errors],
+      // Visibility as of when the beat is actually sent (the tab may have come back meanwhile).
+      const visible = !this.hidden && input.visible;
+      const res = await api.playback.heartbeat({ ...input, visible }, ...rest);
+      this.lastBeatAt = Date.now();
+      if (!visible) this.hiddenBeats++;
+      return res;
     };
+    const start: ApiClient["playback"]["start"] = async (...args) => {
+      const res = await api.playback.start(...args);
+      this.intervalMs = res.heartbeatIntervalMs;
+      return res;
+    };
+    const wrapped: Partial<Record<PropertyKey, unknown>> = { heartbeat, start };
+    const playback = new Proxy(api.playback, {
+      get: (target, key, receiver) => (Object.hasOwn(wrapped, key) ? wrapped[key] : Reflect.get(target, key, receiver)),
+    });
+    return new Proxy(api, {
+      get: (target, key, receiver) => (key === "playback" ? playback : Reflect.get(target, key, receiver)),
+    });
   }
 
-  async stop(): Promise<ViewerReport> {
-    const final = await this.report();
-    if (!this.abort.signal.aborted) {
-      this.abort.abort(new Error("viewer stopped"));
-      await Promise.allSettled(this.loops);
-      await this.session?.end().catch((err: unknown) => {
-        this.state.errors.push(`end: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    }
-    return final;
+  start(): Promise<void> {
+    return this.inner.start();
+  }
+
+  waitForFirstFrame(timeoutMs?: number): Promise<number> {
+    return this.inner.waitForFirstFrame(timeoutMs);
+  }
+
+  report(): Promise<ViewerReport> {
+    return this.inner.report();
+  }
+
+  stop(): Promise<ViewerReport> {
+    this.stopping.abort();
+    return this.inner.stop();
   }
 }
