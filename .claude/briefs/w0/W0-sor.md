@@ -269,7 +269,7 @@ check of `/settings/appeals` as the T2-labelled streamer.
 
 ## Contract step as landed
 
-- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- Your base is main after the P1 contract step merge (`223b192`), which contains all of E7 and the W0 and P1 contract steps. Recheck line numbers against it.
 - The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
 - The next free migration number is 0030.
 - `0029_snapshot` is a copy of 0028.

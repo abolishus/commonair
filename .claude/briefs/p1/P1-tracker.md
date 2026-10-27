@@ -223,3 +223,14 @@ changes in files you do not own, e.g. a contracts doc that the multi-socket chan
 vector that disagrees with the library, the `services/origin/README.md` route line), what is
 left undone, and the commands the user should run live (the `viewers` scenario with `--set p2p=10`
 once P1-player merges).
+
+## Contract step as landed
+
+Your base is main after "merge: P1 contract step" (`223b192`), which contains E7 and the W0 contract step. Recheck line numbers against it.
+
+- The seam is in place: `services/origin/src/p2p-digest.ts` (a stub answering 501 with CORS) and `tests/p2p-digest.test.ts`. Replace the 501 assertion.
+- Record digest requests with `metrics.request("p2p_digest", …, status)`. The harness queries `origin_requests_total{route="p2p_digest",status="200"}`.
+- The IP helpers now come from `@commonair/service`; `services/tracker/src/ip.ts` no longer exists.
+- Allowed info hashes: `p2pAllowedStreamSwarmIds(grant)` gives 10 ids, not 12, because "audio" is deduplicated. Test against `P2P_INFOHASH_VECTORS` from `@commonair/contracts/internal` or `@commonair/contracts/p2p`.
+- The grant key is `KEYS.p2pGrant` (`p2p:grant:<sid>`), and its value is the broadcast id.
+- Fix `services/tracker/README.md:128`, which still says `--profile p2p`. That file is yours.

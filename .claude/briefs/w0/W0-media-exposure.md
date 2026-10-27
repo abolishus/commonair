@@ -246,7 +246,7 @@ in `harness/src/safety.ts` after the contract step) and
 
 ## Contract step as landed
 
-- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- Your base is main after the P1 contract step merge (`223b192`), which contains all of E7 and the W0 and P1 contract steps. Recheck line numbers against it.
 - The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
 - The next free migration number is 0030.
 - `0029_snapshot` is a copy of 0028.
@@ -272,3 +272,7 @@ in `harness/src/safety.ts` after the contract step) and
 - The `vod-placement` job is a stub on the retention queue, running every 60 s with data `{ vodId?: uuid }`. It is in `OPS_TICK_JOBS` and in the api `OPS_JOB_QUEUES`.
 - Its harness step is trust-safety step 10, which is in `PENDING_SAFETY_STEPS`. On landing, remove 10 from that list in `harness/src/safety.ts` and update the pending assertion in `safety.test`. That file belongs to the orchestrator, so this is a contract request.
 - Possible follow-up: reserve the username `vod` in `services/api/src/auth/identity.ts`, because Caddy's `/vod/*` would shadow sub-paths of a channel with that name.
+
+## P1 contract step (merged before wave 2)
+
+- Your base also contains the P1 contract step. When editing the dispatch in `services/origin/src/origin.ts`, keep the `digestHandler` construction and `if (rawPath.startsWith(P2P_DIGEST_ROUTE)) return digestHandler(req, rawPath);`, after `/media/` and before the HLS fallback.

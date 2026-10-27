@@ -252,3 +252,15 @@ pinned loader handles a failed `validateP2PSegment`, what is left undone (accoun
 preference sync, data mode), and the commands the user should run live:
 `bun harness/src/cli.ts run viewers --set p2p=10`, plus a manual check of the notice, indicator,
 dialog and settings switch on the channel page and the embed.
+
+## Contract step as landed
+
+Your base is main after "merge: P1 contract step" (`223b192`), which contains E7 and the W0 contract step. Recheck line numbers against it.
+
+- Use `PlaybackStart.p2p.available` and `.digestUrl`, and read `features.p2pDefault` from `instance.info`.
+- Send `p2pCapable` explicitly; it now defaults to false.
+- Build the swarm ids from `@commonair/contracts/p2p` and test the builder against `P2P_INFOHASH_VECTORS`.
+- The optional heartbeat fields are `bytesP2pUp`, `p2pPeers` (at most 64) and `p2pRejected`.
+- The test ids, storage keys and rules are in `docs/testing/p1-selectors.md`. When you render the ids, add that doc to `apps/web/tests/selectors.test.ts` and spread `P1_TEST_IDS` into `TEST_IDS`.
+- You own `apps/web/src/i18n/p2p.ts`.
+- When P1 is done, flip `P2P_VIEWERS_DEFAULT` in `harness/src/p2p.ts` to 10. From then on the viewers scenario hard-asserts `data-p2p="off"` for default viewers, and a default-only run checks it softly.

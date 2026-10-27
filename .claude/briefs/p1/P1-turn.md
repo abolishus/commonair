@@ -217,3 +217,13 @@ counts, branch and sha, contract requests (`"coturn"` in `STACK_HEALTHY_SERVICES
 what is left undone (TURNS), and the commands the user should run live:
 `bun scripts/infra.ts stack --harness`, `turnutils_stunclient localhost` against the dev coturn,
 and the self-host e2e with and without `--turn-relay`.
+
+## Contract step as landed
+
+Your base is main after "merge: P1 contract step" (`223b192`), which contains E7 and the W0 contract step. Recheck line numbers against it.
+
+- Use this coturn image string exactly: `docker.io/coturn/coturn:4.18.0-trixie@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3`.
+- The env names, `turnEnv` and its startup refusal already exist. Read them through `deps.env`; `P2P_STUN_URLS` and `P2P_TURN_URLS` arrive as `string[]`.
+- Implement `p2p.iceServers` in `services/api/src/routes/p2p.ts`. A session without a grant gets `precondition("p2p")`.
+- Adding "coturn" to `STACK_HEALTHY_SERVICES` is still a contract request to the orchestrator.
+- Send the infra/README Ports rows as a contract request.

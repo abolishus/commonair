@@ -206,7 +206,7 @@ harness hook), what is left, and the exact commands the user should run live:
 
 ## Contract step as landed
 
-- Your base is main after the W0 contract step merge (`648d04e`, "merge: W0 contract step"), which contains all of E7. Recheck line numbers against it.
+- Your base is main after the P1 contract step merge (`223b192`), which contains all of E7 and the W0 and P1 contract steps. Recheck line numbers against it.
 - The migrations taken are `0028_enforcement_statements` and `0029_w0_protections`.
 - The next free migration number is 0030.
 - `0029_snapshot` is a copy of 0028.
@@ -226,3 +226,9 @@ harness hook), what is left, and the exact commands the user should run live:
   - The anchor interface allows a run to be re-anchored. After that happens, `localWindow` compares re-stamped segment times against a stale start time.
   - Fix: either derive `recordingStartedAt` in `localWindow` from the stamped segments, or store the raw value with its `runId` and stamp it when read.
 - A `harness/scenarios/clock-skew.ts` stub exists with `inFull: false`.
+
+## P1 contract step (merged before wave 2)
+
+- `harness/src/proxy.ts` and `harness/src/platform.ts` changed additively: the tracker proxy, `ViewerMix.p2p` and `trackerProxyUrl`.
+- `HARNESS_OVERRIDES` gained `harness/compose.p2p.yaml`.
+- Any new harness override that sets api environment must also be mirrored in `compose.multi-instance.yaml`'s api-2, or `multi-compose.test` fails.
