@@ -101,6 +101,7 @@ const T0_PATTERN = join(FIXTURES, "t0-pattern.png");
 let opener: OpeningKey;
 const bullConn = new Valkey(process.env.VALKEY_URL ?? "redis://localhost:6379", { maxRetriesPerRequest: null });
 let modQueue: Queue;
+let finalizeQueue: Queue;
 
 const logger = createLogger({ service: "media-int", level: (process.env.TEST_LOG_LEVEL as "info") ?? "fatal" });
 let tdb: TestDatabase;
@@ -168,6 +169,7 @@ beforeAll(async () => {
   const keys = await testKeys();
   opener = keys.opener;
   modQueue = new Queue(QUEUES.moderation, { connection: bullConn, prefix: bullPrefix });
+  finalizeQueue = new Queue(QUEUES.vodFinalize, { connection: bullConn, prefix: bullPrefix });
   const apiBase = `http://host.containers.internal:${fakeApi.port}`;
   mtx = startMediaMtx({ apiBase, internalSecret: INTERNAL_SECRET });
   target = startMockTarget();
@@ -256,6 +258,7 @@ afterAll(async () => {
   }
   await raw.quit();
   await modQueue?.close();
+  await finalizeQueue?.close();
   await bullConn.quit();
   await valkey.quit();
   await fakeApi.stop(true);
@@ -584,6 +587,118 @@ describe("media pipeline", () => {
     for await (const o of media.ctx.storage.list(BUCKET, vodPrefix(id, "public"))) expect.unreachable(o.key);
   }, 90_000);
 
+  test("a clip of a VOD whose move committed meanwhile is cut from its other own prefix", async () => {
+    // The row still says `vods/`, the objects are already under `recordings/` (a placement move
+    // between the clip job's row read and its object reads).
+    const pub = vodPrefix(vodId, "public");
+    const priv = vodPrefix(vodId, "private");
+    await moveVodObjects(media.ctx.storage, BUCKET, pub, priv);
+    await media.ctx.storage.deletePrefix(BUCKET, pub);
+    try {
+      const clip = await waitForClip(await createClip(6, 5));
+      expect(clip.status).toBe("ready");
+    } finally {
+      await moveVodObjects(media.ctx.storage, BUCKET, priv, pub);
+      await media.ctx.storage.deletePrefix(BUCKET, priv);
+    }
+  }, 60_000);
+
+  test("a T0 during finalize's copy to vods/ leaves nothing of the VOD there", async () => {
+    const { vodId: id } = await parkedPatternVod();
+    let copies = 0;
+    const storage = hooked({
+      copy: async (target, bucket, from, to) => {
+        // The T0 worker commits the removal and deletes the originals between two copies.
+        if (++copies === 2) {
+          await tdb.db
+            .update(schema.vods)
+            .set({ status: "deleted", removedReason: "t0_hash_match" })
+            .where(eq(schema.vods.id, id));
+          await media.ctx.storage.deletePrefix(BUCKET, vodPrefix(id, "private"));
+        }
+        return target.copy(bucket, from, to);
+      },
+    });
+    await expect(finalizeVod(stubDeps(storage), id)).rejects.toThrow(/copy|verified/);
+    expect(await keysUnder(vodPrefix(id, "public"))).toEqual([]);
+    expect(await keysUnder(vodPrefix(id, "private"))).toEqual([]);
+    // The retry sees the removal and does nothing.
+    expect(await finalizeVod(stubDeps(), id)).toBe("skipped");
+  }, 60_000);
+
+  test("a VOD removed while finalize copies it: the copies go, the source stays for the remover", async () => {
+    const { vodId: id } = await parkedPatternVod();
+    let removed = false;
+    const storage = hooked({
+      copy: async (target, bucket, from, to) => {
+        if (!removed) {
+          removed = true;
+          await tdb.db.update(schema.vods).set({ status: "deleted" }).where(eq(schema.vods.id, id));
+        }
+        return target.copy(bucket, from, to);
+      },
+    });
+    expect(await finalizeVod(stubDeps(storage), id)).toBe("removed");
+    expect(await keysUnder(vodPrefix(id, "public"))).toEqual([]);
+    expect(await keysUnder(vodPrefix(id, "private"))).toContain(vodPrefix(id, "private") + VOD_PLAYLIST);
+  }, 60_000);
+
+  test("a crash after the source delete and before commit is recovered from the verified copy", async () => {
+    const { vodId: id } = await parkedPatternVod();
+    const priv = vodPrefix(id, "private");
+    const pub = vodPrefix(id, "public");
+    // What the crashed run left: a full copy under `vods/`, the source's playlist and one segment
+    // deleted, the row still `processing` under `recordings/`.
+    await tdb.db.update(schema.vods).set({ status: "processing" }).where(eq(schema.vods.id, id));
+    await moveVodObjects(media.ctx.storage, BUCKET, priv, pub);
+    await media.ctx.storage.delete(BUCKET, priv + VOD_PLAYLIST);
+    const segment = (await keysUnder(priv)).find((k) => k.endsWith(".m4s"));
+    if (segment) await media.ctx.storage.delete(BUCKET, segment);
+
+    expect(await finalizeVod(stubDeps(), id)).toBe("ready");
+    const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+    expect(vod?.storagePrefix).toBe(pub);
+    const text = await (await media.ctx.storage.get(BUCKET, pub + VOD_PLAYLIST))?.text();
+    expect(text?.trimEnd().endsWith("#EXT-X-ENDLIST")).toBe(true);
+    expect(await keysUnder(priv)).toEqual([]);
+  }, 60_000);
+
+  test("an NCII hide during processing: ready, but nothing new is written beside the hidden objects", async () => {
+    const { vodId: id } = await parkedPatternVod();
+    const [req] = await tdb.db
+      .insert(schema.nciiRequests)
+      .values({
+        requesterName: "r",
+        requesterEmail: "r@example.test",
+        relationship: "self",
+        contentUrls: ["https://example.test/x"],
+        description: "d",
+        goodFaith: true,
+        signature: "r",
+        deadlineAt: new Date(0),
+      })
+      .returning({ id: schema.nciiRequests.id });
+    if (!req) throw new Error("no NCII request");
+    await tdb.db.insert(schema.nciiRequestItems).values({
+      requestId: req.id,
+      url: "https://example.test/x",
+      subjectType: "vod",
+      subjectId: id,
+      hiddenAt: new Date(),
+    });
+
+    expect(await finalizeVod(stubDeps(), id)).toBe("ready");
+    const priv = vodPrefix(id, "private");
+    const [vod] = await tdb.db.select().from(schema.vods).where(eq(schema.vods.id, id));
+    expect(vod?.storagePrefix).toBe(priv);
+    expect(vod?.thumbnailKey).toBeNull();
+    const keys = await keysUnder(priv);
+    expect(keys.some((k) => k.includes("thumbnail"))).toBe(false);
+    const text = await (await media.ctx.storage.get(BUCKET, priv + VOD_PLAYLIST))?.text();
+    expect(text).not.toContain("#EXT-X-ENDLIST");
+    expect(await keysUnder(vodPrefix(id, "public"))).toEqual([]);
+  }, 60_000);
+
   test("a clip outside any recording fails without retries", async () => {
     const id = await createClip(100_000, 5);
     const clip = await waitForClip(id);
@@ -799,6 +914,62 @@ async function expectEvidenceOpens(t0: ModerationT0Job): Promise<void> {
   expect(luma?.pdqQuality).toBeGreaterThanOrEqual(50);
 }
 
+/** Moderation that passes everything: these tests are about placement, not scanning. */
+const passingModeration = {
+  broadcastTainted: async () => false,
+  sampleSeconds: async () => 2,
+  scanVideoFile: async () => ({ hit: null, frames: 1 }),
+  prepublishFrames: () => {},
+  checkImage: async () => ({ frame: null, pdq: null, match: null }),
+} as never;
+
+function stubDeps(storage: MediaStorage = media.ctx.storage): Parameters<typeof finalizeVod>[0] {
+  return {
+    db: tdb.db,
+    storage,
+    bucket: BUCKET,
+    moderation: passingModeration,
+    ffmpeg: "ffmpeg",
+    imageFormat: "webp",
+    workDir,
+    logger,
+  };
+}
+
+type MediaStorage = MediaService["ctx"]["storage"];
+
+/** The service's storage with some operations wrapped (the wrapper gets the real storage first). */
+function hooked(overrides: {
+  copy?: (target: MediaStorage, bucket: string, from: string, to: string) => Promise<void>;
+}): MediaStorage {
+  return new Proxy(media.ctx.storage, {
+    get(target, property) {
+      if (property === "copy" && overrides.copy) {
+        const copy = overrides.copy;
+        return (bucket: string, from: string, to: string) => copy(target, bucket, from, to);
+      }
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+async function keysUnder(prefix: string): Promise<string[]> {
+  const keys: string[] = [];
+  for await (const o of media.ctx.storage.list(BUCKET, prefix)) keys.push(o.key);
+  return keys;
+}
+
+/**
+ * A public pattern VOD whose finalize job is parked (delayed an hour under its job id), so the
+ * service's stale-VOD reconcile leaves it to the test's own `finalizeVod` call.
+ */
+async function parkedPatternVod(): Promise<{ vodId: string; broadcastId: string }> {
+  const id = uuidv7();
+  await finalizeQueue.add("finalize", { vodId: id }, { jobId: id, delay: 3_600_000 });
+  return uploadPatternVod(id);
+}
+
 /** A VOD of the synthetic T0 pattern, recorded as fMP4 HLS and uploaded like the recorder does. */
 /** The barrier, or a clear failure if finalizeVod finished without reaching it (no 60 s hang). */
 async function barrierOrResult(barrier: Promise<void>, finalizing: Promise<string>): Promise<void> {
@@ -819,9 +990,8 @@ async function barrierOrResult(barrier: Promise<void>, finalizing: Promise<strin
   ]);
 }
 
-async function uploadPatternVod(): Promise<{ vodId: string; broadcastId: string }> {
+async function uploadPatternVod(id = uuidv7()): Promise<{ vodId: string; broadcastId: string }> {
   const bid = uuidv7();
-  const id = uuidv7();
   const at = new Date(Date.now() - 60_000);
   const dir = mkdtempSync(join(tmpdir(), "media-int-vod-"));
   try {

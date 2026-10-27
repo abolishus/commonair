@@ -201,6 +201,31 @@ describe.skipIf(!storage)("vod-placement", () => {
       expect(await placeVod(c, id)).toMatchObject({ outcome: "in_place" });
     });
 
+    test("account deletion during the copy: the copy fails and leaves nothing at the target", async () => {
+      const id = await makeVod({}, "private");
+      let copies = 0;
+      const racing = new Proxy(S3, {
+        get(target, prop) {
+          if (prop === "copy")
+            return async (bucket: string, from: string, to: string) => {
+              // Account deletion (no placement lock) marks the VOD deleted and removes its objects.
+              if (++copies === 2) {
+                await db().update(schema.vods).set({ status: "deleted" }).where(eq(schema.vods.id, id));
+                await target.deletePrefix(MEDIA_BUCKET, vodPrefix(id, "private"));
+              }
+              return target.copy(bucket, from, to);
+            };
+          const v = Reflect.get(target, prop);
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+      });
+      await expect(placeVod({ ...ctx(), storage: racing }, id)).rejects.toThrow(/copy|verified/);
+      expect(await list(vodPrefix(id, "public"))).toEqual([]);
+      expect(await list(vodPrefix(id, "private"))).toEqual([]);
+      // The retry leaves the deleted VOD alone.
+      expect(await placeVod(ctx(), id)).toEqual({ outcome: "left", objects: 0 });
+    });
+
     test("leave: NCII-hidden, DMCA-hidden (until restored) and deleted VODs are not moved", async () => {
       const ncii = await makeVod({ visibility: "subscribers" }, "public");
       const [req] = await db()
@@ -216,15 +241,13 @@ describe.skipIf(!storage)("vod-placement", () => {
           deadlineAt: new Date(0),
         })
         .returning();
-      await db()
-        .insert(schema.nciiRequestItems)
-        .values({
-          requestId: req!.id,
-          url: "https://example.test/x",
-          subjectType: "vod",
-          subjectId: ncii,
-          hiddenAt: new Date(),
-        });
+      await db().insert(schema.nciiRequestItems).values({
+        requestId: req!.id,
+        url: "https://example.test/x",
+        subjectType: "vod",
+        subjectId: ncii,
+        hiddenAt: new Date(),
+      });
 
       const dmca = await makeVod({ removedReason: "dmca" }, "public");
       const [notice] = await db()

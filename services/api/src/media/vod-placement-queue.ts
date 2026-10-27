@@ -71,11 +71,35 @@ export async function closeVodPlacementQueue(deps: Deps): Promise<void> {
   await q?.close();
 }
 
-/** Enqueue after commit; never throws (the sweep is the fallback). Logs the VOD id only. */
-export async function requestVodPlacement(deps: Deps, vodId: string): Promise<void> {
+/**
+ * How long a request waits for the enqueue. The producer's connection queues commands while
+ * Valkey is unreachable (BullMQ needs `maxRetriesPerRequest: null`), so an outage would otherwise
+ * hold the already committed request open until Valkey came back.
+ */
+export const VOD_PLACEMENT_ENQUEUE_TIMEOUT_MS = 2_000;
+
+/**
+ * Enqueue after commit; never throws and never waits longer than `timeoutMs` (the sweep is the
+ * fallback; an enqueue still pending then may land later, deduplicated). Logs the VOD id only.
+ */
+export async function requestVodPlacement(
+  deps: Deps,
+  vodId: string,
+  timeoutMs = VOD_PLACEMENT_ENQUEUE_TIMEOUT_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), timeoutMs);
+  });
   try {
-    await vodPlacementQueue(deps).enqueue(vodId);
+    const enqueue = vodPlacementQueue(deps).enqueue(vodId);
+    // A late failure after the timeout has nothing left to tell.
+    enqueue.catch(() => {});
+    const r = await Promise.race([enqueue, timedOut]);
+    if (r === "timeout") deps.logger.warn("vod-placement enqueue timed out; the sweep will move it", { vodId });
   } catch {
     deps.logger.warn("vod-placement enqueue failed; the sweep will move it", { vodId });
+  } finally {
+    clearTimeout(timer);
   }
 }

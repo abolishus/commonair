@@ -11,9 +11,14 @@
  *
  * Placement (ADR 0009 amendment 1): the recording lives under the private `recordings/<id>/`.
  * Once the scan passes, the VOD's placement as it will be once ready decides where it ends up: a
- * public VOD is copied to `vods/<id>/` before the `ready` transaction (which also switches
- * `storage_prefix`), and the private copy is deleted after commit; anything else stays private. A
- * crash between copy and commit leaves both copies; the rerun finishes the move.
+ * public VOD is copied to `vods/<id>/` before the `ready` transaction, which also switches
+ * `storage_prefix` and deletes the private copy before it commits; anything else stays private.
+ *
+ * The source is deleted before commit, not after: until then the VOD is `processing`, which the
+ * worker's `vod-placement` never touches, whereas after commit a placement move could copy back
+ * into those very keys while a late delete removed them. The cost is a crash between that delete
+ * and commit, which the rerun recovers from the verified copy (`locatePlaylist`); the source's
+ * playlist goes first, so a partly deleted source is never read as a recording.
  */
 
 import { rm } from "node:fs/promises";
@@ -160,11 +165,12 @@ export async function finalizeVod(
     return current?.status === "deleted" ? "removed" : "skipped";
   }
 
-  const prefix = vod.storagePrefix;
   // Only the VOD's own prefixes are ever read, copied or deleted here.
-  if (!isVodOwnPrefix(vodId, prefix)) throw new Error("unexpected VOD storage prefix; not finalizing");
-  const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
-  const segments = res ? parsePlaylist(await res.text()).segments : [];
+  if (!isVodOwnPrefix(vodId, vod.storagePrefix)) throw new Error("unexpected VOD storage prefix; not finalizing");
+  const found = await locatePlaylist(storage, bucket, vodId, vod.storagePrefix);
+  // Where the recording is read from: the row's prefix, or the copy a crashed run left.
+  const prefix = found?.prefix ?? vod.storagePrefix;
+  const segments = found ? parsePlaylist(await found.res.text()).segments : [];
   if (segments.length === 0) {
     log.warn("VOD has no segments; marking failed");
     const failed = await db
@@ -236,11 +242,15 @@ export async function finalizeVod(
   }
   const state = await placementOnceReady(db, vodId);
   const placement = state ? vodPlacement(state) : "private";
-  // `leave`: another flow (NCII, DMCA) owns the keys; the objects stay where they are.
-  const target = placement === "leave" ? prefix : vodPrefix(vodId, placement);
+  // `leave`: another flow (NCII, DMCA) owns the keys and has moved or is moving the objects into
+  // its hidden area. Nothing new is written beside them (a fresh thumbnail would be a frame of the
+  // hidden content outside that area); the VOD is only marked ready, and stays hidden.
+  const leave = placement === "leave";
+  const target = leave ? prefix : vodPrefix(vodId, placement);
   const moving = target !== prefix;
   // Copy (never delete) before `ready`: a ready VOD never points at missing objects.
-  if (moving) await moveVodObjects(storage, bucket, prefix, target);
+  if (moving) await copyOrDiscard(deps, vodId, prefix, target, log);
+  if (leave) thumbnail = null;
   const thumbnailKey = thumbnail ? `${target}thumbnail.${imageExt(deps.imageFormat)}` : null;
   const size = await db.transaction(async (tx) => {
     const [current] = await tx
@@ -252,12 +262,20 @@ export async function finalizeVod(
     // Keep T0 cleanup serialized with publication through the ready transition. If cleanup
     // committed first, no final objects are written; if this transaction wins, cleanup runs
     // afterwards and removes the completed public media.
-    await storage.put(bucket, target + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
-      contentType: "application/vnd.apple.mpegurl",
-      cacheControl: "public, max-age=3600",
-    });
+    if (!leave)
+      await storage.put(bucket, target + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
+        contentType: "application/vnd.apple.mpegurl",
+        cacheControl: "public, max-age=3600",
+      });
     if (thumbnail && thumbnailKey)
       await storage.put(bucket, thumbnailKey, thumbnail, { contentType: imageType(deps.imageFormat) });
+    // Everything at the VOD's other own prefix goes while the row is still locked in `processing`
+    // (see the header): the moved source, or what a crashed run left behind. Playlist first.
+    if (!leave) {
+      const other = otherOwnPrefix(vodId, target);
+      await storage.delete(bucket, other + VOD_PLAYLIST);
+      await storage.deletePrefix(bucket, other);
+    }
     let totalSize = 0;
     for await (const obj of storage.list(bucket, target)) totalSize += obj.size;
     const changed = await tx
@@ -278,26 +296,64 @@ export async function finalizeVod(
     // Not ours to publish any more: removed meanwhile (T0, NCII), or a concurrent run of this job
     // already published it. The copies made here go only when the row does not point at them
     // (the source is intact; T0 evidence lists both prefixes).
-    if (moving) {
-      const [current] = await db
-        .select({ prefix: schema.vods.storagePrefix })
-        .from(schema.vods)
-        .where(eq(schema.vods.id, vodId));
-      if (current && current.prefix !== target) await deleteQuietly(deps, target, log);
-    }
+    if (moving) await discardUnlessCurrent(deps, vodId, target, log);
     return "removed";
   }
-  if (moving) await deleteQuietly(deps, prefix, log);
   log.info("VOD ready", { segments: segments.length, sizeBytes: size, placement });
   return "ready";
 }
 
-/** Delete a VOD prefix after the database no longer points at it; a failure is logged, never thrown. */
-async function deleteQuietly(deps: FinalizeDeps, prefix: string, log: Logger): Promise<void> {
+const otherOwnPrefix = (vodId: string, prefix: string): string =>
+  vodPrefix(vodId, prefix === vodPrefix(vodId, "public") ? "private" : "public");
+
+/**
+ * The recording's playlist under the row's prefix or, when it is gone there, under the VOD's other
+ * own prefix: a run that crashed after deleting the source and before commit left a verified
+ * copy there. Null when neither has one.
+ */
+async function locatePlaylist(
+  storage: ObjectStorage,
+  bucket: string,
+  vodId: string,
+  rowPrefix: string,
+): Promise<{ prefix: string; res: Response } | null> {
+  for (const prefix of [rowPrefix, otherOwnPrefix(vodId, rowPrefix)]) {
+    const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
+    if (res) return { prefix, res };
+  }
+  return null;
+}
+
+/**
+ * Copy the recording to `target`. A copy that fails partway (a source object deleted by a T0 or an
+ * account deletion meanwhile, a verification mismatch) leaves no partial copy behind unless the
+ * row points at `target`: a removed VOD is never finalized again, so nothing else would delete it.
+ */
+async function copyOrDiscard(
+  deps: FinalizeDeps,
+  vodId: string,
+  from: string,
+  target: string,
+  log: Logger,
+): Promise<void> {
   try {
-    await deps.storage.deletePrefix(deps.bucket, prefix);
+    await moveVodObjects(deps.storage, deps.bucket, from, target);
   } catch (err) {
-    log.error("could not delete the VOD's previous prefix", { error: errorCategory(err) });
+    await discardUnlessCurrent(deps, vodId, target, log);
+    throw err;
+  }
+}
+
+/** Delete the copies at `target` unless the row points at them; a failure is logged, never thrown. */
+async function discardUnlessCurrent(deps: FinalizeDeps, vodId: string, target: string, log: Logger): Promise<void> {
+  try {
+    const [current] = await deps.db
+      .select({ prefix: schema.vods.storagePrefix })
+      .from(schema.vods)
+      .where(eq(schema.vods.id, vodId));
+    if (current?.prefix !== target) await deps.storage.deletePrefix(deps.bucket, target);
+  } catch (err) {
+    log.error("could not delete the VOD's discarded copies", { error: errorCategory(err) });
   }
 }
 

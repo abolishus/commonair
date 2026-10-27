@@ -158,7 +158,17 @@ async function move(
   const storage = ctx.storage;
   if (!storage) return { outcome: "no_storage", objects: 0 };
   const from = row.storagePrefix;
-  const { copied, bytes } = await moveVodObjects(storage, ctx.mediaBucket, from, to);
+  let moved: { copied: number; bytes: number };
+  try {
+    moved = await moveVodObjects(storage, ctx.mediaBucket, from, to);
+  } catch (err) {
+    // A copy that fails partway (a source deleted meanwhile by account deletion or a T0, which do
+    // not take this lock; a verification mismatch) leaves no partial copy behind: once the VOD is
+    // deleted, placement leaves it and nothing else would ever delete those copies.
+    await discardUnlessCurrent(ctx, vodId, to);
+    throw err;
+  }
+  const { copied, bytes } = moved;
   const committed = await ctx.db.transaction(async (tx) => {
     await tx.select({ id: vods.id }).from(vods).where(eq(vods.id, vodId)).for("update");
     const now = await loadPlacement(tx, vodId);
@@ -175,14 +185,21 @@ async function move(
   });
   if (!committed) {
     // The source is intact; the copies go unless the row points at them now.
-    const now = await loadPlacement(ctx.db, vodId);
-    if (now && now.storagePrefix !== to) await storage.deletePrefix(ctx.mediaBucket, to);
+    await discardUnlessCurrent(ctx, vodId, to);
     log.info("vod-placement: state changed during the copy; not moved");
     return { outcome: "raced", objects: 0 };
   }
   await storage.deletePrefix(ctx.mediaBucket, from);
   log.info("vod-placement: moved", { placement, objects: copied, bytes });
   return { outcome: "moved", objects: copied };
+}
+
+/** Delete the copies under `to` unless the VOD's row points at them (or the row is gone). */
+async function discardUnlessCurrent(ctx: WorkerContext, vodId: string, to: string): Promise<void> {
+  const storage = ctx.storage;
+  if (!storage) return;
+  const [now] = await ctx.db.select({ prefix: vods.storagePrefix }).from(vods).where(eq(vods.id, vodId));
+  if (now?.prefix !== to) await storage.deletePrefix(ctx.mediaBucket, to);
 }
 
 /**
