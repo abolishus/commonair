@@ -717,7 +717,8 @@ describe("/settings/privacy", () => {
     await waitFor(() => expect(ids("export-row")).toHaveLength(2));
     expect(ids("export-row").map((row) => row.getAttribute("data-status"))).toEqual(["queued", "running"]);
     expect(ids("export-download")).toHaveLength(0);
-    expect(poll.periods()).toEqual([5_000]);
+    // The poll starts in an effect after the rows render; under load that is a tick later.
+    await waitFor(() => expect(poll.periods()).toEqual([5_000]));
     expect(fns.exportsList).toHaveBeenCalledTimes(1);
     await poll.tick();
     await waitFor(() =>
