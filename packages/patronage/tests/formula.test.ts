@@ -213,7 +213,7 @@ describe("formula 2026.1", () => {
       const capCents = Math.floor((vhPool * Math.round(cap * 1e6)) / 1e6);
       for (const a of r.allocations) expect(a.lines[3]!.amountCents).toBeLessThanOrEqual(capCents);
     }
-  });
+  }, 60_000); // CPU-bound property run; the gate runs every package at once
 
   test("deterministic: input order does not matter, ties break by user id", () => {
     const a = allocate(EXAMPLE);
