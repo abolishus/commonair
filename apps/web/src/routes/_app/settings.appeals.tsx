@@ -6,6 +6,7 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
 import { MyAppeals } from "../../components/safety/appeals.tsx";
+import { EnforcementSection } from "../../components/safety/enforcement.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
@@ -22,6 +23,8 @@ function AppealsPage(): React.JSX.Element {
   return (
     <PageContainer data-testid="appeals" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("safety.appeals.title")} description={t("safety.appeals.intro")} />
+      {/* Statements of reasons (ADR 0019) above the appeals they lead to. */}
+      <EnforcementSection />
       <MyAppeals />
     </PageContainer>
   );

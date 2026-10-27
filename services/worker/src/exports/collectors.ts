@@ -253,6 +253,37 @@ const channelBanFields = {
   createdAt: s.modActions.createdAt,
 };
 
+/**
+ * Statements of reasons about the user (ADR 0019 decision 6, w0-selectors "Data export"): the
+ * stored decision 4 columns only. No moderator note (joined on read, never stored), no reversal
+ * (computed on read), no delivery rows.
+ */
+const enforcementStatementFields = {
+  id: s.enforcementStatements.id,
+  sourceAuditId: s.enforcementStatements.sourceAuditId,
+  sourceAction: s.enforcementStatements.sourceAction,
+  channelId: s.enforcementStatements.channelId,
+  contentType: s.enforcementStatements.contentType,
+  contentId: s.enforcementStatements.contentId,
+  restrictionKind: s.enforcementStatements.restrictionKind,
+  restrictionDetail: s.enforcementStatements.restrictionDetail,
+  restrictionEndsAt: s.enforcementStatements.restrictionEndsAt,
+  territorialScope: s.enforcementStatements.territorialScope,
+  facts: s.enforcementStatements.facts,
+  source: s.enforcementStatements.source,
+  automatedDetection: s.enforcementStatements.automatedDetection,
+  automatedDecision: s.enforcementStatements.automatedDecision,
+  groundKind: s.enforcementStatements.groundKind,
+  clauseId: s.enforcementStatements.clauseId,
+  clauseVersion: s.enforcementStatements.clauseVersion,
+  legalBasis: s.enforcementStatements.legalBasis,
+  guidelinesDocumentId: s.enforcementStatements.guidelinesDocumentId,
+  noticeDocumentId: s.enforcementStatements.noticeDocumentId,
+  appealSubjectType: s.enforcementStatements.appealSubjectType,
+  appealSubjectId: s.enforcementStatements.appealSubjectId,
+  createdAt: s.enforcementStatements.createdAt,
+};
+
 const notificationFields = {
   type: s.notifications.type,
   readAt: s.notifications.readAt,
@@ -689,6 +720,21 @@ export const EXPORT_FILES: readonly ExportFile[] = [
             .innerJoin(s.channels, eq(s.channels.id, s.modActions.channelId))
             .where(and(eq(s.modActions.targetUserId, userId), eq(s.modActions.scope, "channel")))
             .orderBy(asc(s.modActions.createdAt)),
+      },
+    },
+  },
+  {
+    name: "enforcement_statements.json",
+    kind: "account",
+    sections: {
+      enforcement_statements: {
+        fields: enforcementStatementFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(enforcementStatementFields)
+            .from(s.enforcementStatements)
+            .where(eq(s.enforcementStatements.recipientUserId, userId))
+            .orderBy(asc(s.enforcementStatements.createdAt), asc(s.enforcementStatements.id)),
       },
     },
   },

@@ -7,7 +7,7 @@
  */
 import { loadEnv, mailEnv } from "@commonair/config";
 import { EXPORT_TTL_SECONDS, exportObjectKey } from "@commonair/contracts/internal";
-import { schema, uuidv7 } from "@commonair/db";
+import { schema, seedLegalDocuments, uuidv7 } from "@commonair/db";
 import { createMailer, MemoryMailer } from "@commonair/email";
 import type { ObjectStorage } from "@commonair/storage";
 import { encryptSecret, randomSecret, sha256Hex } from "@commonair/tokens";
@@ -134,6 +134,55 @@ describe.skipIf(!storage)("data export", () => {
     return out;
   }
 
+  /** An audit row and the statement of reasons it produced (a T1 restriction on the user's channel). */
+  async function seedStatement(userId: string, channelId: string): Promise<string> {
+    await seedLegalDocuments(db());
+    const docs = await db()
+      .select({ id: schema.legalDocuments.id, kind: schema.legalDocuments.kind })
+      .from(schema.legalDocuments);
+    const docId = (kind: string) => docs.find((d) => d.kind === kind)?.id ?? "";
+    const auditId = uuidv7();
+    const caseId = uuidv7();
+    const at = new Date();
+    await db().insert(schema.auditLog).values({
+      id: auditId,
+      actorType: "system",
+      action: "moderation.t1.restrict",
+      subjectType: "moderation_case",
+      subjectId: caseId,
+      channelId,
+      details: { caseId },
+      createdAt: at,
+    });
+    const id = uuidv7();
+    await db()
+      .insert(schema.enforcementStatements)
+      .values({
+        id,
+        sourceAuditId: auditId,
+        sourceAction: "moderation.t1.restrict",
+        recipientUserId: userId,
+        channelId,
+        contentType: "broadcast",
+        contentId: uuidv7(),
+        restrictionKind: "visibility",
+        restrictionDetail: "restricted",
+        facts: { code: "classifier", category: "weapons", tier: "t1", threshold: 0.95, capturedAt: at.toISOString() },
+        source: "own_initiative",
+        automatedDetection: true,
+        automatedDecision: "fully",
+        groundKind: "terms",
+        clauseId: "safety.weapons",
+        clauseVersion: 1,
+        guidelinesDocumentId: docId("guidelines"),
+        noticeDocumentId: docId("enforcement_notice"),
+        appealSubjectType: "moderation_case",
+        appealSubjectId: caseId,
+        createdAt: at,
+      });
+    return id;
+  }
+
   async function requestExport(userId: string, kind: "account" | "channel") {
     const id = uuidv7();
     await env.t.app.db.insert(schema.dataExports).values({ id, userId, kind });
@@ -225,6 +274,9 @@ describe.skipIf(!storage)("data export", () => {
         ipAddress: "198.51.100.9",
       });
     const secrets = [...(await seedSecrets(U.user.id, U.channel.id)), ...(await seedSecrets(V.user.id, V.channel.id))];
+    // A statement of reasons about U and one about V (W0-sor): U's archive holds U's only.
+    const uStatement = await seedStatement(U.user.id, U.channel.id);
+    await seedStatement(V.user.id, V.channel.id);
 
     const accountId = await requestExport(U.user.id, "account");
     const channelId = await requestExport(U.user.id, "channel");
@@ -252,11 +304,24 @@ describe.skipIf(!storage)("data export", () => {
       "chat.json",
       "coop.json",
       "safety.json",
+      "enforcement_statements.json",
       "notifications.json",
       "consents.json",
       "developer.json",
     ];
     expect(Object.keys(acc.files).sort()).toEqual([...accountFiles, MANIFEST].sort());
+    expect(acc.json("enforcement_statements.json")).toEqual([
+      expect.objectContaining({
+        id: uStatement,
+        sourceAction: "moderation.t1.restrict",
+        restrictionKind: "visibility",
+        restrictionDetail: "restricted",
+        clauseId: "safety.weapons",
+        clauseVersion: 1,
+        appealSubjectType: "moderation_case",
+      }),
+    ]);
+    expect(Object.keys((acc.json("enforcement_statements.json") as object[])[0] ?? {})).not.toContain("moderatorNote");
     expect(acc.json(MANIFEST)).toMatchObject({ kind: "account", exportId: accountId, userId: U.user.id });
     expect((acc.json(MANIFEST) as { files: { name: string }[] }).files.map((f) => f.name)).toEqual(accountFiles);
     expect(acc.json("account.json")).toMatchObject({

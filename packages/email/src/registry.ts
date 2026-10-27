@@ -14,6 +14,7 @@ import {
   dmcaCounterNoticeForwarded,
   dmcaNoticeDecided,
   dmcaNoticeReceived,
+  enforcementStatement,
 } from "./templates/trust.tsx";
 
 /** Every email the platform sends, by id. The catalog has one message block per id. */
@@ -38,6 +39,7 @@ export const templates = {
   dmcaCounterNoticeForwarded,
   contentRestored,
   appealDecided,
+  enforcementStatement,
 } satisfies {
   [K in TemplateId]: Omit<TemplateDefinition<never, EmailCatalog[K]>, "links"> & { links: readonly string[] };
 };

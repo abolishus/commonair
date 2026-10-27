@@ -322,6 +322,73 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`enforcementStatement > renders accessible HTML and a plain-text alternative 1`] = `
+"Statement of reasons: Your stream was limited while a moderator reviews it
+
+Example Air https://air.example.test
+
+
+Statement of reasons
+
+The wording of this statement comes from a draft notice that has not been reviewed by a lawyer yet. It may change.
+
+On October 18, 2026 at 2:30 PM UTC we took an action about your stream. This statement says what we did, why, and how you can challenge it.
+
+Reference
+
+SR-3F9A21C7
+
+What we restricted
+
+Your stream was limited while a moderator reviews it
+
+Until
+
+No end date: it stays in place until it is lifted
+
+Where
+
+Everywhere Example Air is available
+
+What led to it
+
+Automated checks found weapons in content captured on October 18, 2026 at 2:30 PM UTC, at or above the threshold of 95% set for automatic action.
+
+How it came to our attention
+
+Our own checks or moderators
+
+Automated means
+
+Software detected it. Software made the decision, without a person.
+
+Rule or law relied on
+
+Our community guidelines: Dangerous weapons (safety.weapons@1)
+
+What the rule says
+
+Content that shows weapons in a way that threatens people or puts them at serious risk is not allowed.
+
+How to challenge this decision
+
+You can appeal on your appeals page, also while your account is suspended.
+
+If you think we got it wrong, you can appeal from your account's appeals page.
+
+You can also take the dispute to an out-of-court dispute settlement body where one is available to you, or to the courts.
+
+Open your appeals page https://air.example.test/settings/appeals
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
 exports[`governanceResultPublished > renders accessible HTML and a plain-text alternative 1`] = `
 "Vote result: Raise the creator share to 85%
 
