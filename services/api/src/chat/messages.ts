@@ -6,7 +6,7 @@
  * the author's channel roles, subscriptions and platform role, and the quoted reply (blank once
  * the quoted message was deleted).
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { dto } from "@commonair/contracts";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
@@ -15,6 +15,20 @@ import { iso } from "../lib/dto.ts";
 const { chatMessages, channelRoles, users, subscriptions } = schema;
 type ChannelRow = typeof schema.channels.$inferSelect;
 type Badge = dto.ChatMessage["user"]["badges"][number];
+
+/** Mirrors services/chat `CHAT_COLOR_COUNT` and `colorFor` (a test pins them equal). */
+export const CHAT_COLOR_COUNT = 12;
+
+/** The design-token name color chat gives `userId` on live messages ("chat-1" … "chat-12"). */
+export function nameColor(userId: string): string {
+  // FNV-1a (32-bit), as chat computes it, so history and released messages match live ones.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < userId.length; i++) {
+    h ^= userId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `chat-${((h >>> 0) % CHAT_COLOR_COUNT) + 1}`;
+}
 
 export type MessageRow = { m: typeof chatMessages.$inferSelect; u: typeof users.$inferSelect };
 
@@ -70,7 +84,7 @@ export function messageDto(
       id: u.id,
       username: u.username,
       displayName: u.name,
-      color: null,
+      color: nameColor(u.id),
       badges,
       accountType: u.accountType,
     },
@@ -99,7 +113,8 @@ export async function messageDtos(
         })
         .from(chatMessages)
         .innerJoin(users, eq(users.id, chatMessages.userId))
-        .where(inArray(chatMessages.id, replyIds))
+        // A held quote is treated as missing, as chat's own reply lookup does: viewers never saw it.
+        .where(and(inArray(chatMessages.id, replyIds), isNull(chatMessages.heldAt)))
     : [];
   const replyBy = new Map(replies.map((r) => [r.id, r]));
   const badges = await badgesFor(

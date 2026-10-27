@@ -287,8 +287,26 @@ describe("held messages", () => {
       .from(schema.auditLog)
       .where(and(eq(schema.auditLog.subjectId, id), eq(schema.auditLog.action, "chat.held.deny")));
     expect(audits).toHaveLength(1);
+    expect(audits[0]?.details).toEqual({ modActionId: action?.id, authorId: troll.userId });
     const list = await mod.client.call<{ id: string }[]>("GET", path(streamer.username, "/chat/held"));
     expect(list.body.some((m) => m.id === id)).toBe(false);
+  });
+
+  test("allowing a banned or timed-out author's message is 403 and leaves it held", async () => {
+    const id = await held("banned author");
+    // Straight into the table: chat never hears of it, so only the API's check is exercised.
+    const [ban] = await db()
+      .insert(schema.chatBans)
+      .values({ channelId, userId: troll.userId, expiresAt: new Date(Date.now() + 600_000) })
+      .returning();
+    try {
+      expect((await resolve(mod, id, true)).status).toBe(403);
+      expect((await heldRow(id)).heldAt).not.toBeNull();
+      // Denying still works.
+      expect((await resolve(mod, id, false)).status).toBe(200);
+    } finally {
+      if (ban) await db().update(schema.chatBans).set({ liftedAt: new Date() }).where(eq(schema.chatBans.id, ban.id));
+    }
   });
 
   test("resolving twice is 409; another channel's or an unknown id is 404", async () => {

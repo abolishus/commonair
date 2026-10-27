@@ -108,10 +108,30 @@ describe("heldReducer", () => {
     expect(heldReducer(s, { type: "remove", id: UUID(1) })).toBe(s);
     s = heldReducer(s, { type: "restore", message: msg(1) });
     expect(s.items.map((m) => m.id)).toEqual([UUID(1), UUID(2)]);
-    // Unknown ids (an ordinary message, a delete of a visible one) are remembered harmlessly.
-    expect(heldReducer(s, { type: "remove", id: UUID(77) }).items).toHaveLength(2);
+    // Unknown ids (an ordinary message, a delete of a visible one) leave the state untouched.
+    expect(heldReducer(s, { type: "remove", id: UUID(77) })).toBe(s);
     expect(heldReducer(s, { type: "reset" })).toBe(EMPTY_HELD);
     expect(heldReducer(EMPTY_HELD, { type: "reset" })).toBe(EMPTY_HELD);
+  });
+
+  it("ordinary message ids are not remembered, so gone stays bounded by the queue", () => {
+    let s = heldReducer(EMPTY_HELD, { type: "held", message: msg(1) });
+    for (let n = 100; n < 600; n++) {
+      const next = heldReducer(s, { type: "remove", id: UUID(n) });
+      expect(next).toBe(s);
+      s = next;
+    }
+    expect(s.gone.size).toBe(0);
+  });
+
+  it("a ban drops the author's queued messages and keeps them out of later lists", () => {
+    const other = msg(3, { user: { ...msg(1).user, id: UUID(901) } });
+    let s = heldReducer(EMPTY_HELD, { type: "loaded", messages: [msg(1), msg(2), other] });
+    s = heldReducer(s, { type: "removeUser", userId: UUID(501) });
+    expect(s.items.map((m) => m.id)).toEqual([UUID(2), UUID(3)]);
+    s = heldReducer(s, { type: "loaded", messages: [msg(1)] });
+    expect(s.items.map((m) => m.id)).toEqual([UUID(2), UUID(3)]);
+    expect(heldReducer(s, { type: "removeUser", userId: UUID(4242) })).toBe(s);
   });
 });
 

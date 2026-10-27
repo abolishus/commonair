@@ -5,8 +5,8 @@
  * The moderator's held-message queue, merged from two sources by message id: `chat.held.list`
  * (loaded when the queue opens) and live `{op:"message", held:true}` frames. A message leaves the
  * queue when a moderator resolves it here (optimistically, put back if the call fails), when it
- * comes back as an ordinary message (someone allowed it) or when a `delete` frame drops it.
- * Ids resolved here stay suppressed so a list that was in flight cannot bring them back. Pure.
+ * comes back as an ordinary message (someone allowed it), when a `delete` frame drops it or when
+ * its author is banned. Ids removed from the queue stay suppressed so a list that was in flight cannot bring them back. Pure.
  */
 import type { ChatMessageFrame } from "../../chat/connection.ts";
 
@@ -19,7 +19,10 @@ export interface HeldState {
 export type HeldAction =
   | { type: "loaded"; messages: readonly ChatMessageFrame[] }
   | { type: "held"; message: ChatMessageFrame }
+  /** Drop `id` if it is queued (frames for ordinary messages arrive here too and are ignored). */
   | { type: "remove"; id: string }
+  /** The author was banned or timed out: drop their queued messages. */
+  | { type: "removeUser"; userId: string }
   | { type: "restore"; message: ChatMessageFrame }
   /** Another channel (or a new connection): start over. */
   | { type: "reset" };
@@ -43,9 +46,17 @@ export function heldReducer(state: HeldState, action: HeldAction): HeldState {
     case "held":
       return merge(state, [action.message]);
     case "remove": {
-      if (state.gone.has(action.id) && !state.items.some((m) => m.id === action.id)) return state;
+      // Only queued ids are remembered, so `gone` grows with the queue, not with the chat.
+      if (!state.items.some((m) => m.id === action.id)) return state;
       const gone = new Set(state.gone).add(action.id);
       return { items: state.items.filter((m) => m.id !== action.id), gone };
+    }
+    case "removeUser": {
+      const drop = state.items.filter((m) => m.user.id === action.userId);
+      if (drop.length === 0) return state;
+      const gone = new Set(state.gone);
+      for (const m of drop) gone.add(m.id);
+      return { items: state.items.filter((m) => m.user.id !== action.userId), gone };
     }
     case "restore": {
       const gone = new Set(state.gone);

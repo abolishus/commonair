@@ -13,7 +13,7 @@ import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { schema, type Executor } from "@commonair/db";
 import { listHeld, resolveHeld } from "../chat/held.ts";
 import { messageDtos } from "../chat/messages.ts";
-import { outcomeError, relayToChat, type RelayRequest } from "../chat/relay.ts";
+import { outcomeError, relayToChat, unavailable, type RelayRequest } from "../chat/relay.ts";
 import { chatTokenFor } from "../chat/token.ts";
 import type { Deps } from "../deps.ts";
 import type { Caller } from "../lib/access.ts";
@@ -169,8 +169,12 @@ export const chat = {
       args: [input.id],
     });
     if (o.type === "notice" && o.code === "cmd_success") return { ok: true as const };
-    // Chat answers an unknown, foreign-channel or already deleted id with msg_rejected.
-    if (o.type === "notice" && o.code === "msg_rejected") throw notFound("Message not found");
+    // Chat answers an unknown, foreign-channel or already deleted id with msg_rejected, but also a
+    // command that threw. A live row means the latter: retryable, not gone.
+    if (o.type === "notice" && o.code === "msg_rejected") {
+      if (await liveMessageExists(context.deps, c.id, input.id)) throw unavailable();
+      throw notFound("Message not found");
+    }
     throw o.type === "ack" ? new Error("chat acked a command") : outcomeError(o);
   }),
 
@@ -540,6 +544,16 @@ export const chat = {
     return { token, url: deps.env.CHAT_PUBLIC_URL, expiresAt: iso(new Date(exp * 1000)) };
   }),
 };
+
+/** Whether `id` is a stored, undeleted message of `channelId` (one primary-key lookup). */
+async function liveMessageExists(deps: Pick<Deps, "db">, channelId: string, id: string): Promise<boolean> {
+  const [row] = await deps.db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(and(eq(chatMessages.id, id), eq(chatMessages.channelId, channelId), isNull(chatMessages.deletedAt)))
+    .limit(1);
+  return row !== undefined;
+}
 
 /** Relay one request to the chat service as `caller`. */
 async function relay(deps: Deps, caller: Caller, request: RelayRequest) {

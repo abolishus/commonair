@@ -7,7 +7,9 @@ import { BUS, BusEvent } from "@commonair/contracts/events";
 import { ChatFanout, chatMessageEventPayload, type ServerFrame } from "@commonair/contracts/chat";
 import type { dto } from "@commonair/contracts";
 import { allowFanout, denyFanout, releasedEvent } from "../src/chat/held.ts";
-import { messageDto, type MessageRow } from "../src/chat/messages.ts";
+import { CHAT_COLOR_COUNT, messageDto, nameColor, type MessageRow } from "../src/chat/messages.ts";
+// Test-only reach into chat: the API mirrors its name color and must not drift.
+import { CHAT_COLOR_COUNT as CHAT_SERVICE_COLOR_COUNT, colorFor } from "../../chat/src/badges.ts";
 import {
   noticeError,
   outcomeError,
@@ -277,7 +279,7 @@ describe("held DTO", () => {
         id: "0192f000-0000-7000-8000-000000000003",
         username: "troll",
         displayName: "Troll",
-        color: null,
+        color: colorFor("0192f000-0000-7000-8000-000000000003"),
         badges: [{ type: "subscriber", tier: 2 }],
         accountType: "human",
       },
@@ -288,6 +290,17 @@ describe("held DTO", () => {
       createdAt: "2026-10-27T10:00:00.000Z",
     });
     expect(messageDto(row(), [], undefined).replyTo).toBeNull();
+  });
+});
+
+describe("name color", () => {
+  test("matches chat's colorFor, so released and history messages look like live ones", () => {
+    expect(CHAT_COLOR_COUNT).toBe(CHAT_SERVICE_COLOR_COUNT);
+    for (let n = 0; n < 200; n++) {
+      const id = `0192f000-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
+      expect(nameColor(id)).toBe(colorFor(id));
+    }
+    expect(nameColor("")).toBe(colorFor(""));
   });
 });
 

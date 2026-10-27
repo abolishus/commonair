@@ -137,11 +137,7 @@ export function HeldQueue({
         <HugeiconsIcon icon={MessageLock01Icon} strokeWidth={2} aria-hidden />
         <span aria-hidden>{count}</span>
       </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        data-testid="held-queue"
-        className="max-h-96 overflow-y-auto"
-      >
+      <PopoverContent align="end" data-testid="held-queue" className="max-h-96 overflow-y-auto">
         <PopoverHeader>
           <PopoverTitle>{t("held.title")}</PopoverTitle>
           <PopoverDescription>{t("held.description")}</PopoverDescription>

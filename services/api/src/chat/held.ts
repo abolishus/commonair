@@ -10,6 +10,9 @@
  * everyone on BUS.chat and `channel.chat.message` on BUS.events, built with the shared
  * `chatMessageEventPayload`), so bots and EventSub cannot tell a released message from a live one.
  * Denying sends a `delete` frame to moderators only: viewers never saw the message.
+ *
+ * One difference stays: chat's middleware `onMessage` hooks ran (or not) when the message was
+ * first received; they are not run again on release, because they live in the chat process.
  */
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { BusEvent, dto } from "@commonair/contracts";
@@ -18,10 +21,11 @@ import { BUS } from "@commonair/contracts/events";
 import { schema, uuidv7 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
-import { conflict, notFound } from "../lib/errors.ts";
+import { conflict, forbidden, notFound } from "../lib/errors.ts";
+import { isActiveBan } from "../moderation/chat-bans.ts";
 import { messageDtos } from "./messages.ts";
 
-const { chatMessages, users, modActions } = schema;
+const { chatMessages, chatBans, users, modActions } = schema;
 type ChannelRow = typeof schema.channels.$inferSelect;
 
 /** At most this many held messages are listed (oldest first). */
@@ -93,6 +97,8 @@ export async function resolveHeld(deps: Pick<Deps, "db" | "valkey" | "logger" | 
   const c = i.channel;
   const now = deps.now();
   const row = await deps.db.transaction(async (tx) => {
+    // Set on deny, so the audit row names the mod action as chat's `/delete` does.
+    let modActionId: string | undefined;
     const [found] = await tx
       .select({
         id: chatMessages.id,
@@ -105,14 +111,23 @@ export async function resolveHeld(deps: Pick<Deps, "db" | "valkey" | "logger" | 
       .for("update");
     if (!found) throw notFound("Held message not found");
     if (found.heldAt === null || found.deletedAt !== null) throw conflict("This message was already resolved");
-    if (i.allow) await tx.update(chatMessages).set({ heldAt: null }).where(eq(chatMessages.id, found.id));
-    else {
+    if (i.allow) {
+      // A banned or timed-out author's message stays held: deny it or wait out the timeout.
+      const bans = await tx
+        .select()
+        .from(chatBans)
+        .where(and(eq(chatBans.channelId, c.id), eq(chatBans.userId, found.userId), isNull(chatBans.liftedAt)));
+      if (bans.some((b) => isActiveBan(b, now))) throw forbidden("The author is banned from this channel");
+      await tx.update(chatMessages).set({ heldAt: null }).where(eq(chatMessages.id, found.id));
+    } else {
+      modActionId = uuidv7();
       await tx
         .update(chatMessages)
         .set({ deletedAt: now, deletedBy: i.moderatorId })
         .where(eq(chatMessages.id, found.id));
       // MOD_ACTIONS has no "allow"; a denial is a message deletion like `/delete`.
       await tx.insert(modActions).values({
+        id: modActionId,
         scope: "channel",
         channelId: c.id,
         moderatorId: i.moderatorId,
@@ -129,7 +144,7 @@ export async function resolveHeld(deps: Pick<Deps, "db" | "valkey" | "logger" | 
       subjectType: "chat_message",
       subjectId: found.id,
       channelId: c.id,
-      details: { authorId: found.userId },
+      details: modActionId ? { modActionId, authorId: found.userId } : { authorId: found.userId },
     });
     return found;
   });

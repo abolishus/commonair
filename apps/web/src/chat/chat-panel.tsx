@@ -77,7 +77,10 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
           heldDispatch({ type: "remove", id: messageId });
         },
         onClear: () => dispatch({ type: "clear" }),
-        onBan: (userId, username) => dispatch({ type: "ban", userId, username }),
+        onBan: (userId, username) => {
+          dispatch({ type: "ban", userId, username });
+          heldDispatch({ type: "removeUser", userId });
+        },
         // Notices answer something the viewer did, so they belong inline; socket errors stay toasts.
         onNotice: (code, kind) => {
           if (kind === "error") toast.error(errorMessage(code));
