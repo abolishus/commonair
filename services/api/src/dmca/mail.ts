@@ -77,8 +77,12 @@ export async function mailOwnersNoticeReceived(deps: Deps, notice: NoticeRow, re
   }
 }
 
-/** The claimant hears the decision; a rejection carries the moderator's note (what was missing). */
-export async function mailClaimantDecided(deps: Deps, notice: NoticeRow) {
+/**
+ * The claimant hears the decision; a rejection carries the moderator's note (what was missing).
+ * An actioned notice says how many of its locations were actually disabled, so the claimant is
+ * never told material came down when none (or only some) did.
+ */
+export async function mailClaimantDecided(deps: Deps, notice: NoticeRow, counts: { removed: number; total: number }) {
   if (notice.status !== "actioned" && notice.status !== "rejected") return;
   const decision = notice.status;
   await sendNotice(deps.logger, "dmcaNoticeDecided", () =>
@@ -89,6 +93,8 @@ export async function mailClaimantDecided(deps: Deps, notice: NoticeRow) {
         decision,
         decidedAt: notice.actionedAt ?? deps.now(),
         note: notice.decisionNote ?? "",
+        removedItems: counts.removed,
+        totalItems: counts.total,
       },
       notice.claimantEmail,
     ),
@@ -111,6 +117,7 @@ export async function mailClaimantCounter(deps: Deps, notice: NoticeRow, counter
         address: counter.address,
         phone: counter.phone,
         statement: counter.statement,
+        signature: counter.signature,
         items: covered.map((i) => i.url),
         receivedAt: counter.createdAt,
         restoreAfter: counter.restoreAfter,

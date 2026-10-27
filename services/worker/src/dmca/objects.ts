@@ -91,6 +91,17 @@ export async function coveredIds(db: Executor, items: readonly ItemSubject[]) {
   return { vodIds, clipIds };
 }
 
+/**
+ * Whether covered media is still being written (a VOD recording or finalizing, a clip still
+ * rendering): its final files land after any move, so the takedown is not complete yet.
+ */
+export function stillWriting(c: Covered): boolean {
+  return (
+    c.vods.some((v) => v.status === "recording" || v.status === "processing") ||
+    c.clips.some((x) => x.status === "processing")
+  );
+}
+
 /** Object keys and prefixes of covered rows that are not deleted. */
 export function objectsOf(c: Covered, skip: { vodIds?: Set<string>; clipIds?: Set<string> } = {}) {
   const keys: string[] = [];

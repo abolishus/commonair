@@ -11,14 +11,21 @@
  *    holds stays hidden, and so does a VOD deleted in the meantime);
  * 2. one transaction: clear `removed_reason = 'dmca'` (a VOD deleted since by retention stays
  *    deleted: `restorable: false` in the audit), set the items' and the counter-notice's
- *    `restored_at`, reverse that notice's strike (`counter_notice_restored`), reconcile a
- *    repeat-infringer termination now under the threshold (`reconcileDmcaTerminationInTx`, which
- *    lifts only the DMCA suspension), mark the notice `restored` once every removed item is back,
- *    audit `dmca.content.restore` and the events;
- * 3. after commit: the user-control invalidation and the `contentRestored` mail.
+ *    `restored_at`, reverse that notice's strike (`counter_notice_restored`) once none of the
+ *    user's removed items on it is left down (a counter-notice covering only some of them keeps
+ *    the strike), reconcile a repeat-infringer termination now under the threshold
+ *    (`reconcileDmcaTerminationInTx`, which lifts only the DMCA suspension), mark the notice
+ *    `restored` once every removed item is back, audit `dmca.content.restore` and the events;
+ * 3. after commit: the user-control invalidation and the `contentRestored` mail, which names only
+ *    material that is actually available again (not material another notice still holds, nor a
+ *    VOD deleted meanwhile).
  *
- * If the transaction finds the counter-notice no longer due (a suit was recorded meanwhile), the
- * objects are hidden again. `asOf` is honoured only with test hooks on (`dmca-tick`).
+ * If the transaction finds the counter-notice no longer due (a suit was recorded meanwhile), or
+ * fails, the objects are hidden again. `asOf` is honoured only with test hooks on (`dmca-tick`).
+ *
+ * Each run first sweeps actioned items whose objects were never moved (`objects_hidden_at` null:
+ * the API's enqueue failed, the job ran out of attempts, or media was still being written) and
+ * runs `dmca-disable` for their notices again.
  */
 import { BUS, UserControlMessage } from "@commonair/contracts/events";
 import type { DmcaRestoreJob, DmcaRestoreResult } from "@commonair/contracts/internal";
@@ -33,6 +40,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "d
 import type { WorkerContext } from "../context.ts";
 import { withRunLock } from "../integrity/lock.ts";
 import { alert, audit, emit, safeErrorCode } from "../moderation/records.ts";
+import { DmcaMediaPendingError, disableNoticeObjects } from "./disable.ts";
 import { coveredBy, coveredIds, hideObjects, objectsOf, unhideObjects, type Covered } from "./objects.ts";
 
 const {
@@ -49,6 +57,10 @@ const {
 export const DMCA_RESTORE_LOCK = "worker:lock:moderation:dmca-restore";
 /** Counter-notices handled per run; the rest wait for the next one (every 15 min). */
 const BATCH = 200;
+/** Notices re-run through dmca-disable per sweep. */
+const SWEEP_BATCH = 50;
+/** A fresh action's own dmca-disable job gets this long before the sweep steps in. */
+export const SWEEP_GRACE_MS = 10 * 60_000;
 
 type CounterRow = typeof counters.$inferSelect;
 type ItemRow = typeof items.$inferSelect;
@@ -121,7 +133,8 @@ interface Restored {
   noticeId: string;
   userId: string;
   restoredItems: number;
-  contentTitles: string[];
+  /** Titles of restored items whose material is available again (what the owner is told). */
+  availableTitles: string[];
   channelSlug: string | null;
   terminationReversed: boolean;
 }
@@ -130,6 +143,7 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
   const [row] = await tx.select().from(counters).where(eq(counters.id, c.id)).for("update");
   if (!row || !isDue(row, asOf)) return null;
   let unrestorable = 0;
+  let held = 0;
   const titles: string[] = [];
   for (const [n, cov] of p.covered.entries()) {
     const item = p.items[n];
@@ -159,7 +173,16 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
         : item.subjectType === "clip"
           ? cov.clips.find((x) => x.id === item.subjectId)
           : undefined;
-    if (item.subjectType !== "broadcast" && (!direct || direct.status === "deleted")) unrestorable++;
+    const gone = item.subjectType !== "broadcast" && (!direct || direct.status === "deleted");
+    if (gone) unrestorable++;
+    // Still down because another active notice holds the same material: restored for this
+    // notice (so neither notice blocks the other for good), but not available, so not mailed.
+    const stillHeld =
+      item.subjectType === "vod" || item.subjectType === "broadcast"
+        ? cov.vods.length > 0 && cov.vods.every((v) => p.held.vodIds.has(v.id))
+        : item.subjectType === "clip" && item.subjectId !== null && p.held.clipIds.has(item.subjectId);
+    if (stillHeld && !gone) held++;
+    if (gone || stillHeld) continue;
     const [t] =
       item.subjectType === "vod" && item.subjectId
         ? await tx.select({ title: vods.title }).from(vods).where(eq(vods.id, item.subjectId))
@@ -179,20 +202,36 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
     .set({ restoredAt: asOf })
     .where(and(eq(counters.id, c.id), isNull(counters.restoredAt)));
 
-  // § 512(i): a successfully countered notice no longer counts towards the repeat-infringer policy.
+  // § 512(i): a successfully countered notice no longer counts towards the repeat-infringer policy,
+  // but only once all of this user's removed material on it is back: countering one of several
+  // URLs must not wipe the strike while the rest stays down.
   await lockAccountActions(tx, c.userId);
-  const [strike] = await tx
-    .select({ id: accountActions.id })
-    .from(accountActions)
+  const [stillDown] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(items)
     .where(
       and(
-        eq(accountActions.userId, c.userId),
-        eq(accountActions.action, "dmca_strike"),
-        eq(accountActions.sourceType, "dmca_notice"),
-        eq(accountActions.sourceId, c.noticeId),
-        isNull(accountActions.reversedAt),
+        eq(items.noticeId, c.noticeId),
+        eq(items.ownerId, c.userId),
+        isNotNull(items.removedAt),
+        isNull(items.restoredAt),
       ),
     );
+  const [strike] =
+    (stillDown?.n ?? 0) > 0
+      ? []
+      : await tx
+          .select({ id: accountActions.id })
+          .from(accountActions)
+          .where(
+            and(
+              eq(accountActions.userId, c.userId),
+              eq(accountActions.action, "dmca_strike"),
+              eq(accountActions.sourceType, "dmca_notice"),
+              eq(accountActions.sourceId, c.noticeId),
+              isNull(accountActions.reversedAt),
+            ),
+          );
   const reversedStrike = strike
     ? await reverseAccountActionInTx(tx, { id: strike.id, now: asOf, byId: null, reason: "counter_notice_restored" })
     : null;
@@ -209,7 +248,9 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
       },
       asOf,
     );
-  const termination = await reconcileDmcaTerminationInTx(tx, { userId: c.userId, now: asOf, byId: null });
+  const termination = reversedStrike
+    ? await reconcileDmcaTerminationInTx(tx, { userId: c.userId, now: asOf, byId: null })
+    : null;
   if (termination)
     await emit(
       tx,
@@ -241,6 +282,7 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
         counterNoticeId: c.id,
         restoredItems: ids.length,
         unrestorableItems: unrestorable,
+        heldItems: held,
         restorable: unrestorable === 0,
         strikeReversed: reversedStrike !== null,
         terminationReversed: termination !== null,
@@ -271,7 +313,7 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
     noticeId: c.noticeId,
     userId: c.userId,
     restoredItems: ids.length,
-    contentTitles: titles,
+    availableTitles: titles,
     channelSlug: ch?.slug ?? null,
     terminationReversed: termination !== null,
   };
@@ -282,7 +324,7 @@ async function afterRestore(ctx: WorkerContext, r: Restored, asOf: Date) {
     const msg = UserControlMessage.parse({ op: "invalidate", userId: r.userId, reason: "suspended" });
     await ctx.valkey.publish(BUS.userControl, JSON.stringify(msg));
   }
-  if (!ctx.mailer || !ctx.site || r.restoredItems === 0) return;
+  if (!ctx.mailer || !ctx.site || r.availableTitles.length === 0) return;
   const [u] = await ctx.db
     .select({ email: users.email, locale: users.locale, accountType: users.accountType })
     .from(users)
@@ -293,7 +335,7 @@ async function afterRestore(ctx: WorkerContext, r: Restored, asOf: Date) {
     await ctx.mailer.send(
       "contentRestored",
       {
-        contentTitle: r.contentTitles.join(", "),
+        contentTitle: r.availableTitles.join(", "),
         restoredAt: asOf,
         contentUrl: `${base}/${r.channelSlug ? encodeURIComponent(r.channelSlug) : "settings/copyright"}`,
         locale: u.locale,
@@ -312,7 +354,15 @@ export async function restoreCounter(ctx: WorkerContext, c: CounterRow, asOf: Da
   const objects = objectsToRestore(p);
   // Objects first, so the content works the moment it is listed again.
   if (ctx.storage) await unhideObjects(ctx.storage, ctx.mediaBucket, objects);
-  const r = await ctx.db.transaction((tx) => restoreInTx(tx, c, p, asOf));
+  let r: Restored | null;
+  try {
+    r = await ctx.db.transaction((tx) => restoreInTx(tx, c, p, asOf));
+  } catch (err) {
+    // The database still hides the content, so its files must not stay public either (a suit
+    // recorded before the next run would otherwise leave them out for good).
+    if (ctx.storage) await hideObjects(ctx.storage, ctx.mediaBucket, objects);
+    throw err;
+  }
   if (!r) {
     // No longer due (a suit was recorded meanwhile): put the objects back out of reach.
     if (ctx.storage) await hideObjects(ctx.storage, ctx.mediaBucket, objects);
@@ -322,7 +372,42 @@ export async function restoreCounter(ctx: WorkerContext, c: CounterRow, asOf: Da
   return r.restoredItems;
 }
 
+/**
+ * Re-run dmca-disable for notices with actioned items whose objects were never moved. Nothing
+ * else retries them: a failed enqueue or an exhausted job would otherwise leave the files public.
+ */
+export async function sweepUnhidden(ctx: WorkerContext, asOf: Date): Promise<number> {
+  if (!ctx.storage) return 0;
+  const before = new Date(asOf.getTime() - SWEEP_GRACE_MS).toISOString();
+  const rows = await ctx.db
+    .selectDistinct({ noticeId: items.noticeId })
+    .from(items)
+    .where(
+      and(
+        isNotNull(items.removedAt),
+        isNull(items.objectsHiddenAt),
+        isNull(items.restoredAt),
+        sql`${items.removedAt} <= ${before}::timestamptz`,
+      ),
+    )
+    .limit(SWEEP_BATCH);
+  let swept = 0;
+  for (const { noticeId } of rows) {
+    try {
+      swept += (await disableNoticeObjects(ctx, { noticeId })).items;
+    } catch (err) {
+      if (err instanceof DmcaMediaPendingError) continue; // still being written; next run
+      alert(ctx, "dmca_disable_failed", "a DMCA notice's objects could not be hidden", {
+        noticeId,
+        errorCode: safeErrorCode(err),
+      });
+    }
+  }
+  return swept;
+}
+
 export async function runDmcaRestoreOnce(ctx: WorkerContext, asOf: Date): Promise<DmcaRestoreResult> {
+  await sweepUnhidden(ctx, asOf);
   const due = await ctx.db
     .select()
     .from(counters)

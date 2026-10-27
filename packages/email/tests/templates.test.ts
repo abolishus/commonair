@@ -337,7 +337,10 @@ describe("DMCA mail (17 U.S.C. § 512; not reviewed by a lawyer)", () => {
       ...samples.dmcaNoticeDecided,
       decision: "actioned",
       note: "",
+      removedItems: 2,
+      totalItems: 2,
     });
+    expect(actioned.text).toContain("disabled access to the material it identified");
     expect(actioned.subject).toBe("Your copyright notice DMCA-2026-0091 was actioned");
     expect(actioned.text).toContain(en.dmcaNoticeDecided.headingActioned);
     expect(actioned.text).not.toContain(en.dmcaNoticeDecided.noteLabel);
@@ -346,10 +349,22 @@ describe("DMCA mail (17 U.S.C. § 512; not reviewed by a lawyer)", () => {
     expect(actioned.html).toContain(`mailto:${site.contacts.dmca}`);
   });
 
+  test("an actioned notice that disabled only some, or none, of its locations says so", async () => {
+    const base = { ...samples.dmcaNoticeDecided, decision: "actioned" as const, note: "" };
+    const partial = await render("dmcaNoticeDecided", { ...base, removedItems: 1, totalItems: 3 });
+    expect(partial.text).toContain("at 1 of the 3 locations");
+    expect(partial.text).not.toContain("disabled access to the material it identified");
+    const none = await render("dmcaNoticeDecided", { ...base, removedItems: 0, totalItems: 2 });
+    expect(none.text).toContain("so nothing was removed");
+    expect(none.text).not.toContain("disabled access");
+  });
+
   test("the forwarded counter-notice carries every § 512(g)(3) element and the restore date", async () => {
     const d = samples.dmcaCounterNoticeForwarded;
     const mail = await render("dmcaCounterNoticeForwarded");
-    for (const part of [d.fullName, d.address, d.phone, d.statement, ...d.items]) expect(mail.text).toContain(part);
+    for (const part of [d.fullName, d.address, d.phone, d.statement, d.signature, ...d.items])
+      expect(mail.text).toContain(part);
+    expect(mail.text).toContain(en.dmcaCounterNoticeForwarded.signatureLabel);
     expect(mail.text).toContain(en.dmcaCounterNoticeForwarded.restoreLabel);
     expect(mail.html).toContain(`mailto:${site.contacts.dmca}`);
     // The item URLs are text, never links.

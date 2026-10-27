@@ -107,6 +107,8 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       decision: "rejected",
       decidedAt: at,
       note: v.decisionNote,
+      removedItems: 0,
+      totalItems: 2,
     },
     dmcaCounterNoticeForwarded: {
       noticeRef: "DMCA-2026-0091",
@@ -114,6 +116,7 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       address: v.address,
       phone: "+1 555 0100",
       statement: v.statement,
+      signature: `/s/ ${v.displayName}`,
       items: [url("/ada_plays/clip/sample")],
       receivedAt: at,
       restoreAfter: "2026-11-03T14:30:00Z",

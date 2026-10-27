@@ -45,6 +45,19 @@ export interface DmcaNoticeDecidedData {
   decidedAt: DateInput;
   /** The moderator's note (for a rejection: what the notice lacks, § 512(c)(3)(B)(ii)). */
   note: string;
+  /** For an actioned notice: how many of its locations were disabled, out of how many. */
+  removedItems: number;
+  totalItems: number;
+}
+
+/** Actioned with nothing (or only part) disabled must not read as a full takedown. */
+function decidedBody(
+  m: { bodyActioned: string; bodyActionedPartial: string; bodyActionedNone: string; bodyRejected: string },
+  d: DmcaNoticeDecidedData,
+) {
+  if (d.decision === "rejected") return m.bodyRejected;
+  if (d.removedItems <= 0) return m.bodyActionedNone;
+  return d.removedItems < d.totalItems ? m.bodyActionedPartial : m.bodyActioned;
 }
 
 /** To the claimant: the notice was actioned, or rejected with what was missing. */
@@ -65,7 +78,13 @@ export const dmcaNoticeDecided = defineTemplate("dmcaNoticeDecided", {
     return (
       <>
         <H1>{ctx.t(actioned ? m.headingActioned : m.headingRejected)}</H1>
-        <P>{ctx.t(actioned ? m.bodyActioned : m.bodyRejected, { noticeRef: <strong>{d.noticeRef}</strong> })}</P>
+        <P>
+          {ctx.t(decidedBody(m, d), {
+            noticeRef: <strong>{d.noticeRef}</strong>,
+            removed: String(d.removedItems),
+            total: String(d.totalItems),
+          })}
+        </P>
         <Facts items={facts} />
         {actioned ? null : <P>{ctx.t(m.resubmit)}</P>}
         <Muted>{ctx.t(m.policy, { contact: ctx.contact("dmca") })}</Muted>
@@ -81,6 +100,8 @@ export interface DmcaCounterNoticeForwardedData {
   address: string;
   phone: string;
   statement: string;
+  /** The counter-notifier's signature (§ 512(g)(3)(A)), as typed. */
+  signature: string;
   /** The locations of the removed material the counter-notice covers (rendered as text). */
   items: readonly string[];
   receivedAt: DateInput;
@@ -103,6 +124,7 @@ export const dmcaCounterNoticeForwarded = defineTemplate("dmcaCounterNoticeForwa
             [m.addressLabel, d.address],
             [m.phoneLabel, d.phone],
             [m.statementLabel, d.statement],
+            [m.signatureLabel, d.signature],
             [m.itemsLabel, d.items.join(", ")],
             [m.receivedLabel, ctx.dateTime(d.receivedAt)],
             [m.restoreLabel, ctx.dateTime(d.restoreAfter)],

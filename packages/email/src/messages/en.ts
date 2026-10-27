@@ -190,6 +190,10 @@ export const en = {
     headingRejected: "We could not act on your copyright notice",
     bodyActioned:
       "We reviewed your copyright (DMCA) notice {noticeRef} and disabled access to the material it identified.",
+    bodyActionedPartial:
+      "We reviewed your copyright (DMCA) notice {noticeRef} and disabled access to the material at {removed} of the {total} locations it identified. The other locations did not point to material we host that was still available.",
+    bodyActionedNone:
+      "We reviewed your copyright (DMCA) notice {noticeRef}. None of the locations it identified pointed to material we host that was still available, so nothing was removed.",
     bodyRejected:
       "We reviewed your copyright (DMCA) notice {noticeRef} and could not act on it as it stands. The note below says what is missing or wrong.",
     noticeLabel: "Notice reference",
@@ -207,6 +211,7 @@ export const en = {
     addressLabel: "Address",
     phoneLabel: "Telephone",
     statementLabel: "Their statement",
+    signatureLabel: "Signature",
     itemsLabel: "Material the counter-notice covers",
     receivedLabel: "Counter-notice received",
     restoreLabel: "Material will be restored after",

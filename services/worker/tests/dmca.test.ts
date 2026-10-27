@@ -4,7 +4,14 @@
 /** Pure parts of the DMCA jobs: the private prefix, which objects an item covers, and when a counter-notice is due. */
 import { describe, expect, test } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
-import { DMCA_HIDDEN_PREFIX, dmcaHiddenKey, dmcaOriginalKey, objectsOf, type Covered } from "../src/dmca/objects.ts";
+import {
+  DMCA_HIDDEN_PREFIX,
+  dmcaHiddenKey,
+  dmcaOriginalKey,
+  objectsOf,
+  stillWriting,
+  type Covered,
+} from "../src/dmca/objects.ts";
 import { isDue, restoreAsOf } from "../src/dmca/restore.ts";
 
 describe("private prefix", () => {
@@ -52,6 +59,21 @@ describe("objectsOf", () => {
       prefixes: [],
     };
     expect(objectsOf(odd).prefixes).toEqual(["vods/v9/"]);
+  });
+});
+
+describe("stillWriting", () => {
+  const vod = (status: string) => ({ id: "v", broadcastId: "b", storagePrefix: "vods/v/", thumbnailKey: null, status });
+  const clip = (status: string) => ({ id: "c", storageKey: null, thumbnailKey: null, status });
+  test("a VOD recording or processing, or a clip processing, is still being written", () => {
+    for (const s of ["recording", "processing"])
+      expect(stillWriting({ vods: [vod(s)], clips: [], prefixes: [] }), s).toBe(true);
+    expect(stillWriting({ vods: [], clips: [clip("processing")], prefixes: [] })).toBe(true);
+  });
+  test("final states are not, and nothing covered is not", () => {
+    for (const s of ["ready", "failed", "deleted"])
+      expect(stillWriting({ vods: [vod(s)], clips: [clip(s)], prefixes: ["thumbnails/b/"] }), s).toBe(false);
+    expect(stillWriting({ vods: [], clips: [], prefixes: [] })).toBe(false);
   });
 });
 

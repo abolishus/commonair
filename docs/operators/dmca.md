@@ -51,7 +51,15 @@ queue", and the `trust-safety` step 8 scenario). The rest of trust & safety is i
 
 Every step writes an `audit_log` row (`dmca.notice.submit`, `dmca.notice.action` or
 `dmca.notice.reject`, `dmca.counter.receive`, `dmca.counter.suit_filed`, `dmca.content.restore`,
-and `account.dmca_termination` for a suspension) and an internal event. Audit rows, events,
+and `account.dmca_termination` for a suspension) and an internal event.
+
+The `dmca-disable` job does not mark an item done while its media is still being written (a VOD
+recording or finalizing after the takedown ended its broadcast, a clip still rendering): it moves
+what exists and retries with backoff until the last files are written. Each `dmca-restore` run
+also sweeps actioned items whose files were never moved (a failed enqueue, an exhausted job) and
+moves them; a `dmca_disable_failed` alert means a notice still has public files. The claimant's
+`dmcaNoticeDecided` mail says when only some, or none, of the listed locations were disabled, and
+the uploader's `contentRestored` mail names only material that is actually available again. Audit rows, events,
 account actions, notifications and logs carry ids, enums and counts only: the claimant's and the
 uploader's names, addresses, phone numbers, signatures, statements and notes stay on the
 `dmca_notices` and `dmca_counter_notices` rows.
@@ -67,7 +75,8 @@ uploader's names, addresses, phone numbers, signatures, statements and notes sta
 The constants are compiled in (a contract change), not instance settings: change them in a
 release, never on a running instance, and update the policy text to match.
 
-A strike is reversed when a counter-notice restores the content or an appeal overturns it; a
+A strike is reversed when a counter-notice restores all of that user's removed material on the
+notice (a counter-notice covering only some of the URLs keeps the strike) or an appeal overturns it; a
 termination is reversed when the user drops below the threshold. Reversing the termination lifts
 only the DMCA suspension: a moderation or T0 suspension in force is never taken over or lifted by
 the DMCA flow. Withdrawn notices are not modelled: if a claimant withdraws a notice, reverse the
@@ -93,8 +102,13 @@ DMCA records are records of a legal process, so they are kept:
   legal process the claimant may still act on; the privacy policy must say so. Audit rows and
   account actions reference users by id only.
 - A user's data export includes their counter-notices and their account actions (`safety.json`).
-- Hidden files stay under `moderation/dmca/` until restored. If a VOD expires by retention while
-  it is down, its files stay in the private prefix; remove them by hand when the matter is closed.
+- Hidden files stay under `moderation/dmca/` until restored. Three deletion paths do not yet
+  reach that prefix, so their files stay private but are never deleted; remove them by hand when
+  the matter is closed (`moderation/dmca/vods/<vod id>/`, `moderation/dmca/clips/<clip id>.*`,
+  `moderation/dmca/thumbnails/<broadcast id>/`):
+  - a VOD that expires by retention while it is down;
+  - **account deletion** of the uploader (it purges `vods/<id>/` and the clip keys only);
+  - a VOD or clip a moderator removes (status `deleted`) while it is down for DMCA.
 
 Decide how long you keep these records (for example the limitation period for copyright claims,
 three years in the US) and write it into your retention policy; nothing purges them

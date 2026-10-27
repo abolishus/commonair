@@ -301,7 +301,7 @@ export async function decideNotice(
       { notice_id: n.id, decision: input.decision, removed_items: removed.length },
       now,
     );
-    return { notice: updated, removed, ended, strikes };
+    return { notice: updated, removed, ended, strikes, totalItems: items.length };
   });
 
   for (const e of result.ended) await afterBroadcastEnded(deps, e);
@@ -312,12 +312,13 @@ export async function decideNotice(
     try {
       await rt.queue.dmcaDisable({ noticeId: result.notice.id });
     } catch (err) {
-      // Access is already disabled in the database; the objects move on the next action retry or by hand.
+      // Access is already disabled in the database. A re-decision is a CONFLICT, so nothing here
+      // retries it: the worker's dmca-restore run sweeps items still lacking objects_hidden_at.
       deps.logger.error("dmca-disable enqueue failed", { noticeId: result.notice.id, err: (err as Error).name });
     }
     await mailOwnersNoticeReceived(deps, result.notice, result.removed);
   }
-  await mailClaimantDecided(deps, result.notice);
+  await mailClaimantDecided(deps, result.notice, { removed: result.removed.length, total: result.totalItems });
   return staffNotice(deps, result.notice.id);
 }
 

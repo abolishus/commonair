@@ -7,14 +7,27 @@
  * under the private DMCA prefix so a known media URL stops working too, then sets each item's
  * `objects_hidden_at` (once, enforced by the 0025 guard). Idempotent: a retry finds the objects
  * already moved and the items already marked. Items already restored are left alone.
+ *
+ * Media still being written (a VOD `recording`/`processing` after its broadcast was ended by the
+ * takedown, a clip still `processing`) gets its final files after this job runs. Such an item is
+ * not marked: what exists is moved now, and the job throws `DmcaMediaPendingError` so BullMQ
+ * retries with backoff; past the last attempt the `dmca-restore` run's sweep keeps retrying.
  */
 import type { DmcaDisableJob } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
-import { coveredBy, hideObjects, objectsOf } from "./objects.ts";
+import { coveredBy, hideObjects, objectsOf, stillWriting } from "./objects.ts";
 
 const { dmcaNoticeItems: items } = schema;
+
+/** Some covered media is still being written; its objects were moved so far, the item is not marked. */
+export class DmcaMediaPendingError extends Error {
+  override name = "DmcaMediaPendingError";
+  constructor(readonly pendingItems: number) {
+    super(`dmca-disable: ${pendingItems} item(s) still have media being written`);
+  }
+}
 
 export async function disableNoticeObjects(
   ctx: WorkerContext,
@@ -40,8 +53,14 @@ export async function disableNoticeObjects(
     );
   let objects = 0;
   let done = 0;
+  let pending = 0;
   for (const i of rows) {
-    objects += await hideObjects(storage, ctx.mediaBucket, objectsOf(await coveredBy(ctx.db, i)));
+    const covered = await coveredBy(ctx.db, i);
+    objects += await hideObjects(storage, ctx.mediaBucket, objectsOf(covered));
+    if (stillWriting(covered)) {
+      pending++;
+      continue;
+    }
     const marked = await ctx.db
       .update(items)
       .set({ objectsHiddenAt: ctx.now() })
@@ -49,6 +68,8 @@ export async function disableNoticeObjects(
       .returning({ id: items.id });
     done += marked.length;
   }
-  if (done > 0) ctx.logger.info("dmca objects hidden", { noticeId: job.noticeId, items: done, objects });
+  if (done > 0 || objects > 0)
+    ctx.logger.info("dmca objects hidden", { noticeId: job.noticeId, items: done, objects, pending });
+  if (pending > 0) throw new DmcaMediaPendingError(pending);
   return { items: done, objects };
 }

@@ -14,9 +14,9 @@ import type { ObjectInfo, ObjectStorage } from "@commonair/storage";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
-import { disableNoticeObjects } from "../src/dmca/disable.ts";
+import { DmcaMediaPendingError, disableNoticeObjects } from "../src/dmca/disable.ts";
 import { DMCA_HIDDEN_PREFIX, dmcaHiddenKey } from "../src/dmca/objects.ts";
-import { runDmcaRestoreOnce } from "../src/dmca/restore.ts";
+import { runDmcaRestoreOnce, SWEEP_GRACE_MS } from "../src/dmca/restore.ts";
 import { siteAt } from "./e6-fixtures.ts";
 import { makeBroadcast, makeUser } from "./fixtures.ts";
 
@@ -235,6 +235,67 @@ describe("dmca-disable", () => {
     expect(r).toEqual({ items: 1, objects: 0 });
     expect(objects.has(dmcaHiddenKey(f.keys.lone))).toBe(true);
   });
+
+  test("a VOD still processing is not marked until its last files are written and moved", async () => {
+    const { objects, storage } = memoryStorage();
+    const f = await content(objects);
+    await t.db.update(schema.vods).set({ status: "processing" }).where(eq(schema.vods.id, f.vodId));
+    const { noticeId } = await actioned(f, [{ type: "vod", id: f.vodId }]);
+    const ctx = context(storage, new MemoryMailer({ site }), []);
+    // What exists moves now; the job throws so BullMQ retries.
+    await expect(disableNoticeObjects(ctx, { noticeId })).rejects.toBeInstanceOf(DmcaMediaPendingError);
+    for (const k of f.keys.vod) expect(objects.has(k), k).toBe(false);
+    const [pending] = await t.db
+      .select()
+      .from(schema.dmcaNoticeItems)
+      .where(eq(schema.dmcaNoticeItems.noticeId, noticeId));
+    expect(pending?.objectsHiddenAt).toBeNull();
+    // Finalization writes the playlist and last segment afterwards.
+    const late = [`vods/${f.vodId}/seg1.ts`, `vods/${f.vodId}/final.m3u8`];
+    for (const k of late) objects.set(k, bytes(k));
+    await t.db.update(schema.vods).set({ status: "ready" }).where(eq(schema.vods.id, f.vodId));
+    expect(await disableNoticeObjects(ctx, { noticeId })).toEqual({ items: 1, objects: 2 });
+    for (const k of late) {
+      expect(objects.has(k), k).toBe(false);
+      expect(objects.has(dmcaHiddenKey(k)), k).toBe(true);
+    }
+  });
+
+  test("a clip still rendering keeps the item unmarked", async () => {
+    const { objects, storage } = memoryStorage();
+    const f = await content(objects);
+    await t.db.update(schema.clips).set({ status: "processing", storageKey: null }).where(eq(schema.clips.id, f.lone));
+    const { noticeId } = await actioned(f, [{ type: "clip", id: f.lone }]);
+    const ctx = context(storage, new MemoryMailer({ site }), []);
+    await expect(disableNoticeObjects(ctx, { noticeId })).rejects.toBeInstanceOf(DmcaMediaPendingError);
+    await t.db
+      .update(schema.clips)
+      .set({ status: "ready", storageKey: f.keys.lone })
+      .where(eq(schema.clips.id, f.lone));
+    expect(await disableNoticeObjects(ctx, { noticeId })).toEqual({ items: 1, objects: 1 });
+    expect(objects.has(f.keys.lone)).toBe(false);
+  });
+});
+
+describe("dmca-restore sweep", () => {
+  test("re-runs dmca-disable for actioned items whose objects were never moved, after a grace period", async () => {
+    const { objects, storage } = memoryStorage();
+    const f = await content(objects);
+    const ctx = context(storage, new MemoryMailer({ site }), []);
+    const at = new Date("2031-01-05T12:00:00Z");
+    // The API's enqueue failed: nothing ever ran dmca-disable for this notice.
+    const { noticeId } = await actioned(f, [{ type: "clip", id: f.lone }], at);
+    await runDmcaRestoreOnce(ctx, new Date(at.getTime() + SWEEP_GRACE_MS - 1_000));
+    expect(objects.has(f.keys.lone)).toBe(true);
+    await runDmcaRestoreOnce(ctx, new Date(at.getTime() + SWEEP_GRACE_MS));
+    expect(objects.has(f.keys.lone)).toBe(false);
+    expect(objects.has(dmcaHiddenKey(f.keys.lone))).toBe(true);
+    const [item] = await t.db
+      .select()
+      .from(schema.dmcaNoticeItems)
+      .where(eq(schema.dmcaNoticeItems.noticeId, noticeId));
+    expect(item?.objectsHiddenAt).not.toBeNull();
+  });
 });
 
 describe("dmca-restore", () => {
@@ -324,10 +385,11 @@ describe("dmca-restore", () => {
     expect(cc?.restoredAt).toBeNull();
   });
 
-  test("material another active notice still holds stays down", async () => {
+  test("material another active notice still holds stays down, and the owner is not told it is back", async () => {
     const { objects, storage } = memoryStorage();
     const f = await content(objects);
-    const ctx = context(storage, new MemoryMailer({ site }), []);
+    const mailer = new MemoryMailer({ site });
+    const ctx = context(storage, mailer, []);
     const first = await actioned(f, [{ type: "clip", id: f.lone }]);
     const second = await actioned(f, [{ type: "clip", id: f.lone }]);
     await disableNoticeObjects(ctx, { noticeId: first.noticeId });
@@ -336,6 +398,69 @@ describe("dmca-restore", () => {
     expect((await reasonOf("clip", f.lone))?.r).toBe("dmca");
     expect(objects.has(f.keys.lone)).toBe(false);
     expect(second.itemIds).toHaveLength(1);
+    expect(mailer.to(f.email)).toHaveLength(0);
+    const [a] = await t.db
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.subjectId, first.noticeId), eq(schema.auditLog.action, "dmca.content.restore")));
+    expect(a?.details).toMatchObject({ restoredItems: 1, heldItems: 1 });
+    // The first notice was countered successfully: its strike goes; the second keeps its own.
+    const strikes = await t.db
+      .select()
+      .from(schema.accountActions)
+      .where(and(eq(schema.accountActions.userId, f.userId), eq(schema.accountActions.action, "dmca_strike")));
+    expect(strikes.find((x) => x.sourceId === first.noticeId)?.reversedAt).not.toBeNull();
+    expect(strikes.find((x) => x.sourceId === second.noticeId)?.reversedAt).toBeNull();
+  });
+
+  test("a counter-notice covering only some of the removed items keeps the strike", async () => {
+    const { objects, storage } = memoryStorage();
+    const f = await content(objects);
+    const mailer = new MemoryMailer({ site });
+    const ctx = context(storage, mailer, []);
+    const { noticeId, itemIds } = await actioned(f, [
+      { type: "vod", id: f.vodId },
+      { type: "clip", id: f.lone },
+    ]);
+    await disableNoticeObjects(ctx, { noticeId });
+    const loneItem = itemIds[1]!;
+    await counter(noticeId, f.userId, [loneItem], new Date("2031-02-03T12:00:00Z"));
+    await runDmcaRestoreOnce(ctx, new Date("2031-02-04T00:00:00Z"));
+    expect(await reasonOf("clip", f.lone)).toEqual({ s: "ready", r: null });
+    expect(objects.has(f.keys.lone)).toBe(true);
+    expect((await reasonOf("vod", f.vodId))?.r).toBe("dmca");
+    const [strike] = await t.db
+      .select()
+      .from(schema.accountActions)
+      .where(and(eq(schema.accountActions.sourceId, noticeId), eq(schema.accountActions.action, "dmca_strike")));
+    expect(strike?.reversedAt).toBeNull();
+    const [n] = await t.db.select().from(schema.dmcaNotices).where(eq(schema.dmcaNotices.id, noticeId));
+    expect(n?.status).toBe("countered");
+    expect(mailer.to(f.email)).toHaveLength(1);
+  });
+
+  test("a failed restore transaction puts the objects back out of reach", async () => {
+    const { objects, storage } = memoryStorage();
+    const f = await content(objects);
+    const ok = context(storage, new MemoryMailer({ site }), []);
+    const { noticeId, itemIds } = await actioned(f, [{ type: "clip", id: f.lone }]);
+    await disableNoticeObjects(ok, { noticeId });
+    const c = await counter(noticeId, f.userId, itemIds, new Date("2031-03-03T12:00:00Z"));
+    const failingDb = new Proxy(t.db, {
+      get(target, prop) {
+        if (prop === "transaction")
+          return async () => {
+            throw new Error("boom");
+          };
+        return Reflect.get(target, prop, target);
+      },
+    });
+    await runDmcaRestoreOnce({ ...ok, db: failingDb }, new Date("2031-03-04T00:00:00Z"));
+    expect(objects.has(f.keys.lone)).toBe(false);
+    expect(objects.has(dmcaHiddenKey(f.keys.lone))).toBe(true);
+    expect((await reasonOf("clip", f.lone))?.r).toBe("dmca");
+    const [cc] = await t.db.select().from(schema.dmcaCounterNotices).where(eq(schema.dmcaCounterNotices.id, c.id));
+    expect(cc?.restoredAt).toBeNull();
   });
 
   test("reverses a termination now under the threshold and lifts only the DMCA suspension", async () => {

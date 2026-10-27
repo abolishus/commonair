@@ -281,6 +281,8 @@ describe("action", () => {
     expect(mail.subject).toContain("Copyright notice about");
     const claim = await waitFor(() => mailTo(who.claimantEmail));
     expect(claim.subject).toContain("was actioned");
+    // One of the three locations is not ours: the claimant is told only two were disabled.
+    expect(claim.text).toContain("at 2 of the 3 locations");
 
     // The owner sees the notice: their items, the claimant's name, never the contact details.
     const mine = await o.s.client.call<Record<string, unknown>[]>("GET", "/api/dmca/mine");
@@ -302,6 +304,15 @@ describe("action", () => {
     const cl = await clip(c.id, b.id);
     const { id } = await submit([clipUrl(c.slug, cl)]);
     expect((await action(id, "actioned", "x", mod2)).status).toBe(403);
+  });
+
+  test("actioned with nothing to remove: the claimant is told nothing was removed", async () => {
+    const { id, who } = await submit(["https://elsewhere.example/nothing-here"]);
+    expect((await action(id, "actioned")).status).toBe(200);
+    const claim = await waitFor(() => mailTo(who.claimantEmail));
+    expect(claim.subject).toContain("was actioned");
+    expect(claim.text).toContain("so nothing was removed");
+    expect(claim.text).not.toContain("disabled access");
   });
 
   test("a live broadcast item ends the stream and hides its recordings", async () => {
