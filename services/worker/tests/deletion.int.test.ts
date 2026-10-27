@@ -650,6 +650,39 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     for (const k of hidden) expect(await S3.head(MEDIA_BUCKET, k), k).toBeNull();
   });
 
+  test("VOD objects are deleted under both own prefixes (and their DMCA copies), whatever storage_prefix says", async () => {
+    const R = await makeUser(db());
+    const [b] = await db()
+      .insert(schema.broadcasts)
+      .values({ channelId: R.channel.id, ingestProtocol: "rtmp", path: `live/${R.channel.slug}`, endedAt: new Date() })
+      .returning();
+    const vodId = uuidv7();
+    await db()
+      .insert(schema.vods)
+      .values({
+        id: vodId,
+        broadcastId: b!.id,
+        channelId: R.channel.id,
+        title: "v",
+        storagePrefix: `recordings/${vodId}/`,
+        thumbnailKey: `recordings/${vodId}/thumbnail.webp`,
+        status: "ready",
+        visibility: "subscribers",
+      });
+    // A placement move was in flight: copies under both prefixes.
+    const keys = [
+      `recordings/${vodId}/index.m3u8`,
+      `recordings/${vodId}/thumbnail.webp`,
+      `vods/${vodId}/index.m3u8`,
+      `moderation/dmca/recordings/${vodId}/index.m3u8`,
+    ];
+    for (const k of keys) await S3.put(MEDIA_BUCKET, k, new Uint8Array([35]));
+
+    await schedule(R.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+    for (const k of keys) expect(await S3.head(MEDIA_BUCKET, k), k).toBeNull();
+  });
+
   test("on-demand ops jobs answer `skipped` while their run lock is busy", async () => {
     const meta = { id: "t", attemptsMade: 0 };
     for (const [job, key] of [

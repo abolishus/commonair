@@ -8,15 +8,27 @@
  * channel's retention. A hash match → `moderation.t0` for the VOD, which is never published. A
  * scan that cannot complete throws, so the job retries and nothing is published (fail closed).
  * Idempotent: a finished VOD is left alone.
+ *
+ * Placement (ADR 0009 amendment 1): the recording lives under the private `recordings/<id>/`.
+ * Once the scan passes, the VOD's placement as it will be once ready decides where it ends up: a
+ * public VOD is copied to `vods/<id>/` before the `ready` transaction, which also switches
+ * `storage_prefix` and deletes the private copy before it commits; anything else stays private.
+ *
+ * The source is deleted before commit, not after: until then the VOD is `processing`, which the
+ * worker's `vod-placement` never touches, whereas after commit a placement move could copy back
+ * into those very keys while a late delete removed them. The cost is a crash between that delete
+ * and commit, which the rerun recovers from the verified copy (`locatePlaylist`); the source's
+ * playlist goes first, so a partly deleted source is never read as a recording.
  */
 
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { isVodOwnPrefix, vodPlacement, vodPrefix, type VodPlacementState } from "@commonair/contracts/storage";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
-import type { ObjectStorage } from "@commonair/storage";
+import { moveVodObjects, type ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "../disk.ts";
 import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
@@ -25,7 +37,7 @@ import { errorCategory } from "../moderation/logging.ts";
 import { ActiveScratch } from "../recovery.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
-import { VOD_PLAYLIST, vodPrefix } from "./recorder.ts";
+import { VOD_PLAYLIST } from "./recorder.ts";
 
 export const VodFinalizeJob = z.object({ vodId: z.uuid() });
 export type VodFinalizeJob = z.infer<typeof VodFinalizeJob>;
@@ -79,6 +91,29 @@ export function scanChunks(segments: readonly PlaylistSegment[], maxSeconds = SC
   return out;
 }
 
+/**
+ * The VOD's placement inputs as they will be once it is `ready`: visibility, removal, the
+ * broadcast's T1 restriction, the channel's suspension, and the NCII and DMCA flows that own the
+ * objects' keys while they run (same rules as the worker's `vod-placement` and the origin).
+ */
+export async function placementOnceReady(db: Database, vodId: string): Promise<VodPlacementState | null> {
+  const v = schema.vods;
+  const [row] = await db
+    .select({
+      visibility: v.visibility,
+      removedReason: v.removedReason,
+      broadcastRestricted: sql<boolean>`${schema.broadcasts.restrictedAt} is not null`,
+      channelSuspended: sql<boolean>`${schema.channels.suspendedAt} is not null`,
+      nciiHidden: sql<boolean>`exists (select 1 from ${schema.nciiRequestItems} i where i.subject_type = 'vod' and i.subject_id = ${v.id} and (i.hidden_at is not null or i.removed_at is not null))`,
+      dmcaHidden: sql<boolean>`exists (select 1 from ${schema.dmcaNoticeItems} d where ((d.subject_type = 'vod' and d.subject_id = ${v.id}) or (d.subject_type = 'broadcast' and d.subject_id = ${v.broadcastId})) and d.removed_at is not null and d.restored_at is null)`,
+    })
+    .from(v)
+    .innerJoin(schema.broadcasts, eq(schema.broadcasts.id, v.broadcastId))
+    .innerJoin(schema.channels, eq(schema.channels.id, v.channelId))
+    .where(eq(v.id, vodId));
+  return row ? { ...row, status: "ready" } : null;
+}
+
 /** Mark a VOD removed by T0 (never published). Conditional, so a finished VOD is not overwritten. */
 async function markRemoved(db: Database, vodId: string): Promise<void> {
   await db
@@ -99,6 +134,7 @@ export async function finalizeVod(
       status: schema.vods.status,
       channelId: schema.vods.channelId,
       broadcastId: schema.vods.broadcastId,
+      storagePrefix: schema.vods.storagePrefix,
       retentionDays: schema.channels.vodRetentionDays,
     })
     .from(schema.vods)
@@ -129,9 +165,12 @@ export async function finalizeVod(
     return current?.status === "deleted" ? "removed" : "skipped";
   }
 
-  const prefix = vodPrefix(vodId);
-  const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
-  const segments = res ? parsePlaylist(await res.text()).segments : [];
+  // Only the VOD's own prefixes are ever read, copied or deleted here.
+  if (!isVodOwnPrefix(vodId, vod.storagePrefix)) throw new Error("unexpected VOD storage prefix; not finalizing");
+  const found = await locatePlaylist(storage, bucket, vodId, vod.storagePrefix);
+  // Where the recording is read from: the row's prefix, or the copy a crashed run left.
+  const prefix = found?.prefix ?? vod.storagePrefix;
+  const segments = found ? parsePlaylist(await found.res.text()).segments : [];
   if (segments.length === 0) {
     log.warn("VOD has no segments; marking failed");
     const failed = await db
@@ -195,16 +234,24 @@ export async function finalizeVod(
     await scratches.release(scratch);
   }
 
-  let thumbnailKey: string | null = null;
-  if (thumbnail) {
-    thumbnailKey = `${prefix}thumbnail.${imageExt(deps.imageFormat)}`;
-  }
   const now = deps.now?.() ?? new Date();
   // A T0 job that landed while we scanned (another sample, the worker) wins over publishing.
   if (await moderation.broadcastTainted(vod.broadcastId)) {
     await markRemoved(db, vodId);
     return "removed";
   }
+  const state = await placementOnceReady(db, vodId);
+  const placement = state ? vodPlacement(state) : "private";
+  // `leave`: another flow (NCII, DMCA) owns the keys and has moved or is moving the objects into
+  // its hidden area. Nothing new is written beside them (a fresh thumbnail would be a frame of the
+  // hidden content outside that area); the VOD is only marked ready, and stays hidden.
+  const leave = placement === "leave";
+  const target = leave ? prefix : vodPrefix(vodId, placement);
+  const moving = target !== prefix;
+  // Copy (never delete) before `ready`: a ready VOD never points at missing objects.
+  if (moving) await copyOrDiscard(deps, vodId, prefix, target, log);
+  if (leave) thumbnail = null;
+  const thumbnailKey = thumbnail ? `${target}thumbnail.${imageExt(deps.imageFormat)}` : null;
   const size = await db.transaction(async (tx) => {
     const [current] = await tx
       .select({ status: schema.vods.status })
@@ -215,18 +262,27 @@ export async function finalizeVod(
     // Keep T0 cleanup serialized with publication through the ready transition. If cleanup
     // committed first, no final objects are written; if this transaction wins, cleanup runs
     // afterwards and removes the completed public media.
-    await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
-      contentType: "application/vnd.apple.mpegurl",
-      cacheControl: "public, max-age=3600",
-    });
+    if (!leave)
+      await storage.put(bucket, target + VOD_PLAYLIST, renderPlaylist(segments, { ended: true }), {
+        contentType: "application/vnd.apple.mpegurl",
+        cacheControl: "public, max-age=3600",
+      });
     if (thumbnail && thumbnailKey)
       await storage.put(bucket, thumbnailKey, thumbnail, { contentType: imageType(deps.imageFormat) });
+    // Everything at the VOD's other own prefix goes while the row is still locked in `processing`
+    // (see the header): the moved source, or what a crashed run left behind. Playlist first.
+    if (!leave) {
+      const other = otherOwnPrefix(vodId, target);
+      await storage.delete(bucket, other + VOD_PLAYLIST);
+      await storage.deletePrefix(bucket, other);
+    }
     let totalSize = 0;
-    for await (const obj of storage.list(bucket, prefix)) totalSize += obj.size;
+    for await (const obj of storage.list(bucket, target)) totalSize += obj.size;
     const changed = await tx
       .update(schema.vods)
       .set({
         status: "ready",
+        storagePrefix: target,
         durationSeconds: totalDuration(segments),
         sizeBytes: totalSize,
         expiresAt: new Date(now.getTime() + vod.retentionDays * DAY_MS),
@@ -236,9 +292,69 @@ export async function finalizeVod(
       .returning({ id: schema.vods.id });
     return changed.length > 0 ? totalSize : null;
   });
-  if (size === null) return "removed";
-  log.info("VOD ready", { segments: segments.length, sizeBytes: size });
+  if (size === null) {
+    // Not ours to publish any more: removed meanwhile (T0, NCII), or a concurrent run of this job
+    // already published it. The copies made here go only when the row does not point at them
+    // (the source is intact; T0 evidence lists both prefixes).
+    if (moving) await discardUnlessCurrent(deps, vodId, target, log);
+    return "removed";
+  }
+  log.info("VOD ready", { segments: segments.length, sizeBytes: size, placement });
   return "ready";
+}
+
+const otherOwnPrefix = (vodId: string, prefix: string): string =>
+  vodPrefix(vodId, prefix === vodPrefix(vodId, "public") ? "private" : "public");
+
+/**
+ * The recording's playlist under the row's prefix or, when it is gone there, under the VOD's other
+ * own prefix: a run that crashed after deleting the source and before commit left a verified
+ * copy there. Null when neither has one.
+ */
+async function locatePlaylist(
+  storage: ObjectStorage,
+  bucket: string,
+  vodId: string,
+  rowPrefix: string,
+): Promise<{ prefix: string; res: Response } | null> {
+  for (const prefix of [rowPrefix, otherOwnPrefix(vodId, rowPrefix)]) {
+    const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
+    if (res) return { prefix, res };
+  }
+  return null;
+}
+
+/**
+ * Copy the recording to `target`. A copy that fails partway (a source object deleted by a T0 or an
+ * account deletion meanwhile, a verification mismatch) leaves no partial copy behind unless the
+ * row points at `target`: a removed VOD is never finalized again, so nothing else would delete it.
+ */
+async function copyOrDiscard(
+  deps: FinalizeDeps,
+  vodId: string,
+  from: string,
+  target: string,
+  log: Logger,
+): Promise<void> {
+  try {
+    await moveVodObjects(deps.storage, deps.bucket, from, target);
+  } catch (err) {
+    await discardUnlessCurrent(deps, vodId, target, log);
+    throw err;
+  }
+}
+
+/** Delete the copies at `target` unless the row points at them; a failure is logged, never thrown. */
+async function discardUnlessCurrent(deps: FinalizeDeps, vodId: string, target: string, log: Logger): Promise<void> {
+  try {
+    const [current] = await deps.db
+      .select({ prefix: schema.vods.storagePrefix })
+      .from(schema.vods)
+      .where(eq(schema.vods.id, vodId));
+    if (current?.prefix !== target) await deps.storage.deletePrefix(deps.bucket, target);
+  } catch (err) {
+    log.error("could not delete the VOD's discarded copies", { error: errorCategory(err) });
+  }
 }
 
 async function sampleFrame(

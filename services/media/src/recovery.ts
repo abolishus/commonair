@@ -23,7 +23,8 @@ import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
 import { errorCategory } from "./moderation/logging.ts";
 import { parsePlaylist, renderPlaylist, type PlaylistSegment } from "./vod/playlist.ts";
-import { VOD_PLAYLIST, vodPrefix } from "./vod/recorder.ts";
+import { VOD_PLAYLIST } from "./vod/recorder.ts";
+import { isVodOwnPrefix } from "@commonair/contracts/storage";
 
 export const BROADCASTS_DIR = "broadcasts";
 /** mkdtemp prefixes of per-job scratch directories (clips.ts, vod/finalize.ts). */
@@ -102,9 +103,10 @@ async function readdirOrEmpty(path: string): Promise<string[]> {
 }
 
 /** Upload what the crashed recorder had not, then rewrite the (still open) VOD playlist. */
-async function recoverRecording(deps: RecoveryDeps, dir: string, vodId: string): Promise<number> {
+async function recoverRecording(deps: RecoveryDeps, dir: string, vodId: string, prefix: string): Promise<number> {
   const { storage, bucket } = deps;
-  const prefix = vodPrefix(vodId);
+  // Only the VOD's own prefixes: a tampered row must not make recovery write elsewhere.
+  if (!isVodOwnPrefix(vodId, prefix)) throw new Error("unexpected VOD storage prefix");
   const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
   const published = res ? parsePlaylist(await res.text()).segments : [];
   const pending = segmentsToRecover(published, await readRuns(dir));
@@ -191,14 +193,14 @@ async function recoverBroadcastDir(
       return { kept: false, uploaded: 0 };
     }
     const [vod] = await deps.db
-      .select({ id: schema.vods.id, status: schema.vods.status })
+      .select({ id: schema.vods.id, status: schema.vods.status, storagePrefix: schema.vods.storagePrefix })
       .from(schema.vods)
       .where(and(eq(schema.vods.broadcastId, name), inArray(schema.vods.status, ["recording", "processing"])))
       .limit(1);
     let uploaded = 0;
     if (vod) {
       if (!recoverable.includes(vod.status as OpenVodStatus)) return { kept: true, uploaded: 0 };
-      uploaded = await recoverRecording(deps, dir, vod.id);
+      uploaded = await recoverRecording(deps, dir, vod.id, vod.storagePrefix);
       if (uploaded > 0)
         log.info("recovered unuploaded segments of a recording", {
           broadcastId: name,

@@ -8,12 +8,12 @@
  */
 import { and, eq, isNull, type SQL } from "drizzle-orm";
 import { LiveEvent } from "@commonair/contracts/internal";
+import { vodPrefix } from "@commonair/contracts/storage";
 import { schema, uuidv7 } from "@commonair/db";
 import type { BroadcastInfo, MediaContext } from "./context.ts";
 import { isLive } from "./mediamtx.ts";
 import { BroadcastSession } from "./session.ts";
 import type { LocalLookup } from "./vod/recorder.ts";
-import { vodPrefix } from "./vod/recorder.ts";
 import { reconcileVods } from "./vod/reconcile.ts";
 import { errorCategory } from "./moderation/logging.ts";
 
@@ -208,7 +208,9 @@ export class LiveCoordinator {
       channelId: info.channelId,
       title: info.title || info.slug,
       status: "recording",
-      storagePrefix: vodPrefix(id),
+      // Private until finalize publishes it (ADR 0009 amendment 1): a recording, and a VOD that
+      // a T0 match stops from ever being published, never has a public object.
+      storagePrefix: vodPrefix(id, "private"),
     });
     return id;
   }

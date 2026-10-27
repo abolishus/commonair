@@ -39,10 +39,25 @@ describe("objectsOf", () => {
   };
 
   test("prefixes and keys of rows that are not deleted; a thumbnail inside the VOD prefix is not listed twice", () => {
+    // Both of a VOD's own prefixes, its storage_prefix first: a placement move may be in flight.
     expect(objectsOf(covered)).toEqual({
       keys: ["thumbnails/b1/t.jpg", "clips/c1.mp4", "clips/c1.jpg"],
-      prefixes: ["thumbnails/b1/", "vods/v1/"],
+      prefixes: ["thumbnails/b1/", "vods/v1/", "recordings/v1/"],
     });
+    const recorded: Covered = {
+      vods: [
+        {
+          id: "v3",
+          broadcastId: "b",
+          storagePrefix: "recordings/v3/",
+          thumbnailKey: "recordings/v3/t.jpg",
+          status: "ready",
+        },
+      ],
+      clips: [],
+      prefixes: [],
+    };
+    expect(objectsOf(recorded)).toEqual({ keys: [], prefixes: ["recordings/v3/", "vods/v3/"] });
   });
 
   test("material held by another notice is skipped", () => {
@@ -52,13 +67,13 @@ describe("objectsOf", () => {
     });
   });
 
-  test("a storage prefix outside vods/ falls back to the VOD's own prefix", () => {
+  test("a storage prefix the VOD does not own falls back to its own prefixes", () => {
     const odd: Covered = {
       vods: [{ id: "v9", broadcastId: "b", storagePrefix: "elsewhere/", thumbnailKey: null, status: "ready" }],
       clips: [],
       prefixes: [],
     };
-    expect(objectsOf(odd).prefixes).toEqual(["vods/v9/"]);
+    expect(objectsOf(odd).prefixes).toEqual(["vods/v9/", "recordings/v9/"]);
   });
 });
 

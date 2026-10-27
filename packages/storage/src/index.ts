@@ -31,6 +31,11 @@ export interface ObjectStorage {
   get(bucket: string, key: string, opts?: GetOptions): Promise<Response | null>;
   head(bucket: string, key: string): Promise<ObjectInfo | null>;
   delete(bucket: string, key: string): Promise<void>;
+  /**
+   * Server-side copy within a bucket (S3 CopyObject): the bytes never pass through this process.
+   * The copy keeps the source's content type and cache-control (metadata directive `COPY`).
+   */
+  copy(bucket: string, fromKey: string, toKey: string): Promise<void>;
   /** Delete every object under a prefix; returns how many were deleted. */
   deletePrefix(bucket: string, prefix: string): Promise<number>;
   list(bucket: string, prefix: string): AsyncIterable<ObjectInfo>;
@@ -130,6 +135,22 @@ export function createS3Storage(opts: S3Options): ObjectStorage {
       if (!res.ok && res.status !== 404) await fail(res, `delete ${bucket}/${key}`);
       await res.body?.cancel();
     },
+    async copy(bucket, fromKey, toKey) {
+      const res = await send(url(bucket, toKey), {
+        method: "PUT",
+        headers: {
+          "x-amz-copy-source": `/${bucket}/${encodeKey(fromKey)}`,
+          "x-amz-metadata-directive": "COPY",
+        },
+      });
+      if (!res.ok) await fail(res, `copy ${bucket}/${fromKey}`);
+      // CopyObject can fail after sending 200: the error is then in the body.
+      const text = await res.text().catch(() => "");
+      if (/<Error>/.test(text)) {
+        const code = /<Code>([^<]+)<\/Code>/.exec(text)?.[1] ?? "CopyFailed";
+        throw new S3Error(res.status, code, `copy ${bucket}/${fromKey}: ${code}`);
+      }
+    },
     async deletePrefix(bucket, prefix) {
       let n = 0;
       for await (const obj of storage.list(bucket, prefix)) {
@@ -225,3 +246,5 @@ export function storageFromEnv(env: {
     forcePathStyle: env.S3_FORCE_PATH_STYLE,
   });
 }
+
+export { CopyVerificationError, moveVodObjects, type MoveResult } from "./move.ts";

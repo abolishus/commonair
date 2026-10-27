@@ -3,11 +3,13 @@
 
 /** Housekeeping: expiry, pruning, stale-session closing, relay liveness, VOD retention. */
 import { KEYS } from "@commonair/contracts/internal";
-import { vodPrefix as contractVodPrefix } from "@commonair/contracts/storage";
 import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
 import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
 import { dmcaHiddenKey } from "./dmca/objects.ts";
+import { withRunLock } from "./integrity/lock.ts";
+import { ownVodPrefix, vodPlacementLockKey } from "./vod/placement.ts";
+import { vodObjectPrefixes } from "./vod/prefixes.ts";
 
 const DAY = 86_400_000;
 const ago = (ctx: WorkerContext, ms: number) => new Date(ctx.now().getTime() - ms);
@@ -86,12 +88,6 @@ export async function markRelaysOffline(ctx: WorkerContext, missedMs = 180_000) 
   });
 }
 
-/**
- * The only object prefix a VOD may own today (trailing slash: "vods/a" must never match "vods/ab…").
- * A one-argument wrapper over the contract until W0-media-exposure switches callers to placements.
- */
-export const vodPrefix = (vodId: string) => contractVodPrefix(vodId, "public");
-
 /** The only object keys a clip may own: `clips/<clip id>.<ext>` (video and thumbnail). */
 export const isOwnClipKey = (clipId: string, key: string) =>
   key.startsWith(`clips/${clipId}.`) && /^clips\/[0-9a-f-]{36}\.[a-z0-9]{2,5}$/.test(key);
@@ -150,9 +146,10 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
     return { deleted: 0, failed: 0, objects: 0, held: 0, clipsDeleted: 0 };
   }
   const due = and(isNotNull(v.expiresAt), lt(v.expiresAt, ctx.now()), ne(v.status, "deleted"));
-  // The media unit writes VODs under exactly `vods/<vod id>/`. Anything else is refused: a
-  // tampered or legacy prefix could otherwise delete another VOD's objects or the whole bucket.
-  const ownPrefix = sql`${v.storagePrefix} = 'vods/' || ${v.id}::text || '/'`;
+  // A VOD owns exactly `vods/<vod id>/` or `recordings/<vod id>/` (`isVodOwnPrefix`, ADR 0009
+  // amendment 1). Anything else is refused: a tampered prefix could otherwise delete another VOD's
+  // objects or the whole bucket.
+  const ownPrefix = ownVodPrefix;
   const refused = await ctx.db
     .select({ id: v.id })
     .from(v)
@@ -165,7 +162,7 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
     .where(and(due, ownPrefix, ownerHeld(v.channelId)));
   // Refused and held rows are excluded here so they can never starve valid ones out of the batch.
   const expired = await ctx.db
-    .select({ id: v.id, channelId: v.channelId })
+    .select({ id: v.id, channelId: v.channelId, storagePrefix: v.storagePrefix })
     .from(v)
     .where(and(due, ownPrefix, sql`not ${ownerHeld(v.channelId)}`))
     .orderBy(v.expiresAt)
@@ -177,17 +174,29 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
   const storage = ctx.storage;
   for (const vod of expired) {
     try {
-      const held = await unlessOwnerHeld(ctx, vod.channelId, async (tx) => {
-        objects += await storage.deletePrefix(ctx.mediaBucket, vodPrefix(vod.id));
-        // A DMCA takedown keeps its copy under moderation/dmca/; expiry ends that too.
-        objects += await storage.deletePrefix(ctx.mediaBucket, dmcaHiddenKey(vodPrefix(vod.id)));
-        // An owner removal keeps its reason; only plain expiry is recorded as retention.
-        await tx
-          .update(v)
-          .set({ status: "deleted", removedReason: sql`coalesce(${v.removedReason}, 'retention')` })
-          .where(eq(v.id, vod.id));
-      });
-      if (held) heldLate++;
+      // Never while a placement move of this VOD runs: it could recreate objects just deleted.
+      const run = await withRunLock(
+        ctx.valkey,
+        vodPlacementLockKey(vod.id),
+        { ttlMs: 30_000, maxHoldMs: 30 * 60_000, job: "vod-retention", logger: ctx.logger },
+        () =>
+          unlessOwnerHeld(ctx, vod.channelId, async (tx) => {
+            // Both own prefixes (a move may have been interrupted), and the DMCA copies of each:
+            // a takedown keeps its copy under moderation/dmca/, and expiry ends that too.
+            for (const prefix of vodObjectPrefixes(vod.id, vod.storagePrefix)) {
+              objects += await storage.deletePrefix(ctx.mediaBucket, prefix);
+              objects += await storage.deletePrefix(ctx.mediaBucket, dmcaHiddenKey(prefix));
+            }
+            // An owner removal keeps its reason; only plain expiry is recorded as retention.
+            await tx
+              .update(v)
+              .set({ status: "deleted", removedReason: sql`coalesce(${v.removedReason}, 'retention')` })
+              .where(eq(v.id, vod.id));
+          }),
+      );
+      // Busy: retried on the next run.
+      if (!run.acquired) failed++;
+      else if (run.value) heldLate++;
       else deleted++;
     } catch (err) {
       failed++;

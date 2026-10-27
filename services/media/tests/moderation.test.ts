@@ -989,6 +989,7 @@ describe("durable T0 replay", () => {
         vodEnabled: true,
       },
       "0192a1b2-0000-7000-8000-000000000008",
+      "recordings/0192a1b2-0000-7000-8000-000000000008/",
     );
     const state = recorder as unknown as {
       local: Array<{

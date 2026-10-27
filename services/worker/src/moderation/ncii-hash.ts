@@ -24,7 +24,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
-import { nciiHiddenKey, readObject, thumbnailPrefix, vodPrefix } from "./objects.ts";
+import { nciiHiddenKey, readObject, thumbnailPrefix } from "./objects.ts";
+import { vodObjectPrefixes } from "../vod/prefixes.ts";
 import { audit } from "./records.ts";
 import { mediaStorage, moderationRuntime } from "./runtime.ts";
 import { sampleSeconds } from "./settings.ts";
@@ -84,8 +85,16 @@ interface ItemResult {
 
 async function hashVod(ctx: WorkerContext, vodId: string, every: number, work: string): Promise<ItemResult> {
   const storage = mediaStorage(ctx);
-  const { base, keys } = await listWithFallback(storage, ctx.mediaBucket, vodPrefix(vodId));
-  if (keys.length === 0) return { hashes: [], deleteKeys: [] };
+  const [v] = await ctx.db.select({ prefix: vods.storagePrefix }).from(vods).where(eq(vods.id, vodId));
+  // The row's prefix first; the other own prefix too, since a placement move may have left copies.
+  const found: { base: string; keys: string[] }[] = [];
+  for (const prefix of vodObjectPrefixes(vodId, v?.prefix)) {
+    const listed = await listWithFallback(storage, ctx.mediaBucket, prefix);
+    if (listed.keys.length > 0) found.push(listed);
+  }
+  const first = found[0];
+  if (!first) return { hashes: [], deleteKeys: [] };
+  const { base, keys } = first;
   const dir = join(work, vodId);
   // One object at a time to disk: a whole VOD is never held in memory.
   for (const k of keys) {
@@ -97,7 +106,7 @@ async function hashVod(ctx: WorkerContext, vodId: string, every: number, work: s
   }
   const playlist = selectVodPlaylist(keys);
   const hashes = await hashVideo(ctx, join(dir, playlist.slice(base.length)), every);
-  return { hashes: usableHashes(hashes), deleteKeys: keys };
+  return { hashes: usableHashes(hashes), deleteKeys: found.flatMap((f) => f.keys) };
 }
 
 async function hashClip(ctx: WorkerContext, clipId: string, work: string): Promise<ItemResult> {
@@ -158,7 +167,7 @@ async function hashBroadcast(ctx: WorkerContext, broadcastId: string, every: num
     vods: vodRows.length,
     clips: clipRows.length,
     thumbnails: thumbKeys.length,
-    prefixes: [...vodRows.map((v) => vodPrefix(v.id)), thumbnailPrefix(broadcastId)],
+    prefixes: [...vodRows.flatMap((v) => vodObjectPrefixes(v.id, null)), thumbnailPrefix(broadcastId)],
   };
 }
 

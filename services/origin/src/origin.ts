@@ -3,6 +3,7 @@
 
 /** Wires the origin together; main.ts adds env loading and the HTTP runtime. */
 import { MEDIA_INTERNAL_USER, STREAMS } from "@commonair/contracts/internal";
+import { VOD_ROUTE } from "@commonair/contracts/storage";
 import type { Executor } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
@@ -21,6 +22,7 @@ import { rawPathOf } from "./paths.ts";
 import { ProductionStore } from "./production.ts";
 import { TokenRefresher } from "./refresh.ts";
 import { MediaUpstream } from "./upstream.ts";
+import { createVodHandler, dbVodStateLookup, VodStateCache } from "./vod.ts";
 
 export interface OriginOptions {
   db: Executor;
@@ -34,7 +36,7 @@ export interface OriginOptions {
   mediaPassword: string;
   cacheMb: number;
   cdn: { provider: "none" | "origin-pull"; baseUrl?: string };
-  /** Serve public media objects at `/media/<key>` (ADR 0009); without it `/media` is a 404. */
+  /** Serve public media objects at `/media/<key>` (ADR 0009) and non-public VODs at `/vod/` (amendment 1); without it both are 404s. */
   media?: Omit<MediaDeps, "logger">;
   /** TRUSTED_PROXY_CIDRS. */
   trustedProxyCidrs?: string[];
@@ -124,7 +126,12 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
     logger: opts.logger,
     now,
   });
-  const mediaHandler = opts.media ? createMediaHandler({ ...opts.media, logger: opts.logger }) : undefined;
+  // One VOD state cache for both VOD routes (5 s per instance, ADR 0009 amendment 1).
+  const vodStates = new VodStateCache(dbVodStateLookup(opts.db), { now });
+  const mediaHandler = opts.media ? createMediaHandler({ ...opts.media, vodStates, logger: opts.logger }) : undefined;
+  const vodHandler = opts.media
+    ? createVodHandler({ ...opts.media, publicKey: signingKey.publicKey, states: vodStates, logger: opts.logger, now })
+    : undefined;
   const digestHandler = createP2PDigestHandler({
     publicKey: signingKey.publicKey,
     store,
@@ -135,6 +142,7 @@ export async function createOrigin(opts: OriginOptions): Promise<Origin> {
   const fetchHandler: OriginFetch = (req, peerIp) => {
     const rawPath = rawPathOf(req.url);
     if (mediaHandler && rawPath.startsWith(MEDIA_ROUTE)) return mediaHandler(req, rawPath);
+    if (vodHandler && rawPath.startsWith(VOD_ROUTE)) return vodHandler(req, rawPath);
     if (rawPath.startsWith(P2P_DIGEST_ROUTE)) return digestHandler(req, rawPath);
     return hlsHandler(req, peerIp);
   };

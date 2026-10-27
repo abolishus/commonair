@@ -224,6 +224,32 @@ describe("dmca-disable", () => {
     expect(itemIds).toHaveLength(2);
   });
 
+  test("finds a VOD's objects under recordings/ and an in-flight copy under vods/, and restores both", async () => {
+    const { objects, storage } = memoryStorage();
+    const f = await content(objects);
+    // The VOD is private (ADR 0009 amendment 1), and a placement move left copies under vods/.
+    await t.db
+      .update(schema.vods)
+      .set({ storagePrefix: `recordings/${f.vodId}/` })
+      .where(eq(schema.vods.id, f.vodId));
+    const recorded = [`recordings/${f.vodId}/index.m3u8`, `recordings/${f.vodId}/seg0.ts`];
+    for (const k of recorded) objects.set(k, bytes(k));
+    const ctx = context(storage, new MemoryMailer({ site }), []);
+    const { noticeId, itemIds } = await actioned(f, [{ type: "vod", id: f.vodId }]);
+    await disableNoticeObjects(ctx, { noticeId });
+    for (const k of [...recorded, ...f.keys.vod]) {
+      expect(objects.has(k), k).toBe(false);
+      expect(objects.has(dmcaHiddenKey(k)), k).toBe(true);
+    }
+    const due = new Date("2031-01-07T12:00:00Z");
+    await counter(noticeId, f.userId, itemIds, due);
+    await runDmcaRestoreOnce(ctx, new Date(due.getTime() + 60_000));
+    for (const k of [...recorded, ...f.keys.vod]) {
+      expect(objects.has(k), k).toBe(true);
+      expect(objects.has(dmcaHiddenKey(k)), k).toBe(false);
+    }
+  });
+
   test("a retry after a crash between the move and the mark finds the objects already moved", async () => {
     const { objects, storage } = memoryStorage();
     const f = await content(objects);
