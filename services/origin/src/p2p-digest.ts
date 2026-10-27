@@ -101,6 +101,9 @@ export function createP2PDigestHandler(deps: P2PDigestDeps): P2PDigestFetch {
   const metrics = deps.metrics ?? noopMetrics;
   const now = deps.now ?? Date.now;
   const memo = new DigestMemo(deps.memoEntries ?? 4096, DEFAULT_TTLS.mediaMs, now);
+  // Without the directory a source digest can differ from what `/hls/` serves (AAC copy) and skips
+  // the liveness and token-channel checks; say so once so a missing wiring is visible in the logs.
+  if (!deps.channels) deps.logger?.warn("p2p digest without a channel directory", { channels: false });
 
   const fail = (status: number, error: string, headers: Record<string, string> = {}) => {
     const res = Response.json({ error }, { status, headers: { ...CORS, ...headers } });
@@ -200,7 +203,13 @@ export function createP2PDigestHandler(deps: P2PDigestDeps): P2PDigestFetch {
   return async (req, rawPath) => {
     const { res, mr, src } = await serve(req, rawPath);
     if (res.status !== 204)
-      metrics.request(P2P_DIGEST_METRIC_ROUTE, mr?.kind ?? "other", src ?? "unauthenticated", res.status);
+      // `kind` is "segment" for every digestable path; refused playlists, parts and junk are "other".
+      metrics.request(
+        P2P_DIGEST_METRIC_ROUTE,
+        mr?.kind === "segment" ? "segment" : "other",
+        src ?? "unauthenticated",
+        res.status,
+      );
     return res;
   };
 }

@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { sourceAacPath } from "@commonair/contracts/internal";
 import type { PlaybackClaims } from "@commonair/contracts/tokens";
 import type { Executor } from "@commonair/db";
+import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
 import { generateSigningKey, signPlaybackToken, type SigningKey } from "@commonair/tokens";
 import type { SourceAacState } from "../src/channels.ts";
@@ -194,6 +195,8 @@ describe("p2p digest", () => {
     expect(r.status).toBe(404);
     expect(r.headers.get("access-control-allow-origin")).toBe("*");
     expect(s.calls).toHaveLength(0);
+    // Refused non-segments never borrow the segment label.
+    expect(s.metrics.requests).toEqual([["p2p_digest", "other", "unauthenticated", 404]]);
   });
 
   test("tokens: missing, malformed, bad signature, expired, wrong path, a VOD token", async () => {
@@ -293,6 +296,23 @@ describe("p2p digest", () => {
       // Renditions never use the copy.
       s.objects.set("live/test/720p/seg9.m4s", obj(BYTES));
       expect(await (await s.call(`/p2p-digest/live/test/720p/seg9.m4s?t=${await token()}`)).text()).toBe(sha256(BYTES));
+    });
+
+    test("a handler built without the directory warns once; with it, never", () => {
+      const warned: string[] = [];
+      const logger: Logger = {
+        trace() {},
+        debug() {},
+        info() {},
+        warn: (msg: string) => void warned.push(msg),
+        error() {},
+        fatal() {},
+        child: () => logger,
+      };
+      setup({ logger });
+      expect(warned).toEqual(["p2p digest without a channel directory"]);
+      setup({ logger, channels: channels("off") });
+      expect(warned).toHaveLength(1);
     });
 
     test("pending copy 503, offline 404, another channel's token 403", async () => {
