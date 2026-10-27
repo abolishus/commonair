@@ -23,8 +23,22 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 ## In flight
 
 Batch 2 (E7 + W0 + P1; waves and shared rules: `.claude/briefs/batch2/README.md`), started
-2026-10-27. ADR drafts (proposed, awaiting the user): 0005 amendment 1 (P1), 0012 part 1
-(W0-clock), 0019 (W0-sor), 0009 amendment 1 (W0-media-exposure). E7 contract step `3bacecb` +
+2026-10-27. ADRs 0005 amendment 1 (P1), 0012 part 1 (W0-clock), 0019 (W0-sor) and 0009
+amendment 1 (W0-media-exposure) are accepted.
+
+**ADRs for every later milestone (2026-10-27):** the maintainer accepted the recommended answers.
+Accepted: 0011 captions, 0012 amendment 1 (Timeline Spine, chat retention and replay), 0013
+splits, 0014 attestation key, 0015 verified-watch signal, 0016 DVR, 0017 watch rooms, 0018 data
+mode, 0022 supply chain, 0026 interactivity, 0027 OAuth and EventSub, 0028 notifications, 0029
+i18n (Hosted Weblate, Spanish first), 0030 federation, 0032 scaling (NYC3; tracker on an app
+droplet). Proposed: 0031 Twitch import (waits for counsel), 0033 SeaweedFS (answers recorded;
+waits for the phase 0 spike; replaces Garage outright, no migration tool). The milestone plans and
+feature-wins.md are corrected to match. Open for the maintainer: the SDK's license; owners for CDN
+fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~86 MB/h (0018);
+0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
+Legal seed follow-ups for E8/N2: a no-cash-value clause in `terms.md`, the locale cookie in
+`cookies.md`.
+E7 contract step `3bacecb` +
 `66e95da`, gate green at `ebe61b0` (pushed).
 
 | Unit              | Wave | Brief                                    | State                     |

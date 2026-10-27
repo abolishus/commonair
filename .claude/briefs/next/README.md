@@ -31,7 +31,7 @@ for self-hosters, held `v0.1.0` for R0-g (landed the same day, `6a1983f`), and m
 | [W2](W2-feature-wave.md)       | feature-wins Wave 2: splits, captions, analytics, enforcement report, DVR, rehearsal     | W1 (per unit); ADRs 0011, 0013, 0014, 0016                 | `captions`, `live-dvr`, `rehearsal`; others extended           |
 | [W3](W3-feature-wave.md)       | feature-wins Wave 3: watch rooms, portability, giveaways, jury, surge raids, predictions | W2, E8; ADR 0017                                           | `watch-room`, `portability`                                    |
 | [N1](N1-notifications-pwa.md)  | go-live notifications (in-app, email, web push, Discord adapter) and the installable PWA | ADR 0028                                                   | new `notifications` scenario                                   |
-| [N2](N2-i18n-weblate.md)       | real i18n (locale negotiation, a second locale, plurals) and self-hosted Weblate         | ADR 0029                                                   | `i18n` unit gate; `e2e-basic` under a second locale            |
+| [N2](N2-i18n-weblate.md)       | real i18n (locale negotiation, a second locale, plurals) and Hosted Weblate (libre plan) | ADR 0029                                                   | `i18n` unit gate; `e2e-basic` under a second locale            |
 | [N3](N3-twitch-import.md)      | import channel info, panels, emotes and schedule from Twitch                             | counsel on the Twitch Developer Agreement; W3 bundle shape | `twitch-import` scenario against a Twitch mock                 |
 | [N4](N4-federation.md)         | ActivityPub: followable channels, go-live posts                                          | N1 (go-live event), ADR 0030                               | `federation` scenario against a second instance                |
 | [M1](M1-money-follow-ups.md)   | ADR 0007 follow-ups, Stripe Connect transfers, E5 money follow-ups                       | counsel and a legal entity before any live keys            | `e4b-money` and `e5-coop` extended (stripe-mock)               |
@@ -67,10 +67,9 @@ before counsel; L1 is the user's. No P2P claim ships before P1.
 
 ## Shared decisions the user owns
 
-- ADR numbers: 0011–0019 stay reserved for the feature-wins candidates (feature-wins.md §7);
-  0025 is hosting on DigitalOcean (accepted); the planned ones are 0026 E8, 0027 E9, 0028 N1,
-  0029 N2, 0030 N4, 0031 N3 and 0032 S1. Numbers are taken when an ADR is written, so these can
-  still shift.
+- ADRs: all written as of 2026-10-27. Accepted: 0011–0019 (feature-wins candidates), 0022,
+  0025, 0026 E8, 0027 E9, 0028 N1, 0029 N2, 0030 N4, 0032 S1. Proposed: 0031 N3 (waits for
+  counsel), 0033 SeaweedFS (waits for its phase 0 spike).
 - Settled 2026-10-26: ADR 0025 accepted; managed Postgres and Valkey for our instance at S1
   stage 1, with `selfhost.sh` support for external managed services for every operator; launch
   target 99.5%, 99.9% from stage 1; `v0.1.0` waits for R0-g (done) but not for E7 (E7 ships in
@@ -94,6 +93,7 @@ facts changed and each wave plan here carries the fix:
   (the grep counts each file's import line too).
 - `scripts/fetch-model.ts` exists and fetches the moderation classifier; W2-captions extends it
   rather than creating it.
-- Playback-token minting is `services/api/src/routes/playback.ts:77`, not `services/api/src/playback/**`.
+- Playback-token minting is `services/api/src/routes/playback.ts:78` (`signFor`, `:66-79`), not
+  `services/api/src/playback/**`.
 - `services/chat/src/persistence.ts` exists; W1-spine edits it rather than creating it.
 - `@commonair/i18n` (PLAN.md "Phase two") does not exist; catalogs live in `apps/web/src/i18n/`.

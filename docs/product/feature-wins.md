@@ -7,6 +7,11 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 Co-authored by the pod: Senior PM and Engineering Manager (facilitators), Staff Engineer/Architect, Senior Realtime & Media Engineer, Lead Product Designer/UX Researcher, Creator Success & DevRel Lead, Billing & Co-op Finance Lead, and Trust & Safety/Integrity Lead. Repo state checked at `8e5e14a` on 2026-10-21. This is the final plan, revised after the review round (see §8, "Review outcome").
 
+**ADRs accepted 2026-10-27.** ADRs [0011](../decisions/0011-caption-models.md) to
+[0018](../decisions/0018-data-mode-claim.md) settle most of the questions this plan left open.
+Where this plan and an accepted ADR differ, the ADR wins; the specs and tables below have been
+corrected to match them.
+
 ## 1. Summary
 
 **The bet.** Twitch wins on scale and network effects, so we should not try to beat it feature for feature. We should ship the things its business model keeps it from shipping. Every item here rests on something CommonAir already enforces or computes:
@@ -22,7 +27,8 @@ The pod cut 38 pitches to 14 features. They run in a Wave 0 of prerequisites and
 The review found that three foundations the draft took for granted do not yet exist:
 
 - **One media clock.** Each rendition and the recorder stamp their own PDT.
-- **Closed integrity review items.** The 2H2 items in `PROGRESS.md:235` are still open.
+- **Closed integrity review items.** The 2H2 integrity items were still open. (Since fixed in code:
+  W0-integrity merged in `be72278`; its closure in `PROGRESS.md` is still to be recorded.)
 - **A multi-recipient ledger.** Hold release and reversals are single-creator throughout.
 
 Wave 0 builds the first two. Ledger Splits moves to Wave 2 behind ADR 0013 and a payment-fraud floor.
@@ -71,7 +77,7 @@ Unscored, because they are owed rather than wins: the **DSA Art. 17 statement-of
 
 **Adjustments.**
 
-- **Payment Breakdown:** feasibility 5.0 → 4.8. It now parses v1 and v2 payment metadata, adds the fee-schedule changelog and chargeback timeline, and adds owner paths the draft left out.
+- **Payment Breakdown:** feasibility 5.0 → 4.8. It now parses v2 payment metadata ([ADR 0013](../decisions/0013-ledger-splits.md)), adds the fee-schedule changelog and chargeback timeline, and adds owner paths the draft left out.
 - **Timeline Spine:** feasibility 4.0 → 3.3, size M → L. It now depends on W0-clock. The draft assumed a single PDT clock. In fact the ladder rungs are separate ffmpeg processes publishing back to their own MediaMTX paths (`services/media/src/ffmpeg/args.ts:99-125`). MediaMTX stamps LL-HLS PDT per path (`infra/mediamtx/mediamtx.yml:63`, with no `useAbsoluteTimestamp`). The VOD recorder's PDT at `args.ts:169` comes from a third, `-c copy`, process.
 - **Verified-watch gate:** feasibility 4.0 → 3.6. CDN-delivered sessions are not fetch-judged (`packages/integrity/src/signals/fetch.ts:107`), and the 2H2 items gate GA.
 - **Open Captions:** feasibility 3.0 → 2.8. The chat filter pool has to be extracted into a package first, and the unit needs a sidecar image, infra work and a captions-on latency profile.
@@ -115,7 +121,7 @@ Every spec assumes the AGENTS.md rules:
   - Gross-side lines (tax + creator(s) + co-op share) sum exactly to gross, through any partial or full refund.
   - The processor fee, the non-reversed fee on refunds, and the chargeback dispute fee are separate co-op-expense lines _outside_ the gross sum. The dispute fee is its own `paymentFees` debit from settlement.
   - A nightly reconciliation invariant checks, per payment: gross-side lines + fee lines = the settlement-account movement across that payment's postings.
-- **Metadata v1/v2.** The builder accepts today's scalar metadata (`creatorUserId`/`creatorCents`) and the v2 share vector frozen in the Wave 1 contract step (ADR 0013). `lines[]` allows N creator lines, so Ledger Splits needs no breakdown change.
+- **Metadata v2.** The builder reads the v2 share vector frozen in the Wave 1 contract step (ADR 0013). There is no v1 reader; staging ledger data is reset (ADR 0013 decision 2). `lines[]` allows N creator lines, so Ledger Splits needs no breakdown change.
 - **`cutSource`.**
   - Resolved by (`platform.cut`, `changed_at <= occurredAt`) against `governance_settings_history`.
   - Shows "founding default (seed)" when no history row exists. The seed writes none, because history is written only by the settings trigger.
@@ -151,7 +157,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Tests.**
 
-- Property test: gross-side lines sum to gross across random partial-reversal sequences, for v1 and v2 metadata.
+- Property test: gross-side lines sum to gross across random partial-reversal sequences, for v2 metadata (single-owner and N-way vectors).
 - Unit: fee lines stay outside gross, including the dispute fee; `cutSource` falls back to the seed.
 - Integration: manual and stripe-mock payments.
 - Harness: `e4b-money` asserts breakdown sums and the reconciliation invariant, including chargeback and won-chargeback cases.
@@ -215,7 +221,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Design.**
 
-1. **Clock alignment (W0-clock, prerequisite).** Choose one media clock in ADR 0012, after the spike. Either the rungs and recorder carry source NTP (RTCP SR plus MediaMTX `useAbsoluteTimestamp`), or `services/media` measures each rung's and the recorder's offset against the source and origin corrects PDT. Targets: cross-rendition skew < 100 ms, live-to-VOD skew < 250 ms. Clips are cut by recorder wall-clock windows (`vod/recorder.ts:132`), so clip replay keys on the aligned recorder clock.
+1. **Clock alignment (W0-clock, prerequisite).** [ADR 0012](../decisions/0012-media-clock.md) chose variant A2 after the spike: the ladder and the recorder read the source over SRT with `-copyts`, and `services/media` anchors every output to the source's wall-clock epoch (rendition paths set `useAbsoluteTimestamp`). Targets: cross-rendition skew < 100 ms, live-to-VOD skew < 250 ms. Clips are cut by recorder wall-clock windows (`vod/recorder.ts:132`), so clip replay keys on the aligned recorder clock.
 2. **PDT passthrough is already tested.** `services/origin/tests/playlist.test.ts` ("non-URI lines are untouched", fixture with PDT at `fixtures.ts:32`) and `relay/internal/hls/rewrite_test.go:48-63` cover it. No new work.
 3. **Player seam (done criterion).** `apps/web/src/player/controller.ts` exposes:
    - `playheadWallclock()`, built on the existing `hls.playingDate` (line 164) and Safari `getStartDate()` (lines 167–170);
@@ -225,7 +231,7 @@ Every spec assumes the AGENTS.md rules:
 
 4. **Chat.**
    - Optional `mediaTs` plus `playbackMode` on the client send frame and server message frame (`packages/contracts/src/chat.ts`), added in the Wave 1 contract step so DVR doesn't force a second change.
-   - Live mode: clamped to [max(receive − 60 s, broadcast.startedAt), receive], and rejected for non-live channels.
+   - Live mode: clamped to [max(receive − 60 s, broadcast.startedAt), receive]. On a channel that is not live the hint is dropped (`media_ts` null) and the message is still accepted (ADR 0012 part 2, decision 2).
    - DVR mode: `media_ts` is null, and replay shows the message as "said while catching up".
    - Missing `mediaTs` (IRC, bots): receive time minus the channel's median heartbeat latency, read from a new `KEYS.chatLatency(channelId)`. The integrity worker writes it from the `latencySeconds` heartbeats already sent.
 5. **Presentation queue** (new `apps/web/src/chat/presentation.ts`):
@@ -238,11 +244,14 @@ Every spec assumes the AGENTS.md rules:
    - messages from users the viewer has blocked;
    - anything on a VOD or clip that is removed or restricted.
 
-   It is governed by a chat retention period (none exists today) and a user-facing disclosure that live chat is replayed.
+   **Prerequisite: user blocks.** No user-block feature exists. The W1 contract step adds a `user_blocks` table and `me.blocks.{list,add,remove}`; hiding blocked users in live chat and the block action in the chat user card ship with it in one W1 unit (ADR 0012 part 2, decision 8). Which unit owns that feature is open (open: maintainer).
+
+   **Retention (ADR 0012 part 2, decision 6).** A message is deleted when it is older than `CHAT_RETENTION_DAYS` (default 30) and its broadcast has no VOD that still exists, or when it is older than `CHAT_REPLAY_MAX_DAYS` (default 60), whichever comes first. A new `chat-retention` worker job applies it. A user-facing disclosure says that live chat is replayed.
 
 **Architecture fit.**
 
-- Migration: nullable `chat_messages.media_ts timestamptz` plus a `(channel_id, media_ts)` index (`packages/db/src/schema/chat.ts`).
+- Migration: nullable `chat_messages.media_ts timestamptz` plus `(broadcast_id, media_ts)` and `(created_at)` indexes (`packages/db/src/schema/chat.ts`). Replay always asks for one broadcast's chat, so the index leads on `broadcast_id` (ADR 0012).
+- New worker files owned by W1-spine: `services/worker/src/jobs/chat-retention.ts` and `services/worker/src/integrity/chat-latency.ts` (the `KEYS.chatLatency` writer).
 - The orchestrator's contract step lands the `mediaTs` passthrough in `services/chat/src/pipeline.ts`/`core.ts`/`types.ts`. The unit owns a new `services/chat/src/clamp.ts` and `persistence.ts`.
 - Replay handlers live in a new `services/api/src/chat-replay/`, wired into the router by the orchestrator. They do not go in `routes/vods.ts`/`clips.ts`, which E6 owns.
 - `services/irc` ignores the field.
@@ -261,7 +270,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Size.** L, including the seam. W0-clock is separate.
 
-**Open questions.** Whether chat hold-back should become a viewer opt-in (usability test). The retention period (ADR 0012).
+**Open questions.** Whether chat hold-back should become a viewer opt-in (usability test). The retention period is settled (ADR 0012 part 2, decision 6).
 
 ### 4.4 Verified-watch chat gate and surge guard
 
@@ -279,25 +288,26 @@ Every spec assumes the AGENTS.md rules:
   - It writes only for sessions with verdict `verified` **whose fetch check actually ran**.
   - Sessions skipped as `cdn` or `no_accounting` (`signals/fetch.ts:77`) count as unverified for gating.
   - The TTL outlasts the scoring interval, so chatters don't flap between allowed and denied.
+- **CDN avoidance for gated channels.** The API does not assign the CDN to a signed-in viewer of a channel whose gate is on or whose surge guard is active (`assignSource` gains `avoidCdn` in `services/api/src/playback/delivery.ts`, W1 contract step). Those sessions go to the origin or a relay, where they are judged ([ADR 0015](../decisions/0015-verified-watch-signal.md) decision 2).
 - Signed-in viewers only, because anonymous sessions have no `userId`. The UI says so.
 - 60 s minimum, because verification takes about 3 heartbeats.
 - Exemptions: mods, VIPs, and optionally subscribers.
-- An account-age fallback for privacy-relay users is on whenever the gate is on.
+- An account-age fallback applies only to viewers on privacy-relay addresses: they are not capped per address and instead need an account at least 7 days old (`gateFallbackAccountAgeDays`) as well as the watch time. It is on whenever the gate is on.
 - **Oracle hardening.**
   - One generic denial for both "not yet" and "never", returned as an i18n code.
   - Jittered unlock time and per-user attempt limits.
-  - Unlocks capped per network hash per channel, reusing integrity network grouping.
+  - Unlocks capped per exact address (`ip_hash`, not a /24 prefix) per channel per broadcast, default 5 (`gateUnlocksPerAddress`, ADR 0015 decision 3).
 - **Surge guard v1.**
   - Triggers on new-session spikes and `follow_burst` flags (`packages/integrity/src/channel.ts`).
   - The override is **TTL'd Valkey state** that chat reads. It is not a settings-row write, which would create settings history and need API-side publishing, still open in PROGRESS.
   - Hysteresis and cooldown.
   - Writes `audit_log` and an outbox `chat.surge.begin/end` event.
   - Mods get an audited one-click override. Chatters in good standing are unaffected.
-- **Rollout.** Off by default, behind an instance flag, until W0-integrity closes the 2H2 items (fetch-less bots, false positives, appeal stickiness). GA follows.
+- **Rollout.** Off by default, behind an instance flag, until the GA criteria in ADR 0015 are met. W0-integrity's code (fetch-less bots, false positives, appeal stickiness) merged in `be72278`, but GA criterion 1, CDN fetch-judging, is unmet and has no owner (open: maintainer).
 
 **Architecture fit.**
 
-- `services/chat/src/rules.ts` stays pure. The contract step adds `verifiedWatchSeconds` to `GateInput`/`Standing` (`types.ts`), loaded in `pipeline.ts`.
+- `services/chat/src/rules.ts` stays pure. `GateInput` lives in `rules.ts:15` and carries a `Standing` (`services/chat/src/types.ts`); the contract step adds `verifiedWatch: { broadcastId, seconds, fallback } | null` to `Standing` only, loaded in `pipeline.ts`.
 - The unit owns `rules.ts` (gate logic, code-based rejections) and `cache.ts` (cached Valkey read).
 - `ChannelChatSettings` (`packages/contracts/src/shapes.ts:35-37`) gains `minVerifiedWatchSeconds` and `surgeGuard {enabled, triggerUnverifiedRatio, cooldownMinutes}`.
 - New `KEYS.verifiedWatch` and `KEYS.surgeOverride` (`packages/contracts/src/internal.ts`).
@@ -346,12 +356,12 @@ Every spec assumes the AGENTS.md rules:
 
 **Design.**
 
-- A caption worker in `services/media` pulls the live path over the existing RTSP pull, extracts 16 kHz mono, and runs a whisper.cpp sidecar on 2–5 s chunks.
+- A caption worker in `services/media` reads the live path through the SRT reader ADR 0012 settled (variant A2, `-copyts`, anchored by W0), extracts 16 kHz mono, and runs a whisper.cpp sidecar on 2–5 s chunks.
 - Its WebVTT is aligned to the **W0-clock media clock**.
 - The origin multivariant rewrite (`services/origin/src/playlist.ts`, next to the audio-only variant at line 226) adds `EXT-X-MEDIA TYPE=SUBTITLES`.
 - **Captions-on latency profile.** Today's LL-HLS gives about 3 s glass-to-glass (1 s segments, `liveSyncDurationCount` 3). When CC is on, the player raises its target through the seam's `setTargetLatency()` to about 8–10 s, so cues arrive before their PDT reaches the playhead.
-- Cues are stitched into the existing VOD `captions[]` (`packages/contracts/src/api/entities.ts`).
-- Captions are opt-in per instance and per creator, under an operator concurrency cap with a queue. The UI says when capacity is the reason captions are off.
+- Cues are stitched into a VOD captions field. `Vod` (`packages/contracts/src/api/entities.ts`) has none today; the contract step adds it. The track is written under the VOD's own storage prefix ([ADR 0011](../decisions/0011-caption-models.md) decision 6).
+- Captions are off by default and turned on per channel. The default is the governance setting `captions.defaultEnabled` (seeded `false`); a channel's own choice wins. They run under the per-host operator cap `CAPTIONS_MAX_STREAMS` (default 2) with a queue. The UI says when capacity is the reason captions are off (ADR 0011 decisions 2 and 3).
 - **Word filter.** Masking, not removal, configurable by the creator, through the safe-regex pool. A shared-lib step first extracts that pool from `services/chat/src/filter-runner.ts`/`filter-worker.ts` into a package, because a service can't import another service's internals.
 - v1 includes a creator correction editor.
 - Deferred: transcript panel and translation.
@@ -371,7 +381,7 @@ Every spec assumes the AGENTS.md rules:
 - They do not feed T0/T1 or other automated moderation without a separate ADR and disclosure.
 - Machine translation will be labelled.
 
-**Money.** Compute is a published co-op cost. The worker cap becomes a governance setting after E5.
+**Money.** Compute is a published co-op cost (`infra_costs` category `captions`). The worker cap is the per-host operator setting `CAPTIONS_MAX_STREAMS`, not a governance setting (ADR 0011 decision 3); members govern only the default.
 
 **Accessibility.** The core purpose. Theme-token styling, with user-set size and contrast.
 
@@ -390,9 +400,9 @@ Every spec assumes the AGENTS.md rules:
 
 **Open questions.**
 
-- **Step 0 gate:** ADR 0011 on whisper.cpp (MIT) and the _specific_ weights at the pinned digest.
-- Policy on CC-BY weights (Opus-MT) before translation.
-- CPU tier for small boxes.
+- **Step 0 gate (settled):** [ADR 0011](../decisions/0011-caption-models.md) accepts whisper.cpp (MIT) and weights licensed MIT or Apache-2.0 only, pinned by digest. W2-captions picks the model size by the `captions` harness's WER threshold.
+- CC-BY weights (Opus-MT) are settled: not used until an attribution policy exists (ADR 0011 decision 1).
+- Small boxes: settled. An operator sets `CAPTIONS_MAX_STREAMS=0` to turn captions off on a host.
 
 ### 4.6 Any-Connection Mode (trimmed)
 
@@ -400,12 +410,16 @@ Every spec assumes the AGENTS.md rules:
 
 **User stories.** On a 1 GB/month plan, I set 50 MB/hour. The player chooses audio-only, plus captions once they exist, shows the MB used, and returns to video on Wi-Fi.
 
+50 MB an hour (about 111 kbit/s) is below the derived audio-only variant, which advertises 192 kbit/s (`AUDIO_ONLY_BANDWIDTH`, about 86 MB an hour). Audio-only is the floor and is kept anyway; the meter shows what is actually spent ([ADR 0018](../decisions/0018-data-mode-claim.md) decision 1). Whether budgets below about 86 MB an hour need a lower audio bitrate is open (open: maintainer).
+
 **Design.**
 
 - A client budget controller (`apps/web/src/player/budget.ts`) uses `stats.ts` byte rates to set hls.js `autoLevelCapping`.
 - Below the lowest rung it drops to the existing audio-only variant (`AUDIO_ONLY_BANDWIDTH`).
 - A usage meter in the stats popover. `saveData`/`effectiveType` set the default where available.
-- DVR (source-only, see 4.14) is excluded from data mode, and the UI says so.
+- DVR (source-only, see 4.12) is excluded from data mode, and the UI says so. The `/dvr/` route refuses tokens carrying `dm`; VODs are excluded too.
+- **Origin-only.** A session in data mode is never given to a relay or the CDN (`assignSource` gains `originOnly` in `services/api/src/playback/delivery.ts`, W1 contract step). Turning data mode on moves a relay or CDN session to the origin. Data mode gets no P2P grant, enforced by the API.
+- **The origin filters the multivariant playlist.** For a token with `dm`, it keeps only video variants whose `BANDWIDTH` is at most `dm`, plus the audio-only variant, which is always kept (a pure function in `services/origin/src/playlist.ts`, served `cache-control: private, no-store`).
 - **Cut:** LAN /24 peer grouping and the stills rendition.
 
 **Architecture fit.**
@@ -414,11 +428,11 @@ Every spec assumes the AGENTS.md rules:
   - `packages/contracts/src/tokens.ts`;
   - the Go mirror `relay/internal/tokens/playback.go`;
   - `packages/tokens` vectors.
-- Minting is in `services/api/src/playback`, and origin enforcement in `services/origin/src/auth.ts`.
+- Minting is in `services/api/src/routes/playback.ts` (`signFor`), and origin enforcement in `services/origin/src/auth.ts` plus the playlist filter in `services/origin/src/playlist.ts`.
 - The draft named `services/origin/src/issuance.ts`, which is relay-issuance accounting; that was wrong.
-- Integrity gets per-mode expected byte-rate bounds in `packages/integrity/src/allowance.ts`.
+- No integrity change. The fetch signal judges object counts, not bytes, and an audio-only viewer meets it exactly as a video viewer does, so there are no per-mode byte-rate bounds (ADR 0018 decision 8).
 
-**Integrity and T&S.** Audio-only is the cheapest viewbot, so per-segment fetch evidence is still required. The mode changes expected rates, not evidence requirements.
+**Integrity and T&S.** Audio-only is the cheapest viewbot, so per-segment fetch evidence is still required. The mode changes the renditions offered, not evidence requirements.
 
 **Money.** None directly.
 
@@ -427,7 +441,8 @@ Every spec assumes the AGENTS.md rules:
 **Tests.**
 
 - Budget controller unit tests.
-- Integrity bound tests.
+- Origin playlist filter tests: filter by ceiling, audio-only always kept, `no-store`.
+- API tests: relay and CDN sessions moved to the origin, no P2P grant.
 - Token vector tests (TS and Go).
 - Harness: a 64 kbps Chromium and WebKit viewer stays verified on audio-only.
 
@@ -485,17 +500,17 @@ Every spec assumes the AGENTS.md rules:
 
 **Design.**
 
-- A worker job on `stream.offline` waits a **settle delay shared with Creator Analytics** (one constant ≥ integrity `finalizeSeconds` plus the re-score policy, set in ADR 0014). It reads **the same per-minute rollup** as Analytics.
+- A worker job on `stream.offline` waits a **settle delay shared with Creator Analytics**: `AUDIENCE_SETTLE_SECONDS = 7200` ([ADR 0014](../decisions/0014-attestation-key.md) decision 3). It reads **the same per-minute rollup** as Analytics.
 - It signs a canonical per-broadcast statement containing:
   - schema version, instance origin, and channel and broadcast ids;
-  - period, integrity package version, and a _hash_ of the threshold set;
+  - period, `rulesetVersion`, and a _hash_ of the threshold set;
   - peak and average verified concurrents, and verified viewer-hours;
-  - excluded hours by reason code;
+  - the excluded total plus a salted commitment to the owner-only reason breakdown (ADR 0014 decision 2);
   - delivery mix (origin, relay, CDN);
   - `prev_hash`.
 - The per-channel chain is serialized with an advisory lock, so supersede entries can't race the offline job.
 - Ed25519 worker-only key, with `kid` and a published key history.
-- Window proofs are signed rollups over attestation hashes.
+- Window proofs are bundles of contiguous signed entries (ADR 0014 decision 6).
 - A re-score appends a "superseded" entry and never mutates.
 - The reason breakdown is owner-only unless shared through an expiring link.
 - The statement says "excluded traffic is not proof of wrongdoing".
@@ -505,13 +520,13 @@ Every spec assumes the AGENTS.md rules:
 
 - Migration: append-only `integrity_attestations` (the `0001_protections.sql` pattern).
 - `INTEGRITY_SIGNING_KEY` in `packages/config`, `.env.example` and `scripts/init-env.ts`.
-- `packages/tokens/src/attestation.ts` and TS/Go vectors are written by the **orchestrator** in the Wave 2b contract step, because AGENTS.md assigns `packages/tokens` to it.
+- `packages/tokens/src/attestation.ts` and vectors in `packages/tokens/vectors.json` are written by the **orchestrator** in the Wave 2b contract step, because AGENTS.md assigns `packages/tokens` to it.
 - Contract: `integrity.attestations.list/get/share`, a public verifier route, `/.well-known/commonair-attestation`, and an SDK `verify()` helper.
 - `services/api/src/routes/integrity.ts` is handed over from W2-rollup-analytics once that unit merges.
 
 **Integrity and T&S.**
 
-- **Hard gate:** W0-integrity closed (the 2H2 items, `PROGRESS.md:235`). The draft cited HANDOFF.md, which doesn't list them.
+- **Hard gate:** W0-integrity closed (the 2H2 items). Its code merged in `be72278`; its closure in `PROGRESS.md` is still to be recorded (ADR 0014 decision 7). The draft cited HANDOFF.md, which doesn't list them.
 - A ruleset changelog and a red-team pass happen before public use.
 - The verifier shows the instance domain prominently.
 
@@ -527,7 +542,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Size.** M.
 
-**Open questions.** The settle delay value.
+**Open questions.** None; the settle delay is settled at 7200 s (ADR 0014).
 
 ### 4.9 Creator Analytics
 
@@ -595,15 +610,17 @@ Every spec assumes the AGENTS.md rules:
 - The co-op cut is taken once, before the split.
 - `splitNetN(net, cut, shares)` via `largestRemainder` (`math.ts:54`).
 - **Per-recipient memos** `hold:<paymentId>:<userId>` and idempotency keys `hold-release:<paymentId>:<userId>`. The due query groups by (account, memo).
-- **PaymentMeta v2.** A versioned Zod schema with the share vector and `splitVersionId`. v1 is still read. The legacy recompute-from-cut path in `reversalSplit` stays for pre-splits payments.
+- **PaymentMeta v2.** A versioned Zod schema with the share vector, `splitVersionId` and `cutHistoryId`. No v1 reader; staging data is reset (ADR 0013 decision 2). `reversalSplit` remains the first step of every reversal.
 - Reversals lock every recipient in sorted user-id order, so they can't deadlock against `runPayoutBatch` (`payouts.ts`). They produce hold, liability and receivable sources per recipient. `ChargebackMeta` stores a per-recipient vector so `chargebackReversal` can restore each slice.
-- **Clawback policy (ADR 0013, decided before code). Proposed:**
-  - (a) the owner channel absorbs recipients' clawback shortfalls;
-  - (b) recipients' shares stay held for the full dispute window.
+- **Clawback policy ([ADR 0013](../decisions/0013-ledger-splits.md) decisions 5 and 6, accepted).** On a refund or chargeback of a split payment:
+  - each recipient's own still-held slice for that payment is taken back first;
+  - the owner absorbs the rest; a crew recipient's released earnings and other lots are never touched;
+  - any remaining shortfall goes to split-shortfall suspense (`asset:receivable:split-shortfall:<owner>`), netted against the owner's future payouts;
+  - an uncollectable shortfall is written off, with two-person approval, to a co-op expense line (`expense:split-shortfall-writeoff`) shown on the transparency page.
 
-  So a 5% mod never becomes a co-op debtor over a dispute on someone else's channel. A co-op mutual (fin-4) stays parked.
+  Crew slices use the normal hold period. So a 5% mod never becomes a co-op debtor over a dispute on someone else's channel. A co-op mutual (fin-4) stays parked.
 
-- **Banned or legal-hold recipient:** the share goes to a suspense hold account keyed by recipient (`accounts.ts`). Release or forfeit is governance-visible, forfeits return to the owner channel and never silently to the co-op, and every movement writes `audit_log`. Enforcement lives in the hold-release job and the protections trigger, not only the API.
+- **Banned or legal-hold recipient:** the share goes to `liability:split-suspense:<recipient>` (ADR 0013 decision 7). This is separate from the owner's shortfall suspense and its write-off above. Release or forfeit is governance-visible, forfeits return to the owner channel and never silently to the co-op, and every movement writes `audit_log`. Enforcement lives in the hold-release job and the protections trigger, not only the API.
 - **Cut from v1:** raid-share tails and chat room-linking.
 
 **Architecture fit.**
@@ -631,7 +648,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Tests.**
 
-- Property tests: sums preserved, 1¢ payments, 3- and 7-way splits, partial refund after a split ended, v1/v2 metadata mix.
+- Property tests: sums preserved, 1¢ payments, 3- and 7-way splits, partial refund after a split ended, single-owner and split payments mixed.
 - Trigger integration tests.
 - Lock-ordering test against a concurrent payout batch.
 - `e4b-money` harness:
@@ -642,7 +659,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Size.** L.
 
-**Open questions.** Payee and contractor tax status (counsel). Notice period for ending a standing split.
+**Open questions.** Payee and contractor tax status (counsel). The notice period is settled: ending a split takes effect for later payments, cannot be backdated, notifies the recipient, and has no notice period in v1 (ADR 0013 decision 8).
 
 ### 4.11 Rehearsal Mode
 
@@ -687,21 +704,23 @@ Every spec assumes the AGENTS.md rules:
 
 **Design.**
 
-- v1 window ≤ the VOD-backed window, read from object storage through `services/media/src/vod/assemble.ts`/`playlist.ts` and a new origin DVR playlist route issuing per-session segment tokens.
+- v1 window ≤ the VOD-backed window, read from object storage through `services/media/src/vod/assemble.ts`/`playlist.ts` and a new token-checked origin route, `/dvr/`, issuing per-session segment tokens ([ADR 0016](../decisions/0016-live-dvr.md)).
+- **DVR exists only when the channel records VODs.** A channel with VODs off has no DVR in v1, and the studio says so.
 - **Source-only.** The recorder copies the source path (`vod/recorder.ts`, `-c copy`), so there is no ABR. The UI says so, and DVR is excluded from data mode. Recording the ladder is an ADR 0016 option, with its cost posted to `infra_costs`.
 - **Visibility inherits the VOD gate.** A `subscribers` or `private` VOD gives a gated DVR or none.
 - **Segments must not be publicly reachable.** Today the recorder uploads closed segments to `vods/<vodId>/` (`recorder.ts:9-11`), and `services/origin/src/media.ts:17` serves the `vods` prefix with no token or removal check. ADR 0009 accepts that withheld VOD objects stay readable at unguessable URLs. DVR v1 has in-progress recordings written to a private prefix that only the DVR route reads, and moves them to `vods/` on publish. That is the W0-media-exposure fix below.
 - **Removal re-check** on every playlist request. A mid-stream T0 purges DVR segments.
 - **Origin-only in v1.** DVR segments are relay-ineligible, because the relay cache (`relay/internal/cache`) has no purge path and relay tokens are bound to `live/<slug>`. The draft's "relays cache DVR without changes" line is deleted. A signed relay purge is a v2 prerequisite.
 - Creator "DVR off" toggle.
-- Heartbeats report `mode`/`behindLiveSeconds` through the seam. Counts split into "watching live" and "catching up", and only live feeds discovery and patronage.
+- Heartbeats report the playback mode and `behindLiveSeconds` through the seam. (§4.3 and the Wave 1 contract step call the mode `playbackMode`; the W1 contract step settles one name.) Counts split into "watching live" and "catching up", and only live feeds discovery and patronage.
 
 **Architecture fit.**
 
 - Contract: `PlaybackStart.dvrWindowSeconds`, heartbeat fields (landed with the Wave 1 `playbackMode`), channel `dvr_window_seconds` capped by an instance setting.
-- New `services/origin/src/dvr.ts`, registered through the origin route seam (no `handler.ts` edit).
-- Recorder prefix change in `services/media/src/vod/recorder.ts`.
+- New `services/origin/src/dvr.ts`, registered through the origin route seam (no `handler.ts` edit). It refuses tokens carrying `dm` (ADR 0018).
+- No recorder change: ADR 0009 amendment 1 already moved in-progress recordings to a private prefix.
 - Count semantics in `packages/integrity/src/concurrency.ts`.
+- DVR fetch accounting: the `/dvr/` route records its playlist and segment fetches for the session, marked as DVR, and `packages/integrity/src/signals/fetch.ts` becomes mode-aware, so DVR seconds can verify (ADR 0016 decision 6).
 - Player UI `apps/web/src/player/dvr*.tsx` on the seam.
 
 **Integrity and T&S.** DVR sessions accrue verified seconds for the gate but are not live viewers.
@@ -714,7 +733,7 @@ Every spec assumes the AGENTS.md rules:
 
 - Origin unit tests: DVR playlist, removal re-check, visibility gate.
 - Harness `live-dvr` (new):
-  - DVR minutes are not counted live;
+  - DVR minutes are not counted live but do verify;
   - removed and in-progress segments return 404 via `/media` and via the DVR route;
   - a relay request for a DVR segment is refused.
 
@@ -731,12 +750,12 @@ Every spec assumes the AGENTS.md rules:
 **Design.**
 
 - At most 8 members. Signed-in, age-confirmed accounts.
-- **No room mixes under-18 and adult accounts.** Rooms inherit every member's platform and channel bans. A host can't invite someone who has blocked a member.
+- **No room mixes under-18 and adult accounts.** Strict age bands, enforced by a trigger ([ADR 0017](../decisions/0017-watch-rooms.md) decision 3). Rooms inherit every member's platform and channel bans. A room refuses a join when the joiner and any member have blocked each other. User blocks do not exist yet: W3's contract step must have `user_blocks` and `me.blocks` (ADR 0012 part 2 plans them for W1; which unit owns the feature is open: maintainer).
 - Sync to slowest member or host, capped at ~5 s behind the edge (`hlsSegmentCount 7`).
 - Steering via the seam's `setTargetLatency()` (hls.js `liveSyncDuration`) rather than raw rate nudges. WebKit native: seek-only correction with ~1 s tolerance.
 - New `services/chat/src/watch-rooms.ts`. Frame dispatch in `core.ts`/`socket.ts` is landed by the orchestrator, and `rooms.ts` (core fan-out) is untouched.
 - Side chat goes through the normal filter.
-- **Reports go to platform moderation, not channel mods.** Retention follows ADR 0017: a TTL'd table covered by the deletion worker, snapshotted into `evidence_objects` on report.
+- **Reports go to platform moderation, not channel mods.** Retention follows ADR 0017: room tables kept 30 days after the room ends, covered by the deletion worker, with the messages and member list copied into `reports.evidence` on report (new report subject `watch_room`).
 - Live only. Public presence is opt-in.
 
 **Architecture fit.** Room frames and `CHAT_LIMITS` in contracts. A web drawer reusing chat-panel blocks and `<ChannelAvatar>`.
@@ -757,7 +776,7 @@ Every spec assumes the AGENTS.md rules:
 
 **Size.** M.
 
-**Open questions.** Report window (72 h proposed).
+**Open questions.** None; the report window is settled at 30 days (ADR 0017 decision 1).
 
 ### 4.14 Portability phases 1–2 (Wave 3)
 
@@ -806,75 +825,78 @@ and take precedence where they differ from this section.
 
 ### Wave 0: prerequisites (start now, in parallel)
 
-| Unit                           | Owner paths (write)                                                                                                                                                     | Contracts honored                              | Tests                                                                        | Done when                                                                                                           |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| W0-clock                       | `services/media/src/ffmpeg/args.ts`, `services/media/src/clock/**` (offset publisher), `infra/mediamtx/mediamtx.yml`                                                    | ADR 0012 media-clock definition (spike output) | offset unit tests                                                            | harness `clock-skew`: cross-rendition skew < 100 ms, live-to-VOD skew < 250 ms                                      |
-| W0-integrity                   | `packages/integrity/src/**` (scoring, appeals re-score), `services/worker/src/integrity/**`                                                                             | existing verdict and appeal shapes             | unit tests per 2H2 item; fetch-unjudged sessions marked ineligible for gates | `PROGRESS.md:235` 2H2 integrity items closed; `integrity-basic` passes with fetch-less bot and false-positive cases |
-| W0-media-exposure (T&S triage) | `services/media/src/vod/recorder.ts` (private in-progress prefix), `services/origin/src/media.ts`                                                                       | ADR 0009 amendment                             | origin unit tests                                                            | in-progress and removed VOD segments return 404 via `/media`; `trust-safety` harness asserts it                     |
-| W0-sor (compliance)            | `packages/moderation/src/reasons.ts`, `services/worker/src/moderation/sor-*`, `apps/web/src/routes/_app/settings.appeals.tsx`, `packages/email/src/templates/trust.tsx` | `me.enforcement.list`; SoR shape (ADR 0019)    | statement builder unit tests per action type; channel-mod actions excluded   | `trust-safety` asserts a statement for every platform T1/T2/NCII action                                             |
+| Unit                           | Owner paths (write)                                                                                                                                                     | Contracts honored                              | Tests                                                                        | Done when                                                                                                                                           |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W0-clock                       | `services/media/src/ffmpeg/args.ts`, `services/media/src/clock/**` (offset publisher), `infra/mediamtx/mediamtx.yml`                                                    | ADR 0012 media-clock definition (spike output) | offset unit tests                                                            | harness `clock-skew`: cross-rendition skew < 100 ms, live-to-VOD skew < 250 ms                                                                      |
+| W0-integrity                   | `packages/integrity/src/**` (scoring, appeals re-score), `services/worker/src/integrity/**`                                                                             | existing verdict and appeal shapes             | unit tests per 2H2 item; fetch-unjudged sessions marked ineligible for gates | 2H2 integrity items closed (merged `be72278`; `PROGRESS.md` closure pending); `integrity-basic` passes with fetch-less bot and false-positive cases |
+| W0-media-exposure (T&S triage) | `services/media/src/vod/recorder.ts` (private in-progress prefix), `services/origin/src/media.ts`                                                                       | ADR 0009 amendment                             | origin unit tests                                                            | in-progress and removed VOD segments return 404 via `/media`; `trust-safety` harness asserts it                                                     |
+| W0-sor (compliance)            | `packages/moderation/src/reasons.ts`, `services/worker/src/moderation/sor-*`, `apps/web/src/routes/_app/settings.appeals.tsx`, `packages/email/src/templates/trust.tsx` | `me.enforcement.list`; SoR shape (ADR 0019)    | statement builder unit tests per action type; channel-mod actions excluded   | `trust-safety` asserts a statement for every platform T1/T2/NCII action                                                                             |
 
-W0-clock and W0-media-exposure both touch `services/media`, but on disjoint files (`ffmpeg/args.ts` and `clock/**` versus `vod/recorder.ts`). W0-integrity and W1-watch-gate both touch `services/worker/src/integrity/jobs.ts`. W0-integrity owns it, and the `verifiedWatch` write lands after W0-integrity merges. Until then W1-watch-gate develops against a stub writer it owns in `services/worker/src/integrity/verified-watch.ts`, which W0-integrity's merge wires in.
+W0-clock and W0-media-exposure both touch `services/media`, but on disjoint files (`ffmpeg/args.ts` and `clock/**` versus `vod/recorder.ts`). W0-integrity and W1-watch-gate both touch `services/worker/src/integrity/jobs.ts`. W0-integrity owns it, and the `verifiedWatch` write lands after W0-integrity merges. W0-integrity has merged (`be72278`), so W1-watch-gate writes `services/worker/src/integrity/verified-watch.ts` directly; the earlier stub-writer arrangement is moot.
 
 ### Wave 1: quick wins on existing foundations (6 parallel, plus 1b)
 
 **Contract step contents (orchestrator):**
 
-- `PaymentMeta` v2 schema (with v1 back-compat), the `cutHistoryId` field, and the `holdDays` move to `packages/config`.
+- `PaymentMeta` v2 schema (v2 only, ADR 0013), the `cutHistoryId` field, and the `holdDays` move to `packages/config`.
 - `money.paymentBreakdown(s)`, `transparency.feeSchedule` and the report subject `message_set`.
-- Chat frames `mediaTs` and `playbackMode`, plus heartbeat `mode`/`behindLiveSeconds`.
-- The `mediaTs` passthrough in `services/chat/src/{pipeline,core,types}.ts`, and `verifiedWatchSeconds` in `GateInput`/`Standing`.
+- Chat frames `mediaTs` and `playbackMode`, plus the heartbeat playback mode and `behindLiveSeconds` (one name for the mode, used by §4.3 and §4.12).
+- The `mediaTs` passthrough in `services/chat/src/{pipeline,core,types}.ts`, and `verifiedWatch` in `Standing` (ADR 0015).
+- `assignSource`'s `avoidCdn` (ADR 0015) and `originOnly` (ADR 0018) in `services/api/src/playback/delivery.ts`.
+- The `user_blocks` table and `me.blocks.*` procedures, `CHAT_RETENTION_DAYS` and `CHAT_REPLAY_MAX_DAYS`, and the `chat-retention` and chat-latency job registrations (ADR 0012 part 2).
 - `KEYS.verifiedWatch`, `KEYS.surgeOverride`, `KEYS.chatLatency`.
 - `ChannelChatSettings` fields and `chat.surge.*` events.
-- Migration for `chat_messages.media_ts`.
+- Migration for `chat_messages.media_ts` with the `(broadcast_id, media_ts)` and `(created_at)` indexes.
 - `chat-replay` router wiring and `money.ts` registrations.
 - The api Prometheus metrics module (`services/api/src/metrics.ts` does not exist today).
 - `dataMode` in `packages/contracts/src/tokens.ts`, `relay/internal/tokens/playback.go` and vectors (for 1b).
 
-| Unit                                        | Owner paths (write)                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Contracts honored                                                          | Tests                                                     | Done when                                                    |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
-| W1-breakdown                                | `packages/ledger/src/breakdown.ts`, `packages/ledger/src/rules.ts` (`cutHistoryId` only; handed to W2-splits after merge), `services/api/src/money/{breakdown,fee-schedule}.ts`, `apps/web/src/components/money/{breakdown-*,fee-schedule}.tsx`, `apps/web/src/components/money/revenue.tsx`, `apps/web/src/routes/_studio/revenue.tsx`, `apps/web/src/routes/_app/settings.subscriptions.tsx`, `apps/web/src/components/support/support-dialog.tsx`, `packages/email/src/templates/payments.tsx` | PaymentMeta v1/v2, `money.paymentBreakdown(s)`, `transparency.feeSchedule` | property sum test (v1 and v2); int manual + stripe-mock   | `e4b-money` breakdown and reconciliation assertions pass     |
-| W1-calm-chat                                | `apps/web/src/chat/calm/**`, `apps/web/src/chat/{chat-panel.tsx,view.ts,state.ts}`                                                                                                                                                                                                                                                                                                                                                                                                                | `ServerFrame`, `message_set` report subject, Spine queue export            | reducer/governor unit; axe; stories                       | `e2e-social` flood step passes                               |
-| W1-spine [W0-clock merged]                  | `apps/web/src/player/controller.ts` (seam), `apps/web/src/chat/presentation.ts` (new), `apps/web/src/chat/connection.ts`, `services/chat/src/{clamp,persistence}.ts`, `services/api/src/chat-replay/**`                                                                                                                                                                                                                                                                                           | `mediaTs`/`playbackMode`, `media_ts` migration, `KEYS.chatLatency`         | clamp unit; replay exclusion int; seam unit               | `timeline-sync` passes; seam API documented in selectors doc |
-| W1-watch-gate [flag; GA after W0-integrity] | `services/chat/src/{rules,cache}.ts`, `services/worker/src/integrity/verified-watch.ts`, `services/worker/src/jobs/chat-surge-guard.ts`, `apps/web/src/components/studio/chat-gate-settings.tsx`, mod banner component                                                                                                                                                                                                                                                                            | `ChannelChatSettings`, KEYS, `chat.surge.*`                                | hysteresis unit; Valkey int                               | `surge-guard` passes, including CDN-bot and per-IP cases     |
-| W1-fraud-floor                              | `packages/integrity/src/payments/**` (new; not `signals/`), `packages/ledger/src/payouts.ts` (release eligibility hook), treasurer flag UI in `apps/web/src/components/money/treasury.tsx`                                                                                                                                                                                                                                                                                                        | payment fraud flags (migration in contract step)                           | velocity and payer-diversity unit tests; payout-block int | a flagged payee's payout is held in `e4b-money`              |
-| W0-sor continues if not merged              | (see Wave 0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |                                                                            |                                                           |                                                              |
-| W1b-data-mode [W1-spine merged]             | `apps/web/src/player/{budget,stats,source}.ts`, `packages/integrity/src/allowance.ts`, `services/api/src/playback/**` (claim minting), `services/origin/src/auth.ts`                                                                                                                                                                                                                                                                                                                              | `dataMode` claim (TS, Go, vectors)                                         | budget unit; bound unit; vector tests                     | throttled-viewer harness step stays verified                 |
+| Unit                                        | Owner paths (write)                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Contracts honored                                                       | Tests                                                     | Done when                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
+| W1-breakdown                                | `packages/ledger/src/breakdown.ts`, `packages/ledger/src/rules.ts` (`cutHistoryId` only; handed to W2-splits after merge), `services/api/src/money/{breakdown,fee-schedule}.ts`, `apps/web/src/components/money/{breakdown-*,fee-schedule}.tsx`, `apps/web/src/components/money/revenue.tsx`, `apps/web/src/routes/_studio/revenue.tsx`, `apps/web/src/routes/_app/settings.subscriptions.tsx`, `apps/web/src/components/support/support-dialog.tsx`, `packages/email/src/templates/payments.tsx` | PaymentMeta v2, `money.paymentBreakdown(s)`, `transparency.feeSchedule` | property sum test; int manual + stripe-mock               | `e4b-money` breakdown and reconciliation assertions pass     |
+| W1-calm-chat                                | `apps/web/src/chat/calm/**`, `apps/web/src/chat/{chat-panel.tsx,view.ts,state.ts}`                                                                                                                                                                                                                                                                                                                                                                                                                | `ServerFrame`, `message_set` report subject, Spine queue export         | reducer/governor unit; axe; stories                       | `e2e-social` flood step passes                               |
+| W1-spine [W0-clock merged]                  | `apps/web/src/player/controller.ts` (seam), `apps/web/src/chat/presentation.ts` (new), `apps/web/src/chat/connection.ts`, `services/chat/src/{clamp,persistence}.ts`, `services/api/src/chat-replay/**`, `services/worker/src/jobs/chat-retention.ts`, `services/worker/src/integrity/chat-latency.ts`                                                                                                                                                                                            | `mediaTs`/`playbackMode`, `media_ts` migration, `KEYS.chatLatency`      | clamp unit; replay exclusion int; seam unit               | `timeline-sync` passes; seam API documented in selectors doc |
+| W1-watch-gate [flag; GA after W0-integrity] | `services/chat/src/{rules,cache}.ts`, `services/worker/src/integrity/verified-watch.ts`, `services/worker/src/jobs/chat-surge-guard.ts`, `apps/web/src/components/studio/chat-gate-settings.tsx`, mod banner component                                                                                                                                                                                                                                                                            | `ChannelChatSettings`, KEYS, `chat.surge.*`                             | hysteresis unit; Valkey int                               | `surge-guard` passes, including CDN-bot and per-IP cases     |
+| W1-fraud-floor                              | `packages/integrity/src/payments/**` (new; not `signals/`), `packages/ledger/src/payouts.ts` (release eligibility hook), treasurer flag UI in `apps/web/src/components/money/treasury.tsx`                                                                                                                                                                                                                                                                                                        | payment fraud flags (migration in contract step)                        | velocity and payer-diversity unit tests; payout-block int | a flagged payee's payout is held in `e4b-money`              |
+| W0-sor continues if not merged              | (see Wave 0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |                                                                         |                                                           |                                                              |
+| W1b-data-mode [W1-spine merged]             | `apps/web/src/player/{budget,stats,source}.ts`, `services/api/src/routes/playback.ts` (claim minting), `services/origin/src/auth.ts`, `services/origin/src/playlist.ts` (data-mode filter)                                                                                                                                                                                                                                                                                                        | `dataMode` claim (TS, Go, vectors)                                      | budget unit; playlist filter unit; vector tests           | throttled-viewer harness step stays verified                 |
 
 **Parallel safety.**
 
 - Breakdown and fraud-floor share no files. Breakdown edits `components/money/revenue.tsx`, fraud-floor edits `treasury.tsx`.
 - Calm-chat owns `state.ts` and wires in the Spine's exported queue.
 - Spine and watch-gate split `services/chat` by file, with shared plumbing landed in the contract step.
-- W1b-data-mode starts after W0-integrity merges (both touch `packages/integrity`) and after the Spine (it consumes the seam, not `controller.ts`).
+- W1b-data-mode starts after the Spine (it consumes the seam, not `controller.ts`). It no longer touches `packages/integrity` (ADR 0018), so it does not wait on W0-integrity.
 
 ### Wave 2 (at most 6 concurrent)
 
 **Contract step:**
 
-- ADR 0013 accepted; split tables, link table and trigger; `money.splits.*`.
+- ADR 0013 accepted; split tables, link table and trigger; `money.splits.*`; `payout.rules.splitShortfallWriteOffDays` and its seed; the new chart entries (split-shortfall suspense, split suspense, the write-off expense); the write-off two-person trigger.
 - Caption settings and tables; the filter-pool extraction into `packages/chat-filter`.
 - Analytics tables; `policy_rules`/`rule_ref`.
 - `broadcasts.kind` with triggers and `KEYS.rehearsalArmed`.
 - `PlaybackStart.dvrWindowSeconds`.
+- Wave 2b: `DEFAULT_FINALIZE_SECONDS` and `AUDIENCE_SETTLE_SECONDS` in `packages/integrity`, and `integrity_signing_keys` (ADR 0014).
 - An origin route-registration seam in `services/origin/src/handler.ts`.
 
-| Unit                                            | Owner paths                                                                                                                                                                                                                                                                | Contracts                                                        | Done when                                                                 |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| W2-splits [ADR 0013; W1-fraud-floor]            | `packages/ledger/src/{rules,reversals,math,holds,queries,locks,accounts}.ts`, `services/worker/src/money/holds.ts`, `services/api/src/money/splits.ts`, `apps/web/src/routes/_studio/crew.tsx`                                                                             | `money.splits.*`, split tables + trigger, `channel.split.update` | `e4b-money` per-recipient release, clawback and won-chargeback steps pass |
-| W2-captions [ADR 0011; W1-spine]                | `services/media/src/captions/**`, `services/origin/src/playlist.ts`, `services/origin/src/captions.ts`, `scripts/fetch-model.ts`, sidecar compose service + `infra/image-licenses.json` entry, `apps/web/src/player/captions*`, `apps/web/src/routes/_studio/captions.tsx` | caption settings, `vods.captions.update`, tables                 | `captions` scenario (WER, cue timing, VOD)                                |
-| W2-rollup-analytics                             | `services/worker/src/jobs/broadcast-rollup.ts`, `services/api/src/routes/integrity.ts`, `services/api/src/analytics/**`, `apps/web/src/routes/_studio/analytics.tsx`                                                                                                       | `analytics.*`, rollup tables, shared settle constant             | `integrity-basic` group assertion                                         |
-| W2-enforcement-report                           | `apps/web/src/components/transparency/enforcement-report.tsx`, `services/api/src/transparency/enforcement.ts`, `packages/moderation/src/clauses.ts`                                                                                                                        | `policy_rules`, `rule_ref`, `transparency.enforcement`           | `trust-safety` report assertions                                          |
-| W2-dvr [W1-spine; W0-media-exposure]            | `services/origin/src/dvr.ts`, `apps/web/src/player/dvr*`, `packages/integrity/src/concurrency.ts`                                                                                                                                                                          | `dvrWindowSeconds`, heartbeat `mode`                             | `live-dvr` passes (404 via `/media`, relay refusal, removal)              |
-| W2-rehearsal                                    | `packages/sim/**`, `services/worker/src/jobs/rehearsal-driver.ts`, `apps/web/src/routes/_studio/rehearse.tsx`, rehearsal arming in `services/api/src/stream/rehearsal.ts`                                                                                                  | `stream.rehearsal.*`, `broadcasts.kind`                          | `rehearsal` passes                                                        |
-| W2b-attestations [rollup merged; W0-integrity]  | `services/worker/src/jobs/integrity-attestation.ts`, `services/api/src/routes/integrity.ts` (handed over from rollup), verifier route, SDK helper. `packages/tokens/src/attestation.ts` + vectors are orchestrator-owned.                                                  | `integrity.attestations.*`, key env, append-only table           | `integrity-basic` signed + tamper steps                                   |
-| W2b-group-appeals [rollup merged; W0-integrity] | `services/api/src/analytics/appeals.ts`, analytics route section                                                                                                                                                                                                           | new `APPEAL_SUBJECTS` value                                      | rate-limited group appeal harness step                                    |
+| Unit                                            | Owner paths                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Contracts                                                        | Done when                                                                 |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| W2-splits [ADR 0013; W1-fraud-floor]            | `packages/ledger/src/{rules,reversals,math,holds,queries,locks,accounts}.ts`, `packages/ledger/src/payouts.ts` (handed over after W1-fraud-floor merges), `services/api/src/money/{stripe-events,checkout-treasurer}.ts` (split resolution at posting), `services/worker/tests/e6-fixtures.ts` (v2, unless the W1 contract step converts it), `services/worker/src/money/holds.ts`, `services/api/src/money/splits.ts`, `apps/web/src/routes/_studio/crew.tsx` | `money.splits.*`, split tables + trigger, `channel.split.update` | `e4b-money` per-recipient release, clawback and won-chargeback steps pass |
+| W2-captions [ADR 0011; W1-spine]                | `services/media/src/captions/**`, `services/origin/src/playlist.ts`, `services/origin/src/captions.ts`, `scripts/fetch-model.ts`, sidecar compose service + `infra/image-licenses.json` entry, `apps/web/src/player/captions*`, `apps/web/src/routes/_studio/captions.tsx`                                                                                                                                                                                     | caption settings, `vods.captions.update`, tables                 | `captions` scenario (WER, cue timing, VOD)                                |
+| W2-rollup-analytics                             | `services/worker/src/jobs/broadcast-rollup.ts`, `services/api/src/routes/integrity.ts`, `services/api/src/analytics/**`, `apps/web/src/routes/_studio/analytics.tsx`                                                                                                                                                                                                                                                                                           | `analytics.*`, rollup tables, shared settle constant             | `integrity-basic` group assertion                                         |
+| W2-enforcement-report                           | `apps/web/src/components/transparency/enforcement-report.tsx`, `services/api/src/transparency/enforcement.ts`, `packages/moderation/src/clauses.ts`                                                                                                                                                                                                                                                                                                            | `policy_rules`, `rule_ref`, `transparency.enforcement`           | `trust-safety` report assertions                                          |
+| W2-dvr [W1-spine; W0-media-exposure]            | `services/origin/src/dvr.ts` (with DVR fetch accounting), `apps/web/src/player/dvr*`, `packages/integrity/src/concurrency.ts`, `packages/integrity/src/signals/fetch.ts` (mode-aware)                                                                                                                                                                                                                                                                          | `dvrWindowSeconds`, heartbeat `mode`                             | `live-dvr` passes (404 via `/media`, relay refusal, removal)              |
+| W2-rehearsal                                    | `packages/sim/**`, `services/worker/src/jobs/rehearsal-driver.ts`, `apps/web/src/routes/_studio/rehearse.tsx`, rehearsal arming in `services/api/src/stream/rehearsal.ts`                                                                                                                                                                                                                                                                                      | `stream.rehearsal.*`, `broadcasts.kind`                          | `rehearsal` passes                                                        |
+| W2b-attestations [rollup merged; W0-integrity]  | `services/worker/src/jobs/integrity-attestation.ts`, `services/api/src/routes/integrity.ts` (handed over from rollup), verifier route, SDK helper. `packages/tokens/src/attestation.ts` + vectors are orchestrator-owned.                                                                                                                                                                                                                                      | `integrity.attestations.*`, key env, append-only table           | `integrity-basic` signed + tamper steps                                   |
+| W2b-group-appeals [rollup merged; W0-integrity] | `services/api/src/analytics/appeals.ts`, analytics route section; re-scores the ended sessions an overturn covers and enqueues the attestation re-check (ADR 0014 decision 4)                                                                                                                                                                                                                                                                                  | new `APPEAL_SUBJECTS` value                                      | rate-limited group appeal harness step                                    |
 
 **Conflicts to watch.**
 
 - Captions owns `origin/playlist.ts`. DVR registers through the route seam and never edits `playlist.ts` or `handler.ts`.
 - No Wave 2 unit edits `controller.ts`: captions, DVR and (later) rooms use the seam.
 - `services/api/src/routes/integrity.ts` is handed from rollup to attestations, and that ordering is enforced.
-- W2-splits and W2-dvr both touch `packages/integrity`? No: splits uses `packages/integrity/src/payments/**` read-only, and DVR owns `concurrency.ts`.
+- W2-splits and W2-dvr both touch `packages/integrity`? No: splits uses `packages/integrity/src/payments/**` read-only, and DVR owns `concurrency.ts` and the mode-aware change to `signals/fetch.ts`.
 
 ### Wave 3 (after E5, E6 and 3D)
 
@@ -913,23 +935,51 @@ All metrics are first-party: Prometheus counters in `services/chat`, `services/o
 
 ## 7. Decisions needed
 
-**ADRs (continuing from 0010):**
+**ADRs (continuing from 0010).** All written and accepted on 2026-10-27. Each entry names what the
+ADR settled; the ADR is the source of truth.
 
-- **0011** Caption models: whisper.cpp plus the exact weights at the pinned digest; CC-BY weight policy before translation; caption word-masking is creator-configurable masking, not removal.
-- **0012** Media clock and Timeline Spine: the clock-alignment method; the `media_ts` clamp (`startedAt` bound, DVR null); presentation defaults; IRC behaviour; **chat retention and replay** (exclusions, blocks, disclosure).
-- **0013** Ledger Splits: per-recipient memo and idempotency keys; PaymentMeta v2 with v1 back-compat and a migration plan for in-flight payments; sorted-lock order; **recipient clawback and liability policy**; the suspense account and forfeit destination; the postings link table.
-- **0014** Attestation key: worker-only key, `kid`, rotation history; threshold hash; the shared settle constant (also used by Analytics); supersede semantics; the advisory-lock chain.
-- **0015** Verified-watch signal: Valkey key and TTL; fetch-unjudged = unverified; per-network cap; oracle hardening; fallback gate; flag-to-GA criteria.
-- **0016** DVR: storage-backed, source-only v1; VOD visibility inheritance; private in-progress prefix; origin-only; relay purge as the v2 prerequisite; count semantics.
-- **0017** Watch Rooms retention: a TTL'd table with deletion-worker coverage; the platform-moderation report route; the age-mixing rule.
-- **0018** `dataMode` as a token claim (TS, Go, vectors; ADR 0005 caps untouched).
-- **0019** Clause catalog and statement-of-reasons shape; platform versus channel-mod scoping.
-- **ADR 0009 amendment:** the in-progress recording prefix, and whether `subscribers`/`private` VOD objects should leave the public `vods/` prefix.
+- **[0011](../decisions/0011-caption-models.md)** Caption models: whisper.cpp with MIT or
+  Apache-2.0 weights pinned by digest; no CC-BY weights until an attribution policy exists;
+  captions off by default (governance setting `captions.defaultEnabled`); per-host operator cap
+  `CAPTIONS_MAX_STREAMS`; creator-configured masking, not removal.
+- **[0012](../decisions/0012-media-clock.md)** Media clock and Timeline Spine: variant A2 (SRT
+  readers anchored to the source clock); the `media_ts` clamp (`startedAt` bound, hint dropped on
+  non-live channels, DVR null); presentation defaults; IRC behaviour; **chat retention and replay**
+  (30 days, or with the VOD up to 60 days; exclusions; user blocks; disclosure).
+- **[0013](../decisions/0013-ledger-splits.md)** Ledger Splits: per-recipient memo and idempotency
+  keys; PaymentMeta v2 only (no v1, staging reset); sorted-lock order; **the owner absorbs every
+  clawback shortfall**, with split-shortfall suspense and a two-person write-off to a co-op expense
+  line; split suspense for withheld shares, forfeits to the owner; the postings link table.
+- **[0014](../decisions/0014-attestation-key.md)** Attestation key: worker-only key, `kid`,
+  rotation history; exact signed bytes with a threshold hash and `rulesetVersion`; the shared
+  settle constant, 7200 s (also used by Analytics); supersede semantics; the advisory-lock chain;
+  window proofs as bundles.
+- **[0015](../decisions/0015-verified-watch-signal.md)** Verified-watch signal: Valkey key and
+  TTL; fetch-unjudged = unverified, with CDN avoidance for gated channels; per-address cap
+  (default 5); oracle hardening; privacy-relay fallback gate; flag-to-GA criteria. GA criterion 1,
+  CDN fetch-judging, has no owner yet (open: maintainer).
+- **[0016](../decisions/0016-live-dvr.md)** DVR: storage-backed, source-only v1, only on channels
+  that record VODs; the `/dvr/` route; VOD visibility inheritance; private in-progress prefix;
+  origin-only; relay purge as the v2 prerequisite; count semantics and DVR fetch accounting.
+- **[0017](../decisions/0017-watch-rooms.md)** Watch Rooms retention: database rows kept 30 days,
+  with deletion-worker coverage; the platform-moderation report route with evidence copied into
+  `reports.evidence`; strict age bands enforced by a trigger; user blocks required.
+- **[0018](../decisions/0018-data-mode-claim.md)** `dataMode` as a token claim (TS, Go, vectors;
+  ADR 0005 caps untouched); origin-only sessions; origin playlist filtering; no integrity change.
+- **[0019](../decisions/0019-statement-of-reasons.md)** Clause catalog and statement-of-reasons
+  shape; platform versus channel-mod scoping.
+- **[ADR 0009 amendment 1](../decisions/0009-public-media-route.md):** the private `recordings/`
+  prefix for VOD objects that are not publicly playable.
+
+**Still open (maintainer):** who owns the user-block feature (ADR 0012 part 2 decision 8 and
+ADR 0017); who owns CDN fetch-judging (ADR 0015 GA criterion 1); whether a data budget below about
+86 MB an hour matters (the 192 kbit/s audio-only floor, ADR 0018).
 
 **Governance (after E5):**
 
 - The analytics cost model.
-- The caption worker cap and "captions on by default".
+- "Captions on by default" (`captions.defaultEnabled`). The caption worker cap is no longer a
+  governance item: it is the per-host operator setting `CAPTIONS_MAX_STREAMS` (ADR 0011).
 - Viewer-membership bases stay protected proposals.
 
 **Counsel:**
@@ -941,7 +991,7 @@ All metrics are first-party: Prometheus counters in `services/chat`, `services/o
 
 **Licensing:**
 
-- whisper.cpp (MIT) and its weights.
+- whisper.cpp (MIT) and its weights (MIT or Apache-2.0 only, ADR 0011).
 - The sidecar base image in `infra/image-licenses.json`.
 - The SDK verifier uses `packages/tokens` code, with no new dependency.
 - `bun scripts/check-licenses.ts` runs per unit.
@@ -1005,7 +1055,7 @@ All metrics are first-party: Prometheus counters in `services/chat`, `services/o
   - Full N-way reversal scope with sorted locks and the chargeback vector.
   - Clawback policy as a required ADR section with a proposed default.
   - Router and barrel registrations moved to the contract step.
-  - v1/v2 metadata frozen up front.
+  - v2 metadata frozen up front (no v1, ADR 0013).
   - Fee lines and invariants rewritten.
   - Breakdown owner paths corrected (`revenue.tsx` ×2, `support-dialog.tsx`, `payments.tsx`).
   - Non-blocking items applied: `cutSource` resolution, seed fallback and `cutHistoryId`; renaming; split card cut; Twitch money claims softened; suspense account with the forfeit destination and audit; the payments-module fraud floor; link table; estimate range.
@@ -1013,9 +1063,9 @@ All metrics are first-party: Prometheus counters in `services/chat`, `services/o
 - **Trust & Safety / Integrity Lead: approve-with-changes, all blocking items resolved.**
   - Gate plumbing moved to the contract step.
   - CDN- and `no_accounting`-skipped sessions are unverified for gating.
-  - The integrity gate extended to the watch gate and analytics appeals, with the citation corrected to `PROGRESS.md:235`.
+  - The integrity gate extended to the watch gate and analytics appeals, with the citation corrected to `PROGRESS.md` (then line 235; W0-integrity has since merged in `be72278`, and its PROGRESS closure is still to be recorded).
   - Fraud floor as a Wave 1 prerequisite that blocks payouts, with a four-eyes flag and trigger or job enforcement.
-  - Dual-format metadata.
+  - Frozen payment metadata (dual-format at review; v2 only since ADR 0013).
   - DVR relay-ineligible.
   - SoR moved to Wave 0/1 compliance with channel-mod scoping.
   - Non-blocking items applied: `metrics.ts` facts corrected (api has none; added in the contract step); `broadcasts.kind`; directory exclusion stated as app-level; `message_set` report subject; replay exclusions and retention; `startedAt` clamp with receive time authoritative; per-network cap and i18n codes; room age-mixing, report routing and ban inheritance; Watch Parties stated as discontinued in April 2024; the `integrity.ts` handoff; anonymous payer masking; caption masking.

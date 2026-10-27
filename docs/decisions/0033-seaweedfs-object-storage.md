@@ -5,7 +5,9 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0033: SeaweedFS as the bundled object store (replaces Garage)
 
-- Status: proposed
+- Status: proposed; the maintainer answered the open questions on 2026-10-27 (see
+  [Answers before phase 0](#answers-before-phase-0-2026-10-27)). Acceptance waits for the
+  phase 0 gate.
 - Date: 2026-10-27 (SeaweedFS facts checked on 2026-10-27, against its wiki and releases)
 
 ## Context
@@ -73,8 +75,10 @@ one host.
    point is dropped). That makes an accidental delete recoverable on the host.
 4. **External S3 stays exactly as R0-b built it.** `S3_MODE` gains `seaweedfs`; `external`
    is unchanged.
-5. **Existing Garage instances get a scripted, verified migration** before Garage is removed.
-   They are never switched silently by `upgrade`.
+5. **SeaweedFS replaces Garage outright, with no migration tool.** There are no self-hosted
+   instances and no public instance yet; the only Garage deployment is our own staging droplet,
+   which is reinstalled fresh (or copied by hand with `rclone sync` and `check`). Garage is
+   deleted in the same change that makes SeaweedFS the bundled store.
 
 ## Plan
 
@@ -104,51 +108,28 @@ afterwards to run against any store) run against SeaweedFS 4.48 under Podman. Th
 
 **Gate:** all pass, results recorded in this ADR, and the maintainers accept it.
 
-### Phase 1: SeaweedFS as a second bundled backend
+### Phase 1: SeaweedFS replaces Garage
+
+One unit, merged only with the gate green:
 
 - `infra/seaweedfs/`: its config, plus `storage-init` support for creating buckets (evidence with
   lock at creation), identities, policies and CORS through the IAM and S3 APIs. Same idempotent
   "creates or checks" behavior as Garage's, with unit tests against a fake API.
-- `S3_MODE=seaweedfs` in `selfhost.sh install` (`--storage seaweedfs`), the Caddy snippet
-  `s3-seaweedfs` (`reverse_proxy seaweedfs:8333`, same two shapes), a Quadlet unit, compose service
-  under a profile, the image pinned by digest (`pin-images.ts`) and listed in
+- `S3_MODE=seaweedfs` replaces `garage` in `selfhost.sh install` and local compose; the Caddy
+  snippet `s3-seaweedfs` (`reverse_proxy seaweedfs:8333`, same two shapes), a Quadlet unit, the
+  compose service, the image pinned by digest (`pin-images.ts`) and listed in
   `infra/image-licenses.json`, firewall and Prometheus scrape config.
-- The Garage tests duplicated for SeaweedFS (bootstrap, CORS, Caddy S3 mode, quadlet, compose), the
-  phase 0 conformance suite in the gate against both bundled stores, and an e2e variant
-  `--storage seaweedfs` in the self-host CI job.
+- Garage's unit, config, image pin, license entry, Caddy snippet and tests are deleted; its tests
+  are rewritten for SeaweedFS (bootstrap, CORS, Caddy S3 mode, quadlet, compose), and the phase 0
+  conformance suite joins the gate.
 - `selfhost.sh backup --objects` and `--restore-objects` cover the filer metadata.
-- Docs: object-storage.md and backups.md describe both bundled stores.
+- ADR 0006 Q4 and the operator guide's evidence section are amended per decision 2; docs
+  (object-storage.md, backups.md) describe SeaweedFS only.
 
-### Phase 2: default flip
+### Phase 2: staging
 
-- New installs and local compose default to SeaweedFS; `--storage garage` stays available.
-- ADR 0006 Q4 and the operator guide's evidence section are amended per decision 2.
-- One release candidate on staging installed fresh with SeaweedFS and run through the full
-  harness and the trust-safety scenario.
-
-### Phase 3: migration for existing Garage instances
-
-`selfhost.sh migrate-storage --to seaweedfs`:
-
-1. Refuses unless a fresh `backup --objects` and WAL-G base backup succeeded in the last 24 h.
-2. Starts SeaweedFS next to Garage and creates the buckets, with lock on evidence, through
-   `storage-init`.
-3. Puts the instance in maintenance (writers stopped, playback of live streams unaffected) and
-   copies all four buckets with rclone, then `rclone check` with hashes. A mismatch aborts and
-   leaves Garage in place.
-4. Switches `S3_MODE`, restarts, runs `storage-init`'s checks, and takes a new WAL-G base backup
-   (the WAL history on Garage stays readable for the rollback window).
-5. Keeps Garage's volumes read-only for a rollback window (default 14 days, `--rollback` restores
-   the old env). `status` shows the window. A later `migrate-storage --finish` removes Garage.
-
-Tested by an e2e variant that installs with Garage, writes media, exports, evidence and backups,
-migrates, and checks every object and the harness. Staging migrates first, on a release candidate.
-
-### Phase 4: Garage removed
-
-Two minor releases after the default flip, if no instance reports a blocker: Garage's unit,
-config, image pin, Caddy snippet and tests are deleted. `upgrade` on an instance still on Garage
-refuses, and tells the operator to run `migrate-storage` first.
+Staging is reinstalled fresh on a release candidate with SeaweedFS and run through the full
+harness and the trust-safety scenario.
 
 ## Consequences
 
@@ -163,16 +144,22 @@ refuses, and tells the operator to run `migrate-storage` first.
 - The phase 0 conformance suite outlives this decision: it becomes the documented way to check
   any external store against object-storage.md.
 
-## Open questions
+## Answers before phase 0 (2026-10-27)
+
+- **Delete markers if a per-principal `Deny` does not work:** acceptable. With versioning and
+  COMPLIANCE retention, a delete marker hides an object but cannot destroy the locked version,
+  so evidence stays recoverable. The stack alerts on any delete marker in the evidence bucket.
+- **Garage as a permanent option:** no. With no outside deployments there is no one to migrate,
+  so the dual-backend phase, the migration tool and the deprecation window are dropped (decision
+  5, phases 1 and 2). Two bundled stores would double the storage test matrix for little gain.
+  Garage stays only as the fallback if phase 0 fails.
+- **Priority:** run the phase 0 spike soon; it is cheap and decides the rest. Phase 1 lands after
+  batch 3 and before L1: evidence that cannot be deleted matters before strangers can upload.
+
+Still open:
 
 - Evidence retention period under COMPLIANCE (ADR 0006 suggests at least one year; legal review
-  per jurisdiction).
-- Whether a per-principal `Deny` works in SeaweedFS (phase 0). If it does not, COMPLIANCE
-  retention alone still blocks deletes of held objects, but the worker could still create
-  delete markers. Decide whether that is acceptable.
-- Whether to keep Garage as a permanent `--storage garage` option rather than removing it in
-  phase 4.
-- Priority relative to the S1 and feature waves: nothing is broken today, so this is hardening.
+  per jurisdiction, on the L1 counsel list).
 
 Sources (2026-10-27): SeaweedFS wiki pages "Amazon S3 API", "S3 Object Lock and Retention",
 "S3 Configuration" and "S3 Bucket Policies"; SeaweedFS GitHub releases (4.46–4.51) and LICENSE;

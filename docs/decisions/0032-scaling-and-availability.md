@@ -5,7 +5,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0032: Scaling and availability in stages
 
-- Status: proposed
+- Status: accepted (2026-10-27; see [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
 - Date: 2026-10-26 (provider facts checked on 2026-10-26)
 
 ## Context
@@ -222,10 +222,20 @@ claims above with two of each app service. What it found, and what the code does
   checks history for every message acknowledged more than 1 s before the kill; what was lost
   within the last interval is reported (`multi.chat.lost_on_kill`), not failed.
 
-## Open questions
+## Decisions at acceptance (2026-10-27)
+
+The maintainer accepted the stages as written and answered two of the three open questions:
+
+- **Production region: NYC3,** unless the launch audience turns out to be mostly in Europe, in
+  which case FRA1. NYC3 offers every product this ADR uses (droplets, Managed PostgreSQL, Managed
+  Valkey, Spaces) and reaches both US coasts; FRA1 would simplify GDPR data residency for an
+  EU-first audience. The droplet size still waits for S1-a's numbers, and both are confirmed on
+  the L1 checklist.
+- **Tracker in stage 2: on one app droplet,** not its own. It is a light WebSocket process, and a
+  restart only drops swarms: players fall back to HTTP. A separate droplet is more cost and one
+  more host to patch for no availability gain. It moves when its metrics say so.
+
+Still open:
 
 - The egress budget that triggers stage 3, in GiB per month: a maintainers' decision at launch
   (L1), from S1-a's per-viewer egress and the transfer allowance of the launch droplet.
-- The production region (ADR 0025's open question), which also places the managed databases.
-- Whether to run the tracker in stage 2 as one instance on one app droplet or on its own small
-  droplet.

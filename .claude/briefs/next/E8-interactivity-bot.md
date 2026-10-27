@@ -25,35 +25,45 @@ EventSub events.
   `overlay.alerts.tsx`. `overlay.goals.tsx` and `overlay.chat.tsx` are placeholders.
 - 29 stubs: `interact.ts` 15 (`:49-64`, `:141-143`), `bot.ts` 14 (`:9-29`).
 
-## Decisions first: ADR 0026 (interactivity policies)
+## Decisions: [ADR 0026](../../../docs/decisions/0026-interactivity-policies.md) (accepted 2026-10-27)
 
-- **Points accrue on verified watch only** (integrity verdict `verified`), per minute, capped
-  per day, so viewbots cannot farm. Spending: bot commands with `costPoints`, predictions.
+- **Points accrue on verified watch only** (`GATE_ELIGIBLE` sessions; `fetch_unjudged` counts
+  as unverified), per minute, capped per day, so viewbots cannot farm. Rate and cap are the
+  governance setting `interact.points.accrual`, default 10 points per 5 minutes and 1,000 per
+  day per viewer per channel; no clawback. Spending: bot commands with `costPoints`,
+  predictions, extra poll votes.
 - **Predictions use channel points only, never money** (no gambling exposure); refund on cancel;
   payout is proportional, with largest-remainder rounding (`packages/ledger/src/math.ts:54`).
-  Points have no cash value, stated in the terms.
-- **Raids:** one at a time per channel, a cooldown, a target can turn raids off or allow only
-  followed channels, suspended channels cannot raid or be raided, the count shown is the verified
-  count. Raid-surge protection on the target is W3.
+  Points have no cash value, stated in a new terms clause (draft until counsel reviews it). A
+  prediction resolved to an outcome nobody bet on refunds like a cancel.
+- **Raids:** one at a time per channel, a cooldown (default 10 minutes), a target can turn raids
+  off or allow only followed channels, suspended channels cannot raid or be raided, the count
+  shown is the verified count. Raid-surge protection on the target is W3.
 - **Goals:** types from `GOAL_TYPES`; progress from the outbox (follows, subs, tips), not polled.
 - **Bot:** templates are variable substitution only (`${user}`, `${count}`, `${var:name}`),
-  never code; timers need `intervalMinutes` and `minChatLines`; the bot speaks as a per-channel
-  bot account (`users.accountType = "bot"`, `botOwnerId`) and its messages skip middlewares
+  never code; timers need `intervalMinutes` and `minChatLines` (at least 1); the bot speaks as a
+  per-channel bot account (`users.accountType = "bot"`, `botOwnerId`, named by
+  `bot_configs.botUserId`) and its messages skip middlewares
   (already how `say` works). Song requests stay a link queue: no playback, no fetching titles.
-- Whether points are a ledger (append-only `loyalty_transactions` with a trigger-checked
-  balance) the way money is: recommended yes, enforced in SQL (AGENTS.md rule 9).
+- **Points are a ledger** the way money is (decided): append-only `loyalty_transactions`, a
+  trigger-maintained `loyalty_balances` with `CHECK (points >= 0)`, enforced in SQL (AGENTS.md
+  rule 9). `reason` becomes an enum; FKs become `restrict`.
 
 ## Contract step
 
-Points trigger in a protections migration, any missing columns (poll/prediction `ends_at`,
-raid opt-out on channel settings), worker job names, the `interact` and `channel-bot` selectors
-docs, event payload shapes for each catalog entry, `BUS` topics the overlays subscribe to.
+Points protections migration (append-only, trigger-maintained balance, `CHECK`, the `reason`
+enum, `restrict` FKs), the `interact.points.accrual` governance setting and its seed, the
+`raids` channel setting (`anyone | followed | off`), the one-pending-raid partial unique index,
+`bot_configs.botUserId`, `BotTimer.minChatLines` min 1, worker job names, the `interact` and
+`channel-bot` selectors docs, event payload shapes for each catalog entry, `BUS` topics the
+overlays subscribe to. `polls.endsAt` and `predictions.locksAt` already exist
+(`schema/interactive.ts:163`, `:200`).
 
 ## Units
 
 | Unit           | Owns                                                                                                                                                          | Builds                                                                                      |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| E8-polls       | `routes/interact.ts` (polls, predictions), `services/api/src/interact/{polls,predictions}.ts`, worker `jobs/interact-end.ts`                                  | create/vote/bet/lock/resolve/cancel, auto-end at `ends_at`, events                          |
+| E8-polls       | `routes/interact.ts` (polls, predictions), `services/api/src/interact/{polls,predictions}.ts`, worker `jobs/interact-end.ts`                                  | create/vote/bet/lock/resolve/cancel, auto-end at `endsAt`, events                           |
 | E8-raids-goals | `routes/interact.ts` (raids, goals), `services/api/src/interact/{raids,goals}.ts`, worker `jobs/raid-execute.ts`, goal progress consumer                      | raid countdown and execute (viewers' players follow), goal progress, raid alert type        |
 | E8-points      | `routes/bot.ts` (points), `packages/ledger`-style points module `services/api/src/points/**`, worker `jobs/points-accrue.ts`                                  | accrual from verified watch, balance, leaderboard, moderator adjust (audit row)             |
 | E8-bot-engine  | `services/chat/src/plugins/bot/**`, `services/chat/src/plugins/index.ts`                                                                                      | commands, aliases, cooldowns, user levels, variables, timers, `!points`, song-request queue |

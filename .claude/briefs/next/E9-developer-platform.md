@@ -22,26 +22,40 @@ or WebSocket. A Twitch bot ports with a scope map and the IRC gateway.
   the EventSub WebSocket server; `packages/sdk`; a developer console; developer docs.
   `harness/src/bots/sdk-bot.ts` is a stand-in written to be replaced by the SDK.
 
-## Decisions first: ADR 0027 (OAuth and EventSub)
+## Decisions: [ADR 0027](../../../docs/decisions/0027-oauth-and-eventsub.md) (accepted 2026-10-27)
 
-- OAuth 2.1 shape: authorization code with PKCE required for every client, no implicit grant,
-  exact redirect URI match, refresh-token rotation with reuse detection, client credentials for
-  app-only tokens. Consent screen lists scopes in plain words (i18n keys).
-- Device code flow for headless bots: recommended (Twitch has it; chat bots need it).
-- Where the EventSub WebSocket runs: in `services/api` behind Caddy at `/eventsub/ws`
-  (recommended; it already authenticates tokens) versus a new service. Keepalive, reconnect
-  message, subscription limit per session, what a revoked token does to an open socket (closes
-  it: there is an open test gap for chat, PROGRESS.md 2B row).
-- Rate limits per app and per user token; how app abuse is suspended (audit row).
-- SDK scope: typed client generated from the oRPC contract, EventSub WS and webhook signature
-  verification helpers, no runtime dependency outside the repo's allowlist. Published to npm
-  under the project's scope (user to confirm the registry and name).
+- OAuth 2.1 shape: authorization code with PKCE (`S256` only) required for every client, no
+  implicit grant, exact redirect URI match, refresh-token rotation with reuse detection, client
+  credentials for app-only tokens. Consent screen lists scopes in plain words (i18n keys).
+- App-only (client-credentials) tokens carry no scopes: every scoped procedure refuses them. A
+  webhook subscription made with one is backed by a user who has already authorized the app
+  with the event's scopes (`event_subscriptions.userId`), and is refused otherwise.
+- Device code flow for headless bots: decided, yes (Twitch has it; chat bots need it). Polling
+  is throttled per device code by the RFC 8628 `interval` and `slow_down`, not the `auth` bucket.
+- The EventSub WebSocket runs in `services/api` behind Caddy at `/eventsub/ws` (decided).
+  Keepalive 10 s by default (10 to 600), `session_reconnect` with a resume token, 300
+  subscriptions per session, 3 sessions per (app, user); a revoked token closes the open socket,
+  and E9 closes the matching chat test gap (PROGRESS.md 2B row).
+- Rate limits per (app, user) token and a new per-app `app` bucket; an admin can suspend an app
+  (audit row), which closes its sockets and revokes its subscriptions.
+- SDK: `@commonair/sdk` on npmjs.com, published from GitHub Actions with npm trusted publishing
+  and provenance; no JSR. Typed client generated from the oRPC contract, auth helpers, EventSub
+  WS and webhook signature verification helpers, no runtime dependency outside the repo's
+  allowlist. The maintainer sets up the `@commonair` npm organisation and the trusted-publisher
+  link. The SDK's license (AGPL like every package, or something more permissive for a library
+  third parties embed) is (open: maintainer).
 
 ## Contract step
 
-Routes for `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/device`; any missing
-`oauth_*` columns (PKCE challenge, refresh family id); EventSub WS limits in config; selectors
-doc `docs/testing/e9-selectors.md` (console pages, consent screen).
+Routes for `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/oauth/device`; `platform.ts`
+as a clean replacement: required `oauth_codes.codeChallenge` (`S256`), refresh family id and
+rotated marker on `oauth_tokens`, nullable `oauth_tokens.userId` (client-credentials tokens),
+nullable `oauth_apps.clientSecretHash` (public clients), `oauth_apps.suspendedAt` and reason
+code, a new `oauth_device_codes` table; `resolveToken` handles a token with no user; the
+`/eventsub/ws` Caddy route; the `app` bucket in `DEFAULT_RATE_LIMITS`; EventSub WS limits in
+config; `UserControlMessage` gets an optional `userId`, an optional `appId` and an
+`app_suspended` reason, and chat and IRC honour `appId`; selectors doc
+`docs/testing/e9-selectors.md` (console pages, consent screen).
 
 ## Units
 

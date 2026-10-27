@@ -5,7 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0022: Supply-chain policy (vet, cool down, pin, audit)
 
-- Status: proposed
+- Status: accepted (2026-10-27; already enforced since 2026-10-22 by AGENTS.md rule 7 and the
+  verify gate)
 - Date: 2026-10-22
 
 ## Context

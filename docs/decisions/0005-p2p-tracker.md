@@ -210,7 +210,8 @@ credentials for every session and widens two hot contracts; rejected at acceptan
 - **The player's policy**, per device:
   - preference `off`: never;
   - preference `on` (the viewer opted in): yes, unless the path is native HLS or W1b data mode is
-    on;
+    on (the API also refuses the grant to a data-mode session,
+    [ADR 0018](0018-data-mode-claim.md) decision 6);
   - no preference: the operator default. With `P2P_DEFAULT=off` that is off. With
     `P2P_DEFAULT=on` it is on only where the device is not touch-primary
     (`matchMedia("(pointer: fine)")`), `navigator.connection.saveData` is not true,

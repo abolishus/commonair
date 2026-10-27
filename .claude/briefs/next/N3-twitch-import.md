@@ -11,9 +11,10 @@ be copied (they are other people's accounts); they come over through W3-portabil
 
 ## State
 
-- Sign in with Twitch exists (`packages/config/src/env.ts:160-163`,
-  `services/api/src/auth/index.ts:74`); `TWITCH_SCOPE_MAP` (`scopes.ts:30`) maps bot scopes;
-  Twitch is a simulcast target; the IRC gateway is Twitch-compatible.
+- Sign in with Twitch exists (`packages/config/src/env.ts:161-163`,
+  `services/api/src/auth/index.ts:74`); `TWITCH_SCOPE_MAP` (`scopes.ts:31`) maps Twitch scope
+  names to CommonAir scopes for the IRC gateway; Twitch is a simulcast target; the IRC gateway
+  is Twitch-compatible.
 - No import code. feature-wins §4.14 (lines 764-777) plans one bundle schema shared with the
   Twitch import.
 
@@ -24,16 +25,32 @@ be copied (they are other people's accounts); they come over through W3-portabil
 - **W3-portability** fixes the bundle schema. The importer converts Twitch data into that
   bundle and feeds the same import path, so there is one importer and one set of tests.
 - AGENTS.md rule 3: Twitch is a proprietary adapter; the instance runs without
-  `TWITCH_CLIENT_ID`, and the import page explains that it is unavailable.
+  `OAUTH_TWITCH_CLIENT_ID` and `OAUTH_TWITCH_CLIENT_SECRET`, and the import page explains that
+  it is unavailable.
 
-## Decisions (ADR 0031, short)
+## Decisions: [ADR 0031](../../../docs/decisions/0031-twitch-import.md) (proposed; counsel gate)
 
-- Scopes requested (read-only: `user:read:email` is not needed; `channel:read:*` for schedule
-  and subscriptions count only if shown).
+ADR 0031 departs from this plan in three places, each awaiting the maintainer (open:
+maintainer): no scopes instead of `channel:read:*`; panels only if Twitch has a documented API
+for them; the schedule carried in the bundle but not applied.
+
+- Scopes: none are requested. The authorization only proves the streamer controls the Twitch
+  account; the data is public Helix data. No `user:read:email`, no `channel:read:*` (the
+  subscriber count is not imported).
 - Emotes: the streamer asserts they own the art; imported emotes go through the same
   moderation and PDQ hashing as uploads (E4c), and are re-hosted, never hotlinked.
-- Panels: images re-hosted, links kept, HTML stripped to the panel's markdown subset.
+- Panels: images re-hosted, links kept, HTML stripped to the panel's markdown subset, only if
+  Helix has a documented panels endpoint; otherwise panels drop out of v1 (open: maintainer).
+- Schedule: CommonAir has no schedule feature, so imported segments have nowhere to land; the
+  bundle carries them and the importer does not apply them (open: maintainer).
 - The Twitch token is used once and discarded (no stored refresh token).
+
+## Contract step
+
+N3-job needs a stated route into the upload moderation pipeline in
+`services/api/src/moderation/uploads.ts` (the worker job cannot import it): an internal API call
+or moving the pipeline into `packages/moderation`. This is a contract request, settled in the N3
+contract step.
 
 ## Units
 
@@ -47,4 +64,5 @@ be copied (they are other people's accounts); they come over through W3-portabil
 ## Done means
 
 `twitch-import` scenario against the mock: connect, preview, import, the channel page shows the
-title, panels, emotes (hashed and moderated) and schedule; `--no-proprietary` hides the page.
+title, panels (if they stay in v1), emotes (hashed and moderated), and the schedule shown as
+carried but not applied; `--no-proprietary` hides the page.

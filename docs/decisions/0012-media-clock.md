@@ -5,8 +5,10 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # ADR 0012: One media clock (part 1: alignment and skew targets)
 
-- Status: accepted (2026-10-27; part 1 only, the six questions answered by the maintainer, see
-  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
+- Status: accepted. Part 1 accepted 2026-10-27 (the six questions answered by the maintainer, see
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)); amendment 1 (part 2, Timeline
+  Spine) accepted 2026-10-27 (the maintainer accepted the recommended answers, see
+  [Amendment 1 decisions at acceptance](#amendment-1-decisions-at-acceptance-2026-10-27))
 - Date: 2026-10-27 (code checked at `9c51c93`)
 - Scope: the first half of the ADR 0012 candidate in
   [feature-wins.md §7](../product/feature-wins.md#7-decisions-needed), which gates W0-clock
@@ -293,6 +295,281 @@ draft, the text above was updated to match.
 The `ClockAnchor` hook in `services/media/src/vod/recorder.ts` (decision 4) lands in the W0
 contract step, as drafted.
 
+## Amendment 1: part 2, Timeline Spine
+
+- Status: accepted (2026-10-27; the maintainer accepted the recommended answers, see
+  [Amendment 1 decisions at acceptance](#amendment-1-decisions-at-acceptance-2026-10-27))
+- Date: 2026-10-27 (code checked at `ccf9c17`)
+- Scope: what [Deferred to W1](#deferred-to-w1-part-2-timeline-spine) lists: the `media_ts` clamp,
+  presentation-queue defaults, IRC and bot behaviour without `mediaTs`, and chat retention and
+  replay. It gates the W1 contract step and W1-spine
+  ([W1-quick-wins](../../.claude/briefs/next/W1-quick-wins.md), feature-wins §4.3).
+
+**Counsel has not reviewed the retention periods or the disclosure text.** The privacy policy is a
+draft "pending lawyer review" (`packages/db/src/legal/privacy.md:6`), and this amendment adds to
+that draft. Acceptance covers the mechanism (what is kept, for how long, what replay hides), not
+legal sufficiency. This is not legal advice.
+
+### Context
+
+Part 1 makes PDT the ingest wall clock on every rendition and in the VOD. Part 2 decides how chat
+is placed on that clock. What the code has at `ccf9c17`:
+
+- **Chat rows carry receive time only.** `chat_messages` has `created_at`, `broadcast_id`,
+  `held_at`, `deleted_at` and indexes on `(channel_id, created_at)` and `(user_id, created_at)`
+  (`packages/db/src/schema/chat.ts:11-38`). The chat core stamps `createdAt` from `receivedAt` and
+  copies `channel.liveBroadcastId` into `broadcastId` (`services/chat/src/core.ts:130-144`), so
+  chat sent while a channel is offline has a null broadcast. Rows are written in batches by
+  `services/chat/src/persistence.ts`.
+- **The wire has no media time.** The client `send` frame is channel, body, reply, action and nonce
+  (`packages/contracts/src/chat.ts:18-25`); the server `message` frame carries a `ChatMessage`
+  (`chat.ts:87-93`, `packages/contracts/src/api/entities.ts:321`). The IRC gateway builds the same
+  `send` frame with no room for a timestamp (`services/irc/src/session.ts:408`).
+- **The player can already read media time.** `latencySeconds()` uses `hls.playingDate` and
+  Safari's `getStartDate()` (`apps/web/src/player/controller.ts:161-171`). It subtracts PDT from the
+  viewer's own `Date.now()`, so the heartbeat's `latencySeconds`
+  (`packages/contracts/src/api/entities.ts:292`, stored as `playback_sessions.latency_ms` at
+  `services/api/src/routes/playback.ts:244`, column at `packages/db/src/schema/delivery.ts:87`)
+  includes the viewer's clock error. The PDT itself does not.
+- **Broadcast start** is `broadcasts.started_at` (`packages/db/src/schema/media.ts:48`).
+- **Moderation state on rows.** A moderator delete sets `deleted_at` and `deleted_by`
+  (`services/chat/src/moderation.ts:274`); approving a held message clears `held_at`
+  (`services/api/src/chat/held.ts:121`). `/clear` writes a `mod_actions` row and broadcasts a
+  `clear` frame but changes no message rows (`moderation.ts:298-303`). Bans and timeouts do not
+  touch message rows either.
+- **Retention.** Nothing deletes chat today except account deletion, which deletes the user's rows
+  (`services/worker/src/deletion/account-deletion.ts:285-288`). The privacy draft keeps "content"
+  until the user deletes it (`privacy.md:70`), and chat is listed as content (`privacy.md:20`).
+  A report on a chat message copies the body into the report's evidence
+  (`services/api/src/routes/safety.ts:79-80`), so a report survives the message. No "report
+  window" constant exists in code; this amendment defines one for chat.
+- **VOD lifetime.** A VOD gets `expires_at = now + channels.vod_retention_days`
+  (`services/media/src/vod/finalize.ts:288`), default 14 days
+  (`packages/db/src/schema/channels.ts:55`), at most 60 (`packages/contracts/src/api/router.ts:72`).
+  `vod-retention` deletes expired VODs unless the owner is under a legal hold
+  (`services/worker/src/housekeeping.ts:102`, `:142`). Clips store `start_offset` from the
+  broadcast start and may outlive their VOD (`clips.vod_id` is `set null`,
+  `packages/db/src/schema/media.ts:171-196`).
+- **No user blocks.** There is no table, procedure or UI for one user blocking another anywhere in
+  the repository (no hit for a blocks table in `packages/db/src/schema/`, `packages/contracts` or
+  `apps/web`). The accepted replay rule about blocks needs one (decision 8).
+
+### Decisions
+
+#### 1. `mediaTs` and `playbackMode` on the wire; `media_ts` on the row
+
+The W1 contract step adds optional `mediaTs` (ISO 8601 with offset) and `playbackMode`
+(`live | dvr`) to the client `send` frame, and `mediaTs` (nullable) to `ChatMessage`; a migration
+adds nullable `chat_messages.media_ts timestamptz` and an index on `(broadcast_id, media_ts)`.
+
+**Why.** `mediaTs` is the PDT under the sender's playhead (`playheadWallclock()`, a new player
+seam W1-spine adds to `controller.ts` on top of the existing `hls.playingDate` read), which part 1
+makes the same on every rendition, so it does not depend on the sender's clock.
+`playbackMode` lands now so DVR (ADR 0016, W2) needs no second contract change. The index leads on
+`broadcast_id`, not `channel_id` as feature-wins §4.3 drafted it, because replay always asks for
+one broadcast's chat (a VOD and a clip each belong to one broadcast).
+
+#### 2. The clamp: receive time stays authoritative, `media_ts` is a bounded hint
+
+New `services/chat/src/clamp.ts`, pure, called by the pipeline before the row is queued:
+
+- **Live mode, live channel:** `media_ts = clamp(mediaTs, max(receive − 60 s, startedAt), receive)`,
+  where `startedAt` is the live broadcast's `started_at`. A value in the future becomes receive
+  time; a value before the window becomes its lower edge.
+- **Channel not live** (no live broadcast): the hint is dropped (`media_ts` null). The message is
+  still accepted; offline chat is ordinary chat. (Feature-wins §4.3 says the hint is "rejected for
+  non-live channels"; this reads that as rejecting the hint, not the message.)
+- **DVR mode:** `media_ts` is null whatever the client sent. Replay places the message at its
+  receive time with a "said while catching up" label.
+- **Missing `mediaTs`** in live mode (IRC, bots, the HTTP chat API, old clients): decision 4.
+
+**Why.** Report evidence, rate limits, retention and moderation all keep using `created_at`; the
+clamp only limits how far a sender can move their own line in replay. 60 s covers LL-HLS at its
+worst plus a slow mobile network; a larger window lets a sender plant a line next to a moment they
+never saw. The `startedAt` bound stops a line landing before the broadcast exists.
+
+#### 3. Presentation queue defaults
+
+New `apps/web/src/chat/presentation.ts` holds an item until `playheadWallclock()` reaches its
+media time:
+
+- **On by default for overlays and alerts** (polls, follows, tips): the alert fires when the
+  viewer's playhead reaches the moment, not when the server sends it.
+- **Off by default for chat lines.** Live chat renders on arrival, as today. A per-device opt-in to
+  sync chat to the video may ship if the usability test in feature-wins §4.3 supports it; it is
+  stored in `localStorage` (wrapped in try/catch) and defaults off.
+- **Own messages echo instantly**, whatever the setting.
+- **The creator dashboard shows real time**: the streamer is at the ingest, so holding anything
+  back for them would only add delay.
+- **Bounded hold.** An item is held at most 60 s (the clamp window), then shown. In `dvr` mode the
+  queue does not hold live alerts at all; they go to the alert history only, because they belong
+  to the live edge the viewer is not watching.
+
+**Why.** Debate item 10 resolved hold-back as overlays-only. Delaying chat lines by default hides
+the conversation from the people having it.
+
+#### 4. IRC, bots and HTTP senders: receive time minus the channel's median latency
+
+When a live-mode message has no `mediaTs`, `media_ts = clamp(receive − L, …)` with the same bounds
+as decision 2, where `L` is the channel's median viewer latency from a new
+`KEYS.chatLatency(channelId)` (STRING, seconds, TTL 60 s). With no key, `L = 0`.
+
+- **Writer.** The integrity worker, on each scoring pass (every 15 s,
+  `services/worker/src/integrity/jobs.ts:42`), computes the median of `latency_ms` over the
+  channel's live, gate-eligible sessions (`GATE_ELIGIBLE`, `packages/integrity/src/jobs.ts:47`),
+  capped to [0, 60] s, and writes the key only when at least 3 such sessions report a latency.
+  It lives in a new `services/worker/src/integrity/chat-latency.ts`.
+- **Why the median of gate-eligible sessions.** Each sample carries the viewer's clock error
+  (Context), and bots could report any latency they like. The median of verified, fetch-judged
+  sessions ignores both; the cap and the clamp bound the rest.
+- **`services/irc` does not read or send `mediaTs`.** IRC has no field for it, and an IRCv3 client
+  tag would reach almost no clients. The gateway keeps building the frame it builds today.
+- **Bot replies are not special-cased.** A bot that answers a command gets the channel median like
+  any other sender without a playhead. Inheriting the triggering message's `media_ts` is a possible
+  later refinement, not needed for v1.
+
+#### 5. Live chat is replayed alongside VODs and clips
+
+Replay procedures `vods.chat` and `clips.chat` return a broadcast's chat ordered by
+`coalesce(media_ts, created_at)`, paged by a media-time cursor (at most 500 messages a page). A
+VOD's window is its recording span; a clip's is the wall-clock window it was cut from (the
+recorder clock, aligned by part 1). Handlers live in a new `services/api/src/chat-replay/`; the
+procedures attach to the VOD and clip routes (the W1 plan lifts the old "E6 owns" restriction).
+
+**Why.** Replay is most of the Spine's value: synced chat is what makes a VOD or clip read like
+the live moment, and a clip without its chat loses the reaction that made it worth clipping.
+
+#### 6. Retention: 30 days, or as long as the VOD, never more than 60 days
+
+A message is deleted when **it is older than `CHAT_RETENTION_DAYS` (default 30) and its broadcast
+has no VOD that still exists**, or when **it is older than `CHAT_REPLAY_MAX_DAYS` (default 60)**,
+whichever comes first.
+
+- Chat attached to a VOD lives as long as that VOD, capped at 60 days. A VOD that expires at 14
+  days leaves its chat to the 30-day rule. Chat with no VOD (VOD off, VOD deleted, or sent while
+  offline) is deleted at 30 days.
+- Both are operator settings in `packages/config` (new), with `.env.example` and
+  `docs/self-hosting/configuration.md` entries. Config validation requires
+  `CHAT_REPLAY_MAX_DAYS >= CHAT_RETENTION_DAYS`. The 60-day default matches the per-channel VOD
+  retention ceiling (`router.ts:72`), so no VOD outlives its chat by default.
+- **Clips follow the message rule.** A clip keeps no chat of its own: once the messages in its
+  window age out, `clips.chat` returns none and the UI says chat is no longer kept.
+- **The job.** A new `chat-retention` worker job (`services/worker/src/jobs/chat-retention.ts`)
+  deletes in batches under a run lock, like `vod-retention`, and skips messages whose author is
+  under a legal hold (the `ownerHeld` pattern, `housekeeping.ts:102`). A new index on
+  `chat_messages (created_at)` keeps the scan cheap.
+- **30 days is the chat report window.** A message can be reported while it exists; a filed report
+  already keeps the body as evidence (`safety.ts:79-80`), so deleting the row later loses nothing
+  the report needs.
+- **No clean-up migration.** There is no public instance and no self-hoster, so the first run of
+  the job simply applies the rule to whatever chat staging has.
+
+**Why.** GDPR data minimisation (Art. 5(1)(c), (e)): keep chat as long as it serves the purpose
+viewers can see, replay, and no longer. Unbounded retention of every chat line had no purpose
+written down anywhere.
+
+#### 7. What replay hides
+
+Replay returns only what the live room could still see and what this viewer chose to see:
+
+- **Deleted and moderated messages are excluded:** `deleted_at` set (author or moderator, or a
+  report resolution), `held_at` still set (never approved), messages sent before a `/clear` in the
+  same broadcast (`mod_actions` `clear_chat`), and messages by a user who was banned or timed out in
+  the channel during that broadcast, sent before the ban (what live viewers saw purged).
+- **Accounts:** messages by a platform-suspended user are hidden while the suspension lasts;
+  messages by a user under a permanent channel ban are hidden on all of that channel's replays.
+  Deleted accounts' messages are already gone (Context).
+- **Blocked users are hidden from the viewer who blocked them** (decision 8). Replay for a
+  signed-in viewer is therefore filtered per viewer and never shared-cached.
+- **Removed or restricted media:** replay is served exactly when the VOD or clip itself is
+  playable to this viewer (status, removal, visibility and the 18+ gate, as its playback path checks
+  them). A removed VOD has no replay; a `subscribers` VOD's replay is for subscribers.
+
+**Why.** Replay must not undo moderation, and a block that stopped at live chat would be a block
+in name only.
+
+#### 8. Blocks need a block feature
+
+No user-block feature exists (Context). The W1 contract step adds the minimum replay needs: a
+`user_blocks (user_id, blocked_user_id, created_at)` table (personal data, deleted with either
+account, never in append-only columns) and `me.blocks.{list,add,remove}`. Hiding blocked users in
+live chat and the block action in the chat user card belong with it in one W1 unit, so a viewer
+can make a block that replay then honours. Until that ships, replay's block filter is written
+against the table and tested with seeded rows.
+
+**Why.** The accepted rule cannot be met without blocks. Building replay first and blocks later
+would ship a disclosure that promised something the product could not do.
+
+#### 9. Disclosure
+
+- **Privacy policy.** The draft's "What you publish" and "How long we keep it" sections say that
+  live chat is saved with the broadcast, replayed beside the VOD and its clips, and deleted after
+  `CHAT_RETENTION_DAYS`, or with the VOD and at most after `CHAT_REPLAY_MAX_DAYS`; and that deleted
+  and moderated messages are never replayed. The edit takes a new `PRIVACY_SEED_VERSION`
+  (`packages/db/src/legal/index.ts:31`), so signed-in users accept it again, as the P2P section did.
+- **Chat UI.** A short line in the chat panel, `chat.replayDisclosure` in the web catalog
+  (`apps/web/src/i18n/`), says chat is saved with the VOD, with a link to the privacy policy. It is
+  shown in the chat input area, not as a modal.
+
+**Why.** Someone chatting live should not learn from a VOD that their words were kept.
+
+### Consequences
+
+- **W1 contract step (orchestrator):** the `send` frame and `ChatMessage` fields, the
+  `chat_messages.media_ts` migration with the `(broadcast_id, media_ts)` and `(created_at)` indexes,
+  `KEYS.chatLatency`, the `user_blocks` table and `me.blocks.*` procedures, the `vods.chat` and
+  `clips.chat` contracts, the `CHAT_RETENTION_DAYS` and `CHAT_REPLAY_MAX_DAYS` settings, and the
+  `chat-retention` and chat-latency registrations in `services/worker/src/jobs/{index,names}.ts`.
+- **W1-spine** owns `clamp.ts`, `persistence.ts` (writing `media_ts`), `presentation.ts`, the player
+  seam, `chat-replay/**`, and needs two worker files its row in feature-wins §5 does not list:
+  `services/worker/src/jobs/chat-retention.ts` and `services/worker/src/integrity/chat-latency.ts`.
+- **Tests.** Clamp unit tests: window edges, before `startedAt`, future values, offline channel,
+  DVR null, missing `mediaTs` with and without `KEYS.chatLatency`. Replay integration tests: every
+  exclusion in decision 7, including a block, a `/clear`, a mid-broadcast ban and a restricted VOD.
+  Retention integration tests: VOD alive past 30 days, VOD expired at 14 days, the 60-day cap,
+  offline chat, a legal hold. Harness `timeline-sync`: two Chromium viewers at forced latencies on
+  different rungs; replay order matches media time within 1 s.
+- **Legal.** The privacy draft changes and is re-accepted. Counsel reviews the periods and the
+  disclosure with the rest of the privacy draft before launch (L1).
+- **Storage.** Chat stops growing without bound. Replay queries read one broadcast's rows through
+  the new index.
+
+### Alternatives considered
+
+- **Client-supplied `mediaTs` unclamped.** Exact for honest clients, but any sender could place a
+  line anywhere in the broadcast. Rejected; receive time stays authoritative.
+- **Hold chat lines back by default.** Matches the video better, but delays the conversation for
+  everyone in it (debate item 10). Rejected; overlays only.
+- **Keep chat as long as the account (today's behaviour).** Simplest, but has no stated purpose
+  past replay and moderation. Rejected on data minimisation.
+- **Keep chat only as long as the VOD, with no floor.** A 14-day VOD would take its chat with it
+  before the 30-day report window closes. Rejected; the 30-day floor stays.
+- **Snapshot chat into the VOD's object storage.** Replay would survive message deletion, which is
+  exactly what decision 7 forbids, and moderation after the fact would have to rewrite objects.
+  Rejected; replay reads the live table with its exclusions.
+- **Index `(channel_id, media_ts)`** as feature-wins drafted. Works, but every replay query is per
+  broadcast. Replaced by `(broadcast_id, media_ts)`.
+
+### Amendment 1 decisions at acceptance (2026-10-27)
+
+The maintainer accepted part 2 with the recommended answers. **Counsel has not reviewed the
+retention periods or the disclosure**; acceptance covers the mechanism.
+
+1. **Replay.** Live chat is replayed alongside VODs (and their clips), decision 5.
+2. **Retention.** Chat attached to a VOD is kept as long as that VOD exists, capped at 60 days;
+   chat with no VOD is deleted after 30 days (the report window). Both are operator settings
+   (decision 6).
+3. **Exclusions.** Deleted and moderated messages are excluded from replay; users a viewer blocked
+   stay hidden from that viewer in replay (decision 7). Because no block feature exists, the W1
+   contract step adds the minimum one (decision 8).
+4. **Disclosure.** The privacy policy says chat is saved with the VOD, and a line in the chat UI
+   says so through an i18n key (decision 9).
+5. **Why.** Replay is most of the Spine's value; bounded retention follows GDPR data minimisation.
+
+Technical items (decisions 1 to 4) follow feature-wins §4.3 and the W1 plan, with two changes made
+while checking the code: the replay index leads on `broadcast_id`, and the median latency is taken
+over gate-eligible sessions only.
+
 ## History
 
 - 2026-10-27: part 1 proposed and accepted (see [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)).
@@ -300,3 +577,6 @@ contract step, as drafted.
   readers have per-session time origins); the maintainer chose variant A2 (SRT input, W0 from
   LL-HLS `tfdt`). Decision 4 notes that the W0-clock brief replaces R1 with the exact W0 + `tfdt`
   derivation, keeping R1 as the fallback.
+- 2026-10-27: amendment 1 (part 2, Timeline Spine) proposed and accepted: the `media_ts` clamp,
+  presentation defaults, IRC and bot behaviour, chat replay, retention, exclusions and disclosure
+  (see [Amendment 1 decisions at acceptance](#amendment-1-decisions-at-acceptance-2026-10-27)).
