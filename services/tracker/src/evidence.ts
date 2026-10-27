@@ -12,8 +12,9 @@
  * swarm's ZSET stays until it stops, disconnects, or ages out of the TTL.
  *
  * `p2pChannelNet(channelId, net)` counts the channel's announcers per network across all of its
- * swarms (client-chosen info hashes make per-swarm counts meaningless) and is never pruned on
- * leave.
+ * swarms (a broadcast has one swarm per rendition and stream type, and a session moves between
+ * them on level switches, so a per-swarm count would split one network's sessions) and is never
+ * pruned on leave.
  */
 import { KEYS, P2P_EVIDENCE } from "@commonair/contracts/internal";
 import { networkPrefix, type ValkeyClient } from "@commonair/service";

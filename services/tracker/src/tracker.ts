@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The tracker service: WebSocket upgrades (authenticated by the playback token), per-socket
- * limits, the swarm registry and evidence writes. Upgrades are accepted on any path because
+ * The tracker service: WebSocket upgrades (authenticated by the playback token and gated by the
+ * session's P2P grant), per-socket limits, server-derived info hashes, the swarm registry and
+ * evidence writes. Upgrades are accepted on any path because
  * Caddy strips the `/tracker` prefix; `/healthz` and `/readyz` belong to runService.
  */
 import type { Server, ServerWebSocket } from "bun";
@@ -21,6 +22,7 @@ import {
 import { heartbeatFresh, verifyTrackerToken } from "./auth.ts";
 import { Evidence } from "./evidence.ts";
 import { PendingExchanges } from "./exchanges.ts";
+import { InfoHashAllowlist } from "./infohash.ts";
 import { LIMITS, parseFrame } from "./protocol.ts";
 import { TokenBucket } from "./ratelimit.ts";
 import { SwarmRegistry, type Conn } from "./swarm.ts";
@@ -44,7 +46,7 @@ export interface TrackerOptions {
   /** TRUSTED_PROXY_CIDRS. */
   trustedProxies: readonly string[];
   limits: TrackerLimits;
-  /** How often an announcing socket's heartbeat is re-checked (default 30 s). */
+  /** How often an announcing socket's heartbeat and P2P grant are re-checked (default 30 s). */
   heartbeatRecheckMs?: number;
   /** Bytes queued to a slow socket before it is closed (default LIMITS.backpressureBytes). */
   backpressureBytes?: number;
@@ -60,6 +62,8 @@ interface SocketData extends Conn {
   channelId: string;
   /** The token's `iat`: a socket with a newer one for the same session replaces this one. */
   iat: number;
+  /** The session's `KEYS.p2pGrant` value (the broadcast id): it derives the allowed info hashes. */
+  swarmId: string;
   ip: string;
   /** Per-address connection-limit subject (`connectionKey`). */
   ipKey: string;
@@ -82,7 +86,12 @@ export interface TrackerStats {
   exchanges: number;
   replaced: number;
   evidenceFailures: number;
+  /** Upgrade refusals by reason. */
   refused: Record<string, number>;
+  /** Frames refused because their info hash is outside the session's grant. */
+  hashesRefused: number;
+  /** Open sockets closed at a re-check, by reason (`not_watching`, `p2p_not_granted`). */
+  revoked: Record<string, number>;
 }
 
 export interface Tracker {
@@ -100,6 +109,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
   const recheckMs = opts.heartbeatRecheckMs ?? HEARTBEAT_RECHECK_MS;
   const rate = opts.rate ?? { burst: LIMITS.rateBurst, perSecond: LIMITS.ratePerSecond };
   const evidence = new Evidence(valkey, opts.internalSecret);
+  const allowlist = new InfoHashAllowlist();
 
   const m = meter("tracker");
   const metrics = {
@@ -112,6 +122,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
     answers: m.createCounter("tracker.answers.relayed"),
     exchanges: m.createCounter("tracker.exchanges.completed"),
     replaced: m.createCounter("tracker.connections.replaced"),
+    revoked: m.createCounter("tracker.connections.revoked"),
     swarms: m.createUpDownCounter("tracker.swarms"),
     evidenceFailures: m.createCounter("tracker.evidence.failures"),
   };
@@ -125,6 +136,8 @@ export function startTracker(opts: TrackerOptions): Tracker {
     replaced: 0,
     evidenceFailures: 0,
     refused: {},
+    hashesRefused: 0,
+    revoked: {},
   };
 
   const registry = new SwarmRegistry({
@@ -198,12 +211,23 @@ export function startTracker(opts: TrackerOptions): Tracker {
         return refuse(503, "unavailable");
       }
       if (!heartbeatFresh(score, now())) return refuse(401, "not_watching");
+      // The API writes the grant only when P2P is enabled for this session (ADR 0005 amendment 1,
+      // decision 5); its value is the swarm id the allowed info hashes derive from.
+      let swarmId: string | null;
+      try {
+        swarmId = await valkey.get(KEYS.p2pGrant(sid));
+      } catch (err) {
+        logger.warn("grant lookup failed", { err: err instanceof Error ? err.message : String(err) });
+        return refuse(503, "unavailable");
+      }
+      if (!swarmId) return refuse(403, "p2p_not_granted");
       if (taken()) return refuse(409, "duplicate_session");
 
       const data: SocketData = {
         sid,
         channelId: cid,
         iat,
+        swarmId,
         pending: new PendingExchanges(),
         ip,
         ipKey,
@@ -230,6 +254,12 @@ export function startTracker(opts: TrackerOptions): Tracker {
     }
   }
 
+  const revoke = (ws: ServerWebSocket<SocketData>, reason: string, message: string) => {
+    stats.revoked[reason] = (stats.revoked[reason] ?? 0) + 1;
+    metrics.revoked.add(1, { reason });
+    ws.close(1008, message);
+  };
+
   const frameError = (d: SocketData, reason: string, infoHash?: string) => {
     metrics.frameErrors.add(1, { reason });
     d.send(infoHash === undefined ? { "failure reason": reason } : { "failure reason": reason, info_hash: infoHash });
@@ -242,21 +272,39 @@ export function startTracker(opts: TrackerOptions): Tracker {
     if (!parsed.ok) return frameError(d, parsed.reason, parsed.infoHash);
     const frame = parsed.frame;
 
+    // Only the grant's derived hashes: refused before anything is joined or recorded.
+    const allowed = allowlist.get(d.swarmId);
+    const foreign =
+      frame.action === "announce"
+        ? allowed.has(frame.infoHash)
+          ? undefined
+          : frame.infoHash
+        : frame.infoHashes.find((h) => !allowed.has(h));
+    if (foreign !== undefined) {
+      stats.hashesRefused++;
+      return frameError(d, "info_hash not allowed", foreign);
+    }
+
     if (frame.action === "announce" && frame.event !== "stopped" && now() - d.lastHeartbeatCheck >= recheckMs) {
       let fresh: boolean | null = null;
+      let granted: boolean | null = null;
       try {
-        fresh = heartbeatFresh(await valkey.zscore(KEYS.viewers(d.channelId), d.sid), now());
+        const [score, grant] = await Promise.all([
+          valkey.zscore(KEYS.viewers(d.channelId), d.sid),
+          valkey.get(KEYS.p2pGrant(d.sid)),
+        ]);
+        fresh = heartbeatFresh(score, now());
+        granted = grant === d.swarmId;
       } catch (err) {
         // Valkey trouble never drops signalling; the check is not recorded, so the next announce
         // re-checks.
-        logger.warn("heartbeat re-check failed", { err: err instanceof Error ? err.message : String(err) });
+        logger.warn("session re-check failed", { err: err instanceof Error ? err.message : String(err) });
       }
-      if (fresh === false) {
-        ws.close(1008, "session not watching");
-        return;
-      }
-      if (fresh) d.lastHeartbeatCheck = now();
       if (d.closed) return;
+      if (fresh === false) return revoke(ws, "not_watching", "session not watching");
+      // The API deletes the grant at playback.end and when the stream becomes gated.
+      if (granted === false) return revoke(ws, "p2p_not_granted", "p2p not granted");
+      if (fresh) d.lastHeartbeatCheck = now();
     }
 
     const outcome = registry.handle(d, frame);
@@ -369,7 +417,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
   return {
     service,
     url: service.url,
-    stats: () => ({ ...stats, refused: { ...stats.refused } }),
+    stats: () => ({ ...stats, refused: { ...stats.refused }, revoked: { ...stats.revoked } }),
     stop: async () => {
       process.off("SIGTERM", closeAll);
       process.off("SIGINT", closeAll);

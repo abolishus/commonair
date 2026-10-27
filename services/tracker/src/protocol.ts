@@ -5,13 +5,21 @@
  * The WebTorrent WebSocket tracker protocol subset that browser WebTorrent and
  * p2p-media-loader clients send (ADR 0005). Frames are JSON text. `info_hash`, `peer_id`,
  * `to_peer_id` and `offer_id` are 20-byte binary strings: 20 characters, each char code 0–255.
+ * p2p-media-loader 4.0.0 sends 20 ASCII characters for all four (`tests/fixtures.ts`).
  */
+import { ALLOWED_PER_GRANT } from "./infohash.ts";
 
 export const LIMITS = {
   /** Largest text frame accepted; Bun closes the socket with 1009 above it. */
   maxFrameBytes: 64 * 1024,
   maxOffersPerAnnounce: 10,
-  maxSwarmsPerSocket: 4,
+  /**
+   * Every allowed hash of one grant (10). The loader keeps a rendition's swarm for 30 s after a
+   * level switch (`p2pInactiveLoaderDestroyTimeoutMs`) before it sends `stopped`, and audio is
+   * a swarm of its own, so a session can briefly hold more than four; it can never hold a hash
+   * outside its grant's set.
+   */
+  maxSwarmsPerSocket: ALLOWED_PER_GRANT,
   maxSdpLength: 16 * 1024,
   maxScrapeHashes: 10,
   /** Token bucket per socket: burst and sustained frames per second. */
