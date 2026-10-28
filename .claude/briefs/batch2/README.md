@@ -69,8 +69,7 @@ At most six units at a time; two agents never write the same file at the same ti
 - DMCA follows 17 U.S.C. § 512 and the operator template; no lawyer has reviewed it. ADR 0019's
   DSA text lives in the operator template; counsel has not reviewed it.
 
-Wave 3 merged 2026-10-28 (`435a1fb`, `d222ca6`, fixes `7afa11a`, `1d6fd9a`, `ba10a9b`); state,
-results and open findings in [PROGRESS.md](../../../PROGRESS.md).
+Wave 3 merged 2026-10-28 (`435a1fb`, `d222ca6`); its regressions fixed and CI green on main `0201068` (every job). State, results and open findings in [PROGRESS.md](../../../PROGRESS.md). Since 2026-10-28 CI is the gate: no local `verify`/`verify:full`.
 
 ## Milestone checks
 

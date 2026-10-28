@@ -38,7 +38,7 @@ fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~8
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
 Legal seed follow-ups for E8/N2: a no-cash-value clause in `terms.md`, the locale cookie in
 `cookies.md`.
-**Batch 2 state (2026-10-28): waves 1–3 merged, gated and pushed (`ba10a9b`); `verify:full` and CI red on W0-clock regressions, fix in flight (see wave 3 open findings).**
+**Batch 2 state (2026-10-28): waves 1–3 merged and pushed; CI green on main `0201068` (every job, all four harness shards). Batch done; open findings below.**
 
 | Unit              | Wave | Commits (branch)                   | State                                                                                     |
 | ----------------- | ---- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -91,22 +91,46 @@ WHIP max 244 ms); `viewers --set p2p=10` and plain `viewers` PASS 15/15 (bytesP2
 HTTP 242 KB/s, digests served, none rejected, default viewers no grant or peer); `trust-safety`
 144/144; `integrity-basic` 15/15 (one 6/7 flake, green rerun).
 
-**`verify:full` on `ba10a9b`: RED**, 17/21. W0-clock regressions, fix in flight: WHIP Chromium
-TTFF 23 s against 15 s since the settle guard `7afa11a` (15.9 s before); on CI only,
-`clock-mediamtx`/`clock-whip` int tests (W0 ~5 s off, or never settles) and `clock-skew` (never
-green on CI). Not wave 3: `integrity-basic` hidden-tab dip 7→6 (red on CI since wave 2), `e5-coop`
-council full on a long-lived stack, `e2e-relay` killed by the 45 min cap (unsharded full run now
-90 min, `scripts/verify.ts`).
+**After wave 3: CI is the gate (user, 2026-10-28).** No local `bun run verify`/`verify:full`: push
+`main`, watch CI fail-fast, fix what it reports. The local runs had failed on local bottlenecks (a
+CPU-hog repro left running, the Mac clock 2 s behind NTP after it, orphaned containers).
+Fixes since `ba10a9b`, all CI-proven:
 
-**Wave 3 open findings:** the `viewers` egress baseline is the low-latency sessions' ~1.7 MB/s,
-so "origin egress drops" passes too easily (compare against a P2P-configured session with no
-peers); the digest assertions skip silently without `HARNESS_PROMETHEUS_URL`; WHIP's AAC copy now
-starts 25–35 s after publish against `SOURCE_AAC_PENDING_MAX_MS` 20 s; P1 audio swarm ids use the
-playlist directory, not `audio` (ADR 0005 decision 5 wording, user to decide); ADR 0005
-amendment 1 needs the measured trade-off text (+4 s, 37 %, first ~10 s HTTP only); a ladder start
-drops up to 2 s of video (keyframe phase lock); `infra.ts stack` does not restart MediaMTX on a
-config-only change; P2P measured only on localhost; report the `updatePlaylist` bug upstream. The
-web image's missing-stylesheet fix is on `claude/elastic-bartik-7d287f` (`b83e86e`), not merged.
+| Problem                                           | Root cause                                                                                                                                                                                                                      | Fix                                                                                                                                                                                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WHIP Chromium TTFF 23.6 s (budget 15 s)           | the AAC copy waited ~30 s for W0 (ffmpeg `-re` catching up at 1.05×); MediaMTX dropped every new publish's first ~5 s (gortsplib drops ffmpeg's first sender report, sent before the SSRC is known); hls.js's 1-2-4-8 s backoff | real-time harness streamer `a917c21`; 1 s manifest retry (web `a917c21`, harness page `5de0b28`); loopback sender-report relay for rendition publishes `acb57a8`; probe one segment `34e1967`. Now 10.4–10.6 s Chromium, 11–11.8 s WebKit |
+| WHIP VOD stuck in `processing`                    | a 0.2 s chunk tail gave ffmpeg's fps filter no frame                                                                                                                                                                            | `c7b8270`                                                                                                                                                                                                                                 |
+| clock int tests red on CI                         | Linux EPIPE piping a segment to a one-frame ffmpeg; the `geq` strip source too slow for a loaded runner; a recorder test that passed vacuously                                                                                  | `d642bb5` (strip ~14× cheaper), `ff00d0a`, `fb9ec58`                                                                                                                                                                                      |
+| `clock-skew` never green on CI; sign-up emails    | aardvark-dns stops answering ~40 s while the app containers join the network; Better Auth's one-shot mail hit it                                                                                                                | `0ab22f9`: `infra.ts stack` waits for in-network DNS, migrate retries, auth mail retries pre-delivery failures                                                                                                                            |
+| `viewers` 20/21; `integrity-basic` hidden-tab dip | `too_many_segments` counted a player's start-up burst against honest headless Chromium; harness HTTP viewers sent some beats >30 s late on purpose                                                                              | `0201068`: a constant 40 s start-up allowance (long sessions still judged by the ratio), steady harness beats, exclusion reasons logged by session id                                                                                     |
+| relay billing and drivers heartbeat tests         | both read a count before the code recorded it                                                                                                                                                                                   | `3ddc559`                                                                                                                                                                                                                                 |
+
+Verified: CI on `0201068` all green (integration, relay, harness relay/long/clock/rest, self-host
+e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ingest-whip` 3/3.
+
+**Open findings (batch 2):**
+
+- In flight: `account-deletion` sometimes cannot open a chat websocket ~20 s after the stack is up
+  (3 CI runs; green on `0201068`); suspected chat's Postgres connection broken by the DNS outage and
+  an unbounded profile read before the upgrade (branch `fix/ci-chat-open`).
+- Seen once: `drivers.int.test.ts` WebKit first frame > 45 s (8.6 MB fetched, no errors), CI run
+  40765376044.
+- CI's Podman 4.9.3 may return nothing for `{{.Label "com.docker.compose.service"}}`, so
+  `infra.ts` preflight / crash-loop / diagnose may be no-ops there (inferred, untested).
+- The `viewers` egress baseline is the low-latency sessions' ~1.7 MB/s, so "origin egress drops"
+  passes too easily; digest assertions skip silently without `HARNESS_PROMETHEUS_URL`.
+- P2P: +4 s latency (4–8 s behind the edge), 37 % of opted-in bytes from peers, first ~10 s HTTP
+  only; measured on localhost only. ADR 0005 amendment 1 needs this trade-off text; audio swarm ids
+  use the playlist directory, not `audio` (decision 5 wording, user to decide). Report
+  p2p-media-loader-hlsjs 4.0.0's `updatePlaylist` (breaks on LL-HLS URLs) upstream.
+- The sender-report relay works around gortsplib v5.6.7 dropping a report that arrives before the
+  SSRC's first packet; report upstream (a pinned int test notices when MediaMTX fixes it). The self-
+  host Quadlet units do not have compose's migrate retry.
+- A WHIP publisher that runs off real time still moves PDT; a stall > 5 s re-anchors the source path
+  while rungs and the VOD keep their W0 (reported, not handled). A ladder start drops up to 2 s.
+- `infra.ts stack` does not restart MediaMTX on a config-only change.
+- The web image's missing-stylesheet fix is on `claude/elastic-bartik-7d287f` (`b83e86e`), not
+  merged (user to decide).
 
 **Gate stability (fix next):** timing tests fail under load (several given longer timeouts this
 batch); Podman Desktop's polling pegs the VM's API service (keep it closed during the gate); a
