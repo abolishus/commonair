@@ -38,6 +38,16 @@ describe("Mailpit against a basic-auth server", () => {
             { ID: "m1", Subject: "Verify", To: [{ Address: "a@harness.test" }], Created: "2026-10-18T00:00:00Z" },
           ],
         });
+      // The message endpoint carries `Date` (the mail's header), not `Created`.
+      if (url.pathname === "/api/v1/message/m1")
+        return Response.json({
+          ID: "m1",
+          Subject: "Verify",
+          To: [{ Address: "a@harness.test" }],
+          Date: "2026-10-18T00:00:01Z",
+          Text: "go to http://x.test/verify?token=t",
+          HTML: "",
+        });
       return new Response("not found", { status: 404 });
     },
   });
@@ -52,5 +62,10 @@ describe("Mailpit against a basic-auth server", () => {
     const m = new Mailpit(base, "ops:secret");
     expect(await m.ping()).toBe(true);
     expect((await m.search("to:x"))[0]?.id).toBe("m1");
+  });
+  test("a fetched message's created time comes from its Date field", async () => {
+    const msg = await new Mailpit(base, "ops:secret").get("m1");
+    expect(msg.created).toBe("2026-10-18T00:00:01Z");
+    expect(Number.isNaN(Date.parse(msg.created))).toBe(false);
   });
 });

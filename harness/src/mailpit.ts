@@ -23,7 +23,8 @@ interface MessageResponse {
   ID: string;
   Subject: string;
   To?: { Address: string }[];
-  Created: string;
+  /** The message endpoint has no `Created`; `Date` is the mail's Date header (whole seconds). */
+  Date: string;
   Text?: string;
   HTML?: string;
 }
@@ -67,7 +68,7 @@ export class Mailpit {
       id: m.ID,
       subject: m.Subject,
       to: (m.To ?? []).map((t) => t.Address),
-      created: m.Created,
+      created: m.Date,
       text: m.Text ?? "",
       html: m.HTML ?? "",
     };
