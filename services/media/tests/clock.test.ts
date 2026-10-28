@@ -22,6 +22,7 @@ import { createMediaClock } from "../src/clock/media-clock.ts";
 import type { ClockMetrics } from "../src/clock/metrics.ts";
 import { firstSampleSeconds, readSidecar, runOffsetMs, runSidecar, writeSidecar } from "../src/clock/run.ts";
 import {
+  completeSegments,
   computeW0,
   fetchW0,
   firstVariant,
@@ -31,7 +32,11 @@ import {
   pdtTrack,
   PTS_WRAP_SECONDS,
   rebasePts,
+  referenceSegment,
+  W0_SETTLE_FLOOR_MS,
+  W0_SETTLE_RATE,
   W0Error,
+  w0Settled,
   type W0Result,
 } from "../src/clock/w0.ts";
 import { captureLogger } from "./helpers/moderation.ts";
@@ -295,6 +300,49 @@ describe("LL-HLS playlists", () => {
     expect(newestSegment('#EXTM3U\n#EXT-X-MAP:URI="i.mp4"\n#EXTINF:2,\ns.mp4\n')).toBeNull();
     expect(newestSegment("#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-10-28T00:00:00Z\n#EXTINF:2,\ns.mp4\n")).toBeNull();
   });
+
+  test("every complete segment with a PDT, oldest first; the reference skips a 3+ playlist's first", () => {
+    const segs = completeSegments(MEDIA);
+    expect(segs.map((s) => s.uri)).toEqual(["x_video1_seg26.mp4?session=s1", "x_video1_seg27.mp4?session=s1"]);
+    expect(segs[0]?.pdtMs).toBe(Date.parse("2026-10-28T00:53:47.377Z"));
+    expect(completeSegments("#EXTM3U\n")).toEqual([]);
+    const ref = (n: number) => Array.from({ length: n }, (_, i) => ({ uri: `s${i}`, map: "i", pdtMs: i * 1000 }));
+    expect(referenceSegment(ref(0))).toBeNull();
+    expect(referenceSegment(ref(1))).toBeNull();
+    expect(referenceSegment(ref(2))?.uri).toBe("s0");
+    // The first of three or more may be deleted by MediaMTX before it is fetched.
+    expect(referenceSegment(ref(3))?.uri).toBe("s1");
+    expect(referenceSegment(ref(7))?.uri).toBe("s1");
+  });
+});
+
+describe("W0 settling", () => {
+  test("allowed drift: a floor for ms-rounded PDT plus a rate of the span, either sign", () => {
+    for (const span of [1_000, 2_000, 6_000]) {
+      const limit = W0_SETTLE_FLOOR_MS + W0_SETTLE_RATE * span;
+      expect(w0Settled({ spanMs: span, driftMs: 0 })).toBe(true);
+      expect(w0Settled({ spanMs: span, driftMs: limit })).toBe(true);
+      expect(w0Settled({ spanMs: span, driftMs: -limit })).toBe(true);
+      expect(w0Settled({ spanMs: span, driftMs: limit + 0.01 })).toBe(false);
+      expect(w0Settled({ spanMs: span, driftMs: -limit - 0.01 })).toBe(false);
+    }
+  });
+
+  test("no span is never settled", () => {
+    expect(w0Settled({ spanMs: 0, driftMs: 0 })).toBe(false);
+    expect(w0Settled({ spanMs: -1_000, driftMs: 0 })).toBe(false);
+  });
+
+  test("measured WHIP start-up slew is refused, its settled tail accepted (2026-10-28)", () => {
+    // Consecutive 2 s segments while MediaMTX's PDT slewed: W0 fell 95 ms, and 563 ms after the first.
+    expect(w0Settled({ spanMs: 2_000, driftMs: -95 })).toBe(false);
+    expect(w0Settled({ spanMs: 2_000, driftMs: -563 })).toBe(false);
+    // Over a 6 s window of 1 s segments at the same rate.
+    expect(w0Settled({ spanMs: 6_000, driftMs: -285 })).toBe(false);
+    // After it: 2 ms over a segment, nothing over several.
+    expect(w0Settled({ spanMs: 2_000, driftMs: -2 })).toBe(true);
+    expect(w0Settled({ spanMs: 6_000, driftMs: 0 })).toBe(true);
+  });
 });
 
 describe("fetchW0", () => {
@@ -302,9 +350,12 @@ describe("fetchW0", () => {
   const PASSWORD = "pass/with+chars=";
   let init: Uint8Array<ArrayBuffer>;
   let seg: Uint8Array<ArrayBuffer>;
+  /** seg27's fragment 2 s earlier on the timeline: seg26 of a settled path (PDT 2 s earlier too). */
+  let prev: Uint8Array<ArrayBuffer>;
   beforeEach(async () => {
     init = await fixture("nob_init.mp4");
     seg = await fixture("nob_1.m4s");
+    prev = shiftTfdt(seg, 1, -2 * 15_360);
   });
 
   /** A fake MediaMTX: routes by pathname, records requests. */
@@ -314,6 +365,7 @@ describe("fetchW0", () => {
       "/live/alice/index.m3u8": () => new Response(MULTIVARIANT),
       "/live/alice/video1_stream.m3u8": () => new Response(MEDIA),
       "/live/alice/x_video1_init.mp4": () => new Response(init),
+      "/live/alice/x_video1_seg26.mp4": () => new Response(prev),
       "/live/alice/x_video1_seg27.mp4": () => new Response(seg),
       ...overrides,
     };
@@ -327,7 +379,7 @@ describe("fetchW0", () => {
     return { requests, doFetch };
   }
 
-  test("multivariant → media playlist → init + newest segment only, with basic auth", async () => {
+  test("multivariant → media playlist → init + newest segment + reference segment, with basic auth", async () => {
     const { requests, doFetch } = fake();
     const r = await fetchW0({ hlsBase: BASE, path: "live/alice", password: PASSWORD, fetch: doFetch });
     expect(r.handler).toBe("vide");
@@ -338,11 +390,14 @@ describe("fetchW0", () => {
       timescale: 15_360,
     });
     expect(r.w0Ms).toBeCloseTo(Date.parse("2026-10-28T00:53:49.377Z") - (50_000.5 - 10) * 1000, 3);
+    expect(r.settle?.spanMs).toBe(2_000);
+    expect(r.settle?.driftMs).toBeCloseTo(0, 6);
     expect(requests.map((q) => new URL(q.url).pathname)).toEqual([
       "/live/alice/index.m3u8",
       "/live/alice/video1_stream.m3u8",
       "/live/alice/x_video1_init.mp4",
       "/live/alice/x_video1_seg27.mp4",
+      "/live/alice/x_video1_seg26.mp4",
     ]);
     // The session query is kept, credentials never go in a URL.
     expect(requests[2]?.url).toContain("session=s1");
@@ -440,6 +495,65 @@ describe("fetchW0", () => {
     ).rejects.toMatchObject({ reason: "segment" });
   });
 
+  test("a W0 still moving between the reference and the newest segment is refused as unsettled", async () => {
+    // The same fragment under both PDTs: W0 moved by the whole 2 s span (a PDT slewing source).
+    const moving = fake({ "/live/alice/x_video1_seg26.mp4": () => new Response(seg) });
+    const err = (await fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: moving.doFetch }).catch(
+      (e: unknown) => e,
+    )) as W0Error;
+    expect(err).toBeInstanceOf(W0Error);
+    expect(err.reason).toBe("unsettled");
+    expect(err.message).toContain("live/alice");
+    expect(err.message).toContain("2000 ms");
+
+    // 95 ms over 2 s, as measured on a WHIP source's first seconds.
+    const slewing = fake({
+      "/live/alice/x_video1_seg26.mp4": () => new Response(shiftTfdt(seg, 1, -2 * 15_360 + 0.095 * 15_360)),
+    });
+    await expect(
+      fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: slewing.doFetch }),
+    ).rejects.toMatchObject({ reason: "unsettled" });
+
+    // The media clock's last resort: the newest segment's W0, with how far it moved.
+    const r = await fetchW0({
+      hlsBase: BASE,
+      path: "live/alice",
+      password: "p",
+      fetch: moving.doFetch,
+      requireSettled: false,
+    });
+    expect(r.w0Ms).toBeCloseTo(Date.parse("2026-10-28T00:53:49.377Z") - (50_000.5 - 10) * 1000, 3);
+    expect(r.settle).toEqual({ spanMs: 2_000, driftMs: 2_000 });
+  });
+
+  test("a playlist with one complete segment is unsettled; without the check it gives that one", async () => {
+    const one = MEDIA.replace("#EXT-X-PROGRAM-DATE-TIME:2026-10-28T00:53:47.377Z\n", "");
+    const { requests, doFetch } = fake({ "/live/alice/video1_stream.m3u8": () => new Response(one) });
+    await expect(fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: doFetch })).rejects.toMatchObject({
+      reason: "unsettled",
+    });
+    // Refused before any segment is downloaded.
+    expect(requests.some((q) => q.url.includes("seg2"))).toBe(false);
+    const r = await fetchW0({
+      hlsBase: BASE,
+      path: "live/alice",
+      password: "p",
+      fetch: doFetch,
+      requireSettled: false,
+    });
+    expect(r.settle).toBeNull();
+    expect(r.sample.pdtMs).toBe(Date.parse("2026-10-28T00:53:49.377Z"));
+  });
+
+  test("a reference segment that cannot be read fails the fetch (retried), never skips the check", async () => {
+    const gone = fake({ "/live/alice/x_video1_seg26.mp4": () => new Response("gone", { status: 404 }) });
+    await expect(
+      fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: gone.doFetch }),
+    ).rejects.toMatchObject({
+      reason: "http",
+    });
+  });
+
   test("an audio-only source anchors on its audio track", async () => {
     const audioInit = await fixture("nob_init.mp4");
     const { doFetch } = fake({
@@ -447,6 +561,7 @@ describe("fetchW0", () => {
       // here the init is replaced by one whose only track is audio (track 2 of the fixture).
       "/live/alice/index.m3u8": () => new Response(MEDIA),
       "/live/alice/x_video1_init.mp4": () => new Response(audioOnly(audioInit)),
+      "/live/alice/x_video1_seg26.mp4": () => new Response(shiftTfdt(seg, 2, -2 * 48_000)),
     });
     const r = await fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: doFetch });
     expect(r.handler).toBe("soun");
@@ -454,6 +569,24 @@ describe("fetchW0", () => {
     expect(r.sample.baseDecodeTime).toBe(2_400_024_576);
   });
 });
+
+/**
+ * A copy of a fragment with track `trackId`'s `tfdt` moved by `ticks` (the fixtures' tfdt are
+ * version 1, 64-bit): the same media as an earlier or later segment.
+ */
+function shiftTfdt(frag: Uint8Array<ArrayBuffer>, trackId: number, ticks: number): Uint8Array<ArrayBuffer> {
+  const out = frag.slice();
+  const view = new DataView(out.buffer);
+  const text = new TextDecoder("latin1").decode(out);
+  for (let at = text.indexOf("tfhd"); at >= 0; at = text.indexOf("tfhd", at + 4)) {
+    if (view.getUint32(at + 8) !== trackId) continue;
+    const t = text.indexOf("tfdt", at);
+    if (out[t + 4] !== 1) throw new Error("fixture tfdt is not version 1");
+    view.setBigUint64(t + 8, view.getBigUint64(t + 8) + BigInt(Math.round(ticks)));
+    return out;
+  }
+  throw new Error(`no traf for track ${trackId}`);
+}
 
 /** The fixture init with its video trak renamed (`skip`), leaving the audio track. */
 function audioOnly(init: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> {
@@ -525,6 +658,7 @@ describe("media clock", () => {
     w0Ms,
     handler: "vide",
     sample: { pdtMs: 0, baseDecodeTime: 0, compositionOffset: 0, timescale: 90_000 },
+    settle: { spanMs: 6_000, driftMs: 0 },
   });
 
   test("W0 drift for the same broadcast is reported; another broadcast starts fresh", async () => {
@@ -545,6 +679,81 @@ describe("media clock", () => {
     await clock.w0("b2", "live/b", "ladder");
     expect(seen.drift).toEqual([0, 12.5]);
     clock.forget("b1");
+  });
+
+  test("an unsettled path is polled until W0 settles; other errors are not retried", async () => {
+    const { m, seen } = metrics();
+    let t = 0;
+    let calls = 0;
+    const clock = createMediaClock({
+      hlsBase: "http://m",
+      password: "p",
+      logger: captureLogger().logger,
+      metrics: m,
+      settle: { pollMs: 1_000, waitMs: 45_000, acceptAfterMs: 120_000 },
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms;
+      },
+      fetchW0: async (o) => {
+        calls++;
+        expect(o.requireSettled).toBe(true);
+        if (t < 25_000) throw new W0Error("live/a: W0 not settled yet", "unsettled");
+        return result(1234);
+      },
+    });
+    expect(await clock.w0("b1", "live/a", "aac")).toBe(1234);
+    expect(t).toBe(25_000);
+    expect(calls).toBe(26);
+    expect(seen.failures).toEqual([]);
+
+    let httpCalls = 0;
+    const down = createMediaClock({
+      hlsBase: "http://m",
+      password: "p",
+      logger: captureLogger().logger,
+      sleep: async () => {},
+      fetchW0: async () => {
+        httpCalls++;
+        throw new W0Error("live/a: HTTP 404", "http");
+      },
+    });
+    await expect(down.w0("b1", "live/a", "ladder")).rejects.toMatchObject({ reason: "http" });
+    expect(httpCalls).toBe(1);
+  });
+
+  test("one call waits at most waitMs; past acceptAfterMs unsettled, the newest W0 is taken with a warning", async () => {
+    const { m, seen } = metrics();
+    const cap = captureLogger();
+    let t = 0;
+    const clock = createMediaClock({
+      hlsBase: "http://m",
+      password: "p",
+      logger: cap.logger,
+      metrics: m,
+      settle: { pollMs: 1_000, waitMs: 10_000, acceptAfterMs: 25_000 },
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms;
+      },
+      fetchW0: async (o) => {
+        if (o.requireSettled) throw new W0Error("live/a: W0 not settled yet", "unsettled");
+        return { ...result(999), settle: { spanMs: 6_000, driftMs: 40.4 } };
+      },
+    });
+    await expect(clock.w0("b1", "live/a", "ladder")).rejects.toMatchObject({ reason: "unsettled" });
+    expect(t).toBe(10_000);
+    expect(seen.failures).toEqual(["ladder"]);
+    // The supervisor retries; the broadcast has now been unsettled since t = 0.
+    await expect(clock.w0("b1", "live/a", "ladder")).rejects.toMatchObject({ reason: "unsettled" });
+    expect(await clock.w0("b1", "live/a", "aac")).toBe(999);
+    expect(t).toBe(25_000);
+    const warn = cap.lines.find((l) => l.includes("W0_UNSETTLED"));
+    expect(warn).toBeDefined();
+    expect(warn).toContain('"driftMs":40');
+    // Another broadcast, and this one after forget, start their own unsettled clock.
+    clock.forget("b1");
+    await expect(clock.w0("b1", "live/a", "ladder")).rejects.toMatchObject({ reason: "unsettled" });
   });
 
   test("a failed W0 is counted by consumer, logged without credentials, and rethrown", async () => {

@@ -13,6 +13,11 @@
  * MPEG-TS PTS wraps at 2^33 ticks of 90 kHz (about 26.5 h). ffmpeg unwraps within one session,
  * so W0 is fetched fresh for every ffmpeg start and rebased to the representation that session
  * will use (`rebasePts`).
+ *
+ * W0 is only taken once the path's PDT has settled (`w0Settled`). For a WebRTC (WHIP) source,
+ * MediaMTX's PDT starts over a second off and slews toward its steady value at about 5 % for
+ * the first ~25 s, while the SRT timeline does not move: a W0 read then stays that far off for
+ * the whole ffmpeg run (measured 2026-10-28, `clock-whip.int.test.ts`).
  */
 import { MEDIA_INTERNAL_USER } from "@commonair/contracts/internal";
 import { parseFragment, parseInit, type InitTrack } from "./boxes.ts";
@@ -39,7 +44,7 @@ const WRAP_REFUSE_FROM_SECONDS = PTS_WRAP_SECONDS - FFMPEG_WRAP_WINDOW_SECONDS -
 export class W0Error extends Error {
   constructor(
     message: string,
-    readonly reason: "timeout" | "http" | "too_large" | "playlist" | "segment" | "wrap",
+    readonly reason: "timeout" | "http" | "too_large" | "playlist" | "segment" | "wrap" | "unsettled",
   ) {
     super(message);
     this.name = "W0Error";
@@ -115,14 +120,14 @@ export function firstVariant(text: string): string | null {
 }
 
 /**
- * The newest complete segment that carries a PDT and an init section. LL-HLS parts after the last
- * `#EXTINF` belong to a segment still being written and are ignored.
+ * Every complete segment that carries a PDT and an init section, oldest first. LL-HLS parts
+ * after the last `#EXTINF` belong to a segment still being written and are ignored.
  */
-export function newestSegment(text: string): MediaSegmentRef | null {
+export function completeSegments(text: string): MediaSegmentRef[] {
   let map: string | null = null;
   let pdt: number | null = null;
   let inf = false;
-  let found: MediaSegmentRef | null = null;
+  const found: MediaSegmentRef[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
@@ -132,12 +137,48 @@ export function newestSegment(text: string): MediaSegmentRef | null {
       pdt = Number.isNaN(t) ? null : t;
     } else if (line.startsWith("#EXTINF:")) inf = true;
     else if (!line.startsWith("#")) {
-      if (inf && pdt !== null && map) found = { uri: line, map, pdtMs: pdt };
+      if (inf && pdt !== null && map) found.push({ uri: line, map, pdtMs: pdt });
       inf = false;
       pdt = null;
     }
   }
   return found;
+}
+
+/** The newest complete segment that carries a PDT and an init section. */
+export function newestSegment(text: string): MediaSegmentRef | null {
+  return completeSegments(text).at(-1) ?? null;
+}
+
+/**
+ * The segment W0 is checked against: the oldest complete one (the longest span), except the very
+ * first entry of a playlist with three or more, which MediaMTX may delete before it is fetched.
+ * Null when the playlist has fewer than two.
+ */
+export function referenceSegment(segments: readonly MediaSegmentRef[]): MediaSegmentRef | null {
+  if (segments.length < 2) return null;
+  return segments[segments.length >= 3 ? 1 : 0] ?? null;
+}
+
+/**
+ * Settled W0 may differ between two segments by this much plus `W0_SETTLE_RATE` of the PDT span
+ * between them: PDT is rounded to the millisecond, and a publisher's media clock may run a little
+ * off the wall clock. MediaMTX's start-up slew (about 5 % for a WHIP source, measured) is ten
+ * times the rate allowed.
+ */
+export const W0_SETTLE_FLOOR_MS = 4;
+export const W0_SETTLE_RATE = 0.005;
+
+export interface W0Settle {
+  /** PDT of the newest segment minus PDT of the reference segment, ms. */
+  spanMs: number;
+  /** W0 of the newest segment minus W0 of the reference segment, ms. */
+  driftMs: number;
+}
+
+/** Whether two segments' W0 agree well enough that the path's PDT is no longer moving. */
+export function w0Settled(s: W0Settle): boolean {
+  return s.spanMs > 0 && Math.abs(s.driftMs) <= W0_SETTLE_FLOOR_MS + W0_SETTLE_RATE * s.spanMs;
 }
 
 export interface FetchW0Options {
@@ -151,12 +192,20 @@ export interface FetchW0Options {
   /** Cap on any one response (playlists, init, segment). */
   maxBytes?: number;
   fetch?: typeof fetch;
+  /**
+   * Refuse (`W0Error("unsettled")`) a W0 whose PDT is still moving (default). False returns the
+   * newest segment's W0 anyway, with `settle` saying how far it moved: the media clock's last
+   * resort for a source that never settles.
+   */
+  requireSettled?: boolean;
 }
 
 export interface W0Result {
   w0Ms: number;
   sample: W0Sample;
   handler: string;
+  /** Against the reference segment; null when only one segment was available (unsettled). */
+  settle: W0Settle | null;
 }
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -164,8 +213,8 @@ const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 
 /**
  * Read W0 for a path from MediaMTX's LL-HLS: multivariant, first media playlist, its init
- * section and its newest complete segment (four bounded requests under one deadline). Errors name
- * the path only, never a URL with credentials.
+ * section, its newest complete segment and an older one to check that W0 has settled (five
+ * bounded requests under one deadline). Errors name the path only, never a URL with credentials.
  */
 export async function fetchW0(opts: FetchW0Options): Promise<W0Result> {
   const doFetch = opts.fetch ?? fetch;
@@ -211,23 +260,44 @@ export async function fetchW0(opts: FetchW0Options): Promise<W0Result> {
     const variant = firstVariant(mv);
     const mediaUrl = variant ? new URL(variant, mvUrl) : mvUrl;
     const media = variant ? text(await get(mediaUrl, "media playlist")) : mv;
-    const seg = newestSegment(media);
+    const segments = completeSegments(media);
+    const seg = segments.at(-1);
     if (!seg) throw new W0Error(`media playlist of ${opts.path}: no complete segment with a PDT yet`, "playlist");
-    const [init, frag] = await Promise.all([
+    // Only segments of the same init section: one MediaMTX muxer, one timeline.
+    const ref = referenceSegment(segments.filter((s) => s.map === seg.map));
+    const requireSettled = opts.requireSettled ?? true;
+    if (!ref && requireSettled)
+      throw new W0Error(`media playlist of ${opts.path}: one segment, W0 not settled yet`, "unsettled");
+    const [init, frag, refFrag] = await Promise.all([
       get(new URL(seg.map, mediaUrl), "init section"),
       get(new URL(seg.uri, mediaUrl), "segment"),
+      ref ? get(new URL(ref.uri, mediaUrl), "reference segment") : null,
     ]);
     const track = pdtTrack(parseInit(init));
     if (!track) throw new W0Error(`init section of ${opts.path}: no audio or video track`, "segment");
-    const t = parseFragment(frag).find((f) => f.trackId === track.trackId);
-    if (!t) throw new W0Error(`segment of ${opts.path}: no fragment for track ${track.trackId}`, "segment");
-    const sample: W0Sample = {
-      pdtMs: seg.pdtMs,
-      baseDecodeTime: t.baseDecodeTime,
-      compositionOffset: t.firstCompositionOffset,
-      timescale: track.timescale,
+    const sampleOf = (bytes: Uint8Array, pdtMs: number, what: string): W0Sample => {
+      const t = parseFragment(bytes).find((f) => f.trackId === track.trackId);
+      if (!t) throw new W0Error(`${what} of ${opts.path}: no fragment for track ${track.trackId}`, "segment");
+      return {
+        pdtMs,
+        baseDecodeTime: t.baseDecodeTime,
+        compositionOffset: t.firstCompositionOffset,
+        timescale: track.timescale,
+      };
     };
-    return { w0Ms: computeW0(sample), sample, handler: track.handler };
+    const sample = sampleOf(frag, seg.pdtMs, "segment");
+    const w0Ms = computeW0(sample);
+    let settle: W0Settle | null = null;
+    if (ref && refFrag) {
+      const refW0 = computeW0(sampleOf(refFrag, ref.pdtMs, "reference segment"));
+      settle = { spanMs: seg.pdtMs - ref.pdtMs, driftMs: w0Ms - refW0 };
+    }
+    if (requireSettled && (!settle || !w0Settled(settle)))
+      throw new W0Error(
+        `${opts.path}: W0 not settled yet (moved ${Math.round(settle?.driftMs ?? 0)} ms over ${Math.round(settle?.spanMs ?? 0)} ms)`,
+        "unsettled",
+      );
+    return { w0Ms, sample, handler: track.handler, settle };
   } catch (err) {
     if (err instanceof W0Error) throw err;
     throw new W0Error(`${opts.path}: ${err instanceof Error ? err.message : String(err)}`, "segment");
