@@ -19,8 +19,57 @@ import { rateLimitKey, type RateLimitRule, type RateLimitStore } from "./lib/rat
 
 export type { Mailer } from "@commonair/email";
 
-export function createApiMailer(env: ApiEnv, site: InstanceSite): Mailer {
-  return createMailer(env, { site });
+export function createApiMailer(env: ApiEnv, site: InstanceSite, logger: Logger): Mailer {
+  return retryingMailer(createMailer(env, { site }), { logger });
+}
+
+/**
+ * Whether a send failed before the SMTP server accepted anything, so sending again cannot
+ * deliver twice: nodemailer tags every error of the connection phase (DNS, connect, greeting)
+ * with `command: "CONN"`, and a 4xx reply means the server refused the message for now.
+ */
+export function isTransientMailError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { command?: unknown; responseCode?: unknown };
+  if (e.command === "CONN") return true;
+  return typeof e.responseCode === "number" && e.responseCode >= 400 && e.responseCode < 500;
+}
+
+export interface RetryOptions {
+  logger: Logger;
+  /** Waits before each retry, in ms; their count is the number of retries. */
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Sends again after a transient failure. Better Auth sends verification, reset and magic-link mail
+ * once, in the background, and drops it on error: a DNS or SMTP blip (a relay restarting, the
+ * container network settling) would otherwise lose the only link a new member gets.
+ */
+export function retryingMailer(inner: Mailer, opts: RetryOptions): Mailer {
+  const delays = opts.delaysMs ?? [1_000, 3_000, 10_000];
+  const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
+  return {
+    async send(template, props, to) {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await inner.send(template, props, to);
+        } catch (err) {
+          const delay = delays[attempt];
+          if (delay === undefined || !isTransientMailError(err)) throw err;
+          // Never log the address; the template id identifies the message.
+          opts.logger.warn("mail send failed; retrying", {
+            template,
+            attempt: attempt + 1,
+            code: (err as { code?: unknown }).code,
+          });
+          await sleep(delay);
+        }
+      }
+    },
+    close: () => inner.close(),
+  };
 }
 
 /** Re-home an absolute link (e.g. on API_PUBLIC_URL) onto the instance's public origin. */

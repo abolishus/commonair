@@ -140,7 +140,17 @@ services:
       <<: *service-build
       args: { SERVICE: tools }
     restart: "no"
-    command: ["sh", "-c", "bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.ts"]
+    # Retried: rootless Podman 4.9's network DNS drops lookups while other containers join the
+    # network, which is exactly when migrate starts (seen on CI: EAI_AGAIN postgres). Both steps
+    # are idempotent.
+    command:
+      - sh
+      - -c
+      - >-
+        for n in 1 2 3 4 5; do
+        bun packages/db/src/migrate.ts && bun infra/postgres/apply-app-role.ts && exit 0;
+        echo "migrate: attempt $$n failed; retrying in 3 s" >&2; sleep 3;
+        done; exit 1
     env_file: *env-file
     environment:
       DATABASE_URL: postgres://commonair:${POSTGRES_PASSWORD:-commonair}@postgres:5432/commonair

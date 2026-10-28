@@ -68,7 +68,7 @@ export async function buildDeps(
   const db = createDb({ url: env.DATABASE_URL, max: env.DATABASE_POOL_MAX, applicationName: "commonair-api" });
   const valkey = createValkey(env.VALKEY_URL, { keyPrefix: opts.valkeyKeyPrefix, name: "api" });
   const site = instanceSite(env);
-  const mailer = createApiMailer(env, site);
+  const mailer = createApiMailer(env, site, logger);
   const deps: Deps = {
     env,
     site,
