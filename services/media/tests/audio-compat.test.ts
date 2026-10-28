@@ -78,6 +78,7 @@ describe("AudioCompat states", () => {
       timings: { transcodePollMs: 60_000 },
       logger: createLogger({ service: "test", level: "fatal" }),
       rtspBase: "rtsp://127.0.0.1:8554",
+      rtspPublishBase: "rtsp://127.0.0.1:18554",
       srtBase: "srt://127.0.0.1:8890",
       clock: {
         w0: async () => 1_000_000,
@@ -133,6 +134,7 @@ describe("AudioCompat probe", () => {
       timings: { transcodePollMs: 60_000 },
       logger: createLogger({ service: "test", level: "fatal" }),
       rtspBase: "rtsp://127.0.0.1:8554",
+      rtspPublishBase: "rtsp://127.0.0.1:18554",
       srtBase: "srt://127.0.0.1:8890",
       clock: { w0: async () => 1_000_000, sourceSegmentMs: () => 2_000 },
       internalSecret: "s",

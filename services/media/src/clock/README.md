@@ -363,8 +363,8 @@ the settled W0, so the two variants differ only by one segment (~2 s) of wait.
 - Every `useAbsoluteTimestamp` path drops its publisher's first ~5 s of packets
   (`received RTP packet without absolute time, skipping it`; ~4,500 lines per ladder start on CI).
   The gap matches ffmpeg's RTP muxer, which sends a sender report with its first packet and the
-  next one no sooner than 5 s later; why MediaMTX does not use the first one was not established
-  (gortsplib's receiver keeps a report that arrives before any RTP). The copy's first LL-HLS
+  next one no sooner than 5 s later. Why MediaMTX drops the first one, and the fix, are in the
+  next section. Before that fix, the copy's first LL-HLS
   segment comes ~8.3 s after its RTSP session opens (4.2 s on a path without
   `useAbsoluteTimestamp`).
 - The player retries the origin's 503 `starting` with hls.js's exponential manifest backoff
@@ -378,3 +378,44 @@ moderation interval (0 frames at 1/2, 1/1 and 1/0.5 fps; 2 at 1/0.1; also with t
 so not the recorder's absolute `tfdt`). A short chunk is now sampled at half its length
 (`scanStepSeconds`); an earlier WHIP VOD stuck the same way (05:10 that day, before these changes)
 finalized once the fix was deployed.
+
+## The first sender report, and the relay in front of MediaMTX (2026-10-28, third pass)
+
+**Root cause.** ffmpeg's RTP muxer (`libavformat/rtpenc.c`, 7.1 in the media image, unchanged on
+master) writes a sender report immediately before a stream's first RTP packet, then the next one
+only once 5 s have passed. gortsplib v5.6.7 (MediaMTX 1.21.2; unchanged on main) hands a sender
+report to a format by the remote SSRC (`serverSessionMedia.readPacketRTCP` →
+`findFormatByRemoteSSRC`), and a recording session learns that SSRC only from the format's first
+RTP packet (`serverSessionFormat.readPacketRTP`). The first report arrives before that, matches
+nothing and is dropped; `rtpreceiver` itself would have kept it. Until the second report, every
+packet on a `useAbsoluteTimestamp` path has no absolute time and is skipped. The report's content
+is not the problem: its RTP time is `base + (now − start_time_realtime)` and the packets' are
+`base + pts` under `-copyts`, the same mapping as every later report.
+
+Measured on a scratch MediaMTX 1.21.2 (path with `useAbsoluteTimestamp`, ffmpeg testsrc publisher
+over RTSP/TCP): 1,028 skipped packets over 5 s and the first LL-HLS playlist 7.6 s after start;
+the same publisher through the relay below: one skipped packet per track, playlist after 1.5 s,
+and identical PDTs on both paths.
+
+**Fix: `ffmpeg/rtsp-publish-proxy.ts` + `ffmpeg/sr-primer.ts`.** The ladder and the AAC copy publish
+to a loopback TCP relay (one per service, started at boot) instead of MediaMTX's RTSP port. The
+relay forwards every byte, except that before an SSRC's first RTP packet it sends a copy of that
+packet one sequence number earlier (MediaMTX learns the SSRC from it and skips it, as it still has
+no absolute time) and then the sender report it saw before it (now routed). The original packet
+is the first one MediaMTX keeps, so nothing is lost and no sequence gap appears. Anything it cannot
+parse switches it to plain pass-through. Readers still go to MediaMTX directly. Neither ffmpeg nor
+MediaMTX has a setting for this (`rtpflags` only has `skip_rtcp`/`send_bye`; the 5 s interval is
+hard-coded), and the fix changes no ADR 0012 decision: the same reports, the same W0.
+
+Effect on the local stack (harness WHIP streamer): the copy's first LL-HLS segment comes ~1.0 s
+after its RTSP session opens (9.0 s before), and its first segment's PDT is the probe backlog's
+(~1.2 s before the session) instead of ~6.8 s after it. Ladder rungs publish the same way and log
+one skipped packet per track instead of ~5 s of them.
+
+**What still bounds `ingest-whip`.** The harness player (`harness/player/player.ts`) does not cap
+hls.js's manifest backoff the way `apps/web` does since a917c21 (`manifestLoadingMaxRetryTimeout`),
+so a 503 `starting` is retried 1, 3, 7 and 15 s after the player starts. The copy is advertised
+~8.7 s after the player starts (W0 settles at the third segment, then a 2.5 s probe), so Chromium
+plays at the 15 s retry whatever the copy does (15.3–15.5 s with the relay). With that cap
+(simulated without editing the harness): Chromium 10.4–10.5 s, WebKit 11.3–11.8 s; without the
+relay but with the cap: 18.5 and 26.1 s.

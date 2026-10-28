@@ -25,6 +25,7 @@ import { probeCapabilities, type Capabilities } from "./ffmpeg/hwaccel.ts";
 import { startJobs, type Jobs } from "./jobs.ts";
 import { LiveCoordinator } from "./lifecycle.ts";
 import { every, type Loop } from "./loop.ts";
+import { startRtspPublishProxy } from "./ffmpeg/rtsp-publish-proxy.ts";
 import { MediaMtxClient } from "./mediamtx.ts";
 import { setupModeration, type ModerationOverrides } from "./moderation/setup.ts";
 import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "./recovery.ts";
@@ -48,6 +49,11 @@ export interface MediaServiceOptions {
   ffprobe?: string;
   /** Skip the startup encoder probe (tests). */
   capabilities?: Capabilities;
+  /**
+   * Tests only: publish renditions straight to MediaMTX, without the sender-report relay. For an
+   * ffmpeg that runs outside this host's network namespace and cannot reach its loopback.
+   */
+  directRtspPublish?: boolean;
 }
 
 export interface MediaService {
@@ -176,6 +182,16 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     metrics: createClockMetrics(),
   });
 
+  // The ladder and the AAC copy publish through this relay so MediaMTX uses ffmpeg's first sender
+  // report: without it a useAbsoluteTimestamp path drops the first ~5 s (clock/README.md).
+  const publishRelay = opts.directRtspPublish
+    ? null
+    : await startRtspPublishProxy(env.MEDIAMTX_RTSP_URL).catch(async (err: unknown) => {
+        await moderationRuntime.stop();
+        await Promise.allSettled([subscriber.quit(), bus.quit(), valkey.quit(), dbh.close()]);
+        throw err;
+      });
+
   const jobsRef: { jobs?: Jobs } = {};
   const jobsNotStarted = () => new Error("job queues not started");
   const ctx: MediaContext = {
@@ -197,6 +213,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     internalSecret: env.MEDIA_INTERNAL_PASSWORD,
     authSecret: env.AUTH_SECRET,
     rtspBase: env.MEDIAMTX_RTSP_URL,
+    rtspPublishBase: publishRelay?.base ?? env.MEDIAMTX_RTSP_URL,
     srtBase: env.MEDIAMTX_SRT_URL,
     transcodeThreshold: env.TRANSCODE_VIEWER_THRESHOLD,
     enqueueVodFinalize: async (vodId) => {
@@ -349,6 +366,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       await reconcileLoop?.stop();
       await sweepLoop?.stop();
       await live.shutdown();
+      await publishRelay?.close();
       await jobs.close();
       await moderationRuntime.stop();
       await Promise.allSettled([subscriber.quit(), bus.quit(), valkey.quit()]);

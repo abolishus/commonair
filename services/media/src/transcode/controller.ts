@@ -129,8 +129,9 @@ export class TranscodeController {
       this.log.warn("source has no tracks to transcode");
       return false;
     }
-    const { rtspBase, srtBase, internalSecret, caps, clock } = this.ctx;
-    const outputFor = (r: Rung["name"]) => internalRtspUrl(rtspBase, renditionPath(this.b.slug, r), internalSecret);
+    const { rtspPublishBase, srtBase, internalSecret, caps, clock } = this.ctx;
+    const outputFor = (r: Rung["name"]) =>
+      internalRtspUrl(rtspPublishBase, renditionPath(this.b.slug, r), internalSecret);
     const renditions = advertisedRenditions(rungs);
     this.ladder = new Supervisor({
       name: `ladder:${this.b.slug}`,

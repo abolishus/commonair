@@ -104,8 +104,8 @@ export class AudioCompat {
   }
 
   private startCopy(): void {
-    const { rtspBase, srtBase, internalSecret } = this.ctx;
-    const output = internalRtspUrl(rtspBase, sourceAacPath(this.b.slug), internalSecret);
+    const { rtspPublishBase, srtBase, internalSecret } = this.ctx;
+    const output = internalRtspUrl(rtspPublishBase, sourceAacPath(this.b.slug), internalSecret);
     this.copy = new Supervisor({
       name: `aac:${this.b.slug}`,
       binary: this.ctx.ffmpeg,

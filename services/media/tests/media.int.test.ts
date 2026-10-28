@@ -237,6 +237,8 @@ beforeAll(async () => {
     // The ladder, AAC copy and recorder read SRT (ADR 0012 A2); a host ffmpeg without it runs
     // those in a container next to MediaMTX.
     ffmpeg: hostFfmpegHasSrt() ? undefined : srtFfmpegWrapper(mtx, [workDir], SRT_LABEL),
+    // That container cannot reach the publish relay on this host's loopback (CI's ffmpeg can).
+    directRtspPublish: !hostFfmpegHasSrt(),
     capabilities: await probeCapabilities("none"),
     timings: {
       healthSampleMs: 1_000,

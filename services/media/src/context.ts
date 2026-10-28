@@ -39,6 +39,12 @@ export interface MediaContext {
   authSecret: string;
   /** MEDIAMTX_RTSP_URL. */
   rtspBase: string;
+  /**
+   * Base for the service's own RTSP publishers (ladder rungs, AAC copy): the loopback relay in
+   * front of `rtspBase` that lets MediaMTX use ffmpeg's first sender report
+   * (`ffmpeg/rtsp-publish-proxy.ts`).
+   */
+  rtspPublishBase: string;
   /** MEDIAMTX_SRT_URL: the ladder, the AAC copy and the recorder read the source here (ADR 0012 A2). */
   srtBase: string;
   transcodeThreshold: number;
