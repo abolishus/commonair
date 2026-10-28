@@ -303,6 +303,15 @@ async function signInByMail(run: Run, email: string): Promise<Api> {
   return api;
 }
 
+/** Whether the account is suspended now. better-auth refuses a suspended account any new sign-in. */
+async function suspendedNow(run: Run, userId: string): Promise<boolean> {
+  return withDb(run.databaseUrl, async (sql) => {
+    const [r] = await sql<{ s: boolean }[]>`
+      select banned and (ban_expires is null or ban_expires > now()) as s from users where id = ${userId}`;
+    return r?.s === true;
+  });
+}
+
 async function listAll(api: Api): Promise<string[]> {
   const ids: string[] = [];
   let cursor: string | undefined;
@@ -367,17 +376,30 @@ export async function runStatementsStep(run: Run): Promise<void> {
   for (const [userId, statements] of byRecipient) {
     const email = scope.users.get(userId);
     if (!email) continue;
-    const api = await ctx.step(t("recipient signs in by magic link"), () => signInByMail(run, email));
-    const listed = new Set(await ctx.step(t("recipient lists their statements"), () => listAll(api)));
-    ctx.check(
-      "statements: me.enforcement.list returns each statement to its recipient",
-      statements.every((s) => listed.has(s.id)),
-      { missing: statements.filter((s) => !listed.has(s.id)).map((s) => s.id) },
-    );
     ctx.check(
       "statements: another user's list never has them",
       statements.every((s) => !otherIds.has(s.id)),
     );
+    // A suspended recipient cannot sign in (W0-sor build 9: the operator guide records it), so
+    // the email is their only channel: check the refusal and the mail, not the in-app list.
+    const suspended = await suspendedNow(run, userId);
+    if (suspended) {
+      const refused = await ctx.step(t("a suspended recipient's magic link is refused"), () =>
+        signInByMail(run, email).then(
+          () => false,
+          () => true,
+        ),
+      );
+      ctx.check("statements: a suspended recipient cannot sign in to read them", refused);
+    } else {
+      const api = await ctx.step(t("recipient signs in by magic link"), () => signInByMail(run, email));
+      const listed = new Set(await ctx.step(t("recipient lists their statements"), () => listAll(api)));
+      ctx.check(
+        "statements: me.enforcement.list returns each statement to its recipient",
+        statements.every((s) => listed.has(s.id)),
+        { missing: statements.filter((s) => !listed.has(s.id)).map((s) => s.id) },
+      );
+    }
     const mail = await ctx
       .step(t("the statement email arrived"), () =>
         run.ctx.platform.users.mailpit.waitForMessage(
@@ -389,7 +411,7 @@ export async function runStatementsStep(run: Run): Promise<void> {
       .catch(() => null);
     ctx.check("statements: the statement email arrived", mail !== null);
 
-    if (run.via === "web") {
+    if (run.via === "web" && !suspended) {
       const first = statements[0];
       if (!first) continue;
       const session = await run.webSession("sor-recipient");
