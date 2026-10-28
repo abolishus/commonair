@@ -58,7 +58,7 @@ COPY --from=manifests /sources/ ./
 RUN set -eu; \
     mkdir -p /out; \
     if [ "${SERVICE}" = web ]; then \
-      (cd apps/web && ./node_modules/.bin/vp build); \
+      (cd apps/web && ./node_modules/.bin/vp build && bun scripts/check-build.ts); \
       mkdir -p /out/web; \
       tar -C apps/web --exclude=./node_modules -cf - . | tar -C /out/web -xf -; \
     fi

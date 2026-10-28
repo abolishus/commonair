@@ -7,6 +7,14 @@
 /* Scan the app's own sources for utilities. */
 @source "./";
 
+/*
+ * Never scan the build output. Automatic detection walks apps/web and skips dist only
+ * through the repo-root .gitignore, which the image build context does not copy; the SSR
+ * build then scanned the client bundle it had just written and emitted a different
+ * stylesheet hash than the client's (unstyled pages).
+ */
+@source not "../dist";
+
 /* The bundled ALTCHA widget, on design tokens instead of its own palette. */
 altcha-widget {
   --altcha-border-color: var(--border);
