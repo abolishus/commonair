@@ -312,8 +312,8 @@ from `a38438f`: path mse, session up, 3.3 MB received, 0 stalls, 2 heartbeats, n
 - happy-dom 21.0.4 on or after 2026-10-27 (vet, bump both package.json files, drop the exception).
 - ADR 0025 **accepted** (2026-10-26): `docs/deploy/digitalocean.md`, 0010 superseded, Railway
   retired from the repository. The droplet `commonair-rc-test` is the staging host until S1-g's
-  OpenTofu recreates it. The Railway project itself is still up: the user deletes it in Railway's
-  console.
+  OpenTofu recreates it. The Railway project was deleted on 2026-10-27 (its mediamtx service was
+  still failing on every push, looking for the removed Containerfile).
 - Decided with the user the same day: managed Postgres and Valkey at S1 stage 1, with
   `selfhost.sh` support for external managed services for every operator; 99.5% at launch, 99.9%
   from stage 1; `v0.1.0` waits for R0-g (resend verification email, done in `6a1983f`); P1 moves into batch 2
