@@ -147,6 +147,9 @@ async function broadcast(ctx: ScenarioContext, protocol: ClockProtocol): Promise
       timeoutMs: 5 * 60_000,
       intervalMs: 2_000,
       signal: ctx.signal,
+    }).catch((err: unknown) => {
+      // Say what the sampler saw: no rung advertised, or rungs it could not fetch or decode.
+      throw new Error(`${(err as Error).message}; sampler ${JSON.stringify(sampler.status())}`);
     });
 
   const opened = Date.now();

@@ -22,6 +22,8 @@ import { PlaybackSession } from "./viewer.ts";
 
 const W = 320;
 const H = 180;
+/** One segment's first frame; a decode past this is killed (and counts as no strip). */
+const DECODE_TIMEOUT_MS = 20_000;
 
 /** First frame's strip of an fMP4 segment (init + media), or null when none decodes. */
 export async function segmentStrip(init: Uint8Array | null, bytes: Uint8Array): Promise<number | null> {
@@ -46,10 +48,24 @@ export async function segmentStrip(init: Uint8Array | null, bytes: Uint8Array): 
     ],
     { stdin: "pipe", stdout: "pipe", stderr: "ignore" },
   );
-  void proc.stdin.write(input);
-  await proc.stdin.end();
-  const out = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
-  await proc.exited;
+  // ffmpeg exits after one frame without reading the rest of stdin: never wait on the write (a
+  // write into a closed pipe must not hold a decode slot), and bound the whole decode.
+  void (async () => {
+    try {
+      void proc.stdin.write(input);
+      await proc.stdin.end();
+    } catch {
+      // EPIPE once ffmpeg has its frame.
+    }
+  })();
+  const timer = setTimeout(() => proc.kill("SIGKILL"), DECODE_TIMEOUT_MS);
+  let out: Uint8Array;
+  try {
+    out = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
+    await proc.exited;
+  } finally {
+    clearTimeout(timer);
+  }
   if (out.byteLength < W * H) return null;
   return decodeStrip(graySource(out, W, H));
 }
@@ -89,6 +105,8 @@ export class RenditionSampler {
   private loops: Promise<void>[] = [];
   private decoding = 0;
   errors = 0;
+  /** The last poll or segment error, for a failure report (URLs without the token). */
+  lastError: string | null = null;
 
   constructor(private readonly opts: SamplerOptions) {
     this.session = new PlaybackSession(opts.api, {
@@ -107,6 +125,13 @@ export class RenditionSampler {
     this.abort.abort();
     await Promise.allSettled(this.loops);
     await this.session.end().catch(() => undefined);
+  }
+
+  /** Samples per rendition, errors and the last error: what a timed-out wait reports. */
+  status(): { samples: Record<string, number>; current: string[]; errors: number; lastError: string | null } {
+    const samples: Record<string, number> = {};
+    for (const s of this.samples) samples[s.rendition] = (samples[s.rendition] ?? 0) + 1;
+    return { samples, current: this.current, errors: this.errors, lastError: this.lastError };
   }
 
   /** Renditions sampled since `since` (wall clock). */
@@ -128,6 +153,7 @@ export class RenditionSampler {
       } catch (err) {
         if (signal.aborted) return;
         this.errors++;
+        this.lastError = (err as Error).message;
         this.opts.log?.debug("clock sampler poll failed", { error: (err as Error).message });
       }
       await Bun.sleep(this.opts.pollMs ?? 1_000);
@@ -189,8 +215,10 @@ export class RenditionSampler {
     for (const seg of media.segments) {
       const key = seg.uri.split("?")[0] ?? seg.uri;
       if (f.seen.has(key) || seg.programDateTime === null) continue;
-      f.seen.add(key);
+      // At the decode cap, leave the segment unseen: the next poll tries it again while it is in
+      // the playlist (marking it seen first lost every segment of a busy runner).
       if (this.decoding >= 6) continue;
+      f.seen.add(key);
       this.decoding++;
       try {
         let init: Uint8Array | null = null;
@@ -204,7 +232,10 @@ export class RenditionSampler {
         if (strip !== null)
           this.samples.push({ rendition: t.rendition, stripMs: strip, pdtMs: seg.programDateTime, seenAt: Date.now() });
       } catch (err) {
-        if (!signal.aborted) this.errors++;
+        if (!signal.aborted) {
+          this.errors++;
+          this.lastError = (err as Error).message;
+        }
         this.opts.log?.debug("clock sampler segment failed", { error: (err as Error).message });
       } finally {
         this.decoding--;
