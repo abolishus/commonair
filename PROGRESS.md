@@ -38,7 +38,7 @@ fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~8
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
 Legal seed follow-ups for E8/N2: a no-cash-value clause in `terms.md`, the locale cookie in
 `cookies.md`.
-**Batch 2 state (2026-10-28): waves 1–3 merged and pushed; CI green on main `0201068` (every job, all four harness shards). Batch done; open findings below.**
+**Batch 2 state (2026-10-28): waves 1–3 merged and pushed; CI green on main `048d397` (every job, all four harness shards). Batch done; open findings below.**
 
 | Unit              | Wave | Commits (branch)                   | State                                                                                     |
 | ----------------- | ---- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -104,17 +104,22 @@ Fixes since `ba10a9b`, all CI-proven:
 | `clock-skew` never green on CI; sign-up emails    | aardvark-dns stops answering ~40 s while the app containers join the network; Better Auth's one-shot mail hit it                                                                                                                | `0ab22f9`: `infra.ts stack` waits for in-network DNS, migrate retries, auth mail retries pre-delivery failures                                                                                                                            |
 | `viewers` 20/21; `integrity-basic` hidden-tab dip | `too_many_segments` counted a player's start-up burst against honest headless Chromium; harness HTTP viewers sent some beats >30 s late on purpose                                                                              | `0201068`: a constant 40 s start-up allowance (long sessions still judged by the ratio), steady harness beats, exclusion reasons logged by session id                                                                                     |
 | relay billing and drivers heartbeat tests         | both read a count before the code recorded it                                                                                                                                                                                   | `3ddc559`                                                                                                                                                                                                                                 |
+| `account-deletion` chat websocket never opened    | CI's in-network DNS stalls even after "settled"; chat's upgrade opened a fresh Postgres connection (name lookup, 30 s connect timeout) and never answered                                                                       | `048d397`: 5 s upgrade deadline (503 + `Retry-After`), warm pool before ready, one-query profile read, `createDb` connect timeout 10 s and reconnect backoff ≤ 2 s for every service                                                      |
+| tracker peer-id reclaim test                      | an earlier test's revoked session left the same swarm asynchronously                                                                                                                                                            | `ba37985`                                                                                                                                                                                                                                 |
+| web pages unstyled from the image                 | Tailwind's SSR build scanned `dist/client` (no root `.gitignore` in the image)                                                                                                                                                  | `5714bf1`; a post-build check fails on a missing stylesheet                                                                                                                                                                               |
 
 Verified: CI on `0201068` all green (integration, relay, harness relay/long/clock/rest, self-host
 e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ingest-whip` 3/3.
 
 **Open findings (batch 2):**
 
-- In flight: `account-deletion` sometimes cannot open a chat websocket ~20 s after the stack is up
-  (3 CI runs; green on `0201068`); suspected chat's Postgres connection broken by the DNS outage and
-  an unbounded profile read before the upgrade (branch `fix/ci-chat-open`).
 - Seen once: `drivers.int.test.ts` WebKit first frame > 45 s (8.6 MB fetched, no errors), CI run
   40765376044.
+- Seen once each (branch CI run 40778234475): tracker "stopped skips the re-check, so a revoked
+  session can still leave"; harness `p2p.test.ts` "one /24 per session" (49 vs 50).
+- The in-network DNS stall also hits other services (MediaMTX → API auth caused one `e2e-relay`
+  failure; origin and media readiness timeouts). Every service gets the faster `createDb`
+  reconnects; only chat warms its pool. Production Podman not checked for the same stall.
 - CI's Podman 4.9.3 may return nothing for `{{.Label "com.docker.compose.service"}}`, so
   `infra.ts` preflight / crash-loop / diagnose may be no-ops there (inferred, untested).
 - The `viewers` egress baseline is the low-latency sessions' ~1.7 MB/s, so "origin egress drops"
@@ -129,8 +134,6 @@ e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ing
 - A WHIP publisher that runs off real time still moves PDT; a stall > 5 s re-anchors the source path
   while rungs and the VOD keep their W0 (reported, not handled). A ladder start drops up to 2 s.
 - `infra.ts stack` does not restart MediaMTX on a config-only change.
-- The web image's missing-stylesheet fix is on `claude/elastic-bartik-7d287f` (`b83e86e`), not
-  merged (user to decide).
 
 **Gate stability (fix next):** timing tests fail under load (several given longer timeouts this
 batch); Podman Desktop's polling pegs the VM's API service (keep it closed during the gate); a
