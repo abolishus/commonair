@@ -199,7 +199,10 @@ Expected segments = claimed watch seconds / segment duration (1 s) × the HTTP s
 when at least 10 are expected. The HTTP share is 10 % (`P2P_HTTP_SHARE`) for a **P2P-evidenced**
 session and 100 % for every other session. It applies to `no_media_fetched` and
 `too_few_segments` (origin counters and relay receipts alike). `too_many_segments` is always judged
-against share 1, so an honest lone peer that falls back to HTTP never trips it. LL-HLS parts count
+against share 1, so an honest lone peer that falls back to HTTP never trips it, and allows 40 s of
+media on top (`TOO_MANY_ALLOWANCE_SECONDS`): a player fills the live playlist window for video and
+audio on start, and watch time is credited per heartbeat while fetches count at once, so an honest
+LL-HLS player is above 4× its credited watch time for its first beats. LL-HLS parts count
 as 1/5 segment. Legacy rows with `assigned_source = 'p2p'` (the API records the HTTP source for new
 sessions) are judged like origin sessions, with the reduced share only when evidenced.
 
@@ -247,13 +250,13 @@ to answer offers it sends (browsers answer automatically). The cap limits that t
 network and channel; a farm spread across many prefixes is exposed to the hosting-range and
 headless signals. Honest viewers behind one large NAT above the cap lose only the P2P discount.
 
-| Check                        | Weight | Fires when                                                       |
-| ---------------------------- | ------ | ---------------------------------------------------------------- |
-| `no_media_fetched`           | 0.9    | Accounting shows no media at all (counters or receipts known)    |
-| `playlists_without_segments` | 0.8    | ≥ 10 playlist requests and no segment or part                    |
-| `segments_without_playlists` | 0.6    | ≥ 10 segments and no playlist request                            |
-| `too_few_segments`           | 0.6    | < 25 % of the media expected                                     |
-| `too_many_segments`          | 0.4    | > 4 × the segments expected (origin with known part counts only) |
+| Check                        | Weight | Fires when                                                                       |
+| ---------------------------- | ------ | -------------------------------------------------------------------------------- |
+| `no_media_fetched`           | 0.9    | Accounting shows no media at all (counters or receipts known)                    |
+| `playlists_without_segments` | 0.8    | ≥ 10 playlist requests and no segment or part                                    |
+| `segments_without_playlists` | 0.6    | ≥ 10 segments and no playlist request                                            |
+| `too_few_segments`           | 0.6    | < 25 % of the media expected                                                     |
+| `too_many_segments`          | 0.4    | > 4 × the segments expected + 40 s of media (origin with known part counts only) |
 
 Independently of the score, these hold the session at **pending** (`media_unconfirmed`), never
 verified:

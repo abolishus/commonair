@@ -18,7 +18,8 @@
  *   playlists_without_segments  ≥ 10 playlist requests and no segment/part at all (playlist pollers)
  *   segments_without_playlists  ≥ 10 segments and zero playlist requests (direct segment scraping)
  *   too_few_segments            < 25 % of the media expected for the watch time (≥ 10 expected)
- *   too_many_segments           > 4 × the segments expected (origin with known part counts only)
+ *   too_many_segments           > 4 × the segments expected + 40 s of media (origin with known part
+ *                               counts only; the allowance covers start-up and heartbeat lag)
  *
  * Independently of the score, a session whose media is not confirmed (`mediaUnconfirmed`)
  * never verifies: it stays pending with reason `media_unconfirmed`. That covers the database
@@ -56,6 +57,16 @@ export const FETCH_MIN_REQUESTS = 10;
 export const MIN_EXPECTED_SEGMENTS = 10;
 export const TOO_FEW_RATIO = 0.25;
 export const TOO_MANY_RATIO = 4;
+/**
+ * Media (in seconds) a player may fetch beyond `TOO_MANY_RATIO` × its watch time before "too
+ * many" fires. Two honest costs are front-loaded: on start a player fills the live playlist
+ * window (MediaMTX keeps 7 segments, ~14 s with a 2 s GOP) for the video and the audio track, and
+ * watch time is credited only per heartbeat (every ~10 s) while fetches are counted as they
+ * happen, so at the first beats a session has fetched ~17 s of LL-HLS parts for both tracks
+ * against ~10 s credited (measured on CI: 43–48 effective segments at 10 s watched, ratio 4.3–4.8,
+ * honest headless Chromium). Constant, so a long session is still judged at the ratio.
+ */
+export const TOO_MANY_ALLOWANCE_SECONDS = 40;
 /**
  * Database counter only: full segments (parts are not counted there). A low-latency player
  * mixes full segments (start-up, catch-up, rendition switches) with parts, so the bar is
@@ -165,8 +176,10 @@ export function fetchChecks(session: FetchSession, fetches: FetchEvidence, ctx: 
           mediaUnconfirmed = true;
         }
       }
-      if (!mediaUnconfirmed && full >= MIN_EXPECTED_SEGMENTS && effectiveSegments / full > TOO_MANY_RATIO) {
-        checks.push("too_many_segments");
+      if (!mediaUnconfirmed && full >= MIN_EXPECTED_SEGMENTS) {
+        const ceiling = full * TOO_MANY_RATIO + TOO_MANY_ALLOWANCE_SECONDS / segDur;
+        measures.tooManyCeiling = round(ceiling);
+        if (effectiveSegments > ceiling) checks.push("too_many_segments");
       }
     }
   }
