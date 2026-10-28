@@ -181,6 +181,8 @@ class Player {
       liveSyncDurationCount: 3,
       manifestLoadingMaxRetry: 45,
       manifestLoadingRetryDelay: 1_000,
+      // As the web player: retry a 503 "starting" every second, not on hls.js's doubling backoff.
+      manifestLoadingMaxRetryTimeout: 1_000,
       levelLoadingMaxRetry: 10,
       fragLoadingMaxRetry: 10,
       xhrSetup: (xhr, requestUrl) => {

@@ -52,6 +52,8 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
+// The `!` index reads below are bounds-checked: every caller checks the buffer's length first.
+
 /** A copy that owns its bytes (`Buffer#slice` would return a view). */
 const copyOf = (b: Uint8Array) => new Uint8Array(b);
 
