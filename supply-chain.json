@@ -5,6 +5,12 @@
       "package": "esbuild",
       "reason": "esbuild 0.18.20 comes only through drizzle-kit 0.31.11 -> @esbuild-kit/core-utils, a dev-only migration generator. The advisory is about esbuild's dev server (`serve`), which drizzle-kit never starts. Remove when drizzle-kit drops @esbuild-kit.",
       "expires": "2027-01-22"
+    },
+    {
+      "id": "GHSA-gcqx-w48m-w2h4",
+      "package": "deepmerge",
+      "reason": "deepmerge 4.3.1 comes only through @react-email/render -> html-to-text, which merges its own formatter options with ours when packages/email turns a rendered template into plain text (render.tsx: toPlainText(html, { selectors: TEXT_SELECTORS })). Both inputs are constants in this repository; no user-supplied object is ever merged, so prototype poisoning cannot be triggered. No fixed deepmerge release exists yet (4.3.1 is the latest and affected); upgrade or override when one ships.",
+      "expires": "2027-01-27"
     }
   ],
   "trustedDependencies": {}
