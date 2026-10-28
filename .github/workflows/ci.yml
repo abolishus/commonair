@@ -190,7 +190,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [relay, long, rest]
+        shard: [relay, long, clock, rest]
     env:
       PODMAN_COMPOSE_PROVIDER: podman-compose
     steps:

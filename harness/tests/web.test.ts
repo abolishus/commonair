@@ -22,6 +22,7 @@ import {
   E4B_ROUTE_PATTERNS,
   E4B_TEST_IDS,
   E4C_NESTED_TEST_IDS,
+  P1_TEST_IDS,
   E4C_ROUTE_PATTERNS,
   E4C_TEST_IDS,
   MODQ_DECISIONS,
@@ -229,7 +230,10 @@ describe("selectors match docs/testing/e4b-selectors.md", () => {
     const e4b = [...Object.values(E4B_TEST_IDS), ...Object.values(E4B_NESTED_TEST_IDS)];
     expect(new Set(e4b).size).toBe(e4b.length);
     for (const id of e4b) expect(earlier.has(id)).toBe(false);
-    const later = Object.values(E4C_TEST_IDS).length + Object.values(E4C_NESTED_TEST_IDS).length;
+    const later =
+      Object.values(E4C_TEST_IDS).length +
+      Object.values(E4C_NESTED_TEST_IDS).length +
+      Object.values(P1_TEST_IDS).length;
     expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4b.length + later);
   });
 
@@ -297,7 +301,24 @@ describe("selectors match docs/testing/e4c-selectors.md", () => {
     const e4c = [...Object.values(E4C_TEST_IDS), ...Object.values(E4C_NESTED_TEST_IDS)];
     expect(new Set(e4c).size).toBe(e4c.length);
     for (const id of e4c) expect(earlier.has(id)).toBe(false);
-    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4c.length);
+    expect(Object.values(TEST_IDS)).toHaveLength(earlier.size + e4c.length + Object.values(P1_TEST_IDS).length);
+  });
+
+  test("P1 ids collide with no earlier id and are in TEST_IDS", () => {
+    const earlier = new Set<string>([
+      ...Object.values(E1_TEST_IDS),
+      ...Object.values(E2_TEST_IDS),
+      ...Object.values(E3_TEST_IDS),
+      ...Object.values(E4B_TEST_IDS),
+      ...Object.values(E4B_NESTED_TEST_IDS),
+      ...Object.values(E4C_TEST_IDS),
+      ...Object.values(E4C_NESTED_TEST_IDS),
+    ]);
+    const all = new Set<string>(Object.values(TEST_IDS));
+    for (const id of Object.values(P1_TEST_IDS)) {
+      expect(earlier.has(id)).toBe(false);
+      expect(all.has(id)).toBe(true);
+    }
   });
 
   test("routes: same set; the new ones are built by ROUTES", () => {

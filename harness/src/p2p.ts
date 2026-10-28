@@ -7,8 +7,8 @@
  * default viewers have no storage keys and get the operator default, which the stack keeps `off`.
  */
 
-/** `p2p` until P1-player merges: 0 keeps the scenario as it was. Then 10. */
-export const P2P_VIEWERS_DEFAULT = 0;
+/** Opted-in Chromium viewers `viewers` runs by default (`--set p2p=0` turns P2P checks off). */
+export const P2P_VIEWERS_DEFAULT = 10;
 /** Opted-in sessions' HTTP bytes per watched second must be at least this much below the baseline. */
 export const P2P_EGRESS_MARGIN = 0.2;
 /** Integrity's fetch checks (packages/integrity/src/signals/fetch.ts); none may hit an honest P2P viewer. */

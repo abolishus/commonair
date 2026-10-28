@@ -289,16 +289,6 @@ export function revenueTierInput(field: RevenueTierField, tier: 1 | 2 | 3): Reve
   return `revenue-tier-${field}-${tier}`;
 }
 
-export const TEST_IDS = {
-  ...E1_TEST_IDS,
-  ...E2_TEST_IDS,
-  ...E3_TEST_IDS,
-  ...E4B_TEST_IDS,
-  ...E4B_NESTED_TEST_IDS,
-  ...E4C_TEST_IDS,
-  ...E4C_NESTED_TEST_IDS,
-} as const;
-
 /** `data-source` values of `player` (never `p2p`: that is a loader, not a playlist source). */
 export const PLAYER_SOURCES = ["origin", "relay", "cdn"] as const;
 export type PlayerSource = (typeof PLAYER_SOURCES)[number];
@@ -313,6 +303,17 @@ export const P1_TEST_IDS = {
   playerP2pToggle: "player-p2p-toggle",
   /** The switch in the P2P section of `/settings/privacy`. */
   privacyP2pToggle: "privacy-p2p-toggle",
+} as const;
+
+export const TEST_IDS = {
+  ...E1_TEST_IDS,
+  ...E2_TEST_IDS,
+  ...E3_TEST_IDS,
+  ...E4B_TEST_IDS,
+  ...E4B_NESTED_TEST_IDS,
+  ...E4C_TEST_IDS,
+  ...E4C_NESTED_TEST_IDS,
+  ...P1_TEST_IDS,
 } as const;
 
 /**

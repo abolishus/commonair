@@ -60,9 +60,10 @@ describe("sessionAddress", () => {
 describe("p2pViewerParams", () => {
   const params = (set: Record<string, number>) => (name: string, fallback: number) => set[name] ?? fallback;
 
-  test("off until P1-player merges: no P2P viewers and no default viewers", () => {
-    expect(P2P_VIEWERS_DEFAULT).toBe(0);
-    expect(p2pViewerParams(params({}))).toEqual({ optedIn: 0, atDefault: 0 });
+  test("P1 is merged: ten opted-in viewers and one default viewer unless set", () => {
+    expect(P2P_VIEWERS_DEFAULT).toBe(10);
+    expect(p2pViewerParams(params({}))).toEqual({ optedIn: 10, atDefault: 1 });
+    expect(p2pViewerParams(params({ p2p: 0 }))).toEqual({ optedIn: 0, atDefault: 0 });
   });
 
   test("one default viewer alongside opted-in ones, unless set", () => {

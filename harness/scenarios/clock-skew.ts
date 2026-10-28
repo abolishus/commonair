@@ -52,7 +52,7 @@ export default defineScenario({
   name: "clock-skew",
   description: "cross-rendition skew < 100 ms and live-to-VOD < 250 ms (ADR 0012)",
   needs: ["api", "mail", "media", "origin", "ffmpeg", "whip"],
-  inFull: false,
+  inFull: true,
   timeoutMs: 40 * 60_000,
   async run(ctx) {
     const enforce = ctx.param("assert", "true") !== "false";

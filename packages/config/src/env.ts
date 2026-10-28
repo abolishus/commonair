@@ -228,9 +228,10 @@ export const paymentsEnv = z.object({
 export const mediaEnv = z.object({
   /**
    * Password for the MediaMTX-internal user (origin and media read RTSP/HLS and publish renditions).
-   * Separate from INTERNAL_API_SECRET because it appears in ffmpeg process arguments.
+   * Separate from INTERNAL_API_SECRET because it appears in ffmpeg process arguments. Must not
+   * contain `:` (MediaMTX splits the SRT streamid on it).
    */
-  MEDIA_INTERNAL_PASSWORD: secret,
+  MEDIA_INTERNAL_PASSWORD: secret.refine((s) => !s.includes(":"), "must not contain ':' (SRT streamid)"),
   /** MediaMTX control API, used by media and by the API's health and live-moderation checks. */
   MEDIAMTX_API_URL: z.url().default("http://localhost:9997"),
   /** MediaMTX HLS server the origin pulls playlists and segments from. */

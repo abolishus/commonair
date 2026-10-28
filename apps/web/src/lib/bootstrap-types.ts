@@ -19,7 +19,8 @@ export interface SessionUser {
 /** Root loader data: everything the shell needs before any page renders. */
 export interface Bootstrap {
   config: PublicConfig;
-  instance: { name: string; sourceUrl: string | null };
+  /** `p2pDefault`: the operator's `P2P_DEFAULT` (`instance.info` `features.p2pDefault`). */
+  instance: { name: string; sourceUrl: string | null; p2pDefault: "off" | "on" };
   me: SessionUser | null;
   theme: Theme;
   /** Server time of the request, so relative times hydrate identically. */

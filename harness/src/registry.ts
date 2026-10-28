@@ -55,6 +55,8 @@ export const FULL_REQUIRED = [
   "multi-instance",
   // E7: egress, status incidents and integrity review.
   "e7-admin",
+  // W0: one media clock (ADR 0012).
+  "clock-skew",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

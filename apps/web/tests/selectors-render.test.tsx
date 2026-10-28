@@ -226,7 +226,9 @@ describe("composition-rendered selectors", () => {
 
   it("footer: footer-source-link is the AGPL source link", () => {
     const doc = render(
-      <InstanceFooter instance={{ name: "Test Air", sourceUrl: "https://code.example.org/commonair" }} />,
+      <InstanceFooter
+        instance={{ name: "Test Air", sourceUrl: "https://code.example.org/commonair", p2pDefault: "off" }}
+      />,
     );
     const link = one(doc, '[data-testid="footer-source-link"]');
     expect([link.tagName, link.getAttribute("href")]).toEqual(["A", "https://code.example.org/commonair"]);
@@ -977,7 +979,7 @@ describe("composition-rendered selectors", () => {
 
   it("footer: footer-transparency-link goes to /transparency", () => {
     const link = one(
-      render(<InstanceFooter instance={{ name: "Test Air", sourceUrl: null }} />),
+      render(<InstanceFooter instance={{ name: "Test Air", sourceUrl: null, p2pDefault: "off" }} />),
       '[data-testid="footer-transparency-link"]',
     );
     expect([link.tagName, link.getAttribute("href")]).toEqual(["A", "/transparency"]);

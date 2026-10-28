@@ -231,7 +231,7 @@ services:
       # Expanded by MediaMTX itself in the runOnOnline/runOnOffline hooks of mediamtx.yml.
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-}
       API_INTERNAL_URL: http://api:3001
-    # RTSP :8554, LL-HLS :8888, API :9997 and metrics :9998 stay inside the network.
+    # RTSP :8554, SRT :8890/udp, LL-HLS :8888, API :9997 and metrics :9998 stay inside the network.
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${MEDIAMTX_RTMP_PORT:-1935}:1935"
       - "${BIND_ADDRESS:-127.0.0.1}:${MEDIAMTX_WEBRTC_PORT:-8889}:8889"

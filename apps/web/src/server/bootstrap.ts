@@ -21,11 +21,14 @@ export async function loadBootstrap(cookie: string | undefined): Promise<Bootstr
     if (instanceCache && Date.now() - instanceCache.at < INSTANCE_TTL_MS) return instanceCache.value;
     try {
       const info = await serverApi(env.API_INTERNAL_URL).instance.info();
-      instanceCache = { value: { name: info.name, sourceUrl: safeHttpUrl(info.sourceUrl) }, at: Date.now() };
+      instanceCache = {
+        value: { name: info.name, sourceUrl: safeHttpUrl(info.sourceUrl), p2pDefault: info.features.p2pDefault },
+        at: Date.now(),
+      };
       return instanceCache.value;
     } catch {
-      // The footer still renders the instance name; the source link waits for the API.
-      return { name: config.instanceName, sourceUrl: null };
+      // The footer still renders the instance name; the source link waits for the API, and P2P stays opt-in.
+      return { name: config.instanceName, sourceUrl: null, p2pDefault: "off" };
     }
   };
 
