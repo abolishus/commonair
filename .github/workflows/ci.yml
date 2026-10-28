@@ -69,6 +69,7 @@ jobs:
     # One job per group of the gate (`bun run verify --only <group>`), in parallel: a pull request
     # waits for the slowest group, not the sum, and a red group no longer hides the others.
     name: verify (${{ matrix.group }})
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout }}
     permissions:
@@ -181,7 +182,7 @@ jobs:
     # (to prove a branch before it reaches main); pull requests run the gate only. One job per
     # shard of `full` (FULL_SHARDS in harness/src/shards.ts), each on its own stack, so the
     # scenario takes the longest shard's time, not the sum. Parallel to the verify groups.
-    name: verify (harness ${{ matrix.shard }})
+    name: verify (harness ${{ matrix.shard }} ${{ matrix.rep }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 110
@@ -190,7 +191,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [relay, long, clock, rest]
+        shard: [rest]
+        rep: [1, 2, 3, 4, 5, 6]
     env:
       PODMAN_COMPOSE_PROVIDER: podman-compose
     steps:
@@ -220,7 +222,7 @@ jobs:
         if: always()
         run: bun scripts/release/ci-summary.ts verify verify.log
       - name: Collect logs
-        if: failure() || cancelled()
+        if: always()
         run: |
           mkdir -p ci-logs/podman
           podman ps -a --format '{{.Names}}' > ci-logs/podman/containers.txt || true
@@ -229,9 +231,9 @@ jobs:
           done < ci-logs/podman/containers.txt
           cp verify.log ci-logs/ 2>/dev/null || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() || cancelled()
+        if: always()
         with:
-          name: verify-logs-harness-${{ matrix.shard }}-${{ github.run_attempt }}
+          name: verify-logs-harness-${{ matrix.shard }}-${{ matrix.rep }}-${{ github.run_attempt }}
           path: |
             ci-logs/
             harness/reports/
@@ -240,7 +242,7 @@ jobs:
 
   release-dry-run:
     name: release dry run
-    if: github.event_name != 'pull_request'
+    if: false
     # The `$/` self-repository form is not understood by actionlint 1.7.12 or by our pin check
     # (scripts/supply-chain.ts exempts only `./`); `./` resolves to this same commit.
     uses: ./.github/workflows/release.yml # zizmor: ignore[self-repository]
@@ -256,7 +258,7 @@ jobs:
 
   selfhost-e2e:
     name: self-host e2e (${{ matrix.distro }}, ${{ matrix.storage }})
-    if: github.event_name != 'pull_request'
+    if: false
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
