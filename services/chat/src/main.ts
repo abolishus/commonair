@@ -23,6 +23,8 @@ const chat = await startChatService({
   valkeyUrl: env.VALKEY_URL,
   internalSecret: env.INTERNAL_API_SECRET,
   logger,
+  // Enough for a join's parallel reads, without holding the whole pool open.
+  warmConnections: Math.min(4, env.DATABASE_POOL_MAX),
   // SIGTERM/SIGINT close sockets and flush chat first; then the pool and telemetry.
   onShutdown: async () => {
     await Promise.allSettled([db.close(), telemetry.shutdown()]);

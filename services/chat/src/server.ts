@@ -29,6 +29,7 @@ import { plugins } from "./plugins/index.ts";
 import { Rooms } from "./rooms.ts";
 import { type ChatSocket, CLOSE, type ConnData, sendFrame, sendNotice, takeToken, type Writer } from "./socket.ts";
 import type { Identity, Rejection } from "./types.ts";
+import { warmPool } from "./pool.ts";
 import { DeadlineError, watchEventLoop, withDeadline } from "./watchdog.ts";
 
 export interface ChatServiceOptions {
@@ -63,6 +64,11 @@ export interface ChatServiceOptions {
    * client gets a 503 instead of an upgrade that never answers. Default 5 s.
    */
   upgradeTimeoutMs?: number;
+  /**
+   * Pool connections opened at start-up, retried until they all succeed; /readyz fails until
+   * then (default 0: lazy). See pool.ts.
+   */
+  warmConnections?: number;
   /** Runs last during shutdown (close the DB pool, flush telemetry). */
   onShutdown?: () => Promise<void>;
 }
@@ -91,6 +97,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   const subscriber = createValkey(opts.valkeyUrl, { name: "chat-sub" });
   watchValkey(valkey, "chat", logger);
   watchValkey(subscriber, "chat-sub", logger);
+  const pool = warmPool(opts.db, opts.warmConnections ?? 0, logger);
   const stopLagWatch = watchEventLoop((lagMs) => logger.warn("event loop stalled", { lagMs }));
   const bus = new Bus(valkey, subscriber, opts.busPrefix ?? "", logger);
   const directory = new Directory(opts.db, {
@@ -362,6 +369,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       valkey: valkeyCheck(valkey),
       postgres: async () => {
         await opts.db.execute(sql`select 1`);
+        if (!pool.warm) throw new Error("pool warming up");
       },
     },
     fetch: (req, server) => upgrade(req, server),
@@ -385,6 +393,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     onShutdown: async () => {
       clearInterval(sweeper);
       stopLagWatch();
+      pool.stop();
       await writer.close();
       for (const mw of middlewares)
         await mw

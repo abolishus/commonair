@@ -31,6 +31,16 @@ export interface DbHandle {
   close(): Promise<void>;
 }
 
+/**
+ * Seconds before a pool connection that failed to connect tries again, by pool-wide failure
+ * count. The driver's default grows to 20 s and resets only on a successful connect, so after a
+ * short outage (a DNS stall) every new connection waited up to 20 s although the database was
+ * back. Capped at 2 s, with jitter.
+ */
+export function reconnectBackoff(retries: number, random: () => number = Math.random): number {
+  return Math.min(0.05 * 2 ** retries, 2) * (0.5 + random() / 2);
+}
+
 export function createDb({
   url,
   max = 10,
@@ -41,6 +51,7 @@ export function createDb({
   const sql = postgres(url, {
     max,
     connect_timeout: connectTimeoutSeconds,
+    backoff: (retries: number) => reconnectBackoff(retries),
     ...(onConnectionClosed ? { onclose: onConnectionClosed } : {}),
     connection: { application_name: applicationName },
     // Drizzle handles bigint mode per column; keep int8 as strings at the driver level.

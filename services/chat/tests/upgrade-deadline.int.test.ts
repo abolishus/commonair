@@ -7,7 +7,9 @@
  * and upgrades succeed again once the database answers.
  */
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
+import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
+import { Directory } from "../src/directory.ts";
 import type { ChatService } from "../src/server.ts";
 import { chatToken, Client, createUser, isolation, startInstance } from "./helpers.ts";
 
@@ -76,4 +78,24 @@ test("a stalled profile read answers 503 within the deadline, then upgrades reco
   } finally {
     client.close();
   }
+});
+
+test("the profile read (one statement) reports active membership only", async () => {
+  const directory = new Directory(t.app.db);
+  const none = await createUser(t.db);
+  const active = await createUser(t.db);
+  const lapsed = await createUser(t.db);
+  await t.db.insert(schema.memberships).values([
+    { id: uuidv7(), userId: active.id, class: "viewer", basis: "share" },
+    { id: uuidv7(), userId: lapsed.id, class: "viewer", basis: "share", status: "lapsed" },
+  ]);
+  expect((await directory.profile(none.id))?.isMember).toBe(false);
+  expect((await directory.profile(active.id))?.isMember).toBe(true);
+  expect((await directory.profile(lapsed.id))?.isMember).toBe(false);
+  expect(await directory.profile(uuidv7())).toBeNull();
+  expect(await directory.profile(active.id)).toMatchObject({
+    id: active.id,
+    username: active.username,
+    deleted: false,
+  });
 });
