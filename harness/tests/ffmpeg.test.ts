@@ -104,7 +104,9 @@ describe("streamer argument builder", () => {
     expect(flag(args, "-b:v")).toBe("2500k");
     expect(flag(args, "-c:a")).toBe("aac");
     expect(flag(args, "-profile:v")).toBe("high");
-    expect(args).toContain("-re");
+    expect(args).not.toContain("-re");
+    expect(flag(args, "-readrate")).toBe("1");
+    expect(flag(args, "-readrate_catchup")).toBe("2");
     expect(flag(args, "-progress")).toBe("pipe:1");
     expect(args).not.toContain("-t");
   });

@@ -724,6 +724,11 @@ describe("PlayerController with P2P", () => {
     expect(f.iceServers).not.toHaveBeenCalled();
     expect(FakeEngine.instances).toHaveLength(0);
     expect(FakeHls.instances[0]?.config).toMatchObject({ lowLatencyMode: true, liveSyncDurationCount: 3 });
+    // A 503 while a rendition starts is retried every second, not on hls.js's doubling backoff.
+    expect(FakeHls.instances[0]?.config).toMatchObject({
+      manifestLoadingRetryDelay: 1_000,
+      manifestLoadingMaxRetryTimeout: 1_000,
+    });
     expect(c.p2pStatus()).toMatchObject({ available: true, state: "off" });
     await c.stop();
   });
@@ -749,6 +754,7 @@ describe("PlayerController with P2P", () => {
     expect(FakeHls.instances[0]?.config).toMatchObject({ lowLatencyMode: false });
     expect(FakeHls.instances[0]?.config.liveSyncDuration).toBeGreaterThanOrEqual(P2P_TUNING.liveSyncDuration);
     expect(FakeHls.instances[0]?.config).not.toHaveProperty("liveSyncDurationCount");
+    expect(FakeHls.instances[0]?.config).toMatchObject({ manifestLoadingMaxRetryTimeout: 1_000 });
     expect(c.p2pStatus().state).toBe("on");
     engine.emit("onPeerConnect", { peerId: "p", infoHash: "h" });
     expect(onP2P).toHaveBeenLastCalledWith(expect.objectContaining({ state: "sharing", peers: 1 }));

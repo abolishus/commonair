@@ -197,8 +197,11 @@ export function buildStreamerArgs(o: StreamerArgsOptions): string[] {
   const enc = effectiveEncoding(o);
   const gop = Math.max(1, Math.round(o.fps * enc.keyframeIntervalSeconds));
   const args = ["-hide_banner", "-nostats", "-loglevel", "warning", "-progress", "pipe:1"];
-  args.push("-re", "-f", "lavfi", "-i", `testsrc2=size=${o.width}x${o.height}:rate=${o.fps}`);
-  args.push("-re", "-f", "lavfi", "-i", `sine=frequency=${o.toneHz ?? 440}:sample_rate=48000`);
+  // Real time like a live encoder: `-re` catches up at 1.05x after a slow start (a WHIP
+  // handshake), which MediaMTX's arrival clock turns into ~30 s of moving PDT (W0 waits for it).
+  const realtime = ["-readrate", "1", "-readrate_catchup", "2"];
+  args.push(...realtime, "-f", "lavfi", "-i", `testsrc2=size=${o.width}x${o.height}:rate=${o.fps}`);
+  args.push(...realtime, "-f", "lavfi", "-i", `sine=frequency=${o.toneHz ?? 440}:sample_rate=48000`);
   args.push("-filter_complex", videoFilter(o), "-map", "[v]", "-map", "1:a");
   if (o.durationSeconds !== undefined) args.push("-t", String(o.durationSeconds));
   args.push(

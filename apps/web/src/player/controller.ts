@@ -84,6 +84,9 @@ const PLAYLIST_WAIT_MS = 45_000;
 const BASE_HLS_CONFIG = {
   manifestLoadingMaxRetry: 45,
   manifestLoadingRetryDelay: 1_000,
+  // Every second, not hls.js's doubling: the origin answers 503 while a rendition (a WHIP
+  // source's AAC copy) starts, and a 1-2-4-8 s backoff adds up to 7 s to its first frame.
+  manifestLoadingMaxRetryTimeout: 1_000,
   levelLoadingMaxRetry: 10,
   fragLoadingMaxRetry: 10,
 } as const satisfies Partial<HlsConfig>;
