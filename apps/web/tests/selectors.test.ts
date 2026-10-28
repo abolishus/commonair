@@ -299,3 +299,28 @@ describe("E3 data attributes", () => {
     expect(setsAttr(attr, appText)).toBe(true);
   });
 });
+
+/** P1 (docs/testing/p1-selectors.md): the P2P indicator, notice, dialog and switches. */
+describe("p1-selectors.md", () => {
+  const ids = testIds("p1-selectors.md");
+
+  it("lists the P1 test ids", () => {
+    expect(ids).toEqual([
+      "player-p2p",
+      "player-p2p-notice",
+      "player-p2p-dialog",
+      "player-p2p-toggle",
+      "privacy-p2p-toggle",
+    ]);
+  });
+
+  it.each(ids)("renders %s", (id) => {
+    expect(onElement(id, appText)).toBe(true);
+  });
+
+  it("sets data-p2p on the player and uses the storage keys the harness writes", () => {
+    expect(setsAttr("data-p2p={p2p.state}", appText)).toBe(true);
+    expect(appText).toContain('"commonair:p2p"');
+    expect(appText).toContain('"commonair:p2p-notice"');
+  });
+});

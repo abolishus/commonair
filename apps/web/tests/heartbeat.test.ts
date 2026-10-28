@@ -137,6 +137,64 @@ describe("HeartbeatAccountant", () => {
   });
 });
 
+describe("HeartbeatAccountant: P2P fields", () => {
+  const p2p = (over: Partial<CumulativeStats> = {}) => totals({ bytesP2pUp: 0, p2pPeers: 0, p2pRejected: 0, ...over });
+
+  it("sends bytesP2p, bytesP2pUp and p2pRejected as deltas and p2pPeers as a gauge", () => {
+    const acc = new HeartbeatAccountant();
+    const first = p2p({ bytesHttp: 500, bytesP2p: 4000, bytesP2pUp: 1000, p2pPeers: 3, p2pRejected: 1 });
+    expect(acc.delta(first)).toMatchObject({
+      bytesHttp: 500,
+      bytesP2p: 4000,
+      bytesP2pUp: 1000,
+      p2pPeers: 3,
+      p2pRejected: 1,
+    });
+    acc.commit(first);
+    const second = p2p({ bytesHttp: 700, bytesP2p: 9000, bytesP2pUp: 1500, p2pPeers: 3, p2pRejected: 1 });
+    // The gauge is reported as is every time; the counters only grow by what is new.
+    expect(acc.delta(second)).toMatchObject({
+      bytesHttp: 200,
+      bytesP2p: 5000,
+      bytesP2pUp: 500,
+      p2pPeers: 3,
+      p2pRejected: 0,
+    });
+  });
+
+  it("carries throttled and failed beats' P2P deltas into the next beat", () => {
+    const acc = new HeartbeatAccountant();
+    acc.commit(p2p({ bytesP2p: 100, bytesP2pUp: 10, p2pRejected: 1 }));
+    const throttled = p2p({ bytesP2p: 300, bytesP2pUp: 40, p2pRejected: 2, p2pPeers: 2 });
+    expect(acc.settle(throttled, { throttled: true })).toBe(false);
+    const next = p2p({ bytesP2p: 600, bytesP2pUp: 90, p2pRejected: 4, p2pPeers: 1 });
+    expect(acc.delta(next)).toMatchObject({ bytesP2p: 500, bytesP2pUp: 80, p2pRejected: 3, p2pPeers: 1 });
+    expect(acc.settle(next, {})).toBe(true);
+    expect(acc.delta(next)).toMatchObject({ bytesP2p: 0, bytesP2pUp: 0, p2pRejected: 0, p2pPeers: 1 });
+  });
+
+  it("caps the peer gauge at the contract's 64 and never sends negatives", () => {
+    const acc = new HeartbeatAccountant();
+    expect(acc.delta(p2p({ p2pPeers: 500 })).p2pPeers).toBe(64);
+    expect(acc.delta(p2p({ p2pPeers: -2, bytesP2pUp: Number.NaN })).p2pPeers).toBe(0);
+    acc.commit(p2p({ bytesP2pUp: 50, p2pRejected: 5 }));
+    expect(acc.delta(p2p({ bytesP2pUp: 10, p2pRejected: 2 }))).toMatchObject({ bytesP2pUp: 0, p2pRejected: 0 });
+  });
+
+  it("sessions without the P2P loader send none of the P2P diagnostics", () => {
+    const d = new HeartbeatAccountant().delta(totals({ bytesHttp: 10 }));
+    for (const k of ["bytesP2pUp", "p2pPeers", "p2pRejected"]) expect(d).not.toHaveProperty(k);
+    expect(d.bytesP2p).toBe(0);
+  });
+
+  it("bytesHttp carries HTTP bytes only: a peer-delivered segment moves bytesP2p, not bytesHttp", () => {
+    const acc = new HeartbeatAccountant();
+    acc.commit(p2p({ bytesHttp: 1000 }));
+    // The controller adds peer bytes to bytesP2p only (tests/p2p-engine.test.ts checks the wiring).
+    expect(acc.delta(p2p({ bytesHttp: 1000, bytesP2p: 8000 }))).toMatchObject({ bytesHttp: 0, bytesP2p: 8000 });
+  });
+});
+
 describe("nextHeartbeatDelay", () => {
   it("stays within the jitter band", () => {
     expect(nextHeartbeatDelay(10_000, 0.1, () => 0)).toBe(9_000);

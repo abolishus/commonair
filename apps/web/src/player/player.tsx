@@ -5,10 +5,15 @@ import { PlayerChrome, PlayerControl } from "@commonair/ui/blocks/media";
 import { cn } from "@commonair/ui/lib/utils";
 import { VolumeHighIcon, VolumeOffIcon } from "@hugeicons/core-free-icons";
 import * as React from "react";
+import type { LegalDoc } from "../components/legal-document-link.tsx";
 import { t } from "../i18n/index.ts";
 import { api, apiKeepalive } from "../lib/api.ts";
-import { PlayerController, type PlayerState } from "./controller.ts";
+import { P2P_STATUS_OFF, PlayerController, prefersNativeHls, type P2PStatus, type PlayerState } from "./controller.ts";
 import { pageLifecycle } from "./lifecycle.ts";
+import { P2PDialog, P2PIndicator, P2PNotice } from "./p2p/p2p-ui.tsx";
+import { deviceSignals, noticeDue, p2pAllowed, type DeviceSignals } from "./p2p/policy.ts";
+import { markP2PNoticeSeen, readP2PPrefs, setP2PPreference } from "./p2p/preference.ts";
+import { useMounted, useOperatorP2PDefault, useP2PPrefs } from "./p2p/use-p2p.ts";
 import type { PlayerSource } from "./source.ts";
 
 export interface PlayerProps {
@@ -24,6 +29,22 @@ export interface PlayerProps {
 }
 
 const RETRY_MS = 5_000;
+
+async function loadPrivacyPolicy(): Promise<LegalDoc | null> {
+  return (await api().legal.current()).find((d) => d.kind === "privacy") ?? null;
+}
+
+/** What the browser says about this device, read once on the client. */
+interface DeviceEnv {
+  signals: DeviceSignals;
+  /** A best guess before hls.js loads; the controller decides for real. */
+  native: boolean;
+}
+
+function readDeviceEnv(): DeviceEnv {
+  const mse = "MediaSource" in window || "ManagedMediaSource" in window;
+  return { signals: deviceSignals(), native: prefersNativeHls(document.createElement("video"), mse) };
+}
 
 /** Live player: autoplays muted (browsers block audible autoplay) with an unmute control. */
 export function Player({
@@ -47,12 +68,48 @@ export function Player({
     onStartErrorRef.current = onStartError;
   });
 
+  // P2P (ADR 0005 amendment 1): the viewer's choice, the operator default, the first-run notice.
+  const operatorDefault = useOperatorP2PDefault();
+  const prefs = useP2PPrefs();
+  const [p2p, setP2P] = React.useState<P2PStatus>(P2P_STATUS_OFF);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const mounted = useMounted();
+  const env = React.useMemo(() => (mounted ? readDeviceEnv() : null), [mounted]);
+  const noticeShown = React.useRef(false);
+  const [noticeOnScreen, setNoticeOnScreen] = React.useState(false);
+  const controllerRef = React.useRef<PlayerController | null>(null);
+  const policy = env && { ...prefs, ...env.signals, operatorDefault, dataMode: false, native: env.native };
+  const showNotice = policy !== null && noticeDue(policy);
+  // Sessions start once the device is known and, when the notice is due, once it is on screen:
+  // P2P never starts before the disclosure. Latched, so a later prefs change never restarts one.
+  const [gateOpen, setGateOpen] = React.useState(false);
+  if (!gateOpen && env && (!showNotice || noticeOnScreen)) setGateOpen(true);
+
+  // The decision for each new session, read fresh at its start (this effect runs before the
+  // session effect below).
+  const p2pWanted = React.useRef<(native: boolean) => boolean>(() => false);
+  React.useEffect(() => {
+    p2pWanted.current = (native) => {
+      const now = readP2PPrefs();
+      const allowed = p2pAllowed({ ...now, ...deviceSignals(), operatorDefault, dataMode: false, native });
+      // An explicit "on" was chosen next to the disclosure; the default needs it seen or shown.
+      return allowed && (now.preference === "on" || now.noticeSeen || noticeShown.current);
+    };
+  });
+
+  // "Off" anywhere (dialog, notice, settings, another tab) stops P2P in this session at once.
+  React.useEffect(() => {
+    if (prefs.preference === "off") controllerRef.current?.disableP2P();
+  }, [prefs.preference]);
+
   React.useEffect(() => {
     const video = videoRef.current;
     if (!live || !video) {
       setState("offline");
       return;
     }
+    // Not yet: the device is unknown, or the first-run notice is not on screen yet.
+    if (!gateOpen) return;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const controller = new PlayerController({
       channel,
@@ -66,8 +123,11 @@ export function Player({
         setState(s);
         if (s === "error") retry = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS);
       },
+      p2pWanted: (native) => p2pWanted.current(native),
+      onP2P: setP2P,
     });
-    setState("loading");
+    controllerRef.current = controller;
+    // `start` reports `loading` first, so a retry after an error shows loading again.
     void controller.start();
     const lifecycle = pageLifecycle(
       () => void controller.stop(),
@@ -79,10 +139,12 @@ export function Player({
       clearTimeout(retry);
       window.removeEventListener("pagehide", lifecycle.pagehide);
       window.removeEventListener("pageshow", lifecycle.pageshow);
+      if (controllerRef.current === controller) controllerRef.current = null;
       void controller.stop();
       setSource(undefined);
+      setP2P(P2P_STATUS_OFF);
     };
-  }, [channel, live, embed, attempt]);
+  }, [channel, live, embed, attempt, gateOpen]);
 
   const toggleMute = () => {
     const video = videoRef.current;
@@ -91,6 +153,11 @@ export function Player({
     setMuted(video.muted);
     if (!video.muted) void video.play().catch(() => undefined);
   };
+
+  const onNoticeShown = React.useCallback(() => {
+    noticeShown.current = true;
+    setNoticeOnScreen(true);
+  }, []);
 
   const stage =
     state === "offline" ? (
@@ -102,34 +169,46 @@ export function Player({
     ) : undefined;
 
   return (
-    <PlayerChrome
-      data-testid="player"
-      data-state={state}
-      data-source={source}
-      variant={live ? "live" : "offline"}
-      liveBadgeProps={{ "data-testid": "live-badge" }}
-      stage={stage}
-      controls={
-        state === "playing" ? (
-          // The label names the action (Mute / Unmute), so no `pressed` state on top of it.
-          <PlayerControl
-            label={muted ? t("player.unmute") : t("player.mute")}
-            icon={muted ? VolumeOffIcon : VolumeHighIcon}
-            onClick={toggleMute}
-          />
-        ) : undefined
-      }
-      className={cn("w-full", className)}
-    >
-      <video
-        ref={videoRef}
-        data-testid="player-video"
-        muted
-        autoPlay
-        playsInline
-        crossOrigin="anonymous"
-        onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
-      />
-    </PlayerChrome>
+    <>
+      <PlayerChrome
+        data-testid="player"
+        data-state={state}
+        data-source={source}
+        data-p2p={p2p.state}
+        variant={live ? "live" : "offline"}
+        liveBadgeProps={{ "data-testid": "live-badge" }}
+        stage={stage}
+        controls={
+          state === "playing" ? (
+            <>
+              {/* The label names the action (Mute / Unmute), so no `pressed` state on top of it. */}
+              <PlayerControl
+                label={muted ? t("player.unmute") : t("player.mute")}
+                icon={muted ? VolumeOffIcon : VolumeHighIcon}
+                onClick={toggleMute}
+              />
+              {p2p.available && <P2PIndicator status={p2p} onOpen={() => setDialogOpen(true)} />}
+            </>
+          ) : undefined
+        }
+        className={cn("w-full", className)}
+      >
+        <video
+          ref={videoRef}
+          data-testid="player-video"
+          muted
+          autoPlay
+          playsInline
+          crossOrigin="anonymous"
+          onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
+        />
+        {live && showNotice && (
+          <P2PNotice onShown={onNoticeShown} onDismiss={markP2PNoticeSeen} onTurnOff={() => setP2PPreference("off")} />
+        )}
+      </PlayerChrome>
+      {(p2p.available || dialogOpen) && (
+        <P2PDialog open={dialogOpen} onOpenChange={setDialogOpen} status={p2p} loadPrivacyPolicy={loadPrivacyPolicy} />
+      )}
+    </>
   );
 }
