@@ -267,3 +267,41 @@ readers set `latency=40000` (µs) explicitly; SRT added no measurable latency ov
 
 **Host clock.** `adjtimex(2)` with `modes = 0` through Bun's FFI returns `TIME_OK` (0) inside the
 media image without extra capabilities, so `media_clock_host_synchronized` is reported there.
+
+## WHIP: W0 read before MediaMTX's PDT settles (2026-10-28)
+
+**Failure.** On the live stack `clock-skew` passed for RTMP (cross-rendition p95 12 ms,
+live-to-VOD 8 ms) and failed for WHIP with a constant ~1.0 s: the AAC copy (served as the source
+rendition for WHIP) disagreed with the rungs and the VOD, which agreed with each other.
+`media_clock_w0_drift_ms` had one sample in (1000, 2500] ms. The AAC copy had fetched its W0
+right after publish; the ladder ~90 s later.
+
+**Cause: W0 itself, not the AAC copy's output.** Reproduced in
+`services/media/tests/clock-whip.int.test.ts` (harness MediaMTX 1.21.2, WHIP source with a
+2 s GOP, W0 of each new LL-HLS segment read from publish to 45 s). For a WebRTC path MediaMTX
+stamps PDT from an estimate that starts off and slews toward its steady value; the stream
+timeline does not move (`strip − pts` was constant to the millisecond in every segment). W0 of
+each new segment, minus the settled value, at seconds after publish:
+
+| t (s)  | 2.6  | 4.8 | 6.5 | 8.7 | 10.3 | 12.5 | 14.3 | 16  | 18.2 | 19.8 | 22.2 | 23.9 | ≥ 26 |
+| ------ | ---- | --- | --- | --- | ---- | ---- | ---- | --- | ---- | ---- | ---- | ---- | ---- |
+| ΔW0 ms | 1537 | 962 | 875 | 780 | 676  | 586  | 492  | 397 | 296  | 194  | 105  | 6    | 0–6  |
+
+So a W0 is about 95 ms (≈5 %) per 2 s segment off while settling, then stable. The pre-fix
+`fetchW0` accepted the first one (+1521 ms in the old-code run), and an AAC copy started with it
+published PDT **+1520 ms** from the source on every segment: all of the copy's error came from its W0.
+RTMP paths do not slew (the RTMP clock checks pass unchanged with the guard).
+
+**Fix.** `fetchW0` also reads an older complete segment of the same init section (the oldest,
+or the second oldest when the playlist has three or more) and refuses W0 with
+`W0Error("unsettled")` unless the two W0 agree within `4 ms + 0.5 %` of the PDT span between
+them (`w0Settled`), and refuses a playlist with one segment. The media clock polls an unsettled
+path every second for up to 45 s per `w0()` call (no supervisor backoff growth), and after
+120 s unsettled for one broadcast takes the newest W0 anyway with a `W0_UNSETTLED` warning, so a
+source that never settles still gets a ladder and an AAC copy. The ladder, the AAC copy and the
+recorder all go through it; the recorder still never waits on W0 (its fetch is in the
+background). With the fix the first W0 was accepted at 25.6 s, 6 ms from the settled value, and
+the AAC copy started on it was **+5 ms** from the source on every segment.
+
+**Cost.** The AAC copy of a WHIP broadcast starts ~25 s after publish instead of at once (live
+~9 s after that); a ladder requested in that window waits the same way.

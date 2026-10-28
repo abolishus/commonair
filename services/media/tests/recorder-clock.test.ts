@@ -129,6 +129,7 @@ function liveClock(w0: () => Promise<number>) {
       w0Ms: await w0(),
       handler: "vide",
       sample: { pdtMs: 0, baseDecodeTime: 0, compositionOffset: 0, timescale: 90_000 },
+      settle: { spanMs: 6_000, driftMs: 0 },
     }),
   });
   return { clock, seen };
