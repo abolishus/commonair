@@ -102,6 +102,8 @@ export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_B
   const r = await scoreActiveSessions(ctx.db, ctx.valkey, ctx.now(), { classifier: ctx.classifier(), limit });
   for (const [verdict, n] of Object.entries(r.counts)) if (n > 0) metrics.integritySessions.add(n, { verdict });
   if (r.newlyExcluded.length) metrics.integrityActions.add(r.newlyExcluded.length, { kind: "session_excluded" });
+  // Which rule excluded whom: session id, codes, sub-checks and measured numbers only (no PII).
+  for (const e of r.exclusions) ctx.logger.info("integrity session excluded", { ...e });
   if (r.restored.length) metrics.integrityActions.add(r.restored.length, { kind: "session_restored" });
   if (r.superseded.length) metrics.integrityActions.add(r.superseded.length, { kind: "session_superseded" });
   if (r.p2p.evidenced) metrics.integrityEvidence.add(r.p2p.evidenced, { source: "p2p", outcome: "evidenced" });

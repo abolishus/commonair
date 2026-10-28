@@ -43,6 +43,7 @@ import {
   honestAudience,
   onCdn,
   type Placement,
+  STEADY_TIMING,
 } from "../src/integrity-viewers.ts";
 import { internalSecret } from "../src/safety-io.ts";
 import { defineScenario, excludedNeeds } from "../src/scenario.ts";
@@ -70,6 +71,35 @@ async function sessionRows(url: string, ids: readonly string[]): Promise<Session
                where f.subject_type = 'session' and f.subject_id = p.id) as flags
         from playback_sessions p
        where p.id = any(${sql.array([...ids], "uuid")})`) as SessionRow[];
+  } finally {
+    await sql.close();
+  }
+}
+
+/**
+ * Seconds since each session's last heartbeat as Postgres has it, with its verdict: on a dip, says
+ * which honest viewer went quiet (or changed verdict).
+ */
+async function heartbeatAges(
+  url: string,
+  ids: ReadonlyMap<string, string>,
+): Promise<{ viewer: string; ageS: number | null; verdict: string }[]> {
+  if (ids.size === 0) return [];
+  const sql = new Bun.SQL(url);
+  try {
+    const rows = (await sql`
+      select id, verdict::text as verdict,
+             extract(epoch from (now() - last_heartbeat_at))::float8 as age
+        from playback_sessions where id = any(${sql.array([...ids.keys()], "uuid")})`) as {
+      id: string;
+      verdict: string;
+      age: number | null;
+    }[];
+    return rows.map((r) => ({
+      viewer: ids.get(r.id) ?? r.id,
+      ageS: r.age === null ? null : Math.round(r.age * 10) / 10,
+      verdict: r.verdict,
+    }));
   } finally {
     await sql.close();
   }
@@ -172,6 +202,7 @@ export default defineScenario({
           id: `household-${i}`,
           target: { channel },
           api: p.api({ clientIp: householdIp }).client,
+          timing: STEADY_TIMING,
           log: p.log,
         }),
     );
@@ -187,10 +218,12 @@ export default defineScenario({
       `open ${PLAIN} honest viewers, a household of ${householdCount}, a hidden tab, ${bots} viewbots and ${fetchlessCount} fetch-less bots together`,
       () =>
         Promise.all([
-          p.openViewers(channel, { chromium: browsers, http: PLAIN - browsers }).then((vs) => {
-            for (const v of vs) ctx.defer(() => v.stop());
-            return vs;
-          }),
+          p
+            .openViewers(channel, { chromium: browsers, http: PLAIN - browsers, httpTiming: STEADY_TIMING })
+            .then((vs) => {
+              for (const v of vs) ctx.defer(() => v.stop());
+              return vs;
+            }),
           ...household.map((v) => v.start()),
           hidden.start(),
           swarm.start(),
@@ -256,6 +289,14 @@ export default defineScenario({
       // Active sessions by verdict at each sample: a dip with fewer active sessions is a missed
       // heartbeat, one with more pending or excluded is a scoring run changing a verdict.
       const breakdown: ({ verified: number; pending: number; excluded: number } | null)[] = [];
+      // On a dip: each honest session's heartbeat age and verdict (session → viewer id).
+      const dips: { sample: number; sessions: Awaited<ReturnType<typeof heartbeatAges>> }[] = [];
+      const honestIds = new Map<string, string>();
+      for (const v of honest) {
+        const sid = (await v.report()).sessionId;
+        if (sid) honestIds.set(sid, v.id);
+      }
+      const dbUrl = process.env.DATABASE_URL;
       if (hiddenMs > 0) hidden.hide();
       const showAt = Date.now() + hiddenMs;
       const until = Date.now() + stableMs;
@@ -268,6 +309,12 @@ export default defineScenario({
           { timeoutMs: 20_000, intervalMs: 2_000, signal: ctx.signal },
         );
         samples.push(count);
+        if (count !== expected && dbUrl) {
+          dips.push({
+            sample: samples.length - 1,
+            sessions: await heartbeatAges(dbUrl, honestIds).catch(() => []),
+          });
+        }
         // Diagnostic only: a rate-limited read is recorded as null, never fails the step.
         breakdown.push(
           await streamer.api.client.stream.health({ channel }).then(
@@ -281,7 +328,18 @@ export default defineScenario({
       ctx.assert(
         `count stays at ${expected} for ${stableMs / 1000} s`,
         samples.every((c) => c === expected),
-        { samples, breakdown, heartbeats: await Promise.all(honest.map(async (v) => (await v.report()).heartbeats)) },
+        {
+          samples,
+          breakdown,
+          dips,
+          heartbeats: await Promise.all(
+            honest.map(async (v) => {
+              const r = await v.report();
+              return { viewer: v.id, beats: r.heartbeats, errors: r.heartbeatErrors };
+            }),
+          ),
+          beatsWhileHidden: hidden.beatsWhileHidden,
+        },
       );
       ctx.check("the hidden tab sent heartbeats while hidden", hidden.beatsWhileHidden > 0, {
         beatsWhileHidden: hidden.beatsWhileHidden,

@@ -4,7 +4,13 @@
 import { describe, expect, test } from "vite-plus/test";
 import { parseNetworkList } from "../src/network.ts";
 import { noisyOr, stdev } from "../src/signals/combine.ts";
-import { claimedSecondsUntil, fetchChecks, fetchSignal, httpShare } from "../src/signals/fetch.ts";
+import {
+  claimedSecondsUntil,
+  fetchChecks,
+  fetchSignal,
+  httpShare,
+  TOO_MANY_ALLOWANCE_SECONDS,
+} from "../src/signals/fetch.ts";
 import { HEADLESS_WEIGHTS, headlessFlags, headlessSignal } from "../src/signals/headless.ts";
 import { HEARTBEAT_WEIGHTS, heartbeatChecks, heartbeatSignal, visibleIntervals } from "../src/signals/heartbeat.ts";
 import { concurrencySignal, DATACENTER_SCORE, datacenterSignal, PRIVACY_RELAY_SCORE } from "../src/signals/network.ts";
@@ -309,12 +315,33 @@ describe("fetch_pattern", () => {
     const all = { playlists: 60, segments: 60, parts: 0 };
     expect(fetchChecks(base, all, { ...ctx, p2p: evidenced }).checks).toEqual([]);
     expect(fetchChecks(base, all, { ...ctx, p2p: lone }).checks).toEqual([]);
-    expect(fetchChecks(base, { playlists: 60, segments: 241, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual([
+    // 60 s watched: 4 × 60 + the 40 s allowance.
+    expect(fetchChecks(base, { playlists: 60, segments: 281, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual([
       "too_many_segments",
     ]);
-    expect(fetchChecks(base, { playlists: 60, segments: 240, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual(
+    expect(fetchChecks(base, { playlists: 60, segments: 280, parts: 0 }, { ...ctx, p2p: evidenced }).checks).toEqual(
       [],
     );
+  });
+
+  test("too many allows a player's start-up burst and the heartbeat lag, not a scraper", () => {
+    // Measured on CI: honest headless Chromium (LL-HLS, video + audio parts) at its first beats,
+    // 10 s credited, ~17 s of parts for both tracks plus the playlist window fetched.
+    const start = { ...base, watchSeconds: 10 };
+    const honest = fetchChecks(start, { playlists: 185, segments: 14, parts: 158 }, ctx);
+    expect(honest.checks).toEqual([]);
+    expect(honest.measures.tooManyCeiling).toBe(4 * 10 + TOO_MANY_ALLOWANCE_SECONDS);
+    // Far past the allowance at the same watch time still fires.
+    expect(fetchChecks(start, { playlists: 185, segments: 81, parts: 0 }, ctx).checks).toEqual(["too_many_segments"]);
+    // Ten minutes in, the allowance is noise: judged at the ratio.
+    const long = { ...base, watchSeconds: 600 };
+    expect(fetchChecks(long, { playlists: 600, segments: 1200, parts: 0 }, ctx).checks).toEqual([]);
+    expect(fetchChecks(long, { playlists: 600, segments: 2441, parts: 0 }, ctx).checks).toEqual(["too_many_segments"]);
+    // The allowance is in seconds: with 2 s segments it is 20 segments.
+    const twoSecond = { ...ctx, segmentDurationSeconds: 2 };
+    const r = fetchChecks({ ...base, watchSeconds: 20 }, { playlists: 20, segments: 61, parts: 0 }, twoSecond);
+    expect(r.measures.tooManyCeiling).toBe(4 * 10 + 20);
+    expect(r.checks).toEqual(["too_many_segments"]);
   });
 
   test("legacy p2p-assigned rows are judged like origin sessions unless evidenced", () => {

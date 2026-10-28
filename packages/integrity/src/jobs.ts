@@ -72,10 +72,35 @@ export interface ScoreSessionsOptions {
   supersedeGraceSeconds?: number;
 }
 
+export interface ExclusionSummary {
+  sessionId: string;
+  score: number;
+  reasons: string[];
+  signals: { code: string; score: number; checks: string[]; measures: Record<string, number> }[];
+}
+
+/** The sub-checks (`checks`) or flags (`flags`) a signal's details name, if any. */
+function firedChecks(details: Record<string, unknown>): string[] {
+  const list = details.checks ?? details.flags;
+  return Array.isArray(list) ? list.filter((c): c is string => typeof c === "string") : [];
+}
+
+/** The numeric measures a signal's details carry (ratios, counts, expectations). */
+function measuresOf(details: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(details)) if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+  return out;
+}
+
 export interface ScoreSessionsResult {
   scored: number;
   counts: Record<Verdict, number>;
   newlyExcluded: string[];
+  /**
+   * Why each newly excluded session was excluded, for the worker's log: the session score and
+   * every signal with the sub-checks that fired. Session ids, codes and numbers only (no PII).
+   */
+  exclusions: ExclusionSummary[];
   /** Excluded sessions an allowance brought back. */
   restored: string[];
   /** Stale sessions replaced by a newer session of the same device and channel, now ended. */
@@ -192,6 +217,7 @@ export async function scoreActiveSessions(
     scored: 0,
     counts: { verified: 0, excluded: 0, pending: 0 },
     newlyExcluded: [],
+    exclusions: [],
     restored: [],
     superseded: [],
     p2p: { evidenced: 0, errors: 0 },
@@ -371,6 +397,17 @@ export async function scoreActiveSessions(
         }
         if (s.score.verdict !== "excluded") continue;
         result.newlyExcluded.push(s.facts.id);
+        result.exclusions.push({
+          sessionId: s.facts.id,
+          score: s.score.score,
+          reasons: s.score.reasons,
+          signals: s.score.signals.map((sig) => ({
+            code: sig.code,
+            score: sig.score,
+            checks: firedChecks(sig.details),
+            measures: measuresOf(sig.details),
+          })),
+        });
         for (const sig of s.score.signals) {
           flags.push({
             subjectType: "session",
