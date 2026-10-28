@@ -10,7 +10,7 @@
  */
 import { KEYS, SOURCE_AAC_STATES, sourceAacPath } from "@commonair/contracts/internal";
 import type { BroadcastInfo, MediaContext } from "../context.ts";
-import { aacCopyArgs, internalRtspUrl } from "../ffmpeg/args.ts";
+import { aacCopyArgs, internalRtspUrl, internalSrtUrl } from "../ffmpeg/args.ts";
 import { Supervisor } from "../ffmpeg/supervisor.ts";
 import { every, type Loop } from "../loop.ts";
 import { needsAacCopy, sourceInfo } from "../mediamtx.ts";
@@ -100,13 +100,17 @@ export class AudioCompat {
   }
 
   private startCopy(): void {
-    const { rtspBase, internalSecret } = this.ctx;
-    const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
+    const { rtspBase, srtBase, internalSecret } = this.ctx;
     const output = internalRtspUrl(rtspBase, sourceAacPath(this.b.slug), internalSecret);
     this.copy = new Supervisor({
       name: `aac:${this.b.slug}`,
       binary: this.ctx.ffmpeg,
-      args: () => aacCopyArgs(input, output),
+      // Fresh W0 per (re)start, like the ladder: the copy's PDT must be the source's (ADR 0012 A2).
+      args: async () => {
+        const input = internalSrtUrl(srtBase, this.b.path, internalSecret);
+        const w0Ms = await this.ctx.clock.w0(this.b.broadcastId, this.b.path, "aac");
+        return aacCopyArgs(input, output, w0Ms);
+      },
       secrets: [internalSecret],
       logger: this.log,
       onProgress: (p) => {

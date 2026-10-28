@@ -38,11 +38,11 @@ describe("needsAacCopy", () => {
 
 describe("aacCopyArgs", () => {
   test("copies video, re-encodes the first audio track to AAC, publishes over RTSP/TCP", () => {
-    const args = aacCopyArgs("rtsp://in/live/alice", "rtsp://out/live/alice/aac");
+    const args = aacCopyArgs("srt://in?streamid=read:live/alice", "rtsp://out/live/alice/aac", 1_000_000);
     const joined = args.join(" ");
-    expect(joined).toContain("-i rtsp://in/live/alice");
+    expect(joined).toContain("-copyts -i srt://in?streamid=read:live/alice");
     expect(joined).toContain("-map 0:v:0? -map 0:a:0 -c:v copy -c:a aac -b:a 128k -ac 2 -ar 48000");
-    expect(joined).toContain("-rtsp_transport tcp -timeout 10000000");
+    expect(joined).toContain("-start_time_realtime 1000000000 -f rtsp -rtsp_transport tcp");
     expect(args.slice(-1)).toEqual(["rtsp://out/live/alice/aac"]);
     expect(args).toContain("-progress");
   });
@@ -63,6 +63,8 @@ describe("AudioCompat states", () => {
       timings: { transcodePollMs: 60_000 },
       logger: createLogger({ service: "test", level: "fatal" }),
       rtspBase: "rtsp://127.0.0.1:8554",
+      srtBase: "srt://127.0.0.1:8890",
+      clock: { w0: async () => 1_000_000 },
       internalSecret: "s",
       ffmpeg: "false",
     } as unknown as MediaContext;

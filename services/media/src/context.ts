@@ -7,7 +7,7 @@ import type { LiveEvent } from "@commonair/contracts/internal";
 import type { Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ObjectStorage } from "@commonair/storage";
-import type { ClockAnchor } from "./clock/anchor.ts";
+import type { MediaClock } from "./clock/anchor.ts";
 import type { DiskBudget } from "./disk.ts";
 import type { Capabilities } from "./ffmpeg/hwaccel.ts";
 import type { MediaMtxClient } from "./mediamtx.ts";
@@ -39,6 +39,8 @@ export interface MediaContext {
   authSecret: string;
   /** MEDIAMTX_RTSP_URL. */
   rtspBase: string;
+  /** MEDIAMTX_SRT_URL: the ladder, the AAC copy and the recorder read the source here (ADR 0012 A2). */
+  srtBase: string;
   transcodeThreshold: number;
   enqueueVodFinalize: (vodId: string) => Promise<void>;
   /** Finalize-job state, for the stale-VOD reconcile. */
@@ -49,8 +51,11 @@ export interface MediaContext {
   transcodeSlots: SlotLimiter;
   /** Dev/test only: allow simulcast targets on loopback/private addresses. */
   simulcastAllowPrivate: boolean;
-  /** Media clock anchor (ADR 0012): shifts recorder wall-clock times onto the broadcast clock. */
-  clock: ClockAnchor;
+  /**
+   * Media clock (ADR 0012): W0 for every SRT reader start, and the anchor that shifts recorder
+   * wall-clock times onto the broadcast clock.
+   */
+  clock: MediaClock;
 }
 
 /** What workers need to know about a live broadcast. */

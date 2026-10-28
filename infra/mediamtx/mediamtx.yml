@@ -10,6 +10,7 @@
 #   1935/tcp  RTMP ingest            8554/tcp  RTSP (TCP only; internal readers/publishers)
 #   8888/tcp  LL-HLS (origin pulls)  8889/tcp  WebRTC / WHIP ingest     8189/udp  WebRTC ICE
 #   9997/tcp  control API (internal) 9998/tcp  Prometheus metrics (internal)
+#   8890/udp  SRT (internal)
 
 logLevel: info
 logStructured: true
@@ -80,8 +81,15 @@ webrtcAdditionalHosts: []
 webrtcICEServers2: []
 
 ###############################################
+# SRT: internal reader path only, for the transcode ladder, the AAC copy and the recorder (ADR 0012
+# variant A2). Every SRT reader of a path gets the same MPEG-TS timeline, which is what lets media
+# anchor every rendition and the VOD to one clock. Never published (compose, Quadlet and
+# selfhost.sh open no port for it); reads need the internal credentials like RTSP.
+srt: true
+srtAddress: :8890
+
+###############################################
 # Protocols we do not serve.
-srt: false
 moq: false
 
 ###############################################
@@ -118,5 +126,10 @@ paths:
   # Transcoded renditions: live/<slug>/<rendition>, and live/<slug>/aac (the source with AAC
   # audio, for WHIP/Opus ingests), published over RTSP by services/media.
   # The API auth hook allows publishing here only to the internal user.
+  # useAbsoluteTimestamp: PDT comes from the publisher's RTCP sender reports, which media anchors
+  # to the source's own PDT (W0, ADR 0012 A2), so a frame has one PDT on every rendition. Only
+  # here: the ingest block above must never have it, or a streamer could move media time (ADR
+  # 0012 decision 1: the media clock is the ingest wall clock).
   "~^live/[a-z0-9_]{3,25}/(1080p|720p|480p|audio|aac)$":
     source: publisher
+    useAbsoluteTimestamp: true

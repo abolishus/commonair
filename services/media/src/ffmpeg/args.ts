@@ -18,6 +18,52 @@ const PROGRESS = ["-progress", "pipe:1", "-nostats"];
 /** Readers of the live source: TCP only (the MediaMTX config disables UDP), bounded socket waits. */
 const RTSP_IN = ["-rtsp_transport", "tcp", "-timeout", "10000000"];
 
+/**
+ * SRT receive latency for the internal network, in microseconds (ffmpeg's unit). SRT's 120 ms
+ * default budgets for retransmissions across the internet; MediaMTX and media share a host or a
+ * private network. It only delays the readers' output: PDT comes from W0, not from arrival.
+ */
+export const SRT_LATENCY_US = 40_000;
+/** Bounded SRT waits: connect (ms, libsrt's unit) and any later socket read (µs). */
+const SRT_CONNECT_TIMEOUT_MS = 5_000;
+const SRT_RW_TIMEOUT_US = 10_000_000;
+
+/**
+ * `srt://host:port?…&streamid=read:<path>:internal:<secret>` from MEDIAMTX_SRT_URL (ADR 0012 A2):
+ * the reader for the ladder, the AAC copy and the recorder. MediaMTX gives every SRT reader one
+ * stream timeline, so `-copyts` times are comparable across sessions. ffmpeg percent-decodes the
+ * `streamid` value, so the path and secret are percent-encoded and the separators stay literal;
+ * MediaMTX splits the decoded value on `:`, so a secret containing one cannot be expressed.
+ */
+export function internalSrtUrl(base: string, path: string, secret: string): string {
+  if (secret.includes(":")) throw new Error("the internal secret cannot contain ':' (SRT streamid separator)");
+  const u = new URL(base);
+  if (u.protocol !== "srt:") throw new Error("MEDIAMTX_SRT_URL must be an srt:// URL");
+  const streamid = ["read", encodeURIComponent(path), MEDIA_INTERNAL_USER, encodeURIComponent(secret)].join(":");
+  const query = [
+    "mode=caller",
+    "transtype=live",
+    `latency=${SRT_LATENCY_US}`,
+    `connect_timeout=${SRT_CONNECT_TIMEOUT_MS}`,
+    `timeout=${SRT_RW_TIMEOUT_US}`,
+    // Last, so redaction masks from the secret to the end of the URL.
+    `streamid=${streamid}`,
+  ].join("&");
+  return `srt://${u.host}?${query}`;
+}
+
+/**
+ * Input flag for an SRT reader: keep the source's stream timeline, so the ladder's outputs can
+ * be anchored with W0 and the recorder's fMP4 times are W0-relative.
+ */
+const SRT_IN = ["-copyts"];
+
+/** `-start_time_realtime`: wall clock (µs) of PTS 0, so an RTSP output's sender reports carry W0. */
+function realtime(w0Ms: number): string[] {
+  if (!Number.isFinite(w0Ms) || w0Ms <= 0) throw new RangeError("W0 must be a positive epoch time");
+  return ["-start_time_realtime", String(Math.round(w0Ms * 1000))];
+}
+
 /** `rtsp://internal:<secret>@host:port/<path>` from MEDIAMTX_RTSP_URL. */
 export function internalRtspUrl(base: string, path: string, secret: string): string {
   const u = new URL(base);
@@ -71,11 +117,24 @@ export interface EncoderSettings {
   encoder: H264Encoder;
 }
 
+/**
+ * Keyframes on 2 s boundaries of the shared source timeline, the first frame always: every rung
+ * and every ladder run, restarts included, cuts at the same instants. ffmpeg (6.1+) evaluates `t`
+ * relative to the first frame the encoder sees, not to the input timeline, so `ALIGN_START`
+ * makes that first frame the first one on a 2 s boundary of the timeline (measured: without it a
+ * B-frame source keyed 67 ms after every boundary).
+ */
+export const KEYFRAME_EXPR = "expr:if(isnan(prev_forced_t),1,gte(floor(t/2),floor(prev_forced_t/2)+1))";
+/**
+ * Drops video frames before the first 2 s boundary of the source timeline (`t`, `start_t` are
+ * absolute under `-copyts`; 1 ms of slack for rounding). Up to 2 s of a new ladder's video is lost.
+ */
+export const ALIGN_START = "select='gte(t,2*ceil((start_t-0.001)/2)-0.001)'";
+
 function videoEncoderFlags(encoder: H264Encoder, kbps: number): string[] {
   const rate = [`-b:v`, `${kbps}k`, "-maxrate", `${kbps}k`, "-bufsize", `${kbps * 2}k`];
-  // Keyframes every 2 s of source time, aligned across rungs (and with a 2 s-GOP source), no
-  // B-frames so WebRTC/LL-HLS players never see reordering.
-  const gop = ["-force_key_frames", "expr:gte(t,n_forced*2)", "-bf", "0"];
+  // No B-frames so WebRTC/LL-HLS players never see reordering.
+  const gop = ["-force_key_frames", KEYFRAME_EXPR, "-bf", "0"];
   if (encoder === "h264_nvenc")
     return ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr", ...rate, ...gop, "-forced-idr", "1"];
   return [
@@ -95,23 +154,31 @@ function videoEncoderFlags(encoder: H264Encoder, kbps: number): string[] {
 }
 
 export interface LadderInput {
+  /** The source over SRT (`internalSrtUrl`). */
   input: string;
+  /** Wall clock of the source timeline's PTS 0, epoch ms (`clock/w0.ts`). */
+  w0Ms: number;
   /** Publish URL for each rung, `rtsp://internal:<secret>@host/live/<slug>/<rung>`. */
   outputFor: (rung: Rung["name"]) => string;
   rungs: readonly Rung[];
   encoder: H264Encoder;
 }
 
-/** One decode, split once per video rung, each rung published back to MediaMTX over RTSP. */
-export function ladderArgs({ input, outputFor, rungs, encoder }: LadderInput): string[] {
+/**
+ * One decode, split once per video rung, each rung published back to MediaMTX over RTSP. Every
+ * output carries W0 in its sender reports and the rendition paths stamp PDT from them
+ * (`useAbsoluteTimestamp`), so a frame has the source's PDT on every rung.
+ */
+export function ladderArgs({ input, w0Ms, outputFor, rungs, encoder }: LadderInput): string[] {
   const video = rungs.filter((r) => r.name !== "audio");
-  const args = [...BASE, ...PROGRESS, ...RTSP_IN, "-i", input];
+  const rt = realtime(w0Ms);
+  const args = [...BASE, ...PROGRESS, ...SRT_IN, "-i", input];
   if (video.length > 0) {
     const labels = video.map((_, i) => `[v${i}]`).join("");
     const scales = video
       .map((r, i) => ("height" in r ? `[v${i}]scale=-2:${r.height}:flags=bicubic[o${i}]` : ""))
       .join(";");
-    args.push("-filter_complex", `[0:v:0]split=${video.length}${labels};${scales}`);
+    args.push("-filter_complex", `[0:v:0]${ALIGN_START},split=${video.length}${labels};${scales}`);
   }
   let vi = 0;
   for (const r of rungs) {
@@ -122,7 +189,7 @@ export function ladderArgs({ input, outputFor, rungs, encoder }: LadderInput): s
       args.push("-map", "0:a:0?", "-c:a", "aac", "-b:a", `${r.audioKbps}k`, "-ac", "2");
       vi++;
     }
-    args.push("-f", "rtsp", "-rtsp_transport", "tcp", "-pkt_size", "1200", outputFor(r.name));
+    args.push(...rt, "-f", "rtsp", "-rtsp_transport", "tcp", "-pkt_size", "1200", outputFor(r.name));
   }
   return args;
 }
@@ -131,11 +198,11 @@ export function ladderArgs({ input, outputFor, rungs, encoder }: LadderInput): s
  * The source with its audio re-encoded to AAC and the video copied, published back to MediaMTX
  * (`sourceAacPath`): cheap enough to run for every WHIP broadcast, whatever the viewer count.
  */
-export function aacCopyArgs(input: string, output: string): string[] {
+export function aacCopyArgs(input: string, output: string, w0Ms: number): string[] {
   return [
     ...BASE,
     ...PROGRESS,
-    ...RTSP_IN,
+    ...SRT_IN,
     "-i",
     input,
     "-map",
@@ -152,6 +219,7 @@ export function aacCopyArgs(input: string, output: string): string[] {
     "2",
     "-ar",
     "48000",
+    ...realtime(w0Ms),
     "-f",
     "rtsp",
     "-rtsp_transport",
@@ -169,17 +237,28 @@ export interface RecorderInput {
   /** Unique per ffmpeg run so a restart never overwrites earlier segments. */
   runId: string;
   segmentSeconds: number;
+  /**
+   * The source's audio is AAC. MPEG-TS (SRT) carries it with ADTS headers, which MP4 cannot hold;
+   * the nested HLS muxer does not insert the rewrap itself. Opus needs none (and the filter would
+   * refuse it), so the caller says which.
+   */
+  aacAudio: boolean;
 }
 
 export const recorderPlaylist = (runId: string) => `${runId}.m3u8`;
 export const recorderInit = (runId: string) => `init_${runId}.mp4`;
 
-/** Copy the source into fMP4 HLS segments: no re-encode, segment boundaries on source keyframes. */
-export function recorderArgs({ input, dir, runId, segmentSeconds }: RecorderInput): string[] {
+/**
+ * Copy the source into fMP4 HLS segments: no re-encode, segment boundaries on source keyframes.
+ * The input is SRT with `-copyts`, and `frag_discont` stops the MP4 muxer from rebasing the first
+ * fragment to 0, so `tfdt` is the source timeline and `W0 + time` is a sample's exact PDT (R4,
+ * ADR 0012 decision 4; measured in `clock-mediamtx.int.test.ts`).
+ */
+export function recorderArgs({ input, dir, runId, segmentSeconds, aacAudio }: RecorderInput): string[] {
   return [
     ...BASE,
     ...PROGRESS,
-    ...RTSP_IN,
+    ...SRT_IN,
     "-i",
     input,
     "-map",
@@ -188,8 +267,11 @@ export function recorderArgs({ input, dir, runId, segmentSeconds }: RecorderInpu
     "0:a:0?",
     "-c",
     "copy",
+    ...(aacAudio ? ["-bsf:a", "aac_adtstoasc"] : []),
     "-f",
     "hls",
+    "-hls_segment_options",
+    "movflags=+frag_discont",
     "-hls_time",
     String(segmentSeconds),
     "-hls_list_size",
