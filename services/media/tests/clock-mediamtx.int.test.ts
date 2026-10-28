@@ -479,10 +479,19 @@ describe("recorder over SRT (R4)", () => {
       text: () => Bun.file(join(dir, recorderPlaylist(runId))).text(),
     };
     const stderr = new Response(proc.stderr).text();
+    // Kept as seen while recording: stopping the container can cut ffmpeg's final rewrite of the
+    // playlist short and leave it empty.
+    let seen = "";
     try {
       await waitFor(
         "three recorder segments",
-        async () => (await playlist.exists()) && parsePlaylist(await playlist.text()).segments.length >= 3,
+        async () => {
+          if (!(await playlist.exists())) return false;
+          const text = await playlist.text();
+          if (parsePlaylist(text).segments.length < 3) return false;
+          seen = text;
+          return true;
+        },
         60_000,
       );
     } catch (err) {
@@ -495,7 +504,7 @@ describe("recorder over SRT (R4)", () => {
     }
     const k = origin.get(slug) ?? (await srtOrigin(slug));
     const eSource = steadyE(await source, slug);
-    const segments = parsePlaylist(await playlist.text()).segments.slice(0, 3);
+    const segments = parsePlaylist(seen).segments.slice(0, 3);
     const offsets: number[] = [];
     for (const seg of segments) {
       const init = new Uint8Array(readFileSync(join(dir, seg.map ?? "")));
