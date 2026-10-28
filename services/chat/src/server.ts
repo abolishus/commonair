@@ -10,7 +10,7 @@ import type { Server } from "bun";
 import { ClientFrame } from "@commonair/contracts";
 import type { Database } from "@commonair/db";
 import { createLogger, type Logger } from "@commonair/observability";
-import { createValkey, runService, valkeyCheck, type RunningService } from "@commonair/service";
+import { createValkey, runService, valkeyCheck, type RunningService, type ValkeyClient } from "@commonair/service";
 import { Authenticator } from "./auth.ts";
 import { Bus } from "./bus.ts";
 import { splitChatCommand } from "./commands.ts";
@@ -29,6 +29,8 @@ import { plugins } from "./plugins/index.ts";
 import { Rooms } from "./rooms.ts";
 import { type ChatSocket, CLOSE, type ConnData, sendFrame, sendNotice, takeToken, type Writer } from "./socket.ts";
 import type { Identity, Rejection } from "./types.ts";
+import { warmPool } from "./pool.ts";
+import { DeadlineError, watchEventLoop, withDeadline } from "./watchdog.ts";
 
 export interface ChatServiceOptions {
   port: number;
@@ -57,6 +59,16 @@ export interface ChatServiceOptions {
    * single regex call.
    */
   filterWorkers?: number;
+  /**
+   * Bound on the awaits before a WebSocket upgrade (token check, profile read). Past it the
+   * client gets a 503 instead of an upgrade that never answers. Default 5 s.
+   */
+  upgradeTimeoutMs?: number;
+  /**
+   * Pool connections opened at start-up, retried until they all succeed; /readyz fails until
+   * then (default 0: lazy). See pool.ts.
+   */
+  warmConnections?: number;
   /** Runs last during shutdown (close the DB pool, flush telemetry). */
   onShutdown?: () => Promise<void>;
 }
@@ -72,14 +84,21 @@ export interface ChatService {
 }
 
 const MAX_PENDING_FRAMES = 32;
+/** Upgrades taking at least this long are logged with the user id, to trace dependency stalls. */
+const SLOW_UPGRADE_MS = 1_000;
 const MAX_BAD_FRAMES = 20;
 
 export async function startChatService(opts: ChatServiceOptions): Promise<ChatService> {
   const logger = opts.logger ?? createLogger({ service: "chat" });
   const heartbeatMs = opts.heartbeatMs ?? 30_000;
+  const upgradeTimeoutMs = opts.upgradeTimeoutMs ?? 5_000;
   const metrics = createMetrics();
   const valkey = createValkey(opts.valkeyUrl, { keyPrefix: opts.keyPrefix, name: "chat" });
   const subscriber = createValkey(opts.valkeyUrl, { name: "chat-sub" });
+  watchValkey(valkey, "chat", logger);
+  watchValkey(subscriber, "chat-sub", logger);
+  const pool = warmPool(opts.db, opts.warmConnections ?? 0, logger);
+  const stopLagWatch = watchEventLoop((lagMs) => logger.warn("event loop stalled", { lagMs }));
   const bus = new Bus(valkey, subscriber, opts.busPrefix ?? "", logger);
   const directory = new Directory(opts.db, {
     onInvalidFilter: (channelId, filterId, reason) => {
@@ -350,6 +369,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       valkey: valkeyCheck(valkey),
       postgres: async () => {
         await opts.db.execute(sql`select 1`);
+        if (!pool.warm) throw new Error("pool warming up");
       },
     },
     fetch: (req, server) => upgrade(req, server),
@@ -372,6 +392,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     },
     onShutdown: async () => {
       clearInterval(sweeper);
+      stopLagWatch();
+      pool.stop();
       await writer.close();
       for (const mw of middlewares)
         await mw
@@ -383,33 +405,65 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     },
   });
 
+  type UpgradeStage = "authenticate" | "profile";
+  type Prepared = { ok: true; identity: Identity; user: ConnData["user"] } | { ok: false; response: Response };
+
+  /** Everything before `server.upgrade` that waits on something; `trace` says what is pending. */
+  const prepareUpgrade = async (
+    req: Request,
+    trace: { stage: UpgradeStage; userId: string | null },
+  ): Promise<Prepared> => {
+    const result = await auth.authenticate(req);
+    if (!result.ok) {
+      // Codes only: never the token. Clients (the IRC gateway) cannot see why an upgrade failed.
+      logger.info("upgrade refused", { status: result.status, error: result.error });
+      return { ok: false, response: Response.json({ error: result.error }, { status: result.status }) };
+    }
+    let user: ConnData["user"] = null;
+    if (result.identity.userId) {
+      trace.stage = "profile";
+      trace.userId = result.identity.userId;
+      directory.invalidateProfile(result.identity.userId);
+      const profile = await directory.profile(result.identity.userId);
+      if (!profile || profile.deleted) {
+        logger.info("upgrade refused", { status: 401, error: "unknown_user" });
+        return { ok: false, response: Response.json({ error: "unknown_user" }, { status: 401 }) };
+      }
+      user = { id: profile.id, username: profile.username, displayName: profile.displayName };
+    }
+    return { ok: true, identity: result.identity, user };
+  };
+
   async function upgrade(req: Request, server: Server<ConnData>): Promise<Response | undefined> {
     const { pathname } = new URL(req.url);
     if (pathname !== "/ws") return Response.json({ error: "not_found" }, { status: 404 });
     if (draining) return Response.json({ error: "shutting_down" }, { status: 503 });
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket")
       return Response.json({ error: "websocket_required" }, { status: 426 });
-    const result = await auth.authenticate(req);
-    if (!result.ok) {
-      // Codes only: never the token. Clients (the IRC gateway) cannot see why an upgrade failed.
-      logger.info("upgrade refused", { status: result.status, error: result.error });
-      return Response.json({ error: result.error }, { status: result.status });
-    }
-    let user: ConnData["user"] = null;
-    if (result.identity.userId) {
-      directory.invalidateProfile(result.identity.userId);
-      const profile = await directory.profile(result.identity.userId);
-      if (!profile || profile.deleted) {
-        logger.info("upgrade refused", { status: 401, error: "unknown_user" });
-        return Response.json({ error: "unknown_user" }, { status: 401 });
+    const started = performance.now();
+    const trace: { stage: UpgradeStage; userId: string | null } = { stage: "authenticate", userId: null };
+    let prepared: Prepared;
+    try {
+      prepared = await withDeadline(prepareUpgrade(req, trace), upgradeTimeoutMs);
+    } catch (err) {
+      const elapsedMs = Math.round(performance.now() - started);
+      if (!(err instanceof DeadlineError)) {
+        logger.error("upgrade failed", { ...errorFields(err), stage: trace.stage, userId: trace.userId, elapsedMs });
+        return Response.json({ error: "unavailable" }, { status: 503, headers: { "retry-after": "1" } });
       }
-      user = { id: profile.id, username: profile.username, displayName: profile.displayName };
+      // A dependency stopped answering: answer now so the client can retry, rather than hang.
+      metrics.upgradeTimedOut(trace.stage);
+      logger.warn("upgrade timed out", { stage: trace.stage, userId: trace.userId, elapsedMs });
+      return Response.json({ error: "unavailable" }, { status: 503, headers: { "retry-after": "1" } });
     }
+    const elapsedMs = Math.round(performance.now() - started);
+    if (elapsedMs >= SLOW_UPGRADE_MS) logger.warn("upgrade slow", { userId: trace.userId, elapsedMs });
+    if (!prepared.ok) return prepared.response;
     const now = Date.now();
     const data: ConnData = {
       sessionId: crypto.randomUUID(),
-      identity: result.identity,
-      user,
+      identity: prepared.identity,
+      user: prepared.user,
       rooms: new Map(),
       lastSeen: now,
       closed: false,
@@ -418,7 +472,10 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       pending: 0,
       errors: 0,
     };
-    if (server.upgrade(req, { data })) return undefined;
+    if (server.upgrade(req, { data })) {
+      logger.debug("upgrade accepted", { sessionId: data.sessionId, userId: trace.userId, elapsedMs });
+      return undefined;
+    }
     return Response.json({ error: "upgrade_failed" }, { status: 400 });
   }
 
@@ -438,6 +495,29 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       await service.stop();
     },
   };
+}
+
+/**
+ * Log a Valkey client's connection trouble and recovery (codes only: iovalkey errors can carry
+ * command arguments). Repeated errors while disconnected are logged once per outage.
+ */
+function watchValkey(client: ValkeyClient, name: string, logger: Logger): void {
+  let down = false;
+  client.on("error", (err: unknown) => {
+    if (down) return;
+    down = true;
+    logger.warn("valkey connection error", { ...errorFields(err), client: name });
+  });
+  client.on("reconnecting", () => {
+    if (down) return;
+    down = true;
+    logger.warn("valkey connection lost; reconnecting", { client: name });
+  });
+  client.on("ready", () => {
+    if (!down) return;
+    down = false;
+    logger.info("valkey reconnected", { client: name });
+  });
 }
 
 async function initPlugins(middlewares: readonly MessageMiddleware[], chat: ChatCore, logger: Logger): Promise<void> {

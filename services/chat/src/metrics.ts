@@ -36,7 +36,11 @@ export function createMetrics() {
     description: "Time from publish on one instance to local delivery on another",
     unit: "ms",
   });
+  const upgradeTimeouts = m.createCounter("chat.upgrade.timeouts", {
+    description: "WebSocket upgrades answered 503 because a dependency did not answer in time, by stage",
+  });
   return {
+    upgradeTimedOut: (stage: string) => upgradeTimeouts.add(1, { stage }),
     connectionOpened: (via: string) => connections.add(1, { via }),
     connectionClosed: (via: string) => connections.add(-1, { via }),
     messageIn: () => messagesIn.add(1),

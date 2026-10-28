@@ -10,7 +10,12 @@ import { startChatService } from "./server.ts";
 const env = loadEnv(coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(servicePorts));
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "chat" });
 const logger = createLogger({ service: "chat", level: env.LOG_LEVEL });
-const db = createDb({ url: env.DATABASE_URL, max: env.DATABASE_POOL_MAX, applicationName: "commonair-chat" });
+const db = createDb({
+  url: env.DATABASE_URL,
+  max: env.DATABASE_POOL_MAX,
+  applicationName: "commonair-chat",
+  onConnectionClosed: (connectionId) => logger.info("postgres connection closed", { connectionId }),
+});
 
 const chat = await startChatService({
   port: env.CHAT_PORT,
@@ -18,6 +23,8 @@ const chat = await startChatService({
   valkeyUrl: env.VALKEY_URL,
   internalSecret: env.INTERNAL_API_SECRET,
   logger,
+  // Enough for a join's parallel reads, without holding the whole pool open.
+  warmConnections: Math.min(4, env.DATABASE_POOL_MAX),
   // SIGTERM/SIGINT close sockets and flush chat first; then the pool and telemetry.
   onShutdown: async () => {
     await Promise.allSettled([db.close(), telemetry.shutdown()]);

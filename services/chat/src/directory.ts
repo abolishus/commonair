@@ -5,7 +5,7 @@
  * Read-through caches over Postgres for channels, users and per-channel standing. TTLs bound
  * staleness if an invalidation on BUS.chatControl is ever missed (pub/sub is at-most-once).
  */
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, isNull, sql } from "drizzle-orm";
 import { ChannelChatSettings } from "@commonair/contracts";
 import { schema, type Database } from "@commonair/db";
 import { TtlCache } from "./cache.ts";
@@ -159,15 +159,19 @@ export class Directory {
   }
 
   private async loadProfile(userId: string): Promise<UserProfile | null> {
-    const [[row], member] = await Promise.all([
-      this.db.select().from(users).where(eq(users.id, userId)).limit(1),
-      this.db
-        .select({ id: memberships.id })
-        .from(memberships)
-        .where(and(eq(memberships.userId, userId), eq(memberships.status, "active")))
-        .limit(1),
-    ]);
-    if (!row) return null;
+    // One statement: every upgrade reads this, and two in parallel need a second pool
+    // connection, i.e. a new connect (and name lookup) when only one is warm.
+    const activeMembership = this.db
+      .select({ id: memberships.id })
+      .from(memberships)
+      .where(and(eq(memberships.userId, users.id), eq(memberships.status, "active")));
+    const [found] = await this.db
+      .select({ row: users, isMember: sql<boolean>`${exists(activeMembership)}` })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!found) return null;
+    const row = found.row;
     return {
       id: row.id,
       username: row.username,
@@ -180,7 +184,7 @@ export class Directory {
       banned: row.banned,
       banExpires: row.banExpires,
       deleted: row.deletedAt !== null,
-      isMember: member.length > 0,
+      isMember: found.isMember,
     };
   }
 
