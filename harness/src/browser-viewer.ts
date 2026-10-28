@@ -215,6 +215,8 @@ export function harnessPlayerUrl(
 class ViewerPage {
   private stoppedIds = new Set<string>();
   private closed = false;
+  /** The web player's latest `playback.start` session (null for harness pages, which report their own). */
+  webSessionId: string | null = null;
 
   constructor(
     readonly page: Page,
@@ -259,6 +261,21 @@ class ViewerPage {
   }
 }
 
+/**
+ * The session id in a web page's `playback.start` response (oRPC's RPC body, `{ json: { sessionId } }`).
+ * The web player keeps its session to itself, so the harness reads it off the wire.
+ */
+export function sessionIdFromRpcStart(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || !("json" in body)) return null;
+  const json = (body as { json: unknown }).json;
+  if (typeof json !== "object" || json === null || !("sessionId" in json)) return null;
+  const id = (json as { sessionId: unknown }).sessionId;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/** The oRPC path the web player starts its playback session on. */
+export const WEB_PLAYBACK_START_PATH = "/rpc/playback/start";
+
 /** A web viewer's P2P status (`data-p2p`, peer connections), or null for any other viewer. */
 export function viewerP2PStatus(viewer: Viewer): Promise<P2PStatus> | null {
   return viewer instanceof BrowserViewer ? viewer.p2pStatus() : null;
@@ -295,7 +312,7 @@ class BrowserViewer implements Viewer {
     this.last = {
       ...this.last,
       playbackPath: info?.path ?? null,
-      sessionId: info?.sessionId ?? null,
+      sessionId: info?.sessionId ?? this.host.webSessionId,
       source: info?.source ?? null,
       ttffMs: probe?.ttffMs ?? null,
       stalls: probe?.stalls ?? 0,
@@ -375,6 +392,19 @@ export async function openBrowserViewers(opts: OpenBrowserViewersOptions): Promi
     }
     const page = await context.newPage();
     page.on("pageerror", (err) => opts.log?.warn("viewer page error", { engine: opts.engine, error: err.message }));
+    const ids = Array.from({ length: onPage }, (_, i) => (player === "harness" ? `p${i}` : "v0"));
+    const host = new ViewerPage(page, context, ids, player === "harness");
+    if (player === "web") {
+      page.on("response", (res) => {
+        if (!res.ok() || new URL(res.url()).pathname !== WEB_PLAYBACK_START_PATH) return;
+        res
+          .json()
+          .then((body: unknown) => {
+            host.webSessionId = sessionIdFromRpcStart(body) ?? host.webSessionId;
+          })
+          .catch(() => undefined);
+      });
+    }
     const ip = opts.clientIp?.(p);
     let url: string;
     if (player === "harness") {
@@ -390,8 +420,6 @@ export async function openBrowserViewers(opts: OpenBrowserViewersOptions): Promi
       url = webEmbedUrl(opts.webUrl, opts.target.channel);
     }
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    const ids = Array.from({ length: onPage }, (_, i) => (player === "harness" ? `p${i}` : "v0"));
-    const host = new ViewerPage(page, context, ids, player === "harness");
     for (const id of ids) viewers.push(new BrowserViewer(`${opts.engine}-${p}-${id}`, opts.engine, host, id));
   }
   return viewers;

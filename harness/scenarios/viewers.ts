@@ -192,8 +192,9 @@ async function checkP2PRecord(
       await waitFor(
         "every session scored",
         async () => {
+          // Drizzle's snake_case names the bytesP2p column bytes_p_2p (0000_initial.sql).
           last = (await sql`
-            select id, bytes_http::float8 as bytes_http, bytes_p2p::float8 as bytes_p2p, watch_seconds,
+            select id, bytes_http::float8 as bytes_http, bytes_p_2p::float8 as bytes_p2p, watch_seconds,
                    verdict::text as verdict, verdict_reasons, scored_at is not null as scored
               from playback_sessions where id = any(${sql.array(all, "uuid")})`) as (SessionStats & {
             scored: boolean;
