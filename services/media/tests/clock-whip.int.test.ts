@@ -4,10 +4,13 @@
 /**
  * W0 of a WHIP source from its first seconds (ADR 0012 A2; the clock-skew failure of 2026-10-28).
  *
- * MediaMTX stamps a WebRTC path's LL-HLS PDT from an estimate that starts over a second off and
- * slews toward its steady value at about 5 % (one 2 s segment moves about 95 ms) for the first
- * ~25 s. The SRT timeline does not move, so a W0 read in that window is off by however far the
- * estimate still had to go: the AAC copy, started at publish, kept a W0 a second away from the one
+ * MediaMTX stamps a WebRTC path's LL-HLS PDT from arrival (its NTP estimator, re-anchored to the
+ * arrival time whenever media would land in the future). The harness streamer's ffmpeg starts its
+ * `-re` clock before the WHIP handshake is done, so it starts ~1.5 s behind and catches up at
+ * `-readrate_catchup`'s default 1.05× for ~30 s: PDT moves about 95 ms per 2 s segment against
+ * the stream timeline, which does not move (with `-readrate_catchup 1` W0 is constant from the
+ * second segment on, measured). A W0 read in that window is off by however far the publisher
+ * still had to catch up: the AAC copy, started at publish, kept a W0 a second away from the one
  * the ladder and recorder read later. `fetchW0` must refuse W0 until the PDT has settled, and an
  * AAC copy started on the first W0 it accepts must carry the source's settled PDT.
  *
@@ -132,6 +135,7 @@ test("fetchW0 refuses a WHIP path's W0 until its PDT settles, and an AAC copy st
   });
   const t0 = Date.now();
   await whip.start();
+  await mtx.waitForPath(PATH, 30_000);
 
   const raw = new Map<string, Sample & { t: number }>();
   const accepted: { t: number; w0Ms: number }[] = [];
@@ -187,7 +191,11 @@ test("fetchW0 refuses a WHIP path's W0 until its PDT settles, and an AAC copy st
   if (process.env.TEST_CLOCK_LOG) console.warn(`whip AAC copy − source PDT ms: ${JSON.stringify(pairs)}`);
 
   // The source settles: its last segments agree on W0.
-  expect(series.length, report()).toBeGreaterThan(8);
+  if (series.length <= 8) {
+    // Nothing (or little) to judge: say why, from MediaMTX and the streamer.
+    const logs = (await mtx.logs()).split("\n").slice(-40).join("\n");
+    throw new Error(`${report()}\nstreamer: ${whip.stderr().slice(-10).join("\n")}\nmediamtx:\n${logs}`);
+  }
   for (const s of series.slice(-3)) expect(Math.abs(s.w0Ms - settled), report()).toBeLessThanOrEqual(FRAME_MS / 4);
   // W0 is accepted (well before the end of the watch) and never off the settled value.
   expect(accepted.length, report()).toBeGreaterThan(0);

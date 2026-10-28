@@ -14,6 +14,15 @@
  * Frames are identified by the timestamp strip the harness streamer burns into every frame. SRT
  * readers (the ladder and recorder too) run in a container sharing MediaMTX's network namespace,
  * so the host ffmpeg needs no SRT support.
+ *
+ * MediaMTX stamps an RTMP source's PDT from arrival (its NTP estimator): a source that falls behind
+ * real time and catches up (ffmpeg's `-re` at 1.05×) moves PDT against the stream timeline, and
+ * one more than 5 s behind is re-anchored, so PDT jumps by ~5 s. On a loaded CI runner the
+ * strip-burning sources did both (2026-10-28: W0 "not settled, moved −100 ms over 1900 ms", and
+ * rung/recorder PDT 5040–5052 ms off a source PDT read a minute earlier). So W0 is taken as the
+ * media service takes it (`settledW0`: polled until settled), the source's `PDT − strip` is
+ * read during each measurement rather than once up front, and a measurement during which the
+ * source itself moved is repeated once and then reported as the runner's, not the clock's.
  */
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -21,7 +30,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test"
 import { buildStreamerArgs } from "../../../harness/src/ffmpeg.ts";
 import { decodeStrip, graySource } from "../../../harness/src/timestamp-strip.ts";
 import { parseFragment, parseInit } from "../src/clock/boxes.ts";
-import { fetchW0, firstVariant, newestSegment, pdtTrack } from "../src/clock/w0.ts";
+import { fetchW0, firstVariant, newestSegment, pdtTrack, W0Error, type W0Result } from "../src/clock/w0.ts";
 import { internalRtspUrl, internalSrtUrl, ladderArgs, recorderArgs, recorderPlaylist } from "../src/ffmpeg/args.ts";
 import { AUDIO_RUNG, type Rung } from "../src/transcode/ladder.ts";
 import { parsePlaylist } from "../src/vod/playlist.ts";
@@ -86,6 +95,8 @@ const basic = `Basic ${Buffer.from(`internal:${SECRET}`).toString("base64")}`;
 const SRT_BASE = "srt://127.0.0.1:8890";
 const RTSP_BASE = "rtsp://127.0.0.1:8554";
 
+const CATCH_UP = ["-readrate", "1", "-readrate_catchup", "2"];
+
 const PLAIN = `clk_${run}`;
 const BFRAMES = `clkb_${run}`;
 
@@ -102,6 +113,10 @@ function startSource(slug: string, bframes: boolean): void {
     startEpochMs: Date.now(),
     timecode: false,
   });
+  // A source that starts behind its `-re` clock (a loaded runner at startup) catches up at
+  // ffmpeg's default 1.05× for a minute and moves MediaMTX's PDT all along; catching up at 2×
+  // settles it within seconds (beforeAll waits for that).
+  for (let i = args.indexOf("-re"); i >= 0; i = args.indexOf("-re")) args.splice(i, 1, ...CATCH_UP);
   if (bframes) {
     // zerolatency forbids B-frames; drop it and ask for two.
     const tune = args.indexOf("zerolatency");
@@ -264,7 +279,49 @@ async function waitFor<T>(what: string, fn: () => Promise<T | null | undefined |
   throw new Error(`timed out waiting for ${what}${last instanceof Error ? `: ${last.message}` : ""}`);
 }
 
-const sourceE = new Map<string, number>();
+/** W0 as the media service takes it: polled until the path's PDT has settled. */
+async function settledW0(slug: string, ms = 40_000): Promise<W0Result> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    try {
+      return await fetchW0({ hlsBase: hlsBase(), path: `live/${slug}`, password: SECRET });
+    } catch (err) {
+      if (!(err instanceof W0Error) || err.reason !== "unsettled" || Date.now() > deadline) throw err;
+      await Bun.sleep(500);
+    }
+  }
+}
+
+/** The source's `PDT − strip` over a measurement: one value, or the source moved under it. */
+function steadyE(samples: HlsSample[], slug: string): number {
+  if (samples.length === 0) throw new Error(`no source samples of ${slug} during the measurement`);
+  const es = samples.map((x) => x.pdtMs - x.strip);
+  const spread = Math.max(...es) - Math.min(...es);
+  if (spread > FRAME_MS) throw new SourceMoved(slug, spread);
+  return es[0] ?? Number.NaN;
+}
+
+/** The source's own PDT moved during a measurement: the runner did not keep it real-time. */
+class SourceMoved extends Error {
+  constructor(slug: string, spreadMs: number) {
+    super(
+      `source ${slug}: PDT − strip moved ${Math.round(spreadMs)} ms during the measurement ` +
+        "(MediaMTX re-estimated its arrival clock: the strip source fell behind real time, so the runner is overloaded)",
+    );
+  }
+}
+
+/** Run a measurement; once more if the source moved under it (an overloaded moment, not the clock). */
+async function measured<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!(err instanceof SourceMoved)) throw err;
+    console.warn(`${err.message}; measuring again`);
+    return fn();
+  }
+}
+
 const origin = new Map<string, number>();
 
 beforeAll(async () => {
@@ -272,7 +329,8 @@ beforeAll(async () => {
   startSource(PLAIN, false);
   startSource(BFRAMES, true);
   for (const slug of [PLAIN, BFRAMES]) await waitFor(`${slug} on LL-HLS`, () => hlsSample(`live/${slug}`), 60_000);
-}, 120_000);
+  for (const slug of [PLAIN, BFRAMES]) await settledW0(slug, 60_000);
+}, 180_000);
 
 afterAll(async () => {
   for (const s of sources) s.kill("SIGKILL");
@@ -318,11 +376,10 @@ describe.each([
     // The SRT pts of the frame whose strip the segment starts with.
     const srtPts = (s.strip - k) / 1000;
     expect(Math.abs(s.pts - 10 - srtPts) * 1000).toBeLessThanOrEqual(FRAME_MS);
-    const w0 = await fetchW0({ hlsBase: hlsBase(), path: `live/${slug}`, password: SECRET });
+    const w0 = await settledW0(slug);
     expect(w0.handler).toBe("vide");
     // W0 + SRT pts is that frame's source PDT.
     const e = s.pdtMs - s.strip;
-    sourceE.set(slug, e);
     expect(Math.abs(w0.w0Ms + srtPts * 1000 - (s.strip + e))).toBeLessThanOrEqual(FRAME_MS);
   });
 });
@@ -331,7 +388,7 @@ describe("ladder over SRT with W0", () => {
   const rungs: Rung[] = [{ name: "480p", height: 240, videoKbps: 500, audioKbps: 64 }, AUDIO_RUNG];
 
   async function ladderRun(slug: string): Promise<{ e: number[]; phaseMs: number[] }> {
-    const w0 = await fetchW0({ hlsBase: hlsBase(), path: `live/${slug}`, password: SECRET });
+    const w0 = await settledW0(slug);
     const args = ladderArgs({
       input: internalSrtUrl(SRT_BASE, `live/${slug}`, SECRET),
       w0Ms: w0.w0Ms,
@@ -343,9 +400,13 @@ describe("ladder over SRT with W0", () => {
     const proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
     try {
       await waitFor("rung on LL-HLS", () => hlsSample(`live/${slug}/480p`), 60_000);
-      const samples = await hlsSamples(`live/${slug}/480p`, 9_000);
+      // The source's PDT − strip is read over the same window as the rung's.
+      const [samples, source] = await Promise.all([
+        hlsSamples(`live/${slug}/480p`, 9_000),
+        hlsSamples(`live/${slug}`, 9_000),
+      ]);
       const k = origin.get(slug) ?? (await srtOrigin(slug));
-      const eSource = sourceE.get(slug) ?? Number.NaN;
+      const eSource = steadyE(source, slug);
       return {
         // Rung PDT − strip, against the source's.
         e: samples.map((s) => s.pdtMs - s.strip - eSource),
@@ -363,14 +424,10 @@ describe("ladder over SRT with W0", () => {
     ["no B-frames", PLAIN],
     ["B-frames", BFRAMES],
   ])("rung PDT equals source PDT and keyframes stay on 2 s boundaries across restarts (%s)", async (_l, slug) => {
-    if (!sourceE.has(slug)) {
-      const s = await hlsSample(`live/${slug}`);
-      sourceE.set(slug, s.pdtMs - s.strip);
-    }
-    const first = await ladderRun(slug);
+    const first = await measured(() => ladderRun(slug));
     // A second start at another phase of the source GOP.
     await Bun.sleep(1_300);
-    const second = await ladderRun(slug);
+    const second = await measured(() => ladderRun(slug));
     for (const r of [first, second]) {
       expect(r.e.length).toBeGreaterThan(2);
       for (const e of r.e) expect(Math.abs(e)).toBeLessThanOrEqual(FRAME_MS);
@@ -393,6 +450,12 @@ describe("recorder over SRT (R4)", () => {
     ["no B-frames", PLAIN],
     ["B-frames", BFRAMES],
   ])("fMP4 times are the SRT timeline and W0 + time is the source PDT (%s)", async (_l, slug) => {
+    const offsets = await measured(() => recorderRun(slug));
+    expect(offsets).toHaveLength(3);
+    if (process.env.TEST_CLOCK_LOG) console.warn(`recorder ${slug}: run offset ms`, offsets);
+  });
+
+  async function recorderRun(slug: string): Promise<number[]> {
     const dir = mkdtempSync(join(scratch, "rec-"));
     chmodSync(dir, 0o777);
     const runId = "rtest";
@@ -407,7 +470,9 @@ describe("recorder over SRT (R4)", () => {
       [dir],
     );
     const proc = Bun.spawn(cmd, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
-    const w0 = await fetchW0({ hlsBase: hlsBase(), path: `live/${slug}`, password: SECRET });
+    // The source's PDT − strip over the recorder's window; W0 as the media service reads it.
+    const source = hlsSamples(`live/${slug}`, 9_000);
+    const w0 = await settledW0(slug);
     // A fresh handle per read: a Bun.file made before the file existed keeps reading it as empty.
     const playlist = {
       exists: () => Bun.file(join(dir, recorderPlaylist(runId))).exists(),
@@ -429,8 +494,7 @@ describe("recorder over SRT (R4)", () => {
       removeContainer(name);
     }
     const k = origin.get(slug) ?? (await srtOrigin(slug));
-    const s0 = await hlsSample(`live/${slug}`);
-    const eSource = sourceE.get(slug) ?? s0.pdtMs - s0.strip;
+    const eSource = steadyE(await source, slug);
     const segments = parsePlaylist(await playlist.text()).segments.slice(0, 3);
     const offsets: number[] = [];
     for (const seg of segments) {
@@ -453,6 +517,6 @@ describe("recorder over SRT (R4)", () => {
     }
     // ffmpeg's PDT is its own clock plus summed durations: one constant offset per run.
     expect(Math.max(...offsets) - Math.min(...offsets)).toBeLessThanOrEqual(FRAME_MS);
-    if (process.env.TEST_CLOCK_LOG) console.warn(`recorder ${slug}: run offset ms`, offsets);
-  });
+    return offsets;
+  }
 });
