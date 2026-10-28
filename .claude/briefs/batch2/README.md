@@ -12,9 +12,9 @@ orchestrator lands (one verified commit) before its units start.
 
 ## Gates
 
-| Milestone | Gated on                                                                                                   | State (2026-10-27)  |
+| Milestone | Gated on                                                                                                   | State (2026-10-28)  |
 | --------- | ---------------------------------------------------------------------------------------------------------- | ------------------- |
-| E7        | nothing                                                                                                    | running             |
+| E7        | nothing                                                                                                    | merged, verified    |
 | W0        | ADR 0012 part 1 (W0-clock), ADR 0019 (W0-sor), ADR 0009 amendment 1 (W0-media-exposure); W0-integrity none | accepted 2026-10-27 |
 | P1        | ADR 0005 amendment 1                                                                                       | accepted 2026-10-27 |
 
@@ -68,6 +68,9 @@ At most six units at a time; two agents never write the same file at the same ti
   by the orchestrator in the P1 contract step.
 - DMCA follows 17 U.S.C. § 512 and the operator template; no lawyer has reviewed it. ADR 0019's
   DSA text lives in the operator template; counsel has not reviewed it.
+
+Wave 3 merged 2026-10-28 (`435a1fb`, `d222ca6`, fixes `7afa11a`, `1d6fd9a`, `ba10a9b`); state,
+results and open findings in [PROGRESS.md](../../../PROGRESS.md).
 
 ## Milestone checks
 

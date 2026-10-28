@@ -5,7 +5,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { FULL_SHARDS } from "../../harness/src/shards.ts";
-import { GROUPS, fullScenarioArg, infraUpCmd, phases, selectGroups, shardError, steps } from "../verify.ts";
+import {
+  FULL_SCENARIO_TIMEOUT_MIN,
+  GROUPS,
+  SHARD_TIMEOUT_MIN,
+  fullScenarioArg,
+  infraUpCmd,
+  phases,
+  selectGroups,
+  shardError,
+  steps,
+} from "../verify.ts";
 
 describe("selectGroups", () => {
   test("every group without --only", () => {
@@ -135,8 +145,9 @@ describe("CI verify jobs", () => {
 
   test("a harness shard's step outlasts verify's own limits, so verify stops a hang and reports it", () => {
     const step = ci.jobs.harness.steps.find((s: { name?: string }) => s.name === "Verify");
-    // platform up + browsers + the full scenario (this test passes no --scenario).
-    const own = steps.filter((s) => s.group === "harness").reduce((m, s) => m + s.timeoutMin, 0);
+    // platform up + browsers + one shard (this test passes no --scenario; CI always passes --shard).
+    const harness = steps.filter((s) => s.group === "harness");
+    const own = harness.reduce((m, s) => m + s.timeoutMin, 0) - FULL_SCENARIO_TIMEOUT_MIN + SHARD_TIMEOUT_MIN;
     expect(step["timeout-minutes"]).toBeGreaterThan(own);
     expect(ci.jobs.harness["timeout-minutes"]).toBeGreaterThan(step["timeout-minutes"]);
   });

@@ -105,6 +105,11 @@ export function infraUpCmd(harnessFollows: boolean): string[] {
   return ["bun", "scripts/infra.ts", "test", ...(harnessFollows ? ["--harness"] : [])];
 }
 
+/** One CI harness shard. */
+export const SHARD_TIMEOUT_MIN = 45;
+/** Every scenario in one run, serially: about an hour since clock-skew (13-18 min) joined. */
+export const FULL_SCENARIO_TIMEOUT_MIN = 90;
+
 export const steps: Step[] = [
   { name: "format", group: "static", timeoutMin: 5, cmd: ["vp", "fmt", "--check"] },
   { name: "lint", group: "static", timeoutMin: 10, cmd: ["vp", "lint", "--deny-warnings"] },
@@ -200,7 +205,7 @@ export const steps: Step[] = [
     name: shard === "full" ? "harness: full scenario" : `harness: ${shard}`,
     group: "harness",
     phase: 4,
-    timeoutMin: 45,
+    timeoutMin: shard === "full" ? FULL_SCENARIO_TIMEOUT_MIN : SHARD_TIMEOUT_MIN,
     cmd: ["bun", "harness/src/cli.ts", "run", shard],
     when: () => full,
   },

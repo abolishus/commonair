@@ -38,23 +38,23 @@ fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~8
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
 Legal seed follow-ups for E8/N2: a no-cash-value clause in `terms.md`, the locale cookie in
 `cookies.md`.
-**Batch 2 state (2026-10-27): waves 1 and 2 merged, gated and pushed; wave 3 not started.**
+**Batch 2 state (2026-10-28): waves 1–3 merged, gated and pushed (`ba10a9b`); `verify:full` and CI red on W0-clock regressions, fix in flight (see wave 3 open findings).**
 
-| Unit              | Wave | Commits (branch)                | State                                                                                     |
-| ----------------- | ---- | ------------------------------- | ----------------------------------------------------------------------------------------- |
-| E7-chat-http      | 1    | `e7/chat-http` → `8298c5c`      | merged; `e2e-social` green                                                                |
-| E7-dmca           | 1    | `e7/dmca` → `9e307e3`           | merged; trust-safety step 8 green. **No lawyer reviewed** the § 512 flow or `DMCA_RULES`  |
-| E7-admin          | 1    | `e7/admin` → `66629bd`          | merged; new `e7-admin` scenario green (in `FULL_REQUIRED`)                                |
-| E7-appeals        | 1    | `e7/appeals` → `224661e`        | merged; trust-safety step 9 green                                                         |
-| E7-coop           | 1    | `e7/coop` → `1309ea5`           | merged; `e5-coop` green                                                                   |
-| E7-legal          | 1    | `e7/legal` → `779462a`          | merged                                                                                    |
-| W0-sor            | 2    | `w0/sor` → `a4a6a29`            | merged; trust-safety step 11. DSA text in the operator template, **counsel not reviewed** |
-| W0-media-exposure | 2    | `w0/media-exposure` → `e4ba1a5` | merged; `vod-clips` green, trust-safety step 10                                           |
-| W0-integrity      | 2    | `w0/integrity` → `103e82b`      | merged; `integrity-basic` green. Closes the 2H2 integrity row                             |
-| P1-tracker        | 2    | `p1/tracker` → `d069fde`        | merged (grant-derived info hashes, origin `/p2p-digest/`)                                 |
-| P1-turn           | 2    | `p1/turn` → `60a3118`           | merged (coturn, STUN only by default; `--turn-relay`); not run on a real host             |
-| W0-clock          | 3    | spike only (`c788e5d`)          | option A failed; user chose A2 (SRT) 2026-10-27; **re-briefed, not started**              |
-| P1-player         | 3    | —                               | brief ready, **not started**                                                              |
+| Unit              | Wave | Commits (branch)                   | State                                                                                     |
+| ----------------- | ---- | ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| E7-chat-http      | 1    | `e7/chat-http` → `8298c5c`         | merged; `e2e-social` green                                                                |
+| E7-dmca           | 1    | `e7/dmca` → `9e307e3`              | merged; trust-safety step 8 green. **No lawyer reviewed** the § 512 flow or `DMCA_RULES`  |
+| E7-admin          | 1    | `e7/admin` → `66629bd`             | merged; new `e7-admin` scenario green (in `FULL_REQUIRED`)                                |
+| E7-appeals        | 1    | `e7/appeals` → `224661e`           | merged; trust-safety step 9 green                                                         |
+| E7-coop           | 1    | `e7/coop` → `1309ea5`              | merged; `e5-coop` green                                                                   |
+| E7-legal          | 1    | `e7/legal` → `779462a`             | merged                                                                                    |
+| W0-sor            | 2    | `w0/sor` → `a4a6a29`               | merged; trust-safety step 11. DSA text in the operator template, **counsel not reviewed** |
+| W0-media-exposure | 2    | `w0/media-exposure` → `e4ba1a5`    | merged; `vod-clips` green, trust-safety step 10                                           |
+| W0-integrity      | 2    | `w0/integrity` → `103e82b`         | merged; `integrity-basic` green. Closes the 2H2 integrity row                             |
+| P1-tracker        | 2    | `p1/tracker` → `d069fde`           | merged (grant-derived info hashes, origin `/p2p-digest/`)                                 |
+| P1-turn           | 2    | `p1/turn` → `60a3118`              | merged (coturn, STUN only by default; `--turn-relay`); not run on a real host             |
+| W0-clock          | 3    | `w0/clock` → `435a1fb`, `e5d5d3d`  | merged (A2 over SRT, step 0 passed); `clock-skew` 12/12 (p95 cross-rendition 14 / 1 ms)   |
+| P1-player         | 3    | `p1/player` → `d222ca6`, `ba10a9b` | merged; `viewers --set p2p=10` 15/15, 37 % of opted-in bytes from peers, +4 s latency     |
 
 Contract steps: E7 `3bacecb`+`66e95da`, W0 `600d263`, P1 `d8c4fe0`+`0a5d750`. Contract requests:
 E7 wave `0f975b7`, wave 2 `ccf9c17`, `MEDIAMTX_SRT_URL` `a10eeee`. E7's `notImplemented` grep
@@ -70,10 +70,43 @@ GHSA-gcqx-w48m-w2h4, published 2026-10-27 with no fix). Against the stack on `54
 `trust-safety` 1–11 144/144, `integrity-basic` 15/15, `vod-clips` 29/29; after E7, `e2e-social`,
 `e5-coop`, `e7-admin` green. Harness fixes found by the runs: step 8 audit log as admin, e5-coop
 tiers, e7-admin flag id, step 11's `Date` parameter, `Mailpit.get` reading `Date` (the message
-endpoint has no `Created`), step 11 checking a suspended recipient by email. Not run yet:
-`clock-skew` (W0-clock), `viewers --set p2p=10` (P1-player), `verify:full`, the self-host e2e
+endpoint has no `Created`), step 11 checking a suspended recipient by email. Not run yet: the self-host e2e
 with coturn, `tofu` locally (CI runs it with `REQUIRE_TOFU=1`). Wave 3 handoff:
 `.claude/briefs/batch2/HANDOFF-wave3.md`.
+
+**Wave 3 (2026-10-27/28).** Units: W0-clock `a73c83c`, `da8a9d2` (merge `435a1fb`); P1-player
+`f5a5498`, `eb297f4` (merge `d222ca6`). Contract requests `48bfb8b`: `clock-skew` in
+`FULL_REQUIRED` with its own CI shard (`clock`), `P2P_VIEWERS_DEFAULT` 10, `P1_TEST_IDS` in
+`TEST_IDS`, `instance.p2pDefault` in the bootstrap, `MEDIA_INTERNAL_PASSWORD` may not contain `:`
+(SRT streamid). Fixes found by the runs: WHIP W0 settle guard `7afa11a` (MediaMTX's LL-HLS PDT for
+WebRTC sources starts up to 1.5 s off and slews ~5 % for ~25 s; W0 is taken once two segments
+agree), harness web-viewer session id and the `bytes_p_2p` column `1d6fd9a`, P2P sharing
+`ba10a9b` (p2p-media-loader-hlsjs 4.0.0 looks streams up by the reloaded playlist URL, which
+carries LL-HLS delivery directives, so no segment ever reached the core; P2P now starts after the
+first acknowledged heartbeat, so the tracker's `not_watching` never trips the error streak; each
+session draws its target 4–8 s behind the edge).
+
+Verified: `bun run verify` green on `ba10a9b`; `clock-skew` PASS 12/12 (live-to-VOD p95 3 / 1 ms,
+WHIP max 244 ms); `viewers --set p2p=10` and plain `viewers` PASS 15/15 (bytesP2p 73 MB, opted-in
+HTTP 242 KB/s, digests served, none rejected, default viewers no grant or peer); `trust-safety`
+144/144; `integrity-basic` 15/15 (one 6/7 flake, green rerun).
+
+**`verify:full` on `ba10a9b`: RED**, 17/21. W0-clock regressions, fix in flight: WHIP Chromium
+TTFF 23 s against 15 s since the settle guard `7afa11a` (15.9 s before); on CI only,
+`clock-mediamtx`/`clock-whip` int tests (W0 ~5 s off, or never settles) and `clock-skew` (never
+green on CI). Not wave 3: `integrity-basic` hidden-tab dip 7→6 (red on CI since wave 2), `e5-coop`
+council full on a long-lived stack, `e2e-relay` killed by the 45 min cap (unsharded full run now
+90 min, `scripts/verify.ts`).
+
+**Wave 3 open findings:** the `viewers` egress baseline is the low-latency sessions' ~1.7 MB/s,
+so "origin egress drops" passes too easily (compare against a P2P-configured session with no
+peers); the digest assertions skip silently without `HARNESS_PROMETHEUS_URL`; WHIP's AAC copy now
+starts 25–35 s after publish against `SOURCE_AAC_PENDING_MAX_MS` 20 s; P1 audio swarm ids use the
+playlist directory, not `audio` (ADR 0005 decision 5 wording, user to decide); ADR 0005
+amendment 1 needs the measured trade-off text (+4 s, 37 %, first ~10 s HTTP only); a ladder start
+drops up to 2 s of video (keyframe phase lock); `infra.ts stack` does not restart MediaMTX on a
+config-only change; P2P measured only on localhost; report the `updatePlaylist` bug upstream. The
+web image's missing-stylesheet fix is on `claude/elastic-bartik-7d287f` (`b83e86e`), not merged.
 
 **Gate stability (fix next):** timing tests fail under load (several given longer timeouts this
 batch); Podman Desktop's polling pegs the VM's API service (keep it closed during the gate); a
