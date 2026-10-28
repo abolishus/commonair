@@ -28,10 +28,13 @@ export const PTS_WRAP_SECONDS = 2 ** 33 / 90_000;
  */
 const FFMPEG_WRAP_WINDOW_SECONDS = 60;
 /**
- * A fetched segment this close before ffmpeg's window could belong to either representation,
- * depending on when the reader's first packet lands: refuse, the caller retries a few seconds later.
+ * A fetched segment this close before ffmpeg's window may be followed by a reader whose first packet
+ * lands inside it: refused as well.
  */
 const AMBIGUOUS_SECONDS = 15;
+
+/** Refused from here to the wrap: ffmpeg's SUB window plus the ambiguous seconds before it. */
+const WRAP_REFUSE_FROM_SECONDS = PTS_WRAP_SECONDS - FFMPEG_WRAP_WINDOW_SECONDS - AMBIGUOUS_SECONDS;
 
 export class W0Error extends Error {
   constructor(
@@ -47,16 +50,25 @@ const mod = (x: number, m: number) => ((x % m) + m) % m;
 
 /**
  * A stream-timeline time (seconds, possibly unwrapped by MediaMTX) in the representation a
- * `-copyts` ffmpeg session that opens now will use: modulo the wrap, and negative in the last
- * 60 s before it (libavformat subtracts 2^33 there). Throws `W0Error("wrap")` in the few seconds
- * where the session could land on either side.
+ * `-copyts` ffmpeg session that opens now will use: modulo the wrap. Throws `W0Error("wrap")`
+ * from shortly before ffmpeg's 60 s window up to the wrap itself. A session opened inside that
+ * window gets negative times, which the RTSP and HLS/fMP4 muxers (no AVFMT_TS_NEGATIVE) shift by
+ * `avoid_negative_ts`, so `W0 + pts` would be up to 60 s off: the caller retries after the wrap.
  */
 export function rebasePts(seconds: number): number {
   const r = mod(seconds, PTS_WRAP_SECONDS);
-  const sub = PTS_WRAP_SECONDS - FFMPEG_WRAP_WINDOW_SECONDS;
-  if (r > sub) return r - PTS_WRAP_SECONDS;
-  if (r > sub - AMBIGUOUS_SECONDS) throw new W0Error("source timeline is about to wrap; retry", "wrap");
+  if (r > WRAP_REFUSE_FROM_SECONDS) throw new W0Error("source timeline is about to wrap; retry", "wrap");
   return r;
+}
+
+/**
+ * Whether a `-copyts` session that opened at `streamSeconds` on the source timeline (less
+ * `marginSeconds` of host-to-source skew) may have opened inside the refused window, so its output
+ * times may have been shifted and cannot be anchored with `W0 + pts`. Only the side before the
+ * wrap: a new stream's timeline may itself start near 0.
+ */
+export function opensNearWrap(streamSeconds: number, marginSeconds = 5): boolean {
+  return mod(streamSeconds, PTS_WRAP_SECONDS) > WRAP_REFUSE_FROM_SECONDS - marginSeconds;
 }
 
 export interface W0Sample {

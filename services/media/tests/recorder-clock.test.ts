@@ -16,7 +16,7 @@ import { IDENTITY_CLOCK, type ClockAnchor, type MediaClock } from "../src/clock/
 import { createMediaClock, offlineClock } from "../src/clock/media-clock.ts";
 import type { ClockMetrics } from "../src/clock/metrics.ts";
 import { readSidecar } from "../src/clock/run.ts";
-import { W0Error } from "../src/clock/w0.ts";
+import { PTS_WRAP_SECONDS, W0Error } from "../src/clock/w0.ts";
 import type { BroadcastInfo, MediaContext } from "../src/context.ts";
 import { recorderInit, recorderPlaylist } from "../src/ffmpeg/args.ts";
 import { parsePlaylist } from "../src/vod/playlist.ts";
@@ -33,15 +33,22 @@ const FIXTURES = new URL("./fixtures/clock/", import.meta.url).pathname;
 interface RecorderInternals {
   runs: string[];
   pollOnce(strict: boolean): Promise<void>;
+  /** What the supervisor's `args()` does for a new ffmpeg run. */
+  beginRun(runId: string, sourceId: string | null, openedAtMs: number): void;
+  /** What the supervisor's `onExit` does. */
+  endRun(): void;
 }
 
 let workDir: string;
 let puts: Map<string, string>;
+/** The MediaMTX source currently publishing on the path (a reconnect changes it). */
+let source: string | null;
 const dir = () => join(workDir, "broadcasts", BROADCAST);
 
 beforeEach(async () => {
   workDir = await mkdtemp(join(tmpdir(), "recorder-clock-"));
   puts = new Map();
+  source = null;
 });
 afterEach(async () => {
   await rm(workDir, { recursive: true, force: true });
@@ -65,6 +72,7 @@ function recorder(clock: ClockAnchor | MediaClock, vodId: string | null = VOD) {
     clock: "w0" in clock ? clock : offlineClock(clock),
     // A large buffer so nothing is pruned by the test's (real) clock.
     timings: { recorderPollMs: 1000, clipBufferSeconds: 10 * 365 * 86_400 },
+    mtx: { getPath: async () => ({ name: broadcast.path, source: source ? { type: "rtmpConn", id: source } : null }) },
     storage: {
       get: async () => null,
       put: async (_bucket: string, key: string, body: Uint8Array | string) => {
@@ -280,5 +288,104 @@ describe("R4: the recorder anchors its own runs from W0", () => {
     for (let i = 0; i < 4; i++) await internals.pollOnce(true);
     expect(clock.offsetMs(BROADCAST, "r1")).toBe(0);
     expect(vodPlaylist().map((s) => s.startedAt?.getTime())).toEqual([T0, T0 + 4000]);
+  });
+
+  test("a run that ended before W0 arrived is never anchored with a later stream's W0", async () => {
+    let available = false;
+    const { clock, seen } = liveClock(async () => {
+      if (!available) throw new W0Error("media playlist of live/alice: no complete segment with a PDT yet", "playlist");
+      return W0;
+    });
+    const { internals } = recorder(clock);
+    const clocks = (internals as unknown as { clocks: Map<string, { nextW0At: number }> }).clocks;
+    source = "a";
+    internals.beginRun("r1", "a", T0);
+    await writeRun("r1", T0, 2, { fixture: true });
+    await internals.pollOnce(true);
+    await settle();
+    expect(clock.offsetMs(BROADCAST, "r1")).toBe(0);
+
+    // The publisher drops: r1's ffmpeg exits, the publisher reconnects (new source, new
+    // timeline) and r2 starts. W0 is now available, but it is r2's stream's.
+    internals.endRun();
+    source = "b";
+    available = true;
+    clocks.get("r1")!.nextW0At = 0;
+    internals.beginRun("r2", "b", T0 + 60_000);
+    await settle();
+    await writeRun("r2", T0 + 60_000, 2, { fixture: true });
+    for (let i = 0; i < 3; i++) {
+      await internals.pollOnce(true);
+      await settle();
+    }
+    expect(clock.offsetMs(BROADCAST, "r1")).toBe(0);
+    expect(await readSidecar(dir(), "r1")).toBeNull();
+    expect(clock.offsetMs(BROADCAST, "r2")).not.toBe(0);
+    expect(seen.offset).toHaveLength(1);
+    expect(
+      vodPlaylist()
+        .slice(0, 2)
+        .map((s) => s.startedAt?.getTime()),
+    ).toEqual([T0, T0 + 500]);
+  });
+
+  test("a W0 that resolves after its run ended, or after the source changed, is dropped", async () => {
+    let release: (w0: number) => void = () => {};
+    const { clock } = liveClock(() => new Promise<number>((r) => (release = r)));
+    const ended = recorder(clock);
+    source = "a";
+    ended.internals.beginRun("r1", "a", T0);
+    ended.internals.endRun();
+    release(W0);
+    await settle();
+    await writeRun("r1", T0, 2, { fixture: true });
+    await ended.internals.pollOnce(true);
+    expect(clock.offsetMs(BROADCAST, "r1")).toBe(0);
+    expect(await readSidecar(dir(), "r1")).toBeNull();
+
+    // Still current, but the path's source changed while the fetch was in flight.
+    const reconnected = recorder(clock);
+    reconnected.internals.beginRun("r2", "a", T0);
+    source = "b";
+    release(W0);
+    await settle();
+    await writeRun("r2", T0, 2, { fixture: true });
+    for (let i = 0; i < 2; i++) {
+      await reconnected.internals.pollOnce(true);
+      await settle();
+    }
+    expect(clock.offsetMs(BROADCAST, "r2")).toBe(0);
+    expect(await readSidecar(dir(), "r2")).toBeNull();
+  });
+
+  test("near the PTS wrap a run stays on raw times", async () => {
+    // The W0 fetch is refused in the wrap window: the run is never anchored, even after the wrap.
+    let wrapping = true;
+    const refused = liveClock(async () => {
+      if (wrapping) throw new W0Error("source timeline is about to wrap; retry", "wrap");
+      return W0;
+    });
+    const a = recorder(refused.clock);
+    a.internals.beginRun("r1", null, T0);
+    await settle();
+    wrapping = false;
+    (a.internals as unknown as { clocks: Map<string, { nextW0At: number }> }).clocks.get("r1")!.nextW0At = 0;
+    await writeRun("r1", T0, 2, { fixture: true });
+    for (let i = 0; i < 2; i++) {
+      await a.internals.pollOnce(true);
+      await settle();
+    }
+    expect(refused.clock.offsetMs(BROADCAST, "r1")).toBe(0);
+
+    // W0 known, but the run opened 30 s before the wrap on that timeline (a fetch that failed
+    // for another reason and succeeded after the wrap): left raw too.
+    const late = liveClock(async () => W0);
+    const b = recorder(late.clock);
+    b.internals.beginRun("r2", null, W0 + (PTS_WRAP_SECONDS - 30) * 1000);
+    await settle();
+    await writeRun("r2", T0, 2, { fixture: true });
+    await b.internals.pollOnce(true);
+    expect(late.clock.offsetMs(BROADCAST, "r2")).toBe(0);
+    expect(late.seen.offset).toEqual([]);
   });
 });

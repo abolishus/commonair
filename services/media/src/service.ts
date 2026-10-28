@@ -16,6 +16,7 @@ import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
 import { hostSynchronized, initHostClock } from "./clock/host.ts";
 import { createMediaClock } from "./clock/media-clock.ts";
 import { createClockMetrics, observeHostSynchronized } from "./clock/metrics.ts";
+import { assertSrtSecret } from "./ffmpeg/args.ts";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
 import { DiskBudget } from "./disk.ts";
@@ -60,6 +61,8 @@ export interface MediaService {
 
 export async function createMediaService(opts: MediaServiceOptions): Promise<MediaService> {
   const { env } = opts;
+  // Fail at boot: every SRT reader (ladder, AAC copy, recorder) would otherwise retry forever.
+  assertSrtSecret(env.MEDIA_INTERNAL_PASSWORD);
   const logger = opts.logger ?? createLogger({ service: "media", level: env.LOG_LEVEL });
   const timings = { ...DEFAULT_TIMINGS, ...opts.timings };
   const ffmpeg = opts.ffmpeg ?? "ffmpeg";

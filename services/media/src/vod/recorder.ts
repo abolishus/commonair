@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import { isVodOwnPrefix, VOD_PLAYLIST } from "@commonair/contracts/storage";
 import { schema } from "@commonair/db";
 import { firstSampleSeconds, runOffsetMs, writeSidecar } from "../clock/run.ts";
+import { opensNearWrap, W0Error } from "../clock/w0.ts";
 import type { BroadcastInfo, MediaContext } from "../context.ts";
 import { internalSrtUrl, recorderArgs, recorderPlaylist } from "../ffmpeg/args.ts";
 import { Supervisor } from "../ffmpeg/supervisor.ts";
@@ -71,6 +72,17 @@ interface RunState {
   anchorFailures: number;
   /** Sidecar writes, in order (a late W0 write must never land after the offset's). */
   writes: Promise<void>;
+  /**
+   * The MediaMTX source (publisher connection) the run read. W0 belongs to that source's stream
+   * timeline; a publisher reconnect inside one broadcast session starts a new one.
+   */
+  sourceId: string | null;
+  /** Host time ffmpeg was started for this run (null for runs this process did not start). */
+  openedAtMs: number | null;
+  /** ffmpeg for this run has exited: no more W0 fetches for it. */
+  ended: boolean;
+  /** Why the run stays on raw times for good (W0 not valid for it), or null. */
+  unanchorable: string | null;
 }
 
 export class SegmentRecorder {
@@ -146,12 +158,10 @@ export class SegmentRecorder {
         const aacAudio = sourceInfo(path).audioCodec === "MPEG-4 Audio";
         // Base-36 time keeps run ids short, unique per broadcast and sortable.
         const runId = `r${Date.now().toString(36)}`;
-        this.runs.push(runId);
-        this.runState(runId);
-        // Never waits: the run records with W0 unknown and is stamped once it arrives.
-        this.requestW0(runId);
+        this.beginRun(runId, path.source?.id ?? null, Date.now());
         return recorderArgs({ input, dir: this.dir, runId, segmentSeconds: timings.segmentSeconds, aacAudio });
       },
+      onExit: () => this.endRun(),
       secrets: [internalSecret],
       logger: this.log,
       stopGraceMs: 10_000,
@@ -193,10 +203,42 @@ export class SegmentRecorder {
         nextW0At: 0,
         anchorFailures: 0,
         writes: Promise.resolve(),
+        sourceId: null,
+        openedAtMs: null,
+        ended: false,
+        unanchorable: null,
       };
       this.clocks.set(runId, s);
     }
     return s;
+  }
+
+  /** A new ffmpeg run reading `sourceId`'s stream. Never waits: W0 is fetched in the background. */
+  private beginRun(runId: string, sourceId: string | null, openedAtMs: number): void {
+    this.endRun();
+    this.runs.push(runId);
+    const s = this.runState(runId);
+    s.sourceId = sourceId;
+    s.openedAtMs = openedAtMs;
+    this.requestW0(runId);
+  }
+
+  /** The current run's ffmpeg exited (or never started): its W0 can no longer be fetched. */
+  private endRun(): void {
+    const last = this.runs.at(-1);
+    if (last) this.runState(last).ended = true;
+  }
+
+  /** Mark a run as never anchorable: it keeps raw times (offset 0), logged once. */
+  private giveUp(runId: string, s: RunState, reason: string): void {
+    if (s.unanchorable) return;
+    s.unanchorable = reason;
+    this.log.warn("recorder run left on raw times", { runId, reason });
+  }
+
+  /** W0 may only be fetched for the run ffmpeg is still writing, while it reads its own source. */
+  private isCurrent(runId: string, s: RunState): boolean {
+    return this.runs.at(-1) === runId && !s.ended && !s.unanchorable && !this.stopping;
   }
 
   /** Queue a sidecar write behind the run's earlier ones; resolves (or rejects) with this one. */
@@ -206,25 +248,44 @@ export class SegmentRecorder {
     return write;
   }
 
-  /** Fetch W0 for a run in the background (one at a time, backing off after a failure). */
+  /**
+   * Fetch W0 for the current run in the background (one at a time, backing off after a failure).
+   * W0 is only valid for the stream timeline the run read, so a result is kept only if the run is
+   * still current and MediaMTX still has the same source on the path; otherwise the run stays raw.
+   */
   private requestW0(runId: string): void {
     const s = this.runState(runId);
-    if (s.w0Ms !== null || s.fetching || this.stopping || Date.now() < s.nextW0At) return;
+    if (s.w0Ms !== null || s.fetching || !this.isCurrent(runId, s) || Date.now() < s.nextW0At) return;
     s.fetching = true;
-    this.ctx.clock
-      .w0(this.b.broadcastId, this.b.path, "recorder")
-      .then(
-        async (w0Ms) => {
-          s.w0Ms = w0Ms;
-          await this.persist(runId, s, w0Ms, s.offsetMs).catch((err: unknown) =>
-            this.log.warn("could not write the run clock sidecar", { error: errorCategory(err) }),
-          );
-        },
-        // Counted and logged by the clock; retried on a later poll.
-        () => {
-          s.nextW0At = Date.now() + W0_RETRY_MS;
-        },
-      )
+    const fetched = this.ctx.clock.w0(this.b.broadcastId, this.b.path, "recorder").then(
+      (w0Ms) => w0Ms,
+      (err: unknown) => {
+        // Counted and logged by the clock. A wrap refusal means this run may have opened in
+        // ffmpeg's negative-time window: its file times cannot be trusted against any W0.
+        if (err instanceof W0Error && err.reason === "wrap") this.giveUp(runId, s, "pts_wrap");
+        s.nextW0At = Date.now() + W0_RETRY_MS;
+        return null;
+      },
+    );
+    void fetched
+      .then(async (w0Ms) => {
+        if (w0Ms === null || !this.isCurrent(runId, s)) return;
+        const path = await this.ctx.mtx.getPath(this.b.path);
+        if (!this.isCurrent(runId, s)) return;
+        if ((path?.source?.id ?? null) !== s.sourceId) {
+          this.giveUp(runId, s, "source_changed");
+          return;
+        }
+        s.w0Ms = w0Ms;
+        await this.persist(runId, s, w0Ms, s.offsetMs).catch((err: unknown) =>
+          this.log.warn("could not write the run clock sidecar", { error: errorCategory(err) }),
+        );
+      })
+      .catch((err: unknown) => {
+        // MediaMTX unreachable: retried on a later poll.
+        s.nextW0At = Date.now() + W0_RETRY_MS;
+        this.log.debug("could not confirm the recorder run's source", { error: errorCategory(err) });
+      })
       .finally(() => {
         s.fetching = false;
       });
@@ -239,10 +300,19 @@ export class SegmentRecorder {
     s: RunState,
     seg: { map: string | null; localPath: string; startedAt: Date | null },
   ) {
-    if (s.w0Ms === null || s.offsetMs !== null || !seg.map || !seg.startedAt) return;
+    if (s.w0Ms === null || s.offsetMs !== null || s.unanchorable || !seg.map || !seg.startedAt) return;
     if (s.anchorFailures >= MAX_ANCHOR_FAILURES) return;
+    // Opened in ffmpeg's negative-time window before the wrap: its times may have been shifted.
+    if (s.openedAtMs !== null && opensNearWrap((s.openedAtMs - s.w0Ms) / 1000)) {
+      this.giveUp(runId, s, "pts_wrap");
+      return;
+    }
     try {
       const t = await firstSampleSeconds(join(this.dir, seg.map), seg.localPath);
+      if (t < 0) {
+        this.giveUp(runId, s, "negative_time");
+        return;
+      }
       const offset = runOffsetMs(s.w0Ms, t, seg.startedAt.getTime());
       await this.persist(runId, s, s.w0Ms, offset);
       s.offsetMs = offset;
@@ -317,6 +387,7 @@ export class SegmentRecorder {
     if (this.refused) await this.startRecording();
     for (const runId of this.runs) {
       const clock = this.runState(runId);
+      // Only the current run: an ended run's W0 would come from whatever stream the path has now.
       if (clock.w0Ms === null) this.requestW0(runId);
       // W0 arrived after the run's first segments were seen: anchor from the oldest still on disk.
       if (clock.w0Ms !== null && clock.offsetMs === null) {

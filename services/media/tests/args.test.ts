@@ -5,6 +5,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   aacCopyArgs,
   ALIGN_START,
+  assertSrtSecret,
   clipArgs,
   internalRtspUrl,
   internalSrtUrl,
@@ -116,7 +117,9 @@ describe("SRT input (ADR 0012 A2)", () => {
   });
 
   test("a secret MediaMTX would split, or a non-SRT base, is refused", () => {
-    expect(() => internalSrtUrl("srt://m:8890", "live/a", "a:b")).toThrow(/cannot contain/);
+    expect(() => internalSrtUrl("srt://m:8890", "live/a", "a:b")).toThrow(/must not contain ':'/);
+    expect(() => assertSrtSecret("a:b")).toThrow(/MEDIA_INTERNAL_PASSWORD must not contain ':'/);
+    expect(() => assertSrtSecret("0f9e8d7c6b5a")).not.toThrow();
     expect(() => internalSrtUrl("rtsp://m:8554", "live/a", "s")).toThrow(/srt:\/\//);
   });
 

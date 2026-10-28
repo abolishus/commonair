@@ -27,6 +27,7 @@ import {
   firstVariant,
   HLS_TFDT_OFFSET_SECONDS,
   newestSegment,
+  opensNearWrap,
   pdtTrack,
   PTS_WRAP_SECONDS,
   rebasePts,
@@ -172,12 +173,7 @@ describe("W0", () => {
     expect(rebasePts(3 * PTS_WRAP_SECONDS + 5)).toBeCloseTo(5, 6);
   });
 
-  test("rebase: the last 60 s before the wrap are negative, as libavformat presents them", () => {
-    expect(rebasePts(PTS_WRAP_SECONDS - 30)).toBeCloseTo(-30, 6);
-    expect(rebasePts(2 * PTS_WRAP_SECONDS - 1)).toBeCloseTo(-1, 6);
-  });
-
-  test("rebase: refuses the few seconds where a new session could land on either side", () => {
+  test("rebase: refuses ffmpeg's 60 s negative-time window and the 15 s before it", () => {
     const errorOf = (t: number) => {
       try {
         rebasePts(t);
@@ -186,15 +182,38 @@ describe("W0", () => {
         return err;
       }
     };
-    for (const t of [PTS_WRAP_SECONDS - 61, PTS_WRAP_SECONDS - 70]) {
+    // Inside libavformat's SUB window a new session's times would be negative and shifted by
+    // avoid_negative_ts; just before it, the session could still land inside. Retry after the wrap.
+    for (const t of [
+      PTS_WRAP_SECONDS - 1,
+      PTS_WRAP_SECONDS - 30,
+      PTS_WRAP_SECONDS - 59,
+      PTS_WRAP_SECONDS - 61,
+      PTS_WRAP_SECONDS - 74,
+      2 * PTS_WRAP_SECONDS - 1,
+    ]) {
       const err = errorOf(t);
       expect(err).toBeInstanceOf(W0Error);
       expect(err).toMatchObject({ reason: "wrap" });
     }
-    expect(rebasePts(PTS_WRAP_SECONDS - 80)).toBeCloseTo(PTS_WRAP_SECONDS - 80, 6);
+    expect(rebasePts(PTS_WRAP_SECONDS - 76)).toBeCloseTo(PTS_WRAP_SECONDS - 76, 6);
+    // Never negative.
+    expect(rebasePts(PTS_WRAP_SECONDS + 0.001)).toBeCloseTo(0.001, 6);
   });
 
-  test("a tfdt MediaMTX wrapped itself and one it did not give the same W0 on both sides of the wrap", () => {
+  test("a session that opened near the wrap is detected (before it only, with a skew margin)", () => {
+    expect(opensNearWrap(PTS_WRAP_SECONDS - 30)).toBe(true);
+    expect(opensNearWrap(PTS_WRAP_SECONDS - 76)).toBe(true); // within the 5 s margin
+    expect(opensNearWrap(3 * PTS_WRAP_SECONDS - 10)).toBe(true);
+    expect(opensNearWrap(-10)).toBe(true); // a negative stream time is just before a wrap
+    expect(opensNearWrap(PTS_WRAP_SECONDS - 81)).toBe(false);
+    // A new stream's timeline may start near 0: not flagged.
+    expect(opensNearWrap(0)).toBe(false);
+    expect(opensNearWrap(2)).toBe(false);
+    expect(opensNearWrap(PTS_WRAP_SECONDS + 1)).toBe(false);
+  });
+
+  test("a tfdt MediaMTX wrapped itself and one it did not give the same W0 after the wrap", () => {
     const at = (tsSeconds: number, pdtMs: number) =>
       computeW0({
         pdtMs,
@@ -210,10 +229,11 @@ describe("W0", () => {
     expect(unwrapped).toBeCloseTo(wrapped, 3);
     // A session started now sees PTS ≈ 5 for that frame: W0 + 5 s is its PDT.
     expect(wrapped + 5_000).toBeCloseTo(pdtAt(W + 5), 3);
-    // Just before the wrap the session sees negative times; after it, small ones: one W0.
-    const before = at(W - 20, pdtAt(W - 20));
-    expect(before + -20 * 1000).toBeCloseTo(pdtAt(W - 20), 3);
-    expect(before).toBeCloseTo(wrapped, 3);
+    // Before the refused window a session counts up to the wrap and adds 2^33 after it: the W0
+    // read there is one wrap period earlier, the same instant modulo the wrap.
+    const before = at(W - 100, pdtAt(W - 100));
+    expect(before + (W - 100) * 1000).toBeCloseTo(pdtAt(W - 100), 3);
+    expect(before + W * 1000).toBeCloseTo(wrapped, 3);
     // Far from the wrap the W0 is the session start (no fold).
     const plain = at(1_000, pdtAt(1_000));
     expect(plain).toBeCloseTo(pdtAt(0), 3);

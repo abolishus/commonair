@@ -29,6 +29,15 @@ const SRT_CONNECT_TIMEOUT_MS = 5_000;
 const SRT_RW_TIMEOUT_US = 10_000_000;
 
 /**
+ * MediaMTX splits an SRT `streamid` on `:`, so the internal password cannot contain one. The
+ * service checks this at boot, so a bad value fails loudly instead of every SRT reader retrying.
+ */
+export function assertSrtSecret(secret: string): void {
+  if (secret.includes(":"))
+    throw new Error("MEDIA_INTERNAL_PASSWORD must not contain ':' (MediaMTX splits the SRT streamid on it)");
+}
+
+/**
  * `srt://host:port?…&streamid=read:<path>:internal:<secret>` from MEDIAMTX_SRT_URL (ADR 0012 A2):
  * the reader for the ladder, the AAC copy and the recorder. MediaMTX gives every SRT reader one
  * stream timeline, so `-copyts` times are comparable across sessions. ffmpeg percent-decodes the
@@ -36,7 +45,7 @@ const SRT_RW_TIMEOUT_US = 10_000_000;
  * MediaMTX splits the decoded value on `:`, so a secret containing one cannot be expressed.
  */
 export function internalSrtUrl(base: string, path: string, secret: string): string {
-  if (secret.includes(":")) throw new Error("the internal secret cannot contain ':' (SRT streamid separator)");
+  assertSrtSecret(secret);
   const u = new URL(base);
   if (u.protocol !== "srt:") throw new Error("MEDIAMTX_SRT_URL must be an srt:// URL");
   const streamid = ["read", encodeURIComponent(path), MEDIA_INTERNAL_USER, encodeURIComponent(secret)].join(":");
