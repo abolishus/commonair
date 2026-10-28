@@ -203,6 +203,7 @@ describe("the pinned loader's handling of a failed validation", () => {
   const pkg = realpathSync(join(new URL("../node_modules/p2p-media-loader-core", import.meta.url).pathname));
   const peer = readFileSync(join(pkg, "src/p2p/peer.ts"), "utf8");
   const request = readFileSync(join(pkg, "src/requests/request.ts"), "utf8");
+  const http = readFileSync(join(pkg, "src/http-loader.ts"), "utf8");
 
   it("is version 4.0.0", () => {
     expect(JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")).version).toBe("4.0.0");
@@ -219,6 +220,28 @@ describe("the pinned loader's handling of a failed validation", () => {
     expect(fn).toContain("request.clearLoadedBytes()");
     expect(fn).toContain('this.#cancelSegmentDownloading("peer-closed", error)');
     expect(fn).toContain("this.destroy(false, error)");
+  });
+
+  it("keeps a peer's partial bytes when it stalls, answers absent or is aborted; only a peer error clears them", () => {
+    expect(peer.match(/clearLoadedBytes\(\)/g)).toHaveLength(1);
+    const fn = /#destroyOnPeerError\(type: PeerErrorType, message: string\) \{[\s\S]*?\n {2}\}/.exec(peer)?.[0] ?? "";
+    expect(fn).toContain("clearLoadedBytes()");
+    const cancel = /\n {2}cancel\(\) \{([\s\S]*?)\n {2}\}/.exec(request)?.[1] ?? "";
+    expect(cancel).not.toContain("clearLoadedBytes");
+    expect(cancel).toContain("this.onSegmentAbort(");
+  });
+
+  it("resumes such a request over HTTP from the loaded bytes and checks the result only with validateHTTPSegment", () => {
+    const execute = /\n {2}execute\(\) \{([\s\S]*?)\n {2}\}/.exec(http)?.[1] ?? "";
+    expect(execute).toMatch(/tryCompleteByLoadedBytes\([\s\S]*?this\.httpConfig\.validateHTTPSegment/);
+    expect(execute).toMatch(/this\.requestByteRange\.start \+ this\.request\.loadedBytes/);
+    expect(http).toMatch(
+      /const isValid = await this\.request\.validateData\(\s*this\.httpConfig\.validateHTTPSegment,?\s*\);[\s\S]*?if \(!isValid\) \{\s*this\.request\.clearLoadedBytes\(\);/,
+    );
+    // The peer that started it is reported with its URL, so the player knows which HTTP completions to check.
+    expect(request).toMatch(
+      /this\.onSegmentStart\(\{\s*segment: mapSegmentWithStreamToSegment\(this\.segment\),\s*downloadSource: requestData\.downloadSource/,
+    );
   });
 
   it("treats a validator that throws as a failed validation", () => {

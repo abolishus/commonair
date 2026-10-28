@@ -72,6 +72,8 @@ export const P2P_TIME_WINDOWS = {
 export interface CoreConfigHooks {
   iceServers: RTCIceServer[];
   validateP2PSegment: NonNullable<CoreConfig["validateP2PSegment"]>;
+  /** Checks HTTP completions of segments a peer started (see `PeerTouchedSegments`). */
+  validateHTTPSegment: NonNullable<CoreConfig["validateHTTPSegment"]>;
   httpRequestSetup: NonNullable<CoreConfig["httpRequestSetup"]>;
 }
 
@@ -87,6 +89,7 @@ export function buildCoreConfig(p2p: P2PSessionInfo, hooks: CoreConfigHooks): Co
     announceTrackers: [...p2p.trackerUrls],
     rtcConfig: { iceServers: hooks.iceServers.map((s) => ({ ...s })) },
     validateP2PSegment: hooks.validateP2PSegment,
+    validateHTTPSegment: hooks.validateHTTPSegment,
     httpRequestSetup: hooks.httpRequestSetup,
     ...P2P_TIME_WINDOWS,
   };

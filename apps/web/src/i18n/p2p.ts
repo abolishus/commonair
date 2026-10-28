@@ -26,6 +26,7 @@ export const p2pMessages = {
   "p2p.dialog.nextStart": "Sharing starts the next time a stream starts playing.",
   "p2p.dialog.stopped": "Sharing is off. The stream keeps playing from our servers.",
   "p2p.dialog.active": "Connected to {peers} other viewers. Sent {sent}, received {received}.",
+  "p2p.dialog.activeOne": "Connected to 1 other viewer. Sent {sent}, received {received}.",
   "p2p.dialog.privacyPolicy": "Privacy policy:",
 
   "p2p.settings.title": "Peer-to-peer sharing",

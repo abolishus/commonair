@@ -312,6 +312,16 @@ describe("the dialog", () => {
     expect(byId("player-p2p-toggle")?.getAttribute("aria-checked")).toBe("false");
     expect(FakeController.instances).toHaveLength(1);
   });
+
+  it.each([
+    [1, "Connected to 1 other viewer."],
+    [2, "Connected to 2 other viewers."],
+  ])("while sharing with %i peer(s) the note uses the right plural", async (peers, text) => {
+    store = memoryStorage({ "commonair:p2p": "on", "commonair:p2p-notice": "seen" });
+    setP2PStorage(() => store);
+    await openDialog({ state: "sharing", peers, uploadedBytes: 0, receivedBytes: 0 });
+    await waitFor(() => expect(byId("player-p2p-dialog-note")?.textContent).toContain(text));
+  });
 });
 
 describe("the settings section", () => {

@@ -298,7 +298,8 @@ export class PlayerController {
   /** TURN credentials expire: fetch fresh ones at ~80 % of their lifetime and apply them at runtime. */
   private scheduleIceRefresh(expiresAt: number | null): void {
     const delay = iceRefreshDelay(expiresAt);
-    if (delay === null || this.stopped || this.p2pOff) return;
+    // The engine may have stopped itself (tracker refusal): no TURN credentials for nothing.
+    if (delay === null || this.stopped || this.p2pOff || !this.p2p?.running) return;
     this.iceTimer = setTimeout(() => {
       this.iceTimer = null;
       void this.refreshIce();
@@ -307,10 +308,10 @@ export class PlayerController {
 
   private async refreshIce(): Promise<void> {
     const session = this.session;
-    if (!session || !this.p2p || this.stopped || this.p2pOff) return;
+    if (!session || !this.p2p?.running || this.stopped || this.p2pOff) return;
     const ice = await fetchIceServers(this.opts.api, { sessionId: session.id, token: session.token });
     // A refusal means the grant is gone; the tracker drops the socket and HTTP carries on.
-    if (!ice || !this.p2p || this.stopped || this.p2pOff) return;
+    if (!ice || !this.p2p?.running || this.stopped || this.p2pOff) return;
     this.p2p.applyIceServers(ice.iceServers);
     this.scheduleIceRefresh(ice.expiresAt);
   }

@@ -21,7 +21,15 @@ import {
   tokenedSegmentRequest,
 } from "../src/player/p2p/config.ts";
 import * as engineModule from "../src/player/p2p/engine.ts";
-import { MAX_TRACKER_SOCKET_ERRORS, countingLoader, createP2PHls, type EngineCtor } from "../src/player/p2p/engine.ts";
+import {
+  MAX_PEER_TOUCHED_SEGMENTS,
+  MAX_TRACKER_SOCKET_ERRORS,
+  PeerTouchedSegments,
+  TRACKER_SOCKET_ERROR_GAP_MS,
+  countingLoader,
+  createP2PHls,
+  type EngineCtor,
+} from "../src/player/p2p/engine.ts";
 import { fetchIceServers, iceRefreshDelay } from "../src/player/p2p/ice.ts";
 import { P2PStats } from "../src/player/p2p/stats.ts";
 import { FakeBaseLoader, FakeEngine, FakeHls, SWARM_ID, fakeApi, playbackStart } from "./p2p-fakes.ts";
@@ -35,9 +43,12 @@ const ICE: RTCIceServer[] = [
   { urls: ["stun:play.example:3478"] },
   { urls: ["turn:play.example:3478"], username: "1700000000:abc", credential: "c3VwZXI=" },
 ];
+const SEG = "https://play.example/hls/live/rivertide/seg7.mp4?t=tok";
+const SEG2 = "https://play.example/hls/live/rivertide/seg8.mp4?t=tok";
 const hooks = (iceServers: RTCIceServer[]) => ({
   iceServers,
   validateP2PSegment: async () => true,
+  validateHTTPSegment: async () => true,
   httpRequestSetup: async () => null,
 });
 
@@ -221,8 +232,8 @@ describe("createP2PHls", () => {
     engine.emit("onPeerClose", { peerId: "p1", infoHash: "h1" });
     engine.emit("onChunkDownloaded", 500, "http", undefined);
     engine.emit("onChunkDownloaded", 700, "p2p", "p2");
-    engine.emit("onSegmentLoaded", { downloadSource: "p2p", bytesLength: 700 });
-    engine.emit("onSegmentLoaded", { downloadSource: "http", bytesLength: 500 });
+    engine.emit("onSegmentLoaded", { segment: { url: SEG }, downloadSource: "p2p", bytesLength: 700 });
+    engine.emit("onSegmentLoaded", { segment: { url: SEG2 }, downloadSource: "http", bytesLength: 500 });
     engine.emit("onChunkUploaded", 300, "p2");
     expect(opts.stats).toMatchObject({ httpSegmentBytes: 500, p2pBytes: 700, uploadedBytes: 300 });
     expect(opts.stats.peerCount).toBe(1);
@@ -270,6 +281,38 @@ describe("createP2PHls", () => {
     expect(p.running).toBe(false);
   });
 
+  it("only a streak of socket failures counts: far apart, after a working socket or a new manifest, it starts over", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const p = createP2PHls(wrapperOptions());
+    const hls = FakeHls.instances[0] as FakeHls;
+    const engine = FakeEngine.instances[0] as FakeEngine;
+    const pool = engine.core.webTorrentSocketPool;
+    hls.emit(FakeHls.Events.MANIFEST_LOADED, {});
+    const almost = () => {
+      for (let i = 1; i < MAX_TRACKER_SOCKET_ERRORS; i++) pool.fail();
+    };
+    // Wi-Fi drops hours apart.
+    for (let i = 0; i < MAX_TRACKER_SOCKET_ERRORS * 2; i++) {
+      pool.fail();
+      vi.advanceTimersByTime(TRACKER_SOCKET_ERROR_GAP_MS + 1);
+    }
+    expect(p.running).toBe(true);
+    const resets: (() => void)[] = [
+      () => engine.emit("onPeerConnect", { peerId: "p1", infoHash: "h1" }),
+      () => engine.emit("onTrackerWarning", { warning: "slow down" }),
+      () => hls.emit(FakeHls.Events.MANIFEST_LOADING, {}),
+    ];
+    for (const reset of resets) {
+      reset();
+      almost();
+      reset();
+      almost();
+      expect(p.running).toBe(true);
+    }
+    pool.fail();
+    expect(p.running).toBe(false);
+  });
+
   it("disable stops P2P at runtime without reloading; destroy takes the engine down before hls.js", () => {
     const p = createP2PHls(wrapperOptions());
     const hls = FakeHls.instances[0] as FakeHls;
@@ -289,6 +332,124 @@ describe("createP2PHls", () => {
     const p = createP2PHls(wrapperOptions());
     p.applyIceServers([{ urls: ["stun:other:3478"] }]);
     expect(FakeEngine.instances[0]?.dynamic).toEqual([{ rtcConfig: { iceServers: [{ urls: ["stun:other:3478"] }] } }]);
+  });
+});
+
+describe("segments a peer started and HTTP finished (validateHTTPSegment)", () => {
+  type Validate = (url: string, range: unknown, data: ArrayBuffer) => Promise<boolean>;
+  type Setup = (
+    u: string,
+    r: unknown,
+    s: AbortSignal | undefined,
+    rr: { start: number } | undefined,
+  ) => Promise<Request>;
+  const bytes = (n: number) => new Uint8Array(n).buffer;
+
+  function setup(valid: (data: ArrayBuffer) => boolean | Promise<boolean>) {
+    const validateP2PSegment = vi.fn<Validate>(async (_u, _r, data) => valid(data));
+    const opts = wrapperOptions({ validateP2PSegment });
+    createP2PHls(opts);
+    const engine = FakeEngine.instances[0] as FakeEngine;
+    const core = engine.config.core;
+    return {
+      opts,
+      engine,
+      validateP2PSegment,
+      validateHTTP: core.validateHTTPSegment as Validate,
+      httpSetup: core.httpRequestSetup as Setup,
+    };
+  }
+
+  it("a pure HTTP segment is not checked (no digest request)", async () => {
+    const { validateHTTP, validateP2PSegment } = setup(() => false);
+    await expect(validateHTTP(SEG, undefined, bytes(10))).resolves.toBe(true);
+    expect(validateP2PSegment).not.toHaveBeenCalled();
+  });
+
+  it("a peer's partial bytes finished over HTTP are checked against the digest; a tampered prefix is rejected", async () => {
+    const tampered = new Uint8Array([6, 6, 6]);
+    const { engine, validateHTTP, httpSetup, validateP2PSegment, opts } = setup(
+      (data) => new Uint8Array(data)[0] !== 6,
+    );
+    // The peer sends a tampered prefix, then stalls; the core resumes over HTTP from byte 3.
+    engine.emit("onSegmentStart", { segment: { url: SEG }, downloadSource: "p2p", peerId: "evil" });
+    engine.emit("onChunkDownloaded", 3, "p2p", "evil");
+    engine.emit("onSegmentError", {
+      segment: { url: SEG },
+      downloadSource: "p2p",
+      error: { type: "bytes-receiving-timeout" },
+    });
+    engine.emit("onSegmentStart", { segment: { url: SEG }, downloadSource: "http" });
+    const req = await httpSetup(SEG, undefined, undefined, { start: 3 });
+    expect(req.headers.get("Range")).toBe("bytes=3-");
+    const joined = new Uint8Array(10);
+    joined.set(tampered);
+    await expect(validateHTTP(SEG, undefined, joined.buffer)).resolves.toBe(false);
+    expect(validateP2PSegment).toHaveBeenCalledWith(SEG, undefined, joined.buffer);
+    // The core drops every byte and fetches again from 0 over HTTP: not checked again.
+    await expect(validateHTTP(SEG, undefined, bytes(10))).resolves.toBe(true);
+    expect(validateP2PSegment).toHaveBeenCalledTimes(1);
+    engine.emit("onSegmentLoaded", { segment: { url: SEG }, downloadSource: "http", bytesLength: 10 });
+    expect(opts.stats.p2pBytes).toBe(0);
+  });
+
+  it("an honest prefix passes, and its bytes count as P2P (the HTTP rest is counted by chunk)", async () => {
+    const { engine, validateHTTP, httpSetup, opts } = setup(() => true);
+    engine.emit("onSegmentStart", { segment: { url: SEG }, downloadSource: "p2p", peerId: "p" });
+    engine.emit("onSegmentAbort", { segment: { url: SEG }, downloadSource: "p2p" });
+    await httpSetup(SEG, undefined, undefined, { start: 4_000 });
+    engine.emit("onChunkDownloaded", 6_000, "http", undefined);
+    await expect(validateHTTP(SEG, undefined, bytes(10_000))).resolves.toBe(true);
+    engine.emit("onSegmentLoaded", { segment: { url: SEG }, downloadSource: "http", bytesLength: 10_000 });
+    expect(opts.stats).toMatchObject({ p2pBytes: 4_000, httpSegmentBytes: 6_000 });
+    // Loaded: forgotten, the next HTTP load of that URL is not checked.
+    await expect(validateHTTP(SEG, undefined, bytes(1))).resolves.toBe(true);
+  });
+
+  it("all bytes from a peer that stalled before saying done: HTTP completes them with no request, still checked", async () => {
+    const { engine, validateHTTP, validateP2PSegment, opts } = setup(() => true);
+    engine.emit("onSegmentStart", { segment: { url: SEG }, downloadSource: "p2p", peerId: "p" });
+    await expect(validateHTTP(SEG, undefined, bytes(8_000))).resolves.toBe(true);
+    expect(validateP2PSegment).toHaveBeenCalledTimes(1);
+    engine.emit("onSegmentLoaded", { segment: { url: SEG }, downloadSource: "http", bytesLength: 8_000 });
+    expect(opts.stats.p2pBytes).toBe(8_000);
+  });
+
+  it("a digest check that throws rejects the segment", async () => {
+    const { engine, validateHTTP } = setup(() => Promise.reject(new Error("offline")));
+    engine.emit("onSegmentStart", { segment: { url: SEG }, downloadSource: "p2p", peerId: "p" });
+    await expect(validateHTTP(SEG, undefined, bytes(5))).rejects.toThrow("offline");
+    // (The core treats a throw as false.) The refetch from 0 is plain HTTP.
+    await expect(validateHTTP(SEG, undefined, bytes(5))).resolves.toBe(true);
+  });
+
+  it("a segment the peer delivered whole is counted once, as P2P", () => {
+    const { engine, opts } = setup(() => true);
+    engine.emit("onSegmentStart", { segment: { url: SEG }, downloadSource: "p2p", peerId: "p" });
+    engine.emit("onSegmentLoaded", { segment: { url: SEG }, downloadSource: "p2p", bytesLength: 900 });
+    expect(opts.stats.p2pBytes).toBe(900);
+  });
+
+  it("is bounded: the oldest peer-touched segment is forgotten first", () => {
+    const t = new PeerTouchedSegments();
+    for (let i = 0; i <= MAX_PEER_TOUCHED_SEGMENTS; i++) t.peerStarted(`u${i}`);
+    expect(t.has("u0")).toBe(false);
+    expect(t.has("u1")).toBe(true);
+    expect(t.has(`u${MAX_PEER_TOUCHED_SEGMENTS}`)).toBe(true);
+    // A new peer attempt refreshes a segment's place.
+    t.peerStarted("u1");
+    t.peerStarted("extra");
+    expect(t.has("u1")).toBe(true);
+    expect(t.has("u2")).toBe(false);
+  });
+
+  it("the first HTTP resume after a peer marks the peer's share; a later one (after truncated HTTP) does not", () => {
+    const t = new PeerTouchedSegments();
+    t.peerStarted("u");
+    t.httpResumed("u", 300);
+    t.httpResumed("u", 700);
+    t.checked("u", true, 1_000);
+    expect(t.loaded("u", "http")).toBe(300);
   });
 });
 
@@ -460,6 +621,21 @@ describe("PlayerController with P2P", () => {
     await c.stop();
   });
 
+  it("no TURN refresh once the engine stopped itself after a tracker refusal", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.setSystemTime(new Date("2026-10-27T10:00:00.000Z"));
+    const f = fakeApi(playbackStart(), async () => ({
+      iceServers: [{ urls: ["turn:play.example:3478"], username: "u", credential: "c" }],
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    }));
+    const { c } = controller(f);
+    await c.start();
+    FakeEngine.instances[0]?.emit("onTrackerError", { error: { type: "tracker-response" } });
+    await vi.advanceTimersByTimeAsync(7_200_000);
+    expect(f.iceServers).toHaveBeenCalledTimes(1);
+    await c.stop();
+  });
+
   it("switchTo keeps the swarm: same engine, new source on the same hls.js", async () => {
     const f = fakeApi(playbackStart());
     f.heartbeat.mockImplementation(async () => ({
@@ -488,7 +664,7 @@ describe("PlayerController with P2P", () => {
     const engine = FakeEngine.instances[0] as FakeEngine;
     FakeBaseLoader.bytes = 400; // a playlist through hls.js's own loader
     hls.loadThroughLoader();
-    engine.emit("onSegmentLoaded", { downloadSource: "p2p", bytesLength: 9_000 });
+    engine.emit("onSegmentLoaded", { segment: { url: SEG }, downloadSource: "p2p", bytesLength: 9_000 });
     hls.emit(FakeHls.Events.FRAG_LOADED, { frag: { stats: { loaded: 9_000 } } });
     engine.emit("onChunkDownloaded", 5_000, "http", undefined);
     engine.emit("onChunkUploaded", 2_500, "p");

@@ -177,11 +177,16 @@ export function P2PDialog({ open, onOpenChange, status, loadPrivacyPolicy }: P2P
   const running = status.state !== "off";
   const note = checked
     ? running
-      ? t("p2p.dialog.active", {
-          peers: status.peers,
-          sent: formatBytes(status.uploadedBytes, locale),
-          received: formatBytes(status.receivedBytes, locale),
-        })
+      ? status.peers === 1
+        ? t("p2p.dialog.activeOne", {
+            sent: formatBytes(status.uploadedBytes, locale),
+            received: formatBytes(status.receivedBytes, locale),
+          })
+        : t("p2p.dialog.active", {
+            peers: status.peers,
+            sent: formatBytes(status.uploadedBytes, locale),
+            received: formatBytes(status.receivedBytes, locale),
+          })
       : t("p2p.dialog.nextStart")
     : running
       ? null
