@@ -461,7 +461,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       errors: 0,
     };
     if (server.upgrade(req, { data })) {
-      logger.debug("upgrade accepted", { sessionId: data.sessionId, userId: trace.userId, elapsedMs });
+      logger.info("upgrade accepted", { sessionId: data.sessionId, userId: trace.userId, elapsedMs });
       return undefined;
     }
     return Response.json({ error: "upgrade_failed" }, { status: 400 });
