@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --bun vp dev",
-    "build": "vp build",
+    "build": "vp build && bun scripts/check-build.ts",
     "start": "bun server.ts",
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
     "test:int": "bun --bun vp test run .int.test --passWithNoTests",
