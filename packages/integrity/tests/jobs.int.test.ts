@@ -178,6 +178,16 @@ describe("scoreActiveSessions", () => {
     expect(botRow.verdictReasons).toEqual(["fetch_pattern", "heartbeat_inconsistent"]);
     expect((await sessionRow(ended)).scoredAt?.getTime()).toBe(endedScoredAt.getTime());
     expect(r.newlyExcluded.sort()).toEqual([dc, multi[0]!, multi[1]!, bot].sort());
+    // The worker logs why: per excluded session, its signals with the sub-checks that fired.
+    expect(r.exclusions.map((e) => e.sessionId).sort()).toEqual(r.newlyExcluded.sort());
+    const botWhy = r.exclusions.find((e) => e.sessionId === bot)!;
+    expect(botWhy.reasons).toEqual(["fetch_pattern", "heartbeat_inconsistent"]);
+    expect(botWhy.signals.map((x) => x.code)).toEqual(["fetch_pattern", "heartbeat_inconsistent"]);
+    expect(botWhy.signals.every((x) => x.checks.length > 0)).toBe(true);
+    expect(botWhy.signals.find((x) => x.code === "heartbeat_inconsistent")!.measures.beats).toBeGreaterThan(0);
+    expect(
+      r.exclusions.find((e) => e.sessionId === dc)!.signals.find((x) => x.code === "headless")!.checks.length,
+    ).toBeGreaterThan(0);
 
     const dcFlags = await flagsFor(dc);
     expect(dcFlags.map((f) => f.signal).sort()).toEqual(["datacenter_ip", "headless"]);

@@ -84,7 +84,7 @@ export default defineScenario({
     ctx.assert("every viewer started playback", started === total, { started, total });
 
     let maxSeen = 0;
-    const converged = await ctx.step(`verified count converges to ${total}`, async () => {
+    const converging = ctx.step(`verified count converges to ${total}`, async () => {
       const t0 = Date.now();
       await waitFor(
         `viewer count ${total}`,
@@ -97,6 +97,18 @@ export default defineScenario({
       );
       return Date.now() - t0;
     });
+    const converged = await converging.catch(async (err: unknown) => {
+      // Say which session held the count back and why (verdict, reasons, the flags that fired).
+      ctx.metric("viewer_count.max_seen", maxSeen);
+      const kinds = new Map<Viewer, string>();
+      for (const v of optedIn) kinds.set(v, "p2p-opted-in");
+      for (const v of atDefault) kinds.set(v, "p2p-default");
+      await reportVerdicts(ctx, viewers, kinds).catch((e: unknown) =>
+        ctx.log.warn("could not read the sessions' verdicts", { error: e instanceof Error ? e.message : String(e) }),
+      );
+      throw err;
+    });
+    ctx.metric("viewer_count.max_seen", maxSeen);
     ctx.metric("viewer_count.converge", converged, "ms");
     ctx.check("count never exceeded the real audience", maxSeen <= total, { maxSeen, total });
 
@@ -136,6 +148,44 @@ export default defineScenario({
     ctx.check("count returns to zero after viewers leave", decayed);
   },
 });
+
+/**
+ * Diagnostics for a count that did not converge: every viewer session's verdict, reasons, counters
+ * and integrity flags (signal, score, sub-checks and measures), as a failed soft check so the text
+ * report prints them. Session ids only.
+ */
+async function reportVerdicts(ctx: ScenarioContext, viewers: Viewer[], kinds: Map<Viewer, string>): Promise<void> {
+  const url = process.env.DATABASE_URL;
+  if (!url) return;
+  const ids = await Promise.all(viewers.map(async (v) => (await v.report()).sessionId));
+  const known = ids.filter((id): id is string => Boolean(id));
+  const sql = new Bun.SQL(url);
+  try {
+    const rows = (await sql`
+      select p.id, p.verdict::text as verdict, p.verdict_reasons as reasons, p.score::float8 as score,
+             p.assigned_source::text as source, p.heartbeats, p.watch_seconds, p.segments_fetched,
+             p.bytes_http::float8 as bytes_http, p.bytes_p_2p::float8 as bytes_p2p,
+             p.ended_at is not null as ended,
+             coalesce((select jsonb_agg(jsonb_build_object('signal', f.signal, 'score', f.score, 'details', f.details))
+                         from integrity_flags f
+                        where f.subject_type = 'session' and f.subject_id = p.id), '[]'::jsonb) as flags
+        from playback_sessions p where p.id = any(${sql.array(known, "uuid")})`) as { id: string; verdict: string }[];
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const sessions = viewers.map((v, i) => {
+      const id = ids[i];
+      const row = id ? (byId.get(id) ?? { id, verdict: "missing" }) : { id: null, verdict: "no session" };
+      return { viewer: i, kind: kinds.get(v) ?? v.kind, ...row };
+    });
+    ctx.data("sessions", sessions);
+    const notVerified = sessions.filter((r) => r.verdict !== "verified");
+    ctx.check("every viewer session is verified (diagnostics)", notVerified.length === 0, {
+      notVerified,
+      verdicts: sessions.map((r) => `${r.viewer}:${r.kind}:${r.verdict}`),
+    });
+  } finally {
+    await sql.close();
+  }
+}
 
 /** A viewer at the default (off) never connected to a peer and holds no grant or tracker record. */
 async function checkDefaultViewersStayedOff(
