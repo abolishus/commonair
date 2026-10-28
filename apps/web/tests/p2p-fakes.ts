@@ -12,13 +12,16 @@ type Handler = (...args: unknown[]) => void;
 /** hls.js's default loader: completes every load with `bytes` bytes. */
 export class FakeBaseLoader {
   static bytes = 1000;
+  /** The browser's response URL (xhr.responseURL); absent = none reported. */
+  static responseUrl: string | undefined = undefined;
   constructor(public config: unknown) {}
   load(
     context: unknown,
     _config: unknown,
     callbacks: { onSuccess: (res: unknown, stats: { loaded: number }, ctx: unknown, net: unknown) => void },
   ) {
-    callbacks.onSuccess({ data: "" }, { loaded: FakeBaseLoader.bytes }, context, null);
+    const res = FakeBaseLoader.responseUrl === undefined ? { data: "" } : { data: "", url: FakeBaseLoader.responseUrl };
+    callbacks.onSuccess(res, { loaded: FakeBaseLoader.bytes }, context, null);
   }
   abort() {}
   destroy() {}
@@ -31,6 +34,7 @@ export class FakeHls {
     ERROR: "hlsError",
     MANIFEST_LOADING: "hlsManifestLoading",
     MANIFEST_LOADED: "hlsManifestLoaded",
+    LEVEL_UPDATED: "hlsLevelUpdated",
   };
   static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
   static DefaultConfig = { loader: FakeBaseLoader };
@@ -44,6 +48,10 @@ export class FakeHls {
   startLoad = vi.fn();
   recoverMediaError = vi.fn();
   playingDate: Date | null = null;
+  media: HTMLMediaElement | null = null;
+  latency = 0;
+  targetLatency: number | null = null;
+  liveSyncPosition: number | null = null;
 
   constructor(public config: Record<string, unknown>) {
     FakeHls.instances.push(this);

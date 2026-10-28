@@ -14,8 +14,11 @@ import type Hls from "hls.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { withToken } from "../src/player/heartbeat.ts";
 import {
-  P2P_HLS_CONFIG,
+  P2P_TUNING,
+  P2P_WATCHING_WINDOW_MS,
   buildCoreConfig,
+  p2pCoreTuning,
+  p2pHlsConfig,
   renditionOf,
   streamSwarmIdBuilder,
   tokenedSegmentRequest,
@@ -26,8 +29,11 @@ import {
   MAX_TRACKER_SOCKET_ERRORS,
   PeerTouchedSegments,
   TRACKER_SOCKET_ERROR_GAP_MS,
+  LATENCY_HOLD_TOLERANCE,
   countingLoader,
   createP2PHls,
+  holdLatency,
+  withoutDeliveryDirectives,
   type EngineCtor,
 } from "../src/player/p2p/engine.ts";
 import { fetchIceServers, iceRefreshDelay } from "../src/player/p2p/ice.ts";
@@ -68,11 +74,36 @@ describe("core config", () => {
       swarmId: SWARM_ID,
       announceTrackers: TRACKERS,
       rtcConfig: { iceServers: ICE },
-      highDemandTimeWindow: 2,
-      httpDownloadTimeWindow: 3,
-      p2pDownloadTimeWindow: 4,
+      ...p2pCoreTuning(P2P_TUNING),
+      isP2PDisabled: true,
+      isP2PUploadDisabled: true,
     });
     expect(config.streamSwarmIdBuilder).toBe(streamSwarmIdBuilder);
+  });
+
+  it("the real core loads nothing through P2P (no stream loader, no tracker socket) until enabled at runtime", () => {
+    const core = new Core(buildCoreConfig({ trackerUrls: TRACKERS, swarmId: SWARM_ID }, hooks(ICE)));
+    core.addStreamIfNoneExists({
+      runtimeId: "https://play.example/hls/live/rivertide/index.m3u8",
+      type: "main",
+      properties: {},
+    });
+    core.updateStream("https://play.example/hls/live/rivertide/index.m3u8", [
+      { runtimeId: SEG, externalId: 7, url: SEG, startTime: 0, endTime: 2 },
+    ]);
+    // Not loadable: the hls.js integration hands the request to hls.js's own loader, so the core
+    // never creates the hybrid loader that opens the tracker socket.
+    expect(core.isSegmentLoadable(SEG)).toBe(false);
+    core.applyDynamicConfig({ isP2PDisabled: false, isP2PUploadDisabled: false });
+    expect(core.isSegmentLoadable(SEG)).toBe(true);
+    expect(core.getConfig().secondaryStream.isP2PDisabled).toBe(false);
+    core.destroy();
+  });
+
+  it("a custom tuning reaches the core", () => {
+    const tuning = { ...P2P_TUNING, highDemandTimeWindow: 1, simultaneousHttpDownloads: 1 };
+    const config = buildCoreConfig({ trackerUrls: TRACKERS, swarmId: SWARM_ID }, hooks(ICE), tuning);
+    expect(config).toMatchObject({ highDemandTimeWindow: 1, simultaneousHttpDownloads: 1 });
   });
 
   it.each([
@@ -194,13 +225,14 @@ describe("token hook (httpRequestSetup)", () => {
 function wrapperOptions(over: Partial<Parameters<typeof createP2PHls>[0]> = {}) {
   return {
     Hls: FakeHls as unknown as typeof Hls,
-    hlsConfig: { ...P2P_HLS_CONFIG },
+    hlsConfig: p2pHlsConfig(),
     p2p: { trackerUrls: TRACKERS, swarmId: SWARM_ID },
     iceServers: ICE,
     validateP2PSegment: async () => true,
     token: () => "tok",
     stats: new P2PStats(),
     onHlsHttpBytes: vi.fn<() => void>(),
+    watching: () => true,
     onChange: vi.fn<() => void>(),
     Engine: FakeEngine as unknown as EngineCtor,
     ...over,
@@ -328,10 +360,126 @@ describe("createP2PHls", () => {
     expect(engineDownFirst).toBe(true);
   });
 
+  it("starts with P2P disabled and enables it once, at runtime", () => {
+    const p = createP2PHls(wrapperOptions());
+    const engine = FakeEngine.instances[0] as FakeEngine;
+    expect(engine.config.core).toMatchObject({ isP2PDisabled: true, isP2PUploadDisabled: true });
+    expect(engine.dynamic).toEqual([]);
+    expect(p.running).toBe(true);
+    p.enable();
+    p.enable();
+    expect(engine.dynamic).toEqual([{ isP2PDisabled: false, isP2PUploadDisabled: false }]);
+  });
+
+  it("enable is a no-op once P2P was turned off or the engine destroyed", () => {
+    const off = createP2PHls(wrapperOptions());
+    off.disable();
+    off.enable();
+    expect(FakeEngine.instances[0]?.dynamic).toEqual([{ isP2PDisabled: true, isP2PUploadDisabled: true }]);
+    const gone = createP2PHls(wrapperOptions());
+    gone.destroy();
+    gone.enable();
+    expect(FakeEngine.instances[1]?.dynamic).toEqual([]);
+  });
+
+  it("socket failures while the session is not seen watching (not_watching) never count", () => {
+    let watching = false;
+    const p = createP2PHls(wrapperOptions({ watching: () => watching }));
+    const hls = FakeHls.instances[0] as FakeHls;
+    const pool = (FakeEngine.instances[0] as FakeEngine).core.webTorrentSocketPool;
+    hls.emit(FakeHls.Events.MANIFEST_LOADED, {});
+    for (let i = 0; i < MAX_TRACKER_SOCKET_ERRORS * 3; i++) pool.fail();
+    expect(p.running).toBe(true);
+    watching = true;
+    for (let i = 0; i < MAX_TRACKER_SOCKET_ERRORS; i++) pool.fail();
+    expect(p.running).toBe(false);
+  });
+
   it("applies fresh ICE servers at runtime", () => {
     const p = createP2PHls(wrapperOptions());
     p.applyIceServers([{ urls: ["stun:other:3478"] }]);
     expect(FakeEngine.instances[0]?.dynamic).toEqual([{ rtcConfig: { iceServers: [{ urls: ["stun:other:3478"] }] } }]);
+  });
+});
+
+describe("latency vs sharing", () => {
+  it("each P2P session draws its target once from [liveSyncDuration, + spread), never low-latency", () => {
+    const { liveSyncDuration: min, liveSyncSpread: spread, maxLatencySlack: slack } = P2P_TUNING;
+    expect(p2pHlsConfig(P2P_TUNING, () => 0)).toEqual({
+      lowLatencyMode: false,
+      liveSyncDuration: min,
+      liveMaxLatencyDuration: min + slack,
+    });
+    expect(p2pHlsConfig(P2P_TUNING, () => 0.5).liveSyncDuration).toBe(min + spread / 2);
+    // A misbehaving random source stays inside the range.
+    expect(p2pHlsConfig(P2P_TUNING, () => 7).liveSyncDuration).toBe(min + spread);
+    expect(p2pHlsConfig(P2P_TUNING, () => -1).liveSyncDuration).toBe(min);
+    expect(p2pHlsConfig(P2P_TUNING, () => Number.NaN).liveSyncDuration).toBe(min);
+  });
+
+  it("fits the 14 s playlist with a segment of margin, and the windows nest", () => {
+    const t = P2P_TUNING;
+    const SEGMENT = 2;
+    const PLAYLIST = 7 * SEGMENT;
+    // The farthest a session may fall behind before hls.js jumps, plus the segment it plays.
+    expect(t.liveSyncDuration + t.liveSyncSpread + t.maxLatencySlack + SEGMENT).toBeLessThanOrEqual(PLAYLIST - SEGMENT);
+    expect(t.highDemandTimeWindow).toBeGreaterThan(0);
+    expect(t.httpDownloadTimeWindow).toBeGreaterThan(t.highDemandTimeWindow);
+    // A new segment is (target - 2) s ahead: the P2P window covers it for the farthest target.
+    expect(t.p2pDownloadTimeWindow).toBeGreaterThanOrEqual(t.liveSyncDuration + t.liveSyncSpread - SEGMENT);
+    // The nearest target still leaves time to seed before the high-demand window.
+    expect(t.liveSyncDuration - SEGMENT).toBeGreaterThan(t.highDemandTimeWindow);
+    expect(p2pCoreTuning(t)).toEqual({
+      highDemandTimeWindow: t.highDemandTimeWindow,
+      httpDownloadTimeWindow: t.httpDownloadTimeWindow,
+      p2pDownloadTimeWindow: t.p2pDownloadTimeWindow,
+      simultaneousHttpDownloads: t.simultaneousHttpDownloads,
+      simultaneousP2PDownloads: t.simultaneousP2PDownloads,
+    });
+  });
+
+  const view = (
+    over: Partial<{ latency: number; targetLatency: number | null; liveSyncPosition: number | null }>,
+    media = { currentTime: 30, seeking: false },
+  ) => ({
+    media: media as unknown as HTMLMediaElement,
+    latency: 2.2,
+    targetLatency: 6,
+    liveSyncPosition: 26.2,
+    ...over,
+  });
+
+  it("steps back to the sync position when playing too close to the edge", () => {
+    const v = view({});
+    expect(holdLatency(v)).toBe(true);
+    expect(v.media.currentTime).toBe(26.2);
+  });
+
+  it.each([
+    ["within tolerance", { latency: 6 - LATENCY_HOLD_TOLERANCE }],
+    ["behind the target", { latency: 9 }],
+    ["no target yet", { targetLatency: null }],
+    ["no sync position", { liveSyncPosition: null }],
+    ["no latency yet", { latency: 0 }],
+    ["sync position ahead of the playhead", { liveSyncPosition: 31 }],
+  ])("does nothing %s", (_name, over) => {
+    const v = view(over);
+    expect(holdLatency(v)).toBe(false);
+    expect(v.media.currentTime).toBe(30);
+  });
+
+  it("does nothing while seeking or without media", () => {
+    expect(holdLatency(view({}, { currentTime: 30, seeking: true }))).toBe(false);
+    expect(holdLatency({ ...view({}), media: null })).toBe(false);
+  });
+
+  it("the wrapper checks on every playlist update", () => {
+    createP2PHls(wrapperOptions());
+    const hls = FakeHls.instances[0] as FakeHls;
+    const media = { currentTime: 30, seeking: false } as unknown as HTMLMediaElement;
+    Object.assign(hls, { media, latency: 2, targetLatency: 6, liveSyncPosition: 26 });
+    hls.emit(FakeHls.Events.LEVEL_UPDATED, {});
+    expect(media.currentTime).toBe(26);
   });
 });
 
@@ -454,6 +602,44 @@ describe("segments a peer started and HTTP finished (validateHTTPSegment)", () =
 });
 
 describe("countingLoader", () => {
+  const PLAYLIST = "https://play.example/hls/live/rivertide/video1_stream.m3u8?t=tok-1";
+  const load = (context: Record<string, unknown>) => {
+    const onSuccess = vi.fn<(res: { url?: string }) => void>();
+    const Counting = countingLoader(FakeBaseLoader as never, () => undefined);
+    new Counting({} as never).load(context as never, {} as never, { onSuccess } as never);
+    return onSuccess.mock.calls[0]?.[0];
+  };
+  afterEach(() => {
+    FakeBaseLoader.responseUrl = undefined;
+  });
+
+  it("reports a blocking reload under the variant URL it was registered with (no directives, original token)", () => {
+    // The browser's URL carries the directives and the token xhrSetup swapped in.
+    FakeBaseLoader.responseUrl =
+      "https://play.example/hls/live/rivertide/video1_stream.m3u8?t=tok-2&_HLS_msn=16&_HLS_part=9&_HLS_skip=YES";
+    expect(load({ type: "level", url: `${PLAYLIST}&_HLS_msn=16&_HLS_part=9&_HLS_skip=YES` })?.url).toBe(PLAYLIST);
+    FakeBaseLoader.responseUrl = "https://play.example/hls/live/rivertide/video1_stream.m3u8?t=tok-2";
+    expect(load({ type: "audioTrack", url: PLAYLIST })?.url).toBe(PLAYLIST);
+  });
+
+  it("leaves segments and redirected playlists alone", () => {
+    FakeBaseLoader.responseUrl = "https://play.example/hls/live/rivertide/seg7.mp4?t=tok-2";
+    expect(load({ frag: {}, url: SEG })?.url).toBe("https://play.example/hls/live/rivertide/seg7.mp4?t=tok-2");
+    FakeBaseLoader.responseUrl = "https://relay.example/hls/live/rivertide/video1_stream.m3u8?t=tok-1";
+    expect(load({ type: "level", url: PLAYLIST })?.url).toBe(FakeBaseLoader.responseUrl);
+  });
+
+  it.each([
+    ["https://a.example/x.m3u8?t=a&_HLS_msn=3&_HLS_part=1", "https://a.example/x.m3u8?t=a"],
+    ["https://a.example/x.m3u8?_HLS_msn=3&_HLS_part=1", "https://a.example/x.m3u8"],
+    ["https://a.example/x.m3u8?_HLS_msn=3&t=a.b-c_d", "https://a.example/x.m3u8?t=a.b-c_d"],
+    ["https://a.example/x.m3u8?t=a%2Fb&_HLS_skip=v2#f", "https://a.example/x.m3u8?t=a%2Fb#f"],
+    ["https://a.example/x.m3u8?t=a", "https://a.example/x.m3u8?t=a"],
+    ["https://a.example/x.m3u8", "https://a.example/x.m3u8"],
+  ])("withoutDeliveryDirectives(%s)", (url, expected) => {
+    expect(withoutDeliveryDirectives(url)).toBe(expected);
+  });
+
   it("counts completed requests and passes them on", () => {
     const onBytes = vi.fn<() => void>();
     const onSuccess = vi.fn<() => void>();
@@ -560,7 +746,8 @@ describe("PlayerController with P2P", () => {
     const engine = FakeEngine.instances[0] as FakeEngine;
     expect(engine.config.core.rtcConfig).toEqual({ iceServers: [{ urls: ["stun:play.example:3478"] }] });
     expect(engine.config.core.announceTrackers).toEqual(["wss://play.example/tracker?t=tok-1"]);
-    expect(FakeHls.instances[0]?.config).toMatchObject(P2P_HLS_CONFIG);
+    expect(FakeHls.instances[0]?.config).toMatchObject({ lowLatencyMode: false });
+    expect(FakeHls.instances[0]?.config.liveSyncDuration).toBeGreaterThanOrEqual(P2P_TUNING.liveSyncDuration);
     expect(FakeHls.instances[0]?.config).not.toHaveProperty("liveSyncDurationCount");
     expect(c.p2pStatus().state).toBe("on");
     engine.emit("onPeerConnect", { peerId: "p", infoHash: "h" });
@@ -568,6 +755,50 @@ describe("PlayerController with P2P", () => {
     // A tracker refusal later: HTTP carries on, the player says on (not sharing).
     engine.emit("onTrackerError", { error: { type: "tracker-response" } });
     expect(c.p2pStatus()).toMatchObject({ state: "on", peers: 0 });
+    await c.stop();
+  });
+
+  it("connects to the tracker only after the first acknowledged heartbeat", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const f = fakeApi(playbackStart());
+    let throttled = true;
+    f.heartbeat.mockImplementation(async () => (throttled ? { ok: true, throttled: true } : { ok: true }));
+    const { c } = controller(f);
+    await c.start();
+    const engine = FakeEngine.instances[0] as FakeEngine;
+    expect(engine.config.core).toMatchObject({ isP2PDisabled: true });
+    // Running from the player's point of view (data-p2p="on"), but no tracker socket yet.
+    expect(c.p2pStatus().state).toBe("on");
+    expect(engine.dynamic).toEqual([]);
+    // A throttled beat recorded nothing: the tracker still does not see the session.
+    await vi.advanceTimersByTimeAsync(700_000);
+    expect(f.heartbeat).toHaveBeenCalledTimes(1);
+    expect(engine.dynamic).toEqual([]);
+    throttled = false;
+    await vi.advanceTimersByTimeAsync(700_000);
+    expect(engine.dynamic).toEqual([{ isP2PDisabled: false, isP2PUploadDisabled: false }]);
+    // Socket failures count while heartbeats are fresh, not once they are stale.
+    const pool = engine.core.webTorrentSocketPool;
+    FakeHls.instances[0]?.emit(FakeHls.Events.MANIFEST_LOADED, {});
+    vi.advanceTimersByTime(P2P_WATCHING_WINDOW_MS);
+    for (let i = 0; i < MAX_TRACKER_SOCKET_ERRORS; i++) pool.fail();
+    expect(c.p2pStatus().state).toBe("on");
+    await c.stop();
+  });
+
+  it("a failed heartbeat does not enable P2P; turning it off first keeps it off", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const f = fakeApi(playbackStart());
+    f.heartbeat.mockImplementationOnce(async () => Promise.reject(new Error("network")));
+    const { c } = controller(f);
+    await c.start();
+    const engine = FakeEngine.instances[0] as FakeEngine;
+    await vi.advanceTimersByTimeAsync(700_000);
+    expect(engine.dynamic).toEqual([]);
+    c.disableP2P();
+    await vi.advanceTimersByTimeAsync(700_000);
+    expect(f.heartbeat).toHaveBeenCalledTimes(2);
+    expect(engine.dynamic).toEqual([{ isP2PDisabled: true, isP2PUploadDisabled: true }]);
     await c.stop();
   });
 

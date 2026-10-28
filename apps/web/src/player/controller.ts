@@ -23,7 +23,7 @@ import {
   withToken,
   type CumulativeStats,
 } from "./heartbeat.ts";
-import { P2P_HLS_CONFIG } from "./p2p/config.ts";
+import { P2P_WATCHING_WINDOW_MS, p2pHlsConfig } from "./p2p/config.ts";
 import { DigestValidator } from "./p2p/digest.ts";
 import type { P2PHls } from "./p2p/engine.ts";
 import { fetchIceServers, iceRefreshDelay } from "./p2p/ice.ts";
@@ -126,6 +126,8 @@ export class PlayerController {
   private p2pAvailable = false;
   /** The viewer turned P2P off during this session. */
   private p2pOff = false;
+  /** When the server last acknowledged a heartbeat (it then lists the session as watching). */
+  private lastAckAt: number | null = null;
 
   constructor(private readonly opts: PlayerControllerOptions) {}
 
@@ -259,7 +261,7 @@ export class PlayerController {
       this.p2pStats = stats;
       this.p2p = plan.engine.createP2PHls({
         Hls: HlsCtor,
-        hlsConfig: { ...BASE_HLS_CONFIG, ...P2P_HLS_CONFIG, xhrSetup },
+        hlsConfig: { ...BASE_HLS_CONFIG, ...p2pHlsConfig(), xhrSetup },
         p2p: plan.info,
         iceServers: plan.iceServers,
         validateP2PSegment: digests.validate,
@@ -270,8 +272,11 @@ export class PlayerController {
         onHlsHttpBytes: (bytes) => {
           this.bytesHttp += bytes;
         },
+        watching: () => this.lastAckAt !== null && Date.now() - this.lastAckAt < P2P_WATCHING_WINDOW_MS,
         onChange: this.emitP2P,
       });
+      // The heartbeat timer runs while ICE servers and the chunk load: one may be acknowledged already.
+      if (this.lastAckAt !== null) this.p2p.enable();
       hls = this.p2p.hls;
       this.scheduleIceRefresh(plan.expiresAt);
       this.emitP2P();
@@ -382,6 +387,9 @@ export class PlayerController {
       });
       // Throttled: the server recorded nothing, so the deltas ride along with the next beat.
       if (!this.accountant.settle(totals, res)) return;
+      this.lastAckAt = Date.now();
+      // The tracker accepts this session's socket from now on: start sharing (once).
+      if (!this.p2pOff) this.p2p?.enable();
       if (res.token) session.token = res.token;
       const move = heartbeatSwitch(res);
       if (move && !this.stopped) this.switchTo(move.url, move.source);

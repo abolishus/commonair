@@ -25,7 +25,7 @@ import type { HlsConfig, Loader, LoaderCallbacks, LoaderConfiguration, LoaderCon
 import { HlsJsP2PEngine } from "p2p-media-loader-hlsjs";
 import type { CoreEventMap, DynamicCoreConfig } from "p2p-media-loader-core";
 import { withToken } from "../heartbeat.ts";
-import { buildCoreConfig, tokenedSegmentRequest, type P2PSessionInfo } from "./config.ts";
+import { buildCoreConfig, tokenedSegmentRequest, type P2PSessionInfo, type P2PTuning } from "./config.ts";
 import type { P2PStats } from "./stats.ts";
 
 /** The part of `HlsJsP2PEngine` this wrapper uses (tests pass a fake). */
@@ -41,8 +41,10 @@ export type EngineCtor = new (config: { core: ReturnType<typeof buildCoreConfig>
 
 export interface P2PHlsOptions {
   Hls: typeof Hls;
-  /** The session's hls.js config (already including `P2P_HLS_CONFIG`). */
+  /** The session's hls.js config (already including `p2pHlsConfig`). */
   hlsConfig: Partial<HlsConfig>;
+  /** The loader's windows and concurrency (default `P2P_TUNING`). */
+  tuning?: P2PTuning;
   p2p: P2PSessionInfo;
   iceServers: RTCIceServer[];
   /** `DigestValidator.validate`. */
@@ -52,6 +54,12 @@ export interface P2PHlsOptions {
   stats: P2PStats;
   /** Bytes of hls.js's own HTTP requests (playlists, parts, segments the loader did not take). */
   onHlsHttpBytes: (bytes: number) => void;
+  /**
+   * Whether the server counts this session as watching now (a heartbeat acknowledged within the
+   * tracker's freshness window). The tracker refuses a socket otherwise (`not_watching`), so
+   * socket failures while this is false never count towards giving up.
+   */
+  watching: () => boolean;
   /** Peers or the running state changed. */
   onChange: () => void;
   Engine?: EngineCtor;
@@ -59,7 +67,14 @@ export interface P2PHlsOptions {
 
 export interface P2PHls {
   hls: Hls;
+  /** P2P is (or will be, once `enable` is called) on for this session. */
   readonly running: boolean;
+  /**
+   * Start sharing: the loader starts with P2P disabled (no tracker socket, hls.js loads over HTTP)
+   * until the session's first heartbeat is acknowledged, because the tracker refuses sockets of
+   * sessions it does not see watching. Idempotent; a no-op once disabled or destroyed.
+   */
+  enable(): void;
   /** Stop P2P now (no reload): the loader drops its peers and tracker socket, HTTP continues. */
   disable(): void;
   /** Fresh ICE servers (TURN credentials) for new peer connections. */
@@ -134,17 +149,78 @@ export class PeerTouchedSegments {
   }
 }
 
+/** How far below its target latency a P2P session may drift before it steps back (seconds). */
+export const LATENCY_HOLD_TOLERANCE = 0.75;
+
+interface LatencyView {
+  readonly media: HTMLMediaElement | null;
+  readonly latency: number;
+  readonly targetLatency: number | null;
+  readonly liveSyncPosition: number | null;
+}
+
+/**
+ * Step back to hls.js's live sync position when playing closer to the edge than the target allows.
+ * The media just played is still buffered, so the step costs no request. Returns whether it seeked.
+ */
+export function holdLatency(hls: LatencyView, tolerance = LATENCY_HOLD_TOLERANCE): boolean {
+  const { media, latency, targetLatency: target, liveSyncPosition: sync } = hls;
+  if (!media || media.seeking || target === null || sync === null) return false;
+  if (!Number.isFinite(latency) || latency <= 0 || !Number.isFinite(sync)) return false;
+  if (latency >= target - tolerance || sync >= media.currentTime) return false;
+  media.currentTime = sync;
+  return true;
+}
+
 type DefaultLoader = new (config: HlsConfig) => Loader<LoaderContext>;
 
-/** hls.js's own loader, counting the bytes of every request it completes. */
+/**
+ * A playlist URL without LL-HLS delivery directives (`_HLS_msn`, `_HLS_part`, `_HLS_skip`), which
+ * hls.js adds to every blocking reload, even with `lowLatencyMode: false`, whenever the server
+ * can block (MediaMTX's LL-HLS always can). Everything else is kept byte for byte.
+ */
+export function withoutDeliveryDirectives(url: string): string {
+  return url
+    .replace(/&_HLS_[A-Za-z]+=[^&#]*/g, "")
+    .replace(/\?_HLS_[A-Za-z]+=[^&#]*&?/g, "?")
+    .replace(/\?(?=#|$)/, "");
+}
+
+/** Same origin and path (a redirect elsewhere keeps its response URL, for relative segment URLs). */
+function sameResource(a: string | undefined, b: string): boolean {
+  if (a === undefined) return true;
+  try {
+    const x = new URL(a);
+    const y = new URL(b);
+    return x.origin === y.origin && x.pathname === y.pathname;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * hls.js's own loader, counting the bytes of every request it completes.
+ *
+ * It also reports each playlist under the URL hls.js asked for, without delivery directives: the
+ * loader's segment manager (`p2p-media-loader-hlsjs` `updatePlaylist`) finds a stream by the
+ * reloaded playlist's URL, which must equal the variant URL the stream was registered with. A
+ * blocking reload's URL (directives) or the browser's response URL (the token `xhrSetup` swapped
+ * in after a refresh) never does, so the core would never learn a new segment and every segment
+ * would bypass it (plain HTTP, nothing to share).
+ */
 export function countingLoader(Base: DefaultLoader, onBytes: (bytes: number) => void): DefaultLoader {
   return class CountingLoader extends Base {
     override load(context: LoaderContext, config: LoaderConfiguration, callbacks: LoaderCallbacks<LoaderContext>) {
+      const playlist = !("frag" in context) && typeof context.url === "string";
       super.load(context, config, {
         ...callbacks,
         onSuccess: (response, stats, ctx, networkDetails) => {
           onBytes(stats.loaded);
-          callbacks.onSuccess(response, stats, ctx, networkDetails);
+          const reported =
+            playlist && sameResource(response.url, context.url)
+              ? { ...response, url: withoutDeliveryDirectives(context.url) }
+              : response;
+          callbacks.onSuccess(reported, stats, ctx, networkDetails);
         },
       });
     }
@@ -170,27 +246,32 @@ export function createP2PHls(opts: P2PHlsOptions): P2PHls {
   const Engine: EngineCtor = opts.Engine ?? (HlsJsP2PEngine as unknown as EngineCtor);
   const touched = new PeerTouchedSegments();
   const engine = new Engine({
-    core: buildCoreConfig(opts.p2p, {
-      iceServers: opts.iceServers,
-      validateP2PSegment: opts.validateP2PSegment,
-      validateHTTPSegment: async (url, byteRange, data) => {
-        if (!touched.has(url)) return true;
-        let valid = false;
-        try {
-          valid = await opts.validateP2PSegment(url, byteRange, data);
-        } finally {
-          touched.checked(url, valid, data.byteLength);
-        }
-        return valid;
+    core: buildCoreConfig(
+      opts.p2p,
+      {
+        iceServers: opts.iceServers,
+        validateP2PSegment: opts.validateP2PSegment,
+        validateHTTPSegment: async (url, byteRange, data) => {
+          if (!touched.has(url)) return true;
+          let valid = false;
+          try {
+            valid = await opts.validateP2PSegment(url, byteRange, data);
+          } finally {
+            touched.checked(url, valid, data.byteLength);
+          }
+          return valid;
+        },
+        httpRequestSetup: async (segmentUrl, segmentRange, signal, range) => {
+          if (!segmentRange) touched.httpResumed(segmentUrl, range?.start ?? 0);
+          return tokenedSegmentRequest(segmentUrl, opts.token(), signal, range, withToken);
+        },
       },
-      httpRequestSetup: async (segmentUrl, segmentRange, signal, range) => {
-        if (!segmentRange) touched.httpResumed(segmentUrl, range?.start ?? 0);
-        return tokenedSegmentRequest(segmentUrl, opts.token(), signal, range, withToken);
-      },
-    }),
+      opts.tuning,
+    ),
   });
 
   let running = true;
+  let enabled = false;
   let destroyed = false;
   let socketErrors = 0;
   let lastSocketError = Number.NEGATIVE_INFINITY;
@@ -207,7 +288,19 @@ export function createP2PHls(opts: P2PHlsOptions): P2PHls {
     opts.onChange();
   };
 
+  const enable = () => {
+    if (enabled || !running || destroyed) return;
+    enabled = true;
+    // The core creates its stream loaders (and with them the tracker socket) on the next segment
+    // request once P2P is no longer disabled (`core.ts` isSegmentLoadable, getStreamHybridLoader).
+    engine.applyDynamicConfig({ core: { isP2PDisabled: false, isP2PUploadDisabled: false } });
+    socketWorks();
+  };
+
   const onSocketError = () => {
+    // A socket refused because the session is not (or no longer) seen watching is not the
+    // tracker refusing this session: it is accepted again after the next heartbeat.
+    if (!opts.watching()) return;
     const now = Date.now();
     if (now - lastSocketError > TRACKER_SOCKET_ERROR_GAP_MS) socketErrors = 0;
     lastSocketError = now;
@@ -267,12 +360,17 @@ export function createP2PHls(opts: P2PHlsOptions): P2PHls {
     opts.onChange();
   });
   hls.on(HlsCtor.Events.MANIFEST_LOADED, watchTrackerSockets);
+  // Hold the distance from the live edge (P1 Build 5). hls.js only ever catches up: a session that
+  // starts on a young playlist, or that plays right at the edge, stays there, and then every new
+  // segment is needed the moment it exists (nothing left to fetch from a peer).
+  hls.on(HlsCtor.Events.LEVEL_UPDATED, () => holdLatency(hls));
 
   return {
     hls,
     get running() {
       return running && !destroyed;
     },
+    enable,
     disable,
     applyIceServers(iceServers) {
       if (destroyed) return;
