@@ -38,35 +38,53 @@ fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~8
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
 Legal seed follow-ups for E8/N2: a no-cash-value clause in `terms.md`, the locale cookie in
 `cookies.md`.
-E7 contract step `3bacecb` +
-`66e95da`, gate green at `ebe61b0` (pushed).
+**Batch 2 state (2026-10-27): waves 1 and 2 merged, gated and pushed; wave 3 not started.**
 
-| Unit              | Wave | Brief                                    | State                     |
-| ----------------- | ---- | ---------------------------------------- | ------------------------- |
-| E7-chat-http      | 1    | `.claude/briefs/e7/E7-chat-http.md`      | running (base `ebe61b0`)  |
-| E7-dmca           | 1    | `.claude/briefs/e7/E7-dmca.md`           | running                   |
-| E7-admin          | 1    | `.claude/briefs/e7/E7-admin.md`          | running                   |
-| E7-appeals        | 1    | `.claude/briefs/e7/E7-appeals.md`        | running                   |
-| E7-coop           | 1    | `.claude/briefs/e7/E7-coop.md`           | running                   |
-| E7-legal          | 1    | `.claude/briefs/e7/E7-legal.md`          | running                   |
-| W0-clock          | 2    | `.claude/briefs/w0/W0-clock.md`          | brief ready; ADR 0012     |
-| W0-integrity      | 2    | `.claude/briefs/w0/W0-integrity.md`      | brief ready               |
-| W0-media-exposure | 2    | `.claude/briefs/w0/W0-media-exposure.md` | brief ready; ADR 0009 amd |
-| W0-sor            | 2    | `.claude/briefs/w0/W0-sor.md`            | brief ready; ADR 0019     |
-| P1-tracker        | 2    | `.claude/briefs/p1/P1-tracker.md`        | brief ready; ADR 0005 amd |
-| P1-turn           | 2    | `.claude/briefs/p1/P1-turn.md`           | brief ready; ADR 0005 amd |
-| P1-player         | 3    | `.claude/briefs/p1/P1-player.md`         | brief ready; ADR 0005 amd |
+| Unit              | Wave | Commits (branch)                | State                                                                                     |
+| ----------------- | ---- | ------------------------------- | ----------------------------------------------------------------------------------------- |
+| E7-chat-http      | 1    | `e7/chat-http` → `8298c5c`      | merged; `e2e-social` green                                                                |
+| E7-dmca           | 1    | `e7/dmca` → `9e307e3`           | merged; trust-safety step 8 green. **No lawyer reviewed** the § 512 flow or `DMCA_RULES`  |
+| E7-admin          | 1    | `e7/admin` → `66629bd`          | merged; new `e7-admin` scenario green (in `FULL_REQUIRED`)                                |
+| E7-appeals        | 1    | `e7/appeals` → `224661e`        | merged; trust-safety step 9 green                                                         |
+| E7-coop           | 1    | `e7/coop` → `1309ea5`           | merged; `e5-coop` green                                                                   |
+| E7-legal          | 1    | `e7/legal` → `779462a`          | merged                                                                                    |
+| W0-sor            | 2    | `w0/sor` → `a4a6a29`            | merged; trust-safety step 11. DSA text in the operator template, **counsel not reviewed** |
+| W0-media-exposure | 2    | `w0/media-exposure` → `e4ba1a5` | merged; `vod-clips` green, trust-safety step 10                                           |
+| W0-integrity      | 2    | `w0/integrity` → `103e82b`      | merged; `integrity-basic` green. Closes the 2H2 integrity row                             |
+| P1-tracker        | 2    | `p1/tracker` → `d069fde`        | merged (grant-derived info hashes, origin `/p2p-digest/`)                                 |
+| P1-turn           | 2    | `p1/turn` → `60a3118`           | merged (coturn, STUN only by default; `--turn-relay`); not run on a real host             |
+| W0-clock          | 3    | spike only (`c788e5d`)          | option A failed; user chose A2 (SRT) 2026-10-27; **re-briefed, not started**              |
+| P1-player         | 3    | —                               | brief ready, **not started**                                                              |
 
-P1 contract step (branch `p1/contract-step`, ADR 0005 amendment 1 accepted 2026-10-27): deps
-`p2p-media-loader-core`/`-hlsjs` 4.0.0, coturn pinned, `turnEnv` + `P2P_DEFAULT=off`,
-`PlaybackStart.p2p.available`/`digestUrl`, `IceServers` + `p2p.iceServers` stub, `KEYS.p2pGrant`
-(written at start, refreshed or revoked by heartbeats, deleted at end), `@commonair/contracts/p2p`
-with info hash vectors, the origin `/p2p-digest/` seam, `ip.ts` in `@commonair/service`, the tracker
-in every stack, the P1 web seams and the harness `viewers --set p2p` (default 0). **Legal:** the
-privacy and cookie policies gained P2P sections under their own seed versions
-(`2026-10-27-p2p-draft`); privacy requires acceptance, so every existing user is asked to accept
-the new privacy version (pending in `me.pendingLegal`) once the seed runs. Counsel has not reviewed
-the text.
+Contract steps: E7 `3bacecb`+`66e95da`, W0 `600d263`, P1 `d8c4fe0`+`0a5d750`. Contract requests:
+E7 wave `0f975b7`, wave 2 `ccf9c17`, `MEDIAMTX_SRT_URL` `a10eeee`. E7's `notImplemented` grep
+leaves only interact, bot, developer and `integrity.channelSummary`.
+
+**Decisions taken this batch (user, 2026-10-27):** the four ADRs above with the recommended
+answers (P2P opt-in by default, `P2P_DEFAULT=off`, until counsel confirms an EU lawful basis;
+per-segment digests in P1); ADR 0012 decision 3 = A2; patronage and governance count only
+gate-eligible viewer sessions (`61263d6`). happy-dom 21.0.4 (`22934c4`) dropped its audit exception.
+
+**Verification:** `bun run verify` green on `d520788` (after a dated exception for deepmerge
+GHSA-gcqx-w48m-w2h4, published 2026-10-27 with no fix). Against the stack on `5404bbf`:
+`trust-safety` 1–11 144/144, `integrity-basic` 15/15, `vod-clips` 29/29; after E7, `e2e-social`,
+`e5-coop`, `e7-admin` green. Harness fixes found by the runs: step 8 audit log as admin, e5-coop
+tiers, e7-admin flag id, step 11's `Date` parameter, `Mailpit.get` reading `Date` (the message
+endpoint has no `Created`), step 11 checking a suspended recipient by email. Not run yet:
+`clock-skew` (W0-clock), `viewers --set p2p=10` (P1-player), `verify:full`, the self-host e2e
+with coturn, `tofu` locally (CI runs it with `REQUIRE_TOFU=1`). Wave 3 handoff:
+`.claude/briefs/batch2/HANDOFF-wave3.md`.
+
+**Gate stability (fix next):** timing tests fail under load (several given longer timeouts this
+batch); Podman Desktop's polling pegs the VM's API service (keep it closed during the gate); a
+failed integration run orphans its containers (`commonair-it-*`, `commonair-pgh-*`,
+`media-int-*`, `harness-mediamtx-*`), and the stale sweep only removes old ones.
+
+**Open for the user or counsel:** DMCA flow and policy numbers (3 strikes in 365 days, restore
+after 12 weekdays, claimant name shown, counter-notice data kept, 395-day consent retention), a US
+Copyright Office designated agent before launch; the DSA statement template; EU lawful basis for
+default-on P2P; a suspended, signed-out user can only appeal by email (better-auth refuses a
+banned sign-in); the TURN relay range on the DigitalOcean firewall (only udp/3478 is open).
 
 Environment note: the podman VM's chrony has no time source; its clock drifted ~150 ms behind
 the host and failed the governance tests' 100 ms margin. Reset with
