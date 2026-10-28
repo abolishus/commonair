@@ -7,9 +7,9 @@
  * it must not move, so any drift is exported as a gauge. Recorder run offsets live in memory for
  * the synchronous anchor; their durable copy is the run sidecar (`run.ts`).
  *
- * A path whose PDT is still settling (a WHIP source's first ~25 s, `w0.ts`) is polled until it
- * settles rather than failed at once, so a consumer starts as soon as W0 is right instead of
- * after the supervisor's growing backoff. A source that never settles gets the newest W0 after
+ * A path whose PDT is still moving (a publisher catching up after a slow start, `w0.ts`) is
+ * polled until it settles rather than failed at once, so a consumer starts as soon as W0 is right
+ * instead of after the supervisor's growing backoff. A source that never settles gets the newest W0 after
  * `acceptAfterMs`, so it still gets a ladder and an AAC copy.
  */
 import type { Logger } from "@commonair/observability";
@@ -44,7 +44,10 @@ export interface SettlePolicy {
   acceptAfterMs: number;
 }
 
-/** WHIP measured: ~25 s of slew, then the playlist window must clear it; one wait covers both. */
+/**
+ * ffmpeg's `-re` catches up at 1.05× (its default `-readrate_catchup`): a 1.5 s late WHIP start
+ * moves PDT for ~30 s, then the playlist window must clear it; one wait covers both.
+ */
 export const DEFAULT_SETTLE: SettlePolicy = { pollMs: 1_000, waitMs: 45_000, acceptAfterMs: 120_000 };
 
 /**
@@ -58,6 +61,7 @@ export function offlineClock(anchor: ClockAnchor = IDENTITY_CLOCK): MediaClock {
     w0: async () => {
       throw new W0Error("no W0 on an offline clock", "http");
     },
+    sourceSegmentMs: () => null,
     setRunOffset: () => {},
     forget: () => {},
     sidecarOffsetMs: async () => null,
@@ -72,6 +76,8 @@ export function createMediaClock(opts: MediaClockOptions): MediaClock {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
   const lastW0 = new Map<string, number>();
+  /** The newest source segment's duration seen with each broadcast's last W0. */
+  const segmentMs = new Map<string, number>();
   /** When a broadcast's W0 was first seen unsettled; cleared once it settles. */
   const unsettledSince = new Map<string, number>();
   const offsets = new Map<string, Map<string, number>>();
@@ -131,6 +137,7 @@ export function createMediaClock(opts: MediaClockOptions): MediaClock {
       const prev = lastW0.get(broadcastId);
       if (prev !== undefined) metrics.w0Drift(result.w0Ms - prev);
       lastW0.set(broadcastId, result.w0Ms);
+      segmentMs.set(broadcastId, result.segmentMs);
       return result.w0Ms;
     },
     setRunOffset(broadcastId, runId, offsetMs) {
@@ -142,8 +149,12 @@ export function createMediaClock(opts: MediaClockOptions): MediaClock {
       if (!runs) offsets.set(broadcastId, (runs = new Map()));
       runs.set(runId, offsetMs);
     },
+    sourceSegmentMs(broadcastId) {
+      return segmentMs.get(broadcastId) ?? null;
+    },
     forget(broadcastId) {
       lastW0.delete(broadcastId);
+      segmentMs.delete(broadcastId);
       unsettledSince.delete(broadcastId);
       offsets.delete(broadcastId);
     },

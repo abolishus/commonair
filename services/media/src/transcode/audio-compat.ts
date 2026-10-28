@@ -19,7 +19,11 @@ import { needsAacCopy, sourceInfo } from "../mediamtx.ts";
 export const SOURCE_AAC_TTL_SECONDS = 30;
 /**
  * How long viewers may be held back ("pending") while the copy starts. Past it the original source
- * is served again, so a copy that cannot start never makes the stream unwatchable.
+ * is served again, so a copy that cannot start never makes the stream unwatchable. It covers a
+ * steady publisher: W0 settles at the third source segment (~6 s with a 2 s GOP), then the copy's
+ * probe (one segment plus 0.5 s) and first frame, ~11 s in all (measured). A publisher still
+ * catching up holds W0 back for up to ~35 s (`clock/README.md`); its viewers get the original
+ * after this limit and the copy once it is live.
  */
 export const SOURCE_AAC_PENDING_MAX_MS = 20_000;
 
@@ -109,7 +113,9 @@ export class AudioCompat {
       args: async () => {
         const input = internalSrtUrl(srtBase, this.b.path, internalSecret);
         const w0Ms = await this.ctx.clock.w0(this.b.broadcastId, this.b.path, "aac");
-        return aacCopyArgs(input, output, w0Ms);
+        // Viewers wait on the copy: probe the input for one source segment, not ffmpeg's 5 s.
+        const segmentMs = this.ctx.clock.sourceSegmentMs(this.b.broadcastId);
+        return aacCopyArgs(input, output, w0Ms, segmentMs ?? undefined);
       },
       secrets: [internalSecret],
       logger: this.log,

@@ -14,10 +14,15 @@
  * so W0 is fetched fresh for every ffmpeg start and rebased to the representation that session
  * will use (`rebasePts`).
  *
- * W0 is only taken once the path's PDT has settled (`w0Settled`). For a WebRTC (WHIP) source,
- * MediaMTX's PDT starts over a second off and slews toward its steady value at about 5 % for
- * the first ~25 s, while the SRT timeline does not move: a W0 read then stays that far off for
- * the whole ffmpeg run (measured 2026-10-28, `clock-whip.int.test.ts`).
+ * W0 is only taken once the path's PDT has settled (`w0Settled`). MediaMTX stamps a non-RTSP
+ * source's PDT from arrival (its NTP estimator: projected from the first packet, re-anchored to
+ * the arrival time when media would land in the future or more than 5 s in the past), while the
+ * SRT timeline only follows the media. A publisher that runs faster than real time for a while,
+ * such as ffmpeg's `-re` catching up at 1.05× after a WHIP handshake, moves PDT about 5 % against
+ * the timeline until it has caught up (~30 s for a 1.5 s late start); a W0 read then stays that
+ * far off for the whole ffmpeg run (measured 2026-10-28, `clock-whip.int.test.ts`). The first
+ * segment's PDT is also set before the publisher's start-up burst is over (500 ms off on a steady
+ * source), so W0 is never taken from a playlist's only segment.
  */
 import { MEDIA_INTERNAL_USER } from "@commonair/contracts/internal";
 import { parseFragment, parseInit, type InitTrack } from "./boxes.ts";
@@ -104,6 +109,8 @@ export interface MediaSegmentRef {
   uri: string;
   map: string;
   pdtMs: number;
+  /** `#EXTINF` duration, ms. MediaMTX cuts segments on keyframes, so about the source's GOP. */
+  durationMs: number;
 }
 
 /** First variant URI of a multivariant playlist, or null when `text` is a media playlist. */
@@ -126,7 +133,7 @@ export function firstVariant(text: string): string | null {
 export function completeSegments(text: string): MediaSegmentRef[] {
   let map: string | null = null;
   let pdt: number | null = null;
-  let inf = false;
+  let inf: number | null = null;
   const found: MediaSegmentRef[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -135,10 +142,12 @@ export function completeSegments(text: string): MediaSegmentRef[] {
     else if (line.startsWith("#EXT-X-PROGRAM-DATE-TIME:")) {
       const t = Date.parse(line.slice("#EXT-X-PROGRAM-DATE-TIME:".length));
       pdt = Number.isNaN(t) ? null : t;
-    } else if (line.startsWith("#EXTINF:")) inf = true;
-    else if (!line.startsWith("#")) {
-      if (inf && pdt !== null && map) found.push({ uri: line, map, pdtMs: pdt });
-      inf = false;
+    } else if (line.startsWith("#EXTINF:")) {
+      const d = Number.parseFloat(line.slice("#EXTINF:".length));
+      inf = Number.isFinite(d) && d >= 0 ? Math.round(d * 1000) : null;
+    } else if (!line.startsWith("#")) {
+      if (inf !== null && pdt !== null && map) found.push({ uri: line, map, pdtMs: pdt, durationMs: inf });
+      inf = null;
       pdt = null;
     }
   }
@@ -163,8 +172,8 @@ export function referenceSegment(segments: readonly MediaSegmentRef[]): MediaSeg
 /**
  * Settled W0 may differ between two segments by this much plus `W0_SETTLE_RATE` of the PDT span
  * between them: PDT is rounded to the millisecond, and a publisher's media clock may run a little
- * off the wall clock. MediaMTX's start-up slew (about 5 % for a WHIP source, measured) is ten
- * times the rate allowed.
+ * off the wall clock. A publisher catching up at ffmpeg's 1.05× moves W0 ten times the rate
+ * allowed.
  */
 export const W0_SETTLE_FLOOR_MS = 4;
 export const W0_SETTLE_RATE = 0.005;
@@ -206,6 +215,8 @@ export interface W0Result {
   handler: string;
   /** Against the reference segment; null when only one segment was available (unsettled). */
   settle: W0Settle | null;
+  /** The newest segment's duration, ms: about the source's keyframe interval. */
+  segmentMs: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -297,7 +308,7 @@ export async function fetchW0(opts: FetchW0Options): Promise<W0Result> {
         `${opts.path}: W0 not settled yet (moved ${Math.round(settle?.driftMs ?? 0)} ms over ${Math.round(settle?.spanMs ?? 0)} ms)`,
         "unsettled",
       );
-    return { w0Ms, sample, handler: track.handler, settle };
+    return { w0Ms, sample, handler: track.handler, settle, segmentMs: seg.durationMs };
   } catch (err) {
     if (err instanceof W0Error) throw err;
     throw new W0Error(`${opts.path}: ${err instanceof Error ? err.message : String(err)}`, "segment");

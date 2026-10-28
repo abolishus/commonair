@@ -36,6 +36,11 @@ export interface MediaClock extends ClockAnchor {
    * on the timeline a `-copyts` SRT reader started now will see. Throws when it cannot be read.
    */
   w0(broadcastId: string, path: string, consumer: W0Consumer): Promise<number>;
+  /**
+   * The source's newest LL-HLS segment duration (ms) read with the broadcast's last W0: about its
+   * keyframe interval. Null before any W0.
+   */
+  sourceSegmentMs(broadcastId: string): number | null;
   /** Set a recorder run's offset (served by `offsetMs`), or clear it with null. */
   setRunOffset(broadcastId: string, runId: string, offsetMs: number | null): void;
   /** Forget a broadcast's W0 history and run offsets (its local recordings are gone). */

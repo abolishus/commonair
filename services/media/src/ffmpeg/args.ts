@@ -203,14 +203,32 @@ export function ladderArgs({ input, w0Ms, outputFor, rungs, encoder }: LadderInp
   return args;
 }
 
+/** Probe bounds for `probeMicros`, ms. */
+const PROBE_MIN_MS = 1_500;
+const PROBE_MAX_MS = 5_000;
+const PROBE_MARGIN_MS = 500;
+
+/**
+ * `-analyzeduration` (µs) for a reader viewers wait on. ffmpeg probes an SRT source for the full
+ * duration (5 s by default, measured: 1 s + the setting before the first output frame), but only
+ * needs a keyframe: video is copied, and its size comes from the SPS. MediaMTX cuts segments on
+ * keyframes, so one source segment plus a margin covers the keyframe interval. Shorter fails:
+ * `Could not write header (incorrect codec parameters ?)` (measured with 0.3 s and 1 s on a 2 s GOP).
+ */
+export function probeMicros(sourceSegmentMs: number): number {
+  const ms = Number.isFinite(sourceSegmentMs) ? sourceSegmentMs + PROBE_MARGIN_MS : PROBE_MAX_MS;
+  return Math.round(Math.min(PROBE_MAX_MS, Math.max(PROBE_MIN_MS, ms)) * 1000);
+}
+
 /**
  * The source with its audio re-encoded to AAC and the video copied, published back to MediaMTX
  * (`sourceAacPath`): cheap enough to run for every WHIP broadcast, whatever the viewer count.
  */
-export function aacCopyArgs(input: string, output: string, w0Ms: number): string[] {
+export function aacCopyArgs(input: string, output: string, w0Ms: number, sourceSegmentMs?: number): string[] {
   return [
     ...BASE,
     ...PROGRESS,
+    ...(sourceSegmentMs === undefined ? [] : ["-analyzeduration", String(probeMicros(sourceSegmentMs))]),
     ...SRT_IN,
     "-i",
     input,

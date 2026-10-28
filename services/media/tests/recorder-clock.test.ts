@@ -130,6 +130,7 @@ function liveClock(w0: () => Promise<number>) {
       handler: "vide",
       sample: { pdtMs: 0, baseDecodeTime: 0, compositionOffset: 0, timescale: 90_000 },
       settle: { spanMs: 6_000, driftMs: 0 },
+      segmentMs: 2_000,
     }),
   });
   return { clock, seen };

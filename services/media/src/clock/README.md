@@ -287,7 +287,8 @@ each new segment, minus the settled value, at seconds after publish:
 | ------ | ---- | --- | --- | --- | ---- | ---- | ---- | --- | ---- | ---- | ---- | ---- | ---- |
 | ΔW0 ms | 1537 | 962 | 875 | 780 | 676  | 586  | 492  | 397 | 296  | 194  | 105  | 6    | 0–6  |
 
-So a W0 is about 95 ms (≈5 %) per 2 s segment off while settling, then stable. The pre-fix
+So a W0 is about 95 ms (≈5 %) per 2 s segment off while settling, then stable. (Corrected
+below: the movement is the publisher catching up, not MediaMTX slewing.) The pre-fix
 `fetchW0` accepted the first one (+1521 ms in the old-code run), and an AAC copy started with it
 published PDT **+1520 ms** from the source on every segment: all of the copy's error came from its W0.
 RTMP paths do not slew (the RTMP clock checks pass unchanged with the guard).
@@ -305,3 +306,75 @@ the AAC copy started on it was **+5 ms** from the source on every segment.
 
 **Cost.** The AAC copy of a WHIP broadcast starts ~25 s after publish instead of at once (live
 ~9 s after that); a ladder requested in that window waits the same way.
+
+## Why PDT moves, CI, and the AAC copy's start (2026-10-28, second pass)
+
+**The movement is the publisher's, not MediaMTX's.** MediaMTX 1.21.2 stamps a WebRTC or RTMP
+path's PDT with its NTP estimator (`internal/ntpestimator`): the arrival time of the first packet
+plus the media time since, re-anchored to the arrival time whenever that would put a packet in
+the future or more than 5 s in the past. The harness streamer's ffmpeg starts its `-re` clock
+before the WHIP handshake finishes (~1.5 s), then catches up at `-readrate_catchup`'s default
+1.05×, so every packet for ~30 s arrives "early" and re-anchors PDT: −5 % against the timeline.
+Measured with the same WHIP source on the harness MediaMTX, W0 of each new segment against the
+first: default catch-up −87, −180, … −955 ms over 24 s, then constant; with
+`-readrate_catchup 1`, −500 ms at the second segment and constant (±3 ms) from there on. The
+first segment's W0 is off on every source (its PDT predates the start-up burst), which is why a
+playlist's only segment never gives W0. A publisher that falls more than 5 s behind is
+re-anchored the other way: PDT jumps by ~5 s.
+
+**CI (GitHub run 40634131663).** The strip-burning RTMP sources of `clock-mediamtx.int.test.ts`
+cost about a fifth of a core each in `geq` alone (60 s rendered in 13 s here); on a 4-vCPU runner
+running every package's integration tests at once they fell behind real time. Both estimator
+effects then showed: `W0 not settled (moved −58 / −94 / −100 ms over ~1.9 s)` is a source
+catching up at 1.05×, and rung/recorder PDT **5040–5052 ms** off a source `PDT − strip` read a
+minute earlier is a source re-anchored after falling 5 s behind (W0 moved with it; the stale
+reference did not). Neither is the media clock. The test now takes W0 as the service does
+(polled until settled), reads the source's `PDT − strip` over the same window as each rung or
+recorder measurement, and repeats a measurement once if the source moved under it, then fails
+naming the runner. The same effect in production needs a publisher that runs off real time; a
+stall of more than 5 s re-anchors the source path's PDT while rungs and the VOD keep the W0 they
+started with (reported, not handled here).
+
+**AAC copy start.** The copy still waits for a settled W0 (a steady publisher settles at its
+third segment, ~6 s with a 2 s GOP). It now probes its input for one source segment plus 0.5 s
+instead of ffmpeg's 5 s (`probeMicros`, from `MediaClock.sourceSegmentMs`): ffmpeg waits the whole
+`-analyzeduration` on this input (first frame 1 s + the setting, measured 5.9 s at the default,
+3.0 s at 2.5 s), but needs only a keyframe, since the copied video's size comes from the SPS
+(0.3 s and 1 s on a 2 s GOP fail with `Could not write header`).
+
+**Not done: starting the copy before W0 settles.** Tried and measured, then left out, because it
+trades ADR 0012's live-to-VOD target for TTFF while the publisher catches up. The copy started on
+a provisional W0 (the newest segment's once there are two, 3.5 s after it is requested) and was
+restarted once on the settled W0 if they differed by more than 15 ms (`ingest-whip` and
+`clock-skew` on the local stack, harness WHIP streamer):
+
+| variant                  | Chromium TTFF      | WHIP cross-rendition p95 | WHIP live-to-VOD p95 |
+| ------------------------ | ------------------ | ------------------------ | -------------------- |
+| settled W0 (before)      | 23.4 s             | 1 ms (orchestrator run)  | pass                 |
+| provisional W0 + restart | 15.5, 14.8, 16.1 s | 3 ms                     | **1028 ms** (fail)   |
+
+The copy was restarted 1036 ms away 27 s after publish and live again 3.8 s later; the source
+rendition's live samples from before the restart carry the provisional W0, ~15 % of the pairs.
+With a publisher that does not catch up (`-readrate_catchup 1`) the second segment already has
+the settled W0, so the two variants differ only by one segment (~2 s) of wait.
+
+**What bounds WHIP TTFF, either way.** Measured on the copy's own path:
+
+- Every `useAbsoluteTimestamp` path drops its publisher's first ~5 s of packets
+  (`received RTP packet without absolute time, skipping it`; ~4,500 lines per ladder start on CI).
+  The gap matches ffmpeg's RTP muxer, which sends a sender report with its first packet and the
+  next one no sooner than 5 s later; why MediaMTX does not use the first one was not established
+  (gortsplib's receiver keeps a report that arrives before any RTP). The copy's first LL-HLS
+  segment comes ~8.3 s after its RTSP session opens (4.2 s on a path without
+  `useAbsoluteTimestamp`).
+- The player retries the origin's 503 `starting` with hls.js's exponential manifest backoff
+  (1, 2, 4, 8 s): a copy that is ready just after the 7 s retry is picked up at 15 s.
+
+**WHIP VOD stuck in `processing`.** A local `clock-skew` run timed out waiting for the WHIP VOD:
+`vod-finalize` failed every attempt with "no frame decoded from a VOD chunk". The scenario's
+recorder restart ended run 1 after 45 four-second segments and a 0.2 s one, so the 60 s scan
+chunks left that tail alone, and ffmpeg's fps filter emits nothing for a 0.2 s clip at the
+moderation interval (0 frames at 1/2, 1/1 and 1/0.5 fps; 2 at 1/0.1; also with timestamps from 0,
+so not the recorder's absolute `tfdt`). A short chunk is now sampled at half its length
+(`scanStepSeconds`); an earlier WHIP VOD stuck the same way (05:10 that day, before these changes)
+finalized once the fix was deployed.

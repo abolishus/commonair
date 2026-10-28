@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
 import { parseFragment, parseInit } from "../src/clock/boxes.ts";
 import { syncedFromState } from "../src/clock/host.ts";
-import { createMediaClock } from "../src/clock/media-clock.ts";
+import { createMediaClock, offlineClock } from "../src/clock/media-clock.ts";
 import type { ClockMetrics } from "../src/clock/metrics.ts";
 import { firstSampleSeconds, readSidecar, runOffsetMs, runSidecar, writeSidecar } from "../src/clock/run.ts";
 import {
@@ -296,6 +296,7 @@ describe("LL-HLS playlists", () => {
       uri: "x_video1_seg27.mp4?session=s1",
       map: "x_video1_init.mp4?session=s1",
       pdtMs: Date.parse("2026-10-28T00:53:49.377Z"),
+      durationMs: 2000,
     });
     expect(newestSegment('#EXTM3U\n#EXT-X-MAP:URI="i.mp4"\n#EXTINF:2,\ns.mp4\n')).toBeNull();
     expect(newestSegment("#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-10-28T00:00:00Z\n#EXTINF:2,\ns.mp4\n")).toBeNull();
@@ -306,7 +307,8 @@ describe("LL-HLS playlists", () => {
     expect(segs.map((s) => s.uri)).toEqual(["x_video1_seg26.mp4?session=s1", "x_video1_seg27.mp4?session=s1"]);
     expect(segs[0]?.pdtMs).toBe(Date.parse("2026-10-28T00:53:47.377Z"));
     expect(completeSegments("#EXTM3U\n")).toEqual([]);
-    const ref = (n: number) => Array.from({ length: n }, (_, i) => ({ uri: `s${i}`, map: "i", pdtMs: i * 1000 }));
+    const ref = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ uri: `s${i}`, map: "i", pdtMs: i * 1000, durationMs: 1000 }));
     expect(referenceSegment(ref(0))).toBeNull();
     expect(referenceSegment(ref(1))).toBeNull();
     expect(referenceSegment(ref(2))?.uri).toBe("s0");
@@ -392,6 +394,7 @@ describe("fetchW0", () => {
     expect(r.w0Ms).toBeCloseTo(Date.parse("2026-10-28T00:53:49.377Z") - (50_000.5 - 10) * 1000, 3);
     expect(r.settle?.spanMs).toBe(2_000);
     expect(r.settle?.driftMs).toBeCloseTo(0, 6);
+    expect(r.segmentMs).toBe(2_000);
     expect(requests.map((q) => new URL(q.url).pathname)).toEqual([
       "/live/alice/index.m3u8",
       "/live/alice/video1_stream.m3u8",
@@ -659,6 +662,7 @@ describe("media clock", () => {
     handler: "vide",
     sample: { pdtMs: 0, baseDecodeTime: 0, compositionOffset: 0, timescale: 90_000 },
     settle: { spanMs: 6_000, driftMs: 0 },
+    segmentMs: 2_000,
   });
 
   test("W0 drift for the same broadcast is reported; another broadcast starts fresh", async () => {
@@ -754,6 +758,25 @@ describe("media clock", () => {
     // Another broadcast, and this one after forget, start their own unsettled clock.
     clock.forget("b1");
     await expect(clock.w0("b1", "live/a", "ladder")).rejects.toMatchObject({ reason: "unsettled" });
+  });
+
+  test("the source segment duration read with a broadcast's last W0 is kept until forget", async () => {
+    const durations = [2_000, 4_000];
+    const clock = createMediaClock({
+      hlsBase: "http://m",
+      password: "p",
+      logger: captureLogger().logger,
+      fetchW0: async () => ({ ...result(1000), segmentMs: durations.shift() ?? 0 }),
+    });
+    expect(clock.sourceSegmentMs("b1")).toBeNull();
+    await clock.w0("b1", "live/a", "aac");
+    expect(clock.sourceSegmentMs("b1")).toBe(2_000);
+    await clock.w0("b1", "live/a", "ladder");
+    expect(clock.sourceSegmentMs("b1")).toBe(4_000);
+    expect(clock.sourceSegmentMs("b2")).toBeNull();
+    clock.forget("b1");
+    expect(clock.sourceSegmentMs("b1")).toBeNull();
+    expect(offlineClock().sourceSegmentMs("b1")).toBeNull();
   });
 
   test("a failed W0 is counted by consumer, logged without credentials, and rethrown", async () => {
