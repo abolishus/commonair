@@ -590,6 +590,8 @@ describe("refusals", () => {
   test("a newer iat replaces the session's socket and reclaims its peer id", async () => {
     const sid = await session();
     const hash = derived("source", BROADCAST, "secondary");
+    // An earlier test's revoked session on this swarm leaves it asynchronously; start empty.
+    await valkey.del(KEYS.p2pSwarm(swarmOf(hash)));
     const peerId = binaryId(91);
     const old = await connect(sid, NET_A, nowS() - 60);
     old.send({ action: "announce", info_hash: hash, peer_id: peerId });
