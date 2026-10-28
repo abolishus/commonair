@@ -18,6 +18,9 @@
  * AAC copy runs `aacCopyArgs` in the media image (or MediaMTX's ffmpeg image) on MediaMTX's
  * network namespace.
  */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
 import { CONTAINER_FFMPEG_IMAGE, whipFfmpeg } from "../../../harness/src/ffmpeg.ts";
 import { Streamer } from "../../../harness/src/streamer.ts";
@@ -55,6 +58,7 @@ let mtx: MediaMtxInstance;
 let whip: Streamer | null = null;
 let copy: Bun.Subprocess | null = null;
 const copyName = `media-int-clockw-${crypto.randomUUID().slice(0, 8)}`;
+const scratch = mkdtempSync(join(tmpdir(), "media-int-clockw-"));
 
 beforeAll(async () => {
   mtx = await startMediaMtx();
@@ -65,6 +69,7 @@ afterAll(async () => {
   podman(["rm", "-f", "-t", "1", copyName]);
   await whip?.stop().catch(() => undefined);
   await mtx?.stop();
+  rmSync(scratch, { recursive: true, force: true });
 });
 
 async function get(url: string): Promise<Uint8Array> {
@@ -73,22 +78,41 @@ async function get(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer());
 }
 
+/** Why the last strip decode failed, for the report. */
+let stripError = "";
+
+/**
+ * The strip of a segment's first frame. ffmpeg reads the segment from a file, not stdin: it exits
+ * after one frame, and on Linux the rest of a piped segment then fails with EPIPE (every sample on
+ * CI, 2026-10-28).
+ */
 async function firstStrip(init: Uint8Array, segment: Uint8Array): Promise<number | null> {
-  const p = Bun.spawn(
-    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-frames:v", "1"].concat([
-      "-vf",
-      `scale=${W}:${H},format=gray`,
-      "-f",
-      "rawvideo",
-      "pipe:1",
-    ]),
-    { stdin: "pipe", stdout: "pipe", stderr: "ignore" },
-  );
-  void p.stdin.write(Buffer.concat([init, segment]));
-  await p.stdin.end();
-  const out = new Uint8Array(await new Response(p.stdout).arrayBuffer());
-  await p.exited;
-  return out.length < W * H ? null : decodeStrip(graySource(out.subarray(0, W * H), W, H));
+  const file = join(scratch, `${crypto.randomUUID()}.mp4`);
+  writeFileSync(file, Buffer.concat([init, segment]));
+  try {
+    const p = Bun.spawn(
+      ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", file, "-frames:v", "1"].concat([
+        "-vf",
+        `scale=${W}:${H},format=gray`,
+        "-f",
+        "rawvideo",
+        "pipe:1",
+      ]),
+      { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+    );
+    const [out, err] = await Promise.all([
+      new Response(p.stdout).arrayBuffer().then((b) => new Uint8Array(b)),
+      new Response(p.stderr).text(),
+    ]);
+    await p.exited;
+    if (out.length < W * H) {
+      stripError = `ffmpeg exit ${p.exitCode}: ${err.slice(-500)}`;
+      return null;
+    }
+    return decodeStrip(graySource(out.subarray(0, W * H), W, H));
+  } finally {
+    rmSync(file, { force: true });
+  }
 }
 
 interface Sample {
@@ -183,6 +207,7 @@ test("fetchW0 refuses a WHIP path's W0 until its PDT settles, and an AAC copy st
       raw: series.map((s) => [Math.round(s.t / 100) / 10, Math.round(s.w0Ms - settled), s.e]),
       accepted: accepted.map((a) => [Math.round(a.t / 100) / 10, Math.round(a.w0Ms - settled)]),
       sampleError,
+      stripError,
     });
   if (process.env.TEST_CLOCK_LOG) console.warn(`whip W0 ms vs settled (t s, Δ, PDT − strip): ${report()}`);
 

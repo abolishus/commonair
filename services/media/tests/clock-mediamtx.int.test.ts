@@ -168,8 +168,12 @@ const DECODE = ["-fps_mode", "passthrough", "-vf", `showinfo,scale=${W}:${H},for
 async function decodeFrames(cmd: string[], input?: Uint8Array): Promise<Frame[]> {
   const p = Bun.spawn(cmd, { stdin: input ? "pipe" : "ignore", stdout: "pipe", stderr: "pipe" });
   if (input && p.stdin) {
-    void p.stdin.write(input);
-    await p.stdin.end();
+    // ffmpeg exits once it has its frames; the unread rest then fails with EPIPE on Linux.
+    const stdin = p.stdin;
+    await Promise.resolve()
+      .then(() => stdin.write(input))
+      .then(() => stdin.end())
+      .catch(() => undefined);
   }
   const [out, err] = await Promise.all([new Response(p.stdout).arrayBuffer(), new Response(p.stderr).text()]);
   await p.exited;
