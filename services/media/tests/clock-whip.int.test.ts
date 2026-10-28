@@ -139,8 +139,13 @@ test("fetchW0 refuses a WHIP path's W0 until its PDT settles, and an AAC copy st
 
   const raw = new Map<string, Sample & { t: number }>();
   const accepted: { t: number; w0Ms: number }[] = [];
+  /** Why the last sample failed, for the report. */
+  let sampleError = "";
   while (Date.now() - t0 < WATCH_MS) {
-    const s = await sample(PATH).catch(() => null);
+    const s = await sample(PATH).catch((err: unknown) => {
+      sampleError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      return null;
+    });
     if (s && !raw.has(s.uri)) raw.set(s.uri, { ...s, t: Date.now() - t0 });
     const w0 = await fetchW0({ hlsBase: mtx.hlsUrl, path: PATH, password: SECRET }).catch(() => null);
     if (w0) {
@@ -177,6 +182,7 @@ test("fetchW0 refuses a WHIP path's W0 until its PDT settles, and an AAC copy st
     JSON.stringify({
       raw: series.map((s) => [Math.round(s.t / 100) / 10, Math.round(s.w0Ms - settled), s.e]),
       accepted: accepted.map((a) => [Math.round(a.t / 100) / 10, Math.round(a.w0Ms - settled)]),
+      sampleError,
     });
   if (process.env.TEST_CLOCK_LOG) console.warn(`whip W0 ms vs settled (t s, Δ, PDT − strip): ${report()}`);
 

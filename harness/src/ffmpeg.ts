@@ -5,7 +5,7 @@
  * FFmpeg capability detection and argument builders for simulated streamers. Builders are pure
  * so every encoder mode is unit-tested without spawning ffmpeg.
  */
-import { MIN_FRAME_WIDTH, geqExpression, stripHeight } from "./timestamp-strip.ts";
+import { CELLS, MIN_FRAME_WIDTH, geqExpression, stripHeight } from "./timestamp-strip.ts";
 
 export interface FfmpegCapabilities {
   version: string;
@@ -162,12 +162,20 @@ export function effectiveEncoding(o: Pick<StreamerArgsOptions, "bitrateKbps" | "
   }
 }
 
-/** Video filtergraph: test pattern + timestamp strip (+ optional wall-clock timecode). */
+/**
+ * Video filtergraph: test pattern + timestamp strip (+ optional wall-clock timecode).
+ *
+ * `geq` evaluates its expression per pixel, so it draws the strip one pixel per cell (CELLS×1)
+ * and a nearest-neighbour scale blows it up to the strip's size. At full size it cost a fifth of a
+ * CI core per streamer, enough for a loaded runner to fall behind real time, which moves
+ * MediaMTX's arrival-clock PDT under the clock tests.
+ */
 export function videoFilter(o: Pick<StreamerArgsOptions, "width" | "height" | "startEpochMs" | "timecode">): string {
   const h = stripHeight(o.height);
   const graph = [
     `[0:v]split[base][src]`,
-    `[src]crop=${o.width}:${h}:0:0,format=gray,geq=lum=${geqExpression(o.startEpochMs)},format=yuv420p[strip]`,
+    `[src]crop=${o.width}:${h}:0:0,scale=${CELLS}:1:flags=neighbor,format=gray,geq=lum=${geqExpression(o.startEpochMs)},` +
+      `scale=${o.width}:${h}:flags=neighbor,format=yuv420p[strip]`,
   ];
   if (o.timecode) {
     const seconds = Math.floor(o.startEpochMs / 1000);
