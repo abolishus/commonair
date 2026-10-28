@@ -261,6 +261,12 @@ describe("API-mode playback sessions", () => {
       await viewer.waitForFirstFrame(45_000);
       const heartbeats = () => api.calls.filter((c) => c.path.endsWith("/heartbeat"));
       await waitFor("two heartbeats", () => heartbeats().length >= 2, { timeoutMs: 20_000, intervalMs: 250 });
+      // The page counts a heartbeat when its answer arrives, after the API has seen the request;
+      // stopping first would abort the second one in flight.
+      await waitFor("two heartbeats answered", async () => (await viewer.report()).heartbeats >= 2, {
+        timeoutMs: 10_000,
+        intervalMs: 250,
+      });
       const report = await viewer.stop();
       await waitFor("session end", () => api.calls.some((c) => c.path.endsWith("/end")), {
         timeoutMs: 10_000,

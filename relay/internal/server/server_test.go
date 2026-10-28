@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,9 +140,22 @@ func TestMediaAccountingHeadAndRange(t *testing.T) {
 	if resp := f.do(t, http.MethodGet, "/hls/live/alice/seg1.mp4?t="+tok, nil); resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") == "" {
 		t.Fatalf("GET %d", resp.StatusCode)
 	}
-	p := f.ledger.Cut(time.Now())
-	if len(p.Entries) != 1 || p.Entries[0].Bytes != 100+10_000 || p.Entries[0].Segments != 1 {
-		t.Fatalf("entries %+v: HEAD bills nothing, a range bills its bytes but no segment", p.Entries)
+	// The handler books the segment after ServeContent returns, which can be after the client has
+	// read the whole body: sum cuts until it shows up.
+	var sids []string
+	var bytes, segments int64
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		for _, e := range f.ledger.Cut(time.Now()).Entries {
+			sids = append(sids, e.SessionID)
+			bytes += e.Bytes
+			segments += e.Segments
+		}
+		if segments >= 1 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if len(slices.Compact(sids)) != 1 || bytes != 100+10_000 || segments != 1 {
+		t.Fatalf("sids %v bytes %d segments %d: HEAD bills nothing, a range bills its bytes but no segment", sids, bytes, segments)
 	}
 }
 
