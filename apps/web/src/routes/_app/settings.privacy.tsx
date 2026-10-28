@@ -9,6 +9,7 @@ import { DeletionSection, ExportSection } from "../../components/privacy-panels.
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
+import { P2PSettingsSection } from "../../player/p2p/p2p-ui.tsx";
 
 export const Route = createFileRoute("/_app/settings/privacy")({
   // Server-side guard (SSR and client navigation); the component keeps a client fallback.
@@ -22,6 +23,7 @@ function PrivacyPage(): React.JSX.Element {
   return (
     <PageContainer width="narrow" data-testid="privacy-page" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("privacy.title")} description={t("privacy.intro")} />
+      <P2PSettingsSection />
       <ExportSection hasChannel={me.channelSlug !== null} />
       <DeletionSection username={me.username} />
     </PageContainer>

@@ -15,8 +15,17 @@ export interface CumulativeStats {
   playedSeconds: number;
   bufferSeconds: number;
   stalls: number;
+  /** HTTP bytes only: playlists, segments over HTTP, digest requests. Never a peer's bytes. */
   bytesHttp: number;
+  /** Segment bytes received from peers. */
   bytesP2p: number;
+  /**
+   * P2P diagnostics (informational, ADR 0005 amendment 1 decision 6), only for sessions that ran
+   * the P2P loader: bytes sent to peers and rejected segments are cumulative, `p2pPeers` is a gauge.
+   */
+  bytesP2pUp?: number;
+  p2pPeers?: number;
+  p2pRejected?: number;
   latencySeconds: number | null;
   ttffMs: number | null;
   visible: boolean;
@@ -29,20 +38,26 @@ export interface HeartbeatDelta {
   stalls: number;
   bytesHttp: number;
   bytesP2p: number;
+  bytesP2pUp?: number;
+  p2pPeers?: number;
+  p2pRejected?: number;
   latencySeconds: number | null;
   ttffMs: number | null;
   visible: boolean;
   muted: boolean;
 }
 
+/** Heartbeat `p2pPeers` maximum (the contract's). */
+export const MAX_P2P_PEERS = 64;
+
 const nonNeg = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
 
 export class HeartbeatAccountant {
-  private sent = { played: 0, stalls: 0, bytesHttp: 0, bytesP2p: 0 };
+  private sent = { played: 0, stalls: 0, bytesHttp: 0, bytesP2p: 0, bytesP2pUp: 0, p2pRejected: 0 };
 
   /** The delta to send for these cumulative totals (does not commit). */
   delta(c: CumulativeStats): HeartbeatDelta {
-    return {
+    const d: HeartbeatDelta = {
       playedSeconds: Math.min(MAX_PLAYED_PER_HEARTBEAT, nonNeg(c.playedSeconds - this.sent.played)),
       bufferSeconds: nonNeg(c.bufferSeconds),
       stalls: Math.round(nonNeg(c.stalls - this.sent.stalls)),
@@ -54,6 +69,10 @@ export class HeartbeatAccountant {
       visible: c.visible,
       muted: c.muted,
     };
+    if (c.bytesP2pUp !== undefined) d.bytesP2pUp = Math.round(nonNeg(c.bytesP2pUp - this.sent.bytesP2pUp));
+    if (c.p2pRejected !== undefined) d.p2pRejected = Math.round(nonNeg(c.p2pRejected - this.sent.p2pRejected));
+    if (c.p2pPeers !== undefined) d.p2pPeers = Math.min(MAX_P2P_PEERS, Math.round(nonNeg(c.p2pPeers)));
+    return d;
   }
 
   /**
@@ -66,6 +85,8 @@ export class HeartbeatAccountant {
       stalls: c.stalls,
       bytesHttp: c.bytesHttp,
       bytesP2p: c.bytesP2p,
+      bytesP2pUp: c.bytesP2pUp ?? this.sent.bytesP2pUp,
+      p2pRejected: c.p2pRejected ?? this.sent.p2pRejected,
     };
   }
 
