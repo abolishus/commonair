@@ -409,12 +409,15 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   type Prepared = { ok: true; identity: Identity; user: ConnData["user"] } | { ok: false; response: Response };
 
   /** Everything before `server.upgrade` that waits on something; `trace` says what is pending. */
-  const prepareUpgrade = async (req: Request, trace: { stage: UpgradeStage; userId: string | null }) => {
+  const prepareUpgrade = async (
+    req: Request,
+    trace: { stage: UpgradeStage; userId: string | null },
+  ): Promise<Prepared> => {
     const result = await auth.authenticate(req);
     if (!result.ok) {
       // Codes only: never the token. Clients (the IRC gateway) cannot see why an upgrade failed.
       logger.info("upgrade refused", { status: result.status, error: result.error });
-      return { ok: false, response: Response.json({ error: result.error }, { status: result.status }) } as Prepared;
+      return { ok: false, response: Response.json({ error: result.error }, { status: result.status }) };
     }
     let user: ConnData["user"] = null;
     if (result.identity.userId) {
@@ -424,11 +427,11 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       const profile = await directory.profile(result.identity.userId);
       if (!profile || profile.deleted) {
         logger.info("upgrade refused", { status: 401, error: "unknown_user" });
-        return { ok: false, response: Response.json({ error: "unknown_user" }, { status: 401 }) } as Prepared;
+        return { ok: false, response: Response.json({ error: "unknown_user" }, { status: 401 }) };
       }
       user = { id: profile.id, username: profile.username, displayName: profile.displayName };
     }
-    return { ok: true, identity: result.identity, user } as Prepared;
+    return { ok: true, identity: result.identity, user };
   };
 
   async function upgrade(req: Request, server: Server<ConnData>): Promise<Response | undefined> {
@@ -505,9 +508,10 @@ function watchValkey(client: ValkeyClient, name: string, logger: Logger): void {
     down = true;
     logger.warn("valkey connection error", { ...errorFields(err), client: name });
   });
-  client.on("reconnecting", (delayMs: unknown) => {
+  client.on("reconnecting", () => {
+    if (down) return;
     down = true;
-    logger.info("valkey reconnecting", { client: name, delayMs: typeof delayMs === "number" ? delayMs : null });
+    logger.warn("valkey connection lost; reconnecting", { client: name });
   });
   client.on("ready", () => {
     if (!down) return;
