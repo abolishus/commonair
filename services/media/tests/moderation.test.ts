@@ -20,7 +20,7 @@ import type { MediaContext } from "../src/context.ts";
 import type { Database } from "@commonair/db";
 import { ActiveScratch, recoverWorkDir, sweepScratchAtStartup, sweepWorkDir } from "../src/recovery.ts";
 import { BroadcastSession } from "../src/session.ts";
-import { scanChunks } from "../src/vod/finalize.ts";
+import { scanChunks, scanStepSeconds } from "../src/vod/finalize.ts";
 import type { PlaylistSegment } from "../src/vod/playlist.ts";
 import {
   captureLogger,
@@ -523,6 +523,21 @@ describe("pre-publish scans", () => {
     ]);
     expect(chunks.flat()).toHaveLength(segs.length);
     expect(scanChunks([])).toEqual([]);
+  });
+
+  test("a chunk shorter than the sampling interval is sampled at half its length (a run's 0.2 s tail)", () => {
+    const seg = (d: number): PlaylistSegment => ({ uri: "s", map: "i", durationSeconds: d, startedAt: null });
+    expect(
+      scanStepSeconds(
+        Array.from({ length: 15 }, () => seg(4)),
+        2,
+      ),
+    ).toBe(2);
+    expect(scanStepSeconds([seg(4)], 2)).toBe(2);
+    expect(scanStepSeconds([seg(0.2)], 2)).toBeCloseTo(0.1, 9);
+    expect(scanStepSeconds([seg(1), seg(1)], 5)).toBe(1);
+    expect(scanStepSeconds([seg(0)], 2)).toBe(0.04);
+    expect(scanStepSeconds([], 2)).toBe(0.04);
   });
 
   test("live capture reads one frame over TCP RTSP as PNG", () => {

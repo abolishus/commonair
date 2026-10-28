@@ -67,6 +67,21 @@ export const imageType = (f: ImageFormat) => (f === "webp" ? "image/webp" : "ima
 /** Longest stretch of recording assembled into one scratch file for frame sampling. */
 export const SCAN_CHUNK_SECONDS = 60;
 
+/** Finest sampling step for a short chunk: about one frame at 25 fps. */
+const MIN_SCAN_STEP_SECONDS = 0.04;
+
+/**
+ * Pure: the sampling interval for one chunk. ffmpeg's fps filter emits nothing for a clip much
+ * shorter than its interval (measured, ffmpeg 7.1: 0 frames from a 0.2 s recorder-run tail at
+ * 1/2, 1/1 and 1/0.5 fps; 2 at 1/0.1), and a chunk with no frame fails the VOD closed. A recorder
+ * run that ends just after a keyframe leaves such a tail, so a short chunk is sampled at half its
+ * length: at least one frame, never further apart than `everySeconds`.
+ */
+export function scanStepSeconds(chunk: readonly PlaylistSegment[], everySeconds: number): number {
+  const seconds = chunk.reduce((sum, sg) => sum + sg.durationSeconds, 0);
+  return Math.min(everySeconds, Math.max(MIN_SCAN_STEP_SECONDS, seconds / 2));
+}
+
 /**
  * Pure: consecutive segments grouped for sampling. A group shares one init segment (a new
  * recorder run starts a new group) and spans at most `maxSeconds` (bounds scratch space; a single
@@ -200,7 +215,7 @@ export async function finalizeVod(
       const keys = [...(first.map ? [prefix + first.map] : []), ...chunk.map((sg) => prefix + sg.uri)];
       // Missing objects or an undecodable chunk throw: the job retries, nothing is published.
       await assembleFromStorage(storage, bucket, keys, scratch, file);
-      const { hit, frames: n } = await moderation.scanVideoFile(file, every, new Date());
+      const { hit, frames: n } = await moderation.scanVideoFile(file, scanStepSeconds(chunk, every), new Date());
       await rm(file, { force: true });
       frames += n;
       if (n === 0) throw new Error("no frame decoded from a VOD chunk; not publishing");
