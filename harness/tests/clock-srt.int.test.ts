@@ -106,7 +106,8 @@ afterAll(async () => {
   for (const name of names)
     Bun.spawnSync(["podman", "rm", "-f", "-t", "1", name], { stdout: "ignore", stderr: "ignore" });
   await mtx?.stop();
-});
+  // Container removal takes longer than the default 10 s while the gate's other tests run.
+}, 60_000);
 
 test("the helper's MediaMTX is the version compose runs", () => {
   const compose = readFileSync(new URL("../../compose.yaml", import.meta.url), "utf8");
