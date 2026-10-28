@@ -83,6 +83,11 @@ export function startMediaMtx(opts: { apiBase: string; internalSecret: string })
     "127.0.0.1::8554",
     "-p",
     "127.0.0.1::9997",
+    // LL-HLS (W0) and SRT (the ladder, AAC copy and recorder input, ADR 0012 A2).
+    "-p",
+    "127.0.0.1::8888",
+    "-p",
+    "127.0.0.1::8890/udp",
     "-e",
     `INTERNAL_API_SECRET=${opts.internalSecret}`,
     "-e",
@@ -91,6 +96,56 @@ export function startMediaMtx(opts: { apiBase: string; internalSecret: string })
     `${file}:/mediamtx.yml:ro`,
     MEDIAMTX_IMAGE,
   ]);
+}
+
+/** True when this host's ffmpeg can read SRT (Homebrew's build cannot; CI's static build can). */
+export function hostFfmpegHasSrt(binary = "ffmpeg"): boolean {
+  const p = Bun.spawnSync([binary, "-hide_banner", "-protocols"], { stdout: "pipe", stderr: "ignore" });
+  return /^\s*srt\s*$/m.test(p.stdout.toString());
+}
+
+/**
+ * An ffmpeg for the media service under test when the host's has no SRT (ADR 0012 A2: the ladder,
+ * AAC copy and recorder read SRT). A shell wrapper: command lines without `srt://` run the host
+ * ffmpeg; the rest run the compose image's ffmpeg in a container sharing `mtx`'s network
+ * namespace, with MediaMTX's host ports rewritten to its container ports and `dirs` mounted at
+ * the same paths. Every such container carries `label`, so a test can remove leftovers
+ * (`removeLabelled`) before stopping MediaMTX.
+ */
+export function srtFfmpegWrapper(mtx: Container, dirs: string[], label: string): string {
+  const rewrite = [
+    ["8890/udp", "8890"],
+    ["8554/tcp", "8554"],
+  ]
+    .map(([published, port]) => `-e 's#127\\.0\\.0\\.1:${mtx.port(published ?? "")}#127.0.0.1:${port}#g'`)
+    .join(" ");
+  const mounts = dirs.map((d) => `-v '${d}:${d}'`).join(" ");
+  const file = join(scratch, `${unique("ffmpeg-srt")}.sh`);
+  writeFileSync(
+    file,
+    [
+      "#!/bin/sh",
+      'case " $* " in *" srt://"*) ;; *) exec ffmpeg "$@" ;; esac',
+      "n=$#",
+      "i=0",
+      'while [ "$i" -lt "$n" ]; do',
+      `  a=$1; shift; set -- "$@" "$(printf '%s' "$a" | sed ${rewrite})"; i=$((i + 1))`,
+      "done",
+      `exec podman run --rm -i --label '${label}' --network 'container:${mtx.name}' ${mounts} --entrypoint ffmpeg '${MEDIAMTX_IMAGE}' "$@"`,
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return file;
+}
+
+/** Remove every container carrying `label` (leftovers of `srtFfmpegWrapper`). */
+export function removeLabelled(label: string): void {
+  const ids = Bun.spawnSync(["podman", "ps", "-aq", "--filter", `label=${label}`], { stdout: "pipe" })
+    .stdout.toString()
+    .split("\n")
+    .filter(Boolean);
+  if (ids.length > 0) Bun.spawnSync(["podman", "rm", "-f", "-t", "1", ...ids], { stdout: "ignore", stderr: "ignore" });
 }
 
 export function startMockTarget(): Container {

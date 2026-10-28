@@ -11,7 +11,7 @@ import type { Valkey } from "iovalkey";
 import { KEYS, renditionPath } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import type { BroadcastInfo, MediaContext } from "../context.ts";
-import { internalRtspUrl, ladderArgs } from "../ffmpeg/args.ts";
+import { internalRtspUrl, internalSrtUrl, ladderArgs } from "../ffmpeg/args.ts";
 import { Supervisor } from "../ffmpeg/supervisor.ts";
 import { every, type Loop } from "../loop.ts";
 import { sourceInfo } from "../mediamtx.ts";
@@ -129,14 +129,19 @@ export class TranscodeController {
       this.log.warn("source has no tracks to transcode");
       return false;
     }
-    const { rtspBase, internalSecret, caps } = this.ctx;
-    const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
+    const { rtspBase, srtBase, internalSecret, caps, clock } = this.ctx;
     const outputFor = (r: Rung["name"]) => internalRtspUrl(rtspBase, renditionPath(this.b.slug, r), internalSecret);
     const renditions = advertisedRenditions(rungs);
     this.ladder = new Supervisor({
       name: `ladder:${this.b.slug}`,
       binary: this.ctx.ffmpeg,
-      args: () => ladderArgs({ input, outputFor, rungs, encoder: caps.encoder }),
+      // A fresh W0 for every (re)start; without one the start fails and is retried with backoff
+      // (an unanchored rung would be seconds off under useAbsoluteTimestamp). ADR 0012 A2.
+      args: async () => {
+        const input = internalSrtUrl(srtBase, this.b.path, internalSecret);
+        const w0Ms = await clock.w0(this.b.broadcastId, this.b.path, "ladder");
+        return ladderArgs({ input, w0Ms, outputFor, rungs, encoder: caps.encoder });
+      },
       secrets: [internalSecret],
       logger: this.log,
       onProgress: (p) => {

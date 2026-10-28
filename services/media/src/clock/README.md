@@ -210,3 +210,60 @@ podman run --rm --network clockspike --entrypoint ffmpeg localhost/commonair/med
 
 Each path's LL-HLS playlist was followed, and the strip of each segment's first frame was decoded
 with `harness/src/timestamp-strip.ts` (as `HttpViewer.decodeLatency` does).
+
+## A2 implementation checks (2026-10-27)
+
+Build step 0 of the second W0-clock run, before production code. Each check is a kept integration
+test: `services/media/tests/clock-mediamtx.int.test.ts` (production `mediamtx.yml` on the compose
+image `mediamtx:1.21.2-ffmpeg`, SRT readers in a container sharing MediaMTX's network namespace)
+and `harness/tests/clock-srt.int.test.ts` (the harness MediaMTX, WHIP source). ffmpeg was the
+media image's 7.1.5 (`localhost/commonair/media:dev`) for the readers, Homebrew 9.0.2 for the
+sources. A frame is 33 ms; every pass bound below is one frame.
+
+1. **Shared timeline and the 10 s offset: hold, with and without B-frames.** Three sequential
+   `-copyts` SRT sessions of an RTMP strip source gave the same `strip − pts` to the millisecond,
+   for `-bf 0` and for `-bf 2`; so did a WHIP source. A source LL-HLS segment's
+   `(tfdt + cto) / timescale − 10 s` equals the SRT PTS of the frame with the same strip within
+   one frame. W0 read three times 1.5 s apart from a B-frame source was identical; the first
+   sample's composition offset (`trun`, 2993–3015 ticks, one frame) is needed: without it W0 is a
+   frame late. PDT on MediaMTX's video playlist refers to the video track (`clock.test.ts` pins the
+   track choice: video, else audio).
+2. **Opus over SRT: survives.** A WHIP (Opus) source read over SRT has `Audio: opus`; ffmpeg
+   re-encodes it to AAC (235 packets ≈ 5 s, under `-copyts` counted with `-frames:a`, not `-t`,
+   since output times start at the source timeline, not 0). The AAC copy built by `aacCopyArgs`
+   with W0 published `live/<slug>/aac` with PDT **−1 ms** from the source on every segment.
+3. **Recorder over SRT: holds, with one muxer flag.** By default the HLS muxer's MP4 rebases each
+   track so the first fragment's `tfdt` is 0, which loses the timeline. With
+   `-hls_segment_options movflags=+frag_discont` `tfdt` stays absolute, and the first sample time
+   of every segment equals the SRT PTS of that frame within one frame (both sources), so R4 is
+   implemented and R1 is not needed. ffmpeg's own PDT is a constant offset from `W0 + time` within
+   a run. Two more findings: AAC arrives in MPEG-TS with ADTS headers that the nested MP4 muxer
+   does not rewrap itself (`Malformed AAC bitstream`, muxing fails), so the recorder adds
+   `-bsf:a aac_adtstoasc` when MediaMTX reports AAC (never for Opus, which the filter refuses);
+   and the MP4 muxer logs `Packet duration: -16 / -30 … is out of range` at fragment starts (RTMP
+   millisecond timestamps rounded to 90 kHz; it nudges that one packet's DTS by under 1 ms).
+
+**Keyframes (Build step 2): the brief's expression alone is not phase-locked.** ffmpeg (6.1+,
+`forced_kf_apply`) evaluates `t` relative to the first frame the encoder sees (`ref_pts`), even
+under `-copyts`. Measured on a B-frame source: rung keyframes landed 67 ms after every 2 s
+boundary of the timeline, the same on both ladder starts only because both started on a source
+keyframe. The ladder now starts its filter graph with
+`select='gte(t,2*ceil((start_t-0.001)/2)-0.001)'` (filter `t` and `start_t` are absolute), so
+the encoder's first frame is the first one on a 2 s boundary and
+`expr:if(isnan(prev_forced_t),1,gte(floor(t/2),floor(prev_forced_t/2)+1))` then cuts on every
+later boundary. Measured: keyframes at 960.000, 962.000, 964.000 s; in the integration test, rung
+segments start within one frame of a 2 s boundary on two ladder starts at different phases, for
+both sources. Cost: a new ladder drops up to 2 s of video before its first frame.
+
+**Ladder (Build steps 1–2).** Rung PDT − source PDT, same strip: **−1 ms** on every segment of
+two ladder starts (B-frame source), and within one frame for both sources in the test (the spike
+measured +12 ms; the difference was not investigated).
+
+**SRT latency.** Capture-to-decode of a B-frame source over SRT on the local network, median of
+90 frames: default 931–934 ms, `latency=120 ms` 948, `40 ms` 916–1001, `20 ms` 970–996; over
+RTSP 964–966 ms. The run-to-run noise (±40 ms) is larger than any effect: SRT negotiates the
+larger of both peers' latencies, so the receiver's setting cannot go below MediaMTX's own. The
+readers set `latency=40000` (µs) explicitly; SRT added no measurable latency over RTSP.
+
+**Host clock.** `adjtimex(2)` with `modes = 0` through Bun's FFI returns `TIME_OK` (0) inside the
+media image without extra capabilities, so `media_clock_host_synchronized` is reported there.

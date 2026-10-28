@@ -22,6 +22,8 @@ export interface MediaMtxInstance {
   hlsUrl: string;
   whipBaseUrl: string;
   apiUrl: string;
+  /** `srt://127.0.0.1:<port>`: SRT readers (ADR 0012 A2), as the media service reads sources. */
+  srtUrl: string;
   /** HLS multivariant playlist URL for a path, e.g. `live/test`. */
   hlsPlaylist(path: string): string;
   /** WHIP endpoint for a path. */
@@ -66,7 +68,10 @@ export function mediamtxConfig(opts: MediaMtxOptions & { webrtcUdpPort: number }
     // The container's own interface addresses are unreachable from the host; advertise loopback.
     "webrtcIPsFromInterfaces: no",
     "webrtcAdditionalHosts: [127.0.0.1]",
-    "srt: no",
+    // As in production (infra/mediamtx/mediamtx.yml): media's ladder, AAC copy and recorder read
+    // sources over SRT, one stream timeline for every reader (ADR 0012 A2).
+    "srt: yes",
+    "srtAddress: :8890",
     "authMethod: internal",
     "authInternalUsers:",
     "  - user: any",
@@ -79,6 +84,10 @@ export function mediamtxConfig(opts: MediaMtxOptions & { webrtcUdpPort: number }
     "      - action: api",
     "      - action: metrics",
     "paths:",
+    // Renditions stamp PDT from their publisher's sender reports, as in production (never the
+    // ingest paths: a streamer must not move media time).
+    `  "~^live/[a-z0-9_]{3,25}/(1080p|720p|480p|audio|aac)$":`,
+    "    useAbsoluteTimestamp: yes",
     "  all_others:",
     "",
   ].join("\n");
@@ -143,6 +152,8 @@ export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMt
     "127.0.0.1::9997",
     "-p",
     `127.0.0.1:${udp}:${udp}/udp`,
+    "-p",
+    "127.0.0.1::8890/udp",
     opts.image ?? MEDIAMTX_IMAGE,
   ]);
   if (started.code !== 0) {
@@ -156,13 +167,14 @@ export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMt
   };
 
   try {
-    const hostPort = async (containerPort: number): Promise<number> => {
-      const out = await run(["podman", "port", name, `${containerPort}/tcp`]);
+    const hostPort = async (containerPort: number, proto = "tcp"): Promise<number> => {
+      const out = await run(["podman", "port", name, `${containerPort}/${proto}`]);
       const match = /:(\d+)\s*$/m.exec(out.stdout.trim());
       if (out.code !== 0 || !match?.[1]) throw new Error(`no host port for ${containerPort}: ${out.stderr}`);
       return Number(match[1]);
     };
-    const [rtmp, rtsp, hls, webrtc, api] = await Promise.all([1935, 8554, 8888, 8889, 9997].map(hostPort));
+    const [rtmp, rtsp, hls, webrtc, api] = await Promise.all([1935, 8554, 8888, 8889, 9997].map((p) => hostPort(p)));
+    const srt = await hostPort(8890, "udp");
     const apiUrl = `http://127.0.0.1:${api}`;
     await waitFor(
       "mediamtx api",
@@ -181,6 +193,7 @@ export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMt
       hlsUrl,
       whipBaseUrl,
       apiUrl,
+      srtUrl: `srt://127.0.0.1:${srt}`,
       hlsPlaylist: (path) => `${hlsUrl}/${path}/index.m3u8`,
       whipEndpoint: (path) => `${whipBaseUrl}/${path}/whip`,
       async waitForPath(path, timeoutMs = 20_000) {

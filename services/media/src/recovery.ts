@@ -62,7 +62,14 @@ export function segmentsToRecover(published: readonly PlaylistSegment[], runs: r
   return out.map((o) => o.seg);
 }
 
+/** Reads a crashed recorder run's clock offset (ADR 0012 R4); `MediaClock` implements it. */
+export interface RecoveryClock {
+  sidecarOffsetMs(dir: string, runId: string): Promise<number | null>;
+}
+
 export interface RecoveryDeps {
+  /** Stamps local run segments onto the broadcast clock; absent: raw times (tests, tools). */
+  clock?: RecoveryClock;
   db: Database;
   storage: ObjectStorage;
   bucket: string;
@@ -102,14 +109,66 @@ async function readdirOrEmpty(path: string): Promise<string[]> {
   }
 }
 
+const shift = (at: Date | null, ms: number) => (at && ms !== 0 ? new Date(at.getTime() + ms) : at);
+
+/**
+ * Pure: local runs on the broadcast clock, and the published segments of those runs re-stamped
+ * from the same raw times. A run's offset comes from its sidecar; a run without one (it crashed
+ * before W0 was known, or was recorded before the media clock) keeps raw times, as the crashed
+ * recorder would have published them. Published segments whose run is not local (or has no
+ * offset) were stamped by the process that uploaded them and are left alone.
+ */
+export function stampRecovery(
+  published: readonly PlaylistSegment[],
+  runs: readonly LocalRun[],
+  offsets: ReadonlyMap<string, number>,
+): { published: PlaylistSegment[]; runs: LocalRun[]; rawRuns: number } {
+  const stampedRaw = new Map<string, Date | null>();
+  let rawRuns = 0;
+  const stampedRuns = runs.map((r) => {
+    const offset = offsets.get(r.runId);
+    if (offset === undefined) {
+      rawRuns++;
+      return r;
+    }
+    const segments = r.segments.map((s) => ({ ...s, startedAt: shift(s.startedAt, offset) }));
+    for (const s of segments) stampedRaw.set(basename(s.uri), s.startedAt);
+    return { ...r, segments };
+  });
+  const restamped = published.map((s) => {
+    const uri = basename(s.uri);
+    return stampedRaw.has(uri) ? { ...s, startedAt: stampedRaw.get(uri) ?? null } : s;
+  });
+  return { published: restamped, runs: stampedRuns, rawRuns };
+}
+
 /** Upload what the crashed recorder had not, then rewrite the (still open) VOD playlist. */
-async function recoverRecording(deps: RecoveryDeps, dir: string, vodId: string, prefix: string): Promise<number> {
+async function recoverRecording(
+  deps: RecoveryDeps,
+  dir: string,
+  vodId: string,
+  prefix: string,
+  log: Logger,
+): Promise<number> {
   const { storage, bucket } = deps;
   // Only the VOD's own prefixes: a tampered row must not make recovery write elsewhere.
   if (!isVodOwnPrefix(vodId, prefix)) throw new Error("unexpected VOD storage prefix");
   const res = await storage.get(bucket, prefix + VOD_PLAYLIST);
-  const published = res ? parsePlaylist(await res.text()).segments : [];
-  const pending = segmentsToRecover(published, await readRuns(dir));
+  const runs = await readRuns(dir);
+  const offsets = new Map<string, number>();
+  if (deps.clock)
+    for (const r of runs) {
+      const o = await deps.clock.sidecarOffsetMs(dir, r.runId);
+      if (o !== null) offsets.set(r.runId, o);
+    }
+  const before = res ? parsePlaylist(await res.text()).segments : [];
+  const stamped = stampRecovery(before, runs, offsets);
+  if (deps.clock && stamped.rawRuns > 0)
+    log.info("recovered runs without a clock offset keep raw times", { vodId, runs: stamped.rawRuns });
+  const published = stamped.published;
+  // Published segments uploaded before their run was anchored are re-stamped even with nothing new.
+  const restamped = published.some((s, i) => s.startedAt?.getTime() !== before[i]?.startedAt?.getTime());
+  const pending = segmentsToRecover(published, stamped.runs);
   const maps = new Set(published.flatMap((s) => (s.map ? [s.map] : [])));
   const added: PlaylistSegment[] = [];
   for (const seg of pending) {
@@ -125,7 +184,7 @@ async function recoverRecording(deps: RecoveryDeps, dir: string, vodId: string, 
     await storage.put(bucket, prefix + seg.uri, await file.bytes(), { contentType: "video/iso.segment" });
     added.push(seg);
   }
-  if (added.length === 0) return 0;
+  if (added.length === 0 && !restamped) return 0;
   await storage.put(bucket, prefix + VOD_PLAYLIST, renderPlaylist([...published, ...added], { ended: false }), {
     contentType: "application/vnd.apple.mpegurl",
     cacheControl: "no-cache",
@@ -200,7 +259,7 @@ async function recoverBroadcastDir(
     let uploaded = 0;
     if (vod) {
       if (!recoverable.includes(vod.status as OpenVodStatus)) return { kept: true, uploaded: 0 };
-      uploaded = await recoverRecording(deps, dir, vod.id, vod.storagePrefix);
+      uploaded = await recoverRecording(deps, dir, vod.id, vod.storagePrefix, log);
       if (uploaded > 0)
         log.info("recovered unuploaded segments of a recording", {
           broadcastId: name,

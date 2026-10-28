@@ -13,7 +13,10 @@ import type { Logger } from "@commonair/observability";
 import { createLogger } from "@commonair/observability";
 import { createValkey, valkeyCheck, type ReadinessCheck } from "@commonair/service";
 import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
-import { IDENTITY_CLOCK } from "./clock/anchor.ts";
+import { hostSynchronized, initHostClock } from "./clock/host.ts";
+import { createMediaClock } from "./clock/media-clock.ts";
+import { createClockMetrics, observeHostSynchronized } from "./clock/metrics.ts";
+import { assertSrtSecret } from "./ffmpeg/args.ts";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
 import { DiskBudget } from "./disk.ts";
@@ -58,6 +61,8 @@ export interface MediaService {
 
 export async function createMediaService(opts: MediaServiceOptions): Promise<MediaService> {
   const { env } = opts;
+  // Fail at boot: every SRT reader (ladder, AAC copy, recorder) would otherwise retry forever.
+  assertSrtSecret(env.MEDIA_INTERNAL_PASSWORD);
   const logger = opts.logger ?? createLogger({ service: "media", level: env.LOG_LEVEL });
   const timings = { ...DEFAULT_TIMINGS, ...opts.timings };
   const ffmpeg = opts.ffmpeg ?? "ffmpeg";
@@ -164,6 +169,13 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     workDirMinFreeBytes: diskBudget.config.minFreeBytes,
   });
 
+  const clock = createMediaClock({
+    hlsBase: env.MEDIAMTX_HLS_URL,
+    password: env.MEDIA_INTERNAL_PASSWORD,
+    logger,
+    metrics: createClockMetrics(),
+  });
+
   const jobsRef: { jobs?: Jobs } = {};
   const jobsNotStarted = () => new Error("job queues not started");
   const ctx: MediaContext = {
@@ -185,6 +197,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     internalSecret: env.MEDIA_INTERNAL_PASSWORD,
     authSecret: env.AUTH_SECRET,
     rtspBase: env.MEDIAMTX_RTSP_URL,
+    srtBase: env.MEDIAMTX_SRT_URL,
     transcodeThreshold: env.TRANSCODE_VIEWER_THRESHOLD,
     enqueueVodFinalize: async (vodId) => {
       if (!jobsRef.jobs) throw jobsNotStarted();
@@ -203,8 +216,8 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     diskBudget,
     transcodeSlots,
     simulcastAllowPrivate: env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
-    // ADR 0012: W0-clock replaces the identity anchor.
-    clock: IDENTITY_CLOCK,
+    // ADR 0012 variant A2: W0 from the source's LL-HLS, recorder runs anchored from it.
+    clock,
   };
   coordinator = new LiveCoordinator(ctx);
   const live = coordinator;
@@ -248,6 +261,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
   const sweep = async () => {
     await moderation.pruneCommittedT0Outbox();
     const { removed } = await sweepWorkDir({
+      clock,
       db: dbh.db,
       storage,
       bucket: ctx.bucket,
@@ -286,6 +300,11 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     jobs,
     checks,
     async start() {
+      // ADR 0012 decision 2: the media clock is this host's wall clock. Warn, never fail health.
+      await initHostClock();
+      observeHostSynchronized(hostSynchronized);
+      if (hostSynchronized() === false)
+        logger.warn("host clock is not NTP-synchronized; broadcast times (PDT) follow it (ADR 0012)");
       await storage.ensureBucket(ctx.bucket).catch((err: unknown) => {
         logger.warn("could not ensure media bucket exists (bootstrap should create it)", { error: errorCategory(err) });
       });
@@ -295,6 +314,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
       // cannot republish their local segments before the queued cleanup runs.
       try {
         const r = await recoverWorkDir({
+          clock,
           db: dbh.db,
           storage,
           bucket: ctx.bucket,

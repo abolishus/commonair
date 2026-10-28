@@ -17,9 +17,12 @@ import { basename, join } from "node:path";
 import { eq } from "drizzle-orm";
 import { isVodOwnPrefix, VOD_PLAYLIST } from "@commonair/contracts/storage";
 import { schema } from "@commonair/db";
+import { firstSampleSeconds, runOffsetMs, writeSidecar } from "../clock/run.ts";
+import { opensNearWrap, W0Error } from "../clock/w0.ts";
 import type { BroadcastInfo, MediaContext } from "../context.ts";
-import { internalRtspUrl, recorderArgs, recorderPlaylist } from "../ffmpeg/args.ts";
+import { internalSrtUrl, recorderArgs, recorderPlaylist } from "../ffmpeg/args.ts";
 import { Supervisor } from "../ffmpeg/supervisor.ts";
+import { sourceInfo } from "../mediamtx.ts";
 import { every, type Loop } from "../loop.ts";
 import { MAX_PENDING_UPLOADS } from "../settings.ts";
 import { errorCategory } from "../moderation/logging.ts";
@@ -53,14 +56,42 @@ export interface LocalWindow {
 /** `pending`: live here, but the window is not on disk yet. `null`: outside the buffer. */
 export type LocalLookup = LocalWindow | "pending" | null;
 
+/** Wait this long after a failed W0 fetch before the recorder asks again. */
+const W0_RETRY_MS = 5_000;
+/** Give up anchoring a run after this many unreadable segments (it stays on raw times). */
+const MAX_ANCHOR_FAILURES = 3;
+
+/** One ffmpeg run's clock (R4, `clock/run.ts`). */
+interface RunState {
+  /** Raw start of the run's first segment ever seen (pruning never moves it). */
+  firstRaw: Date | null;
+  w0Ms: number | null;
+  offsetMs: number | null;
+  fetching: boolean;
+  nextW0At: number;
+  anchorFailures: number;
+  /** Sidecar writes, in order (a late W0 write must never land after the offset's). */
+  writes: Promise<void>;
+  /**
+   * The MediaMTX source (publisher connection) the run read. W0 belongs to that source's stream
+   * timeline; a publisher reconnect inside one broadcast session starts a new one.
+   */
+  sourceId: string | null;
+  /** Host time ffmpeg was started for this run (null for runs this process did not start). */
+  openedAtMs: number | null;
+  /** ffmpeg for this run has exited: no more W0 fetches for it. */
+  ended: boolean;
+  /** Why the run stays on raw times for good (W0 not valid for it), or null. */
+  unanchorable: string | null;
+}
+
 export class SegmentRecorder {
   private supervisor: Supervisor | null = null;
   private loop: Loop | null = null;
   private readonly runs: string[] = [];
+  private readonly clocks = new Map<string, RunState>();
   private local: LocalSegment[] = [];
   private readonly known = new Set<string>();
-  /** Anchored start of the first segment ever recorded (pruning never moves it). */
-  private recordingStartedAt: Date | null = null;
   /** Everything already in the published VOD playlist, in order. */
   private published: PublishedSegment[] = [];
   /** The playlist text last uploaded; re-rendered each poll so a re-anchored run is re-stamped. */
@@ -115,17 +146,22 @@ export class SegmentRecorder {
     }
     if (this.refused) this.log.info("disk budget available again; recording starts");
     this.refused = false;
-    const { rtspBase, internalSecret, timings } = this.ctx;
-    const input = internalRtspUrl(rtspBase, this.b.path, internalSecret);
+    const { srtBase, internalSecret, timings } = this.ctx;
     this.supervisor = new Supervisor({
       name: `recorder:${this.b.slug}`,
       binary: this.ctx.ffmpeg,
-      args: () => {
+      args: async () => {
+        const input = internalSrtUrl(srtBase, this.b.path, internalSecret);
+        // AAC arrives over SRT with ADTS headers that MP4 needs rewrapped; Opus must not be.
+        const path = await this.ctx.mtx.getPath(this.b.path);
+        if (!path) throw new Error("source path not ready");
+        const aacAudio = sourceInfo(path).audioCodec === "MPEG-4 Audio";
         // Base-36 time keeps run ids short, unique per broadcast and sortable.
         const runId = `r${Date.now().toString(36)}`;
-        this.runs.push(runId);
-        return recorderArgs({ input, dir: this.dir, runId, segmentSeconds: timings.segmentSeconds });
+        this.beginRun(runId, path.source?.id ?? null, Date.now());
+        return recorderArgs({ input, dir: this.dir, runId, segmentSeconds: timings.segmentSeconds, aacAudio });
       },
+      onExit: () => this.endRun(),
       secrets: [internalSecret],
       logger: this.log,
       stopGraceMs: 10_000,
@@ -147,7 +183,168 @@ export class SegmentRecorder {
     await this.poll(strict);
     if (!final) return;
     const dir = this.dir;
-    setTimeout(() => void rm(dir, { recursive: true, force: true }), LOCAL_GRACE_MS).unref();
+    const { clock } = this.ctx;
+    const id = this.b.broadcastId;
+    setTimeout(() => {
+      // Run offsets serve live clips from the local buffer until it is gone.
+      clock.forget(id);
+      void rm(dir, { recursive: true, force: true });
+    }, LOCAL_GRACE_MS).unref();
+  }
+
+  private runState(runId: string): RunState {
+    let s = this.clocks.get(runId);
+    if (!s) {
+      s = {
+        firstRaw: null,
+        w0Ms: null,
+        offsetMs: null,
+        fetching: false,
+        nextW0At: 0,
+        anchorFailures: 0,
+        writes: Promise.resolve(),
+        sourceId: null,
+        openedAtMs: null,
+        ended: false,
+        unanchorable: null,
+      };
+      this.clocks.set(runId, s);
+    }
+    return s;
+  }
+
+  /** A new ffmpeg run reading `sourceId`'s stream. Never waits: W0 is fetched in the background. */
+  private beginRun(runId: string, sourceId: string | null, openedAtMs: number): void {
+    this.endRun();
+    this.runs.push(runId);
+    const s = this.runState(runId);
+    s.sourceId = sourceId;
+    s.openedAtMs = openedAtMs;
+    this.requestW0(runId);
+  }
+
+  /** The current run's ffmpeg exited (or never started): its W0 can no longer be fetched. */
+  private endRun(): void {
+    const last = this.runs.at(-1);
+    if (last) this.runState(last).ended = true;
+  }
+
+  /** Mark a run as never anchorable: it keeps raw times (offset 0), logged once. */
+  private giveUp(runId: string, s: RunState, reason: string): void {
+    if (s.unanchorable) return;
+    s.unanchorable = reason;
+    this.log.warn("recorder run left on raw times", { runId, reason });
+  }
+
+  /** W0 may only be fetched for the run ffmpeg is still writing, while it reads its own source. */
+  private isCurrent(runId: string, s: RunState): boolean {
+    return this.runs.at(-1) === runId && !s.ended && !s.unanchorable && !this.stopping;
+  }
+
+  /** Queue a sidecar write behind the run's earlier ones; resolves (or rejects) with this one. */
+  private persist(runId: string, s: RunState, w0Ms: number | null, offsetMs: number | null): Promise<void> {
+    const write = s.writes.then(() => writeSidecar(this.dir, { runId, w0Ms, offsetMs }));
+    s.writes = write.catch(() => {});
+    return write;
+  }
+
+  /**
+   * Fetch W0 for the current run in the background (one at a time, backing off after a failure).
+   * W0 is only valid for the stream timeline the run read, so a result is kept only if the run is
+   * still current and MediaMTX still has the same source on the path; otherwise the run stays raw.
+   */
+  private requestW0(runId: string): void {
+    const s = this.runState(runId);
+    if (s.w0Ms !== null || s.fetching || !this.isCurrent(runId, s) || Date.now() < s.nextW0At) return;
+    s.fetching = true;
+    const fetched = this.ctx.clock.w0(this.b.broadcastId, this.b.path, "recorder").then(
+      (w0Ms) => w0Ms,
+      (err: unknown) => {
+        // Counted and logged by the clock. A wrap refusal means this run may have opened in
+        // ffmpeg's negative-time window: its file times cannot be trusted against any W0.
+        if (err instanceof W0Error && err.reason === "wrap") this.giveUp(runId, s, "pts_wrap");
+        s.nextW0At = Date.now() + W0_RETRY_MS;
+        return null;
+      },
+    );
+    void fetched
+      .then(async (w0Ms) => {
+        if (w0Ms === null || !this.isCurrent(runId, s)) return;
+        const path = await this.ctx.mtx.getPath(this.b.path);
+        if (!this.isCurrent(runId, s)) return;
+        if ((path?.source?.id ?? null) !== s.sourceId) {
+          this.giveUp(runId, s, "source_changed");
+          return;
+        }
+        s.w0Ms = w0Ms;
+        await this.persist(runId, s, w0Ms, s.offsetMs).catch((err: unknown) =>
+          this.log.warn("could not write the run clock sidecar", { error: errorCategory(err) }),
+        );
+      })
+      .catch((err: unknown) => {
+        // MediaMTX unreachable: retried on a later poll.
+        s.nextW0At = Date.now() + W0_RETRY_MS;
+        this.log.debug("could not confirm the recorder run's source", { error: errorCategory(err) });
+      })
+      .finally(() => {
+        s.fetching = false;
+      });
+  }
+
+  /**
+   * Anchor a run from one of its segments (W0 known): `offset = W0 + first sample − raw PDT`. The
+   * offset is persisted in the run's sidecar for crash recovery before any stamped time uses it.
+   */
+  private async anchorRun(
+    runId: string,
+    s: RunState,
+    seg: { map: string | null; localPath: string; startedAt: Date | null },
+  ) {
+    if (s.w0Ms === null || s.offsetMs !== null || s.unanchorable || !seg.map || !seg.startedAt) return;
+    if (s.anchorFailures >= MAX_ANCHOR_FAILURES) return;
+    // Opened in ffmpeg's negative-time window before the wrap: its times may have been shifted.
+    if (s.openedAtMs !== null && opensNearWrap((s.openedAtMs - s.w0Ms) / 1000)) {
+      this.giveUp(runId, s, "pts_wrap");
+      return;
+    }
+    try {
+      const t = await firstSampleSeconds(join(this.dir, seg.map), seg.localPath);
+      if (t < 0) {
+        this.giveUp(runId, s, "negative_time");
+        return;
+      }
+      const offset = runOffsetMs(s.w0Ms, t, seg.startedAt.getTime());
+      await this.persist(runId, s, s.w0Ms, offset);
+      s.offsetMs = offset;
+      this.ctx.clock.setRunOffset(this.b.broadcastId, runId, offset);
+      this.ctx.clock.metrics.recorderOffset(offset);
+      this.log.info("recorder run anchored", { runId, offsetMs: Math.round(offset) });
+    } catch (err) {
+      if (++s.anchorFailures >= MAX_ANCHOR_FAILURES)
+        this.log.warn("could not anchor a recorder run; it keeps raw times", { runId, error: errorCategory(err) });
+    }
+  }
+
+  /** Production live-to-VOD gauge: how far a stamped segment is from `W0 + its own first sample`. */
+  private async checkResidual(s: RunState, seg: { map: string | null; localPath: string; startedAt: Date | null }) {
+    if (s.w0Ms === null || s.offsetMs === null || !seg.map || !seg.startedAt) return;
+    try {
+      const t = await firstSampleSeconds(join(this.dir, seg.map), seg.localPath);
+      // (W0 + t) − stamped, folded like an offset (the metric takes the magnitude).
+      this.ctx.clock.metrics.recorderResidual(runOffsetMs(s.w0Ms, t, seg.startedAt.getTime() + s.offsetMs));
+    } catch {
+      // A gauge only: an unreadable segment is not worth a log line per segment.
+    }
+  }
+
+  /** Anchored start of the first segment ever recorded, re-stamped on every read (ADR 0012). */
+  private recordingStartedAt(): Date | null {
+    let first: Date | null = null;
+    for (const [runId, s] of this.clocks) {
+      const at = this.stamp(runId, s.firstRaw);
+      if (at && (!first || at < first)) first = at;
+    }
+    return first;
   }
 
   /** A raw segment time on the broadcast clock (ADR 0012). */
@@ -160,7 +357,7 @@ export class SegmentRecorder {
   /** Local segments covering a wall-clock window (broadcast clock), for live clips. */
   localWindow(start: Date, durationSeconds: number): LocalLookup {
     const anchored = this.local.map((s) => ({ ...s, startedAt: this.stamp(s.runId, s.startedAt) }));
-    const found = findLiveWindow(anchored, this.recordingStartedAt, start, durationSeconds);
+    const found = findLiveWindow(anchored, this.recordingStartedAt(), start, durationSeconds);
     if (found.status === "pending") return "pending";
     if (found.status === "outside") return null;
     const w = found.window;
@@ -189,17 +386,33 @@ export class SegmentRecorder {
   private async pollOnce(strict: boolean): Promise<void> {
     if (this.refused) await this.startRecording();
     for (const runId of this.runs) {
+      const clock = this.runState(runId);
+      // Only the current run: an ended run's W0 would come from whatever stream the path has now.
+      if (clock.w0Ms === null) this.requestW0(runId);
+      // W0 arrived after the run's first segments were seen: anchor from the oldest still on disk.
+      if (clock.w0Ms !== null && clock.offsetMs === null) {
+        const oldest = this.local.find((l) => l.runId === runId);
+        if (oldest) await this.anchorRun(runId, clock, oldest);
+      }
       const file = Bun.file(join(this.dir, recorderPlaylist(runId)));
       if (!(await file.exists())) continue;
       for (const s of parsePlaylist(await file.text()).segments) {
         const uri = basename(s.uri);
         if (this.known.has(uri)) continue;
         this.known.add(uri);
-        const map = s.map ? basename(s.map) : null;
-        const startedAt = this.stamp(runId, s.startedAt);
-        if (startedAt && (!this.recordingStartedAt || startedAt < this.recordingStartedAt))
-          this.recordingStartedAt = startedAt;
-        this.local.push({ ...s, uri, map, runId, localPath: join(this.dir, uri), uploaded: false });
+        const seg: LocalSegment = {
+          ...s,
+          uri,
+          map: s.map ? basename(s.map) : null,
+          runId,
+          localPath: join(this.dir, uri),
+          uploaded: false,
+        };
+        // Anchored before the segment is pushed, so no stamped time leaves unanchored once W0 is known.
+        if (clock.offsetMs === null) await this.anchorRun(runId, clock, seg);
+        else await this.checkResidual(clock, seg);
+        clock.firstRaw ??= s.startedAt;
+        this.local.push(seg);
       }
     }
     if (this.vodId) {

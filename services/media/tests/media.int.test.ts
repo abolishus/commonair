@@ -46,8 +46,11 @@ import { VOD_PLAYLIST } from "../src/vod/recorder.ts";
 import { vodPrefix } from "@commonair/contracts/storage";
 import { moveVodObjects } from "@commonair/storage";
 import {
+  hostFfmpegHasSrt,
   podmanAvailable,
   publishTestPattern,
+  removeLabelled,
+  srtFfmpegWrapper,
   startGarage,
   startMediaMtx,
   startMockTarget,
@@ -74,6 +77,7 @@ const SIMULCAST_KEY = `mockkey_${run}`;
 const keyPrefix = `test:${crypto.randomUUID()}:`;
 const bullPrefix = `test-bull-${run}`;
 const busChannel = `test:bus:live:${run}`;
+const SRT_LABEL = `commonair-media-int=${run}`;
 
 interface Hook {
   path: string;
@@ -207,6 +211,8 @@ beforeAll(async () => {
     S3_BUCKET_MEDIA: BUCKET,
     MEDIAMTX_API_URL: `http://127.0.0.1:${mtx.port("9997/tcp")}`,
     MEDIAMTX_RTSP_URL: `rtsp://127.0.0.1:${mtx.port("8554/tcp")}`,
+    MEDIAMTX_SRT_URL: `srt://127.0.0.1:${mtx.port("8890/udp")}`,
+    MEDIAMTX_HLS_URL: `http://127.0.0.1:${mtx.port("8888/tcp")}`,
     INTERNAL_API_SECRET: INTERNAL_SECRET,
     MEDIA_INTERNAL_PASSWORD: MEDIA_PASSWORD,
     AUTH_SECRET,
@@ -228,6 +234,9 @@ beforeAll(async () => {
     bullPrefix,
     busChannel,
     workDir,
+    // The ladder, AAC copy and recorder read SRT (ADR 0012 A2); a host ffmpeg without it runs
+    // those in a container next to MediaMTX.
+    ffmpeg: hostFfmpegHasSrt() ? undefined : srtFfmpegWrapper(mtx, [workDir], SRT_LABEL),
     capabilities: await probeCapabilities("none"),
     timings: {
       healthSampleMs: 1_000,
@@ -263,6 +272,7 @@ afterAll(async () => {
   await valkey.quit();
   await fakeApi.stop(true);
   if (process.env.TEST_MTX_LOGS) console.warn(mtx?.logs());
+  removeLabelled(SRT_LABEL);
   mtx?.stop();
   target?.stop();
   garage?.stop();

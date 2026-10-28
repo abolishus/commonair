@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
 import { vodPrefix } from "@commonair/contracts/storage";
-import { IDENTITY_CLOCK } from "../src/clock/anchor.ts";
+import { offlineClock } from "../src/clock/media-clock.ts";
 import type { BroadcastInfo, MediaContext } from "../src/context.ts";
 import { recorderInit, recorderPlaylist } from "../src/ffmpeg/args.ts";
 import { parsePlaylist } from "../src/vod/playlist.ts";
@@ -73,7 +73,7 @@ function recorder(db: unknown, stored: Record<string, string> = {}) {
     logger,
     db,
     bucket: "media",
-    clock: IDENTITY_CLOCK,
+    clock: offlineClock(),
     timings: { recorderPollMs: 1000, clipBufferSeconds: 10 * 365 * 86_400 },
     storage: {
       get: async (_bucket: string, key: string) => {
