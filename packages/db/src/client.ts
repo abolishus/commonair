@@ -15,6 +15,14 @@ export interface DbOptions {
   max?: number;
   /** Application name reported to Postgres (shows up in pg_stat_activity). */
   applicationName?: string;
+  /**
+   * Seconds to establish a connection, name lookup included (default 10; the driver's own is 30).
+   * A pool connection opened while in-network DNS or the database stalls fails and is retried
+   * instead of holding queries for half a minute.
+   */
+  connectTimeoutSeconds?: number;
+  /** Called with the pool connection's id whenever one closes (diagnostics). */
+  onConnectionClosed?: (connectionId: number) => void;
 }
 
 export interface DbHandle {
@@ -23,9 +31,17 @@ export interface DbHandle {
   close(): Promise<void>;
 }
 
-export function createDb({ url, max = 10, applicationName = "commonair" }: DbOptions): DbHandle {
+export function createDb({
+  url,
+  max = 10,
+  applicationName = "commonair",
+  connectTimeoutSeconds = 10,
+  onConnectionClosed,
+}: DbOptions): DbHandle {
   const sql = postgres(url, {
     max,
+    connect_timeout: connectTimeoutSeconds,
+    ...(onConnectionClosed ? { onclose: onConnectionClosed } : {}),
     connection: { application_name: applicationName },
     // Drizzle handles bigint mode per column; keep int8 as strings at the driver level.
     onnotice: () => {},

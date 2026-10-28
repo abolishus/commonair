@@ -27,6 +27,21 @@ export interface ChatConnectOptions {
   connectTimeoutMs?: number;
 }
 
+/** One-line health of the chat service behind a ws:// URL, for timeout messages. */
+async function probeHealth(wsUrl: string): Promise<string> {
+  const url = new URL("/healthz", wsUrl);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.search = "";
+  const started = Date.now();
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2_000) });
+    await res.body?.cancel();
+    return `${url.host}/healthz answered ${res.status} in ${Date.now() - started} ms`;
+  } catch (err) {
+    return `${url.host}/healthz failed after ${Date.now() - started} ms: ${err instanceof Error ? err.name : "error"}`;
+  }
+}
+
 export class ChatProtocolError extends Error {
   constructor(message: string) {
     super(message);
@@ -60,16 +75,23 @@ export class ChatClient {
     // Listen before the socket opens: the server may send `welcome` immediately.
     const welcome = client.next("welcome", () => true, timeoutMs);
     welcome.catch(() => undefined);
+    const started = Date.now();
     try {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new TimeoutError("chat websocket open", timeoutMs)), timeoutMs);
+        const timer = setTimeout(() => {
+          // Say whether the service answers plain HTTP on the same address right now: tells a
+          // stalled upgrade (service side) from an unreachable port (network side).
+          void probeHealth(opts.url).then((health) =>
+            reject(new TimeoutError(`chat websocket open (${health})`, timeoutMs)),
+          );
+        }, timeoutMs);
         ws.addEventListener("open", () => {
           clearTimeout(timer);
           resolve();
         });
         ws.addEventListener("error", () => {
           clearTimeout(timer);
-          reject(new Error("chat websocket failed to connect"));
+          reject(new Error(`chat websocket failed to connect after ${Date.now() - started} ms`));
         });
       });
       client.welcome = await welcome;

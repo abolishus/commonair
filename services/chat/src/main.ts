@@ -10,7 +10,12 @@ import { startChatService } from "./server.ts";
 const env = loadEnv(coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(servicePorts));
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "chat" });
 const logger = createLogger({ service: "chat", level: env.LOG_LEVEL });
-const db = createDb({ url: env.DATABASE_URL, max: env.DATABASE_POOL_MAX, applicationName: "commonair-chat" });
+const db = createDb({
+  url: env.DATABASE_URL,
+  max: env.DATABASE_POOL_MAX,
+  applicationName: "commonair-chat",
+  onConnectionClosed: (connectionId) => logger.info("postgres connection closed", { connectionId }),
+});
 
 const chat = await startChatService({
   port: env.CHAT_PORT,
