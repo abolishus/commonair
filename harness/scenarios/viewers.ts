@@ -255,6 +255,16 @@ async function checkP2PRecord(
       );
       return last;
     });
+    // Every session's verdict and reasons, kept in the JSON report even on a pass (how close the
+    // honest P2P sessions came to an exclusion).
+    ctx.data(
+      "sessions.verdicts",
+      rows.map((r) => ({
+        kind: ids.optedIn.includes(r.id) ? "p2p-opted-in" : ids.atDefault.includes(r.id) ? "p2p-default" : "http",
+        verdict: r.verdict,
+        reasons: r.verdict_reasons,
+      })),
+    );
     const pick = (list: string[]) => rows.filter((r) => list.includes(r.id));
     const opted = pick(ids.optedIn);
     const bytesP2p = opted.reduce((s, r) => s + Number(r.bytes_p2p), 0);
