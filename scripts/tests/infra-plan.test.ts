@@ -3,7 +3,13 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { type ComposeService, ONE_SHOT_SERVICES, STACK_HEALTHY_SERVICES, startPlan } from "../infra.ts";
+import {
+  type ComposeService,
+  dnsSettleScript,
+  ONE_SHOT_SERVICES,
+  STACK_HEALTHY_SERVICES,
+  startPlan,
+} from "../infra.ts";
 
 const healthy = { condition: "service_healthy" as const };
 const done = { condition: "service_completed_successfully" as const };
@@ -99,5 +105,26 @@ describe("STACK_HEALTHY_SERVICES", () => {
     const block = /^ {2}coturn:\n((?: {4}.*\n|\s*\n)+)/m.exec(compose)?.[1] ?? "";
     expect(block).toContain("healthcheck:");
     expect(block).not.toMatch(/^ {4}profiles:/m);
+  });
+});
+
+describe("in-network DNS settle", () => {
+  const run = (script: string) => Bun.spawnSync(["bun", "-e", script], { timeout: 20_000 });
+
+  test("exits 0 after the required clean rounds", () => {
+    const started = Date.now();
+    const proc = run(dnsSettleScript([], 2, 10_000));
+    expect(proc.exitCode).toBe(0);
+    expect(proc.stdout.toString()).toContain("dns: 0 names settled after 0 bad rounds");
+    // One round a second: two clean rounds take at least a second.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+  });
+
+  test("a name that never resolves keeps it unsettled until the deadline, then exits 1", () => {
+    const proc = run(dnsSettleScript(["no-such-host.invalid"], 1, 1_500));
+    expect(proc.exitCode).toBe(1);
+    const out = proc.stdout.toString();
+    expect(out).toContain("dns: no-such-host.invalid=");
+    expect(out).toContain("dns: not settled");
   });
 });

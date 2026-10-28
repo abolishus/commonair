@@ -515,6 +515,53 @@ export async function waitHealthy(services: string[], timeoutMs = 120_000): Prom
   }
 }
 
+/**
+ * In-network DNS (aardvark-dns, Podman 4.9.3 on Ubuntu 24.04, so CI) stops answering while
+ * containers join the network: a probe on the compose network saw every name time out for ~40 s
+ * after the app wave started. When that outlasted the healthchecks (which can pass on pooled
+ * connections), "platform healthy" was printed while the API still could not resolve `mailpit`,
+ * and the first sign-up's verification mail was lost. So before declaring the platform healthy,
+ * wait until every service name resolves promptly for a while. The probe runs with `podman exec`
+ * in a running service: a probe container would itself join and leave the network.
+ */
+export const DNS_SETTLED_ROUNDS = 10;
+const DNS_SETTLE_TIMEOUT_MS = 4 * 60_000;
+
+/**
+ * One round a second, each name through c-ares straight to the network's resolver (1 s, no
+ * retries, so a stalled resolver shows at once); exits 0 after `rounds` clean rounds in a row,
+ * 1 at the deadline. Prints each bad round and a summary.
+ */
+export function dnsSettleScript(hosts: readonly string[], rounds: number, timeoutMs: number): string {
+  return `
+const { Resolver } = require("node:dns").promises;
+const hosts = ${JSON.stringify(hosts)};
+const deadline = Date.now() + ${timeoutMs};
+let streak = 0, bad = 0;
+while (streak < ${rounds}) {
+  if (Date.now() > deadline) { console.log("dns: not settled; " + bad + " bad rounds"); process.exit(1); }
+  const started = Date.now();
+  const failed = (await Promise.all(hosts.map((h) =>
+    new Resolver({ timeout: 1000, tries: 1 }).resolve4(h).then(() => null, (e) => h + "=" + (e.code || e.message))))).filter(Boolean);
+  if (failed.length) { streak = 0; bad++; console.log(new Date().toISOString() + " dns: " + failed.join(" ")); }
+  else streak++;
+  await Bun.sleep(Math.max(0, 1000 - (Date.now() - started)));
+}
+console.log("dns: " + hosts.length + " names settled after " + bad + " bad rounds");
+`;
+}
+
+/** Waits for in-network DNS to answer `hosts` steadily, probing from inside `fromService`. */
+function waitDnsSettled(fromService: string, hosts: readonly string[]): void {
+  const id = containerId(fromService);
+  if (!id) throw new Error(`no ${fromService} container to probe in-network DNS from`);
+  const proc = Bun.spawnSync(
+    ["podman", "exec", id, "bun", "-e", dnsSettleScript(hosts, DNS_SETTLED_ROUNDS, DNS_SETTLE_TIMEOUT_MS)],
+    { stdio: ["ignore", "inherit", "inherit"], timeout: DNS_SETTLE_TIMEOUT_MS + 60_000, killSignal: "SIGKILL" },
+  );
+  if (proc.exitCode !== 0) throw new Error(`in-network DNS did not settle; see the dns: lines above`);
+}
+
 if (import.meta.main) {
   try {
     const cmd = process.argv[2];
@@ -552,10 +599,11 @@ if (import.meta.main) {
           `still on an old image: ${still.map((r) => r.name).join(", ")}; ` +
             `run \`podman rm -f --depend ${still.map((r) => r.name).join(" ")}\` and \`stack\` again`,
         );
-      await waitHealthy(
-        profiles.includes("multi") ? [...STACK_HEALTHY_SERVICES, ...MULTI_REPLICAS] : STACK_HEALTHY_SERVICES,
-        300_000,
-      );
+      const running = profiles.includes("multi")
+        ? [...STACK_HEALTHY_SERVICES, ...MULTI_REPLICAS]
+        : STACK_HEALTHY_SERVICES;
+      await waitHealthy(running, 300_000);
+      waitDnsSettled("api", running);
       console.log("infra: platform healthy");
     } else if (cmd === "down") {
       removeReplicas();
