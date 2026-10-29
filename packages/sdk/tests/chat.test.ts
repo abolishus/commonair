@@ -46,6 +46,9 @@ function fakeChat(opts: { requireBearer?: string; heartbeatMs?: number; welcome?
         const frame = ClientFrame.parse(JSON.parse(String(raw)));
         received.push(frame);
         if (frame.op === "join") {
+          // An error for some other request in this channel, before the join's own reply.
+          if (frame.channel === "noisy")
+            send(ws, { op: "error", code: "rate_limited", message: "slow down", channel: "noisy", nonce: "s-other" });
           if (frame.channel === "banned")
             send(ws, {
               op: "error",
@@ -64,7 +67,8 @@ function fakeChat(opts: { requireBearer?: string; heartbeatMs?: number; welcome?
             });
         } else if (frame.op === "part") send(ws, { op: "parted", channel: frame.channel });
         else if (frame.op === "send") {
-          if (frame.body === "error")
+          if (frame.body === "close") ws.close(4000, "bye");
+          else if (frame.body === "error")
             send(ws, { op: "error", code: "rate_limited", message: "slow down", nonce: frame.nonce });
           else
             send(ws, {
@@ -212,6 +216,23 @@ describe("connectChat", () => {
     for (const s of fake.sockets) s.close(4000, "bye");
     expect((await other.closed).code).toBe(4000);
     expect(other.isOpen).toBe(false);
+  });
+
+  test("a join fails only on an error for its own nonce", async () => {
+    const fake = fakeChat();
+    const chat = await connectChat({ url: fake.url, token: "t" });
+    cleanups.push(() => chat.close());
+    expect((await chat.join("noisy")).channel).toBe("noisy");
+  });
+
+  test("a close fails pending requests at once, not after the reply timeout", async () => {
+    const fake = fakeChat();
+    const chat = await connectChat({ url: fake.url, token: "t", replyTimeoutMs: 5_000 });
+    const t0 = Date.now();
+    const err = (await chat.say("chan", "close").catch((e: unknown) => e)) as ChatError;
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.code).toBe("closed");
+    expect(Date.now() - t0).toBeLessThan(2_000);
   });
 
   test("no welcome in time rejects", async () => {

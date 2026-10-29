@@ -103,6 +103,8 @@ export async function connectChat(opts: ChatConnectOptions): Promise<ChatConnect
       : new Ws(u.toString());
 
   const listeners = new Set<(f: ServerFrame) => void>();
+  /** Pending requests, failed by a close (a set, so settled ones hold nothing on a long-lived socket). */
+  const onClose = new Set<(code: number) => void>();
   const replyTimeoutMs = opts.replyTimeoutMs ?? 10_000;
   let nonce = 0;
   let ended = false;
@@ -113,6 +115,7 @@ export async function connectChat(opts: ChatConnectOptions): Promise<ChatConnect
     ws.addEventListener("close", (ev) => {
       ended = true;
       if (pinger) clearInterval(pinger);
+      for (const fail of onClose) fail(ev.code);
       resolve({ code: ev.code, reason: ev.reason });
     }),
   );
@@ -147,7 +150,14 @@ export async function connectChat(opts: ChatConnectOptions): Promise<ChatConnect
         off();
         reject(new ChatError("timeout", `no ${op} within ${timeoutMs} ms`));
       }, timeoutMs);
-      const off = onFrame((f) => {
+      // A close fails the request now, not after the timeout.
+      const fail = (code: number) => {
+        clearTimeout(timer);
+        off();
+        reject(new ChatError("closed", `chat socket closed (${code}) before ${op}`));
+      };
+      onClose.add(fail);
+      const unlisten = onFrame((f) => {
         if (f.op === "error" && failsOn(f)) {
           clearTimeout(timer);
           off();
@@ -158,6 +168,10 @@ export async function connectChat(opts: ChatConnectOptions): Promise<ChatConnect
           resolve(f as FrameOf<Op>);
         }
       });
+      const off = () => {
+        unlisten();
+        onClose.delete(fail);
+      };
     });
 
   const welcomeP = next(
@@ -194,37 +208,40 @@ export async function connectChat(opts: ChatConnectOptions): Promise<ChatConnect
     get isOpen() {
       return !ended && ws.readyState === OPEN;
     },
+    // Send first, then listen: a send on a closed socket throws with nothing left pending, and the
+    // reply cannot arrive before the listener (frames are dispatched on a later task).
     async join(channel) {
       const n = `j${++nonce}`;
+      raw({ op: "join", channel, nonce: n });
       const joined = next(
         "joined",
         (f) => f.channel === channel,
         replyTimeoutMs,
-        (e) => e.nonce === n || e.channel === channel,
+        // By nonce only: an error for an earlier `say` in this channel must not fail the join.
+        (e) => e.nonce === n,
       );
-      raw({ op: "join", channel, nonce: n });
       return joined;
     },
     async part(channel) {
       const n = `p${++nonce}`;
+      raw({ op: "part", channel, nonce: n });
       const parted = next(
         "parted",
         (f) => f.channel === channel,
         replyTimeoutMs,
         (e) => e.nonce === n,
       );
-      raw({ op: "part", channel, nonce: n });
       await parted;
     },
     async say(channel, text, o = {}) {
       const n = `s${++nonce}`;
+      raw({ op: "send", channel, body: text, nonce: n, isAction: o.isAction ?? false, replyToId: o.replyToId });
       const ack = next(
         "ack",
         (f) => f.nonce === n,
         replyTimeoutMs,
         (e) => e.nonce === n,
       );
-      raw({ op: "send", channel, body: text, nonce: n, isAction: o.isAction ?? false, replyToId: o.replyToId });
       const a = await ack;
       if (a.id === null && !a.held) throw new ChatError("rejected", "the message was not accepted");
       return { id: a.id, held: a.held };

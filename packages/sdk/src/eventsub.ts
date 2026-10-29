@@ -124,6 +124,8 @@ class Session implements EventSubSession {
   private current!: Socket;
   private handover: Socket | null = null;
   private id = "";
+  /** The first session was welcomed (until then a close is start()'s failure, not a reconnect). */
+  private started = false;
   private keepaliveMs = 10_000;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
   private readonly handlers = new Map<EventSubMessageType, Set<(m: WsMessage) => void>>();
@@ -156,6 +158,7 @@ class Session implements EventSubSession {
     this.current = s;
     try {
       this.adopt(await s.welcome);
+      this.started = true;
     } catch (err) {
       this.ended = true;
       this.stopWatchdog();
@@ -286,7 +289,8 @@ class Session implements EventSubSession {
   }
 
   private onSocketClose(s: Socket, code: number, reason: string) {
-    if (s.closedByUs || s !== this.current || this.ended) return;
+    // Before the first welcome, start() owns the failure: connectEventSub rejects, nothing reconnects.
+    if (s.closedByUs || s !== this.current || this.ended || !this.started) return;
     if (TERMINAL_CODES.has(code)) {
       this.finish({
         code,

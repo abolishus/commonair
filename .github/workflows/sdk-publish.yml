@@ -87,7 +87,14 @@ jobs:
           fi
           echo "publishing version $version (dry run: ${DRY_RUN:-false})"
       - name: Build
-        run: bun run --filter @commonair/sdk build
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        # The build refuses inlined contract files that do not allow Apache-2.0 (ADR 0035); only a
+        # dry run may skip that check.
+        run: |
+          args=(packages/sdk/scripts/build.ts)
+          if [ "$DRY_RUN" = "true" ]; then args+=(--allow-unlicensed-inline); fi
+          bun "${args[@]}"
       - name: npm version
         run: npm --version
       - name: Publish

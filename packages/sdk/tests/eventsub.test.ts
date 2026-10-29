@@ -327,6 +327,33 @@ describe("EventSub client", () => {
     await expect(connectEventSub({ baseUrl: server.origin, welcomeTimeoutMs: 200 })).rejects.toThrow(/session_welcome/);
   });
 
+  test("a close before the first welcome rejects connectEventSub and opens no second socket", async () => {
+    let upgrades = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req, srv) {
+        upgrades++;
+        return srv.upgrade(req, { data: undefined }) ? undefined : new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        open(ws) {
+          ws.close(1011, "not yet"); // not a terminal EventSub code
+        },
+        message() {},
+      },
+    });
+    cleanups.push(() => server.stop(true));
+    await expect(
+      connectEventSub({
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        reconnectDelayMs: { initial: 10, max: 20 },
+      }),
+    ).rejects.toThrow(/before session_welcome/);
+    await Bun.sleep(300);
+    expect(upgrades).toBe(1);
+  });
+
   test("a handler that throws is reported and does not stop delivery", async () => {
     const server = start({ keepalive: 10 });
     const { session, errors } = await connect(server);

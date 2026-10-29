@@ -11,6 +11,7 @@ import {
   contractTarget,
   distPackageJson,
   exactVersion,
+  filesNotAllowingApache,
   rewriteContractImports,
 } from "../scripts/build.ts";
 import { INLINED_CONTRACT_FILES } from "./inlined.ts";
@@ -21,7 +22,8 @@ const OUT = path.join(PKG_DIR, ".cache", `build-test-${process.pid}`);
 let result: BuildResult;
 
 beforeAll(async () => {
-  result = await buildSdk({ outDir: OUT, quiet: true });
+  // The contract files are AGPL-only until the dual licence lands (ADR 0035); the gate is tested below.
+  result = await buildSdk({ outDir: OUT, quiet: true, allowUnlicensedInline: true });
 }, 120_000);
 afterAll(async () => {
   await rm(OUT, { recursive: true, force: true });
@@ -161,4 +163,41 @@ describe("build helpers", () => {
       'import { a } from "../contracts/oauth.ts";\nimport type { C } from "../contracts/api/router.ts";\n',
     );
   });
+});
+
+describe("the inlined-licence gate", () => {
+  test("only SPDX expressions that allow Apache-2.0 pass", () => {
+    const h = (expr: string) => `// SPDX-FileCopyrightText: 2026 x\n// SPDX-License-Identifier: ${expr}\nexport {};\n`;
+    expect(
+      filesNotAllowingApache({
+        "dual.ts": h("AGPL-3.0-or-later OR Apache-2.0"),
+        "paren.ts": h("(AGPL-3.0-or-later OR Apache-2.0)"),
+        "apache.ts": h("Apache-2.0"),
+        "agpl.ts": h("AGPL-3.0-or-later"),
+        "lookalike.ts": h("Apache-2.0-ish"),
+        "none.ts": "export {};\n",
+      }),
+    ).toEqual(["agpl.ts", "lookalike.ts", "none.ts"]);
+  });
+
+  test("a publishable build refuses inlined files that do not allow Apache-2.0, and leaves no dist", async () => {
+    const ROOT = path.resolve(PKG_DIR, "../..");
+    const texts: Record<string, string> = {};
+    for (const f of INLINED_CONTRACT_FILES) texts[f] = await readFile(path.join(ROOT, f), "utf8");
+    const out = path.join(PKG_DIR, ".cache", `build-test-gate-${process.pid}`);
+    try {
+      // Refused while any inlined file is AGPL-only; once the dual licence lands, it builds.
+      const publishable = filesNotAllowingApache(texts).length === 0;
+      const err = await buildSdk({ outDir: out, quiet: true }).then(
+        () => null,
+        (e: unknown) => String(e),
+      );
+      expect(err === null ? "built" : /do not allow Apache-2\.0/.test(err) ? "refused" : err).toBe(
+        publishable ? "built" : "refused",
+      );
+      expect(existsSync(path.join(out, "index.js"))).toBe(publishable);
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

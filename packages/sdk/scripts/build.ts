@@ -6,10 +6,11 @@
  * `src/index.ts` as ESM with one bundled `index.d.ts`, inlining `@commonair/contracts` (private,
  * never published; see `stage`) and keeping `@orpc/*` and `zod` as dependencies. Then
  * `dist/package.json` is written from `package.json` with exact dependency versions, and the README
- * and the Apache-2.0 licence text are copied. Prints the contract files the bundle inlines (they
- * must be dual-licensed, ADR 0035).
+ * and the Apache-2.0 licence text are copied. Every contract file the bundle inlines must allow
+ * Apache-2.0 in its SPDX header (dual-licensed, ADR 0035), or the build fails; only a local or
+ * dry-run build may pass `--allow-unlicensed-inline` to skip that.
  *
- *   bun run build [-- --out-dir <dir>]
+ *   bun run build [-- --out-dir <dir>] [--allow-unlicensed-inline]
  */
 import { copyFile, cp, mkdir, readFile, readdir, rm, rmdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -139,7 +140,30 @@ async function stage(dir: string): Promise<void> {
   );
 }
 
-export async function buildSdk(opts: { outDir?: string; quiet?: boolean } = {}): Promise<BuildResult> {
+const SPDX_LINE = /SPDX-License-Identifier:\s*(.+?)\s*(?:\*\/)?$/m;
+
+/** The inlined files whose SPDX header does not allow Apache-2.0 (missing headers count as not). */
+export function filesNotAllowingApache(files: Record<string, string>): string[] {
+  return Object.entries(files)
+    .filter(([, text]) => !/(^|[\s(])Apache-2\.0([\s)]|$)/.test(SPDX_LINE.exec(text)?.[1] ?? ""))
+    .map(([f]) => f)
+    .sort();
+}
+
+/** Throw unless every inlined contract file may ship under Apache-2.0 (ADR 0035). */
+export async function assertInlinedLicenses(files: string[]): Promise<void> {
+  const texts: Record<string, string> = {};
+  for (const f of files) texts[f] = await readFile(path.join(ROOT, f), "utf8");
+  const bad = filesNotAllowingApache(texts);
+  if (bad.length > 0)
+    throw new Error(
+      `inlined contract files do not allow Apache-2.0 (ADR 0035 needs "AGPL-3.0-or-later OR Apache-2.0"): ${bad.join(", ")}`,
+    );
+}
+
+export async function buildSdk(
+  opts: { outDir?: string; quiet?: boolean; allowUnlicensedInline?: boolean } = {},
+): Promise<BuildResult> {
   const outDir = path.resolve(opts.outDir ?? path.join(PKG_DIR, "dist"));
   const stageDir = path.join(PKG_DIR, ".cache", `build-${process.pid}-${Date.now()}`);
   const stagedContracts = path.join(stageDir, "contracts") + path.sep;
@@ -183,6 +207,15 @@ export async function buildSdk(opts: { outDir?: string; quiet?: boolean } = {}):
     await rmdir(path.dirname(stageDir)).catch(() => undefined);
   }
 
+  if (!opts.allowUnlicensedInline) {
+    try {
+      await assertInlinedLicenses([...new Set([...code, ...types])]);
+    } catch (err) {
+      await rm(outDir, { recursive: true, force: true });
+      throw err;
+    }
+  }
+
   const pkg = JSON.parse(await readFile(path.join(PKG_DIR, "package.json"), "utf8")) as PackageJson;
   const root = JSON.parse(await readFile(path.join(ROOT, "package.json"), "utf8")) as {
     catalog: Record<string, string>;
@@ -199,7 +232,9 @@ export async function buildSdk(opts: { outDir?: string; quiet?: boolean } = {}):
 
 if (import.meta.main) {
   const i = process.argv.indexOf("--out-dir");
-  const result = await buildSdk({ outDir: i > 0 ? process.argv[i + 1] : undefined });
+  const allowUnlicensedInline = process.argv.includes("--allow-unlicensed-inline");
+  if (allowUnlicensedInline) console.warn("--allow-unlicensed-inline: not publishable (local or dry-run build only)");
+  const result = await buildSdk({ outDir: i > 0 ? process.argv[i + 1] : undefined, allowUnlicensedInline });
   console.warn(`built ${rel(result.outDir)}`);
   console.warn(`inlined contract files (code): ${result.inlinedCode.join(", ")}`);
   console.warn(`inlined contract files (types): ${result.inlinedTypes.join(", ")}`);
