@@ -312,9 +312,14 @@ describe("webhook subscriptions", () => {
               'webhook', 'https://hooks.example.com/' || i, 'ct', 'enabled'
        from generate_series(1, 10000) i`,
     );
-    const r = await post(as(appTok), follow());
-    expect(r.status).toBe(412);
-    expect(r.body.data).toEqual({ requirement: "subscription_limit" });
+    try {
+      const r = await post(as(appTok), follow());
+      expect(r.status).toBe(412);
+      expect(r.body.data).toEqual({ requirement: "subscription_limit" });
+    } finally {
+      // dev's session sees these rows; left behind, the visibility tests would page through 10,000 of them.
+      await db().execute(sql`delete from event_subscriptions where app_id = ${app}::uuid`);
+    }
   });
 });
 
