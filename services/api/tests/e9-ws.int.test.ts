@@ -22,6 +22,8 @@ import { KEYS } from "@commonair/contracts/internal";
 import { notificationMessageId, schema, uuidv7 } from "@commonair/db";
 import { sha256Hex } from "@commonair/tokens";
 import type { Deps } from "../src/deps.ts";
+import type { EventSubIo } from "../src/eventsub/hub.ts";
+import { sweepOrphans } from "../src/eventsub/sweep.ts";
 import {
   eventSubSessions,
   startEventSub,
@@ -59,15 +61,19 @@ interface Served {
 }
 
 /** One API "process": its own deps object (so its own hub), a Bun server with the handler. */
-async function serve(): Promise<Served> {
+async function serve(io?: Partial<EventSubIo>): Promise<Served> {
   const deps: Deps = { ...api.deps };
-  const hub = startEventSub(deps, {
-    keepaliveMinSeconds: 1,
-    tickMs: 100,
-    authCacheMs: 200,
-    sweepMs: 3_600_000,
-    handleSignals: false,
-  });
+  const hub = startEventSub(
+    deps,
+    {
+      keepaliveMinSeconds: 1,
+      tickMs: 100,
+      authCacheMs: 200,
+      sweepMs: 3_600_000,
+      handleSignals: false,
+    },
+    io,
+  );
   const server = Bun.serve<EventSubSocketData>({
     port: 0,
     hostname: "127.0.0.1",
@@ -520,6 +526,45 @@ describe("reconnect", () => {
     await waitFor(async () => (await rowsOf(sessionId)).length === 0);
   });
 
+  test("an event between the takeover and the welcome goes out once, after the welcome, on the new socket", async () => {
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    let paused = false;
+    const a = await serve();
+    const b = await serve({
+      beforeResumeWelcome: async () => {
+        paused = true;
+        await held;
+      },
+    });
+    const u = await newUser();
+    const app = await newApp(u);
+    const { client: old, sessionId } = await welcomed(a.wsUrl);
+    const subId = await subscribe(a, sessionId, { appId: app, userId: u, tokenHash: "h" }, "channel.follow", {
+      broadcaster_user_id: u,
+    });
+    const drained = a.hub.drain();
+    const rc = await old.next("session_reconnect");
+    const resume = new URL(rc.payload.session!.reconnect_url!).searchParams.get("resume")!;
+    const fresh = await connect(`${b.wsUrl}?resume=${resume}`);
+    await waitFor(async () => paused);
+    // The old holder has seen the takeover and let go before the welcome.
+    expect((await old.closed).code).toBe(1000);
+
+    const ev = await publishEvent("channel.follow", followPayload(u));
+    await Bun.sleep(300);
+    expect(fresh.messages).toHaveLength(0);
+    release();
+    const w = await fresh.next("session_welcome");
+    expect(w.payload.session?.id).toBe(sessionId);
+    const n = await fresh.next("notification");
+    expect(n.metadata.message_id).toBe(notificationMessageId(subId, ev.id));
+    expect(fresh.messages.map((m) => m.metadata.message_type)).toEqual(["session_welcome", "notification"]);
+    expect(old.messages.filter((m) => m.metadata.message_type === "notification")).toHaveLength(0);
+    await drained;
+    fresh.close();
+  });
+
   test("a session that does not move within the grace closes 4004 and ends", async () => {
     const a = await serve();
     const u = await newUser();
@@ -572,5 +617,43 @@ describe("sweep", () => {
     // Only the lock holder sweeps.
     expect(await s.hub.sweep()).toBe(0);
     live.client.close();
+  });
+
+  test("pages by session id: orphans after many live sessions are reached, across runs", async () => {
+    const s = await serve();
+    const u = await newUser();
+    const old = new Date(Date.now() - 3_600_000);
+    const lives = await Promise.all([0, 1, 2].map(() => welcomed(s.wsUrl)));
+    const orphan = `zz-gone-${rand()}`;
+    for (const sessionId of [...lives.map((l) => l.sessionId), orphan])
+      await ownerDb()
+        .insert(schema.eventSubscriptions)
+        .values({
+          appId: null,
+          userId: u,
+          type: "channel.follow",
+          condition: { broadcaster_user_id: rand() },
+          transport: "websocket",
+          websocketSessionId: sessionId,
+          status: "enabled",
+          createdAt: old,
+        });
+    // One batch of two per run: the walk resumes where the previous run stopped.
+    let cursor: string | null = null;
+    let runs = 0;
+    do {
+      const r = await sweepOrphans(api.deps.db, s.hub.store, new Date(), 3000, cursor, { batch: 2, maxBatches: 1 });
+      cursor = r.cursor;
+      runs++;
+    } while (cursor !== null && runs < 10_000);
+    expect(runs).toBeGreaterThan(1);
+    const left = await ownerDb()
+      .select({ session: schema.eventSubscriptions.websocketSessionId })
+      .from(schema.eventSubscriptions)
+      .where(eq(schema.eventSubscriptions.userId, u));
+    expect(left.map((r) => r.session ?? "").sort((x, y) => x.localeCompare(y))).toEqual(
+      lives.map((l) => l.sessionId).sort((x, y) => x.localeCompare(y)),
+    );
+    for (const l of lives) l.client.close();
   });
 });

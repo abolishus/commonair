@@ -94,11 +94,17 @@ export const EVENTSUB_DEFAULTS: EventSubOptions = {
 /** Above the 600 s keepalive maximum: Bun's default 120 s would close quiet sockets. */
 export const WS_IDLE_TIMEOUT_SECONDS = 720;
 
-/** Seams for tests: the subscriber connection. */
+/** Seams for tests: the subscriber connection, and a pause in a resume just before the welcome. */
 export interface EventSubIo {
   connect(url: string): Valkey;
+  beforeResumeWelcome?(sessionId: string): Promise<void>;
 }
-const DEFAULT_IO: EventSubIo = { connect: (url) => createValkey(url, { name: "api-eventsub-sub" }) };
+
+/** A resumed session waits at most this long to see its own takeover message on the bus. */
+const RESUME_GATE_MS = 2000;
+/** Messages held back for a session whose welcome has not gone out yet. */
+const MAX_QUEUED = 1000;
+export const DEFAULT_EVENTSUB_IO: EventSubIo = { connect: (url) => createValkey(url, { name: "api-eventsub-sub" }) };
 
 interface Held {
   ws: ServerWebSocket<EventSubSocketData>;
@@ -110,6 +116,10 @@ interface Held {
   binding: SessionBinding | null;
   /** `session_welcome` went out (a resumed session first loads its state). */
   welcomed: boolean;
+  /** Notifications and revocations that arrived before the welcome; sent right after it. */
+  queue: WsMessage[];
+  /** A revocation that arrived before the welcome: applied right after it. */
+  revokeAfterWelcome: UserControlMessage["reason"] | null;
   /** Closed or closing by us, or moved: no more sends; the close handler has nothing to do. */
   ended: boolean;
   resumeHash: string | null;
@@ -136,6 +146,12 @@ export class EventSubHub implements EventSub {
   private readonly authCache = new Map<string, { at: number; sessionId: string; result: Promise<AuthOutcome> }>();
   /** Session reloads in flight; a bus message waits for those started before it arrived. */
   private readonly pending = new Set<Promise<void>>();
+  /**
+   * Resumed sessions whose takeover message this subscriber has not seen yet. Events received
+   * before it are the old holder's to deliver (it stops at that message), so each event goes out
+   * once: on the old socket or on the new one, never both.
+   */
+  private readonly notLive = new Map<string, () => void>();
   private sub: Valkey | null = null;
   private subscribed = false;
   private starting = false;
@@ -144,6 +160,8 @@ export class EventSubHub implements EventSub {
   private wake: (() => void) | null = null;
   private readonly timers: ReturnType<typeof setInterval>[] = [];
   private refreshing = false;
+  /** Where this instance's next sweep run continues (bounded work per run). */
+  private sweepCursor: string | null = null;
   private readonly onSignal = () => void this.drain();
   private readonly counts = { sent: new Map<string, number>(), closes: new Map<number, number>() };
 
@@ -152,14 +170,15 @@ export class EventSubHub implements EventSub {
   constructor(
     private readonly deps: Deps,
     readonly opts: EventSubOptions = EVENTSUB_DEFAULTS,
-    private readonly io: EventSubIo = DEFAULT_IO,
+    private readonly io: EventSubIo = DEFAULT_EVENTSUB_IO,
   ) {
     this.store = new SessionStore(deps.valkey, () => deps.env.EVENTSUB_WS_MAX_SESSIONS_PER_GRANT);
     this.websocket = {
       idleTimeout: WS_IDLE_TIMEOUT_SECONDS,
       sendPings: true,
-      // Any client frame closes the socket (4001); nothing large is ever read.
-      maxPayloadLength: 4096,
+      // Any client frame closes the socket (4001). The cap only has to be high enough that Bun hands
+      // the frame to `message` instead of closing 1009 itself.
+      maxPayloadLength: 64 * 1024,
       open: (ws) => this.onOpen(ws),
       message: (ws) => this.onClientTraffic(ws),
       close: (ws, code) => this.onClose(ws, code),
@@ -248,15 +267,19 @@ export class EventSubHub implements EventSub {
     try {
       const socketIp = server.requestIP(req)?.address ?? "0.0.0.0";
       const ip = canonicalIp(clientIp(socketIp, req.headers.get("x-forwarded-for"), deps.env.TRUSTED_PROXY_CIDRS));
-      const subject = await hmacHex(deps.env.AUTH_SECRET, `rl:${rateLimitSubjectIp(ip)}`);
-      const nowMs = deps.now().getTime();
-      const rl = await deps.rateLimitStore.hit(
-        rateLimitKey("auth", `ip:${subject}`),
-        deps.rateLimits.auth,
-        nowMs,
-        `${nowMs}:${crypto.randomUUID()}`,
-      );
-      if (!rl.allowed) return json({ error: "rate_limited" }, 429, { "retry-after": String(rl.retryAfterSeconds) });
+      const limited = async (): Promise<Response | null> => {
+        const subject = await hmacHex(deps.env.AUTH_SECRET, `rl:${rateLimitSubjectIp(ip)}`);
+        const nowMs = deps.now().getTime();
+        const rl = await deps.rateLimitStore.hit(
+          rateLimitKey("auth", `ip:${subject}`),
+          deps.rateLimits.auth,
+          nowMs,
+          `${nowMs}:${crypto.randomUUID()}`,
+        );
+        return rl.allowed
+          ? null
+          : json({ error: "rate_limited" }, 429, { "retry-after": String(rl.retryAfterSeconds) });
+      };
       if (this.held.size >= this.opts.maxSessions)
         return json({ error: "eventsub_unavailable" }, 503, { "retry-after": "5" });
 
@@ -264,9 +287,15 @@ export class EventSubHub implements EventSub {
       let data: EventSubSocketData;
       let created = false;
       if (resume !== null) {
+        // A valid resume token (one-time, 256-bit) is proof enough: a rolling upgrade moves every
+        // session of a bot host at once and must not hit the limit. Only failed attempts are charged.
         const took = resume
           ? await this.store.takeover(await sha256Hex(resume), this.instance, keepaliveRaw === null ? null : keepalive)
           : null;
+        if (!took) {
+          const res = await limited();
+          if (res) return res;
+        }
         data = took
           ? {
               sessionId: took.sessionId,
@@ -282,6 +311,8 @@ export class EventSubHub implements EventSub {
               reject: EVENTSUB_WS_CLOSE.invalidReconnect,
             };
       } else {
+        const res = await limited();
+        if (res) return res;
         const connectedAt = deps.now();
         data = {
           sessionId: uuidv7(),
@@ -318,6 +349,8 @@ export class EventSubHub implements EventSub {
       lastRefreshAt: now,
       binding: null,
       welcomed: false,
+      queue: [],
+      revokeAfterWelcome: null,
       ended: false,
       resumeHash: null,
       unusedTimer: null,
@@ -331,19 +364,56 @@ export class EventSubHub implements EventSub {
     else this.welcome(held);
   }
 
-  /** A resumed session: load its binding and subscriptions, tell the old holder, then welcome. */
+  /**
+   * A resumed session: tell the old holder at once (it stops delivering when it sees the message)
+   * while loading the binding and subscriptions; bus messages wait for that load. Events this
+   * subscriber received before its own takeover message are left to the old holder; events after
+   * it are queued until the welcome, which goes out first.
+   */
   private async adopt(held: Held): Promise<void> {
-    await this.reloadSession(held.sessionId);
-    if (held.ended) return;
+    const { sessionId } = held;
+    let open = () => {};
+    const live = new Promise<void>((resolve) => {
+      open = resolve;
+      this.notLive.set(sessionId, resolve);
+      setTimeout(resolve, RESUME_GATE_MS).unref?.();
+    }).then(() => {
+      if (this.notLive.get(sessionId) === open) this.notLive.delete(sessionId);
+    });
+    const loaded = this.reloadSession(sessionId);
+    this.pending.add(loaded);
+    void loaded.finally(() => this.pending.delete(loaded));
     await this.deps.valkey
-      .publish(BUS.eventsubControl, JSON.stringify({ op: "subscriptions_changed", sessionId: held.sessionId }))
-      .catch((err: unknown) => this.deps.logger.warn("eventsub control publish failed", { err: (err as Error).name }));
+      .publish(BUS.eventsubControl, JSON.stringify({ op: "subscriptions_changed", sessionId }))
+      .catch((err: unknown) => {
+        // Without the message the old holder stops at its next reload; deliver from here now.
+        this.deps.logger.warn("eventsub control publish failed", { err: (err as Error).name });
+        this.notLive.get(sessionId)?.();
+      });
+    await Promise.all([loaded, live]);
+    await this.io.beforeResumeWelcome?.(sessionId);
     this.welcome(held);
+  }
+
+  /** Notifications and revocations: held back until the welcome has gone out. */
+  private emit(held: Held, msg: WsMessage): void {
+    if (held.welcomed) {
+      this.send(held, msg);
+      return;
+    }
+    if (held.ended) return;
+    if (held.queue.length >= MAX_QUEUED) {
+      this.deps.logger.warn("eventsub pre-welcome queue overflow", { queued: held.queue.length });
+      void this.closeSession(held, EVENTSUB_WS_CLOSE.internalError);
+      return;
+    }
+    held.queue.push(msg);
   }
 
   private welcome(held: Held): void {
     if (held.ended) return;
     held.welcomed = true;
+    this.notLive.get(held.sessionId)?.();
     this.send(
       held,
       welcomeMessage({
@@ -354,6 +424,11 @@ export class EventSubHub implements EventSub {
         connectedAt: held.connectedAt,
       }),
     );
+    for (const msg of held.queue.splice(0)) if (!this.send(held, msg)) return;
+    if (held.revokeAfterWelcome) {
+      void this.revokeSession(held, held.revokeAfterWelcome);
+      return;
+    }
     held.unusedTimer = setTimeout(
       () => void this.checkUsed(held),
       this.deps.env.EVENTSUB_WS_SUBSCRIBE_WITHIN_SECONDS * 1000,
@@ -394,7 +469,9 @@ export class EventSubHub implements EventSub {
     held.ended = true;
     if (held.unusedTimer) clearTimeout(held.unusedTimer);
     held.unusedTimer = null;
+    held.queue = [];
     if (this.held.get(held.sessionId) === held) {
+      this.notLive.get(held.sessionId)?.();
       this.held.delete(held.sessionId);
       this.index.remove(held.sessionId);
       this.dropAuth(held.sessionId);
@@ -521,7 +598,9 @@ export class EventSubHub implements EventSub {
     if (channel === BUS.events) {
       if (this.held.size === 0) return;
       const ev = BusEvent.safeParse(data);
-      if (ev.success) after(() => this.deliver(ev.data));
+      // Snapshot at receipt: bus order decides which holder delivers this event.
+      const skip = this.notLive.size > 0 ? new Set(this.notLive.keys()) : null;
+      if (ev.success) after(() => this.deliver(ev.data, skip));
       return;
     }
     if (channel === BUS.userControl) {
@@ -532,16 +611,17 @@ export class EventSubHub implements EventSub {
     if (channel === BUS.eventsubControl) {
       const msg = EventSubControlMessage.safeParse(data);
       if (!msg.success || !this.held.has(msg.data.sessionId)) return;
+      this.notLive.get(msg.data.sessionId)?.();
       const p = this.reloadSession(msg.data.sessionId);
       this.pending.add(p);
       void p.finally(() => this.pending.delete(p));
     }
   }
 
-  private async deliver(ev: BusEvent): Promise<void> {
+  private async deliver(ev: BusEvent, skip: ReadonlySet<string> | null): Promise<void> {
     const subs = this.index
       .candidates(ev.type, ev.version)
-      .filter((s) => matchesCondition(s.condition, ev.payload, s.userId));
+      .filter((s) => !skip?.has(s.sessionId) && matchesCondition(s.condition, ev.payload, s.userId));
     await Promise.all(subs.map((s) => this.deliverOne(s, ev)));
   }
 
@@ -558,7 +638,7 @@ export class EventSubHub implements EventSub {
       });
       this.index.removeSubscription(sub.id);
       this.authCache.delete(sub.id);
-      this.send(
+      this.emit(
         held,
         revocationMessage({ messageId: uuidv7(), now: this.deps.now(), subscription: envelope(sub, REVOKED_STATUS) }),
       );
@@ -567,7 +647,7 @@ export class EventSubHub implements EventSub {
       );
       return;
     }
-    this.send(
+    this.emit(
       held,
       notificationMessage({
         messageId: notificationMessageId(sub.id, ev.id),
@@ -602,11 +682,16 @@ export class EventSubHub implements EventSub {
 
   private async applyControl(msg: UserControlMessage): Promise<void> {
     if (msg.op === "disconnect") {
-      // A session bound without a row yet (its holder never heard of the binding): ask Valkey.
-      const unknown = [...this.held.values()].filter((h) => !h.ended && !h.binding);
-      if (unknown.length > 0) {
-        const recs = await this.store.getMany(unknown.map((h) => h.sessionId));
-        for (const h of unknown) if (!h.binding) h.binding = recs.get(h.sessionId)?.binding ?? null;
+      // Bindings change without a control message (a bind whose subscribe then failed, or a later
+      // bind with a refreshed token): match against Valkey, not memory. One pipeline; revocations
+      // are rare.
+      const live = [...this.held.values()].filter((h) => !h.ended);
+      if (live.length > 0) {
+        const recs = await this.store.getMany(live.map((h) => h.sessionId));
+        for (const h of live) {
+          const rec = recs.get(h.sessionId);
+          if (rec && rec.instance === this.instance) h.binding = rec.binding;
+        }
       }
     }
     const closing: Promise<void>[] = [];
@@ -622,6 +707,10 @@ export class EventSubHub implements EventSub {
   /** `revocation` per subscription, rows deleted, close 4008. */
   private async revokeSession(held: Held, reason: UserControlMessage["reason"]): Promise<void> {
     if (held.ended) return;
+    if (!held.welcomed) {
+      held.revokeAfterWelcome = reason;
+      return;
+    }
     const subs = this.index.of(held.sessionId);
     const now = this.deps.now();
     for (const s of subs)
@@ -677,12 +766,14 @@ export class EventSubHub implements EventSub {
     try {
       if (!(await this.store.tryLock(KEYS.eventsubSweepLock, this.instance, Math.max(1000, this.opts.sweepMs - 1000))))
         return 0;
-      const n = await sweepOrphans(
+      const { deleted: n, cursor } = await sweepOrphans(
         deps.db,
         this.store,
         deps.now(),
         deps.env.EVENTSUB_WS_RECONNECT_GRACE_SECONDS * 1000,
+        this.sweepCursor,
       );
+      this.sweepCursor = cursor;
       if (n > 0) deps.logger.info("eventsub orphaned subscriptions swept", { deleted: n });
       return n;
     } catch (err) {

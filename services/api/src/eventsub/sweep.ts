@@ -15,18 +15,33 @@ const BATCH = 500;
 /** Bounded work per run; the next run continues. */
 const MAX_BATCHES = 20;
 
-export async function sweepOrphans(db: Executor, store: SessionStore, now: Date, graceMs: number): Promise<number> {
+export interface SweepResult {
+  deleted: number;
+  /** Where the next run starts; `null` once the whole table has been walked. */
+  cursor: string | null;
+}
+
+export async function sweepOrphans(
+  db: Executor,
+  store: SessionStore,
+  now: Date,
+  graceMs: number,
+  startAfter: string | null = null,
+  { batch = BATCH, maxBatches = MAX_BATCHES }: { batch?: number; maxBatches?: number } = {},
+): Promise<SweepResult> {
   const before = new Date(now.getTime() - graceMs);
   let deleted = 0;
-  const seen = new Set<string>();
-  for (let i = 0; i < MAX_BATCHES; i++) {
-    const ids = (await staleSessionIds(db, before, BATCH + seen.size)).filter((id) => !seen.has(id));
-    if (ids.length === 0) break;
-    for (const id of ids) seen.add(id);
+  // Keyset pagination: each batch starts after the last id of the previous one, so live sessions
+  // are read once per pass and orphans past them are still reached, across runs.
+  let afterId = startAfter;
+  for (let i = 0; i < maxBatches; i++) {
+    const ids = await staleSessionIds(db, before, batch, afterId);
+    if (ids.length === 0) return { deleted, cursor: null };
+    afterId = ids[ids.length - 1] ?? null;
     const live = await store.existing(ids);
     const orphans = ids.filter((id) => !live.has(id));
     deleted += await deleteSessionsBefore(db, orphans, before);
-    if (ids.length < BATCH) break;
+    if (ids.length < batch) return { deleted, cursor: null };
   }
-  return deleted;
+  return { deleted, cursor: afterId };
 }

@@ -9,7 +9,7 @@
  */
 import type { Server, WebSocketHandler } from "bun";
 import type { Deps } from "../deps.ts";
-import { EVENTSUB_DEFAULTS, EventSubHub, type EventSubIo, type EventSubOptions } from "./hub.ts";
+import { DEFAULT_EVENTSUB_IO, EVENTSUB_DEFAULTS, EventSubHub, type EventSubIo, type EventSubOptions } from "./hub.ts";
 import { SessionStore } from "./sessions.ts";
 
 export interface EventSubSocketData {
@@ -47,11 +47,7 @@ const hubs = new WeakMap<Deps, EventSubHub>();
 export function startEventSub(deps: Deps, opts: Partial<EventSubOptions> = {}, io?: Partial<EventSubIo>): EventSubHub {
   const old = hubs.get(deps);
   if (old) void old.close();
-  const hub = new EventSubHub(
-    deps,
-    { ...EVENTSUB_DEFAULTS, ...opts },
-    io?.connect ? { connect: io.connect } : undefined,
-  );
+  const hub = new EventSubHub(deps, { ...EVENTSUB_DEFAULTS, ...opts }, { ...DEFAULT_EVENTSUB_IO, ...io });
   hubs.set(deps, hub);
   hub.start();
   return hub;

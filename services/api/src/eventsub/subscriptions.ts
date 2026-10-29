@@ -6,7 +6,7 @@
  * session and by `type@version`, and the Postgres loads that fill it. Rows are the truth; the index
  * is reloaded per session on `subscriptions_changed` and in full every minute.
  */
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { PUBLIC_EVENT_TYPES, type PublicEventType } from "@commonair/contracts/events";
 import { schema, type Executor } from "@commonair/db";
 
@@ -156,12 +156,24 @@ export async function deleteSubscription(db: Executor, id: string): Promise<void
   await db.delete(es).where(eq(es.id, id));
 }
 
-/** Session ids of WebSocket rows created before `before` (sweep candidates). */
-export async function staleSessionIds(db: Executor, before: Date, limit: number): Promise<string[]> {
+/** Session ids of WebSocket rows created before `before` (sweep candidates), in order, after `afterId`. */
+export async function staleSessionIds(
+  db: Executor,
+  before: Date,
+  limit: number,
+  afterId: string | null = null,
+): Promise<string[]> {
   const rows = await db
     .selectDistinct({ sessionId: es.websocketSessionId })
     .from(es)
-    .where(and(eq(es.transport, "websocket"), lt(es.createdAt, before)))
+    .where(
+      and(
+        eq(es.transport, "websocket"),
+        lt(es.createdAt, before),
+        afterId === null ? undefined : gt(es.websocketSessionId, afterId),
+      ),
+    )
+    .orderBy(asc(es.websocketSessionId))
     .limit(limit);
   return rows.flatMap((r) => (r.sessionId === null ? [] : [r.sessionId]));
 }
