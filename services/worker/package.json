@@ -29,7 +29,7 @@
     "@commonair/storage": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@opentelemetry/api": "catalog:",
-    "bullmq": "6.3.16",
+    "bullmq": "6.4.0",
     "drizzle-orm": "catalog:",
     "fflate": "catalog:",
     "iovalkey": "catalog:",

@@ -22,7 +22,7 @@
     "@commonair/service": "workspace:*",
     "@commonair/storage": "workspace:*",
     "@commonair/tokens": "workspace:*",
-    "bullmq": "6.3.16",
+    "bullmq": "6.4.0",
     "drizzle-orm": "catalog:",
     "iovalkey": "catalog:",
     "zod": "catalog:"

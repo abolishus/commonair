@@ -16,7 +16,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@better-auth/passkey": "1.7.10",
+    "@better-auth/passkey": "1.7.12",
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
     "@commonair/db": "workspace:*",
@@ -37,12 +37,12 @@
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "@orpc/zod": "catalog:",
-    "altcha-lib": "2.6.0",
-    "better-auth": "1.7.10",
-    "bullmq": "6.3.16",
+    "altcha-lib": "2.7.0",
+    "better-auth": "1.7.12",
+    "bullmq": "6.4.0",
     "drizzle-orm": "catalog:",
     "iovalkey": "catalog:",
-    "nodemailer": "10.1.7",
+    "nodemailer": "10.2.1",
     "postgres": "catalog:",
     "zod": "catalog:"
   },
