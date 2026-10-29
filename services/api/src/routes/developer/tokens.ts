@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** `developer.tokens.*` (E9-oauth): token listing, revocation and Twitch-shaped validation. */
-import { and, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
 import { schema } from "@commonair/db";
 import type { Deps } from "../../deps.ts";
-import { bearerToken, resolveToken } from "../../lib/caller.ts";
-import { publishUserControl } from "../../lib/control.ts";
+import { publishRevocations, revokeTokensInTx } from "../../developer/grants.ts";
+import { bearerToken, resolveBearer } from "../../lib/caller.ts";
 import { iso, isoOrNull } from "../../lib/dto.ts";
 import { apiError, notFound } from "../../lib/errors.ts";
 import { os, requireCaller } from "../../lib/orpc.ts";
+import { liveToken } from "../../oauth/tokens.ts";
 
 const { oauthTokens, oauthApps, users } = schema;
 
@@ -30,7 +31,8 @@ export const tokens = {
       .from(oauthTokens)
       .leftJoin(oauthApps, eq(oauthApps.id, oauthTokens.appId))
       .where(
-        and(answeredBy(deps, caller.user.id), isNull(oauthTokens.revokedAt), gt(oauthTokens.expiresAt, deps.now())),
+        // A token whose access expired but whose refresh token lives is still an authorization.
+        and(answeredBy(deps, caller.user.id), liveToken(deps.now())),
       )
       .orderBy(desc(oauthTokens.createdAt))
       .limit(500);
@@ -50,40 +52,44 @@ export const tokens = {
     const { deps } = context;
     const caller = requireCaller(context);
     const [row] = await deps.db
-      .update(oauthTokens)
-      .set({ revokedAt: deps.now() })
+      .select({ id: oauthTokens.id })
+      .from(oauthTokens)
       .where(and(eq(oauthTokens.id, input.id), answeredBy(deps, caller.user.id), isNull(oauthTokens.revokedAt)))
-      .returning({ userId: oauthTokens.userId, appId: oauthTokens.appId, hash: oauthTokens.accessTokenHash });
+      .limit(1);
     if (!row) throw notFound("Token not found");
-    // Chat, IRC and EventSub close sockets authenticated with this token right away.
-    await publishUserControl(deps, {
-      op: "disconnect",
-      userId: row.userId ?? undefined,
-      appId: row.appId ?? undefined,
-      tokenHash: row.hash,
-      reason: "token_revoked",
-    });
+    const revoked = await deps.db.transaction((tx) => revokeTokensInTx(tx, { tokenIds: [row.id] }, deps.now()));
+    if (revoked.length === 0) throw notFound("Token not found");
+    // Chat, IRC and EventSub close sockets authenticated with this token (best effort; the row is authoritative).
+    await publishRevocations(deps, revoked, "token_revoked");
     return { ok: true as const };
   }),
   /** Twitch's GET /oauth2/validate shape, so existing bot libraries work unchanged. */
   validate: os.developer.tokens.validate.handler(async ({ context: { deps, req } }) => {
     const raw = bearerToken(req.headers);
-    const caller = raw ? await resolveToken(deps, raw) : null;
-    if (!caller || caller.kind !== "token") throw apiError("UNAUTHORIZED", "Invalid or expired access token");
+    const resolved = raw ? await resolveBearer(deps, raw) : null;
+    const subject = !resolved
+      ? null
+      : "app" in resolved
+        ? { appId: resolved.app.appId, expiresAt: resolved.app.expiresAt, user: null, scopes: [] }
+        : resolved.caller.kind === "token"
+          ? resolved.caller
+          : null;
+    if (!subject) throw apiError("UNAUTHORIZED", "Invalid or expired access token");
     let clientId: string | null = null;
-    if (caller.appId) {
+    if (subject.appId) {
       const [app] = await deps.db
         .select({ clientId: schema.oauthApps.clientId })
         .from(schema.oauthApps)
-        .where(eq(schema.oauthApps.id, caller.appId));
+        .where(eq(schema.oauthApps.id, subject.appId));
       clientId = app?.clientId ?? null;
     }
+    // An app token has no user: `login` and `user_id` are null, as Twitch answers for app tokens.
     return {
       client_id: clientId,
-      login: caller.user.username,
-      user_id: caller.user.id,
-      scopes: caller.scopes,
-      expires_in: Math.max(0, Math.floor((caller.expiresAt.getTime() - deps.now().getTime()) / 1000)),
+      login: subject.user?.username ?? null,
+      user_id: subject.user?.id ?? null,
+      scopes: subject.scopes,
+      expires_in: Math.max(0, Math.floor((subject.expiresAt.getTime() - deps.now().getTime()) / 1000)),
     };
   }),
 };
