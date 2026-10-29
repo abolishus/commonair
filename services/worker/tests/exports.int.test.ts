@@ -308,6 +308,7 @@ describe.skipIf(!storage)("data export", () => {
       "notifications.json",
       "consents.json",
       "developer.json",
+      "interact.json",
     ];
     expect(Object.keys(acc.files).sort()).toEqual([...accountFiles, MANIFEST].sort());
     expect(acc.json("enforcement_statements.json")).toEqual([

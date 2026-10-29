@@ -44,5 +44,3 @@ export function createBotMiddleware(opts: BotEngineOptions = {}): BotMiddleware 
     },
   };
 }
-
-export const botMiddleware: MessageMiddleware = createBotMiddleware();

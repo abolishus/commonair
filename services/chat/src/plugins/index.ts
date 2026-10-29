@@ -6,7 +6,10 @@
  * themselves here; they run in array order after the built-in rules.
  */
 import type { MessageMiddleware } from "../pipeline.ts";
-import { botMiddleware } from "./bot/index.ts";
+import { createBotMiddleware } from "./bot/index.ts";
 import { noopMiddleware } from "./noop.ts";
 
-export const plugins: MessageMiddleware[] = [noopMiddleware, botMiddleware];
+/** A fresh set per chat service, so two services in one process never share a bot engine. */
+export function plugins(): MessageMiddleware[] {
+  return [noopMiddleware, createBotMiddleware()];
+}

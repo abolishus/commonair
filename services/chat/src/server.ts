@@ -109,7 +109,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
   });
   const writer = new MessageWriter(opts.db, logger, metrics, opts.writer);
   const frameWriter: Writer = { maxBufferedBytes: opts.maxBufferedBytes ?? 1024 * 1024, metrics };
-  const middlewares = opts.middlewares ?? plugins;
+  const middlewares = opts.middlewares ?? plugins();
   const sockets = new Set<ChatSocket>();
   const auth = new Authenticator(opts.db, opts.internalSecret, opts.oauthRevalidateMs);
   const filterRunner: FilterRunner =
