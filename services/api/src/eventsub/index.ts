@@ -4,13 +4,23 @@
 /**
  * The EventSub WebSocket transport (ADR 0027 §3), served by the API at `EVENTSUB_WS_PATH`. Owned by
  * E9-ws; the contract step fixed these exported names and types (E9-subs codes against
- * `EventSubSessions`) and wired the stub into `main.ts` and `index.ts`.
+ * `EventSubSessions`) and wired them into `main.ts` and `index.ts`. The hub is in `hub.ts`, the
+ * Valkey session registry in `sessions.ts`, the pure protocol in `protocol.ts`.
  */
 import type { Server, WebSocketHandler } from "bun";
 import type { Deps } from "../deps.ts";
+import { EVENTSUB_DEFAULTS, EventSubHub, type EventSubIo, type EventSubOptions } from "./hub.ts";
+import { SessionStore } from "./sessions.ts";
 
 export interface EventSubSocketData {
-  sessionId: string /* E9-ws extends */;
+  sessionId: string;
+  keepaliveSeconds: number;
+  /** ISO 8601; the original connect time, kept across a resume. */
+  connectedAt: string;
+  /** Taken over from another instance with a resume token. */
+  resumed: boolean;
+  /** Set when a `resume` token did not resolve: the socket is closed with this code (4007) on open. */
+  reject?: number;
 }
 
 export interface EventSub {
@@ -23,40 +33,38 @@ export interface EventSub {
   drain(): Promise<void>;
 }
 
-const hubs = new WeakMap<Deps, EventSub>();
+export type { EventSubOptions } from "./hub.ts";
+export { EventSubHub } from "./hub.ts";
 
-function stub(): EventSub {
-  return {
-    websocket: { message() {} },
-    async upgrade() {
-      return Response.json(
-        { error: "eventsub_unavailable" },
-        { status: 503, headers: { "cache-control": "no-store" } },
-      );
-    },
-    warm: true,
-    async drain() {},
-  };
-}
+const hubs = new WeakMap<Deps, EventSubHub>();
 
 /**
- * Start the transport (BUS subscribers, keepalives). E9-ws registers its own
- * `process.once("SIGTERM" | "SIGINT", () => void drain())` here: `main.ts` calls this before
- * `runService`, so the drain runs before runService's handlers stop the server. The stub
- * registers nothing.
+ * Start the transport (BUS subscriber, keepalives, reload, sweep) and register
+ * `process.once("SIGTERM" | "SIGINT", () => void drain())`: `main.ts` calls this before
+ * `runService`, so the drain runs before runService's handlers stop the server. Tests pass options
+ * (shorter timers, `handleSignals: false`); a hub already running for these deps is replaced.
  */
-export function startEventSub(deps: Deps): EventSub {
-  const hub = stub();
+export function startEventSub(deps: Deps, opts: Partial<EventSubOptions> = {}, io?: Partial<EventSubIo>): EventSubHub {
+  const old = hubs.get(deps);
+  if (old) void old.close();
+  const hub = new EventSubHub(
+    deps,
+    { ...EVENTSUB_DEFAULTS, ...opts },
+    io?.connect ? { connect: io.connect } : undefined,
+  );
   hubs.set(deps, hub);
+  hub.start();
   return hub;
 }
 
-export function eventSub(deps: Deps): EventSub {
+export function eventSub(deps: Deps): EventSubHub {
   return hubs.get(deps) ?? startEventSub(deps);
 }
 
 export async function closeEventSub(deps: Deps): Promise<void> {
+  const hub = hubs.get(deps);
   hubs.delete(deps);
+  await hub?.close();
 }
 
 /** Session lookups for `developer.events.subscribe` (E9-subs), implemented by E9-ws. */
@@ -79,8 +87,15 @@ export interface EventSubSessions {
 
 const sessions = new WeakMap<Deps, EventSubSessions>();
 
+/** The Valkey registry (any API instance can bind a session another one holds). */
 export function eventSubSessions(deps: Deps): EventSubSessions {
-  return sessions.get(deps) ?? { bind: async () => "unknown_session" };
+  let s = sessions.get(deps);
+  if (!s) {
+    const store = new SessionStore(deps.valkey, () => deps.env.EVENTSUB_WS_MAX_SESSIONS_PER_GRANT);
+    s = { bind: (sessionId, grant) => store.bind(sessionId, grant) };
+    sessions.set(deps, s);
+  }
+  return s;
 }
 
 /** Tests install a fake. */
