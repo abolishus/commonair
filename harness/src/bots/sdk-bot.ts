@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * SDK bot. Written against `BotSdk`, a contract-level client interface (typed API client + chat
- * connection) so the implementation can be swapped for `@commonair/sdk` when it lands: the SDK
- * only has to satisfy `BotSdk` (or be adapted to it in `createContractSdk`). Answers the same
- * commands as the tmi.js bot.
+ * SDK bot: a bot built on `@commonair/sdk` (ADR 0027 §5), so `e2e-social` exercises the SDK.
+ * `BotSdk` is the surface a bot needs (typed API client + chat connection); `createContractSdk`
+ * provides it with the SDK's `createClient` and `connectChat`. Answers the same commands as the
+ * tmi.js bot.
  */
 import type { Logger } from "@commonair/observability";
-import { type ApiClient, createApi } from "../api/client.ts";
-import { ChatClient } from "../chat-client.ts";
+import { connectChat, createClient } from "@commonair/sdk";
+import { type ApiClient, DEFAULT_USER_AGENT } from "../api/client.ts";
 import { type BotReply } from "./tmi-bot.ts";
 import { replyTo } from "./commands.ts";
 
@@ -29,7 +29,7 @@ export interface BotChatConnection {
   close(): void;
 }
 
-/** The surface a bot needs from an SDK. `@commonair/sdk` must provide (or adapt to) this. */
+/** The surface a bot needs from an SDK; `createContractSdk` builds it on `@commonair/sdk`. */
 export interface BotSdk {
   api: ApiClient;
   connectChat(): Promise<BotChatConnection>;
@@ -44,33 +44,34 @@ export interface ContractSdkOptions {
   log?: Logger;
 }
 
-/** BotSdk built directly on the oRPC contract client and the chat protocol. */
+/** `BotSdk` on `@commonair/sdk`: its typed client and its chat client (bearer on the upgrade). */
 export function createContractSdk(opts: ContractSdkOptions): BotSdk {
-  const { client: api } = createApi({ baseUrl: opts.apiUrl, bearer: opts.token });
+  const api: ApiClient = createClient({
+    baseUrl: opts.apiUrl,
+    token: opts.token,
+    headers: { "user-agent": DEFAULT_USER_AGENT },
+  });
   return {
     api,
     async connectChat() {
-      const url = opts.chatUrl ?? (await api.chat.connectToken()).url;
-      const chat = await ChatClient.connect({ url, bearer: opts.token, log: opts.log });
+      const chat = await connectChat({
+        url: opts.chatUrl,
+        client: api,
+        token: opts.token,
+        onError: (e) => opts.log?.warn("sdk chat frame dropped", { error: e.message }),
+      });
       return {
         async join(channel) {
           await chat.join(channel);
         },
         async say(channel, text) {
-          const ack = await chat.send(channel, text);
-          if (ack.id === null && !ack.held) throw new Error("message rejected by chat");
+          // Throws ChatError("rejected") when chat refuses it (an ack without an id, not held).
+          await chat.say(channel, text);
         },
         onMessage(handler) {
-          return chat.onFrame((f) => {
-            if (f.op !== "message") return;
-            handler({
-              channel: f.channel,
-              id: f.message.id,
-              userId: f.message.user.id,
-              username: f.message.user.username,
-              text: f.message.body,
-            });
-          });
+          return chat.onMessage((m) =>
+            handler({ channel: m.channel, id: m.id, userId: m.userId, username: m.username, text: m.text }),
+          );
         },
         close: () => chat.close(),
       };

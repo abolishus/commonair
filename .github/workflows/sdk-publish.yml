@@ -1,0 +1,106 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Publishes @commonair/sdk to npmjs.com (ADR 0027 §5, ADR 0035) with npm trusted publishing: OIDC
+# from this workflow, no long-lived npm token, and a provenance attestation. Only
+# `packages/sdk/dist` is published (the workspace package stays private).
+#
+# Nobody runs this until the maintainer has created the `@commonair` npm organisation and added
+# this workflow as the trusted publisher of `@commonair/sdk`. Then:
+#   - a tag `sdk-vX.Y.Z` (X.Y.Z must equal packages/sdk/package.json `version`) publishes it;
+#   - `gh workflow run sdk-publish.yml` (dry_run defaults to true) builds and packs, publishing
+#     nothing. A real publish from a dispatch must run on an `sdk-v*` tag ref.
+#
+# Supply chain (AGENTS.md rule 7, ADR 0022): actions pinned to commit SHAs, no caches restored (so
+# nothing a pull request wrote can reach a release), no pull_request_target.
+name: sdk-publish
+
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build, test and pack, but publish nothing"
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: sdk-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUN_VERSION: "1.4.3"
+
+jobs:
+  publish:
+    name: publish @commonair/sdk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          no-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # npm >= 11.5 for trusted publishing; no cache: nothing is restored into a release.
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Test
+        run: bun run --filter @commonair/sdk test
+      - name: Check the tag matches the package version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          version="$(bun -e 'console.log((await Bun.file("packages/sdk/package.json").json()).version)')"
+          if [ "$REF_TYPE" = "tag" ]; then
+            case "$REF_NAME" in
+              sdk-v*) ;;
+              *) echo "::error::not an sdk-v* tag: $REF_NAME"; exit 1 ;;
+            esac
+            if [ "${REF_NAME#sdk-v}" != "$version" ]; then
+              echo "::error::tag $REF_NAME does not match packages/sdk/package.json version $version"
+              exit 1
+            fi
+          elif [ "$DRY_RUN" != "true" ]; then
+            echo "::error::a real publish runs on an sdk-v* tag (event: $EVENT, ref: $REF_NAME)"
+            exit 1
+          fi
+          echo "publishing version $version (dry run: ${DRY_RUN:-false})"
+      - name: Build
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        # The build refuses inlined contract files that do not allow Apache-2.0 (ADR 0035); only a
+        # dry run may skip that check.
+        run: |
+          args=(packages/sdk/scripts/build.ts)
+          if [ "$DRY_RUN" = "true" ]; then args+=(--allow-unlicensed-inline); fi
+          bun "${args[@]}"
+      - name: npm version
+        run: npm --version
+      - name: Publish
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          args=(publish packages/sdk/dist --provenance --access public)
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          npm "${args[@]}"
