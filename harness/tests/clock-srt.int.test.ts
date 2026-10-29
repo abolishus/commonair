@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { CONTAINER_FFMPEG_IMAGE, whipFfmpeg } from "../src/ffmpeg.ts";
+import { testOwnerArgs } from "../../scripts/test-owner.ts";
 import { Streamer } from "../src/streamer.ts";
 import { MEDIAMTX_IMAGE, podmanAvailable, startMediaMtx, type MediaMtxInstance } from "../src/testing/mediamtx.ts";
 import { decodeStrip, graySource } from "../src/timestamp-strip.ts";
@@ -37,6 +38,7 @@ function srtFfmpeg(args: string[]): string[] {
     "-i",
     "--name",
     name,
+    ...testOwnerArgs(),
     "--network",
     `container:${mtx.name}`,
     "--entrypoint",

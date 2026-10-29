@@ -16,6 +16,7 @@
  */
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { pidAlive, TEST_OWNER_LABEL, testOwnerPid } from "./test-owner.ts";
 
 export const TEST_SERVICES = ["postgres", "valkey", "mailpit", "garage", "garage-init", "migrate"];
 /** Long-running services that report health. */
@@ -198,24 +199,35 @@ export function crashLooping(rows: ContainerRow[]): ContainerRow[] {
 }
 
 /**
- * Throwaway containers, compose projects (`commonair-it-*` containers, volumes, network) and
- * databases that integration tests create. A killed run skips its cleanup and leaks them, and the
- * leaked stacks keep running and load every later run.
+ * Throwaway containers, compose projects (`commonair-it-*` containers, volumes, network), images
+ * and databases that integration tests create. A killed run skips its cleanup and leaks them, and
+ * the leaked stacks keep running and load every later run. Resources labelled with their owner
+ * (`test-owner.ts`) go as soon as that process is gone; older unlabelled ones by name and age.
  */
 const TEST_RESOURCE =
-  /^(?:(?:harness-mediamtx|media-int-(?:garage|mtx|target)|origin-test)-[0-9a-f]{8}|commonair-it-[0-9a-f]{8}[_-][\w.-]+)$/;
+  /^(?:(?:harness-mediamtx(?:-ff)?|media-int-[a-z]+|origin-test|commonair-pgh(?:-[a-z]+)?)-[0-9a-f]{8}|commonair-it-(?:\d+-)?[0-9a-f]{8}[_-][\w.-]+)$/;
 /** Far longer than any test run, so another checkout's run in progress is never touched. */
 export const STALE_TEST_MS = 2 * 60 * 60_000;
 
 export interface TestResource {
-  kind: "container" | "volume" | "network";
+  kind: "container" | "volume" | "network" | "image";
   name: string;
   createdMs: number;
+  labels?: Record<string, string> | null;
 }
 
-export function staleTestResources(rows: TestResource[], now: number): TestResource[] {
-  // An unparseable creation time is NaN, which is never stale.
-  return rows.filter((r) => TEST_RESOURCE.test(r.name) && now - r.createdMs > STALE_TEST_MS);
+/** Test resources to remove: those whose owner process is gone, and old unlabelled ones by name. */
+export function staleTestResources(
+  rows: TestResource[],
+  now: number,
+  alive: (pid: number) => boolean = pidAlive,
+): TestResource[] {
+  return rows.filter((r) => {
+    const owner = testOwnerPid(r.labels);
+    if (owner !== undefined) return !alive(owner);
+    // An unparseable creation time is NaN, which is never stale.
+    return r.kind !== "image" && TEST_RESOURCE.test(r.name) && now - r.createdMs > STALE_TEST_MS;
+  });
 }
 
 function podmanJson<T>(args: string[]): T[] {
@@ -227,22 +239,38 @@ function podmanJson<T>(args: string[]): T[] {
   }
 }
 
+type Labels = Record<string, string> | null;
+
 function testResources(): TestResource[] {
   return [
-    ...podmanJson<{ Names?: string[]; Created?: number }>(["ps", "-a"]).map((c) => ({
+    ...podmanJson<{ Names?: string[]; Created?: number; Labels?: Labels }>(["ps", "-a"]).map((c) => ({
       kind: "container" as const,
       name: c.Names?.[0] ?? "",
       createdMs: (c.Created ?? Number.NaN) * 1000,
+      labels: c.Labels,
     })),
-    ...podmanJson<{ Name?: string; CreatedAt?: string }>(["volume", "ls"]).map((v) => ({
+    ...podmanJson<{ Name?: string; CreatedAt?: string; Labels?: Labels }>(["volume", "ls"]).map((v) => ({
       kind: "volume" as const,
       name: v.Name ?? "",
       createdMs: Date.parse(v.CreatedAt ?? ""),
+      labels: v.Labels,
     })),
-    ...podmanJson<{ name?: string; created?: string }>(["network", "ls"]).map((n) => ({
+    ...podmanJson<{ name?: string; created?: string; labels?: Labels }>(["network", "ls"]).map((n) => ({
       kind: "network" as const,
       name: n.name ?? "",
       createdMs: Date.parse(n.created ?? ""),
+      labels: n.labels,
+    })),
+    // Only labelled images: an image's name says nothing about who built it.
+    ...podmanJson<{ Id?: string; Created?: number; Labels?: Labels }>([
+      "images",
+      "--filter",
+      `label=${TEST_OWNER_LABEL}`,
+    ]).map((i) => ({
+      kind: "image" as const,
+      name: i.Id ?? "",
+      createdMs: (i.Created ?? Number.NaN) * 1000,
+      labels: i.Labels,
     })),
   ];
 }
@@ -269,11 +297,13 @@ function sweepStaleTestContainers(): void {
       ["container", ["rm", "-f", "--depend", "-t", "1"]],
       ["volume", ["volume", "rm", "-f"]],
       ["network", ["network", "rm", "-f"]],
+      ["image", ["rmi", "-f"]],
     ] as const) {
       const list = names(kind);
       if (list.length > 0) Bun.spawnSync(["podman", ...cmd, ...list], { timeout: 120_000 });
     }
-    if (stale.length > 0) console.log(`infra: removed ${stale.length} stale test containers, volumes and networks`);
+    if (stale.length > 0)
+      console.log(`infra: removed ${stale.length} leftover test containers, volumes, networks and images`);
   } catch (e) {
     console.warn(`infra: stale test container sweep skipped: ${(e as Error).message}`);
   }
@@ -298,7 +328,25 @@ function sweepStaleTestDatabases(): void {
   }
 }
 
+/**
+ * Podman Desktop polls the API service so often that it pegs the VM's CPU and slows every
+ * timing-sensitive test. Matches the app's main process only, not its helpers.
+ */
+export function podmanDesktopRunning(psOutput: string): boolean {
+  return psOutput.split("\n").some((l) => l.trim().endsWith("/Contents/MacOS/Podman Desktop"));
+}
+
+function warnPodmanDesktop(): void {
+  if (process.platform !== "darwin") return;
+  const ps = Bun.spawnSync(["ps", "-axo", "comm="], { timeout: 10_000 });
+  if (podmanDesktopRunning(ps.stdout.toString()))
+    console.warn(
+      "infra: Podman Desktop is running; its polling loads the podman VM and makes timing tests flaky. Quit it for test runs.",
+    );
+}
+
 function preflight(): void {
+  warnPodmanDesktop();
   const foreign = foreignContainers(projectContainers(), ROOT);
   if (foreign.length === 0) return;
   const dirs = [...new Set(foreign.map((r) => r.workingDir))];

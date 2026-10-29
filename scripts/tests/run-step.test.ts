@@ -8,6 +8,7 @@ import {
   type TestResource,
   crashLooping,
   foreignContainers,
+  podmanDesktopRunning,
   HARNESS_OVERRIDES,
   stackFiles,
   stackProfiles,
@@ -15,6 +16,7 @@ import {
   staleTestResources,
 } from "../infra.ts";
 import { runStep } from "../run-step.ts";
+import { ownedProjectName, pidAlive, TEST_OWNER_LABEL, testOwnerArgs, testOwnerPid } from "../test-owner.ts";
 
 const quiet = { stdio: "ignore" as const, log: () => {} };
 
@@ -168,6 +170,105 @@ describe("staleTestResources", () => {
 
   test("an unknown creation time is never stale", () => {
     expect(staleTestResources([res("origin-test-68a93d4a", Number.NaN)], now)).toEqual([]);
+  });
+
+  test("covers every name the integration tests use", () => {
+    const rows = [
+      res("harness-mediamtx-ff-2a9ddb70"),
+      res("media-int-clockw-2a9ddb70"),
+      res("media-int-clockff-2a9ddb70"),
+      res("commonair-pgh-primary-2a9ddb70"),
+      res("commonair-pgh-2a9ddb70", old, "volume"),
+      res("commonair-it-4242-783005c5_postgres_1"),
+    ];
+    expect(staleTestResources(rows, now)).toEqual(rows);
+  });
+
+  describe("owner labels", () => {
+    const dead = new Set([111, 333]);
+    const alive = (pid: number) => !dead.has(pid);
+    const owned = (name: string, labels: Record<string, string>, kind: TestResource["kind"] = "container") => ({
+      ...res(name, now, kind),
+      labels,
+    });
+
+    test("removes a fresh resource as soon as its owner is gone, of any kind or name", () => {
+      const rows = [
+        owned("wizardly_turing", { [TEST_OWNER_LABEL]: "111" }),
+        owned("commonair-pgh-2a9ddb70", { [TEST_OWNER_LABEL]: "111" }, "volume"),
+        owned("sha256:abc", { [TEST_OWNER_LABEL]: "333" }, "image"),
+        owned(
+          "commonair-it-333-783005c5_default",
+          { "com.docker.compose.project": "commonair-it-333-783005c5" },
+          "network",
+        ),
+      ];
+      expect(staleTestResources(rows, now, alive)).toEqual(rows);
+    });
+
+    test("keeps anything whose owner is alive, however old", () => {
+      const rows = [
+        { ...owned("media-int-mtx-e5c3f33f", { [TEST_OWNER_LABEL]: "222" }), createdMs: old },
+        owned("commonair-it-222-783005c5_postgres_1", { "com.docker.compose.project": "commonair-it-222-783005c5" }),
+      ];
+      expect(staleTestResources(rows, now, alive)).toEqual([]);
+    });
+
+    test("ignores labels that name no owner, and unlabelled images", () => {
+      const rows = [
+        owned("commonair_postgres_1", { "com.docker.compose.project": "commonair" }),
+        owned("commonair-it-783005c5_postgres_1", { "com.docker.compose.project": "commonair-it-783005c5" }),
+        owned("x", { [TEST_OWNER_LABEL]: "" }),
+        owned("y", { [TEST_OWNER_LABEL]: "0" }),
+        owned("z", { [TEST_OWNER_LABEL]: "12a" }),
+        res("media-int-mtx-e5c3f33f", old, "image"),
+      ];
+      expect(staleTestResources(rows, now, () => false)).toEqual([]);
+    });
+  });
+});
+
+describe("podmanDesktopRunning", () => {
+  test("spots the app's main process", () => {
+    expect(
+      podmanDesktopRunning("/usr/sbin/cfprefsd\n/Applications/Podman Desktop.app/Contents/MacOS/Podman Desktop\n"),
+    ).toBe(true);
+  });
+
+  test("ignores its helpers, the podman machine and everything else", () => {
+    const ps = [
+      "/Applications/Podman Desktop.app/Contents/Frameworks/Podman Desktop Helper (Renderer).app/Contents/MacOS/Podman Desktop Helper (Renderer)",
+      "/opt/homebrew/Cellar/podman/6.1.4/libexec/podman/gvproxy",
+      "/opt/homebrew/Cellar/podman/6.1.4/libexec/podman/vfkit",
+      "",
+    ].join("\n");
+    expect(podmanDesktopRunning(ps)).toBe(false);
+  });
+});
+
+describe("test-owner", () => {
+  test("pidAlive tells a running process from an exited one", async () => {
+    expect(pidAlive(process.pid)).toBe(true);
+    const child = Bun.spawn(["true"]);
+    await child.exited;
+    expect(pidAlive(child.pid)).toBe(false);
+  });
+
+  test("testOwnerArgs labels with the pid", () => {
+    expect(testOwnerArgs(4242)).toEqual(["--label", `${TEST_OWNER_LABEL}=4242`]);
+  });
+
+  test("ownedProjectName round-trips through testOwnerPid", () => {
+    const name = ownedProjectName("commonair-it", 4242);
+    expect(name).toMatch(/^commonair-it-4242-[0-9a-f]{8}$/);
+    expect(testOwnerPid({ "com.docker.compose.project": name })).toBe(4242);
+  });
+
+  test("testOwnerPid prefers the owner label and tolerates missing labels", () => {
+    expect(testOwnerPid({ [TEST_OWNER_LABEL]: "7", "com.docker.compose.project": "commonair-it-9-783005c5" })).toBe(7);
+    expect(testOwnerPid(null)).toBeUndefined();
+    expect(testOwnerPid(undefined)).toBeUndefined();
+    expect(testOwnerPid({})).toBeUndefined();
   });
 });
 

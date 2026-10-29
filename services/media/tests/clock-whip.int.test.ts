@@ -22,6 +22,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test, vi } from "vite-plus/test";
+import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 import { CONTAINER_FFMPEG_IMAGE, whipFfmpeg } from "../../../harness/src/ffmpeg.ts";
 import { Streamer } from "../../../harness/src/streamer.ts";
 import { podmanAvailable, startMediaMtx, type MediaMtxInstance } from "../../../harness/src/testing/mediamtx.ts";
@@ -183,6 +184,7 @@ test("fetchW0 refuses a WHIP path's W0 until its PDT settles, and an AAC copy st
             "--rm",
             "--name",
             copyName,
+            ...testOwnerArgs(),
             "--network",
             `container:${mtx.name}`,
             "--entrypoint",

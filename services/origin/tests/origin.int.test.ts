@@ -18,6 +18,7 @@ import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey, type ValkeyClient } from "@commonair/service";
 import { generateSigningKey, randomSecret, sha256Hex, signPlaybackToken, type SigningKey } from "@commonair/tokens";
+import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 import { minuteOf } from "../src/accounting.ts";
 import { cdnAuthValue } from "../src/auth.ts";
 import { sessionAllowance } from "../src/issuance.ts";
@@ -202,6 +203,7 @@ beforeAll(async () => {
     "-d",
     "--name",
     container,
+    ...testOwnerArgs(),
     "-p",
     "127.0.0.1::8888",
     "-p",

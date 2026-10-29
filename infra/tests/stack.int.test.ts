@@ -13,10 +13,12 @@ import { join } from "node:path";
 import postgres from "postgres";
 import { createS3Storage, type ObjectStorage } from "@commonair/storage";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { ownedProjectName, testOwnerArgs } from "../../scripts/test-owner.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
-const SUFFIX = crypto.randomUUID().slice(0, 8);
-const PROJECT = `commonair-it-${SUFFIX}`;
+// The pid in the name lets `infra.ts test` remove the project once this process is gone.
+const PROJECT = ownedProjectName("commonair-it");
+const SUFFIX = PROJECT.slice(-8);
 const OFFSET = 20_000 + Math.floor(Math.random() * 90) * 10;
 const SERVICES = ["postgres", "valkey", "garage", "garage-init", "mailpit", "migrate"];
 const hex = (n: number) =>
@@ -322,6 +324,7 @@ describe("compose data stack", () => {
         "--rm",
         "--name",
         `${PROJECT}-restore`,
+        ...testOwnerArgs(),
         "--network",
         `${PROJECT}_default`,
         "-e",

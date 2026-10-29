@@ -8,6 +8,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { testOwnerArgs } from "../../../../scripts/test-owner.ts";
 
 export const MEDIAMTX_IMAGE =
   "docker.io/bluenviron/mediamtx:1.21.2-ffmpeg@sha256:c0feb4acc548d5f410d57d9046f62dfa355e2abc4098f5243de9e86430c77a95";
@@ -40,7 +41,7 @@ export interface Container {
 }
 
 function run(name: string, args: string[]): Container {
-  podman(["run", "-d", "--rm", "--name", name, ...args]);
+  podman(["run", "-d", "--rm", "--name", name, ...testOwnerArgs(), ...args]);
   const ports = new Map<string, number>();
   return {
     name,
@@ -131,7 +132,7 @@ export function srtFfmpegWrapper(mtx: Container, dirs: string[], label: string):
       'while [ "$i" -lt "$n" ]; do',
       `  a=$1; shift; set -- "$@" "$(printf '%s' "$a" | sed ${rewrite})"; i=$((i + 1))`,
       "done",
-      `exec podman run --rm -i --label '${label}' --network 'container:${mtx.name}' ${mounts} --entrypoint ffmpeg '${MEDIAMTX_IMAGE}' "$@"`,
+      `exec podman run --rm -i --label '${label}' ${testOwnerArgs().join(" ")} --network 'container:${mtx.name}' ${mounts} --entrypoint ffmpeg '${MEDIAMTX_IMAGE}' "$@"`,
       "",
     ].join("\n"),
     { mode: 0o755 },

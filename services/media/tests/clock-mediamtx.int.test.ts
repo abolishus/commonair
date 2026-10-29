@@ -27,6 +27,7 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
+import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 import { buildStreamerArgs } from "../../../harness/src/ffmpeg.ts";
 import { decodeStrip, graySource } from "../../../harness/src/timestamp-strip.ts";
 import { parseFragment, parseInit } from "../src/clock/boxes.ts";
@@ -139,6 +140,7 @@ function containerFfmpeg(args: string[], dirs: string[] = []): { name: string; c
       "-i",
       "--name",
       name,
+      ...testOwnerArgs(),
       "--network",
       `container:${mtx.name}`,
       ...dirs.flatMap((d) => ["-v", `${d}:${d}`]),

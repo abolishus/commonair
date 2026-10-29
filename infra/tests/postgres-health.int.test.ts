@@ -15,6 +15,7 @@
  * Needs podman.
  */
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { testOwnerArgs } from "../../scripts/test-owner.ts";
 
 const ROOT = new URL("../../", import.meta.url).pathname;
 const SUFFIX = crypto.randomUUID().slice(0, 8);
@@ -122,8 +123,9 @@ function startRecovery(
 
 beforeAll(() => {
   // Build context is the repository root, as the release and compose builds use.
-  ok(["build", "-f", "infra/postgres/Containerfile", "-t", IMAGE, "."], 20 * 60_000);
-  ok(["volume", "create", VOLUME]);
+  // Containers inherit the image's labels, so the owner label on the build covers every one.
+  ok(["build", ...testOwnerArgs(), "-f", "infra/postgres/Containerfile", "-t", IMAGE, "."], 20 * 60_000);
+  ok(["volume", "create", ...testOwnerArgs(), VOLUME]);
   ok([
     "run",
     "--rm",

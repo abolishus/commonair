@@ -10,6 +10,7 @@ import { createSocket } from "node:dgram";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { testOwnerArgs } from "../../../scripts/test-owner.ts";
 import { waitFor } from "../wait.ts";
 
 export const MEDIAMTX_IMAGE =
@@ -138,6 +139,7 @@ export async function startMediaMtx(opts: MediaMtxOptions = {}): Promise<MediaMt
     "--rm",
     "--name",
     name,
+    ...testOwnerArgs(),
     "-v",
     `${configPath}:/mediamtx.yml:ro`,
     "-p",
