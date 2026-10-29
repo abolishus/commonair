@@ -7,11 +7,12 @@ import { Toaster } from "@commonair/ui/toast";
 import { HeadContent, Outlet, Scripts, createRootRoute, useLocation, useRouter } from "@tanstack/react-router";
 import * as React from "react";
 import { localeDirection } from "@commonair/i18n";
+import { ConsentRoot } from "../components/consent/consent-root.tsx";
 import { onLocaleApplied, syncLocale } from "../i18n/client.ts";
 import { t, uiMessagesFor } from "../i18n/index.ts";
 import { getBootstrap } from "../lib/bootstrap.ts";
 import { rootChrome } from "../lib/overlay-page.ts";
-import { storeTheme } from "../lib/theme.ts";
+import { storeTheme, tabTheme } from "../lib/theme.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import appCss from "../styles.css?url";
 
@@ -32,9 +33,25 @@ export const Route = createRootRoute({
   component: RootComponent,
 });
 
+const subscribeNothing = () => () => {};
+const tabThemeSnapshot = (): Theme | null => tabTheme() ?? null;
+const noTabTheme = (): Theme | null => null;
+/** `read`, evaluated on the first call and remembered. */
+function latchOnce<T>(read: () => T): () => T {
+  let value: { v: T } | null = null;
+  return () => (value ??= { v: read() }).v;
+}
+
 function RootComponent(): React.JSX.Element {
   const boot = Route.useLoaderData();
-  const [theme, setThemeState] = React.useState<Theme>(boot.theme);
+  // A theme chosen without Preferences consent lives in this tab only (`sessionStorage`): the
+  // server rendered the cookie's theme or the default, and the tab's choice applies right after
+  // hydration (the server snapshot is "none", so the first client render matches the HTML).
+  const [chosen, setThemeState] = React.useState<Theme | null>(null);
+  // Read once: granting consent later moves the value into the cookie and out of the tab.
+  const [tabOnce] = React.useState(() => latchOnce(tabThemeSnapshot));
+  const tab = React.useSyncExternalStore(subscribeNothing, tabOnce, noTabTheme);
+  const theme = chosen ?? tab ?? boot.theme;
   const resolved = useResolvedTheme(theme);
   const pathname = useLocation({ select: (location) => location.pathname });
   const chrome = rootChrome(pathname, theme);
@@ -60,6 +77,10 @@ function RootComponent(): React.JSX.Element {
   React.useEffect(() => {
     void syncLocale({ locale: bootLocale, localeFromUser });
   }, [bootLocale, localeFromUser]);
+  const tabDiffers = chosen === null && tab !== null && tab !== boot.theme;
+  React.useEffect(() => {
+    if (tabDiffers && tab) applyTheme(tab);
+  }, [tabDiffers, tab]);
   const themeValue = React.useMemo(
     () => ({
       theme,
@@ -87,6 +108,7 @@ function RootComponent(): React.JSX.Element {
           <NowProvider now={boot.now}>
             <TooltipProvider>
               <ThemeContext.Provider value={themeValue}>
+                <ConsentRoot consent={boot.consent} signedIn={boot.me !== null} pathname={pathname} />
                 <Outlet />
               </ThemeContext.Provider>
               <Toaster theme={resolved} />
