@@ -337,6 +337,45 @@ const webhookFields = {
   createdAt: s.eventSubscriptions.createdAt,
 };
 
+/**
+ * E8 channel features (ADR 0026): the user's points per channel and their ledger, poll votes,
+ * prediction bets and song requests. Channels appear by their public slug only.
+ */
+const pointsBalanceFields = { channelSlug: s.channels.slug, points: s.loyaltyBalances.points };
+
+const pointsTransactionFields = {
+  id: s.loyaltyTransactions.id,
+  channelSlug: s.channels.slug,
+  delta: s.loyaltyTransactions.delta,
+  reason: s.loyaltyTransactions.reason,
+  createdAt: s.loyaltyTransactions.createdAt,
+};
+
+const pollVoteFields = {
+  channelSlug: s.channels.slug,
+  pollId: s.pollVotes.pollId,
+  choiceId: s.pollVotes.choiceId,
+  votes: s.pollVotes.votes,
+  pointsSpent: s.pollVotes.pointsSpent,
+  castAt: s.pollVotes.castAt,
+};
+
+const predictionBetFields = {
+  channelSlug: s.channels.slug,
+  predictionId: s.predictionBets.predictionId,
+  outcomeId: s.predictionBets.outcomeId,
+  points: s.predictionBets.points,
+  payout: s.predictionBets.payout,
+  placedAt: s.predictionBets.placedAt,
+};
+
+const songRequestFields = {
+  channelSlug: s.channels.slug,
+  url: s.songRequests.url,
+  status: s.songRequests.status,
+  createdAt: s.songRequests.createdAt,
+};
+
 // Channel export ----------------------------------------------------------------------------
 
 const channelSettingsFields = {
@@ -813,6 +852,64 @@ export const EXPORT_FILES: readonly ExportFile[] = [
             .from(s.eventSubscriptions)
             .where(eq(s.eventSubscriptions.userId, userId))
             .orderBy(asc(s.eventSubscriptions.createdAt)),
+      },
+    },
+  },
+  {
+    name: "interact.json",
+    kind: "account",
+    sections: {
+      pointsBalances: {
+        fields: pointsBalanceFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(pointsBalanceFields)
+            .from(s.loyaltyBalances)
+            .innerJoin(s.channels, eq(s.channels.id, s.loyaltyBalances.channelId))
+            .where(eq(s.loyaltyBalances.userId, userId))
+            .orderBy(asc(s.channels.slug)),
+      },
+      pointsTransactions: {
+        fields: pointsTransactionFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(pointsTransactionFields)
+            .from(s.loyaltyTransactions)
+            .innerJoin(s.channels, eq(s.channels.id, s.loyaltyTransactions.channelId))
+            .where(eq(s.loyaltyTransactions.userId, userId))
+            .orderBy(asc(s.loyaltyTransactions.createdAt), asc(s.loyaltyTransactions.id)),
+      },
+      pollVotes: {
+        fields: pollVoteFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(pollVoteFields)
+            .from(s.pollVotes)
+            .innerJoin(s.polls, eq(s.polls.id, s.pollVotes.pollId))
+            .innerJoin(s.channels, eq(s.channels.id, s.polls.channelId))
+            .where(eq(s.pollVotes.userId, userId))
+            .orderBy(asc(s.pollVotes.castAt)),
+      },
+      predictionBets: {
+        fields: predictionBetFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(predictionBetFields)
+            .from(s.predictionBets)
+            .innerJoin(s.predictions, eq(s.predictions.id, s.predictionBets.predictionId))
+            .innerJoin(s.channels, eq(s.channels.id, s.predictions.channelId))
+            .where(eq(s.predictionBets.userId, userId))
+            .orderBy(asc(s.predictionBets.placedAt)),
+      },
+      songRequests: {
+        fields: songRequestFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(songRequestFields)
+            .from(s.songRequests)
+            .innerJoin(s.channels, eq(s.channels.id, s.songRequests.channelId))
+            .where(eq(s.songRequests.requesterId, userId))
+            .orderBy(asc(s.songRequests.createdAt)),
       },
     },
   },

@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** Owned by E8-points; the contract step registered it with its final schedule and a no-op handler. */
+/** Channel points for gate-eligible watch time (ADR 0026 decision 1); the work is in `interact/points`. */
 import { INTERACT_JOBS, InteractJob, QUEUES } from "@commonair/contracts/internal";
+import { accruePoints } from "../interact/points/accrue.ts";
 import { defineJob } from "../runtime/registry.ts";
 
 export const job = defineJob({
@@ -12,5 +13,8 @@ export const job = defineJob({
   data: InteractJob,
   schedule: { every: 60_000 },
   attempts: 1,
-  handler: async () => ({ viewers: 0, points: 0 }),
+  handler: async (_data, ctx) => {
+    const r = await accruePoints(ctx);
+    return { viewers: r.viewers, points: r.points };
+  },
 });
