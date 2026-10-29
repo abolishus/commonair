@@ -117,6 +117,8 @@ describe("create, vote, end", () => {
     expect((await current(viewers[0]!)).body?.id).toBe(poll.id);
     expect((await end(streamer, poll.id, "archived")).body.status).toBe("archived");
     expect((await current(viewers[0]!)).body?.id).not.toBe(poll.id);
+    // Archiving an ended poll hides it but sends no second `end`.
+    expect(await events("channel.poll.end", poll.id)).toHaveLength(1);
 
     const audits = await db()
       .select()

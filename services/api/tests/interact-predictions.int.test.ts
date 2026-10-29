@@ -176,6 +176,7 @@ describe("a prediction runs", () => {
       bettors: 3,
       credited: 2,
       pool: 600,
+      refunded: false,
     });
   });
 
@@ -199,6 +200,11 @@ describe("a prediction runs", () => {
     expect(refunds.map((x) => x.delta).sort((a, b) => a - b)).toEqual([50, 70]);
     const [end] = await events("channel.prediction.end", p.id);
     expect(end?.payload).toMatchObject({ status: "canceled", winning_outcome_id: null });
+    const [resolveAudit] = await db()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.subjectId, p.id), eq(schema.auditLog.action, "prediction.resolve")));
+    expect(resolveAudit?.details).toMatchObject({ status: "canceled", refunded: true });
   });
 
   test("cancel from active refunds", async () => {

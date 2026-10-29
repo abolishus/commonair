@@ -10,6 +10,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { InsufficientPointsError, postPointsInTx, schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import {
+  changedAtAfterProgress,
   emitEvent,
   lockPrediction,
   lockPredictionInTx,
@@ -184,8 +185,12 @@ export async function betPrediction(
       pointsChangePayload(channel, me, { delta: -input.points, balance, reason: "prediction_bet" }),
       now,
     );
-    await tx.update(predictions).set({ changedAt: now }).where(eq(predictions.id, prediction.id));
-    const refreshed = await refreshPredictionOutcomes(tx, { ...prediction, changedAt: now });
+    const [changed] = await tx
+      .update(predictions)
+      .set({ changedAt: changedAtAfterProgress(predictions, now) })
+      .where(eq(predictions.id, prediction.id))
+      .returning();
+    const refreshed = await refreshPredictionOutcomes(tx, changed ?? prediction);
     return viewOf(tx, refreshed, userId);
   });
 }
@@ -248,6 +253,8 @@ export async function settlePrediction(
         bettors: settled.bettors,
         credited: settled.credits.length,
         pool: settled.pool,
+        // A resolve nobody bet on refunds every bet and ends canceled.
+        refunded: settled.row.status === "canceled",
       },
     });
     return viewOf(tx, settled.row, caller.user.id);

@@ -34,7 +34,7 @@ Suspended accounts cannot vote or bet.
 - The poll ends on its own when the time runs out (within about two seconds). You can end it
   early. Ending sets the status to **completed** (time ran out) or **terminated** (ended early).
 - An ended poll stays on screen until you start a new one or **archive** it. Archiving an active
-  poll ends it and hides it.
+  poll ends it and hides it. Apps get one end event per poll: archiving an ended poll sends none.
 - Vote counts update for viewers and apps at most every two seconds, not on every vote.
 
 ## Predictions

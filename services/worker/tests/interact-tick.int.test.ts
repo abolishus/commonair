@@ -8,6 +8,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { schema, uuidv7 } from "@commonair/db";
+import { changedAtAfterProgress } from "@commonair/interact";
 import { runInteractTick } from "../src/interact/polls/tick.ts";
 import { makeUser, setup, type TestEnv } from "./fixtures.ts";
 
@@ -152,5 +153,34 @@ describe("interact-tick", () => {
     await Bun.sleep(5);
     expect((await runInteractTick(ctx().db, ctx().now())).progress).toBe(1);
     expect(await eventsFor("channel.poll.progress", [changedPoll])).toHaveLength(2);
+  });
+
+  test("a vote or bet that waited on the tick's lock still gets a progress event", async () => {
+    const [a, b] = await Promise.all([makeUser(db()), makeUser(db())]);
+    const p = await poll(a.channel.id, 60);
+    const q = await prediction(b.channel.id, 60);
+    // The vote and bet took `now` before the tick did, then committed after it (they were waiting on
+    // its row lock): they write `changedAt` with that earlier clock.
+    const voteNow = new Date(Date.now() - 5 * SEC);
+    await vote(p, "x");
+    await db().update(schema.polls).set({ changedAt: voteNow }).where(eq(schema.polls.id, p));
+    await db().update(schema.predictions).set({ changedAt: voteNow }).where(eq(schema.predictions.id, q));
+    expect((await runInteractTick(ctx().db, ctx().now())).progress).toBe(2);
+
+    await vote(p, "y");
+    await db()
+      .update(schema.polls)
+      .set({ changedAt: changedAtAfterProgress(schema.polls, voteNow) })
+      .where(eq(schema.polls.id, p));
+    await db()
+      .update(schema.predictions)
+      .set({ changedAt: changedAtAfterProgress(schema.predictions, voteNow) })
+      .where(eq(schema.predictions.id, q));
+    expect((await runInteractTick(ctx().db, ctx().now())).progress).toBe(2);
+    const progress = await eventsFor("channel.poll.progress", [p]);
+    expect(progress).toHaveLength(2);
+    const votesOf = (e: (typeof progress)[number]) => (e.payload.choices as { votes: number }[]).map((ch) => ch.votes);
+    expect(progress.map(votesOf)).toContainEqual([1, 1]);
+    expect(await eventsFor("channel.prediction.progress", [q])).toHaveLength(2);
   });
 });

@@ -134,7 +134,7 @@ export async function lockPoll(tx: Executor, pollId: string, opts: { skipLocked?
 /**
  * End a poll under its row lock: an active poll gets `status`, `endedAt = now` and its final
  * counts in `choices`; `archived` also hides an already ended poll from `current` (keeping its
- * `endedAt`). Writes `channel.poll.end`. Returns the updated row, or null when there was nothing to
+ * `endedAt`). Writes `channel.poll.end` only when an active poll ends. Returns the updated row, or null when there was nothing to
  * do (already ended, or already archived), so a second end is a no-op.
  */
 export async function endPollInTx(
@@ -156,9 +156,21 @@ export async function endPollInTx(
     .where(eq(schema.polls.id, pollId))
     .returning();
   if (!updated) return null;
-  const channel = await pollChannelOf(tx, updated.channelId);
-  await emitEvent(tx, "channel.poll.end", channel.id, pollEventPayload("end", channel, updated, counts), now);
+  // One `end` per poll: archiving an already ended poll only hides it, apps already had its end.
+  if (ending) {
+    const channel = await pollChannelOf(tx, updated.channelId);
+    await emitEvent(tx, "channel.poll.end", channel.id, pollEventPayload("end", channel, updated, counts), now);
+  }
   return updated;
+}
+
+/**
+ * The `changedAt` a vote or bet writes, under the row lock: never at or before the last
+ * `progressAt`. A vote that took `now` before waiting on the tick's lock would otherwise commit a
+ * `changedAt` older than that tick's `progressAt`, and no progress event would ever report it.
+ */
+export function changedAtAfterProgress(t: typeof schema.polls | typeof schema.predictions, now: Date) {
+  return sql<Date>`greatest(${now.toISOString()}::timestamptz, coalesce(${t.progressAt}, ${t.startedAt}) + interval '1 millisecond')`;
 }
 
 /** Whether `changedAt` is newer than the last progress (or the start): a progress event is due. */

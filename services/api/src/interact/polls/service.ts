@@ -10,6 +10,7 @@ import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { POLL_RULES } from "@commonair/contracts/enums";
 import { InsufficientPointsError, postPointsInTx, schema, uuidv7, type Database, type Executor } from "@commonair/db";
 import {
+  changedAtAfterProgress,
   emitEvent,
   endPollInTx,
   lockPoll,
@@ -191,7 +192,11 @@ export async function votePoll(
       await tx
         .insert(pollVotes)
         .values({ pollId: poll.id, userId, choiceId: input.choiceId, votes, pointsSpent: spent, castAt: now });
-    const [updated] = await tx.update(polls).set({ changedAt: now }).where(eq(polls.id, poll.id)).returning();
+    const [updated] = await tx
+      .update(polls)
+      .set({ changedAt: changedAtAfterProgress(polls, now) })
+      .where(eq(polls.id, poll.id))
+      .returning();
     return viewOf(tx, updated ?? poll, userId);
   });
 }
