@@ -226,6 +226,28 @@ describe("bot.settings", () => {
     expect(roles).toHaveLength(1);
   });
 
+  test("a later save does not restore a revoked bot moderator role", async () => {
+    const o = await newOwner();
+    const bot = (await enable(o)).body.botUser!;
+    const botRoles = () =>
+      db()
+        .select()
+        .from(schema.channelRoles)
+        .where(and(eq(schema.channelRoles.channelId, o.channelId), eq(schema.channelRoles.userId, bot.id)));
+    await db()
+      .delete(schema.channelRoles)
+      .where(and(eq(schema.channelRoles.channelId, o.channelId), eq(schema.channelRoles.userId, bot.id)));
+    const again = await enable(o, true, { displayName: "Tweaked" });
+    expect(again.status).toBe(200);
+    expect(again.body.botUser).toEqual(bot);
+    expect(await botRoles()).toHaveLength(0);
+    const adds = await db()
+      .select({ id: schema.auditLog.id })
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.channelId, o.channelId), eq(schema.auditLog.action, "channel.role.add")));
+    expect(adds).toHaveLength(1);
+  });
+
   test("a display name change renames the bot user and invalidates its profile", async () => {
     const o = await newOwner();
     const bot = (await enable(o, true, { displayName: "One" })).body.botUser!;
@@ -352,9 +374,18 @@ describe("bot.commands", () => {
     ]);
     const modId = await newUser();
     await db().insert(schema.channelRoles).values({ channelId: o.channelId, userId: modId, role: "moderator" });
-    const mod = client(api, { bearer: await tokenFor(modId, []) });
+    const mod = client(api, { bearer: await tokenFor(modId, ["channel:manage:bot"]) });
     expect(names(await mod.call<CommandBody[]>("GET", `/api/channels/${o.slug}/bot/commands`))).toEqual([
       "hidden",
+      "shown",
+    ]);
+    // A token not granted bot management lists as a viewer, even the owner's or a moderator's.
+    const ownerChat = client(api, { bearer: await tokenFor(o.userId, ["chat:read"]) });
+    expect(names(await ownerChat.call<CommandBody[]>("GET", `/api/channels/${o.slug}/bot/commands`))).toEqual([
+      "shown",
+    ]);
+    const modUnscoped = client(api, { bearer: await tokenFor(modId, []) });
+    expect(names(await modUnscoped.call<CommandBody[]>("GET", `/api/channels/${o.slug}/bot/commands`))).toEqual([
       "shown",
     ]);
     const viewer = client(api, { bearer: await tokenFor(await newUser(), []) });

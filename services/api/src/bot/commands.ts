@@ -9,6 +9,7 @@ import { and, asc, count, eq, ne, sql } from "drizzle-orm";
 import { BOT_BUILTIN_COMMANDS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
 import type { Deps } from "../deps.ts";
+import { channelAuthority, type Caller } from "../lib/access.ts";
 import { audit } from "../events/audit.ts";
 import { badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
 import { publishBotControl } from "./control.ts";
@@ -38,6 +39,33 @@ export function normalizeAliases(name: string, aliases: readonly string[]): stri
 export function builtinClash(names: readonly string[]): string | null {
   const builtins: readonly string[] = BOT_BUILTIN_COMMANDS;
   return names.find((n) => builtins.includes(n)) ?? null;
+}
+
+/**
+ * The commands `caller` may see. A token without `channel:manage:bot` lists as a viewer even
+ * when its user is the owner or a moderator: it was not granted bot management.
+ */
+export async function listCommandsFor(
+  deps: Deps,
+  channel: { id: string; ownerId: string },
+  caller: Caller | null,
+): Promise<BotCommand[]> {
+  const commands = await listCommands(deps, channel.id);
+  if (!caller || (caller.kind === "token" && !caller.scopes.includes("channel:manage:bot"))) {
+    return visibleCommands(commands, null);
+  }
+  const roles = await deps.db
+    .select({ role: schema.channelRoles.role })
+    .from(schema.channelRoles)
+    .where(and(eq(schema.channelRoles.channelId, channel.id), eq(schema.channelRoles.userId, caller.user.id)));
+  return visibleCommands(
+    commands,
+    channelAuthority(
+      caller,
+      channel,
+      roles.map((r) => r.role),
+    ),
+  );
 }
 
 export async function listCommands(deps: Deps, channelId: string): Promise<BotCommand[]> {

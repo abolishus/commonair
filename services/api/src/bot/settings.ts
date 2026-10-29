@@ -4,7 +4,9 @@
 /**
  * Channel bot settings. The first enable creates the channel's bot account (ADR 0026 decision 6:
  * the bot speaks as itself) and makes it a channel moderator, so chat gates admit it and its
- * filters can time out. Disabling keeps the account and the role.
+ * filters can time out. Disabling keeps the account and the role. The role is granted once, at
+ * creation: a later save never restores it, so an owner or moderator who revoked it on purpose
+ * keeps that choice.
  */
 import { eq } from "drizzle-orm";
 import { BotConfig } from "@commonair/contracts/shapes";
@@ -99,9 +101,8 @@ export async function updateBotSettings(
         nameChanged = true;
       }
     }
-    // Ensured on every enable: `changeRoleInTx` is a no-op (false) while the role is held.
     const roleAdded =
-      bot && input.enabled
+      bot && botCreated
         ? await changeRoleInTx(tx, { channel, target: bot, role: "moderator", op: "add", actorId })
         : false;
 

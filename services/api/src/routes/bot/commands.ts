@@ -2,10 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** `bot.commands.*` (E8-bot-api). */
-import { and, eq } from "drizzle-orm";
-import { schema } from "@commonair/db";
-import { listCommands, removeCommand, upsertCommand, visibleCommands } from "../../bot/commands.ts";
-import { channelAuthority } from "../../lib/access.ts";
+import { listCommandsFor, removeCommand, upsertCommand } from "../../bot/commands.ts";
 import { channelBySlug } from "../../lib/dto.ts";
 import { notFound } from "../../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../../lib/orpc.ts";
@@ -15,15 +12,7 @@ export const commands = {
   list: os.bot.commands.list.handler(async ({ context: { deps, caller }, input }) => {
     const channel = await channelBySlug(deps, input.channel);
     if (!channel) throw notFound("Channel not found");
-    const roles = caller
-      ? (
-          await deps.db
-            .select({ role: schema.channelRoles.role })
-            .from(schema.channelRoles)
-            .where(and(eq(schema.channelRoles.channelId, channel.id), eq(schema.channelRoles.userId, caller.user.id)))
-        ).map((r) => r.role)
-      : [];
-    return visibleCommands(await listCommands(deps, channel.id), channelAuthority(caller, channel, roles));
+    return listCommandsFor(deps, channel, caller);
   }),
 
   upsert: os.bot.commands.upsert.handler(async ({ context, input }) => {
