@@ -107,6 +107,7 @@ Fixes since `ba10a9b`, all CI-proven:
 | `account-deletion` chat websocket never opened    | CI's in-network DNS stalls even after "settled"; chat's upgrade opened a fresh Postgres connection (name lookup, 30 s connect timeout) and never answered                                                                       | `048d397`: 5 s upgrade deadline (503 + `Retry-After`), warm pool before ready, one-query profile read, `createDb` connect timeout 10 s and reconnect backoff ≤ 2 s for every service                                                      |
 | tracker peer-id reclaim test                      | an earlier test's revoked session left the same swarm asynchronously                                                                                                                                                            | `ba37985`                                                                                                                                                                                                                                 |
 | web pages unstyled from the image                 | Tailwind's SSR build scanned `dist/client` (no root `.gitignore` in the image)                                                                                                                                                  | `5714bf1`; a post-build check fails on a missing stylesheet                                                                                                                                                                               |
+| `overlay-alert` stream sent no headers in 15 s    | the overlay hub connected its Valkey subscriber lazily on the first open and awaited the join with no deadline; the DNS stall hung it                                                                                           | `837f419`: subscriber opened at start-up (readyz waits on it), 5 s join deadline (503 + `Retry-After`), harness SSE client records why `open` failed                                                                                      |
 
 Verified: CI on `0201068` all green (integration, relay, harness relay/long/clock/rest, self-host
 e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ingest-whip` 3/3.
@@ -119,7 +120,7 @@ e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ing
   session can still leave"; harness `p2p.test.ts` "one /24 per session" (49 vs 50).
 - The in-network DNS stall also hits other services (MediaMTX → API auth caused one `e2e-relay`
   failure; origin and media readiness timeouts). Every service gets the faster `createDb`
-  reconnects; only chat warms its pool. Production Podman not checked for the same stall.
+  reconnects; only chat warms its pool (and the API its overlay subscriber). Production Podman not checked for the same stall.
 - CI's Podman 4.9.3 may return nothing for `{{.Label "com.docker.compose.service"}}`, so
   `infra.ts` preflight / crash-loop / diagnose may be no-ops there (inferred, untested).
 - The `viewers` egress baseline is the low-latency sessions' ~1.7 MB/s, so "origin egress drops"
