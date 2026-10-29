@@ -39,8 +39,9 @@ describe("sessionAddress", () => {
     expect(sessionAddress(SID, cidrs)).toBe(a);
     expect(anyContains(cidrs, a)).toBe(true);
     const nets = new Set<string>();
+    // Fixed ids: 50 random ones share a /24 by the birthday bound on ~1 % of runs (~98k /24s).
     for (let i = 0; i < 50; i++) {
-      const ip = sessionAddress(crypto.randomUUID(), cidrs);
+      const ip = sessionAddress(`019a0000-0000-7000-8000-${String(i).padStart(12, "0")}`, cidrs);
       expect(anyContains(cidrs, ip)).toBe(true);
       const last = Number(ip.split(".")[3]);
       expect(last).toBeGreaterThanOrEqual(1);
