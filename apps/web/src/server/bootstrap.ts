@@ -46,10 +46,10 @@ export async function loadBootstrap(cookie: string | undefined): Promise<Bootstr
   };
 
   const store = requestLocale();
-  const [instanceInfo, user, locale] = await Promise.all([
+  const [instanceInfo, user, { locale, fromUser }] = await Promise.all([
     instance(),
     loadSessionUser(cookie),
-    store && store.cookie === cookie ? store.sessionLocale() : Promise.resolve("en"),
+    store && store.cookie === cookie ? store.sessionLocale() : Promise.resolve({ locale: "en", fromUser: false }),
   ]);
   return {
     config,
@@ -59,6 +59,7 @@ export async function loadBootstrap(cookie: string | undefined): Promise<Bootstr
     now: Date.now(),
     locale,
     dir: localeDirection(locale),
+    localeFromUser: fromUser,
   };
 }
 

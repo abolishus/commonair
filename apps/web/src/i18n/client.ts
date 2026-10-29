@@ -10,12 +10,13 @@
  *
  * N2-core never stores a choice on its own: the switcher calls `rememberLocale` with the
  * visitor's Preferences consent. Without it the choice lives in this tab's `sessionStorage`
- * only; after hydration a supported tab choice that differs from the server's is applied with
- * one remount (`restoreTabLocale`).
+ * only. After hydration, and whenever the root loader returns a new locale, `syncLocale` makes the
+ * page match: a member's saved `Me.locale` wins (and drops any tab choice), else a supported tab
+ * choice, else the server's locale; a remount happens only when that differs from what is shown.
  */
 import { localeDirection } from "@commonair/i18n";
 import { LOCALE_COOKIE } from "./cookie.ts";
-import { SUPPORTED_LOCALES, loadLocale, setClientTranslator } from "./index.ts";
+import { SUPPORTED_LOCALES, activeLocale, loadLocale, setClientTranslator } from "./index.ts";
 
 export { LOCALE_COOKIE } from "./cookie.ts";
 /** `sessionStorage` key of a tab-only choice (no Preferences consent). */
@@ -58,11 +59,7 @@ export function rememberLocale(tag: string, opts: { preferencesAllowed: boolean 
     } catch {
       // Cookies blocked: the choice still applies to this page.
     }
-    try {
-      sessionStorage.removeItem(LOCALE_SESSION_KEY);
-    } catch {
-      // Storage blocked: nothing to clear.
-    }
+    forgetTabLocale();
     return;
   }
   try {
@@ -91,8 +88,21 @@ export function tabLocale(): string | undefined {
   }
 }
 
-/** After hydration: apply the tab's choice when it differs from what the server rendered. */
-export async function restoreTabLocale(serverLocale: string): Promise<void> {
-  const tag = tabLocale();
-  if (tag && tag !== serverLocale) await applyLocale(tag);
+/** Drop the tab-only choice (a member's saved choice now decides). */
+export function forgetTabLocale(): void {
+  try {
+    sessionStorage.removeItem(LOCALE_SESSION_KEY);
+  } catch {
+    // Storage blocked: nothing to clear.
+  }
+}
+
+/**
+ * Make the page show the locale the user chose (ADR 0029: user choice first). `server` is the
+ * root loader's `locale` and `localeFromUser`.
+ */
+export async function syncLocale(server: { locale: string; localeFromUser: boolean }): Promise<void> {
+  if (server.localeFromUser) forgetTabLocale();
+  const want = (!server.localeFromUser && tabLocale()) || server.locale;
+  if (want !== activeLocale()) await applyLocale(want);
 }

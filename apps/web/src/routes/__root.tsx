@@ -4,10 +4,10 @@
 /// <reference types="vite/client" />
 import { LocaleProvider, NowProvider, TooltipProvider, applyTheme, useResolvedTheme, type Theme } from "@commonair/ui";
 import { Toaster } from "@commonair/ui/toast";
-import { HeadContent, Outlet, Scripts, createRootRoute, useLocation } from "@tanstack/react-router";
+import { HeadContent, Outlet, Scripts, createRootRoute, useLocation, useRouter } from "@tanstack/react-router";
 import * as React from "react";
 import { localeDirection } from "@commonair/i18n";
-import { onLocaleApplied, restoreTabLocale } from "../i18n/client.ts";
+import { onLocaleApplied, syncLocale } from "../i18n/client.ts";
 import { t, uiMessagesFor } from "../i18n/index.ts";
 import { getBootstrap } from "../lib/bootstrap.ts";
 import { rootChrome } from "../lib/overlay-page.ts";
@@ -43,12 +43,23 @@ function RootComponent(): React.JSX.Element {
   React.useEffect(() => {
     document.documentElement.dataset.hydrated = "true";
   }, []);
-  // `t()` is not reactive: a language switch remounts everything under `LocaleProvider`.
+  // `t()` is not reactive: a language switch remounts everything under `LocaleProvider` and
+  // re-runs the matches so `head()` (the document title) is in the new language too.
+  const router = useRouter();
   const [active, setActive] = React.useState({ locale: boot.locale, generation: 0 });
-  React.useEffect(() => onLocaleApplied((locale) => setActive((s) => ({ locale, generation: s.generation + 1 }))), []);
+  React.useEffect(
+    () =>
+      onLocaleApplied((locale) => {
+        setActive((s) => ({ locale, generation: s.generation + 1 }));
+        void router.invalidate();
+      }),
+    [router],
+  );
+  // Also when the loader returns a new locale (a member's `me.update`, then a reload of the root).
+  const { locale: bootLocale, localeFromUser } = boot;
   React.useEffect(() => {
-    void restoreTabLocale(boot.locale);
-  }, [boot.locale]);
+    void syncLocale({ locale: bootLocale, localeFromUser });
+  }, [bootLocale, localeFromUser]);
   const themeValue = React.useMemo(
     () => ({
       theme,

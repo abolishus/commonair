@@ -4,7 +4,8 @@
 import { type MessageArgs, type MessageAst, formatMessage, parseMessage } from "./format.ts";
 
 /**
- * Translator over a catalog with per-key English fallback and a parse cache. `onMissing` hears
+ * Translator over a catalog with per-key English fallback and a parse cache. An empty string counts
+ * as missing (Weblate's monolingual JSON writes untranslated units as `""`). `onMissing` hears
  * about a key the catalog lacks (English is used) and about a message that does not parse (its
  * raw source is shown): a translation must never break the page.
  */
@@ -21,7 +22,8 @@ export function createTranslator<K extends string>(opts: {
     let parsed = cache.get(key);
     if (parsed === undefined) {
       let source: string;
-      if (has(messages, key)) source = messages[key] as string;
+      const translated = has(messages, key) ? messages[key] : undefined;
+      if (translated) source = translated;
       else {
         onMissing?.(key);
         source = has(fallback, key) ? fallback[key] : key;

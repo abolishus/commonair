@@ -9,7 +9,7 @@
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Me } from "@commonair/contracts/dto";
-import { pickLocale } from "@commonair/i18n";
+import { negotiateLocale, pickLocale } from "@commonair/i18n";
 import { LOCALE_COOKIE } from "./cookie.ts";
 import type { LocaleRegistry } from "./catalogs.ts";
 import { type Translator, registry, setServerTranslatorResolver } from "./index.ts";
@@ -30,8 +30,11 @@ export interface RequestLocale {
   readonly cookie: string | undefined;
   /** The signed-in member (memoized: at most one `me.get` per request), or null. */
   me(): Promise<Me | null>;
-  /** The locale for this visitor with their `Me.locale` taken into account. */
-  sessionLocale(): Promise<string>;
+  /**
+   * The locale for this visitor with their `Me.locale` taken into account, and whether that saved
+   * choice decided it (the browser then ignores a tab-only choice: the member's choice comes first).
+   */
+  sessionLocale(): Promise<{ locale: string; fromUser: boolean }>;
 }
 
 const storage = new AsyncLocalStorage<RequestLocale>();
@@ -89,14 +92,20 @@ export async function negotiateRequest(
       instanceDefault: deps.instanceDefault,
       supported: locales.supported,
     });
-  const locale = pick(opts.document ? (await me())?.locale : null);
-  const translator = await locales.load(locale);
+  const fromUser = (userLocale: string | null | undefined) =>
+    Boolean(userLocale && negotiateLocale([userLocale], locales.supported));
+  const userLocale = opts.document ? (await me())?.locale : null;
+  const translator = await locales.load(pick(userLocale));
   return {
     locale: translator.locale,
     translator,
     cookie,
     me,
-    sessionLocale: async () => (opts.document ? translator.locale : pick((await me())?.locale)),
+    sessionLocale: async () => {
+      if (opts.document) return { locale: translator.locale, fromUser: fromUser(userLocale) };
+      const saved = (await me())?.locale;
+      return { locale: pick(saved), fromUser: fromUser(saved) };
+    },
   };
 }
 

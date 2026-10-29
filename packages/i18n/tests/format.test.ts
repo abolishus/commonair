@@ -243,6 +243,18 @@ describe("createTranslator", () => {
     expect(missing).toEqual(["k"]);
   });
 
+  it("treats an empty translation as missing (Weblate's untranslated units)", () => {
+    const missing: string[] = [];
+    const tr = createTranslator<"k">({
+      locale: "es",
+      messages: { k: "" },
+      fallback: { k: "English {x}" },
+      onMissing: (key) => missing.push(key),
+    });
+    expect(tr("k", { x: 1 })).toBe("English 1");
+    expect(missing).toEqual(["k"]);
+  });
+
   it("returns the key itself when no catalog has it", () => {
     const tr = createTranslator<string>({ locale: "en", messages: {}, fallback: {} });
     expect(tr("nope.key")).toBe("nope.key");

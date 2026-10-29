@@ -16,7 +16,7 @@ import {
   forgetLocaleCookie,
   onLocaleApplied,
   rememberLocale,
-  restoreTabLocale,
+  syncLocale,
   tabLocale,
 } from "../src/i18n/client.ts";
 import { activeLocale, registry, setClientTranslator, t } from "../src/i18n/index.ts";
@@ -132,16 +132,49 @@ describe("boot and tab restore", () => {
   });
 
   it("applies a supported tab choice that differs from the server's, once", async () => {
+    await bootClientLocale("en");
     const remounts: string[] = [];
     const off = onLocaleApplied((locale) => remounts.push(locale));
     sessionStorage.setItem(LOCALE_SESSION_KEY, "en-XA");
-    await restoreTabLocale("en");
+    await syncLocale({ locale: "en", localeFromUser: false });
     expect(remounts).toEqual(["en-XA"]);
-    await restoreTabLocale("en-XA");
+    await syncLocale({ locale: "en", localeFromUser: false });
     expect(remounts).toEqual(["en-XA"]);
+    // An unsupported tab choice is ignored: the server's locale is shown.
     sessionStorage.setItem(LOCALE_SESSION_KEY, "klingon");
-    await restoreTabLocale("en");
+    await syncLocale({ locale: "en", localeFromUser: false });
+    expect(remounts).toEqual(["en-XA", "en"]);
+    off();
+  });
+
+  it("lets a member's saved choice win over a tab choice, and drops the tab choice", async () => {
+    // Tab choice made signed out, then the member signs in with Me.locale = en.
+    await bootClientLocale("en");
+    const remounts: string[] = [];
+    const off = onLocaleApplied((locale) => remounts.push(locale));
+    sessionStorage.setItem(LOCALE_SESSION_KEY, "en-XA");
+    await syncLocale({ locale: "en", localeFromUser: true });
+    expect(remounts).toEqual([]);
+    expect(activeLocale()).toBe("en");
+    expect(sessionStorage.getItem(LOCALE_SESSION_KEY)).toBeNull();
+    off();
+  });
+
+  it("follows a new locale from the root loader, over a stale tab choice", async () => {
+    // Showing a tab choice, then the member saves en-XA (me.update) and the root reloads.
+    await bootClientLocale("en");
+    const remounts: string[] = [];
+    const off = onLocaleApplied((locale) => remounts.push(locale));
+    sessionStorage.setItem(LOCALE_SESSION_KEY, "en");
+    await syncLocale({ locale: "en", localeFromUser: false });
+    expect(remounts).toEqual([]);
+    await syncLocale({ locale: "en-XA", localeFromUser: true });
     expect(remounts).toEqual(["en-XA"]);
+    expect(document.documentElement.lang).toBe("en-XA");
+    expect(sessionStorage.getItem(LOCALE_SESSION_KEY)).toBeNull();
+    // A signed-out loader result changes the page too when no tab choice overrides it.
+    await syncLocale({ locale: "en", localeFromUser: false });
+    expect(remounts).toEqual(["en-XA", "en"]);
     off();
   });
 });

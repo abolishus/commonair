@@ -44,22 +44,22 @@ async function render(cookie: string | undefined, delays: number[]): Promise<str
   const headers = new Headers({ accept: "text/html" });
   if (cookie) headers.set("cookie", cookie);
   const store = await negotiateRequest(new Request("http://web.test/", { headers }), { document: true, deps });
-  return runWithRequestLocale(store, async () => {
-    const waits = delays.map((ms) => delay(ms));
-    const stream = await renderToReadableStream(<Page waits={waits} />);
-    // An await between chunks: the store must survive it too.
-    let html = "";
-    const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      html += value;
-      await delay(1);
-      expect(requestLocale()).toBe(store);
-    }
-    // React separates adjacent text nodes with empty comments.
-    return html.replaceAll("<!-- -->", "");
-  });
+  // As in production: the stream leaves the store (the middleware returns the Response) and the
+  // HTTP server pulls the body outside it, so suspended work must keep the request's context.
+  const stream = await runWithRequestLocale(store, () =>
+    renderToReadableStream(<Page waits={delays.map((ms) => delay(ms))} />),
+  );
+  expect(requestLocale()).toBeUndefined();
+  let html = "";
+  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    html += value;
+    await delay(1);
+  }
+  // React separates adjacent text nodes with empty comments.
+  return html.replaceAll("<!-- -->", "");
 }
 
 describe("server rendering per request", () => {

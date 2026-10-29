@@ -29,4 +29,6 @@ export interface Bootstrap {
   locale: string;
   /** Its text direction, for `<html dir>`. */
   dir: "ltr" | "rtl";
+  /** The signed-in member's saved `Me.locale` decided `locale`: a tab-only choice must not override it. */
+  localeFromUser: boolean;
 }

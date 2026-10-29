@@ -119,6 +119,7 @@ describe("one me.get per document request", () => {
     expect(d.calls).toEqual([cookie]);
     expect(result.boot.locale).toBe("es");
     expect(result.boot.dir).toBe("ltr");
+    expect(result.boot.localeFromUser).toBe(true);
     expect(result.boot.me).toEqual({
       id: "0190f0f0-0000-7000-8000-000000000001",
       username: "wren",
@@ -148,6 +149,7 @@ describe("one me.get per document request", () => {
     );
     expect(d.calls).toEqual([]);
     expect(boot.locale).toBe("es");
+    expect(boot.localeFromUser).toBe(false);
     expect(boot.me).toBeNull();
   });
 
@@ -160,9 +162,25 @@ describe("one me.get per document request", () => {
     expect(d.calls).toEqual([]);
     expect(store.locale).toBe("en");
     // A bootstrap fetched as a server function still reports the member's choice.
-    expect(await store.sessionLocale()).toBe("es");
-    expect(await store.sessionLocale()).toBe("es");
+    expect(await store.sessionLocale()).toEqual({ locale: "es", fromUser: true });
+    expect(await store.sessionLocale()).toEqual({ locale: "es", fromUser: true });
     expect(d.calls).toHaveLength(1);
+  });
+
+  it("says the member's choice decided only when Me.locale is set and supported", async () => {
+    const choice = async (member: Me | null, document: boolean) =>
+      (
+        await negotiateRequest(request({ cookie: "better-auth.session_token=abc; commonair-locale=es" }), {
+          document,
+          deps: deps(member),
+        })
+      ).sessionLocale();
+    for (const document of [true, false]) {
+      expect(await choice(me("en"), document)).toEqual({ locale: "en", fromUser: true });
+      expect(await choice(me(null), document)).toEqual({ locale: "es", fromUser: false });
+      expect(await choice(me("fr"), document)).toEqual({ locale: "es", fromUser: false });
+      expect(await choice(null, document)).toEqual({ locale: "es", fromUser: false });
+    }
   });
 
   it("bypasses the store for a different cookie", async () => {
