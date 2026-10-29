@@ -7,6 +7,7 @@ import { localeDirection } from "@commonair/i18n";
 import { type LocaleDeps, requestLocale } from "../i18n/server.ts";
 import { serverApi } from "../lib/api.ts";
 import type { Bootstrap, SessionUser } from "../lib/bootstrap-types.ts";
+import { parseConsent } from "../lib/consent.ts";
 import { themeFromCookie } from "../lib/theme.ts";
 import { safeHttpUrl } from "../lib/url.ts";
 import { loadWebEnv, publicConfig } from "./env.ts";
@@ -60,6 +61,7 @@ export async function loadBootstrap(cookie: string | undefined): Promise<Bootstr
     locale,
     dir: localeDirection(locale),
     localeFromUser: fromUser,
+    consent: parseConsent(cookie),
   };
 }
 

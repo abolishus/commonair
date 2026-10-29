@@ -4,6 +4,7 @@
 import type { Me } from "@commonair/contracts/dto";
 import type { Theme } from "@commonair/ui";
 import type { PublicConfig } from "../server/env.ts";
+import type { StoredConsent } from "./consent.ts";
 
 export type { PublicConfig } from "../server/env.ts";
 
@@ -31,4 +32,6 @@ export interface Bootstrap {
   dir: "ltr" | "rtl";
   /** The signed-in member's saved `Me.locale` decided `locale`: a tab-only choice must not override it. */
   localeFromUser: boolean;
+  /** The cookie consent stored in the request's cookie, or null: SSR shows the banner exactly when the client will. */
+  consent: StoredConsent | null;
 }

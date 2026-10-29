@@ -39,6 +39,7 @@ import {
 } from "../lib/nav.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
+import { CookieSettingsButton } from "./consent/cookie-settings-button.tsx";
 import { isLegal, isSafetyStaff } from "./safety/access.ts";
 
 async function onSignOut(): Promise<void> {
@@ -268,7 +269,10 @@ export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.
   return (
     <SiteFooter
       instanceName={instance.name}
-      links={footerNav().map(footerLink)}
+      links={[
+        ...footerNav().map(footerLink),
+        { label: t("consent.footer.settings"), render: <CookieSettingsButton /> },
+      ]}
       license={t("footer.license")}
       sourceLink={
         sourceUrl ? { label: t("footer.source"), href: sourceUrl, "data-testid": "footer-source-link" } : undefined
