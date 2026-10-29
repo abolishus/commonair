@@ -68,8 +68,8 @@ packages, and referenced actions and images by mutable tags.
 
 - `bun run verify` now needs network access for `bun audit`, OSV and the Go vulnerability
   database. It fails closed: it refuses rather than skipping.
-- Upgrades arrive at least a week after release. Renovate or Dependabot can automate the bumps
-  later. Both respect pinned SHAs and digests, and both support a minimum release age.
+- Upgrades arrive at least a week after release. Dependabot (`.github/dependabot.yml`) proposes
+  the bumps with a matching 7-day cooldown; it keeps SHA and digest pins in place.
 - Exceptions expire, so each one is reviewed again on a known date instead of being forgotten.
 - Not covered yet: CVE scanning of container image contents (for example with Trivy,
   Apache-2.0), and verifying signatures and provenance of npm tarballs and images at install

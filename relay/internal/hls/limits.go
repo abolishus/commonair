@@ -22,6 +22,9 @@ type Limits struct {
 	PartsPerSegment int64
 }
 
+// maxCount caps counts read from the playlist, far above any real segment or part count.
+const maxCount = 1 << 30
+
 // ParseLimits reads a media playlist's sequence numbers and part layout.
 // It returns ok=false for playlists without a media sequence (multivariant).
 func ParseLimits(body []byte) (Limits, bool) {
@@ -44,7 +47,10 @@ func ParseLimits(body []byte) (Limits, bool) {
 		case strings.HasPrefix(line, "#EXT-X-PART-INF:"):
 			partTarget = attrFloat(line, "PART-TARGET")
 		case strings.HasPrefix(line, "#EXT-X-SKIP:"):
-			segments += int64(attrFloat(line, "SKIPPED-SEGMENTS"))
+			// Bounded so a malformed tag cannot wrap the sequence arithmetic below.
+			if n := attrFloat(line, "SKIPPED-SEGMENTS"); n > 0 && n < maxCount {
+				segments += int64(n)
+			}
 		case strings.HasPrefix(line, "#EXT-X-PART:"):
 			partsNow++
 		case strings.HasPrefix(line, "#EXTINF:"):
@@ -56,13 +62,19 @@ func ParseLimits(body []byte) (Limits, bool) {
 	if !haveSeq {
 		return Limits{}, false
 	}
+	if seq > math.MaxInt64-segments-1 {
+		return Limits{}, false
+	}
 	last := seq + segments - 1
 	if partsNow > 0 {
 		last++ // parts of the segment being produced
 	}
 	maxParts = max(maxParts, partsNow)
 	if partTarget > 0 && target > 0 {
-		maxParts = max(maxParts, int64(math.Ceil(target/partTarget)))
+		// A huge ratio would convert to a negative int64 and switch the part check off.
+		if r := math.Ceil(target / partTarget); r < maxCount {
+			maxParts = max(maxParts, int64(r))
+		}
 	}
 	return Limits{LastMSN: last, PartsPerSegment: maxParts}, true
 }

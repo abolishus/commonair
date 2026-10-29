@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Proposes dependency bumps as pull requests (ADR 0022). The cooldown matches bunfig.toml's
+# minimumReleaseAge, so nothing younger than 7 days is proposed; CI runs the same supply-chain
+# gate on every bump. Updates are grouped weekly to keep the queue short. Security updates
+# ignore the cooldown, which is what ADR 0022 point 8 allows after vetting.
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    versioning-strategy: increase
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch: { update-types: [minor, patch] }
+  - package-ecosystem: gomod
+    directory: /relay
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups:
+      go: { patterns: ["*"] }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: /relay
+    schedule: { interval: weekly, day: monday }
+    cooldown: { default-days: 7 }
