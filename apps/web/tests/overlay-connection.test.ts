@@ -11,6 +11,7 @@ import {
   OVERLAY_STALL_MS,
   connectOverlay,
   parseAlertFrame,
+  parseGoalFrame,
   type EventSourceLike,
   type OverlayConnectionDeps,
 } from "../src/lib/overlay-connection.ts";
@@ -54,6 +55,8 @@ function harness(stateAnswers: (() => Promise<{ eventsUrl: string }>)[]) {
   const sources: FakeEventSource[] = [];
   const states: string[] = [];
   const alerts: unknown[] = [];
+  const goals: unknown[] = [];
+  const loaded: unknown[] = [];
   let stateCalls = 0;
   const deps: OverlayConnectionDeps = {
     loadState: () => {
@@ -91,11 +94,18 @@ function harness(stateAnswers: (() => Promise<{ eventsUrl: string }>)[]) {
     }
     clock = until;
   };
-  const stop = connectOverlay(deps, { onState: (s) => states.push(s), onAlert: (a) => alerts.push(a) });
+  const stop = connectOverlay(deps, {
+    onState: (s) => states.push(s),
+    onAlert: (a) => alerts.push(a),
+    onGoal: (g) => goals.push(g),
+    onLoaded: (s) => loaded.push(s),
+  });
   return {
     stop,
     states,
     alerts,
+    goals,
+    loaded,
     sources,
     flush,
     advance,
@@ -262,5 +272,76 @@ describe("connectOverlay", () => {
     h.stop();
     await h.flush();
     expect(h.sources).toHaveLength(0);
+  });
+});
+
+// E8-viewer: the goals overlay's `goal` frames and the state handed to the page.
+const GOAL = {
+  id: "0192f000-0000-7000-8000-0000000000a1",
+  type: "followers",
+  title: "Two follows",
+  target: 2,
+  current: 1,
+  startedAt: "2026-10-29T12:00:00.000Z",
+  endedAt: null,
+};
+
+describe("parseGoalFrame", () => {
+  it("keeps a valid Goal", () => {
+    expect(parseGoalFrame(JSON.stringify(GOAL))).toEqual(GOAL);
+  });
+
+  it.each([
+    ["broken JSON", "{nope"],
+    ["not a string", { ...GOAL }],
+    ["a zero target", JSON.stringify({ ...GOAL, target: 0 })],
+    ["an unknown type", JSON.stringify({ ...GOAL, type: "bits" })],
+    ["a fractional count", JSON.stringify({ ...GOAL, current: 1.5 })],
+  ])("ignores %s", (_name, data) => {
+    expect(parseGoalFrame(data)).toBeNull();
+  });
+});
+
+describe("connectOverlay goals", () => {
+  it("hands the state to onLoaded before the stream opens, again on every reconnect", async () => {
+    const state = { eventsUrl: "https://api.example/overlay/events?token=t", goals: [GOAL], channelSlug: "rivertide" };
+    const h = harness([() => Promise.resolve(state)]);
+    await h.flush();
+    expect(h.loaded).toEqual([state]);
+    expect(h.sources).toHaveLength(1);
+    h.sources[0]?.emit("error");
+    await h.advance(5_000);
+    expect(h.loaded).toHaveLength(2);
+  });
+
+  it("forwards goal frames, drops malformed ones", async () => {
+    const h = harness([ok()]);
+    await h.flush();
+    const source = h.sources[0] as FakeEventSource;
+    source.emit("open");
+    source.emit("goal", JSON.stringify(GOAL));
+    source.emit("goal", JSON.stringify({ ...GOAL, current: 2, endedAt: "2026-10-29T12:01:00.000Z" }));
+    source.emit("goal", "{broken");
+    expect(h.goals).toEqual([GOAL, { ...GOAL, current: 2, endedAt: "2026-10-29T12:01:00.000Z" }]);
+    expect(h.alerts).toEqual([]);
+  });
+
+  it("no goal frames after revoked", async () => {
+    const h = harness([ok()]);
+    await h.flush();
+    const source = h.sources[0] as FakeEventSource;
+    source.emit("open");
+    source.emit("revoked", "{}");
+    source.emit("goal", JSON.stringify(GOAL));
+    expect(h.goals).toEqual([]);
+    expect(h.states.at(-1)).toBe("refused");
+  });
+
+  it("a stop while the state call is in flight opens nothing and loads nothing", async () => {
+    const h = harness([ok()]);
+    h.stop();
+    await h.flush();
+    expect(h.loaded).toEqual([]);
+    expect(h.sources).toEqual([]);
   });
 });

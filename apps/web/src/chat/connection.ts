@@ -13,6 +13,7 @@ import { backoffDelay } from "./backoff.ts";
 
 export type ChatStatus = "connecting" | "open" | "closed";
 export type ChatMessageFrame = Extract<ServerFrame, { op: "message" }>["message"];
+export type ChatRaidFrame = Omit<Extract<ServerFrame, { op: "raid" }>, "op" | "channel">;
 
 export interface SocketLike {
   readonly readyState: number;
@@ -43,6 +44,8 @@ export interface ChatEvents {
   onNotice: (code: string, kind: "notice" | "error") => void;
   /** A platform event for this channel (`op: "event"`): its catalog type and raw payload. */
   onEvent?: (type: string, data: Record<string, unknown>) => void;
+  /** This channel's outgoing raid (E8): `pending` (countdown), then `completed` or `canceled`. */
+  onRaid?: (raid: ChatRaidFrame) => void;
 }
 
 const OPEN = 1;
@@ -180,6 +183,16 @@ export class ChatConnection {
         return;
       case "event":
         if (f.channel === this.channel) this.events.onEvent?.(f.type, f.data);
+        return;
+      case "raid":
+        if (f.channel === this.channel)
+          this.events.onRaid?.({
+            raidId: f.raidId,
+            status: f.status,
+            to: f.to,
+            toDisplayName: f.toDisplayName,
+            executeAt: f.executeAt,
+          });
         return;
       default:
         return;

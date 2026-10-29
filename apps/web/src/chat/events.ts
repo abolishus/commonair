@@ -3,13 +3,18 @@
 
 /**
  * Platform events (`op: "event"` frames) shown inline in the chat log: new subscriptions, gift
- * subs and tips. The payload is validated against the event catalog in @commonair/contracts;
+ * subs, tips and incoming raids. The payload is validated against the event catalog in @commonair/contracts;
  * anything else (unknown types, malformed data) is dropped. Pure, for unit tests.
  */
 import { EVENTS } from "@commonair/contracts/events";
 import { t } from "../i18n/index.ts";
 
-export const CHAT_EVENT_TYPES = ["channel.subscribe", "channel.subscription.gift", "channel.tip"] as const;
+export const CHAT_EVENT_TYPES = [
+  "channel.subscribe",
+  "channel.subscription.gift",
+  "channel.tip",
+  "channel.raid",
+] as const;
 export type ChatEventType = (typeof CHAT_EVENT_TYPES)[number];
 
 export interface ChatEventView {
@@ -25,6 +30,8 @@ export interface ChatEventView {
   total: number | null;
   isGift: boolean;
   message: string | null;
+  /** Incoming raids: the integrity-verified viewer count, rendered as given (`data-viewers`). */
+  viewers: number | null;
 }
 
 /** EventSub tier strings ("1000" | "2000" | "3000") → 1–3. */
@@ -48,6 +55,7 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
         total: null,
         isGift: false,
         message: null,
+        viewers: null,
       };
     }
     case "channel.subscription.gift": {
@@ -63,6 +71,7 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
         total: p.data.total,
         isGift: true,
         message: null,
+        viewers: null,
       };
     }
     case "channel.tip": {
@@ -79,6 +88,22 @@ export function chatEventView(type: string, data: unknown): ChatEventView | null
         total: null,
         isGift: false,
         message: p.data.message.trim() || null,
+        viewers: null,
+      };
+    }
+    case "channel.raid": {
+      const p = EVENTS[type].payload.safeParse(data);
+      if (!p.success) return null;
+      return {
+        type,
+        user: p.data.from_broadcaster_user_login,
+        name: p.data.from_broadcaster_user_name || p.data.from_broadcaster_user_login,
+        tier: null,
+        amount: null,
+        total: null,
+        isGift: false,
+        message: null,
+        viewers: p.data.viewers,
       };
     }
     default:
@@ -93,5 +118,6 @@ export function chatEventText(view: ChatEventView): string {
   if (view.type === "channel.subscription.gift") {
     return view.name ? t("chat.event.gift", vars) : t("chat.event.giftAnonymous", vars);
   }
+  if (view.type === "channel.raid") return t("chatRaid.incoming", { name: view.name ?? "", count: view.viewers ?? 0 });
   return view.name ? t("chat.event.tip", vars) : t("chat.event.tipAnonymous");
 }

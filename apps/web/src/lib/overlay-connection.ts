@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The OBS alert overlay's connection (docs/testing/e6-selectors.md "Overlay page"): load
- * `interact.overlays.state` with the token, open an `EventSource` on its `eventsUrl`, hand each
- * `alert` frame to the queue. A `revoked` frame or a 401 from the state call ends it for good
+ * The OBS overlays' connection (docs/testing/e6-selectors.md "Overlay page", e8-selectors.md
+ * "Overlays"): load `interact.overlays.state` with the token (handed to `onLoaded` on every
+ * (re)connect, so a page resyncs from it), open an `EventSource` on its `eventsUrl`, hand each
+ * `alert` frame to the queue and each `goal` frame to the goals overlay. A `revoked` frame or a 401 from the state call ends it for good
  * (`refused`); anything else (a dropped stream, a network error, a 5xx) reconnects with backoff.
  *
  * An `EventSource` cannot tell a 401 from a network error, so every stream error closes the
  * stream and asks the state call again: its answer decides between refusing and retrying. The
  * token is never logged and never leaves this module except in the URL the API gave us.
  */
-import { OverlayAlert } from "@commonair/contracts/dto";
+import { Goal, OverlayAlert } from "@commonair/contracts/dto";
+import type { z } from "zod";
 import type { OverlayAlertItem, OverlayState } from "@commonair/ui/blocks/overlay";
 import { backoffDelay } from "../chat/backoff.ts";
 import { errorCode } from "./api.ts";
@@ -22,18 +24,24 @@ export interface EventSourceLike {
   close(): void;
 }
 
-export interface OverlayConnectionDeps {
+export type OverlayGoal = z.infer<typeof Goal>;
+
+export interface OverlayConnectionDeps<S extends { eventsUrl: string } = { eventsUrl: string }> {
   /** `interact.overlays.state` with the token; rejects with the oRPC error. */
-  loadState: () => Promise<{ eventsUrl: string }>;
+  loadState: () => Promise<S>;
   openEvents: (url: string) => EventSourceLike;
   setTimeout: (fn: () => void, ms: number) => unknown;
   clearTimeout: (handle: unknown) => void;
   random?: () => number;
 }
 
-export interface OverlayConnectionHandlers {
+export interface OverlayConnectionHandlers<S extends { eventsUrl: string } = { eventsUrl: string }> {
   onState: (state: OverlayState) => void;
-  onAlert: (alert: OverlayAlertItem) => void;
+  /** The state call's answer, before the stream opens (goals, the channel slug). */
+  onLoaded?: (state: S) => void;
+  onAlert?: (alert: OverlayAlertItem) => void;
+  /** A `goal` frame: the goal as it is now (open, or just ended). */
+  onGoal?: (goal: OverlayGoal) => void;
 }
 
 /** Reconnect delays: 1 s doubling to 30 s, so a restarting API is not stampeded by every OBS. */
@@ -65,8 +73,24 @@ export function parseAlertFrame(data: unknown): OverlayAlertItem | null {
   };
 }
 
+/** A `goal` frame's data, or null when it does not parse. */
+export function parseGoalFrame(data: unknown): OverlayGoal | null {
+  if (typeof data !== "string") return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(data);
+  } catch {
+    return null;
+  }
+  const parsed = Goal.safeParse(json);
+  return parsed.success ? parsed.data : null;
+}
+
 /** Starts the connection; returns `stop`, which closes everything and schedules nothing more. */
-export function connectOverlay(deps: OverlayConnectionDeps, handlers: OverlayConnectionHandlers): () => void {
+export function connectOverlay<S extends { eventsUrl: string }>(
+  deps: OverlayConnectionDeps<S>,
+  handlers: OverlayConnectionHandlers<S>,
+): () => void {
   let stopped = false;
   let attempt = 0;
   let source: EventSourceLike | null = null;
@@ -130,7 +154,13 @@ export function connectOverlay(deps: OverlayConnectionDeps, handlers: OverlayCon
       if (!live()) return;
       armStall(current);
       const alert = parseAlertFrame(event.data);
-      if (alert) handlers.onAlert(alert);
+      if (alert) handlers.onAlert?.(alert);
+    });
+    current.addEventListener("goal", (event) => {
+      if (!live()) return;
+      armStall(current);
+      const goal = parseGoalFrame(event.data);
+      if (goal) handlers.onGoal?.(goal);
     });
     current.addEventListener("revoked", () => {
       if (live()) refuse();
@@ -145,7 +175,11 @@ export function connectOverlay(deps: OverlayConnectionDeps, handlers: OverlayCon
     if (stopped) return;
     deps
       .loadState()
-      .then((state) => open(state.eventsUrl))
+      .then((state) => {
+        if (stopped) return;
+        handlers.onLoaded?.(state);
+        open(state.eventsUrl);
+      })
       .catch((err: unknown) => {
         if (errorCode(err) === "UNAUTHORIZED") refuse();
         else retryLater();

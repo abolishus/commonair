@@ -190,3 +190,105 @@ describe("ChatConnection event frames", () => {
     expect(onEvent).not.toHaveBeenCalled();
   });
 });
+
+// E8-viewer: the incoming raid row and the outgoing raid's control frame.
+const raidPayload = (over: Record<string, unknown> = {}) => ({
+  from_broadcaster_user_id: "s1",
+  from_broadcaster_user_login: "mothwing",
+  from_broadcaster_user_name: "Mothwing",
+  to_broadcaster_user_id: "b1",
+  to_broadcaster_user_login: "rivertide",
+  to_broadcaster_user_name: "Rivertide",
+  viewers: 12,
+  ...over,
+});
+
+describe("channel.raid rows", () => {
+  it("the raider's login as data-user, the verified count as given, one line with a plural", () => {
+    const v = chatEventView("channel.raid", raidPayload());
+    expect(v).toMatchObject({ type: "channel.raid", user: "mothwing", name: "Mothwing", viewers: 12, amount: null });
+    expect(chatEventText(v!)).toBe("Mothwing is raiding with 12 viewers!");
+    expect(chatEventText(chatEventView("channel.raid", raidPayload({ viewers: 1 }))!)).toBe(
+      "Mothwing is raiding with 1 viewer!",
+    );
+    // An empty display name falls back to the login.
+    expect(chatEventView("channel.raid", raidPayload({ from_broadcaster_user_name: "" }))?.name).toBe("mothwing");
+  });
+
+  it("drops malformed raid payloads", () => {
+    expect(chatEventView("channel.raid", raidPayload({ viewers: "12" }))).toBeNull();
+    expect(chatEventView("channel.raid", raidPayload({ from_broadcaster_user_login: undefined }))).toBeNull();
+  });
+
+  it("other event views carry no viewer count", () => {
+    expect(chatEventView("channel.tip", tipPayload())?.viewers).toBeNull();
+    expect(chatEventView("channel.subscribe", subscribe())?.viewers).toBeNull();
+  });
+});
+
+describe("ChatConnection raid frames", () => {
+  const RAID_ID = "0192f000-0000-7000-8000-0000000000aa";
+  const make = () => {
+    const onRaid = vi.fn<NonNullable<ChatEvents["onRaid"]>>();
+    const conn = new ChatConnection(
+      "rivertide",
+      {
+        getToken: async () => ({ token: "t", url: "ws://x" }),
+        createSocket: () => {
+          throw new Error("unused");
+        },
+      },
+      {
+        onStatus: () => {},
+        onJoined: () => {},
+        onMessage: () => {},
+        onDelete: () => {},
+        onClear: () => {},
+        onNotice: () => {},
+        onRaid,
+      },
+    );
+    return { conn, onRaid };
+  };
+  const frame = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      op: "raid",
+      channel: "rivertide",
+      raidId: RAID_ID,
+      status: "pending",
+      to: "mothwing",
+      toDisplayName: "Mothwing",
+      executeAt: "2026-10-29T12:00:30.000Z",
+      ...over,
+    });
+
+  it("hands this channel's raid frames to onRaid without the op and channel", () => {
+    const { conn, onRaid } = make();
+    conn.handleFrame(frame());
+    conn.handleFrame(frame({ status: "completed" }));
+    expect(onRaid.mock.calls.map(([r]) => r)).toEqual([
+      {
+        raidId: RAID_ID,
+        status: "pending",
+        to: "mothwing",
+        toDisplayName: "Mothwing",
+        executeAt: "2026-10-29T12:00:30.000Z",
+      },
+      {
+        raidId: RAID_ID,
+        status: "completed",
+        to: "mothwing",
+        toDisplayName: "Mothwing",
+        executeAt: "2026-10-29T12:00:30.000Z",
+      },
+    ]);
+  });
+
+  it("ignores another channel's raid and malformed frames", () => {
+    const { conn, onRaid } = make();
+    conn.handleFrame(frame({ channel: "someone" }));
+    conn.handleFrame(frame({ status: "exploded" }));
+    conn.handleFrame(frame({ raidId: "nope" }));
+    expect(onRaid).not.toHaveBeenCalled();
+  });
+});

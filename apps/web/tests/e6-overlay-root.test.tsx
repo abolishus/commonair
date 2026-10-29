@@ -5,7 +5,7 @@
 /**
  * The OBS overlay pages as the browser source sees them: a transparent root on `/overlay/*`
  * only, the merged head (no-referrer, the root's color-scheme replaced), the goals and chat
- * placeholders, and the overlay's API client and `EventSource` carrying no cookies.
+ * overlays (refused without a token), and the overlay's API client and `EventSource` carrying no cookies.
  */
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import {
@@ -63,6 +63,8 @@ const componentOf = (route: { options: { component?: unknown } }) => route.optio
 function renderOverlay(path: string) {
   const root = createRootRoute({
     head: headOf(AppRoot),
+    // The goals overlay reads the instance currency from the root's bootstrap.
+    loader: () => ({ config: { currency: "usd" } }),
     component: () => (
       <>
         <HeadContent />
@@ -88,14 +90,15 @@ function renderOverlay(path: string) {
 const metas = (name: string) =>
   [...document.querySelectorAll(`meta[name="${name}"]`)].map((meta) => meta.getAttribute("content"));
 
-describe("overlay placeholders and head", () => {
+describe("goals and chat overlays and head", () => {
   it.each([
-    ["/overlay/goals", "goals"],
-    ["/overlay/chat", "chat"],
-  ])("%s renders overlay-placeholder (%s) with the overlay head", async (path, kind) => {
+    ["/overlay/goals", "overlay-goals"],
+    ["/overlay/chat", "overlay-chat"],
+  ])("%s renders %s (refused without a token) with the overlay head", async (path, id) => {
     renderOverlay(path);
-    const placeholder = await screen.findByTestId("overlay-placeholder");
-    expect(placeholder.getAttribute("data-kind")).toBe(kind);
+    const overlay = await screen.findByTestId(id);
+    await waitFor(() => expect(overlay.getAttribute("data-state")).toBe("refused"));
+    expect(document.querySelector('[data-testid="overlay-placeholder"]')).toBeNull();
     await waitFor(() => expect(metas("referrer")).toEqual(["no-referrer"]));
     // The overlay's color-scheme replaces the root's `dark light`, which would paint a canvas.
     expect(metas("color-scheme")).toEqual(["normal"]);
