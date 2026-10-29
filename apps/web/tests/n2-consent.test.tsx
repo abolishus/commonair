@@ -215,7 +215,7 @@ describe("the banner", () => {
     await waitFor(() => expect(fake.consent).toHaveBeenCalledTimes(1));
     expect(fake.consent.mock.calls[0]?.[0]).toMatchObject({ choices: { essential: true, preferences: false } });
     expect(screen.queryByTestId("consent-banner")).toBeNull();
-    expect(fake.toastSuccess).toHaveBeenCalledWith("Cookie choices saved");
+    await waitFor(() => expect(fake.toastSuccess).toHaveBeenCalledWith("Cookie choices saved"));
     expect(parseConsent(document.cookie)?.preferences).toBe(false);
   });
 
@@ -241,6 +241,7 @@ describe("the banner", () => {
     fireEvent.click(screen.getByTestId("consent-accept-all"));
     const notice = await screen.findByTestId("consent-error");
     expect(notice.getAttribute("data-code")).toBe("rate_limited");
+    expect(fake.toastSuccess).not.toHaveBeenCalled();
     expect(screen.queryByTestId("consent-banner")).toBeNull();
     expect(parseConsent(document.cookie)).toMatchObject({ preferences: true, recorded: "pending" });
   });
@@ -254,6 +255,8 @@ describe("the banner", () => {
     const notice = await screen.findByTestId("consent-error");
     expect(notice.getAttribute("data-code")).toBe("policy_changed");
     expect(screen.getByTestId("consent-banner").getAttribute("data-reason")).toBe("policy-changed");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(fake.toastSuccess).not.toHaveBeenCalled();
   });
 });
 

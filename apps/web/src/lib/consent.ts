@@ -32,7 +32,11 @@ export const CONSENT_MAX_AGE_SECONDS = 31_536_000;
 const FORMAT = "1";
 
 export type ConsentRecorded = "user" | "anonymous" | "pending";
-export type ConsentErrorCode = "rate_limited" | "network" | "policy_changed";
+/**
+ * Why the last save was not recorded: `unrecorded` (the policy version was unknown, so the banner
+ * asks again once it is), `rejected` (refused for another reason; retrying will not help).
+ */
+export type ConsentErrorCode = "rate_limited" | "network" | "policy_changed" | "unrecorded" | "rejected";
 export type ConsentPrompt = "none" | "policy-changed";
 
 export interface StoredConsent {
@@ -181,10 +185,33 @@ export function useConsent(): ConsentState {
   return React.useSyncExternalStore(subscribeConsent, consentSnapshot, serverSnapshot);
 }
 
-/** The stored consent this tab acts on (read from the cookie on first use). */
+/** False once a consent cookie this tab wrote did not stick (cookies blocked). */
+let cookieBacked = true;
+
+/**
+ * The stored consent this tab acts on. In the browser it is always the cookie, so a choice made
+ * in another tab (a withdrawal above all) applies here at once; only when cookies are blocked
+ * does this tab's in-memory choice stand in.
+ */
 function storedConsent(): StoredConsent | null {
-  if (!state.ready && typeof document !== "undefined") return parseConsent(readCookies());
-  return state.stored;
+  if (typeof document === "undefined") return state.stored;
+  if (state.ready && !cookieBacked) return state.stored;
+  return parseConsent(readCookies());
+}
+
+/** Bring the store (and so the banner) in line with a cookie another tab may have changed. */
+export function syncConsentFromCookie(): void {
+  if (!state.ready || !cookieBacked) return;
+  const stored = parseConsent(readCookies());
+  const same =
+    stored === null || state.stored === null
+      ? stored === state.stored
+      : serializeConsent(stored) === serializeConsent(state.stored);
+  if (!same) update({ stored });
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === "visible") syncConsentFromCookie();
 }
 
 /** OBS overlays and third-party embeds: no banner, and no preference is written there. */
@@ -195,7 +222,10 @@ export function isConsentFreePath(pathname: string): boolean {
 /** Whether to ask, and why: no choice yet, or one made for another policy version. */
 export function consentPrompt(stored: StoredConsent | null, policyVersion: string | null): ConsentPrompt | null {
   if (!stored) return "none";
-  if (policyVersion !== null && stored.version !== policyVersion) return "policy-changed";
+  if (policyVersion === null) return null;
+  // Saved while the policy was unreachable: never recorded, so it is a first ask, not a change.
+  if (stored.version === "") return "none";
+  if (stored.version !== policyVersion) return "policy-changed";
   return null;
 }
 
@@ -300,6 +330,7 @@ function spendRetry(): void {
 
 function setStored(consent: StoredConsent): void {
   writeConsentCookie(consent);
+  cookieBacked = cookieValue(readCookies(), CONSENT_COOKIE) === serializeConsent(consent);
   update({ stored: consent });
 }
 
@@ -327,22 +358,45 @@ async function record(consent: StoredConsent, opts: { silent?: boolean } = {}): 
     }
     setStored({ ...consent, recorded: "pending" });
     // A background retry fails quietly: the visitor already saw the notice when they chose.
-    if (!opts.silent) update({ error: code === "RATE_LIMITED" ? "rate_limited" : "network" });
+    if (opts.silent) return;
+    update({ error: code === "RATE_LIMITED" ? "rate_limited" : code === "BAD_REQUEST" ? "rejected" : "network" });
   }
 }
 
-/**
- * Save the visitor's choice: the cookie first (the choice applies at once whatever the network
- * does), then the side effects, then one `legal.consent` call.
- */
-export async function saveConsent(choice: { preferences: boolean }): Promise<void> {
+async function save(choice: { preferences: boolean }): Promise<ConsentErrorCode | null> {
   const version = state.policy?.version ?? (await loadCookiePolicy())?.version ?? "";
   const consent: StoredConsent = { version, preferences: choice.preferences, recorded: "pending" };
   setStored(consent);
   update({ ready: true, dialogOpen: false, error: null });
   if (choice.preferences) grantPreferences();
   else withdrawPreferences();
-  await record(consent);
+  if (version === "") {
+    // `legal.consent` refuses an unknown version: keep it local; the banner asks again later.
+    update({ error: "unrecorded" });
+  } else {
+    await record(consent);
+  }
+  return state.error;
+}
+
+let saving: { preferences: boolean; promise: Promise<ConsentErrorCode | null> } | null = null;
+
+/**
+ * Save the visitor's choice: the cookie first (the choice applies at once whatever the network
+ * does), then the side effects, then one `legal.consent` call. Resolves to the notice shown, or
+ * null when it was recorded. A repeat of an in-flight save shares it (one request from the
+ * shared rate budget); a different choice waits for it, then saves.
+ */
+export function saveConsent(choice: { preferences: boolean }): Promise<ConsentErrorCode | null> {
+  if (saving) {
+    if (saving.preferences === choice.preferences) return saving.promise;
+    return saving.promise.then(() => saveConsent(choice));
+  }
+  const promise = save(choice).finally(() => {
+    if (saving?.promise === promise) saving = null;
+  });
+  saving = { preferences: choice.preferences, promise };
+  return promise;
 }
 
 let initialized = false;
@@ -353,10 +407,17 @@ let initialized = false;
  * visitor's anonymous record is recorded once as the user).
  */
 export async function initConsent(opts: { signedIn: boolean }): Promise<void> {
+  // Kept current on every call, so a client-side sign-in or sign-out records the right way.
+  if (state.signedIn !== opts.signedIn) update({ signedIn: opts.signedIn });
   if (initialized) return;
   initialized = true;
   const stored = parseConsent(readCookies());
-  update({ ready: true, stored, signedIn: opts.signedIn });
+  update({ ready: true, stored });
+  try {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  } catch {
+    // No document events: the cookie is still read on every Preferences write.
+  }
   if (stored && !stored.preferences) withdrawPreferences();
   const policy = await loadCookiePolicy();
   if (!stored || !policy || stored.version !== policy.version) return;
@@ -374,4 +435,7 @@ export function resetConsentForTests(): void {
   state = INITIAL;
   policyRequest = null;
   initialized = false;
+  saving = null;
+  cookieBacked = true;
+  if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange);
 }

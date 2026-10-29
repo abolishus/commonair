@@ -23,6 +23,8 @@ const ERROR_MESSAGE: Record<ConsentErrorCode, MessageKey> = {
   network: "consent.error.network",
   rate_limited: "consent.error.rateLimited",
   policy_changed: "consent.error.policyChanged",
+  unrecorded: "consent.error.unrecorded",
+  rejected: "consent.error.rejected",
 };
 
 function ConsentError({ code }: { code: ConsentErrorCode }): React.JSX.Element {
@@ -42,8 +44,10 @@ function ConsentError({ code }: { code: ConsentErrorCode }): React.JSX.Element {
 }
 
 function choose(preferences: boolean): void {
-  void saveConsent({ preferences });
-  toast.success(t("consent.toast.saved"));
+  // Confirm only a recorded choice: a failure shows its own notice instead.
+  void saveConsent({ preferences }).then((error) => {
+    if (error === null) toast.success(t("consent.toast.saved"));
+  });
 }
 
 /**

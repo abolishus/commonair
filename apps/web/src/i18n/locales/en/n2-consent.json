@@ -18,6 +18,8 @@
   "consent.error.network": "Your choice applies on this device. We could not record it just now and will try again later.",
   "consent.error.rateLimited": "Your choice applies on this device. Too many requests came from your network, so we will record it later.",
   "consent.error.policyChanged": "The cookie policy changed while you were choosing. Please choose again.",
+  "consent.error.unrecorded": "Your choice applies on this device. We could not reach the cookie policy to record it, so we will ask again later.",
+  "consent.error.rejected": "Your choice applies on this device, but we could not record it.",
   "consent.error.dismiss": "Dismiss",
   "consent.toast.saved": "Cookie choices saved",
   "consent.footer.settings": "Cookie settings"

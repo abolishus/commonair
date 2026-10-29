@@ -213,6 +213,33 @@ describe("preferencesAllowed", () => {
   });
 });
 
+describe("another tab's choice", () => {
+  it("a withdrawal elsewhere applies here at once, and a grant too", async () => {
+    setConsentCookie({ version: "v2", preferences: true, recorded: "user" });
+    await initConsent({ signedIn: true });
+    expect(preferencesAllowed()).toBe(true);
+
+    // Tab A withdraws: it rewrites the shared cookie behind this tab's store.
+    setConsentCookie({ version: "v2", preferences: false, recorded: "user" });
+    expect(preferencesAllowed()).toBe(false);
+    theme.storeTheme("light");
+    expect(cookies()[theme.THEME_COOKIE]).toBeUndefined();
+    expect(theme.tabTheme()).toBe("light");
+
+    // Tab A grants again.
+    setConsentCookie({ version: "v2", preferences: true, recorded: "user" });
+    expect(preferencesAllowed()).toBe(true);
+  });
+
+  it("the store follows the cookie when the tab becomes visible", async () => {
+    await initConsent({ signedIn: false });
+    expect(consentSnapshot().stored).toBeNull();
+    setConsentCookie({ version: "v2", preferences: false, recorded: "anonymous" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(consentSnapshot().stored).toEqual({ version: "v2", preferences: false, recorded: "anonymous" });
+  });
+});
+
 describe("the anonymous id", () => {
   it("is 32 lowercase hex characters, created once", () => {
     const id = anonymousId();
@@ -243,6 +270,14 @@ describe("consent-gated Preferences writers", () => {
     theme.storeTheme("light");
     expect(cookies()[theme.THEME_COOKIE]).toBe("light");
     expect(sessionStorage.getItem(theme.THEME_SESSION_KEY)).toBeNull();
+  });
+
+  it("storeTheme with consent drops an old tab-only theme, so it cannot override the cookie", () => {
+    sessionStorage.setItem(theme.THEME_SESSION_KEY, "system");
+    setConsentCookie({ version: "v2", preferences: true, recorded: "user" });
+    theme.storeTheme("light");
+    expect(cookies()[theme.THEME_COOKIE]).toBe("light");
+    expect(theme.tabTheme()).toBeUndefined();
   });
 
   it("storeTheme without consent keeps the tab's theme and expires the cookie", () => {
@@ -309,8 +344,10 @@ describe("consent-gated Preferences writers", () => {
       expect(() => grantPreferences()).not.toThrow();
       expect(() => withdrawPreferences()).not.toThrow();
       await expect(initConsent({ signedIn: false })).resolves.toBeUndefined();
-      await expect(saveConsent({ preferences: true })).resolves.toBeUndefined();
+      await expect(saveConsent({ preferences: true })).resolves.toBeNull();
       expect(consentSnapshot().stored?.preferences).toBe(true);
+      // Cookies blocked: this tab's in-memory choice stands in.
+      expect(preferencesAllowed()).toBe(true);
     } finally {
       // Drop the own property: the prototype's accessor is back.
       Reflect.deleteProperty(document, "cookie");
@@ -446,12 +483,65 @@ describe("saving", () => {
     expect(theme.tabTheme()).toBe("light");
   });
 
-  it("an unreachable policy still saves the choice locally", async () => {
+  it("an unreachable policy saves the choice locally, sends nothing, and asks afresh later", async () => {
     fake.get.mockRejectedValue(new TypeError("Failed to fetch"));
     await initConsent({ signedIn: false });
+    await expect(saveConsent({ preferences: false })).resolves.toBe("unrecorded");
+    expect(fake.consent).not.toHaveBeenCalled();
+    expect(parseConsent(document.cookie)).toEqual({ version: "", preferences: false, recorded: "pending" });
+    expect(consentSnapshot().error).toBe("unrecorded");
+    // No banner while the policy is still unknown.
+    expect(consentPrompt(consentSnapshot().stored, null)).toBeNull();
+
+    // Next load, the policy is back: a first ask, not "the policy changed", and no request.
+    resetConsentForTests();
+    fake.get.mockReset().mockImplementation(async () => policy());
+    await initConsent({ signedIn: false });
+    expect(fake.consent).not.toHaveBeenCalled();
+    expect(consentPrompt(consentSnapshot().stored, "v2")).toBe("none");
+    expect(preferencesAllowed()).toBe(false);
+  });
+
+  it("a refusal that is not a policy change does not promise a retry", async () => {
+    await initConsent({ signedIn: false });
     fake.consent.mockRejectedValueOnce(new RpcError("BAD_REQUEST"));
-    await saveConsent({ preferences: false });
-    expect(parseConsent(document.cookie)).toMatchObject({ preferences: false, recorded: "pending" });
-    expect(consentSnapshot().error).toBe("network");
+    await expect(saveConsent({ preferences: true })).resolves.toBe("rejected");
+    expect(consentSnapshot().error).toBe("rejected");
+    expect(parseConsent(document.cookie)).toMatchObject({ version: "v2", preferences: true, recorded: "pending" });
+  });
+
+  it("a repeated save while one is in flight sends one request", async () => {
+    await initConsent({ signedIn: false });
+    let resolve: (value: { ok: true }) => void = () => {};
+    fake.consent.mockImplementationOnce(() => new Promise((r) => (resolve = r)));
+    const first = saveConsent({ preferences: true });
+    const second = saveConsent({ preferences: true });
+    await flush();
+    resolve({ ok: true });
+    await expect(Promise.all([first, second])).resolves.toEqual([null, null]);
+    expect(fake.consent).toHaveBeenCalledTimes(1);
+  });
+
+  it("a different choice while one is in flight waits, then wins", async () => {
+    await initConsent({ signedIn: false });
+    let resolve: (value: { ok: true }) => void = () => {};
+    fake.consent.mockImplementationOnce(() => new Promise((r) => (resolve = r)));
+    const first = saveConsent({ preferences: true });
+    const second = saveConsent({ preferences: false });
+    await flush();
+    expect(fake.consent).toHaveBeenCalledTimes(1);
+    resolve({ ok: true });
+    await Promise.all([first, second]);
+    expect(fake.consent).toHaveBeenCalledTimes(2);
+    expect(fake.consent.mock.calls[1]?.[0]).toMatchObject({ choices: { essential: true, preferences: false } });
+    expect(parseConsent(document.cookie)).toMatchObject({ preferences: false, recorded: "anonymous" });
+  });
+
+  it("keeps signedIn current after the first init", async () => {
+    await initConsent({ signedIn: false });
+    await initConsent({ signedIn: true });
+    expect(consentSnapshot().signedIn).toBe(true);
+    await saveConsent({ preferences: true });
+    expect(fake.consent.mock.calls[0]?.[0]).not.toHaveProperty("anonymousId");
   });
 });

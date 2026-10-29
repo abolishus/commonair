@@ -78,6 +78,8 @@ export function takeTabTheme(): Theme | undefined {
  */
 export function storeTheme(theme: Theme): void {
   if (preferencesAllowed()) {
+    // Drop any tab-only theme too: the root prefers it over the cookie on every load.
+    takeTabTheme();
     writeThemeCookie(theme);
     return;
   }

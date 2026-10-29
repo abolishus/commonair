@@ -23,6 +23,8 @@ export type Key =
   | "consent.error.network"
   | "consent.error.rateLimited"
   | "consent.error.policyChanged"
+  | "consent.error.unrecorded"
+  | "consent.error.rejected"
   | "consent.error.dismiss"
   | "consent.toast.saved"
   | "consent.footer.settings";
