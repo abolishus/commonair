@@ -12,6 +12,7 @@ export const FULL_SHARDS = {
   relay: ["e2e-relay"],
   long: ["trust-safety", "e5-coop"],
   clock: ["clock-skew"],
+  interact: ["interact", "channel-bot"],
   rest: null,
 } as const satisfies Record<string, readonly string[] | null>;
 export type FullShard = keyof typeof FULL_SHARDS;

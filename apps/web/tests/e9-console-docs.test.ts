@@ -101,8 +101,7 @@ describe("docs/developers", () => {
   it("links every page from the README", () => {
     const readme = text.get(join(DOCS, "README.md")) ?? "";
     const linked = new Set(links(readme).map((l) => l.split("#")[0]));
-    // sdk.md is E9-sdk's; the orchestrator links it once both units merge.
-    const pages = files.map((f) => relative(DOCS, f)).filter((p) => p !== "README.md" && p !== "sdk.md");
+    const pages = files.map((f) => relative(DOCS, f)).filter((p) => p !== "README.md");
     expect(pages.filter((p) => !linked.has(p))).toEqual([]);
   });
 

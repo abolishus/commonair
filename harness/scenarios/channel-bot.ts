@@ -42,8 +42,7 @@ export default defineScenario({
   description:
     "Commands answer from the bot account with cooldowns and levels → a command's points cost → a timer that waits for chat lines → viewbots earn no points → song request links → the same set up from /bot",
   needs: ["api", "web", "chat", "mail", "media", "origin", "worker", "ffmpeg", "browser"],
-  // The milestone's end adds it to FULL_REQUIRED and the `interact` shard (contract step §9).
-  inFull: false,
+  inFull: true,
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseBotSteps(ctx.param("steps", "all"));

@@ -57,6 +57,11 @@ export const FULL_REQUIRED = [
   "e7-admin",
   // W0: one media clock (ADR 0012).
   "clock-skew",
+  // E8: interactivity and the channel bot (ADR 0026).
+  "interact",
+  "channel-bot",
+  // E9: OAuth apps, EventSub and the SDK (ADR 0027).
+  "developer-platform",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */

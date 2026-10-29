@@ -16,6 +16,7 @@ so most Twitch tools port with a different base URL and a few documented differe
 | [OAuth](oauth.md)                             | Endpoints, authorization code with PKCE, refresh rotation, client credentials, the device flow, scopes, errors |
 | [EventSub](eventsub.md)                       | The event catalog, conditions, webhooks (signing, retries), the WebSocket (keepalive, close codes, reconnect)  |
 | [Rate limits](rate-limits.md)                 | Who a request counts against: the per-token subject and the per-app bucket                                     |
+| [SDK](sdk.md)                                 | `@commonair/sdk`: the typed client, OAuth helpers, EventSub, webhook verification, chat                        |
 | [Porting from Twitch](porting-from-twitch.md) | Scope names, the IRC gateway for tmi.js and friends, EventSub differences, what has no equivalent yet          |
 
 The API's own reference is the OpenAPI document at `https://<your instance>/api/openapi.json`.

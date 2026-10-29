@@ -39,14 +39,14 @@ against this file.
 
 ### Consent (`/oauth2/authorize`)
 
-| Test id                 | Element / meaning                                                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `oauth-consent`         | The consent card: `data-client-id`, `data-already-granted` (`true`/`false`)                                                                    |
-| `oauth-consent-owner`   | Who registered the app (username)                                                                                                              |
-| `oauth-consent-scope`   | One per requested scope: `data-scope` (the scope name)                                                                                         |
-| `oauth-consent-approve` | Approve: the browser goes to the app's redirect URI with `code` and `state`                                                                    |
-| `oauth-consent-deny`    | Deny: the browser goes to the redirect URI with `error=access_denied` and `state`                                                              |
-| `oauth-consent-error`   | Shown instead of the card when the request cannot go back to the app: `data-error` (`invalid_client`, `invalid_redirect_uri`, `app_suspended`) |
+| Test id                 | Element / meaning                                                                                                                                                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `oauth-consent`         | The consent card: `data-client-id`, `data-already-granted` (`true`/`false`)                                                                                                                                                                     |
+| `oauth-consent-owner`   | Who registered the app (username)                                                                                                                                                                                                               |
+| `oauth-consent-scope`   | One per requested scope: `data-scope` (the scope name)                                                                                                                                                                                          |
+| `oauth-consent-approve` | Approve: the browser goes to the app's redirect URI with `code` and `state`                                                                                                                                                                     |
+| `oauth-consent-deny`    | Deny: the browser goes to the redirect URI with `error=access_denied` and `state`                                                                                                                                                               |
+| `oauth-consent-error`   | Shown instead of the card when the request cannot go back to the app: `data-error` (`invalid_client`, `invalid_redirect_uri`, `app_suspended`, `invalid_request`: the API refused the request as malformed, e.g. a `state` over 500 characters) |
 
 ### Device activation (`/activate`)
 
@@ -78,7 +78,7 @@ against this file.
 | `devsubs`               | The app's subscriptions; `devsubs-empty`; `devsub-new` opens `devsub-form`                                                                                                                                                                                  |
 | `devsub-form`           | `devsub-type` (items `devsub-type-<type>`), one `devsub-condition-<field>` input per condition field of the type, `devsub-callback`, `devsub-secret`, `devsub-submit`                                                                                       |
 | `devsub`                | One subscription: `data-subscription-id`, `data-type`, `data-transport`, `data-status`; `devsub-test`, `devsub-deliveries` (opens the log), `devsub-delete` (`ConfirmDialog`)                                                                               |
-| `devdelivery`           | One logged delivery: `data-delivery-id`, `data-message-type`, `data-status`, `data-response-status` (empty when none), `data-attempt`; `devdelivery-redeliver` (failed notifications only)                                                                  |
+| `devdelivery`           | One logged delivery: `data-delivery-id`, `data-message-type`, `data-status`, `data-response-status` (empty when none), `data-attempt`; `devdelivery-redeliver` (notifications; failed ones emphasised)                                                      |
 
 ### Bots and tokens (`/developer/bots`)
 

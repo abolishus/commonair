@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5- and e7-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9- and n2-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -322,5 +322,25 @@ describe("p1-selectors.md", () => {
     expect(setsAttr("data-p2p={p2p.state}", appText)).toBe(true);
     expect(appText).toContain('"commonair:p2p"');
     expect(appText).toContain('"commonair:p2p-notice"');
+  });
+});
+
+/**
+ * Batch 3 (docs/testing/e8-, e9- and n2-selectors.md): every literal test id is set in web or ui
+ * source, as `data-testid="…"`, a `"data-testid": "…"` prop (Base UI triggers, compositions) or a
+ * component's default test id prop (`testId = "…"`).
+ * Templated ids (`poll-choice-<n>`) are checked by the units' own render tests.
+ */
+describe.each(["e8-selectors.md", "e9-selectors.md", "n2-selectors.md"])("%s", (doc) => {
+  const ids = testIds(doc);
+  const text = `${appText}\n${uiText}`;
+
+  it("lists test ids", () => {
+    expect(ids.length).toBeGreaterThan(0);
+  });
+
+  it.each(ids)("renders %s", (id) => {
+    const asProp = text.includes(`"data-testid": "${id}"`) || new RegExp(`[tT]estId = "${id}"`).test(text);
+    expect(onElement(id, text) || asProp).toBe(true);
   });
 });

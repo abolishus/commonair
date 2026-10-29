@@ -50,8 +50,7 @@ export default defineScenario({
   description:
     "Poll votes and end → prediction bets, lock, payouts and refunds → raid countdown, execute and follow, policy and cooldown refusals → goal overlay advances and ends → the same from /interact → a viewer votes, bets and follows the raid in the chat panel",
   needs: ["api", "web", "chat", "mail", "media", "origin", "worker", "ffmpeg", "browser"],
-  // The milestone's end adds it to FULL_REQUIRED and the `interact` shard (contract step §9).
-  inFull: false,
+  inFull: true,
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseInteractSteps(ctx.param("steps", "all"));

@@ -68,8 +68,9 @@ land signed in on `/dashboard`. Publish to `<server URL>/<stream key>` and open 
   with the contract's `ServerFrame`, exponential backoff with jitter on unexpected closes. Notices
   and errors are shown from the catalog by code (`src/chat/messages.ts`), never the server's text.
 - **Channel state** comes from `channels.get` (SSR snapshot, then polled every 5 s).
-- **i18n:** every visible string is `t("key")` from `src/i18n/en.ts`; `tests/i18n.test.ts` fails on
-  a missing or dynamically built key.
+- **i18n:** every visible string is `t("key")` from a JSON namespace in `src/i18n/locales/<lang>/`
+  with keys typed by `bun run i18n:gen` (format and how to add a namespace: `src/i18n/README.md`);
+  `tests/i18n.test.ts` fails on a missing, unused or dynamically built key.
 
 ## Design system (E4a)
 

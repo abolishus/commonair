@@ -19,6 +19,7 @@ written yet.
 | [governance/](governance/)                                       | How the co-op makes decisions                                         |
 | [governance/decision-process.md](governance/decision-process.md) | Proposal lifecycle, protected decisions, quorum, tallies              |
 | [api/](api/)                                                     | Public API and SDK reference (coming)                                 |
+| [developers/](developers/README.md)                              | Building on the platform: OAuth apps, EventSub, the SDK, porting      |
 
 ## Decisions
 
