@@ -116,8 +116,6 @@ e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ing
 
 - Seen once: `drivers.int.test.ts` WebKit first frame > 45 s (8.6 MB fetched, no errors), CI run
   40765376044.
-- Seen once each (branch CI run 40778234475): tracker "stopped skips the re-check, so a revoked
-  session can still leave"; harness `p2p.test.ts` "one /24 per session" (49 vs 50).
 - The in-network DNS stall also hits other services (MediaMTX → API auth caused one `e2e-relay`
   failure; origin and media readiness timeouts). Every service gets the faster `createDb`
   reconnects; only chat warms its pool (and the API its overlay subscriber). Production Podman not checked for the same stall.
@@ -136,10 +134,22 @@ e2e ×3, release dry run). Locally `clock-skew` 12/12 (WHIP max skew 1 ms), `ing
   while rungs and the VOD keep their W0 (reported, not handled). A ladder start drops up to 2 s.
 - `infra.ts stack` does not restart MediaMTX on a config-only change.
 
-**Gate stability (fix next):** timing tests fail under load (several given longer timeouts this
-batch); Podman Desktop's polling pegs the VM's API service (keep it closed during the gate); a
-failed integration run orphans its containers (`commonair-it-*`, `commonair-pgh-*`,
-`media-int-*`, `harness-mediamtx-*`), and the stale sweep only removes old ones.
+**Gate stability (2026-10-29):** fixed `fc6740a`, `bec1f1e`, `c796ee4`.
+
+- Tracker: a socket's swarm writes now land in frame order. `record` awaited the network hash
+  before its ZADD while `stopped` sent its ZREM at once, so a quick level switch could leave a
+  session listed until the TTL. This was the "stopped skips the re-check" CI failure (run
+  40778234475). A regression test holds an announce's write back 200 ms; it failed the same way
+  before the fix.
+- `p2p.test.ts` "one /24 per session" was a birthday collision (50 random ids, ~98k /24s, ~1 % of
+  runs). It now uses fixed ids.
+- Orphaned test containers: integration tests label containers, volumes and images with their
+  owner pid (`scripts/test-owner.ts`); the stack test puts the pid in its compose project name.
+  `infra.ts test` removes them once that pid is gone, with the 2 h name fallback widened to the
+  clock, ffmpeg and pg-health containers it missed. Checked live against labelled probes.
+- `infra.ts` preflight warns when Podman Desktop is running (macOS).
+- Still open: the general "timing tests fail under load" has no single fix; take each flake as CI
+  reports it (the WebKit first-frame one above).
 
 **Open for the user or counsel:** DMCA flow and policy numbers (3 strikes in 365 days, restore
 after 12 weekdays, claimant name shown, counter-notice data kept, 395-day consent retention), a US
