@@ -30,9 +30,9 @@
 # at the predictable name this check (root) writes.
 #
 # A stop that does not take (a postmaster that ignores SIGQUIT, an entrypoint that ignores the
-# forwarded SIGTERM) is escalated: a detached watcher sends SIGKILL after
-# COMMONAIR_PG_KILL_GRACE_SECONDS (default 30). Detached, because the check itself must return
-# within HealthStartupTimeout. The environment overrides exist for tests.
+# forwarded SIGTERM) is escalated: a detached watcher sends the stop once the check has exited,
+# then SIGKILL after COMMONAIR_PG_KILL_GRACE_SECONDS (default 30). Detached, because the check
+# itself must return within HealthStartupTimeout. The environment overrides exist for tests.
 set -eu
 
 mode="${1:-ready}"
@@ -109,19 +109,29 @@ fi
 echo "commonair-pg-health: no progress for ${idle}s (limit ${limit}s); stopping Postgres so it restarts" >&2
 rm -f "$state"
 pid=$(sed -n 1p "$pgdata/postmaster.pid" 2>/dev/null || true)
-# SIGQUIT is an immediate shutdown: safe here, the next start replays WAL from the last
-# restartpoint. Without a postmaster, stop whatever PID 1 runs (catatonit forwards the signal).
-if is_postgres "$pid"; then
-  kill -QUIT "$pid"
-else
-  pid=""
-  kill -TERM 1
-fi
+is_postgres "$pid" || pid=""
+check=$$
 
-# The watcher. Its output goes to the container log (PID 1's stderr); it must not hold the exec
-# session's pipes open, or the check would not return until it ends.
+# The watcher sends the stop and, if it does not take, the SIGKILL. The stop waits for this
+# check to exit first: stopping PID 1 tears down the PID namespace, which would SIGKILL the
+# check mid-way and report 137 instead of 2. Its output goes to the container log (PID 1's
+# stderr); it must not hold the exec session's pipes open, or the check would not return until
+# it ends.
 (
   trap '' HUP
+  # Bounded, in case the PID is reused before this looks.
+  i=0
+  while kill -0 "$check" 2>/dev/null && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  # SIGQUIT is an immediate shutdown: safe here, the next start replays WAL from the last
+  # restartpoint. Without a postmaster, stop whatever PID 1 runs (catatonit forwards the signal).
+  if [ -n "$pid" ]; then
+    kill -QUIT "$pid" 2>/dev/null || exit 0
+  else
+    kill -TERM 1
+  fi
   sleep "$kill_grace"
   if [ -n "$pid" ]; then
     is_postgres "$pid" || exit 0
