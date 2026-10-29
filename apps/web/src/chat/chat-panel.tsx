@@ -6,7 +6,7 @@ import { ChatComposer, ChatMessage, ChatPanel as ChatPanelShell } from "@commona
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
 import { Message01Icon, UserBlock01Icon } from "@hugeicons/core-free-icons";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { HeldQueue } from "../components/mod/held-queue.tsx";
 import { EMPTY_HELD, heldReducer } from "../components/mod/held-state.ts";
@@ -16,6 +16,12 @@ import { api } from "../lib/api.ts";
 import { ChatEventRow } from "./chat-event-row.tsx";
 import { ChatConnection, type ChatStatus } from "./connection.ts";
 import { chatEventView } from "./events.ts";
+import { browserInteractClient, type InteractClient } from "./interact/client.ts";
+import { PointsChip } from "./interact/points-chip.tsx";
+import { ChatPollCard } from "./interact/poll-card.tsx";
+import { ChatPredictionCard } from "./interact/prediction-card.tsx";
+import { RaidBanner } from "./interact/raid-banner.tsx";
+import { useChatInteract } from "./interact/use-chat-interact.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
 import { ModMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
 import { chatReducer, type ChatRow } from "./state.ts";
@@ -27,6 +33,8 @@ export interface ChatPanelProps {
   /** The signed-in viewer's username, so moderation controls skip their own messages. */
   selfUsername?: string | null;
   className?: string;
+  /** Poll, prediction and points calls; tests pass a fake. */
+  interactClient?: InteractClient;
 }
 
 interface ModTarget {
@@ -37,7 +45,13 @@ interface ModTarget {
 const EMPTY_ROWS: ChatRow[] = [];
 const noop = () => {};
 
-export function ChatPanel({ channel, signedIn, selfUsername = null, className }: ChatPanelProps): React.JSX.Element {
+export function ChatPanel({
+  channel,
+  signedIn,
+  selfUsername = null,
+  className,
+  interactClient,
+}: ChatPanelProps): React.JSX.Element {
   const [status, setStatus] = React.useState<ChatStatus>("connecting");
   const [rows, dispatch] = React.useReducer(chatReducer, EMPTY_ROWS);
   const [canChat, setCanChat] = React.useState(false);
@@ -51,6 +65,20 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
   const [draft, setDraft] = React.useState("");
   const connection = React.useRef<ChatConnection | null>(null);
   const noticeSeq = React.useRef(0);
+  const navigate = useNavigate();
+  const [client] = React.useState(() => interactClient ?? browserInteractClient());
+  const interact = useChatInteract({
+    channel,
+    signedIn,
+    selfUsername,
+    client,
+    onFollowRaid: (to) => void navigate({ to: "/$channel", params: { channel: to } }),
+  });
+  // The connection keeps the handlers it was given; they reach the latest state through this.
+  const interactRef = React.useRef(interact);
+  React.useEffect(() => {
+    interactRef.current = interact;
+  });
 
   React.useEffect(() => {
     heldDispatch({ type: "reset" });
@@ -87,9 +115,12 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
           else dispatch({ type: "notice", id: `notice-${++noticeSeq.current}`, code });
         },
         onEvent: (type, data) => {
+          // Poll and prediction frames update their cards, never the log.
+          if (interactRef.current.onEvent(type, data)) return;
           const event = chatEventView(type, data);
           if (event) dispatch({ type: "event", id: `event-${++noticeSeq.current}`, event });
         },
+        onRaid: (raid) => interactRef.current.onRaid(raid),
       },
     );
     connection.current = conn;
@@ -124,6 +155,37 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
   const self = selfUsername?.toLowerCase() ?? null;
   const statusView = chatStatusView(status);
   const inputDisabled = status !== "open" || !canChat;
+  const isBroadcaster = self !== null && self === channel.toLowerCase();
+  const { poll, prediction, points, raid } = interact;
+  const pinned =
+    raid || poll || prediction ? (
+      <div className="grid gap-3">
+        {raid && <RaidBanner raid={raid} isBroadcaster={isBroadcaster} />}
+        {poll && (
+          <ChatPollCard
+            key={poll.id}
+            poll={poll}
+            signedIn={signedIn}
+            points={points}
+            client={client}
+            onVoted={interact.setPoll}
+            onPointsSpent={interact.refreshPoints}
+          />
+        )}
+        {prediction && (
+          <ChatPredictionCard
+            key={prediction.id}
+            prediction={prediction}
+            signedIn={signedIn}
+            staff={canModerate || isBroadcaster}
+            points={points}
+            client={client}
+            onBet={interact.setPrediction}
+            onPointsSpent={interact.refreshPoints}
+          />
+        )}
+      </div>
+    ) : undefined;
 
   return (
     <ChatPanelShell
@@ -133,8 +195,10 @@ export function ChatPanel({ channel, signedIn, selfUsername = null, className }:
       title={t("chat.title")}
       logLabel={t("chat.log")}
       newMessagesLabel={t("chat.newMessages")}
+      pinned={pinned}
       viewersAction={
         <>
+          {points && <PointsChip balance={points} />}
           {canModerate && <HeldQueue channel={channel} state={held} dispatch={heldDispatch} />}
           <StatusBadge tone={statusView.tone} aria-live="polite">
             {statusView.label}
