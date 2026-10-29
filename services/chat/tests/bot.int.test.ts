@@ -3,7 +3,7 @@
 
 /** The channel bot on two chat instances sharing Valkey and one throwaway database. */
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { BUS, type ServerFrame } from "@commonair/contracts";
 import { KEYS } from "@commonair/contracts/internal";
 import { BotConfig } from "@commonair/contracts/shapes";
@@ -337,6 +337,23 @@ describe("song requests", () => {
     expect(queued.map((r) => r.url).sort()).toEqual([1, 2, 3, 5].map((n) => `https://example.org/${n}`));
   });
 
+  test("after a refusal, !sr from that user is silent for a few seconds", async () => {
+    const room = await botRoom({ songRequests: { enabled: true, maxQueue: 25 } });
+    const sender = await connect(a, room.viewer.id);
+    await sender.say(room.ch.slug, "!sr not-a-link");
+    await waitBot(sender, room, "takes a link");
+    await sender.say(room.ch.slug, "!sr still-not-a-link");
+    await sender.say(room.ch.slug, "!sr https://example.org/song");
+    await Bun.sleep(400);
+    expect(botMessages(sender, room)).toHaveLength(1);
+    const rows = await t.db.select().from(schema.songRequests).where(eq(schema.songRequests.channelId, room.ch.id));
+    expect(rows).toHaveLength(0);
+    // Another viewer is not held back by it.
+    const other = await connect(a, room.viewer2.id);
+    await other.say(room.ch.slug, "!sr https://example.org/other");
+    await waitBot(other, room, "number 1");
+  });
+
   test("!sr is silent when song requests are off", async () => {
     const room = await botRoom();
     const sender = await connect(a, room.viewer.id);
@@ -425,11 +442,27 @@ describe("timers", () => {
     const [timer] = await t.db.select().from(schema.botTimers).where(eq(schema.botTimers.id, timerId));
     expect(timer?.lastFiredAt).not.toBeNull();
 
-    // Enough new lines, but the interval has not passed: still one post.
+    // Enough new lines, but the interval has not passed: still one post. The Valkey lock is cleared
+    // first, so only the database claim can refuse it.
     for (const n of ["four", "five", "six"]) await onA.say(room.ch.slug, n);
+    await eventually(async () => Number(await valkey.get(KEYS.botLines(room.ch.id))) >= 6);
+    await valkey.del(KEYS.botTimerLock(timerId));
     await tick();
     await Bun.sleep(300);
     expect(botMessages(onA, room)).toHaveLength(1);
+
+    // Once the interval has passed, it fires again, once. (New text: chat's duplicate window would
+    // otherwise drop a second identical body.)
+    await t.db
+      .update(schema.botTimers)
+      .set({ lastFiredAt: sql`now() - interval '2 minutes'`, message: "Second round" })
+      .where(eq(schema.botTimers.id, timerId));
+    await valkey.del(KEYS.botTimerLock(timerId));
+    await tick();
+    await waitBot(onA, room, "Second round");
+    await Bun.sleep(300);
+    expect(botMessages(onA, room)).toHaveLength(2);
+    expect(botMessages(onB, room)).toHaveLength(2);
   });
 
   test("an offline channel's timer never fires", async () => {

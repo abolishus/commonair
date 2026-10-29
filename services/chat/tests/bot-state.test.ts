@@ -83,6 +83,25 @@ describe("PartCache", () => {
     c.cache.retain(new Set(["b"]));
     expect(c.cache.size).toBe(1);
   });
+
+  test("retain during a dropped load does not let the stale value back in", async () => {
+    const resolvers: ((v: string) => void)[] = [];
+    const cache = new PartCache<string>(() => new Promise((resolve) => resolvers.push(resolve)), {
+      ttlMs: 60_000,
+      max: 10,
+      now: () => 0,
+    });
+    const stale = cache.get("a");
+    cache.drop("a");
+    cache.retain(new Set());
+    resolvers[0]?.("stale");
+    expect(await stale).toBe("stale");
+    expect(cache.size).toBe(0);
+    const fresh = cache.get("a");
+    resolvers[1]?.("fresh");
+    expect(await fresh).toBe("fresh");
+    expect(resolvers).toHaveLength(2);
+  });
 });
 
 describe("commandList", () => {
@@ -119,5 +138,18 @@ describe("commandList", () => {
     expect(out.length).toBeLessThanOrEqual(500);
     expect(out).not.toContain("!points");
     expect(out.endsWith("!command_")).toBe(false);
+  });
+
+  test("a command with a cost is listed only while loyalty is on", () => {
+    const paid = [cmd("free", "everyone"), { ...cmd("paid", "everyone"), costPoints: 10 }];
+    const set = { index: indexCommands(paid), list: paid };
+    const off = BotConfig.parse({ loyalty: { enabled: false, pointsName: "p" } });
+    const on = BotConfig.parse({ loyalty: { enabled: true, pointsName: "p" } });
+    expect(commandList(set, { standing: standing() }, { botUserId: "b", config: off })).toBe(
+      "Commands: !free !commands",
+    );
+    expect(commandList(set, { standing: standing() }, { botUserId: "b", config: on })).toBe(
+      "Commands: !free !paid !points !commands",
+    );
   });
 });

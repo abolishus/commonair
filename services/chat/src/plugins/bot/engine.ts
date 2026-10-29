@@ -129,7 +129,10 @@ export class BotEngine {
     const bot = await this.state.config.get(ctx.channel.id);
     // The bot's own messages reach onMessage too (`say` skips only `process`): never count or answer them.
     if (!bot || ctx.user.id === bot.botUserId) return;
-    await this.valkey.incr(KEYS.botLines(ctx.channel.id));
+    const linesKey = KEYS.botLines(ctx.channel.id);
+    await this.valkey.incr(linesKey);
+    // Expires with the timer marks, so a channel that stops chatting leaves nothing behind.
+    await this.valkey.expire(linesKey, TIMER_MARK_TTL_SECONDS);
     // Other bots never trigger commands, so two bots cannot answer each other in a loop.
     if (ctx.isAction || ctx.user.accountType === "bot") return;
     const bang = parseBang(ctx.body);
@@ -244,7 +247,8 @@ export class BotEngine {
     const { loyalty, songRequests } = bot.config;
     if (name === "points" && !loyalty.enabled) return;
     if (name === "sr" && !songRequests.enabled) return;
-    // `!sr` has no cooldown: its queue limits bound it, and a refused link deserves an answer.
+    // `!sr` has no plain cooldown: its queue limits bound it, and a refused link deserves an answer.
+    // A refusal starts a per-user cooldown instead (see songRequest).
     if (name !== "sr" && !bypassesCooldown(standing)) {
       const key = KEYS.botCooldown(channel.id, `${name}:${user.id}`);
       if ((await this.valkey.set(key, "1", "EX", BUILTIN_COOLDOWN_SECONDS, "NX")) === null) return;
@@ -262,17 +266,26 @@ export class BotEngine {
   }
 
   private async songRequest(ctx: MessageContext, bot: ChannelBotConfig, raw: string | undefined): Promise<void> {
-    const { channel, user } = ctx;
+    const { channel, user, standing } = ctx;
+    // After a refusal the requester waits a few seconds: repeated junk gets neither an answer nor a
+    // queue transaction, so `!sr` cannot turn chat lines into bot lines one for one.
+    const refusedKey = KEYS.botCooldown(channel.id, `sr-refused:${user.id}`);
+    const exempt = bypassesCooldown(standing);
+    if (!exempt && (await this.valkey.exists(refusedKey)) > 0) return;
+    const refuse = async (text: string) => {
+      if (!exempt) await this.valkey.set(refusedKey, "1", "EX", BUILTIN_COOLDOWN_SECONDS);
+      return this.say(channel, bot, text);
+    };
     const url = acceptSongUrl(raw);
-    if (!url) return this.say(channel, bot, `@${user.displayName}, !sr takes a link: !sr https://…`);
+    if (!url) return refuse(`@${user.displayName}, !sr takes a link: !sr https://…`);
     const result = await this.queueSong(channel.id, user.id, url, bot.config.songRequests.maxQueue);
-    const text =
-      result.ok === true
-        ? `@${user.displayName}, your request is number ${result.position} in the queue.`
-        : result.reason === "full"
-          ? `@${user.displayName}, the song request queue is full.`
-          : `@${user.displayName}, you already have ${MAX_QUEUED_PER_REQUESTER} songs in the queue.`;
-    return this.say(channel, bot, text);
+    if (result.ok === true)
+      return this.say(channel, bot, `@${user.displayName}, your request is number ${result.position} in the queue.`);
+    return refuse(
+      result.reason === "full"
+        ? `@${user.displayName}, the song request queue is full.`
+        : `@${user.displayName}, you already have ${MAX_QUEUED_PER_REQUESTER} songs in the queue.`,
+    );
   }
 
   /** Count and insert under a per-channel lock, so two instances cannot overfill the queue. */
@@ -422,7 +435,10 @@ export function commandList(
   ctx: Pick<MessageContext, "standing">,
   bot: ChannelBotConfig,
 ): string {
-  const names = commands.list.filter((c) => meetsLevel(ctx.standing, c.userLevel)).map((c) => `!${c.name}`);
+  // A command with a cost is silent while loyalty is off, so it is not offered either.
+  const names = commands.list
+    .filter((c) => meetsLevel(ctx.standing, c.userLevel) && (c.costPoints === 0 || bot.config.loyalty.enabled))
+    .map((c) => `!${c.name}`);
   if (bot.config.loyalty.enabled) names.push("!points");
   if (bot.config.songRequests.enabled) names.push("!sr");
   names.push("!commands");

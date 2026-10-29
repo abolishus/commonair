@@ -17,7 +17,10 @@ export interface BotMiddleware extends MessageMiddleware {
 
 /**
  * One middleware per chat service. `init` again (a second service in the same process sharing the
- * registry's instance) replaces the engine; the previous one's timers stop.
+ * registry's instance) replaces the engine; the previous one's timers stop, and the first service's
+ * messages then run through the second one's host. Production runs one service per process; tests
+ * that start two services pass each its own `createBotMiddleware()` until the registry hands out
+ * fresh middlewares per service.
  */
 export function createBotMiddleware(opts: BotEngineOptions = {}): BotMiddleware {
   let engine: BotEngine | null = null;

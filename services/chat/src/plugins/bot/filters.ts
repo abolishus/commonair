@@ -60,7 +60,8 @@ export function hostOf(token: string): string | null {
   const scheme = t.indexOf("://");
   if (scheme !== -1) t = t.slice(scheme + 3);
   let end = t.length;
-  for (const sep of ["/", "?", "#"]) {
+  // WHATWG URL parsing reads "\\" as "/" in http(s) URLs, so it ends the authority too.
+  for (const sep of ["/", "\\", "?", "#"]) {
     const at = t.indexOf(sep);
     if (at !== -1 && at < end) end = at;
   }

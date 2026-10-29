@@ -121,6 +121,20 @@ describe("hosts and the allowlist", () => {
     expect(linksAllowlisted("https://example.org@evil.test/", ["example.org"])).toBe(false);
     expect(linksAllowlisted("https://evil.test@example.org/", ["example.org"])).toBe(true);
   });
+
+  test("a backslash ends the authority, as URL parsers read it", () => {
+    expect(hostOf("https://evil.test\\@example.org/x")).toBe("evil.test");
+    expect(new URL("https://evil.test\\@example.org/x").hostname).toBe("evil.test");
+    expect(linksAllowlisted("https://evil.test\\@example.org/x", ["example.org"])).toBe(false);
+    expect(linksAllowlisted("evil.test\\@example.org", ["example.org"])).toBe(false);
+    expect(
+      checkFilters(
+        "https://evil.test\\@example.org/x",
+        filters({ links: { enabled: true, allowSubscribers: true, allowlist: ["example.org"] } }),
+        standing(),
+      ),
+    ).not.toBeNull();
+  });
 });
 
 describe("checkFilters", () => {

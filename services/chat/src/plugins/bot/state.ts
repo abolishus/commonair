@@ -59,6 +59,8 @@ export class PartCache<T> {
   private readonly entries = new Map<string, Entry<T>>();
   private readonly inflight = new Map<string, Promise<T>>();
   private readonly generation = new Map<string, number>();
+  /** Loads still running per channel, dropped ones included: a generation is kept while any runs. */
+  private readonly loading = new Map<string, number>();
 
   constructor(
     private readonly load: (channelId: string) => Promise<T>,
@@ -71,6 +73,7 @@ export class PartCache<T> {
     const pending = this.inflight.get(channelId);
     if (pending) return pending;
     const gen = this.generation.get(channelId) ?? 0;
+    this.loading.set(channelId, (this.loading.get(channelId) ?? 0) + 1);
     const p = this.load(channelId)
       .then((value) => {
         if ((this.generation.get(channelId) ?? 0) === gen) this.put(channelId, value);
@@ -78,6 +81,9 @@ export class PartCache<T> {
       })
       .finally(() => {
         if (this.inflight.get(channelId) === p) this.inflight.delete(channelId);
+        const left = (this.loading.get(channelId) ?? 1) - 1;
+        if (left > 0) this.loading.set(channelId, left);
+        else this.loading.delete(channelId);
       });
     this.inflight.set(channelId, p);
     return p;
@@ -92,7 +98,7 @@ export class PartCache<T> {
   /** Forget every channel not in `keep`. */
   retain(keep: ReadonlySet<string>): void {
     for (const id of this.entries.keys()) if (!keep.has(id)) this.entries.delete(id);
-    for (const id of this.generation.keys()) if (!keep.has(id) && !this.inflight.has(id)) this.generation.delete(id);
+    for (const id of this.generation.keys()) if (!keep.has(id) && !this.loading.has(id)) this.generation.delete(id);
   }
 
   get size(): number {
