@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { SCOPE_NAMES, type Scope } from "@commonair/contracts/scopes";
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import { ORPCError } from "@orpc/client";
+import { defaultParseSearch, defaultStringifySearch } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -219,11 +220,32 @@ describe("authorize query", () => {
     expect(forcesVerify({ force_verify: "1" })).toBe(false);
   });
 
-  it("validateSearch keeps strings, stringifies parsed numbers and booleans, drops the rest", () => {
+  it("validateSearch is an identity on the OAuth names, so the router never rewrites the URL", () => {
     expect(
       validateAuthorizeSearch({ client_id: "abc", state: 7, force_verify: true, scope: { x: 1 }, other: "x" }),
-    ).toEqual({ client_id: "abc", state: "7", force_verify: "true" });
+    ).toEqual({ client_id: "abc", state: 7, force_verify: true });
     expect(validateAuthorizeSearch({ redirect_uri: "x".repeat(5000) })).toEqual({});
+    for (const s of [
+      "?client_id=abc&state=123&force_verify=true",
+      "?client_id=abc&state=1e3",
+      "?client_id=abc&state=12345678901234567890123",
+      "?client_id=abc&state=%22abc%22&force_verify=false",
+      `?${queryString()}`,
+    ]) {
+      const parsed = defaultParseSearch(s);
+      expect(defaultStringifySearch(validateAuthorizeSearch(parsed))).toBe(defaultStringifySearch(parsed));
+    }
+  });
+
+  it("the raw query keeps values the router's parser would change", () => {
+    const q = authorizeQueryFrom("?client_id=abc&state=%22abc%22&force_verify=true");
+    expect(q.state).toBe('"abc"');
+    expect(forcesVerify(q)).toBe(true);
+    expect(authorizeQueryFrom("?state=12345678901234567890123").state).toBe("12345678901234567890123");
+    expect(authorizeQueryFrom("?state=1e3").state).toBe("1e3");
+    expect(authorizeQueryFrom("?state=007").state).toBe("007");
+    expect(authorizeQueryFrom("?state=123").state).toBe("123");
+    expect(authorizeQueryFrom(`?state=${"x".repeat(5000)}&client_id=c`)).toEqual({ client_id: "c" });
   });
 
   it("maps to the request input; no client id or redirect URI never reaches the API", () => {
@@ -338,6 +360,17 @@ describe("consent page", () => {
     expect(alert.textContent).toBe(en["oauth.consent.decideSuspended"]);
     expect(screen.getByTestId("oauth-consent-approve")).toHaveProperty("disabled", false);
     expect(navigator.assign).not.toHaveBeenCalled();
+  });
+
+  it("a malformed request (BAD_REQUEST) says so, with its own copy", async () => {
+    const request = fn(async () => {
+      throw new ORPCError("BAD_REQUEST");
+    });
+    renderConsent({ fake: fakeClient({ request }) });
+    const box = await screen.findByTestId("oauth-consent-error");
+    expect(box.getAttribute("data-error")).toBe("invalid_request");
+    expect(box.textContent).toContain(en["oauth.error.invalidRequest"]);
+    expect(box.textContent).not.toContain(en["oauth.consent.decideInvalid"]);
   });
 
   it("a redirect answer goes straight back without a card", async () => {
@@ -563,6 +596,7 @@ describe("connections", () => {
     collectIds();
     expect(screen.getByTestId("connections")).toBeTruthy();
     expect(rows).toHaveLength(2);
+    expect(screen.getByText(/2 apps\./)).toBeTruthy();
     expect(rows[0]?.getAttribute("data-app-id")).toBe(APP_ID);
     expect(rows[0]?.getAttribute("data-client-id")).toBe(APP.clientId);
     expect(rows[0]?.getAttribute("data-scopes")).toBe("chat:read channel:read:subscriptions");

@@ -33,10 +33,8 @@
   "oauth.scope.clips.edit.body": "Create clips as you.",
   "oauth.scope.sensitive": "Sensitive",
   "oauth.scope.sensitiveHint": "This permission reaches private data or acts with real weight. Grant it only to apps you trust.",
-
   "oauth.owner.by": "Registered by {username}",
   "oauth.owner.profile": "Open {username}'s profile",
-
   "oauth.consent.pageTitle": "Authorize an app",
   "oauth.consent.heading": "{app} wants to use your account",
   "oauth.consent.willAbleTo": "{app} will be able to:",
@@ -53,15 +51,14 @@
   "oauth.consent.decideFailed": "The app could not be authorized. Try again in a moment.",
   "oauth.consent.decideSuspended": "This app was suspended while you were deciding, so it cannot be authorized.",
   "oauth.consent.decideInvalid": "This request is no longer valid. Go back to the app and start again.",
-
   "oauth.error.title": "This request cannot be completed",
   "oauth.error.invalidClient": "The app that sent you here is not registered on this site. Check the link, or ask the app's developer.",
   "oauth.error.invalidRedirectUri": "The app asked to send you to an address it did not register. For your safety, you were not sent back.",
   "oauth.error.appSuspended": "This app is suspended and cannot be authorized right now.",
+  "oauth.error.invalidRequest": "The app sent an authorization request this site cannot accept. Go back to the app and try again, or ask its developer.",
   "oauth.error.failed": "The request could not be checked. Try again in a moment.",
   "oauth.error.retry": "Try again",
   "oauth.error.home": "Go to the home page",
-
   "oauth.device.pageTitle": "Connect a device",
   "oauth.device.intro": "Enter the code your device or bot shows to let it use your account.",
   "oauth.device.codeLabel": "Code",
@@ -81,10 +78,9 @@
   "oauth.device.approvedBody": "Return to your device. It will finish signing in by itself.",
   "oauth.device.denied": "Device not connected",
   "oauth.device.deniedBody": "The device was refused and cannot use your account.",
-
   "oauth.connections.pageTitle": "Connections",
   "oauth.connections.intro": "Apps and bots you have allowed to use your account.",
-  "oauth.connections.count": "{count, plural, one {# app} other {# apps}}",
+  "oauth.connections.introWithCount": "Apps and bots you have allowed to use your account. {count, plural, one {# app} other {# apps}}.",
   "oauth.connections.loading": "Loading your connections",
   "oauth.connections.loadFailed": "Your connections could not be loaded.",
   "oauth.connections.retry": "Try again",

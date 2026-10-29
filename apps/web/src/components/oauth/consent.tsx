@@ -10,7 +10,7 @@
  */
 import type { Scope } from "@commonair/contracts/scopes";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { Button } from "@commonair/ui/components/button";
+import { Button, buttonVariants } from "@commonair/ui/components/button";
 import { Card, CardContent, CardFooter, CardHeader } from "@commonair/ui/components/card";
 import { Skeleton, SkeletonButton, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { PageContainer } from "@commonair/ui/layouts";
@@ -37,7 +37,7 @@ const ERROR_TEXT: Record<AuthorizeErrorCode, MessageKey> = {
   invalid_client: "oauth.error.invalidClient",
   invalid_redirect_uri: "oauth.error.invalidRedirectUri",
   app_suspended: "oauth.error.appSuspended",
-  invalid_request: "oauth.consent.decideInvalid",
+  invalid_request: "oauth.error.invalidRequest",
   request_failed: "oauth.error.failed",
 };
 
@@ -169,7 +169,8 @@ export function useFocusOnMount<T extends HTMLElement>(): React.RefObject<T | nu
   return ref;
 }
 
-function ConsentSkeleton({ label }: { label: string }): React.JSX.Element {
+/** The card's loading shape; the route also shows it until it has read the query. */
+export function ConsentSkeleton({ label }: { label: string }): React.JSX.Element {
   return (
     <PageContainer width="form" className="py-8 sm:py-12">
       <SkeletonGroup label={label} data-testid="oauth-consent-loading">
@@ -210,8 +211,8 @@ function ConsentError({ error, onRetry }: { error: AuthorizeErrorCode; onRetry: 
                   {t("oauth.error.retry")}
                 </Button>
               )}
-              {/* A real link (not a button role): it navigates. */}
-              <a href="/" className="text-xs font-medium text-foreground underline underline-offset-4">
+              {/* A real link styled as the house link button (Base UI's Button would give it role=button). */}
+              <a href="/" className={buttonVariants({ variant: "link", size: "sm" })}>
                 {t("oauth.error.home")}
               </a>
             </>

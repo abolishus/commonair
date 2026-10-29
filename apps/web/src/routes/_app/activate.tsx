@@ -10,14 +10,21 @@ import { api } from "../../lib/api.ts";
 import { getSessionUser } from "../../lib/bootstrap.ts";
 import { requireSession } from "../../lib/guard.ts";
 
-/** `?code=` from the device's verification link; anything else is dropped. */
+/**
+ * `?code=` from the device's verification link; anything else is dropped. A value the router's
+ * parser turned into a number stays one here (an identity, so the rebuilt URL never gains quotes);
+ * the page turns it into text.
+ */
 const ActivateSearch = z.object({
-  code: z.preprocess((v) => (typeof v === "number" ? String(v) : v), z.string().max(32).optional()).catch(undefined),
+  code: z
+    .union([z.string().max(32), z.number()])
+    .optional()
+    .catch(undefined),
 });
 
 /** Device activation: enter a device's user code, then consent (E9-consent; RFC 8628). Signed out: sign-in returns here. */
 export const Route = createFileRoute("/_app/activate")({
-  validateSearch: (search: Record<string, unknown>): { code?: string } => {
+  validateSearch: (search: Record<string, unknown>): { code?: string | number } => {
     const { code } = ActivateSearch.parse(search);
     return code === undefined ? {} : { code };
   },
@@ -36,5 +43,5 @@ export const Route = createFileRoute("/_app/activate")({
 function ActivatePage(): React.JSX.Element {
   const { code } = Route.useSearch();
   const client = React.useMemo(() => api().developer, []);
-  return <DeviceActivation client={client} initialCode={code} />;
+  return <DeviceActivation client={client} initialCode={code === undefined ? undefined : String(code)} />;
 }

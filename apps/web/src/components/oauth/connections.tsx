@@ -57,7 +57,7 @@ export function Connections({ client }: { client: OAuthClient }): React.JSX.Elem
         title={t("oauth.connections.pageTitle")}
         description={
           load.kind === "loaded" && load.grants.length > 0
-            ? `${t("oauth.connections.intro")} ${t("oauth.connections.count", { count: load.grants.length })}`
+            ? t("oauth.connections.introWithCount", { count: load.grants.length })
             : t("oauth.connections.intro")
         }
       />

@@ -13,31 +13,49 @@ import type { ConsentRequestInput } from "./shared.ts";
 /** Longer than any value the API accepts (redirect URI 2000, scope 2000). */
 const MAX = 4096;
 
-/**
- * TanStack's default search parser turns `123` into a number and `true` into a boolean, so a
- * value comes back to a string here; an unusable one is dropped rather than failing the route.
- */
-const param = z
-  .preprocess((v) => (typeof v === "number" || typeof v === "boolean" ? String(v) : v), z.string().max(MAX).optional())
-  .catch(undefined);
+/** One value of the raw query: a bounded string, or absent. */
+const param = z.string().max(MAX).optional().catch(undefined);
 
-export const AuthorizeSearch = z.object({
-  client_id: param,
-  redirect_uri: param,
-  response_type: param,
-  scope: param,
-  state: param,
-  code_challenge: param,
-  code_challenge_method: param,
-  force_verify: param,
-});
+/** Every OAuth parameter the page reads; anything else in the query is ignored. */
+const KEYS = [
+  "client_id",
+  "redirect_uri",
+  "response_type",
+  "scope",
+  "state",
+  "code_challenge",
+  "code_challenge_method",
+  "force_verify",
+] as const;
+type Key = (typeof KEYS)[number];
+
+export const AuthorizeSearch = z.object(Object.fromEntries(KEYS.map((k) => [k, param])) as Record<Key, typeof param>);
 export type AuthorizeSearch = z.infer<typeof AuthorizeSearch>;
 
-/** The route's `validateSearch`: only the OAuth names, each a string or absent. */
-export function validateAuthorizeSearch(search: Record<string, unknown>): AuthorizeSearch {
-  const parsed = AuthorizeSearch.parse(search);
+/**
+ * A value as TanStack's default search parser hands it over: `123` arrives as a number and `true`
+ * as a boolean. Kept exactly as parsed, never turned back into a string: the router rebuilds the
+ * canonical URL from this, and a string that reads as JSON would come back quoted
+ * (`force_verify=%22true%22`), so a converted value breaks the app's query and causes a redirect.
+ */
+const routeParam = z
+  .union([z.string().max(MAX), z.number(), z.boolean()])
+  .optional()
+  .catch(undefined);
+const AuthorizeRouteSearch = z.object(
+  Object.fromEntries(KEYS.map((k) => [k, routeParam])) as Record<Key, typeof routeParam>,
+);
+export type AuthorizeRouteSearch = z.infer<typeof AuthorizeRouteSearch>;
+
+/**
+ * The route's `validateSearch`: an identity on the OAuth names (as the router parsed them), so the
+ * URL the router rebuilds matches the one the app sent. The page never reads this: it reads the
+ * raw query (`authorizeQueryFrom`).
+ */
+export function validateAuthorizeSearch(search: Record<string, unknown>): AuthorizeRouteSearch {
+  const parsed = AuthorizeRouteSearch.parse(search);
   // Drop absent keys, so the URL the router rebuilds carries nothing the app did not send.
-  return Object.fromEntries(Object.entries(parsed).filter(([, v]) => v !== undefined)) as AuthorizeSearch;
+  return Object.fromEntries(Object.entries(parsed).filter(([, v]) => v !== undefined)) as AuthorizeRouteSearch;
 }
 
 /**
@@ -48,11 +66,12 @@ export function validateAuthorizeSearch(search: Record<string, unknown>): Author
 export function authorizeQueryFrom(searchStr: string): AuthorizeSearch {
   const params = new URLSearchParams(searchStr.startsWith("?") ? searchStr.slice(1) : searchStr);
   const raw: Record<string, string> = {};
-  for (const key of Object.keys(AuthorizeSearch.shape)) {
+  for (const key of KEYS) {
     const v = params.get(key);
     if (v !== null) raw[key] = v;
   }
-  return validateAuthorizeSearch(raw);
+  const parsed = AuthorizeSearch.parse(raw);
+  return Object.fromEntries(Object.entries(parsed).filter(([, v]) => v !== undefined)) as AuthorizeSearch;
 }
 
 /** Twitch's convention: only the literal `true` forces the consent screen. */
