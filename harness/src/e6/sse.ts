@@ -66,6 +66,8 @@ export class SseParser {
 export class SseStream {
   readonly events: (SseEvent & { at: number })[] = [];
   status: number | null = null;
+  /** Why no response arrived (`status` null): the connect timeout, or the network error's name. */
+  failure: string | null = null;
   closedAt: number | null = null;
   private readonly controller = new AbortController();
   private readonly done: Promise<void>;
@@ -73,8 +75,10 @@ export class SseStream {
   private constructor(
     readonly label: string,
     response: Response | null,
+    failure: string | null = null,
   ) {
     this.status = response?.status ?? null;
+    this.failure = failure;
     if (response?.ok && response.body) this.done = this.read(response.body);
     else {
       void response?.body?.cancel().catch(() => undefined);
@@ -88,15 +92,18 @@ export class SseStream {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let res: Response | null = null;
+    let failure: string | null = null;
     try {
       res = await fetch(url, { headers: { accept: "text/event-stream" }, signal: controller.signal });
-    } catch {
+    } catch (err) {
       res = null;
+      // The error's name only: its message may carry the URL, and the URL carries the token.
+      failure = controller.signal.aborted ? `no response headers within ${timeoutMs} ms` : (err as Error).name;
     } finally {
       clearTimeout(timer);
     }
     // The connect timer is cleared, so it never cuts the body; `close()` cancels the reader.
-    return new SseStream(label, res);
+    return new SseStream(label, res, failure);
   }
 
   private markClosed(): void {

@@ -186,7 +186,7 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   let obs = await ctx.step("2 an SSE client holds the alert stream open (like OBS)", () =>
     openObserver("overlay stream 1", alertsUrl),
   );
-  ctx.assert("2 the alert stream answers 200", obs.status === 200, { status: obs.status });
+  ctx.assert("2 the alert stream answers 200", obs.status === 200, { status: obs.status, failure: obs.failure });
   let obsPage: Page | null = null;
   if (kit.via === "web") {
     const obsSession = await kit.webSession("OBS");
@@ -388,7 +388,7 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
     signal,
   );
   obs = await ctx.step("6 the new URL works", () => openObserver("overlay stream 2", alertsUrl));
-  ctx.assert("6 the new alert stream answers 200", obs.status === 200, { status: obs.status });
+  ctx.assert("6 the new alert stream answers 200", obs.status === 200, { status: obs.status, failure: obs.failure });
   if (kit.via === "web") {
     const obs2 = await kit.webSession("OBS2");
     obsPage = await ctx.step("6 the new alerts URL is live in the browser", async () => {
@@ -444,7 +444,10 @@ async function overlayAlert(ctx: ScenarioContext, kit: Kit): Promise<void> {
   const shortStream = await ctx.step("7 open its alert stream", () =>
     openObserver("overlay stream 3", short.alertsUrl),
   );
-  ctx.assert("7 the short token's stream answers 200", shortStream.status === 200, { status: shortStream.status });
+  ctx.assert("7 the short token's stream answers 200", shortStream.status === 200, {
+    status: shortStream.status,
+    failure: shortStream.failure,
+  });
   await delay(Math.max(0, expiresAt + 1_000 - Date.now()), undefined, { signal });
   const expired = await errorOf(() => shortClient.interact.overlays.state());
   ctx.assert("7 after expiry the state call is 401", isUnauthorized(expired), { code: apiError(expired).code });
@@ -508,7 +511,7 @@ async function expectStreamRefused(
   const stream = await SseStream.open(what, overlayEventsUrl(apiUrl, token));
   try {
     const refused = await refusedStream(stream, 3_000, signal);
-    ctx.assert(what, refused, { status: stream.status, closed: stream.closedAt !== null });
+    ctx.assert(what, refused, { status: stream.status, closed: stream.closedAt !== null, failure: stream.failure });
   } finally {
     await stream.close();
   }

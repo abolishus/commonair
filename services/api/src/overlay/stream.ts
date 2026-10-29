@@ -29,6 +29,10 @@ export interface OverlayHubOptions {
   maxTotal: number;
   /** Alert configs are cached this long per channel (`alerts.set` invalidates locally). */
   configTtlMs: number;
+  /** An open still waiting on Valkey after this answers 503 instead of hanging the client. */
+  joinTimeoutMs: number;
+  /** Pause between start-up subscribe attempts (`start()`). */
+  warmRetryMs: number;
 }
 
 export const OVERLAY_HUB_DEFAULTS: OverlayHubOptions = {
@@ -38,6 +42,8 @@ export const OVERLAY_HUB_DEFAULTS: OverlayHubOptions = {
   maxPerChannel: 20,
   maxTotal: 2000,
   configTtlMs: 10_000,
+  joinTimeoutMs: 5_000,
+  warmRetryMs: 1_000,
 };
 
 /** setTimeout's ceiling; later expiries are caught by the periodic re-check. */
@@ -62,6 +68,16 @@ const DEFAULT_IO: OverlayHubIo = {
   resolve: resolveOverlayHash,
 };
 
+const unavailable = () =>
+  Response.json(
+    { code: "SERVICE_UNAVAILABLE", message: "Overlay alerts are unavailable" },
+    { status: 503, headers: { "retry-after": "1" } },
+  );
+
+class JoinTimeout extends Error {
+  override name = "JoinTimeout";
+}
+
 const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
   "cache-control": "no-store",
@@ -73,6 +89,11 @@ const SSE_HEADERS = {
 export class OverlayHub {
   private sub: Valkey | null = null;
   private ready: Promise<Valkey> | null = null;
+  /** The shared subscribe has succeeded (and the hub is not closed). */
+  private subscribed = false;
+  private starting = false;
+  private stopped = false;
+  private wake: (() => void) | null = null;
   private readonly byChannel = new Map<string, Set<OpenStream>>();
   /** The pending or settled `BUS.overlay(channelId)` subscription of each channel with streams. */
   private readonly channelSubs = new Map<string, Promise<void>>();
@@ -89,6 +110,36 @@ export class OverlayHub {
   /** Open streams (all channels, or one). */
   count(channelId?: string): number {
     return channelId === undefined ? this.total : (this.byChannel.get(channelId)?.size ?? 0);
+  }
+
+  /** True once the shared subscriber is listening; readiness waits on this. */
+  get warm(): boolean {
+    return this.subscribed;
+  }
+
+  /**
+   * Open the shared subscriber now, retrying until it is listening, so a Valkey name lookup that
+   * stalls (in-network DNS while containers join the network) delays readiness, not the first
+   * overlay. Later drops are iovalkey's to reconnect and resubscribe.
+   */
+  start(): void {
+    if (this.starting || this.stopped) return;
+    this.starting = true;
+    void (async () => {
+      for (let attempt = 1; !this.stopped; attempt++) {
+        try {
+          await this.subscriber();
+          this.deps.logger.info("overlay subscriber ready", { attempts: attempt });
+          return;
+        } catch (err) {
+          this.deps.logger.warn("overlay subscriber start failed", { err: (err as Error).name, attempt });
+        }
+        await new Promise<void>((r) => {
+          this.wake = r;
+          setTimeout(r, this.opts.warmRetryMs).unref?.();
+        });
+      }
+    })();
   }
 
   invalidateConfigs(channelId: string): void {
@@ -118,6 +169,12 @@ export class OverlayHub {
       this.sub = sub;
       const ready = sub.subscribe(BUS.events).then(() => sub);
       this.ready = ready;
+      ready.then(
+        () => {
+          if (this.ready === ready) this.subscribed = true;
+        },
+        () => undefined,
+      );
       ready.catch(() => {
         if (this.ready !== ready) return;
         this.ready = null;
@@ -271,12 +328,28 @@ export class OverlayHub {
       cancel: () => close(),
     });
 
+    const joined = this.join(stream);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.join(stream);
+      await Promise.race([
+        joined,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new JoinTimeout()), opts.joinTimeoutMs);
+        }),
+      ]);
     } catch (err) {
       close();
-      deps.logger.warn("overlay stream join failed", { err: (err as Error).name });
-      return Response.json({ code: "SERVICE_UNAVAILABLE", message: "Overlay alerts are unavailable" }, { status: 503 });
+      // A join that settles after the deadline counts the stream in: take it straight out again.
+      joined.then(
+        () => this.leave(stream),
+        () => undefined,
+      );
+      deps.logger.warn(err instanceof JoinTimeout ? "overlay stream join timed out" : "overlay stream join failed", {
+        err: (err as Error).name,
+      });
+      return unavailable();
+    } finally {
+      clearTimeout(timer);
     }
     if (signal.aborted) {
       close();
@@ -296,9 +369,12 @@ export class OverlayHub {
     // Snapshot first: closing a stream removes it from these sets.
     const open = Array.from(this.byChannel.values(), (set) => Array.from(set)).flat();
     for (const s of open) s.close();
+    this.stopped = true;
+    this.wake?.();
     const sub = this.sub;
     this.sub = null;
     this.ready = null;
+    this.subscribed = false;
     this.channelSubs.clear();
     sub?.disconnect();
   }
@@ -325,6 +401,13 @@ export async function configureOverlayHub(
   await hubs.get(deps)?.close();
   const h = new OverlayHub(deps, { ...OVERLAY_HUB_DEFAULTS, ...opts }, { ...DEFAULT_IO, ...io });
   hubs.set(deps, h);
+  return h;
+}
+
+/** Open the process hub's subscriber at start-up; readiness should wait on `overlayHub(deps).warm`. */
+export function startOverlayHub(deps: Deps): OverlayHub {
+  const h = overlayHub(deps);
+  h.start();
   return h;
 }
 
