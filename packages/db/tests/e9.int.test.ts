@@ -180,17 +180,15 @@ describe("oauth_tokens", () => {
     const userId = await newUser();
     const appId = await newApp(userId);
     await expectCheck(
-      app
-        .insert(s.oauthTokens)
-        .values(
-          token({
-            appId,
-            userId,
-            kind: "authorization_code",
-            refreshTokenHash: `rt_${rand()}`,
-            refreshExpiresAt: hour(),
-          }),
-        ),
+      app.insert(s.oauthTokens).values(
+        token({
+          appId,
+          userId,
+          kind: "authorization_code",
+          refreshTokenHash: `rt_${rand()}`,
+          refreshExpiresAt: hour(),
+        }),
+      ),
       "oauth_tokens_family_ck",
     );
     await expectCheck(
@@ -363,6 +361,21 @@ describe("authorizeSubscription", () => {
         new Date(),
       ),
     ).toEqual({ ok: false, reason: "subscriber is not the broadcaster" });
+  });
+
+  test("scope-less events of a suspended app are refused", async () => {
+    const userId = await newUser();
+    const appId = await newApp(userId);
+    const sub = { userId, appId, condition: { broadcaster_user_id: userId } };
+    expect(await authorizeSubscription(app, sub, "channel.follow", new Date())).toEqual({ ok: true });
+    await app
+      .update(s.oauthApps)
+      .set({ suspendedAt: new Date(), suspendedReason: "spam", suspendedById: userId })
+      .where(eq(s.oauthApps.id, appId));
+    expect(await authorizeSubscription(app, sub, "channel.follow", new Date())).toEqual({
+      ok: false,
+      reason: "app suspended",
+    });
   });
 
   test("notification message ids are deterministic uuids", () => {

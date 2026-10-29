@@ -1068,8 +1068,9 @@ export async function revokeWebhookSubscriptionsInTx(
 ): Promise<string[]>;
 /**
  * After commit: one `disconnect` per token (`userId`, `appId`, `tokenHash`, reason) on
- * BUS.userControl, then, for an app-wide reason (`app_suspended`, `app_removed`), one
- * `{ op: "disconnect", appId, reason }` so chat-token sockets and EventSub sessions of the app close.
+ * BUS.userControl, then, for `app_suspended`, `app_removed` or `grant_revoked` with `appWide`, one
+ * `{ op: "disconnect", appId, userId?, reason }` (`userId` narrows it to one grant) so chat-token
+ * sockets, which carry no token hash and are never revalidated, and EventSub sessions close.
  * Publishes through `publishUserControl` (`services/api/src/lib/control.ts:38`), which parses
  * each message. Refresh rotation passes `token_rotated` (§1.5). Best effort, like
  * `tokens.revoke` today: never throws; a failed publish is logged with ids only. The committed
@@ -1080,7 +1081,7 @@ export async function publishRevocations(
   deps: Deps,
   tokens: RevokedToken[],
   reason: UserControlMessage["reason"],
-  appWide?: { appId: string },
+  appWide?: { appId: string; userId?: string },
 ): Promise<void>;
 ```
 
@@ -1260,7 +1261,7 @@ AGPL-3.0-or-later.
 - `LICENSES/Apache-2.0.txt`: `reuse download Apache-2.0` (the SPDX text, unmodified).
 - `REUSE.toml`: a new annotation after the `**/package.json` block, so the package's JSON files
   (which carry no header) are Apache-2.0 and not the aggregate AGPL:
-  `path = ["packages/sdk/**"]`, `precedence = "override"`,
+  `path = ["packages/sdk/**"]`, `precedence = "closest"`,
   `SPDX-FileCopyrightText = "2026 CommonAir contributors"`, `SPDX-License-Identifier = "Apache-2.0"`.
   Files with their own header keep it (E9-sdk writes Apache-2.0 headers on every file it adds).
 - `scripts/check-licenses.ts` (:65-66): the blanket skip of `@commonair/*` becomes a check of our

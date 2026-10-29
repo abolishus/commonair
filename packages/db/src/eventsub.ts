@@ -50,6 +50,15 @@ async function isModerator(db: Executor, broadcasterUserId: string, userId: stri
   return rows.length > 0;
 }
 
+async function appSuspended(db: Executor, appId: string) {
+  const rows = await db
+    .select({ id: oauthApps.id })
+    .from(oauthApps)
+    .where(and(eq(oauthApps.id, appId), isNotNull(oauthApps.suspendedAt)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Delivery- and subscribe-time authorization of a subscription (ADR 0027 §1). */
@@ -62,7 +71,11 @@ export async function authorizeSubscription(
   if (!conditionComplete(type, sub.condition)) return { ok: false, reason: "condition incomplete" };
   const scopes = EVENTS[type].scopes;
   const binding = bindingFor(scopes);
-  if (binding === "none") return { ok: true };
+  if (binding === "none") {
+    // No token is consulted here, so the app's suspension must be checked on its own.
+    if (sub.appId !== null && (await appSuspended(db, sub.appId))) return { ok: false, reason: "app suspended" };
+    return { ok: true };
+  }
   if (!(await hasToken(db, sub, scopes, now))) return { ok: false, reason: "missing authorization" };
   if (binding === "self") {
     return sub.condition.user_id === sub.userId ? { ok: true } : { ok: false, reason: "user_id is not the subscriber" };

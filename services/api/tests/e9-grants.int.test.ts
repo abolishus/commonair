@@ -189,7 +189,7 @@ describe("publishRevocations", () => {
     }
   });
 
-  test("a grant revocation sends no app-wide message", async () => {
+  test("a grant revocation closes that grant's sockets, not the whole app's", async () => {
     const appId = uuidv7();
     const userId = uuidv7();
     const sub = subscriber();
@@ -199,13 +199,17 @@ describe("publishRevocations", () => {
     try {
       await publishRevocations(api.deps, [{ id: uuidv7(), userId, appId, accessTokenHash: "h" }], "grant_revoked", {
         appId,
+        userId,
       });
       // A sentinel on the same channel: once it arrives, everything published before it has.
       await publishRevocations(api.deps, [], "app_removed", { appId: userId });
       await waitFor(async () => (got.some((m) => m.appId === userId) ? true : null));
       expect(got.filter((m) => m.appId === appId)).toEqual([
         { op: "disconnect", userId, appId, tokenHash: "h", reason: "grant_revoked" },
+        // Chat-token sockets minted through the app carry no token hash; this one closes them.
+        { op: "disconnect", appId, userId, reason: "grant_revoked" },
       ]);
+      for (const m of got) expect(UserControlMessage.safeParse(m).success).toBe(true);
     } finally {
       sub.disconnect();
     }

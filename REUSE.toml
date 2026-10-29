@@ -22,10 +22,10 @@ SPDX-FileCopyrightText = "2026 CommonAir contributors"
 SPDX-License-Identifier = "AGPL-3.0-or-later"
 
 # The SDK is Apache-2.0 (ADR 0035), including its JSON files, which carry no header; files with
-# their own header keep it.
+# their own header keep it ("closest"), so an inlined AGPL file is never relabelled silently.
 [[annotations]]
 path = ["packages/sdk/**"]
-precedence = "override"
+precedence = "closest"
 SPDX-FileCopyrightText = "2026 CommonAir contributors"
 SPDX-License-Identifier = "Apache-2.0"
 

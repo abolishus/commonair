@@ -37,7 +37,7 @@ harness, the other packages and the docs keep their licences (AGENTS.md rule 1).
   repository. Contributors license their SDK changes under Apache-2.0.
 - **REUSE.** `LICENSES/Apache-2.0.txt` (from `reuse download Apache-2.0`); every file under
   `packages/sdk/` that can carry a header has an `SPDX-License-Identifier` of `Apache-2.0`; a `REUSE.toml`
-  annotation with `precedence = "override"` covers `packages/sdk/**`, so its JSON files are not
+  annotation with `precedence = "closest"` covers `packages/sdk/**`, so its JSON files are not
   caught by the repository-wide `**/package.json` and `**/*.json` AGPL annotation.
 - **License check.** `scripts/check-licenses.ts` no longer skips our own packages blindly: it
   checks that `@commonair/sdk` declares `Apache-2.0` and every other `@commonair/*` package

@@ -21,9 +21,10 @@ real thing.
 > Only `packages/sdk/**` is Apache-2.0; everything else in the repository stays
 > AGPL-3.0-or-later, and contributions to the SDK are still signed off under the DCO. Every
 > place below marked **[LICENSE]** uses `Apache-2.0`. The contract step already set
-> `"license": "Apache-2.0"` and `"private": false` in `packages/sdk/package.json`, added
-> `LICENSES/Apache-2.0.txt`, the `REUSE.toml` override for `packages/sdk/**` and the
-> `check-licenses` own-licence check; keep them. Nobody publishes until the maintainer creates
+> `"license": "Apache-2.0"` and `"private": true` in `packages/sdk/package.json` (the
+> workspace package is never published; only `dist/`, whose `package.json` has no `private`),
+> added `LICENSES/Apache-2.0.txt`, the `REUSE.toml` annotation (`precedence = "closest"`) for
+> `packages/sdk/**` and the `check-licenses` own-licence check; keep them. Nobody publishes until the maintainer creates
 > the `@commonair` npm organisation and the trusted publisher.
 
 ## Why

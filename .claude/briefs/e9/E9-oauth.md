@@ -164,7 +164,8 @@ Anything else is a **contract request** with the exact diff.
      `createdAt` of the live family as `authorizedAt`, latest `lastUsedAt`.
    - `grants.revoke({ appId })`: one transaction: `revokeTokensInTx({ appId, userId })` and
      `revokeWebhookSubscriptionsInTx({ appId, userId })`; after commit `publishRevocations(…,
-     "grant_revoked")` and enqueue one `revocation` job per subscription id
+     "grant_revoked", { appId, userId })` (the grant-wide message closes that user's chat-token
+     sockets minted through the app, which carry no token hash) and enqueue one `revocation` job per subscription id
      (`webhookQueue(deps).enqueue("revocation", { subscriptionId }, \`revocation-${id}\`)`).
      Unknown or already revoked → still `{ ok: true }`(idempotent). The notices after commit are
      **best effort, as in`tokens.revoke`** (decided 2026-10-29; ADR 0027 consequences): a failed

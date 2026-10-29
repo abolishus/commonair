@@ -69,12 +69,17 @@ export async function revokeWebhookSubscriptionsInTx(
   return rows.map((r) => r.id);
 }
 
-const APP_WIDE_REASONS: ReadonlySet<UserControlMessage["reason"]> = new Set(["app_suspended", "app_removed"]);
+const APP_WIDE_REASONS: ReadonlySet<UserControlMessage["reason"]> = new Set([
+  "app_suspended",
+  "app_removed",
+  "grant_revoked",
+]);
 
 /**
  * After commit: one `disconnect` per token (`userId`, `appId`, `tokenHash`, reason) on
- * BUS.userControl, then, for an app-wide reason (`app_suspended`, `app_removed`), one
- * `{ op: "disconnect", appId, reason }` so chat-token sockets and EventSub sessions of the app close.
+ * BUS.userControl, then, for `app_suspended`, `app_removed` or `grant_revoked` with `appWide`, one
+ * `{ op: "disconnect", appId, userId?, reason }` (`userId` narrows it to one grant) so chat-token
+ * sockets, which carry no token hash and are never revalidated, and EventSub sessions close.
  * Publishes through `publishUserControl`, which parses each message. Refresh rotation passes
  * `token_rotated`. Best effort, like `tokens.revoke`: never throws; a failed publish is logged with
  * ids only. The committed revocation is authoritative (tokens stop resolving at once; chat
@@ -85,7 +90,7 @@ export async function publishRevocations(
   deps: Deps,
   tokens: RevokedToken[],
   reason: UserControlMessage["reason"],
-  appWide?: { appId: string },
+  appWide?: { appId: string; userId?: string },
 ): Promise<void> {
   const send = async (message: UserControlMessage, ids: Record<string, string | null>) => {
     try {
@@ -106,5 +111,8 @@ export async function publishRevocations(
       { tokenId: t.id, appId: t.appId },
     );
   if (appWide && APP_WIDE_REASONS.has(reason))
-    await send({ op: "disconnect", appId: appWide.appId, reason }, { appId: appWide.appId });
+    await send(
+      { op: "disconnect", appId: appWide.appId, userId: appWide.userId, reason },
+      { appId: appWide.appId, userId: appWide.userId ?? null },
+    );
 }
