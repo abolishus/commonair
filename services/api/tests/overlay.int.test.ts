@@ -366,6 +366,80 @@ describe("alert stream", () => {
     await waitFor(async () => overlayHub(api.deps).count(sid) === 0);
   });
 
+  test("goals (E8): state lists the open goal; `goal` frames reach only the goal's channel; raid alert", async () => {
+    const sid = await channelId(s.username);
+    const oid = await channelId(other.username);
+    const g = await s.client.call<{ id: string; startedAt: string }>("POST", `/api/channels/${s.username}/goals`, {
+      type: "followers",
+      title: "Two follows",
+      target: 2,
+    });
+    expect(g.status).toBe(200);
+    const { token } = (await createToken(s)).body;
+    expect((await state(token)).body.goals).toEqual([
+      {
+        id: g.body.id,
+        type: "followers",
+        title: "Two follows",
+        target: 2,
+        current: 0,
+        startedAt: g.body.startedAt,
+        endedAt: null,
+      },
+    ]);
+    await s.client.call("PUT", `/api/channels/${s.username}/alerts/raid`, {
+      enabled: true,
+      template: { message: "${user} raids with ${viewers}", animation: "fade", showMessage: true },
+      minAmountCents: 0,
+      durationMs: 5000,
+    });
+    const stream = await openStream(token);
+    await waitFor(async () => overlayHub(api.deps).count(sid) === 1);
+    const goals = () =>
+      stream.frames.filter((f) => f.event === "goal").map((f) => JSON.parse(f.data) as Record<string, unknown>);
+
+    const goalPayload = (u: User, id: string, current: number) => ({
+      broadcaster_user_id: u.userId,
+      broadcaster_user_login: u.username,
+      broadcaster_user_name: u.username,
+      id,
+      type: "followers",
+      description: "Two follows",
+      current_amount: current,
+      target_amount: 2,
+      started_at: g.body.startedAt,
+    });
+    await publishEvent(oid, "channel.goal.progress", goalPayload(other, uuidv7(), 1));
+    await publishEvent(sid, "channel.goal.progress", goalPayload(s, g.body.id, 1));
+    await publishEvent(sid, "channel.goal.end", {
+      ...goalPayload(s, g.body.id, 2),
+      is_achieved: true,
+      ended_at: new Date().toISOString(),
+    });
+    await waitFor(async () => goals().length >= 2);
+    expect(goals().map((x) => [x.id, x.current, x.endedAt === null])).toEqual([
+      [g.body.id, 1, true],
+      [g.body.id, 2, false],
+    ]);
+    // A goal event is never an alert.
+    expect(stream.alerts()).toHaveLength(0);
+
+    const raidId = await publishEvent(sid, "channel.raid", {
+      from_broadcaster_user_id: other.userId,
+      from_broadcaster_user_login: other.username,
+      from_broadcaster_user_name: "Raider Rae",
+      to_broadcaster_user_id: s.userId,
+      to_broadcaster_user_login: s.username,
+      to_broadcaster_user_name: s.username,
+      viewers: 3,
+    });
+    const raid = await waitFor(async () => stream.alerts().find((a) => a.id === raidId));
+    expect(raid).toMatchObject({ type: "raid", text: "Raider Rae raids with 3" });
+    stream.close();
+    await waitFor(async () => overlayHub(api.deps).count(sid) === 0);
+    await s.client.call("POST", `/api/channels/${s.username}/goals/${g.body.id}/end`, {});
+  });
+
   test("revoke → `revoked` and close at once; rotation closes the old stream", async () => {
     const sid = await channelId(s.username);
     const old = (await createToken(s)).body.token;

@@ -7,12 +7,15 @@
  * an open overlay, to `BUS.overlay(channelId)` (test alerts and revoke signals), and fans both out
  * in memory to that channel's streams. Each stream re-checks its token on a timer, at its expiry
  * and on every revoke signal, and closes with `revoked` once the token no longer resolves.
+ * `channel.goal.*` events of a channel go out to its streams as `goal` frames (the `Goal` DTO).
  * The token value is never kept or logged: a stream holds only its SHA-256.
  */
 import type { Valkey } from "iovalkey";
 import { BUS, BusEvent } from "@commonair/contracts/events";
 import { dto } from "@commonair/contracts";
+import { goalFromEvent } from "@commonair/interact";
 import { createValkey } from "@commonair/service";
+import type { z } from "zod";
 import type { Deps } from "../deps.ts";
 import { alertForEvent, type AlertConfig, type OverlayAlert } from "./alerts.ts";
 import { loadAlertConfigs } from "./configs.ts";
@@ -50,9 +53,11 @@ export const OVERLAY_HUB_DEFAULTS: OverlayHubOptions = {
 const MAX_TIMER_MS = 2 ** 31 - 1;
 const OVERLAY_PREFIX = BUS.overlay("");
 
+type Goal = z.infer<typeof dto.Goal>;
+
 interface OpenStream {
   channelId: string;
-  send(event: "alert", data: OverlayAlert): void;
+  send(event: "alert" | "goal", data: OverlayAlert | Goal): void;
   recheck(): void;
   close(): void;
 }
@@ -197,6 +202,12 @@ export class OverlayHub {
       if (!ev.success || !ev.data.channelId) return;
       const channelId = ev.data.channelId;
       if (!this.byChannel.get(channelId)?.size) return;
+      const goal = goalFromEvent(ev.data);
+      if (goal) {
+        const parsed = dto.Goal.safeParse(goal);
+        if (parsed.success) for (const s of this.byChannel.get(channelId) ?? []) s.send("goal", parsed.data);
+        return;
+      }
       const alert = alertForEvent(ev.data, channelId, await this.alertConfigs(channelId));
       if (!alert) return;
       const frame = dto.OverlayAlert.parse(alert);

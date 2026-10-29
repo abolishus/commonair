@@ -232,6 +232,117 @@ describe("OverlayHub", () => {
   });
 });
 
+describe("OverlayHub goal frames (E8)", () => {
+  const OTHER = "0190f0aa-0000-7000-8000-000000000002";
+  const OTHER_TOKEN: ResolvedOverlayToken = { ...TOKEN, id: "0190f0aa-0000-7000-8000-0000000000bb", channelId: OTHER };
+  const GOAL = "0190f0aa-0000-7000-8000-0000000000c1";
+  const STARTED = "2026-10-29T12:00:00.000Z";
+
+  /** A subscriber that keeps its `message` handler, so the test can deliver bus messages. */
+  function deliveringValkey() {
+    let onMessage: ((channel: string, message: string) => void) | null = null;
+    const v = {
+      on: (event: string, fn: (channel: string, message: string) => void) => {
+        if (event === "message") onMessage = fn;
+        return v;
+      },
+      subscribe: async () => 1,
+      unsubscribe: async () => 0,
+      disconnect: () => undefined,
+    };
+    return {
+      client: v as unknown as Valkey,
+      deliver: (channel: string, message: unknown) => onMessage?.(channel, JSON.stringify(message)),
+    };
+  }
+
+  /** Collect the SSE frames of a response body. */
+  function frames(res: Response) {
+    const out: { event: string; data: unknown }[] = [];
+    const body = res.body;
+    if (!body) throw new Error("no body");
+    const reader = body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    void (async () => {
+      for (;;) {
+        const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true as const }));
+        if (done) return;
+        buf += dec.decode(value, { stream: true });
+        for (let i = buf.indexOf("\n\n"); i >= 0; i = buf.indexOf("\n\n")) {
+          const raw = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const event = /^event: (.*)$/m.exec(raw)?.[1];
+          const data = /^data: (.*)$/m.exec(raw)?.[1];
+          if (event && data) out.push({ event, data: JSON.parse(data) });
+        }
+      }
+    })();
+    return { goals: () => out.filter((x) => x.event === "goal").map((x) => x.data), cancel: () => reader.cancel() };
+  }
+
+  let seq = 0;
+  const goalEvent = (type: string, channelId: string, payload: Record<string, unknown>) => ({
+    id: `0190f0aa-0000-7000-8000-${String(++seq).padStart(12, "0")}`,
+    type,
+    version: "1",
+    channelId,
+    payload: {
+      broadcaster_user_id: "0190f0aa-0000-7000-8000-0000000000a1",
+      broadcaster_user_login: "chan",
+      broadcaster_user_name: "Chan",
+      id: GOAL,
+      type: "followers",
+      description: "Two follows",
+      current_amount: 0,
+      target_amount: 2,
+      started_at: STARTED,
+      ...payload,
+    },
+    occurredAt: "2026-10-29T12:00:01.000Z",
+  });
+  const dto = (current: number, endedAt: string | null = null) => ({
+    id: GOAL,
+    type: "followers",
+    title: "Two follows",
+    target: 2,
+    current,
+    startedAt: STARTED,
+    endedAt,
+  });
+
+  test("channel.goal.* → a `goal` frame (the Goal DTO) on that channel's streams only", async () => {
+    const f = deliveringValkey();
+    const h = hub({ connect: () => f.client, resolve: async (_db, hash) => (hash === "other" ? OTHER_TOKEN : TOKEN) });
+    const mine = await open(h);
+    const theirs = await h.open(OTHER_TOKEN, "other", new AbortController().signal);
+    expect([mine.status, theirs.status]).toEqual([200, 200]);
+    const a = frames(mine);
+    const b = frames(theirs);
+
+    const ended = "2026-10-29T12:05:00.000Z";
+    f.deliver(BUS.events, goalEvent("channel.goal.begin", CH, {}));
+    f.deliver(BUS.events, goalEvent("channel.goal.progress", CH, { current_amount: 1 }));
+    f.deliver(BUS.events, goalEvent("channel.goal.end", CH, { current_amount: 2, is_achieved: true, ended_at: ended }));
+    // Malformed (a zero target fails the DTO): dropped, the stream stays healthy.
+    f.deliver(BUS.events, goalEvent("channel.goal.progress", CH, { target_amount: 0 }));
+    // A channel with no stream on this hub: nothing anywhere.
+    f.deliver(BUS.events, goalEvent("channel.goal.progress", "0190f0aa-0000-7000-8000-000000000003", {}));
+
+    await waitUntil(() => a.goals().length === 3);
+    expect(a.goals()).toEqual([dto(0), dto(1), dto(2, ended)]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(a.goals()).toHaveLength(3);
+    expect(b.goals()).toHaveLength(0);
+
+    f.deliver(BUS.events, goalEvent("channel.goal.progress", OTHER, { current_amount: 1 }));
+    await waitUntil(() => b.goals().length === 1);
+    expect(a.goals()).toHaveLength(3);
+    await a.cancel();
+    await b.cancel();
+  });
+});
+
 async function waitUntil(cond: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!cond()) {
