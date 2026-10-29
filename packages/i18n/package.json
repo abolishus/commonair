@@ -5,7 +5,9 @@
   "license": "AGPL-3.0-or-later",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./catalog": "./src/catalog.ts",
+    "./cli": "./src/cli.ts"
   },
   "scripts": {
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
