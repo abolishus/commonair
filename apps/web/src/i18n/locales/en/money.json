@@ -1,19 +1,13 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** Revenue, treasury and transparency pages (E4b web-money unit owns this file). */
-export const moneyMessages = {
+{
   "nav.subscriptions": "Subscriptions",
   "nav.treasury": "Treasury",
   "studio.revenue": "Revenue",
   "dashboard.revenue": "Revenue",
   "footer.transparency": "Transparency",
   "admin.nav": "Platform tools",
-
   "page.notFound": "Page not found",
   "page.notFoundHint": "This page does not exist, or you do not have access to it.",
   "page.notFoundHome": "Back to the directory",
-
   "money.month.1": "January",
   "money.month.2": "February",
   "money.month.3": "March",
@@ -31,7 +25,6 @@ export const moneyMessages = {
   "money.tierName": "Tier {tier}",
   "money.detailSeparator": " · ",
   "money.amountFormat": "Enter an amount, e.g. 5.00",
-
   "revenue.title": "Revenue",
   "revenue.intro": "What your channel earned, what is held, and what is on its way to you.",
   "revenue.month": "Month",
@@ -107,7 +100,6 @@ export const moneyMessages = {
   "revenue.tiers.error.benefitsTooLong": "At most {max} characters",
   "revenue.tiers.error.priceRange": "Outside the allowed price range",
   "revenue.tiers.error.priceOrder": "Must cost more than the tier before it",
-
   "treasury.title": "Treasury",
   "treasury.intro": "Confirm payments, handle refunds and chargebacks, run payouts and record costs.",
   "treasury.tab.payments": "Payments",
@@ -160,8 +152,7 @@ export const moneyMessages = {
   "treasury.chargeback": "Chargeback",
   "treasury.chargeback.label": "Record a chargeback on {reference}",
   "treasury.chargeback.title": "Chargeback on {reference}",
-  "treasury.chargeback.body":
-    "Record money the bank took back. The creator's share is reclaimed from their balance; anything left is deducted from their next payout.",
+  "treasury.chargeback.body": "Record money the bank took back. The creator's share is reclaimed from their balance; anything left is deducted from their next payout.",
   "treasury.chargeback.submit": "Record chargeback",
   "treasury.chargeback.done": "Chargeback recorded",
   "treasury.chargeback.failed": "Could not record the chargeback.",
@@ -172,8 +163,7 @@ export const moneyMessages = {
   "treasury.dispute.reasonHint": "For the co-op's records. Not shown to the supporter or the creator.",
   "treasury.payouts.loadFailed": "Could not load payouts. Try again in a moment.",
   "treasury.payouts.run": "Run payouts",
-  "treasury.payouts.runHint":
-    "Pays every creator whose available balance reaches the minimum this month. Safe to run again.",
+  "treasury.payouts.runHint": "Pays every creator whose available balance reaches the minimum this month. Safe to run again.",
   "treasury.payouts.runFailed": "Could not run payouts.",
   "treasury.payouts.ran": "Payout run finished",
   "treasury.payouts.result": "Payout run finished",
@@ -224,7 +214,6 @@ export const moneyMessages = {
   "treasury.cost.submit": "Record cost",
   "treasury.cost.saved": "Cost recorded",
   "treasury.cost.failed": "Could not record the cost.",
-
   "transparency.title": "Transparency",
   "transparency.intro": "The co-op's books, month by month, straight from the ledger.",
   "transparency.periodLabel": "Period",
@@ -254,5 +243,5 @@ export const moneyMessages = {
   "transparency.egress.title": "Member relays",
   "transparency.egress.share": "{share}%",
   "transparency.egress.caption": "Share of video traffic served by member relays",
-  "transparency.egress.body": "{relay} of {total}",
-} as const;
+  "transparency.egress.body": "{relay} of {total}"
+}

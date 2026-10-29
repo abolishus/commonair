@@ -1,15 +1,9 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** Co-op pages: membership, proposals, votes, council, settings, patronage, treasury and admin (E5 unit D). */
-export const coopMessages = {
+{
   "nav.coop": "Co-op",
   "nav.coopMembership": "Co-op membership",
   "nav.adminCoop": "Co-op administration",
-
   "coop.title": "The co-op",
-  "coop.intro":
-    "Streamers, viewers and workers own the platform together. Members decide how it runs; protected decisions also need the streamer class.",
+  "coop.intro": "Streamers, viewers and workers own the platform together. Members decide how it runs; protected decisions also need the streamer class.",
   "coop.tabs": "Co-op",
   "coop.tab.overview": "Overview",
   "coop.tab.membership": "Membership",
@@ -26,7 +20,6 @@ export const coopMessages = {
   "coop.loadMore": "Load more",
   "coop.actionFailed": "That did not work. Try again.",
   "coop.period": "{start} – {end} (UTC)",
-
   "coop.class.streamer": "Streamer",
   "coop.class.viewer": "Viewer",
   "coop.class.worker": "Worker",
@@ -54,8 +47,7 @@ export const coopMessages = {
   "coop.kind.ordinary": "Ordinary decision",
   "coop.kind.protected": "Protected decision",
   "coop.kind.ordinaryHint": "Needs a majority of the members who vote.",
-  "coop.kind.protectedHint":
-    "Needs two thirds of members and a majority of the streamer class, after council review and a longer vote.",
+  "coop.kind.protectedHint": "Needs two thirds of members and a majority of the streamer class, after council review and a longer vote.",
   "coop.stance.support": "Supports",
   "coop.stance.oppose": "Opposes",
   "coop.stance.mixed": "Mixed",
@@ -72,7 +64,6 @@ export const coopMessages = {
   "coop.component.relayBandwidth": "Relay bandwidth",
   "coop.component.viewerHours": "Viewer hours",
   "coop.component.adjustment": "Adjustment",
-
   "coop.card.title": "Your membership",
   "coop.card.none": "You are not a member yet.",
   "coop.card.manage": "Manage your membership",
@@ -89,10 +80,8 @@ export const coopMessages = {
   "coop.council.more": "Council",
   "coop.council.empty": "No council is seated yet.",
   "coop.council.rank": "Rank {rank}",
-
   "coop.membership.title": "Your membership",
-  "coop.membership.intro":
-    "Stream to join as a streamer, buy the refundable member share to join as a viewer, or be appointed by the board as a worker.",
+  "coop.membership.intro": "Stream to join as a streamer, buy the refundable member share to join as a viewer, or be appointed by the board as a worker.",
   "coop.membership.memberships": "Memberships",
   "coop.membership.emptyTitle": "You are not a member yet",
   "coop.membership.emptyHint": "Stream, buy the member share or subscribe to a channel to join.",
@@ -114,13 +103,11 @@ export const coopMessages = {
   "coop.rejoin.hint": "You left the viewer class. Your subscription qualifies you to rejoin.",
   "coop.rejoin.label": "Rejoin the viewer class",
   "coop.rejoin.title": "Rejoin the viewer class?",
-  "coop.rejoin.description":
-    "You become a viewer member again on your subscription. No share is bought; you can leave again at any time.",
+  "coop.rejoin.description": "You become a viewer member again on your subscription. No share is bought; you can leave again at any time.",
   "coop.rejoin.confirm": "Rejoin",
   "coop.rejoin.done": "You are a viewer member again.",
   "coop.rejoin.conflict": "You are already a viewer member.",
-  "coop.rejoin.notQualified":
-    "Your subscriptions do not qualify any more. Subscribe to a channel, or buy the member share.",
+  "coop.rejoin.notQualified": "Your subscriptions do not qualify any more. Subscribe to a channel, or buy the member share.",
   "coop.share.title": "Member share",
   "coop.share.description": "One-time and refundable, one per member.",
   "coop.share.amount": "Share",
@@ -137,10 +124,8 @@ export const coopMessages = {
   "coop.share.copyFailed": "Could not copy the reference",
   "coop.share.conflict": "You already have a share or a viewer membership.",
   "coop.share.manualOnly": "Member shares cannot be bought on this instance yet.",
-
   "coop.proposals.title": "Proposals",
-  "coop.proposals.intro":
-    "Members draft, discuss and vote on how the co-op runs. Protected decisions also need the streamer class.",
+  "coop.proposals.intro": "Members draft, discuss and vote on how the co-op runs. Protected decisions also need the streamer class.",
   "coop.proposals.new": "New proposal",
   "coop.proposals.filter": "Status",
   "coop.proposals.filter.all": "All",
@@ -150,7 +135,6 @@ export const coopMessages = {
   "coop.participation.label": "Participation",
   "coop.participation.value": "{voted} of {eligible} voted",
   "coop.participation.noTally": "Results are counted when voting closes. No running tally is shown.",
-
   "coop.form.newTitle": "New proposal",
   "coop.form.editTitle": "Edit proposal",
   "coop.form.newIntro": "Drafts are private until you open them for discussion.",
@@ -186,7 +170,6 @@ export const coopMessages = {
   "coop.form.invalid": "The proposal was refused: check the title and every setting value.",
   "coop.form.notEditable": "This proposal can no longer be edited.",
   "coop.form.failed": "The proposal could not be saved. Try again.",
-
   "coop.proposal.affectsCreators": "Affects creators",
   "coop.proposal.body": "Proposal",
   "coop.proposal.changes": "What changes",
@@ -195,8 +178,7 @@ export const coopMessages = {
   "coop.proposal.noChanges": "No setting changes.",
   "coop.proposal.submit": "Open for discussion",
   "coop.proposal.submitTitle": "Open this proposal for discussion?",
-  "coop.proposal.submitHint":
-    "Members can read and comment on it. Editing during discussion restarts the discussion period.",
+  "coop.proposal.submitHint": "Members can read and comment on it. Editing during discussion restarts the discussion period.",
   "coop.proposal.submitted": "Discussion is open.",
   "coop.proposal.edit": "Edit",
   "coop.proposal.withdraw": "Withdraw",
@@ -205,8 +187,7 @@ export const coopMessages = {
   "coop.proposal.withdrawn": "The proposal was withdrawn.",
   "coop.council.responseTitle": "Creator council response",
   "coop.council.missedTitle": "No council response",
-  "coop.council.missedHint":
-    "The creator council did not publish a response before review ended. Voting opened anyway.",
+  "coop.council.missedHint": "The creator council did not publish a response before review ended. Voting opened anyway.",
   "coop.council.respondTitle": "Respond for the creator council",
   "coop.council.respondHint": "One response per proposal, shown on the ballot.",
   "coop.council.stance": "Stance",
@@ -267,10 +248,8 @@ export const coopMessages = {
   "coop.tally.rule.streamer_class_quorum": "Streamer-class quorum",
   "coop.tally.rule.streamer_class_majority": "Streamer-class majority",
   "coop.timeline.title": "Timeline",
-
   "coop.councilPage.title": "Creator council and board",
-  "coop.councilPage.intro":
-    "The creator council reviews every proposal that affects creators before members vote. It is seated monthly from streamer members by contribution.",
+  "coop.councilPage.intro": "The creator council reviews every proposal that affects creators before members vote. It is seated monthly from streamer members by contribution.",
   "coop.council.emptyTitle": "No council seated yet",
   "coop.council.emptyHint": "The council is seated once streamer members qualify; the daily recompute fills it.",
   "coop.council.rankScore": "Rank {rank} · score {score}",
@@ -282,8 +261,7 @@ export const coopMessages = {
   "coop.board.seat": "{class} seat",
   "coop.board.empty": "No board seats are filled yet.",
   "coop.elections.title": "Board elections",
-  "coop.elections.intro":
-    "Members of a class stand for and elect its board seats on an approval ballot. Ballots are secret; counts appear when voting closes.",
+  "coop.elections.intro": "Members of a class stand for and elect its board seats on an approval ballot. Ballots are secret; counts appear when voting closes.",
   "coop.elections.empty": "No elections scheduled.",
   "coop.elections.seat": "{class} seats",
   "coop.elections.seats": "Seats",
@@ -297,8 +275,7 @@ export const coopMessages = {
   "coop.elections.youStand": "You are standing in this election.",
   "coop.elections.nominate": "Stand as a candidate",
   "coop.elections.statement": "Your statement",
-  "coop.elections.statementHint":
-    "Why members of your class should approve you. Optional, up to {max} characters, shown to everyone.",
+  "coop.elections.statementHint": "Why members of your class should approve you. Optional, up to {max} characters, shown to everyone.",
   "coop.elections.nominateSubmit": "Submit candidacy",
   "coop.elections.cancel": "Cancel",
   "coop.elections.nominated": "You are a candidate.",
@@ -313,18 +290,14 @@ export const coopMessages = {
   "coop.elections.errorNotMember": "Only members of this class can stand and vote.",
   "coop.elections.errorTooMany": "Approve at most {seats} candidates.",
   "coop.elections.errorFailed": "That did not work. Try again.",
-
   "coop.settings.title": "Governance settings",
-  "coop.settings.intro":
-    "The rules the platform runs on. Only a passed proposal can change them; each shows the decision that last did.",
+  "coop.settings.intro": "The rules the platform runs on. Only a passed proposal can change them; each shows the decision that last did.",
   "coop.settings.protectedTitle": "Protected settings",
-  "coop.settings.protectedHint":
-    "Changing a protected setting needs two thirds of members and a majority of the streamer class. The database enforces it.",
+  "coop.settings.protectedHint": "Changing a protected setting needs two thirds of members and a majority of the streamer class. The database enforces it.",
   "coop.settings.protected": "Protected",
   "coop.settings.seeded": "Seeded at launch",
   "coop.settings.setBy": "Set by",
   "coop.settings.proposal": "the proposal",
-
   "coop.patronage.title": "Patronage",
   "coop.patronage.intro": "Your share of the co-op's surplus, period by period, explained line by line.",
   "coop.patronage.listTitle": "Your statements",
@@ -348,7 +321,6 @@ export const coopMessages = {
   "coop.statement.inputRelay": "Verified relay traffic",
   "coop.statement.inputViewerHours": "Verified viewer-hours",
   "coop.statement.inputViewerHoursExcluded": "Viewer-hours excluded by integrity checks",
-
   "coop.treasury.tabShares": "Shares",
   "coop.treasury.tabPatronage": "Patronage",
   "coop.treasury.sharesTitle": "Member shares",
@@ -370,8 +342,7 @@ export const coopMessages = {
   "coop.treasury.refundFailed": "The refund could not be recorded. Nothing was posted.",
   "coop.treasury.refunded": "The refund is recorded.",
   "coop.patronageRun.title": "Run patronage",
-  "coop.patronageRun.intro":
-    "Closes the ledger for the period and computes every member's allocation. Someone else approves it.",
+  "coop.patronageRun.intro": "Closes the ledger for the period and computes every member's allocation. Someone else approves it.",
   "coop.patronageRun.start": "Period start (UTC)",
   "coop.patronageRun.end": "Period end (UTC)",
   "coop.patronageRun.timesHint": "Times are UTC. The end must be in the past; closed periods cannot overlap.",
@@ -408,12 +379,10 @@ export const coopMessages = {
   "coop.periods.approved": "The period is approved and posted.",
   "coop.periods.approveFailed": "The period could not be approved.",
   "coop.periods.secondApprover": "You ran this period; someone else must approve it.",
-
   "coop.admin.title": "Co-op administration",
   "coop.admin.intro": "Record board decisions. Every appointment is audited with its board minute.",
   "coop.admin.appointTitle": "Appoint a worker member",
-  "coop.admin.appointIntro":
-    "Workers join by board decision, not by activity. The user must exist and not already be a worker member.",
+  "coop.admin.appointIntro": "Workers join by board decision, not by activity. The user must exist and not already be a worker member.",
   "coop.admin.username": "Username",
   "coop.admin.usernameHint": "The account's username, without @.",
   "coop.admin.minute": "Board minute reference",
@@ -426,12 +395,11 @@ export const coopMessages = {
   "coop.admin.invalid": "Check the username and the board minute reference.",
   "coop.admin.failed": "The appointment could not be recorded. Try again.",
   "coop.admin.note": "Exits and lapses are the member's own; this page only records appointments.",
-
   "coop.transparency.governance": "Governance outcomes",
   "coop.transparency.governanceHint": "Every proposal decided, with the rule that decided it.",
   "coop.transparency.governanceEmpty": "No proposals were decided in these months.",
   "coop.transparency.patronage": "Patronage distributed",
   "coop.transparency.patronageHint": "Approved allocations posted to members, by month.",
   "coop.transparency.patronageEmpty": "No patronage was distributed in these months.",
-  "coop.transparency.distributed": "Distributed",
-} as const;
+  "coop.transparency.distributed": "Distributed"
+}

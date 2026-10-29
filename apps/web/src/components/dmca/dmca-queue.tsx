@@ -137,7 +137,7 @@ export function DmcaNoticeList({
             data-resolved-items={String(resolvedCount(n))}
             aria-expanded={selectedId === n.id}
             onClick={() => onSelect(n)}
-            className="h-auto w-full flex-col items-start gap-1 p-3 text-left whitespace-normal sm:flex-row sm:items-center sm:justify-between"
+            className="h-auto w-full flex-col items-start gap-1 p-3 text-start whitespace-normal sm:flex-row sm:items-center sm:justify-between"
           >
             <span className="min-w-0 break-words font-medium">{n.claimantName}</span>
             <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

@@ -1,8 +1,4 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** Support dialog and subscription settings (E4b web-support unit owns this file). */
-export const supportMessages = {
+{
   "support.open": "Support",
   "support.title": "Support {name}",
   "support.description": "Every option pays the creator directly through the co-op.",
@@ -31,8 +27,7 @@ export const supportMessages = {
   "support.gift.recipient": "Recipient",
   "support.gift.random": "Random community members",
   "support.gift.viewer": "A specific viewer",
-  "support.gift.randomHint":
-    "Recipients are drawn from people who chatted here in the last 30 days or follow the channel.",
+  "support.gift.randomHint": "Recipients are drawn from people who chatted here in the last 30 days or follow the channel.",
   "support.gift.to": "Username",
   "support.gift.toHint": "One sub goes to this viewer.",
   "support.gift.invalidCount": "Choose between 1 and {max} subs.",
@@ -57,14 +52,12 @@ export const supportMessages = {
   "support.instructions.title": "Pay to complete",
   "support.instructions.reference": "Payment reference",
   "support.instructions.amount": "Amount",
-  "support.instructions.hint":
-    "Quote the reference with your payment. It is confirmed once the co-op's treasurer receives it.",
+  "support.instructions.hint": "Quote the reference with your payment. It is confirmed once the co-op's treasurer receives it.",
   "support.instructions.copy": "Copy reference",
   "support.instructions.copied": "Reference copied",
   "support.instructions.copyFailed": "Could not copy. Select the reference and copy it yourself.",
   "support.instructions.done": "Done",
   "support.redirecting": "Opening checkout…",
-
   "subscriptions.title": "Subscriptions",
   "subscriptions.intro": "Channels you subscribe to. Cancelling keeps your benefits until the period ends.",
   "subscriptions.loading": "Loading your subscriptions…",
@@ -78,23 +71,18 @@ export const supportMessages = {
   "subscriptions.cancelling": "Ends at period end",
   "subscriptions.cancel": "Cancel",
   "subscriptions.cancelTitle": "Cancel your subscription to {channel}?",
-  "subscriptions.cancelBody":
-    "It stays active until the end of the current period and then stops. Nothing is refunded.",
+  "subscriptions.cancelBody": "It stays active until the end of the current period and then stops. Nothing is refunded.",
   "subscriptions.cancelConfirm": "Cancel at period end",
   "subscriptions.cancelled": "Your subscription ends at the end of the period.",
   "subscriptions.cancelFailed": "Could not cancel the subscription. Try again.",
-
   "chat.badge.broadcaster": "Broadcaster",
   "chat.badge.moderator": "Moderator",
   "chat.badge.vip": "VIP",
   "chat.badge.subscriber": "Subscriber",
   "chat.badge.member": "Co-op member",
-
   "chat.event.subscribe": "{name} subscribed at Tier {tier}",
-  "chat.event.giftOne": "{name} gifted a Tier {tier} sub",
-  "chat.event.giftOther": "{name} gifted {total} Tier {tier} subs",
-  "chat.event.giftAnonymousOne": "An anonymous viewer gifted a Tier {tier} sub",
-  "chat.event.giftAnonymousOther": "An anonymous viewer gifted {total} Tier {tier} subs",
+  "chat.event.gift": "{total, plural, one {{name} gifted a Tier {tier} sub} other {{name} gifted # Tier {tier} subs}}",
+  "chat.event.giftAnonymous": "{total, plural, one {An anonymous viewer gifted a Tier {tier} sub} other {An anonymous viewer gifted # Tier {tier} subs}}",
   "chat.event.tip": "{name} tipped",
-  "chat.event.tipAnonymous": "Someone tipped",
-} as const;
+  "chat.event.tipAnonymous": "Someone tipped"
+}

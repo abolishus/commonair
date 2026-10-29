@@ -1,11 +1,6 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** E7-admin: integrity flags, egress and incidents (admin.integrity.*, admin.egress.*, admin.incidents.*). That unit owns this file. */
-export const e7AdminMessages = {
+{
   "admin.egress.title": "Egress",
-  "admin.egress.intro":
-    "Bytes delivered by source over a range. Origin egress is what hosting bills; relays, P2P and the CDN take load off it.",
+  "admin.egress.intro": "Bytes delivered by source over a range. Origin egress is what hosting bills; relays, P2P and the CDN take load off it.",
   "admin.egress.from": "From (UTC)",
   "admin.egress.to": "To (UTC)",
   "admin.egress.load": "Show",
@@ -27,10 +22,8 @@ export const e7AdminMessages = {
   "admin.egress.source.relay": "Relays",
   "admin.egress.source.p2p": "P2P",
   "admin.egress.source.cdn": "CDN",
-
   "admin.incidents.title": "Incidents",
-  "admin.incidents.intro":
-    "Open and update status-page incidents. An open incident marks its components degraded on the status page.",
+  "admin.incidents.intro": "Open and update status-page incidents. An open incident marks its components degraded on the status page.",
   "admin.incidents.new": "New incident",
   "admin.incidents.edit": "Edit",
   "admin.incidents.loadFailed": "Could not load the incidents.",
@@ -55,17 +48,14 @@ export const e7AdminMessages = {
   "admin.incidents.saved": "Incident published",
   "admin.incidents.failed": "Could not publish the incident.",
   "admin.incidents.resolveTitle": "Resolve this incident?",
-  "admin.incidents.resolveDescription":
-    "The status page shows it as resolved and its components are no longer marked degraded.",
+  "admin.incidents.resolveDescription": "The status page shows it as resolved and its components are no longer marked degraded.",
   "admin.incidents.resolveConfirm": "Resolve",
   "admin.incidents.status.investigating": "Investigating",
   "admin.incidents.status.identified": "Identified",
   "admin.incidents.status.monitoring": "Monitoring",
   "admin.incidents.status.resolved": "Resolved",
-
   "admin.integrity.title": "Integrity flags",
-  "admin.integrity.intro":
-    "What the integrity checks flagged. Allowing a session or account flag stops that signal counting against it on the next scoring run.",
+  "admin.integrity.intro": "What the integrity checks flagged. Allowing a session or account flag stops that signal counting against it on the next scoring run.",
   "admin.integrity.filterSubject": "Subject",
   "admin.integrity.filterDecision": "Decision",
   "admin.integrity.filterChannel": "Channel",
@@ -96,5 +86,5 @@ export const e7AdminMessages = {
   "admin.integrity.submit": "Decide",
   "admin.integrity.decided": "Flag decided",
   "admin.integrity.failed": "Could not decide the flag.",
-  "admin.integrity.conflict": "Someone decided this flag first. Reload to see the current decision.",
-} as const;
+  "admin.integrity.conflict": "Someone decided this flag first. Reload to see the current decision."
+}

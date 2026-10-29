@@ -1,13 +1,7 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** E7-appeals: account actions and their appeals (appeals.account.*). That unit owns this file. */
-export const e7AppealsMessages = {
-  "appeals.account.queueIntro":
-    "Open appeals, oldest first. Overturning undoes what it can: a mature label is removed, a ban or suspension in force is lifted, an account action is reversed.",
+{
+  "appeals.account.queueIntro": "Open appeals, oldest first. Overturning undoes what it can: a mature label is removed, a ban or suspension in force is lifted, an account action is reversed.",
   "appeals.account.title": "Account actions",
-  "appeals.account.intro":
-    "Copyright strikes and suspensions recorded on your account. If one is wrong, appeal it and a moderator will review it.",
+  "appeals.account.intro": "Copyright strikes and suspensions recorded on your account. If one is wrong, appeal it and a moderator will review it.",
   "appeals.account.loading": "Loading your account actions…",
   "appeals.account.loadFailed": "Your account actions could not be loaded. Reload to try again.",
   "appeals.account.empty": "No account actions",
@@ -22,8 +16,7 @@ export const e7AppealsMessages = {
   "appeals.account.appeal": "Appeal",
   "appeals.account.appealPending": "Appeal waiting for review",
   "appeals.account.appealTitle": "Appeal this account action",
-  "appeals.account.appealDescription":
-    "Tell the moderators why this is wrong. To dispute the removal of the content itself, file a counter-notice under Copyright.",
+  "appeals.account.appealDescription": "Tell the moderators why this is wrong. To dispute the removal of the content itself, file a counter-notice under Copyright.",
   "appeals.account.appealBody": "Why this is wrong",
   "appeals.account.appealBodyHint": "Between {min} and {max} characters.",
   "appeals.account.appealSubmit": "Send appeal",
@@ -41,11 +34,8 @@ export const e7AppealsMessages = {
   "appeals.account.effect.liftsBan": "Overturning lifts the chat ban.",
   "appeals.account.effect.liftsSuspension": "Overturning lifts the suspension.",
   "appeals.account.effect.recordsOnly": "Overturning records the decision only.",
-  "appeals.account.effect.moderationAction":
-    "Overturning lifts the chat ban, timeout or suspension while it is in force. Any other action is recorded only.",
-  "appeals.account.effect.reversesStrike":
-    "Overturning reverses the strike, and the repeat-infringer suspension if the account drops below the limit.",
+  "appeals.account.effect.moderationAction": "Overturning lifts the chat ban, timeout or suspension while it is in force. Any other action is recorded only.",
+  "appeals.account.effect.reversesStrike": "Overturning reverses the strike, and the repeat-infringer suspension if the account drops below the limit.",
   "appeals.account.effect.reversesTermination": "Overturning reverses the termination and lifts the suspension.",
-  "appeals.account.effect.accountAction":
-    "Overturning reverses the strike or termination. A reversed termination lifts the repeat-infringer suspension.",
-} as const;
+  "appeals.account.effect.accountAction": "Overturning reverses the strike or termination. A reversed termination lifts the repeat-infringer suspension."
+}

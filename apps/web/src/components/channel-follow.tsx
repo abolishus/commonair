@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { AccentButton, formatNumber, useLocale } from "@commonair/ui";
+import { AccentButton } from "@commonair/ui";
 import { FavouriteIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Link } from "@tanstack/react-router";
@@ -39,11 +39,9 @@ export function useFollow(
 
 /** Follower count for `ChannelHeader`'s `followers` slot (which sets its type and color). */
 export function FollowerCount({ count }: { count: number }): React.JSX.Element {
-  const { locale } = useLocale();
-  const n = formatNumber(count, locale);
   return (
     <span data-testid="follower-count" data-count={count}>
-      {count === 1 ? t("follow.countOne", { count: n }) : t("follow.countOther", { count: n })}
+      {t("follow.count", { count })}
     </span>
   );
 }

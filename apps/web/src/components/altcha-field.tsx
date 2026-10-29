@@ -7,7 +7,7 @@
  * mirrors the widget state in `data-state` so tests and the form can wait for `verified`.
  */
 import * as React from "react";
-import { locale } from "../i18n/index.ts";
+import { activeLocale, baseLanguage } from "../i18n/index.ts";
 import { AUTH_ROUTES } from "../lib/auth.ts";
 
 export type AltchaState = "loading" | "unverified" | "verifying" | "verified" | "expired" | "error" | "code";
@@ -84,7 +84,7 @@ export function AltchaField({ onChange, ref }: AltchaFieldProps): React.JSX.Elem
           challenge: AUTH_ROUTES.altchaChallenge,
           auto: "onload",
           name: "altcha",
-          language: locale,
+          language: baseLanguage(activeLocale()),
           configuration: WIDGET_CONFIG,
         })}
     </div>

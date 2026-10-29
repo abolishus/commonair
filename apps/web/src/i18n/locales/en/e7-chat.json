@@ -1,8 +1,4 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** E7-chat-http: the held-message queue (held.*). That unit owns this file. */
-export const e7ChatMessages = {
+{
   "held.open": "Held messages ({count})",
   "held.title": "Held messages",
   "held.description": "A word filter is holding these. Allowed messages appear in chat for everyone.",
@@ -13,5 +9,5 @@ export const e7ChatMessages = {
   "held.allow": "Allow {name}'s message",
   "held.deny": "Deny {name}'s message",
   "held.failed": "Could not update that message. Try again.",
-  "held.alreadyResolved": "Another moderator already handled that message.",
-} as const;
+  "held.alreadyResolved": "Another moderator already handled that message."
+}

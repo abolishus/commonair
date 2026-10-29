@@ -1,14 +1,8 @@
-// SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-/** E6 pages: simulcast, overlays and alerts, the OBS overlay, content, privacy (unit D owns this file). */
-export const opsMessages = {
+{
   "common.retry": "Try again",
-
   "nav.privacy": "Privacy",
   "studio.overlays": "Alerts & overlays",
   "studio.content": "Videos & clips",
-
   "simulcast.title": "Simulcast",
   "simulcast.intro": "Restream to other platforms from our servers, so your upload stays the same.",
   "simulcast.list": "Simulcast targets",
@@ -47,7 +41,6 @@ export const opsMessages = {
   "simulcast.error.generic": "The target could not be added. Try again.",
   "simulcast.actionFailed": "That change could not be saved. Try again.",
   "simulcast.loadFailed": "Your simulcast targets could not be loaded.",
-
   "overlays.title": "Alerts & overlays",
   "overlays.intro": "Choose which alerts appear on stream, then add the overlay URL to OBS as a browser source.",
   "overlays.loading": "Loading alerts…",
@@ -123,13 +116,11 @@ export const opsMessages = {
   "overlays.token.revokeBody": "Alerts stop showing in OBS until you create a new URL.",
   "overlays.token.revoked": "Overlay URL revoked.",
   "overlays.token.failed": "The overlay URL could not be changed. Try again.",
-
   "overlay.alertsTitle": "Alerts overlay",
   "overlay.goalsTitle": "Goals overlay",
   "overlay.goalsLater": "Goal bars are not available yet. This URL will show them once they are.",
   "overlay.chatTitle": "Chat overlay",
   "overlay.chatLater": "The chat overlay is not available yet. This URL will show it once it is.",
-
   "content.title": "Videos & clips",
   "content.intro": "Rename, change who can watch, or delete.",
   "content.vods": "Past broadcasts",
@@ -164,7 +155,6 @@ export const opsMessages = {
   "content.views": "{count} views",
   "content.actionFailed": "That change could not be saved. Try again.",
   "content.loadFailed": "Your videos and clips could not be loaded.",
-
   "privacy.title": "Privacy",
   "privacy.intro": "Download your data or delete your account.",
   "privacy.export.title": "Export your data",
@@ -194,8 +184,7 @@ export const opsMessages = {
   "privacy.deletion.intro": "Your profile, messages and media are removed after a grace period.",
   "privacy.deletion.request": "Delete my account…",
   "privacy.deletion.confirmTitle": "Delete your account?",
-  "privacy.deletion.confirmBody":
-    "Your profile, sign-in methods, chat messages and media are removed. Payments, the ledger, votes and audit history stay, with your name and email removed.",
+  "privacy.deletion.confirmBody": "Your profile, sign-in methods, chat messages and media are removed. Payments, the ledger, votes and audit history stay, with your name and email removed.",
   "privacy.deletion.confirm": "Schedule deletion",
   "privacy.deletion.confirmUsername": "Type your username to confirm",
   "privacy.deletion.confirmUsernameHint": "Your username is {username}.",
@@ -208,5 +197,5 @@ export const opsMessages = {
   "privacy.deletion.scheduledToast": "Deletion scheduled. We emailed you the date.",
   "privacy.deletion.canceledToast": "Deletion canceled.",
   "privacy.deletion.failed": "That did not work. Try again.",
-  "privacy.deletion.loadFailed": "Your deletion status could not be loaded.",
-} as const;
+  "privacy.deletion.loadFailed": "Your deletion status could not be loaded."
+}

@@ -91,8 +91,7 @@ export function chatEventText(view: ChatEventView): string {
   const vars = { name: view.name ?? "", tier: view.tier ?? "", total: view.total ?? "" };
   if (view.type === "channel.subscribe") return t("chat.event.subscribe", vars);
   if (view.type === "channel.subscription.gift") {
-    if (view.total === 1) return view.name ? t("chat.event.giftOne", vars) : t("chat.event.giftAnonymousOne", vars);
-    return view.name ? t("chat.event.giftOther", vars) : t("chat.event.giftAnonymousOther", vars);
+    return view.name ? t("chat.event.gift", vars) : t("chat.event.giftAnonymous", vars);
   }
   return view.name ? t("chat.event.tip", vars) : t("chat.event.tipAnonymous");
 }
