@@ -58,7 +58,9 @@ conservative default until CDN delivery can be judged.
 
 In the channel bot settings you can turn points off (no earning, no spending, `!points` stays
 silent, predictions and point-bought votes are refused) and give them your own name, up to 20
-characters (for example "beans"). Balances stay where they are while points are off.
+characters (for example "beans"). Balances stay where they are while points are off, and time
+watched while they are off never earns, even after you turn them back on. The same goes for time a
+viewer watches while their account is suspended.
 
 ## Adjusting a viewer's points
 

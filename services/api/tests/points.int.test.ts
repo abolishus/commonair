@@ -264,13 +264,15 @@ describe("adjust", () => {
     expect((await anon().call("GET", pointsPath(c.slug, v.username))).body).toMatchObject({ points: 30 });
   });
 
-  test("delta 0, an unknown target and a bot target are refused", async () => {
+  test("delta 0, an unknown, deleted or bot target are refused", async () => {
     const c = await newChannel();
     const m = await moderator(c.id);
     const bot = await newUser({ bot: true });
+    const gone = await newUser({ pseudonymized: true });
     const mod = client(api, { bearer: await bearer(m.id, ["channel:manage:points"]) });
     expect((await mod.call("POST", pointsPath(c.slug, m.username), { delta: 0, reason: "other" })).status).toBe(400);
     expect((await mod.call("POST", pointsPath(c.slug, "nobody_here"), { delta: 5, reason: "other" })).status).toBe(404);
+    expect((await mod.call("POST", pointsPath(c.slug, gone.username), { delta: 5, reason: "other" })).status).toBe(404);
     expect((await mod.call("POST", pointsPath(c.slug, bot.username), { delta: 5, reason: "other" })).status).toBe(400);
     expect(
       (await mod.call("POST", pointsPath(c.slug, m.username), { delta: 5, reason: "free text here" })).status,

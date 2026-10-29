@@ -12,6 +12,10 @@
  * lock and the re-read make a second, concurrent run (the test hook) credit nothing twice. No
  * clawback: a verdict that changes after a credit leaves the points where they are.
  *
+ * A session that grows while its viewer may not earn there (points off on the channel, or a
+ * platform suspension) has its high-water mark raised with no credit on every run, so that time is
+ * never credited once points come back on or the suspension ends.
+ *
  * Skipped: the channel's own owner, bot accounts, platform-suspended and deleted accounts, channels
  * whose points are off, and demo data (a demo channel's viewers and a demo viewer anywhere; the
  * `demo:clear` two-anchor rule), because a `loyalty_transactions` row is append-only and
@@ -51,6 +55,33 @@ interface Candidate {
 /** postgres.js cannot bind Date objects inside raw `sql` fragments; pass ISO text with a cast. */
 const tsz = (d: Date): SQL => sql`${d.toISOString()}::timestamptz`;
 
+const POINTS_OFF = sql`coalesce(bc.config->'loyalty'->>'enabled', 'true') = 'false'`;
+const SUSPENDED = (now: Date): SQL => sql`(u.banned and (u.ban_expires is null or u.ban_expires > ${tsz(now)}))`;
+
+/**
+ * Raise the high-water mark, with no credit, of every recently scored session whose viewer may not
+ * earn on its channel right now (any verdict: a pending session verified later must not earn for
+ * this time either). With `everyone` (the daily cap is 0, so nobody earns) every such session is
+ * marked, so raising the cap later does not pay out the time before it.
+ */
+async function markUnearnable(db: Database, now: Date, everyone: boolean): Promise<void> {
+  const since = new Date(now.getTime() - SCORED_LOOKBACK_MS);
+  await db.execute(sql`
+    insert into loyalty_accrual_sessions (session_id, counted_seconds, updated_at)
+    select ps.id, ps.watch_seconds, ${tsz(now)}
+      from playback_sessions ps
+      join users u on u.id = ps.user_id
+      left join loyalty_accrual_sessions las on las.session_id = ps.id
+      left join bot_configs bc on bc.channel_id = ps.channel_id
+     where ps.user_id is not null
+       and ps.scored_at >= ${tsz(since)}
+       and ps.watch_seconds > coalesce(las.counted_seconds, 0)
+       and (${everyone ? sql`true` : sql`false`} or ${POINTS_OFF} or ${SUSPENDED(now)})
+    on conflict (session_id) do update
+       set counted_seconds = greatest(loyalty_accrual_sessions.counted_seconds, excluded.counted_seconds),
+           updated_at = excluded.updated_at`);
+}
+
 /** Who may earn on which channel: everything but the time itself (see the module comment). */
 function candidates(now: Date, after: { channelId: string; userId: string } | null, limit: number): SQL {
   const since = new Date(now.getTime() - SCORED_LOOKBACK_MS);
@@ -73,8 +104,8 @@ function candidates(now: Date, after: { channelId: string; userId: string } | nu
        and ps.user_id <> c.owner_id
        and u.account_type <> 'bot'
        and u.deleted_at is null
-       and not (u.banned and (u.ban_expires is null or u.ban_expires > ${tsz(now)}))
-       and coalesce(bc.config->'loyalty'->>'enabled', 'true') <> 'false'
+       and not ${SUSPENDED(now)}
+       and not ${POINTS_OFF}
        and not exists (select 1 from users where users.id = c.owner_id and ${anchoredUser()})
        and not exists (select 1 from users where users.id = ps.user_id and ${anchoredUser()})
        ${cursor}
@@ -106,6 +137,7 @@ async function accrueOne(
         id: s.playbackSessions.id,
         watch: s.playbackSessions.watchSeconds,
         counted: sql<number>`coalesce(${s.loyaltyAccrualSessions.countedSeconds}, 0)`.mapWith(Number),
+        startedAt: s.playbackSessions.startedAt,
       })
       .from(s.playbackSessions)
       .leftJoin(s.loyaltyAccrualSessions, eq(s.loyaltyAccrualSessions.sessionId, s.playbackSessions.id))
@@ -113,7 +145,13 @@ async function accrueOne(
     const grown = sessions.filter((x) => x.watch > x.counted);
     if (grown.length === 0) return 0;
 
-    const sinceLastRun = created.length > 0 ? null : (now.getTime() - state.updatedAt.getTime()) / 1000;
+    // No window on a first run, or when every growing session started after the last credit:
+    // then the sessions may have run side by side all along, so only the largest counts.
+    const firstStart = Math.min(...grown.map((x) => x.startedAt.getTime()));
+    const sinceLastRun =
+      created.length > 0 || state.updatedAt.getTime() < firstStart
+        ? null
+        : (now.getTime() - state.updatedAt.getTime()) / 1000;
     const seconds = creditableSeconds(
       grown.map((x) => x.watch - x.counted),
       sinceLastRun,
@@ -156,6 +194,7 @@ export async function accruePoints(
   const max = Math.max(1, opts.maxViewers ?? ACCRUAL_MAX_VIEWERS);
   const setting = await readPointsAccrual(ctx.db, ctx.logger);
   const result: AccrueResult = { viewers: 0, points: 0 };
+  await markUnearnable(ctx.db, now, setting.dailyCapPerChannel === 0);
   if (setting.dailyCapPerChannel === 0) return result;
 
   let after: { channelId: string; userId: string } | null = null;
@@ -163,7 +202,8 @@ export async function accruePoints(
   for (;;) {
     const limit = Math.min(batch, max - handled);
     if (limit <= 0) {
-      ctx.logger.warn("points accrual stopped early; the next run continues", { handled, max });
+      const more = (await ctx.db.execute(candidates(now, after, 1))) as unknown as Candidate[];
+      if (more.length > 0) ctx.logger.warn("points accrual stopped early; the next run continues", { handled, max });
       break;
     }
     const rows = (await ctx.db.execute(candidates(now, after, limit))) as unknown as Candidate[];

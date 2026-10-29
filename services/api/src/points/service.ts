@@ -49,7 +49,14 @@ async function channelBySlug(db: Executor, slug: string): Promise<ChannelRef> {
 
 async function userByUsername(db: Executor, username: string) {
   const [u] = await db
-    .select({ id: s.users.id, username: s.users.username, name: s.users.name, accountType: s.users.accountType })
+    .select({
+      id: s.users.id,
+      username: s.users.username,
+      name: s.users.name,
+      accountType: s.users.accountType,
+      deletedAt: s.users.deletedAt,
+      pseudonymizedAt: s.users.pseudonymizedAt,
+    })
     .from(s.users)
     .where(eq(s.users.username, username));
   if (!u) throw notFound("User not found");
@@ -110,6 +117,8 @@ export async function adjust(
 ): Promise<LoyaltyBalance> {
   if (p.delta === 0) throw badRequest("delta must not be 0");
   const target = await userByUsername(db, p.username);
+  // The leaderboard hides deleted accounts; nothing new goes on their append-only ledger either.
+  if (target.deletedAt !== null || target.pseudonymizedAt !== null) throw notFound("User not found");
   if (target.accountType === "bot") throw badRequest("Bot accounts do not hold channel points");
   const loyalty = await loyaltyOf(db, p.channel.id);
   const balance = await db

@@ -42,9 +42,9 @@ const wholeNonNegative = (n: number): number => (Number.isFinite(n) && n > 0 ? M
 /**
  * Add `eligibleSeconds` of gate-eligible watch time to `state` (null: the viewer's first time on
  * the channel). A new UTC day resets `dayPoints` but keeps the carry. Every whole block is used
- * up: blocks under the cap are credited, the rest are dropped (the cap is reached exactly, so a
- * block that crosses it is credited only up to the cap), and the remainder under one block is
- * carried, also at the cap.
+ * up: blocks that fit under the cap are credited whole, the rest are dropped (a block that would
+ * cross the cap is dropped too, so a cap that is not a multiple of `pointsPerBlock` is not reached
+ * exactly), and the remainder under one block is carried, also at the cap.
  */
 export function accrue(
   setting: PointsAccrualSetting,
@@ -59,7 +59,7 @@ export function accrue(
   const blockSeconds = setting.blockMinutes * 60;
   const blocks = Math.floor(total / blockSeconds);
   const room = Math.max(0, setting.dailyCapPerChannel - dayPoints);
-  const points = Math.min(blocks * setting.pointsPerBlock, room);
+  const points = Math.min(blocks, Math.floor(room / setting.pointsPerBlock)) * setting.pointsPerBlock;
   return {
     state: { carrySeconds: total - blocks * blockSeconds, day: today, dayPoints: dayPoints + points },
     points,
@@ -67,17 +67,26 @@ export function accrue(
 }
 
 /**
+ * A previous credit older than this (five `points-accrue` intervals) bounds nothing: the sessions
+ * growing now may have run side by side for all of it, so they count as a first run.
+ */
+export const ACCRUAL_STALE_SECONDS = 300;
+
+/**
  * How many of a viewer's new seconds on one channel count, when several sessions grew since the
  * last run: one viewer's concurrent sessions count once (decided 2026-10-29). At most the
- * wall-clock seconds since the previous run (`sinceLastRunSeconds`, null on the first run), but
- * never less than the largest single session's growth: heartbeats land on their own clock, so one
- * session can report a little more than the time between two runs, and that time is real.
+ * wall-clock seconds since the previous credit (`sinceLastRunSeconds`; null on the first run or
+ * when the caller knows the window says nothing, e.g. every session started after it), but never
+ * less than the largest single session's growth: heartbeats land on their own clock, so one
+ * session can report a little more than the time between two runs, and that time is real. With no
+ * window, or one older than `ACCRUAL_STALE_SECONDS`, only the largest session's growth counts, so
+ * two tabs never earn twice for time watched before their first credited run.
  */
 export function creditableSeconds(newSecondsPerSession: readonly number[], sinceLastRunSeconds: number | null): number {
   const grown = newSecondsPerSession.map(wholeNonNegative);
   const sum = grown.reduce((a, b) => a + b, 0);
   const largest = grown.reduce((a, b) => Math.max(a, b), 0);
-  if (sinceLastRunSeconds === null) return largest;
+  if (sinceLastRunSeconds === null || sinceLastRunSeconds > ACCRUAL_STALE_SECONDS) return largest;
   return Math.min(sum, Math.max(wholeNonNegative(sinceLastRunSeconds), largest));
 }
 

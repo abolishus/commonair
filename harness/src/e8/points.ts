@@ -90,6 +90,22 @@ async function ledgerRows(url: string, channelId: string, userIds: readonly stri
   }
 }
 
+/**
+ * The sum of a viewer's `watch` credits on a channel. Step 4 measures the change across its own
+ * watch, so points from earlier steps (a reward, a spent command) cannot pass or fail it.
+ */
+async function watchPoints(url: string, channelId: string, userId: string): Promise<number> {
+  const sql = new Bun.SQL(url);
+  try {
+    const [r] = (await sql`
+      select coalesce(sum(delta), 0)::int as n from loyalty_transactions
+       where channel_id = ${channelId}::uuid and user_id = ${userId}::uuid and reason = 'watch'`) as { n: number }[];
+    return r?.n ?? 0;
+  } finally {
+    await sql.close();
+  }
+}
+
 export async function stepViewbots(run: E8Run): Promise<void> {
   const { ctx } = run;
   const p = ctx.platform;
@@ -129,6 +145,9 @@ export async function stepViewbots(run: E8Run): Promise<void> {
   ctx.defer(() => honest.stop());
   ctx.defer(() => swarm.stop());
 
+  const watchedBefore = await ctx.step(t("the viewer's watch points before"), () =>
+    watchPoints(databaseUrl, channelId, viewer.id),
+  );
   await ctx.step(t("the viewer and the signed-in swarm start watching"), () =>
     Promise.all([honest.start(), swarm.start()]),
   );
@@ -162,18 +181,21 @@ export async function stepViewbots(run: E8Run): Promise<void> {
   const tick = await ctx.step(t("run points-accrue"), () => run.hooks.tick("points-accrue"));
   ctx.data("pointsAccrue", tick);
 
-  const balance = await ctx.step(t("the viewer's balance"), () =>
+  const earned = await ctx.step(t("the viewer's watch points"), () =>
     waitFor(
-      "viewer balance",
+      "viewer watch credit",
       async () => {
-        const b = await run.api.bot.points.balance({ channel, username: viewer.username });
-        return b.points > 0 ? b : null;
+        const n = (await watchPoints(databaseUrl, channelId, viewer.id)) - watchedBefore;
+        return n > 0 ? n : null;
       },
       { timeoutMs: 30_000, intervalMs: 1_000, signal: ctx.signal },
     ),
   );
-  ctx.data("viewerPoints", balance.points);
-  ctx.assert(`the viewer earned whole blocks of ${POINTS_PER_BLOCK}`, earnedWholeBlocks(balance.points), balance);
+  ctx.data("viewerPoints", earned);
+  ctx.assert(`the viewer earned whole blocks of ${POINTS_PER_BLOCK} by watching`, earnedWholeBlocks(earned), {
+    before: watchedBefore,
+    earned,
+  });
 
   const finalSwarm = await sessionRows(databaseUrl, swarm.sessionIds);
   ctx.data(

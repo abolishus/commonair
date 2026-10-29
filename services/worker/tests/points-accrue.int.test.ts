@@ -77,7 +77,7 @@ async function session(
   channelId: string,
   userId: string | null,
   watchSeconds: number,
-  opts: { verdict?: Verdict; reasons?: string[]; scored?: boolean } = {},
+  opts: { verdict?: Verdict; reasons?: string[]; scored?: boolean; startedAt?: Date } = {},
 ): Promise<string> {
   const id = uuidv7();
   await owner.insert(s.playbackSessions).values({
@@ -91,6 +91,7 @@ async function session(
     verdictReasons: opts.reasons ?? [],
     scoredAt: opts.scored === false ? null : new Date(),
     lastHeartbeatAt: new Date(),
+    ...(opts.startedAt ? { startedAt: opts.startedAt } : {}),
   });
   return id;
 }
@@ -182,6 +183,38 @@ describe("who earns", () => {
     await accruePoints(ctx());
     expect(await balance(c.id, v)).toBe(10);
   });
+
+  test("a suspension that ends mid-session: only the time after it earns", async () => {
+    const c = await channel();
+    const v = await user({ banned: true });
+    const t0 = new Date();
+    await owner
+      .update(s.users)
+      .set({ banExpires: new Date(t0.getTime() + 30_000) })
+      .where(eq(s.users.id, v));
+    const id = await session(c.id, v, 300);
+    await accruePoints(ctx(), { now: t0 });
+    expect(await txCount({ userId: v })).toBe(0);
+    await watch(id, 360);
+    await accruePoints(ctx(), { now: new Date(t0.getTime() + 60_000) });
+    expect(await balance(c.id, v)).toBe(10);
+  });
+
+  test("points turned on mid-session: only the time after it earns", async () => {
+    const c = await channel(undefined, false);
+    const v = await user();
+    const id = await session(c.id, v, 300);
+    const t0 = new Date();
+    await accruePoints(ctx(), { now: t0 });
+    expect(await txCount({ channelId: c.id })).toBe(0);
+    await owner
+      .update(s.botConfigs)
+      .set({ config: BotConfig.parse({ loyalty: { enabled: true, pointsName: "beans" } }) })
+      .where(eq(s.botConfigs.channelId, c.id));
+    await watch(id, 360);
+    await accruePoints(ctx(), { now: new Date(t0.getTime() + 60_000) });
+    expect(await balance(c.id, v)).toBe(10);
+  });
 });
 
 describe("demo data (decided 2026-10-29: demo:clear keeps working)", () => {
@@ -234,6 +267,43 @@ describe("how much", () => {
     expect(marks.filter((m) => m.sessionId === a || m.sessionId === b).map((m) => m.countedSeconds)).toEqual([
       120, 120,
     ]);
+  });
+
+  test("two concurrent sessions after a day-old credit earn as one", async () => {
+    const c = await channel();
+    const v = await user();
+    const t0 = new Date();
+    const yesterday = new Date(t0.getTime() - 86_400_000);
+    await owner.insert(s.loyaltyAccruals).values({
+      channelId: c.id,
+      userId: v,
+      day: yesterday.toISOString().slice(0, 10),
+      carrySeconds: 0,
+      dayPoints: 10,
+      updatedAt: yesterday,
+    });
+    await session(c.id, v, 120);
+    await session(c.id, v, 120);
+    await accruePoints(ctx(), { now: t0 });
+    expect(await balance(c.id, v)).toBe(20);
+  });
+
+  test("two sessions that started before a stale credit still earn as one", async () => {
+    const c = await channel();
+    const v = await user();
+    const t0 = new Date();
+    const tenAgo = new Date(t0.getTime() - 600_000);
+    await owner.insert(s.loyaltyAccruals).values({
+      channelId: c.id,
+      userId: v,
+      day: tenAgo.toISOString().slice(0, 10),
+      updatedAt: tenAgo,
+    });
+    const started = new Date(t0.getTime() - 1_200_000);
+    await session(c.id, v, 120, { startedAt: started });
+    await session(c.id, v, 120, { startedAt: started });
+    await accruePoints(ctx(), { now: t0 });
+    expect(await balance(c.id, v)).toBe(20);
   });
 
   test("a second run without new watch time credits nothing", async () => {
@@ -299,6 +369,23 @@ describe("how much", () => {
     expect(first).toEqual({ viewers: 2, points: 20 });
     const second = await accruePoints(ctx(), { batchSize: 1 });
     expect(second).toEqual({ viewers: 1, points: 10 });
+  });
+
+  test("stopping at maxViewers warns only when candidates are left", async () => {
+    const warnings: string[] = [];
+    const logger = { error: () => {}, warn: (msg: string) => void warnings.push(msg) };
+    const c = await channel();
+    const vs = await Promise.all([user(), user()]);
+    for (const v of vs) await session(c.id, v, 60);
+    expect(await accruePoints({ db: app, logger }, { batchSize: 1, maxViewers: 2 })).toEqual({
+      viewers: 2,
+      points: 20,
+    });
+    expect(warnings).toEqual([]);
+    for (const v of await Promise.all([user(), user(), user()])) await session(c.id, v, 60);
+    await accruePoints({ db: app, logger }, { batchSize: 1, maxViewers: 2 });
+    expect(warnings).toHaveLength(1);
+    await accruePoints({ db: app, logger });
   });
 });
 

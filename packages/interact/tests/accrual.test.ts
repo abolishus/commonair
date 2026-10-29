@@ -4,7 +4,14 @@
 /** Channel points accrual math (ADR 0026 decision 1): blocks, carry, the daily cap, UTC days. */
 import { describe, expect, test, vi } from "vite-plus/test";
 import { PointsAccrualSetting } from "@commonair/contracts/shapes";
-import { DEFAULT_POINTS_ACCRUAL, accrue, creditableSeconds, parsePointsAccrual, utcDay } from "../src/accrual.ts";
+import {
+  ACCRUAL_STALE_SECONDS,
+  DEFAULT_POINTS_ACCRUAL,
+  accrue,
+  creditableSeconds,
+  parsePointsAccrual,
+  utcDay,
+} from "../src/accrual.ts";
 
 const S = DEFAULT_POINTS_ACCRUAL; // 10 per 5 min, 1,000 a day
 const NOW = new Date("2026-10-29T12:00:00Z");
@@ -39,10 +46,14 @@ describe("accrue", () => {
     expect(accrue(S, at.state, 420, NOW)).toEqual({ points: 0, state: day(120, 1000) });
   });
 
-  test("over the cap: blocks past it dropped, a crossing block credited only up to it", () => {
+  test("over the cap: blocks past it dropped, a block that would cross it dropped whole", () => {
     expect(accrue(S, day(0, 980), 5 * 300 + 7, NOW)).toEqual({ points: 20, state: day(7, 1000) });
     const odd = { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 25 };
-    expect(accrue(odd, day(0, 20), 600, NOW)).toEqual({ points: 5, state: day(0, 25) });
+    expect(accrue(odd, day(0, 0), 900, NOW)).toEqual({ points: 20, state: day(0, 20) });
+    expect(accrue(odd, day(0, 20), 600, NOW)).toEqual({ points: 0, state: day(0, 20) });
+    const seven = { pointsPerBlock: 7, blockMinutes: 5, dailyCapPerChannel: 1000 };
+    expect(accrue(seven, day(0, 994), 600, NOW)).toEqual({ points: 0, state: day(0, 994) });
+    expect(accrue(seven, day(0, 990), 600, NOW)).toEqual({ points: 7, state: day(0, 997) });
   });
 
   test("day rollover resets the day's points and keeps the carry", () => {
@@ -98,8 +109,10 @@ describe("creditableSeconds (concurrent sessions count once)", () => {
     expect(creditableSeconds([65, 65], 60)).toBe(65);
   });
 
-  test("a long gap since the last run bounds nothing beyond the sum", () => {
-    expect(creditableSeconds([100, 200], 86_400)).toBe(300);
+  test("a stale last credit counts as a first run: the largest session only", () => {
+    expect(creditableSeconds([100, 200], 86_400)).toBe(200);
+    expect(creditableSeconds([100, 200], ACCRUAL_STALE_SECONDS + 1)).toBe(200);
+    expect(creditableSeconds([100, 200], ACCRUAL_STALE_SECONDS)).toBe(300);
   });
 
   test("negative growth and a negative window are ignored", () => {
