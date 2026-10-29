@@ -35,17 +35,51 @@ app-level disconnects, `/eventsub/ws` in Caddy, `harness/compose.e9.yaml`, the
 ADR 0035), seven placeholder routes, `returnTo` on sign-in and sign-up), then N2. Waves then start
 from the N2 step's sha:
 
-| Wave | Units                                                                   | State   |
-| ---- | ----------------------------------------------------------------------- | ------- |
-| 1    | N2-core, E8-polls, E8-raids-goals, E8-points, E8-bot-engine, E8-bot-api | waiting |
-| 2    | E9-oauth, E9-apps, E9-subs, E9-ws, E8-studio, E8-viewer                 | waiting |
-| 3    | E9-sdk, E9-consent, E9-console, N2-consent                              | waiting |
+| Wave | Units                                                                   | State                                                   |
+| ---- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| 1    | N2-core, E8-polls, E8-raids-goals, E8-points, E8-bot-engine, E8-bot-api | merged `d3b705a`…`bab135d`; contract requests `29c1ffd` |
+| 2    | E9-oauth, E9-apps, E9-subs, E9-ws, E8-studio, E8-viewer                 | merged `5660e8c`…`3087f85`; contract requests `db38034` |
+| 3    | E9-sdk, E9-consent, E9-console, N2-consent                              | merged `6d94b96`…`c8d225c`; milestone wiring `4dbbce1`  |
 
-E8 harness steps (`interact` 1-6, `channel-bot` 1-6) are all pending (`harness/src/e8/steps.ts`)
-until their units merge; both scenarios are `inFull: false` until the milestone's end.
-E9 harness steps (`developer-platform` 1-8) are pending (`ready: false` in `harness/src/e9/*.ts`)
-until their units merge; the scenario skips pending steps, and `FULL_REQUIRED` gains it when the
-last E9 unit merges.
+Contract steps: E8 `5a59feb` + `221ed29`, E9 `a59aad1` + `a493779`, N2 `81211d2` + `a8bd952`.
+Each unit ran implement → independent review → fix in its own worktree (Workflow tool); units
+ran targeted checks only. Milestone wiring (`4dbbce1`): `interact`, `channel-bot` and
+`developer-platform` are in `FULL_REQUIRED`; `interact` and `channel-bot` run in a new CI shard
+`interact`; selector checks cover the e8, e9 and n2 docs. No `notImplemented` is left in
+`interact.ts`, `bot.ts` or `developer/*`.
+
+**Decisions (user, 2026-10-29):** SDK under Apache-2.0 (ADR 0035; the rest of the repo stays
+AGPL); terms and privacy both bumped (drafts, counsel not reviewed); a consent banner and footer
+cookie settings in batch 3 (N2-consent); no points accrual on demo channels; the per-channel bot
+cannot be given API tokens. Orchestrator defaults: goal progress counted in the outbox relay
+transaction (ADR 0026 amendment 1); per-channel accrual knobs removed; the channel bot is a
+channel moderator (granted once, at first enable); goals count from zero; channel staff cannot
+bet; raid countdown 30 s; concurrent sessions accrue once; grant revocation notices best effort
+after commit (ADR 0027); `oauth.activation`/`activate` are POSTs; sign-up honours `returnTo`;
+a footer locale cookie outranks Accept-Language.
+
+**CI fixes so far:** E6 webhook fixture vs the E9 transport check (`dbe2723`); generated SPDX
+header vs `reuse lint` (`585f5d0`); the e9-subs app-limit test left 10,000 rows behind and a
+later list test paged through them past the timeout (`1b0d749`); `developer-platform` step 2
+replayed inside the 2 s refresh reuse grace (`aee8112`). CI green on `dbe2723` (contract steps).
+
+**Open (batch 3):**
+
+- First live runs of `interact`, `channel-bot` and `developer-platform` are on CI now; none ran
+  against a stack before merge.
+- `account-deletion` step 6 (completed email) timed out once on `db38034` with no deletion or
+  mail change since a green run; `integrity-basic`'s hidden-tab dip (7 → 6) recurred once on
+  `29c1ffd`. Both treated as flakes until they recur.
+- User: confirm dual-licensing the ten inlined contract files as `AGPL-3.0-or-later OR
+  Apache-2.0` (ADR 0035; the SDK build refuses to publish until then), create the `@commonair`
+  npm organisation and the trusted-publisher link. The OAuth token endpoint still accepts query
+  parameters (Twitch client compatibility); refusing them is the maintainer's call.
+- Counsel: the points no-cash-value terms clause, the privacy paragraph, the cookie policy's
+  language paragraph.
+- Follow-ups: a separate `PREDICTION_RULES.maxBetPoints` contract constant (web mirrors it);
+  the console's own scope labels → E9-consent's `oauth.scope.*`; signed-out OAuth `state` values
+  that parse as JSON can be rewritten by the router on the sign-in round trip; N2 rest (es
+  catalog, N2-ui, N2-email, switcher, Weblate) is the next N2 batch.
 
 Batch 2 (E7 + W0 + P1; waves and shared rules: `.claude/briefs/batch2/README.md`), started
 2026-10-27. ADRs 0005 amendment 1 (P1), 0012 part 1 (W0-clock), 0019 (W0-sor) and 0009
@@ -62,10 +96,8 @@ feature-wins.md are corrected to match. Open for the maintainer: the SDK's npm o
 the contract files its bundle inlines (ADR 0035; the licence itself is decided, Apache-2.0); owners for CDN
 fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~86 MB/h (0018);
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
-Legal seed follow-ups for E8/N2: the E8 contract step added the no-cash-value clause to
-`terms.md` (`TERMS_SEED_VERSION`) and the channel-features paragraph to `privacy.md` (bumped
-`PRIVACY_SEED_VERSION`); **counsel has reviewed neither**. Still open: the locale cookie in
-`cookies.md` (N2).
+Legal seed follow-ups for E8/N2: done in batch 3 (terms, privacy and cookies seeds bumped);
+**counsel has reviewed none of them**.
 **Batch 2 state (2026-10-28): waves 1–3 merged and pushed; CI green on main `048d397` (every job, all four harness shards). Batch done; open findings below.**
 
 | Unit              | Wave | Commits (branch)                   | State                                                                                     |
