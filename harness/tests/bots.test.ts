@@ -10,7 +10,7 @@ import { ChannelChatSettings, ClientFrame, type ServerFrame } from "@commonair/c
 import type { ServerWebSocket } from "bun";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { formatUptime, replyTo } from "../src/bots/commands.ts";
-import { type BotChatConnection, type BotSdk, SdkBot } from "../src/bots/sdk-bot.ts";
+import { type BotChatConnection, type BotSdk, SdkBot, createContractSdk } from "../src/bots/sdk-bot.ts";
 import { EVENT_LOG_LIMIT, TmiBot, TmiEventLog, tmiConnection, twitchTagProblems } from "../src/bots/tmi-bot.ts";
 import { ChatClient, ChatProtocolError } from "../src/chat-client.ts";
 import { waitFor } from "../src/wait.ts";
@@ -216,6 +216,59 @@ describe("SDK bot", () => {
     expect(bot.replies.map((r) => r.reply).sort()).toEqual(["live for 1m 5s", "pong"]);
     const sent = fake.received.flatMap((f) => (f.op === "send" ? [f.body] : []));
     expect(sent.sort()).toEqual(["live for 1m 5s", "pong"]);
+  });
+
+  test("createContractSdk runs on @commonair/sdk: bearer API calls, chat URL from connectToken, replies", async () => {
+    const fake = startFakeChat({ requireBearer: "bot-token" });
+    const calls: { path: string; auth: string | null }[] = [];
+    const api = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(req) {
+        const path = new URL(req.url).pathname;
+        calls.push({ path, auth: req.headers.get("authorization") });
+        if (path === "/rpc/chat/connectToken")
+          return Response.json({
+            json: { token: "unused", url: fake.url, expiresAt: new Date().toISOString() },
+            meta: [],
+          });
+        if (path === "/rpc/channels/get")
+          return Response.json({
+            json: { live: { startedAt: new Date(Date.now() - 65_500).toISOString() } },
+            meta: [],
+          });
+        return new Response("not found", { status: 404 });
+      },
+    });
+    stops.push(() => api.stop(true));
+    const sdk: BotSdk = createContractSdk({ apiUrl: `http://127.0.0.1:${api.port}`, token: "bot-token" });
+    const botId = "0193a1b2-0000-7000-8000-0000000000bb";
+    const bot = new SdkBot({ sdk, botUserId: botId, channels: ["chan"] });
+    await bot.start();
+    stops.push(() => bot.stop());
+    expect(fake.received.filter((f) => f.op === "join").map((f) => f.op === "join" && f.channel)).toEqual(["chan"]);
+    fake.broadcast(fake.message("!uptime"));
+    fake.broadcast(fake.message("!ping", { id: botId, username: "the_bot" }));
+    await waitFor("one reply", () => bot.replies.length >= 1, { timeoutMs: 5_000, intervalMs: 20 });
+    await Bun.sleep(100);
+    expect(bot.replies.map((r) => r.reply)).toEqual(["live for 1m 5s"]);
+    expect(calls.map((c) => c.path)).toEqual(["/rpc/chat/connectToken", "/rpc/channels/get"]);
+    expect(calls.every((c) => c.auth === "Bearer bot-token")).toBe(true);
+  });
+
+  test("createContractSdk: an explicit chat URL skips connectToken; a rejected reply throws", async () => {
+    const fake = startFakeChat({ requireBearer: "bot-token" });
+    const sdk = createContractSdk({ apiUrl: "http://127.0.0.1:9", token: "bot-token", chatUrl: fake.url });
+    const chat = await sdk.connectChat();
+    stops.push(() => chat.close());
+    await chat.join("chan");
+    await chat.say("chan", "hello");
+    await expect(chat.say("chan", "rejected")).rejects.toThrow(/rejected/);
+    const got: string[] = [];
+    chat.onMessage((m) => got.push(`${m.username}: ${m.text}`));
+    fake.broadcast(fake.message("hi"));
+    await waitFor("message", () => got.length === 1, { timeoutMs: 2_000, intervalMs: 20 });
+    expect(got[0]).toMatch(/: hi$/);
   });
 });
 
