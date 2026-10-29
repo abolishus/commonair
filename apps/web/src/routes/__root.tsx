@@ -6,7 +6,9 @@ import { LocaleProvider, NowProvider, TooltipProvider, applyTheme, useResolvedTh
 import { Toaster } from "@commonair/ui/toast";
 import { HeadContent, Outlet, Scripts, createRootRoute, useLocation } from "@tanstack/react-router";
 import * as React from "react";
-import { locale, t, uiMessages } from "../i18n/index.ts";
+import { localeDirection } from "@commonair/i18n";
+import { onLocaleApplied, restoreTabLocale } from "../i18n/client.ts";
+import { t, uiMessagesFor } from "../i18n/index.ts";
 import { getBootstrap } from "../lib/bootstrap.ts";
 import { rootChrome } from "../lib/overlay-page.ts";
 import { storeTheme } from "../lib/theme.ts";
@@ -41,6 +43,12 @@ function RootComponent(): React.JSX.Element {
   React.useEffect(() => {
     document.documentElement.dataset.hydrated = "true";
   }, []);
+  // `t()` is not reactive: a language switch remounts everything under `LocaleProvider`.
+  const [active, setActive] = React.useState({ locale: boot.locale, generation: 0 });
+  React.useEffect(() => onLocaleApplied((locale) => setActive((s) => ({ locale, generation: s.generation + 1 }))), []);
+  React.useEffect(() => {
+    void restoreTabLocale(boot.locale);
+  }, [boot.locale]);
   const themeValue = React.useMemo(
     () => ({
       theme,
@@ -53,12 +61,18 @@ function RootComponent(): React.JSX.Element {
     [theme],
   );
   return (
-    <html lang={locale} data-theme={theme} data-overlay={chrome.dataOverlay} className={chrome.htmlClass}>
+    <html
+      lang={active.locale}
+      dir={localeDirection(active.locale)}
+      data-theme={theme}
+      data-overlay={chrome.dataOverlay}
+      className={chrome.htmlClass}
+    >
       <head>
         <HeadContent />
       </head>
       <body className={chrome.bodyClass}>
-        <LocaleProvider locale={locale} messages={uiMessages}>
+        <LocaleProvider key={active.generation} locale={active.locale} messages={uiMessagesFor(active.locale)}>
           <NowProvider now={boot.now}>
             <TooltipProvider>
               <ThemeContext.Provider value={themeValue}>

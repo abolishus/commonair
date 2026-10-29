@@ -25,4 +25,8 @@ export interface Bootstrap {
   theme: Theme;
   /** Server time of the request, so relative times hydrate identically. */
   now: number;
+  /** The negotiated locale (ADR 0029: `Me.locale`, cookie, Accept-Language, instance default). */
+  locale: string;
+  /** Its text direction, for `<html dir>`. */
+  dir: "ltr" | "rtl";
 }

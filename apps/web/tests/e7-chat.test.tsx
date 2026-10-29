@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { ChatConnection, type ChatDeps, type ChatEvents, type ChatMessageFrame } from "../src/chat/connection.ts";
 import { HeldQueue, type HeldClient } from "../src/components/mod/held-queue.tsx";
 import { EMPTY_HELD, heldReducer, type HeldState } from "../src/components/mod/held-state.ts";
-import { e7ChatMessages } from "../src/i18n/e7-chat.ts";
+import e7ChatMessages from "../src/i18n/locales/en/e7-chat.json" with { type: "json" };
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
 afterEach(cleanup);

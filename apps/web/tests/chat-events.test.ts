@@ -68,6 +68,18 @@ describe("chatEventView", () => {
     expect(chatEventText(anon!)).toBe("An anonymous viewer gifted 2 Tier 1 subs");
   });
 
+  it("channel.subscription.gift with no total → the plural's other branch, the total left empty", () => {
+    const v = chatEventView("channel.subscription.gift", giftPayload())!;
+    expect(chatEventText({ ...v, total: null })).toBe("KanjiKat gifted  Tier 1 subs");
+    expect(chatEventText({ ...v, name: null, total: null })).toBe("An anonymous viewer gifted  Tier 1 subs");
+  });
+
+  it("channel.subscription.gift of 1,000 or more → the total is grouped (ICU `#`)", () => {
+    const v = chatEventView("channel.subscription.gift", giftPayload({ total: 1000 }))!;
+    expect(chatEventText(v)).toBe("KanjiKat gifted 1,000 Tier 1 subs");
+    expect(chatEventText({ ...v, name: null, total: 25_000 })).toBe("An anonymous viewer gifted 25,000 Tier 1 subs");
+  });
+
   it("channel.tip → cents, currency and message; an anonymous tip has an empty data-user", () => {
     const v = chatEventView("channel.tip", tipPayload());
     expect(v).toMatchObject({ user: "wren", amount: { cents: 500, currency: "usd" }, message: "Great stream" });
