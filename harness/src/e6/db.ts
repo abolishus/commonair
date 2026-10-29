@@ -283,10 +283,10 @@ export async function seedWebhookDelivery(
     const deliveryId = uuidv7();
     await sql.begin(async (tx) => {
       await tx`
-        insert into event_subscriptions (id, user_id, type, version, condition, transport, callback_url, status)
+        insert into event_subscriptions (id, user_id, type, version, condition, transport, callback_url, secret_ciphertext, status)
         values (${subscriptionId}, ${input.subscriberId}, 'channel.tip', '1',
                 ${JSON.stringify({ broadcaster_user_id: input.subscriberId })}::jsonb, 'webhook',
-                'http://harness.invalid/webhook', 'revoked')`;
+                'http://harness.invalid/webhook', 'harness-fixture-never-delivered', 'revoked')`;
       await tx`
         insert into webhook_deliveries (id, subscription_id, event_id, message_id, status, response_status, response_body)
         values (${deliveryId}, ${subscriptionId}, ${input.eventId}, ${uuidv7()}, 'succeeded', 200, ${input.responseBody})`;
