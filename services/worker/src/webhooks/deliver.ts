@@ -121,14 +121,30 @@ export async function sendRevocation(ctx: WorkerContext, sub: SubscriptionRow, s
 export async function notifyRevoked(ctx: WorkerContext, subscriptionId: string): Promise<0 | 1> {
   const sub = await loadSubscription(ctx, subscriptionId);
   if (!sub || sub.status !== "revoked" || sub.transport !== "webhook") return 0;
-  const [prior] = await ctx.db
-    .select({ id: deliveries.id })
-    .from(deliveries)
-    .where(and(eq(deliveries.subscriptionId, sub.id), eq(deliveries.messageType, "revocation")))
-    .limit(1);
-  if (prior) return 0;
-  await sendRevocation(ctx, sub, ENVELOPE_STATUS.revoked, uuidv7());
-  return 1;
+  return withRevocationLock(ctx, sub.id, async () => {
+    const [prior] = await ctx.db
+      .select({ id: deliveries.id })
+      .from(deliveries)
+      .where(and(eq(deliveries.subscriptionId, sub.id), eq(deliveries.messageType, "revocation")))
+      .limit(1);
+    if (prior) return 0;
+    await sendRevocation(ctx, sub, ENVELOPE_STATUS.revoked, uuidv7());
+    return 1;
+  });
+}
+
+/**
+ * Serializes revocation sends per subscription: the log row is written only after the POST, so
+ * without the lock two `revocation` jobs (or one beside `revoke`) could both miss it and both send.
+ * The lock's transaction only holds the lock; the send logs on its own connection and commits
+ * before the lock is released, so the next holder sees the row. Revocations are rare, so holding
+ * a connection for one POST is acceptable.
+ */
+async function withRevocationLock<T>(ctx: WorkerContext, subscriptionId: string, fn: () => Promise<T>): Promise<T> {
+  return ctx.db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`webhook-revocation:${subscriptionId}`}, 0))`);
+    return fn();
+  });
 }
 
 /** Revoke (once) and tell the receiver. Returns false if another worker got there first. */
@@ -145,7 +161,9 @@ export async function revoke(
     .returning({ id: subs.id });
   if (updated.length === 0) return false;
   ctx.logger.info("webhook subscription revoked", { subscriptionId: sub.id, type: sub.type, reason });
-  await sendRevocation(ctx, { ...sub, status: "revoked" }, ENVELOPE_STATUS.revoked, eventId);
+  await withRevocationLock(ctx, sub.id, () =>
+    sendRevocation(ctx, { ...sub, status: "revoked" }, ENVELOPE_STATUS.revoked, eventId),
+  );
   return true;
 }
 

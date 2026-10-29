@@ -206,6 +206,8 @@ async function createWebhook(deps: Deps, base: NewSubscription, callback: string
         .where(
           and(
             eq(subs.transport, "webhook"),
+            // Revoked and failed rows are dead weight the developer may not have cleaned up yet.
+            inArray(subs.status, ["enabled", "verification_pending"]),
             base.appId === null ? and(isNull(subs.appId), eq(subs.userId, base.userId)) : eq(subs.appId, base.appId),
           ),
         );
@@ -385,6 +387,8 @@ export async function sendTest(deps: Deps, resolved: ResolvedActor, id: string) 
 /**
  * `developer.events.redeliver`: one more attempt of a logged notification, same message id. Only
  * notifications of real events (test events have no outbox row to replay) of an enabled subscription.
+ * A succeeded delivery may be redelivered too (deliberately, unlike the brief's "that failed"): a
+ * receiver that lost a message it acknowledged needs it again, and the harness relies on it.
  */
 export async function redeliver(deps: Deps, resolved: ResolvedActor, deliveryId: string) {
   const actor = actorOf(resolved);

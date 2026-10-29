@@ -181,6 +181,15 @@ describe("condition keys", () => {
     });
     expect(checkTypeAndCondition("channel.follow", "1", {})).toMatchObject({ requirement: "condition_keys" });
   });
+  test("user id fields must be UUIDs", () => {
+    expect(checkTypeAndCondition("channel.subscribe", "1", { broadcaster_user_id: "abc" })).toMatchObject({
+      requirement: "condition_keys",
+      message: expect.stringContaining("broadcaster_user_id"),
+    });
+    expect(
+      checkTypeAndCondition("channel.chat.message", "1", { broadcaster_user_id: STREAMER, user_id: "not-a-uuid" }),
+    ).toMatchObject({ requirement: "condition_keys", message: expect.stringContaining("user_id") });
+  });
   test("only version 1 exists", () => {
     expect(checkTypeAndCondition("channel.follow", "2", { broadcaster_user_id: STREAMER })).toMatchObject({
       requirement: "version",

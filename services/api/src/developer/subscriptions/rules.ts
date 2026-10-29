@@ -50,6 +50,8 @@ export interface Plan {
 export const isPublicEventType = (t: string): t is PublicEventType =>
   (PUBLIC_EVENT_TYPES as readonly string[]).includes(t);
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const precondition = (requirement: string, message: string): Refusal => ({
   code: "PRECONDITION_FAILED",
   requirement,
@@ -70,6 +72,9 @@ export function checkTypeAndCondition(
   if (unknown.length > 0) return precondition("condition_keys", `Unknown condition fields: ${unknown.join(", ")}`);
   const missing = expected.filter((k) => !Object.hasOwn(condition, k) || condition[k] === "");
   if (missing.length > 0) return precondition("condition_keys", `Missing condition fields: ${missing.join(", ")}`);
+  // User ids are UUIDs; anything else would reach uuid columns (authorization lookups) and fail there.
+  const notIds = keys.filter((k) => k.endsWith("user_id") && !UUID.test(condition[k] ?? ""));
+  if (notIds.length > 0) return precondition("condition_keys", `Not a user id: ${notIds.join(", ")}`);
   return null;
 }
 

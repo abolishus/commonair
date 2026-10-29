@@ -207,6 +207,16 @@ describe("webhook subscriptions", () => {
     expect(missing.body.data).toEqual({ requirement: "condition_keys" });
   });
 
+  test("a non-UUID user id in the condition is condition_keys, not a 500", async () => {
+    const r = await post(as(tokA), {
+      type: "channel.subscribe",
+      condition: { broadcaster_user_id: "abc" },
+      transport: { method: "webhook", callback: hook(), secret: "s3cret-0123456789" },
+    });
+    expect(r.status).toBe(412);
+    expect(r.body.data).toEqual({ requirement: "condition_keys" });
+  });
+
   test("appId from a token caller is FORBIDDEN", async () => {
     expect((await post(as(tokA), { ...follow(), appId: appA })).status).toBe(403);
   });
@@ -277,6 +287,32 @@ describe("webhook subscriptions", () => {
               'https://hooks.example.com/' || i, 'ct' from generate_series(1, 1000) i`,
     );
     const r = await post(as(personal.raw), follow());
+    expect(r.status).toBe(412);
+    expect(r.body.data).toEqual({ requirement: "subscription_limit" });
+  });
+
+  test("revoked and failed rows do not count toward the limit", async () => {
+    const user = await newUser();
+    const personal = await token(null, user);
+    await db().execute(
+      sql`insert into event_subscriptions (id, user_id, type, condition, transport, callback_url, secret_ciphertext, status)
+       select gen_random_uuid(), ${user}::uuid, 'channel.follow', '{"broadcaster_user_id":"x"}'::jsonb, 'webhook',
+              'https://hooks.example.com/' || i, 'ct', case when i % 2 = 0 then 'revoked' else 'failed' end::event_subscription_state
+       from generate_series(1, 1000) i`,
+    );
+    expect((await post(as(personal.raw), follow())).status).toBe(200);
+  });
+
+  test("app limit: 10000 webhook subscriptions per app", async () => {
+    const app = await newApp(dev.userId);
+    const appTok = (await token(app, null)).raw;
+    await db().execute(
+      sql`insert into event_subscriptions (id, app_id, user_id, type, condition, transport, callback_url, secret_ciphertext, status)
+       select gen_random_uuid(), ${app}::uuid, ${dev.userId}::uuid, 'channel.follow', '{"broadcaster_user_id":"x"}'::jsonb,
+              'webhook', 'https://hooks.example.com/' || i, 'ct', 'enabled'
+       from generate_series(1, 10000) i`,
+    );
+    const r = await post(as(appTok), follow());
     expect(r.status).toBe(412);
     expect(r.body.data).toEqual({ requirement: "subscription_limit" });
   });
