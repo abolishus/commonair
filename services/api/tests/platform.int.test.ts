@@ -5,7 +5,9 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { BUS } from "@commonair/contracts/events";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER, MEDIA_INTERNAL_USER, mediaPath } from "@commonair/contracts/internal";
+import { BotConfig } from "@commonair/contracts/shapes";
 import { schema } from "@commonair/db";
+import { insertBotAccount } from "../src/auth/bot-account.ts";
 import { client, signUpAndSignIn, startApi, subscriber, type Client, type TestApi } from "./harness.ts";
 
 let api: TestApi;
@@ -599,6 +601,47 @@ describe("tokens, bots and the API surface", () => {
     expect(
       (await bob.client.call("POST", `/api/me/bots/${bot.body.id}/tokens`, { scopes: ["chat:read"] })).status,
     ).toBe(404);
+  });
+
+  test("the channel bot takes no bot slot and cannot have tokens (E8)", async () => {
+    const carol = await signUpAndSignIn(api);
+    const channel = await channelOf(carol.username);
+    const channelBot = await insertBotAccount(db(), {
+      ownerId: channel.ownerId,
+      username: `${carol.username.slice(0, 18)}_bot`,
+      displayName: "Carol's channel bot",
+    });
+    await db()
+      .insert(schema.botConfigs)
+      .values({ channelId: channel.id, config: BotConfig.parse({}), botUserId: channelBot.id });
+    const ids: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const r = await carol.client.call<{ id: string }>("POST", "/api/me/bots", {
+        username: `${carol.username.slice(0, 18)}_b${i}`,
+        displayName: `Bot ${i}`,
+      });
+      expect(r.status, `bot ${i}`).toBe(200);
+      ids.push(r.body.id);
+    }
+    const eleventh = await carol.client.call<{ data: { requirement: string } }>("POST", "/api/me/bots", {
+      username: `${carol.username.slice(0, 18)}_bx`,
+      displayName: "One too many",
+    });
+    expect(eleventh.status).toBe(412);
+    expect(eleventh.body.data.requirement).toBe("bot_limit");
+
+    const refused = await carol.client.call<{ code: string; data: { requirement: string } }>(
+      "POST",
+      `/api/me/bots/${channelBot.id}/tokens`,
+      { scopes: ["chat:read"] },
+    );
+    expect(refused.status).toBe(412);
+    expect(refused.body).toMatchObject({ code: "PRECONDITION_FAILED", data: { requirement: "channel_bot" } });
+    expect(await db().select().from(schema.oauthTokens).where(eq(schema.oauthTokens.userId, channelBot.id))).toEqual(
+      [],
+    );
+    const ordinary = await carol.client.call("POST", `/api/me/bots/${ids[0]}/tokens`, { scopes: ["chat:read"] });
+    expect(ordinary.status).toBe(200);
   });
 
   test("OpenAPI document, instance info and status", async () => {

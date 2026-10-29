@@ -6,6 +6,8 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
+  date,
   index,
   integer,
   jsonb,
@@ -18,14 +20,17 @@ import {
 import type { AlertTemplate, BotConfig, PollChoice, PredictionOutcome } from "@commonair/contracts/shapes";
 import { users } from "./auth.ts";
 import { channels } from "./channels.ts";
+import { playbackSessions } from "./delivery.ts";
 import {
   alertType,
   cents,
   createdAt,
   goalType,
   id,
+  loyaltyReason,
   pollStatus,
   predictionStatus,
+  raidCancelReason,
   raidStatus,
   songRequestStatus,
   ts,
@@ -37,8 +42,12 @@ export const botConfigs = pgTable("bot_configs", {
   channelId: uuid()
     .primaryKey()
     .references(() => channels.id, { onDelete: "cascade" }),
-  enabled: boolean().notNull().default(true),
+  enabled: boolean().notNull().default(false),
   config: jsonb().$type<BotConfig>().notNull(),
+  /** The channel's bot account; null until the bot is first enabled. */
+  botUserId: uuid()
+    .unique()
+    .references(() => users.id, { onDelete: "restrict" }),
   updatedAt: updatedAt(),
 });
 
@@ -95,38 +104,86 @@ export const botVariables = pgTable(
   (t) => [primaryKey({ columns: [t.channelId, t.name] })],
 );
 
+/**
+ * Written only by the `loyalty_transactions` trigger (migration 0034); the CHECK makes an overdraw
+ * fail the inserting transaction.
+ */
 export const loyaltyBalances = pgTable(
   "loyalty_balances",
   {
     channelId: uuid()
       .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+      .references(() => channels.id, { onDelete: "restrict" }),
     userId: uuid()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "restrict" }),
     points: bigint({ mode: "number" }).notNull().default(0),
     updatedAt: updatedAt(),
   },
-  (t) => [primaryKey({ columns: [t.channelId, t.userId] })],
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.userId] }),
+    check("loyalty_balances_points_nonneg", sql`${t.points} >= 0`),
+    index("loyalty_balances_leaderboard_idx").on(t.channelId, t.points),
+  ],
 );
 
+/** The points ledger (ADR 0026 decision 2): append-only, balances follow by trigger (migration 0034). */
 export const loyaltyTransactions = pgTable(
   "loyalty_transactions",
   {
     id: id(),
     channelId: uuid()
       .notNull()
+      .references(() => channels.id, { onDelete: "restrict" }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    delta: bigint({ mode: "number" }).notNull(),
+    reason: loyaltyReason().notNull(),
+    /** The poll, prediction, command or audit row. */
+    refId: uuid(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("loyalty_tx_user_idx").on(t.channelId, t.userId, t.createdAt),
+    check("loyalty_tx_delta_nonzero", sql`${t.delta} <> 0`),
+    check(
+      "loyalty_tx_sign_ck",
+      sql`(${t.reason} in ('watch', 'prediction_payout', 'prediction_refund') and ${t.delta} > 0)
+       or (${t.reason} in ('command', 'prediction_bet', 'poll_vote') and ${t.delta} < 0)
+       or ${t.reason} = 'moderator_adjust'`,
+    ),
+  ],
+);
+
+/** Points accrual state per viewer and channel (worker `points-accrue` only; mutable, no history). */
+export const loyaltyAccruals = pgTable(
+  "loyalty_accruals",
+  {
+    channelId: uuid()
+      .notNull()
       .references(() => channels.id, { onDelete: "cascade" }),
     userId: uuid()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    delta: bigint({ mode: "number" }).notNull(),
-    reason: text().notNull(),
-    refId: uuid(),
-    createdAt: createdAt(),
+    /** Gate-eligible seconds not yet worth a whole block. */
+    carrySeconds: integer().notNull().default(0),
+    /** The UTC day `dayPoints` counts. */
+    day: date({ mode: "string" }).notNull(),
+    dayPoints: integer().notNull().default(0),
+    updatedAt: updatedAt(),
   },
-  (t) => [index("loyalty_tx_user_idx").on(t.channelId, t.userId, t.createdAt)],
+  (t) => [primaryKey({ columns: [t.channelId, t.userId] })],
 );
+
+/** High-water mark per playback session: watch seconds already turned into carry or points. */
+export const loyaltyAccrualSessions = pgTable("loyalty_accrual_sessions", {
+  sessionId: uuid()
+    .primaryKey()
+    .references(() => playbackSessions.id, { onDelete: "cascade" }),
+  countedSeconds: integer().notNull().default(0),
+  updatedAt: updatedAt(),
+});
 
 export const songRequests = pgTable(
   "song_requests",
@@ -138,11 +195,15 @@ export const songRequests = pgTable(
     requesterId: uuid()
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    query: text().notNull(),
+    /** A link; never fetched. */
+    url: text().notNull(),
     status: songRequestStatus().notNull().default("queued"),
     createdAt: createdAt(),
   },
-  (t) => [index("song_requests_channel_idx").on(t.channelId, t.status, t.createdAt)],
+  (t) => [
+    index("song_requests_channel_idx").on(t.channelId, t.status, t.createdAt),
+    index("song_requests_requester_idx").on(t.channelId, t.requesterId, t.status),
+  ],
 );
 
 export const polls = pgTable(
@@ -162,8 +223,20 @@ export const polls = pgTable(
     startedAt: ts().notNull().defaultNow(),
     endsAt: ts().notNull(),
     endedAt: ts(),
+    /** Last vote. */
+    changedAt: ts(),
+    /** Last `channel.poll.progress`. */
+    progressAt: ts(),
   },
-  (t) => [index("polls_channel_idx").on(t.channelId, t.startedAt)],
+  (t) => [
+    index("polls_channel_idx").on(t.channelId, t.startedAt),
+    uniqueIndex("polls_channel_active_uq")
+      .on(t.channelId)
+      .where(sql`${t.status} = 'active'`),
+    index("polls_due_idx")
+      .on(t.endsAt)
+      .where(sql`${t.status} = 'active'`),
+  ],
 );
 
 export const pollVotes = pgTable(
@@ -198,9 +271,22 @@ export const predictions = pgTable(
     createdById: uuid(),
     startedAt: ts().notNull().defaultNow(),
     locksAt: ts().notNull(),
+    lockedAt: ts(),
     resolvedAt: ts(),
+    /** Last bet. */
+    changedAt: ts(),
+    /** Last `channel.prediction.progress`. */
+    progressAt: ts(),
   },
-  (t) => [index("predictions_channel_idx").on(t.channelId, t.startedAt)],
+  (t) => [
+    index("predictions_channel_idx").on(t.channelId, t.startedAt),
+    uniqueIndex("predictions_channel_open_uq")
+      .on(t.channelId)
+      .where(sql`${t.status} in ('active', 'locked')`),
+    index("predictions_due_idx")
+      .on(t.locksAt)
+      .where(sql`${t.status} = 'active'`),
+  ],
 );
 
 export const predictionBets = pgTable(
@@ -237,8 +323,22 @@ export const raids = pgTable(
     createdAt: createdAt(),
     executeAt: ts().notNull(),
     executedAt: ts(),
+    canceledAt: ts(),
+    cancelReason: raidCancelReason(),
   },
-  (t) => [index("raids_to_idx").on(t.toChannelId, t.createdAt)],
+  (t) => [
+    index("raids_to_idx").on(t.toChannelId, t.createdAt),
+    // One pending raid per source channel at a time.
+    uniqueIndex("raids_from_pending_uq")
+      .on(t.fromChannelId)
+      .where(sql`${t.status} = 'pending'`),
+    // The cooldown reads the source's last raid.
+    index("raids_from_idx").on(t.fromChannelId, t.createdAt),
+    index("raids_due_idx")
+      .on(t.executeAt)
+      .where(sql`${t.status} = 'pending'`),
+    check("raids_cancel_ck", sql`(${t.status} = 'canceled') = (${t.cancelReason} is not null)`),
+  ],
 );
 
 export const alertConfigs = pgTable(
@@ -272,7 +372,13 @@ export const goals = pgTable(
     startedAt: ts().notNull().defaultNow(),
     endedAt: ts(),
   },
-  (t) => [index("goals_channel_idx").on(t.channelId)],
+  (t) => [
+    index("goals_channel_idx").on(t.channelId),
+    // The outbox hook advances "the channel's open goal of the matching type".
+    uniqueIndex("goals_channel_open_uq")
+      .on(t.channelId, t.type)
+      .where(sql`${t.endedAt} is null`),
+  ],
 );
 
 /**

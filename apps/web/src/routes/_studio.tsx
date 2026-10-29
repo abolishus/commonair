@@ -3,6 +3,8 @@
 
 import { StudioShell, type NavItem } from "@commonair/ui/layouts";
 import {
+  BotIcon,
+  ChartBarLineIcon,
   DashboardSquare01Icon,
   Money03Icon,
   Notification03Icon,
@@ -16,7 +18,7 @@ import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
 import { studioNav, type StudioEntry } from "../lib/nav.ts";
 
-/** Creator tools (stream manager, overlays, content, revenue, relays) in the studio sidebar. Each page guards its own session. */
+/** Creator tools (stream manager, overlays, polls and raids, channel bot, content, revenue, relays) in the studio sidebar. Each page guards its own session. */
 export const Route = createFileRoute("/_studio")({ component: StudioLayout });
 
 function studioItem(entry: StudioEntry): NavItem {
@@ -35,6 +37,20 @@ function studioItem(entry: StudioEntry): NavItem {
         label: t("studio.overlays"),
         icon: <HugeiconsIcon icon={Notification03Icon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="studio-overlays-link" to="/overlays" />,
+      };
+    case "interact":
+      return {
+        ...base,
+        label: t("studio.interact"),
+        icon: <HugeiconsIcon icon={ChartBarLineIcon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-interact-link" to="/interact" />,
+      };
+    case "bot":
+      return {
+        ...base,
+        label: t("studio.bot"),
+        icon: <HugeiconsIcon icon={BotIcon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-bot-link" to="/bot" />,
       };
     case "content":
       return {

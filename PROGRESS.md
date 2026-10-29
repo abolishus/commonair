@@ -22,6 +22,22 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 3 (E8 + E9 + N2-core + N2-consent; `.claude/briefs/batch3/README.md`), started 2026-10-29.**
+Contract steps land in order, one commit each: E8 (`feat(e8): contract step`: migrations
+`0033_e8_interactivity` and `0034_e8_protections`, `packages/interact`, the `PluginHost`
+extension, `INTERACT_TEST_HOOKS` and `harness/compose.e8.yaml`, the `/interact` and `/bot`
+placeholders, the terms points clause and the privacy channel-features paragraph), then E9, then
+N2. Waves then start from the N2 step's sha:
+
+| Wave | Units                                                                   | State   |
+| ---- | ----------------------------------------------------------------------- | ------- |
+| 1    | N2-core, E8-polls, E8-raids-goals, E8-points, E8-bot-engine, E8-bot-api | waiting |
+| 2    | E9-oauth, E9-apps, E9-subs, E9-ws, E8-studio, E8-viewer                 | waiting |
+| 3    | E9-sdk, E9-consent, E9-console, N2-consent                              | waiting |
+
+E8 harness steps (`interact` 1-6, `channel-bot` 1-6) are all pending (`harness/src/e8/steps.ts`)
+until their units merge; both scenarios are `inFull: false` until the milestone's end.
+
 Batch 2 (E7 + W0 + P1; waves and shared rules: `.claude/briefs/batch2/README.md`), started
 2026-10-27. ADRs 0005 amendment 1 (P1), 0012 part 1 (W0-clock), 0019 (W0-sor) and 0009
 amendment 1 (W0-media-exposure) are accepted.
@@ -36,8 +52,10 @@ waits for the phase 0 spike; replaces Garage outright, no migration tool). The m
 feature-wins.md are corrected to match. Open for the maintainer: the SDK's license; owners for CDN
 fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~86 MB/h (0018);
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
-Legal seed follow-ups for E8/N2: a no-cash-value clause in `terms.md`, the locale cookie in
-`cookies.md`.
+Legal seed follow-ups for E8/N2: the E8 contract step added the no-cash-value clause to
+`terms.md` (`TERMS_SEED_VERSION`) and the channel-features paragraph to `privacy.md` (bumped
+`PRIVACY_SEED_VERSION`); **counsel has reviewed neither**. Still open: the locale cookie in
+`cookies.md` (N2).
 **Batch 2 state (2026-10-28): waves 1–3 merged and pushed; CI green on main `048d397` (every job, all four harness shards). Batch done; open findings below.**
 
 | Unit              | Wave | Commits (branch)                   | State                                                                                     |

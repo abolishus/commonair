@@ -6,7 +6,13 @@ import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { LEGAL_DOCUMENT_KINDS } from "@commonair/contracts/enums";
 import { schema } from "@commonair/db";
-import { COOKIES_SEED_VERSION, LEGAL_SEED_VERSION, legalSeedVersion, seedLegalDocuments } from "@commonair/db";
+import {
+  COOKIES_SEED_VERSION,
+  LEGAL_SEED_VERSION,
+  TERMS_SEED_VERSION,
+  legalSeedVersion,
+  seedLegalDocuments,
+} from "@commonair/db";
 import {
   client,
   mailTo,
@@ -97,10 +103,10 @@ describe("legal.get", () => {
   test("current, a specific version, and 404s", async () => {
     const cur = await client(api).call<Doc>("GET", "/api/legal/terms");
     expect(cur.status).toBe(200);
-    expect(cur.body).toMatchObject({ kind: "terms", version: LEGAL_SEED_VERSION, isDraft: true });
+    expect(cur.body).toMatchObject({ kind: "terms", version: TERMS_SEED_VERSION, isDraft: true });
     expect(cur.body.body).not.toContain("{{");
 
-    const byVersion = await client(api).call<Doc>("GET", `/api/legal/terms?version=${LEGAL_SEED_VERSION}`);
+    const byVersion = await client(api).call<Doc>("GET", `/api/legal/terms?version=${TERMS_SEED_VERSION}`);
     expect(byVersion.status).toBe(200);
     expect(byVersion.body.id).toBe(cur.body.id);
 

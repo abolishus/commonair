@@ -7,6 +7,7 @@ import { runService, valkeyCheck } from "@commonair/service";
 import { buildDeps, createApp, loadApiEnv, VERSION } from "./index.ts";
 import { coopHealth } from "./coop/hooks.ts";
 import { opsHealth } from "./ops/hooks.ts";
+import { interactHealth } from "./interact/hooks.ts";
 import { moderationHealth, startModeration } from "./moderation/index.ts";
 import { startOverlayHub } from "./overlay/stream.ts";
 
@@ -33,7 +34,12 @@ runService({
       if (!overlay.warm) throw new Error("overlay subscriber connecting");
     },
   },
-  health: { ...moderationHealth(built.deps), ...coopHealth(built.deps), ...opsHealth(built.deps) },
+  health: {
+    ...moderationHealth(built.deps),
+    ...coopHealth(built.deps),
+    ...opsHealth(built.deps),
+    ...interactHealth(built.deps),
+  },
   fetch: (req, server) => app.fetch(req, server),
   onShutdown: async () => {
     await built.close();

@@ -140,6 +140,13 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
       sampleSeconds: 10,
     },
   },
+  {
+    key: "interact.points.accrual",
+    protected: false,
+    description:
+      "Channel points: points per block of verified watch time, block length in minutes, and the daily cap per viewer per channel (ADR 0026).",
+    value: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
+  },
 ] as const;
 
 export type GovernanceOverrides = Record<string, Record<string, unknown>>;

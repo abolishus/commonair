@@ -89,6 +89,12 @@ export const INTERNAL_ROUTES = {
   opsTick: "/internal/ops/tick",
   /** POST a DmcaTickBody: run the dmca-restore job once as of that time (test hooks only). */
   dmcaTick: "/internal/moderation/dmca-tick",
+  /**
+   * Interactivity test hook (served only while `INTERACT_TEST_HOOKS=true`, otherwise 404). `POST` an
+   * `InteractTickBody`: the API enqueues that `INTERACT_JOBS` job, waits (30 s) and returns its
+   * `InteractJobResult`.
+   */
+  interactTick: "/internal/interact/tick",
 } as const;
 
 /**
@@ -207,6 +213,14 @@ export const KEYS = {
   issuanceSeen: (object: string) => `issuance:seen:${object}`,
   /** Leader lock: the replica holding it computes relay issuance. */
   issuanceLock: "issuance:lock",
+  /** INCR on every accepted chat message of the channel (the bot's timers count lines). */
+  botLines: (channelId: string) => `bot:lines:${channelId}`,
+  /** The `botLines` value when the timer last fired. */
+  botTimerMark: (timerId: string) => `bot:timer-mark:${timerId}`,
+  /** SET NX PX lock: exactly one chat instance fires a due timer. */
+  botTimerLock: (timerId: string) => `bot:timer-lock:${timerId}`,
+  /** SET NX EX: a command's cooldown (per channel and command, not per user). */
+  botCooldown: (channelId: string, command: string) => `bot:cooldown:${channelId}:${command}`,
 } as const;
 
 /**
@@ -289,6 +303,8 @@ export const QUEUES = {
   moderation: "moderation",
   /** Co-op (E5): `COOP_JOBS`. Patronage runs are API calls (two-person approval), not jobs. */
   coop: "coop",
+  /** Interactivity (E8, ADR 0026): `INTERACT_JOBS`. */
+  interact: "interact",
 } as const;
 
 // Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
@@ -542,3 +558,26 @@ export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });
 export type OpsTickBody = z.infer<typeof OpsTickBody>;
 export const OpsJobResult = z.record(z.string(), z.number().int());
 export type OpsJobResult = z.infer<typeof OpsJobResult>;
+
+// Interactivity (E8, ADR 0026, docs/testing/e8-selectors.md) -------------------------------
+
+/** Jobs on `QUEUES.interact`; all scheduled by the worker, enqueued by the API only on the test hook. */
+export const INTERACT_JOBS = {
+  /** Every 2 s: end due polls, lock due predictions, emit throttled `*.progress` events. */
+  tick: "interact-tick",
+  /** Every 2 s: execute or cancel raids whose countdown ended. */
+  raidsExecute: "raids-execute",
+  /** Every 60 s: credit gate-eligible watch time (ADR 0026 decision 1). */
+  pointsAccrue: "points-accrue",
+} as const;
+export type InteractJobName = (typeof INTERACT_JOBS)[keyof typeof INTERACT_JOBS];
+export const INTERACT_JOB_NAMES = Object.values(INTERACT_JOBS) as [InteractJobName, ...InteractJobName[]];
+/** Every interactivity job takes an empty payload: it works from the database state and the clock. */
+export const InteractJob = z.object({});
+export type InteractJob = z.infer<typeof InteractJob>;
+/** Body of `INTERNAL_ROUTES.interactTick`; the response is the job's `InteractJobResult`. */
+export const InteractTickBody = z.object({ job: z.enum(INTERACT_JOB_NAMES) });
+export type InteractTickBody = z.infer<typeof InteractTickBody>;
+/** What an interactivity job returns (counts only; logged and returned by the test hook). */
+export const InteractJobResult = z.record(z.string(), z.number().int());
+export type InteractJobResult = z.infer<typeof InteractJobResult>;

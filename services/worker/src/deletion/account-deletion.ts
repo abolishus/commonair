@@ -419,6 +419,27 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .update(s.channels)
           .set({ slug: pseudonym, displayName: pseudonym, title: "", description: "", theme: {}, tags: [] })
           .where(eq(s.channels.id, channel.id));
+        // E8: the channel bot's username is derived from the old slug, so it goes with the owner's
+        // identity. Its id, role and ledger rows stay (ADR 0004). Setting pseudonymized_at is what
+        // lets the app role rewrite a username (0007's identity guard).
+        const [bot] = await tx
+          .select({ id: s.users.id, pseudonymizedAt: s.users.pseudonymizedAt })
+          .from(s.botConfigs)
+          .innerJoin(s.users, eq(s.users.id, s.botConfigs.botUserId))
+          .where(eq(s.botConfigs.channelId, channel.id));
+        if (bot) {
+          const botPseudonym = newPseudonym();
+          await tx
+            .update(s.users)
+            .set({
+              name: botPseudonym,
+              username: botPseudonym,
+              displayUsername: botPseudonym,
+              pseudonymizedAt: bot.pseudonymizedAt ?? now,
+            })
+            .where(eq(s.users.id, bot.id));
+          counts.channel_bot = 1;
+        }
       }
 
       await tx

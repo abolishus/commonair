@@ -291,6 +291,8 @@ export const contract = {
           method: "POST",
           path: "/me/bots/{botId}/tokens",
           summary: "Mint an access token for your bot",
+          description:
+            "Refused with PRECONDITION_FAILED (requirement `channel_bot`) for a channel's built-in bot: it speaks only through the bot engine, never with a token.",
           ...tag("Developers"),
         })
         .input(
@@ -1618,25 +1620,27 @@ export const contract = {
         )
         .output(Ok),
     },
-    songRequests: mod
-      .route({
-        method: "GET",
-        path: "/channels/{channel}/bot/song-requests",
-        summary: "Song request queue (stub: queue only, no playback integration)",
-        ...tag("Channel bot"),
-      })
-      .input(ChannelRef)
-      .output(
-        z.array(
-          z.object({
-            id: Id,
-            query: z.string(),
-            requester: Slug,
-            status: z.enum(E.SONG_REQUEST_STATUSES),
-            createdAt: Timestamp,
-          }),
-        ),
-      ),
+    songRequests: {
+      list: mod
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/bot/song-requests",
+          summary: "Song request queue (links only; no playback)",
+          ...tag("Channel bot"),
+        })
+        .input(ChannelRef.extend({ status: z.enum(E.SONG_REQUEST_STATUSES).optional() }))
+        .output(z.array(D.SongRequest)),
+      setStatus: mod
+        .meta({ access: "moderator", scopes: ["channel:manage:bot"] })
+        .route({
+          method: "PUT",
+          path: "/channels/{channel}/bot/song-requests/{id}",
+          summary: "Mark a song request played or skipped",
+          ...tag("Channel bot"),
+        })
+        .input(ChannelRef.extend({ id: Id, status: z.enum(["played", "skipped"]) }))
+        .output(D.SongRequest),
+    },
     points: {
       balance: base
         .route({
@@ -1668,7 +1672,7 @@ export const contract = {
           ChannelRef.extend({
             username: Slug,
             delta: z.number().int().min(-1_000_000).max(1_000_000),
-            reason: z.string().max(200),
+            reason: z.enum(E.POINTS_ADJUST_REASONS),
           }),
         )
         .output(D.LoyaltyBalance),
@@ -1818,6 +1822,26 @@ export const contract = {
         })
         .input(ChannelRef)
         .output(Ok),
+      current: owner
+        .meta({ access: "owner", scopes: ["channel:manage:raids"] })
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/raids",
+          summary: "The pending or last raid, the cooldown and the raid policy",
+          ...tag("Raids"),
+        })
+        .input(ChannelRef)
+        .output(D.RaidState),
+      setPolicy: owner
+        .meta({ access: "owner", scopes: ["channel:manage:raids"], rateLimit: "write" })
+        .route({
+          method: "PUT",
+          path: "/channels/{channel}/raids/policy",
+          summary: "Who may raid this channel",
+          ...tag("Raids"),
+        })
+        .input(ChannelRef.extend({ policy: z.enum(E.RAID_POLICIES) }))
+        .output(D.RaidState),
     },
     alerts: {
       list: owner

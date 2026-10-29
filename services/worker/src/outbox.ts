@@ -14,6 +14,7 @@ import { QUEUES } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
+import { applyGoalProgress } from "./interact/goals/outbox-hook.ts";
 import { WEBHOOK_JOBS } from "./jobs/names.ts";
 import { metrics } from "./metrics.ts";
 import { moderationMetrics } from "./moderation/metrics.ts";
@@ -117,6 +118,11 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
               .where(and(eq(subs.transport, "webhook"), eq(subs.status, "enabled"), inArray(subs.type, types)))
           ).map((r) => r.type),
     );
+
+    // E8: goals advance in the relay transaction, so each follow/subscribe/tip counts exactly once
+    // and the progress event is written with it (ADR 0026 decision 5 as amended, Amendment 1;
+    // relayed in a later batch). A rollback of the batch rolls the goal update back too.
+    await applyGoalProgress(tx, valid, ctx);
 
     // The claimed rows stay locked until commit, so each Valkey round trip is bounded: on a
     // timeout the transaction rolls back and the batch is retried (at-least-once; fan-out

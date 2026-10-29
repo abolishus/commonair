@@ -18,6 +18,7 @@ import { job as coopStreamHours } from "./coop-stream-hours.ts";
 import { job as dmcaDisable } from "./dmca-disable.ts";
 import { job as dmcaRestore } from "./dmca-restore.ts";
 import { job as expireAuthRows } from "./expire-auth-rows.ts";
+import { job as interactTick } from "./interact-tick.ts";
 import { job as exportBuild } from "./export-build.ts";
 import { job as exportCleanup } from "./export-cleanup.ts";
 import { job as legalConsentRetention } from "./legal-consent-retention.ts";
@@ -33,7 +34,9 @@ import { sorJobs } from "./moderation-sor.ts";
 import { job as moderationT0Escalated } from "./moderation-t0-escalated.ts";
 import { job as moderationT0Media } from "./moderation-t0-media.ts";
 import { job as moderationT0 } from "./moderation-t0.ts";
+import { job as pointsAccrue } from "./points-accrue.ts";
 import { job as pruneWebhookDeliveries } from "./prune-webhook-deliveries.ts";
+import { job as raidsExecute } from "./raids-execute.ts";
 import { job as relaysOffline } from "./relays-offline.ts";
 import { job as vodPlacement } from "./vod-placement.ts";
 import { job as vodRetention } from "./vod-retention.ts";
@@ -79,4 +82,8 @@ export const JOBS = [
   dmcaDisable,
   dmcaRestore,
   legalConsentRetention,
+  // Interactivity (E8, ADR 0026).
+  interactTick,
+  raidsExecute,
+  pointsAccrue,
 ] as readonly JobDefinition[];

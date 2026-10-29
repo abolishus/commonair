@@ -171,19 +171,11 @@ export const BotConfig = z.object({
     }),
   loyalty: z
     .object({
+      /** Off: no accrual, no spending, `!points` silent, predictions and point-bought votes refused. */
       enabled: z.boolean(),
       pointsName: z.string().min(1).max(20),
-      perFiveMinutes: z.number().int().min(0),
-      subscriberMultiplier: z.number().min(1).max(5),
-      followBonus: z.number().int().min(0),
     })
-    .default({
-      enabled: true,
-      pointsName: "points",
-      perFiveMinutes: 10,
-      subscriberMultiplier: 2,
-      followBonus: 50,
-    }),
+    .default({ enabled: true, pointsName: "points" }),
   songRequests: z
     .object({ enabled: z.boolean(), maxQueue: z.number().int().min(1).max(200) })
     .default({ enabled: false, maxQueue: 25 }),
@@ -229,6 +221,18 @@ export const PayoutRulesSetting = z.object({
   currency: z.string().regex(/^[a-z]{3}$/),
 });
 export type PayoutRulesSetting = z.infer<typeof PayoutRulesSetting>;
+
+/**
+ * `interact.points.accrual` governance setting (ADR 0026 decision 1, ordinary decision). Range-checked
+ * by the database (`commonair_validate_points_accrual`, migration 0034).
+ */
+export const PointsAccrualSetting = z.object({
+  pointsPerBlock: z.number().int().min(1).max(1000),
+  blockMinutes: z.number().int().min(1).max(60),
+  /** Per viewer per channel per UTC day; 0 turns accrual off instance-wide. */
+  dailyCapPerChannel: z.number().int().min(0).max(100_000),
+});
+export type PointsAccrualSetting = z.infer<typeof PointsAccrualSetting>;
 
 /** What a channel can upload, and which file types each purpose takes (enforced by `channels.uploadUrl`). */
 export const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;

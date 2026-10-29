@@ -20,6 +20,8 @@ import {
   MODERATION_SUBJECTS,
   MODERATION_TIERS,
   EVIDENCE_KINDS,
+  GOAL_TYPES,
+  LOYALTY_REASONS,
   COUNCIL_STANCES,
   ELECTION_STATUSES,
   MEMBER_CLASSES,
@@ -42,13 +44,28 @@ const moderator = {
   moderator_user_login: z.string(),
   moderator_user_name: z.string(),
 };
-const choice = z.object({ id: z.string(), title: z.string(), votes: z.number().int() });
+/** `votes` includes the votes bought with channel points (Twitch shape). */
+const choice = z.object({
+  id: z.string(),
+  title: z.string(),
+  votes: z.number().int(),
+  channel_points_votes: z.number().int(),
+});
+/** `channel_points_won` is null until the prediction resolves. */
+const predictor = z.object({
+  ...user,
+  channel_points_used: z.number().int(),
+  channel_points_won: z.number().int().nullable(),
+});
 const outcome = z.object({
   id: z.string(),
   title: z.string(),
   users: z.number().int(),
   channel_points: z.number().int(),
+  /** Ordered by points used (descending), then user id. */
+  top_predictors: z.array(predictor).max(10),
 });
+const pointsVoting = z.object({ is_enabled: z.boolean(), amount_per_vote: z.number().int() });
 
 interface EventDef {
   version: string;
@@ -296,6 +313,7 @@ export const EVENTS = {
       id,
       title: z.string(),
       choices: z.array(choice),
+      channel_points_voting: pointsVoting,
       started_at: ts,
       ends_at: ts,
     },
@@ -310,6 +328,7 @@ export const EVENTS = {
       id,
       title: z.string(),
       choices: z.array(choice),
+      channel_points_voting: pointsVoting,
       started_at: ts,
       ends_at: ts,
     },
@@ -324,6 +343,7 @@ export const EVENTS = {
       id,
       title: z.string(),
       choices: z.array(choice),
+      channel_points_voting: pointsVoting,
       status: z.enum(["completed", "terminated", "archived"]),
       started_at: ts,
       ended_at: ts,
@@ -395,7 +415,7 @@ export const EVENTS = {
     payload: {
       ...broadcaster,
       id,
-      type: z.enum(["followers", "subscriptions", "tips"]),
+      type: z.enum(GOAL_TYPES),
       description: z.string(),
       current_amount: z.number().int(),
       target_amount: z.number().int(),
@@ -410,7 +430,7 @@ export const EVENTS = {
     payload: {
       ...broadcaster,
       id,
-      type: z.enum(["followers", "subscriptions", "tips"]),
+      type: z.enum(GOAL_TYPES),
       description: z.string(),
       current_amount: z.number().int(),
       target_amount: z.number().int(),
@@ -425,7 +445,7 @@ export const EVENTS = {
     payload: {
       ...broadcaster,
       id,
-      type: z.enum(["followers", "subscriptions", "tips"]),
+      type: z.enum(GOAL_TYPES),
       description: z.string(),
       current_amount: z.number().int(),
       target_amount: z.number().int(),
@@ -444,7 +464,7 @@ export const EVENTS = {
       ...user,
       delta: z.number().int(),
       balance: z.number().int(),
-      reason: z.string(),
+      reason: z.enum(LOYALTY_REASONS),
     },
   }),
   "coop.proposal.update": def({
@@ -815,12 +835,15 @@ export const BUS = {
    * Real alerts are derived from `BUS.events` by the API's overlay stream.
    */
   overlay: (channelId: string) => `overlay:${channelId}`,
+  /** Channel-bot config changes (JSON `BotControlMessage`), published by the API after commit; every chat instance reloads that part. */
+  botControl: "bus:bot-control",
 } as const;
 
 /**
  * The overlay alert stream, served by the API as `text/event-stream` (not an oRPC procedure: OBS
  * browser sources use `EventSource`). Auth: the overlay token as `?token=` (ADR 0021). SSE events:
- * `alert` (data: `OverlayAlert` JSON), `ping` (every 15 s), and `revoked` (the token was revoked
+ * `alert` (data: `OverlayAlert` JSON), `goal` (data: `Goal` JSON) on every `channel.goal.*` event
+ * of the token's channel, `ping` (every 15 s), and `revoked` (the token was revoked
  * or expired; the server closes the stream right after). `interact.overlays.state` returns this
  * URL as `eventsUrl`.
  */

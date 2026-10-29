@@ -51,8 +51,8 @@ export interface SignedOutEntry {
 }
 
 export interface StudioEntry {
-  id: "streamManager" | "overlays" | "content" | "revenue" | "relays";
-  to: "/dashboard" | "/overlays" | "/content" | "/revenue" | "/relays";
+  id: "streamManager" | "overlays" | "interact" | "bot" | "content" | "revenue" | "relays";
+  to: "/dashboard" | "/overlays" | "/interact" | "/bot" | "/content" | "/revenue" | "/relays";
   current: boolean;
 }
 
@@ -151,6 +151,8 @@ export function studioNav(pathname: string): StudioEntry[] {
   return [
     { id: "streamManager", to: "/dashboard", current: path === "/dashboard" },
     { id: "overlays", to: "/overlays", current: path === "/overlays" },
+    { id: "interact", to: "/interact", current: path === "/interact" },
+    { id: "bot", to: "/bot", current: path === "/bot" },
     { id: "content", to: "/content", current: path === "/content" },
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "relays", to: "/relays", current: path === "/relays" },

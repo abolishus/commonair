@@ -8,6 +8,7 @@
  */
 import { z } from "zod";
 import { ChatMessage } from "./api/entities.ts";
+import { BOT_CONTROL_SCOPES, RAID_STATUSES } from "./enums.ts";
 import type { EventPayload } from "./events.ts";
 import { ChannelChatSettings, type EmoteRange } from "./shapes.ts";
 
@@ -124,6 +125,19 @@ export const ServerFrame = z.discriminatedUnion("op", [
     type: z.string(),
     data: z.record(z.string(), z.unknown()),
   }),
+  /**
+   * An outgoing raid of this channel (E8): `pending` when it starts (countdown to `executeAt`),
+   * then `completed` (players follow to `to`) or `canceled`. Sent on the source's chat control.
+   */
+  z.object({
+    op: z.literal("raid"),
+    channel,
+    raidId: z.uuid(),
+    status: z.enum(RAID_STATUSES),
+    to: z.string(),
+    toDisplayName: z.string(),
+    executeAt: z.string(),
+  }),
   z.object({ op: z.literal("pong"), nonce: z.string().optional() }),
   z.object({
     op: z.literal("error"),
@@ -149,7 +163,7 @@ export const CHAT_LIMITS = {
 
 /**
  * Messages on BUS.chatControl(channelId): a client-visible control frame (`ban`, `delete`,
- * `clear`, `settings`) every chat instance forwards after updating caches, or an `invalidate`
+ * `clear`, `settings`, `raid`) every chat instance forwards after updating caches, or an `invalidate`
  * signal (role changes, unbans, follows, subscriptions, emote/filter/suspension edits) that only
  * drops caches. The API publishes these after REST moderation and related writes.
  */
@@ -160,7 +174,7 @@ export const InvalidateMessage = z.object({
 });
 export type InvalidateMessage = z.infer<typeof InvalidateMessage>;
 
-const CONTROL_OPS = new Set(["ban", "delete", "clear", "settings"]);
+const CONTROL_OPS = new Set(["ban", "delete", "clear", "settings", "raid"]);
 export const ChatControlMessage = z.union([
   InvalidateMessage,
   ServerFrame.refine((f) => CONTROL_OPS.has(f.op), "not a control frame"),
@@ -177,6 +191,10 @@ export const ChatFanout = z.object({
   frame: ServerFrame,
 });
 export type ChatFanout = z.infer<typeof ChatFanout>;
+
+/** On `BUS.botControl`: which part of a channel's bot config changed; every chat instance reloads it. */
+export const BotControlMessage = z.object({ channelId: z.uuid(), scope: z.enum(BOT_CONTROL_SCOPES) });
+export type BotControlMessage = z.infer<typeof BotControlMessage>;
 
 type ChatMessageEventPayload = EventPayload<"channel.chat.message">;
 type Fragment = ChatMessageEventPayload["message"]["fragments"][number];

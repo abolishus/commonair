@@ -525,6 +525,8 @@ export class IrcSession {
         if (line) this.emit(line, "twitch.tv/commands");
         return;
       }
+      case "raid":
+        return; // an outgoing raid countdown has no Twitch IRC line (the incoming raid is the channel.raid USERNOTICE)
       case "pong":
         return;
     }

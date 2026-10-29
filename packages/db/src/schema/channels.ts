@@ -16,7 +16,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { ChannelChatSettings, type ChannelTheme } from "@commonair/contracts/shapes";
 import { users } from "./auth.ts";
-import { cents, channelRole, createdAt, id, notificationType, ts, updatedAt } from "./_shared.ts";
+import { cents, channelRole, createdAt, id, notificationType, raidPolicy, ts, updatedAt } from "./_shared.ts";
 
 export const categories = pgTable("categories", {
   id: id(),
@@ -53,6 +53,8 @@ export const channels = pgTable(
     chatSettings: jsonb().$type<ChannelChatSettings>().notNull().default(ChannelChatSettings.parse({})),
     vodEnabled: boolean().notNull().default(false),
     vodRetentionDays: integer().notNull().default(14),
+    /** ADR 0026 decision 4; checked at raid start and again at execute. */
+    raidPolicy: raidPolicy().notNull().default("anyone"),
     /** Set while a broadcast is live; maintained by the ingest lifecycle hooks. */
     liveBroadcastId: uuid(),
     followerCount: integer().notNull().default(0),

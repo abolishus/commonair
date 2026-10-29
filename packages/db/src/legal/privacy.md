@@ -36,6 +36,13 @@ and tax law require. Card details are handled by the payment provider, not by us
 
 **Support and safety reports.** Reports, appeals and correspondence you send us.
 
+**Channel features.** If you use a channel's interactive features, we keep your channel points
+balance and its history, your poll votes, your prediction bets and payouts, the links you submit
+as song requests, and your interactions with the channel's bot (commands you use that cost
+points, and your requests). We process them only to run those features. They are kept as
+described under "How long we keep it" and included in your data export (see "Export and
+deletion").
+
 ## Why we use it
 
 To run the service you asked for, to keep it safe and fair (moderation, integrity, abuse

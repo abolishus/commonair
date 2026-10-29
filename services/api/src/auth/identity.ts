@@ -46,6 +46,7 @@ export const RESERVED_USERNAMES: ReadonlySet<string> = new Set([
   "help",
   "hls",
   "here",
+  "interact",
   "internal",
   "legal",
   "live",

@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { and, count, desc, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Scope } from "@commonair/contracts/scopes";
-import { schema, uuidv7, type Executor } from "@commonair/db";
+import { schema, type Executor } from "@commonair/db";
 import { randomTokenSecret, sha256Hex } from "@commonair/tokens";
 import { isAdult, usernameProblem } from "../auth/identity.ts";
+import { insertBotAccount } from "../auth/bot-account.ts";
 import type { Deps } from "../deps.ts";
 import {
   channelAvatar,
@@ -33,10 +34,10 @@ import { appUrl, sendNotice } from "../mail.ts";
 import { createExport, listExports } from "../privacy/exports.ts";
 import { meEnforcement } from "./me-enforcement.ts";
 
-const { users, channels, follows, memberships, notifications, oauthTokens } = schema;
+const { users, channels, follows, memberships, notifications, oauthTokens, botConfigs } = schema;
 
 const MAX_BOTS_PER_OWNER = 10;
-export const BOT_EMAIL_DOMAIN = "bots.invalid";
+export { BOT_EMAIL_DOMAIN } from "../auth/bot-account.ts";
 
 export async function matureConfirmed(db: Executor, userId: string): Promise<boolean> {
   const [row] = await db.select({ at: users.matureConfirmedAt }).from(users).where(eq(users.id, userId)).limit(1);
@@ -344,28 +345,24 @@ export const me = {
       if (caller.user.accountType !== "human") throw forbidden("Only members can own bots");
       const problem = usernameProblem(input.username);
       if (problem) throw badRequest(problem === "reserved" ? "This username is reserved" : "Invalid username");
+      // A channel's built-in bot (E8) never takes one of the owner's slots.
       const [{ n } = { n: 0 }] = await deps.db
         .select({ n: count() })
         .from(users)
-        .where(and(eq(users.botOwnerId, caller.user.id), isNull(users.deletedAt)));
+        .where(
+          and(
+            eq(users.botOwnerId, caller.user.id),
+            isNull(users.deletedAt),
+            sql`not exists (select 1 from ${botConfigs} where ${botConfigs.botUserId} = ${users.id})`,
+          ),
+        );
       if (n >= MAX_BOTS_PER_OWNER) throw precondition("bot_limit", `You can own at most ${MAX_BOTS_PER_OWNER} bots`);
-      const id = uuidv7();
       try {
-        const [bot] = await deps.db
-          .insert(users)
-          .values({
-            id,
-            name: input.displayName.trim() || input.username,
-            username: input.username,
-            displayUsername: input.username,
-            // Bots never sign in with email; a reserved, undeliverable address keeps the column unique.
-            email: `bot+${id}@${BOT_EMAIL_DOMAIN}`,
-            emailVerified: false,
-            accountType: "bot",
-            botOwnerId: caller.user.id,
-          })
-          .returning();
-        if (!bot) throw new Error("bot insert returned no row");
+        const bot = await insertBotAccount(deps.db, {
+          ownerId: caller.user.id,
+          username: input.username,
+          displayName: input.displayName,
+        });
         return toUserPublic(deps, bot, { id: caller.user.id, username: caller.user.username });
       } catch (err) {
         if (isUniqueViolation(err)) throw conflict("That username is taken");
@@ -391,6 +388,14 @@ export const me = {
         .from(users)
         .where(and(eq(users.id, input.botId), eq(users.botOwnerId, caller.user.id), isNull(users.deletedAt)));
       if (!bot) throw notFound("Bot not found");
+      // The channel bot speaks only through the bot engine: a token would let whoever holds it
+      // speak and moderate as the channel's moderator bot.
+      const [channelBot] = await deps.db
+        .select({ channelId: botConfigs.channelId })
+        .from(botConfigs)
+        .where(eq(botConfigs.botUserId, bot.id))
+        .limit(1);
+      if (channelBot) throw precondition("channel_bot", "The channel bot cannot have tokens");
       // Lowercase: tmi.js and other Twitch-style IRC clients lowercase the token they send.
       const accessToken = randomTokenSecret("ca_");
       const [token] = await deps.db

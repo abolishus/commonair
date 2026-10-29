@@ -313,6 +313,15 @@ export const opsEnv = z.object({
   OPS_TEST_HOOKS: bool.default(false),
 });
 
+/**
+ * Interactivity (E8, ADR 0026). Harness only, never on a public instance: serves
+ * `POST /internal/interact/tick` (run an interactivity job now). Services log a warning at every start while it is on.
+ */
+export const interactEnv = z.object({
+  /** Harness only: serves `POST /internal/interact/tick`. Never on a public instance. */
+  INTERACT_TEST_HOOKS: bool.default(false),
+});
+
 export const moderationEnv = moderationShape.superRefine((env, ctx) => {
   if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
     ctx.addIssue({
@@ -607,6 +616,7 @@ export const ALL_ENV_SCHEMAS = {
   moderationEnv: moderationShape,
   coopEnv,
   opsEnv,
+  interactEnv,
   evidenceSealEnv,
   evidenceOpenEnv,
   evidenceStorageEnv,

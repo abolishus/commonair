@@ -139,7 +139,7 @@ describe("clear plan", () => {
 
   test("never touches append-only, money, co-op or relay tables", () => {
     const forbidden =
-      /audit_log|ledger|governance|vote|membership|proposal|subscription|tip|payment|payout|relay|election|council|patronage/;
+      /audit_log|ledger|loyalty|governance|vote|membership|proposal|subscription|tip|payment|payout|relay|election|council|patronage/;
     for (const t of order) expect(t).not.toMatch(forbidden);
   });
 });

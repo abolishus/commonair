@@ -71,6 +71,8 @@ export const E5_GOVERNANCE_BOOTSTRAP = {
     worker: { ...MEMBERSHIP_CLASSES_DEFAULTS.worker },
   },
   "council.config": { size: 50, minStreamingHours: 0.01 },
+  // E8 (docs/testing/e8-selectors.md): one-minute points blocks, so a short watch earns points.
+  "interact.points.accrual": { pointsPerBlock: 10, blockMinutes: 1, dailyCapPerChannel: 1000 },
 } as const;
 
 /** The seed's rule: each override key is shallow-merged into that key's default value. */

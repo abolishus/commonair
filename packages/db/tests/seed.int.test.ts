@@ -13,6 +13,7 @@ import {
   LEGAL_SEED_VERSION,
   PLACEHOLDER_PATTERN,
   PRIVACY_SEED_VERSION,
+  TERMS_SEED_VERSION,
   legalSeedDocuments,
   legalSeedVersion,
   stripSpdxHeader,
@@ -28,10 +29,11 @@ vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 });
 describe("legal seed documents", () => {
   const docs = legalSeedDocuments();
 
-  test("one draft per kind, at the seed version (the enforcement notice, privacy and cookies at their own)", () => {
+  test("one draft per kind, at the seed version (the enforcement notice, terms, privacy and cookies at their own)", () => {
     expect(docs.map((d) => d.kind).sort()).toEqual([...LEGAL_DOCUMENT_KINDS].sort());
     const own: Record<string, string> = {
       enforcement_notice: ENFORCEMENT_NOTICE_SEED_VERSION,
+      terms: TERMS_SEED_VERSION,
       privacy: PRIVACY_SEED_VERSION,
       cookies: COOKIES_SEED_VERSION,
     };
@@ -42,6 +44,7 @@ describe("legal seed documents", () => {
     }
     for (const v of Object.values(own)) expect(v).not.toBe(LEGAL_SEED_VERSION);
     // Same publishedAt: the newer version must sort after the one users already accepted.
+    expect(TERMS_SEED_VERSION > LEGAL_SEED_VERSION).toBe(true);
     expect(PRIVACY_SEED_VERSION > LEGAL_SEED_VERSION).toBe(true);
     expect(COOKIES_SEED_VERSION > LEGAL_SEED_VERSION).toBe(true);
   });
@@ -52,6 +55,12 @@ describe("legal seed documents", () => {
     expect(body("privacy")).toMatch(/see your IP address/);
     expect(body("privacy")).toMatch(/off unless you turn it\s+on/);
     expect(body("cookies")).toMatch(/\*\*essential\*\*/);
+  });
+
+  test("the terms carry the channel points clause and privacy the channel-features paragraph (ADR 0026)", () => {
+    const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
+    expect(body("terms")).toMatch(/no cash value/);
+    expect(body("privacy")).toMatch(/poll votes/);
   });
 
   test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {
@@ -71,7 +80,7 @@ describe("legal seed documents", () => {
       expect(d.body.startsWith("> **Draft pending lawyer review.**"), d.kind).toBe(true);
       const words = d.body.split(/\s+/).filter(Boolean).length;
       expect(words, d.kind).toBeGreaterThanOrEqual(300);
-      expect(words, d.kind).toBeLessThanOrEqual(900);
+      expect(words, d.kind).toBeLessThanOrEqual(1000);
     }
   });
 

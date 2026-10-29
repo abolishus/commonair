@@ -26,6 +26,7 @@ import { overlayTokenOf, type BaseContext, type RequestInfo } from "./lib/orpc.t
 import { rateLimitKey } from "./lib/ratelimit.ts";
 import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
 import { isOpsHookPath, opsHook } from "./ops/hooks.ts";
+import { interactHook, isInteractHookPath } from "./interact/hooks.ts";
 import { overlayHub } from "./overlay/stream.ts";
 import { overlayTokenHash, resolveOverlayToken } from "./overlay/tokens.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
@@ -56,6 +57,11 @@ export function createApp(deps: Deps): ApiApp {
   if (deps.env.OPS_TEST_HOOKS)
     deps.logger.warn(
       "OPS_TEST_HOOKS is on: POST /internal/ops/tick runs deletion, export cleanup and VOD retention on demand; never on a public instance",
+      { testHooks: true },
+    );
+  if (deps.env.INTERACT_TEST_HOOKS)
+    deps.logger.warn(
+      "INTERACT_TEST_HOOKS is on: POST /internal/interact/tick runs interactivity jobs on demand; never on a public instance",
       { testHooks: true },
     );
   const allowedOrigins = new Set(
@@ -225,6 +231,12 @@ export function createApp(deps: Deps): ApiApp {
       if (!deps.env.OPS_TEST_HOOKS) return new Response(null, { status: 404 });
       if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
       return opsHook(deps, raw.method, await readJson(raw));
+    }
+    if (isInteractHookPath(path)) {
+      // Off: 404 before the secret check, like any unknown internal path.
+      if (!deps.env.INTERACT_TEST_HOOKS) return new Response(null, { status: 404 });
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return interactHook(deps, raw.method, await readJson(raw));
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
 

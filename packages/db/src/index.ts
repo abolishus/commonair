@@ -5,8 +5,11 @@ export * from "./client.ts";
 export * from "./ids.ts";
 export * from "./hold-lock.ts";
 export * from "./account-actions.ts";
+export * from "./points.ts";
 export * as schema from "./schema/index.ts";
 export { runMigrations, MIGRATIONS_DIR } from "./migrate.ts";
+/** Demo-data anchors (both required), so jobs can skip demo users and channels as `demo:clear` selects them. */
+export { anchoredUser } from "./demo/anchors.ts";
 export { DEFAULT_GOVERNANCE_SETTINGS, seedGovernanceSettings, seedLegalDocuments } from "./seed.ts";
 export {
   CONSENT_CATEGORIES,
@@ -16,6 +19,7 @@ export {
   LEGAL_SEED_VERSION,
   PLACEHOLDER_PATTERN,
   PRIVACY_SEED_VERSION,
+  TERMS_SEED_VERSION,
   legalSeedDocuments,
   legalSeedVersion,
 } from "./legal/index.ts";

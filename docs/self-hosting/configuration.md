@@ -104,7 +104,7 @@ bucket with the instance's keys.
   unless `CONTACT_EMAIL`, `SECURITY_EMAIL`, `ABUSE_EMAIL`, `DMCA_EMAIL` and `PRIVACY_EMAIL` are
   set. `install` sets them from `--email`.
 
-Never set `MODERATION_TEST_HOOKS`, `COOP_TEST_HOOKS`, `OPS_TEST_HOOKS`,
+Never set `MODERATION_TEST_HOOKS`, `COOP_TEST_HOOKS`, `OPS_TEST_HOOKS`, `INTERACT_TEST_HOOKS`,
 `EVENTSUB_ALLOW_INSECURE_CALLBACKS` or `OUTBOUND_ALLOW_PRIVATE_NETWORKS` on a public instance.
 They exist for the test harness and development.
 
@@ -327,6 +327,12 @@ the tables by hand. Columns:
 | Variable         | Required | Default | Self-host | Description                                                                 |
 | ---------------- | -------- | ------- | --------- | --------------------------------------------------------------------------- |
 | `OPS_TEST_HOOKS` | no       | `false` | —         | Harness only: serves `POST /internal/ops/tick`. Never on a public instance. |
+
+### `interactEnv`
+
+| Variable              | Required | Default | Self-host | Description                                                                      |
+| --------------------- | -------- | ------- | --------- | -------------------------------------------------------------------------------- |
+| `INTERACT_TEST_HOOKS` | no       | `false` | —         | Harness only: serves `POST /internal/interact/tick`. Never on a public instance. |
 
 ### `evidenceSealEnv`
 

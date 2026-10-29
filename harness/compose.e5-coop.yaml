@@ -29,7 +29,8 @@ services:
         "membership.classes":{"streamer":{"minStreamingHours":0.01,"windowDays":90,"minVerifiedViewers":2,"lapseGraceDays":14},
         "viewer":{"shareCents":500,"shareRefundableOnExit":true,"activeSubscriptionQualifies":true,"minSubscriptionCents":300},
         "worker":{"appointedBy":"board"}},
-        "council.config":{"size":50,"minStreamingHours":0.01}}
+        "council.config":{"size":50,"minStreamingHours":0.01},
+        "interact.points.accrual":{"pointsPerBlock":10,"blockMinutes":1,"dailyCapPerChannel":1000}}
   api:
     environment:
       COOP_TEST_HOOKS: "true"

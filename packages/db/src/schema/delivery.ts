@@ -109,6 +109,10 @@ export const playbackSessions = pgTable(
     index("playback_sessions_live_hb_idx")
       .on(t.lastHeartbeatAt)
       .where(sql`${t.endedAt} is null`),
+    // Points accrual reads signed-in verified sessions scored recently.
+    index("playback_sessions_points_idx")
+      .on(t.scoredAt)
+      .where(sql`${t.userId} is not null and ${t.verdict} = 'verified'`),
   ],
 );
 

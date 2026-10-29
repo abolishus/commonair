@@ -83,19 +83,30 @@ governance rules published on the site. Questions about membership and governanc
 Subscriptions, tips and payouts, where offered, are covered by the payment terms shown at the
 time of purchase. Amounts are always shown in a specific currency before you pay.
 
-## 10. Disclaimers and liability
+## 10. Channel points and predictions
+
+Channels can give viewers channel points for watching and let them spend those points on chat
+commands, extra poll votes and predictions. Channel points have no cash value. They cannot be
+bought, sold, transferred to another person or channel, or exchanged for money, goods or
+services, and we never pay out, refund or compensate them in money. Predictions stake channel
+points only, never money. A channel or the co-op may change how points are earned, adjust or
+remove points (for example to correct an error or abuse), or turn points off; points end when the
+channel turns them off, when your account ends, or when the service ends. Points are not a
+deposit, a currency or property of yours.
+
+## 11. Disclaimers and liability
 
 The service is provided "as is". Live streaming depends on networks and volunteers we do not
 control, so we cannot promise it will always be available or error-free. To the extent the law
 allows, the co-op is not liable for indirect or consequential losses. Nothing in these terms
 limits rights you have under consumer law that cannot be waived.
 
-## 11. Ending your use
+## 12. Ending your use
 
 You can delete your account at any time from your settings; the privacy policy explains what is
 kept and why. We may suspend or end accounts that seriously or repeatedly break these terms.
 
-## 12. Changes
+## 13. Changes
 
 When we change these terms we publish a new version with a new date. If the change is material,
 we ask you to accept the new version before you continue using features that need an account.

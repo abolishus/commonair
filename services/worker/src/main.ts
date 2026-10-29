@@ -14,6 +14,7 @@ import { ClassifierHolder } from "./integrity/classifier.ts";
 import { buildModerationOptions } from "./moderation/startup.ts";
 import { mailableStorageOrigin } from "./exports/build.ts";
 import { opsTestHooks } from "./ops/startup.ts";
+import { interactTestHooks } from "./interact/startup.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
 import { createWorker } from "./worker.ts";
 
@@ -41,6 +42,7 @@ if (moderation.testHooks)
   });
 const coopHooks = coopTestHooks(env, logger);
 const opsHooks = opsTestHooks(env, logger);
+const interactHooks = interactTestHooks(env, logger);
 const site = instanceSite(env);
 // Presigned export links point at the storage endpoint browsers use, not the web origin. Only an
 // explicitly public endpoint qualifies, over https unless it is a local development host;
@@ -80,7 +82,12 @@ runService({
   port: env.WORKER_PORT,
   logger,
   checks: worker.checks,
-  health: { moderation_test_hooks: moderation.testHooks, coop_test_hooks: coopHooks, ops_test_hooks: opsHooks },
+  health: {
+    moderation_test_hooks: moderation.testHooks,
+    coop_test_hooks: coopHooks,
+    ops_test_hooks: opsHooks,
+    interact_test_hooks: interactHooks,
+  },
   fetch: () => new Response("not found", { status: 404 }),
   shutdownTimeoutMs: SHUTDOWN_DEADLINE_MS + 3_000,
   onShutdown: async () => {

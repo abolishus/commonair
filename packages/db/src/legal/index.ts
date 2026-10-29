@@ -23,12 +23,23 @@ export const LEGAL_SEED_VERSION = "2026-10-18-draft";
  */
 export const ENFORCEMENT_NOTICE_SEED_VERSION = "2026-10-27-draft";
 /**
- * `privacy` and `cookies` gained the peer-to-peer sections (ADR 0005 amendment 1) after
- * `LEGAL_SEED_VERSION` reached databases, so they take their own versions. A new privacy version
- * is newer than the accepted one (same publishedAt, the version sorts later), so every signed-in
- * user is asked to accept it again; the cookie policy needs no acceptance.
+ * The terms reached databases at `LEGAL_SEED_VERSION`; the channel points clause (ADR 0026
+ * decision 3: points have no cash value) is a new version, so every signed-in user is asked to
+ * accept the terms again (same publishedAt, the version sorts later). Draft: counsel has not
+ * reviewed the clause.
  */
-export const PRIVACY_SEED_VERSION = "2026-10-27-p2p-draft";
+export const TERMS_SEED_VERSION = "2026-10-29-points-draft";
+/**
+ * `privacy` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
+ * `LEGAL_SEED_VERSION` reached databases, and moved again for the channel-features paragraph
+ * (ADR 0026). Each new version sorts after the accepted one, so every signed-in user is asked to
+ * accept it again. Draft: counsel has not reviewed the paragraph.
+ */
+export const PRIVACY_SEED_VERSION = "2026-10-29-interact-draft";
+/**
+ * `cookies` gained the peer-to-peer sections (ADR 0005 amendment 1) after `LEGAL_SEED_VERSION`
+ * reached databases, so it takes its own version; the cookie policy needs no acceptance.
+ */
 export const COOKIES_SEED_VERSION = "2026-10-27-p2p-draft";
 /**
  * Fixed rather than the seed's clock: the migrate job and the API run on different hosts,
@@ -73,7 +84,7 @@ type SeedMeta = Omit<LegalSeedDocument, "body" | "version" | "isDraft" | "publis
 };
 
 const SEED_META: readonly SeedMeta[] = [
-  { kind: "terms", title: "Terms of service", requiresAcceptance: true },
+  { kind: "terms", title: "Terms of service", requiresAcceptance: true, version: TERMS_SEED_VERSION },
   { kind: "privacy", title: "Privacy policy", requiresAcceptance: true, version: PRIVACY_SEED_VERSION },
   { kind: "guidelines", title: "Community guidelines", requiresAcceptance: true },
   { kind: "cookies", title: "Cookie and storage policy", requiresAcceptance: false, version: COOKIES_SEED_VERSION },

@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the E8 harness scenarios ONLY (docs/testing/e8-selectors.md, ADR 0026).
+# Never use it on a public instance: it turns on the interactivity test hook
+# (`POST /internal/interact/tick`, INTERACT_TEST_HOOKS), which runs poll, raid and points jobs on
+# demand.
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      INTERACT_TEST_HOOKS: "true"
+  worker:
+    environment:
+      INTERACT_TEST_HOOKS: "true"

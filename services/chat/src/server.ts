@@ -185,7 +185,15 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     bus.acquire(bus.names.live(), (raw) => chat.onLive(raw)),
     bus.acquire((opts.busPrefix ?? "") + BUS.userControl, (raw) => onUserControl(raw)),
   ]);
-  await initPlugins(middlewares, chat, logger);
+  await initPlugins(middlewares, {
+    chat,
+    rooms,
+    bus,
+    busPrefix: opts.busPrefix ?? "",
+    db: opts.db,
+    valkey,
+    logger,
+  });
 
   /** Reply addressing for a frame: the IRC gateway pairs replies with requests by nonce. */
   type Reply = { channel: string | null; nonce: string | undefined };
@@ -520,9 +528,26 @@ function watchValkey(client: ValkeyClient, name: string, logger: Logger): void {
   });
 }
 
-async function initPlugins(middlewares: readonly MessageMiddleware[], chat: ChatCore, logger: Logger): Promise<void> {
+async function initPlugins(
+  middlewares: readonly MessageMiddleware[],
+  deps: {
+    chat: ChatCore;
+    rooms: Rooms;
+    bus: Bus;
+    busPrefix: string;
+    db: Database;
+    valkey: ValkeyClient;
+    logger: Logger;
+  },
+): Promise<void> {
+  const { chat, rooms, bus, busPrefix, db, valkey, logger } = deps;
   const host: PluginHost = {
     logger,
+    db,
+    valkey,
+    subscribe: (channel, handler) => bus.acquire(busPrefix + channel, handler),
+    hostedChannels: () =>
+      [...rooms.all()].filter((r) => r.members.size > 0).map((r) => ({ id: r.channelId, slug: r.slug })),
     async say({ channel, userId, body, isAction }) {
       const identity: Identity = {
         userId,

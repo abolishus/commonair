@@ -140,10 +140,12 @@ describe("account menu", () => {
 });
 
 describe("studio nav", () => {
-  it("lists stream manager, overlays, content, revenue and relays, nothing else", () => {
+  it("lists stream manager, overlays, polls and raids, the bot, content, revenue and relays, nothing else", () => {
     expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
       ["overlays", "/overlays"],
+      ["interact", "/interact"],
+      ["bot", "/bot"],
       ["content", "/content"],
       ["revenue", "/revenue"],
       ["relays", "/relays"],
@@ -154,6 +156,9 @@ describe("studio nav", () => {
     ["/dashboard", "streamManager"],
     ["/overlays", "overlays"],
     ["/overlays/", "overlays"],
+    ["/interact", "interact"],
+    ["/bot", "bot"],
+    ["/bot/", "bot"],
     ["/content", "content"],
     ["/revenue", "revenue"],
     ["/revenue/", "revenue"],
@@ -170,6 +175,8 @@ describe("studio nav", () => {
     // The OBS overlay pages are not the studio's overlays page.
     expect(studioNav("/overlay/alerts").some((i) => i.current)).toBe(false);
     expect(studioNav("/contents").some((i) => i.current)).toBe(false);
+    // A channel page is never the studio's bot page.
+    expect(studioNav("/bots").some((i) => i.current)).toBe(false);
   });
 });
 

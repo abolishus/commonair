@@ -20,8 +20,10 @@ import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
 import { Route as AppTransparencyRouteImport } from './routes/_app/transparency'
+import { Route as StudioBotRouteImport } from './routes/_studio/bot'
 import { Route as StudioContentRouteImport } from './routes/_studio/content'
 import { Route as StudioDashboardRouteImport } from './routes/_studio/dashboard'
+import { Route as StudioInteractRouteImport } from './routes/_studio/interact'
 import { Route as StudioOverlaysRouteImport } from './routes/_studio/overlays'
 import { Route as StudioRelaysRouteImport } from './routes/_studio/relays'
 import { Route as StudioRevenueRouteImport } from './routes/_studio/revenue'
@@ -104,6 +106,11 @@ const AppTransparencyRoute = AppTransparencyRouteImport.update({
   path: '/transparency',
   getParentRoute: () => AppRoute,
 } as any)
+const StudioBotRoute = StudioBotRouteImport.update({
+  id: '/bot',
+  path: '/bot',
+  getParentRoute: () => StudioRoute,
+} as any)
 const StudioContentRoute = StudioContentRouteImport.update({
   id: '/content',
   path: '/content',
@@ -112,6 +119,11 @@ const StudioContentRoute = StudioContentRouteImport.update({
 const StudioDashboardRoute = StudioDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioInteractRoute = StudioInteractRouteImport.update({
+  id: '/interact',
+  path: '/interact',
   getParentRoute: () => StudioRoute,
 } as any)
 const StudioOverlaysRoute = StudioOverlaysRouteImport.update({
@@ -271,8 +283,10 @@ export interface FileRoutesByFullPath {
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
+  '/bot': typeof StudioBotRoute
   '/content': typeof StudioContentRoute
   '/dashboard': typeof StudioDashboardRoute
+  '/interact': typeof StudioInteractRoute
   '/overlays': typeof StudioOverlaysRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
@@ -312,8 +326,10 @@ export interface FileRoutesByTo {
   '/signup': typeof AppSignupRoute
   '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
+  '/bot': typeof StudioBotRoute
   '/content': typeof StudioContentRoute
   '/dashboard': typeof StudioDashboardRoute
+  '/interact': typeof StudioInteractRoute
   '/overlays': typeof StudioOverlaysRoute
   '/relays': typeof StudioRelaysRoute
   '/revenue': typeof StudioRevenueRoute
@@ -356,8 +372,10 @@ export interface FileRoutesById {
   '/_app/signup': typeof AppSignupRoute
   '/_app/takedown': typeof AppTakedownRoute
   '/_app/transparency': typeof AppTransparencyRoute
+  '/_studio/bot': typeof StudioBotRoute
   '/_studio/content': typeof StudioContentRoute
   '/_studio/dashboard': typeof StudioDashboardRoute
+  '/_studio/interact': typeof StudioInteractRoute
   '/_studio/overlays': typeof StudioOverlaysRoute
   '/_studio/relays': typeof StudioRelaysRoute
   '/_studio/revenue': typeof StudioRevenueRoute
@@ -400,8 +418,10 @@ export interface FileRouteTypes {
     | '/signup'
     | '/takedown'
     | '/transparency'
+    | '/bot'
     | '/content'
     | '/dashboard'
+    | '/interact'
     | '/overlays'
     | '/relays'
     | '/revenue'
@@ -441,8 +461,10 @@ export interface FileRouteTypes {
     | '/signup'
     | '/takedown'
     | '/transparency'
+    | '/bot'
     | '/content'
     | '/dashboard'
+    | '/interact'
     | '/overlays'
     | '/relays'
     | '/revenue'
@@ -484,8 +506,10 @@ export interface FileRouteTypes {
     | '/_app/signup'
     | '/_app/takedown'
     | '/_app/transparency'
+    | '/_studio/bot'
     | '/_studio/content'
     | '/_studio/dashboard'
+    | '/_studio/interact'
     | '/_studio/overlays'
     | '/_studio/relays'
     | '/_studio/revenue'
@@ -607,6 +631,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTransparencyRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_studio/bot': {
+      id: '/_studio/bot'
+      path: '/bot'
+      fullPath: '/bot'
+      preLoaderRoute: typeof StudioBotRouteImport
+      parentRoute: typeof StudioRoute
+    }
     '/_studio/content': {
       id: '/_studio/content'
       path: '/content'
@@ -619,6 +650,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof StudioDashboardRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/interact': {
+      id: '/_studio/interact'
+      path: '/interact'
+      fullPath: '/interact'
+      preLoaderRoute: typeof StudioInteractRouteImport
       parentRoute: typeof StudioRoute
     }
     '/_studio/overlays': {
@@ -904,16 +942,20 @@ const AppRouteChildren: AppRouteChildren = {
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface StudioRouteChildren {
+  StudioBotRoute: typeof StudioBotRoute
   StudioContentRoute: typeof StudioContentRoute
   StudioDashboardRoute: typeof StudioDashboardRoute
+  StudioInteractRoute: typeof StudioInteractRoute
   StudioOverlaysRoute: typeof StudioOverlaysRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
   StudioRevenueRoute: typeof StudioRevenueRoute
 }
 
 const StudioRouteChildren: StudioRouteChildren = {
+  StudioBotRoute: StudioBotRoute,
   StudioContentRoute: StudioContentRoute,
   StudioDashboardRoute: StudioDashboardRoute,
+  StudioInteractRoute: StudioInteractRoute,
   StudioOverlaysRoute: StudioOverlaysRoute,
   StudioRelaysRoute: StudioRelaysRoute,
   StudioRevenueRoute: StudioRevenueRoute,

@@ -568,14 +568,16 @@ export const WebhookDelivery = z.object({
   createdAt: Timestamp,
 });
 
+const BotCommandName = z.string().regex(/^[a-z0-9_]{1,25}$/);
 export const BotCommand = z.object({
   id: Id,
-  name: z.string().regex(/^[a-z0-9_]{1,25}$/),
-  aliases: z.array(z.string()),
+  name: BotCommandName,
+  aliases: z.array(BotCommandName).max(5),
+  /** Variable substitution only (ADR 0026 decision 6): `${user}`, `${count}`, `${var:name}` and the bot engine's documented built-ins. */
   response: z.string().min(1).max(500),
   userLevel: z.enum(E.USER_LEVELS),
   cooldownSeconds: z.number().int().min(0).max(3600),
-  costPoints: z.number().int().min(0),
+  costPoints: z.number().int().min(0).max(1_000_000),
   enabled: z.boolean(),
   useCount: z.number().int(),
 });
@@ -584,10 +586,24 @@ export const BotTimer = z.object({
   name: z.string().min(1).max(50),
   message: z.string().min(1).max(500),
   intervalMinutes: z.number().int().min(1).max(1440),
-  minChatLines: z.number().int().min(0),
+  /** At least 1: a timer never talks to an empty room (ADR 0026 decision 6). */
+  minChatLines: z.number().int().min(1).max(1000),
   enabled: z.boolean(),
 });
-export const BotSettings = z.object({ enabled: z.boolean(), config: BotConfig });
+export const BotSettings = z.object({
+  enabled: z.boolean(),
+  config: BotConfig,
+  /** The channel's bot account (`users.account_type = 'bot'`), created the first time the bot is enabled. */
+  botUser: UserPublic.pick({ id: true, username: true }).nullable(),
+});
+export const SongRequest = z.object({
+  id: Id,
+  /** The link the viewer pasted; never fetched (ADR 0026 decision 6). */
+  url: z.string(),
+  requester: Slug,
+  status: z.enum(E.SONG_REQUEST_STATUSES),
+  createdAt: Timestamp,
+});
 export const PollView = z.object({
   id: Id,
   title: z.string(),
@@ -595,8 +611,11 @@ export const PollView = z.object({
   status: z.enum(E.POLL_STATUSES),
   startedAt: Timestamp,
   endsAt: Timestamp,
+  endedAt: Timestamp.nullable(),
   pointsPerExtraVote: z.number().int(),
   myVote: z.string().nullable(),
+  /** The caller's votes including bought extra votes; 0 when not voted or anonymous. */
+  myVotes: z.number().int(),
 });
 export const PredictionView = z.object({
   id: Id,
@@ -612,16 +631,28 @@ export const PredictionView = z.object({
   status: z.enum(E.PREDICTION_STATUSES),
   startedAt: Timestamp,
   locksAt: Timestamp,
+  lockedAt: Timestamp.nullable(),
+  endedAt: Timestamp.nullable(),
   winningOutcomeId: z.string().nullable(),
-  myBet: z.object({ outcomeId: z.string(), points: z.number().int() }).nullable(),
+  myBet: z.object({ outcomeId: z.string(), points: z.number().int(), payout: z.number().int().nullable() }).nullable(),
 });
 export const RaidView = z.object({
   id: Id,
   from: Slug,
   to: Slug,
+  toDisplayName: z.string(),
+  /** Gate-eligible viewers of the source at execute time (0 while pending). */
   viewerCount: z.number().int(),
   status: z.enum(E.RAID_STATUSES),
+  cancelReason: z.enum(E.RAID_CANCEL_REASONS).nullable(),
+  createdAt: Timestamp,
   executeAt: Timestamp,
+});
+/** `interact.raids.current`: the pending or last raid, when the next may start, and who may raid this channel. */
+export const RaidState = z.object({
+  raid: RaidView.nullable(),
+  cooldownEndsAt: Timestamp.nullable(),
+  policy: z.enum(E.RAID_POLICIES),
 });
 export const AlertConfig = z.object({
   type: z.enum(E.ALERT_TYPES),
@@ -671,6 +702,8 @@ export const LoyaltyBalance = z.object({
   user: UserPublic.pick({ id: true, username: true }),
   points: z.number().int(),
   pointsName: z.string(),
+  /** The channel's points are on (`BotConfig.loyalty.enabled`); viewers hide the chip and the spend controls when false. */
+  enabled: z.boolean(),
 });
 
 export const MembershipView = z.object({

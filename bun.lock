@@ -186,6 +186,23 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/interact": {
+      "name": "@commonair/interact",
+      "version": "0.0.0",
+      "dependencies": {
+        "@commonair/contracts": "workspace:*",
+        "@commonair/db": "workspace:*",
+        "@commonair/integrity": "workspace:*",
+        "@commonair/ledger": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/ledger": {
       "name": "@commonair/ledger",
       "version": "0.0.0",
@@ -380,6 +397,7 @@
         "@commonair/email": "workspace:*",
         "@commonair/governance": "workspace:*",
         "@commonair/integrity": "workspace:*",
+        "@commonair/interact": "workspace:*",
         "@commonair/ledger": "workspace:*",
         "@commonair/moderation": "workspace:*",
         "@commonair/observability": "workspace:*",
@@ -416,6 +434,7 @@
         "@commonair/config": "workspace:*",
         "@commonair/contracts": "workspace:*",
         "@commonair/db": "workspace:*",
+        "@commonair/interact": "workspace:*",
         "@commonair/observability": "workspace:*",
         "@commonair/safe-regex": "workspace:*",
         "@commonair/service": "workspace:*",
@@ -520,6 +539,7 @@
         "@commonair/email": "workspace:*",
         "@commonair/governance": "workspace:*",
         "@commonair/integrity": "workspace:*",
+        "@commonair/interact": "workspace:*",
         "@commonair/ledger": "workspace:*",
         "@commonair/moderation": "workspace:*",
         "@commonair/observability": "workspace:*",
@@ -655,6 +675,8 @@
     "@commonair/infra": ["@commonair/infra@workspace:infra"],
 
     "@commonair/integrity": ["@commonair/integrity@workspace:packages/integrity"],
+
+    "@commonair/interact": ["@commonair/interact@workspace:packages/interact"],
 
     "@commonair/irc": ["@commonair/irc@workspace:services/irc"],
 

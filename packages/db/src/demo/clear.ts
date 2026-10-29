@@ -7,7 +7,11 @@
  * are RESTRICT (channels.owner_id; playback sessions, stream hours and integrity flags on
  * channels and broadcasts), so those children go first. Append-only rows (audit_log) stay: they
  * reference ids only (ADR 0004). Money, co-op and relay rows are never touched: if an anchored
- * user has any, their RESTRICT keys make the transaction fail and nothing is deleted.
+ * user has any, their RESTRICT keys make the transaction fail and nothing is deleted. The same
+ * holds for channel points (ADR 0026): `loyalty_transactions` and `loyalty_balances` are RESTRICT
+ * and append-only like money, so a demo user or channel with any points ledger row fails the
+ * clear as a whole. The worker's `points-accrue` skips demo channels and viewers so watching the
+ * demo never creates one; the accrual tables cascade and need no step here.
  */
 import { and, eq, inArray, isNotNull, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn, PgTable } from "drizzle-orm/pg-core";

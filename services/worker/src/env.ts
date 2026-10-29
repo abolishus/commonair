@@ -8,6 +8,7 @@ import {
   developerEnv,
   moderationEnv,
   coopEnv,
+  interactEnv,
   evidenceSealEnv,
   evidenceStorageEnv,
   mailEnv,
@@ -43,6 +44,8 @@ export const workerEnv = z
     // E6: export emails and the operations test hook (ADR 0021).
     ...mailEnv.shape,
     ...opsEnv.shape,
+    // E8: the interactivity test hook (ADR 0026).
+    ...interactEnv.shape,
   })
   .superRefine((env, ctx) => {
     if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)

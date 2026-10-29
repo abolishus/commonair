@@ -4,7 +4,6 @@
 import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { schema, uuidv7 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
-import { audit } from "../events/audit.ts";
 import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
 import { channelBySlug, iso, loadUsersPublic, toChannelDto, toPanelDto, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
@@ -17,8 +16,9 @@ import { assertCommittedUpload } from "../moderation/committed.ts";
 import { incomingKey, UPLOAD_TYPES } from "../moderation/upload-keys.ts";
 import { commitUpload } from "../moderation/uploads.ts";
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
+import { changeRoleInTx } from "../channels/roles.ts";
 
-const { channels, channelPanels, categories, follows, users, channelRoles, modActions } = schema;
+const { channels, channelPanels, categories, follows, users, channelRoles } = schema;
 
 /** Revoke any active stream key found in `text`, and store the text with keys redacted. */
 async function scrubKeys(deps: Deps, text: string, source: LeakSource): Promise<string> {
@@ -27,12 +27,6 @@ async function scrubKeys(deps: Deps, text: string, source: LeakSource): Promise<
 }
 
 const UPLOAD_TTL_SECONDS = 600;
-
-const ROLE_ACTIONS = {
-  moderator: { add: "add_moderator", remove: "remove_moderator" },
-  vip: { add: "add_vip", remove: "remove_vip" },
-  editor: { add: null, remove: null },
-} as const;
 
 export const channelsRoutes = {
   get: os.channels.get.handler(async ({ context: { deps, caller }, input }) => {
@@ -313,49 +307,8 @@ async function changeRole(
   const target = await userByUsername(deps, input.username);
   if (!target) throw notFound("User not found");
   if (target.id === c.ownerId) throw badRequest("The owner already has every role");
-  const changed = await deps.db.transaction(async (tx) => {
-    const rows =
-      op === "add"
-        ? await tx
-            .insert(channelRoles)
-            .values({ channelId: c.id, userId: target.id, role: input.role, grantedBy: caller.user.id })
-            .onConflictDoNothing()
-            .returning()
-        : await tx
-            .delete(channelRoles)
-            .where(
-              and(
-                eq(channelRoles.channelId, c.id),
-                eq(channelRoles.userId, target.id),
-                eq(channelRoles.role, input.role),
-              ),
-            )
-            .returning();
-    if (rows.length === 0) return false;
-    const action = ROLE_ACTIONS[input.role][op];
-    if (action)
-      await tx.insert(modActions).values({
-        scope: "channel",
-        channelId: c.id,
-        moderatorId: caller.user.id,
-        targetUserId: target.id,
-        action,
-      });
-    await audit(tx, {
-      actorType: "user",
-      actorId: caller.user.id,
-      action: `channel.role.${op}`,
-      subjectType: "user",
-      subjectId: target.id,
-      channelId: c.id,
-      details: { role: input.role },
-    });
-    if (input.role === "moderator")
-      await emit(tx, op === "add" ? "channel.moderator.add" : "channel.moderator.remove", c.id, {
-        ...broadcasterFields(c),
-        ...userFields(target),
-      });
-    return true;
-  });
+  const changed = await deps.db.transaction((tx) =>
+    changeRoleInTx(tx, { channel: c, target, role: input.role, op, actorId: caller.user.id }),
+  );
   if (changed) await publishControl(deps, c.id, { op: "invalidate", scope: "user", userId: target.id });
 }

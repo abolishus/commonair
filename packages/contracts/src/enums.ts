@@ -213,6 +213,40 @@ export const RAID_STATUSES = ["pending", "completed", "canceled"] as const;
 export const ALERT_TYPES = ["follow", "subscription", "tip", "raid"] as const;
 export const GOAL_TYPES = ["followers", "subscriptions", "tips"] as const;
 export const SONG_REQUEST_STATUSES = ["queued", "played", "skipped"] as const;
+/** Why points moved (`loyalty_transactions.reason`, ADR 0026 decision 2). The sign is checked by the database. */
+export const LOYALTY_REASONS = [
+  "watch",
+  "command",
+  "prediction_bet",
+  "prediction_payout",
+  "prediction_refund",
+  "poll_vote",
+  "moderator_adjust",
+] as const;
+/** `bot.points.adjust`: a reason code for the audit row, never free text (ADR 0026 decision 2). */
+export const POINTS_ADJUST_REASONS = ["correction", "reward", "penalty", "other"] as const;
+/** Who may raid a channel (`channels.raid_policy`, ADR 0026 decision 4). */
+export const RAID_POLICIES = ["anyone", "followed", "off"] as const;
+/** Why a raid ended without executing. */
+export const RAID_CANCEL_REASONS = [
+  "owner",
+  "target_offline",
+  "target_refused",
+  "suspended",
+  "source_offline",
+] as const;
+/**
+ * Raid timing (ADR 0026 decision 4: "an instance constant in the API config"). The countdown
+ * runs from `start` to `executeAt`; a channel can start another raid `cooldownSeconds` after its
+ * last raid completed or was canceled.
+ */
+export const RAID_RULES = { countdownSeconds: 30, cooldownSeconds: 600 } as const;
+/** Poll limits beyond the router's per-call input bounds. */
+export const POLL_RULES = { maxExtraVotesPerUser: 100 } as const;
+/** Command names the bot engine answers itself; `bot.commands.upsert` refuses them and their use as aliases. */
+export const BOT_BUILTIN_COMMANDS = ["points", "sr", "commands"] as const;
+/** What a `BotControlMessage` tells the chat service to reload. */
+export const BOT_CONTROL_SCOPES = ["config", "commands", "timers", "variables"] as const;
 
 export const NOTIFICATION_TYPES = [
   "go_live",

@@ -48,6 +48,8 @@ export const en = {
   "studio.nav": "Creator studio",
   "studio.streamManager": "Stream manager",
   "studio.relays": "Relays",
+  "studio.interact": "Polls & raids",
+  "studio.bot": "Channel bot",
   "auth.signOutFailed": "Could not sign out. Try again.",
   "auth.sessionExpired": "Your session has ended. Sign in again to continue.",
 

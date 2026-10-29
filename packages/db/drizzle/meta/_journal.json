@@ -232,6 +232,20 @@
       "when": 1793132539821,
       "tag": "0032_drop_provider_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793307649517,
+      "tag": "0033_e8_interactivity",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793307659047,
+      "tag": "0034_e8_protections",
+      "breakpoints": true
     }
   ]
 }

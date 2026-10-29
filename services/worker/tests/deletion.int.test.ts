@@ -8,6 +8,7 @@
  * stack's Postgres, Valkey and Garage.
  */
 import { exportObjectKey } from "@commonair/contracts/internal";
+import { BotConfig } from "@commonair/contracts/shapes";
 import { schema, uuidv7 } from "@commonair/db";
 import { MemoryMailer } from "@commonair/email";
 import type { ObjectStorage } from "@commonair/storage";
@@ -604,6 +605,55 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 0, objectsPurged: 1 });
     expect(await S3.head(MEDIA_BUCKET, `vods/${vodId}/index.m3u8`)).toBeNull();
     expect(await pendingOf()).toBeNull();
+  });
+
+  test("the channel bot is pseudonymized with its owner; its id and role stay (E8)", async () => {
+    const O = await makeUser(db());
+    const botName = `${O.user.username}_bot`;
+    const [bot] = await db()
+      .insert(schema.users)
+      .values({
+        name: botName,
+        email: `bot+${uuidv7()}@bots.invalid`,
+        username: botName,
+        displayUsername: botName,
+        accountType: "bot",
+        botOwnerId: O.user.id,
+      })
+      .returning();
+    await db()
+      .insert(schema.botConfigs)
+      .values({ channelId: O.channel.id, config: BotConfig.parse({}), enabled: true, botUserId: bot!.id });
+    await db()
+      .insert(schema.channelRoles)
+      .values({ channelId: O.channel.id, userId: bot!.id, role: "moderator", grantedBy: O.user.id });
+    // The owner's other bots are untouched: they were named by the owner, not derived from the slug.
+    const otherName = `${O.user.username}_x`;
+    const [other] = await db()
+      .insert(schema.users)
+      .values({
+        name: otherName,
+        email: `bot+${uuidv7()}@bots.invalid`,
+        username: otherName,
+        accountType: "bot",
+        botOwnerId: O.user.id,
+      })
+      .returning();
+
+    await schedule(O.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+
+    const [b] = await db().select().from(schema.users).where(eq(schema.users.id, bot!.id));
+    expect(b?.username).toMatch(/^deleted_[0-9a-f]{12}$/);
+    expect(b?.displayUsername).toBe(b?.username);
+    expect(b?.name).toBe(b?.username);
+    expect(b?.username).not.toContain(O.user.username);
+    expect(b?.accountType).toBe("bot");
+    expect(b?.pseudonymizedAt).not.toBeNull();
+    const [role] = await db().select().from(schema.channelRoles).where(eq(schema.channelRoles.userId, bot!.id));
+    expect(role?.role).toBe("moderator");
+    const [o] = await db().select().from(schema.users).where(eq(schema.users.id, other!.id));
+    expect(o?.username).toBe(otherName);
   });
 
   test("DMCA-hidden copies of the channel's media are deleted too", async () => {

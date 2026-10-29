@@ -13,7 +13,9 @@
  * and can drop or rewrite a message, and observe accepted messages via `onMessage`.
  */
 import { CHAT_LIMITS, type dto, type EmoteRange, type NoticeCode } from "@commonair/contracts";
+import type { Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
+import type { ValkeyClient } from "@commonair/service";
 import { type CompiledFilter, containsLink } from "./content.ts";
 import { type FilterRunner, inlineFilterRunner } from "./filter-runner.ts";
 import { emoteTierFor, parseEmotes } from "./emotes.ts";
@@ -64,6 +66,13 @@ export interface PluginHost {
   }): Promise<{ id: string | null; notice: NoticeCode | null }>;
   /** Run a chat command (e.g. `timeout`) as `userId`. Returns the resulting notice codes. */
   command(input: { channel: string; userId: string; command: string; args: string[] }): Promise<NoticeCode[]>;
+  /** The chat service's database (app role) and Valkey (key prefix applied), for plugins with state. */
+  db: Database;
+  valkey: ValkeyClient;
+  /** Subscribe to a pub/sub channel (a `BUS` name; the service's bus prefix is applied). */
+  subscribe(channel: string, handler: (message: string) => void): Promise<void>;
+  /** Rooms with at least one member on this instance: timers only fire where someone listens. */
+  hostedChannels(): Array<{ id: string; slug: string }>;
 }
 
 export interface PipelineInput {

@@ -6,6 +6,7 @@
  * themselves here; they run in array order after the built-in rules.
  */
 import type { MessageMiddleware } from "../pipeline.ts";
+import { botMiddleware } from "./bot/index.ts";
 import { noopMiddleware } from "./noop.ts";
 
-export const plugins: MessageMiddleware[] = [noopMiddleware];
+export const plugins: MessageMiddleware[] = [noopMiddleware, botMiddleware];

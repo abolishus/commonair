@@ -23,6 +23,7 @@
     "@commonair/email": "workspace:*",
     "@commonair/governance": "workspace:*",
     "@commonair/integrity": "workspace:*",
+    "@commonair/interact": "workspace:*",
     "@commonair/ledger": "workspace:*",
     "@commonair/moderation": "workspace:*",
     "@commonair/observability": "workspace:*",
