@@ -19,6 +19,7 @@
       "dependencies": {
         "@commonair/config": "workspace:*",
         "@commonair/contracts": "workspace:*",
+        "@commonair/i18n": "workspace:*",
         "@commonair/observability": "workspace:*",
         "@commonair/ui": "workspace:*",
         "@hugeicons/core-free-icons": "4.3.5",
@@ -164,6 +165,15 @@
         "drizzle-orm": "catalog:",
         "zod": "catalog:",
       },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
+    "packages/i18n": {
+      "name": "@commonair/i18n",
+      "version": "0.0.0",
       "devDependencies": {
         "@types/bun": "catalog:",
         "typescript": "catalog:",
@@ -687,6 +697,8 @@
     "@commonair/governance": ["@commonair/governance@workspace:packages/governance"],
 
     "@commonair/harness": ["@commonair/harness@workspace:harness"],
+
+    "@commonair/i18n": ["@commonair/i18n@workspace:packages/i18n"],
 
     "@commonair/infra": ["@commonair/infra@workspace:infra"],
 

@@ -57,6 +57,12 @@ describe("legal seed documents", () => {
     expect(body("cookies")).toMatch(/\*\*essential\*\*/);
   });
 
+  test("the cookie policy names language as a Preferences setting (ADR 0029)", () => {
+    const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
+    expect(body("cookies")).toMatch(/language/);
+    expect(COOKIES_SEED_VERSION > "2026-10-27-p2p-draft").toBe(true);
+  });
+
   test("the terms carry the channel points clause and privacy the channel-features paragraph (ADR 0026)", () => {
     const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
     expect(body("terms")).toMatch(/no cash value/);

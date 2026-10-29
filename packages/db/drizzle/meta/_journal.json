@@ -253,6 +253,13 @@
       "when": 1793309534455,
       "tag": "0035_e9_developer_platform",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793311758847,
+      "tag": "0036_n2_users_locale",
+      "breakpoints": true
     }
   ]
 }

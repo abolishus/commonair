@@ -171,7 +171,8 @@ export async function scrubOutbox(
 /** Where the completed notice goes: read in the transaction, never stored or logged. */
 interface Notice {
   email: string;
-  locale: string;
+  /** Null: not chosen; the mailer uses the instance default. */
+  locale: string | null;
 }
 
 interface Completed {

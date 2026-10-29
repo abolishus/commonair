@@ -141,7 +141,7 @@ describe("update-user cannot change identity or privileged fields", () => {
       twoFactorEnabled: false,
       accountType: "human",
       botVerified: false,
-      locale: "en",
+      locale: null,
       username: s.username,
       email: s.email,
       matureConfirmedAt: null,

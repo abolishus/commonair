@@ -114,7 +114,8 @@ export const contract = {
         z.object({
           displayName: z.string().min(1).max(40).optional(),
           shareEmailWithFollowedChannels: z.boolean().optional(),
-          locale: z.string().max(10).optional(),
+          /** A language tag, or null to clear the choice (back to browser and instance defaults). */
+          locale: D.LocaleTag.nullable().optional(),
         }),
       )
       .output(D.Me),

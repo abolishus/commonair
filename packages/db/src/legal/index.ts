@@ -37,10 +37,11 @@ export const TERMS_SEED_VERSION = "2026-10-29-points-draft";
  */
 export const PRIVACY_SEED_VERSION = "2026-10-29-interact-draft";
 /**
- * `cookies` gained the peer-to-peer sections (ADR 0005 amendment 1) after `LEGAL_SEED_VERSION`
- * reached databases, so it takes its own version; the cookie policy needs no acceptance.
+ * `cookies` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
+ * `LEGAL_SEED_VERSION` reached databases, and moved again for the language line in Preferences
+ * (ADR 0029); the cookie policy needs no acceptance. Draft: counsel has not reviewed it.
  */
-export const COOKIES_SEED_VERSION = "2026-10-27-p2p-draft";
+export const COOKIES_SEED_VERSION = "2026-10-29-i18n-draft";
 /**
  * Fixed rather than the seed's clock: the migrate job and the API run on different hosts,
  * and a database clock ahead of the API's would hide fresh rows (`publishedAt <= now`).

@@ -35,9 +35,11 @@ These are needed for the service you asked for:
 ## Preferences (optional)
 
 If you allow preferences, we remember settings on your device so you do not have to set them
-again: theme, player volume and quality, chat display options and similar. If you decline, the
-site still works and uses defaults on each visit. Signed-in users' account settings are stored on
-the server as part of their account, not in this category.
+again: theme, language, player volume and quality, chat display options and similar. If you
+decline, the site still works and uses defaults on each visit; a language you pick is then kept
+only in this browser tab's own storage and is gone when you close the tab. Signed-in users'
+account settings, including their language, are stored on the server as part of their account,
+not in this category.
 
 ## Peer-to-peer delivery
 

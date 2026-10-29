@@ -54,6 +54,8 @@ export interface InstanceSite {
   sourceCommit: string;
   /** True when this instance is the co-op's flagship deployment. */
   isFlagship: boolean;
+  /** `INSTANCE_DEFAULT_LOCALE`: the language for users and visitors who have not chosen one. */
+  defaultLocale: string;
 }
 
 /** Link to the exact commit this instance runs (AGPL §13). */

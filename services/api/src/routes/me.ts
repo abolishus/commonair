@@ -76,6 +76,7 @@ async function loadMe(deps: Deps, userId: string) {
     isAdult: adult,
     matureConfirmed: adult && mature,
     shareEmailWithFollowedChannels: u.shareEmailWithFollowedChannels,
+    locale: u.locale,
     memberships: member.map((m) => ({ class: m.class, since: iso(m.since) })),
     pendingLegal: pending.map((p) => ({ kind: p.kind, version: p.version })),
     channelSlug: channel[0]?.slug ?? null,
@@ -124,10 +125,8 @@ export const me = {
     if (input.displayName !== undefined) set.name = input.displayName.trim();
     if (input.shareEmailWithFollowedChannels !== undefined)
       set.shareEmailWithFollowedChannels = input.shareEmailWithFollowedChannels;
-    if (input.locale !== undefined) {
-      if (!/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/.test(input.locale)) throw badRequest("Invalid locale");
-      set.locale = input.locale;
-    }
+    // The contract validates the tag; null clears the choice (ADR 0029).
+    if (input.locale !== undefined) set.locale = input.locale;
     if (set.name === "") throw badRequest("Display name cannot be blank");
     if (Object.keys(set).length > 0) await context.deps.db.update(users).set(set).where(eq(users.id, caller.user.id));
     return loadMe(context.deps, caller.user.id);

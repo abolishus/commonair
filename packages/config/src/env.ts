@@ -37,6 +37,15 @@ const coreShape = z.object({
   INSTANCE_NAME: z.string().min(1).default(SITE.name),
   /** Whether this is the co-op's flagship instance; in production, only the flagship may use the built-in contacts. */
   INSTANCE_IS_FLAGSHIP: bool.default(false),
+  /**
+   * Language for anyone who has not chosen one and whose browser asks for none we have (ADR 0029):
+   * the web app's last fallback, and the language of mail to members with no `users.locale`.
+   * A BCP 47 tag such as `en` or `es`; a tag the web has no catalog for falls back to English.
+   */
+  INSTANCE_DEFAULT_LOCALE: z
+    .string()
+    .regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/, "a BCP 47 tag such as en or pt-BR")
+    .default("en"),
   /** General contact address; required in production on instances other than the flagship. */
   CONTACT_EMAIL: z.email().optional(),
   /** Where security reports go; required in production on instances other than the flagship. */
@@ -594,6 +603,7 @@ export function instanceSite(env: z.output<typeof coreShape>): InstanceSite {
     name: env.INSTANCE_NAME,
     publicUrl: env.PUBLIC_URL.replace(/\/+$/, ""),
     isFlagship: env.INSTANCE_IS_FLAGSHIP,
+    defaultLocale: env.INSTANCE_DEFAULT_LOCALE,
     sourceUrl: env.SOURCE_URL,
     sourceCommit: env.SOURCE_COMMIT,
     contacts: {

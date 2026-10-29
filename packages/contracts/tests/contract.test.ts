@@ -5,6 +5,7 @@ import { isContractProcedure, type AnyContractProcedure } from "@orpc/contract";
 import { describe, expect, test } from "vite-plus/test";
 import { z } from "zod";
 import { contract } from "../src/api/router.ts";
+import { LocaleTag, Me } from "../src/api/entities.ts";
 import {
   BusEvent,
   EVENTS,
@@ -91,6 +92,47 @@ describe("API contract", () => {
     expect(doc.openapi).toMatch(/^3\.1/);
     const ops = Object.values(doc.paths ?? {}).flatMap((p) => Object.keys(p ?? {}));
     expect(ops.length).toBe(all.length);
+  });
+});
+
+describe("locale (ADR 0029)", () => {
+  const me = {
+    id: "0190f0a8-7c3e-7000-8000-000000000001",
+    username: "ada",
+    displayName: "Ada",
+    avatarUrl: null,
+    accountType: "human",
+    botOwner: null,
+    createdAt: "2026-10-29T00:00:00.000Z",
+    email: "ada@example.test",
+    emailVerified: true,
+    twoFactorEnabled: false,
+    role: "user",
+    isAdult: true,
+    matureConfirmed: false,
+    shareEmailWithFollowedChannels: false,
+    memberships: [],
+    pendingLegal: [],
+    channelSlug: null,
+  };
+
+  test("LocaleTag takes BCP 47 tags as the platform stores them", () => {
+    for (const tag of ["en", "es", "pt-BR", "en-XA", "zh-Hant"])
+      expect(LocaleTag.safeParse(tag).success, tag).toBe(true);
+    for (const bad of ["english", "EN", "en_US", "e", ""]) expect(LocaleTag.safeParse(bad).success, bad).toBe(false);
+  });
+
+  test("Me carries locale, null when not chosen", () => {
+    expect(Me.parse({ ...me, locale: null }).locale).toBeNull();
+    expect(Me.parse({ ...me, locale: "es" }).locale).toBe("es");
+    expect(Me.safeParse(me).success).toBe(false);
+  });
+
+  test("me.update takes a tag or null", () => {
+    const input = contract.me.update["~orpc"].inputSchema as z.ZodType;
+    expect(input.safeParse({ locale: null }).success).toBe(true);
+    expect(input.safeParse({ locale: "pt-BR" }).success).toBe(true);
+    expect(input.safeParse({ locale: "english" }).success).toBe(false);
   });
 });
 

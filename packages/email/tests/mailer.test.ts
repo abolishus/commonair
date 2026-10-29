@@ -60,6 +60,24 @@ test("the recipient's locale is used and removed from template data", async () =
   expect(mailer.sent[0]).toMatchObject({ locale: "fr", subject: "Connexion à Example Air" });
 });
 
+test("a member with no chosen language gets the instance default (ADR 0029)", async () => {
+  const esSite = testSite({ INSTANCE_DEFAULT_LOCALE: "es" });
+  const esCatalogs = { es: { magicLink: { subject: "Inicia sesión en {instance}" } } };
+  const withEs = new MemoryMailer({ site: esSite, catalogs: esCatalogs });
+  await withEs.send("magicLink", { ...samples.magicLink, locale: null }, "a@air.example.test");
+  expect(withEs.sent[0]).toMatchObject({ locale: "es", subject: "Inicia sesión en Example Air" });
+
+  // No catalog for the default: English.
+  const noEs = new MemoryMailer({ site: esSite });
+  await noEs.send("magicLink", { ...samples.magicLink, locale: null }, "a@air.example.test");
+  expect(noEs.sent[0]?.locale).toBe("en");
+
+  // An explicit choice wins over the default.
+  const chosen = new MemoryMailer({ site: esSite, catalogs: esCatalogs });
+  await chosen.send("magicLink", { ...samples.magicLink, locale: "en" }, "a@air.example.test");
+  expect(chosen.sent[0]?.locale).toBe("en");
+});
+
 test("rejects anything but a single plain address", async () => {
   const mailer = new MemoryMailer({ site });
   for (const bad of ["", "nobody", "a@b.test, c@d.test", "Ada <a@b.test>", "a@b.test\r\nBcc: c@d.test", "a b@c.test"]) {

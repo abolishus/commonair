@@ -14,6 +14,7 @@ const site: InstanceSite = {
   sourceUrl: "https://source.example.test/commonair/",
   sourceCommit: "abc123",
   isFlagship: false,
+  defaultLocale: "en",
 };
 const vars = legalVariables(site, 16);
 

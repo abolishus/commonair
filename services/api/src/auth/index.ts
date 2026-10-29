@@ -137,7 +137,7 @@ export function createAuth(deps: Deps) {
       additionalFields: {
         birthDate: { type: "string", required: false, input: true, returned: false },
         accountType: { type: "string", required: false, input: false, defaultValue: "human" },
-        locale: { type: "string", required: false, input: false, defaultValue: "en" },
+        locale: { type: "string", required: false, input: false },
       },
     },
     session: { expiresIn: 30 * 86_400, updateAge: 86_400 },

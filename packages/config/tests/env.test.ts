@@ -45,6 +45,15 @@ describe("env", () => {
     expect(env.PUBLIC_URL).toBe("http://localhost:3000");
   });
 
+  test("INSTANCE_DEFAULT_LOCALE defaults to en and takes only BCP 47 tags (ADR 0029)", () => {
+    expect(loadEnv(coreEnv, {}).INSTANCE_DEFAULT_LOCALE).toBe("en");
+    for (const tag of ["es", "pt-BR", "en-XA"])
+      expect(loadEnv(coreEnv, { INSTANCE_DEFAULT_LOCALE: tag }).INSTANCE_DEFAULT_LOCALE).toBe(tag);
+    for (const bad of ["english", "EN", "en_US", "e"])
+      expect(() => loadEnv(coreEnv, { INSTANCE_DEFAULT_LOCALE: bad })).toThrow(EnvError);
+    expect(instanceSite(loadEnv(coreEnv, { INSTANCE_DEFAULT_LOCALE: "es" })).defaultLocale).toBe("es");
+  });
+
   test("reports every invalid variable at once", () => {
     const run = () => loadEnv(coreEnv, { NODE_ENV: "staging", PUBLIC_URL: "not a url" });
     expect(run).toThrow(EnvError);

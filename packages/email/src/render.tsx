@@ -10,8 +10,11 @@ import { createContext, Layout, type EmailContext, type TemplateDefinition, type
 
 export interface RenderOptions {
   site: InstanceSite;
-  /** BCP 47 tag of the recipient's language; falls back to English. */
-  locale?: string | undefined;
+  /**
+   * BCP 47 tag of the recipient's language. Null or unset: the instance default,
+   * `site.defaultLocale` (ADR 0029); a tag with no catalog falls back to English.
+   */
+  locale?: string | null | undefined;
   /** Translations by tag; English is built in. */
   catalogs?: Catalogs;
   /** Origin of the object storage browsers download from; allowed only for `storageLinks`. */
@@ -101,7 +104,7 @@ export async function renderEmail<K extends TemplateId>(
   input: TemplateData<K>,
   opts: RenderOptions,
 ): Promise<RenderedEmail> {
-  const { locale, catalog } = resolveCatalog(opts.locale, opts.catalogs);
+  const { locale, catalog } = resolveCatalog(opts.locale ?? opts.site.defaultLocale, opts.catalogs);
   // The registry is keyed by id, so this pairing is sound; TS cannot correlate the generic.
   const def = templates[id] as unknown as TemplateDefinition<TemplateData<K>, unknown>;
   const data = normalizeLinks(input, def.links, opts.site, {

@@ -15,6 +15,7 @@
   "dependencies": {
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
+    "@commonair/i18n": "workspace:*",
     "@commonair/observability": "workspace:*",
     "@commonair/ui": "workspace:*",
     "@hugeicons/core-free-icons": "4.3.5",

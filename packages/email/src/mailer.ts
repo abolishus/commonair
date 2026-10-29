@@ -16,8 +16,8 @@ import type { TemplateId } from "./template.tsx";
 
 export type MailEnv = z.output<typeof mailEnv>;
 
-/** Template data plus the recipient's preferred locale. */
-export type SendProps<K extends TemplateId> = TemplateData<K> & { locale?: string | undefined };
+/** Template data plus the recipient's preferred locale (null or unset: the instance default). */
+export type SendProps<K extends TemplateId> = TemplateData<K> & { locale?: string | null | undefined };
 
 export interface Mailer {
   /** Render `template` and send it to one recipient; resolves to the message id. */

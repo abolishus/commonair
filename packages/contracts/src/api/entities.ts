@@ -29,6 +29,9 @@ export const UserPublic = z.object({
 });
 export type UserPublic = z.infer<typeof UserPublic>;
 
+/** A BCP 47 language tag as the platform stores it (`en`, `es`, `pt-BR`; `en-XA` is the pseudo-locale). */
+export const LocaleTag = z.string().regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/);
+
 export const Me = UserPublic.extend({
   email: z.email(),
   emailVerified: z.boolean(),
@@ -38,6 +41,8 @@ export const Me = UserPublic.extend({
   /** Has the viewer confirmed 18+ for mature streams (signed-in adults only). */
   matureConfirmed: z.boolean(),
   shareEmailWithFollowedChannels: z.boolean(),
+  /** The language the member chose; null = not chosen, so the web negotiates (ADR 0029). */
+  locale: LocaleTag.nullable(),
   memberships: z.array(z.object({ class: z.enum(E.MEMBER_CLASSES), since: Timestamp })),
   pendingLegal: z.array(z.object({ kind: z.enum(E.LEGAL_DOCUMENT_KINDS), version: z.string() })),
   channelSlug: Slug.nullable(),

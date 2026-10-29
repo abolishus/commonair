@@ -7,7 +7,18 @@
  * in services/api's auth config). Extra columns are CommonAir's.
  */
 import { sql } from "drizzle-orm";
-import { type AnyPgColumn, boolean, date, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  type AnyPgColumn,
+  boolean,
+  check,
+  date,
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { accountType, createdAt, id, platformRole, ts, updatedAt } from "./_shared.ts";
 
 export const users = pgTable(
@@ -38,7 +49,8 @@ export const users = pgTable(
     shareEmailWithFollowedChannels: boolean().notNull().default(false),
     /** When an adult confirmed they want to see mature (18+) streams. */
     matureConfirmedAt: ts(),
-    locale: text().notNull().default("en"),
+    /** Chosen language (BCP 47); null = never chosen: the web negotiates, mail uses INSTANCE_DEFAULT_LOCALE (ADR 0029). */
+    locale: text(),
     /** Set when deletion completes; the row is pseudonymized, not dropped, if retention requires it. */
     deletedAt: ts(),
     pseudonymizedAt: ts(),
@@ -49,6 +61,7 @@ export const users = pgTable(
     uniqueIndex("users_email_uq").on(sql`lower(${t.email})`),
     uniqueIndex("users_username_uq").on(t.username),
     index("users_bot_owner_idx").on(t.botOwnerId),
+    check("users_locale_format", sql`${t.locale} ~ '^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$'`),
   ],
 );
 
