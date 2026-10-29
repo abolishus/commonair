@@ -19,9 +19,8 @@ export type LoyaltyBalanceDto = z.infer<typeof D.LoyaltyBalance>;
 export const RESULTS_VISIBLE_MS = 120_000;
 /** Points chip refresh (and the prediction amount's bound) while the panel is open. */
 export const POINTS_REFRESH_MS = 60_000;
-/** Router bounds (`interact.predictions.bet`, `interact.polls.vote`). */
+/** The router's bound on `interact.predictions.bet` points (no shared constant in contracts yet). */
 export const MAX_BET_POINTS = 250_000;
-export const MAX_EXTRA_VOTES = 100;
 
 export const POLL_EVENT_TYPES = ["channel.poll.begin", "channel.poll.progress", "channel.poll.end"] as const;
 export const PREDICTION_EVENT_TYPES = [

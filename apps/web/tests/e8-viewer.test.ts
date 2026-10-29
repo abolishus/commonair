@@ -316,10 +316,19 @@ describe("interactErrorKey", () => {
     expect(interactErrorKey(err("PRECONDITION_FAILED", "points_disabled"), "prediction")).toBe("chatPoints.disabled");
     expect(interactErrorKey(err("CONFLICT"), "poll")).toBe("chatPoll.error.closed");
     expect(interactErrorKey(err("CONFLICT"), "prediction")).toBe("chatPrediction.error.closed");
-    expect(interactErrorKey(err("FORBIDDEN"), "prediction")).toBe("chatPrediction.error.staff");
+    expect(interactErrorKey(err("UNAUTHORIZED"), "prediction")).toBe("chatPrediction.signIn");
     expect(interactErrorKey(err("UNAUTHORIZED"), "poll")).toBe("chatPoll.signIn");
     expect(interactErrorKey(err("TOO_MANY_REQUESTS"), "poll")).toBe("chatPoints.error.slowDown");
     expect(interactErrorKey(new Error("network"), "prediction")).toBe("chatPrediction.error.failed");
+  });
+  it("FORBIDDEN is a staff refusal only with reason staff; a ban or timeout stays neutral", () => {
+    const forbidden = (reason?: string) =>
+      Object.assign(new Error("x"), { code: "FORBIDDEN", data: reason ? { reason } : {} });
+    expect(interactErrorKey(forbidden("staff"), "prediction")).toBe("chatPrediction.error.staff");
+    expect(interactErrorKey(forbidden(), "prediction")).toBe("chatPrediction.error.forbidden");
+    expect(interactErrorKey(forbidden("banned"), "prediction")).toBe("chatPrediction.error.forbidden");
+    expect(interactErrorKey(forbidden(), "poll")).toBe("chatPoll.error.forbidden");
+    expect(interactErrorKey(forbidden("staff"), "poll")).toBe("chatPoll.error.forbidden");
   });
 });
 

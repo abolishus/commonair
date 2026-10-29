@@ -5,8 +5,7 @@ import { RelativeTime, formatNumber, useLocale } from "@commonair/ui";
 import { ViewerPredictionCard } from "@commonair/ui/blocks/interact-viewer";
 import * as React from "react";
 import { type MessageKey, t } from "../../i18n/index.ts";
-import { errorCode } from "../../lib/api.ts";
-import { type InteractClient, interactErrorKey } from "./client.ts";
+import { type InteractClient, interactErrorKey, isStaffRefusal } from "./client.ts";
 import { MAX_BET_POINTS, betAmount, type LoyaltyBalanceDto, type PredictionViewDto } from "./state.ts";
 
 export interface ChatPredictionCardProps {
@@ -57,7 +56,8 @@ export function ChatPredictionCard({
       setAmount("");
       onPointsSpent();
     } catch (err) {
-      if (errorCode(err) === "FORBIDDEN") setRefusedStaff(true);
+      // A ban or timeout is FORBIDDEN too, and ends; only a staff refusal hides betting for good.
+      if (isStaffRefusal(err)) setRefusedStaff(true);
       setError(interactErrorKey(err, "prediction"));
     } finally {
       setPending(false);

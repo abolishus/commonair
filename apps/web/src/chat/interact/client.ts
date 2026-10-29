@@ -6,7 +6,7 @@
  * tests pass a fake. The browser's goes through the same-origin `/rpc` with the session cookie.
  */
 import { api, errorCode } from "../../lib/api.ts";
-import { errorRequirement } from "../../lib/coop.ts";
+import { errorReason, errorRequirement } from "../../lib/coop.ts";
 import type { MessageKey } from "../../i18n/index.ts";
 import type { LoyaltyBalanceDto, PollViewDto, PredictionViewDto } from "./state.ts";
 
@@ -38,7 +38,10 @@ export function interactErrorKey(err: unknown, what: "poll" | "prediction"): Mes
     case "UNAUTHORIZED":
       return what === "poll" ? "chatPoll.signIn" : "chatPrediction.signIn";
     case "FORBIDDEN":
-      return "chatPrediction.error.staff";
+      // Both a ban/timeout and (for bets) the channel's staff are FORBIDDEN; only a `staff`
+      // reason earns the staff message, anything else stays neutral.
+      if (what === "prediction" && isStaffRefusal(err)) return "chatPrediction.error.staff";
+      return what === "poll" ? "chatPoll.error.forbidden" : "chatPrediction.error.forbidden";
     case "CONFLICT":
       return what === "poll" ? "chatPoll.error.closed" : "chatPrediction.error.closed";
     case "TOO_MANY_REQUESTS":
@@ -46,4 +49,9 @@ export function interactErrorKey(err: unknown, what: "poll" | "prediction"): Mes
     default:
       return what === "poll" ? "chatPoll.error.failed" : "chatPrediction.error.failed";
   }
+}
+
+/** A bet refused because the viewer is the channel's owner, an editor or a moderator. */
+export function isStaffRefusal(err: unknown): boolean {
+  return errorCode(err) === "FORBIDDEN" && errorReason(err) === "staff";
 }

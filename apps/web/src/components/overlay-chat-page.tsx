@@ -9,7 +9,7 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import * as React from "react";
-import { ChatConnection, type ChatDeps, type ChatMessageFrame } from "../chat/connection.ts";
+import { ChatConnection, type ChatDeps, type ChatMessageFrame, type ChatStatus } from "../chat/connection.ts";
 import { nameColorIndex, visibleBadges } from "../chat/view.ts";
 import { overlayApi } from "../lib/api.ts";
 import { type OverlayConnectionDeps, connectOverlay } from "../lib/overlay-connection.ts";
@@ -140,6 +140,8 @@ export function OverlayChatPage({
   const reducedMotion = reducedProp ?? prefersReduced;
   const [state, setState] = React.useState<OverlayState>("connecting");
   const [channel, setChannel] = React.useState<string | null>(null);
+  // `data-state` follows the token (selectors spec); the chat socket is reported beside it.
+  const [chatStatus, setChatStatus] = React.useState<ChatStatus>("closed");
   const [lines, dispatch] = React.useReducer(overlayChatReducer, []);
   const [now, setNow] = React.useState(() => Date.now());
   const made = React.useRef<OverlayChatDeps | null>(null);
@@ -157,7 +159,7 @@ export function OverlayChatPage({
     const d = made.current;
     if (!d || channel === null || refused) return;
     const conn = new ChatConnection(channel, d.chat, {
-      onStatus: noop,
+      onStatus: setChatStatus,
       onJoined: noop,
       onMessage: (message) => dispatch({ type: "message", message, now: Date.now() }),
       onDelete: (messageId) => dispatch({ type: "delete", messageId }),
@@ -166,7 +168,10 @@ export function OverlayChatPage({
       onNotice: noop,
     });
     conn.start();
-    return () => conn.stop();
+    return () => {
+      conn.stop();
+      setChatStatus("closed");
+    };
   }, [channel, refused]);
 
   React.useEffect(() => {
@@ -190,6 +195,7 @@ export function OverlayChatPage({
     <div
       data-testid="overlay-chat"
       data-state={state === "connecting" ? "loading" : state}
+      data-chat={chatStatus}
       data-motion={reducedMotion ? "reduced" : "full"}
       className="pointer-events-none flex min-h-svh w-full flex-col justify-end gap-1 bg-transparent p-4 text-base text-overlay-foreground select-none"
     >

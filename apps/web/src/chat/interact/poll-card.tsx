@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { POLL_RULES } from "@commonair/contracts/enums";
 import { RelativeTime, formatNumber, useLocale } from "@commonair/ui";
 import { ViewerPollCard } from "@commonair/ui/blocks/interact-viewer";
 import * as React from "react";
 import { type MessageKey, t } from "../../i18n/index.ts";
 import { type InteractClient, interactErrorKey } from "./client.ts";
-import { MAX_EXTRA_VOTES, type LoyaltyBalanceDto, type PollViewDto } from "./state.ts";
+import { type LoyaltyBalanceDto, type PollViewDto } from "./state.ts";
 
 export interface ChatPollCardProps {
   poll: PollViewDto;
@@ -44,13 +45,19 @@ export function ChatPollCard({
 
   const active = poll.status === "active";
   const total = poll.choices.reduce((sum, c) => sum + c.votes, 0);
-  const sellsVotes = poll.pointsPerExtraVote > 0 && points !== null;
+  // The server's cap is per viewer per poll, so votes already bought count against it.
+  const extraLeft = POLL_RULES.maxExtraVotesPerUser - Math.max(0, poll.myVotes - 1);
+  const sellsVotes = poll.pointsPerExtraVote > 0 && points !== null && extraLeft > 0;
 
   const vote = async (choiceId: string) => {
     setPending(true);
     setError(null);
     try {
-      const view = await client.vote({ id: poll.id, choiceId, extraVotes: sellsVotes ? extra : 0 });
+      const view = await client.vote({
+        id: poll.id,
+        choiceId,
+        extraVotes: sellsVotes ? Math.min(extra, extraLeft) : 0,
+      });
       onVoted(view);
       setExtra(0);
       onPointsSpent();
@@ -90,7 +97,7 @@ export function ChatPollCard({
         sellsVotes && points
           ? {
               value: extra,
-              max: MAX_EXTRA_VOTES,
+              max: extraLeft,
               onValueChange: setExtra,
               label: t("chatPoll.extraVotes"),
               costLabel: t("chatPoll.extraCost", {

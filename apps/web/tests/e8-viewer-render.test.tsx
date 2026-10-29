@@ -9,6 +9,7 @@
  * real chat panel, and the goals and chat overlays (state + frames, refused, reduced motion).
  * Every e8-selectors.md Viewer and Overlays id is checked on the rendered DOM.
  */
+import { POLL_RULES } from "@commonair/contracts/enums";
 import { LocaleProvider, TooltipProvider } from "@commonair/ui";
 import {
   Outlet,
@@ -129,8 +130,11 @@ function fakeClient(over: Partial<InteractClient> = {}) {
   return { client, calls };
 }
 
-const refusal = (code: string, requirement?: string) =>
-  Object.assign(new Error("refused"), { code, data: requirement ? { requirement } : {} });
+const refusal = (code: string, requirement?: string, reason?: string) =>
+  Object.assign(new Error("refused"), {
+    code,
+    data: { ...(requirement ? { requirement } : {}), ...(reason ? { reason } : {}) },
+  });
 
 describe("ChatPollCard", () => {
   it("one click votes, then shows chat-poll-voted and refreshes the points", async () => {
@@ -235,6 +239,45 @@ describe("ChatPollCard", () => {
     expect(screen.getByText("Sign in to vote in polls.")).toBeTruthy();
     expect(screen.getByText("Poll results")).toBeTruthy();
   });
+
+  it("extra votes already bought count against the per-poll cap; none left hides the field", () => {
+    const { client } = fakeClient();
+    const props = { signedIn: true, points: balance(), client, onVoted: () => {}, onPointsSpent: () => {} };
+    const { rerender } = render(
+      wrap(<ChatPollCard poll={pollView({ pointsPerExtraVote: 20, myVote: "c1", myVotes: 61 })} {...props} />),
+    );
+    expect(byId("chat-poll-extra").getAttribute("max")).toBe(String(POLL_RULES.maxExtraVotesPerUser - 60));
+    rerender(
+      wrap(
+        <ChatPollCard
+          poll={pollView({ pointsPerExtraVote: 20, myVote: "c1", myVotes: POLL_RULES.maxExtraVotesPerUser + 1 })}
+          {...props}
+        />,
+      ),
+    );
+    expect(screen.queryByTestId("chat-poll-extra")).toBeNull();
+  });
+
+  it("a banned or timed-out viewer's refused vote is not called a staff refusal", async () => {
+    const { client, calls } = fakeClient();
+    calls.vote.mockRejectedValue(refusal("FORBIDDEN"));
+    render(
+      wrap(
+        <ChatPollCard
+          poll={pollView()}
+          signedIn
+          points={balance()}
+          client={client}
+          onVoted={() => {}}
+          onPointsSpent={() => {}}
+        />,
+      ),
+    );
+    fireEvent.click(screen.getAllByTestId("chat-poll-choice")[0] as Element);
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe("You can't vote in this channel right now."),
+    );
+  });
 });
 
 describe("ChatPredictionCard", () => {
@@ -313,12 +356,12 @@ describe("ChatPredictionCard", () => {
     expect(screen.queryByTestId("chat-prediction-bet-o1")).toBeNull();
   });
 
-  it("staff see no betting controls; a FORBIDDEN answer hides them too", async () => {
+  it("staff see no betting controls; a staff FORBIDDEN answer hides them too", async () => {
     card({ staff: true });
     expect(screen.queryByTestId("chat-prediction-amount")).toBeNull();
     cleanup();
     const { client, calls } = fakeClient();
-    calls.bet.mockRejectedValue(refusal("FORBIDDEN"));
+    calls.bet.mockRejectedValue(refusal("FORBIDDEN", undefined, "staff"));
     render(
       wrap(
         <ChatPredictionCard
@@ -336,6 +379,30 @@ describe("ChatPredictionCard", () => {
     fireEvent.click(screen.getByTestId("chat-prediction-bet-o2"));
     await waitFor(() => expect(screen.queryByTestId("chat-prediction-amount")).toBeNull());
     expect(screen.getByRole("alert").textContent).toContain("cannot bet");
+  });
+
+  it("a banned or timed-out viewer gets a neutral refusal and keeps the controls", async () => {
+    const { client, calls } = fakeClient();
+    calls.bet.mockRejectedValue(refusal("FORBIDDEN"));
+    render(
+      wrap(
+        <ChatPredictionCard
+          prediction={predictionView()}
+          signedIn
+          staff={false}
+          points={balance()}
+          client={client}
+          onBet={() => {}}
+          onPointsSpent={() => {}}
+        />,
+      ),
+    );
+    fireEvent.change(screen.getByTestId("chat-prediction-amount"), { target: { value: "10" } });
+    fireEvent.click(screen.getByTestId("chat-prediction-bet-o2"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toBe("You can't bet on this channel's predictions right now."),
+    );
+    expect(screen.getByTestId("chat-prediction-amount")).toBeTruthy();
   });
 });
 
@@ -799,7 +866,28 @@ describe("OverlayChatPage", () => {
     const ws = sockets[0] as FakeSocket;
     act(() => sources[0]?.emit("open"));
     expect(root.getAttribute("data-state")).toBe("live");
+    // The chat socket is reported apart from the token stream.
+    expect(root.getAttribute("data-chat")).toBe("connecting");
     act(() => ws.push({ op: "welcome", sessionId: "s", user: null, heartbeatMs: 30_000 }));
+    expect(root.getAttribute("data-chat")).toBe("connecting");
+    act(() =>
+      ws.push({
+        op: "joined",
+        channel: "rivertide",
+        channelId: UUID(9),
+        settings: {
+          slowModeSeconds: 0,
+          followersOnlyMinutes: null,
+          subscribersOnly: false,
+          emoteOnly: false,
+          minAccountAgeDays: 0,
+          requireVerifiedEmail: true,
+          linksAllowed: true,
+        },
+        me: { badges: [], canModerate: false, canChat: false },
+      }),
+    );
+    expect(root.getAttribute("data-chat")).toBe("open");
     expect(ws.sent.map((s) => JSON.parse(s) as { op: string; channel?: string })).toContainEqual({
       op: "join",
       channel: "rivertide",
