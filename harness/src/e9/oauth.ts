@@ -24,6 +24,9 @@ import type { SignedInUser } from "../users.ts";
 import { sleep } from "../wait.ts";
 import { type E9App, type E9Run, type E9Step, authorizeOverApi } from "./run.ts";
 
+/** Past `REFRESH_REUSE_GRACE_MS` (2 s, services/api/src/oauth/tokens.ts). */
+const REFRESH_REPLAY_AFTER_MS = 2500;
+
 /** Step 5 subscribes polls and points with this grant (E8's EventSub delivery check). */
 export const STEP2_SCOPES: readonly Scope[] = [
   "chat:read",
@@ -176,6 +179,9 @@ async function codeFlow(run: E9Run, app: E9App): Promise<void> {
   ctx.assert("2. refresh rotates", rotated.status === 200 && rotated.refreshToken !== null, { status: rotated.status });
   const oldAccess = await validateToken(run, grant.accessToken);
   ctx.check("2. the rotated access token stops validating", oldAccess.status === 401, { status: oldAccess.status });
+  // A replay inside the API's 2 s reuse grace (a client retrying a lost response) is refused
+  // without revoking anything; only a later replay is a theft signal.
+  await sleep(REFRESH_REPLAY_AFTER_MS);
   const replay = await refresh(run, app, grant.refreshToken);
   ctx.assert("2. replaying the old refresh token is invalid_grant", replay.error === "invalid_grant", {
     error: replay.error,
