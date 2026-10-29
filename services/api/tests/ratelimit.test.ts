@@ -57,5 +57,6 @@ test("default buckets match the documented limits", () => {
     expensive: { max: 5, windowMs: 3_600_000 },
     mail: { max: 10, windowMs: 3_600_000 },
     playback: { max: 3000, windowMs: 60_000 },
+    app: { max: 6000, windowMs: 60_000 },
   });
 });

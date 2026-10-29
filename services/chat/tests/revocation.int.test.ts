@@ -12,7 +12,7 @@ import { BUS, type UserControlMessage } from "@commonair/contracts";
 import { schema } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
 import { createValkey } from "@commonair/service";
-import { sha256Hex } from "@commonair/tokens";
+import { randomSecret, sha256Hex, signChatToken } from "@commonair/tokens";
 import type { ChatService } from "../src/server.ts";
 import {
   chatToken,
@@ -22,6 +22,7 @@ import {
   createUser,
   eventually,
   isolation,
+  SECRET,
   startInstance,
   VALKEY_URL,
 } from "./helpers.ts";
@@ -196,5 +197,109 @@ describe("session revoked while the socket is open", () => {
     expect(viaChatToken.closed?.code).toBe(4001);
     expect(viaOauth.closed?.code).toBe(4001);
     expect(bystander.closed).toBeNull();
+  });
+});
+
+describe("OAuth apps (E9, ADR 0027)", () => {
+  const newApp = async (ownerId: string) => {
+    const [app] = await t.db
+      .insert(schema.oauthApps)
+      .values({
+        ownerId,
+        name: "app",
+        clientId: crypto.randomUUID(),
+        clientSecretHash: "x",
+        redirectUris: ["https://app.example.test/cb"],
+      })
+      .returning({ id: schema.oauthApps.id });
+    return app!.id;
+  };
+  /** A user token issued to an app (an authorization-code grant). */
+  const appToken = async (appId: string, userId: string | null, scopes = BOT_SCOPES) => {
+    const token = randomSecret("ca_", 24);
+    await t.db.insert(schema.oauthTokens).values({
+      appId,
+      userId,
+      kind: userId === null ? "client_credentials" : "authorization_code",
+      scopes: userId === null ? [] : scopes,
+      accessTokenHash: await sha256Hex(token),
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    return token;
+  };
+  /** A browser chat token minted for an app (`claims.app`). */
+  const appChatToken = (uid: string, app: string) =>
+    signChatToken(SECRET, { v: 1, uid, app, scopes: BOT_SCOPES, exp: Math.floor(Date.now() / 1000) + 300 });
+  /** The upgrade's HTTP status (chat authenticates before upgrading). */
+  const upgradeStatus = async (svc: ChatService, bearer: string) => {
+    const res = await fetch(svc.wsUrl.replace(/^ws/, "http"), {
+      headers: { authorization: `Bearer ${bearer}`, upgrade: "websocket", connection: "Upgrade" },
+    });
+    await res.body?.cancel();
+    return res.status;
+  };
+  /** Every earlier message on the channel has been handled once this one closes its target. */
+  const sentinel = async () => {
+    const { owner } = await setup();
+    const s = await connect(a, { token: await chatToken(owner.id) });
+    const s2 = await connect(b, { token: await chatToken(owner.id) });
+    await publish({ op: "disconnect", userId: owner.id, reason: "suspended" });
+    await eventually(() => s.closed && s2.closed);
+  };
+
+  test("an app-wide disconnect closes that app's sockets on both instances and nothing else", async () => {
+    const { owner, bot } = await setup();
+    const { bot: bot2 } = await setup();
+    const appId = await newApp(owner.id);
+    const otherAppId = await newApp(owner.id);
+    const onA = await connect(a, { bearer: await appToken(appId, bot.id) });
+    const onB = await connect(b, { bearer: await appToken(appId, bot2.id) });
+    const browser = await connect(b, { token: await appChatToken(bot.id, appId) });
+    const otherApp = await connect(a, { bearer: await appToken(otherAppId, bot.id) });
+    const personal = await connect(b, { bearer: await createOauthToken(t.db, bot.id, BOT_SCOPES) });
+
+    await publish({ op: "disconnect", appId, reason: "app_removed" });
+    await eventually(() => onA.closed && onB.closed && browser.closed);
+    expect(onA.closed?.code).toBe(4001);
+    expect(onB.closed?.code).toBe(4001);
+    expect(browser.closed?.code).toBe(4001);
+    await sentinel();
+    expect(otherApp.closed).toBeNull();
+    expect(personal.closed).toBeNull();
+  });
+
+  test("a grant disconnect ({ userId, appId }) closes only that grant's sockets", async () => {
+    const { owner, bot } = await setup();
+    const { bot: bot2 } = await setup();
+    const appId = await newApp(owner.id);
+    const grant = await connect(a, { bearer: await appToken(appId, bot.id) });
+    const sameAppOtherUser = await connect(b, { bearer: await appToken(appId, bot2.id) });
+    const sameUserPersonal = await connect(b, { bearer: await createOauthToken(t.db, bot.id, BOT_SCOPES) });
+
+    await publish({ op: "disconnect", userId: bot.id, appId, reason: "grant_revoked" });
+    await eventually(() => grant.closed);
+    expect(grant.closed?.code).toBe(4001);
+    await sentinel();
+    expect(sameAppOtherUser.closed).toBeNull();
+    expect(sameUserPersonal.closed).toBeNull();
+  });
+
+  test("an app-only (client credentials) token cannot chat: 401 at upgrade", async () => {
+    const { owner } = await setup();
+    const appId = await newApp(owner.id);
+    expect(await upgradeStatus(a, await appToken(appId, null))).toBe(401);
+  });
+
+  test("a token of a suspended app is refused at upgrade", async () => {
+    const { owner, bot } = await setup();
+    const appId = await newApp(owner.id);
+    const token = await appToken(appId, bot.id);
+    const before = await connect(a, { bearer: token });
+    expect(before.closed).toBeNull();
+    await t.db
+      .update(schema.oauthApps)
+      .set({ suspendedAt: new Date(), suspendedReason: "abuse", suspendedById: owner.id })
+      .where(eq(schema.oauthApps.id, appId));
+    expect(await upgradeStatus(a, token)).toBe(401);
   });
 });

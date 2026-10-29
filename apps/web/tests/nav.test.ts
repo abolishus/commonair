@@ -35,7 +35,7 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, appeals, copyright, privacy, co-op, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, appeals, copyright, privacy, connected apps, co-op, then sign out after a separator", () => {
     const items = accountMenu(true);
     expect(items.map((i) => i.id)).toEqual([
       "dashboard",
@@ -44,6 +44,7 @@ describe("account menu", () => {
       "appeals",
       "copyright",
       "privacy",
+      "connections",
       "coop",
       "signOut",
     ]);
@@ -54,11 +55,12 @@ describe("account menu", () => {
       "/settings/appeals",
       "/settings/copyright",
       "/settings/privacy",
+      "/settings/connections",
       "/coop/membership",
       undefined,
     ]);
-    expect(items[7]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 7).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[8]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 8).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
   });
 
   it("adds co-op administration for admins only, before sign out", () => {
@@ -72,6 +74,7 @@ describe("account menu", () => {
       "appeals",
       "copyright",
       "privacy",
+      "connections",
       "coop",
       "moderation",
       "adminCoop",
@@ -90,6 +93,7 @@ describe("account menu", () => {
       "appeals",
       "copyright",
       "privacy",
+      "connections",
       "coop",
       "treasury",
       "signOut",
@@ -129,6 +133,7 @@ describe("account menu", () => {
         "/settings/appeals",
         "/settings/copyright",
         "/settings/privacy",
+        "/settings/connections",
         "/coop/membership",
         "/treasury",
         "/admin/coop",
@@ -140,7 +145,7 @@ describe("account menu", () => {
 });
 
 describe("studio nav", () => {
-  it("lists stream manager, overlays, polls and raids, the bot, content, revenue and relays, nothing else", () => {
+  it("lists stream manager, overlays, polls and raids, the bot, content, revenue, relays and developer, nothing else", () => {
     expect(studioNav("/dashboard").map((i) => [i.id, i.to])).toEqual([
       ["streamManager", "/dashboard"],
       ["overlays", "/overlays"],
@@ -149,6 +154,7 @@ describe("studio nav", () => {
       ["content", "/content"],
       ["revenue", "/revenue"],
       ["relays", "/relays"],
+      ["developer", "/developer"],
     ]);
   });
 
@@ -164,6 +170,10 @@ describe("studio nav", () => {
     ["/revenue/", "revenue"],
     ["/relays", "relays"],
     ["/relays/", "relays"],
+    ["/developer", "developer"],
+    ["/developer/", "developer"],
+    ["/developer/apps/0193e6a0-0000-7000-8000-000000000001", "developer"],
+    ["/developer/bots", "developer"],
   ])("on %s marks %s current (and only it)", (path, id) => {
     const current = studioNav(path).filter((i) => i.current);
     expect(current.map((i) => i.id)).toEqual([id]);
@@ -177,6 +187,7 @@ describe("studio nav", () => {
     expect(studioNav("/contents").some((i) => i.current)).toBe(false);
     // A channel page is never the studio's bot page.
     expect(studioNav("/bots").some((i) => i.current)).toBe(false);
+    expect(studioNav("/developers").some((i) => i.current)).toBe(false);
   });
 });
 
@@ -205,11 +216,12 @@ describe("trust and safety navigation", () => {
       { id: "integrity", to: "/admin/integrity", current: false },
       { id: "egress", to: "/admin/egress", current: false },
       { id: "incidents", to: "/admin/incidents", current: false },
+      { id: "apps", to: "/admin/apps", current: false },
     ]);
     expect(adminNav("/admin/coop", moderator).map((entry) => entry.id)).not.toContain("coop");
   });
 
-  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents", () => {
+  it("orders the platform tools moderation, appeals, dmca, legal, coop, integrity, egress, incidents, apps", () => {
     const everything = { treasurer: false, safetyStaff: true, platformModerator: true, legal: true, admin: true };
     expect(adminNav("/admin/dmca", everything).map((entry) => [entry.id, entry.current])).toEqual([
       ["moderation", false],
@@ -220,9 +232,10 @@ describe("trust and safety navigation", () => {
       ["integrity", false],
       ["egress", false],
       ["incidents", false],
+      ["apps", false],
     ]);
     const moderator = { safetyStaff: true, platformModerator: true };
-    for (const id of ["integrity", "egress", "incidents", "coop"])
+    for (const id of ["integrity", "egress", "incidents", "coop", "apps"])
       expect(adminNav("/admin/moderation", moderator).map((entry) => entry.id)).not.toContain(id);
   });
 });
@@ -245,6 +258,18 @@ describe("E7 platform tools access", () => {
       expect(mayOpenAdminPage(page, as("moderator"))).toBe(false);
       expect(mayOpenAdminPage(page, null)).toBe(false);
     }
+  });
+});
+
+describe("E9 platform tools access", () => {
+  const as = (role: string) => ({ id: "u", username: "a", displayName: "A", channelSlug: null, role });
+  it("maps /admin/apps and opens it to admins only", () => {
+    expect(adminPageFor("/admin/apps")).toBe("apps");
+    expect(adminPageFor("/admin/apps/")).toBe("apps");
+    expect(mayOpenAdminPage("apps", as("admin"))).toBe(true);
+    for (const role of ["moderator", "legal", "treasurer", "user"])
+      expect(mayOpenAdminPage("apps", as(role))).toBe(false);
+    expect(mayOpenAdminPage("apps", null)).toBe(false);
   });
 });
 

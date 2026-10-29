@@ -171,6 +171,10 @@ import http-{$CADDY_LISTEN:ports}
 			flush_interval -1
 		}
 	}
+	# EventSub WebSocket (ADR 0027 §3): wss://<host>/eventsub/ws → the API.
+	handle /eventsub/ws {
+		reverse_proxy api:3001
+	}
 
 	# Chat WebSocket: wss://<host>/chat → chat:3002/ws
 	handle /chat {

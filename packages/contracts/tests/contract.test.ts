@@ -67,6 +67,20 @@ describe("API contract", () => {
     expect(open).toEqual(["appeals.create"]);
   });
 
+  test("only developer.events.* (but catalog) admit app tokens (ADR 0027)", () => {
+    const open = all.filter(([, p]) => p["~orpc"].meta.appTokens === true).map(([name]) => name);
+    expect(open.toSorted()).toEqual(
+      [
+        "developer.events.subscribe",
+        "developer.events.list",
+        "developer.events.unsubscribe",
+        "developer.events.deliveries",
+        "developer.events.sendTest",
+        "developer.events.redeliver",
+      ].toSorted(),
+    );
+  });
+
   test("generates a valid OpenAPI 3.1 document", async () => {
     const doc = await generateOpenApi({
       title: "Test",

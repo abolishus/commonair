@@ -57,7 +57,8 @@ export default defineConfig(({ mode, command }) => {
       port: Number(env.WEB_PORT || 3000),
       strictPort: true,
       // Same-origin API in dev too, so better-auth cookies are first-party (production: server.ts).
-      proxy: { "/api": proxied, "/rpc": proxied },
+      // `/eventsub` is the EventSub WebSocket (ADR 0027 §3; Caddy routes it in production).
+      proxy: { "/api": proxied, "/rpc": proxied, "/eventsub": { ...proxied, ws: true } },
     },
     plugins: [healthz(), tailwindcss(), tanstackStart(), react()],
     test: {

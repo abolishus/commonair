@@ -100,7 +100,9 @@ async function sendDeletionScheduled(deps: Deps, userId: string, deleteAt: Date)
 
 const toAccessToken = (t: typeof oauthTokens.$inferSelect, appName: string | null) => ({
   id: t.id,
+  appId: t.appId,
   appName,
+  kind: t.kind,
   scopes: t.scopes as Scope[],
   createdAt: iso(t.createdAt),
   expiresAt: iso(t.expiresAt),
@@ -410,6 +412,7 @@ export const me = {
         .values({
           appId: null,
           userId: bot.id,
+          kind: "personal",
           scopes: [...new Set(input.scopes)],
           accessTokenHash: await sha256Hex(accessToken),
           expiresAt: new Date(deps.now().getTime() + input.expiresInDays * 86_400_000),

@@ -12,7 +12,7 @@
  * Credentials are not trusted for the socket's lifetime: sockets close when their token
  * expires, and OAuth tokens are re-checked (through a short cache) before every send/command.
  */
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNotNull, isNull } from "drizzle-orm";
 import { schema, type Database } from "@commonair/db";
 import { sha256Hex, verifyChatToken } from "@commonair/tokens";
 import { TtlCache } from "./cache.ts";
@@ -39,12 +39,25 @@ interface OauthRow {
 
 async function findOauthToken(db: Database, hash: string): Promise<OauthRow | null> {
   const t = schema.oauthTokens;
+  const a = schema.oauthApps;
   const [row] = await db
     .select({ id: t.id, userId: t.userId, appId: t.appId, scopes: t.scopes, expiresAt: t.expiresAt })
     .from(t)
-    .where(and(eq(t.accessTokenHash, hash), isNull(t.revokedAt), gt(t.expiresAt, new Date())))
+    .leftJoin(a, eq(a.id, t.appId))
+    .where(
+      and(
+        eq(t.accessTokenHash, hash),
+        isNull(t.revokedAt),
+        gt(t.expiresAt, new Date()),
+        // App-only (client credentials) tokens act for no user, so they cannot chat (ADR 0027).
+        isNotNull(t.userId),
+        // A suspended app's tokens are revoked with the suspension; this is defence in depth.
+        isNull(a.suspendedAt),
+      ),
+    )
     .limit(1);
-  return row ?? null;
+  if (!row || row.userId === null) return null;
+  return { ...row, userId: row.userId };
 }
 
 export class Authenticator {

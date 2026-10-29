@@ -7,7 +7,7 @@ import { Checkbox } from "@commonair/ui/components/checkbox";
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import { PageContainer } from "@commonair/ui/layouts";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { AltchaField, type AltchaFieldHandle } from "../../components/altcha-field.tsx";
 import { FormError } from "../../components/form-error.tsx";
@@ -19,10 +19,17 @@ import { api } from "../../lib/api.ts";
 import { signUp } from "../../lib/auth.ts";
 import { authErrorMessage } from "../../lib/form-errors.ts";
 import { field } from "../../lib/form.ts";
+import { returnToSearch, safeReturnTo } from "../../lib/guard.ts";
 
-export const Route = createFileRoute("/_app/signup")({ component: SignUpPage });
+export const Route = createFileRoute("/_app/signup")({
+  // `?returnTo=`: the verification link lands there (e.g. back on an OAuth consent page).
+  validateSearch: returnToSearch,
+  component: SignUpPage,
+});
 
 function SignUpPage(): React.JSX.Element {
+  // From the location, not the route match: the page also renders outside it (tests). Re-checked.
+  const returnTo = safeReturnTo(useLocation({ select: (l) => (l.search as { returnTo?: unknown }).returnTo }));
   const [docs, setDocs] = React.useState<LegalDoc[] | null>(null);
   const [altcha, setAltcha] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -54,14 +61,17 @@ function SignUpPage(): React.JSX.Element {
       const requiredIds = accepting
         ? splitByAcceptance(docs ?? (await api().legal.current())).required.map((d) => d.id)
         : [];
-      await signUp({
-        email,
-        username: field(form, "username").trim().toLowerCase(),
-        password: field(form, "password"),
-        birthDate: field(form, "birthDate"),
-        altcha,
-        acceptedDocumentIds: requiredIds,
-      });
+      await signUp(
+        {
+          email,
+          username: field(form, "username").trim().toLowerCase(),
+          password: field(form, "password"),
+          birthDate: field(form, "birthDate"),
+          altcha,
+          acceptedDocumentIds: requiredIds,
+        },
+        returnTo,
+      );
       setDoneEmail(email);
     } catch (err) {
       setError(authErrorMessage(err));
@@ -84,7 +94,7 @@ function SignUpPage(): React.JSX.Element {
           title={t("signup.checkEmailTitle")}
           description={t("signup.checkEmailBody", { email: doneEmail })}
         />
-        <ResendVerification email={doneEmail} />
+        <ResendVerification email={doneEmail} callbackURL={returnTo} />
       </PageContainer>
     );
 
@@ -160,7 +170,11 @@ function SignUpPage(): React.JSX.Element {
           </Button>
           <FieldDescription>
             {t("signup.haveAccount")}{" "}
-            <Button variant="link" nativeButton={false} render={<Link to="/signin" />}>
+            <Button
+              variant="link"
+              nativeButton={false}
+              render={<Link to="/signin" search={returnTo === undefined ? {} : { returnTo }} />}
+            >
               {t("nav.signIn")}
             </Button>
           </FieldDescription>

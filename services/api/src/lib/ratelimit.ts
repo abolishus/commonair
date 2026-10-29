@@ -9,7 +9,7 @@
 import { KEYS } from "@commonair/contracts/internal";
 import type { ValkeyClient } from "@commonair/service";
 
-export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive" | "mail" | "playback";
+export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive" | "mail" | "playback" | "app";
 export interface RateLimitRule {
   max: number;
   windowMs: number;
@@ -29,6 +29,8 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitBucket, RateLimitRule> = {
    * Heartbeats also have a per-session floor (MIN_HEARTBEAT_WALL_SECONDS).
    */
   playback: { max: 3000, windowMs: 60_000 },
+  /** Every request an OAuth app makes, across all its tokens (ADR 0027 §4). */
+  app: { max: 6000, windowMs: 60_000 },
 };
 
 export interface RateLimitResult {

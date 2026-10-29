@@ -130,7 +130,7 @@ describe.skipIf(!storage)("data export", () => {
         secretCiphertext: webhookCipher,
       });
     out.push(sessionToken, password, totp, streamKey, streamKeyHash, simulcastKey, simulcastCipher);
-    out.push(botToken, botTokenHash, webhookSecret, webhookCipher, app.clientId, app.clientSecretHash);
+    out.push(botToken, botTokenHash, webhookSecret, webhookCipher, app.clientId, app.clientSecretHash!);
     return out;
   }
 

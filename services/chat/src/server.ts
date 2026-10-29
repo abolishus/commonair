@@ -22,7 +22,7 @@ import { MODERATE_SCOPE, Moderation } from "./moderation.ts";
 import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "./filter-runner.ts";
 import { MessageWriter, type WriterOptions } from "./persistence.ts";
 import { errorFields } from "./errors.ts";
-import { BUS, UserControlMessage } from "@commonair/contracts";
+import { BUS, UserControlMessage, userControlTargets } from "@commonair/contracts";
 import { parseJson } from "./control.ts";
 import type { MessageMiddleware, PluginHost } from "./pipeline.ts";
 import { plugins } from "./plugins/index.ts";
@@ -130,14 +130,11 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     const msg = parseJson(UserControlMessage, raw);
     if (!msg) return;
     if (msg.tokenHash) auth.forget(msg.tokenHash);
-    core?.invalidateUser(msg.userId);
+    if (msg.userId) core?.invalidateUser(msg.userId);
     if (msg.op !== "disconnect") return;
-    for (const ws of sockets) {
-      const id = ws.data.identity;
-      if (id.userId !== msg.userId) continue;
-      if (msg.tokenHash && id.tokenHash !== msg.tokenHash) continue;
-      expire(ws, msg.reason);
-    }
+    // `{ appId }` alone closes every socket of the app, browser chat-token sockets included
+    // (`claims.app`); with `userId` only that grant's; `token_rotated` closes the old token's.
+    for (const ws of sockets) if (userControlTargets(ws.data.identity, msg)) expire(ws, msg.reason);
   };
   let draining = false;
 

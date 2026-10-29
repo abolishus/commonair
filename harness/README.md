@@ -68,7 +68,7 @@ its own stack. CI runs one job per shard (`bun run verify --full --only harness 
 
 `full` runs on the harness stack: `compose.yaml` with every harness override layered
 (`harness/compose.trust-safety.yaml`, `harness/compose.e5-coop.yaml`, `harness/compose.e6.yaml`,
-`harness/compose.p2p.yaml`, `harness/compose.e8.yaml`),
+`harness/compose.p2p.yaml`, `harness/compose.e8.yaml`, `harness/compose.e9.yaml`),
 on a Postgres volume created once with the E5 bootstrap (ADR 0020: `harness/compose.e5-coop.yaml`
 gives `migrate` the short governance periods in `GOVERNANCE_BOOTSTRAP_JSON`, which apply at the
 database's first migration only; see `e5-coop` below).
@@ -498,7 +498,7 @@ run the others into the 10-minute timeout; the weights plus teardown fit it
 Until `scripts/infra.ts` learns `--multi`, start the replicas on a running harness stack with:
 
 ```sh
-F="-f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml -f harness/compose.e6.yaml -f harness/compose.e8.yaml -f harness/compose.multi-instance.yaml"
+F="-f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml -f harness/compose.e6.yaml -f harness/compose.e8.yaml -f harness/compose.e9.yaml -f harness/compose.multi-instance.yaml"
 podman compose $F --profile harness --profile multi up -d --no-deps api-2 chat-2 worker-2 origin-2
 bun harness/src/cli.ts run multi-instance
 podman rm -f commonair_api-2_1 commonair_chat-2_1 commonair_worker-2_1 commonair_origin-2_1   # when done

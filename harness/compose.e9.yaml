@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the E9 harness scenarios ONLY (docs/testing/e9-selectors.md, ADR 0027).
+# Never use it on a public instance: it lets EventSub webhooks call plain-http and private-network
+# callbacks (EVENTSUB_ALLOW_INSECURE_CALLBACKS), because the harness webhook receiver listens on
+# the host over http.
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      EVENTSUB_ALLOW_INSECURE_CALLBACKS: "true"
+  worker:
+    environment:
+      EVENTSUB_ALLOW_INSECURE_CALLBACKS: "true"

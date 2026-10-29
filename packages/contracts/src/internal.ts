@@ -213,6 +213,18 @@ export const KEYS = {
   issuanceSeen: (object: string) => `issuance:seen:${object}`,
   /** Leader lock: the replica holding it computes relay issuance. */
   issuanceLock: "issuance:lock",
+  /**
+   * EventSub WebSocket session (hash, E9-ws): `instance`, `keepalive`, `connectedAt`, and once the
+   * first subscription binds it `appId` ("" for personal tokens), `userId`, `tokenHash`. Expires
+   * when the holding instance stops refreshing it.
+   */
+  eventsubSession: (sessionId: string) => `eventsub:session:${sessionId}`,
+  /** ZSET of a grant's bound open session ids (score: bind time ms); `grant` = `${appId || "personal"}:${userId}`. */
+  eventsubGrantSessions: (grant: string) => `eventsub:grant:${grant}`,
+  /** One-time resume token (sha256) → session id, from a `session_reconnect`'s `reconnect_url`. */
+  eventsubResume: (tokenHash: string) => `eventsub:resume:${tokenHash}`,
+  /** Leader lock: the API instance holding it sweeps WebSocket subscriptions of vanished sessions. */
+  eventsubSweepLock: "eventsub:sweep:lock",
   /** INCR on every accepted chat message of the channel (the bot's timers count lines). */
   botLines: (channelId: string) => `bot:lines:${channelId}`,
   /** The `botLines` value when the timer last fired. */
@@ -481,6 +493,8 @@ export const WEBHOOK_JOBS = {
   testEvent: "test-event",
   /** `developer.events.redeliver`. */
   redeliver: "redeliver",
+  /** A webhook subscription was revoked by the API (grant revoked, app suspended): tell the receiver once. */
+  revocation: "revocation",
 } as const;
 
 export const FanoutJob = z.object({ eventId: z.uuid() });
@@ -495,6 +509,8 @@ export type DeliverJob = z.infer<typeof DeliverJob>;
 export const VerifyCallbackJob = z.object({ subscriptionId: z.uuid() });
 export const TestEventJob = z.object({ subscriptionId: z.uuid(), eventId: z.uuid().optional() });
 export const RedeliverJob = z.object({ deliveryId: z.uuid() });
+export const RevocationJob = z.object({ subscriptionId: z.uuid() });
+export type RevocationJob = z.infer<typeof RevocationJob>;
 
 // Co-op (E5, ADR 0020, docs/testing/e5-selectors.md) ----------------------------------------
 

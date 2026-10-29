@@ -1,8 +1,13 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { createHash } from "node:crypto";
-import { signWebhook, SubscriptionEnvelope, WEBHOOK_HEADERS, WEBHOOK_MESSAGE_TYPES } from "@commonair/contracts/events";
+import { subscriptionEnvelope } from "@commonair/contracts/eventsub";
+import {
+  signWebhook,
+  type SubscriptionEnvelope,
+  WEBHOOK_HEADERS,
+  WEBHOOK_MESSAGE_TYPES,
+} from "@commonair/contracts/events";
 import type { schema } from "@commonair/db";
 import type { z } from "zod";
 
@@ -10,33 +15,11 @@ export type SubscriptionRow = typeof schema.eventSubscriptions.$inferSelect;
 export type MessageType = (typeof WEBHOOK_MESSAGE_TYPES)[number];
 export type Envelope = z.infer<typeof SubscriptionEnvelope>;
 
-/** Twitch-compatible status strings shown in the envelope (the DB enum is coarser). */
-export const ENVELOPE_STATUS = {
-  enabled: "enabled",
-  verification_pending: "webhook_callback_verification_pending",
-  failed: "notification_failures_exceeded",
-  revoked: "authorization_revoked",
-} as const;
+export { ENVELOPE_STATUS } from "@commonair/contracts/eventsub";
+export { notificationMessageId } from "@commonair/db";
 
 export function envelope(sub: SubscriptionRow, status?: string): Envelope {
-  return SubscriptionEnvelope.parse({
-    id: sub.id,
-    type: sub.type,
-    version: sub.version,
-    status: status ?? ENVELOPE_STATUS[sub.status],
-    condition: sub.condition,
-    transport: { method: "webhook", callback: sub.callbackUrl ?? undefined },
-    created_at: sub.createdAt.toISOString(),
-  });
-}
-
-/**
- * Message id for (subscription, event): deterministic, so every retry and any
- * duplicate fan-out of the same event carries the same id and receivers dedupe.
- */
-export function notificationMessageId(subscriptionId: string, eventId: string): string {
-  const h = createHash("sha256").update(`notification:${subscriptionId}:${eventId}`).digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  return subscriptionEnvelope(sub, status);
 }
 
 export async function signedHeaders(input: {

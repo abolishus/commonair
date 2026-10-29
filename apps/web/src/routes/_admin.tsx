@@ -4,6 +4,7 @@
 import { AppShell, AdminShell, type NavItem } from "@commonair/ui/layouts";
 import {
   Alert02Icon,
+  AppStoreIcon,
   BankIcon,
   Chart01Icon,
   CopyrightIcon,
@@ -35,7 +36,7 @@ import { adminNav, type AdminEntry } from "../lib/nav.ts";
 /**
  * Platform tools: the treasury (treasurers), the mod queue (moderators, admins, `legal`), the
  * appeals and DMCA queues (moderators, admins), the legal queue (`legal` only), and co-op
- * administration, integrity flags, egress and incidents (admins). Anyone without the page's
+ * administration, integrity flags, egress, incidents and OAuth apps (admins). Anyone without the page's
  * role, signed out included, gets the not-found page, decided in `beforeLoad` (on the server
  * during SSR) so neither the tools nor their sidebar ever render for them.
  */
@@ -119,6 +120,14 @@ function adminItem(entry: AdminEntry): NavItem {
         current: entry.current,
         icon: icon(Alert02Icon),
         render: <Link to="/admin/incidents" />,
+      };
+    case "apps":
+      return {
+        id: entry.id,
+        label: t("nav.adminApps"),
+        current: entry.current,
+        icon: icon(AppStoreIcon),
+        render: <Link data-testid="admin-apps-link" to="/admin/apps" />,
       };
   }
 }

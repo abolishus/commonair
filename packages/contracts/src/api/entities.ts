@@ -525,18 +525,29 @@ export const OAuthApp = z.object({
   name: z.string(),
   description: z.string(),
   clientId: z.string(),
-  redirectUris: z.array(z.url()),
+  redirectUris: z.array(z.string()),
   confidential: z.boolean(),
   createdAt: Timestamp,
   secretRotatedAt: Timestamp.nullable(),
+  /** Set while an admin has suspended the app (ADR 0027 §4); its tokens do not resolve. */
+  suspended: z.object({ at: Timestamp, reason: z.enum(E.APP_SUSPENSION_REASONS) }).nullable(),
 });
 export const OAuthAppSecret = z.object({
   clientId: z.string(),
   clientSecret: z.string().describe("Shown once."),
 });
+export const OAuthAppSummary = z.object({
+  id: Id,
+  name: z.string(),
+  description: z.string(),
+  clientId: z.string(),
+  owner: UserPublic.pick({ id: true, username: true }),
+});
 export const AccessToken = z.object({
   id: Id,
+  appId: Id.nullable(),
   appName: z.string().nullable(),
+  kind: z.enum(E.OAUTH_TOKEN_KINDS),
   scopes: z.array(z.enum(SCOPE_NAMES)),
   createdAt: Timestamp,
   expiresAt: Timestamp,
@@ -544,6 +555,9 @@ export const AccessToken = z.object({
 });
 export const EventSubscription = z.object({
   id: Id,
+  appId: Id.nullable(),
+  /** The user whose authorization backs it (the app owner for scope-less app subscriptions). */
+  userId: Id,
   type: z.string(),
   version: z.string(),
   condition: z.record(z.string(), z.string()),
@@ -552,6 +566,7 @@ export const EventSubscription = z.object({
     z.object({ method: z.literal("websocket"), sessionId: z.string() }),
   ]),
   status: z.enum(E.SUBSCRIPTION_STATES),
+  failureCount: z.number().int(),
   createdAt: Timestamp,
 });
 export const WebhookDelivery = z.object({
@@ -566,6 +581,38 @@ export const WebhookDelivery = z.object({
   error: z.string().nullable(),
   latencyMs: z.number().int().nullable(),
   createdAt: Timestamp,
+});
+/** What `developer.oauth.request` answers: show consent, or send the browser back with an error. */
+export const OAuthConsent = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("consent"),
+    app: OAuthAppSummary,
+    scopes: z.array(z.enum(SCOPE_NAMES)),
+    /** The user already holds a live grant covering every requested scope. */
+    alreadyGranted: z.boolean(),
+  }),
+  /** RFC 6749 §4.1.2.1: the redirect URI is valid, so errors go back to the client. */
+  z.object({ kind: z.literal("redirect"), redirectTo: z.string() }),
+]);
+export const OAuthDeviceConsent = z.object({
+  app: OAuthAppSummary,
+  scopes: z.array(z.enum(SCOPE_NAMES)),
+  expiresAt: Timestamp,
+});
+/** One app the user has authorized (settings, "Connections"). */
+export const OAuthGrant = z.object({
+  app: OAuthAppSummary,
+  /** Union of the scopes of the grant's live tokens. */
+  scopes: z.array(z.enum(SCOPE_NAMES)),
+  authorizedAt: Timestamp,
+  lastUsedAt: Timestamp.nullable(),
+});
+export const AdminOAuthApp = OAuthApp.extend({
+  owner: UserPublic.pick({ id: true, username: true }),
+  /** Users with a live grant. */
+  grants: z.number().int(),
+  /** Enabled webhook subscriptions. */
+  subscriptions: z.number().int(),
 });
 
 const BotCommandName = z.string().regex(/^[a-z0-9_]{1,25}$/);

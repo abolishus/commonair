@@ -6,7 +6,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 # ADR 0026: Interactivity policies (points, predictions, raids, goals, the channel bot)
 
 - Status: accepted (2026-10-27; the maintainer accepted the recommended answers, see
-  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27))
+  [Decisions at acceptance](#decisions-at-acceptance-2026-10-27)); decision 5 amended
+  2026-10-29, see [Amendment 1](#amendment-1-goal-progress-in-the-outbox-relay-transaction-2026-10-29)
 - Date: 2026-10-27 (code checked at `ccf9c17`)
 
 **Counsel has not reviewed whether channel-point predictions fall outside gambling law in every
@@ -168,6 +169,9 @@ money, but once predictions exist people care about them, and they become the fr
 
 ### 5. Goals advance from the outbox, not by polling
 
+(Amended 2026-10-29: the counting runs inside the outbox relay transaction, not in a
+`BUS.events` consumer. See [Amendment 1](#amendment-1-goal-progress-in-the-outbox-relay-transaction-2026-10-29).)
+
 Goal types are `GOAL_TYPES` only. A goal-progress consumer (E8-raids-goals) reads `BUS.events`,
 which the outbox relay publishes, and advances the channel's open goal of the matching type on
 `channel.follow`, `channel.subscribe` and `channel.tip` (tips in integer cents, AGENTS.md money
@@ -256,3 +260,31 @@ Decided in drafting within these answers (recorded so reviewers can check them):
 clawback; a prediction resolved to an outcome nobody bet on refunds like a cancel; the raid
 cooldown default is 10 minutes; `minChatLines` must be at least 1; the points `reason` becomes an
 enum and the points FKs become `restrict`.
+
+## Amendment 1: goal progress in the outbox relay transaction (2026-10-29)
+
+- Status: accepted (2026-10-29; the maintainer accepted the orchestrator's default while
+  reviewing the batch 3 briefs)
+- Amends: decision 5 ("A goal-progress consumer (E8-raids-goals) reads `BUS.events`")
+
+**Context.** `BUS.events` is Valkey pub/sub. A consumer that is down when an event is published
+misses it for good, and with more than one API or worker replica every replica would see each
+event and count it once each. A goal counter fed that way can both lose and double-count
+follows, subscriptions and tips.
+
+**Decision.** Goal progress is counted inside the outbox relay's transaction
+(`services/worker/src/outbox.ts`, `relayOutboxBatch`): after the batch's events are validated
+and before they are published, `applyGoalProgress(tx, events, ctx)` (E8-raids-goals) advances the
+channel's open goal of the matching type for each `channel.follow`, `channel.subscribe` and
+`channel.tip`, and writes `channel.goal.progress` and, at the target, `channel.goal.end` as outbox
+rows in the same transaction. A rolled-back batch rolls the goal update back with it, and a
+relayed row is never relayed again, so each event counts exactly once. Progress still comes from
+the outbox, never from polling counts, which is what decision 5 was for.
+
+Decided with it (E8's contract step records them): a goal counts from zero at its start, so only
+events after `startedAt` advance it; the progress events are relayed by a later batch of the same
+relay.
+
+**Consequences.** The relay transaction does a little more work per batch (one indexed update per
+goal-bearing event). No goal state depends on Valkey delivery. Nothing else subscribes to
+`BUS.events` for goals; the overlay hub still reads it to push `goal` frames to OBS.

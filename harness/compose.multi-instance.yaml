@@ -102,6 +102,8 @@ services:
       P2P_TRACKER_URL: ws://localhost:${HARNESS_TRACKER_PROXY_PORT:-8010}
       # harness/compose.e8.yaml
       INTERACT_TEST_HOOKS: "true"
+      # harness/compose.e9.yaml
+      EVENTSUB_ALLOW_INSECURE_CALLBACKS: "true"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
@@ -110,6 +112,7 @@ services:
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_2_PORT:-3101}:3001"]
     depends_on: *app-depends
     healthcheck: *app-healthcheck
+    stop_grace_period: 45s
 
   chat-2:
     profiles: [multi]
@@ -161,6 +164,8 @@ services:
       OPS_TEST_HOOKS: "true"
       # harness/compose.e8.yaml
       INTERACT_TEST_HOOKS: "true"
+      # harness/compose.e9.yaml
+      EVENTSUB_ALLOW_INSECURE_CALLBACKS: "true"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z

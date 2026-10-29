@@ -187,6 +187,8 @@ interface Completed {
   activeHold: boolean;
   completedAt: Date;
   notice: Notice | null;
+  /** The user's OAuth apps the deletion removed (with every other user's grants of them). */
+  deletedAppIds: string[];
 }
 
 /** Complete one due deletion. Returns null if it is not due or someone else took it. */
@@ -217,6 +219,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
     const objectKeys: string[] = [];
     const objectPrefixes: string[] = [];
     const exportKeys: string[] = [];
+    const deletedAppIds: string[] = [];
     let notice: Notice | null = null;
     let identity: DeletedIdentity | null = null;
     if (user) {
@@ -259,10 +262,20 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           .where(eq(s.eventSubscriptions.userId, userId))
           .returning({ id: s.eventSubscriptions.id }),
       );
+      // Users are pseudonymized, never deleted, so the device codes' user FK cascade never fires.
       await del(
-        "oauth_apps",
-        tx.delete(s.oauthApps).where(eq(s.oauthApps.ownerId, userId)).returning({ id: s.oauthApps.id }),
+        "oauth_device_codes",
+        tx
+          .delete(s.oauthDeviceCodes)
+          .where(eq(s.oauthDeviceCodes.userId, userId))
+          .returning({ id: s.oauthDeviceCodes.id }),
       );
+      const deletedApps = await tx
+        .delete(s.oauthApps)
+        .where(eq(s.oauthApps.ownerId, userId))
+        .returning({ id: s.oauthApps.id });
+      counts.oauth_apps = deletedApps.length;
+      deletedAppIds.push(...deletedApps.map((a) => a.id));
       // Social graph and personal activity.
       const follows = await tx
         .delete(s.follows)
@@ -504,6 +517,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
       activeHold: activeHold !== undefined,
       completedAt: now,
       notice,
+      deletedAppIds,
     };
   });
 }
@@ -516,6 +530,16 @@ async function afterCommit(ctx: WorkerContext, c: Completed) {
     await ctx.valkey.publish(BUS.userControl, JSON.stringify(msg));
   } catch (err) {
     ctx.logger.warn("user control publish failed", { userId: c.userId, errorCode: safeErrorCode(err) });
+  }
+  // The deleted apps' tokens and subscriptions went with them (cascade): close every chat socket
+  // and EventSub session made through them, not only the deleted user's (ADR 0027).
+  for (const appId of c.deletedAppIds) {
+    try {
+      const msg = UserControlMessage.parse({ op: "disconnect", appId, reason: "app_removed" });
+      await ctx.valkey.publish(BUS.userControl, JSON.stringify(msg));
+    } catch (err) {
+      ctx.logger.warn("user control publish failed", { appId, errorCode: safeErrorCode(err) });
+    }
   }
   if (c.notice && ctx.mailer) {
     try {

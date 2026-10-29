@@ -10,7 +10,7 @@ import { channelsRoutes } from "./routes/channels.ts";
 import { chat } from "./routes/chat.ts";
 import { clips } from "./routes/clips.ts";
 import { coop } from "./routes/coop.ts";
-import { developer } from "./routes/developer.ts";
+import { developer } from "./routes/developer/index.ts";
 import { categoriesRoutes, directory } from "./routes/directory.ts";
 import { instance } from "./routes/instance.ts";
 import { integrity } from "./routes/integrity.ts";

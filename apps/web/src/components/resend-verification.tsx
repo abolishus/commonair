@@ -19,11 +19,14 @@ export const RESEND_COOLDOWN_MS = 60_000;
  */
 export function ResendVerification({
   email,
+  callbackURL,
   send = resendVerificationEmail,
 }: {
   email: string;
+  /** Where the new link lands (a validated `returnTo`); the dashboard when absent. */
+  callbackURL?: string | undefined;
   /** Tests pass a fake; the better-auth endpoint otherwise. */
-  send?: (email: string) => Promise<void>;
+  send?: (email: string, callbackURL?: string) => Promise<void>;
 }): React.JSX.Element {
   const [state, setState] = React.useState<"idle" | "pending" | "sent" | "limited">("idle");
   const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -33,7 +36,7 @@ export function ResendVerification({
     setState("pending");
     let next: "sent" | "limited" = "sent";
     try {
-      await send(email);
+      await (callbackURL === undefined ? send(email) : send(email, callbackURL));
     } catch (err) {
       if (err instanceof AuthRequestError && err.status === 429) next = "limited";
     }

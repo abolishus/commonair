@@ -21,6 +21,7 @@ import {
 import { SCOPE_NAMES } from "../scopes.ts";
 import { PUBLIC_EVENT_TYPES } from "../events.ts";
 import { MONEY_LIMITS } from "../currency.ts";
+import { OAUTH_LIMITS, PKCE_CHALLENGE, RedirectUri } from "../oauth.ts";
 import {
   ChannelRef,
   Id,
@@ -1329,6 +1330,7 @@ export const contract = {
         })
         .output(z.array(D.OAuthApp)),
       create: user
+        .meta({ access: "user", rateLimit: "write" })
         .route({
           method: "POST",
           path: "/developer/apps",
@@ -1339,12 +1341,13 @@ export const contract = {
           z.object({
             name: z.string().min(1).max(50),
             description: z.string().max(500).default(""),
-            redirectUris: z.array(z.url()).min(1).max(10),
+            redirectUris: z.array(RedirectUri).min(1).max(OAUTH_LIMITS.redirectUrisPerApp),
             confidential: z.boolean().default(true),
           }),
         )
         .output(z.object({ app: D.OAuthApp, secret: D.OAuthAppSecret.nullable() })),
       update: user
+        .meta({ access: "user", rateLimit: "write" })
         .route({
           method: "PATCH",
           path: "/developer/apps/{id}",
@@ -1356,11 +1359,12 @@ export const contract = {
             id: Id,
             name: z.string().min(1).max(50).optional(),
             description: z.string().max(500).optional(),
-            redirectUris: z.array(z.url()).min(1).max(10).optional(),
+            redirectUris: z.array(RedirectUri).min(1).max(OAUTH_LIMITS.redirectUrisPerApp).optional(),
           }),
         )
         .output(D.OAuthApp),
       rotateSecret: user
+        .meta({ access: "user", rateLimit: "write" })
         .route({
           method: "POST",
           path: "/developer/apps/{id}/secret",
@@ -1370,6 +1374,7 @@ export const contract = {
         .input(z.object({ id: Id }))
         .output(D.OAuthAppSecret),
       remove: user
+        .meta({ access: "user", rateLimit: "write" })
         .route({
           method: "DELETE",
           path: "/developer/apps/{id}",
@@ -1407,8 +1412,8 @@ export const contract = {
         .output(
           z.object({
             client_id: z.string().nullable(),
-            login: Slug,
-            user_id: Id,
+            login: Slug.nullable(),
+            user_id: Id.nullable(),
             scopes: z.array(z.string()),
             expires_in: z.number().int(),
           }),
@@ -1429,11 +1434,13 @@ export const contract = {
               version: z.string(),
               condition: z.array(z.string()),
               scopes: z.array(z.string()),
+              transports: z.array(z.enum(E.EVENT_TRANSPORTS)),
               description: z.string(),
             }),
           ),
         ),
       subscribe: user
+        .meta({ access: "user", scopes: [], appTokens: true, rateLimit: "write" })
         .route({
           method: "POST",
           path: "/eventsub/subscriptions",
@@ -1455,10 +1462,12 @@ export const contract = {
               }),
               z.object({ method: z.literal("websocket"), sessionId: z.string().max(64) }),
             ]),
+            appId: Id.optional().describe("Session callers only: subscribe for an app you own"),
           }),
         )
         .output(D.EventSubscription),
       list: user
+        .meta({ access: "user", scopes: [], appTokens: true })
         .route({
           method: "GET",
           path: "/eventsub/subscriptions",
@@ -1469,10 +1478,12 @@ export const contract = {
           PageInput.extend({
             type: z.enum(PUBLIC_EVENT_TYPES).optional(),
             status: z.enum(E.SUBSCRIPTION_STATES).optional(),
+            appId: Id.optional(),
           }),
         )
         .output(page(D.EventSubscription)),
       unsubscribe: user
+        .meta({ access: "user", scopes: [], appTokens: true })
         .route({
           method: "DELETE",
           path: "/eventsub/subscriptions/{id}",
@@ -1482,6 +1493,7 @@ export const contract = {
         .input(z.object({ id: Id }))
         .output(Ok),
       deliveries: user
+        .meta({ access: "user", scopes: [], appTokens: true })
         .route({
           method: "GET",
           path: "/eventsub/subscriptions/{id}/deliveries",
@@ -1491,6 +1503,7 @@ export const contract = {
         .input(z.object({ id: Id }).extend(PageInput.shape))
         .output(page(D.WebhookDelivery)),
       sendTest: user
+        .meta({ access: "user", scopes: [], appTokens: true, rateLimit: "write" })
         .route({
           method: "POST",
           path: "/eventsub/subscriptions/{id}/test",
@@ -1500,6 +1513,7 @@ export const contract = {
         .input(z.object({ id: Id }))
         .output(z.object({ eventId: Id })),
       redeliver: user
+        .meta({ access: "user", scopes: [], appTokens: true, rateLimit: "write" })
         .route({
           method: "POST",
           path: "/eventsub/deliveries/{id}/redeliver",
@@ -1508,6 +1522,123 @@ export const contract = {
         })
         .input(z.object({ id: Id }))
         .output(Ok),
+    },
+    oauth: {
+      /** Validates an authorization request for the consent page (never redirects by itself). */
+      request: user
+        .route({
+          method: "GET",
+          path: "/oauth2/authorize/request",
+          summary: "Check an authorization request",
+          ...tag("OAuth"),
+        })
+        .input(
+          z.object({
+            clientId: z.string().min(1).max(64),
+            redirectUri: z.string().min(1).max(2000),
+            // Loose on purpose: once the redirect URI is valid, problems go back to the client (kind "redirect").
+            responseType: z.string().max(40),
+            scope: z.string().max(2000).default(""),
+            state: z.string().max(OAUTH_LIMITS.stateMaxLength).optional(),
+            codeChallenge: z.string().max(200).optional(),
+            codeChallengeMethod: z.string().max(20).optional(),
+            forceVerify: z.boolean().default(false),
+          }),
+        )
+        .output(D.OAuthConsent),
+      decide: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/oauth2/authorize",
+          summary: "Approve or deny an authorization request",
+          ...tag("OAuth"),
+        })
+        .input(
+          z.object({
+            clientId: z.string().min(1).max(64),
+            redirectUri: z.string().min(1).max(2000),
+            scope: z.string().max(2000).default(""),
+            state: z.string().max(OAUTH_LIMITS.stateMaxLength).optional(),
+            codeChallenge: z.string().regex(PKCE_CHALLENGE),
+            codeChallengeMethod: z.literal("S256"),
+            approve: z.boolean(),
+          }),
+        )
+        .output(z.object({ redirectTo: z.string() })),
+      // POST with the user code in the body, never in the path or query: a code in a URL reaches
+      // access logs, and a logged code could be approved by someone else (decided 2026-10-29).
+      activation: user
+        .meta({ access: "user", rateLimit: "auth" })
+        .route({
+          method: "POST",
+          path: "/oauth2/activate/lookup",
+          summary: "Look up a device's user code",
+          ...tag("OAuth"),
+        })
+        .input(z.object({ userCode: z.string().min(8).max(16) }))
+        .output(D.OAuthDeviceConsent),
+      activate: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/oauth2/activate",
+          summary: "Approve or deny a device",
+          ...tag("OAuth"),
+        })
+        .input(z.object({ userCode: z.string().min(8).max(16), approve: z.boolean() }))
+        .output(Ok),
+    },
+    grants: {
+      list: user
+        .route({
+          method: "GET",
+          path: "/me/authorizations",
+          summary: "Apps you have authorized",
+          ...tag("OAuth"),
+        })
+        .output(z.array(D.OAuthGrant)),
+      revoke: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "DELETE",
+          path: "/me/authorizations/{appId}",
+          summary: "Revoke an app's access to your account",
+          ...tag("OAuth"),
+        })
+        .input(z.object({ appId: Id }))
+        .output(Ok),
+    },
+    admin: {
+      list: admin
+        .route({
+          method: "GET",
+          path: "/admin/apps",
+          summary: "OAuth apps on this instance",
+          ...tag("Developers"),
+        })
+        .input(PageInput.extend({ q: z.string().max(100).optional(), suspended: z.boolean().optional() }))
+        .output(page(D.AdminOAuthApp)),
+      suspend: admin
+        .meta({ access: "admin", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/admin/apps/{id}/suspend",
+          summary: "Suspend an app (revokes its tokens and subscriptions)",
+          ...tag("Developers"),
+        })
+        .input(z.object({ id: Id, reason: z.enum(E.APP_SUSPENSION_REASONS) }))
+        .output(D.AdminOAuthApp),
+      unsuspend: admin
+        .meta({ access: "admin", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/admin/apps/{id}/unsuspend",
+          summary: "Lift an app's suspension (tokens stay revoked)",
+          ...tag("Developers"),
+        })
+        .input(z.object({ id: Id }))
+        .output(D.AdminOAuthApp),
     },
   },
 

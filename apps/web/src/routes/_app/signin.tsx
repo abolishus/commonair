@@ -6,7 +6,7 @@ import { Button } from "@commonair/ui/components/button";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@commonair/ui/components/field";
 import { Input } from "@commonair/ui/components/input";
 import { PageContainer } from "@commonair/ui/layouts";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useLocation } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
 import { SignInPasswordField } from "../../components/password-fields.tsx";
@@ -15,10 +15,17 @@ import { t } from "../../i18n/index.ts";
 import { AuthRequestError, signIn } from "../../lib/auth.ts";
 import { authErrorMessage } from "../../lib/form-errors.ts";
 import { field } from "../../lib/form.ts";
+import { returnToSearch, safeReturnTo } from "../../lib/guard.ts";
 
-export const Route = createFileRoute("/_app/signin")({ component: SignInPage });
+export const Route = createFileRoute("/_app/signin")({
+  // `?returnTo=` (a relative path, e.g. an OAuth consent page); anything else is dropped.
+  validateSearch: returnToSearch,
+  component: SignInPage,
+});
 
 function SignInPage(): React.JSX.Element {
+  // From the location, not the route match: the page also renders outside it (tests). Re-checked.
+  const returnTo = safeReturnTo(useLocation({ select: (l) => (l.search as { returnTo?: unknown }).returnTo }));
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   /** The address of a sign-in refused as unverified: offers a new link for it. */
@@ -36,7 +43,7 @@ function SignInPage(): React.JSX.Element {
       await signIn(email, field(form, "password"));
       // A full load renders the dashboard on the server with the new session cookie
       // (stays pending until the page goes away).
-      window.location.assign("/dashboard");
+      window.location.assign(returnTo ?? "/dashboard");
     } catch (err) {
       setError(authErrorMessage(err));
       if (err instanceof AuthRequestError && err.code === "EMAIL_NOT_VERIFIED") setUnverified(email);
@@ -62,7 +69,7 @@ function SignInPage(): React.JSX.Element {
           </Field>
           <SignInPasswordField />
           {error && <FormError>{error}</FormError>}
-          {unverified && <ResendVerification email={unverified} />}
+          {unverified && <ResendVerification email={unverified} callbackURL={returnTo} />}
           <Button
             data-testid="signin-submit"
             type="submit"
@@ -74,7 +81,11 @@ function SignInPage(): React.JSX.Element {
           </Button>
           <FieldDescription>
             {t("signin.noAccount")}{" "}
-            <Button variant="link" nativeButton={false} render={<Link to="/signup" />}>
+            <Button
+              variant="link"
+              nativeButton={false}
+              render={<Link to="/signup" search={returnTo === undefined ? {} : { returnTo }} />}
+            >
               {t("nav.signUp")}
             </Button>
           </FieldDescription>

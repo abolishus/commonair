@@ -314,6 +314,9 @@ services:
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-3001}:3001"]
     depends_on: *app-depends
     healthcheck: *app-healthcheck
+    # EventSub WebSocket sessions get a session_reconnect and EVENTSUB_WS_RECONNECT_GRACE_SECONDS
+    # (30 s) to move before the API exits; Podman's default 10 s would SIGKILL mid-drain.
+    stop_grace_period: 45s
 
   chat:
     image: ${IMAGE_REGISTRY:-localhost/commonair}/chat:${IMAGE_TAG:-dev}

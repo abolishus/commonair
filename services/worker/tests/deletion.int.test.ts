@@ -7,12 +7,14 @@
  * balanced, held data untouched, the completed mail sent. Runs as the app role against the
  * stack's Postgres, Valkey and Garage.
  */
+import { BUS } from "@commonair/contracts/events";
 import { exportObjectKey } from "@commonair/contracts/internal";
 import { BotConfig } from "@commonair/contracts/shapes";
 import { schema, uuidv7 } from "@commonair/db";
 import { MemoryMailer } from "@commonair/email";
 import type { ObjectStorage } from "@commonair/storage";
 import { eq, inArray, sql } from "drizzle-orm";
+import { Valkey } from "iovalkey";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { runAccountDeletions, scrubOutbox } from "../src/deletion/account-deletion.ts";
 import { job as accountDeletionJob } from "../src/jobs/account-deletion.ts";
@@ -22,10 +24,14 @@ import { EXPORTS_BUCKET, MEDIA_BUCKET, siteAt, stackStorage, tip } from "./e6-fi
 import {
   broadcasterFields,
   insertEvent,
+  makeApp,
   makeBroadcast,
   makeSubscription,
+  makeToken,
   makeUser,
   setup,
+  VALKEY_URL,
+  waitFor,
   type TestEnv,
 } from "./fixtures.ts";
 
@@ -654,6 +660,72 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(role?.role).toBe("moderator");
     const [o] = await db().select().from(schema.users).where(eq(schema.users.id, other!.id));
     expect(o?.username).toBe(otherName);
+  });
+
+  test("a deleted owner's OAuth apps go with every grant; each app's connections are told to close (E9)", async () => {
+    const O = await makeUser(db());
+    const V = await makeUser(db());
+    const appRow = await makeApp(db(), O.user.id);
+    // Another user authorized the app; that token and the device code it approved go with the app.
+    const tok = await makeToken(db(), appRow.id, V.user.id, ["chat:read"]);
+    await db()
+      .insert(schema.oauthDeviceCodes)
+      .values({
+        appId: appRow.id,
+        deviceCodeHash: `dc_${uuidv7()}`,
+        userCodeHash: `uc_${uuidv7()}`,
+        scopes: ["chat:read"],
+        status: "approved",
+        userId: V.user.id,
+        decidedAt: new Date(),
+        expiresAt: new Date(Date.now() + 600_000),
+      });
+    // A device code the deleted user approved for someone else's app goes too.
+    const W = await makeUser(db());
+    const otherApp = await makeApp(db(), W.user.id);
+    const [ownCode] = await db()
+      .insert(schema.oauthDeviceCodes)
+      .values({
+        appId: otherApp.id,
+        deviceCodeHash: `dc_${uuidv7()}`,
+        userCodeHash: `uc_${uuidv7()}`,
+        scopes: ["chat:read"],
+        status: "denied",
+        userId: O.user.id,
+        decidedAt: new Date(),
+        expiresAt: new Date(Date.now() + 600_000),
+      })
+      .returning();
+
+    const listener = new Valkey(VALKEY_URL);
+    const messages: string[] = [];
+    listener.on("pmessage", (_pattern: string, _channel: string, message: string) => messages.push(message));
+    await listener.psubscribe(`*${BUS.userControl}`);
+    try {
+      await schedule(O.user.id);
+      expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+      const appRemoved = await waitFor(
+        async () =>
+          messages
+            .map((m) => JSON.parse(m) as Record<string, unknown>)
+            .find((m) => m.appId === appRow.id && m.reason === "app_removed"),
+        { label: "app_removed" },
+      );
+      expect(appRemoved).toEqual({ op: "disconnect", appId: appRow.id, reason: "app_removed" });
+    } finally {
+      listener.disconnect();
+    }
+
+    expect(await db().select().from(schema.oauthApps).where(eq(schema.oauthApps.id, appRow.id))).toEqual([]);
+    expect(await db().select().from(schema.oauthTokens).where(eq(schema.oauthTokens.id, tok.id))).toEqual([]);
+    expect(
+      await db().select().from(schema.oauthDeviceCodes).where(eq(schema.oauthDeviceCodes.appId, appRow.id)),
+    ).toEqual([]);
+    expect(
+      await db().select().from(schema.oauthDeviceCodes).where(eq(schema.oauthDeviceCodes.id, ownCode!.id)),
+    ).toEqual([]);
+    // The other owner's app stays.
+    expect(await db().select().from(schema.oauthApps).where(eq(schema.oauthApps.id, otherApp.id))).toHaveLength(1);
   });
 
   test("DMCA-hidden copies of the channel's media are deleted too", async () => {

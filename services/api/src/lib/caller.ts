@@ -8,9 +8,9 @@ import { schema } from "@commonair/db";
 import { sha256Hex } from "@commonair/tokens";
 import type { Auth } from "../auth/index.ts";
 import type { Deps } from "../deps.ts";
-import type { Caller, CallerUser } from "./access.ts";
+import type { AppCaller, Caller, CallerUser } from "./access.ts";
 
-const { users, oauthTokens } = schema;
+const { users, oauthTokens, oauthApps } = schema;
 type UserRow = typeof users.$inferSelect;
 
 export const isSuspended = (u: Pick<UserRow, "banned" | "banExpires">, now: Date) =>
@@ -33,16 +33,26 @@ export function bearerToken(headers: Headers): string | null {
 
 const LAST_USED_RESOLUTION_MS = 60_000;
 
-export async function resolveToken(deps: Deps, token: string): Promise<Caller | null> {
+/**
+ * Resolve an OAuth bearer token: a user token becomes a `Caller`, an app-only (client credentials)
+ * token an `AppCaller`. Revoked, expired, deleted-user and suspended-app tokens resolve to null
+ * (suspension also revokes the app's tokens; this is defence in depth, ADR 0027 §4).
+ */
+export async function resolveBearer(
+  deps: Deps,
+  token: string,
+): Promise<{ caller: Caller } | { app: AppCaller } | null> {
   const now = deps.now();
   const hash = await sha256Hex(token);
   const [row] = await deps.db
-    .select({ token: oauthTokens, user: users })
+    .select({ token: oauthTokens, user: users, appSuspendedAt: oauthApps.suspendedAt })
     .from(oauthTokens)
-    .innerJoin(users, eq(users.id, oauthTokens.userId))
+    .leftJoin(users, eq(users.id, oauthTokens.userId))
+    .leftJoin(oauthApps, eq(oauthApps.id, oauthTokens.appId))
     .where(and(eq(oauthTokens.accessTokenHash, hash), isNull(oauthTokens.revokedAt), gt(oauthTokens.expiresAt, now)))
     .limit(1);
-  if (!row || row.user.deletedAt) return null;
+  if (!row || row.appSuspendedAt) return null;
+  if (row.token.userId !== null && (!row.user || row.user.deletedAt)) return null;
   // Throttled so a busy bot does not turn every request into a write.
   if (!row.token.lastUsedAt || now.getTime() - row.token.lastUsedAt.getTime() >= LAST_USED_RESOLUTION_MS)
     await deps.db
@@ -57,15 +67,28 @@ export async function resolveToken(deps: Deps, token: string): Promise<Caller | 
           ),
         ),
       );
+  if (!row.user) {
+    // The app-only CHECK (oauth_tokens_app_only_ck + _personal_ck) guarantees an app id here.
+    if (row.token.appId === null) return null;
+    return { app: { appId: row.token.appId, tokenId: row.token.id, expiresAt: row.token.expiresAt } };
+  }
   const known = new Set<string>(SCOPE_NAMES);
   return {
-    kind: "token",
-    user: toCallerUser(row.user, now),
-    tokenId: row.token.id,
-    appId: row.token.appId,
-    scopes: row.token.scopes.filter((s): s is Scope => known.has(s)),
-    expiresAt: row.token.expiresAt,
+    caller: {
+      kind: "token",
+      user: toCallerUser(row.user, now),
+      tokenId: row.token.id,
+      appId: row.token.appId,
+      scopes: row.token.scopes.filter((s): s is Scope => known.has(s)),
+      expiresAt: row.token.expiresAt,
+    },
   };
+}
+
+/** A user token's caller; app-only tokens resolve to null here (see `resolveBearer`). */
+export async function resolveToken(deps: Deps, token: string): Promise<Caller | null> {
+  const r = await resolveBearer(deps, token);
+  return r && "caller" in r ? r.caller : null;
 }
 
 export async function resolveSession(deps: Deps, auth: Auth, headers: Headers): Promise<Caller | null> {
@@ -82,11 +105,14 @@ export async function resolveCaller(
   deps: Deps,
   auth: Auth,
   headers: Headers,
-): Promise<{ caller: Caller | null; invalidBearer: boolean }> {
+): Promise<{ caller: Caller | null; app: AppCaller | null; invalidBearer: boolean }> {
   const token = bearerToken(headers);
   if (token) {
-    const caller = await resolveToken(deps, token);
-    return { caller, invalidBearer: caller === null };
+    const r = await resolveBearer(deps, token);
+    if (!r) return { caller: null, app: null, invalidBearer: true };
+    return "caller" in r
+      ? { caller: r.caller, app: null, invalidBearer: false }
+      : { caller: null, app: r.app, invalidBearer: false };
   }
-  return { caller: await resolveSession(deps, auth, headers), invalidBearer: false };
+  return { caller: await resolveSession(deps, auth, headers), app: null, invalidBearer: false };
 }

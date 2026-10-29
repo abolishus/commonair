@@ -385,10 +385,14 @@ the tables by hand. Columns:
 
 ### `developerEnv`
 
-| Variable                            | Required | Default | Self-host | Description                                                                                                                                                                              |
-| ----------------------------------- | -------- | ------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EVENTSUB_ALLOW_INSECURE_CALLBACKS` | no       | `false` | —         | Allow http:// and private-network EventSub webhook callbacks. Development and harness only.                                                                                              |
-| `OUTBOUND_ALLOW_PRIVATE_NETWORKS`   | no       | `false` | —         | Allow relay URLs and simulcast targets on private, loopback and other non-public networks (and plain http relays). Development and harness only: the local stack runs on such addresses. |
+| Variable                               | Required | Default | Self-host | Description                                                                                                                                                                              |
+| -------------------------------------- | -------- | ------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EVENTSUB_ALLOW_INSECURE_CALLBACKS`    | no       | `false` | —         | Allow http:// and private-network EventSub webhook callbacks. Development and harness only.                                                                                              |
+| `EVENTSUB_WS_MAX_SUBSCRIPTIONS`        | no       | `300`   | —         | EventSub WebSocket: enabled subscriptions per session (ADR 0027 §3).                                                                                                                     |
+| `EVENTSUB_WS_MAX_SESSIONS_PER_GRANT`   | no       | `3`     | —         | EventSub WebSocket: open sessions per (app, user) grant.                                                                                                                                 |
+| `EVENTSUB_WS_SUBSCRIBE_WITHIN_SECONDS` | no       | `10`    | —         | Seconds a new EventSub session has to create its first subscription before it is closed (4003).                                                                                          |
+| `EVENTSUB_WS_RECONNECT_GRACE_SECONDS`  | no       | `30`    | —         | Seconds the old socket stays open after a `session_reconnect`.                                                                                                                           |
+| `OUTBOUND_ALLOW_PRIVATE_NETWORKS`      | no       | `false` | —         | Allow relay URLs and simulcast targets on private, loopback and other non-public networks (and plain http relays). Development and harness only: the local stack runs on such addresses. |
 
 ### `workerEnv`
 

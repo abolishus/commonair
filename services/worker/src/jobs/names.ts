@@ -6,6 +6,7 @@ export {
   DeliverJob,
   FanoutJob,
   RedeliverJob,
+  RevocationJob,
   TestEventJob,
   VerifyCallbackJob,
   WEBHOOK_JOBS,

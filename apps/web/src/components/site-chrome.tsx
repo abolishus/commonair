@@ -16,6 +16,7 @@ import {
   LegalDocument01Icon,
   LiveStreaming02Icon,
   Logout03Icon,
+  Plug01Icon,
   ServerStack01Icon,
   Shield01Icon,
   SquareLock01Icon,
@@ -89,6 +90,13 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("nav.privacy"),
         icon: icon(SquareLock01Icon),
         render: <Link data-testid="account-privacy-link" to="/settings/privacy" />,
+      };
+    case "connections":
+      return {
+        id: entry.id,
+        label: t("nav.connections"),
+        icon: icon(Plug01Icon),
+        render: <Link data-testid="account-connections-link" to="/settings/connections" />,
       };
     case "coop":
       return {

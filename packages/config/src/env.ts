@@ -420,6 +420,14 @@ export const integrityEnv = z.object({
 export const developerEnv = z.object({
   /** Allow http:// and private-network EventSub webhook callbacks. Development and harness only. */
   EVENTSUB_ALLOW_INSECURE_CALLBACKS: bool.default(false),
+  /** EventSub WebSocket: enabled subscriptions per session (ADR 0027 §3). */
+  EVENTSUB_WS_MAX_SUBSCRIPTIONS: z.coerce.number().int().min(1).max(10_000).default(300),
+  /** EventSub WebSocket: open sessions per (app, user) grant. */
+  EVENTSUB_WS_MAX_SESSIONS_PER_GRANT: z.coerce.number().int().min(1).max(100).default(3),
+  /** Seconds a new EventSub session has to create its first subscription before it is closed (4003). */
+  EVENTSUB_WS_SUBSCRIBE_WITHIN_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
+  /** Seconds the old socket stays open after a `session_reconnect`. */
+  EVENTSUB_WS_RECONNECT_GRACE_SECONDS: z.coerce.number().int().min(1).max(120).default(30),
   /**
    * Allow relay URLs and simulcast targets on private, loopback and other non-public networks
    * (and plain http relays). Development and harness only: the local stack runs on such addresses.

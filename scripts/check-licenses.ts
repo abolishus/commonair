@@ -46,6 +46,9 @@ function* packageJsonFiles(dir: string, depth = 0): Generator<string> {
   }
 }
 
+/** Our packages that are not AGPL-3.0-or-later (ADR 0035: the SDK is Apache-2.0, so apps of any licence can embed it). */
+export const OWN_LICENSES: Record<string, string> = { "@commonair/sdk": "Apache-2.0" };
+
 export function checkNpm(roots: string[]): { checked: number; findings: Finding[] } {
   const seen = new Map<string, Finding | null>();
   for (const root of roots) {
@@ -63,10 +66,27 @@ export function checkNpm(roots: string[]): { checked: number; findings: Finding[
         continue;
       }
       if (!pkg.name || !pkg.version) continue;
-      // Our own workspace packages are AGPL by construction (checked by reuse lint).
-      if (pkg.name.startsWith("@commonair/") || pkg.name === "commonair") continue;
       const key = `${pkg.name}@${pkg.version}`;
       if (seen.has(key)) continue;
+      // Our own workspace packages: AGPL, except the SDK (Apache-2.0, ADR 0035). Their files'
+      // headers are checked by reuse lint; this checks what each package.json declares.
+      if (pkg.name.startsWith("@commonair/") || pkg.name === "commonair") {
+        const expected = OWN_LICENSES[pkg.name] ?? "AGPL-3.0-or-later";
+        const declared = licenseOf(pkg) ?? "UNKNOWN";
+        seen.set(
+          key,
+          declared === expected
+            ? null
+            : {
+                name: pkg.name,
+                version: pkg.version,
+                license: declared,
+                reason: `own package must be ${expected}`,
+                where: pj,
+              },
+        );
+        continue;
+      }
       const license = licenseOf(pkg) ?? "UNKNOWN";
       const exception = EXCEPTIONS[pkg.name];
       if (exception) {

@@ -21,6 +21,7 @@ export interface AccountEntry {
     | "appeals"
     | "copyright"
     | "privacy"
+    | "connections"
     | "coop"
     | "treasury"
     | "moderation"
@@ -35,6 +36,7 @@ export interface AccountEntry {
     | "/settings/appeals"
     | "/settings/copyright"
     | "/settings/privacy"
+    | "/settings/connections"
     | "/coop/membership"
     | "/treasury"
     | "/admin/moderation"
@@ -51,8 +53,8 @@ export interface SignedOutEntry {
 }
 
 export interface StudioEntry {
-  id: "streamManager" | "overlays" | "interact" | "bot" | "content" | "revenue" | "relays";
-  to: "/dashboard" | "/overlays" | "/interact" | "/bot" | "/content" | "/revenue" | "/relays";
+  id: "streamManager" | "overlays" | "interact" | "bot" | "content" | "revenue" | "relays" | "developer";
+  to: "/dashboard" | "/overlays" | "/interact" | "/bot" | "/content" | "/revenue" | "/relays" | "/developer";
   current: boolean;
 }
 
@@ -73,7 +75,7 @@ export interface AccountMenuOptions {
 }
 
 export interface AdminEntry {
-  id: "treasury" | "moderation" | "appeals" | "dmca" | "legal" | "coop" | "integrity" | "egress" | "incidents";
+  id: "treasury" | "moderation" | "appeals" | "dmca" | "legal" | "coop" | "integrity" | "egress" | "incidents" | "apps";
   to:
     | "/treasury"
     | "/admin/moderation"
@@ -83,7 +85,8 @@ export interface AdminEntry {
     | "/admin/coop"
     | "/admin/integrity"
     | "/admin/egress"
-    | "/admin/incidents";
+    | "/admin/incidents"
+    | "/admin/apps";
   current: boolean;
 }
 
@@ -94,7 +97,7 @@ export interface AdminNavOptions {
   /** Moderators and admins: the appeals and DMCA queues. */
   platformModerator?: boolean;
   legal?: boolean;
-  /** Admins: co-op administration (appoint workers), integrity flags, egress and incidents. */
+  /** Admins: co-op administration (appoint workers), integrity flags, egress, incidents and OAuth apps. */
   admin?: boolean;
 }
 
@@ -134,6 +137,7 @@ export function accountMenu(
       { id: "appeals", to: "/settings/appeals" },
       { id: "copyright", to: "/settings/copyright" },
       { id: "privacy", to: "/settings/privacy" },
+      { id: "connections", to: "/settings/connections" },
       { id: "coop", to: "/coop/membership" },
       ...staff,
       { id: "signOut", separatorBefore: true, destructive: true },
@@ -156,6 +160,7 @@ export function studioNav(pathname: string): StudioEntry[] {
     { id: "content", to: "/content", current: path === "/content" },
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "relays", to: "/relays", current: path === "/relays" },
+    { id: "developer", to: "/developer", current: path === "/developer" || path.startsWith("/developer/") },
   ];
 }
 
@@ -183,6 +188,7 @@ export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry
           { id: "integrity", to: "/admin/integrity" },
           { id: "egress", to: "/admin/egress" },
           { id: "incidents", to: "/admin/incidents" },
+          { id: "apps", to: "/admin/apps" },
         ] as const)
       : []),
   ];

@@ -14,7 +14,7 @@ import { schema } from "@commonair/db";
 import { sha256Hex } from "@commonair/tokens";
 import type { Auth } from "../auth/index.ts";
 import type { Deps } from "../deps.ts";
-import { decideAccess, type Caller, type ChannelRole } from "./access.ts";
+import { decideAccess, type AppCaller, type Caller, type ChannelRole } from "./access.ts";
 import { bearerToken, resolveCaller } from "./caller.ts";
 import { apiError, rateLimited } from "./errors.ts";
 import { rateLimitKey } from "./ratelimit.ts";
@@ -44,6 +44,8 @@ type RelayRow = typeof schema.relayNodes.$inferSelect;
 
 export interface ResolvedContext {
   caller: Caller | null;
+  /** An app-only token (client credentials); `caller` is then null (ADR 0027 §1). */
+  app: AppCaller | null;
   /** The channel named by `input.channel`, for owner/moderator procedures. */
   channel: ChannelRow | null;
   channelRoles: ChannelRole[];
@@ -100,6 +102,7 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
   const write = (procedure["~orpc"].route.method ?? "POST") !== "GET";
 
   let caller: Caller | null = null;
+  let app: AppCaller | null = null;
   let relay: RelayRow | null = null;
   let overlayChannelId: string | null = null;
   let channel: ChannelRow | null = null;
@@ -113,6 +116,7 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
     if (resolved.invalidBearer && meta.access !== "public")
       throw apiError("UNAUTHORIZED", "Invalid or expired access token");
     caller = resolved.caller;
+    app = resolved.app;
   }
 
   const slug = meta.access === "owner" || meta.access === "moderator" ? channelSlugOf(input) : null;
@@ -125,6 +129,7 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
   const decision = decideAccess({
     meta,
     caller,
+    app,
     write,
     machineCredential: relay !== null || overlayChannelId !== null,
     channel: slug
@@ -134,7 +139,18 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
   if (!decision.ok) throw apiError(decision.code, decision.message);
 
   const bucket = meta.rateLimit ?? "default";
-  const subject = caller ? `u:${caller.user.id}` : relay ? `r:${relay.id}` : `ip:${req.rateLimitHash}`;
+  // ADR 0027 §4: an app's user token is its own subject, so one app cannot spend a user's
+  // allowance for every other app and the user's own session.
+  const appId = caller?.kind === "token" ? caller.appId : (app?.appId ?? null);
+  const subject = caller
+    ? caller.kind === "token" && caller.appId
+      ? `g:${caller.appId}:${caller.user.id}`
+      : `u:${caller.user.id}`
+    : app
+      ? `a:${app.appId}`
+      : relay
+        ? `r:${relay.id}`
+        : `ip:${req.rateLimitHash}`;
   const nowMs = deps.now().getTime();
   const rl = await deps.rateLimitStore.hit(
     rateLimitKey(bucket, subject),
@@ -143,8 +159,19 @@ export const os = base.use(async ({ context, next, procedure }, input) => {
     `${nowMs}:${crypto.randomUUID()}`,
   );
   if (!rl.allowed) throw rateLimited(rl.retryAfterSeconds);
+  if (appId) {
+    const all = await deps.rateLimitStore.hit(
+      rateLimitKey("app", `app:${appId}`),
+      deps.rateLimits.app,
+      nowMs,
+      `${nowMs}:${crypto.randomUUID()}`,
+    );
+    if (!all.allowed) throw rateLimited(all.retryAfterSeconds);
+  }
 
-  return next({ context: { caller, channel, channelRoles, relay, overlayChannelId } satisfies ResolvedContext });
+  return next({
+    context: { caller, app, channel, channelRoles, relay, overlayChannelId } satisfies ResolvedContext,
+  });
 });
 
 export type Ctx = BaseContext & ResolvedContext;
@@ -153,6 +180,14 @@ export type Ctx = BaseContext & ResolvedContext;
 export function requireCaller(ctx: Pick<ResolvedContext, "caller">): Caller {
   if (!ctx.caller) throw apiError("UNAUTHORIZED", "Sign in required");
   return ctx.caller;
+}
+/** `developer.events.*`: a user (session or user token) or an app acting with an app token. */
+export function requireActor(
+  ctx: Pick<ResolvedContext, "caller" | "app">,
+): { kind: "user"; caller: Caller } | { kind: "app"; app: AppCaller } {
+  if (ctx.caller) return { kind: "user", caller: ctx.caller };
+  if (ctx.app) return { kind: "app", app: ctx.app };
+  throw apiError("UNAUTHORIZED", "Sign in required");
 }
 export function requireChannel(ctx: Pick<ResolvedContext, "channel">): ChannelRow {
   if (!ctx.channel) throw apiError("NOT_FOUND", "Channel not found");

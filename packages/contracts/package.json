@@ -20,7 +20,9 @@
     "./p2p": "./src/p2p.ts",
     "./currency": "./src/currency.ts",
     "./auth": "./src/auth.ts",
-    "./fixtures": "./src/fixtures.ts"
+    "./fixtures": "./src/fixtures.ts",
+    "./oauth": "./src/oauth.ts",
+    "./eventsub": "./src/eventsub.ts"
   },
   "scripts": {
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",

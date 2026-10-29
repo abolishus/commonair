@@ -21,4 +21,22 @@ describe("redactUrlSecrets", () => {
     );
     expect(errorMessage("x?access_token=t")).toBe("x?access_token=REDACTED");
   });
+
+  test("OAuth query parameters are replaced", () => {
+    const text =
+      "http://127.0.0.1:5000/cb?code=cac_0123&state=keep-me&refresh_token=x&device_code=y&client_secret=z&resume=r";
+    const out = redactUrlSecrets(text);
+    expect(out).toBe(
+      "http://127.0.0.1:5000/cb?code=REDACTED&state=keep-me&refresh_token=REDACTED&device_code=REDACTED&client_secret=REDACTED&resume=REDACTED",
+    );
+  });
+
+  test("prefixed OAuth secrets are replaced wherever they appear", () => {
+    const hex = "0123456789abcdef0123456789abcdef";
+    for (const prefix of ["ca_", "car_", "cas_", "cac_", "cad_", "ces_"])
+      expect(redactUrlSecrets(`token ${prefix}${hex} leaked`)).toBe("token REDACTED leaked");
+    // Short or unprefixed values are not secrets of this shape.
+    expect(redactUrlSecrets("ca_short and cab_0123456789abcdef0123")).toBe("ca_short and cab_0123456789abcdef0123");
+    expect(redactUrlSecrets(`scope chat:read`)).toBe("scope chat:read");
+  });
 });

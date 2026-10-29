@@ -47,6 +47,12 @@ export interface ProcedureMeta {
    * a router test keeps `appeals.create` the sole holder.
    */
   whileSuspended?: true;
+  /**
+   * App access tokens (client credentials, no user) may call this procedure (ADR 0027 §1). They
+   * are otherwise refused everywhere except `public` procedures. A router test keeps the holders to
+   * `developer.events.*` (except `catalog`, which is public).
+   */
+  appTokens?: true;
 }
 
 export const base = oc.$meta<ProcedureMeta>({ access: "public" }).errors({
@@ -84,6 +90,8 @@ export const ReturnPath = z
   .string()
   .max(500)
   .regex(/^\/(?!\/)[^\s\\]*$/, "must be a relative path starting with a single /");
+/** `/signin?returnTo=` (lives in `oauth.ts`, so the web can import it without the whole contract). */
+export { SignInReturnPath } from "../oauth.ts";
 /** A JSON value bounded in serialized size. */
 export const BoundedJson = (maxBytes: number) =>
   z

@@ -108,7 +108,7 @@ async function send(ctx: WorkerContext, input: SendInput, nextAttemptAt: (ok: bo
 }
 
 /** Best-effort single revocation message; the subscription is already revoked/failed in the DB. */
-async function sendRevocation(ctx: WorkerContext, sub: SubscriptionRow, status: string, eventId: string) {
+export async function sendRevocation(ctx: WorkerContext, sub: SubscriptionRow, status: string, eventId: string) {
   const body = JSON.stringify({ subscription: envelope(sub, status) });
   await send(ctx, { sub, messageType: "revocation", messageId: uuidv7(), eventId, attempt: 1, body }, () => null);
 }

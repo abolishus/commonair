@@ -12,6 +12,7 @@ import { experimental_ZodSmartCoercionPlugin as ZodSmartCoercionPlugin } from "@
 import type { Server } from "bun";
 import { AUTH_BASE_PATH, AUTH_ROUTES } from "@commonair/contracts/auth";
 import { OVERLAY_EVENTS_PATH } from "@commonair/contracts/events";
+import { OAUTH_PATHS } from "@commonair/contracts/oauth";
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER } from "@commonair/contracts/internal";
 import { generateOpenApi } from "@commonair/contracts/openapi";
 import { sourceLink } from "@commonair/config/site";
@@ -27,6 +28,7 @@ import { rateLimitKey } from "./lib/ratelimit.ts";
 import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
 import { isOpsHookPath, opsHook } from "./ops/hooks.ts";
 import { interactHook, isInteractHookPath } from "./interact/hooks.ts";
+import { oauthEndpoint } from "./oauth/endpoints.ts";
 import { overlayHub } from "./overlay/stream.ts";
 import { overlayTokenHash, resolveOverlayToken } from "./overlay/tokens.ts";
 import { mediaAuth, mediaNotReady, mediaReady } from "./media/hooks.ts";
@@ -38,7 +40,7 @@ const MAX_INTERNAL_BODY = 64 * 1024;
 const STRIPE_WEBHOOK_ROUTE = "/api/webhooks/stripe";
 
 export interface ApiApp {
-  fetch(req: Request, server?: Pick<Server<undefined>, "requestIP">): Promise<Response>;
+  fetch(req: Request, server?: Pick<Server<unknown>, "requestIP">): Promise<Response>;
   auth: Auth;
 }
 
@@ -144,7 +146,7 @@ export function createApp(deps: Deps): ApiApp {
   async function requestInfo(
     req: Request,
     url: URL,
-    server?: Pick<Server<undefined>, "requestIP">,
+    server?: Pick<Server<unknown>, "requestIP">,
   ): Promise<RequestInfo> {
     const socketIp = server?.requestIP(req as Request)?.address ?? "0.0.0.0";
     const forwardedFor = req.headers.get("x-forwarded-for");
@@ -177,11 +179,7 @@ export function createApp(deps: Deps): ApiApp {
   }
 
   /** The overlay alert stream (SSE). Authenticated only by the overlay token; cookies are ignored. */
-  async function overlayEvents(
-    raw: Request,
-    url: URL,
-    server?: Pick<Server<undefined>, "requestIP">,
-  ): Promise<Response> {
+  async function overlayEvents(raw: Request, url: URL, server?: Pick<Server<unknown>, "requestIP">): Promise<Response> {
     if (raw.method !== "GET") return json({ code: "METHOD_NOT_ALLOWED", message: "Use GET" }, 405);
     const info = await requestInfo(raw, url, server);
     const nowMs = deps.now().getTime();
@@ -201,7 +199,7 @@ export function createApp(deps: Deps): ApiApp {
     return overlayHub(deps).open(resolved, await overlayTokenHash(token), raw.signal);
   }
 
-  async function handle(raw: Request, server?: Pick<Server<undefined>, "requestIP">): Promise<Response> {
+  async function handle(raw: Request, server?: Pick<Server<unknown>, "requestIP">): Promise<Response> {
     const url = new URL(raw.url);
     const path = url.pathname;
 
@@ -255,6 +253,8 @@ export function createApp(deps: Deps): ApiApp {
       return res;
     };
 
+    if (path === OAUTH_PATHS.token || path === OAUTH_PATHS.revoke || path === OAUTH_PATHS.device)
+      return withCors(await oauthEndpoint(deps, stripCredentials(raw), await requestInfo(raw, url, server)));
     if (path === OVERLAY_EVENTS_PATH) return withCors(await overlayEvents(raw, url, server));
 
     if (path === "/api/openapi.json" && raw.method === "GET")

@@ -10,6 +10,8 @@ import { opsHealth } from "./ops/hooks.ts";
 import { interactHealth } from "./interact/hooks.ts";
 import { moderationHealth, startModeration } from "./moderation/index.ts";
 import { startOverlayHub } from "./overlay/stream.ts";
+import { EVENTSUB_WS_PATH } from "@commonair/contracts/eventsub";
+import { startEventSub, type EventSubSocketData } from "./eventsub/index.ts";
 
 const env = loadApiEnv();
 const logger = createLogger({ service: "api", level: env.LOG_LEVEL });
@@ -20,8 +22,10 @@ const built = await buildDeps(env, { logger });
 await startModeration(built.deps);
 const app = createApp(built.deps);
 const overlay = startOverlayHub(built.deps);
+// Before runService: E9-ws registers its SIGTERM drain here, so it runs before the server stops.
+const eventsub = startEventSub(built.deps);
 
-runService({
+runService<EventSubSocketData>({
   name: "api",
   port: env.API_PORT,
   logger,
@@ -33,6 +37,9 @@ runService({
     overlay: async () => {
       if (!overlay.warm) throw new Error("overlay subscriber connecting");
     },
+    eventsub: async () => {
+      if (!eventsub.warm) throw new Error("eventsub subscriber connecting");
+    },
   },
   health: {
     ...moderationHealth(built.deps),
@@ -40,7 +47,11 @@ runService({
     ...opsHealth(built.deps),
     ...interactHealth(built.deps),
   },
-  fetch: (req, server) => app.fetch(req, server),
+  fetch: (req, server) =>
+    new URL(req.url).pathname === EVENTSUB_WS_PATH ? eventsub.upgrade(req, server) : app.fetch(req, server),
+  websocket: eventsub.websocket,
+  // runService bounds onShutdown by this; the reconnect grace plus room to close pools.
+  shutdownTimeoutMs: (built.deps.env.EVENTSUB_WS_RECONNECT_GRACE_SECONDS + 10) * 1000,
   onShutdown: async () => {
     await built.close();
     await telemetry.shutdown();

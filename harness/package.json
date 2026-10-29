@@ -17,6 +17,7 @@
     "@commonair/db": "workspace:*",
     "@commonair/ledger": "workspace:*",
     "@commonair/observability": "workspace:*",
+    "@commonair/sdk": "workspace:*",
     "@commonair/storage": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@orpc/client": "catalog:",

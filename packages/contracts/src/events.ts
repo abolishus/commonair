@@ -837,6 +837,11 @@ export const BUS = {
   overlay: (channelId: string) => `overlay:${channelId}`,
   /** Channel-bot config changes (JSON `BotControlMessage`), published by the API after commit; every chat instance reloads that part. */
   botControl: "bus:bot-control",
+  /**
+   * EventSub WebSocket control (E9): `EventSubControlMessage`. The API instance holding a session
+   * reloads its subscriptions when another instance created or deleted one over HTTP.
+   */
+  eventsubControl: "bus:eventsub-control",
 } as const;
 
 /**
@@ -865,11 +870,47 @@ export type BusEvent = z.infer<typeof BusEvent>;
  * Chat, IRC and the EventSub WebSocket drop caches (`invalidate`) or close the user's sockets
  * (`disconnect`, optionally only those authenticated with one token).
  */
-export const UserControlMessage = z.object({
-  op: z.enum(["invalidate", "disconnect"]),
-  userId: id,
-  /** sha256 of the revoked access token, when only sockets using that token must close. */
-  tokenHash: z.string().optional(),
-  reason: z.enum(["suspended", "deleted", "token_revoked", "role_changed", "profile_changed"]),
-});
+export const UserControlMessage = z
+  .object({
+    op: z.enum(["invalidate", "disconnect"]),
+    /** The user concerned. Absent on app-wide messages (only `appId`). */
+    userId: id.optional(),
+    /** With `userId`: only that user's connections made through this app. Alone: every connection of the app. */
+    appId: id.optional(),
+    /** sha256 of the revoked access token, when only sockets using that token must close. */
+    tokenHash: z.string().optional(),
+    reason: z.enum([
+      "suspended",
+      "deleted",
+      "token_revoked",
+      /**
+       * The access token was replaced by a refresh (the grant lives on). Chat closes sockets using
+       * the old token; the EventSub WebSocket ignores it (its sessions are bound to the grant).
+       */
+      "token_rotated",
+      "role_changed",
+      "profile_changed",
+      "grant_revoked",
+      "app_suspended",
+      "app_removed",
+    ]),
+  })
+  .refine((m) => m.userId !== undefined || m.appId !== undefined, "userId or appId is required");
 export type UserControlMessage = z.infer<typeof UserControlMessage>;
+
+/** Whether a connection (chat socket, EventSub session) is one a control message targets. */
+export function userControlTargets(
+  conn: { userId: string | null; appId: string | null; tokenHash: string | null },
+  msg: Pick<UserControlMessage, "userId" | "appId" | "tokenHash">,
+): boolean {
+  if (msg.userId !== undefined && conn.userId !== msg.userId) return false;
+  if (msg.appId !== undefined && conn.appId !== msg.appId) return false;
+  if (msg.tokenHash !== undefined && conn.tokenHash !== msg.tokenHash) return false;
+  return true;
+}
+
+export const EventSubControlMessage = z.object({
+  op: z.literal("subscriptions_changed"),
+  sessionId: z.string().max(64),
+});
+export type EventSubControlMessage = z.infer<typeof EventSubControlMessage>;

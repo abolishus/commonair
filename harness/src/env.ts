@@ -50,6 +50,11 @@ export const harnessEnvSchema = z.object({
    * P2P_TRACKER_URL at it.
    */
   HARNESS_TRACKER_PROXY_PORT: z.coerce.number().int().min(1024).max(65535).default(8010),
+  /**
+   * `developer-platform` (E9): the host name the stack's containers use to reach the harness
+   * webhook receiver on this machine (Podman resolves `host.containers.internal`).
+   */
+  HARNESS_WEBHOOK_HOST: z.string().default("host.containers.internal"),
   /** `harness` = the harness player page; `web` = the web app's `/embed/<channel>` route. */
   HARNESS_PLAYER: z.enum(["harness", "web"]).default("harness"),
   /** Prometheus HTTP API for load-test metrics; unset = skip Prometheus queries. */

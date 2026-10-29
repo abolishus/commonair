@@ -26,8 +26,14 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 Contract steps land in order, one commit each: E8 (`feat(e8): contract step`: migrations
 `0033_e8_interactivity` and `0034_e8_protections`, `packages/interact`, the `PluginHost`
 extension, `INTERACT_TEST_HOOKS` and `harness/compose.e8.yaml`, the `/interact` and `/bot`
-placeholders, the terms points clause and the privacy channel-features paragraph), then E9, then
-N2. Waves then start from the N2 step's sha:
+placeholders, the terms points clause and the privacy channel-features paragraph), then E9
+(`feat(e9): contract step`: migration `0035_e9_developer_platform`, `contracts/{oauth,eventsub}.ts`,
+app-token callers and the `app` rate-limit bucket, `routes/developer/*` split with 21 stubs,
+`developer/{grants,webhook-queue}.ts`, the OAuth endpoint and EventSub WebSocket stubs, chat's
+app-level disconnects, `/eventsub/ws` in Caddy, `harness/compose.e9.yaml`, the
+`developer-platform` scenario with all eight steps pending, `packages/sdk` skeleton (Apache-2.0,
+ADR 0035), seven placeholder routes, `returnTo` on sign-in and sign-up), then N2. Waves then start
+from the N2 step's sha:
 
 | Wave | Units                                                                   | State   |
 | ---- | ----------------------------------------------------------------------- | ------- |
@@ -37,6 +43,9 @@ N2. Waves then start from the N2 step's sha:
 
 E8 harness steps (`interact` 1-6, `channel-bot` 1-6) are all pending (`harness/src/e8/steps.ts`)
 until their units merge; both scenarios are `inFull: false` until the milestone's end.
+E9 harness steps (`developer-platform` 1-8) are pending (`ready: false` in `harness/src/e9/*.ts`)
+until their units merge; the scenario skips pending steps, and `FULL_REQUIRED` gains it when the
+last E9 unit merges.
 
 Batch 2 (E7 + W0 + P1; waves and shared rules: `.claude/briefs/batch2/README.md`), started
 2026-10-27. ADRs 0005 amendment 1 (P1), 0012 part 1 (W0-clock), 0019 (W0-sor) and 0009
@@ -49,7 +58,8 @@ mode, 0022 supply chain, 0026 interactivity, 0027 OAuth and EventSub, 0028 notif
 i18n (Hosted Weblate, Spanish first), 0030 federation, 0032 scaling (NYC3; tracker on an app
 droplet). Proposed: 0031 Twitch import (waits for counsel), 0033 SeaweedFS (answers recorded;
 waits for the phase 0 spike; replaces Garage outright, no migration tool). The milestone plans and
-feature-wins.md are corrected to match. Open for the maintainer: the SDK's license; owners for CDN
+feature-wins.md are corrected to match. Open for the maintainer: the SDK's npm organisation and the dual licence of
+the contract files its bundle inlines (ADR 0035; the licence itself is decided, Apache-2.0); owners for CDN
 fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~86 MB/h (0018);
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
 Legal seed follow-ups for E8/N2: the E8 contract step added the no-cash-value clause to
@@ -1302,7 +1312,7 @@ integration, licenses, domains, reuse, relay). All units below are merged except
 | Unit                       | Branch (`worktree-agent-…`)      | Merged                                | Open items (not done)                                                                                                                                                                                                                                                                                                                                                                                 |
 | -------------------------- | -------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2A api-core                | a6c3e9d45066950e6                | yes                                   | **API review (see HANDOFF): ReDoS-capable filter check, minors can edit birthDate**, category mature gate, third-party image URLs, better-auth admin endpoints unaudited, rate-limit subject behind proxy / IPv6 /64, relay+simulcast URL SSRF, upload size, per-recipient mail limits, interim verify too fast; `BUS.userControl` publishing; `developer.tokens.list/revoke`; TOTP integration tests |
-| 2B chat                    | a10faca9017b35f37                | yes                                   | README for round-two behavior; test for OAuth revocation on an open socket                                                                                                                                                                                                                                                                                                                            |
+| 2B chat                    | a10faca9017b35f37                | yes                                   | README for round-two behavior; OAuth revocation on an open socket is tested (`revocation.int.test.ts`; app-level cases added by the E9 contract step)                                                                                                                                                                                                                                                 |
 | 2C irc                     | afc07554b4056edf3                | yes                                   | move `IRC_*` connection-limit env vars into `packages/config`                                                                                                                                                                                                                                                                                                                                         |
 | 2D origin                  | a5d29e5776daab709                | yes (includes a `wip(origin)` commit) | integration tests for relay 401→429, CDN URIs without `t=`, HEAD not recorded; multi-replica issuance integration test; `ORIGIN_ISSUANCE_ENABLED` and `ISSUANCE_KEYS` into config/contracts                                                                                                                                                                                                           |
 | 2E media                   | a910b90d0855b019d                | yes                                   | stale `processing` VOD reconcile; crash recovery of recordings + work-dir sweep; global disk budget; transcode slot limit; simulcast SSRF + protocol whitelist + generic errors; simulcast key out of argv; thumbnail history cleanup                                                                                                                                                                 |

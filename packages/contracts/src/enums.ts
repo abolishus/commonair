@@ -206,6 +206,19 @@ export const DELETION_STATUSES = ["scheduled", "canceled", "completed"] as const
 export const EVENT_TRANSPORTS = ["webhook", "websocket"] as const;
 export const SUBSCRIPTION_STATES = ["enabled", "verification_pending", "failed", "revoked"] as const;
 export const DELIVERY_STATUSES = ["pending", "succeeded", "failed"] as const;
+/** How an `oauth_tokens` row was issued. `personal`: a bot token minted by its owner (`me.bots.createToken`). */
+export const OAUTH_TOKEN_KINDS = ["personal", "authorization_code", "device_code", "client_credentials"] as const;
+/** RFC 8628 device authorization state. */
+export const DEVICE_CODE_STATUSES = ["pending", "approved", "denied", "redeemed"] as const;
+/** Why an admin suspended an OAuth app (ADR 0027 §4). Audit rows carry this, never free text. */
+export const APP_SUSPENSION_REASONS = [
+  "abuse",
+  "spam",
+  "security",
+  "terms_violation",
+  "impersonation",
+  "other",
+] as const;
 
 export const POLL_STATUSES = ["active", "completed", "terminated", "archived"] as const;
 export const PREDICTION_STATUSES = ["active", "locked", "resolved", "canceled"] as const;

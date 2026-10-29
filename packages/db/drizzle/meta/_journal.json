@@ -246,6 +246,13 @@
       "when": 1793307659047,
       "tag": "0034_e8_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793309534455,
+      "tag": "0035_e9_developer_platform",
+      "breakpoints": true
     }
   ]
 }

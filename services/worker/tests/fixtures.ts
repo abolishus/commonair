@@ -121,9 +121,12 @@ export async function makeToken(db: Database, appId: string, userId: string, sco
       id: uuidv7(),
       appId,
       userId,
+      kind: "authorization_code",
       scopes,
       accessTokenHash: await sha256Hex(randomSecret()),
       refreshTokenHash: await sha256Hex(randomSecret()),
+      refreshExpiresAt: new Date(Date.now() + 30 * 86_400_000),
+      familyId: uuidv7(),
       expiresAt: new Date(Date.now() + 3_600_000),
     })
     .returning();

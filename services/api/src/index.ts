@@ -23,6 +23,8 @@ import { closeExportQueue } from "./privacy/export-queue.ts";
 import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeVodPlacementQueue } from "./media/vod-placement-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
+import { closeWebhookQueue } from "./developer/webhook-queue.ts";
+import { closeEventSub } from "./eventsub/index.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
 export { loadApiEnv, type ApiEnv } from "./env.ts";
@@ -119,6 +121,8 @@ export async function buildDeps(
         ["interact queue", closeInteractTickRunner],
         ["overlay hub", closeOverlayHub],
         ["export queue", closeExportQueue],
+        ["webhook queue", closeWebhookQueue],
+        ["eventsub", closeEventSub],
       ] as const)
         await close(deps).catch((err: unknown) => logger.warn(`${what} close failed`, { err: (err as Error).name }));
       await mailer.close();

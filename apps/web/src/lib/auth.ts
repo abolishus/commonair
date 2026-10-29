@@ -42,9 +42,14 @@ async function post(path: string, body: unknown): Promise<void> {
   );
 }
 
-export function signUp(input: SignUpInput): Promise<void> {
-  // The display name starts as the username; `callbackURL` is where the verification link lands.
-  return post(AUTH_ROUTES.signUp, { ...input, name: input.username, callbackURL: "/dashboard" });
+/**
+ * `callbackURL` is where the verification link lands: the dashboard, or the page that sent the
+ * visitor to sign up (`returnTo`, already checked by `safeReturnTo`; better-auth also checks it
+ * against its trusted origins).
+ */
+export function signUp(input: SignUpInput, callbackURL = "/dashboard"): Promise<void> {
+  // The display name starts as the username.
+  return post(AUTH_ROUTES.signUp, { ...input, name: input.username, callbackURL });
 }
 
 /**
@@ -52,8 +57,8 @@ export function signUp(input: SignUpInput): Promise<void> {
  * delay) whether or not the address exists or is already verified, so callers show one neutral
  * confirmation and only treat a rate limit differently.
  */
-export function resendVerificationEmail(email: string): Promise<void> {
-  return post(AUTH_ROUTES.sendVerificationEmail, { email, callbackURL: "/dashboard" });
+export function resendVerificationEmail(email: string, callbackURL = "/dashboard"): Promise<void> {
+  return post(AUTH_ROUTES.sendVerificationEmail, { email, callbackURL });
 }
 
 export function signIn(email: string, password: string): Promise<void> {

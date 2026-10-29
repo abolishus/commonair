@@ -15,6 +15,7 @@ import { Route as StudioRouteImport } from './routes/_studio'
 import { Route as AdminTreasuryRouteImport } from './routes/_admin/treasury'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppChannelRouteImport } from './routes/_app/$channel'
+import { Route as AppActivateRouteImport } from './routes/_app/activate'
 import { Route as AppDmcaRouteImport } from './routes/_app/dmca'
 import { Route as AppSigninRouteImport } from './routes/_app/signin'
 import { Route as AppSignupRouteImport } from './routes/_app/signup'
@@ -32,6 +33,7 @@ import { Route as OverlayAlertsRouteImport } from './routes/overlay.alerts'
 import { Route as OverlayChatRouteImport } from './routes/overlay.chat'
 import { Route as OverlayGoalsRouteImport } from './routes/overlay.goals'
 import { Route as AdminAdminAppealsRouteImport } from './routes/_admin/admin.appeals'
+import { Route as AdminAdminAppsRouteImport } from './routes/_admin/admin.apps'
 import { Route as AdminAdminCoopRouteImport } from './routes/_admin/admin.coop'
 import { Route as AdminAdminDmcaRouteImport } from './routes/_admin/admin.dmca'
 import { Route as AdminAdminEgressRouteImport } from './routes/_admin/admin.egress'
@@ -43,14 +45,19 @@ import { Route as AppCoopIndexRouteImport } from './routes/_app/coop.index'
 import { Route as AppCoopCouncilRouteImport } from './routes/_app/coop.council'
 import { Route as AppCoopMembershipRouteImport } from './routes/_app/coop.membership'
 import { Route as AppCoopSettingsRouteImport } from './routes/_app/coop.settings'
+import { Route as AppOauth2AuthorizeRouteImport } from './routes/_app/oauth2.authorize'
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
+import { Route as AppSettingsConnectionsRouteImport } from './routes/_app/settings.connections'
 import { Route as AppSettingsCopyrightRouteImport } from './routes/_app/settings.copyright'
 import { Route as AppSettingsPrivacyRouteImport } from './routes/_app/settings.privacy'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
+import { Route as StudioDeveloperIndexRouteImport } from './routes/_studio/developer.index'
+import { Route as StudioDeveloperBotsRouteImport } from './routes/_studio/developer.bots'
 import { Route as AppCoopPatronageIndexRouteImport } from './routes/_app/coop.patronage.index'
 import { Route as AppCoopPatronagePeriodIdRouteImport } from './routes/_app/coop.patronage.$periodId'
 import { Route as AppCoopProposalsIndexRouteImport } from './routes/_app/coop.proposals.index'
 import { Route as AppCoopProposalsNewRouteImport } from './routes/_app/coop.proposals.new'
+import { Route as StudioDeveloperAppsAppIdRouteImport } from './routes/_studio/developer.apps.$appId'
 import { Route as AppCoopProposalsIdIndexRouteImport } from './routes/_app/coop.proposals.$id.index'
 import { Route as AppCoopProposalsIdEditRouteImport } from './routes/_app/coop.proposals.$id.edit'
 
@@ -79,6 +86,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppChannelRoute = AppChannelRouteImport.update({
   id: '/$channel',
   path: '/$channel',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppActivateRoute = AppActivateRouteImport.update({
+  id: '/activate',
+  path: '/activate',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDmcaRoute = AppDmcaRouteImport.update({
@@ -166,6 +178,11 @@ const AdminAdminAppealsRoute = AdminAdminAppealsRouteImport.update({
   path: '/admin/appeals',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminAppsRoute = AdminAdminAppsRouteImport.update({
+  id: '/admin/apps',
+  path: '/admin/apps',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminCoopRoute = AdminAdminCoopRouteImport.update({
   id: '/admin/coop',
   path: '/admin/coop',
@@ -221,9 +238,19 @@ const AppCoopSettingsRoute = AppCoopSettingsRouteImport.update({
   path: '/coop/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOauth2AuthorizeRoute = AppOauth2AuthorizeRouteImport.update({
+  id: '/oauth2/authorize',
+  path: '/oauth2/authorize',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsAppealsRoute = AppSettingsAppealsRouteImport.update({
   id: '/settings/appeals',
   path: '/settings/appeals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsConnectionsRoute = AppSettingsConnectionsRouteImport.update({
+  id: '/settings/connections',
+  path: '/settings/connections',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsCopyrightRoute = AppSettingsCopyrightRouteImport.update({
@@ -242,6 +269,16 @@ const AppSettingsSubscriptionsRoute =
     path: '/settings/subscriptions',
     getParentRoute: () => AppRoute,
   } as any)
+const StudioDeveloperIndexRoute = StudioDeveloperIndexRouteImport.update({
+  id: '/developer/',
+  path: '/developer/',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioDeveloperBotsRoute = StudioDeveloperBotsRouteImport.update({
+  id: '/developer/bots',
+  path: '/developer/bots',
+  getParentRoute: () => StudioRoute,
+} as any)
 const AppCoopPatronageIndexRoute = AppCoopPatronageIndexRouteImport.update({
   id: '/coop/patronage/',
   path: '/coop/patronage/',
@@ -263,6 +300,12 @@ const AppCoopProposalsNewRoute = AppCoopProposalsNewRouteImport.update({
   path: '/coop/proposals/new',
   getParentRoute: () => AppRoute,
 } as any)
+const StudioDeveloperAppsAppIdRoute =
+  StudioDeveloperAppsAppIdRouteImport.update({
+    id: '/developer/apps/$appId',
+    path: '/developer/apps/$appId',
+    getParentRoute: () => StudioRoute,
+  } as any)
 const AppCoopProposalsIdIndexRoute = AppCoopProposalsIdIndexRouteImport.update({
   id: '/coop/proposals/$id/',
   path: '/coop/proposals/$id/',
@@ -278,6 +321,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
+  '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
@@ -295,6 +339,7 @@ export interface FileRoutesByFullPath {
   '/overlay/chat': typeof OverlayChatRoute
   '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
+  '/admin/apps': typeof AdminAdminAppsRoute
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
@@ -305,13 +350,18 @@ export interface FileRoutesByFullPath {
   '/coop/council': typeof AppCoopCouncilRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
+  '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
+  '/settings/connections': typeof AppSettingsConnectionsRoute
   '/settings/copyright': typeof AppSettingsCopyrightRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/developer/bots': typeof StudioDeveloperBotsRoute
   '/coop/': typeof AppCoopIndexRoute
+  '/developer/': typeof StudioDeveloperIndexRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/coop/patronage/': typeof AppCoopPatronageIndexRoute
   '/coop/proposals/': typeof AppCoopProposalsIndexRoute
   '/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
@@ -321,6 +371,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/treasury': typeof AdminTreasuryRoute
   '/$channel': typeof AppChannelRoute
+  '/activate': typeof AppActivateRoute
   '/dmca': typeof AppDmcaRoute
   '/signin': typeof AppSigninRoute
   '/signup': typeof AppSignupRoute
@@ -338,6 +389,7 @@ export interface FileRoutesByTo {
   '/overlay/chat': typeof OverlayChatRoute
   '/overlay/goals': typeof OverlayGoalsRoute
   '/admin/appeals': typeof AdminAdminAppealsRoute
+  '/admin/apps': typeof AdminAdminAppsRoute
   '/admin/coop': typeof AdminAdminCoopRoute
   '/admin/dmca': typeof AdminAdminDmcaRoute
   '/admin/egress': typeof AdminAdminEgressRoute
@@ -348,13 +400,18 @@ export interface FileRoutesByTo {
   '/coop/council': typeof AppCoopCouncilRoute
   '/coop/membership': typeof AppCoopMembershipRoute
   '/coop/settings': typeof AppCoopSettingsRoute
+  '/oauth2/authorize': typeof AppOauth2AuthorizeRoute
   '/settings/appeals': typeof AppSettingsAppealsRoute
+  '/settings/connections': typeof AppSettingsConnectionsRoute
   '/settings/copyright': typeof AppSettingsCopyrightRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/developer/bots': typeof StudioDeveloperBotsRoute
   '/coop': typeof AppCoopIndexRoute
+  '/developer': typeof StudioDeveloperIndexRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/coop/patronage': typeof AppCoopPatronageIndexRoute
   '/coop/proposals': typeof AppCoopProposalsIndexRoute
   '/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
@@ -367,6 +424,7 @@ export interface FileRoutesById {
   '/_studio': typeof StudioRouteWithChildren
   '/_admin/treasury': typeof AdminTreasuryRoute
   '/_app/$channel': typeof AppChannelRoute
+  '/_app/activate': typeof AppActivateRoute
   '/_app/dmca': typeof AppDmcaRoute
   '/_app/signin': typeof AppSigninRoute
   '/_app/signup': typeof AppSignupRoute
@@ -385,6 +443,7 @@ export interface FileRoutesById {
   '/overlay/goals': typeof OverlayGoalsRoute
   '/_app/': typeof AppIndexRoute
   '/_admin/admin/appeals': typeof AdminAdminAppealsRoute
+  '/_admin/admin/apps': typeof AdminAdminAppsRoute
   '/_admin/admin/coop': typeof AdminAdminCoopRoute
   '/_admin/admin/dmca': typeof AdminAdminDmcaRoute
   '/_admin/admin/egress': typeof AdminAdminEgressRoute
@@ -395,13 +454,18 @@ export interface FileRoutesById {
   '/_app/coop/council': typeof AppCoopCouncilRoute
   '/_app/coop/membership': typeof AppCoopMembershipRoute
   '/_app/coop/settings': typeof AppCoopSettingsRoute
+  '/_app/oauth2/authorize': typeof AppOauth2AuthorizeRoute
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
+  '/_app/settings/connections': typeof AppSettingsConnectionsRoute
   '/_app/settings/copyright': typeof AppSettingsCopyrightRoute
   '/_app/settings/privacy': typeof AppSettingsPrivacyRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
+  '/_studio/developer/bots': typeof StudioDeveloperBotsRoute
   '/_app/coop/': typeof AppCoopIndexRoute
+  '/_studio/developer/': typeof StudioDeveloperIndexRoute
   '/_app/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/_app/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/_studio/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/_app/coop/patronage/': typeof AppCoopPatronageIndexRoute
   '/_app/coop/proposals/': typeof AppCoopProposalsIndexRoute
   '/_app/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
@@ -413,6 +477,7 @@ export interface FileRouteTypes {
     | '/'
     | '/treasury'
     | '/$channel'
+    | '/activate'
     | '/dmca'
     | '/signin'
     | '/signup'
@@ -430,6 +495,7 @@ export interface FileRouteTypes {
     | '/overlay/chat'
     | '/overlay/goals'
     | '/admin/appeals'
+    | '/admin/apps'
     | '/admin/coop'
     | '/admin/dmca'
     | '/admin/egress'
@@ -440,13 +506,18 @@ export interface FileRouteTypes {
     | '/coop/council'
     | '/coop/membership'
     | '/coop/settings'
+    | '/oauth2/authorize'
     | '/settings/appeals'
+    | '/settings/connections'
     | '/settings/copyright'
     | '/settings/privacy'
     | '/settings/subscriptions'
+    | '/developer/bots'
     | '/coop/'
+    | '/developer/'
     | '/coop/patronage/$periodId'
     | '/coop/proposals/new'
+    | '/developer/apps/$appId'
     | '/coop/patronage/'
     | '/coop/proposals/'
     | '/coop/proposals/$id/edit'
@@ -456,6 +527,7 @@ export interface FileRouteTypes {
     | '/'
     | '/treasury'
     | '/$channel'
+    | '/activate'
     | '/dmca'
     | '/signin'
     | '/signup'
@@ -473,6 +545,7 @@ export interface FileRouteTypes {
     | '/overlay/chat'
     | '/overlay/goals'
     | '/admin/appeals'
+    | '/admin/apps'
     | '/admin/coop'
     | '/admin/dmca'
     | '/admin/egress'
@@ -483,13 +556,18 @@ export interface FileRouteTypes {
     | '/coop/council'
     | '/coop/membership'
     | '/coop/settings'
+    | '/oauth2/authorize'
     | '/settings/appeals'
+    | '/settings/connections'
     | '/settings/copyright'
     | '/settings/privacy'
     | '/settings/subscriptions'
+    | '/developer/bots'
     | '/coop'
+    | '/developer'
     | '/coop/patronage/$periodId'
     | '/coop/proposals/new'
+    | '/developer/apps/$appId'
     | '/coop/patronage'
     | '/coop/proposals'
     | '/coop/proposals/$id/edit'
@@ -501,6 +579,7 @@ export interface FileRouteTypes {
     | '/_studio'
     | '/_admin/treasury'
     | '/_app/$channel'
+    | '/_app/activate'
     | '/_app/dmca'
     | '/_app/signin'
     | '/_app/signup'
@@ -519,6 +598,7 @@ export interface FileRouteTypes {
     | '/overlay/goals'
     | '/_app/'
     | '/_admin/admin/appeals'
+    | '/_admin/admin/apps'
     | '/_admin/admin/coop'
     | '/_admin/admin/dmca'
     | '/_admin/admin/egress'
@@ -529,13 +609,18 @@ export interface FileRouteTypes {
     | '/_app/coop/council'
     | '/_app/coop/membership'
     | '/_app/coop/settings'
+    | '/_app/oauth2/authorize'
     | '/_app/settings/appeals'
+    | '/_app/settings/connections'
     | '/_app/settings/copyright'
     | '/_app/settings/privacy'
     | '/_app/settings/subscriptions'
+    | '/_studio/developer/bots'
     | '/_app/coop/'
+    | '/_studio/developer/'
     | '/_app/coop/patronage/$periodId'
     | '/_app/coop/proposals/new'
+    | '/_studio/developer/apps/$appId'
     | '/_app/coop/patronage/'
     | '/_app/coop/proposals/'
     | '/_app/coop/proposals/$id/edit'
@@ -594,6 +679,13 @@ declare module '@tanstack/react-router' {
       path: '/$channel'
       fullPath: '/$channel'
       preLoaderRoute: typeof AppChannelRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/activate': {
+      id: '/_app/activate'
+      path: '/activate'
+      fullPath: '/activate'
+      preLoaderRoute: typeof AppActivateRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/dmca': {
@@ -715,6 +807,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminAppealsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/apps': {
+      id: '/_admin/admin/apps'
+      path: '/admin/apps'
+      fullPath: '/admin/apps'
+      preLoaderRoute: typeof AdminAdminAppsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/coop': {
       id: '/_admin/admin/coop'
       path: '/admin/coop'
@@ -792,11 +891,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCoopSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/oauth2/authorize': {
+      id: '/_app/oauth2/authorize'
+      path: '/oauth2/authorize'
+      fullPath: '/oauth2/authorize'
+      preLoaderRoute: typeof AppOauth2AuthorizeRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/appeals': {
       id: '/_app/settings/appeals'
       path: '/settings/appeals'
       fullPath: '/settings/appeals'
       preLoaderRoute: typeof AppSettingsAppealsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/connections': {
+      id: '/_app/settings/connections'
+      path: '/settings/connections'
+      fullPath: '/settings/connections'
+      preLoaderRoute: typeof AppSettingsConnectionsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/copyright': {
@@ -819,6 +932,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/subscriptions'
       preLoaderRoute: typeof AppSettingsSubscriptionsRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/_studio/developer/': {
+      id: '/_studio/developer/'
+      path: '/developer'
+      fullPath: '/developer/'
+      preLoaderRoute: typeof StudioDeveloperIndexRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/developer/bots': {
+      id: '/_studio/developer/bots'
+      path: '/developer/bots'
+      fullPath: '/developer/bots'
+      preLoaderRoute: typeof StudioDeveloperBotsRouteImport
+      parentRoute: typeof StudioRoute
     }
     '/_app/coop/patronage/': {
       id: '/_app/coop/patronage/'
@@ -848,6 +975,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCoopProposalsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_studio/developer/apps/$appId': {
+      id: '/_studio/developer/apps/$appId'
+      path: '/developer/apps/$appId'
+      fullPath: '/developer/apps/$appId'
+      preLoaderRoute: typeof StudioDeveloperAppsAppIdRouteImport
+      parentRoute: typeof StudioRoute
+    }
     '/_app/coop/proposals/$id/': {
       id: '/_app/coop/proposals/$id/'
       path: '/coop/proposals/$id'
@@ -868,6 +1002,7 @@ declare module '@tanstack/react-router' {
 interface AdminRouteChildren {
   AdminTreasuryRoute: typeof AdminTreasuryRoute
   AdminAdminAppealsRoute: typeof AdminAdminAppealsRoute
+  AdminAdminAppsRoute: typeof AdminAdminAppsRoute
   AdminAdminCoopRoute: typeof AdminAdminCoopRoute
   AdminAdminDmcaRoute: typeof AdminAdminDmcaRoute
   AdminAdminEgressRoute: typeof AdminAdminEgressRoute
@@ -880,6 +1015,7 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminTreasuryRoute: AdminTreasuryRoute,
   AdminAdminAppealsRoute: AdminAdminAppealsRoute,
+  AdminAdminAppsRoute: AdminAdminAppsRoute,
   AdminAdminCoopRoute: AdminAdminCoopRoute,
   AdminAdminDmcaRoute: AdminAdminDmcaRoute,
   AdminAdminEgressRoute: AdminAdminEgressRoute,
@@ -893,6 +1029,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppRouteChildren {
   AppChannelRoute: typeof AppChannelRoute
+  AppActivateRoute: typeof AppActivateRoute
   AppDmcaRoute: typeof AppDmcaRoute
   AppSigninRoute: typeof AppSigninRoute
   AppSignupRoute: typeof AppSignupRoute
@@ -902,7 +1039,9 @@ interface AppRouteChildren {
   AppCoopCouncilRoute: typeof AppCoopCouncilRoute
   AppCoopMembershipRoute: typeof AppCoopMembershipRoute
   AppCoopSettingsRoute: typeof AppCoopSettingsRoute
+  AppOauth2AuthorizeRoute: typeof AppOauth2AuthorizeRoute
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
+  AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
   AppSettingsCopyrightRoute: typeof AppSettingsCopyrightRoute
   AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
@@ -917,6 +1056,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppChannelRoute: AppChannelRoute,
+  AppActivateRoute: AppActivateRoute,
   AppDmcaRoute: AppDmcaRoute,
   AppSigninRoute: AppSigninRoute,
   AppSignupRoute: AppSignupRoute,
@@ -926,7 +1066,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopCouncilRoute: AppCoopCouncilRoute,
   AppCoopMembershipRoute: AppCoopMembershipRoute,
   AppCoopSettingsRoute: AppCoopSettingsRoute,
+  AppOauth2AuthorizeRoute: AppOauth2AuthorizeRoute,
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
+  AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
   AppSettingsCopyrightRoute: AppSettingsCopyrightRoute,
   AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
@@ -949,6 +1091,9 @@ interface StudioRouteChildren {
   StudioOverlaysRoute: typeof StudioOverlaysRoute
   StudioRelaysRoute: typeof StudioRelaysRoute
   StudioRevenueRoute: typeof StudioRevenueRoute
+  StudioDeveloperBotsRoute: typeof StudioDeveloperBotsRoute
+  StudioDeveloperIndexRoute: typeof StudioDeveloperIndexRoute
+  StudioDeveloperAppsAppIdRoute: typeof StudioDeveloperAppsAppIdRoute
 }
 
 const StudioRouteChildren: StudioRouteChildren = {
@@ -959,6 +1104,9 @@ const StudioRouteChildren: StudioRouteChildren = {
   StudioOverlaysRoute: StudioOverlaysRoute,
   StudioRelaysRoute: StudioRelaysRoute,
   StudioRevenueRoute: StudioRevenueRoute,
+  StudioDeveloperBotsRoute: StudioDeveloperBotsRoute,
+  StudioDeveloperIndexRoute: StudioDeveloperIndexRoute,
+  StudioDeveloperAppsAppIdRoute: StudioDeveloperAppsAppIdRoute,
 }
 
 const StudioRouteWithChildren =

@@ -27,6 +27,9 @@ ContainerName=commonair-api
 RunInit=true
 Network=commonair.network
 NetworkAlias=api
+# EventSub WebSocket sessions get a session_reconnect and the 30 s reconnect grace before the API
+# exits; Podman's default 10 s stop timeout would SIGKILL mid-drain (ADR 0027 §3).
+StopTimeout=45
 # Only the keys of commonair.env this unit needs, copied at every start (see the ExecStartPre=).
 EnvironmentFile=%h/.config/commonair/unit-env/commonair-api.env
 Environment=MEDIAMTX_API_URL=http://mediamtx:9997

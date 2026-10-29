@@ -154,6 +154,7 @@ without it a headless bot needs a hand-copied token.
 - **Dependencies.** No runtime dependency outside the license allowlist that
   `bun scripts/check-licenses.ts` enforces, each vetted with `bun scripts/vet-package.ts`.
 - **Harness.** `harness/src/bots/sdk-bot.ts` is replaced by the SDK, so `e2e-social` exercises it.
+- **License.** Apache-2.0, for `packages/sdk` only (added 2026-10-29, [ADR 0035](0035-sdk-license.md)).
 
 ## Consequences
 
@@ -172,8 +173,18 @@ without it a headless bot needs a hand-copied token.
 - The API process gains WebSocket handling and a `BUS.userControl` subscriber; the Caddyfile
   gains `/eventsub/ws`.
 - Rate-limit keys change for token callers; session callers keep `u:<userId>`.
-- The SDK is AGPL-3.0-or-later like every package (AGENTS.md rule 1). Whether a client library
-  that third parties embed should carry a more permissive license is not decided here.
+- ~~The SDK is AGPL-3.0-or-later like every package (AGENTS.md rule 1). Whether a client library
+  that third parties embed should carry a more permissive license is not decided here.~~
+  Superseded 2026-10-29 by [ADR 0035](0035-sdk-license.md): the SDK (`packages/sdk` only) is
+  Apache-2.0.
+- Revocation notices are best effort after commit (decided 2026-10-29). Revoking a grant, a token
+  or an app commits the revocation first, then publishes the `BUS.userControl` messages and
+  enqueues the webhook `revocation` jobs, the same way `developer.tokens.revoke` already does. If
+  that publish or enqueue fails, it is logged and not retried in the request, and the caller still
+  gets success: the database revocation is authoritative. Revoked tokens stop resolving at once,
+  chat revalidates OAuth tokens within 30 seconds, the EventSub fan-out re-authorizes each
+  subscription at least every 30 seconds, and webhook deliveries are authorized when they are
+  sent, so a lost notice delays the end of delivery to a revoked grant by at most that window.
 - Publishing the SDK needs an npm organisation for `@commonair` and a trusted-publisher link to
   the repository, which only the maintainer can set up.
 
@@ -213,7 +224,7 @@ Decided in drafting within these answers (recorded so reviewers can check them):
 only; loopback redirects may vary the port; the keepalive default is 10 seconds (10 to 600); a
 new session must subscribe within 10 seconds; 300 subscriptions per session and 3 sessions per
 (app, user); the old socket closes 30 seconds after a reconnect; unsuspending an app does not
-restore its tokens. The SDK's license is left open.
+restore its tokens. The SDK's license is left open (decided 2026-10-29 in ADR 0035: Apache-2.0).
 
 Settled in review (2026-10-27): app-only tokens carry no scopes, and a webhook subscription made
 with one is backed by a user's existing authorization of the app (the drafter's list of

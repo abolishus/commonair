@@ -23,6 +23,7 @@ import { job as exportBuild } from "./export-build.ts";
 import { job as exportCleanup } from "./export-cleanup.ts";
 import { job as legalConsentRetention } from "./legal-consent-retention.ts";
 import { job as liveCounters } from "./live-counters.ts";
+import { job as oauthExpire } from "./oauth-expire.ts";
 import { job as moneyExpirePending } from "./money-expire-pending.ts";
 import { job as moneyReleaseHolds } from "./money-release-holds.ts";
 import { job as moneyRenew } from "./money-renew.ts";
@@ -43,6 +44,7 @@ import { job as vodRetention } from "./vod-retention.ts";
 import { job as webhookDeliver } from "./webhook-deliver.ts";
 import { job as webhookFanout } from "./webhook-fanout.ts";
 import { job as webhookRedeliver } from "./webhook-redeliver.ts";
+import { job as webhookRevocation } from "./webhook-revocation.ts";
 import { job as webhookTestEvent } from "./webhook-test-event.ts";
 import { job as webhookVerifyCallback } from "./webhook-verify-callback.ts";
 
@@ -86,4 +88,7 @@ export const JOBS = [
   interactTick,
   raidsExecute,
   pointsAccrue,
+  // Developer platform (E9, ADR 0027).
+  webhookRevocation,
+  oauthExpire,
 ] as readonly JobDefinition[];

@@ -131,7 +131,10 @@ describe("OAuth bearer connections (server-to-server)", () => {
       })
       .returning({ id: schema.oauthApps.id });
     const token = await createOauthToken(t.db, bot.id, ["chat:read", "chat:edit"]);
-    await t.db.update(schema.oauthTokens).set({ appId: app[0]?.id }).where(eq(schema.oauthTokens.userId, bot.id));
+    await t.db
+      .update(schema.oauthTokens)
+      .set({ appId: app[0]?.id, kind: "authorization_code" })
+      .where(eq(schema.oauthTokens.userId, bot.id));
     const c = track(await Client.connect(svc, { bearer: token }));
     expect(c.frames[0]).toMatchObject({ op: "welcome", user: { id: bot.id } });
     await c.join(ch.slug);

@@ -33,6 +33,7 @@ describe("routing", () => {
       "/api/*": "api:3001",
       "/rpc/*": "api:3001",
       "/overlay/events": "api:3001",
+      "/eventsub/ws": "api:3001",
       "/chat": "chat:3002",
       "/hls/*": "origin:3003",
       "/p2p-digest/*": "origin:3003",
@@ -53,6 +54,10 @@ describe("routing", () => {
   test("everything else goes to the web app, last", () => {
     expect(site).toMatch(/\thandle \{\n\t\treverse_proxy web:3000\n\t\}\n/);
     expect(site.lastIndexOf("reverse_proxy web:3000")).toBeGreaterThan(site.lastIndexOf("reverse_proxy tracker:8000"));
+  });
+
+  test("the EventSub WebSocket is a plain proxy to the API (no rewrite)", () => {
+    expect(site).toMatch(/\thandle \/eventsub\/ws \{\n\t\treverse_proxy api:3001\n\t\}\n/);
   });
 
   test("the chat WebSocket is rewritten to the service's /ws", () => {

@@ -26,9 +26,18 @@ export type Caller =
   | { kind: "session"; user: CallerUser; sessionId: string }
   | { kind: "token"; user: CallerUser; tokenId: string; appId: string | null; scopes: Scope[]; expiresAt: Date };
 
+/** An app access token (client credentials): acts as the app, for no user (ADR 0027 §1). */
+export interface AppCaller {
+  appId: string;
+  tokenId: string;
+  expiresAt: Date;
+}
+
 export interface AccessFacts {
   meta: ProcedureMeta;
   caller: Caller | null;
+  /** An app-only bearer token, when `caller` is null because the token has no user. */
+  app?: AppCaller | null;
   /** Whether the procedure changes state (non-GET); suspended users may still read. */
   write: boolean;
   /** For owner/moderator procedures: the channel named in the input, if the input names one. */
@@ -69,6 +78,10 @@ export function decideAccess(f: AccessFacts): AccessDecision {
   if (access === "public") return { ok: true };
   if (access === "relay" || access === "overlay")
     return f.machineCredential ? { ok: true } : deny("UNAUTHORIZED", `A valid ${access} token is required`);
+  if (!f.caller && f.app) {
+    if (access === "user" && f.meta.appTokens === true) return { ok: true };
+    return deny("FORBIDDEN", "App access tokens cannot call this endpoint; use a user access token");
+  }
 
   const caller = f.caller;
   if (!caller) return deny("UNAUTHORIZED", "Sign in required");

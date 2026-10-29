@@ -187,3 +187,30 @@ test("channelAuthority ranks owner > editor > moderator", () => {
   expect(channelAuthority(session(), { ownerId: "u2" }, ["vip"])).toBeNull();
   expect(channelAuthority(null, { ownerId: "u2" }, [])).toBeNull();
 });
+
+describe("app access tokens (ADR 0027 §1)", () => {
+  const app = { appId: "a1", tokenId: "t9", expiresAt: new Date(Date.now() + 60_000) };
+  const decide = (m: ProcedureMeta, write = false) => decideAccess({ meta: m, caller: null, app, write });
+
+  test("public procedures admit an app token", () => {
+    expect(decide(meta({ access: "public" })).ok).toBe(true);
+  });
+  test("user procedures admit it only with appTokens", () => {
+    expect(decide(meta({ access: "user", scopes: [], appTokens: true }), true).ok).toBe(true);
+    expect(decide(meta({ access: "user", scopes: [] }))).toMatchObject({ ok: false, code: "FORBIDDEN" });
+    expect(decide(meta({ access: "user" }))).toMatchObject({ ok: false, code: "FORBIDDEN" });
+  });
+  test("owner, moderator and platform-role procedures refuse it", () => {
+    for (const access of ["owner", "moderator", "admin", "treasurer", "legal", "safety-staff"] as const)
+      expect(decide(meta({ access, scopes: [], appTokens: true })), access).toMatchObject({
+        ok: false,
+        code: "FORBIDDEN",
+      });
+  });
+  test("a user caller is decided as before, whatever the app field says", () => {
+    expect(decideAccess({ meta: meta({ access: "user" }), caller: session(), app, write: false }).ok).toBe(true);
+  });
+  test("relay and overlay procedures still need their machine credential", () => {
+    expect(decide(meta({ access: "relay", appTokens: true }))).toMatchObject({ ok: false, code: "UNAUTHORIZED" });
+  });
+});

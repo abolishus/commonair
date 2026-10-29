@@ -12,6 +12,8 @@ export * from "./internal.ts";
 export * from "./currency.ts";
 export * from "./auth.ts";
 export * from "./fixtures.ts";
+export * from "./oauth.ts";
+export * from "./eventsub.ts";
 export * from "./api/common.ts";
 export * as dto from "./api/entities.ts";
 export { contract, type Contract } from "./api/router.ts";

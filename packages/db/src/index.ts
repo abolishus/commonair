@@ -6,6 +6,7 @@ export * from "./ids.ts";
 export * from "./hold-lock.ts";
 export * from "./account-actions.ts";
 export * from "./points.ts";
+export * from "./eventsub.ts";
 export * as schema from "./schema/index.ts";
 export { runMigrations, MIGRATIONS_DIR } from "./migrate.ts";
 /** Demo-data anchors (both required), so jobs can skip demo users and channels as `demo:clear` selects them. */

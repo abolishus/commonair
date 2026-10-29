@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
+import { checkNpm } from "../check-licenses.ts";
 import { evaluate, licenseOf } from "../licenses.ts";
 
 describe("license policy", () => {
@@ -53,5 +57,46 @@ describe("license policy", () => {
     expect(licenseOf({ license: { type: "ISC" } })).toBe("ISC");
     expect(licenseOf({ licenses: [{ type: "MIT" }, { type: "Apache-2.0" }] })).toBe("(MIT OR Apache-2.0)");
     expect(licenseOf({})).toBeUndefined();
+  });
+});
+
+describe("our own packages (ADR 0035)", () => {
+  /** A fixture `node_modules` with one package per [name, license]. */
+  function fixture(pkgs: [string, string][]): { root: string; done(): void } {
+    const root = mkdtempSync(join(tmpdir(), "licenses-"));
+    for (const [name, license] of pkgs) {
+      const dir = join(root, "node_modules", ...name.split("/"));
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version: "0.0.0", license }));
+    }
+    return { root, done: () => rmSync(root, { recursive: true, force: true }) };
+  }
+  const reasons = (pkgs: [string, string][]) => {
+    const f = fixture(pkgs);
+    try {
+      return checkNpm([f.root]).findings.map((x) => [x.name, x.reason]);
+    } finally {
+      f.done();
+    }
+  };
+
+  test("the SDK is Apache-2.0 and every other package AGPL-3.0-or-later", () => {
+    expect(
+      reasons([
+        ["@commonair/sdk", "Apache-2.0"],
+        ["@commonair/db", "AGPL-3.0-or-later"],
+        ["commonair", "AGPL-3.0-or-later"],
+      ]),
+    ).toEqual([]);
+  });
+  test("an AGPL SDK fails", () => {
+    expect(reasons([["@commonair/sdk", "AGPL-3.0-or-later"]])).toEqual([
+      ["@commonair/sdk", "own package must be Apache-2.0"],
+    ]);
+  });
+  test("any other package of ours declared Apache-2.0 fails", () => {
+    expect(reasons([["@commonair/db", "Apache-2.0"]])).toEqual([
+      ["@commonair/db", "own package must be AGPL-3.0-or-later"],
+    ]);
   });
 });
