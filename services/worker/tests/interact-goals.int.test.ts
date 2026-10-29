@@ -51,8 +51,13 @@ async function event(
     .returning();
   return e!;
 }
-const follow = (at?: Date) =>
-  event("channel.follow", { ...userFields(fan.user), followed_at: new Date().toISOString() }, at);
+/** A follow by a fresh account (a followers goal counts each account once), or by `who`. */
+async function follow(at?: Date, who?: Owner) {
+  const by = who ?? (await makeUser(db()));
+  return event("channel.follow", { ...userFields(by.user), followed_at: new Date().toISOString() }, at);
+}
+const markPublished = (id: string) =>
+  db().update(schema.events).set({ publishedAt: new Date() }).where(eq(schema.events.id, id));
 const subscribe = (isGift: boolean) =>
   event("channel.subscribe", { ...userFields(fan.user), tier: "1000", is_gift: isGift });
 const gift = (total: number) =>
@@ -204,5 +209,35 @@ describe("goal progress in the relay", () => {
     await drain();
     expect((await goalRow(old.id)).current).toBe(0);
     expect((await goalRow(fresh.id)).current).toBe(1);
+  });
+
+  test("followers count accounts: an unfollow and refollow adds nothing, in one batch or across batches", async () => {
+    const g = await goal("followers", 10);
+    await follow(undefined, fan);
+    await follow(undefined, fan);
+    await drain();
+    expect((await goalRow(g.id)).current).toBe(1);
+    await follow(undefined, fan);
+    await follow();
+    await drain();
+    expect((await goalRow(g.id)).current).toBe(2);
+  });
+
+  test("a follow relayed before the goal started does not stop the account counting", async () => {
+    const before = await follow(new Date(Date.now() - 120_000), fan);
+    await markPublished(before.id);
+    const g = await goal("followers", 10);
+    await follow(undefined, fan);
+    await drain();
+    expect((await goalRow(g.id)).current).toBe(1);
+  });
+
+  test("a follow that commits late with an earlier time is skipped when the later one already counted", async () => {
+    const g = await goal("followers", 10);
+    await follow(undefined, fan);
+    await drain();
+    await follow(new Date(Date.now() - 5_000), fan);
+    await drain();
+    expect((await goalRow(g.id)).current).toBe(1);
   });
 });

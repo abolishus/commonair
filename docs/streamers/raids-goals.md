@@ -74,8 +74,9 @@ reaches the target the goal ends by itself and is marked achieved. You can also 
 a goal ended below its target is marked not achieved. The channel's goal list shows the open goals,
 then the ten most recently ended.
 
-Follows that the integrity system excludes are not announced and do not count. Unfollowing does
-not lower a goal.
+A followers goal counts each account once: unfollowing and following again does not add to it,
+and unfollowing does not lower it. A follow counts when it happens; if the integrity system later
+excludes it (a follow burst), the goal is not lowered.
 
 ## For developers
 
@@ -87,6 +88,7 @@ not lower a goal.
   characters, `target` above 0; tips in minor units), `POST .../goals/{id}/end`.
 - Events: `channel.raid` on the receiving channel (with `viewers`, the verified count),
   `channel.goal.begin`, `channel.goal.progress`, `channel.goal.end` (`is_achieved`). Goal
-  progress is counted from the event outbox, exactly once per follow, subscription and tip.
+  progress is counted from the event outbox, exactly once per subscription and tip and once per
+  following account.
 - Overlay stream: `goal` events carry the `Goal` object on every goal change of the token's
   channel; raids arrive as `alert` events of type `raid` when the raid alert is on.

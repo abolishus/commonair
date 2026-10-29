@@ -56,16 +56,45 @@ export function goalTargets(
 export function goalIncrement(
   goal: { channelId: string; type: GoalType; startedAt: Date },
   events: readonly Pick<BusEvent, "type" | "payload" | "channelId" | "occurredAt">[],
+  countedFollowers: readonly Pick<PriorFollow, "channelId" | "userId" | "occurredAt">[] = [],
 ): number {
   let n = 0;
   const from = goal.startedAt.getTime();
+  // Followers goals count accounts, not follow events: unfollowing and following again must not
+  // add one each time. Seeded with the follows already relayed since the goal started.
+  const seen = new Set<string>();
+  if (goal.type === "followers")
+    for (const f of countedFollowers)
+      if (f.channelId === goal.channelId && f.occurredAt.getTime() >= from) seen.add(f.userId);
   for (const ev of events) {
     if (ev.channelId !== goal.channelId) continue;
     if (Date.parse(ev.occurredAt) < from) continue;
     const u = goalUnits(ev);
-    if (u?.type === goal.type) n += u.amount;
+    if (u?.type !== goal.type) continue;
+    if (u.type === "followers") {
+      const who = followerId(ev);
+      if (who !== null) {
+        if (seen.has(who)) continue;
+        seen.add(who);
+      }
+    }
+    n += u.amount;
   }
   return n;
+}
+
+/** A `channel.follow` that the relay already published (so it has already counted). */
+export interface PriorFollow {
+  channelId: string;
+  userId: string;
+  occurredAt: Date;
+}
+
+/** The following account of a `channel.follow` event, or null when the payload lacks it. */
+export function followerId(ev: Pick<BusEvent, "type" | "payload">): string | null {
+  if (ev.type !== "channel.follow") return null;
+  const id = (ev.payload as { user_id?: unknown } | null)?.user_id;
+  return typeof id === "string" && id.length > 0 ? id : null;
 }
 
 /** A goal is achieved once its count reaches the target. */

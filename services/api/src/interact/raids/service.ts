@@ -166,6 +166,7 @@ export async function cancelRaid(deps: Deps, source: ChannelRow, actorId: string
 }
 
 export async function raidState(deps: Deps, sourceId: string) {
+  const now = deps.now();
   const db = deps.db;
   const source = await channelById(db, sourceId);
   if (!source) throw notFound("Channel not found");
@@ -182,7 +183,7 @@ export async function raidState(deps: Deps, sourceId: string) {
         .where(eq(raids.fromChannelId, source.id))
         .orderBy(desc(raids.createdAt), desc(raids.id))
         .limit(1);
-  const cooldown = raidCooldownEndsAt(await lastRaidEnd(db, source.id), deps.now());
+  const cooldown = raidCooldownEndsAt(await lastRaidEnd(db, source.id), now);
   return {
     raid: last ? await viewOf(db, last, source) : null,
     cooldownEndsAt: cooldown ? cooldown.toISOString() : null,

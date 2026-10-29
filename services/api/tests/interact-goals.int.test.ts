@@ -176,4 +176,16 @@ describe("goals", () => {
     expect(ended.map((g) => g.title)).toEqual(["G11", "G10", "G9", "G8", "G7", "G6", "G5", "G4", "G3", "G2"]);
     expect((await list("nosuchchannelxyz")).status).toBe(404);
   });
+
+  test("list (public) of a suspended channel is empty", async () => {
+    const ch = eq(schema.channels.id, other.channelId);
+    await db().update(schema.channels).set({ suspendedAt: new Date() }).where(ch);
+    try {
+      const r = await list(other.username);
+      expect(r.status).toBe(200);
+      expect(r.body).toEqual([]);
+    } finally {
+      await db().update(schema.channels).set({ suspendedAt: null }).where(ch);
+    }
+  });
 });

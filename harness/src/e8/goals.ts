@@ -63,7 +63,8 @@ export async function stepGoal(run: E8Run): Promise<void> {
     await v2.api.client.channels.follow({ channel: s.channel, notify: false });
     const f = await stream.waitEvent<GoalFrame>(
       "goal",
-      (x) => x.id === goal.id && x.current === 2,
+      // The progress frame at 2 (still `endedAt: null`) comes first; wait for the end frame.
+      (x) => x.id === goal.id && x.current === 2 && x.endedAt !== null,
       FRAME_TIMEOUT_MS,
       ctx.signal,
     );

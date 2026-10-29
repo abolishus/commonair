@@ -12,6 +12,8 @@ export const goals = {
     // Public: the middleware resolves channels for owner and moderator procedures only.
     const channel = await channelBySlug(context.deps, input.channel);
     if (!channel) throw notFound("Channel not found");
+    // Like a suspended channel's VODs: nothing public while it is suspended.
+    if (channel.suspendedAt !== null) return [];
     return listGoals(context.deps.db, channel.id);
   }),
   create: os.interact.goals.create.handler(async ({ context, input }) =>

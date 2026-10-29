@@ -107,7 +107,9 @@ export async function executeDueRaids(ctx: WorkerContext, limit = RAIDS_PER_RUN)
   for (let i = 0; i < limit; i++) {
     const outcome = await settleOne(ctx, now);
     if (outcome === "none") break;
-    if (!outcome) continue;
+    // Unreachable (the row is locked and both FKs cascade), but retrying would claim the same raid
+    // again: stop this run instead of spinning on it.
+    if (!outcome) break;
     if (outcome.executed) result.executed++;
     else result.canceled++;
     await publishFrame(ctx, outcome.sourceId, outcome.frame);

@@ -6,6 +6,7 @@ import { dto } from "@commonair/contracts";
 import { EVENTS, type BusEvent } from "@commonair/contracts/events";
 import {
   goalAchieved,
+  followerId,
   goalBeginPayload,
   goalEndPayload,
   goalFromEvent,
@@ -102,6 +103,44 @@ describe("goalIncrement", () => {
     expect(goalIncrement(goal("followers"), batch)).toBe(1);
   });
   test("nothing matching → 0", () => expect(goalIncrement(goal("tips"), [ev("channel.follow")])).toBe(0));
+  test("followers: each account counts once per batch; follows without a user still count", () => {
+    const batch = [
+      ev("channel.follow", { user_id: "u1" }),
+      ev("channel.follow", { user_id: "u1" }),
+      ev("channel.follow", { user_id: "u2" }),
+      ev("channel.follow", { user_id: "u1" }, { channelId: OTHER }),
+      ev("channel.follow"),
+    ];
+    expect(goalIncrement(goal("followers"), batch)).toBe(3);
+  });
+  test("followers: accounts already relayed since the start do not count again; earlier ones do not block", () => {
+    const batch = [
+      ev("channel.follow", { user_id: "u1" }),
+      ev("channel.follow", { user_id: "u2" }),
+      ev("channel.follow", { user_id: "u3" }),
+    ];
+    const prior = [
+      { channelId: CH, userId: "u1", occurredAt: START },
+      { channelId: CH, userId: "u2", occurredAt: new Date(START.getTime() - 1) },
+      { channelId: OTHER, userId: "u3", occurredAt: START },
+    ];
+    expect(goalIncrement(goal("followers"), batch, prior)).toBe(2);
+  });
+  test("prior follows never affect other goal types", () => {
+    const prior = [{ channelId: CH, userId: "u1", occurredAt: START }];
+    expect(goalIncrement(goal("tips"), [tip(100, { payload: { user_id: "u1", amount: { value: 100 } } })], prior)).toBe(
+      100,
+    );
+  });
+});
+
+describe("followerId", () => {
+  test("the user of a follow; null otherwise", () => {
+    expect(followerId(ev("channel.follow", { user_id: "u1" }))).toBe("u1");
+    expect(followerId(ev("channel.follow", { user_id: "" }))).toBeNull();
+    expect(followerId(ev("channel.follow", null as unknown as Record<string, unknown>))).toBeNull();
+    expect(followerId(ev("channel.subscribe", { user_id: "u1" }))).toBeNull();
+  });
 });
 
 describe("achievement and payloads", () => {
