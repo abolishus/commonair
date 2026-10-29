@@ -79,7 +79,11 @@ async function token(deps: Deps, req: Request, info: RequestInfo, params: Record
     case "authorization_code":
       return ok(await authorizationCodeGrant(deps, app, r));
     case "refresh_token":
-      return ok(await refreshGrant(deps, app, r.refresh_token));
+      // `scope` is not in the contract's refresh variant yet (zod strips it): read it from the
+      // raw parameters, bounded like the other scope fields.
+      if (params.scope !== undefined && params.scope.length > 2000)
+        throw new OAuthError("invalid_request", "Missing or malformed parameters for this grant");
+      return ok(await refreshGrant(deps, app, r.refresh_token, params.scope));
     case "client_credentials":
       return ok(await clientCredentialsGrant(deps, app));
     case DEVICE_CODE_GRANT:

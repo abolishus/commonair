@@ -86,8 +86,8 @@ export const grants = {
     const scope = { appId: input.appId, userId: caller.user.id };
     const now = deps.now();
     const { tokens, subscriptions } = await deps.db.transaction(async (tx) => {
-      const tokens = await revokeTokensInTx(tx, scope, now);
-      const subscriptions = await revokeWebhookSubscriptionsInTx(tx, scope);
+      // Codes first: these statements wait on any exchange or device redemption holding the code
+      // row, so the token revocation below (a fresh snapshot under read committed) sees its token.
       await tx.delete(schema.oauthCodes).where(pendingCodesOf(scope.appId, scope.userId));
       await tx
         .update(schema.oauthDeviceCodes)
@@ -99,6 +99,8 @@ export const grants = {
             eq(schema.oauthDeviceCodes.status, "approved"),
           ),
         );
+      const tokens = await revokeTokensInTx(tx, scope, now);
+      const subscriptions = await revokeWebhookSubscriptionsInTx(tx, scope);
       return { tokens, subscriptions };
     });
     deps.logger.info("oauth grant revoked", {

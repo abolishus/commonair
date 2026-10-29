@@ -255,6 +255,28 @@ describe("authorization code flow", () => {
     expect(wrong.res.headers.get("www-authenticate")).toContain("Basic");
   });
 
+  test("a parameter in both the query and the body is invalid_request", async () => {
+    const app = await newApp();
+    const res = await fetch(`${api.url}${OAUTH_PATHS.token}?grant_type=client_credentials`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(withSecret(app, { grant_type: "client_credentials" })),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_request");
+  });
+
+  test("a public client may send Basic with an empty password", async () => {
+    const app = await newApp({ confidential: false });
+    const a = await authorize(app, streamer.client);
+    const r = await post(
+      OAUTH_PATHS.token,
+      { grant_type: "authorization_code", code: a.code, redirect_uri: a.redirectUri, code_verifier: a.verifier },
+      { authorization: `Basic ${Buffer.from(`${encodeURIComponent(app.clientId)}:`).toString("base64")}` },
+    );
+    expect(r.status).toBe(200);
+  });
+
   test("using a code twice is invalid_grant and revokes the first redemption's family (and publishes)", async () => {
     const app = await newApp();
     const a = await authorize(app, streamer.client);
@@ -392,11 +414,50 @@ describe("refresh tokens", () => {
     const r1 = (await refresh(app, t.refresh_token)).body as { access_token: string; refresh_token: string };
     const r2 = (await refresh(app, r1.refresh_token)).body as { access_token: string; refresh_token: string };
     expect((await validate(r2.access_token)).status).toBe(200);
-    const replay = await refresh(app, t.refresh_token);
+    // Past the reuse grace period (2 s after the token's rotation).
+    const replay = await withClock(3000, () => refresh(app, t.refresh_token));
     expect(replay.body?.error).toBe("invalid_grant");
     expect((await validate(r2.access_token)).status).toBe(401);
     expect((await refresh(app, r2.refresh_token)).body?.error).toBe("invalid_grant");
     const hash = await sha256Hex(r2.access_token);
+    await waitFor(async () => messagesFor((m) => m.tokenHash === hash && m.reason === "token_revoked").length > 0);
+  });
+
+  test("a rotated token presented again within the grace period is invalid_grant without revoking", async () => {
+    const app = await newApp();
+    const t = await tokenFor(app, streamer.client);
+    const next = (await refresh(app, t.refresh_token)).body as { access_token: string; refresh_token: string };
+    const again = await refresh(app, t.refresh_token);
+    expect(again.body?.error).toBe("invalid_grant");
+    expect((await validate(next.access_token)).status).toBe(200);
+    expect((await tokenRow(next.access_token)).revokedAt).toBeNull();
+  });
+
+  test("scope narrows the successor to a subset; a wider or unknown scope is invalid_scope and burns nothing", async () => {
+    const app = await newApp();
+    const t = await tokenFor(app, streamer.client, "chat:read chat:edit");
+    const scoped = (scope: string, token: string) =>
+      post(OAUTH_PATHS.token, withSecret(app, { grant_type: "refresh_token", refresh_token: token, scope }));
+    expect((await scoped("chat:read chat:edit clips:edit", t.refresh_token)).body?.error).toBe("invalid_scope");
+    expect((await scoped("nope:nope", t.refresh_token)).body?.error).toBe("invalid_scope");
+    const r = await scoped("chat:read", t.refresh_token);
+    expect(r.status).toBe(200);
+    const next = r.body as { access_token: string; refresh_token: string; scope: string };
+    expect(next.scope).toBe("chat:read");
+    expect((await tokenRow(next.access_token)).scopes).toEqual(["chat:read"]);
+    // Without a scope, the successor keeps the (narrowed) set.
+    const after = await refresh(app, next.refresh_token);
+    expect(after.body?.scope).toBe("chat:read");
+  });
+
+  test("a deleted user's refresh is invalid_grant and publishes token_revoked for the old access token", async () => {
+    const app = await newApp();
+    const doomed = await signUpAndSignIn(api);
+    const t = await tokenFor(app, doomed.client);
+    await db().update(schema.users).set({ deletedAt: new Date() }).where(eq(schema.users.id, doomed.userId));
+    expect((await refresh(app, t.refresh_token)).body?.error).toBe("invalid_grant");
+    expect((await tokenRow(t.access_token)).revokedAt).not.toBeNull();
+    const hash = await sha256Hex(t.access_token);
     await waitFor(async () => messagesFor((m) => m.tokenHash === hash && m.reason === "token_revoked").length > 0);
   });
 
@@ -684,6 +745,39 @@ describe("suspended apps", () => {
     expect(r.status).toBe(412);
     expect(r.body.data?.requirement).toBe("app_suspended");
   });
+
+  test("a suspended app's device code cannot be looked up or approved", async () => {
+    const app = await newApp({ confidential: false });
+    const d = (await post(OAUTH_PATHS.device, { client_id: app.clientId, scope: "chat:read" })).body as {
+      user_code: string;
+    };
+    await db()
+      .update(schema.oauthApps)
+      .set({ suspendedAt: new Date(), suspendedReason: "abuse", suspendedById: ownerId })
+      .where(eq(schema.oauthApps.id, app.id));
+    const user = await signUpAndSignIn(api);
+    const look = await user.client.call<{ data?: { requirement?: string } }>("POST", "/api/oauth2/activate/lookup", {
+      userCode: d.user_code,
+    });
+    expect(look.status).toBe(412);
+    expect(look.body.data?.requirement).toBe("app_suspended");
+    const act = await user.client.call<{ data?: { requirement?: string } }>("POST", "/api/oauth2/activate", {
+      userCode: d.user_code,
+      approve: true,
+    });
+    expect(act.status).toBe(412);
+    expect(act.body.data?.requirement).toBe("app_suspended");
+    // Unsuspended, the code is still pending: nothing was approved while suspended.
+    await db()
+      .update(schema.oauthApps)
+      .set({ suspendedAt: null, suspendedReason: null, suspendedById: null })
+      .where(eq(schema.oauthApps.id, app.id));
+    const [row] = await db()
+      .select({ status: schema.oauthDeviceCodes.status })
+      .from(schema.oauthDeviceCodes)
+      .where(eq(schema.oauthDeviceCodes.userCodeHash, await sha256Hex(normalizeUserCode(d.user_code))));
+    expect(row?.status).toBe("pending");
+  });
 });
 
 describe("developer.oauth.request", () => {
@@ -878,6 +972,34 @@ describe("grants", () => {
     // Idempotent, also for an app never authorized.
     expect((await user.client.call("DELETE", `/api/me/authorizations/${app.id}`)).status).toBe(200);
     expect((await user.client.call("DELETE", `/api/me/authorizations/${uuidv7()}`)).status).toBe(200);
+  });
+
+  test("revoke racing an in-flight code exchange still revokes the token it issues", async () => {
+    const user = await signUpAndSignIn(api);
+    const app = await newApp();
+    const a = await authorize(app, user.client);
+    const codeHash = await sha256Hex(a.code);
+    const lockWaiters = async () => {
+      const [w] = (await db().execute(
+        sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
+      )) as unknown as { n: number }[];
+      return w?.n ?? 0;
+    };
+    // Hold the code row: the exchange queues on it first, then the revoke queues behind it.
+    let exchanged: Promise<Raw> = Promise.resolve({} as Raw);
+    let revoked: Promise<{ status: number }> = Promise.resolve({ status: 0 });
+    await db().transaction(async (tx) => {
+      await tx.execute(sql`select code_hash from oauth_codes where code_hash = ${codeHash} for update`);
+      exchanged = exchange(app, a);
+      await waitFor(async () => (await lockWaiters()) >= 1, 10_000, 25);
+      revoked = user.client.call("DELETE", `/api/me/authorizations/${app.id}`);
+      await waitFor(async () => (await lockWaiters()) >= 2, 10_000, 25);
+    });
+    const ex = await exchanged;
+    expect((await revoked).status).toBe(200);
+    expect(ex.status).toBe(200);
+    expect((await validate(ex.body!.access_token as string)).status).toBe(401);
+    expect((await tokenRow(ex.body!.access_token as string)).revokedAt).not.toBeNull();
   });
 
   test("with the publish and the enqueue failing, the revocation still commits and answers ok", async () => {

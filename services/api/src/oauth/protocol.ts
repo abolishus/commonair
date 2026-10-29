@@ -52,8 +52,8 @@ function parseOnce(search: URLSearchParams): Record<string, string> {
 
 /**
  * Request parameters: the `application/x-www-form-urlencoded` body, else the query string (Twitch
- * libraries send the query). Where both carry a parameter, the body wins. Empty values count as
- * absent (RFC 6749 §3.1).
+ * libraries send the query). Empty values count as absent (RFC 6749 §3.1); a parameter with a value
+ * in both sources was sent twice, which is `invalid_request` (RFC 6749 §3.1, §3.2).
  */
 export async function readParams(req: Request): Promise<Record<string, string>> {
   const query = parseOnce(new URL(req.url).searchParams);
@@ -67,7 +67,12 @@ export async function readParams(req: Request): Promise<Record<string, string>> 
     body = parseOnce(new URLSearchParams(text));
   }
   const merged: Record<string, string> = {};
-  for (const [k, v] of Object.entries({ ...query, ...body })) if (v !== "") merged[k] = v;
+  for (const source of [query, body])
+    for (const [k, v] of Object.entries(source)) {
+      if (v === "") continue;
+      if (Object.hasOwn(merged, k)) throw new OAuthError("invalid_request", "A parameter was sent more than once");
+      merged[k] = v;
+    }
   return merged;
 }
 
@@ -109,7 +114,8 @@ export function clientCredentials(headers: Headers, params: Record<string, strin
     if (params.client_id !== undefined && params.client_id !== id)
       throw new OAuthError("invalid_request", "client_id does not match the authenticated client");
     if (id === "") throw new OAuthError("invalid_client", "Malformed client credentials", { basicChallenge: true });
-    return { clientId: id, secret, method: "basic" };
+    // An empty password is no secret, as an empty posted client_secret is (public clients send `id:`).
+    return { clientId: id, secret: secret === "" ? null : secret, method: "basic" };
   }
   const id = params.client_id;
   if (id === undefined) throw new OAuthError("invalid_request", "client_id is required");

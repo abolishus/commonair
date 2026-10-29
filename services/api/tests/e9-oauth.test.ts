@@ -44,10 +44,13 @@ describe("readParams", () => {
     });
   });
 
-  test("falls back to the query string, and the body wins where both carry a parameter", async () => {
-    const req = form("client_id=body", "?client_id=query&grant_type=client_credentials");
+  test("merges the query string and the body; a parameter in both is invalid_request (RFC 6749 §3.1)", async () => {
+    const req = form("client_id=body", "?grant_type=client_credentials");
     expect(await readParams(req)).toEqual({ client_id: "body", grant_type: "client_credentials" });
     expect(await readParams(new Request(`${URL_BASE}?a=1`, { method: "POST" }))).toEqual({ a: "1" });
+    expect(await oauthCode(() => readParams(form("client_id=body", "?client_id=query")))).toBe("invalid_request");
+    // An empty value is absent, so it does not collide.
+    expect(await readParams(form("client_id=body", "?client_id="))).toEqual({ client_id: "body" });
   });
 
   test("ignores a body that is not form-encoded", async () => {
@@ -97,6 +100,10 @@ describe("clientCredentials", () => {
 
   test("the secret may contain a colon; the first one splits", () => {
     expect(clientCredentials(basic("cid", "a:b"), {})).toMatchObject({ clientId: "cid", secret: "a:b" });
+  });
+
+  test("Basic with an empty password carries no secret (a public client sending `id:`)", () => {
+    expect(clientCredentials(basic("cid", ""), {})).toEqual({ clientId: "cid", secret: null, method: "basic" });
   });
 
   test("Basic with a matching client_id parameter is fine; a different one is invalid_request", async () => {

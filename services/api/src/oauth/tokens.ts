@@ -7,7 +7,7 @@
  * (lowercase: IRC clients lowercase tokens) and stored as sha256 only.
  */
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
-import { OAUTH_LIMITS, pkceChallenge, type TokenResponse } from "@commonair/contracts/oauth";
+import { OAUTH_LIMITS, parseScope, pkceChallenge, type TokenResponse } from "@commonair/contracts/oauth";
 import { schema, uuidv7, type Executor } from "@commonair/db";
 import { randomTokenSecret, sha256Hex, timingSafeEqual } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
@@ -129,12 +129,25 @@ export async function authorizationCodeGrant(
 }
 
 /**
- * `refresh_token` with rotation and reuse detection (OAuth 2.1 §4.3.1). Presenting a rotated
- * refresh token revokes the whole family. Two concurrent refreshes of the same live token are not
- * an attack signal: both read it unrotated, one wins the CAS on `rotated_at`, and the loser gets
- * `invalid_grant` without any revocation.
+ * A rotated refresh token presented again within this long after its rotation is answered
+ * `invalid_grant` without revoking the family: a bot on several instances refreshing at nearly the
+ * same moment (the second request reads the row just after the first commits) is not a theft signal.
  */
-export async function refreshGrant(deps: Deps, app: OAuthAppRow, refreshToken: string): Promise<TokenResponse> {
+export const REFRESH_REUSE_GRACE_MS = 2000;
+
+/**
+ * `refresh_token` with rotation and reuse detection (OAuth 2.1 §4.3.1). Presenting a rotated
+ * refresh token revokes the whole family, unless it was rotated under `REFRESH_REUSE_GRACE_MS`
+ * ago. Two concurrent refreshes of the same live token are not an attack signal either: both read
+ * it unrotated, one wins the CAS on `rotated_at`, and the loser gets `invalid_grant` without any
+ * revocation. A `scope` narrows the successor to a subset of the grant's scopes (RFC 6749 §6).
+ */
+export async function refreshGrant(
+  deps: Deps,
+  app: OAuthAppRow,
+  refreshToken: string,
+  requestedScope?: string,
+): Promise<TokenResponse> {
   const now = deps.now();
   const hash = await sha256Hex(refreshToken);
   const [row] = await deps.db.select().from(oauthTokens).where(eq(oauthTokens.refreshTokenHash, hash)).limit(1);
@@ -142,6 +155,8 @@ export async function refreshGrant(deps: Deps, app: OAuthAppRow, refreshToken: s
     throw new OAuthError("invalid_grant", "The refresh token is invalid");
   const familyId = row.familyId;
   if (row.rotatedAt) {
+    if (now.getTime() - row.rotatedAt.getTime() < REFRESH_REUSE_GRACE_MS)
+      throw new OAuthError("invalid_grant", "The refresh token was just rotated");
     const revoked = await deps.db.transaction((tx) => revokeTokensInTx(tx, { familyId }, now));
     return settle(deps, invalidGrant("The refresh token was already used", revoked), "refresh_token", app.id);
   }
@@ -150,11 +165,13 @@ export async function refreshGrant(deps: Deps, app: OAuthAppRow, refreshToken: s
     throw new OAuthError("invalid_grant", "The refresh token expired");
   if (row.userId === null || (row.kind !== "authorization_code" && row.kind !== "device_code"))
     throw new OAuthError("invalid_grant", "The refresh token is invalid");
+  // Checked before the CAS, so a bad scope does not burn the refresh token.
+  const scopes = narrowScopes(row.scopes, requestedScope);
   const userId = row.userId;
   const kind = row.kind;
 
-  const { outcome, rotated } = await deps.db.transaction(
-    async (tx): Promise<{ outcome: Outcome; rotated: RevokedToken | null }> => {
+  const { outcome, rotated, ended } = await deps.db.transaction(
+    async (tx): Promise<{ outcome: Outcome; rotated: RevokedToken | null; ended?: RevokedToken }> => {
       const [old] = await tx
         .update(oauthTokens)
         .set({ rotatedAt: now, revokedAt: now })
@@ -167,15 +184,29 @@ export async function refreshGrant(deps: Deps, app: OAuthAppRow, refreshToken: s
         });
       // Lost the race to a concurrent refresh (or a revocation): no family revocation.
       if (!old) return { outcome: invalidGrant("The refresh token is no longer valid"), rotated: null };
+      // The old row stays rotated and revoked on commit; it is a revocation, not a rotation.
       if (!(await userUsable(tx, userId)))
-        return { outcome: invalidGrant("The authorizing user no longer exists"), rotated: null };
-      const token = await issueToken(tx, now, { appId: app.id, userId, kind, scopes: row.scopes, familyId });
+        return { outcome: invalidGrant("The authorizing user no longer exists"), rotated: null, ended: old };
+      const token = await issueToken(tx, now, { appId: app.id, userId, kind, scopes, familyId });
       return { outcome: { ok: true, token }, rotated: old };
     },
   );
   // The grant lives on: chat closes sockets on the old token, EventSub sessions stay bound.
   if (rotated) await publishRevocations(deps, [rotated], "token_rotated");
+  if (ended) await publishRevocations(deps, [ended], "token_revoked");
   return settle(deps, outcome, "refresh_token", app.id);
+}
+
+/** The successor's scopes: the grant's, or the requested subset of them (RFC 6749 §6). */
+function narrowScopes(granted: string[], requested: string | undefined): string[] {
+  if (requested === undefined) return granted;
+  const parsed = parseScope(requested);
+  if (!parsed.ok || parsed.scopes.length === 0)
+    throw new OAuthError("invalid_scope", "The requested scope is unknown or empty");
+  const have = new Set(granted);
+  if (!parsed.scopes.every((s) => have.has(s)))
+    throw new OAuthError("invalid_scope", "The requested scope exceeds the original grant");
+  return [...new Set<string>(parsed.scopes)];
 }
 
 /** `client_credentials`: an app-only token, no user, no scopes, no refresh token (ADR 0027 §1). */

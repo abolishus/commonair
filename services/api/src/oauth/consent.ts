@@ -6,7 +6,7 @@
  * the grant listing behind `developer.grants.*` (ADR 0027 §1-2). The web consent and activation
  * pages (E9-consent) are thin clients of these.
  */
-import { and, eq, gt, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, notExists } from "drizzle-orm";
 import {
   OAUTH_LIMITS,
   PKCE_CHALLENGE,
@@ -137,6 +137,7 @@ export async function lookupDevice(deps: Deps, rawUserCode: string) {
     .where(eq(oauthDeviceCodes.userCodeHash, hash))
     .limit(1);
   if (!row) throw notFound("Unknown code");
+  if (row.app.suspendedAt) throw precondition("app_suspended", "This app is suspended");
   if (row.code.status !== "pending" || row.code.expiresAt <= deps.now())
     throw precondition("expired", "This code expired or was already used");
   const known = new Set<string>(SCOPE_NAMES);
@@ -160,6 +161,13 @@ export async function decideDevice(deps: Deps, rawUserCode: string, userId: stri
         eq(oauthDeviceCodes.userCodeHash, hash),
         eq(oauthDeviceCodes.status, "pending"),
         gt(oauthDeviceCodes.expiresAt, now),
+        // A suspended app's code cannot be approved, so unsuspending it cannot redeem one.
+        notExists(
+          deps.db
+            .select({ id: oauthApps.id })
+            .from(oauthApps)
+            .where(and(eq(oauthApps.id, oauthDeviceCodes.appId), isNotNull(oauthApps.suspendedAt))),
+        ),
       ),
     )
     .returning({ appId: oauthDeviceCodes.appId });
@@ -168,11 +176,13 @@ export async function decideDevice(deps: Deps, rawUserCode: string, userId: stri
     return;
   }
   const [exists] = await deps.db
-    .select({ id: oauthDeviceCodes.id })
+    .select({ id: oauthDeviceCodes.id, suspendedAt: oauthApps.suspendedAt })
     .from(oauthDeviceCodes)
+    .innerJoin(oauthApps, eq(oauthApps.id, oauthDeviceCodes.appId))
     .where(eq(oauthDeviceCodes.userCodeHash, hash))
     .limit(1);
   if (!exists) throw notFound("Unknown code");
+  if (exists.suspendedAt) throw precondition("app_suspended", "This app is suspended");
   throw apiError("CONFLICT", "This code expired or was already decided");
 }
 
