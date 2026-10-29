@@ -246,6 +246,54 @@ describe("alertSourceOf / alertForEvent", () => {
   });
 });
 
+describe("raid alert (E8)", () => {
+  // `channel.raid` has no broadcaster fields: the outbox row is keyed on the target channel.
+  const raid = (viewers: unknown, channelId: string | null = CH): BusEvent => ({
+    id: EV,
+    type: "channel.raid",
+    version: "1",
+    channelId,
+    payload: {
+      from_broadcaster_user_id: "src-owner",
+      from_broadcaster_user_login: "raider",
+      from_broadcaster_user_name: "Raider Rae",
+      to_broadcaster_user_id: "o",
+      to_broadcaster_user_login: "s",
+      to_broadcaster_user_name: "S",
+      viewers,
+    },
+    occurredAt: AT,
+  });
+  test("raid on the target → raid alert with the raider's display name and the viewers", () => {
+    const a = alertForEvent(raid(12), CH, [
+      cfg("raid", { template: { message: "${user} raids with ${viewers}!", animation: "slide", showMessage: true } }),
+    ]);
+    expect(a).toMatchObject({
+      id: EV,
+      type: "raid",
+      text: "Raider Rae raids with 12!",
+      amountCents: null,
+      message: null,
+      test: false,
+    });
+    expect(dto.OverlayAlert.parse(a)).toEqual(a);
+  });
+  test("the default raid template", () => {
+    const a = alertForEvent(raid(0), CH, [{ ...defaultAlertConfig("raid"), enabled: true }]);
+    expect(a?.text).toBe(t("alert.default.raid").replace("${user}", "Raider Rae").replace("${viewers}", "0"));
+  });
+  test("disabled, another channel (the source's overlay) or a malformed count → nothing", () => {
+    expect(alertForEvent(raid(5), CH, [cfg("raid", { enabled: false })])).toBeNull();
+    expect(alertForEvent(raid(5), OTHER, all())).toBeNull();
+    expect(alertForEvent(raid(-1), CH, all())).toBeNull();
+    expect(alertForEvent(raid(1.5), CH, all())).toBeNull();
+    expect(alertForEvent(raid("5"), CH, all())).toBeNull();
+  });
+  test("the minimum amount never applies to raids", () => {
+    expect(alertForEvent(raid(1), CH, [cfg("raid", { minAmountCents: 10_000 })])?.type).toBe("raid");
+  });
+});
+
 describe("defaults and samples", () => {
   test("one config per type in enum order, stored rows win", () => {
     const stored = cfg("tip", { minAmountCents: 77 });

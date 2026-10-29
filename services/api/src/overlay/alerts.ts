@@ -145,6 +145,19 @@ export function alertSourceOf(ev: BusEvent, channelId: string): AlertSource | nu
         currency: null,
         tier: tierNumber(p.tier),
       };
+    // Keyed on the target (the outbox row's channel); `viewers` is already integrity-capped.
+    case "channel.raid": {
+      const viewers = p.viewers;
+      if (typeof viewers !== "number" || !Number.isSafeInteger(viewers) || viewers < 0) return null;
+      return {
+        ...base,
+        type: "raid",
+        userName: str(p.from_broadcaster_user_name),
+        amountCents: null,
+        currency: null,
+        viewers,
+      };
+    }
     default:
       return null;
   }

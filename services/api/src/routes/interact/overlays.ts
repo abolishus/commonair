@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * `interact.overlays.*` (E6, ADR 0021; moved unchanged from `routes/interact.ts`). E8-raids-goals
- * fills `state.goals`.
+ * `interact.overlays.*` (E6, ADR 0021; moved unchanged from `routes/interact.ts`). `state.goals`
+ * is the channel's open goals (E8-raids-goals).
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { OVERLAY_EVENTS_PATH } from "@commonair/contracts/events";
@@ -22,6 +22,7 @@ import {
   resolveOverlayToken,
 } from "../../overlay/tokens.ts";
 import type { Deps } from "../../deps.ts";
+import { openGoals } from "../../interact/goals/service.ts";
 
 const { channels, overlayTokens } = schema;
 
@@ -135,7 +136,7 @@ export const overlays = {
     return {
       channelSlug: channel.slug,
       alerts: await loadAlertConfigs(deps.db, resolved.channelId),
-      goals: [],
+      goals: await openGoals(deps.db, resolved.channelId),
       eventsUrl: overlayEventsUrl(deps, token),
     };
   }),
