@@ -134,6 +134,7 @@ export function checkCatalog(namespaces: readonly Namespace[]): string[] {
   return problems;
 }
 
+// REUSE-IgnoreStart
 const HEADER = [
   "// SPDX-FileCopyrightText: 2026 CommonAir contributors",
   "// SPDX-License-Identifier: AGPL-3.0-or-later",
@@ -142,6 +143,7 @@ const HEADER = [
   "",
   "",
 ].join("\n");
+// REUSE-IgnoreEnd
 
 function typeName(namespace: string): string {
   return namespace
