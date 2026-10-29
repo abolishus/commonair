@@ -30,7 +30,7 @@ import {
   type RaidStateDto,
 } from "../../lib/interact-studio.ts";
 import { POLL_REFRESH_MS } from "./poll-panel.tsx";
-import { StudioSection, TextField, useLiveState, useNow, usePolling, type StudioApi } from "./shared.tsx";
+import { StudioSection, TextField, useLiveState, useNowUntil, usePolling, type StudioApi } from "./shared.tsx";
 
 export function RaidPanel({
   channel,
@@ -47,7 +47,7 @@ export function RaidPanel({
   const raids = client.interact.raids;
   const pending = state.raid?.status === "pending" ? state.raid : null;
   usePolling(pending !== null, refreshMs, () => refreshState(() => raids.current({ channel })));
-  const now = useNow(state.cooldownEndsAt !== null);
+  const now = useNowUntil(state.cooldownEndsAt);
   const cooldownUntil = raidCooldownUntil(state, now);
   const last = state.raid !== null && state.raid.status !== "pending" ? state.raid : null;
 
@@ -65,7 +65,13 @@ export function RaidPanel({
       ) : (
         <RaidForm
           onStart={async (to) => {
-            await raids.start({ channel, to });
+            try {
+              await raids.start({ channel, to });
+            } catch (err) {
+              // A raid started elsewhere (another editor's tab): show it and its cancel button.
+              if (raidErrorCode(err) === "raid_pending") setState(await raids.current({ channel }));
+              throw err;
+            }
             setState(await raids.current({ channel }));
           }}
         />

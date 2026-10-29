@@ -249,13 +249,40 @@ export function useLiveState<T>(
   return [value, set, refresh];
 }
 
-/** The current time, re-read every `ms` while `active` (a cooldown that ends on its own). */
-export function useNow(active: boolean, ms = 1000): number {
+/**
+ * A catalog string with several `{name}` placeholders, each filled by a React node, in whatever
+ * order the locale puts them (`fillNode` in lib/fill.tsx fills one). Unknown placeholders stay as text.
+ */
+export function fillNodes(template: string, nodes: Readonly<Record<string, React.ReactNode>>): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of template.matchAll(/\{(\w+)\}/g)) {
+    const name = m[1] ?? "";
+    if (!Object.hasOwn(nodes, name)) continue;
+    if (m.index > last) out.push(template.slice(last, m.index));
+    out.push(<React.Fragment key={`${name}-${m.index}`}>{nodes[name]}</React.Fragment>);
+    last = m.index + m[0].length;
+  }
+  if (last < template.length) out.push(template.slice(last));
+  return out;
+}
+
+/**
+ * The clock, ticking every `ms` until `until` (ISO 8601) has passed, then still: a past deadline
+ * (a raid cooldown that ended, which the API keeps reporting) costs no timer and no re-renders.
+ */
+export function useNowUntil(until: string | null, ms = 1000): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
-    if (!active) return;
-    const id = setInterval(() => setNow(Date.now()), ms);
+    if (until === null) return;
+    const end = Date.parse(until);
+    if (!(end > Date.now())) return;
+    const id = setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (n >= end) clearInterval(id);
+    }, ms);
     return () => clearInterval(id);
-  }, [active, ms]);
+  }, [until, ms]);
   return now;
 }

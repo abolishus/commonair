@@ -175,11 +175,20 @@ export type CommandField = "name" | "aliases" | "response" | "cooldown" | "cost"
 
 const isBuiltin = (name: string): boolean => (BOT_BUILTIN_COMMANDS as readonly string[]).includes(name);
 
-export function commandInput(channel: string, d: CommandDraft): Checked<CommandUpsertInput, CommandField> {
+/**
+ * `taken` is the names of the commands already on the channel when the draft is a new command:
+ * `bot.commands.upsert` replaces a command of the same name, so a new one must not reuse a name.
+ */
+export function commandInput(
+  channel: string,
+  d: CommandDraft,
+  taken: readonly string[] = [],
+): Checked<CommandUpsertInput, CommandField> {
   const errors: FieldErrors<CommandField> = {};
   const name = commandName(d.name);
   if (!COMMAND_NAME.test(name)) errors.name = t("bot.command.error.name", { max: COMMAND_LIMITS.nameMax });
   else if (isBuiltin(name)) errors.name = t("bot.command.error.builtin");
+  else if (taken.includes(name)) errors.name = t("bot.command.error.exists", { name });
   const aliases = parseAliases(d.aliases).filter((a) => a !== name);
   if (aliases.length > COMMAND_LIMITS.aliasesMax)
     errors.aliases = t("bot.command.error.aliasCount", { max: COMMAND_LIMITS.aliasesMax });

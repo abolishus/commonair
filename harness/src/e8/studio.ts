@@ -6,7 +6,7 @@
  * "Scenarios"), driven in a real browser through `data-testid`s only:
  *
  * - `stepInteractStudio`: step 1 (a 20 s poll, three viewers vote 2/1/0, it completes, the outbox
- *   agrees) and step 3 (both live, a gate-eligible viewer, the countdown, `raids-execute`, the
+ *   agrees) and step 3 on a fresh source/target pair (both live, a gate-eligible viewer, the countdown, `raids-execute`, the
  *   completed raid with its verified viewers and cooldown; the target's policy `off` from its own
  *   page refuses with `raid_refused`, the cooldown with `raid_cooldown`) from `/interact`, plus a
  *   followers goal started and ended from `goal-form`.
@@ -35,7 +35,7 @@ import { signInViaUi } from "../web/flows.ts";
 import { ROUTES, TEST_IDS } from "../web/selectors.ts";
 import { WebSession, byTestId } from "../web/session.ts";
 import { REPLY_TIMEOUT_MS, SILENCE_MS, TIMER_TICK_MS, isBotMessage } from "./bot.ts";
-import { API_SETTLE_MS, type E8Run, type E8Streamer, waitLive } from "./kit.ts";
+import { API_SETTLE_MS, type E8Run, type E8Streamer, newE8Streamer, waitLive } from "./kit.ts";
 import { POLL_SECONDS, POLL_VOTES, expectedVotes, outboxRows, pollOutboxProblems } from "./polls.ts";
 import { RAID_HEARTBEAT_WINDOW_MS, gateEligibleViewers, viewersBracketed } from "./raids.ts";
 import { E8_ROUTES, E8_TEST_IDS as T, byE8Id, e8Option } from "./selectors.ts";
@@ -146,7 +146,9 @@ async function waitAttached(locator: Locator, timeoutMs = UI_TIMEOUT_MS): Promis
 
 // ---------------------------------------------------------------- interact step 5
 
+/** Publish to `s` unless it is already live (a second publisher would rotate the key under the first). */
 async function goLive(run: E8Run, s: E8Streamer): Promise<void> {
+  if ((await run.ctx.platform.api().client.channels.get({ channel: s.channel })).live !== null) return;
   const streamer = await run.ctx.platform.streamerFor(s.user, {
     protocol: "rtmp",
     width: 640,
@@ -264,8 +266,12 @@ async function studioPoll(run: E8Run, page: Page): Promise<void> {
   });
 }
 
-async function studioRaid(run: E8Run, page: Page, targetPage: Page): Promise<void> {
-  const { ctx, streamer: src, target: dst } = run;
+/**
+ * The raid half of step 5. `src` and `dst` are a fresh pair (not `run.streamer`/`run.target`): step 3
+ * raids that pair in the same run, and its 600 s cooldown would refuse this step's first raid.
+ */
+async function studioRaid(run: E8Run, src: E8Streamer, dst: E8Streamer, page: Page, targetPage: Page): Promise<void> {
+  const { ctx } = run;
   const t = (w: string) => interactTitle(5, `raid: ${w}`);
   const raids = src.user.api.client.interact.raids;
 
@@ -417,19 +423,27 @@ async function studioGoal(run: E8Run, page: Page): Promise<void> {
 
 export async function stepInteractStudio(run: E8Run): Promise<void> {
   const { ctx } = run;
-  const source = await ctx.step(interactTitle(5, "streamer signs in on the web"), () =>
+  const [raidSrc, raidDst] = await ctx.step(interactTitle(5, "sign up a fresh raid source and target"), () =>
+    Promise.all([newE8Streamer(ctx, "e8irs"), newE8Streamer(ctx, "e8irt")]),
+  );
+  const streamer = await ctx.step(interactTitle(5, "streamer signs in on the web"), () =>
     studioSession(run, "studio-streamer", run.streamer.user),
   );
-  const target = await ctx.step(interactTitle(5, "raid target signs in on the web"), () =>
-    studioSession(run, "studio-target", run.target.user),
+  const source = await ctx.step(interactTitle(5, "raid source signs in on the web"), () =>
+    studioSession(run, "studio-raid-source", raidSrc.user),
   );
-  await withScreenshots(run, [source, target], async () => {
-    const page = await source.goto(E8_ROUTES.interact);
+  const target = await ctx.step(interactTitle(5, "raid target signs in on the web"), () =>
+    studioSession(run, "studio-raid-target", raidDst.user),
+  );
+  await withScreenshots(run, [streamer, source, target], async () => {
+    const page = await streamer.goto(E8_ROUTES.interact);
     await byE8Id(page, T.interact).waitFor(ui);
+    const sourcePage = await source.goto(E8_ROUTES.interact);
+    await byE8Id(sourcePage, T.raidForm).waitFor(ui);
     const targetPage = await target.goto(E8_ROUTES.interact);
     await byE8Id(targetPage, T.raidPolicy).waitFor(ui);
     await studioPoll(run, page);
-    await studioRaid(run, page, targetPage);
+    await studioRaid(run, raidSrc, raidDst, sourcePage, targetPage);
     await studioGoal(run, page);
   });
 }

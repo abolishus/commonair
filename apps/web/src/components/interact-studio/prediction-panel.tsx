@@ -6,7 +6,7 @@
  * open, the live card (refreshed every 2 s while open), lock, resolve per outcome and cancel (each
  * confirmed), then the payouts per outcome.
  */
-import { ConfirmDialog, IconButton, RelativeTime, StatusBadge, formatNumber, useLocale } from "@commonair/ui";
+import { ConfirmDialog, IconButton, RelativeTime, StatusBadge } from "@commonair/ui";
 import { TallyList } from "@commonair/ui/blocks/interact-studio";
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
@@ -96,9 +96,9 @@ export function PredictionPanel({
   );
 }
 
-function payoutNote(payout: OutcomePayout | undefined, users: number, locale: string): string | undefined {
+function payoutNote(payout: OutcomePayout | undefined, users: number): string | undefined {
   if (!payout) return undefined;
-  const points = formatNumber(payout.paid, locale);
+  const points = payout.paid;
   if (payout.result === "won") return t("interact.prediction.payout.won", { points, count: users });
   if (payout.result === "refunded") return t("interact.prediction.payout.refunded", { points });
   return t("interact.prediction.payout.lost");
@@ -111,7 +111,6 @@ function PredictionLive({
   prediction: PredictionDto;
   onAction: (a: Action) => Promise<void>;
 }): React.JSX.Element {
-  const { locale } = useLocale();
   const payouts = predictionPayouts(p);
   const onError = (err: unknown) => toastActionError(err, t("interact.prediction.actionFailed"));
   return (
@@ -140,11 +139,11 @@ function PredictionLive({
             label: o.title,
             value: o.points,
             valueText: t("interact.prediction.outcomeTotals", {
-              points: formatNumber(o.points, locale),
+              points: o.points,
               count: o.users,
             }),
             tone: payout?.result === "won" ? ("success" as const) : undefined,
-            note: payoutNote(payout, o.users, locale),
+            note: payoutNote(payout, o.users),
             badge:
               p.winningOutcomeId === o.id ? (
                 <StatusBadge tone="success">{t("interact.prediction.winner")}</StatusBadge>

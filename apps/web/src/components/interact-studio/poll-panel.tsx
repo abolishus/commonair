@@ -5,7 +5,7 @@
  * Polls on `/interact` (docs/testing/e8-selectors.md "Polls"): the form while none runs, the live
  * card with counts refreshed every 2 s while active, end (confirmed) and archive once ended.
  */
-import { ConfirmDialog, IconButton, RelativeTime, StatusBadge, formatNumber, useLocale } from "@commonair/ui";
+import { ConfirmDialog, IconButton, RelativeTime, StatusBadge } from "@commonair/ui";
 import { TallyList } from "@commonair/ui/blocks/interact-studio";
 import { Button } from "@commonair/ui/components/button";
 import { toast } from "@commonair/ui/toast";
@@ -81,7 +81,6 @@ function PollLive({
   poll: PollDto;
   onEnd: (status: "terminated" | "archived") => Promise<void>;
 }): React.JSX.Element {
-  const { locale } = useLocale();
   const total = pollTotal(poll);
   const active = poll.status === "active";
   const [archiving, setArchiving] = React.useState(false);
@@ -114,7 +113,7 @@ function PollLive({
       />
       {poll.pointsPerExtraVote > 0 ? (
         <p className="text-xs text-muted-foreground">
-          {t("interact.poll.extraVotesOn", { points: formatNumber(poll.pointsPerExtraVote, locale) })}
+          {t("interact.poll.extraVotesOn", { points: poll.pointsPerExtraVote })}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">

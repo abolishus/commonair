@@ -67,7 +67,8 @@ export function CommandsPanel({
   const sorted = [...commands].sort((a, b) => a.name.localeCompare(b.name));
 
   const save = async (draft: CommandDraft): Promise<FieldErrors<CommandField> | null> => {
-    const checked = commandInput(channel, draft);
+    const taken = editing?.mode === "new" ? commands.map((c) => c.name) : [];
+    const checked = commandInput(channel, draft, taken);
     if (!checked.ok) return checked.errors;
     const saved = await api.upsert(checked.input);
     setCommands((list) => [...list.filter((c) => c.name !== saved.name), saved]);

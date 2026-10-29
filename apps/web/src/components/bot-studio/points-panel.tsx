@@ -61,7 +61,7 @@ export function PointsPanel({
     toast.success(
       t("bot.points.adjusted", {
         username: balance.user.username,
-        points: formatNumber(balance.points, locale),
+        points: balance.points,
       }),
     );
     setOpen(false);

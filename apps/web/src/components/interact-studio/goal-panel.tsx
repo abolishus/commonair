@@ -29,7 +29,7 @@ import {
   type GoalDto,
   type GoalField,
 } from "../../lib/interact-studio.ts";
-import { StudioSection, TextField, useLiveState, usePolling, type StudioApi } from "./shared.tsx";
+import { StudioSection, TextField, fillNodes, useLiveState, usePolling, type StudioApi } from "./shared.tsx";
 
 /** Goals move with follows, subscriptions and tips; a slower refresh is enough. */
 export const GOAL_REFRESH_MS = 5000;
@@ -144,9 +144,10 @@ function GoalRow({
         tone={goal.current >= goal.target ? "success" : "default"}
         valueText={
           <>
-            <GoalAmount goal={goal} value={goal.current} currency={currency} />
-            {" / "}
-            <GoalAmount goal={goal} value={goal.target} currency={currency} />
+            {fillNodes(t("interact.goal.progressValue"), {
+              current: <GoalAmount goal={goal} value={goal.current} currency={currency} />,
+              target: <GoalAmount goal={goal} value={goal.target} currency={currency} />,
+            })}
           </>
         }
       />

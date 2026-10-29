@@ -461,6 +461,18 @@ describe("/interact: raids", () => {
     expect(m.interact.raids.start).toHaveBeenCalledWith({ channel: "ann", to: "bob" });
   });
 
+  it("shows a raid started elsewhere (raid_pending) with its cancel button", async () => {
+    const { client, m } = fakeApi();
+    m.interact.raids.start.mockRejectedValueOnce(apiError("CONFLICT"));
+    m.interact.raids.current.mockResolvedValueOnce(raidState()).mockResolvedValue(raidState({ raid: raid() }));
+    renderInteract(client);
+    await screen.findByTestId("raid-form");
+    type("raid-target", "bob");
+    submit("raid-start");
+    expect((await screen.findByTestId("raid-pending")).dataset.to).toBe("bob");
+    expect(screen.getByTestId("raid-cancel")).toBeTruthy();
+  });
+
   it("checks the target before sending", async () => {
     const { client, m } = fakeApi();
     renderInteract(client);
@@ -535,6 +547,7 @@ describe("/interact: goals", () => {
     expect(row.dataset.type).toBe("tips");
     expect(row.dataset.target).toBe("1250");
     expect(row.textContent).toContain("$12.50");
+    expect(row.textContent).toContain("$0.00 / $12.50");
   });
 
   it("validates a follower target and lists goals with their numbers", async () => {
@@ -755,6 +768,19 @@ describe("/bot: commands", () => {
     submit("command-save");
     const error = await screen.findByTestId("command-error");
     expect(error.textContent).toBe(en["bot.command.error.conflict"]);
+  });
+
+  it("refuses a new command named like an existing one instead of overwriting it", async () => {
+    const { client, m } = fakeApi();
+    m.bot.commands.list.mockResolvedValue([hello]);
+    renderBot(client);
+    fireEvent.click(await screen.findByTestId("command-new"));
+    await screen.findByTestId("command-form");
+    type("command-name", "!Hello");
+    type("command-response", "replaced");
+    submit("command-save");
+    expect(await screen.findByText(en["bot.command.error.exists"].replace("{name}", "hello"))).toBeTruthy();
+    expect(m.bot.commands.upsert).not.toHaveBeenCalled();
   });
 
   it("edits with the name fixed and removes after a confirmation", async () => {

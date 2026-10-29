@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { BotConfig } from "@commonair/contracts/shapes";
 import { en } from "../src/i18n/en.ts";
+import { t } from "../src/i18n/index.ts";
 import {
   adjustError,
   adjustInput,
@@ -410,6 +411,20 @@ describe("commands", () => {
     expect(commandInput(CH, commandDraft(c))).toMatchObject({
       input: { name: "hug", aliases: ["cuddle"], userLevel: "follower", costPoints: 50, enabled: false },
     });
+  });
+
+  it("pluralizes point counts in the studio strings", () => {
+    expect(t("bot.points.adjusted", { username: "ann", points: 1 })).toBe("ann now has 1 point.");
+    expect(t("bot.points.adjusted", { username: "ann", points: 1200 })).toBe("ann now has 1,200 points.");
+    expect(t("interact.prediction.payout.refunded", { points: 1 })).toBe("Refunded 1 point");
+  });
+
+  it("refuses a new command whose name is already taken, so a save never overwrites it", () => {
+    const r = commandInput(CH, { ...draft, name: "!Hello" }, ["hello", "bye"]);
+    expect(r).toEqual({ ok: false, errors: { name: en["bot.command.error.exists"].replace("{name}", "hello") } });
+    expect(commandInput(CH, draft, ["bye"]).ok).toBe(true);
+    // Editing passes no taken names: saving the same name updates it.
+    expect(commandInput(CH, draft).ok).toBe(true);
   });
 
   it("maps refused saves to messages", () => {
