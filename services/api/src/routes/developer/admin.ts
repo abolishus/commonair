@@ -3,8 +3,9 @@
 
 /**
  * `developer.admin.*` (E9-apps): every app on the instance, suspend and unsuspend (ADR 0027 §4).
- * Suspension revokes every token of the app and its webhook subscriptions in the same transaction
- * as the audit row; the control messages and revocation notices follow after commit, best effort.
+ * Suspension revokes every token of the app and its webhook subscriptions, and drops its pending
+ * authorization and device codes, in the same transaction as the audit row; the control messages
+ * and revocation notices follow after commit, best effort.
  * Unsuspending restores nothing: users re-authorize.
  */
 import { and, desc, eq, ilike, isNotNull, isNull, lt, or, sql, type SQL } from "drizzle-orm";
@@ -19,7 +20,7 @@ import { decodeCursor, encodeCursor, isKeyCursor } from "../../lib/cursor.ts";
 import { conflict, notFound } from "../../lib/errors.ts";
 import { os, requireCaller } from "../../lib/orpc.ts";
 
-const { oauthApps, users } = schema;
+const { oauthApps, oauthCodes, oauthDeviceCodes, users } = schema;
 
 const APP_NOT_FOUND = "App not found";
 
@@ -99,6 +100,10 @@ export const admin = {
         .where(eq(oauthApps.id, app.id));
       const revokedTokens = await revokeTokensInTx(tx, { appId: app.id }, now);
       const revokedSubs = await revokeWebhookSubscriptionsInTx(tx, { appId: app.id });
+      // Pending codes would otherwise mint fresh tokens if the app is unsuspended inside their
+      // lifetime; unsuspending must restore nothing (ADR 0027 §4).
+      await tx.delete(oauthCodes).where(eq(oauthCodes.appId, app.id));
+      await tx.delete(oauthDeviceCodes).where(eq(oauthDeviceCodes.appId, app.id));
       await audit(tx, {
         actorType: "admin",
         actorId: caller.user.id,

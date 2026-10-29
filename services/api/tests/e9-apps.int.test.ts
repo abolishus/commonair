@@ -295,7 +295,7 @@ describe("apps.update, rotateSecret and remove", () => {
     expect(r.body.data?.requirement).toBe("public_client");
   });
 
-  test("a suspended app cannot be updated or rotated", async () => {
+  test("a suspended app cannot be updated, rotated or removed", async () => {
     const { app } = await createOk(owner.client);
     await db()
       .update(schema.oauthApps)
@@ -307,6 +307,9 @@ describe("apps.update, rotateSecret and remove", () => {
     const s = await owner.client.call<ErrorBody>("POST", `/api/developer/apps/${app.id}/secret`);
     expect(s.status).toBe(412);
     expect(s.body.data?.requirement).toBe("app_suspended");
+    const d = await owner.client.call<ErrorBody>("DELETE", `/api/developer/apps/${app.id}`);
+    expect(d.status).toBe(412);
+    expect(d.body.data?.requirement).toBe("app_suspended");
     expect((await appRow(app.id))?.name).toBe(app.name);
   });
 
@@ -467,6 +470,29 @@ describe("developer.admin", () => {
     const otherApp = (await createOk(other.client)).app.id;
     const tOther = await token(otherApp, u1);
     const sOther = await subscription(otherApp, u1);
+    await db()
+      .insert(schema.oauthCodes)
+      .values({
+        codeHash: await sha256Hex(`cac_${rand()}`),
+        appId: app.id,
+        userId: u1,
+        scopes: ["chat:read"],
+        redirectUri: REDIRECT,
+        codeChallenge: "x".repeat(43),
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+    await db()
+      .insert(schema.oauthDeviceCodes)
+      .values({
+        appId: app.id,
+        deviceCodeHash: await sha256Hex(`cad_${rand()}`),
+        userCodeHash: await sha256Hex(rand()),
+        scopes: [],
+        status: "approved",
+        userId: u1,
+        decidedAt: new Date(),
+        expiresAt: new Date(Date.now() + 600_000),
+      });
 
     let res: { status: number; body: AdminApp } | undefined;
     const msgs = await captureControl(
@@ -487,6 +513,13 @@ describe("developer.admin", () => {
       .from(schema.oauthTokens)
       .where(eq(schema.oauthTokens.appId, app.id));
     expect(tokens.every((t) => t.revokedAt !== null)).toBe(true);
+
+    // Pending codes are gone, so unsuspending cannot let them mint new tokens.
+    const codesLeft = await Promise.all([
+      db().select().from(schema.oauthCodes).where(eq(schema.oauthCodes.appId, app.id)),
+      db().select().from(schema.oauthDeviceCodes).where(eq(schema.oauthDeviceCodes.appId, app.id)),
+    ]);
+    expect(codesLeft.map((rows) => rows.length)).toEqual([0, 0]);
 
     // Webhook subscriptions revoked (WebSocket rows are E9-ws's to close), others untouched.
     const subs = await db()

@@ -122,7 +122,7 @@ export const apps = {
   /**
    * Deletes the app; the foreign keys take its codes, tokens, device codes, subscriptions and their
    * deliveries with it. Sockets close through the app-wide `app_removed`. No revocation webhook can
-   * be sent: the subscription rows are gone with the app.
+   * be sent: the subscription rows are gone with the app. A suspended app cannot be removed.
    */
   remove: os.developer.apps.remove.handler(async ({ context, input }) => {
     const { deps } = context;
@@ -130,6 +130,8 @@ export const apps = {
     const revoked = await deps.db.transaction(async (tx) => {
       const app = await ownedApp(tx, input.id, caller.user.id, true);
       if (!app) throw notFound(APP_NOT_FOUND);
+      // A suspended app stays on record for admins; the owner cannot wipe it and re-register.
+      assertChangeable(app);
       // Revoked first only to learn the token hashes the disconnect messages need.
       const tokens = await revokeTokensInTx(tx, { appId: app.id }, deps.now());
       await tx.delete(oauthApps).where(eq(oauthApps.id, app.id));
