@@ -72,6 +72,12 @@ interface SocketData extends Conn {
   swarms: Map<string, string>;
   lastHeartbeatCheck: number;
   queue: Promise<void>;
+  /**
+   * This socket's swarm membership writes, in frame order. `record` waits for the network hash
+   * first, so without the chain a `stopped` right after an announce could ZREM before the ZADD
+   * and leave the session listed until the TTL.
+   */
+  writes: Promise<void>;
   closed: boolean;
   ws: ServerWebSocket<SocketData> | null;
   send(msg: object): void;
@@ -176,6 +182,9 @@ export function startTracker(opts: TrackerOptions): Tracker {
     metrics.evidenceFailures.add(1);
     logger.warn("p2p evidence write failed", { err: err instanceof Error ? err.message : String(err) });
   };
+  const write = (d: SocketData, op: () => Promise<void>) => {
+    d.writes = d.writes.then(op).catch(evidenceFailed);
+  };
 
   async function upgrade(req: Request, server: Server<SocketData>): Promise<Response | undefined> {
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket")
@@ -236,6 +245,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
         swarms: new Map(),
         lastHeartbeatCheck: now(),
         queue: Promise.resolve(),
+        writes: Promise.resolve(),
         closed: false,
         ws: null,
         send(msg) {
@@ -313,7 +323,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
       return;
     }
     if (outcome.kind === "stopped") {
-      evidence.forget(d.sid, [outcome.swarm]).catch(evidenceFailed);
+      write(d, () => evidence.forget(d.sid, [outcome.swarm]));
       return;
     }
     if (outcome.kind !== "announce") return;
@@ -328,7 +338,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
       metrics.answers.add(1);
     }
     const at = now();
-    d.net.then((net) => evidence.record(d.sid, d.channelId, outcome.swarm, net, at)).catch(evidenceFailed);
+    write(d, async () => evidence.record(d.sid, d.channelId, outcome.swarm, await d.net, at));
     const offerer = outcome.exchange as SocketData | null;
     if (offerer) {
       stats.exchanges++;
@@ -351,7 +361,7 @@ export function startTracker(opts: TrackerOptions): Tracker {
     const left = registry.leaveAll(d);
     // A replacing socket of the same session may already be in some of these swarms.
     const current = sessions.get(d.sid);
-    evidence.forget(d.sid, current ? left.filter((s) => !current.swarms.has(s)) : left).catch(evidenceFailed);
+    write(d, () => evidence.forget(d.sid, current ? left.filter((s) => !current.swarms.has(s)) : left));
   }
 
   const service = runService<SocketData>({

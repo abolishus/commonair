@@ -487,6 +487,75 @@ describe("grants and derived info hashes", () => {
   });
 });
 
+describe("swarm writes in frame order", () => {
+  let slow: Tracker;
+  const holdMs = 200;
+  beforeAll(() => {
+    // The real client, with every pipeline that adds to a sorted set (an announce's record) held
+    // back before it is sent, as a slow network hash or a busy event loop can.
+    const delayed = <P extends object>(pipeline: P): P => {
+      let adds = false;
+      const proxy: P = new Proxy(pipeline, {
+        get(target, prop) {
+          const v: unknown = Reflect.get(target, prop);
+          if (typeof v !== "function") return v;
+          const fn = v as (...a: unknown[]) => unknown;
+          if (prop === "exec")
+            return async (...a: unknown[]) => {
+              if (adds) await Bun.sleep(holdMs);
+              return fn.apply(target, a);
+            };
+          return (...a: unknown[]) => {
+            if (prop === "zadd") adds = true;
+            const r = fn.apply(target, a);
+            return r === target ? proxy : r;
+          };
+        },
+      });
+      return proxy;
+    };
+    const proxied = new Proxy(valkey, {
+      get(target, prop) {
+        const v: unknown = Reflect.get(target, prop);
+        if (prop === "pipeline")
+          return (...a: unknown[]) => delayed((v as (...b: unknown[]) => object).apply(target, a));
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    slow = startTracker({
+      port: 0,
+      hostname: "127.0.0.1",
+      logger: createLogger({ service: "tracker-int-slow", level: "fatal" }),
+      valkey: proxied,
+      publicKey: key.publicKey,
+      internalSecret: SECRET,
+      trustedProxies: ["127.0.0.0/8", "::1/128"],
+      limits: { maxConnections: 100, maxConnectionsPerIp: 10, maxNumwant: 20, tokenMaxAgeSeconds: MAX_AGE },
+    });
+  });
+  afterAll(async () => {
+    await slow.stop();
+  });
+
+  test("stopped right after an announce leaves, even when the announce's write lands late", async () => {
+    const sid = await session();
+    const p = await Peer.open(`ws://127.0.0.1:${slow.url.port}/?t=${await token(sid)}`, {
+      "x-forwarded-for": NET_A,
+    });
+    peers.push(p);
+    const hash = derived("1080p", BROADCAST, "secondary");
+    extraKeys.push(KEYS.p2pSwarm(swarmOf(hash)));
+    p.send(periodicNoOffers(hash, binaryId(83)));
+    await p.next((m) => m.interval !== undefined);
+    p.send(stopped(hash, binaryId(83)));
+    await p.next((m) => m.interval !== undefined);
+    // Past the held write: a ZREM sent before it would be undone by its ZADD.
+    await Bun.sleep(holdMs * 2);
+    await eventually(async () => expect(await valkey.zscore(KEYS.p2pSwarm(swarmOf(hash)), sid)).toBeNull());
+    expect(await valkey.hget(KEYS.p2pPeer(sid), "announces")).toBe("1");
+  });
+});
+
 describe("Valkey errors on the grant", () => {
   let flaky: Tracker;
   let failGet = false;
