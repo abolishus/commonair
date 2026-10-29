@@ -4,7 +4,12 @@
 /** Small database helpers shared by the co-op handlers. */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { PayoutRulesSetting, PlatformCutSetting, type GovernanceChange } from "@commonair/contracts/shapes";
+import {
+  PayoutRulesSetting,
+  PlatformCutSetting,
+  PointsAccrualSetting,
+  type GovernanceChange,
+} from "@commonair/contracts/shapes";
 import { type Executor, schema } from "@commonair/db";
 import {
   BoardSeats,
@@ -79,6 +84,7 @@ const VALUE_SHAPES: Readonly<Record<string, z.ZodType>> = {
   "platform.cut": PlatformCutSetting,
   "payout.rules": PayoutRulesSetting,
   "discovery.ranking": DiscoveryRanking,
+  "interact.points.accrual": PointsAccrualSetting,
 };
 
 export type ClassifiedChanges =

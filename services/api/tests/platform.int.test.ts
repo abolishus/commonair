@@ -629,6 +629,9 @@ describe("tokens, bots and the API surface", () => {
     });
     expect(eleventh.status).toBe(412);
     expect(eleventh.body.data.requirement).toBe("bot_limit");
+    const listed = await carol.client.call<{ id: string }[]>("GET", "/api/me/bots");
+    expect(listed.status).toBe(200);
+    expect(listed.body.map((b) => b.id).toSorted()).toEqual(ids.toSorted());
 
     const refused = await carol.client.call<{ code: string; data: { requirement: string } }>(
       "POST",

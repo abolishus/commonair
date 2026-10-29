@@ -420,6 +420,20 @@ describe("draft classification", () => {
     expect(classifyDraft([{ key: "discovery.ranking", value: { spotlightSlots: 4 } }], false, SETTINGS).ok).toBe(false);
     expect(classifyDraft([{ key: "platform.cut", value: { streamerShare: 2 } }], false, SETTINGS).ok).toBe(false);
   });
+
+  test("points accrual values are shape-checked before the vote, not only when they apply", () => {
+    const accrual = SETTINGS["interact.points.accrual"] as Record<string, unknown>;
+    expect(classifyDraft([{ key: "interact.points.accrual", value: accrual }], false, SETTINGS)).toMatchObject({
+      ok: true,
+      kind: "ordinary",
+    });
+    for (const value of [{ ...accrual, blockMinutes: 0 }, { ...accrual, blockMinutes: "5" }, { pointsPerBlock: 10 }]) {
+      expect(classifyDraft([{ key: "interact.points.accrual", value }], false, SETTINGS)).toEqual({
+        ok: false,
+        reason: "The new value of interact.points.accrual does not have the setting's shape",
+      });
+    }
+  });
 });
 
 // Trigger refusals → contract errors ----------------------------------------------------------

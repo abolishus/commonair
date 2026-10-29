@@ -375,7 +375,14 @@ export const me = {
       const rows = await context.deps.db
         .select()
         .from(users)
-        .where(and(eq(users.botOwnerId, caller.user.id), isNull(users.deletedAt)))
+        .where(
+          and(
+            eq(users.botOwnerId, caller.user.id),
+            isNull(users.deletedAt),
+            // The channel bot (E8) is managed from the channel's bot settings, not as a developer bot.
+            sql`not exists (select 1 from ${botConfigs} where ${botConfigs.botUserId} = ${users.id})`,
+          ),
+        )
         .orderBy(users.createdAt);
       return rows.map((b) => toUserPublic(context.deps, b, { id: caller.user.id, username: caller.user.username }));
     }),
