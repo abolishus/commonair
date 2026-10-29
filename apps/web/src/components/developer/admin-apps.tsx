@@ -43,8 +43,9 @@ export function AdminAppsPage({ client }: { client: AdminAppsClient }): React.JS
     return () => clearTimeout(id);
   }, [typed]);
 
+  const listKey = `admin:apps:${suspendedOnly ? "s" : "a"}:${q}`;
   const list = useLiveList(
-    `admin:apps:${suspendedOnly ? "s" : "a"}:${q}`,
+    listKey,
     (cursor) =>
       client.list({
         limit: PAGE_SIZE,
@@ -54,10 +55,21 @@ export function AdminAppsPage({ client }: { client: AdminAppsClient }): React.JS
       }),
     { onMoreError: (err) => toast.error(developerError(err, "developer.admin.loadFailed")) },
   );
-  const [changed, setChanged] = React.useState<ReadonlyMap<string, AdminOAuthAppDto>>(new Map());
+  // Local results of suspend/unsuspend, kept only for the list they were made in: a new search
+  // or filter reads the server again rather than masking a later change behind a stale copy.
+  const [changedState, setChanged] = React.useState<{ key: string; map: ReadonlyMap<string, AdminOAuthAppDto> }>({
+    key: listKey,
+    map: new Map(),
+  });
+  const changed: ReadonlyMap<string, AdminOAuthAppDto> =
+    changedState.key === listKey ? changedState.map : new Map<string, AdminOAuthAppDto>();
   const [suspending, setSuspending] = React.useState<AdminOAuthAppDto | null>(null);
   const [failure, setFailure] = React.useState<string | null>(null);
-  const update = (app: AdminOAuthAppDto) => setChanged((m) => new Map(m).set(app.id, app));
+  const update = (app: AdminOAuthAppDto) =>
+    setChanged((prev) => ({
+      key: listKey,
+      map: new Map(prev.key === listKey ? prev.map : []).set(app.id, app),
+    }));
 
   const unsuspend = async (app: AdminOAuthAppDto): Promise<void> => {
     setFailure(null);

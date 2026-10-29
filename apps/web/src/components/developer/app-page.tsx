@@ -41,7 +41,8 @@ export function DeveloperAppPage({
 }): React.JSX.Element {
   const loaded = useLoad(
     `developer:app:${appId}`,
-    async () => (await client.apps.list()).find((a) => a.id === appId) ?? null,
+    // Wrapped: `useLoad` reads a bare null as "still loading".
+    async () => ({ app: (await client.apps.list()).find((a) => a.id === appId) ?? null }),
   );
   const [updated, setUpdated] = React.useState<OAuthAppDto | null>(null);
   if (loaded.data === null && loaded.failed)
@@ -52,7 +53,7 @@ export function DeveloperAppPage({
         <SkeletonText lines={6} />
       </SkeletonGroup>
     );
-  const found = loaded.data;
+  const found = loaded.data.app;
   if (!found) return <NotFoundState />;
   const app = updated?.id === found.id ? updated : found;
   return (
@@ -94,6 +95,7 @@ function AppHeader({
     setFailure(null);
     const issued = await client.apps.rotateSecret({ id: app.id });
     setSecret(issued);
+    onUpdated({ ...app, secretRotatedAt: new Date().toISOString() });
   };
 
   const remove = async (): Promise<void> => {

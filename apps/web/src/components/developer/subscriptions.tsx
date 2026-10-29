@@ -84,6 +84,7 @@ export function SubscriptionsPanel({ app, client }: { app: OAuthAppDto; client: 
   const remove = async (sub: SubscriptionDto): Promise<void> => {
     setFailure(null);
     await client.events.unsubscribe({ id: sub.id });
+    list.drop(sub.id);
     toast.success(t("developer.sub.deleted", { type: sub.type }));
     await list.refresh().catch(() => undefined);
   };

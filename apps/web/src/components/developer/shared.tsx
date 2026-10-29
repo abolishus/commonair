@@ -119,6 +119,8 @@ export interface LiveList<T> {
   loadMore: () => void;
   /** Reload the first page and merge it into what is shown (older pages stay). */
   refresh: () => Promise<void>;
+  /** Take a row off the screen now (a delete): `refresh()` alone keeps rows missing from page one. */
+  drop: (id: string) => void;
   retry: () => void;
 }
 
@@ -214,6 +216,10 @@ export function useLiveList<T extends { id: string }>(
     loadingMore,
     loadMore,
     refresh,
+    drop: (id: string) =>
+      setState((prev) =>
+        prev.key === key && prev.items ? { ...prev, items: prev.items.filter((r) => r.id !== id) } : prev,
+      ),
     retry: () => void refresh(),
   };
 }

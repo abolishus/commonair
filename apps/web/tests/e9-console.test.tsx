@@ -557,8 +557,8 @@ describe("/developer/apps/$appId", () => {
     const { client, m } = fakeDeveloper();
     m.apps.list.mockResolvedValueOnce([]);
     renderApp(client);
-    await waitFor(() => expect(m.apps.list).toHaveBeenCalled());
-    await waitFor(() => expect(screen.queryByTestId("devapp")).toBeNull());
+    expect(await screen.findByText(en["page.notFound"])).toBeTruthy();
+    expect(screen.queryByTestId("devapp")).toBeNull();
   });
 
   it("edits the app in the filled form", async () => {
@@ -590,6 +590,7 @@ describe("/developer/apps/$appId", () => {
     const { client, m } = fakeDeveloper();
     renderApp(client);
     await find("devapp");
+    expect(document.body.textContent).toContain("Issued");
     click("devapp-rotate");
     expect(m.apps.rotateSecret).not.toHaveBeenCalled();
     await confirm();
@@ -598,6 +599,8 @@ describe("/developer/apps/$appId", () => {
     expect(id("devapp-secret-value").textContent).toBe(SECRET);
     click("devapp-secret-done");
     await waitFor(() => expect(document.body.textContent).not.toContain(SECRET));
+    // The rotation date shows without a reload.
+    expect(document.body.textContent).toContain("Last rotated");
   });
 
   it("has no rotation for a public app", async () => {
@@ -655,10 +658,17 @@ describe("/developer/apps/$appId", () => {
     fireEvent.click(within(hook as HTMLElement).getByTestId("devsub-test"));
     await waitFor(() => expect(m.events.sendTest).toHaveBeenCalledWith({ id: "0192f000-0000-7000-8000-0000000000b1" }));
     record();
+    // The server no longer lists it; the merge alone would keep the row that was shown.
+    m.events.list.mockResolvedValue(
+      page([subscription({ id: "ws", transport: { method: "websocket", sessionId: "s1" } })]),
+    );
     fireEvent.click(within(hook as HTMLElement).getByTestId("devsub-delete"));
     await confirm();
     await waitFor(() =>
       expect(m.events.unsubscribe).toHaveBeenCalledWith({ id: "0192f000-0000-7000-8000-0000000000b1" }),
+    );
+    await waitFor(() =>
+      expect((screen.getAllByTestId("devsub") as HTMLElement[]).map((r) => r.dataset.subscriptionId)).toEqual(["ws"]),
     );
   });
 
@@ -968,6 +978,20 @@ describe("/admin/apps", () => {
     await confirm();
     await waitFor(() => expect(m.unsuspend).toHaveBeenCalledWith({ id: "a2" }));
     await waitFor(() => expect((screen.getAllByTestId("adminapp")[1] as HTMLElement).dataset.suspended).toBe("false"));
+  });
+
+  it("drops local changes when the search or filter changes", async () => {
+    const { client, m } = fakeAdmin();
+    wrap(<AdminAppsPage client={client} />);
+    await find("adminapp-unsuspend");
+    click("adminapp-unsuspend");
+    await confirm();
+    await waitFor(() => expect((screen.getAllByTestId("adminapp")[1] as HTMLElement).dataset.suspended).toBe("false"));
+    // Another admin suspended it again; the filtered list must show the server's copy.
+    m.list.mockResolvedValueOnce(page([adminApp({ id: "a2", name: "Spammy", suspended: { at: T0, reason: "spam" } })]));
+    fireEvent.click(id("adminapps-filter-suspended"));
+    await waitFor(() => expect(m.list).toHaveBeenLastCalledWith({ limit: 25, suspended: true }));
+    await waitFor(() => expect((screen.getAllByTestId("adminapp")[0] as HTMLElement).dataset.suspended).toBe("true"));
   });
 });
 

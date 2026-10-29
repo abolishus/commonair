@@ -123,7 +123,7 @@ async function attr(locator: Locator, name: string): Promise<string> {
 }
 
 async function confirmDialog(page: Page): Promise<void> {
-  await page.locator('[data-testid="confirm-dialog-confirm"]').click(ui);
+  await byTestId(page, TEST_IDS.confirmDialogConfirm).click(ui);
 }
 
 async function setSwitch(page: Page, id: string, want: boolean): Promise<void> {
