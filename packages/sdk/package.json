@@ -8,6 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "bun scripts/build.ts",
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
     "typecheck": "tsc -p ."
   },
