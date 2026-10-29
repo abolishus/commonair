@@ -41,6 +41,7 @@ describe("export collectors", () => {
       "notifications.json",
       "consents.json",
       "developer.json",
+      "interact.json",
     ]);
     expect(filesFor("channel").map((f) => f.name)).toEqual([
       "channel.json",
@@ -175,6 +176,13 @@ describe("export collectors", () => {
         botTokens: ["botUsername", "scopes", "expiresAt", "lastUsedAt", "revokedAt", "createdAt"],
         webhooks: ["type", "version", "transport", "callbackUrl", "status", "createdAt"],
       },
+      "interact.json": {
+        pointsBalances: ["channelSlug", "points"],
+        pointsTransactions: ["id", "channelSlug", "delta", "reason", "createdAt"],
+        pollVotes: ["channelSlug", "pollId", "choiceId", "votes", "pointsSpent", "castAt"],
+        predictionBets: ["channelSlug", "predictionId", "outcomeId", "points", "payout", "placedAt"],
+        songRequests: ["channelSlug", "url", "status", "createdAt"],
+      },
       "channel.json": {
         settings: [
           "slug",
@@ -255,6 +263,13 @@ describe("export collectors", () => {
       { id: "p1", disputes: [] },
       { id: "p2", disputes: [{ kind: "refund", amountCents: 100 }] },
     ]);
+    expect(fileValue(byName("interact.json"), { pointsBalances: [{ channelSlug: "a", points: 5 }] })).toEqual({
+      pointsBalances: [{ channelSlug: "a", points: 5 }],
+      pointsTransactions: [],
+      pollVotes: [],
+      predictionBets: [],
+      songRequests: [],
+    });
     const revenue = byName("revenue.json").sections.revenue;
     expect(revenue?.map?.({ grossCents: 1000, taxCents: 100, feeCents: 59 })).toMatchObject({ netCents: 841 });
   });
