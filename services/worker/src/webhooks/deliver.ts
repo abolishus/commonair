@@ -113,6 +113,24 @@ export async function sendRevocation(ctx: WorkerContext, sub: SubscriptionRow, s
   await send(ctx, { sub, messageType: "revocation", messageId: uuidv7(), eventId, attempt: 1, body }, () => null);
 }
 
+/**
+ * The API revoked a webhook subscription (grant revoked, app suspended) and enqueued this after
+ * its commit: tell the receiver once. Idempotent across job retries and duplicate enqueues: a
+ * logged revocation message (sent by this or by `revoke` below) means the receiver was told.
+ */
+export async function notifyRevoked(ctx: WorkerContext, subscriptionId: string): Promise<0 | 1> {
+  const sub = await loadSubscription(ctx, subscriptionId);
+  if (!sub || sub.status !== "revoked" || sub.transport !== "webhook") return 0;
+  const [prior] = await ctx.db
+    .select({ id: deliveries.id })
+    .from(deliveries)
+    .where(and(eq(deliveries.subscriptionId, sub.id), eq(deliveries.messageType, "revocation")))
+    .limit(1);
+  if (prior) return 0;
+  await sendRevocation(ctx, sub, ENVELOPE_STATUS.revoked, uuidv7());
+  return 1;
+}
+
 /** Revoke (once) and tell the receiver. Returns false if another worker got there first. */
 export async function revoke(
   ctx: WorkerContext,
