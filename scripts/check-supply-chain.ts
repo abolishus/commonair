@@ -5,6 +5,9 @@
  * The supply-chain gate (ADR 0022): exact pins, install cooldown, trusted install scripts,
  * known advisories, SHA-pinned actions and digest-pinned images. Needs the network for
  * `bun audit`; fails closed when the registry cannot be reached.
+ *
+ * `--advisories` runs only the advisory check, for the daily vulnerability scan: new advisories
+ * land against code that has not changed, so a push-time check alone misses them.
  */
 import { existsSync, readFileSync } from "node:fs";
 import {
@@ -24,16 +27,21 @@ const tracked = Bun.spawnSync(["git", "ls-files", "-z"]).stdout.toString().split
 const read = (p: string) => readFileSync(p, "utf8");
 const policy = JSON.parse(read("supply-chain.json")) as Policy;
 const findings: Finding[] = [];
+const advisoriesOnly = process.argv.includes("--advisories");
 
-const manifests = tracked.filter((p) => p === "package.json" || p.endsWith("/package.json"));
+const manifests = advisoriesOnly ? [] : tracked.filter((p) => p === "package.json" || p.endsWith("/package.json"));
 for (const p of manifests) findings.push(...checkManifest(p, JSON.parse(read(p))));
-findings.push(...checkTrusted("package.json", JSON.parse(read("package.json")), policy));
-findings.push(...checkBunfig("bunfig.toml", existsSync("bunfig.toml") ? read("bunfig.toml") : null));
+if (!advisoriesOnly) {
+  findings.push(...checkTrusted("package.json", JSON.parse(read("package.json")), policy));
+  findings.push(...checkBunfig("bunfig.toml", existsSync("bunfig.toml") ? read("bunfig.toml") : null));
+}
 
-const workflows = tracked.filter((p) => /^\.github\/(workflows\/.+|actions\/.+\/action)\.ya?ml$/.test(p));
+const workflows = advisoriesOnly
+  ? []
+  : tracked.filter((p) => /^\.github\/(workflows\/.+|actions\/.+\/action)\.ya?ml$/.test(p));
 for (const p of workflows) findings.push(...checkWorkflow(p, read(p)));
 
-const imageFiles = imageBearing(tracked).filter((p) => existsSync(p));
+const imageFiles = advisoriesOnly ? [] : imageBearing(tracked).filter((p) => existsSync(p));
 for (const p of imageFiles) findings.push(...checkImages(p, read(p)));
 
 const audit = Bun.spawnSync(["bun", "audit", "--json"], { timeout: 120_000 });

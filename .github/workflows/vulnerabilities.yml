@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Known-vulnerability scan of main, daily: `bun audit` for npm and govulncheck for the relay, with
+# the dated exceptions in supply-chain.json (ADR 0022). The gate runs the same checks on every
+# push; this catches advisories published after the code last changed, and backs the README badge.
+name: vulnerabilities
+
+on:
+  push:
+    branches: [main]
+    paths: ["bun.lock", "relay/go.mod", "relay/go.sum", "supply-chain.json"]
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: vulnerabilities-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BUN_VERSION: "1.4.3"
+  GO_VERSION: "1.27.3"
+
+jobs:
+  scan:
+    name: vulnerabilities
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup # zizmor: ignore[self-repository]
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          go-version: ${{ env.GO_VERSION }}
+      - name: npm advisories
+        run: bun scripts/check-supply-chain.ts --advisories
+      - name: Go vulnerabilities
+        if: ${{ !cancelled() }}
+        run: bun scripts/check-go-vulns.ts
