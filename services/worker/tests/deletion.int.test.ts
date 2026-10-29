@@ -315,6 +315,7 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(sent.map((m) => m.template)).toEqual(["accountDeletionCompleted"]);
     const [pseudonymized] = await db().select().from(schema.users).where(eq(schema.users.id, U.user.id));
     expect(pseudonymized?.email).not.toBe(old.email);
+    expect(pseudonymized?.locale).toBeNull();
     // A second run finds nothing due and mails nobody.
     expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 0, failed: 0 });
     expect(mailer.to(old.email)).toHaveLength(1);

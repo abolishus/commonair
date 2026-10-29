@@ -469,6 +469,7 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
           matureConfirmedAt: null,
           twoFactorEnabled: false,
           shareEmailWithFollowedChannels: false,
+          locale: null,
           pseudonymizedAt: user.pseudonymizedAt ?? now,
           deletedAt: user.deletedAt ?? now,
         })
