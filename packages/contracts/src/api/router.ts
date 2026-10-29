@@ -1580,7 +1580,7 @@ export const contract = {
         .input(z.object({ userCode: z.string().min(8).max(16) }))
         .output(D.OAuthDeviceConsent),
       activate: user
-        .meta({ access: "user", rateLimit: "write" })
+        .meta({ access: "user", rateLimit: "auth" })
         .route({
           method: "POST",
           path: "/oauth2/activate",

@@ -34,8 +34,8 @@ export const BOT_STEP_NUMBERS: readonly BotStep[] = [1, 2, 3, 4, 5, 6];
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set steps=1`) but
  * left out of `all`, so the full harness on main stays green while they are stubs.
  */
-export const PENDING_INTERACT_STEPS: readonly InteractStep[] = [5, 6];
-export const PENDING_BOT_STEPS: readonly BotStep[] = [6];
+export const PENDING_INTERACT_STEPS: readonly InteractStep[] = [];
+export const PENDING_BOT_STEPS: readonly BotStep[] = [];
 
 /** No E8 step needs another: each sets up its own channels, viewers and points. */
 export const INTERACT_STEP_PREREQUISITES: Readonly<Record<InteractStep, readonly InteractStep[]>> = {

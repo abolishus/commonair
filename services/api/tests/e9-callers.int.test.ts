@@ -116,8 +116,8 @@ describe("app tokens over HTTP", () => {
     const appTok = await token(appId, null);
     const asApp = client(api, { bearer: appTok.raw });
     expect((await asApp.call("GET", "/api/developer/tokens")).status).toBe(403);
-    // `developer.events.list` admits app tokens: the stub answers 501 past the access check.
-    expect((await asApp.call("GET", "/api/eventsub/subscriptions")).status).toBe(501);
+    // `developer.events.list` admits app tokens: it answers 200 past the access check.
+    expect((await asApp.call("GET", "/api/eventsub/subscriptions")).status).toBe(200);
   });
 });
 
@@ -132,7 +132,7 @@ describe("rate limits (ADR 0027 §4)", () => {
 
     for (let i = 0; i < APP_LIMIT / 2; i++) {
       expect((await asUser.call("GET", "/api/oauth2/validate")).status).toBe(200);
-      expect((await asApp.call("GET", "/api/eventsub/subscriptions")).status).toBe(501);
+      expect((await asApp.call("GET", "/api/eventsub/subscriptions")).status).toBe(200);
     }
     const refused = await asApp.call("GET", "/api/eventsub/subscriptions");
     expect(refused.status).toBe(429);

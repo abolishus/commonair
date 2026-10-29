@@ -79,9 +79,11 @@ describe("planE9Steps", () => {
     expect(planE9Steps([1, 2, 4], shapes(), "api").run).toEqual([1, 2, 4]);
   });
 
-  test("the modules as committed: nothing runs until a unit flips its step", () => {
+  test("the modules as committed: a step runs when it and every step it needs are ready", () => {
     const plan = planE9Steps(parseE9Steps("all"), MODULES, "web");
-    expect(plan.run).toEqual(E9_STEP_NUMBERS.filter((n) => MODULES[n].ready));
+    const runs = (n: E9StepNumber): boolean =>
+      MODULES[n].ready && MODULES[n].needs.every((m) => runs(m as E9StepNumber));
+    expect(plan.run).toEqual(E9_STEP_NUMBERS.filter(runs));
   });
 });
 

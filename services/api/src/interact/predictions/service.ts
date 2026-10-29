@@ -24,7 +24,7 @@ import {
 } from "@commonair/interact";
 import { audit } from "../../events/audit.ts";
 import type { Caller } from "../../lib/access.ts";
-import { badRequest, conflict, forbidden, isUniqueViolation, notFound, precondition } from "../../lib/errors.ts";
+import { apiError, badRequest, conflict, isUniqueViolation, notFound, precondition } from "../../lib/errors.ts";
 import {
   actorTypeOf,
   assertNotBanned,
@@ -144,7 +144,9 @@ export async function betPrediction(
     if (!prediction) throw notFound("Prediction not found");
     const channel = await channelById(tx, prediction.channelId);
     if ((await authorityOn(tx, caller, channel)) !== null)
-      throw forbidden("The channel's owner, editors and moderators cannot bet on its predictions");
+      throw apiError("FORBIDDEN", "The channel's owner, editors and moderators cannot bet on its predictions", {
+        reason: "staff",
+      });
     await assertNotBanned(tx, channel.id, userId, now);
     if (prediction.status !== "active" || now >= prediction.locksAt) throw conflict("Betting is closed");
     if (!prediction.outcomes.some((o) => o.id === input.outcomeId)) throw badRequest("No such outcome");

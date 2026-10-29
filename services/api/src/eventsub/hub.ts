@@ -271,8 +271,8 @@ export class EventSubHub implements EventSub {
         const subject = await hmacHex(deps.env.AUTH_SECRET, `rl:${rateLimitSubjectIp(ip)}`);
         const nowMs = deps.now().getTime();
         const rl = await deps.rateLimitStore.hit(
-          rateLimitKey("auth", `ip:${subject}`),
-          deps.rateLimits.auth,
+          rateLimitKey("eventsub", `ip:${subject}`),
+          deps.rateLimits.eventsub,
           nowMs,
           `${nowMs}:${crypto.randomUUID()}`,
         );

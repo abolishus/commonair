@@ -9,7 +9,16 @@
 import { KEYS } from "@commonair/contracts/internal";
 import type { ValkeyClient } from "@commonair/service";
 
-export type RateLimitBucket = "default" | "write" | "auth" | "chat" | "expensive" | "mail" | "playback" | "app";
+export type RateLimitBucket =
+  | "default"
+  | "write"
+  | "auth"
+  | "chat"
+  | "expensive"
+  | "mail"
+  | "playback"
+  | "app"
+  | "eventsub";
 export interface RateLimitRule {
   max: number;
   windowMs: number;
@@ -31,6 +40,8 @@ export const DEFAULT_RATE_LIMITS: Record<RateLimitBucket, RateLimitRule> = {
   playback: { max: 3000, windowMs: 60_000 },
   /** Every request an OAuth app makes, across all its tokens (ADR 0027 §4). */
   app: { max: 6000, windowMs: 60_000 },
+  /** Per address for new EventSub WebSocket connects; kept apart from `auth` so sign-ins and sockets do not starve each other. */
+  eventsub: { max: 60, windowMs: 60_000 },
 };
 
 export interface RateLimitResult {
