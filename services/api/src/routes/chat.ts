@@ -208,9 +208,15 @@ export const chat = {
     if (deps.env.CHAT_SURGE_GUARD !== "on" && patch.surgeGuard?.enabled === true)
       throw precondition("surge_guard_off", "The surge guard is not enabled on this instance");
     const before = chatSettingsOf(c);
+    // The patch schema has no defaults, so a field left out keeps its stored value.
+    const { surgeGuard, ...flat } = patch;
     const settings = ChannelChatSettings.parse({
       ...before,
-      ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),
+      ...Object.fromEntries(Object.entries(flat).filter(([, v]) => v !== undefined)),
+      surgeGuard: {
+        ...before.surgeGuard,
+        ...Object.fromEntries(Object.entries(surgeGuard ?? {}).filter(([, v]) => v !== undefined)),
+      },
     });
     const modes: {
       action: "slow_mode" | "followers_only" | "subscribers_only" | "emote_only";

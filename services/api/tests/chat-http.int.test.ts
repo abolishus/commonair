@@ -208,6 +208,40 @@ describe("chat settings: instance flags (W1)", () => {
       env.CHAT_SURGE_GUARD = "off";
     }
   });
+
+  test("a partial update keeps every field it leaves out", async () => {
+    const env = api.deps.env as { CHAT_WATCH_GATE: "off" | "on"; CHAT_SURGE_GUARD: "off" | "on" };
+    env.CHAT_WATCH_GATE = "on";
+    env.CHAT_SURGE_GUARD = "on";
+    try {
+      const set = await patch({
+        linksAllowed: false,
+        minVerifiedWatchSeconds: 120,
+        surgeGuard: { enabled: true, cooldownMinutes: 30 },
+      });
+      expect(set.status).toBe(200);
+      const r = await patch({ slowModeSeconds: 5 });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({
+        slowModeSeconds: 5,
+        linksAllowed: false,
+        minVerifiedWatchSeconds: 120,
+        surgeGuard: { enabled: true, cooldownMinutes: 30 },
+      });
+      // A partial surgeGuard merges into the stored guard settings.
+      const g = await patch({ surgeGuard: { triggerUnverifiedRatio: 0.8 } });
+      expect(g.body).toMatchObject({ surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.8, cooldownMinutes: 30 } });
+    } finally {
+      await patch({
+        slowModeSeconds: 0,
+        linksAllowed: true,
+        minVerifiedWatchSeconds: 0,
+        surgeGuard: { enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 },
+      });
+      env.CHAT_WATCH_GATE = "off";
+      env.CHAT_SURGE_GUARD = "off";
+    }
+  });
 });
 
 describe("held messages", () => {

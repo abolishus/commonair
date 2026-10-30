@@ -502,7 +502,11 @@ export const PaymentBreakdown = z.object({
   /** `succeededAt + payout.rules.holdDays`; null once released. */
   holdReleasesAt: Timestamp.nullable(),
   holdReleasedAt: Timestamp.nullable(),
-  /** The `platform.cut` that fixed the split (`cutHistoryId` in the posting; null history id = the founding seed). */
+  /**
+   * The `platform.cut` that fixed the split (`cutHistoryId` in the posting). The founding seed has
+   * `historyId` and `changedAt` null even though its insert wrote a history row (old value null, no
+   * proposal); `coop.feeSchedule` reports that row the same way.
+   */
   cutSource: z.object({
     historyId: Id.nullable(),
     changedAt: Timestamp.nullable(),
@@ -515,12 +519,16 @@ export const PaymentBreakdown = z.object({
   ),
 });
 export const FeeScheduleEntry = z.object({
-  /** `governance_settings_history.id`; null for the founding seed value (no history row exists for it). */
+  /**
+   * `governance_settings_history.id`; null for the founding seed value. The seed's insert does write
+   * a history row (old value null, no proposal), but it is reported with `id` and `changedAt` null,
+   * matching `PaymentMetaV2.cutHistoryId` and `PaymentBreakdown.cutSource`.
+   */
   id: Id.nullable(),
   key: z.enum(E.FEE_SCHEDULE_KEYS),
   value: z.record(z.string(), z.unknown()),
   previous: z.record(z.string(), z.unknown()).nullable(),
-  /** Null for the seed. */
+  /** Null for the founding seed (see `id`). */
   changedAt: Timestamp.nullable(),
   proposalId: Id.nullable(),
 });

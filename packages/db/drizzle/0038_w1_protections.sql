@@ -27,6 +27,8 @@ BEGIN
     RAISE EXCEPTION 'payment fraud flags are never deleted' USING ERRCODE = 'insufficient_privilege';
   END IF;
   IF TG_OP = 'INSERT' THEN
+    -- Serializes with payouts_fraud_guard per payee (see there).
+    PERFORM pg_advisory_xact_lock(hashtext('fraud-payee:' || NEW.payee_user_id::text));
     IF NEW.status <> 'open' OR NEW.reviewed_by_id IS NOT NULL OR NEW.recommendation IS NOT NULL
        OR NEW.reviewed_at IS NOT NULL OR NEW.decided_by_id IS NOT NULL OR NEW.decision IS NOT NULL
        OR NEW.decided_at IS NOT NULL OR NEW.released_by_id IS NOT NULL OR NEW.released_at IS NOT NULL THEN
@@ -77,7 +79,8 @@ BEGIN
        -- Parenthesized: PL/pgSQL ends an IF condition at the first THEN outside parentheses.
        OR NEW.decision::text <> (CASE NEW.status WHEN 'cleared' THEN 'clear' ELSE 'confirm' END)
        OR NEW.reviewed_by_id IS DISTINCT FROM OLD.reviewed_by_id
-       OR NEW.recommendation IS DISTINCT FROM OLD.recommendation THEN
+       OR NEW.recommendation IS DISTINCT FROM OLD.recommendation
+       OR NEW.reviewed_at IS DISTINCT FROM OLD.reviewed_at THEN
       RAISE EXCEPTION 'a decision sets the decider, a matching decision and the time only' USING ERRCODE = 'check_violation';
     END IF;
     IF NEW.decided_by_id = OLD.reviewed_by_id OR NEW.decided_by_id IS NOT DISTINCT FROM OLD.raised_by_id
@@ -110,6 +113,15 @@ CREATE TRIGGER payment_fraud_flags_no_truncate BEFORE TRUNCATE ON public.payment
 CREATE FUNCTION commonair_payout_fraud_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
+  IF NEW.status::text IN ('pending', 'scheduled', 'paid')
+     AND (TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status) THEN
+    -- Under READ COMMITTED a flag insert and this release could each miss the other's uncommitted
+    -- row. Both take this per-payee lock, so the later one waits and then sees the earlier one: the
+    -- EXISTS below runs on a fresh snapshot, and a raise re-tags a payout released just before it.
+    -- A raise that re-tags rows another release already locked can deadlock; Postgres aborts one
+    -- side and nothing is paid out.
+    PERFORM pg_advisory_xact_lock(hashtext('fraud-payee:' || NEW.user_id::text));
+  END IF;
   IF NEW.status::text IN ('pending', 'scheduled', 'paid')
      AND (TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status)
      AND EXISTS (SELECT 1 FROM public.payment_fraud_flags f

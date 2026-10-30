@@ -151,4 +151,19 @@ describe("message_set reports", () => {
     const [row] = await db().select().from(schema.reports).where(eq(schema.reports.id, r.body.id));
     expect(row?.status).toBe("open");
   });
+
+  test("a moderator who wrote one of the wave's messages cannot resolve it", async () => {
+    const ids = await messages(aliceChannel, [bob, staff], 2);
+    const r = await report(alice, wave(ids));
+    expect(r.status).toBe(200);
+    const dismiss = await staff.client.call<ReportDto>("POST", `/api/admin/reports/${r.body.id}`, {
+      status: "dismissed",
+      resolution: "not a wave",
+      action: "none",
+    });
+    expect(dismiss.status).toBe(403);
+    expect((await resolve(r.body.id, "remove_content")).status).toBe(403);
+    const [row] = await db().select().from(schema.reports).where(eq(schema.reports.id, r.body.id));
+    expect(row?.status).toBe("open");
+  });
 });

@@ -30,17 +30,22 @@ export const ChannelTheme = z.object({
 });
 export type ChannelTheme = z.infer<typeof ChannelTheme>;
 
-export const ChannelChatSettings = z.object({
+/**
+ * Each chat setting's validator without its default. `ChannelChatSettings` adds the defaults; the
+ * PATCH input (`ChannelChatSettingsPatch`) must not, because Zod applies `.default()` even inside
+ * `.partial()`, which would reset every field a partial update leaves out.
+ */
+const chatSettingFields = {
   /** Seconds between messages per user; 0 = off. */
-  slowModeSeconds: z.number().int().min(0).max(600).default(0),
+  slowModeSeconds: z.number().int().min(0).max(600),
   /** Minimum minutes followed before chatting; null = off. */
-  followersOnlyMinutes: z.number().int().min(0).max(129_600).nullable().default(null),
-  subscribersOnly: z.boolean().default(false),
-  emoteOnly: z.boolean().default(false),
+  followersOnlyMinutes: z.number().int().min(0).max(129_600).nullable(),
+  subscribersOnly: z.boolean(),
+  emoteOnly: z.boolean(),
   /** Account-age gate (days since signup); 0 = off. */
-  minAccountAgeDays: z.number().int().min(0).max(365).default(0),
-  requireVerifiedEmail: z.boolean().default(true),
-  linksAllowed: z.boolean().default(true),
+  minAccountAgeDays: z.number().int().min(0).max(365),
+  requireVerifiedEmail: z.boolean(),
+  linksAllowed: z.boolean(),
   /**
    * Verified-watch gate (ADR 0015 decision 7): seconds of gate-eligible watching this broadcast a
    * signed-in viewer needs before chatting; 0 = off, else 60–3600. Applies only while the instance
@@ -49,21 +54,47 @@ export const ChannelChatSettings = z.object({
   minVerifiedWatchSeconds: z
     .number()
     .int()
-    .refine((s) => s === 0 || (s >= 60 && s <= 3600), "0 (off) or 60–3600")
-    .default(0),
+    .refine((s) => s === 0 || (s >= 60 && s <= 3600), "0 (off) or 60–3600"),
   /** Subscribers skip the gate (broadcaster, moderators, VIPs and verified bots always do). */
-  verifiedWatchExemptSubscribers: z.boolean().default(true),
+  verifiedWatchExemptSubscribers: z.boolean(),
+};
+const surgeGuardFields = {
+  enabled: z.boolean(),
+  /** Share of new sessions older than 60 s that are not gate-eligible which trips the guard. */
+  triggerUnverifiedRatio: z.number().min(0.1).max(1),
+  cooldownMinutes: z.number().int().min(1).max(120),
+};
+const f = chatSettingFields;
+
+export const ChannelChatSettings = z.object({
+  slowModeSeconds: f.slowModeSeconds.default(0),
+  followersOnlyMinutes: f.followersOnlyMinutes.default(null),
+  subscribersOnly: f.subscribersOnly.default(false),
+  emoteOnly: f.emoteOnly.default(false),
+  minAccountAgeDays: f.minAccountAgeDays.default(0),
+  requireVerifiedEmail: f.requireVerifiedEmail.default(true),
+  linksAllowed: f.linksAllowed.default(true),
+  minVerifiedWatchSeconds: f.minVerifiedWatchSeconds.default(0),
+  verifiedWatchExemptSubscribers: f.verifiedWatchExemptSubscribers.default(true),
   /** Surge guard (ADR 0015 decision 6). Applies only while `CHAT_SURGE_GUARD` is on (`features.surgeGuard`). */
   surgeGuard: z
     .object({
-      enabled: z.boolean().default(false),
-      /** Share of new sessions older than 60 s that are not gate-eligible which trips the guard. */
-      triggerUnverifiedRatio: z.number().min(0.1).max(1).default(0.5),
-      cooldownMinutes: z.number().int().min(1).max(120).default(10),
+      enabled: surgeGuardFields.enabled.default(false),
+      triggerUnverifiedRatio: surgeGuardFields.triggerUnverifiedRatio.default(0.5),
+      cooldownMinutes: surgeGuardFields.cooldownMinutes.default(10),
     })
     .default({ enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 }),
 });
 export type ChannelChatSettings = z.infer<typeof ChannelChatSettings>;
+
+/**
+ * A partial chat-settings update: every field optional and default-free, so fields left out keep
+ * their stored value. `surgeGuard` is itself partial and merges into the stored guard settings.
+ */
+export const ChannelChatSettingsPatch = z
+  .object({ ...chatSettingFields, surgeGuard: z.object(surgeGuardFields).partial() })
+  .partial();
+export type ChannelChatSettingsPatch = z.infer<typeof ChannelChatSettingsPatch>;
 
 export const EmoteRange = z.object({
   emoteId: z.string(),

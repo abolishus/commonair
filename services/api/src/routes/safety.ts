@@ -306,6 +306,8 @@ export const safety = {
           ? { channelId: r.channelId, userId: null, evidence: r.evidence }
           : await subjectInfo(tx, r.subjectType, r.subjectId);
       if (info?.userId === caller.user.id) throw forbidden("You cannot resolve a report about yourself");
+      // A wave has no single subject user, but a moderator who wrote one of its messages is a party to it.
+      if (wave.some((m) => m.userId === caller.user.id)) throw forbidden("You cannot resolve a report about yourself");
       let ended: EndedBroadcast | null = null;
       let suspendedUser: string | null = null;
       let chatBan: { channelId: string; userId: string } | null = null;

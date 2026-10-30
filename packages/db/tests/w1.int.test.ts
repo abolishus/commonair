@@ -183,6 +183,27 @@ describe("payment_fraud_flags lifecycle", () => {
     ).toBe("23514");
   });
 
+  test("a decision cannot rewrite the review's time", async () => {
+    const a = await newFlag(await newUser());
+    await review(a, await newUser("treasurer"));
+    for (const reviewedAt of [null, new Date("2026-01-01T00:00:00Z")])
+      expect(
+        await pgCode(
+          app
+            .update(s.paymentFraudFlags)
+            .set({
+              status: "cleared",
+              decidedById: await newUser("treasurer"),
+              decision: "clear",
+              decidedAt: new Date(),
+              reviewedAt,
+            })
+            .where(eq(s.paymentFraudFlags.id, a)),
+        ),
+      ).toBe("23514");
+    expect((await flag(a)).status).toBe("reviewed");
+  });
+
   test("an undecided flag's note can change, nothing else outside review and decision", async () => {
     const a = await newFlag(await newUser());
     await app.update(s.paymentFraudFlags).set({ note: "looked at it" }).where(eq(s.paymentFraudFlags.id, a));
@@ -283,6 +304,28 @@ describe("payouts under fraud review", () => {
     expect(await pgCode(toPending(p))).toBe("23514");
     await release(id, await newUser("admin"));
     await toPending(p);
+  });
+
+  test("a release racing an uncommitted flag waits for it and is refused", async () => {
+    const payee = await newUser();
+    const p = await heldPayout(payee);
+    let inserted!: () => void;
+    let commit!: () => void;
+    const insertedP = new Promise<void>((r) => (inserted = r));
+    const commitP = new Promise<void>((r) => (commit = r));
+    const raise = app.transaction(async (tx) => {
+      await tx.insert(s.paymentFraudFlags).values({ payeeUserId: payee, kind: "manual", evidence: {} });
+      inserted();
+      await commitP;
+    });
+    await insertedP;
+    // Without the per-payee lock this would not see the uncommitted flag and would succeed.
+    const release = pgCode(toPending(p));
+    await new Promise((r) => setTimeout(r, 200));
+    commit();
+    await raise;
+    expect(await release).toBe("23514");
+    expect((await app.select().from(s.payouts).where(eq(s.payouts.id, p)))[0]?.status).toBe("held");
   });
 
   test("payees without a holding flag are unaffected", async () => {

@@ -17,7 +17,7 @@ export type PayoutRules = z.infer<typeof PayoutRulesSetting>;
 
 export interface MoneySettings {
   cut: PlatformCut;
-  /** `governance_settings_history.id` of the `platform.cut` in effect; null = the founding seed (no history row). */
+  /** `governance_settings_history.id` of the `platform.cut` in effect; null = the founding seed (its history row has old value null). */
   cutHistoryId: string | null;
   payoutRules: PayoutRules;
 }

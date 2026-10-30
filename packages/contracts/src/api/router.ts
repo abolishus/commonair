@@ -11,7 +11,7 @@ import * as E from "../enums.ts";
 import {
   AlertTemplate,
   BotConfig,
-  ChannelChatSettings,
+  ChannelChatSettingsPatch,
   ChannelTheme,
   GovernanceChange,
   MAX_UPLOAD_BYTES,
@@ -946,7 +946,7 @@ export const contract = {
         summary: "Change chat modes (slow, followers-only, subscribers-only, emote-only)",
         ...tag("Moderation"),
       })
-      .input(ChannelRef.extend(ChannelChatSettings.partial().shape))
+      .input(ChannelRef.extend(ChannelChatSettingsPatch.shape))
       .output(D.ChatSettings),
     bans: {
       list: mod
