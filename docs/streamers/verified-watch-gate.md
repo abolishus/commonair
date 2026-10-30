@@ -44,8 +44,8 @@ You, your moderators, your VIPs and verified bot accounts. Subscribers too, unle
 ## The surge guard
 
 With the guard on (off by default), the platform watches for a rush: in two minutes, at least 20
-new viewing sessions (or three times the channel's usual rate) of which a set share (default 50 %)
-are not verified after a minute, or a burst of suspicious follows. Then **surge mode** starts:
+new viewing sessions, or three times the channel's usual rate if that is higher, of which a set
+share (default 50 %) are not verified after a minute, or a burst of suspicious follows. Then **surge mode** starts:
 chat needs a minute of verified watching (or your own gate, if it is longer) until the cooldown
 (default 10 minutes) passes with no new rush.
 

@@ -5,7 +5,9 @@
  * The `chat-surge-guard` pass against real Postgres (application role) and Valkey (ADR 0015
  * decision 6): a burst of unverified sessions begins surge mode (override, outbox and audit rows
  * in one transaction, the `surge` frame), the cooldown ends it, a lapsed key is recorded as
- * expired, a moderator's suppression blocks a re-trigger, and the flag off does nothing.
+ * expired, a moderator's suppression blocks a re-trigger, a moderator's change between the read and
+ * the write wins with nothing recorded, turning the guard off mid-surge ends it, and the flag off
+ * does nothing.
  */
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -43,13 +45,15 @@ afterAll(async () => {
 });
 
 const created: string[] = [];
-// Each test's channels stop being scanned afterwards, so result counts are this test's alone.
+// Each test's channels stop being scanned (and swept) afterwards, so result counts are this test's alone.
 afterEach(async () => {
-  for (const id of created.splice(0))
+  for (const id of created.splice(0)) {
     await owner
       .update(s.channels)
       .set({ chatSettings: ChannelChatSettings.parse({}) })
       .where(eq(s.channels.id, id));
+    await valkey.del(KEYS.surgeOverride(id), surgeOpenKey(id));
+  }
 });
 
 let seq = 0;
@@ -211,6 +215,85 @@ describe("runSurgeGuard", () => {
     await burst(ch, 40, 90);
     expect((await runSurgeGuard(ctx, ON)).begun).toBe(0);
     expect((await override(ch.id))?.state).toBe("suppressed");
+    expect((await rows(ch.id))[0]).toHaveLength(0);
+  });
+
+  test("a moderator's override between the read and the write wins: nothing is recorded", async () => {
+    clock = new Date();
+    const ch = await guardedChannel();
+    await burst(ch, 30, 90);
+    const theirs = JSON.stringify({
+      state: "suppressed",
+      since: clock.toISOString(),
+      until: new Date(clock.getTime() + 600_000).toISOString(),
+      by: null,
+    });
+    // The API's write lands just before the job's compare-and-set.
+    let raced = false;
+    const racing = new Proxy(valkey, {
+      get(target, prop, receiver) {
+        if (prop === "eval" && !raced)
+          return async (...args: Parameters<typeof valkey.eval>) => {
+            raced = true;
+            await target.set(KEYS.surgeOverride(ch.id), theirs, "EX", 660);
+            return target.eval(...args);
+          };
+        const v: unknown = Reflect.get(target, prop, receiver);
+        return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const r = await runSurgeGuard({ ...ctx, valkey: racing } as WorkerContext, ON);
+    expect(raced).toBe(true);
+    expect(r.begun).toBe(0);
+    expect(await valkey.get(KEYS.surgeOverride(ch.id))).toBe(theirs);
+    expect(await valkey.exists(surgeOpenKey(ch.id))).toBe(0);
+    expect(await rows(ch.id)).toEqual([[], []]);
+    expect(framesFor(ch.id)).toEqual([]);
+  });
+
+  test("turning the guard off mid-surge ends it: end event, audit, keys gone, off frame", async () => {
+    clock = new Date();
+    const ch = await guardedChannel();
+    await burst(ch, 30, 90);
+    expect((await runSurgeGuard(ctx, ON)).begun).toBe(1);
+    await owner
+      .update(s.channels)
+      .set({ chatSettings: ChannelChatSettings.parse({}) })
+      .where(eq(s.channels.id, ch.id));
+    clock = new Date(clock.getTime() + 30_000);
+    const r = await runSurgeGuard(ctx, ON);
+    expect(r.ended).toBe(1);
+    expect(await override(ch.id)).toBeNull();
+    expect(await valkey.exists(surgeOpenKey(ch.id))).toBe(0);
+    const [events, audits] = await rows(ch.id);
+    expect(events.map((e) => e.payload)).toEqual([
+      expect.objectContaining({ trigger: "new_sessions" }),
+      { reason: "cooldown", by_user_id: null },
+    ]);
+    expect(audits.find((a) => a.action === "chat.surge.end")?.details).toEqual({
+      reason: "cooldown",
+      cause: "guard_disabled",
+    });
+    await waitFor(async () => framesFor(ch.id).some((f) => f.state === "off"), { timeoutMs: 3_000 });
+    // Nothing left: the next run does nothing more.
+    expect((await runSurgeGuard(ctx, ON)).ended).toBe(0);
+  });
+
+  test("a moderator's suppression left on an unguarded channel is cleared quietly", async () => {
+    clock = new Date();
+    const ch = await guardedChannel();
+    await owner
+      .update(s.channels)
+      .set({ chatSettings: ChannelChatSettings.parse({}) })
+      .where(eq(s.channels.id, ch.id));
+    await valkey.set(
+      KEYS.surgeOverride(ch.id),
+      JSON.stringify({ state: "suppressed", since: clock.toISOString(), until: clock.toISOString(), by: null }),
+      "EX",
+      660,
+    );
+    expect((await runSurgeGuard(ctx, ON)).ended).toBe(0);
+    expect(await override(ch.id)).toBeNull();
     expect((await rows(ch.id))[0]).toHaveLength(0);
   });
 

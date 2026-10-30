@@ -139,6 +139,23 @@ describe("unlocks: the per-address cap", () => {
     expect(capped?.value.f).toBe(1);
   });
 
+  test("the fallback counts the relay seconds only, not those from the address that capped them", () => {
+    const rows = [
+      ...[1, 2].map((n) => row(n)),
+      row(3, { seconds: 600 }),
+      row(3, { ipHash: "relay", privacyRelay: true, seconds: 90 }),
+    ];
+    const capped = unlocks(rows, 2, SECRET).find((u) => u.userId === uid(3));
+    expect(capped?.value).toEqual({ b: B, s: Math.max(0, 90 - verifiedWatchJitter(SECRET, B, uid(3))), f: 1 });
+    // Counted on an ordinary address: every address's seconds add up.
+    const [counted] = unlocks(
+      [row(1, { seconds: 600 }), row(1, { ipHash: "relay", privacyRelay: true, seconds: 90 })],
+      5,
+      SECRET,
+    );
+    expect(counted?.value.s).toBe(690 - verifiedWatchJitter(SECRET, B, uid(1)));
+  });
+
   test("exempt roles are left out by the query, so they take no place (five others still fit)", () => {
     // The writer's SQL drops the broadcaster, moderators, VIPs and verified bots before ranking.
     const rows = [1, 2, 3, 4, 5].map((n) => row(n));

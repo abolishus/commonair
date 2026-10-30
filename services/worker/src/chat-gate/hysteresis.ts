@@ -53,7 +53,8 @@ export type SurgeAction =
   | { kind: "expired" }
   | { kind: "begin"; trigger: SurgeTrigger; next: SurgeOverride }
   | { kind: "extend"; next: SurgeOverride }
-  | { kind: "end" }
+  /** `cause`: the channel's guard was turned off with surge mode still open (audit detail only). */
+  | { kind: "end"; cause?: "guard_disabled" }
   /** A suppression ran out with nothing to start: drop the key quietly (the moderator's end was recorded). */
   | { kind: "clear" };
 

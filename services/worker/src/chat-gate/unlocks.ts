@@ -45,17 +45,25 @@ export interface Unlock {
 /**
  * The per-address cap (decision 3) and the fallback (decision 5). On each exact address, users are
  * ranked by their first session there and the first `perAddress` count; privacy-relay addresses are
- * not capped and mark the user `f: 1`. A user counted on any ordinary address gets `f: 0`. Seconds
- * are summed over all the user's gate-eligible sessions on the broadcast, minus the jitter. Rows
+ * not capped and mark the user `f: 1`. A user counted on any ordinary address gets `f: 0` and their
+ * seconds summed over all their gate-eligible sessions on the broadcast; a user unlocked only by the
+ * fallback gets the relay seconds alone (the address that capped them does not count). Both minus
+ * the jitter. Rows
  * must already exclude the exempt roles (they neither need a key nor take a place in the cap).
  */
 export function unlocks(rows: readonly WatchRow[], perAddress: number, secret: string): Unlock[] {
-  const users = new Map<string, { row: WatchRow; seconds: number; counted: boolean; relay: boolean }>();
+  const users = new Map<
+    string,
+    { row: WatchRow; seconds: number; relaySeconds: number; counted: boolean; relay: boolean }
+  >();
   const userKey = (r: WatchRow) => `${r.channelId}:${r.broadcastId}:${r.userId}`;
   for (const r of rows) {
-    const u = users.get(userKey(r)) ?? { row: r, seconds: 0, counted: false, relay: false };
+    const u = users.get(userKey(r)) ?? { row: r, seconds: 0, relaySeconds: 0, counted: false, relay: false };
     u.seconds += Math.max(0, r.seconds);
-    if (r.privacyRelay) u.relay = true;
+    if (r.privacyRelay) {
+      u.relay = true;
+      u.relaySeconds += Math.max(0, r.seconds);
+    }
     users.set(userKey(r), u);
   }
 
@@ -82,10 +90,11 @@ export function unlocks(rows: readonly WatchRow[], perAddress: number, secret: s
   for (const u of users.values()) {
     if (!u.counted && !u.relay) continue;
     const j = verifiedWatchJitter(secret, u.row.broadcastId, u.row.userId);
+    const seconds = u.counted ? u.seconds : u.relaySeconds;
     out.push({
       channelId: u.row.channelId,
       userId: u.row.userId,
-      value: { b: u.row.broadcastId, s: Math.max(0, Math.floor(u.seconds) - j), f: u.counted ? 0 : 1 },
+      value: { b: u.row.broadcastId, s: Math.max(0, Math.floor(seconds) - j), f: u.counted ? 0 : 1 },
     });
   }
   return out;

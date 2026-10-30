@@ -73,8 +73,10 @@ afterAll(async () => {
 beforeEach(async () => {
   env().CHAT_SURGE_GUARD = "on";
   await guard(true);
-  await api.deps.valkey.del(KEYS.surgeOverride(channelId));
+  await api.deps.valkey.del(KEYS.surgeOverride(channelId), surgeOpen());
 });
+const surgeOpen = () => `surge-open:${channelId}`;
+const markOpen = () => api.deps.valkey.set(surgeOpen(), "1", "EX", 600);
 
 describe("chat.surge", () => {
   test("state is off with no override; viewers are refused", async () => {
@@ -147,5 +149,54 @@ describe("chat.surge", () => {
     const r = await override(mod, "end");
     expect(r.body.state).toBe("suppressed");
     expect((await surgeEvents()).length).toBe(before);
+  });
+
+  test("a begin whose key lapsed is recorded as expired before a moderator's start", async () => {
+    await markOpen();
+    const before = (await surgeEvents()).length;
+    const r = await override(mod, "start");
+    expect(r.body.state).toBe("on");
+    expect((await surgeEvents()).slice(before)).toEqual([
+      { type: "chat.surge.end", payload: { reason: "expired", by_user_id: null } },
+      { type: "chat.surge.begin", payload: { trigger: "moderator", until: r.body.until, by_user_id: mod.userId } },
+    ]);
+    const expired = await db()
+      .select({ actorType: schema.auditLog.actorType, details: schema.auditLog.details })
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.channelId, channelId), eq(schema.auditLog.action, "chat.surge.end")));
+    expect(expired).toContainEqual({ actorType: "system", details: { reason: "expired" } });
+    expect(await api.deps.valkey.exists(surgeOpen())).toBe(1);
+  });
+
+  test("a lapsed begin and a moderator's end: only the expired end is recorded", async () => {
+    await markOpen();
+    const before = (await surgeEvents()).length;
+    expect((await override(mod, "end")).body.state).toBe("suppressed");
+    expect((await surgeEvents()).slice(before)).toEqual([
+      { type: "chat.surge.end", payload: { reason: "expired", by_user_id: null } },
+    ]);
+    expect(await api.deps.valkey.exists(surgeOpen())).toBe(0);
+  });
+
+  test("starting while on extends only: since and by stay, no second begin", async () => {
+    const first = await override(mod, "start");
+    const before = (await surgeEvents()).length;
+    await new Promise((r) => setTimeout(r, 20));
+    const again = await override(streamer, "start");
+    expect(again.body).toMatchObject({ state: "on", since: first.body.since, by: { id: mod.userId } });
+    expect(Date.parse(again.body.until ?? "")).toBeGreaterThan(Date.parse(first.body.until ?? ""));
+    expect((await surgeEvents()).length).toBe(before);
+  });
+
+  test("with the guard turned off, a moderator can still end what is left; start stays refused", async () => {
+    await override(mod, "start");
+    await guard(false);
+    expect((await override(mod, "start")).body.data).toEqual({ requirement: "surge_guard_disabled" });
+    const before = (await surgeEvents()).length;
+    const ended = await override(mod, "end");
+    expect(ended.status).toBe(200);
+    expect((await surgeEvents()).slice(before)).toEqual([
+      { type: "chat.surge.end", payload: { reason: "moderator", by_user_id: mod.userId } },
+    ]);
   });
 });

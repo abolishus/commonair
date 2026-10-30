@@ -6,7 +6,8 @@
  * enabled, read the new-session counts and the override, decide (`hysteresis.ts`) and apply. Begin
  * and end write the outbox event and the audit row in one transaction, with the override write as
  * its last statement (compare-and-set: a moderator's override in between wins and rolls this back);
- * the `surge` frame is published after the commit.
+ * the `surge` frame is published after the commit. A channel whose guard was turned off with surge
+ * state still in Valkey is ended the same way, so the moderator banner never sticks on `on`.
  */
 import { sql } from "drizzle-orm";
 import { ChatControlMessage } from "@commonair/contracts/chat";
@@ -101,7 +102,8 @@ export async function runSurgeGuard(
   const result: SurgeGuardResult = { channels: 0, begun: 0, ended: 0 };
   if (!cfg.surgeGuard) return result;
   const now = ctx.now();
-  for (const ch of await guardedChannels(ctx)) {
+  const guarded = await guardedChannels(ctx);
+  for (const ch of guarded) {
     result.channels++;
     try {
       const counts = ch.liveBroadcastId ? await surgeCounts(ctx.db, ch.id, ch.liveBroadcastId, now) : null;
@@ -128,8 +130,67 @@ export async function runSurgeGuard(
       ctx.logger.warn("surge guard: channel pass failed", { channelId: ch.id, errorCode: safeErrorCode(err) });
     }
   }
+  try {
+    result.ended += await sweepUnguarded(ctx, new Set(guarded.map((c) => c.id)), now);
+  } catch (err) {
+    ctx.logger.warn("surge guard: unguarded sweep failed", { errorCode: safeErrorCode(err) });
+  }
   if (result.begun || result.ended) ctx.logger.info("surge guard", { ...result });
   return result;
+}
+
+const SURGE_KEY = /^surge-(?:open|override):([0-9a-f-]{36})$/i;
+const globEscape = (s: string) => s.replace(/[*?[\]\\]/g, "\\$&");
+
+/** Channel ids with an override key or a begin marker (SCAN ignores the client's key prefix). */
+async function surgeKeyChannels(valkey: WorkerContext["valkey"]): Promise<Set<string>> {
+  const prefix = valkey.options.keyPrefix ?? "";
+  const ids = new Set<string>();
+  let cursor = "0";
+  do {
+    const [next, keys] = await valkey.scan(cursor, "MATCH", `${globEscape(prefix)}surge-o*`, "COUNT", 1000);
+    cursor = next;
+    for (const k of keys) {
+      const m = SURGE_KEY.exec(k.slice(prefix.length));
+      if (m?.[1]) ids.add(m[1].toLowerCase());
+    }
+  } while (cursor !== "0");
+  return ids;
+}
+
+/**
+ * Surge state left on channels whose guard is now off: chat already ignores it, so record the end
+ * (reason `cooldown`, audited as `guard_disabled`), drop the key and marker, and publish `off`.
+ */
+async function sweepUnguarded(ctx: WorkerContext, guarded: ReadonlySet<string>, now: Date): Promise<number> {
+  const ids = [...(await surgeKeyChannels(ctx.valkey))].filter((id) => !guarded.has(id));
+  if (ids.length === 0) return 0;
+  const rows = (await ctx.db.execute(sql`
+    select c.id, c.slug from channels c
+     where c.id in (${sql.join(
+       ids.map((id) => sql`${id}::uuid`),
+       sql`, `,
+     )})
+       and not coalesce((c.chat_settings->'surgeGuard'->>'enabled')::boolean, false)`)) as unknown as Row[];
+  let ended = 0;
+  for (const r of rows) {
+    const ch: GuardedChannel = {
+      id: String(r.id),
+      slug: String(r.slug),
+      liveBroadcastId: null,
+      settings: ChannelChatSettings.parse({}).surgeGuard,
+    };
+    try {
+      const stored = await readOverride(ctx.valkey, ch.id);
+      const open = (await ctx.valkey.exists(surgeOpenKey(ch.id))) === 1;
+      if (open || stored.value?.state === "on") {
+        if ((await apply(ctx, ch, { kind: "end", cause: "guard_disabled" }, stored, now, null)) !== null) ended++;
+      } else if (stored.raw !== null) await apply(ctx, ch, { kind: "clear" }, stored, now, null);
+    } catch (err) {
+      ctx.logger.warn("surge guard: unguarded channel failed", { channelId: ch.id, errorCode: safeErrorCode(err) });
+    }
+  }
+  return ended;
 }
 
 /** Apply one action; returns the override as it now stands, or null when a moderator got there first. */
@@ -181,7 +242,15 @@ async function apply(
       case "end":
         await ctx.db.transaction(async (tx) => {
           await emit(tx, "chat.surge.end", ch.id, { reason: "cooldown", by_user_id: null }, now);
-          await audit(tx, surgeAudit(ch.id, "chat.surge.end", { reason: "cooldown" }), now);
+          await audit(
+            tx,
+            surgeAudit(
+              ch.id,
+              "chat.surge.end",
+              a.cause ? { reason: "cooldown", cause: a.cause } : { reason: "cooldown" },
+            ),
+            now,
+          );
           await cas(null);
         });
         await ctx.valkey.del(surgeOpenKey(ch.id));
