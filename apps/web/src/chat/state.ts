@@ -7,7 +7,8 @@
  * subs, tips). Events carry a local id, never a message id: moderation, dedupe and the
  * message-only logic skip them; they share the log cap. Pure, for unit tests.
  */
-import type { ChatMessageFrame } from "./connection.ts";
+import type { ChannelChatSettings } from "@commonair/contracts/shapes";
+import type { ChatMessageFrame, ChatSurge } from "./connection.ts";
 import { MAX_MESSAGES } from "./connection.ts";
 import type { ChatEventView } from "./events.ts";
 
@@ -54,5 +55,88 @@ export function chatReducer(rows: ChatRow[], action: ChatAction): ChatRow[] {
       return cap([...rows, { kind: "notice", id: action.id, code: action.code }]);
     case "event":
       return cap([...rows, { kind: "event", id: action.id, event: action.event }]);
+  }
+}
+
+/** How many deleted ids `Tombstones` remembers (the presentation queue holds at most 60 s of chat). */
+const MAX_TOMBSTONES = 2_000;
+
+/**
+ * Moderation that arrives while the presentation queue still holds a line (up to 60 s with chat
+ * sync on): `chatReducer` only marks rows already in the log, so a held line would otherwise show
+ * as a normal one after its delete, ban or clear. Each message is stamped on arrival (`arrive`);
+ * `hides` drops it at show time when it was deleted, or when a ban of its author or a clear came
+ * after it arrived (a timed-out user's later lines still show).
+ */
+export class Tombstones {
+  private seq = 0;
+  private clearedAt = 0;
+  private readonly deleted = new Set<string>();
+  private readonly bans = new Map<string, number>();
+
+  /** Stamp a message as it arrives from the socket. */
+  arrive(): number {
+    return ++this.seq;
+  }
+
+  delete(messageId: string): void {
+    this.deleted.add(messageId);
+    if (this.deleted.size > MAX_TOMBSTONES) {
+      const oldest = this.deleted.values().next();
+      if (!oldest.done) this.deleted.delete(oldest.value);
+    }
+  }
+
+  ban(userId: string, username: string): void {
+    const at = ++this.seq;
+    this.bans.set(`id:${userId}`, at);
+    this.bans.set(`name:${username}`, at);
+  }
+
+  clear(): void {
+    this.clearedAt = ++this.seq;
+    // Everything that arrived before is covered by the clear.
+    this.deleted.clear();
+    this.bans.clear();
+  }
+
+  /** Whether a message stamped `arrivedAt` must not be shown. */
+  hides(m: ChatMessageFrame, arrivedAt: number): boolean {
+    if (arrivedAt <= this.clearedAt || this.deleted.has(m.id)) return true;
+    const ban = Math.max(this.bans.get(`id:${m.user.id}`) ?? 0, this.bans.get(`name:${m.user.username}`) ?? 0);
+    return ban > arrivedAt;
+  }
+}
+
+/**
+ * What the panel feeds `<SurgeBanner/>` (W1-watch-gate): the latest settings and surge state (the
+ * `joined` frame carries both, so a viewer who joins mid-surge sees the hint at once) and whether a
+ * send was refused by the verified-watch gate since the last (re)join.
+ */
+export interface GateState {
+  settings: ChannelChatSettings | null;
+  surge: ChatSurge | null;
+  gateDenied: boolean;
+}
+export type GateAction =
+  | { type: "reset" }
+  | { type: "joined" }
+  | { type: "denied" }
+  | { type: "settings"; settings: ChannelChatSettings }
+  | { type: "surge"; surge: ChatSurge };
+export const EMPTY_GATE: GateState = { settings: null, surge: null, gateDenied: false };
+
+export function gateReducer(state: GateState, action: GateAction): GateState {
+  switch (action.type) {
+    case "reset":
+      return EMPTY_GATE;
+    case "joined":
+      return state.gateDenied ? { ...state, gateDenied: false } : state;
+    case "denied":
+      return state.gateDenied ? state : { ...state, gateDenied: true };
+    case "settings":
+      return { ...state, settings: action.settings };
+    case "surge":
+      return { ...state, surge: action.surge };
   }
 }

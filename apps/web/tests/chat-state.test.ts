@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ChatConnection, MAX_MESSAGES, type ChatMessageFrame, type SocketLike } from "../src/chat/connection.ts";
 import { noticeMessage } from "../src/chat/messages.ts";
-import { chatReducer, type ChatAction, type ChatRow } from "../src/chat/state.ts";
+import { chatReducer, EMPTY_GATE, gateReducer, Tombstones, type ChatAction, type ChatRow } from "../src/chat/state.ts";
 import { t } from "../src/i18n/index.ts";
 
 const UUID = (n: number) => `0190f000-0000-7000-8000-${n.toString().padStart(12, "0")}`;
@@ -220,5 +220,61 @@ describe("ChatConnection settings and surge frames", () => {
     conn.handleFrame(JSON.stringify({ op: "surge", channel: CHANNEL, state: "bogus", until: null }));
     expect(settings).toEqual([next]);
     expect(surges).toEqual([{ state: "suppressed", until: null }]);
+  });
+});
+
+describe("gateReducer (what the panel hands <SurgeBanner/>)", () => {
+  it("a mid-surge joiner has the surge from the joined frame at once, and every rejoin starts over", () => {
+    const until = "2026-10-30T12:10:00.000Z";
+    // The order the panel dispatches for a joined frame: joined, settings, surge.
+    let s = gateReducer(EMPTY_GATE, { type: "joined" });
+    s = gateReducer(s, { type: "surge", surge: { state: "on", until } });
+    expect(s.surge).toEqual({ state: "on", until });
+    expect(s.gateDenied).toBe(false);
+    s = gateReducer(s, { type: "denied" });
+    expect(gateReducer(s, { type: "denied" })).toBe(s);
+    // A reconnect: the join clears the denial; the new joined frame's surge replaces the old one.
+    s = gateReducer(s, { type: "joined" });
+    expect(s.gateDenied).toBe(false);
+    s = gateReducer(s, { type: "surge", surge: { state: "off", until: null } });
+    expect(s.surge).toEqual({ state: "off", until: null });
+    expect(gateReducer(s, { type: "joined" })).toBe(s);
+    expect(gateReducer(s, { type: "reset" })).toBe(EMPTY_GATE);
+  });
+});
+
+describe("Tombstones (moderation that arrives while a line is held)", () => {
+  const troll = { id: 7, username: "troll_seven" };
+
+  it("hides a held line deleted before it is shown, and nothing else", () => {
+    const t = new Tombstones();
+    const a = t.arrive();
+    const b = t.arrive();
+    t.delete(msg(1).id);
+    expect(t.hides(msg(1), a)).toBe(true);
+    expect(t.hides(msg(2), b)).toBe(false);
+  });
+
+  it("a ban hides the author's lines that arrived before it, by id or by name, not later ones", () => {
+    const t = new Tombstones();
+    const before = t.arrive();
+    t.ban(UUID(7), "troll_seven");
+    const after = t.arrive();
+    expect(t.hides(msg(1, troll), before)).toBe(true);
+    expect(t.hides(msg(1, { id: 8, username: "troll_seven" }), before)).toBe(true);
+    expect(t.hides(msg(1, { id: 7, username: "renamed" }), before)).toBe(true);
+    // A timeout ends: the user's next lines show.
+    expect(t.hides(msg(2, troll), after)).toBe(false);
+    expect(t.hides(msg(3), before)).toBe(false);
+  });
+
+  it("a clear hides every line that arrived before it", () => {
+    const t = new Tombstones();
+    const before = t.arrive();
+    t.delete(msg(9).id);
+    t.clear();
+    const after = t.arrive();
+    expect(t.hides(msg(1), before)).toBe(true);
+    expect(t.hides(msg(2), after)).toBe(false);
   });
 });
