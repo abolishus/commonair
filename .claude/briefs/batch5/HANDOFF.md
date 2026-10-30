@@ -57,8 +57,7 @@ and `apps/web/src/i18n/README.md` to see what already landed; `.claude/briefs/_d
 
 - **Workflow tool per wave.** Per unit: implement in its own worktree (`isolation: 'worktree'`,
   branch `n2/<unit>`, `git commit -s`), then an independent review, then a fix pass in the same
-  worktree. The batch 4 scripts are reusable: `batch4-wave2-*.js` under this project's
-  `workflows/scripts/` (implement schema returns worktree, branch, commits and report; the fix
+  worktree. The batch 4 scripts are reusable: `~/.claude/projects/-Users-joshe-Repos-bcon/555274cf-5518-4b7f-94d9-e487a614ddc4/workflows/scripts/batch4-wave2-wf_8302f353-c4e.js` (implement schema returns worktree, branch, commits and report; the fix
   agent `cd`s into the worktree). Tell implementers to copy `.env` into their worktree root (run
   `bun scripts/init-env.ts --merge` there if VAPID keys are missing) and `bun install` if needed.
 - **Merge waves yourself.** Before merging, check that no two branches touch the same file. Use
