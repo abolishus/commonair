@@ -151,6 +151,22 @@ describe("calmRows (the wave view)", () => {
     expect(calmRows([row(m[0]!, true)], { self: SELF })).toEqual([]);
   });
 
+  it("a wave the log's cap cut down to one copy keeps its wave row and id; a deletion does not", () => {
+    const m = [msg(1, "go", { at: 0 }), msg(2, "go", { at: 10 }), msg(3, "go", { at: 20 })];
+    const waveIds = new Map(m.map((x) => [x.id, UUID(1)]));
+    // The cap dropped copies 1 and 2: copy 3 is still the wave first shown as UUID(1).
+    expect(shape(calmRows([row(m[2]!)], { self: SELF, waveIds }))).toEqual([`w:${UUID(1)}x1`]);
+    expect(shape(calmRows([row(m[2]!)], { self: SELF, waveIds, admitted: new Set([UUID(3)]) }))).toEqual([
+      `w:${UUID(1)}x1`,
+    ]);
+    // Deleted copies are still in the log: the wave of one becomes a row.
+    expect(shape(calmRows([row(m[0]!, true), row(m[1]!, true), row(m[2]!)], { self: SELF, waveIds }))).toEqual([
+      UUID(3),
+    ]);
+    // Never remembered as a wave: a plain row.
+    expect(shape(calmRows([row(m[2]!)], { self: SELF, waveIds: new Map() }))).toEqual([UUID(3)]);
+  });
+
   it("a ban (every message of the user marked deleted) shrinks the wave and its sender count", () => {
     const rows = [
       row(msg(1, "spam", { at: 0, user: 1 })),

@@ -66,13 +66,19 @@ an owner notification and audit row, studio panel; no harness step per ADR 0028 
 Applied: the `discord-webhook-remove-confirm` row names the dialog (its confirm is
 `confirm-dialog-confirm`); the `lastPostedAt` comment (test posts do not set it). **Milestone
 wiring:** `timeline-sync`, `surge-guard` and `notifications` are `inFull: true`, in
-`FULL_REQUIRED`, and run in a new `features` shard (the CI matrix follows `FULL_SHARDS`; decision
-(m): `notifications` stays in `features` unless the shard passes ~12 minutes); w1 and n1 selectors
+`FULL_REQUIRED`, and run in new shards (the CI matrix follows `FULL_SHARDS`): `features`
+(`timeline-sync`, `surge-guard`) and, by decision (m), `notify` (`notifications`, ~3 min), since
+`features` with all three ran ~15 minutes; w1 and n1 selectors
 checks in `apps/web/tests/selectors.test.ts` (literal, conditional and templated ids); docs index
 rows for the N1 pages. CI flakes seen on `b3b3d68` and its rerun, not reproduced and not tied to a
 change: `integrity-basic` "count converges to 7" timed out at 150 s once (36–64 s on other runs),
 and `simulcast` hit its 10-minute scenario timeout with every assertion passed on a rerun whose
-`rest` shard took 1387 s (usually ~800 s). Watch both.
+`rest` shard took 1387 s (usually ~800 s). Watch both. First full runs of the new scenarios found: a Calm
+Chat bug (when the 200-row log cap trimmed a shown wave to one copy, the wave became a plain line
+under a new id the governor never admitted, so 4 rows could appear in a second; `calmRows` now
+keeps the wave row, with a flood reproduction test), and harness reads in `timeline-sync` that
+assumed `Date`s from the raw client (drizzle turns its timestamp parsers off; the step now uses
+millisecond ISO text both ways).
 
 Planning (2026-10-30): briefs,
 both contract-step docs and ADR 0036 (payment fraud floor) are on main (`e8fc926`); the decisions

@@ -525,6 +525,11 @@ describe("ChatPanel in Calm Chat", () => {
     // One more copy pushes out the second: the wave (copies 3 and 202) is still the same row.
     send(msg(202, "PogChamp", { at: 202 }));
     expect(all("chat-wave").map((w) => [w.dataset.id, w.dataset.count])).toEqual([[UUID(1), "2"]]);
+    await act(() => new Promise((r) => setTimeout(r, 300)));
+    // The cap drops copy 3 too: copy 202 alone is still the wave's row, not a new line under its own id.
+    send(msg(203, "distinct line 203"));
+    expect(all("chat-wave").map((w) => [w.dataset.id, w.dataset.count])).toEqual([[UUID(1), "1"]]);
+    expect(messageIds()).not.toContain(UUID(202));
   });
 
   it("turning Calm Chat off shows every line again (the log was never changed)", async () => {

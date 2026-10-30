@@ -127,6 +127,15 @@ export interface CalmViewOptions extends CalmContext {
 export function calmRows(rows: readonly ChatRow[], opts: CalmViewOptions): CalmRow[] {
   const groups = groupMessages(rows, opts);
   const shown = (id: string) => opts.admitted === undefined || opts.admitted.has(id);
+  let inLog: Set<string> | null = null;
+  // A wave the cap cut down to one copy stays the row it was (same id), rather than turning into
+  // a plain line under that copy's id: a new row the governor never let through. A deletion still
+  // turns a wave of one into a row (its first message is still in the log, marked deleted).
+  const keepsWave = (wave: Wave) => {
+    if (wave.id === wave.first.id) return false;
+    inLog ??= new Set(rows.flatMap((r) => (r.kind === "message" ? [r.id] : [])));
+    return !inLog.has(wave.id);
+  };
   const out: CalmRow[] = [];
   for (const r of rows) {
     if (r.kind !== "message") {
@@ -135,7 +144,7 @@ export function calmRows(rows: readonly ChatRow[], opts: CalmViewOptions): CalmR
     }
     if (r.deleted) continue;
     const wave = groups.get(r.id);
-    if (!wave || wave.count < 2) {
+    if (!wave || (wave.count < 2 && !keepsWave(wave))) {
       if (shown(r.id)) out.push({ kind: "row", row: r });
       continue;
     }

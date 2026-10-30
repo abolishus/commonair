@@ -13,8 +13,9 @@ export const FULL_SHARDS = {
   long: ["trust-safety", "e5-coop"],
   clock: ["clock-skew"],
   interact: ["interact", "channel-bot"],
-  // W1 and N1 (batch 4): their own stack, so `rest` keeps its ~10 minutes.
-  features: ["timeline-sync", "surge-guard", "notifications"],
+  // W1 (batch 4): ~15 min with both, so N1's notifications runs apart (decision (m), ~12 min cap).
+  features: ["timeline-sync", "surge-guard"],
+  notify: ["notifications"],
   rest: null,
 } as const satisfies Record<string, readonly string[] | null>;
 export type FullShard = keyof typeof FULL_SHARDS;
