@@ -5,18 +5,31 @@
  * Payout batch and lifecycle. The batch reserves each payout in the ledger (creator liability
  * → payout clearing) in the same transaction that writes the `payouts` row, so the reserved
  * money is no longer "available" to anything else: a later batch cannot pay it twice, and a
- * later chargeback cannot draw on it. Sending moves clearing → cash and is never refused;
- * a failed payout cancels the reservation.
+ * later chargeback cannot draw on it. Sending moves clearing → cash and is never refused
+ * for balance reasons; a failed payout cancels the reservation.
+ *
+ * The payment fraud floor (ADR 0036) hooks in here: a payee with a holding fraud flag gets every
+ * payout created `held` / `fraud_review`, a first large payout raises a `new_payee` flag, and
+ * sending refuses a held payee. The same rule is enforced by `payouts_fraud_guard` (migration
+ * 0038); these checks only give clearer errors and keep batches from tripping it.
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { type Executor, schema } from "@commonair/db";
+import {
+  FRAUD_REVIEW_HOLD,
+  PAYMENT_FRAUD_RULES,
+  type ACTOR_TYPES,
+  type PAYMENT_FRAUD_KINDS,
+} from "@commonair/contracts/enums";
+import { EVENTS } from "@commonair/contracts/events";
+import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { accounts, assertCurrency, parseStoredCode, storedCode } from "./accounts.ts";
 import { lockCreator, lockPayoutBatch } from "./locks.ts";
 import { assertCents, negate } from "./math.ts";
 import { type PostResult, post } from "./poster.ts";
 import { creatorBalances } from "./queries.ts";
 import { InsufficientBalanceError, payoutCancel, payoutReserve, payoutSent } from "./rules.ts";
+import { loadMoneySettings } from "./settings.ts";
 
 export interface CreatorAvailable {
   userId: string;
@@ -47,13 +60,263 @@ export function computePayoutBatch(creators: readonly CreatorAvailable[], minimu
 export interface PayoutRunResult {
   /** Rows created as `pending` (payout account ready). */
   created: number;
-  /** Rows created as `held` (payout account missing or not enabled); the money is reserved. */
+  /** Rows created as `held` (payout account missing or not enabled, or a fraud hold); the money is reserved. */
   held: number;
   totalCents: number;
   carriedOver: CreatorAvailable[];
 }
 
 export const PAYOUT_ACCOUNT_NOT_READY = "payout_account_not_ready";
+
+// ── Fraud floor (ADR 0036) ────────────────────────────────────────────────────────────────────
+
+export { FRAUD_REVIEW_HOLD };
+export type PaymentFraudKind = (typeof PAYMENT_FRAUD_KINDS)[number];
+type FlagRow = typeof schema.paymentFraudFlags.$inferSelect;
+const flags = schema.paymentFraudFlags;
+
+/**
+ * The one release-eligibility rule (the same as `payouts_fraud_guard`): a flag holds the payee's
+ * payouts while it is open or reviewed, or confirmed and not yet released by an admin. A cleared
+ * flag, or a released confirmed one, holds nothing.
+ */
+export function fraudFlagHolds(f: { status: string; releasedAt: Date | null }): boolean {
+  return f.status === "open" || f.status === "reviewed" || (f.status === "confirmed" && f.releasedAt === null);
+}
+
+/** `fraudFlagHolds` as a SQL condition on `payment_fraud_flags`. */
+export const fraudFlagHoldsSql = (): SQL =>
+  or(inArray(flags.status, ["open", "reviewed"]), and(eq(flags.status, "confirmed"), isNull(flags.releasedAt))) ??
+  sql`false`;
+
+/** Whether the payee has a holding flag (other than `exceptFlagId`). */
+export async function payeeHasHoldingFlag(tx: Executor, payeeUserId: string, exceptFlagId?: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: flags.id })
+    .from(flags)
+    .where(
+      and(
+        eq(flags.payeeUserId, payeeUserId),
+        fraudFlagHoldsSql(),
+        exceptFlagId ? sql`${flags.id} <> ${exceptFlagId}` : undefined,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** Payees with a holding flag. */
+async function holdingPayees(tx: Executor): Promise<Set<string>> {
+  const rows = await tx.selectDistinct({ id: flags.payeeUserId }).from(flags).where(fraudFlagHoldsSql());
+  return new Set(rows.map((r) => r.id));
+}
+
+/** How many of the payee's payouts are held for fraud review now. */
+export async function fraudHeldPayouts(tx: Executor, payeeUserId: string): Promise<number> {
+  const [row] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.payouts)
+    .where(
+      and(
+        eq(schema.payouts.userId, payeeUserId),
+        eq(schema.payouts.status, "held"),
+        eq(schema.payouts.holdReason, FRAUD_REVIEW_HOLD),
+      ),
+    );
+  return row?.n ?? 0;
+}
+
+/**
+ * Move the payee's `pending`/`scheduled` payouts, and its `held` / `payout_account_not_ready` ones,
+ * to `held` / `fraud_review`. The re-tag keeps the account-ready release paths (which release only
+ * `payout_account_not_ready`) from hitting `payouts_fraud_guard`. `paid` and `failed` stay as they
+ * are. Returns how many moved.
+ */
+export async function holdPayoutsForFraud(tx: Executor, payeeUserId: string): Promise<number> {
+  const p = schema.payouts;
+  const moved = await tx
+    .update(p)
+    .set({ status: "held", holdReason: FRAUD_REVIEW_HOLD })
+    .where(
+      and(
+        eq(p.userId, payeeUserId),
+        or(
+          inArray(p.status, ["pending", "scheduled"]),
+          and(eq(p.status, "held"), eq(p.holdReason, PAYOUT_ACCOUNT_NOT_READY)),
+        ),
+      ),
+    )
+    .returning({ id: p.id });
+  return moved.length;
+}
+
+/**
+ * After a clear or a release: when the payee has no holding flag left, move their `fraud_review`
+ * payouts to `pending`, or to `held` / `payout_account_not_ready` when their payout account is not
+ * ready. Call it after the flag update in the same transaction (the trigger reads the new status).
+ * Returns how many payouts became `pending` and how many stayed held for the account.
+ */
+export async function releaseFraudHolds(
+  tx: Executor,
+  payeeUserId: string,
+): Promise<{ released: number; accountNotReady: number }> {
+  if (await payeeHasHoldingFlag(tx, payeeUserId)) return { released: 0, accountNotReady: 0 };
+  const [acct] = await tx
+    .select({ enabled: schema.payoutAccounts.payoutsEnabled })
+    .from(schema.payoutAccounts)
+    .where(eq(schema.payoutAccounts.userId, payeeUserId));
+  const ready = acct?.enabled === true;
+  const p = schema.payouts;
+  const moved = await tx
+    .update(p)
+    .set(ready ? { status: "pending", holdReason: null } : { status: "held", holdReason: PAYOUT_ACCOUNT_NOT_READY })
+    .where(and(eq(p.userId, payeeUserId), eq(p.status, "held"), eq(p.holdReason, FRAUD_REVIEW_HOLD)))
+    .returning({ id: p.id });
+  return ready ? { released: moved.length, accountNotReady: 0 } : { released: 0, accountNotReady: moved.length };
+}
+
+export interface NewFraudFlag {
+  payeeUserId: string;
+  kind: PaymentFraudKind;
+  /** Ids, counts and cents only (ADR 0036 decision 5). */
+  evidence: Record<string, string | number>;
+  /** Null when the scan or the batch raised it. */
+  raisedById: string | null;
+  note?: string;
+  at: Date;
+}
+
+/**
+ * Insert an open flag; null when an undecided flag of that kind already exists for the payee (the
+ * partial unique index). `raised_at` is stamped from `at` (millisecond precision, so the list's
+ * keyset cursor round-trips exactly).
+ */
+export async function insertFraudFlag(tx: Executor, f: NewFraudFlag): Promise<FlagRow | null> {
+  const [row] = await tx
+    .insert(flags)
+    .values({
+      id: uuidv7(f.at.getTime()),
+      payeeUserId: f.payeeUserId,
+      kind: f.kind,
+      evidence: f.evidence,
+      raisedById: f.raisedById,
+      raisedAt: f.at,
+      note: f.note ?? "",
+    })
+    .onConflictDoNothing()
+    .returning();
+  return row ?? null;
+}
+
+export type FraudAction = "money.fraud.raise" | "money.fraud.review" | "money.fraud.decide" | "money.fraud.release";
+
+/**
+ * The audit row and the internal `money.fraud.flag` outbox row for one change to a flag, in the
+ * caller's transaction. Details and payload are ids and enums only: the treasurers' note is never
+ * copied (ADR 0036 decision 5).
+ */
+export async function recordFraudFlag(
+  tx: Executor,
+  r: {
+    flag: Pick<FlagRow, "id" | "payeeUserId" | "kind" | "status" | "releasedAt">;
+    action: FraudAction;
+    actorType: (typeof ACTOR_TYPES)[number];
+    actorId: string | null;
+    at: Date;
+  },
+): Promise<{ heldPayouts: number }> {
+  const heldPayouts = await fraudHeldPayouts(tx, r.flag.payeeUserId);
+  const [channel] = await tx
+    .select({ id: schema.channels.id })
+    .from(schema.channels)
+    .where(eq(schema.channels.ownerId, r.flag.payeeUserId))
+    .limit(1);
+  const channelId = channel?.id ?? null;
+  const def = EVENTS["money.fraud.flag"];
+  const payload = def.payload.parse({
+    flag_id: r.flag.id,
+    payee_user_id: r.flag.payeeUserId,
+    kind: r.flag.kind,
+    status: r.flag.status,
+    released: r.flag.releasedAt !== null,
+    held_payouts: heldPayouts,
+  }) as Record<string, unknown>;
+  await tx.insert(schema.events).values({
+    id: uuidv7(r.at.getTime()),
+    type: "money.fraud.flag",
+    version: def.version,
+    channelId,
+    payload,
+    occurredAt: r.at,
+  });
+  await tx.insert(schema.auditLog).values({
+    id: uuidv7(r.at.getTime()),
+    actorType: r.actorType,
+    actorId: r.actorId,
+    action: r.action,
+    subjectType: "payment_fraud_flag",
+    subjectId: r.flag.id,
+    channelId,
+    reason: "",
+    details: { flagId: r.flag.id, kind: r.flag.kind, status: r.flag.status },
+    createdAt: r.at,
+  });
+  return { heldPayouts };
+}
+
+/**
+ * Take the payout batch lock for a fraud change (raise, clear, release). `runPayoutBatch` reads the
+ * held payees once under this lock, so a flag change that does not wait for it could clear a payee
+ * the batch still treats as held and leave a fraud_review payout with no flag behind it.
+ * Lock order: payout batch → flag → payouts.
+ */
+export async function lockFraudPayoutBatch(tx: Executor): Promise<void> {
+  const { payoutRules } = await loadMoneySettings(tx);
+  await lockPayoutBatch(tx, payoutRules.currency);
+}
+
+/**
+ * Raise a flag and hold the payee's payouts, with its audit and outbox rows, in the caller's
+ * transaction (the scan and `raise`). Takes the payout batch lock first (lock order: payout batch
+ * → payment → creator), so a batch running now cannot create a `pending` payout after the re-tag.
+ * Null when an undecided flag of that kind already holds the payee.
+ */
+export async function raiseFraudFlag(
+  tx: Executor,
+  f: NewFraudFlag & { actorType: (typeof ACTOR_TYPES)[number] },
+): Promise<{ flag: FlagRow; held: number; heldPayouts: number } | null> {
+  await lockFraudPayoutBatch(tx);
+  const flag = await insertFraudFlag(tx, f);
+  if (!flag) return null;
+  const held = await holdPayoutsForFraud(tx, f.payeeUserId);
+  const { heldPayouts } = await recordFraudFlag(tx, {
+    flag,
+    action: "money.fraud.raise",
+    actorType: f.actorType,
+    actorId: f.raisedById,
+    at: f.at,
+  });
+  return { flag, held, heldPayouts };
+}
+
+/** `new_payee` (ADR 0036 decision 1): the first payout ever at or above the threshold; evidence `{ payoutCents }`. */
+export function newPayeeEvidence(
+  firstPayoutCents: number,
+  rules: { newPayeeFirstPayoutCents: number } = PAYMENT_FRAUD_RULES,
+): { payoutCents: number } | null {
+  return firstPayoutCents >= rules.newPayeeFirstPayoutCents ? { payoutCents: firstPayoutCents } : null;
+}
+
+/** Whether the creator ever had a payout (any status): `new_payee` judges only the first. */
+async function hadPayout(tx: Executor, userId: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: schema.payouts.id })
+    .from(schema.payouts)
+    .where(eq(schema.payouts.userId, userId))
+    .orderBy(desc(schema.payouts.periodStart))
+    .limit(1);
+  return rows.length > 0;
+}
 
 export interface PayableBalances {
   /** Released earnings not yet reserved (natural terms: owed). */
@@ -198,6 +461,9 @@ export async function runPayoutBatch(
       ).map((a) => [a.userId, a]),
     );
 
+    const fraudHeld = await holdingPayees(tx);
+    const flaggedAt = new Date();
+
     const result: PayoutRunResult = { created: 0, held: 0, totalCents: 0, carriedOver: candidates.carriedOver };
     for (const c of candidates.payouts) {
       if (already.has(c.userId)) continue;
@@ -217,7 +483,25 @@ export async function runPayoutBatch(
         );
       }
       const acct = accountsByUser.get(c.userId);
-      const ready = acct?.enabled === true;
+      // ADR 0036: a first payout this large raises `new_payee` before it is inserted, held.
+      let raised: FlagRow | null = null;
+      // Also for a payee another flag already holds: clearing that flag must not release this payout unreviewed.
+      if (!(await hadPayout(tx, c.userId))) {
+        const evidence = newPayeeEvidence(r.amountCents);
+        if (evidence) {
+          raised = await insertFraudFlag(tx, {
+            payeeUserId: c.userId,
+            kind: "new_payee",
+            evidence,
+            raisedById: null,
+            at: flaggedAt,
+          });
+          fraudHeld.add(c.userId);
+        }
+      }
+      // Fraud wins over account readiness: the hold is lifted by people, not by the account.
+      const fraud = fraudHeld.has(c.userId);
+      const ready = !fraud && acct?.enabled === true;
       const [row] = await tx
         .insert(schema.payouts)
         .values({
@@ -228,10 +512,20 @@ export async function runPayoutBatch(
           currency: opts.currency,
           status: ready ? "pending" : "held",
           provider: acct?.provider ?? "manual",
-          holdReason: ready ? null : PAYOUT_ACCOUNT_NOT_READY,
+          holdReason: ready ? null : fraud ? FRAUD_REVIEW_HOLD : PAYOUT_ACCOUNT_NOT_READY,
         })
         .onConflictDoNothing({ target: [schema.payouts.userId, schema.payouts.periodStart] })
         .returning({ id: schema.payouts.id });
+      if (raised) {
+        // `runPayoutBatch`'s caller audits only `payout.run`: the flag's own rows are written here.
+        await recordFraudFlag(tx, {
+          flag: raised,
+          action: "money.fraud.raise",
+          actorType: "system",
+          actorId: null,
+          at: flaggedAt,
+        });
+      }
       if (!row) continue;
       await post(
         tx,
@@ -291,6 +585,10 @@ export async function postPayout(
       throw new PayoutStateError(`payout ${row.id} is ${row.status}`);
     }
     if (!reservation) throw new PayoutStateError(`payout ${row.id} was never reserved in the ledger`);
+    // ADR 0036: refused before `payouts_fraud_guard` would, with an error the caller can map.
+    if (await payeeHasHoldingFlag(tx, row.userId)) {
+      throw new PayoutStateError(`payout ${row.id} is held: its payee is under fraud review`);
+    }
     const r = await post(
       tx,
       payoutSent({

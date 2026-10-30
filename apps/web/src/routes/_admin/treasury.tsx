@@ -12,10 +12,12 @@ import {
   PaymentsPanel,
   PayoutAccountForm,
   PayoutsPanel,
+  TreasuryPageTabs,
   type PayoutRunResult,
+  type TreasuryPageTab,
 } from "../../components/money/treasury.tsx";
+import { FraudReviewPanel, type FraudStatusFilter } from "../../components/money/fraud-review.tsx";
 import { CoopPatronageTab, CoopSharesTab } from "../../components/coop/treasury-tabs.tsx";
-import { TreasuryCoopTabs, type TreasuryCoopTab } from "../../components/coop/treasury.tsx";
 import { usePaged } from "../../components/money/use-load.ts";
 import { useBootstrap } from "../../lib/bootstrap.ts";
 import { t } from "../../i18n/index.ts";
@@ -30,7 +32,8 @@ const PAGE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
 
 function TreasuryPage(): React.JSX.Element {
-  const [tab, setTab] = React.useState<TreasuryCoopTab>("payments");
+  const [tab, setTab] = React.useState<TreasuryPageTab>("payments");
+  const [fraudStatus, setFraudStatus] = React.useState<FraudStatusFilter>("all");
   const [search, setSearch] = React.useState("");
   const reference = useDebounced(normalizeReference(search), SEARCH_DEBOUNCE_MS);
 
@@ -45,6 +48,19 @@ function TreasuryPage(): React.JSX.Element {
     moreFailed,
   );
   const payouts = usePaged("payouts", (cursor) => api().money.treasurer.payouts({ limit: PAGE, cursor }), moreFailed);
+  const fraud = usePaged(
+    `fraud|${fraudStatus}`,
+    (cursor) =>
+      api().money.treasurer.fraudFlags.list(
+        fraudStatus === "all" ? { limit: PAGE, cursor } : { status: fraudStatus, limit: PAGE, cursor },
+      ),
+    moreFailed,
+  );
+  // A flag change moves payouts too (held for review, or released).
+  const fraudChanged = () => {
+    fraud.reload();
+    payouts.reload();
+  };
   const [result, setResult] = React.useState<PayoutRunResult | null>(null);
   const [running, setRunning] = React.useState(false);
 
@@ -65,7 +81,7 @@ function TreasuryPage(): React.JSX.Element {
   return (
     <PageContainer data-testid="treasury" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("treasury.title")} description={t("treasury.intro")} />
-      <TreasuryCoopTabs
+      <TreasuryPageTabs
         value={tab}
         onValueChange={setTab}
         panels={{
@@ -136,6 +152,34 @@ function TreasuryPage(): React.JSX.Element {
           // E5: member shares (refunds to send) and patronage (run, approve, periods).
           shares: <CoopSharesTab />,
           patronage: <CoopPatronageTab meId={me?.id ?? ""} currency={config.currency} />,
+          // W1: payment fraud flags (ADR 0036); an admin's release is API-only.
+          fraud: (
+            <>
+              {fraud.failed && <FormError>{t("fraud.loadFailed")}</FormError>}
+              <FraudReviewPanel
+                flags={fraud.items ?? (fraud.failed ? [] : null)}
+                meId={me?.id ?? ""}
+                currency={config.currency}
+                status={fraudStatus}
+                onStatusChange={setFraudStatus}
+                hasMore={fraud.hasMore}
+                loadingMore={fraud.loadingMore}
+                onLoadMore={fraud.loadMore}
+                onRaise={async (username, note) => {
+                  await api().money.treasurer.fraudFlags.raise({ username, note });
+                  fraudChanged();
+                }}
+                onReview={async (flag, recommendation, note) => {
+                  await api().money.treasurer.fraudFlags.review({ id: flag.id, recommendation, note });
+                  fraudChanged();
+                }}
+                onDecide={async (flag, decision, note) => {
+                  await api().money.treasurer.fraudFlags.decide({ id: flag.id, decision, note });
+                  fraudChanged();
+                }}
+              />
+            </>
+          ),
         }}
       />
     </PageContainer>
