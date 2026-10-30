@@ -3,6 +3,7 @@
 
 import { QUEUES } from "@commonair/contracts/internal";
 import { z } from "zod";
+import { enforceChatRetention } from "../chat/retention.ts";
 import { withRunLock } from "../integrity/lock.ts";
 import { defineJob } from "../runtime/registry.ts";
 
@@ -18,8 +19,7 @@ export const job = defineJob({
       ctx.valkey,
       "worker:lock:retention:chat-retention",
       { ttlMs: 30_000, maxHoldMs: 30 * 60_000, job: "chat-retention", logger: ctx.logger },
-      // Stub: W1-spine implements it.
-      async () => ({ deleted: 0, held: 0 }),
+      () => enforceChatRetention(ctx),
     );
     return r.acquired ? r.value : { skipped: 1 };
   },
