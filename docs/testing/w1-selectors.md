@@ -78,7 +78,8 @@ the seed).
 
 `calm-toggle` (`data-state` `on|off`), `calm-digest` (the `aria-live` region), `chat-wave`
 (`data-count`, `data-senders`), `chat-wave-expand`, `chat-report-wave`, `chat-message-actions`
-(existing id, now for every signed-in viewer), `chat-user-block`, `blocked-users`, `blocked-user`
+(existing id, now for every signed-in viewer; `data-moderation` `true` when it offers timeout and
+ban), `chat-user-block`, `blocked-users`, `blocked-user`
 (`data-username`), `blocked-user-remove`, `chat-replay-disclosure`. Messages from blocked users are
 not rendered; `chat-message` keeps its E1 attributes and gains `data-media-ts`.
 

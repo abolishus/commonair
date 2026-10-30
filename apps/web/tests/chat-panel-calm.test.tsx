@@ -234,6 +234,7 @@ describe("MessageMenu", () => {
     const onBlock = vi.fn<() => void>();
     render(wrap(<MessageMenu displayName="Troll" onBlock={onBlock} />));
     expect(one("chat-message-actions").getAttribute("aria-label")).toBe("Actions for Troll");
+    expect(one("chat-message-actions").dataset.moderation).toBe("false");
     const item = await open();
     expect(item.textContent).toContain("Block Troll");
     expect(document.querySelector('[data-testid="chat-mod-timeout"]')).toBeNull();
@@ -247,6 +248,7 @@ describe("MessageMenu", () => {
     const onBan = vi.fn<() => void>();
     render(wrap(<MessageMenu displayName="Troll" onBlock={() => {}} moderation={{ onTimeout, onBan }} />));
     expect(one("chat-message-actions").getAttribute("aria-label")).toBe(t("chat.mod.actionsFor", { name: "Troll" }));
+    expect(one("chat-message-actions").dataset.moderation).toBe("true");
     await open();
     one("chat-mod-ban");
     fireEvent.click(one("chat-mod-timeout"));

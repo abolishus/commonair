@@ -35,6 +35,7 @@ export function MessageMenu({ displayName, onBlock, moderation = null }: Message
         render={
           <IconButton
             data-testid="chat-message-actions"
+            data-moderation={moderation ? "true" : "false"}
             label={
               moderation
                 ? t("chat.mod.actionsFor", { name: displayName })

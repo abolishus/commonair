@@ -278,7 +278,8 @@ export class WebActor implements SocialActor {
   }
 
   async moderationControls(): Promise<number> {
-    return byTestId(this.page, T.chatMessageActions).count();
+    // Every signed-in viewer gets the menu (to block); only a moderator's offers timeout and ban.
+    return byTestId(this.page, T.chatMessageActions, { moderation: "true" }).count();
   }
 
   async timeoutAuthor(author: string, text: string, b: WaitBudget): Promise<void> {
