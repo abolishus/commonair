@@ -4,7 +4,7 @@
 /** E6 web helpers that run without a browser: the /rpc filter and the secret-safe navigation. */
 import type { Page } from "playwright";
 import { describe, expect, test } from "vite-plus/test";
-import { gotoSecretUrl, isRpcUrl } from "../../src/e6/web.ts";
+import { RpcResponses, gotoSecretUrl, isRpcUrl } from "../../src/e6/web.ts";
 
 describe("isRpcUrl", () => {
   test("the API's /rpc endpoint, proxied or not", () => {
@@ -34,5 +34,27 @@ describe("gotoSecretUrl", () => {
   test("a successful navigation returns the page", async () => {
     const page = {} as Page;
     expect(await gotoSecretUrl(() => Promise.resolve(page), "x")).toBe(page);
+  });
+});
+
+describe("RpcResponses.settle", () => {
+  test("collects finished bodies and gives up on one that never finishes", async () => {
+    const rpc = new RpcResponses();
+    rpc.track(Promise.resolve("a"));
+    rpc.track(Promise.reject(new Error("gone")));
+    rpc.track(new Promise<string>(() => undefined));
+    const started = Date.now();
+    const { bodies, unfinished } = await rpc.settle(50);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(bodies).toEqual(["a"]);
+    expect(unfinished).toBe(1);
+  });
+
+  test("returns as soon as every body is read", async () => {
+    const rpc = new RpcResponses();
+    rpc.track(Promise.resolve("a"));
+    const started = Date.now();
+    expect(await rpc.settle(60_000)).toEqual({ bodies: ["a"], unfinished: 0 });
+    expect(Date.now() - started).toBeLessThan(1_000);
   });
 });

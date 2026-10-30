@@ -8,7 +8,7 @@
  */
 import type { Locator, Page } from "playwright";
 import { centsToInput } from "../money.ts";
-import { waitFor } from "../wait.ts";
+import { sleep, waitFor } from "../wait.ts";
 import { CONFIRM_DIALOG_CONFIRM, E6_TEST_IDS as E, byE6Id, etid, optionId } from "./selectors.ts";
 
 export type Dataset = Record<string, string | undefined>;
@@ -217,21 +217,29 @@ export class RpcResponses {
     if (this.pages.has(page)) return page;
     this.pages.add(page);
     page.on("response", (res) => {
-      if (!isRpcUrl(res.url())) return;
-      const p: Promise<void> = res.text().then(
-        (t) => void this.bodies.push(t),
-        () => undefined,
-      );
-      this.pending.add(p);
-      void p.finally(() => this.pending.delete(p));
+      if (isRpcUrl(res.url())) this.track(res.text());
     });
     return page;
   }
 
-  /** Wait for bodies still being read. */
-  async settle(): Promise<string[]> {
-    await Promise.allSettled(this.pending);
-    return this.bodies;
+  /** Keep a body being read; exposed for tests, which have no browser. */
+  track(body: Promise<string>): void {
+    const p: Promise<void> = body.then(
+      (t) => void this.bodies.push(t),
+      () => undefined,
+    );
+    this.pending.add(p);
+    void p.finally(() => this.pending.delete(p));
+  }
+
+  /**
+   * Wait up to `timeoutMs` for bodies still being read. A Playwright `response.text()` can stay
+   * pending for good (the page navigated or closed mid-read); waiting without a deadline hung
+   * simulcast until its 10-minute scenario timeout on CI. `unfinished` counts the ones given up on.
+   */
+  async settle(timeoutMs = 15_000, signal?: AbortSignal): Promise<{ bodies: string[]; unfinished: number }> {
+    await Promise.race([Promise.allSettled(this.pending), sleep(timeoutMs, signal)]);
+    return { bodies: this.bodies, unfinished: this.pending.size };
   }
 }
 

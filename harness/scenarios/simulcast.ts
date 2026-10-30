@@ -282,9 +282,12 @@ async function simulcast(ctx: ScenarioContext, kit: Kit): Promise<void> {
   );
 
   await removeTarget(ctx, s, channel, targetId, session, responses);
-  const browserBodies = await browserRpc.settle();
-  if (session) ctx.data("browserRpcResponses", browserBodies.length);
-  await scanForKey(ctx, kit, key, startedAt, [...responses, ...browserBodies]);
+  const browser = await browserRpc.settle(15_000, ctx.signal);
+  if (session) {
+    ctx.data("browserRpcResponses", browser.bodies.length);
+    if (browser.unfinished > 0) ctx.log.warn("browser /rpc bodies never finished", { unfinished: browser.unfinished });
+  }
+  await scanForKey(ctx, kit, key, startedAt, [...responses, ...browser.bodies]);
 }
 
 async function removeTarget(
