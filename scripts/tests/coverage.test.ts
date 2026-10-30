@@ -63,5 +63,6 @@ describe("coverage", () => {
   test("counts every source file, so untested files lower the number", () => {
     expect(COVERAGE_ARGS).toContain("--coverage.include=src/**/*.{ts,tsx}");
     expect(COVERAGE_ARGS).toContain("--coverage.provider=istanbul");
+    expect(COVERAGE_ARGS).toContain("--testTimeout=60000");
   });
 });

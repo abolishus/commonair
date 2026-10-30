@@ -37,6 +37,9 @@ export const COVERAGE_ARGS = [
   "--coverage.exclude=**/*.gen.*",
   "--coverage.exclude=**/*.stories.tsx",
   "--coverage.exclude=**/*.d.ts",
+  // Instrumentation makes cold imports ~4x slower (the harness tests that load every scenario
+  // module then cross 5 s). Timing is ci.yml's gate; this run only measures.
+  "--testTimeout=60000",
 ];
 
 export function percent(c: Counts): number {
