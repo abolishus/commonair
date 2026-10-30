@@ -10,7 +10,7 @@
  */
 import type { Scope } from "@commonair/contracts/scopes";
 import { AlertCallout } from "@commonair/ui/blocks/feedback";
-import { Button, buttonVariants } from "@commonair/ui/components/button";
+import { Button } from "@commonair/ui/components/button";
 import { Card, CardContent, CardFooter, CardHeader } from "@commonair/ui/components/card";
 import { Skeleton, SkeletonButton, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { PageContainer } from "@commonair/ui/layouts";
@@ -211,8 +211,8 @@ function ConsentError({ error, onRetry }: { error: AuthorizeErrorCode; onRetry: 
                   {t("oauth.error.retry")}
                 </Button>
               )}
-              {/* A real link styled as the house link button (Base UI's Button would give it role=button). */}
-              <a href="/" className={buttonVariants({ variant: "link", size: "sm" })}>
+              {/* A real link (Base UI's Button with an `<a>` would give it role=button). */}
+              <a href="/" className="text-sm text-primary underline-offset-4 hover:underline">
                 {t("oauth.error.home")}
               </a>
             </>
