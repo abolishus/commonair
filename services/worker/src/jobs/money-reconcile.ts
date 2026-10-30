@@ -4,6 +4,7 @@
 import { QUEUES } from "@commonair/contracts/internal";
 import { z } from "zod";
 import { withRunLock } from "../integrity/lock.ts";
+import { reconcilePayments } from "../money/reconcile.ts";
 import { defineJob } from "../runtime/registry.ts";
 
 /** feature-wins §4.1. Also enqueued on demand (empty data) by the ops test hook; a busy run lock answers `skipped`. */
@@ -18,8 +19,7 @@ export const job = defineJob({
       ctx.valkey,
       "worker:lock:payments:money-reconcile",
       { ttlMs: 30_000, maxHoldMs: 30 * 60_000, job: "money-reconcile", logger: ctx.logger },
-      // Stub: W1-breakdown implements it.
-      async () => ({ payments: 0, mismatches: 0 }),
+      () => reconcilePayments(ctx),
     );
     return r.acquired ? r.value : { skipped: 1 };
   },

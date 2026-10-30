@@ -39,6 +39,7 @@ import { Link } from "@tanstack/react-router";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
+import { BreakdownEstimate } from "../money/breakdown-estimate.tsx";
 import {
   SUBSCRIPTION_STATUS_VIEW,
   SUPPORT_TABS,
@@ -538,6 +539,12 @@ export function SupportForm({ channel, info, checkout, onInstructions, initial }
         formatValue={money}
         formatLabel={() => t("support.split.label", { creator: percents.creator, coop: percents.coop })}
         legendLayout="inline"
+      />
+      <BreakdownEstimate
+        totalCents={total ?? 0}
+        currency={info.currency}
+        split={info.split}
+        feeEstimate={info.feeEstimate}
       />
       <KeyValueList
         rows={[

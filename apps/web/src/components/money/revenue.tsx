@@ -50,6 +50,7 @@ import {
   type TierDraft,
 } from "../../lib/money.ts";
 import { safeHttpUrl } from "../../lib/url.ts";
+import { BreakdownOpenButton } from "./breakdown-dialog.tsx";
 
 /**
  * `/revenue` pieces (Revenue board). Each takes its data as props, so tests/selectors-render.test.tsx
@@ -283,6 +284,12 @@ export function RevenueLedger({
       header: t("revenue.ledger.net"),
       align: "numeric",
       cell: ({ row }) => <MoneyAmount value={row.original.net} colorNegative />,
+    },
+    {
+      id: "breakdown",
+      header: t("breakdown.payments.details"),
+      // Payments and their reversals open the payment's breakdown; payouts have none.
+      cell: ({ row }) => (row.original.paymentId ? <BreakdownOpenButton paymentId={row.original.paymentId} /> : null),
     },
   ];
   return (
