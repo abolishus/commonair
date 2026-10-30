@@ -1,1 +1,15 @@
-{}
+{
+  "pwa.push.live": "{channel} is live",
+  "pwa.update.message": "A new version of this site is ready.",
+  "pwa.update.reload": "Reload",
+  "pwa.update.dismiss": "Later",
+  "push.toggle.label": "Notifications in this browser",
+  "push.toggle.description": "Get a notification on this device when a channel you follow goes live, even when this site is closed.",
+  "push.vendorNote": "Your browser's maker relays these notifications to this device. They are encrypted on the way and carry only the channel and the stream title.",
+  "push.unsupported": "This browser cannot show notifications from this site. Try another browser, or install the site as an app first.",
+  "push.deniedHelp": "Notifications are blocked for this site. Allow them in your browser's site settings (the icon beside the address), then reload this page.",
+  "push.toast.on": "Notifications are on in this browser.",
+  "push.toast.off": "Notifications are off in this browser.",
+  "push.error.on": "Could not turn notifications on. Try again.",
+  "push.error.off": "Could not turn notifications off. Try again."
+}
