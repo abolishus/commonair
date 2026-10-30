@@ -14,6 +14,7 @@ import type { Scope } from "@commonair/contracts/scopes";
 import type { BrowserFleet } from "../browser-viewer.ts";
 import type { HarnessEnv } from "../env.ts";
 import type { Via } from "../money.ts";
+import type { FetchLike } from "../api/cookies.ts";
 import type { Platform } from "../platform.ts";
 import type { ScenarioContext } from "../scenario.ts";
 import type { SignedInUser } from "../users.ts";
@@ -146,7 +147,7 @@ function newVerifier(): string {
  * `POST OAUTH_PATHS.token`. Steps that need a live grant (5 revokes the streamer's) call this.
  */
 export async function authorizeOverApi(
-  run: Pick<E9Run, "env">,
+  run: Pick<E9Run, "env" | "platform">,
   opts: { app: E9App; actor: SignedInUser; scopes: readonly Scope[] },
 ): Promise<Grant> {
   const verifier = newVerifier();
@@ -175,11 +176,13 @@ export async function authorizeOverApi(
     code_verifier: verifier,
   });
   if (opts.app.clientSecret !== null) form.set("client_secret", opts.app.clientSecret);
-  const res = await fetch(new URL(OAUTH_PATHS.token, run.env.HARNESS_API_URL), {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: form,
-  });
+  const res = await machineFetch(run.platform)(
+    new Request(new URL(OAUTH_PATHS.token, run.env.HARNESS_API_URL), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form,
+    }),
+  );
   // Never the body: it carries the tokens on success and nothing useful beyond the code otherwise.
   if (!res.ok) throw new Error(`token endpoint answered HTTP ${res.status}`);
   const token = TokenResponse.parse(await res.json());
@@ -189,5 +192,18 @@ export async function authorizeOverApi(
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
     scopes: token.scope.split(" ").filter(Boolean) as Scope[],
+  };
+}
+
+/**
+ * Fetch for the OAuth machine endpoints, through the forwarding proxy from a fresh simulated
+ * address per request: the token endpoint shares the `auth` bucket (10/min per address), and one
+ * scenario run makes more than ten token calls a minute from the harness host.
+ */
+export function machineFetch(platform: Pick<Platform, "api">): FetchLike {
+  return (request) => {
+    const api = platform.api();
+    const u = new URL(request.url);
+    return api.fetch(new Request(`${api.baseUrl}${u.pathname}${u.search}`, request));
   };
 }

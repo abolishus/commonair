@@ -37,7 +37,7 @@ import {
 import { WEBHOOK_HEADERS } from "@commonair/contracts/events";
 import { waitFor } from "../wait.ts";
 import type { ReceivedRequest } from "./receiver.ts";
-import type { E9App, E9Run, E9Step } from "./run.ts";
+import { type E9App, type E9Run, type E9Step, machineFetch } from "./run.ts";
 
 /** Follows need no scope; chat reads as the streamer (`chat:read`), as in step 5. */
 export const STEP6_SCOPES: readonly Scope[] = ["chat:read"];
@@ -130,6 +130,7 @@ async function authorize(r: E9Run, app: E9App): Promise<StoredTokens> {
   if (!code) throw new Error(`step 6: no code on the redirect (error=${back.searchParams.get("error")})`);
   const t = await exchangeCode({
     baseUrl: env.HARNESS_API_URL,
+    fetch: machineFetch(r.platform),
     clientId: app.clientId,
     clientSecret: app.clientSecret,
     code,
@@ -168,6 +169,7 @@ async function run(r: E9Run): Promise<void> {
       async () => {
         const app = await clientCredentials({
           baseUrl,
+          fetch: machineFetch(r.platform),
           clientId: conf.clientId,
           clientSecret: conf.clientSecret ?? "",
         });
@@ -205,6 +207,7 @@ async function run(r: E9Run): Promise<void> {
     const saved: StoredTokens[] = [];
     const getToken = refreshingToken({
       baseUrl,
+      fetch: machineFetch(r.platform),
       clientId: conf.clientId,
       clientSecret: conf.clientSecret,
       store: memoryStore(initial, (t) => saved.push(t)),
@@ -287,6 +290,7 @@ async function run(r: E9Run): Promise<void> {
     await ctx.step("deviceFlow with the public app", async () => {
       const t = await deviceFlow({
         baseUrl,
+        fetch: machineFetch(r.platform),
         clientId: pub.clientId,
         clientSecret: pub.clientSecret,
         scopes: ["chat:read"],
@@ -308,6 +312,7 @@ async function run(r: E9Run): Promise<void> {
       if (!current) throw new Error("no rotated pair");
       await revoke({
         baseUrl,
+        fetch: machineFetch(r.platform),
         clientId: conf.clientId,
         clientSecret: conf.clientSecret,
         token: current.refreshToken,

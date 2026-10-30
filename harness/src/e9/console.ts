@@ -26,7 +26,7 @@ import { signInViaUi } from "../web/flows.ts";
 import { ROUTES, TEST_IDS } from "../web/selectors.ts";
 import { WebSession, byTestId } from "../web/session.ts";
 import { clientCredentialsForm } from "./app.ts";
-import type { E9Run, E9Step } from "./run.ts";
+import { type E9Run, type E9Step, machineFetch } from "./run.ts";
 import { E9_ROUTES, E9_TEST_IDS as T, byE9Id, e9Option, e9tid } from "./selectors.ts";
 
 /** A page action plus one API round trip. */
@@ -179,11 +179,13 @@ async function registerThirdApp(run: E9Run, page: Page): Promise<{ id: string; c
     const secret = ((await byE9Id(page, T.devappSecretValue).textContent(ui)) ?? "").trim();
     ctx.assert("devapp-secret shows a client secret", looksLikeClientSecret(secret));
     // The secret works: the token endpoint issues an app token for it (the body is never read).
-    const res = await fetch(new URL(OAUTH_PATHS.token, run.env.HARNESS_API_URL), {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: clientCredentialsForm(clientId, secret),
-    });
+    const res = await machineFetch(run.platform)(
+      new Request(new URL(OAUTH_PATHS.token, run.env.HARNESS_API_URL), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: clientCredentialsForm(clientId, secret),
+      }),
+    );
     await res.body?.cancel();
     ctx.assert("the shown secret is the app's (client credentials succeed)", res.status === 200, {
       status: res.status,

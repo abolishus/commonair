@@ -22,7 +22,7 @@ import type { Scope } from "@commonair/contracts/scopes";
 import { createApi } from "../api/client.ts";
 import type { SignedInUser } from "../users.ts";
 import { sleep } from "../wait.ts";
-import { type E9App, type E9Run, type E9Step, authorizeOverApi } from "./run.ts";
+import { type E9App, type E9Run, type E9Step, authorizeOverApi, machineFetch } from "./run.ts";
 
 /** Past `REFRESH_REUSE_GRACE_MS` (2 s, services/api/src/oauth/tokens.ts). */
 const REFRESH_REPLAY_AFTER_MS = 2500;
@@ -75,15 +75,16 @@ export interface TokenAnswer {
 
 /** POST a form to one of the machine endpoints. The body is returned to the caller, never logged. */
 export async function postForm(
-  run: Pick<E9Run, "env">,
+  run: Pick<E9Run, "env"> & { platform?: Pick<E9Run["platform"], "api"> },
   path: string,
   params: Record<string, string>,
 ): Promise<TokenAnswer> {
-  const res = await fetch(new URL(path, run.env.HARNESS_API_URL), {
+  const request = new Request(new URL(path, run.env.HARNESS_API_URL), {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(params),
   });
+  const res = await (run.platform ? machineFetch(run.platform)(request) : fetch(request));
   const text = await res.text();
   let body: Record<string, unknown> = {};
   try {

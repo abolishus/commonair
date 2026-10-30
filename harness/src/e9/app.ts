@@ -11,7 +11,8 @@
  */
 import { OAUTH_PATHS, OAuthErrorResponse } from "@commonair/contracts/oauth";
 import type { HarnessEnv } from "../env.ts";
-import { type E9App, type E9Run, type E9Step } from "./run.ts";
+import type { FetchLike } from "../api/cookies.ts";
+import { type E9App, type E9Run, type E9Step, machineFetch } from "./run.ts";
 
 /** The client-credentials form the token endpoint takes (`client_secret_post`). */
 export function clientCredentialsForm(clientId: string, clientSecret: string): URLSearchParams {
@@ -29,12 +30,15 @@ export async function probeClientCredentials(
   env: Pick<HarnessEnv, "HARNESS_API_URL">,
   clientId: string,
   clientSecret: string,
+  send: FetchLike = (request) => fetch(request),
 ): Promise<{ status: number; error: string | null }> {
-  const res = await fetch(new URL(OAUTH_PATHS.token, env.HARNESS_API_URL), {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: clientCredentialsForm(clientId, clientSecret),
-  });
+  const res = await send(
+    new Request(new URL(OAUTH_PATHS.token, env.HARNESS_API_URL), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: clientCredentialsForm(clientId, clientSecret),
+    }),
+  );
   const body: unknown = await res.json().catch(() => null);
   return { status: res.status, error: res.ok ? null : oauthErrorCode(body) };
 }
@@ -107,7 +111,12 @@ async function runStep(run: E9Run): Promise<void> {
   });
 
   await ctx.step("the old secret fails at the token endpoint (invalid_client)", async () => {
-    const probe = await probeClientCredentials(run.env, confidential.app.clientId, oldSecret);
+    const probe = await probeClientCredentials(
+      run.env,
+      confidential.app.clientId,
+      oldSecret,
+      machineFetch(run.platform),
+    );
     ctx.assert(
       "old secret refused with 401 invalid_client",
       probe.status === 401 && probe.error === "invalid_client",
