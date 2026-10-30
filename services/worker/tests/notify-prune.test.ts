@@ -45,9 +45,20 @@ describe("the statements", () => {
     const q = dialect.sqlToQuery(pruneBatch(rules.all, 5_000));
     const flat = q.sql.replace(/\s+/g, " ").trim();
     expect(flat).toBe(
-      "delete from notifications where id in (select id from notifications where created_at < $1::timestamptz order by created_at limit $2) returning 1",
+      "with d as ( delete from notifications where id in (select id from notifications where created_at < $1::timestamptz order by created_at limit $2) returning created_at) select count(*)::int as n, max(created_at)::text as last from d",
     );
     expect(q.params[1]).toBe(5_000);
+  });
+
+  test("a later batch starts at the previous batch's newest row, inclusive", () => {
+    const from = "2026-08-01 11:00:00.123456+00";
+    const q = dialect.sqlToQuery(pruneBatch(rules.readGoLive, 5_000, from));
+    const flat = q.sql.replace(/\s+/g, " ").trim();
+    expect(flat).toContain(
+      "where created_at < $1::timestamptz and type = 'go_live' and read_at is not null and created_at >= $2::timestamptz order by created_at limit $3",
+    );
+    expect(q.params[1]).toBe(from);
+    expect(q.params[2]).toBe(5_000);
   });
 });
 

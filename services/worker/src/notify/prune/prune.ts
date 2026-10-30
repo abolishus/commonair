@@ -55,18 +55,35 @@ export const pruneRules = (c: PruneCutoffs): { all: SQL; readGoLive: SQL } => ({
   readGoLive: sql`created_at < ${tsz(c.readGoLive)} and type = 'go_live' and read_at is not null`,
 });
 
-/** One batch: the oldest `batchSize` matching rows. */
-export const pruneBatch = (where: SQL, batchSize: number): SQL => sql`
-  delete from notifications
-   where id in (select id from notifications where ${where} order by created_at limit ${batchSize})
-   returning 1`;
+/**
+ * One batch: the oldest `batchSize` matching rows, at or after `from` (the newest `created_at` the
+ * previous batch deleted). The lower bound keeps each batch from rescanning the rows the rule
+ * skips (unread or other-type rows in the read-`go_live` band); it is inclusive because rows can
+ * share a timestamp, and still walks `notifications_created_idx` in index order. Returns the count
+ * and the next bound as text, so microseconds survive the round trip.
+ */
+export const pruneBatch = (where: SQL, batchSize: number, from: string | null = null): SQL => {
+  const bound = from === null ? sql`` : sql` and created_at >= ${from}::timestamptz`;
+  return sql`
+  with d as (
+    delete from notifications
+     where id in (select id from notifications where ${where}${bound} order by created_at limit ${batchSize})
+     returning created_at)
+  select count(*)::int as n, max(created_at)::text as last from d`;
+};
 
 async function drain(ctx: WorkerContext, where: SQL, batchSize: number): Promise<number> {
   let total = 0;
+  let from: string | null = null;
   for (;;) {
-    const rows = (await ctx.db.execute(pruneBatch(where, batchSize))) as unknown as unknown[];
-    total += rows.length;
-    if (rows.length < batchSize) return total;
+    const [row] = (await ctx.db.execute(pruneBatch(where, batchSize, from))) as unknown as {
+      n: number;
+      last: string | null;
+    }[];
+    const n = row?.n ?? 0;
+    total += n;
+    if (n < batchSize || row?.last === undefined || row.last === null) return total;
+    from = row.last;
   }
 }
 

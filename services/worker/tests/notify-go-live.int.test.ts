@@ -228,6 +228,53 @@ describe("go-live fan-out: media", () => {
     ]);
   });
 
+  test("push only (in-app off, push on): a push job and no in-app row", async () => {
+    // N1-push cannot read a go_live row for this member; see the push-title contract request.
+    const s = await streamer();
+    const [f] = await followers(s.channel.id, 1);
+    await pref(f!, "in_app", false);
+    await pref(f!, "push", true);
+    await pushSubscription(f!);
+    const ev = await goLive(s);
+    const { ctx, jobs } = recording({ webPush: WEB_PUSH });
+    expect(await fanOutGoLive(ctx, { eventId: ev.eventId, after: null })).toMatchObject({ inApp: 0, push: 1 });
+    expect(await rowsFor(s.channel.id)).toHaveLength(0);
+    expect(jobs.map((j) => j.name)).toEqual([NOTIFY_JOBS.push]);
+  });
+
+  test("push is enqueued last: a failing Discord or next-page enqueue sends no push", async () => {
+    const s = await streamer();
+    const fs = await followers(s.channel.id, 2);
+    for (const f of fs) {
+      await pref(f, "push", true);
+      await pushSubscription(f);
+    }
+    await db().insert(schema.discordWebhooks).values({ channelId: s.channel.id, url: "ciphertext" });
+    const ev = await goLive(s);
+    const ok = recording({ webPush: WEB_PUSH });
+    await fanOutGoLive(ok.ctx, { eventId: ev.eventId, after: null }, { pageSize: 2 });
+    expect(ok.jobs.map((j) => j.name)).toEqual([
+      NOTIFY_JOBS.discord,
+      NOTIFY_JOBS.goLive,
+      NOTIFY_JOBS.push,
+      NOTIFY_JOBS.push,
+    ]);
+    const pushed: unknown[] = [];
+    const failing = recording({
+      webPush: WEB_PUSH,
+      enqueue: async () => {
+        throw new Error("valkey down");
+      },
+      enqueueBulk: async (_q, list) => {
+        pushed.push(...list);
+      },
+    });
+    await expect(fanOutGoLive(failing.ctx, { eventId: ev.eventId, after: null }, { pageSize: 2 })).rejects.toThrow(
+      "valkey down",
+    );
+    expect(pushed).toEqual([]);
+  });
+
   test("push on without a subscription → no push job", async () => {
     const s = await streamer();
     const [f] = await followers(s.channel.id, 1);

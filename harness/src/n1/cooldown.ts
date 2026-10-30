@@ -6,6 +6,11 @@
  * "Scenarios" 3). The first streamer (step 1 left it offline) goes live again; after 45 s the
  * viewer still has exactly one `go_live` row for that channel, the one about step 1's broadcast,
  * and Mailpit has no go-live email about it since the restart.
+ *
+ * The in-app row is the proof: one cooldown row governs every medium, so a second row would mean
+ * a second email and push too. The Mailpit check is a smoke check only and cannot fail on its own:
+ * the viewer's go-live email is off unless step 2 turned it on, and a wrongly queued email would
+ * leave only after the digest window plus a sweep (about 90 s on the harness), past this watch.
  */
 import type { MailMessage, MailSummary } from "../mailpit.ts";
 import { sleep } from "../wait.ts";

@@ -248,10 +248,12 @@ export async function fanOutGoLive(
     };
   });
 
-  // After commit: a failure here retries the job, which passes the cooldown again (same event)
-  // and re-enqueues by the same ids, so nothing is sent twice.
+  // After commit. A failure here retries the page, which passes the cooldown again (same event):
+  // in-app rows and the email queue dedupe in SQL, and the Discord and next-page jobs by id. Push
+  // jobs dedupe by id only while BullMQ still holds them (completed jobs are evicted), so push goes
+  // last: a failing Discord or next-page enqueue cannot re-send pushes. A full re-run of the same
+  // event (outbox redelivery, a stalled job) still can; durable push dedupe is N1-push's to add.
   const ref = { eventId: g.eventId, channelId: g.channelId, broadcastId: g.broadcastId };
-  if (page.pushUsers.length > 0) await ctx.enqueueBulk(QUEUES.notifications, pushJobs(ref, page.pushUsers));
   if (job.after === null) {
     const [hook] = await ctx.db
       .select({ channelId: schema.discordWebhooks.channelId })
@@ -264,6 +266,7 @@ export async function fanOutGoLive(
   }
   const next = nextPageJob(g.eventId, page.ids, pageSize);
   if (next) await ctx.enqueue(QUEUES.notifications, next.name, next.data, next.opts);
+  if (page.pushUsers.length > 0) await ctx.enqueueBulk(QUEUES.notifications, pushJobs(ref, page.pushUsers));
 
   const result: GoLiveResult = {
     followers: page.ids.length,

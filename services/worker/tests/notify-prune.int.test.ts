@@ -115,6 +115,22 @@ describe("notify-prune", () => {
     expect(await pruneNotifications(ctx(), { batchSize: 5 })).toEqual({ deleted: 10, readGoLive: 0 });
   });
 
+  test("the read go_live rule skips kept rows across batches, ties at a batch edge included", async () => {
+    // Interleaved: read go_live (deleted) and unread / other-type rows (kept) in the 30-90 day band,
+    // with pairs sharing one timestamp so a batch can end in the middle of a tie.
+    const read: string[] = [];
+    const kept: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      const age = 40 * DAY + Math.floor(i / 2) * 1_000;
+      read.push(await row(age, { read: true }));
+      kept.push(await row(age));
+      kept.push(await row(age, { type: "raid", read: true }));
+    }
+    expect(await pruneNotifications(ctx(), { batchSize: 5 })).toEqual({ deleted: 12, readGoLive: 12 });
+    expect(await remaining(read)).toEqual(new Set());
+    expect(await remaining(kept)).toEqual(new Set(kept));
+  });
+
   test("an empty table returns zeros", async () => {
     expect(await pruneNotifications(ctx())).toEqual({ deleted: 0, readGoLive: 0 });
   });
