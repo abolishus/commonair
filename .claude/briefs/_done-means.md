@@ -10,7 +10,7 @@ SPDX-License-Identifier: CC-BY-SA-4.0
   your packages' `bun run test` and `bun run test:int` (the data services are already up at the
   `.env.example` defaults; never run `podman compose` or `scripts/infra.ts`), `bunx tsc -p <pkg>
   --noEmit`, `vp lint --deny-warnings <changed paths>`, `vp fmt <changed paths>`, `vp build` for
-  `apps/web`, `go test ./...` / `go vet ./...` for `relay/`. Do not run several packages'
+  `apps/web`, `reuse lint` (an SPDX tag inside a string literal needs `REUSE-IgnoreStart`/`End`), `go test ./...` / `go vet ./...` for `relay/`. Do not run several packages'
   `test:int` at the same time (shared Postgres/Valkey load makes timing tests flaky).
 - No files outside your ownership list changed (`git status`).
 - Commit in your worktree with `git commit -s` (Conventional Commits), message ending with

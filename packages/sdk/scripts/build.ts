@@ -140,7 +140,9 @@ async function stage(dir: string): Promise<void> {
   );
 }
 
+// REUSE-IgnoreStart
 const SPDX_LINE = /SPDX-License-Identifier:\s*(.+?)\s*(?:\*\/)?$/m;
+// REUSE-IgnoreEnd
 
 /** The inlined files whose SPDX header does not allow Apache-2.0 (missing headers count as not). */
 export function filesNotAllowingApache(files: Record<string, string>): string[] {

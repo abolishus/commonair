@@ -75,7 +75,9 @@ describe("docs/developers", () => {
     ])
       expect(names).toContain(page);
     for (const [file, body] of text) {
+      // REUSE-IgnoreStart
       expect(body, file).toContain("SPDX-License-Identifier: CC-BY-SA-4.0");
+      // REUSE-IgnoreEnd
       expect(body, file).toContain("SPDX-FileCopyrightText: 2026 CommonAir contributors");
     }
   });
