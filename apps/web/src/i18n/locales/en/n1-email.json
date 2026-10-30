@@ -1,1 +1,14 @@
-{}
+{
+  "unsubscribe.title.go_live": "Stop go-live emails?",
+  "unsubscribe.title.governance": "Stop co-op governance emails?",
+  "unsubscribe.intro.go_live": "You will no longer get an email when channels you follow go live. In-app and browser notifications are not affected.",
+  "unsubscribe.intro.governance": "You will no longer get emails about new co-op votes and their results.",
+  "unsubscribe.confirm": "Unsubscribe",
+  "unsubscribe.done.title": "You are unsubscribed",
+  "unsubscribe.done.go_live": "You will no longer get go-live emails. You can turn them back on in your notification settings.",
+  "unsubscribe.done.governance": "You will no longer get co-op governance emails. You can turn them back on in your notification settings.",
+  "unsubscribe.settings": "Notification settings",
+  "unsubscribe.invalid.title": "This unsubscribe link does not work",
+  "unsubscribe.invalid.body": "The link may be incomplete or out of date. Open it again from the email, or choose your emails in your notification settings.",
+  "unsubscribe.failed": "Could not unsubscribe. Please try again."
+}

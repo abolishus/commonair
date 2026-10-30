@@ -82,19 +82,27 @@ export function sampleData(publicUrl: string, v: SampleValues = ENGLISH_SAMPLE_V
       proposalTitle: v.proposalTitle,
       closesAt: "2026-11-01T18:00:00Z",
       voteUrl: url("/coop/proposals/sample"),
-      unsubscribeUrl: url("/settings/notifications/unsubscribe?list=governance&token=sample"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=governance&token=sample"),
     },
     governanceResultPublished: {
       proposalTitle: v.proposalTitle,
       outcome: "passed",
       turnout: 0.412,
       resultUrl: url("/coop/proposals/sample"),
-      unsubscribeUrl: url("/settings/notifications/unsubscribe?list=governance&token=sample"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=governance&token=sample"),
     },
     councilReviewRequested: {
       proposalTitle: v.proposalTitle,
       reviewEndsAt: "2026-10-25T18:00:00Z",
       respondUrl: url("/coop/proposals/sample/council-response"),
+    },
+    goLiveDigest: {
+      channels: [
+        { name: v.channelName, title: v.contentTitle, url: url(`/${encodeURIComponent(v.channelName)}`) },
+        { name: v.displayName, title: "", url: url("/sample_channel") },
+      ],
+      settingsUrl: url("/settings/notifications"),
+      unsubscribeUrl: url("/api/email/unsubscribe?list=go_live&token=sample"),
     },
     dmcaNoticeReceived: {
       contentTitle: v.contentTitle,
