@@ -39,7 +39,14 @@ targets 9 s, not 12 s (MediaMTX keeps seven ~2 s segments); a guard turned off m
 with reason `cooldown` and audit `cause: "guard_disabled"` (no contract enum change); the
 optional `settlementAccount` export is left to W2-splits. Open from wave 1: the steps have not run
 against a live stack (CI runs them); a refund of another payment drawing from a lot can leave a
-breakdown hold date showing (W1-breakdown note). **Next:** wave 2 (W1-data-mode, N1-fanout,
+breakdown hold date showing (W1-breakdown note). CI fixes after the wave-1 merge (green on
+`0b403bf`): the worker's chat-latency test pins the scoring clock (CI rescored its heartbeat-less
+fixtures; locally the Podman VM's clock ran ahead and hid it); the e8-studio goal-end test switches
+the list only inside `end`; the message menu carries `data-moderation` so e2e-social counts only
+moderator menus; the flood check allows one governor tick (250 ms) of render lag;
+`signInViaUi` retries the `auth` bucket's "Too many attempts" for up to its window (scenarios in a
+shard share an address). `timeline-sync` and `surge-guard` stay `inFull: false` until the
+milestone wiring, so their steps have not run in CI yet. **Next:** wave 2 (W1-data-mode, N1-fanout,
 N1-email, N1-push, N1-inbox, N1-pwa) once CI is green; W1-data-mode takes over the player files
 with the "Player seam" text in `docs/testing/w1-selectors.md`.
 
