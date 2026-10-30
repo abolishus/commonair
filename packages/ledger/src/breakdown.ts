@@ -176,6 +176,9 @@ export function buildBreakdown(
 
   const timeline: BuiltBreakdownEvent[] = [];
   let releasedAt: Date | null = null;
+  // What this payment's refunds and chargebacks drew back out of its own hold lot (ADR 0013
+  // decision 5). A won chargeback never re-opens a lot, so it adds nothing here.
+  let drawnFromLot = 0;
   for (const tx of [...transactions].sort(byTime)) {
     const at = tx.occurredAt.toISOString();
     if (tx.kind === "payment") {
@@ -192,6 +195,7 @@ export function buildBreakdown(
     const event = REVERSAL_EVENTS[tx.kind];
     if (!event) continue;
     const r = parseReversal(tx);
+    if (tx.kind !== "chargeback_reversal") drawnFromLot += r.shares.reduce((s, x) => s + x.fromOwnLotCents, 0);
     if (r.taxCents !== 0) line("reversal", r.taxCents, tx.id, { component: "tax" });
     const reversed = [...r.shares].sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
     for (const s of reversed) {
@@ -214,7 +218,12 @@ export function buildBreakdown(
     succeededAt: (payment.succeededAt ?? paid.occurredAt).toISOString(),
     lines,
     // The hold runs from the posting (as `releaseDueHolds` counts it), not from the row's timestamp.
-    holdReleasesAt: releasedAt ? null : holdReleaseDueAt(paid.occurredAt, holdDays).toISOString(),
+    // An emptied lot is never released (`releaseDueHolds` skips it), so it has no release date:
+    // both hold fields null means nothing of the creator's share is left on hold.
+    holdReleasesAt:
+      releasedAt || drawnFromLot >= meta.creatorCents
+        ? null
+        : holdReleaseDueAt(paid.occurredAt, holdDays).toISOString(),
     holdReleasedAt: releasedAt ? releasedAt.toISOString() : null,
     cut: { historyId: meta.cutHistoryId, streamerShare: meta.streamerShare, coopShare: meta.coopShare },
     timeline,

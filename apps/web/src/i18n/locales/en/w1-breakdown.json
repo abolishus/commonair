@@ -24,6 +24,7 @@
   "breakdown.coopNegative": "The co-op lost {amount} on this payment: the fees were larger than its share.",
   "breakdown.hold.pending": "The creator's share is held until {date} in case of a refund or chargeback.",
   "breakdown.hold.released": "The creator's share was released on {date}.",
+  "breakdown.hold.none": "Nothing of the creator's share is left on hold: it went back in refunds or chargebacks.",
   "breakdown.cut.label": "Split in effect: {creator}% to creators, {coop}% to the co-op",
   "breakdown.cut.seed": "Set when the co-op was founded.",
   "breakdown.cut.changed": "Changed by a member decision on {date}.",

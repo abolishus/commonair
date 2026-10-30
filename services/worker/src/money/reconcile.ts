@@ -46,16 +46,16 @@ export interface ReconcileResult {
 
 const { ledgerTransactions: lt, ledgerEntries: le, ledgerAccounts: la, payments } = schema;
 
-/** The payment ids with a posting created after `since`, after `after` in id order. */
-async function changedPayments(ctx: WorkerContext, since: Date, after: string | null): Promise<string[]> {
+/**
+ * Every payment id with a posting created after `since`, read once per run. `created_at` has no
+ * index, so this is one scan of the payment postings per run rather than one per batch.
+ */
+async function changedPayments(ctx: WorkerContext, since: Date): Promise<string[]> {
   const rows = await ctx.db
     .selectDistinct({ id: lt.refId })
     .from(lt)
-    .where(
-      and(eq(lt.refType, "payment"), gt(lt.createdAt, since), after ? sql`${lt.refId} > ${after}::uuid` : undefined),
-    )
-    .orderBy(asc(lt.refId))
-    .limit(RECONCILE_BATCH);
+    .where(and(eq(lt.refType, "payment"), gt(lt.createdAt, since)))
+    .orderBy(asc(lt.refId));
   return rows.map((r) => r.id).filter((id): id is string => id !== null);
 }
 
@@ -141,17 +141,12 @@ export async function reconcilePayments(ctx: WorkerContext): Promise<ReconcileRe
       ? parsed
       : new Date(startedAt.getTime() - RECONCILE_FIRST_RUN_DAYS * 86_400_000);
 
-  let checked = 0;
+  const changed = await changedPayments(ctx, since);
   let mismatches = 0;
-  let after: string | null = null;
-  for (;;) {
-    const ids = await changedPayments(ctx, since, after);
-    if (ids.length === 0) break;
-    mismatches += await checkBatch(ctx, ids);
-    checked += ids.length;
-    after = ids[ids.length - 1] ?? null;
-    if (ids.length < RECONCILE_BATCH) break;
+  for (let i = 0; i < changed.length; i += RECONCILE_BATCH) {
+    mismatches += await checkBatch(ctx, changed.slice(i, i + RECONCILE_BATCH));
   }
+  const checked = changed.length;
   await ctx.valkey.set(RECONCILE_CURSOR_KEY, new Date(startedAt.getTime() - RECONCILE_OVERLAP_MS).toISOString());
   if (checked > 0) ctx.logger.info("reconciled payment breakdowns", { payments: checked, mismatches });
   return { payments: checked, mismatches };

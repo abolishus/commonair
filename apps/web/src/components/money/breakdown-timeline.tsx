@@ -4,7 +4,7 @@
 import { MoneyAmount, RelativeTime, formatDateTime, formatNumber, useLocale } from "@commonair/ui";
 import { Timeline } from "@commonair/ui/blocks/data";
 import { Link } from "@tanstack/react-router";
-import type * as React from "react";
+import * as React from "react";
 import { t, type MessageKey } from "../../i18n/index.ts";
 import type { PaymentBreakdownDto } from "./breakdown-table.tsx";
 
@@ -20,9 +20,10 @@ const EVENT_LABEL: Record<EventKind, MessageKey> = {
 
 /** One item per ledger transaction of the payment, oldest first. */
 export function BreakdownTimeline({ breakdown }: { breakdown: PaymentBreakdownDto }): React.JSX.Element {
+  const headingId = React.useId();
   return (
-    <section aria-labelledby="breakdown-timeline-heading" className="flex min-w-0 flex-col gap-2">
-      <h3 id="breakdown-timeline-heading" className="text-sm font-medium">
+    <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-2">
+      <h3 id={headingId} className="text-sm font-medium">
         {t("breakdown.timeline")}
       </h3>
       <Timeline
@@ -43,11 +44,18 @@ export function BreakdownTimeline({ breakdown }: { breakdown: PaymentBreakdownDt
   );
 }
 
-/** When the creator's share leaves the chargeback hold (or left it). */
-export function BreakdownHold({ breakdown }: { breakdown: PaymentBreakdownDto }): React.JSX.Element | null {
+/** When the creator's share leaves the chargeback hold (or left it, or that nothing is left on it). */
+export function BreakdownHold({ breakdown }: { breakdown: PaymentBreakdownDto }): React.JSX.Element {
   const { locale, timeZone } = useLocale();
   const at = breakdown.holdReleasedAt ?? breakdown.holdReleasesAt;
-  if (!at) return null;
+  // Both null: refunds or chargebacks emptied the hold, so no release will ever come.
+  if (!at) {
+    return (
+      <p data-testid="breakdown-hold" data-empty="" className="text-sm text-muted-foreground">
+        {t("breakdown.hold.none")}
+      </p>
+    );
+  }
   const date = formatDateTime(new Date(at), locale, timeZone);
   return (
     <p

@@ -130,6 +130,33 @@ describe("buildBreakdown", () => {
     ]);
   });
 
+  test("a refund that empties the hold lot leaves no release date; a partial one keeps it", () => {
+    const pay = asTx(paid({ gross: 1000 }));
+    const refundOf = (disputeId: string, amountCents: number, alreadyReversedCents: number, lot: number) =>
+      asTx(
+        refund({
+          disputeId,
+          paymentId: PAYMENT,
+          provider: "stripe",
+          creatorUserId: CREATOR,
+          currency: "usd",
+          occurredAt: new Date(T0.getTime() + DAY),
+          original: { grossCents: 1000, taxCents: 0 },
+          cut: { streamerShare: 0.9, coopShare: 0.1 },
+          alreadyReversedCents,
+          amountCents,
+          balances: { liabilityCents: 0, holdLots: [{ paymentId: PAYMENT, cents: lot }] },
+        }),
+      );
+    const partial = refundOf(OTHER, 400, 0, 900);
+    const half = buildBreakdown(facts(), [pay, partial], 14);
+    expect(half.holdReleasesAt).toBe(holdReleaseDueAt(T0, 14).toISOString());
+    const rest = refundOf(HISTORY, 600, 400, 900 - ReversalMetaV2.parse(partial.metadata).shares[0]!.fromOwnLotCents);
+    const empty = buildBreakdown(facts(), [pay, partial, rest], 14);
+    expect(empty.holdReleasesAt).toBeNull();
+    expect(empty.holdReleasedAt).toBeNull();
+  });
+
   test("succeededAt comes from the row, else the posting", () => {
     const later = new Date(T0.getTime() + 1000);
     expect(buildBreakdown(facts(later), [asTx(paid({ gross: 100 }))], 0).succeededAt).toBe(later.toISOString());
@@ -405,6 +432,10 @@ describe("property: breakdowns of real postings", () => {
       );
       expect(coopNet(b.lines.filter((l) => l.kind !== "coop_net"))).toBe(net[0]?.amount.cents);
       expect(reconciles(b, settlementMovement(shuffled)), JSON.stringify(ctx)).toBe(true);
+      // An emptied lot is never released, so it has no release date either.
+      const released = txs.some((t) => t.kind === "hold_release");
+      expect(b.holdReleasesAt === null, JSON.stringify(ctx)).toBe(released || hold === 0);
+      expect(b.holdReleasedAt === null).toBe(!released);
       expect(b.timeline).toHaveLength(txs.length);
       const times = b.timeline.map((e) => Date.parse(e.at));
       expect([...times].sort((x, y) => x - y)).toEqual(times);

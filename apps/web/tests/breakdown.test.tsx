@@ -146,6 +146,13 @@ describe("BreakdownView", () => {
     expect(screen.getByText("Rivertide")).toBeTruthy();
   });
 
+  it("says nothing is left on hold when a refund emptied it (both hold dates null)", () => {
+    wrap(<BreakdownView breakdown={fixture({ holdReleasesAt: null, holdReleasedAt: null })} />);
+    const hold = ids("breakdown-hold")[0];
+    expect(hold?.dataset.empty).toBe("");
+    expect(hold?.textContent).toMatch(/left on hold/);
+  });
+
   it("labels each kind", () => {
     const l = (kind: PaymentBreakdownDto["lines"][number]["kind"], cents: number, component = null as never) =>
       breakdownLineLabel({ kind, amount: usd(cents), recipientUserId: null, component, transactionId: null });
@@ -204,10 +211,27 @@ describe("estimate", () => {
     expect(el?.textContent).toMatch(/\$1\.00/);
   });
 
-  it("is hidden when the provider charges no fee (feeEstimate null)", () => {
+  it("keeps the split but drops the fee row when the provider charges no fee (feeEstimate null)", () => {
     wrap(
       <BreakdownEstimate
         totalCents={1000}
+        currency="usd"
+        split={{ streamerShare: 0.9, coopShare: 0.1 }}
+        feeEstimate={null}
+      />,
+    );
+    const el = ids("breakdown-estimate")[0];
+    expect(el).toBeTruthy();
+    expect(el?.dataset.lowCents).toBeUndefined();
+    expect(el?.textContent).toMatch(/To the creator/);
+    expect(el?.textContent).not.toMatch(/Card fee/);
+    expect(el?.getAttribute("aria-labelledby")).toBe(el?.querySelector("h3")?.id);
+  });
+
+  it("is hidden for nothing to pay", () => {
+    wrap(
+      <BreakdownEstimate
+        totalCents={0}
         currency="usd"
         split={{ streamerShare: 0.9, coopShare: 0.1 }}
         feeEstimate={null}

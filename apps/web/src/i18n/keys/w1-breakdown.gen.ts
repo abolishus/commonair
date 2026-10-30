@@ -29,6 +29,7 @@ export type Key =
   | "breakdown.coopNegative"
   | "breakdown.hold.pending"
   | "breakdown.hold.released"
+  | "breakdown.hold.none"
   | "breakdown.cut.label"
   | "breakdown.cut.seed"
   | "breakdown.cut.changed"
