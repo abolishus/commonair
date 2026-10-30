@@ -109,7 +109,9 @@ export function Player({
   const [dataChoice, setDataChoice] = React.useState<DataModeChoice | null>(null);
   if (dataChoice === null && savedDataMode) setDataChoice(savedDataMode.choice);
   const [dataChosen, setDataChosen] = React.useState(false);
-  const wantedCeiling = ceilingOf(dataChoice);
+  // Embeds have no data-saver panel, so they never play under the site's saved choice: a viewer
+  // who chose Audio on the site would otherwise get an unexplained audio-only embed.
+  const wantedCeiling = embed ? null : ceilingOf(dataChoice);
   const dataModeOn = wantedCeiling !== null;
   // Read at each session's start without restarting the session when it changes.
   const wantedCeilingRef = React.useRef(wantedCeiling);
@@ -119,13 +121,17 @@ export function Player({
   const [appliedCeiling, setAppliedCeiling] = React.useState<number | null>(null);
   const [usage, setUsage] = React.useState<DataUsage | null | undefined>(undefined);
   const [levels, setLevels] = React.useState<readonly LevelInfo[]>([]);
-  const onDataChoice = React.useCallback((next: DataModeChoice) => {
-    setDataChoice(next);
-    setDataChosen(true);
-    saveDataModeChoice(localStore(), next);
-    wantedCeilingRef.current = ceilingOf(next);
-    controllerRef.current?.setDataMode(ceilingOf(next));
-  }, []);
+  const onDataChoice = React.useCallback(
+    (next: DataModeChoice) => {
+      setDataChoice(next);
+      setDataChosen(true);
+      saveDataModeChoice(localStore(), next);
+      if (embed) return;
+      wantedCeilingRef.current = ceilingOf(next);
+      controllerRef.current?.setDataMode(ceilingOf(next));
+    },
+    [embed],
+  );
 
   const policy = env && {
     ...prefs,

@@ -236,11 +236,21 @@ export async function stepThrottledViewer(ext: IntegrityExtension): Promise<void
     const label = r.engine;
     ctx.assert(title(`${label}: the token carries the Audio ceiling`), r.ceiling === String(AUDIO_CEILING_BPS), r);
     ctx.assert(title(`${label}: the session is on the origin`), r.source === "origin", r);
-    ctx.assert(
-      title(`${label}: plays audio only (no picture, no video media requested)`),
-      r.videoWidth === 0 && r.videoRequests.length === 0,
-      { videoWidth: r.videoWidth, videoRequests: r.videoRequests.slice(0, 5), mediaRequests: r.mediaRequests },
-    );
+    const evidence = {
+      videoWidth: r.videoWidth,
+      videoRequests: r.videoRequests.slice(0, 5),
+      mediaRequests: r.mediaRequests,
+    };
+    ctx.assert(title(`${label}: plays audio only (no picture)`), r.videoWidth === 0, evidence);
+    // "No video media requested" only proves something when the page saw media requests at all:
+    // native HLS (AVFoundation) may fetch outside what Playwright observes, so WebKit can see none.
+    if (r.mediaRequests > 0) {
+      ctx.assert(title(`${label}: no video media requested`), r.videoRequests.length === 0, evidence);
+    } else if (label === "chromium") {
+      ctx.assert(title("chromium: media requests are observed"), false, evidence);
+    } else {
+      ctx.skipStep(title(`${label}: no video media requested`), "the browser's native HLS fetches are not observable");
+    }
     ctx.check(title(`${label}: playback moved while watched`), r.playedSeconds > watchMs / 1000 / 2, r);
     if (r.meter === null || r.estimateMbPerHour === null) {
       if (label === "chromium") ctx.assert(title("chromium: the meter and the estimate are shown"), false, r);

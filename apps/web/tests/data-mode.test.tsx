@@ -260,6 +260,15 @@ describe("Player wiring", () => {
     expect(screen.getByTestId("data-mode-estimate").getAttribute("data-mb-per-hour")).toBe("50");
   });
 
+  it("an embed ignores the site's saved choice: no data mode, P2P as before", async () => {
+    window.localStorage.setItem(DATA_MODE_STORAGE_KEY, JSON.stringify({ on: true, mbPerHour: 50 }));
+    wrap(<Player channel="rivertide" live embed />);
+    await waitFor(() => expect(FakeController.instances).toHaveLength(1));
+    expect(last().opts.dataMode).toBeNull();
+    expect(last().opts.p2pWanted?.(false)).toBe(true);
+    expect(last().setDataMode).not.toHaveBeenCalled();
+  });
+
   it("embeds and offline channels show no panel", async () => {
     wrap(<Player channel="rivertide" live embed />);
     await waitFor(() => expect(FakeController.instances).toHaveLength(1));
