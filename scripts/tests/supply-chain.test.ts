@@ -284,3 +284,26 @@ describe("parseJsonStream", () => {
   });
   test("empty input", () => expect(parseJsonStream("")).toEqual([]));
 });
+
+describe("osv-scanner.toml", () => {
+  // Scorecard reads OSV-Scanner's ignore list, not supply-chain.json: every dated exception must
+  // be in both, with the same expiry, or Scorecard and `bun audit` disagree.
+  test("mirrors the advisory exceptions in supply-chain.json", async () => {
+    const root = new URL("../../", import.meta.url);
+    const policy = (await Bun.file(new URL("supply-chain.json", root)).json()) as Policy;
+    const osv = Bun.TOML.parse(await Bun.file(new URL("osv-scanner.toml", root)).text()) as {
+      // Bun parses TOML datetimes as Temporal.Instant; String() gives ISO 8601 either way.
+      IgnoredVulns?: { id: string; ignoreUntil: unknown }[];
+    };
+    const ignored = (osv.IgnoredVulns ?? []).map((v) => ({
+      id: v.id,
+      expires: String(v.ignoreUntil).slice(0, 10),
+    }));
+    const expected = policy.advisoryExceptions
+      .filter((e) => (e.ecosystem ?? "npm") === "npm")
+      .map((e) => ({ id: e.id, expires: e.expires }));
+    expect(ignored.toSorted((a, b) => a.id.localeCompare(b.id))).toEqual(
+      expected.toSorted((a, b) => a.id.localeCompare(b.id)),
+    );
+  });
+});

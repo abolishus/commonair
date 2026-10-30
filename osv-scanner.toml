@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# OSV-Scanner (and OpenSSF Scorecard's Vulnerabilities check, which runs it) reads this file next
+# to bun.lock. It mirrors supply-chain.json `advisoryExceptions`, where the full reasons live;
+# scripts/tests/supply-chain.test.ts fails if the two drift.
+
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+ignoreUntil = 2027-01-22T00:00:00Z
+reason = "esbuild 0.18.20 via drizzle-kit -> @esbuild-kit/core-utils, dev only; its dev server is never started."
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-01-27T00:00:00Z
+reason = "deepmerge 4.3.1 via @react-email/render -> html-to-text; only constant objects are merged. No fixed release yet."
