@@ -22,7 +22,7 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
-**Batch 3 (E8 + E9 + N2-core + N2-consent; `.claude/briefs/batch3/README.md`), started 2026-10-29.**
+**Batch 3 (E8 + E9 + N2-core + N2-consent; `.claude/briefs/batch3/README.md`), started 2026-10-29, done 2026-10-30 (CI green on `d51c084`).**
 Contract steps land in order, one commit each: E8 (`feat(e8): contract step`: migrations
 `0033_e8_interactivity` and `0034_e8_protections`, `packages/interact`, the `PluginHost`
 extension, `INTERACT_TEST_HOOKS` and `harness/compose.e8.yaml`, the `/interact` and `/bot`
@@ -61,7 +61,12 @@ a footer locale cookie outranks Accept-Language.
 **CI fixes so far:** E6 webhook fixture vs the E9 transport check (`dbe2723`); generated SPDX
 header vs `reuse lint` (`585f5d0`); the e9-subs app-limit test left 10,000 rows behind and a
 later list test paged through them past the timeout (`1b0d749`); `developer-platform` step 2
-replayed inside the 2 s refresh reuse grace (`aee8112`). CI green on `dbe2723` (contract steps).
+replayed inside the 2 s refresh reuse grace (`aee8112`); `reuse lint` on SPDX strings in a test and
+the SDK build (`bf95fc3`); `buttonVariants` in the consent page (`531544f`); E9 token calls hit the
+`auth` bucket from one address (`ed65cee`, through the forwarding proxy); `channel-bot` step 6
+reused step 1's `!hello` (`1c4266f`); `developer-platform` step 3 navigated while the previous
+redirect to `/cb` was still loading (`d51c084`). **CI green on `d51c084` (every job, all five
+harness shards): batch 3 done (E8, E9, N2-core, N2-consent).**
 
 **CI selection (2026-10-29, user):** a `changes` job (`scripts/ci-changes.ts`) diffs a push against
 the last green `ci` run on main. The harness runs only the scenarios a push can affect: none for
@@ -74,8 +79,6 @@ The gate always runs; the nightly run and a dispatch run everything.
 
 **Open (batch 3):**
 
-- First live runs of `interact`, `channel-bot` and `developer-platform` are on CI now; none ran
-  against a stack before merge.
 - `account-deletion` step 6 (completed email) timed out once on `db38034` with no deletion or
   mail change since a green run; `integrity-basic`'s hidden-tab dip (7 → 6) recurred once on
   `29c1ffd`. Both treated as flakes until they recur.
