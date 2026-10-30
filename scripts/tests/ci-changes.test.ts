@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 import { FULL_SHARDS } from "../../harness/src/shards.ts";
@@ -156,7 +157,18 @@ describe("changesFor", () => {
     { EVENT_NAME: "push", BASE: "not-a-commit", SHA: "also-not" },
   ])("everything for %o", (env) => expect(changesFor(env, ROOT)).toEqual(EVERYTHING));
 
-  test("real ranges in this repository", () => {
+  // CI's gate jobs check out one commit (no history): the ranges exist only in a full clone, and
+  // without them changesFor falls back to everything, which the cases above already cover.
+  const hasHistory = (() => {
+    try {
+      execFileSync("git", ["cat-file", "-e", "4a29455~1^{commit}"], { cwd: ROOT, stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  test.skipIf(!hasHistory)("real ranges in this repository", () => {
     // PROGRESS.md only.
     expect(changesFor({ EVENT_NAME: "push", BASE: "4a29455~1", SHA: "4a29455" }, ROOT)).toEqual({
       scenarios: [],
