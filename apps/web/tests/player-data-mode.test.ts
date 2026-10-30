@@ -265,6 +265,20 @@ describe("setDataMode", () => {
   });
 });
 
+describe("heartbeat timeout", () => {
+  it("a beat that never answers is given up after one interval; the next still goes out", async () => {
+    const { f } = await hlsSession();
+    f.heartbeat.mockImplementationOnce(() => new Promise(() => undefined));
+    await vi.advanceTimersByTimeAsync(BEAT_MS);
+    expect(f.heartbeat).toHaveBeenCalledTimes(1);
+    // The request carries a signal, so the fetch itself is cancelled too.
+    expect((f.heartbeat.mock.calls[0] as unknown[])[1]).toMatchObject({ signal: expect.any(AbortSignal) });
+    // One interval (600 s) to give up, then the next jittered delay (at most 660 s).
+    await vi.advanceTimersByTimeAsync(600_000 + BEAT_MS);
+    expect(f.heartbeat).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("the rest of the seam is unchanged", () => {
   it("without data mode hls.js is never capped and no manifest handler is added", async () => {
     const { c, hls } = await hlsSession();

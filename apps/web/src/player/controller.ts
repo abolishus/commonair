@@ -688,16 +688,27 @@ export class PlayerController {
     // A data-mode change the current token does not carry yet; resent until the server applies it.
     const wanted = this.dataModeWanted;
     const change = wanted !== this.dataModeApplied ? wanted : undefined;
+    // Beats go one after another, so a request that never answers would stop them all and drop the
+    // viewer from the count (once on CI: 35 s without a beat). Give up after one interval; the
+    // deltas ride along with the next beat, and the server caps watch time to wall-clock time.
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(new Error("heartbeat timed out")), session.intervalMs);
     try {
-      const res = await this.opts.api.playback.heartbeat({
-        sessionId: session.id,
-        token: session.token,
-        rendition: RENDITION_SOURCE,
-        fingerprint: collectFingerprint(this.native),
-        ...this.accountant.delta(totals),
-        ...playbackFields(this.playbackMode()),
-        ...dataModeField(change),
-      });
+      const res = await Promise.race([
+        this.opts.api.playback.heartbeat(
+          {
+            sessionId: session.id,
+            token: session.token,
+            rendition: RENDITION_SOURCE,
+            fingerprint: collectFingerprint(this.native),
+            ...this.accountant.delta(totals),
+            ...playbackFields(this.playbackMode()),
+            ...dataModeField(change),
+          },
+          { signal: abort.signal },
+        ),
+        new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => reject(abort.signal.reason))),
+      ]);
       // Throttled: the server recorded nothing, so the deltas ride along with the next beat.
       if (!this.accountant.settle(totals, res)) return;
       this.lastAckAt = Date.now();
@@ -713,6 +724,7 @@ export class PlayerController {
     } catch {
       // Not committed: this heartbeat's share is reported with the next one.
     } finally {
+      clearTimeout(timeout);
       // Bytes shared move between peer events; the indicator follows the heartbeat.
       if (this.p2p) this.emitP2P();
     }
