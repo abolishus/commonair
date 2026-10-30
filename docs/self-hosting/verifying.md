@@ -22,6 +22,7 @@ GitHub's API.
 | `<relay binary>.cdx.json`                               | CycloneDX SBOM of a relay binary                                  |
 | `<relay binary>.sigstore.json`                          | cosign signature bundle of a relay binary                         |
 | `<relay binary>.intoto.sigstore.json`                   | Signed SLSA provenance of a relay binary                          |
+| `<relay binary>.intoto.jsonl`                           | The same signed provenance as a bare DSSE envelope (SLSA layout)  |
 | `<relay binary>.provenance.json`                        | The same provenance, unsigned, for reading                        |
 | `commonair-image-<name>_<version>_<os>_<arch>.cdx.json` | SBOM of one image, one platform                                   |
 | `commonair-image-<name>_<version>.provenance.json`      | SLSA provenance predicate of one image (signed copy on the image) |

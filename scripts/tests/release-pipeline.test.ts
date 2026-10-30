@@ -6,14 +6,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, test } from "vite-plus/test";
 import { checkAssets, expectedAssets } from "../release/assemble.ts";
-import { imageAssetBase, imageProvenanceAsset, provenanceAsset, sbomAsset, signatureAsset } from "../release/assets.ts";
+import {
+  envelopeAsset,
+  imageAssetBase,
+  imageProvenanceAsset,
+  provenanceAsset,
+  sbomAsset,
+  signatureAsset,
+} from "../release/assets.ts";
 import { EXCLUDED, formatSums, sumsForDir } from "../release/checksums.ts";
 import { needsSummary, stripAnsi, verifySummary } from "../release/ci-summary.ts";
 import { RELAY_TARGETS, RELEASE_IMAGES, parseManifest, relayAssetName } from "../release/manifest.ts";
 import { DRY_RUN_REGISTRY, type PlanInput, outputs, plan, registryFor } from "../release/prepare.ts";
 import { BUILD_TYPE, contextFromEnv, slsaPredicate } from "../release/provenance.ts";
 import { archiveName, indexArgv, isInsecure, signArgv, sbomArgv } from "../release/publish-image.ts";
-import { attestBlobArgv, relayBuild, signBlobArgv } from "../release/relay.ts";
+import { attestBlobArgv, envelopeLine, relayBuild, signBlobArgv } from "../release/relay.ts";
 import { type Fetch, client, parseChallenge, repoUrl, tagLatest } from "../release/tag-latest.ts";
 import { TOOLS, assertChecksum, currentHost, sha256Hex } from "../release/tools.ts";
 
@@ -318,6 +325,31 @@ describe("relay", () => {
       "/b",
     ]);
   });
+
+  test("the provenance bundle's DSSE envelope becomes one .intoto.jsonl line", () => {
+    const dsseEnvelope = {
+      payload: "eyJfdHlwZSI6Imh0dHBzOi8vaW4tdG90by5pby9TdGF0ZW1lbnQvdjEifQ==",
+      payloadType: "application/vnd.in-toto+json",
+      signatures: [{ sig: "MEQCIB" }],
+    };
+    const bundle = JSON.stringify(
+      { mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json", dsseEnvelope },
+      null,
+      2,
+    );
+    const line = envelopeLine(bundle);
+    expect(line.endsWith("\n")).toBe(true);
+    expect(line.trimEnd()).not.toContain("\n");
+    expect(JSON.parse(line)).toEqual(dsseEnvelope);
+    // A signature bundle (no envelope), an unsigned or a non-in-toto envelope is refused.
+    expect(() => envelopeLine(JSON.stringify({ messageSignature: {} }))).toThrow(/no signed in-toto/);
+    expect(() => envelopeLine(JSON.stringify({ dsseEnvelope: { ...dsseEnvelope, signatures: [] } }))).toThrow(
+      /no signed in-toto/,
+    );
+    expect(() =>
+      envelopeLine(JSON.stringify({ dsseEnvelope: { ...dsseEnvelope, payloadType: "text/plain" } })),
+    ).toThrow(/no signed in-toto/);
+  });
 });
 
 describe("asset names", () => {
@@ -326,6 +358,7 @@ describe("asset names", () => {
     expect(sbomAsset(relay)).toBe("commonair-relay_0.1.0_linux_amd64.cdx.json");
     expect(signatureAsset(relay)).toBe("commonair-relay_0.1.0_linux_amd64.sigstore.json");
     expect(provenanceAsset(relay)).toBe("commonair-relay_0.1.0_linux_amd64.intoto.sigstore.json");
+    expect(envelopeAsset(relay)).toBe("commonair-relay_0.1.0_linux_amd64.intoto.jsonl");
     expect(sbomAsset(imageAssetBase("api", "0.1.0", "linux/arm64"))).toBe(
       "commonair-image-api_0.1.0_linux_arm64.cdx.json",
     );
@@ -498,9 +531,10 @@ describe("assemble", () => {
     expect(unsigned.relay).toHaveLength(RELAY_TARGETS.length * 3);
     expect(unsigned.dist).toEqual(["release-manifest.json", "commonair-selfhost_0.1.0.tar.gz"]);
     const signed = expectedAssets(m, true);
-    expect(signed.relay).toHaveLength(RELAY_TARGETS.length * 5);
+    expect(signed.relay).toHaveLength(RELAY_TARGETS.length * 6);
     expect(signed.relay).toContain("commonair-relay_0.1.0_windows_arm64.exe.sigstore.json");
     expect(signed.relay).toContain("commonair-relay_0.1.0_linux_amd64.intoto.sigstore.json");
+    expect(signed.relay).toContain("commonair-relay_0.1.0_linux_amd64.intoto.jsonl");
   });
 
   test("a complete directory passes; missing and stray files are named", () => {

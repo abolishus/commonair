@@ -10,9 +10,9 @@
  *
  * `build` needs only Go. `attest` needs syft, and cosign with a GitHub OIDC token for --sign.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { predicateAsset, provenanceAsset, sbomAsset, signatureAsset } from "./assets.ts";
+import { envelopeAsset, predicateAsset, provenanceAsset, sbomAsset, signatureAsset } from "./assets.ts";
 import { RELAY_TARGETS, relayAssetName } from "./manifest.ts";
 import { contextFromEnv, slsaPredicate } from "./provenance.ts";
 
@@ -61,6 +61,14 @@ export function attestBlobArgv(file: string, predicate: string, bundle: string):
     bundle,
     file,
   ];
+}
+
+/** The signed in-toto statement of a cosign bundle, as one `.intoto.jsonl` line. */
+export function envelopeLine(bundle: string): string {
+  const { dsseEnvelope } = JSON.parse(bundle) as { dsseEnvelope?: { payloadType?: string; signatures?: unknown[] } };
+  if (dsseEnvelope?.payloadType !== "application/vnd.in-toto+json" || !dsseEnvelope.signatures?.length)
+    throw new Error("bundle has no signed in-toto DSSE envelope");
+  return `${JSON.stringify(dsseEnvelope)}\n`;
 }
 
 function run(argv: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): void {
@@ -116,7 +124,9 @@ if (import.meta.main) {
       writeFileSync(predicate, `${JSON.stringify(slsaPredicate(ctx, { artifact: name, version, commit }), null, 2)}\n`);
       if (opt("sign") === "true") {
         run(signBlobArgv(bin, join(out, signatureAsset(name))));
-        run(attestBlobArgv(bin, predicate, join(out, provenanceAsset(name))));
+        const bundle = join(out, provenanceAsset(name));
+        run(attestBlobArgv(bin, predicate, bundle));
+        writeFileSync(join(out, envelopeAsset(name)), envelopeLine(readFileSync(bundle, "utf8")));
       }
     }
   }

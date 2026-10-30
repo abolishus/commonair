@@ -16,6 +16,7 @@ import {
   imageAssetBase,
   imageProvenanceAsset,
   predicateAsset,
+  envelopeAsset,
   provenanceAsset,
   sbomAsset,
   signatureAsset,
@@ -52,7 +53,7 @@ export function expectedAssets(m: ReleaseManifest, sign: boolean): ExpectedAsset
       name,
       sbomAsset(name),
       predicateAsset(name),
-      ...(sign ? [signatureAsset(name), provenanceAsset(name)] : []),
+      ...(sign ? [signatureAsset(name), provenanceAsset(name), envelopeAsset(name)] : []),
     ];
   });
   return { images, relay, dist: [MANIFEST_ASSET, bundleAssetName(m.version)] };
