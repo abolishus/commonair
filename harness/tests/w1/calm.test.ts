@@ -1,18 +1,17 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/** The pure parts of the `flood` extension (src/w1/calm.ts): the plan, the sampling maths, the a11y rules. */
+/** The pure parts of the `flood` extension (src/w1/calm.ts): the plan, the window maths, the a11y rules. */
 import { CHAT_LIMITS } from "@commonair/contracts/chat";
 import { describe, expect, test } from "vite-plus/test";
 import {
   FLOOD,
   a11yViolations,
+  RENDER_TOLERANCE_MS,
   digestUpdates,
-  firstSeen,
   floodPlan,
   maxNewRowsPerWindow,
   type A11yNode,
-  type RowSample,
 } from "../../src/w1/calm.ts";
 
 describe("floodPlan", () => {
@@ -48,46 +47,39 @@ describe("floodPlan", () => {
   });
 });
 
-const sample = (t: number, rows: string[], digest = ""): RowSample => ({ t, rows, digest });
+const row = (id: string, t: number) => ({ id, t });
 
-describe("firstSeen and maxNewRowsPerWindow", () => {
-  test("ignores rows that were there before and counts each row once", () => {
-    const samples = [sample(0, ["old", "a"]), sample(250, ["old", "a", "b"]), sample(500, ["a", "b"])];
-    expect([...firstSeen(samples, new Set(["old"]))]).toEqual([
-      ["a", 0],
-      ["b", 250],
-    ]);
+describe("maxNewRowsPerWindow", () => {
+  test("a sliding one-second window over the recorded times", () => {
+    // The governor's pattern: 3 rows at one tick, the next 3 a second later.
+    const steady = [row("a", 100), row("b", 101), row("c", 102), row("d", 1_100), row("e", 1_101), row("f", 1_102)];
+    expect(maxNewRowsPerWindow(steady, new Set())).toEqual({ max: 3, at: 100 });
+    // One batch rendered late by less than the tolerance still reads as separate seconds.
+    const late = [row("a", 130), row("b", 131), row("c", 132), row("d", 1_100)];
+    expect(maxNewRowsPerWindow(late, new Set()).max).toBe(3);
+    // A real overflow inside the window is caught wherever it starts.
+    const over = [row("a", 0), row("b", 400), row("c", 500), row("d", 600), row("e", 2_000)];
+    expect(maxNewRowsPerWindow(over, new Set())).toEqual({ max: 4, at: 0 });
+    expect(maxNewRowsPerWindow([row("a", 1_000 - RENDER_TOLERANCE_MS - 1), row("b", 0)], new Set()).max).toBe(2);
   });
 
-  test("the most new rows within four consecutive samples (one second)", () => {
-    const samples = [
-      sample(0, ["a"]),
-      sample(250, ["a", "b"]),
-      sample(500, ["a", "b", "c"]),
-      sample(750, ["a", "b", "c"]),
-      sample(1000, ["a", "b", "c", "d"]),
-      sample(1250, ["a", "b", "c", "d", "e", "f"]),
-    ];
-    expect(maxNewRowsPerWindow(samples, new Set(), new Set())).toEqual({ max: 4, at: 500 });
-    expect(maxNewRowsPerWindow(samples, new Set(), new Set(["e"]))).toEqual({ max: 3, at: 0 });
-    const burst = [sample(0, []), sample(250, ["a", "b", "c", "m"])];
-    expect(maxNewRowsPerWindow(burst, new Set(), new Set()).max).toBe(4);
-    expect(maxNewRowsPerWindow(burst, new Set(), new Set(["m"])).max).toBe(3);
-    expect(maxNewRowsPerWindow([], new Set(), new Set())).toEqual({ max: 0, at: 0 });
+  test("mentions are exempt; nothing recorded is zero", () => {
+    const burst = [row("a", 0), row("b", 0), row("c", 0), row("m", 1)];
+    expect(maxNewRowsPerWindow(burst, new Set()).max).toBe(4);
+    expect(maxNewRowsPerWindow(burst, new Set(["m"])).max).toBe(3);
+    expect(maxNewRowsPerWindow([], new Set())).toEqual({ max: 0, at: 0 });
   });
 });
 
 describe("digestUpdates", () => {
   test("change times and the shortest gap", () => {
-    const samples = [
-      sample(0, [], ""),
-      sample(250, [], "3 new messages"),
-      sample(500, [], "3 new messages"),
-      sample(5_250, [], "40 new messages"),
-      sample(10_500, [], "80 new messages"),
+    const changes = [
+      { text: "3 new messages", t: 250 },
+      { text: "40 new messages", t: 5_252 },
+      { text: "80 new messages", t: 10_500 },
     ];
-    expect(digestUpdates(samples)).toEqual({ times: [250, 5_250, 10_500], minGapMs: 5_000 });
-    expect(digestUpdates([sample(0, [], "a")]).minGapMs).toBe(Number.POSITIVE_INFINITY);
+    expect(digestUpdates(changes)).toEqual({ times: [250, 5_252, 10_500], minGapMs: 5_002 });
+    expect(digestUpdates([{ text: "a", t: 0 }]).minGapMs).toBe(Number.POSITIVE_INFINITY);
   });
 });
 

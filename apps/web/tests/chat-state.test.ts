@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ChatConnection, MAX_MESSAGES, type ChatMessageFrame, type SocketLike } from "../src/chat/connection.ts";
 import { noticeMessage } from "../src/chat/messages.ts";
-import { chatReducer, EMPTY_GATE, gateReducer, type ChatAction, type ChatRow } from "../src/chat/state.ts";
+import { chatReducer, EMPTY_GATE, gateReducer, Tombstones, type ChatAction, type ChatRow } from "../src/chat/state.ts";
 import { t } from "../src/i18n/index.ts";
 
 const UUID = (n: number) => `0190f000-0000-7000-8000-${n.toString().padStart(12, "0")}`;
@@ -240,5 +240,41 @@ describe("gateReducer (what the panel hands <SurgeBanner/>)", () => {
     expect(s.surge).toEqual({ state: "off", until: null });
     expect(gateReducer(s, { type: "joined" })).toBe(s);
     expect(gateReducer(s, { type: "reset" })).toBe(EMPTY_GATE);
+  });
+});
+
+describe("Tombstones (moderation that arrives while a line is held)", () => {
+  const troll = { id: 7, username: "troll_seven" };
+
+  it("hides a held line deleted before it is shown, and nothing else", () => {
+    const t = new Tombstones();
+    const a = t.arrive();
+    const b = t.arrive();
+    t.delete(msg(1).id);
+    expect(t.hides(msg(1), a)).toBe(true);
+    expect(t.hides(msg(2), b)).toBe(false);
+  });
+
+  it("a ban hides the author's lines that arrived before it, by id or by name, not later ones", () => {
+    const t = new Tombstones();
+    const before = t.arrive();
+    t.ban(UUID(7), "troll_seven");
+    const after = t.arrive();
+    expect(t.hides(msg(1, troll), before)).toBe(true);
+    expect(t.hides(msg(1, { id: 8, username: "troll_seven" }), before)).toBe(true);
+    expect(t.hides(msg(1, { id: 7, username: "renamed" }), before)).toBe(true);
+    // A timeout ends: the user's next lines show.
+    expect(t.hides(msg(2, troll), after)).toBe(false);
+    expect(t.hides(msg(3), before)).toBe(false);
+  });
+
+  it("a clear hides every line that arrived before it", () => {
+    const t = new Tombstones();
+    const before = t.arrive();
+    t.delete(msg(9).id);
+    t.clear();
+    const after = t.arrive();
+    expect(t.hides(msg(1), before)).toBe(true);
+    expect(t.hides(msg(2), after)).toBe(false);
   });
 });

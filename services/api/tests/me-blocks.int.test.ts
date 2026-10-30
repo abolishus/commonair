@@ -243,10 +243,14 @@ describe("me.blocks", () => {
   test("blocking a moderator or the broadcaster is allowed and writes no audit or event row", async () => {
     const me = await signUpAndSignIn(api);
     const streamer = await signUpAndSignIn(api);
-    const before = await db().select({ id: schema.auditLog.id }).from(schema.auditLog);
+    const counts = async () => ({
+      audit: (await db().select({ id: schema.auditLog.id }).from(schema.auditLog)).length,
+      events: (await db().select({ id: schema.events.id }).from(schema.events)).length,
+    });
+    const before = await counts();
     const res = await me.client.call("POST", "/api/me/blocks", { username: streamer.username });
     expect(res.status).toBe(200);
-    const after = await db().select({ id: schema.auditLog.id }).from(schema.auditLog);
-    expect(after.length).toBe(before.length);
+    expect((await me.client.call("DELETE", `/api/me/blocks/${streamer.username}`)).status).toBe(200);
+    expect(await counts()).toEqual(before);
   });
 });

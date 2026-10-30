@@ -58,6 +58,56 @@ export function chatReducer(rows: ChatRow[], action: ChatAction): ChatRow[] {
   }
 }
 
+/** How many deleted ids `Tombstones` remembers (the presentation queue holds at most 60 s of chat). */
+const MAX_TOMBSTONES = 2_000;
+
+/**
+ * Moderation that arrives while the presentation queue still holds a line (up to 60 s with chat
+ * sync on): `chatReducer` only marks rows already in the log, so a held line would otherwise show
+ * as a normal one after its delete, ban or clear. Each message is stamped on arrival (`arrive`);
+ * `hides` drops it at show time when it was deleted, or when a ban of its author or a clear came
+ * after it arrived (a timed-out user's later lines still show).
+ */
+export class Tombstones {
+  private seq = 0;
+  private clearedAt = 0;
+  private readonly deleted = new Set<string>();
+  private readonly bans = new Map<string, number>();
+
+  /** Stamp a message as it arrives from the socket. */
+  arrive(): number {
+    return ++this.seq;
+  }
+
+  delete(messageId: string): void {
+    this.deleted.add(messageId);
+    if (this.deleted.size > MAX_TOMBSTONES) {
+      const oldest = this.deleted.values().next();
+      if (!oldest.done) this.deleted.delete(oldest.value);
+    }
+  }
+
+  ban(userId: string, username: string): void {
+    const at = ++this.seq;
+    this.bans.set(`id:${userId}`, at);
+    this.bans.set(`name:${username}`, at);
+  }
+
+  clear(): void {
+    this.clearedAt = ++this.seq;
+    // Everything that arrived before is covered by the clear.
+    this.deleted.clear();
+    this.bans.clear();
+  }
+
+  /** Whether a message stamped `arrivedAt` must not be shown. */
+  hides(m: ChatMessageFrame, arrivedAt: number): boolean {
+    if (arrivedAt <= this.clearedAt || this.deleted.has(m.id)) return true;
+    const ban = Math.max(this.bans.get(`id:${m.user.id}`) ?? 0, this.bans.get(`name:${m.user.username}`) ?? 0);
+    return ban > arrivedAt;
+  }
+}
+
 /**
  * What the panel feeds `<SurgeBanner/>` (W1-watch-gate): the latest settings and surge state (the
  * `joined` frame carries both, so a viewer who joins mid-surge sees the hint at once) and whether a

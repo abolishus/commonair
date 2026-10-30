@@ -4,14 +4,14 @@
 /**
  * Calm Chat's rate governor (feature-wins §4.2): at most `rowsPerSecond` new rows in any one-second
  * window. Candidates wait for the next `flush`, which lets the most important through first:
- * mentions of the viewer, the broadcaster, moderators, replies to the viewer, first-time chatters,
- * subscribers when that setting is on, then everyone else. What does not fit is dropped from view
- * (never from the log) and counted for the digest. Mentions of the viewer are never dropped: they
- * pass even over the limit (and still use it up). Pure apart from the injected clock.
+ * mentions of and replies to the viewer (and their own lines), the broadcaster, moderators,
+ * first-time chatters, subscribers when that setting is on, then everyone else. What does not fit
+ * is dropped from view (never from the log) and counted for the digest. The first three are never
+ * dropped (`PROTECTED`): they pass even over the limit, and still use it up. Pure apart from the
+ * injected clock.
  */
 import type { ChatMessageFrame } from "../connection.ts";
 import { isForMe, isOwn } from "./reducer.ts";
-import { mentions } from "./normalize.ts";
 
 export const RATE_MIN = 1;
 export const RATE_MAX = 10;
@@ -20,15 +20,18 @@ const WINDOW_MS = 1_000;
 
 /** Lower is more important. */
 export const PRIORITY = {
+  /** A mention of or reply to the viewer, or the viewer's own line. */
   mention: 0,
   broadcaster: 1,
   moderator: 2,
-  reply: 3,
-  firstTime: 4,
-  subscriber: 5,
-  rest: 6,
+  firstTime: 3,
+  subscriber: 4,
+  rest: 5,
 } as const;
 export type Priority = (typeof PRIORITY)[keyof typeof PRIORITY];
+
+/** Priorities the speed limit never drops: what the digest and settings promise is always shown. */
+export const isProtected = (p: Priority): boolean => p <= PRIORITY.moderator;
 
 export interface PriorityContext {
   /** The viewer's username; null signed out. */
@@ -40,11 +43,10 @@ export interface PriorityContext {
 
 export function priorityOf(m: ChatMessageFrame, ctx: PriorityContext): Priority {
   const badges = new Set(m.user.badges.map((b) => b.type));
-  // The viewer's own lines are never governed away either.
-  if (mentions(m.body, ctx.self) || isOwn(m, ctx.self)) return PRIORITY.mention;
+  // Whatever `isForMe` marks (the digest's "mention of you", the m key) must be on screen.
+  if (isForMe(m, ctx.self) || isOwn(m, ctx.self)) return PRIORITY.mention;
   if (badges.has("broadcaster")) return PRIORITY.broadcaster;
   if (badges.has("moderator")) return PRIORITY.moderator;
-  if (isForMe(m, ctx.self)) return PRIORITY.reply;
   if (ctx.firstTime) return PRIORITY.firstTime;
   if (ctx.subscriberPriority && badges.has("subscriber")) return PRIORITY.subscriber;
   return PRIORITY.rest;
@@ -106,7 +108,7 @@ export class RateGovernor {
     const admitted: string[] = [];
     const dropped: string[] = [];
     for (const { c } of ordered) {
-      if (c.priority === PRIORITY.mention || budget > 0) {
+      if (isProtected(c.priority) || budget > 0) {
         admitted.push(c.id);
         this.shownAt.push(t);
         budget = Math.max(0, budget - 1);

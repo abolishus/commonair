@@ -59,5 +59,6 @@ export function waveKey(message: { body: string; emotes: readonly EmoteRange[] }
 export function mentions(body: string, username: string | null): boolean {
   if (!username) return false;
   const want = `@${username.toLowerCase()}`;
-  return tokens(body).some((tok) => tok.replace(/[^\p{L}\p{N}_@]+$/u, "") === want);
+  // Punctuation around the name counts too: "(@fan)", "\"@fan\"", "@fan!".
+  return tokens(body).some((tok) => tok.replace(/^[^\p{L}\p{N}_@]+|[^\p{L}\p{N}_]+$/gu, "") === want);
 }

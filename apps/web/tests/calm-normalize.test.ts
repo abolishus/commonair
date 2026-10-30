@@ -101,6 +101,9 @@ describe("mentions", () => {
     expect(mentions("hi @Fan_One!", "fan_one")).toBe(true);
     expect(mentions("@FAN_ONE", "fan_one")).toBe(true);
     expect(mentions("hey @fan_one, look", "Fan_One")).toBe(true);
+    expect(mentions("ask (@fan_one)", "fan_one")).toBe(true);
+    expect(mentions('"@fan_one" said', "fan_one")).toBe(true);
+    expect(mentions("¿@fan_one?", "fan_one")).toBe(true);
   });
 
   it("ignores longer names, bare names and signed-out viewers", () => {

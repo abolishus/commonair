@@ -276,11 +276,22 @@ describe("RateGovernor", () => {
     const { g } = gov(4);
     g.offer({ id: "rest", priority: PRIORITY.rest });
     g.offer({ id: "first", priority: PRIORITY.firstTime });
-    g.offer({ id: "reply", priority: PRIORITY.reply });
+    g.offer({ id: "sub", priority: PRIORITY.subscriber });
+    g.offer({ id: "rest2", priority: PRIORITY.rest });
     g.offer({ id: "mod", priority: PRIORITY.moderator });
     g.offer({ id: "caster", priority: PRIORITY.broadcaster });
-    g.offer({ id: "sub", priority: PRIORITY.subscriber });
-    expect(g.flush()).toEqual({ admitted: ["caster", "mod", "reply", "first"], dropped: ["sub", "rest"] });
+    expect(g.flush()).toEqual({ admitted: ["caster", "mod", "first", "sub"], dropped: ["rest", "rest2"] });
+  });
+
+  it("never drops the broadcaster or a moderator over the limit either", () => {
+    const { g } = gov(1);
+    g.offer({ id: "rest", priority: PRIORITY.rest });
+    g.offer({ id: "mod", priority: PRIORITY.moderator });
+    g.offer({ id: "caster", priority: PRIORITY.broadcaster });
+    g.offer({ id: "first", priority: PRIORITY.firstTime });
+    expect(g.flush()).toEqual({ admitted: ["caster", "mod"], dropped: ["first", "rest"] });
+    g.offer({ id: "mod2", priority: PRIORITY.moderator });
+    expect(g.flush().admitted).toEqual(["mod2"]);
   });
 
   it("never drops a mention, even over the limit (and it uses the budget up)", () => {
@@ -330,7 +341,10 @@ describe("priorityOf", () => {
     expect(priorityOf(msg(1, "hey @fan_one", { badges: ["moderator"] }), ctx)).toBe(PRIORITY.mention);
     expect(priorityOf(msg(1, "x", { badges: ["broadcaster", "moderator"] }), ctx)).toBe(PRIORITY.broadcaster);
     expect(priorityOf(msg(1, "x", { badges: ["moderator"] }), ctx)).toBe(PRIORITY.moderator);
-    expect(priorityOf(msg(1, "x", { replyTo: { id: UUID(5), username: SELF, body: "y" } }), ctx)).toBe(PRIORITY.reply);
+    // A reply to the viewer is a "mention of you" in the digest, so it is never dropped either.
+    expect(priorityOf(msg(1, "x", { replyTo: { id: UUID(5), username: SELF, body: "y" } }), ctx)).toBe(
+      PRIORITY.mention,
+    );
     expect(priorityOf(msg(1, "x"), { ...ctx, firstTime: true })).toBe(PRIORITY.firstTime);
     expect(priorityOf(msg(1, "x"), ctx)).toBe(PRIORITY.rest);
   });

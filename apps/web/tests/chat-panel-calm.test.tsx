@@ -35,6 +35,18 @@ import type { ReportClient } from "../src/components/safety/client.ts";
 import { locale, t, uiMessages } from "../src/i18n/index.ts";
 
 const banner = vi.hoisted(() => ({ props: [] as unknown[] }));
+// A presentation queue that can hold lines (W1-player's real one holds up to 60 s with sync on).
+const queue = vi.hoisted(() => ({ hold: false, held: [] as (() => void)[] }));
+vi.mock("../src/chat/presentation.ts", () => ({
+  presentationQueue: () => ({
+    present: <T,>(item: T, show: (item: T) => void) => {
+      if (queue.hold) queue.held.push(() => show(item));
+      else show(item);
+    },
+    syncChat: false,
+    dispose: () => {},
+  }),
+}));
 vi.mock("../src/chat/surge-banner.tsx", () => ({
   SurgeBanner: (props: unknown) => {
     banner.props.push(props);
@@ -106,6 +118,8 @@ beforeEach(() => {
   setCalmStorage(() => storage);
   resetBlocks();
   banner.props = [];
+  queue.hold = false;
+  queue.held = [];
 });
 afterEach(() => {
   cleanup();
@@ -371,6 +385,16 @@ describe("ChatPanel with blocks", () => {
     expect(messageIds()).toEqual([UUID(2)]);
   });
 
+  it("moderators still see blocked users' lines in channels they moderate", async () => {
+    const client = blocks([UUID(7)]);
+    const { send } = await panel({ self: "mod", canModerate: true, blocksClient: client });
+    await waitFor(() => expect(blockSnapshot().ids.has(UUID(7))).toBe(true));
+    send(msg(1, "rule-breaking line", { user: 7, username: "troll7" }));
+    send(msg(2, "re", { user: 8, replyTo: { id: UUID(1), username: "troll7", body: "x" } }));
+    expect(messageIds()).toEqual([UUID(1), UUID(2)]);
+    expect(all("chat-message")[1]?.textContent).not.toContain(t("blocks.replyToBlocked"));
+  });
+
   it("no menu on your own messages; signed out no menu at all", async () => {
     const { send } = await panel({ self: "fan" });
     send(msg(1, "mine", { user: 5, username: "fan" }));
@@ -382,6 +406,33 @@ describe("ChatPanel with blocks", () => {
     const anon = await panel({ self: null });
     anon.send(msg(3, "theirs", { user: 6 }));
     expect(document.querySelector('[data-testid="chat-message-actions"]')).toBeNull();
+  });
+});
+
+describe("ChatPanel with a presentation queue holding lines", () => {
+  const release = () =>
+    act(() => {
+      for (const show of queue.held.splice(0)) show();
+    });
+
+  it("a line deleted, or whose author is banned, while held never shows; a clear drops what was held", async () => {
+    const { ws, send } = await panel({ self: "fan" });
+    queue.hold = true;
+    send(msg(1, "deleted while held"));
+    send(msg(2, "from the banned user", { user: 7, username: "troll7" }));
+    send(msg(3, "kept"));
+    act(() => {
+      ws.push({ op: "delete", channel: CHANNEL, messageId: UUID(1), username: "user101" });
+      ws.push({ op: "ban", channel: CHANNEL, userId: UUID(7), username: "troll7", expiresAt: null, reason: "" });
+    });
+    release();
+    expect(messageIds()).toEqual([UUID(3)]);
+    send(msg(4, "held before the clear"));
+    act(() => ws.push({ op: "clear", channel: CHANNEL }));
+    send(msg(5, "after the clear"));
+    release();
+    expect(messageIds()).toEqual([UUID(3), UUID(5)]);
+    expect(all("chat-message").find((m) => m.dataset.id === UUID(3))?.dataset.deleted).toBe("true");
   });
 });
 
@@ -445,6 +496,33 @@ describe("ChatPanel in Calm Chat", () => {
     // Wait out the digest interval's first tick: the region says what came in.
     await waitFor(() => expect(one("calm-digest").textContent).toContain("41 new messages"), { timeout: 2_000 });
     expect(one("calm-digest").textContent).toContain("mention of you");
+  });
+
+  it("a reply to the viewer over the limit is shown (the digest counts it as a mention of you)", async () => {
+    writeCalmSettings({ enabled: true });
+    const { send } = await panel({ self: "fan" });
+    for (let i = 1; i <= 10; i++) send(msg(i, `distinct line ${i}`));
+    send(msg(11, "agreed", { replyTo: { id: UUID(99), username: "fan", body: "x" } }));
+    await waitFor(() => expect(all("chat-message").some((m) => m.dataset.id === UUID(11))).toBe(true));
+    expect(all("chat-message").find((m) => m.dataset.id === UUID(11))?.dataset.mention).toBe("true");
+  });
+
+  it("a shown wave keeps its row and id when the log's cap drops its first copies", async () => {
+    writeCalmSettings({ enabled: true });
+    const { send } = await panel({ self: "fan" });
+    send(msg(1, "PogChamp"));
+    await waitFor(() => expect(messageIds()).toEqual([UUID(1)]));
+    send(msg(2, "PogChamp"));
+    send(msg(3, "PogChamp"));
+    expect(all("chat-wave").map((w) => [w.dataset.id, w.dataset.count])).toEqual([[UUID(1), "3"]]);
+    // The next tick admits the copies that joined (the log takes seconds to turn over in a real flood).
+    await act(() => new Promise((r) => setTimeout(r, 300)));
+    // 198 other lines: the log (200 rows) drops the wave's first copy, its id's own message.
+    for (let i = 4; i <= 201; i++) send(msg(i, `distinct line ${i}`));
+    expect(all("chat-wave").map((w) => [w.dataset.id, w.dataset.count])).toEqual([[UUID(1), "2"]]);
+    // One more copy pushes out the second: the wave (copies 3 and 202) is still the same row.
+    send(msg(202, "PogChamp", { at: 202 }));
+    expect(all("chat-wave").map((w) => [w.dataset.id, w.dataset.count])).toEqual([[UUID(1), "2"]]);
   });
 
   it("turning Calm Chat off shows every line again (the log was never changed)", async () => {

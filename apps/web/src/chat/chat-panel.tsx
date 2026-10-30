@@ -38,7 +38,7 @@ import { useChatInteract } from "./interact/use-chat-interact.ts";
 import { errorMessage, noticeMessage } from "./messages.ts";
 import { MessageMenu, TIMEOUT_SECONDS } from "./mod-menu.tsx";
 import { presentationQueue } from "./presentation.ts";
-import { chatReducer, EMPTY_GATE, gateReducer, type ChatRow } from "./state.ts";
+import { chatReducer, EMPTY_GATE, gateReducer, Tombstones, type ChatRow } from "./state.ts";
 import { SurgeBanner } from "./surge-banner.tsx";
 import { badgeAttr, chatStatusView, nameColorIndex, visibleBadges } from "./view.ts";
 
@@ -63,6 +63,7 @@ interface ModTarget {
 }
 
 const EMPTY_ROWS: ChatRow[] = [];
+const NO_BLOCKS: BlockSet = { ids: new Set(), usernames: new Set() };
 
 const noop = () => {};
 
@@ -213,6 +214,7 @@ export function ChatPanel({
       channel,
       creatorView: selfRef.current?.toLowerCase() === channel.toLowerCase(),
     });
+    const tombstones = new Tombstones();
     const conn = new ChatConnection(
       channel,
       {
@@ -232,17 +234,27 @@ export function ChatPanel({
         onMessage: (message) => {
           // An allowed held message comes back as an ordinary one.
           heldDispatch({ type: "remove", id: message.id });
-          queue.present({ kind: "chat", mediaTs: message.mediaTs ?? null, own: isOwn(message, selfRef.current) }, () =>
-            dispatch({ type: "message", message }),
+          const arrived = tombstones.arrive();
+          queue.present(
+            { kind: "chat", mediaTs: message.mediaTs ?? null, own: isOwn(message, selfRef.current) },
+            () => {
+              // Moderation may have come while the queue held the line.
+              if (!tombstones.hides(message, arrived)) dispatch({ type: "message", message });
+            },
           );
         },
         onHeld: (message) => heldDispatch({ type: "held", message }),
         onDelete: (messageId) => {
+          tombstones.delete(messageId);
           dispatch({ type: "delete", messageId });
           heldDispatch({ type: "remove", id: messageId });
         },
-        onClear: () => dispatch({ type: "clear" }),
+        onClear: () => {
+          tombstones.clear();
+          dispatch({ type: "clear" });
+        },
         onBan: (userId, username) => {
+          tombstones.ban(userId, username);
           dispatch({ type: "ban", userId, username });
           heldDispatch({ type: "removeUser", userId });
         },
@@ -293,7 +305,10 @@ export function ChatPanel({
     toast.success(t("chat.mod.banned", { name: target.displayName }));
   };
 
-  const blocks = useBlocks(signedIn ? selfUsername : null, blocksClient);
+  const myBlocks = useBlocks(signedIn ? selfUsername : null, blocksClient);
+  // Moderators (and the broadcaster) see blocked users' lines in channels they moderate, so they
+  // can still time them out or ban them.
+  const blocks = canModerate ? NO_BLOCKS : myBlocks;
   const block = async (target: ModTarget) => {
     const { user } = await (blocksClient ?? defaultBlocksClient()).add(target.username);
     noteBlocked(user);
@@ -308,6 +323,7 @@ export function ChatPanel({
   const calmOn = calmSettings.enabled && !canModerate;
   const calm = useCalm({
     rows: visible,
+    log: rows,
     enabled: calmOn,
     rowsPerSecond: calmSettings.rowsPerSecond,
     subscriberPriority: calmSettings.subscriberPriority,

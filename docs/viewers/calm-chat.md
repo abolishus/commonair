@@ -40,10 +40,11 @@ Moderators always see the raw chat, so the buttons are not shown to them.
   message, or report the whole wave at once with **Report wave**: moderators get one report with
   up to 50 of its messages.
 - **A speed limit.** At most the set number of new lines appear each second. When more arrive,
-  the most important go first: mentions of you, the broadcaster, moderators, replies to you,
+  the most important go first: mentions of and replies to you, the broadcaster, moderators,
   people chatting for the first time this session, subscribers if you chose so, then everyone
-  else. Lines that do not fit are skipped on your screen (they stay in the chat) and counted in
-  the summary.
+  else. Mentions, replies, the broadcaster and moderators always get through, even over the
+  limit. Other lines that do not fit are skipped on your screen (they stay in the chat) and
+  counted in the summary.
 - **A summary instead of every line.** A single line under the chat, read out politely by screen
   readers at most every 5 seconds: "12 new messages, 2 waves (PogChamp ×312), 1 mention of you".
 - **Removed messages leave.** A message a moderator deletes, or every message of someone who is
@@ -54,7 +55,8 @@ Moderators always see the raw chat, so the buttons are not shown to them.
 - Mentions of you (`@yourname`) and replies to your messages: always shown, never grouped, never
   skipped by the speed limit.
 - Your own messages.
-- Messages from the broadcaster and the channel's moderators: never grouped.
+- Messages from the broadcaster and the channel's moderators: never grouped, never skipped by
+  the speed limit.
 - Chat notices (slow mode, a message of yours that was refused) and events such as tips and
   subscriptions.
 - The line under the message box that says chat is saved with the broadcast's VOD and replayed

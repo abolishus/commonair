@@ -6,10 +6,10 @@
  * W1-calm-chat).
  *
  * `flood`: signed-in API chat bots send 50 messages a second for 10 seconds (a few repeated bodies,
- * varied lines and some mentions of the fan) while the fan's page has Calm Chat on. Sampling the
- * DOM every 250 ms, at most 3 distinct new rows appear in any second (mentions of the fan excepted:
- * they are never dropped), every mention of the fan appears, the digest region changes at most
- * every 5 s, and the chat panel passes the accessibility check. The check is the in-repo one
+ * varied lines and some mentions of the fan) while the fan's page has Calm Chat on. Recording
+ * in the page (a MutationObserver stamping each new row and digest change), at most 3 distinct new
+ * rows appear in any one-second window (mentions of the fan excepted: they are never dropped),
+ * every mention of the fan appears, the digest region changes at most every 5 s, and the chat panel passes the accessibility check. The check is the in-repo one
  * (roles, names and the live region through the DOM and Playwright's `ariaSnapshot`):
  * `@axe-core/playwright` is not a dependency (TODO(axe): call it here once the orchestrator lands
  * the dependency from W1-calm-chat's contract request).
@@ -43,7 +43,6 @@ export const FLOOD = {
   rowsPerSecond: 3,
   /** Chat allows a member 20 messages per 30 s (`CHAT_LIMITS.user`): 30 bots send at most 17 each. */
   bots: 30,
-  sampleMs: 250,
   digestIntervalMs: 5_000,
   /** Mentions of the fan spread over the flood. */
   mentions: 6,
@@ -87,53 +86,51 @@ export function floodPlan(fan: string, run: string, f: typeof FLOOD = FLOOD): Fl
 
 // ------------------------------------------------------------------ flood: what the page showed
 
-export interface RowSample {
-  /** Milliseconds since the flood started. */
-  t: number;
-  /** `data-id` of every `chat-message` and `chat-wave` on screen. */
-  rows: string[];
-  digest: string;
+/**
+ * What the page recorded during the flood (`installFloodRecorder`): when each row id was first on
+ * screen and when the digest's text changed, stamped in the page itself (`performance.now()` in a
+ * MutationObserver), so polling latency never shifts a time. Rows on screen when the recorder was
+ * installed are not recorded.
+ */
+export interface FloodRecord {
+  rows: { id: string; t: number }[];
+  digest: { text: string; t: number }[];
 }
 
-/** When each row id was first on screen (ids present before the flood are ignored). */
-export function firstSeen(samples: readonly RowSample[], before: ReadonlySet<string>): Map<string, number> {
-  const seen = new Map<string, number>();
-  for (const s of samples) for (const id of s.rows) if (!before.has(id) && !seen.has(id)) seen.set(id, s.t);
-  return seen;
-}
+/** Render latency the window allows: one batch committed a little late, the next on time. */
+export const RENDER_TOLERANCE_MS = 50;
 
 /**
- * The most new rows first seen within any window of `windowSamples` consecutive samples (4 × 250
- * ms: a row first seen at sample i appeared after sample i − 1, so four samples span one second),
- * not counting `exempt` rows (mentions, which pass the governor regardless).
+ * The most new rows that appeared within any one-second window (a true sliding window over the
+ * recorded times, narrowed by `toleranceMs`), not counting `exempt` rows (mentions, which pass the
+ * governor regardless).
  */
 export function maxNewRowsPerWindow(
-  samples: readonly RowSample[],
-  before: ReadonlySet<string>,
+  rows: readonly { id: string; t: number }[],
   exempt: ReadonlySet<string>,
-  windowSamples = 4,
+  windowMs = 1_000,
+  toleranceMs = RENDER_TOLERANCE_MS,
 ): { max: number; at: number } {
-  const seen = firstSeen(samples, before);
-  const perSample = samples.map((s) => [...seen].filter(([id, t]) => t === s.t && !exempt.has(id)).length);
+  const times = rows
+    .filter((r) => !exempt.has(r.id))
+    .map((r) => r.t)
+    .sort((a, b) => a - b);
+  const span = windowMs - toleranceMs;
   let best = { max: 0, at: 0 };
-  for (let i = 0; i < perSample.length; i++) {
-    const n = perSample.slice(i, i + windowSamples).reduce((a, b) => a + b, 0);
-    if (n > best.max) best = { max: n, at: samples[i]?.t ?? 0 };
+  let j = 0;
+  for (let i = 0; i < times.length; i++) {
+    const from = times[i] ?? 0;
+    if (j < i) j = i;
+    while (j + 1 < times.length && (times[j + 1] ?? 0) - from < span) j++;
+    const n = j - i + 1;
+    if (n > best.max) best = { max: n, at: from };
   }
   return best;
 }
 
-/**
- * The digest's updates: the sample times at which its text changed, and the shortest gap between
- * two of them (Infinity with fewer than two).
- */
-export function digestUpdates(samples: readonly RowSample[]): { times: number[]; minGapMs: number } {
-  const times: number[] = [];
-  let last: string | null = null;
-  for (const s of samples) {
-    if (last !== null && s.digest !== last) times.push(s.t);
-    last = s.digest;
-  }
+/** The digest's change times and the shortest gap between two of them (Infinity with fewer than two). */
+export function digestUpdates(changes: readonly { text: string; t: number }[]): { times: number[]; minGapMs: number } {
+  const times = changes.map((c) => c.t);
   let minGapMs = Number.POSITIVE_INFINITY;
   for (let i = 1; i < times.length; i++) minGapMs = Math.min(minGapMs, (times[i] ?? 0) - (times[i - 1] ?? 0));
   return { times, minGapMs };
@@ -259,16 +256,50 @@ async function openChannel(session: WebSession, channel: string): Promise<Page> 
   return page;
 }
 
-async function sampleRows(page: Page): Promise<{ rows: string[]; digest: string }> {
-  return page.evaluate(
-    ({ message, wave, digest }) => ({
-      rows: [...document.querySelectorAll<HTMLElement>(`[data-testid="${message}"], [data-testid="${wave}"]`)].map(
-        (el) => el.dataset.id ?? "",
-      ),
-      digest: document.querySelector(`[data-testid="${digest}"]`)?.textContent ?? "",
-    }),
-    { message: W.chatMessage, wave: W.chatWave, digest: W.calmDigest },
+const RECORDER = "__w1FloodRecord";
+
+/** Start recording row appearances and digest changes inside the page (see `FloodRecord`). */
+async function installFloodRecorder(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ chat, message, wave, digest, key }) => {
+      const root = document.querySelector(`[data-testid="${chat}"]`);
+      if (!root) throw new Error("no chat panel");
+      const record: { rows: { id: string; t: number }[]; digest: { text: string; t: number }[] } = {
+        rows: [],
+        digest: [],
+      };
+      const rowSelector = `[data-testid="${message}"], [data-testid="${wave}"]`;
+      const seen = new Set([...root.querySelectorAll<HTMLElement>(rowSelector)].map((el) => el.dataset.id ?? ""));
+      const digestText = () => root.querySelector(`[data-testid="${digest}"]`)?.textContent ?? "";
+      let lastDigest = digestText();
+      const observer = new MutationObserver(() => {
+        const t = performance.now();
+        for (const el of root.querySelectorAll<HTMLElement>(rowSelector)) {
+          const id = el.dataset.id ?? "";
+          if (seen.has(id)) continue;
+          seen.add(id);
+          record.rows.push({ id, t });
+        }
+        const text = digestText();
+        if (text !== lastDigest) {
+          lastDigest = text;
+          record.digest.push({ text, t });
+        }
+      });
+      observer.observe(root, { childList: true, subtree: true, characterData: true });
+      Object.assign(window, { [key]: { record, stop: () => observer.disconnect() } });
+    },
+    { chat: T.chat, message: W.chatMessage, wave: W.chatWave, digest: W.calmDigest, key: RECORDER },
   );
+}
+
+async function collectFloodRecord(page: Page): Promise<FloodRecord> {
+  return page.evaluate((key) => {
+    const rec = (window as unknown as Record<string, { record: FloodRecord; stop: () => void } | undefined>)[key];
+    if (!rec) throw new Error("the flood recorder is not installed");
+    rec.stop();
+    return rec.record;
+  }, RECORDER);
 }
 
 async function joined(ctx: ScenarioContext, chat: ChatClient, channel: string): Promise<ChatClient> {
@@ -305,19 +336,10 @@ export async function stepFlood(ext: SocialExtension): Promise<void> {
     await byW1Id(page, W.calmDigest).waitFor({ timeout: UI_TIMEOUT_MS });
   });
 
-  const before = new Set((await sampleRows(page)).rows);
+  await installFloodRecorder(page);
   const plan = floodPlan(ext.fan.username, run);
   const acks: Promise<{ line: FloodLine; id: string | null }>[] = [];
-  const samples: RowSample[] = [];
-  let sampling = true;
   const started = performance.now();
-  const sampler = (async () => {
-    while (sampling) {
-      const s = await sampleRows(page);
-      samples.push({ t: Math.round(performance.now() - started), ...s });
-      await sleep(FLOOD.sampleMs, ctx.signal);
-    }
-  })();
 
   await ctx.step(`bots send ${plan.length} messages in ${FLOOD.seconds} s`, async () => {
     for (const line of plan) {
@@ -331,8 +353,7 @@ export async function stepFlood(ext: SocialExtension): Promise<void> {
   const sent = await ctx.step("every message is acknowledged", () => Promise.all(acks));
   // One more digest interval, so its last update and the last admitted rows are on screen.
   await sleep(FLOOD.digestIntervalMs + 1_000, ctx.signal);
-  sampling = false;
-  await sampler;
+  const record = await collectFloodRecord(page);
 
   const accepted = sent.filter((s) => s.id !== null);
   const mentionIds = new Set(accepted.filter((s) => s.line.mention).map((s) => s.id ?? ""));
@@ -340,13 +361,14 @@ export async function stepFlood(ext: SocialExtension): Promise<void> {
     planned: plan.length,
     accepted: accepted.length,
     refused: sent.length - accepted.length,
-    samples: samples.length,
+    rowsRecorded: record.rows.length,
+    digestChanges: record.digest.length,
   });
   ctx.assert("chat accepted the mentions of the fan", mentionIds.size === FLOOD.mentions, {
     mentions: mentionIds.size,
   });
 
-  const rate = maxNewRowsPerWindow(samples, before, mentionIds);
+  const rate = maxNewRowsPerWindow(record.rows, mentionIds);
   ctx.metric("w1_flood_max_rows_per_second", rate.max, "rows");
   ctx.assert(
     `at most ${FLOOD.rowsPerSecond} new rows a second (mentions aside)`,
@@ -354,17 +376,16 @@ export async function stepFlood(ext: SocialExtension): Promise<void> {
     rate,
   );
 
-  const seen = firstSeen(samples, before);
+  const seen = new Set(record.rows.map((r) => r.id));
   const missing = [...mentionIds].filter((id) => !seen.has(id));
   ctx.assert("every mention of the fan was rendered", missing.length === 0, { missing });
 
-  const digest = digestUpdates(samples);
+  const digest = digestUpdates(record.digest);
   ctx.data("w1.flood.digestUpdates", digest.times);
   ctx.assert("the digest updated during the flood", digest.times.length > 0, digest);
-  // Sampling every 250 ms can see two updates up to one sample closer together than they were.
   ctx.assert(
     `the digest updates at most every ${FLOOD.digestIntervalMs / 1000} s`,
-    digest.minGapMs >= FLOOD.digestIntervalMs - FLOOD.sampleMs,
+    digest.minGapMs >= FLOOD.digestIntervalMs - RENDER_TOLERANCE_MS,
     digest,
   );
 

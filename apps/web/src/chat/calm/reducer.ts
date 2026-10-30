@@ -23,10 +23,16 @@ export interface CalmContext {
   /** Ids of messages a presentation queue or filter still holds. */
   held?: ReadonlySet<string>;
   windowMs?: number;
+  /**
+   * The wave id each message was first grouped under (`useCalm` remembers them), so a wave keeps
+   * its id when the log's cap drops its first messages. Without it a wave's id is its first
+   * message still in the log.
+   */
+  waveIds?: ReadonlyMap<string, string>;
 }
 
 export interface Wave {
-  /** The first message's id: the row keeps it while the wave grows. */
+  /** The first message's id (or the id it was first shown under): the row keeps it while the wave grows. */
   id: string;
   key: string;
   /** Oldest first. */
@@ -79,6 +85,7 @@ export function groupMessages(rows: readonly ChatRow[], ctx: CalmContext): Map<s
   const open = new Map<string, Wave>();
   const byMessage = new Map<string, Wave>();
   const senders = new Map<Wave, Set<string>>();
+  const ids = new Set<string>();
   for (const r of rows) {
     if (r.kind !== "message" || r.deleted || standsAlone(r.message, ctx)) continue;
     const m = r.message;
@@ -90,7 +97,11 @@ export function groupMessages(rows: readonly ChatRow[], ctx: CalmContext): Map<s
       wave.messages.push(m);
       wave.latest = m;
     } else {
-      wave = { id: m.id, key, messages: [m], count: 0, senders: 0, first: m, latest: m };
+      // A remembered id already taken (a wave split by a deletion) falls back to the message's own.
+      const remembered = ctx.waveIds?.get(m.id);
+      const id = remembered !== undefined && !ids.has(remembered) ? remembered : m.id;
+      ids.add(id);
+      wave = { id, key, messages: [m], count: 0, senders: 0, first: m, latest: m };
       open.set(key, wave);
       senders.set(wave, new Set());
     }
