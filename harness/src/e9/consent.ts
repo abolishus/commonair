@@ -71,6 +71,16 @@ export function isCallbackFor(state: string): (r: ReceivedRequest) => boolean {
   return (r) => r.method === "GET" && r.path === "/cb" && r.query.state === state;
 }
 
+/**
+ * The browser has landed on the app's redirect URI for that `state`. Compared on origin, path and
+ * `state` only: the rest of the query is the API's.
+ */
+export function isOnCallback(url: string | URL, redirectUri: string, state: string): boolean {
+  const at = new URL(url);
+  const cb = new URL(redirectUri);
+  return at.origin === cb.origin && at.pathname === cb.pathname && at.searchParams.get("state") === state;
+}
+
 export type CallbackOutcome = { kind: "code"; code: string } | { kind: "error"; error: string } | { kind: "empty" };
 
 /** What the app's redirect URI received. */
@@ -138,6 +148,21 @@ async function shownScopes(page: Page): Promise<(string | null)[]> {
   return Promise.all((await rows.all()).map((r) => r.getAttribute("data-scope")));
 }
 
+/**
+ * The receiver's `/cb` request for `state`, once the page has also finished landing there. The
+ * receiver records the request before the browser commits its answer; a `goto` issued in that gap
+ * races the still-pending redirect, and Chromium can leave the `goto` waiting forever on a page
+ * that settled on `/cb` instead (CI run 40980264052).
+ */
+async function backAtApp(run: E9Run, page: Page, app: E9App, state: string): Promise<ReceivedRequest> {
+  const back = await run.state.receiver.waitFor(isCallbackFor(state), UI_TIMEOUT_MS);
+  await page.waitForURL((u) => isOnCallback(u, app.redirectUri, state), {
+    waitUntil: "domcontentloaded",
+    timeout: UI_TIMEOUT_MS,
+  });
+  return back;
+}
+
 // ---------------------------------------------------------------- the step
 
 async function approveSignedOut(run: E9Run, session: WebSession, app: E9App): Promise<void> {
@@ -171,7 +196,7 @@ async function approveSignedOut(run: E9Run, session: WebSession, app: E9App): Pr
   ctx.assert("3. one oauth-consent-scope per requested scope", sameScopes(shown, STEP3_SCOPES), { shown });
 
   await byE9Id(page, T.oauthConsentApprove).click(ui);
-  const back = await run.state.receiver.waitFor(isCallbackFor(state), UI_TIMEOUT_MS);
+  const back = await backAtApp(run, page, app, state);
   const outcome = callbackOutcome(back);
   ctx.assert("3. approve: /cb gets a code and the same state", outcome.kind === "code", { kind: outcome.kind });
   if (outcome.kind !== "code") return;
@@ -206,7 +231,7 @@ async function approveSilently(run: E9Run, session: WebSession, app: E9App): Pro
     }),
     { waitUntil: "commit", timeout: UI_TIMEOUT_MS },
   );
-  const back = await run.state.receiver.waitFor(isCallbackFor(state), UI_TIMEOUT_MS);
+  const back = await backAtApp(run, page, app, state);
   ctx.check("3. already granted: back to the app with a code, no card", callbackOutcome(back).kind === "code", {
     kind: callbackOutcome(back).kind,
   });
@@ -227,7 +252,7 @@ async function deny(run: E9Run, session: WebSession, app: E9App): Promise<void> 
   );
   await byE9Id(page, T.oauthConsent, { "client-id": app.clientId }).waitFor(ui);
   await byE9Id(page, T.oauthConsentDeny).click(ui);
-  const back = await run.state.receiver.waitFor(isCallbackFor(state), UI_TIMEOUT_MS);
+  const back = await backAtApp(run, page, app, state);
   const outcome = callbackOutcome(back);
   ctx.assert(
     "3. deny: /cb gets error=access_denied and the same state",

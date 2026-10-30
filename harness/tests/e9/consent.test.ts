@@ -11,6 +11,7 @@ import {
   callbackOutcome,
   coversScopes,
   isCallbackFor,
+  isOnCallback,
   nextDeviceInterval,
   sameScopes,
   scopesOf,
@@ -69,6 +70,16 @@ describe("callbacks", () => {
     expect(match(request({ path: "/hook", query: { state: "abc" } }))).toBe(false);
     expect(match(request({ method: "POST", query: { state: "abc" } }))).toBe(false);
     expect(match(request())).toBe(false);
+  });
+
+  test("isOnCallback: the page sits on the redirect URI with that state (before the next goto)", () => {
+    const cb = "http://127.0.0.1:4567/cb";
+    expect(isOnCallback(`${cb}?code=x&state=abc`, cb, "abc")).toBe(true);
+    expect(isOnCallback(new URL(`${cb}?error=access_denied&state=abc`), cb, "abc")).toBe(true);
+    expect(isOnCallback(`${cb}?code=x&state=abd`, cb, "abc")).toBe(false);
+    expect(isOnCallback(`${cb}?code=x`, cb, "abc")).toBe(false);
+    expect(isOnCallback("http://127.0.0.1:4568/cb?state=abc", cb, "abc")).toBe(false);
+    expect(isOnCallback("http://localhost:3000/oauth2/authorize?state=abc", cb, "abc")).toBe(false);
   });
 
   test("callbackOutcome: an error wins, then a code, else empty", () => {
