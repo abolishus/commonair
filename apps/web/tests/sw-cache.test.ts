@@ -3,7 +3,16 @@
 
 /** The service worker's shell cache: what it intercepts, how caches are named and cleaned up. */
 import { describe, expect, it } from "vite-plus/test";
-import { CACHE_PREFIX, cacheName, shouldServeFromCache, staleCaches } from "../src/sw/cache.ts";
+import {
+  CACHE_PREFIX,
+  type RouterRule,
+  SHELL_PREFIXES,
+  addNetworkRoutes,
+  cacheName,
+  networkRouterRules,
+  shouldServeFromCache,
+  staleCaches,
+} from "../src/sw/cache.ts";
 
 const ORIGIN = "https://air.example";
 const PRECACHE = new Set(["/assets/index-abc.js", "/assets/styles-def.css", "/icons/icon-192.png"]);
@@ -77,5 +86,46 @@ describe("cache names", () => {
     ]);
     expect(staleCaches([current], current)).toEqual([]);
     expect(staleCaches([], current)).toEqual([]);
+  });
+});
+
+describe("static routing rules", () => {
+  it("sends everything outside /assets and /icons to the network", () => {
+    expect(networkRouterRules()).toEqual([
+      {
+        condition: { not: { or: [{ urlPattern: "/assets/*" }, { urlPattern: "/icons/*" }] } },
+        source: "network",
+      },
+    ]);
+  });
+
+  it("covers every path the fetch listener may answer", () => {
+    const precache = new Set(["/assets/a.js", "/icons/icon.svg"]);
+    for (const path of precache) expect(SHELL_PREFIXES.some((p) => path.startsWith(p))).toBe(true);
+  });
+
+  it("registers them where the browser has the API", async () => {
+    const got: RouterRule[][] = [];
+    const event = {
+      addRoutes(this: unknown, rules: RouterRule[]) {
+        expect(this).toBe(event);
+        got.push(rules);
+        return Promise.resolve();
+      },
+    };
+    expect(await addNetworkRoutes(event)).toBe(true);
+    expect(got).toEqual([networkRouterRules()]);
+  });
+
+  it("is a no-op without the API, and never fails the install when it rejects", async () => {
+    expect(await addNetworkRoutes({})).toBe(false);
+    expect(await addNetworkRoutes({ addRoutes: () => Promise.reject(new TypeError("unsupported")) })).toBe(false);
+    expect(
+      await addNetworkRoutes({
+        addRoutes: () => {
+          throw new TypeError("sync");
+        },
+      }),
+    ).toBe(false);
   });
 });

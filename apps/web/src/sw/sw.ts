@@ -5,7 +5,7 @@
 // as a classic script into `/sw.js` by `scripts/vite-pwa.ts`, which defines the two constants
 // below. It stores nothing but the build's own static files: no IndexedDB, cookies or
 // `localStorage`, and nothing personal. The logic lives in the pure modules beside it.
-import { cacheName, shouldServeFromCache, staleCaches } from "./cache.ts";
+import { addNetworkRoutes, cacheName, shouldServeFromCache, staleCaches } from "./cache.ts";
 import { clickTarget, goLiveNotification, parsePushPayload } from "./push.ts";
 
 /** Same-origin paths of the shell: the entry's scripts and styles, and the icons. */
@@ -19,7 +19,9 @@ const PRECACHE = new Set(__PRECACHE__);
 
 sw.addEventListener("install", (event) => {
   // No skipWaiting here: the page asks once the viewer chose to reload (the update prompt).
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([...PRECACHE])));
+  event.waitUntil(
+    Promise.all([addNetworkRoutes(event), caches.open(CACHE).then((cache) => cache.addAll([...PRECACHE]))]),
+  );
 });
 
 sw.addEventListener("message", (event) => {
@@ -39,7 +41,8 @@ sw.addEventListener("activate", (event) => {
 
 sw.addEventListener("fetch", (event) => {
   const { request } = event;
-  // Not intercepted: the browser handles it exactly as without a worker.
+  // Not intercepted: the browser handles it exactly as without a worker. Where the Static Routing
+  // API exists, such requests never reach this listener at all (`addNetworkRoutes`).
   if (!shouldServeFromCache(request, sw.location.origin, PRECACHE)) return;
   event.respondWith(
     caches.open(CACHE).then(async (cache) => {

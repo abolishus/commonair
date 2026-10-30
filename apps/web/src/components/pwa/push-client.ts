@@ -18,6 +18,8 @@ export const READY_TIMEOUT_MS = 10_000;
 
 export interface PushSubscriptionLike {
   readonly endpoint: string;
+  /** The key it was made with; null or missing where the browser (or a test stub) does not say. */
+  readonly options?: { readonly applicationServerKey?: ArrayBuffer | null };
   toJSON(): { endpoint?: string; keys?: Record<string, string> };
   unsubscribe(): Promise<boolean>;
 }
@@ -79,6 +81,18 @@ function endpointOf(sub: PushSubscriptionLike): string {
   return sub.toJSON().endpoint ?? sub.endpoint;
 }
 
+/**
+ * Whether the subscription was made with another VAPID key than the instance's current one (a key
+ * rotation): such an endpoint can never be delivered to. Unknown (no `options`) counts as current.
+ */
+export function madeWithOtherKey(sub: PushSubscriptionLike, vapidPublicKey: string): boolean {
+  const key = sub.options?.applicationServerKey;
+  if (!key) return false;
+  const have = new Uint8Array(key);
+  const want = base64UrlToBytes(vapidPublicKey);
+  return have.length !== want.length || have.some((b, i) => b !== want[i]);
+}
+
 /** The toggle's state on load. Never asks for permission. */
 export async function readPushState(env: PushEnv): Promise<PushState> {
   if (!env.supported) return "unsupported";
@@ -88,8 +102,11 @@ export async function readPushState(env: PushEnv): Promise<PushState> {
   const manager = await env.pushManager(true);
   if (!manager) return "unsupported";
   const sub = await manager.getSubscription();
-  // "On" means the server knows a subscription and this browser still has one.
-  return sub && status.subscriptions > 0 ? "on" : "off";
+  // "On" means the server knows a subscription and this browser still has one made with the
+  // current key. `push.status` only reports a count, so a browser subscription the server never
+  // registered still reads "on" while the member has another one; re-registering it here would be
+  // a write without a click (and would adopt a previous member's leftover), so it is not done.
+  return sub && status.subscriptions > 0 && !madeWithOtherKey(sub, status.vapidPublicKey) ? "on" : "off";
 }
 
 /**
@@ -106,8 +123,13 @@ export async function turnPushOn(env: PushEnv): Promise<PushState> {
   if (!status.enabled || !status.vapidPublicKey) return "unavailable";
   const manager = await env.pushManager(true);
   if (!manager) return "unsupported";
+  let existing = await manager.getSubscription();
+  if (existing && madeWithOtherKey(existing, status.vapidPublicKey)) {
+    await existing.unsubscribe().catch(() => false);
+    existing = null;
+  }
   const sub =
-    (await manager.getSubscription()) ??
+    existing ??
     (await manager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(status.vapidPublicKey) }));
   try {
     await env.api.subscribe(subscriptionInput(sub));
@@ -133,8 +155,21 @@ export async function turnPushOff(env: PushEnv, wait = true): Promise<PushState>
 }
 
 /**
- * Sign-out in this browser removes its push subscription (ADR 0028 decision 6): the same as
- * turning it off, silent on errors and bounded so sign-out never hangs.
+ * Sign-out's half of turning push off: the browser subscription is dropped whatever the API does,
+ * and at the same time as the API call, so neither a failure nor the time bound can leave the next
+ * member of a shared device receiving this one's pushes.
+ */
+async function forgetBoth(env: PushEnv): Promise<void> {
+  const manager = await env.pushManager(false);
+  const sub = manager ? await manager.getSubscription() : null;
+  if (!sub) return;
+  const endpoint = endpointOf(sub);
+  await Promise.allSettled([env.api.unsubscribe({ endpoint }), sub.unsubscribe()]);
+}
+
+/**
+ * Sign-out in this browser removes its push subscription (ADR 0028 decision 6): in the browser
+ * always, on the API when it answers; silent on errors and bounded so sign-out never hangs.
  */
 export async function forgetPushSubscription(
   env: PushEnv = browserPushEnv(),
@@ -147,7 +182,7 @@ export async function forgetPushSubscription(
   });
   try {
     await Promise.race([
-      turnPushOff(env, false).then(
+      forgetBoth(env).then(
         () => undefined,
         () => undefined,
       ),

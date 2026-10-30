@@ -37,3 +37,40 @@ export function shouldServeFromCache(
   }
   return url.origin === origin && url.search === "" && precache.has(url.pathname);
 }
+
+/** The shell's path prefixes: the only requests the fetch listener may answer. */
+export const SHELL_PREFIXES = ["/assets/", "/icons/"] as const;
+
+/** One Static Routing API rule (`InstallEvent.addRoutes`), as far as it is used here. */
+export interface RouterRule {
+  condition: { not: { or: { urlPattern: string }[] } };
+  source: "network";
+}
+
+/**
+ * The Static Routing API rules: every request outside the shell goes straight to the network
+ * without starting the worker or dispatching `fetch` (documents, `/api`, `/rpc`, each LL-HLS
+ * playlist and part under `/hls`). Browsers without the API fall back to the listener, which
+ * declines the same requests.
+ */
+export function networkRouterRules(): RouterRule[] {
+  return [
+    {
+      condition: { not: { or: SHELL_PREFIXES.map((prefix) => ({ urlPattern: `${prefix}*` })) } },
+      source: "network",
+    },
+  ];
+}
+
+/** Register the rules where the browser has the API; never fails the install. */
+export async function addNetworkRoutes(event: object): Promise<boolean> {
+  const add = (event as { addRoutes?: (rules: RouterRule[]) => Promise<void> }).addRoutes;
+  if (typeof add !== "function") return false;
+  try {
+    await add.call(event, networkRouterRules());
+    return true;
+  } catch {
+    // An older implementation without `not`/`or`: the fetch listener still declines these.
+    return false;
+  }
+}

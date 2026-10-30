@@ -4,7 +4,7 @@
 /** The web app manifest and the PWA build hook's precache selection. */
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
-import { type ShellBundleItem, precacheList, precacheVersion } from "../scripts/vite-pwa.ts";
+import { type ShellBundleItem, precacheList, precacheVersion, readIconBytes } from "../scripts/vite-pwa.ts";
 import { PWA_ICONS, PWA_ICON_PATHS } from "../src/pwa/icons.ts";
 import { PWA_THEME_COLORS } from "../src/pwa/theme.ts";
 import type { PublicConfig } from "../src/server/env.ts";
@@ -151,5 +151,16 @@ describe("precache selection", () => {
     expect(v).toMatch(/^[0-9a-f]{16}$/);
     expect(precacheVersion(["/assets/a.js"])).toBe(v);
     expect(precacheVersion(["/assets/b.js"])).not.toBe(v);
+  });
+
+  it("versions the icons by their bytes, whose names never change", async () => {
+    const list = ["/assets/a.js", ...PWA_ICON_PATHS];
+    const a = precacheVersion(list, [new Uint8Array([1, 2])]);
+    expect(precacheVersion(list, [new Uint8Array([1, 2])])).toBe(a);
+    expect(precacheVersion(list, [new Uint8Array([1, 3])])).not.toBe(a);
+    expect(precacheVersion(list, [new Uint8Array([1]), new Uint8Array([2])])).not.toBe(a);
+    const icons = await readIconBytes();
+    expect(icons).toHaveLength(PWA_ICON_PATHS.length);
+    for (const bytes of icons) expect(bytes.length).toBeGreaterThan(0);
   });
 });

@@ -58,6 +58,11 @@ export async function registerServiceWorker(
 
 /** The viewer chose to reload: let the waiting worker take over, then reload once it controls the page. */
 export function applyUpdate(container: WorkerContainer, worker: WaitingWorker, reload: () => void): void {
+  // Another tab already let it take over: `controllerchange` has fired here or never will.
+  if (worker.state === "activating" || worker.state === "activated" || worker.state === "redundant") {
+    reload();
+    return;
+  }
   container.addEventListener("controllerchange", reload, { once: true });
   worker.postMessage(SKIP_WAITING);
 }

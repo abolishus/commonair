@@ -7,11 +7,13 @@ import { LocaleProvider } from "@commonair/ui";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
+  FORGET_TIMEOUT_MS,
   type PushEnv,
   type PushManagerLike,
   type PushSubscriptionLike,
   base64UrlToBytes,
   forgetPushSubscription,
+  madeWithOtherKey,
   readPushState,
   subscriptionInput,
   turnPushOff,
@@ -30,10 +32,14 @@ const KEYS = { p256dh: "B" + "x".repeat(86), auth: "y".repeat(22) };
 
 class FakeSubscription implements PushSubscriptionLike {
   unsubscribed = false;
+  options?: { applicationServerKey: ArrayBuffer | null };
   constructor(
     readonly endpoint: string,
     private readonly manager: FakePushManager,
-  ) {}
+    key?: Uint8Array<ArrayBuffer>,
+  ) {
+    if (key) this.options = { applicationServerKey: key.slice().buffer };
+  }
   toJSON() {
     return { endpoint: this.endpoint, keys: KEYS };
   }
@@ -52,7 +58,11 @@ class FakePushManager implements PushManagerLike {
   }
   subscribe(options: { userVisibleOnly: boolean; applicationServerKey: Uint8Array<ArrayBuffer> }) {
     this.subscribeCalls.push(options);
-    this.current = new FakeSubscription("https://push.example/sub/1", this);
+    this.current = new FakeSubscription(
+      `https://push.example/sub/${this.subscribeCalls.length}`,
+      this,
+      options.applicationServerKey,
+    );
     return Promise.resolve(this.current);
   }
 }
@@ -148,7 +158,7 @@ describe("readPushState", () => {
 
   it("is on only when this browser and the server both have one", async () => {
     const f = fake();
-    await f.manager.subscribe({ userVisibleOnly: true, applicationServerKey: new Uint8Array() });
+    await f.manager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(VAPID) });
     expect(await readPushState(f.env)).toBe("off");
     f.server.subscriptions = 1;
     expect(await readPushState(f.env)).toBe("on");
@@ -182,7 +192,7 @@ describe("turnPushOn", () => {
   it("does not ask again when permission is already granted, and reuses a subscription", async () => {
     const f = fake();
     f.permission.value = "granted";
-    await f.manager.subscribe({ userVisibleOnly: true, applicationServerKey: new Uint8Array() });
+    await f.manager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(VAPID) });
     expect(await turnPushOn(f.env)).toBe("on");
     expect(f.permission.asked).toBe(0);
     expect(f.manager.subscribeCalls).toHaveLength(1);
@@ -238,11 +248,41 @@ describe("turnPushOff and sign-out", () => {
     expect(f.server.subscriptions).toBe(0);
   });
 
-  it("is silent when the API fails", async () => {
+  it("is silent when the API fails, and still drops the browser subscription", async () => {
+    const f = fake();
+    await turnPushOn(f.env);
+    const sub = f.manager.current;
+    f.env.api.unsubscribe = () => Promise.reject(new Error("network"));
+    await expect(forgetPushSubscription(f.env)).resolves.toBeUndefined();
+    expect(sub?.unsubscribed).toBe(true);
+    expect(f.manager.current).toBeNull();
+  });
+
+  it("drops the browser subscription even when the API hangs past the limit", async () => {
+    vi.useFakeTimers();
+    const f = fake();
+    await turnPushOn(f.env);
+    const sub = f.manager.current;
+    let asked: string | undefined;
+    f.env.api.unsubscribe = (input) => {
+      asked = input.endpoint;
+      return new Promise(() => undefined);
+    };
+    const p = forgetPushSubscription(f.env);
+    await vi.advanceTimersByTimeAsync(FORGET_TIMEOUT_MS);
+    await p;
+    expect(asked).toBe("https://push.example/sub/1");
+    expect(sub?.unsubscribed).toBe(true);
+    expect(f.manager.current).toBeNull();
+  });
+
+  it("does not stop the toggle's turn-off when the API refuses (it reports the error)", async () => {
     const f = fake();
     await turnPushOn(f.env);
     f.env.api.unsubscribe = () => Promise.reject(new Error("network"));
-    await expect(forgetPushSubscription(f.env)).resolves.toBeUndefined();
+    await expect(turnPushOff(f.env)).rejects.toThrow("network");
+    // The toggle stays on, so the viewer can retry; the browser subscription is kept with it.
+    expect(f.manager.current).not.toBeNull();
   });
 
   it("is bounded: a hanging API never holds sign-out up past the limit", async () => {
@@ -265,6 +305,51 @@ describe("turnPushOff and sign-out", () => {
     const f = fake({ supported: false });
     await forgetPushSubscription(f.env);
     expect(f.calls).toEqual([]);
+  });
+});
+
+describe("VAPID key rotation", () => {
+  it("re-subscribes a browser subscription made with another key", async () => {
+    const f = fake();
+    const old = new FakeSubscription("https://push.example/old", f.manager, new Uint8Array([4, 1, 2, 3]));
+    f.manager.current = old;
+    expect(await turnPushOn(f.env)).toBe("on");
+    expect(old.unsubscribed).toBe(true);
+    expect(f.manager.subscribeCalls).toHaveLength(1);
+    expect(f.calls).toContain("subscribe https://push.example/sub/1 true");
+    expect(f.calls).not.toContain("subscribe https://push.example/old true");
+  });
+
+  it("reuses a subscription made with the current key, or one that does not say", async () => {
+    const f = fake();
+    f.manager.current = new FakeSubscription("https://push.example/same", f.manager, base64UrlToBytes(VAPID));
+    expect(await turnPushOn(f.env)).toBe("on");
+    expect(f.manager.subscribeCalls).toHaveLength(0);
+    const g = fake();
+    g.manager.current = new FakeSubscription("https://push.example/stub", g.manager);
+    expect(await turnPushOn(g.env)).toBe("on");
+    expect(g.manager.subscribeCalls).toHaveLength(0);
+  });
+
+  it("reads a subscription made with another key as off", async () => {
+    const f = fake();
+    f.permission.value = "granted";
+    f.server.subscriptions = 1;
+    f.manager.current = new FakeSubscription("https://push.example/old", f.manager, new Uint8Array([4, 1]));
+    expect(await readPushState(f.env)).toBe("off");
+    f.manager.current = new FakeSubscription("https://push.example/same", f.manager, base64UrlToBytes(VAPID));
+    expect(await readPushState(f.env)).toBe("on");
+  });
+
+  it("compares keys byte for byte", () => {
+    const m = new FakePushManager();
+    const key = base64UrlToBytes(VAPID);
+    expect(madeWithOtherKey(new FakeSubscription("e", m, key), VAPID)).toBe(false);
+    const flipped = key.slice();
+    flipped[64] = (flipped[64] ?? 0) ^ 1;
+    expect(madeWithOtherKey(new FakeSubscription("e", m, flipped), VAPID)).toBe(true);
+    expect(madeWithOtherKey(new FakeSubscription("e", m, key.slice(0, 64)), VAPID)).toBe(true);
+    expect(madeWithOtherKey(new FakeSubscription("e", m), VAPID)).toBe(false);
   });
 });
 

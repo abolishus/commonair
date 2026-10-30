@@ -113,6 +113,19 @@ describe("registerServiceWorker", () => {
   });
 });
 
+describe("applyUpdate after another tab", () => {
+  it.each(["activating", "activated", "redundant"])("reloads at once when the worker is %s", (state) => {
+    const c = container({});
+    const w = new FakeWorker();
+    w.state = state;
+    const reload = vi.fn<() => void>();
+    applyUpdate(c, w, reload);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(w.messages).toEqual([]);
+    expect(c.changes).toEqual([]);
+  });
+});
+
 describe("pwaExcludedPath", () => {
   it.each([
     ["/overlay/chat", true],

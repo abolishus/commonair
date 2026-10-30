@@ -12,6 +12,8 @@
  *   registers one in production builds).
  */
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite-plus";
 import { PWA_ICON_PATHS } from "../src/pwa/icons.ts";
@@ -57,12 +59,20 @@ export function precacheList(bundle: Readonly<Record<string, ShellBundleItem>>):
 }
 
 /** The cache version: a short hash of the list, so a build with other files gets another cache. */
-export function precacheVersion(list: readonly string[]): string {
-  return createHash("sha256").update(list.join("\n")).digest("hex").slice(0, 16);
+export function precacheVersion(list: readonly string[], contents: readonly Uint8Array[] = []): string {
+  const hash = createHash("sha256").update(list.join("\n"));
+  // Hashed file names change with their content; the icons keep theirs, so their bytes count too.
+  for (const bytes of contents) hash.update("\0").update(bytes);
+  return hash.digest("hex").slice(0, 16);
+}
+
+/** The icons' bytes from `public/`, in `PWA_ICON_PATHS` order. */
+export function readIconBytes(root: string = WEB_ROOT): Promise<Uint8Array[]> {
+  return Promise.all(PWA_ICON_PATHS.map((path) => readFile(join(root, "public", path))));
 }
 
 /** `src/sw/sw.ts` as one classic script with the list defined (a nested build; nothing written). */
-export async function buildServiceWorker(precache: readonly string[]): Promise<string> {
+export async function buildServiceWorker(precache: readonly string[], version: string): Promise<string> {
   const result = await build({
     configFile: false,
     root: WEB_ROOT,
@@ -70,7 +80,7 @@ export async function buildServiceWorker(precache: readonly string[]): Promise<s
     publicDir: false,
     define: {
       __PRECACHE__: JSON.stringify(precache),
-      __VERSION__: JSON.stringify(precacheVersion(precache)),
+      __VERSION__: JSON.stringify(version),
     },
     build: {
       write: false,
@@ -118,7 +128,8 @@ export function pwa(): Plugin {
     async generateBundle(_options, bundle) {
       if (this.environment.config.consumer !== "client" || this.environment.config.command !== "build") return;
       const list = precacheList(bundle as unknown as Record<string, ShellBundleItem>);
-      this.emitFile({ type: "asset", fileName: SW_FILE, source: await buildServiceWorker(list) });
+      const version = precacheVersion(list, await readIconBytes());
+      this.emitFile({ type: "asset", fileName: SW_FILE, source: await buildServiceWorker(list, version) });
     },
   };
 }
