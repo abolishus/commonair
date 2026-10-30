@@ -6,8 +6,8 @@
  * first rejection or null. Stateful rules (slow mode, rate limit, duplicates) live in
  * `limiter.ts`; content rules (links, word filters) in `content.ts`.
  */
-import { CHAT_LIMITS } from "@commonair/contracts";
-import type { ChannelState, Rejection, Standing, UserProfile } from "./types.ts";
+import { CHAT_LIMITS, type ChannelChatSettings } from "@commonair/contracts";
+import type { ChannelState, Rejection, Standing, UserProfile, WatchGateState } from "./types.ts";
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
@@ -71,11 +71,50 @@ export function checkGates(i: GateInput): Rejection | null {
             : `This room is in ${s.followersOnlyMinutes}-minute followers-only mode.`,
       };
   }
+  if (standing.verifiedWatch && verifiedWatchRefuses(user, standing, s, standing.verifiedWatch, now))
+    return VERIFIED_WATCH_REFUSAL;
   if (s.subscribersOnly && !privileged && !standing.isVip && standing.subscriberTier === null)
     return { code: "msg_subsonly", text: "This room is in subscribers-only mode." };
   if (s.emoteOnly && !privileged && !i.emoteOnly)
     return { code: "msg_emoteonly", text: "This room is in emote-only mode." };
   return null;
+}
+
+/**
+ * ADR 0015 decision 4: one code and one text for every gate denial (never watched, not long
+ * enough, capped, unjudged, fallback not met), so a refusal never says why. Browsers show their
+ * catalog string for the code.
+ */
+export const VERIFIED_WATCH_REFUSAL: Rejection = {
+  code: "msg_verified_watch",
+  text: "This chat is for viewers who have been watching for a little while.",
+};
+
+/** Broadcaster, moderators, VIPs and verified bots never need the gate (ADR 0015 decision 7). */
+export function verifiedWatchExempt(user: UserProfile, standing: Standing, s: ChannelChatSettings): boolean {
+  if (isPrivileged(standing) || standing.isVip) return true;
+  if (user.accountType === "bot" && user.botVerified) return true;
+  return s.verifiedWatchExemptSubscribers && standing.subscriberTier !== null;
+}
+
+/**
+ * The verified-watch gate (ADR 0015 decision 7). `WatchGate.load` already folded surge mode and
+ * the surge exemption into `requiredSeconds` (an earlier chatter keeps only the channel's own
+ * gate), so this is a plain comparison. Valkey unavailable fails open.
+ */
+export function verifiedWatchRefuses(
+  user: UserProfile,
+  standing: Standing,
+  s: ChannelChatSettings,
+  gate: WatchGateState,
+  now: Date,
+): boolean {
+  if (gate.unavailable || gate.requiredSeconds <= 0) return false;
+  if (verifiedWatchExempt(user, standing, s)) return false;
+  const v = gate.verified;
+  if (!v || v.seconds < gate.requiredSeconds) return true;
+  // Privacy-relay viewers are not capped per address; their account must be old enough instead (decision 5).
+  return v.fallback && now.getTime() - user.createdAt.getTime() < gate.fallbackAccountAgeDays * DAY_MS;
 }
 
 /** Slow mode applies to everyone below VIP. */
