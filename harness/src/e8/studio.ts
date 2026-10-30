@@ -677,8 +677,12 @@ async function botTimer(run: E8Run, page: Page, bot: BotHandle): Promise<void> {
   });
 }
 
-export async function stepBotStudio(run: E8Run): Promise<void> {
-  const { ctx } = run;
+export async function stepBotStudio(shared: E8Run): Promise<void> {
+  const { ctx } = shared;
+  // A fresh channel: steps 1-5 leave `!hello` and timers on `shared.streamer`, and the studio refuses
+  // a new command whose name is taken, so in `all` this step would trip over step 1's command.
+  const streamer = await ctx.step(botTitle(6, "sign up a studio streamer"), () => newE8Streamer(ctx, "e8bst"));
+  const run: E8Run = { ...shared, streamer };
   const session = await ctx.step(botTitle(6, "streamer signs in on the web"), () =>
     studioSession(run, "studio-bot", run.streamer.user),
   );
