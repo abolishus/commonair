@@ -35,7 +35,7 @@ import { scanLog, summarizeHits, textNeedles } from "../src/safety.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
 import { STREAMER_DEFAULTS } from "../src/streamer.ts";
 import type { SignedInUser } from "../src/users.ts";
-import { waitFor } from "../src/wait.ts";
+import { sleep, waitFor } from "../src/wait.ts";
 import type { WebSession } from "../src/web/session.ts";
 
 type SimulcastTarget = Awaited<ReturnType<ApiClient["stream"]["simulcast"]["list"]>>[number];
@@ -297,11 +297,27 @@ async function removeTarget(
 ): Promise<void> {
   await ctx.step("S removes the target", async () => {
     if (session) {
-      const page = await session.goto(E6_ROUTES.dashboard);
-      const row = byE6Id(page, E.simulcastTarget, { "target-id": targetId });
-      await byE6Id(row, E.simulcastRemove).click({ timeout: UI_TIMEOUT_MS });
-      await confirmDialog(page, UI_TIMEOUT_MS);
-      await row.waitFor({ state: "detached", timeout: UI_TIMEOUT_MS });
+      // Twice on slow CI runners this step hung until the scenario timeout with the target already
+      // gone from the page. Each action is logged and the web path is capped, so a stuck browser
+      // call names itself and the list below still decides.
+      let at = "open /dashboard";
+      const web = (async () => {
+        const page = await session.goto(E6_ROUTES.dashboard);
+        const row = byE6Id(page, E.simulcastTarget, { "target-id": targetId });
+        at = "click remove";
+        await byE6Id(row, E.simulcastRemove).click({ timeout: UI_TIMEOUT_MS });
+        at = "confirm";
+        await confirmDialog(page, UI_TIMEOUT_MS);
+        at = "row detached";
+        await row.waitFor({ state: "detached", timeout: UI_TIMEOUT_MS });
+        at = "done";
+      })();
+      const capped = await Promise.race([web.then(() => false), sleep(WEB_REMOVE_CAP_MS, ctx.signal).then(() => true)]);
+      if (capped) {
+        web.catch(() => undefined);
+        ctx.log.warn("simulcast web removal still running past its cap", { at, capMs: WEB_REMOVE_CAP_MS });
+        ctx.data("simulcast.webRemoveStuckAt", at);
+      }
     } else {
       await s.api.client.stream.simulcast.remove({ channel, id: targetId });
     }
@@ -311,6 +327,8 @@ async function removeTarget(
   });
 }
 
+/** Longest the web removal may take before the step logs where it stuck and lets the list decide. */
+const WEB_REMOVE_CAP_MS = 60_000;
 async function scanForKey(
   ctx: ScenarioContext,
   kit: Kit,

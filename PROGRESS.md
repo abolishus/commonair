@@ -78,7 +78,11 @@ Chat bug (when the 200-row log cap trimmed a shown wave to one copy, the wave be
 under a new id the governor never admitted, so 4 rows could appear in a second; `calmRows` now
 keeps the wave row, with a flood reproduction test), and harness reads in `timeline-sync` that
 assumed `Date`s from the raw client (drizzle turns its timestamp parsers off; the step now uses
-millisecond ISO text both ways).
+millisecond ISO text both ways). Also: `timeline-sync` step 1 waits until the broadcast is 6 s old
+before the "5 s back" hint (run first in its shard, the hint fell before `started_at` and was
+rightly clamped); `simulcast`'s "S removes the target" hung until the scenario timeout on two slow
+runs with the target already removed in the page, so its web path now logs each action and is
+capped at 60 s (`simulcast.webRemoveStuckAt` in the report names where), the list check deciding.
 
 Planning (2026-10-30): briefs,
 both contract-step docs and ADR 0036 (payment fraud floor) are on main (`e8fc926`); the decisions

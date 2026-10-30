@@ -270,6 +270,9 @@ export async function stepLiveMediaTime(run: W1Run): Promise<void> {
     expectedMediaTs({ receivedAt, hint, playbackMode: mode, liveStartedAt: startedAt, latencySeconds: null });
 
   await ctx.step("hint 5 s back is kept", async () => {
+    // A hint before `started_at` is clamped up to it (decision 2): when this scenario runs first in
+    // its shard the broadcast is only seconds old, so wait until 5 s back is inside the broadcast.
+    await sleep(Math.max(0, startedAt.getTime() + 6_000 - Date.now()), ctx.signal);
     const hint = new Date(Date.now() - 5_000);
     const got = await sendHinted(run, chat, channel, marker("minus5"), { mediaTs: hint.toISOString() });
     expectPlaced(run, "now − 5 s: stored and live mediaTs", got, clamp(got.row.createdAt, hint, "live"));
