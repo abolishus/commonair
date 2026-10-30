@@ -5,7 +5,7 @@
  * The send pipeline. Rules run in a fixed order and the first failure wins:
  *
  *   auth + chat:edit → platform ban → channel suspended → channel ban/timeout →
- *   verified email → account age → followers-only → subscribers-only → emote-only →
+ *   verified email → account age → followers-only → verified watch → subscribers-only → emote-only →
  *   slow mode → rate limit → duplicate → links → word filters → middleware chain
  *
  * Middlewares (`MessageMiddleware`) are the extension point for the built-in channel bot,

@@ -19,6 +19,8 @@ export interface ChatPanelProps extends React.ComponentProps<"section"> {
   logLabel: string;
   newMessagesLabel: string;
   onJumpToLatest?: () => void;
+  /** `off` when another live region summarizes the log (Calm Chat's digest). */
+  logLive?: "polite" | "off";
 }
 
 export function ChatPanel({
@@ -32,6 +34,7 @@ export function ChatPanel({
   logLabel,
   newMessagesLabel,
   onJumpToLatest,
+  logLive = "polite",
   className,
   ...props
 }: ChatPanelProps): React.JSX.Element {
@@ -87,7 +90,7 @@ export function ChatPanel({
         <div
           role="log"
           aria-label={logLabel}
-          aria-live="polite"
+          aria-live={logLive}
           data-slot="chat-log"
           className="flex min-h-48 flex-col gap-1 p-3 text-xs"
         >

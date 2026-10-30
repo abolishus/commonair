@@ -288,6 +288,13 @@
       "when": 1793341048911,
       "tag": "0040_n1_protections",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793345045020,
+      "tag": "0041_w1_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -47,8 +47,8 @@ export const chatMessages = pgTable(
   (t) => [
     index("chat_messages_channel_idx").on(t.channelId, t.createdAt),
     index("chat_messages_user_idx").on(t.userId, t.createdAt),
-    // Chat replay in media-time order (ADR 0012 amendment 1 decision 1).
-    index("chat_messages_broadcast_media_idx").on(t.broadcastId, t.mediaTs),
+    // Chat replay in media-time order (ADR 0012 amendment 1 decision 1): replay's sort and cursor key.
+    index("chat_messages_broadcast_at_idx").on(t.broadcastId, sql`coalesce(${t.mediaTs}, ${t.createdAt})`, t.id),
     // Retention (decision 6).
     index("chat_messages_created_idx").on(t.createdAt),
   ],

@@ -12,6 +12,7 @@
     "browsers": "playwright install chromium webkit"
   },
   "dependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
     "@commonair/db": "workspace:*",

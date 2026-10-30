@@ -44,11 +44,17 @@ W1-player builds it; W2 units build on it and never edit `controller.ts`.
 `PlayerController` methods: `playheadWallclock(): Date | null` (PDT under the playhead,
 `hls.playingDate` or Safari `getStartDate() + currentTime`), `seekToWallclock(t: Date): boolean`,
 `setTargetLatency(seconds: number): number` (hls.js `liveSyncDuration`, returns the value applied;
-native: changes nothing and returns the current latency), `onTextTrack(cb)`,
+native: changes nothing and returns the current latency; before `start()` the path is not decided
+yet: the value is stored and returned, and applies only if hls.js attaches), `onTextTrack(cb)`,
 `playbackMode(): "live" | "dvr"` and `onPlaybackMode(cb)`. The `player` element carries
 `data-playback-mode`. Diagnostic query parameters on `/$channel` (read by `player.tsx`, for
 `timeline-sync` step 2): `targetLatency=<seconds>` and `rendition=<name>`. `media-clock.ts` exposes
-`playheadWallclock(channel)` / `playbackMode(channel)` for the chat panel. W1-data-mode (wave 2)
+`playheadWallclock(channel)` / `playbackMode(channel)` for the chat panel. `chat/presentation.ts`
+keeps order within a kind, so an item with a null or unparsable `mediaTs` (normally shown at once)
+still waits behind held items of its kind; after `dispose`, `present` shows items at once. Chat
+replay (`vods.chat` / `clips.chat`) items are `ChatMessage` plus `at` (`mediaTs`, or `createdAt`
+when `catchingUp`, at microsecond precision), ordered by `(at, id)`; a reply whose quoted line is
+hidden from this viewer has `replyTo: null`. W1-data-mode (wave 2)
 adds `setDataMode(ceilingBps | null)` and `dataUsage()` (it takes `controller.ts` over after
 W1-player merges).
 
@@ -60,12 +66,12 @@ W1-player merges).
 
 ### Breakdown
 
-`breakdown-open` (on a revenue row, a subscription row, the support dialog's estimate link;
-`data-payment-id`), `breakdown-dialog`, `breakdown-gross` (`data-cents`), `breakdown-line`
-(`data-kind`, `data-component`, `data-cents`, signed), `breakdown-hold` (`data-releases-at` or
-`data-released-at`), `breakdown-cut-source` (`data-history-id`, empty for the seed),
+`breakdown-open` (on a revenue-ledger payment row and a "Your payments" row on
+`/settings/subscriptions`; `data-payment-id`), `breakdown-dialog`, `breakdown-gross` (`data-cents`), `breakdown-line`
+(`data-kind`, `data-component`, `data-cents`, signed), `breakdown-hold` (`data-releases-at`,
+`data-released-at`, or `data-empty` when refunds or chargebacks emptied the hold), `breakdown-cut-source` (`data-history-id`, empty for the seed),
 `breakdown-timeline-item` (`data-kind`), `breakdown-estimate` (`data-low-cents`,
-`data-high-cents`), `fee-schedule`, `fee-schedule-row` (`data-key`, `data-changed-at`, empty for
+`data-high-cents`; both absent when the provider charges no fee), `fee-schedule`, `fee-schedule-row` (`data-key`, `data-changed-at`, empty for
 the seed).
 
 ### Calm Chat
@@ -85,10 +91,14 @@ or surge mode applies).
 
 ### Fraud floor
 
-`fraud-flags`, `fraud-flag` (`data-kind`, `data-status`, `data-payee`, and `data-released`: `true`
-once an admin released a confirmed flag; no release control in W1), `fraud-flag-review`,
-`fraud-flag-decide`, `fraud-flag-raise`, `fraud-decision-clear`, `fraud-decision-confirm`. Payout
-rows keep their ids and show `data-hold-reason`.
+`treasury-tab-fraud` (the treasury tab), `fraud-flags`, `fraud-flag` (`data-flag-id`, `data-kind`,
+`data-status`, `data-payee`, `data-held-payouts`, and `data-released`: `true` once an admin
+released a confirmed flag; no release control in W1), `fraud-flag-evidence`, `fraud-flag-held`,
+`fraud-flag-confirmed`, `fraud-flag-action-hint`, `fraud-flag-review`, `fraud-flag-decide`
+(disabled for the reviewer, the raiser and the payee), `fraud-review-dialog`,
+`fraud-decide-dialog`, `fraud-decision` with `fraud-decision-clear` and `fraud-decision-confirm`,
+`fraud-note`, `fraud-raise-form`, `fraud-raise-username`, `fraud-flag-raise`. Payout rows keep
+their ids and show `data-hold-reason`.
 
 ### Data mode
 
@@ -110,7 +120,8 @@ pending step runs only when named (`--set steps=`, `--set w1=`). Both new scenar
   an IRC (tmi.js) message gets receive − the channel median once three verified viewers report
   latency (≥ 3 sessions), else receive time; offline channel → null and the message is accepted.
 - **`timeline-sync` 2 (W1-player):** two Chromium viewers on different rungs at forced latencies
-  (hls.js `liveSyncDuration` 3 s and 12 s via `setTargetLatency`) each send a marker message;
+  (hls.js `liveSyncDuration` 3 s and 9 s via `setTargetLatency`; 12 s would sit on the oldest of
+  MediaMTX's seven segments) each send a marker message;
   `vods.chat` after the VOD is ready returns them in media-time order, each within 1 s of the PDT
   the sender's page reported at send time.
 - **`timeline-sync` 3 (W1-spine):** replay excludes a deleted message, a held-and-never-approved

@@ -47,16 +47,9 @@ export type W1Extension<S extends W1ExtendedScenario = W1ExtendedScenario> = (ty
  * `--set w1=breakdown`) but left out of `all`, so the full harness on main stays green while they
  * are stubs.
  */
-export const PENDING_TIMELINE_STEPS: readonly TimelineStep[] = [1, 2, 3, 4];
-export const PENDING_SURGE_STEPS: readonly SurgeStep[] = [1, 2, 3, 4, 5, 6, 7];
-export const PENDING_W1_EXTENSIONS: readonly W1Extension[] = [
-  "breakdown",
-  "reconciliation",
-  "fraud-hold",
-  "flood",
-  "block",
-  "data-mode",
-];
+export const PENDING_TIMELINE_STEPS: readonly TimelineStep[] = [];
+export const PENDING_SURGE_STEPS: readonly SurgeStep[] = [];
+export const PENDING_W1_EXTENSIONS: readonly W1Extension[] = ["data-mode"];
 
 /** No W1 step needs another: each sets up its own channel, viewers and messages. */
 export const TIMELINE_STEP_PREREQUISITES: Readonly<Record<TimelineStep, readonly TimelineStep[]>> = {

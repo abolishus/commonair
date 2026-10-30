@@ -354,3 +354,17 @@ describe("user_blocks and media_ts", () => {
     expect(m?.mediaTs?.toISOString()).toBe(mediaTs.toISOString());
   });
 });
+
+describe("W1 read indexes (0041)", () => {
+  test("replay's sort key and the reconcile cursor have their indexes", async () => {
+    const rows = await owner.execute<{ indexname: string; indexdef: string }>(
+      sql`select indexname, indexdef from pg_indexes
+          where indexname in ('chat_messages_broadcast_at_idx', 'ledger_transactions_ref_created_idx',
+                              'chat_messages_broadcast_media_idx')`,
+    );
+    const defs = new Map(rows.map((r) => [r.indexname, r.indexdef]));
+    expect(defs.has("chat_messages_broadcast_media_idx")).toBe(false);
+    expect(defs.get("chat_messages_broadcast_at_idx")).toContain("COALESCE(media_ts, created_at), id");
+    expect(defs.get("ledger_transactions_ref_created_idx")).toContain("(ref_type, created_at)");
+  });
+});

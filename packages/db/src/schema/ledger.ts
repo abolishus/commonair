@@ -57,6 +57,8 @@ export const ledgerTransactions = pgTable(
   },
   (t) => [
     index("ledger_transactions_ref_idx").on(t.refType, t.refId),
+    // money-reconcile reads the payments posted since its cursor.
+    index("ledger_transactions_ref_created_idx").on(t.refType, t.createdAt),
     index("ledger_transactions_time_idx").on(t.occurredAt),
   ],
 );

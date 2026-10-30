@@ -9,16 +9,16 @@
  * varied lines and some mentions of the fan) while the fan's page has Calm Chat on. Recording
  * in the page (a MutationObserver stamping each new row and digest change), at most 3 distinct new
  * rows appear in any one-second window (mentions of the fan excepted: they are never dropped),
- * every mention of the fan appears, the digest region changes at most every 5 s, and the chat panel passes the accessibility check. The check is the in-repo one
- * (roles, names and the live region through the DOM and Playwright's `ariaSnapshot`):
- * `@axe-core/playwright` is not a dependency (TODO(axe): call it here once the orchestrator lands
- * the dependency from W1-calm-chat's contract request).
+ * every mention of the fan appears, the digest region changes at most every 5 s, and the chat panel
+ * passes the accessibility check: the in-repo one (roles, names and the live region through the DOM
+ * and Playwright's `ariaSnapshot`) plus axe (`@axe-core/playwright`) on the panel.
  *
  * `block`: the fan blocks the troll from `chat-user-block`; the troll's next message is not
  * rendered for the fan but reaches the streamer; unblocking from `/settings/privacy` brings the
  * troll's next message back. With `--set via=api` the same through `me.blocks.*` (the hiding itself
  * is the web client's, so the API run checks the block list and delivery).
  */
+import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "playwright";
 import type { ChatClient } from "../chat-client.ts";
 import { playerBundles } from "../player-server.ts";
@@ -225,8 +225,8 @@ async function checkPanelA11y(ctx: ScenarioContext, page: Page, calm: boolean): 
   const tree = await page.locator(`[data-testid="${T.chat}"]`).ariaSnapshot({ timeout: UI_TIMEOUT_MS });
   ctx.data("w1.flood.ariaSnapshot", tree.slice(0, 4_000));
   if (!/\blog\b/.test(tree)) violations.push("the accessibility tree has no log");
-  // TODO(axe): once `@axe-core/playwright` lands (W1-calm-chat contract request), add
-  // `new AxeBuilder({ page }).include('[data-testid="chat"]').analyze()` and fail on its violations.
+  const axe = await new AxeBuilder({ page }).include(`[data-testid="${T.chat}"]`).analyze();
+  for (const v of axe.violations) violations.push(`axe ${v.id}: ${v.help} (${v.nodes.length} nodes)`);
   return violations;
 }
 

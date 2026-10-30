@@ -33,11 +33,8 @@ const UI_TIMEOUT_MS = 20_000;
 const ROLE_CLI_TIMEOUT_MS = 30_000;
 /** New accounts tipping the payee: three, so the top-three share is everything. */
 export const FRAUD_PAYERS = 3;
-/**
- * The treasury's fraud tab. Not in docs/testing/w1-selectors.md yet: W1-fraud-floor's contract
- * request adds `treasury-tab-fraud` there and to `W1_TEST_IDS`.
- */
-export const TREASURY_TAB_FRAUD = "treasury-tab-fraud";
+/** The treasury's fraud tab. */
+export const TREASURY_TAB_FRAUD = W.treasuryTabFraud;
 
 export interface FraudTipPlan {
   /** Cents per payer; their sum reaches the concentration floor. */

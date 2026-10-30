@@ -335,8 +335,10 @@ export function ChatPanel({
   const { poll, prediction, points, raid } = interact;
   // The banner area opens only when there is something to say, so an empty bordered box never shows.
   const surgeActive = surge !== null && surge.state !== "off";
+  // The viewer's gate hint (ADR 0015); the banner checks features.watchGate and renders nothing otherwise.
+  const gated = !canModerate && (settings?.minVerifiedWatchSeconds ?? 0) > 0;
   const pinned =
-    raid || poll || prediction || surgeActive || gateDenied ? (
+    raid || poll || prediction || surgeActive || gateDenied || gated ? (
       <div className="grid gap-3">
         <SurgeBanner
           channel={channel}
@@ -477,6 +479,7 @@ export function ChatPanel({
   return (
     <ChatPanelShell
       data-testid="chat"
+      logLive={calmOn ? "off" : "polite"}
       data-state={status}
       aria-label={t("chat.title")}
       title={t("chat.title")}

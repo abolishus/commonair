@@ -22,7 +22,28 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
-**Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), planned 2026-10-30, not started.** Briefs,
+**Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30.** Contract steps
+landed with CI green: W1 `a29063e` + review fix `c842658` (0037/0038), N1 `30e046b` + review fix
+`c444b15` (0039/0040). **Wave 1 merged** (W1-breakdown, W1-calm-chat, W1-spine, W1-player,
+W1-watch-gate, W1-fraud-floor; each implement → independent review → fix in its own worktree,
+merged `--no-ff`). Contract requests applied at integration: migration `0041_w1_indexes`
+(`chat_messages_broadcast_at_idx` on `(broadcast_id, coalesce(media_ts, created_at), id)` replaces
+`chat_messages_broadcast_media_idx`, replay its only reader; `ledger_transactions_ref_created_idx`
+for `money-reconcile`); `KEYS.surgeOpen` shared by the API and worker; `ChatPanel` `logLive`
+(off under Calm Chat, whose digest is the live region); the gate hint opens the pinned area;
+`@axe-core/playwright@4.14.0` in the harness (MPL-2.0, vetted, upstream LICENSE checked; decision
+(k)) now runs in Calm Chat's flood step; the W1 501 stub test dropped; all timeline-sync and
+surge-guard steps and every W1 extension except `data-mode` lifted from the pending lists;
+selectors doc and `docs/README.md` rows. Orchestrator defaults: timeline-sync step 2's far viewer
+targets 9 s, not 12 s (MediaMTX keeps seven ~2 s segments); a guard turned off mid-surge ends it
+with reason `cooldown` and audit `cause: "guard_disabled"` (no contract enum change); the
+optional `settlementAccount` export is left to W2-splits. Open from wave 1: the steps have not run
+against a live stack (CI runs them); a refund of another payment drawing from a lot can leave a
+breakdown hold date showing (W1-breakdown note). **Next:** wave 2 (W1-data-mode, N1-fanout,
+N1-email, N1-push, N1-inbox, N1-pwa) once CI is green; W1-data-mode takes over the player files
+with the "Player seam" text in `docs/testing/w1-selectors.md`.
+
+Planning (2026-10-30): briefs,
 both contract-step docs and ADR 0036 (payment fraud floor) are on main (`e8fc926`); the decisions
 table in the batch4 README is final (user: ADR 0036 with confirmed flags holding payouts until an
 admin releases the payee, data-mode presets 50/800/1900 MB/h, watch gate ships off with CDN

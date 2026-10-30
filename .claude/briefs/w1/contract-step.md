@@ -1529,7 +1529,7 @@ W1-player merges).
   an IRC (tmi.js) message gets receive − the channel median once three verified viewers report
   latency (≥ 3 sessions), else receive time; offline channel → null and the message is accepted.
 - **2 (W1-player):** two Chromium viewers on different rungs at forced latencies (hls.js
-  `liveSyncDuration` 3 s and 12 s via `setTargetLatency`) each send a marker message; `vods.chat`
+  `liveSyncDuration` 3 s and 9 s via `setTargetLatency`) each send a marker message; `vods.chat`
   after the VOD is ready returns them in media-time order, each within 1 s of the PDT the sender's
   page reported at send time.
 - **3 (W1-spine):** replay excludes a deleted message, a held-and-never-approved one, messages before

@@ -8,9 +8,9 @@ import type { ValkeyClient } from "@commonair/service";
 /**
  * Set while a recorded `chat.surge.begin` has no `chat.surge.end` yet, so a key that lapsed while
  * the worker was down still gets its end event (reason `expired`). The API's override writes the
- * same key (services/api/src/chat/surge.ts): keep the two in step.
+ * same key (services/api/src/chat/surge.ts).
  */
-export const surgeOpenKey = (channelId: string): string => `surge-open:${channelId}`;
+export const surgeOpenKey = KEYS.surgeOpen;
 /** Long enough to outlive any cooldown (at most 120 minutes) plus a worker outage. */
 export const SURGE_OPEN_TTL_SECONDS = 2 * 86_400;
 

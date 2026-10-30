@@ -240,6 +240,8 @@ export const KEYS = {
   verifiedWatch: (channelId: string, userId: string) => `verified-watch:${channelId}:${userId}`,
   /** ADR 0015 decision 6: STRING JSON `SurgeOverride`, TTL `until − now + 60 s`. */
   surgeOverride: (channelId: string) => `surge-override:${channelId}`,
+  /** ADR 0015 decision 6: set while a recorded chat.surge.begin has no end yet (TTL 2 days). */
+  surgeOpen: (channelId: string) => `surge-open:${channelId}`,
   /** ADR 0012 amendment 1 decision 4: STRING, the median viewer latency in seconds, TTL 60 s. */
   chatLatency: (channelId: string) => `chat-latency:${channelId}`,
 } as const;

@@ -20,10 +20,10 @@ import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { apiMetrics } from "../metrics.ts";
 
 /**
- * The worker's begin-without-end marker (services/worker/src/chat-gate/state.ts `surgeOpenKey`):
- * set on a begin, cleared on an end, so a lapsed key still gets its `expired` end event. Keep in step.
+ * The begin-without-end marker the worker shares: set on a begin, cleared on an end, so a lapsed
+ * key still gets its `expired` end event.
  */
-const surgeOpenKey = (channelId: string): string => `surge-open:${channelId}`;
+const surgeOpenKey = KEYS.surgeOpen;
 const SURGE_OPEN_TTL_SECONDS = 2 * 86_400;
 /** The key outlives `until` by a minute so chat reopens on its own if the worker dies. */
 const TTL_GRACE_SECONDS = 60;

@@ -8,18 +8,24 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 An index of the `docs/` tree. Entries marked "(coming)" are planned but not
 written yet.
 
-| Path                                                             | Contents                                                              |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------- |
-| [decisions/](decisions/)                                         | Architecture Decision Records (ADRs): context, decision, consequences |
-| [operators/trust-safety.md](operators/trust-safety.md)           | Trust & safety duties, hash lists, evidence, holds (not legal advice) |
-| [deploy/digitalocean.md](deploy/digitalocean.md)                 | Staging and production on DigitalOcean droplets (ADR 0025)            |
-| [runbooks/](runbooks/)                                           | Operational procedures for running an instance (coming)               |
-| [self-hosting/](self-hosting/)                                   | How to deploy and operate your own instance (coming)                  |
-| [architecture.md](architecture.md)                               | System overview: services, data flow, relay network                   |
-| [governance/](governance/)                                       | How the co-op makes decisions                                         |
-| [governance/decision-process.md](governance/decision-process.md) | Proposal lifecycle, protected decisions, quorum, tallies              |
-| [api/](api/)                                                     | Public API and SDK reference (coming)                                 |
-| [developers/](developers/README.md)                              | Building on the platform: OAuth apps, EventSub, the SDK, porting      |
+| Path                                                                   | Contents                                                              |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [decisions/](decisions/)                                               | Architecture Decision Records (ADRs): context, decision, consequences |
+| [operators/trust-safety.md](operators/trust-safety.md)                 | Trust & safety duties, hash lists, evidence, holds (not legal advice) |
+| [operators/payment-fraud-review.md](operators/payment-fraud-review.md) | Payment fraud review: flags, four eyes, confirming, the admin release |
+| [viewers/](viewers/)                                                   | Guides for viewers                                                    |
+| [viewers/payment-breakdown.md](viewers/payment-breakdown.md)           | Where your payment goes: the breakdown, fee schedule and estimate     |
+| [viewers/calm-chat.md](viewers/calm-chat.md)                           | Calm Chat and blocking users                                          |
+| [streamers/chat-replay.md](streamers/chat-replay.md)                   | Chat replay and how long chat is kept                                 |
+| [streamers/verified-watch-gate.md](streamers/verified-watch-gate.md)   | The verified-watch gate and the surge guard                           |
+| [deploy/digitalocean.md](deploy/digitalocean.md)                       | Staging and production on DigitalOcean droplets (ADR 0025)            |
+| [runbooks/](runbooks/)                                                 | Operational procedures for running an instance (coming)               |
+| [self-hosting/](self-hosting/)                                         | How to deploy and operate your own instance (coming)                  |
+| [architecture.md](architecture.md)                                     | System overview: services, data flow, relay network                   |
+| [governance/](governance/)                                             | How the co-op makes decisions                                         |
+| [governance/decision-process.md](governance/decision-process.md)       | Proposal lifecycle, protected decisions, quorum, tallies              |
+| [api/](api/)                                                           | Public API and SDK reference (coming)                                 |
+| [developers/](developers/README.md)                                    | Building on the platform: OAuth apps, EventSub, the SDK, porting      |
 
 ## Decisions
 

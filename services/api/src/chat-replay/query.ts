@@ -4,10 +4,8 @@
 /**
  * Chat replay (ADR 0012 amendment 1 decisions 5 to 7): one broadcast's messages inside a
  * wall-clock window, in media-time order, minus everything the live room could no longer see and
- * everything this viewer chose not to see. The sort key is `coalesce(media_ts, created_at)`, which
- * `chat_messages_broadcast_media_idx (broadcast_id, media_ts)` only narrows to the broadcast: each
- * page sorts that broadcast's rows until an expression index on
- * `(broadcast_id, coalesce(media_ts, created_at), id)` lands (contract request to packages/db).
+ * everything this viewer chose not to see. Rows are read in `(coalesce(media_ts, created_at), id)`
+ * order through `chat_messages_broadcast_at_idx`.
  */
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { dto } from "@commonair/contracts";

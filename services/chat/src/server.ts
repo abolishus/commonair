@@ -167,7 +167,7 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     deleteRetryMs: opts.deleteRetryMs,
   });
   const limiter = opts.limiter ?? new ValkeyLimiter(valkey);
-  const latency = new ChannelLatency(valkey);
+  const latency = new ChannelLatency(valkey, { logger });
   const watchGate = new WatchGate({
     valkey,
     db: opts.db,
