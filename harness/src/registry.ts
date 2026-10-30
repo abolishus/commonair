@@ -72,6 +72,32 @@ export function shardOf(full: readonly Scenario[], shard: FullShard): Scenario[]
 }
 
 /**
+ * CI's path-based selection (`HARNESS_ONLY`, from scripts/ci-changes.ts): `full` and its shards
+ * keep only the named scenarios; anything else named on the command line is untouched. Empty or
+ * `all` keeps everything. A name that is no scenario at all is an error, so a typo cannot quietly
+ * skip the harness. Returns what was dropped too, for the log. Pure.
+ */
+export function onlySelected(
+  names: readonly string[],
+  resolved: readonly Scenario[],
+  all: readonly Scenario[],
+  only: string | undefined,
+): { run: Scenario[]; dropped: string[] } {
+  const wanted = (only ?? "")
+    .split(",")
+    .map((n) => n.trim())
+    .filter(Boolean);
+  const fullRun = names.some((n) => n === FULL || n.startsWith(`${FULL}:`));
+  if (!fullRun || wanted.length === 0 || wanted.includes("all")) return { run: [...resolved], dropped: [] };
+  const known = new Set(all.map((s) => s.name));
+  const unknown = wanted.filter((n) => !known.has(n));
+  if (unknown.length > 0) throw new RegistryError(`HARNESS_ONLY names unknown scenario(s): ${unknown.join(", ")}`);
+  const explicit = new Set(names);
+  const keep = (s: Scenario) => wanted.includes(s.name) || explicit.has(s.name);
+  return { run: resolved.filter(keep), dropped: resolved.filter((s) => !keep(s)).map((s) => s.name) };
+}
+
+/**
  * Parameter variants of scenarios whose module does not declare `paramNeeds` itself. The Stripe
  * variant of `e4b-money` is the one step `--profile no-proprietary` skips.
  */

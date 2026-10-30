@@ -11,7 +11,7 @@ import { type Command, USAGE, UsageError, parseArgs } from "./args.ts";
 import { loadHarnessEnv } from "./env.ts";
 import { type LoadOptions, runLoad } from "./load.ts";
 import { stopAll } from "./process.ts";
-import { FULL_SHARDS, loadRegistry } from "./registry.ts";
+import { FULL_SHARDS, loadRegistry, onlySelected } from "./registry.ts";
 import { DEFAULT_REPORT_DIR, formatHuman, writeReport } from "./report.ts";
 import { formatSkipTable, newRunId, runScenarios } from "./runner.ts";
 import { defineScenario } from "./scenario.ts";
@@ -73,9 +73,18 @@ async function main(argv: string[]): Promise<number> {
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
 
+  const selectRun = (names: string[]) => {
+    const { run, dropped } = onlySelected(names, registry.resolve(names), registry.all, process.env.HARNESS_ONLY);
+    if (dropped.length > 0)
+      log.info("HARNESS_ONLY: scenarios this change cannot affect are skipped", {
+        run: run.map((s) => s.name),
+        skipped: dropped,
+      });
+    return run;
+  };
   const scenarios =
     command.kind === "run"
-      ? registry.resolve(command.scenarios)
+      ? selectRun(command.scenarios)
       : [
           defineScenario({
             name: "load",

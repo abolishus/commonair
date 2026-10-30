@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { FULL_SHARDS } from "../../harness/src/shards.ts";
+import { ALL, shardsFor } from "../ci-changes.ts";
 import {
   FULL_SCENARIO_TIMEOUT_MIN,
   GROUPS,
@@ -128,7 +129,9 @@ describe("CI verify jobs", () => {
 
   // `full` runs as one job per shard; a shard missing here would silently never run on CI.
   test("one harness job per full shard, each running its own shard of the full scenario", () => {
-    expect(ci.jobs.harness.strategy.matrix.shard).toEqual(Object.keys(FULL_SHARDS));
+    expect(ci.jobs.harness.strategy.matrix.shard).toBe("${{ fromJSON(needs.changes.outputs.shards) }}");
+    expect(shardsFor(ALL)).toEqual(Object.keys(FULL_SHARDS));
+    expect(ci.jobs.harness.env.HARNESS_ONLY).toBe("${{ needs.changes.outputs.scenarios }}");
     expect(ci.jobs.harness.strategy["fail-fast"]).toBe(false);
     expect(runOf(ci.jobs.harness)).toContain('bun scripts/verify.ts --full --only harness --shard "$SHARD"');
     const verify = ci.jobs.harness.steps.find((s: { name?: string }) => s.name === "Verify");

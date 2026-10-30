@@ -13,6 +13,7 @@ import {
   Registry,
   RegistryError,
   loadRegistry,
+  onlySelected,
   validateScenario,
 } from "../src/registry.ts";
 import { type RunReport, formatHuman, reportStem, summarizeResults, writeReport } from "../src/report.ts";
@@ -261,5 +262,30 @@ describe("reports", () => {
 
   test("report stems are filesystem-safe", () => {
     expect(reportStem(report)).toBe("2026-10-18T12-00-00-000Z-run-abc123");
+  });
+});
+
+describe("onlySelected (HARNESS_ONLY, CI's path-based selection)", () => {
+  const all = [sc("smoke"), sc("interact"), sc("channel-bot"), sc("developer-platform")];
+  const names = (r: { run: Scenario[] }) => r.run.map((s) => s.name);
+
+  test("full and its shards keep only the selected scenarios, in order, and report the rest", () => {
+    const r = onlySelected([FULL], all, all, "developer-platform,interact");
+    expect(names(r)).toEqual(["interact", "developer-platform"]);
+    expect(r.dropped).toEqual(["smoke", "channel-bot"]);
+    expect(names(onlySelected([`${FULL}:interact`], all.slice(1, 3), all, "interact"))).toEqual(["interact"]);
+  });
+
+  test("unset, empty or all keeps everything", () => {
+    for (const only of [undefined, "", "all"]) expect(names(onlySelected([FULL], all, all, only))).toHaveLength(4);
+  });
+
+  test("a scenario named on the command line always runs; a run without full is untouched", () => {
+    expect(names(onlySelected([FULL, "smoke"], all, all, "interact"))).toEqual(["smoke", "interact"]);
+    expect(names(onlySelected(["smoke"], [all[0] as Scenario], all, "interact"))).toEqual(["smoke"]);
+  });
+
+  test("a selection that is no scenario is an error, not a silent skip", () => {
+    expect(() => onlySelected([FULL], all, all, "interactt")).toThrow(RegistryError);
   });
 });

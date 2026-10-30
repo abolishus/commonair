@@ -4,9 +4,10 @@
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
 # goes red on main, fix main immediately. Pull requests run the gate; main, the nightly schedule
 # and a manual dispatch also run the full harness scenario, a release dry run (release.yml) and
-# the self-host end-to-end test. On a push to main, `changes` (scripts/ci-changes.ts) skips the
-# harness for a docs-only push and the release dry run and self-host test unless something they
-# build or install changed; the nightly run and a dispatch run everything. `ci-ok` is the one
+# the self-host end-to-end test. On a push to main, `changes` (scripts/ci-changes.ts) runs only the
+# harness scenarios (and shards) the push can affect, none for docs and tests alone, and skips the
+# release dry run and self-host test unless something they build or install changed; the nightly
+# run and a dispatch run everything. `ci-ok` is the one
 # check branch protection requires (skipped jobs count as passed).
 name: ci
 
@@ -43,6 +44,8 @@ jobs:
       actions: read
     outputs:
       code: ${{ steps.classify.outputs.code }}
+      scenarios: ${{ steps.classify.outputs.scenarios }}
+      shards: ${{ steps.classify.outputs.shards }}
       deploy: ${{ steps.classify.outputs.deploy }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -225,9 +228,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [relay, long, clock, interact, rest]
+        # Every shard on the nightly run and a dispatch; on a push, the ones holding a selected
+        # scenario (scripts/ci-changes.ts; the full list is FULL_SHARDS).
+        shard: ${{ fromJSON(needs.changes.outputs.shards) }}
     env:
       PODMAN_COMPOSE_PROVIDER: podman-compose
+      # The scenarios this push can affect (`all`, or a list the harness CLI keeps from the shard).
+      HARNESS_ONLY: ${{ needs.changes.outputs.scenarios }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:

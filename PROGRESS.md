@@ -64,11 +64,13 @@ later list test paged through them past the timeout (`1b0d749`); `developer-plat
 replayed inside the 2 s refresh reuse grace (`aee8112`). CI green on `dbe2723` (contract steps).
 
 **CI selection (2026-10-29, user):** a `changes` job (`scripts/ci-changes.ts`) diffs a push against
-the last green `ci` run on main. Docs- and brief-only pushes skip the harness shards; the release
-dry run and the three self-host e2e jobs run only when images, the installer, release tooling,
-compose, workflows, lockfiles, migrations or `.env.example` change. The gate always runs; the
-nightly run and a dispatch run everything. Next step if wanted: map changed paths to harness
-scenarios.
+the last green `ci` run on main. The harness runs only the scenarios a push can affect: none for
+docs, briefs and tests alone; for a change inside the harness, the scenarios whose modules import
+the changed file (transitively, from the import graph), and only the shards holding them
+(`HARNESS_ONLY`, `onlySelected` in `harness/src/registry.ts`); everything for any product or
+harness-runtime change. The release dry run and the three self-host e2e jobs run only when images,
+the installer, release tooling, compose, workflows, lockfiles, migrations or `.env.example` change.
+The gate always runs; the nightly run and a dispatch run everything.
 
 **Open (batch 3):**
 
