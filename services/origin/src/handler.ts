@@ -26,7 +26,15 @@ import {
   type HlsDirectives,
   type MediaRequest,
 } from "./paths.ts";
-import { rewritePlaylist, synthesizeMultivariant, type UriTarget, type VariantSource } from "./playlist.ts";
+import {
+  filterForDataMode,
+  isMultivariantText,
+  rewritePlaylist,
+  stripLowLatency,
+  synthesizeMultivariant,
+  type UriTarget,
+  type VariantSource,
+} from "./playlist.ts";
 import type { TokenRefresher } from "./refresh.ts";
 import { UpstreamError } from "./upstream.ts";
 
@@ -118,26 +126,32 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
   async function playlistBody(mr: MediaRequest, obj: MediaObject, channel: LiveChannel, p: Puller): Promise<string> {
     let text = dec.decode(obj.body);
     if (mr.isMultivariant) {
+      const dm = p.route === "hls" ? p.claims.dm : undefined;
       const renditions = await deps.channels.renditions(channel.id);
-      if (renditions.length > 0) {
-        const fetched = await Promise.all(
-          renditions.map(async (r): Promise<VariantSource | null> => {
-            try {
-              const o = await deps.store.get({
-                upstreamPath: renditionPath(mr.slug, r),
-                file: "index.m3u8",
-                kind: "playlist",
-              });
-              return o.status === 200 ? { rendition: r, text: dec.decode(o.body) } : null;
-            } catch {
-              // A rendition whose transcoder is not up yet is simply left out of the ladder.
-              return null;
-            }
-          }),
-        );
-        const variants = fetched.filter((v): v is VariantSource => v !== null);
-        if (variants.length > 0) text = synthesizeMultivariant([{ rendition: "source", text }, ...variants]);
-      }
+      const fetched = await Promise.all(
+        renditions.map(async (r): Promise<VariantSource | null> => {
+          try {
+            const o = await deps.store.get({
+              upstreamPath: renditionPath(mr.slug, r),
+              file: "index.m3u8",
+              kind: "playlist",
+            });
+            return o.status === 200 ? { rendition: r, text: dec.decode(o.body) } : null;
+          } catch {
+            // A rendition whose transcoder is not up yet is simply left out of the ladder.
+            return null;
+          }
+        }),
+      );
+      const variants = fetched.filter((v): v is VariantSource => v !== null);
+      // A data-mode token always gets the synthesized ladder, so a source-only channel still has
+      // its derived audio-only variant; the filter then applies the viewer's budget (ADR 0018
+      // decision 5).
+      const dataMode = dm !== undefined && isMultivariantText(text);
+      if (variants.length > 0 || dataMode) text = synthesizeMultivariant([{ rendition: "source", text }, ...variants]);
+      if (dataMode) text = filterForDataMode(text, dm);
+    } else if (p.route === "hls" && p.claims.dm !== undefined) {
+      text = stripLowLatency(text);
     }
     return rewritePlaylist(text, { dir: mr.upstreamPath, root: mr.channelPath, target: await uriTarget(p) });
   }
@@ -146,7 +160,8 @@ export function createHandler(deps: HandlerDeps): OriginFetch {
     // Tokenized responses are per viewer; relay and CDN pulls are shared.
     const scope = p.route === "hls" ? "private" : "public";
     if (mr.kind !== "playlist") return `${scope}, max-age=86400, immutable`;
-    if (mr.isMultivariant) return "no-cache";
+    // A data-mode playlist is filtered for this viewer's budget: never stored anywhere.
+    if (mr.isMultivariant) return p.route === "hls" && p.claims.dm !== undefined ? "private, no-store" : "no-cache";
     // A blocking reload's answer never changes once produced; caches may keep it briefly.
     return isBlocking(d) ? `${scope}, max-age=6` : "no-cache";
   }

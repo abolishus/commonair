@@ -1,1 +1,27 @@
-{}
+{
+  "dataMode.title": "Data saver",
+  "dataMode.intro": "Set a budget and the player picks the best quality that fits it, down to audio only.",
+  "dataMode.toggle": "Limit data use",
+  "dataMode.toggleHint": "Sharing with other viewers stays off while this is on. Your choice is kept on this device.",
+  "dataMode.state.on": "On",
+  "dataMode.state.off": "Off",
+  "dataMode.budget.label": "Budget",
+  "dataMode.budget.audio": "Audio only, about {mb} MB an hour",
+  "dataMode.budget.low": "Low video, about {mb} MB an hour",
+  "dataMode.budget.medium": "Medium video, about {mb} MB an hour",
+  "dataMode.budget.custom": "Custom",
+  "dataMode.budget.customLabel": "MB an hour",
+  "dataMode.budget.customHint": "Between {min} and {max} MB an hour.",
+  "dataMode.budget.customSave": "Use this budget",
+  "dataMode.suggested": "Your browser asked to save data, so the audio-only budget is selected. Turn the switch on to use it.",
+  "dataMode.usage.value": "Data used: {used} this session",
+  "dataMode.usage.rate": "Data used: {used} this session, about {rate} MB an hour",
+  "dataMode.usage.unknown": "This browser does not report what the stream downloads.",
+  "dataMode.estimate.video": "At this budget the stream uses about {mb} MB an hour.",
+  "dataMode.estimate.audio": "At this budget the stream plays audio only, about {mb} MB an hour.",
+  "dataMode.overBudget": "Audio only is the lowest this stream goes and uses more than your budget. It plays anyway, and the meter shows what it really uses.",
+  "dataMode.pending": "Applying your budget…",
+  "dataMode.notice.nativeReload": "On this device a budget change reloads the stream, with a short pause.",
+  "dataMode.notice.dvr": "Data saver does not apply while you watch behind live.",
+  "dataMode.notice.vod": "Data saver does not apply to videos."
+}

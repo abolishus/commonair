@@ -32,6 +32,15 @@ describe("authorizeViewer", () => {
     }
   });
 
+  test("a data-mode token passes through with its dm claim unchanged (ADR 0018)", async () => {
+    const t = await signPlaybackToken(key, claims({ dm: 96_618 }));
+    const r = await authorizeViewer(key.publicKey, t, req("/hls/live/alice/index.m3u8"), now);
+    expect(r).toMatchObject({ ok: true, claims: { dm: 96_618, src: "origin" } });
+    // Media playlists and segments of any rendition are never refused by rendition.
+    const seg = await authorizeViewer(key.publicKey, t, req("/hls/live/alice/1080p/x_seg1.mp4"), now);
+    expect(seg.ok).toBe(true);
+  });
+
   test("accepts cdn-delivered sessions", async () => {
     const t = await signPlaybackToken(key, claims({ src: "cdn" }));
     expect((await authorizeViewer(key.publicKey, t, req("/hls/live/alice/index.m3u8"), now)).ok).toBe(true);

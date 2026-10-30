@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, it } from "vite-plus/test";
-import { heartbeatSwitch, playerSource, sourceAfterSwitch, tokenSource } from "../src/player/source.ts";
+import { heartbeatSwitch, playerSource, sourceAfterSwitch, tokenDataMode, tokenSource } from "../src/player/source.ts";
 
 /** A playback token as the API signs it: base64url JSON claims, a dot, a signature. */
 function token(claims: Record<string, unknown>): string {
@@ -79,5 +79,26 @@ describe("heartbeatSwitch", () => {
 
   it("ignores a throttled beat", () => {
     expect(heartbeatSwitch({ switchTo: url, throttled: true })).toBeNull();
+  });
+});
+
+describe("tokenDataMode (ADR 0018)", () => {
+  it("the dm claim when data mode is on, null when the claim is absent", () => {
+    expect(tokenDataMode(token(claims("origin", { dm: 96_618 })))).toBe(96_618);
+    expect(tokenDataMode(token(claims("origin")))).toBeNull();
+    expect(tokenDataMode(token(claims("origin", { dm: "1" })))).toBeNull();
+  });
+
+  it("undefined when the token cannot be read", () => {
+    expect(tokenDataMode(undefined)).toBeUndefined();
+    expect(tokenDataMode("")).toBeUndefined();
+    expect(tokenDataMode("not base64!.sig")).toBeUndefined();
+    expect(tokenDataMode(`${Buffer.from("nope").toString("base64url")}.sig`)).toBeUndefined();
+    // Valid JSON but not claims: no ceiling.
+    expect(tokenDataMode(`${Buffer.from("[1,2]").toString("base64url")}.sig`)).toBeNull();
+  });
+
+  it("tokenSource still reads src from a token with dm", () => {
+    expect(tokenSource(token(claims("origin", { dm: 96_618 })))).toBe("origin");
   });
 });

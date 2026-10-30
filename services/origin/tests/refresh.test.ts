@@ -50,6 +50,33 @@ describe("TokenRefresher", () => {
     expect(f.queries()).toBe(1);
   });
 
+  test("a token is never reused across a dm change (ADR 0018)", async () => {
+    const f = fakeDb([{ endedAt: null }]);
+    const r = new TokenRefresher({ key, db: f.db, now: () => NOW });
+    const before = claims(NOW + 30);
+    const first = await r.tokenFor(before, await signPlaybackToken(key, before));
+    expect((await verifyPlaybackToken(key.publicKey, first, NOW)).ok).toBe(true);
+
+    // The API re-minted with a ceiling; the new token is near expiry too.
+    const on = { ...claims(NOW + 30), dm: 96_618 };
+    const second = await r.tokenFor(on, await signPlaybackToken(key, on));
+    expect(second).not.toBe(first);
+    const v = await verifyPlaybackToken(key.publicKey, second, NOW);
+    expect(v.ok && v.value.dm).toBe(96_618);
+
+    // A different ceiling, and back to off: each gets its own token, never the other's.
+    const raised = { ...claims(NOW + 30), dm: 1_545_894 };
+    const third = await r.tokenFor(raised, await signPlaybackToken(key, raised));
+    const v3 = await verifyPlaybackToken(key.publicKey, third, NOW);
+    expect(v3.ok && v3.value.dm).toBe(1_545_894);
+    const off = claims(NOW + 30);
+    const fourth = await r.tokenFor(off, await signPlaybackToken(key, off));
+    const v4 = await verifyPlaybackToken(key.publicKey, fourth, NOW);
+    expect(v4.ok && v4.value.dm).toBeUndefined();
+    // Same (sid, dm) is still reused.
+    expect(await r.tokenFor(on, await signPlaybackToken(key, on))).toBe(second);
+  });
+
   test("ended or unknown sessions are not extended", async () => {
     for (const rows of [[{ endedAt: new Date() }], []]) {
       const r = new TokenRefresher({ key, db: fakeDb(rows).db, now: () => NOW });

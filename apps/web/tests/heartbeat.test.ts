@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   HeartbeatAccountant,
   MAX_PLAYED_PER_HEARTBEAT,
+  dataModeField,
   nextHeartbeatDelay,
   playbackFields,
   withToken,
@@ -228,5 +229,16 @@ describe("playbackFields", () => {
     expect(playbackFields("dvr", -3).behindLiveSeconds).toBe(0);
     expect(playbackFields("dvr", 1e9).behindLiveSeconds).toBe(86_400);
     expect(playbackFields("dvr", Number.NaN).behindLiveSeconds).toBeNull();
+  });
+});
+
+describe("dataModeField (ADR 0018 decision 3)", () => {
+  it("absent when nothing is pending, so the server keeps the token's ceiling", () => {
+    expect(dataModeField(undefined)).toEqual({});
+    expect("dataMode" in dataModeField(undefined)).toBe(false);
+  });
+  it("a pending ceiling, or null to turn data mode off", () => {
+    expect(dataModeField(96_618)).toEqual({ dataMode: 96_618 });
+    expect(dataModeField(null)).toEqual({ dataMode: null });
   });
 });

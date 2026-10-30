@@ -13,17 +13,20 @@
  * hls.js exactly as without P2P.
  *
  * The player seam (docs/testing/w1-selectors.md "Player seam"): `playheadWallclock`,
- * `seekToWallclock`, `setTargetLatency`, `onTextTrack`, `playbackMode`/`onPlaybackMode`. Later
- * features (DVR, captions, data mode, watch rooms) build on these instead of reaching into hls.js.
+ * `seekToWallclock`, `setTargetLatency`, `onTextTrack`, `playbackMode`/`onPlaybackMode`, and for
+ * data mode (ADR 0018) `setDataMode`/`dataUsage`. Later features (DVR, captions, watch rooms)
+ * build on these instead of reaching into hls.js.
  */
 import type Hls from "hls.js";
 import type { HlsConfig } from "hls.js";
 import { RENDITIONS } from "@commonair/contracts/enums";
 import type { Api } from "../lib/api.ts";
+import { capIndex, nominalLevels, type LevelInfo } from "./budget.ts";
 import {
   HeartbeatAccountant,
   MAX_P2P_PEERS,
   RENDITION_SOURCE,
+  dataModeField,
   nextHeartbeatDelay,
   playbackFields,
   withToken,
@@ -35,8 +38,15 @@ import { DigestValidator } from "./p2p/digest.ts";
 import type { P2PHls } from "./p2p/engine.ts";
 import { fetchIceServers, iceRefreshDelay } from "./p2p/ice.ts";
 import { P2PStats, p2pState, type P2PState } from "./p2p/stats.ts";
-import { heartbeatSwitch, playerSource, type PlayerSource } from "./source.ts";
-import { VideoStats, collectFingerprint, sessionDeviceId } from "./stats.ts";
+import { heartbeatSwitch, playerSource, tokenDataMode, type PlayerSource } from "./source.ts";
+import {
+  DataUsageMeter,
+  VideoStats,
+  collectFingerprint,
+  nativeMediaBytes,
+  sessionDeviceId,
+  type DataUsage,
+} from "./stats.ts";
 
 export type PlayerState = "offline" | "loading" | "playing" | "error";
 
@@ -87,6 +97,18 @@ export interface PlayerControllerOptions {
   targetLatency?: number | undefined;
   /** Diagnostic (`?rendition=`): pin the hls.js level of this rendition (`source`, `720p`, …). */
   rendition?: string | undefined;
+  /** Data mode (ADR 0018): the ceiling (bit/s) to start with; null or absent = off. */
+  dataMode?: number | null;
+  /** The ceiling in effect (the token's `dm`): on start and whenever the server applied a change. */
+  onDataMode?: (ceiling: number | null) => void;
+}
+
+/** hls.js levels as the budget controller sees them (audio-only: no video codec, no picture size). */
+function levelInfos(hls: Pick<Hls, "levels">): LevelInfo[] {
+  return hls.levels.map((l) => ({
+    bitrate: Number.isFinite(l.bitrate) ? l.bitrate : 0,
+    audioOnly: !l.videoCodec && !((l.width ?? 0) > 0),
+  }));
 }
 
 /** Bounds of `setTargetLatency` (seconds): below one second hls.js stalls, past a minute it is DVR. */
@@ -200,10 +222,21 @@ export class PlayerController {
   private mode: PlaybackMode = "live";
   private readonly modeListeners = new Set<(mode: PlaybackMode) => void>();
   private readonly textTrackUnsubs = new Set<() => void>();
+  /** The data-mode ceiling the viewer wants (bit/s), null = off. */
+  private dataModeWanted: number | null;
+  /** The ceiling in the current token: what the origin applies. A difference goes out with the next beat. */
+  private dataModeApplied: number | null = null;
+  private cappingHooked = false;
+  private hlsCtor: typeof Hls | null = null;
+  /** The playlist being played (its token is replaced on reload). */
+  private playlistUrl: string | null = null;
+  private renditions: readonly string[] = [];
+  private readonly meter = new DataUsageMeter();
 
   constructor(private readonly opts: PlayerControllerOptions) {
     const t = opts.targetLatency;
     if (t !== undefined && Number.isFinite(t) && t > 0) this.targetLatencyS = clampLatency(t);
+    this.dataModeWanted = opts.dataMode ?? null;
   }
 
   // ------------------------------------------------------------ the player seam
@@ -321,6 +354,66 @@ export class PlayerController {
     for (const l of this.modeListeners) l(mode);
   }
 
+  /**
+   * Data mode (ADR 0018): the bitrate ceiling in bit/s, or null to turn it off. hls.js is capped
+   * at once and P2P stops; the next heartbeat sends `dataMode`, and when the server answers with a
+   * token carrying the new ceiling the player reloads the multivariant playlist the origin now
+   * filters (hls.js `loadSource`; native HLS a source reload and a short rebuffer). Before
+   * `start()` the value is what the session starts with.
+   */
+  setDataMode(ceiling: number | null): void {
+    if (this.stopped) return;
+    this.dataModeWanted = ceiling !== null && Number.isFinite(ceiling) ? Math.round(ceiling) : null;
+    // Uploading to peers spends the budget; the server drops the grant with the beat (decision 6).
+    if (this.dataModeWanted !== null && this.p2p) this.disableP2P();
+    this.applyCapping();
+  }
+
+  /** HTTP bytes this session (P2P is off in data mode) and the recent rate in MB an hour. */
+  dataUsage(): DataUsage {
+    return this.meter.sample(this.httpBytes());
+  }
+
+  /**
+   * The levels the budget is judged against: hls.js's own, or on native HLS (which exposes none)
+   * the nominal rungs of the renditions `playback.start` listed.
+   */
+  playableLevels(): LevelInfo[] {
+    const levels = this.hls ? levelInfos(this.hls) : [];
+    return levels.length > 0 ? levels : nominalLevels(this.renditions);
+  }
+
+  /** hls.js: cap ABR at the wanted ceiling (the origin's filter does it for native HLS). */
+  private applyCapping(): void {
+    const hls = this.hls;
+    const ctor = this.hlsCtor;
+    if (!hls || !ctor) return;
+    // Hooked only once data mode is wanted: sessions without it keep hls.js's ABR untouched.
+    if (!this.cappingHooked && this.dataModeWanted !== null) {
+      this.cappingHooked = true;
+      hls.on(ctor.Events.MANIFEST_PARSED, () => this.applyCapping());
+    }
+    if (this.cappingHooked) hls.autoLevelCapping = capIndex(levelInfos(hls), this.dataModeWanted);
+  }
+
+  private httpBytes(): number {
+    if (this.native) return nativeMediaBytes(this.opts.video) ?? 0;
+    return this.bytesHttp + (this.p2pStats?.httpBytes ?? 0);
+  }
+
+  /** A token arrived: if its ceiling differs from the one being played, reload under it. */
+  private applyDataModeToken(token: string, moved: boolean): void {
+    const dm = tokenDataMode(token);
+    if (dm === undefined || dm === this.dataModeApplied) return;
+    this.dataModeApplied = dm;
+    this.meter.restart();
+    this.opts.onDataMode?.(dm);
+    if (dm !== null && this.p2p) this.disableP2P();
+    // A `switchTo` reloads anyway.
+    if (moved || !this.playlistUrl) return;
+    this.reload(withToken(this.playlistUrl, token));
+  }
+
   // ------------------------------------------------------------ session
 
   private setState(s: PlayerState): void {
@@ -369,20 +462,26 @@ export class PlayerController {
       const { default: HlsCtor } = await import("hls.js");
       if (this.stopped) return;
       this.native = prefersNativeHls(video, HlsCtor.isSupported());
-      // Native HLS has no loader to plug into, so it never asks.
-      const wantP2P = !this.native && (this.opts.p2pWanted?.(this.native) ?? false);
+      // Native HLS has no loader to plug into, so it never asks; data mode never shares (ADR 0018).
+      const wantP2P = !this.native && this.dataModeWanted === null && (this.opts.p2pWanted?.(this.native) ?? false);
       const started = await api.playback.start({
         channel,
         deviceId: sessionDeviceId(),
         embed: this.opts.embed ?? false,
         p2pCapable: wantP2P,
         nativeHls: this.native,
+        dataMode: this.dataModeWanted,
       });
       if (this.stopped) {
         await this.endSession(started.sessionId, started.token);
         return;
       }
       this.session = { id: started.sessionId, token: started.token, intervalMs: started.heartbeatIntervalMs };
+      this.playlistUrl = started.playlistUrl;
+      this.renditions = started.renditions;
+      // A change made while `start` was in flight goes out with the first beat.
+      this.dataModeApplied = started.dataMode;
+      this.opts.onDataMode?.(started.dataMode);
       this.p2pAvailable = started.p2p.available;
       this.emitP2P();
       this.opts.onSource?.(playerSource(started.source));
@@ -498,6 +597,8 @@ export class PlayerController {
     hls.loadSource(url);
     hls.attachMedia(this.opts.video);
     this.hls = hls;
+    this.hlsCtor = HlsCtor;
+    this.applyCapping();
   }
 
   /** Low-latency hls.js, with `liveSyncDuration` in place of the segment count once a target is set. */
@@ -584,6 +685,9 @@ export class PlayerController {
     const session = this.session;
     if (!session || this.stopped) return;
     const totals = this.cumulative();
+    // A data-mode change the current token does not carry yet; resent until the server applies it.
+    const wanted = this.dataModeWanted;
+    const change = wanted !== this.dataModeApplied ? wanted : undefined;
     try {
       const res = await this.opts.api.playback.heartbeat({
         sessionId: session.id,
@@ -592,15 +696,20 @@ export class PlayerController {
         fingerprint: collectFingerprint(this.native),
         ...this.accountant.delta(totals),
         ...playbackFields(this.playbackMode()),
+        ...dataModeField(change),
       });
       // Throttled: the server recorded nothing, so the deltas ride along with the next beat.
       if (!this.accountant.settle(totals, res)) return;
       this.lastAckAt = Date.now();
+      this.meter.sample(this.httpBytes());
       // The tracker accepts this session's socket from now on: start sharing (once).
       if (!this.p2pOff) this.p2p?.enable();
       if (res.token) session.token = res.token;
       const move = heartbeatSwitch(res);
       if (move && !this.stopped) this.switchTo(move.url, move.source);
+      // Only a token says what the origin applies: a beat answered without one (a concurrent beat
+      // lost the race) leaves the change pending, and it is sent again.
+      if (res.token && !this.stopped) this.applyDataModeToken(res.token, move !== null);
     } catch {
       // Not committed: this heartbeat's share is reported with the next one.
     } finally {
@@ -616,11 +725,17 @@ export class PlayerController {
    * session keeps its swarm: the swarm ids come from the broadcast, not from the HTTP source.
    */
   private switchTo(url: string, source: PlayerSource): void {
+    this.reload(url);
+    this.opts.onSource?.(source);
+  }
+
+  /** Load a new multivariant playlist of the same stream (a move, or a new data-mode ceiling). */
+  private reload(url: string): void {
     const { video } = this.opts;
+    this.playlistUrl = url;
     if (this.hls) this.hls.loadSource(url);
     else video.src = url;
     void video.play().catch(() => undefined);
-    this.opts.onSource?.(source);
   }
 
   private async endSession(id: string, token: string): Promise<void> {

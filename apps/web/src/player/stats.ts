@@ -58,6 +58,67 @@ export class VideoStats {
   }
 }
 
+/** The data meter's numbers (ADR 0018): bytes this session and the recent rate. */
+export interface DataUsage {
+  bytes: number;
+  /** MB (10^6 bytes) an hour over the meter's window; 0 until it has a few seconds of data. */
+  mbPerHour: number;
+}
+
+/** A rate needs at least this much time between its first and last sample. */
+const MIN_RATE_SPAN_MS = 5_000;
+
+/**
+ * The data-usage meter: samples a cumulative byte count and reports the rate over the last
+ * `windowMs`. `restart()` forgets the rate (not the bytes) when the budget changes, so the rate
+ * shows the new mode and not the old one.
+ */
+export class DataUsageMeter {
+  private samples: { at: number; bytes: number }[] = [];
+  private last = 0;
+
+  constructor(
+    private readonly now: () => number = () => performance.now(),
+    private readonly windowMs = 120_000,
+  ) {}
+
+  /** Record the cumulative byte count now. Counts never go down. */
+  sample(bytes: number): DataUsage {
+    const b = Number.isFinite(bytes) ? Math.max(this.last, Math.round(bytes)) : this.last;
+    this.last = b;
+    const at = this.now();
+    this.samples.push({ at, bytes: b });
+    // Keep one sample at or before the window's start so the rate covers the whole window.
+    while (this.samples.length > 2 && (this.samples[1]?.at ?? at) <= at - this.windowMs) this.samples.shift();
+    return this.usage();
+  }
+
+  usage(): DataUsage {
+    const first = this.samples[0];
+    const last = this.samples.at(-1);
+    if (!first || !last || last.at - first.at < MIN_RATE_SPAN_MS) return { bytes: this.last, mbPerHour: 0 };
+    const perSecond = (last.bytes - first.bytes) / ((last.at - first.at) / 1000);
+    return { bytes: this.last, mbPerHour: (perSecond * 3600) / 1_000_000 };
+  }
+
+  restart(): void {
+    this.samples = [];
+  }
+}
+
+/**
+ * Media bytes a native-HLS element has decoded (WebKit's `webkit{Audio,Video}DecodedByteCount`),
+ * the closest a page gets to what AVFoundation downloaded: its requests are invisible to the page.
+ * Null where the browser does not expose them. Playlists are not included.
+ */
+export function nativeMediaBytes(video: HTMLVideoElement): number | null {
+  const v = video as HTMLVideoElement & { webkitAudioDecodedByteCount?: number; webkitVideoDecodedByteCount?: number };
+  const audio = v.webkitAudioDecodedByteCount;
+  const vid = v.webkitVideoDecodedByteCount;
+  if (typeof audio !== "number" && typeof vid !== "number") return null;
+  return (Number.isFinite(audio) ? (audio ?? 0) : 0) + (Number.isFinite(vid) ? (vid ?? 0) : 0);
+}
+
 /** Coarse capability signals for the integrity checks; no persistent identifiers (see contract). */
 export function collectFingerprint(nativeHls: boolean): Record<string, string | number | boolean | null> {
   const nav = navigator as Navigator & { deviceMemory?: number };
