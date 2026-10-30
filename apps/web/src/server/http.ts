@@ -18,6 +18,8 @@ export interface WebServerOptions {
   clientDir: string;
   /** TanStack Start's server entry. */
   ssr: (req: Request) => Response | Promise<Response>;
+  /** `/manifest.webmanifest`, built from the instance (ADR 0028 decision 7). Absent: SSR answers it. */
+  manifest?: () => Response;
   fetchUpstream?: Fetcher;
 }
 
@@ -59,6 +61,9 @@ export function createHandler(opts: Omit<WebServerOptions, "port" | "hostname">)
       return new Response(HEALTH, {
         headers: { "content-type": "application/json", "cache-control": "no-store", ...security },
       });
+    // The manifest names the instance, so it is not a static file (one image serves every instance).
+    if ((req.method === "GET" || req.method === "HEAD") && url.pathname === "/manifest.webmanifest" && opts.manifest)
+      return withHeaders(opts.manifest(), { "cache-control": "public, max-age=0, must-revalidate", ...security });
     if ((req.method === "GET" || req.method === "HEAD") && url.pathname !== "/") {
       const path = staticPath(opts.clientDir, url.pathname);
       const file = path ? Bun.file(path) : null;

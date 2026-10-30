@@ -105,8 +105,9 @@ bucket with the instance's keys.
   set. `install` sets them from `--email`.
 
 Never set `MODERATION_TEST_HOOKS`, `COOP_TEST_HOOKS`, `OPS_TEST_HOOKS`, `INTERACT_TEST_HOOKS`,
-`EVENTSUB_ALLOW_INSECURE_CALLBACKS` or `OUTBOUND_ALLOW_PRIVATE_NETWORKS` on a public instance.
-They exist for the test harness and development.
+`EVENTSUB_ALLOW_INSECURE_CALLBACKS`, `OUTBOUND_ALLOW_PRIVATE_NETWORKS` or
+`WEB_PUSH_ALLOW_INSECURE_ENDPOINTS` on a public instance. They exist for the test harness and
+development.
 
 ## Which unit sees which key
 
@@ -412,6 +413,15 @@ the tables by hand. Columns:
 | `EVENTSUB_WS_SUBSCRIBE_WITHIN_SECONDS` | no       | `10`    | —         | Seconds a new EventSub session has to create its first subscription before it is closed (4003).                                                                                          |
 | `EVENTSUB_WS_RECONNECT_GRACE_SECONDS`  | no       | `30`    | —         | Seconds the old socket stays open after a `session_reconnect`.                                                                                                                           |
 | `OUTBOUND_ALLOW_PRIVATE_NETWORKS`      | no       | `false` | —         | Allow relay URLs and simulcast targets on private, loopback and other non-public networks (and plain http relays). Development and harness only: the local stack runs on such addresses. |
+
+### `webPushEnv`
+
+| Variable                            | Required | Default | Self-host      | Description                                                                                                                 |
+| ----------------------------------- | -------- | ------- | -------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `WEB_PUSH_ENABLED`                  | no       | `false` | set by install | Offer browser push; each viewer still opts in per browser. Off: the push procedures answer PRECONDITION_FAILED.             |
+| `VAPID_PUBLIC_KEY`                  | no       | —       | generated      | VAPID public key (RFC 8292): the uncompressed P-256 point, base64url (65 bytes). Browsers get it as `applicationServerKey`. |
+| `VAPID_PRIVATE_KEY`                 | no       | —       | generated      | VAPID private key: P-256 PKCS#8 DER, base64. Worker only.                                                                   |
+| `WEB_PUSH_ALLOW_INSECURE_ENDPOINTS` | no       | `false` | —              | Harness only: accept http:// and private-network push endpoints. Never on a public instance.                                |
 
 ### `workerEnv`
 

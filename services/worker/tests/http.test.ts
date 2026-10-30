@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { afterAll, describe, expect, test } from "vite-plus/test";
-import { postWebhook, type PostOptions } from "../src/webhooks/http.ts";
+import { postPinned, postWebhook, type PostOptions } from "../src/webhooks/http.ts";
 import type { Resolver } from "../src/webhooks/ssrf.ts";
 
 const seen: { host: string | null; body: string; headers: Headers }[] = [];
@@ -91,5 +91,60 @@ describe("postWebhook", () => {
     expect(r).toMatchObject({ ok: true, status: 200 });
     expect(calls).toBe(1);
     expect(seen.at(-1)?.host).toBe(`receiver.test:${server.port}`);
+  });
+});
+
+describe("postPinned (N1: web push and Discord)", () => {
+  const got: { bytes: Uint8Array; headers: Headers }[] = [];
+  const bin = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      got.push({ bytes: new Uint8Array(await req.arrayBuffer()), headers: req.headers });
+      return new Response(null, {
+        status: 201,
+        headers: { location: "https://push.example/m/1", "Retry-After": "7" },
+      });
+    },
+  });
+  afterAll(() => bin.stop(true));
+
+  test("a binary body arrives byte for byte, with the given content type and user agent", async () => {
+    // Every byte value, including ones that are not valid UTF-8.
+    const body = Uint8Array.from({ length: 512 }, (_, i) => (i * 7 + 255) % 256);
+    const r = await postPinned(
+      `http://127.0.0.1:${bin.port}/push`,
+      {
+        headers: { "content-encoding": "aes128gcm", ttl: "60" },
+        body,
+        contentType: "application/octet-stream",
+        userAgent: "CommonAir-Push/1",
+      },
+      opts(),
+    );
+    expect(r).toMatchObject({ ok: true, status: 201 });
+    const last = got.at(-1);
+    expect(last?.bytes).toEqual(body);
+    expect(last?.headers.get("content-type")).toBe("application/octet-stream");
+    expect(last?.headers.get("user-agent")).toBe("CommonAir-Push/1");
+    expect(last?.headers.get("content-encoding")).toBe("aes128gcm");
+    expect(last?.headers.get("content-length")).toBe("512");
+  });
+
+  test("response headers come back with lower-case names", async () => {
+    const r = await postPinned(
+      `http://127.0.0.1:${bin.port}/push`,
+      { headers: {}, body: "{}", contentType: "application/json", userAgent: "CommonAir-Discord/1" },
+      opts(),
+    );
+    expect(r.ok && r.headers["location"]).toBe("https://push.example/m/1");
+    expect(r.ok && r.headers["retry-after"]).toBe("7");
+  });
+
+  test("postWebhook keeps its JSON content type and EventSub user agent", async () => {
+    await postWebhook(`http://127.0.0.1:${bin.port}/hook`, {}, '{"a":1}', opts());
+    const last = got.at(-1);
+    expect(last?.headers.get("content-type")).toBe("application/json");
+    expect(last?.headers.get("user-agent")).toBe("CommonAir-EventSub/1");
   });
 });

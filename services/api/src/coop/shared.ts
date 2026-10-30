@@ -5,6 +5,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import {
+  GoLiveSetting,
   PayoutRulesSetting,
   PlatformCutSetting,
   PointsAccrualSetting,
@@ -85,6 +86,7 @@ const VALUE_SHAPES: Readonly<Record<string, z.ZodType>> = {
   "payout.rules": PayoutRulesSetting,
   "discovery.ranking": DiscoveryRanking,
   "interact.points.accrual": PointsAccrualSetting,
+  "notifications.goLive": GoLiveSetting,
 };
 
 export type ClassifiedChanges =

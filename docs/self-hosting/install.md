@@ -120,6 +120,7 @@ the same checks. Other options:
 | `--model <path>`       | A local copy of the moderation model, checked against its pinned sha256                 |
 | `--unsupported-distro` | Continue on a distribution other than Debian 13 or Fedora 42+                           |
 | `--reinstall`          | Install over an existing instance (secrets and env-file edits are kept)                 |
+| `--web-push`           | Offer browser push notifications; `--no-web-push` turns them off                        |
 
 Run `sh selfhost.sh --help` for the full list.
 

@@ -12,6 +12,7 @@ import type postgres from "postgres";
 import type { QueueName } from "./env.ts";
 import type { ModerationRuntime } from "./moderation/runtime.ts";
 import type { MoneyJobConfig } from "./money/config.ts";
+import type { WebPushSettings } from "./notify/settings.ts";
 import type { WebhookSettings } from "./webhooks/settings.ts";
 
 export interface EnqueueOptions {
@@ -60,5 +61,7 @@ export interface WorkerContext {
    * refuses to start without it; moderation jobs throw rather than run without it.
    */
   moderation?: ModerationRuntime;
+  /** Web push (N1); absent when WEB_PUSH_ENABLED is off. */
+  webPush?: WebPushSettings;
   now(): Date;
 }

@@ -18,6 +18,7 @@ export interface AccountEntry {
     | "dashboard"
     | "relays"
     | "subscriptions"
+    | "notifications"
     | "appeals"
     | "copyright"
     | "privacy"
@@ -33,6 +34,7 @@ export interface AccountEntry {
     | "/dashboard"
     | "/relays"
     | "/settings/subscriptions"
+    | "/settings/notifications"
     | "/settings/appeals"
     | "/settings/copyright"
     | "/settings/privacy"
@@ -134,6 +136,7 @@ export function accountMenu(
       { id: "dashboard", to: "/dashboard" },
       { id: "relays", to: "/relays" },
       { id: "subscriptions", to: "/settings/subscriptions" },
+      { id: "notifications", to: "/settings/notifications" },
       { id: "appeals", to: "/settings/appeals" },
       { id: "copyright", to: "/settings/copyright" },
       { id: "privacy", to: "/settings/privacy" },

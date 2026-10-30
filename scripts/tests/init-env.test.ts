@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 import { ALL_ENV_SCHEMAS, infraEnv, loadEnv } from "../../packages/config/src/env.ts";
 import { z } from "zod";
+import { loadApiEnv } from "../../services/api/src/env.ts";
+import { workerEnv } from "../../services/worker/src/env.ts";
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -106,5 +108,72 @@ describe("the owner's DATABASE_URL", () => {
   test("a merge into a file without DATABASE_URL uses the kept password", () => {
     const env = initEnv("POSTGRES_PASSWORD=kept-pw\n");
     expect(new URL(env.DATABASE_URL!).password).toBe("kept-pw");
+  });
+});
+
+describe("VAPID keypair (N1, ADR 0028)", () => {
+  async function importPair(env: Record<string, string>) {
+    const pub = await crypto.subtle.importKey(
+      "raw",
+      Buffer.from(env.VAPID_PUBLIC_KEY!, "base64url"),
+      { name: "ECDSA", namedCurve: "P-256" },
+      true,
+      ["verify"],
+    );
+    const priv = await crypto.subtle.importKey(
+      "pkcs8",
+      Buffer.from(env.VAPID_PRIVATE_KEY!, "base64"),
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign"],
+    );
+    return { pub, priv };
+  }
+
+  test("a fresh env has a matching pair: base64url raw public key, base64 PKCS#8 private key", async () => {
+    const env = initEnv();
+    expect(env.VAPID_PUBLIC_KEY).toMatch(/^[A-Za-z0-9_-]{87}$/);
+    expect(Buffer.from(env.VAPID_PUBLIC_KEY!, "base64url")[0]).toBe(0x04);
+    const { pub, priv } = await importPair(env);
+    const data = new TextEncoder().encode("vapid");
+    const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, priv, data);
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pub, sig, data)).toBe(true);
+    expect(initEnv().VAPID_PUBLIC_KEY).not.toBe(env.VAPID_PUBLIC_KEY);
+  });
+
+  test("a merge keeps an existing pair and fills a missing one", () => {
+    const first = initEnv();
+    const kept = initEnv(`VAPID_PUBLIC_KEY=${first.VAPID_PUBLIC_KEY}\nVAPID_PRIVATE_KEY=${first.VAPID_PRIVATE_KEY}\n`);
+    expect([kept.VAPID_PUBLIC_KEY, kept.VAPID_PRIVATE_KEY]).toEqual([first.VAPID_PUBLIC_KEY, first.VAPID_PRIVATE_KEY]);
+    // A file from before N1 (no VAPID keys) gets a pair and keeps everything else.
+    const added = initEnv("AUTH_SECRET=kept\n");
+    expect(added.AUTH_SECRET).toBe("kept");
+    expect(added.VAPID_PUBLIC_KEY).toMatch(/^[A-Za-z0-9_-]{87}$/);
+    expect(added.VAPID_PRIVATE_KEY?.length).toBeGreaterThan(32);
+  });
+
+  test("the API and the worker refuse to start with push on and no VAPID keys (an .env from before N1)", () => {
+    const { VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, ...rest } = initEnv();
+    const on = { ...rest, WEB_PUSH_ENABLED: "true" };
+    expect(() => loadApiEnv(on)).toThrow(/WEB_PUSH_ENABLED needs the VAPID key pair/);
+    expect(() => loadEnv(workerEnv, on)).toThrow(/WEB_PUSH_ENABLED needs the VAPID key pair/);
+    // The worker needs the private key too; the API only the public one.
+    expect(loadApiEnv({ ...on, VAPID_PUBLIC_KEY }).WEB_PUSH_ENABLED).toBe(true);
+    expect(() => loadEnv(workerEnv, { ...on, VAPID_PUBLIC_KEY })).toThrow(/VAPID key pair/);
+    expect(loadEnv(workerEnv, { ...on, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY }).WEB_PUSH_ENABLED).toBe(true);
+    // Off, an env without the pair still starts.
+    expect(loadApiEnv(rest).WEB_PUSH_ENABLED).toBe(false);
+    expect(loadEnv(workerEnv, rest).WEB_PUSH_ENABLED).toBe(false);
+  });
+
+  test("a merge refuses a file with only one half of the pair", () => {
+    for (const half of ["VAPID_PUBLIC_KEY=x\n", "VAPID_PRIVATE_KEY=y\n"]) {
+      const out = join(mkdtempSync(join(tmpdir(), "commonair-env-")), ".env");
+      writeFileSync(out, half);
+      const proc = Bun.spawnSync(["bun", "scripts/init-env.ts", "--out", out, "--merge"], { cwd: root });
+      expect(proc.exitCode).toBe(1);
+      expect(proc.stderr.toString()).toContain("VAPID keypair");
+      expect(readFileSync(out, "utf8")).toBe(half);
+    }
   });
 });

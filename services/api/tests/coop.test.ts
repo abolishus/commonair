@@ -435,6 +435,24 @@ describe("draft classification", () => {
       });
     }
   });
+
+  test("go-live notification values are shape-checked before the vote (ADR 0028)", () => {
+    const goLive = SETTINGS["notifications.goLive"] as Record<string, unknown>;
+    expect(classifyDraft([{ key: "notifications.goLive", value: goLive }], false, SETTINGS)).toMatchObject({
+      ok: true,
+      kind: "ordinary",
+    });
+    for (const value of [
+      { ...goLive, cooldownHours: 0 },
+      { ...goLive, emailDigestMinutes: 1.5 },
+      { cooldownHours: 4 },
+    ]) {
+      expect(classifyDraft([{ key: "notifications.goLive", value }], false, SETTINGS)).toEqual({
+        ok: false,
+        reason: "The new value of notifications.goLive does not have the setting's shape",
+      });
+    }
+  });
 });
 
 // Trigger refusals → contract errors ----------------------------------------------------------

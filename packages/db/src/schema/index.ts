@@ -14,3 +14,4 @@ export * from "./safety.ts";
 export * from "./moderation.ts";
 export * from "./platform.ts";
 export * from "./interactive.ts";
+export * from "./notify.ts";

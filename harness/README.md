@@ -38,9 +38,11 @@ Options for `run` and `load`:
 - `--profile no-proprietary` (alias `--no-proprietary`): first reads the API's `/healthz` and
   fails the run (one failed `no-proprietary preflight` entry, no scenario started) unless it
   reports `stripe`, `oauth` and `cdn` all `false`; a missing flag fails too. Then scenarios whose
-  `needs` include `stripe`, `oauth` or `cdn` are skipped, and so are steps: a parameter variant
-  declared in `paramNeeds` (e.g. `e4b-money --set provider=stripe`) or a step run with
-  `ctx.optionalStep(name, needs, fn)`. Each skip carries its reason in the report
+  `needs` include `stripe`, `oauth`, `cdn` or `webPush` are skipped, and so are steps: a parameter
+  variant declared in `paramNeeds` (e.g. `e4b-money --set provider=stripe`) or a step run with
+  `ctx.optionalStep(name, needs, fn)` (e.g. `notifications` steps 4 and 7, which need `webPush`).
+  `webPush` is not in the preflight: the harness stack runs push against the harness's own
+  receiver, never a vendor push service. Each skip carries its reason in the report
   (`skipReason`, `skippedSteps`), and the CLI prints a skip table at the end. Expected on the
   harness stack: no scenario skipped, one step (the `e4b-money` Stripe variant).
 - `--report <path>`: where the JSON report goes. Default `harness/reports/<time>-<cmd>-<run>.json`
@@ -69,12 +71,19 @@ its own stack. CI runs one job per shard (`bun run verify --full --only harness 
 `full` runs on the harness stack: `compose.yaml` with every harness override layered
 (`harness/compose.trust-safety.yaml`, `harness/compose.e5-coop.yaml`, `harness/compose.e6.yaml`,
 `harness/compose.p2p.yaml`, `harness/compose.e8.yaml`, `harness/compose.e9.yaml`,
-`harness/compose.w1.yaml`),
+`harness/compose.w1.yaml`, `harness/compose.n1.yaml`),
 on a Postgres volume created once with the E5 bootstrap (ADR 0020: `harness/compose.e5-coop.yaml`
 gives `migrate` the short governance periods in `GOVERNANCE_BOOTSTRAP_JSON`, which apply at the
 database's first migration only; see `e5-coop` below).
 
+`harness/compose.n1.yaml` turns browser push on, which needs the VAPID pair in `.env`. A `.env`
+written before N1 has none, and with push on and no keys the API and the worker refuse to start,
+taking the whole stack down: run `bun scripts/init-env.ts --merge` once (it adds the missing keys
+and keeps every other value). CI writes a fresh `.env`, so it is unaffected.
+
 ```sh
+# once, if .env predates N1: add the VAPID pair (keeps every other value)
+bun scripts/init-env.ts --merge
 # once: recreate the Postgres volume so the E5 bootstrap applies (destroys local data)
 podman compose down
 podman volume rm commonair_postgres-data
@@ -507,7 +516,7 @@ run the others into the 10-minute timeout; the weights plus teardown fit it
 Until `scripts/infra.ts` learns `--multi`, start the replicas on a running harness stack with:
 
 ```sh
-F="-f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml -f harness/compose.e6.yaml -f harness/compose.e8.yaml -f harness/compose.e9.yaml -f harness/compose.w1.yaml -f harness/compose.multi-instance.yaml"
+F="-f compose.yaml -f harness/compose.trust-safety.yaml -f harness/compose.e5-coop.yaml -f harness/compose.e6.yaml -f harness/compose.e8.yaml -f harness/compose.e9.yaml -f harness/compose.w1.yaml -f harness/compose.n1.yaml -f harness/compose.multi-instance.yaml"
 podman compose $F --profile harness --profile multi up -d --no-deps api-2 chat-2 worker-2 origin-2
 bun harness/src/cli.ts run multi-instance
 podman rm -f commonair_api-2_1 commonair_chat-2_1 commonair_worker-2_1 commonair_origin-2_1   # when done

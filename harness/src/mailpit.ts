@@ -36,16 +36,16 @@ interface MessageResponse {
  */
 export class Mailpit {
   private readonly baseUrl: string;
-  private readonly headers: Record<string, string>;
+  private readonly authHeaders: Record<string, string>;
 
   constructor(baseUrl: string, auth?: string) {
     const { url, authorization } = mailpitEndpoint(baseUrl, auth);
     this.baseUrl = url;
-    this.headers = authorization ? { authorization } : {};
+    this.authHeaders = authorization ? { authorization } : {};
   }
 
   private fetch(path: string, timeoutMs: number): Promise<Response> {
-    return fetch(`${this.baseUrl}${path}`, { headers: this.headers, signal: AbortSignal.timeout(timeoutMs) });
+    return fetch(`${this.baseUrl}${path}`, { headers: this.authHeaders, signal: AbortSignal.timeout(timeoutMs) });
   }
 
   async search(query: string): Promise<MailSummary[]> {
@@ -72,6 +72,13 @@ export class Mailpit {
       text: m.Text ?? "",
       html: m.HTML ?? "",
     };
+  }
+
+  /** A message's headers as Mailpit reports them: each name maps to every value it had, in order. */
+  async headers(id: string): Promise<Record<string, string[]>> {
+    const res = await this.fetch(`/api/v1/message/${encodeURIComponent(id)}/headers`, 5_000);
+    if (!res.ok) throw new Error(`mailpit headers ${id} failed: HTTP ${res.status}`);
+    return (await res.json()) as Record<string, string[]>;
   }
 
   /** Wait for a message to `address` whose subject or body matches `match`. Newest first. */

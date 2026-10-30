@@ -39,6 +39,7 @@ import {
   base,
   page,
 } from "./common.ts";
+import { DISCORD_WEBHOOK_URL, PushSubscriptionKeys } from "../notify.ts";
 import * as D from "./entities.ts";
 
 const tag = (t: string) => ({ tags: [t] });
@@ -3256,6 +3257,128 @@ export const contract = {
       })
       .input(z.object({ id: Id, decision: z.enum(E.NCII_DECISIONS), note: z.string().min(1).max(2000) }))
       .output(D.NciiRequest),
+  },
+
+  /** Go-live notifications, preferences, web push and the Discord adapter (N1, ADR 0028). The list and mark-read stay in `me`. */
+  notifications: {
+    unreadCount: user
+      .route({
+        method: "GET",
+        path: "/notifications/unread-count",
+        summary: "Unread in-app notifications (capped)",
+        ...tag("Notifications"),
+      })
+      .output(z.object({ count: z.number().int(), capped: z.boolean() })),
+    preferences: {
+      get: user
+        .route({
+          method: "GET",
+          path: "/notifications/preferences",
+          summary: "Go-live notification preferences",
+          ...tag("Notifications"),
+        })
+        .input(z.object({ type: z.enum(E.PREFERENCE_TYPES).default("go_live") }))
+        .output(D.NotificationPreferences),
+      set: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "PUT",
+          path: "/notifications/preferences",
+          summary: "Set a default (no channel) or a channel override; enabled null removes the override",
+          ...tag("Notifications"),
+        })
+        .input(
+          z.object({
+            type: z.enum(E.PREFERENCE_TYPES),
+            medium: z.enum(E.NOTIFY_MEDIA),
+            channel: Slug.nullable(),
+            /** null: remove the channel override (refused BAD_REQUEST for a default). */
+            enabled: z.boolean().nullable(),
+          }),
+        )
+        .output(D.NotificationPreferences),
+    },
+    push: {
+      status: user
+        .route({
+          method: "GET",
+          path: "/notifications/push",
+          summary: "Whether web push is offered, and the VAPID key",
+          ...tag("Notifications"),
+        })
+        .output(D.PushStatus),
+      subscribe: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/notifications/push/subscriptions",
+          summary: "Register this browser's push subscription",
+          description: "PRECONDITION_FAILED (requirement `web_push_disabled`) when the instance has push off.",
+          ...tag("Notifications"),
+        })
+        .input(z.object({ endpoint: z.url().max(2048), keys: PushSubscriptionKeys }))
+        .output(Ok),
+      unsubscribe: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/notifications/push/unsubscribe",
+          summary: "Forget this browser's push subscription",
+          ...tag("Notifications"),
+        })
+        .input(z.object({ endpoint: z.url().max(2048) }))
+        .output(Ok),
+    },
+    unsubscribe: base
+      .meta({ access: "public", rateLimit: "write" })
+      .route({
+        method: "POST",
+        path: "/notifications/unsubscribe",
+        summary: "Apply an email unsubscribe link (the confirm page; mail clients use the one-click route)",
+        ...tag("Notifications"),
+      })
+      .input(z.object({ list: z.enum(E.UNSUBSCRIBE_LISTS), token: z.string().min(1).max(200) }))
+      .output(z.object({ list: z.enum(E.UNSUBSCRIBE_LISTS) })),
+    discord: {
+      get: owner
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/discord-webhook",
+          summary: "Whether a Discord webhook is set (never the URL)",
+          ...tag("Notifications"),
+        })
+        .input(ChannelRef)
+        .output(D.DiscordWebhookStatus),
+      set: owner
+        .meta({ access: "owner", rateLimit: "write" })
+        .route({
+          method: "PUT",
+          path: "/channels/{channel}/discord-webhook",
+          summary: "Set the Discord webhook go-live posts go to",
+          ...tag("Notifications"),
+        })
+        .input(ChannelRef.extend({ url: z.string().max(300).regex(DISCORD_WEBHOOK_URL) }))
+        .output(D.DiscordWebhookStatus),
+      remove: owner
+        .route({
+          method: "DELETE",
+          path: "/channels/{channel}/discord-webhook",
+          summary: "Remove the Discord webhook",
+          ...tag("Notifications"),
+        })
+        .input(ChannelRef)
+        .output(Ok),
+      test: owner
+        .meta({ access: "owner", rateLimit: "expensive" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/discord-webhook/test",
+          summary: "Post a test message now",
+          ...tag("Notifications"),
+        })
+        .input(ChannelRef)
+        .output(D.DiscordWebhookStatus),
+    },
   },
 };
 

@@ -26,6 +26,7 @@ export const NEEDS = [
   "stripe",
   "oauth",
   "cdn",
+  "webPush",
   "ffmpeg",
   "whip",
   "browser",
@@ -35,7 +36,7 @@ export const NEEDS = [
 export type Need = (typeof NEEDS)[number];
 
 /** Optional vendor adapters. Under `--profile no-proprietary` scenarios that need them are skipped. */
-export const PROPRIETARY_NEEDS: readonly Need[] = ["stripe", "oauth", "cdn"];
+export const PROPRIETARY_NEEDS: readonly Need[] = ["stripe", "oauth", "cdn", "webPush"];
 
 export const PROFILES = ["default", "no-proprietary"] as const;
 export type Profile = (typeof PROFILES)[number];

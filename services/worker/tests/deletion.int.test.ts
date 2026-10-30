@@ -683,6 +683,94 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(left.map((r) => [r.userId, r.blockedUserId])).toEqual([[A.user.id, B.user.id]]);
   });
 
+  test("notification state goes: the member's own, and every follower's about their channel (N1)", async () => {
+    const S = await makeUser(db()); // the deleted streamer
+    const F = await makeUser(db()); // a follower of S, also a streamer others follow
+    const G = await makeUser(db());
+    const sb = await makeBroadcast(db(), S.channel.id);
+    const fb = await makeBroadcast(db(), F.channel.id);
+    const eventId = uuidv7();
+    const goLive = (userId: string, ch: { id: string; slug: string }, broadcastId: string) => ({
+      userId,
+      type: "go_live" as const,
+      payload: { channelId: ch.id, slug: ch.slug, broadcastId, title: "t" },
+      dedupeKey: `go-live-${uuidv7()}`,
+    });
+    await app()
+      .insert(schema.notifications)
+      .values([
+        goLive(F.user.id, S.channel, sb.id),
+        goLive(S.user.id, F.channel, fb.id),
+        goLive(G.user.id, F.channel, fb.id),
+      ]);
+    await app()
+      .insert(schema.notificationPreferences)
+      .values([
+        { userId: S.user.id, type: "go_live", channelId: null, medium: "email", enabled: true },
+        { userId: F.user.id, type: "go_live", channelId: S.channel.id, medium: "push", enabled: false },
+        { userId: G.user.id, type: "go_live", channelId: F.channel.id, medium: "push", enabled: false },
+      ]);
+    await app()
+      .insert(schema.notificationGoLiveSends)
+      .values([
+        { userId: S.user.id, channelId: F.channel.id, lastSentAt: new Date(), eventId },
+        { userId: F.user.id, channelId: S.channel.id, lastSentAt: new Date(), eventId },
+        { userId: G.user.id, channelId: F.channel.id, lastSentAt: new Date(), eventId },
+      ]);
+    await app()
+      .insert(schema.notificationEmailQueue)
+      .values([
+        { userId: S.user.id, eventId, channelId: F.channel.id, broadcastId: fb.id },
+        { userId: F.user.id, eventId, channelId: S.channel.id, broadcastId: sb.id },
+        { userId: G.user.id, eventId, channelId: F.channel.id, broadcastId: fb.id },
+      ]);
+    await app()
+      .insert(schema.pushSubscriptions)
+      .values([
+        { userId: S.user.id, endpointHash: uuidv7(), subscription: "enc" },
+        { userId: G.user.id, endpointHash: uuidv7(), subscription: "enc" },
+      ]);
+    await app()
+      .insert(schema.discordWebhooks)
+      .values([
+        { channelId: S.channel.id, url: "enc", setBy: S.user.id },
+        { channelId: F.channel.id, url: "enc", setBy: F.user.id },
+      ]);
+
+    await schedule(S.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+
+    const users = [S.user.id, F.user.id, G.user.id];
+    const notes = await db().select().from(schema.notifications).where(inArray(schema.notifications.userId, users));
+    // S's own inbox and F's go-live about S are gone; G's about F stays.
+    expect(notes.map((n) => [n.userId, n.payload.channelId])).toEqual([[G.user.id, F.channel.id]]);
+    const prefs = await db()
+      .select()
+      .from(schema.notificationPreferences)
+      .where(inArray(schema.notificationPreferences.userId, users));
+    expect(prefs.map((p) => p.userId)).toEqual([G.user.id]);
+    const sends = await db()
+      .select()
+      .from(schema.notificationGoLiveSends)
+      .where(inArray(schema.notificationGoLiveSends.userId, users));
+    expect(sends.map((r) => r.userId)).toEqual([G.user.id]);
+    const queued = await db()
+      .select()
+      .from(schema.notificationEmailQueue)
+      .where(inArray(schema.notificationEmailQueue.userId, users));
+    expect(queued.map((r) => r.userId)).toEqual([G.user.id]);
+    const subs = await db()
+      .select()
+      .from(schema.pushSubscriptions)
+      .where(inArray(schema.pushSubscriptions.userId, users));
+    expect(subs.map((r) => r.userId)).toEqual([G.user.id]);
+    const hooks = await db()
+      .select()
+      .from(schema.discordWebhooks)
+      .where(inArray(schema.discordWebhooks.channelId, [S.channel.id, F.channel.id]));
+    expect(hooks.map((r) => r.channelId)).toEqual([F.channel.id]);
+  });
+
   test("a deleted owner's OAuth apps go with every grant; each app's connections are told to close (E9)", async () => {
     const O = await makeUser(db());
     const V = await makeUser(db());

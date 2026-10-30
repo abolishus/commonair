@@ -483,6 +483,30 @@ const blockFields = {
   blockedAt: s.userBlocks.createdAt,
 };
 
+// N1 (ADR 0028): go-live preferences (a null channel is the member's default for the medium).
+const notificationPreferenceFields = {
+  type: s.notificationPreferences.type,
+  channelSlug: s.channels.slug,
+  medium: s.notificationPreferences.medium,
+  enabled: s.notificationPreferences.enabled,
+  updatedAt: s.notificationPreferences.updatedAt,
+};
+
+// Never the endpoint or keys: they are the browser's, encrypted, and of no use to the member.
+const pushSubscriptionFields = {
+  id: s.pushSubscriptions.id,
+  createdAt: s.pushSubscriptions.createdAt,
+  lastSuccessAt: s.pushSubscriptions.lastSuccessAt,
+  failures: s.pushSubscriptions.failures,
+};
+
+// Never the URL: it is a secret that lets anyone post to the channel's Discord.
+const discordWebhookFields = {
+  configured: sql<boolean>`${s.discordWebhooks.channelId} is not null`,
+  setAt: s.discordWebhooks.setAt,
+  lastPostedAt: s.discordWebhooks.lastPostedAt,
+};
+
 export const EXPORT_FILES: readonly ExportFile[] = [
   {
     name: "account.json",
@@ -795,6 +819,26 @@ export const EXPORT_FILES: readonly ExportFile[] = [
             .where(eq(s.notifications.userId, userId))
             .orderBy(asc(s.notifications.createdAt)),
       },
+      // N1 (ADR 0028).
+      preferences: {
+        fields: notificationPreferenceFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(notificationPreferenceFields)
+            .from(s.notificationPreferences)
+            .leftJoin(s.channels, eq(s.channels.id, s.notificationPreferences.channelId))
+            .where(eq(s.notificationPreferences.userId, userId))
+            .orderBy(asc(s.notificationPreferences.updatedAt), asc(s.notificationPreferences.id)),
+      },
+      pushSubscriptions: {
+        fields: pushSubscriptionFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(pushSubscriptionFields)
+            .from(s.pushSubscriptions)
+            .where(eq(s.pushSubscriptions.userId, userId))
+            .orderBy(asc(s.pushSubscriptions.createdAt), asc(s.pushSubscriptions.id)),
+      },
     },
   },
   {
@@ -984,6 +1028,17 @@ export const EXPORT_FILES: readonly ExportFile[] = [
             .from(s.simulcastTargets)
             .where(eq(s.simulcastTargets.channelId, channelId(scope)))
             .orderBy(asc(s.simulcastTargets.createdAt)),
+      },
+      // N1 (ADR 0028): whether a Discord webhook is set, never its URL. Always one row.
+      discordWebhook: {
+        one: true,
+        fields: discordWebhookFields,
+        query: (tx, scope) =>
+          tx
+            .select(discordWebhookFields)
+            .from(s.channels)
+            .leftJoin(s.discordWebhooks, eq(s.discordWebhooks.channelId, s.channels.id))
+            .where(and(eq(s.channels.id, channelId(scope)), eq(s.channels.ownerId, scope.userId))),
       },
     },
   },

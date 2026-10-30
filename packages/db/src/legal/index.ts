@@ -32,16 +32,19 @@ export const TERMS_SEED_VERSION = "2026-10-29-points-draft";
 /**
  * `privacy` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, moved again for the channel-features paragraph
- * (ADR 0026), and again for chat replay, retention and blocks (ADR 0012 amendment 1). Each new version sorts after the accepted one, so every signed-in user is asked to
- * accept it again. Draft: counsel has not reviewed the paragraph.
+ * (ADR 0026), again for chat replay, retention and blocks (ADR 0012 amendment 1), and again for
+ * notifications, browser push and Discord (ADR 0028). Each new version sorts after the accepted
+ * one, so every signed-in user is asked to accept it again. Draft: counsel has not reviewed the
+ * paragraphs.
  */
-export const PRIVACY_SEED_VERSION = "2026-10-30-chat-replay-draft";
+export const PRIVACY_SEED_VERSION = "2026-10-30-notifications-draft";
 /**
  * `cookies` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
- * `LEGAL_SEED_VERSION` reached databases, and moved again for the language line in Preferences
- * (ADR 0029); the cookie policy needs no acceptance. Draft: counsel has not reviewed it.
+ * `LEGAL_SEED_VERSION` reached databases, moved again for the language line in Preferences
+ * (ADR 0029), and again for the app-file cache and push permission (ADR 0028); the cookie policy
+ * needs no acceptance. Draft: counsel has not reviewed it.
  */
-export const COOKIES_SEED_VERSION = "2026-10-29-i18n-draft";
+export const COOKIES_SEED_VERSION = "2026-10-30-notifications-draft";
 /**
  * Fixed rather than the seed's clock: the migrate job and the API run on different hosts,
  * and a database clock ahead of the API's would hide fresh rows (`publishedAt <= now`).

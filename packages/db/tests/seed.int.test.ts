@@ -77,6 +77,19 @@ describe("legal seed documents", () => {
     expect(body("privacy")).toMatch(/blocked users/);
   });
 
+  test("privacy describes notifications, browser push and Discord, and cookies the app cache and push (ADR 0028)", () => {
+    const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
+    expect(body("privacy")).toMatch(/## Notifications/);
+    expect(body("privacy")).toMatch(/one-click unsubscribe/);
+    expect(body("privacy")).toMatch(/\*\*Browser push\*\*/);
+    expect(body("privacy")).toMatch(/Discord webhook/);
+    expect(body("cookies")).toMatch(/\*\*App files\.\*\*/);
+    expect(body("cookies")).toMatch(/\*\*Push permission\.\*\*/);
+    // On top of W1's privacy bump, so members who accepted that version are asked again.
+    expect(PRIVACY_SEED_VERSION > "2026-10-30-chat-replay-draft").toBe(true);
+    expect(COOKIES_SEED_VERSION > "2026-10-29-i18n-draft").toBe(true);
+  });
+
   test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {
     const required = Object.fromEntries(docs.map((d) => [d.kind, d.requiresAcceptance]));
     expect(required).toEqual({
@@ -94,8 +107,9 @@ describe("legal seed documents", () => {
       expect(d.body.startsWith("> **Draft pending lawyer review.**"), d.kind).toBe(true);
       const words = d.body.split(/\s+/).filter(Boolean).length;
       expect(words, d.kind).toBeGreaterThanOrEqual(300);
-      // Privacy grew past 1000 words with chat replay and blocks (W1); keep it under 1200.
-      expect(words, d.kind).toBeLessThanOrEqual(d.kind === "privacy" ? 1200 : 1000);
+      // Privacy grew past 1000 words with chat replay and blocks (W1), then notifications, push
+      // and Discord (N1); keep it under 1400.
+      expect(words, d.kind).toBeLessThanOrEqual(d.kind === "privacy" ? 1400 : 1000);
     }
   });
 

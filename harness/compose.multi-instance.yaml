@@ -107,6 +107,9 @@ services:
       # harness/compose.w1.yaml
       CHAT_WATCH_GATE: "on"
       CHAT_SURGE_GUARD: "on"
+      # harness/compose.n1.yaml
+      WEB_PUSH_ENABLED: "true"
+      WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: "true"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
@@ -175,6 +178,9 @@ services:
       # harness/compose.w1.yaml
       CHAT_WATCH_GATE: "on"
       CHAT_SURGE_GUARD: "on"
+      # harness/compose.n1.yaml
+      WEB_PUSH_ENABLED: "true"
+      WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: "true"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z

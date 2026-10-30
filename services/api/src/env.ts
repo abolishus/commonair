@@ -23,6 +23,7 @@ import {
   storageEnv,
   turnEnv,
   valkeyEnv,
+  webPushPublicEnv,
   workerEnv,
 } from "@commonair/config/env";
 import type { z } from "zod";
@@ -56,6 +57,8 @@ const SCHEMAS = [
   interactEnv,
   // W1: verified-watch gate, surge guard and chat retention (ADR 0015, ADR 0012 amendment 1).
   chatEnv,
+  // N1: web push (ADR 0028 decision 1); on without the VAPID public key refuses to start.
+  webPushPublicEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -78,7 +81,8 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof coopEnv> &
   z.output<typeof opsEnv> &
   z.output<typeof interactEnv> &
-  z.output<typeof chatEnv>;
+  z.output<typeof chatEnv> &
+  z.output<typeof webPushPublicEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

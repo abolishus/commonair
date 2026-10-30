@@ -95,6 +95,11 @@ install options:
                         3478/udp is always on. Kept in commonair.env until --no-turn-relay.
   --no-turn-relay       Turn the TURN relay off. Without either flag the setting is kept
                         (off on a first install).
+  --web-push            Offer browser push notifications (WEB_PUSH_ENABLED; viewers still opt
+                        in per browser; docs/self-hosting/web-push.md). Pushes go through the
+                        browser vendor's push service. Kept in commonair.env until --no-web-push.
+  --no-web-push         Turn browser push off. Without either flag the setting is kept (off on
+                        a first install).
   --require-signature   Fail unless cosign verifies SHA256SUMS against the release workflow.
   --insecure-no-checksum
                         Offline only: accept a --bundle with no SHA256SUMS. Its integrity is
@@ -126,7 +131,8 @@ never switches store (there is no --migrate-objects; see backups.md for copying 
   They are kept in commonair.env (mode 0600); a --reinstall without them keeps the stored ones.
 
 upgrade options: --version | --bundle, --sha256sums, --registry, --require-signature,
-  --insecure-no-checksum, --turn-relay | --no-turn-relay. The object store stays as installed.
+  --insecure-no-checksum, --turn-relay | --no-turn-relay, --web-push | --no-web-push. The object
+  store stays as installed.
 
 backup options (no option: --database):
   --database            A WAL-G base backup of Postgres now, then the list of base backups.
@@ -801,6 +807,24 @@ turn_env() {
   fi
 }
 
+# --- web push (ADR 0028 decision 1) -------------------------------------------------------
+#
+# WEB_PUSH_ENABLED in commonair.env: --web-push sets it, --no-web-push clears it, and without
+# either, install and upgrade keep what is there. The VAPID pair needs nothing here: write_env's
+# init-env --merge generates it on install and on the first upgrade that knows it.
+web_push_env() {
+  case "${WEB_PUSH:-}" in
+    on)
+      if [ -z "$(env_get VAPID_PUBLIC_KEY "$ENV_FILE")" ] || [ -z "$(env_get VAPID_PRIVATE_KEY "$ENV_FILE")" ]; then
+        die "--web-push needs the VAPID key pair but $ENV_FILE lacks VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY" \
+          "fix: delete both VAPID_* lines (install and upgrade generate a new pair), then re-run"
+      fi
+      env_set WEB_PUSH_ENABLED true
+      ;;
+    off) env_set WEB_PUSH_ENABLED false ;;
+  esac
+}
+
 configure_env() {
   _host=$DOMAIN
   _old_host=$(env_get PUBLIC_HOSTNAME "$ENV_FILE")
@@ -843,6 +867,7 @@ configure_env() {
     env_default TURN_EXTERNAL_IP "$_turn_ip"
   fi
   turn_env "$_host" "$_old_host"
+  web_push_env
   # The app-role URL; the services get it as a podman secret as well (create_secrets).
   _app=$(env_get POSTGRES_APP_PASSWORD "$ENV_FILE")
   env_set DATABASE_URL "postgres://commonair_app:$_app@postgres:5432/commonair"
@@ -886,6 +911,7 @@ backfill_env() {
   _turn_ip=$(turn_address "$(env_get MTX_WEBRTCADDITIONALHOSTS "$ENV_FILE")")
   if [ -n "$_turn_ip" ]; then env_default TURN_EXTERNAL_IP "$_turn_ip"; fi
   turn_env "$_host" "$_host"
+  web_push_env
   # Releases up to rc.2 pinned Garage's endpoint, region and path style in the units, and the
   # env file held init-env's development values for them. The units now read them from here.
   if [ "$STORAGE_MODE" = garage ] && [ "$(env_get S3_ENDPOINT "$ENV_FILE")" != "$GARAGE_S3_ENDPOINT" ]; then
@@ -1503,6 +1529,8 @@ parse_flags() {
   S3_ALLOW_HTTP=no
   # The TURN relay: on, off, or empty (keep what commonair.env says; off on a first install).
   TURN_RELAY=""
+  # Browser push: on, off, or empty (keep what commonair.env says; off on a first install).
+  WEB_PUSH=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --version | --bundle | --sha256sums | --domain | --email | --tls | --registry | --public-ip | --model)
@@ -1544,6 +1572,9 @@ parse_flags() {
       # across upgrades and reinstalls until the opposite flag.
       --turn-relay) TURN_RELAY=on && shift ;;
       --no-turn-relay) TURN_RELAY=off && shift ;;
+      # Browser push (ADR 0028). Kept in commonair.env, like the TURN relay.
+      --web-push) WEB_PUSH=on && shift ;;
+      --no-web-push) WEB_PUSH=off && shift ;;
       --s3-*key* | --s3-*secret*)
         die "S3 keys are never flags: every user on this host can read a command line (ps)" \
           "fix: export S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_EVIDENCE_ACCESS_KEY_ID and S3_EVIDENCE_SECRET_ACCESS_KEY" \

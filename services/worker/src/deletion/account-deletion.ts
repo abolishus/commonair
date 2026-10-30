@@ -296,6 +296,35 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         "notifications",
         tx.delete(s.notifications).where(eq(s.notifications.userId, userId)).returning({ id: s.notifications.id }),
       );
+      // N1 (ADR 0028): preferences, cooldowns, queued go-live emails and push subscriptions.
+      await del(
+        "notification_preferences",
+        tx
+          .delete(s.notificationPreferences)
+          .where(eq(s.notificationPreferences.userId, userId))
+          .returning({ id: s.notificationPreferences.id }),
+      );
+      await del(
+        "notification_go_live_sends",
+        tx
+          .delete(s.notificationGoLiveSends)
+          .where(eq(s.notificationGoLiveSends.userId, userId))
+          .returning({ u: s.notificationGoLiveSends.userId }),
+      );
+      await del(
+        "notification_email_queue",
+        tx
+          .delete(s.notificationEmailQueue)
+          .where(eq(s.notificationEmailQueue.userId, userId))
+          .returning({ u: s.notificationEmailQueue.userId }),
+      );
+      await del(
+        "push_subscriptions",
+        tx
+          .delete(s.pushSubscriptions)
+          .where(eq(s.pushSubscriptions.userId, userId))
+          .returning({ id: s.pushSubscriptions.id }),
+      );
       await del(
         "chat_messages",
         tx.delete(s.chatMessages).where(eq(s.chatMessages.userId, userId)).returning({ id: s.chatMessages.id }),
@@ -432,6 +461,45 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
             .delete(s.simulcastTargets)
             .where(eq(s.simulcastTargets.channelId, channel.id))
             .returning({ id: s.simulcastTargets.id }),
+        );
+        // N1 (ADR 0028): the Discord webhook, and every follower's notification state about this
+        // channel. Other members' go_live rows carry the old slug and title, so they go too.
+        await del(
+          "discord_webhooks",
+          tx
+            .delete(s.discordWebhooks)
+            .where(eq(s.discordWebhooks.channelId, channel.id))
+            .returning({ id: s.discordWebhooks.channelId }),
+        );
+        await del(
+          "go_live_notifications",
+          tx
+            .delete(s.notifications)
+            .where(
+              and(eq(s.notifications.type, "go_live"), sql`${s.notifications.payload}->>'channelId' = ${channel.id}`),
+            )
+            .returning({ id: s.notifications.id }),
+        );
+        await del(
+          "channel_notification_preferences",
+          tx
+            .delete(s.notificationPreferences)
+            .where(eq(s.notificationPreferences.channelId, channel.id))
+            .returning({ id: s.notificationPreferences.id }),
+        );
+        await del(
+          "channel_notification_go_live_sends",
+          tx
+            .delete(s.notificationGoLiveSends)
+            .where(eq(s.notificationGoLiveSends.channelId, channel.id))
+            .returning({ u: s.notificationGoLiveSends.userId }),
+        );
+        await del(
+          "channel_notification_email_queue",
+          tx
+            .delete(s.notificationEmailQueue)
+            .where(eq(s.notificationEmailQueue.channelId, channel.id))
+            .returning({ u: s.notificationEmailQueue.userId }),
         );
         await tx
           .update(s.streamKeys)

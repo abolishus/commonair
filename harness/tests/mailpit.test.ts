@@ -48,6 +48,12 @@ describe("Mailpit against a basic-auth server", () => {
           Text: "go to http://x.test/verify?token=t",
           HTML: "",
         });
+      if (url.pathname === "/api/v1/message/m1/headers")
+        return Response.json({
+          "List-Unsubscribe": ["<http://x.test/api/email/unsubscribe?list=go_live&token=t>"],
+          "List-Unsubscribe-Post": ["List-Unsubscribe=One-Click"],
+          Received: ["a", "b"],
+        });
       return new Response("not found", { status: 404 });
     },
   });
@@ -67,5 +73,11 @@ describe("Mailpit against a basic-auth server", () => {
     const msg = await new Mailpit(base, "ops:secret").get("m1");
     expect(msg.created).toBe("2026-10-18T00:00:01Z");
     expect(Number.isNaN(Date.parse(msg.created))).toBe(false);
+  });
+  test("headers lists every value of each header", async () => {
+    const headers = await new Mailpit(base, "ops:secret").headers("m1");
+    expect(headers["List-Unsubscribe-Post"]).toEqual(["List-Unsubscribe=One-Click"]);
+    expect(headers.Received).toEqual(["a", "b"]);
+    await expect(new Mailpit(base, "ops:secret").headers("missing")).rejects.toThrow(/HTTP 404/);
   });
 });

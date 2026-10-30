@@ -164,6 +164,64 @@ describe("upgrade", () => {
   );
 
   test(
+    "web push (ADR 0028): off on a first install with a VAPID pair; the flags set it; kept when absent",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const fresh = envOf(h);
+      expect(fresh.WEB_PUSH_ENABLED).toBe("false");
+      expect(fresh.VAPID_PUBLIC_KEY).toMatch(/^[A-Za-z0-9_-]{87}$/);
+      expect(fresh.VAPID_PRIVATE_KEY?.length).toBeGreaterThan(32);
+      expectOk(h.run(["install", "--reinstall", "--web-push"]));
+      expect(envOf(h).WEB_PUSH_ENABLED).toBe("true");
+      // Without either flag the upgrade keeps it, and keeps the pair.
+      expectOk(h.run(["upgrade", "--version", "v0.2.0"]));
+      const after = envOf(h);
+      expect(after.WEB_PUSH_ENABLED).toBe("true");
+      expect([after.VAPID_PUBLIC_KEY, after.VAPID_PRIVATE_KEY]).toEqual([
+        fresh.VAPID_PUBLIC_KEY,
+        fresh.VAPID_PRIVATE_KEY,
+      ]);
+      expectOk(h.run(["install", "--reinstall", "--no-web-push"]));
+      expect(envOf(h).WEB_PUSH_ENABLED).toBe("false");
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "an upgrade from before N1 gets a VAPID pair, and --no-web-push turns push off",
+    () => {
+      const h = host();
+      expectOk(h.run([...INSTALL, "--web-push"]));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      expect(envOf(h).WEB_PUSH_ENABLED).toBe("true");
+      // The pair's lines are missing entirely in an older env file.
+      writeFileSync(file, readFileSync(file, "utf8").replace(/^VAPID_(PUBLIC|PRIVATE)_KEY=.*\n/gm, ""));
+      const r = h.run(["upgrade", "--version", "v0.2.0", "--no-web-push"]);
+      expect(r.code, r.err).toBe(0);
+      const env = envOf(h);
+      expect(env.WEB_PUSH_ENABLED).toBe("false");
+      expect(env.VAPID_PUBLIC_KEY).toMatch(/^[A-Za-z0-9_-]{87}$/);
+      expect(r.out + r.err).not.toContain(env.VAPID_PRIVATE_KEY!);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "--web-push refuses an env file with an emptied VAPID key",
+    () => {
+      const h = host();
+      expectOk(h.run(INSTALL));
+      const file = join(h.home, ".config/commonair/commonair.env");
+      writeFileSync(file, readFileSync(file, "utf8").replace(/^VAPID_PRIVATE_KEY=.*$/m, "VAPID_PRIVATE_KEY="));
+      const r = h.run(["install", "--reinstall", "--web-push"]);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain("--web-push needs the VAPID key pair");
+    },
+    TIMEOUT,
+  );
+
+  test(
     "a network whose lease range already leaves out the trusted addresses is kept, not re-created",
     () => {
       const h = host();

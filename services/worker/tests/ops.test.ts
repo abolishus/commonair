@@ -20,6 +20,7 @@ describe("operations jobs (E6)", () => {
       "chat-surge-guard": QUEUES.moderation,
       "money-fraud-scan": QUEUES.payments,
       "money-reconcile": QUEUES.payments,
+      "notify-prune": QUEUES.retention,
     };
     for (const name of OPS_TICK_JOBS) {
       const def = reg.get(queueOf[name])?.get(name);

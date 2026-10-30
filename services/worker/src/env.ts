@@ -19,6 +19,8 @@ import {
   servicePorts,
   storageEnv,
   valkeyEnv,
+  webPushRefinement,
+  webPushShape,
   workerEnv as workerTuningEnv,
 } from "@commonair/config";
 import { QUEUES } from "@commonair/contracts/internal";
@@ -52,6 +54,8 @@ export const workerEnv = z
     ...chatEnv.shape,
     // W1: verified-watch jitter (ADR 0015 decision 4)
     ...internalEnv.pick({ INTERNAL_API_SECRET: true }).shape,
+    // N1: web push (ADR 0028 decision 1); the worker signs with the VAPID private key.
+    ...webPushShape.shape,
   })
   .superRefine((env, ctx) => {
     if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
@@ -67,6 +71,8 @@ export const workerEnv = z
         path: ["CHAT_REPLAY_MAX_DAYS"],
         message: "CHAT_REPLAY_MAX_DAYS must be at least CHAT_RETENTION_DAYS",
       });
+    // Push on without the VAPID pair refuses to start (`.shape` drops webPushEnv's refine too).
+    webPushRefinement(env, ctx, true);
   });
 export type WorkerEnv = z.output<typeof workerEnv>;
 

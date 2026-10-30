@@ -29,8 +29,22 @@ admin releases the payee, data-mode presets 50/800/1900 MB/h, watch gate ships o
 fetch-judging owned by S1 stage 4, W1 and N1 legal drafts land with re-acceptance). **Next:** land
 the W1 contract step (migrations 0037–0038), then N1's (0039–0040), each implement → review → fix
 on main; then wave 1 (six W1 units), wave 2 (W1-data-mode + five N1 units), wave 3 (N1-discord).
-After the N1 step, the user runs `bun scripts/init-env.ts --merge` (VAPID keys) before a local
-harness stack.
+The N1 contract step (`feat(n1): contract step`, on top of W1's): migrations
+`0039_n1_notifications` (generated: `notification_preferences`, `push_subscriptions`,
+`discord_webhooks`, `notification_go_live_sends`, `notification_email_queue`,
+`notifications.dedupe_key` and indexes) and `0040_n1_protections` (custom); `contracts/notify.ts`,
+the top-level `notifications` API namespace with 11 `notImplemented` handlers, the
+`/api/email/unsubscribe` stub, the `QUEUES.notifications` producer, five `notify-*` job stubs, the
+go-live outbox hook, `postPinned`, deletion and export of the new rows, unsubscribe tokens,
+`webPushEnv` and `selfhost.sh --web-push`, the `notifications.goLive` setting; web placeholders
+(`/settings/notifications`, `/settings/notifications/unsubscribe`), the account entry, bell, PWA,
+push-toggle and Discord stubs, the manifest hook, `src/sw` typing and four empty i18n namespaces;
+`docs/testing/n1-selectors.md`; the `notifications` scenario (`inFull: false`, all seven steps in
+`PENDING_N1_STEPS`), `harness/compose.n1.yaml` and the `webPush` need; privacy and cookie drafts
+bumped to `2026-10-30-notifications-draft` (re-acceptance); ADR 0028 Amendment 1. **Before a local
+harness stack, the user runs `bun scripts/init-env.ts --merge`**: a `.env` written before N1 has no
+VAPID pair, and `compose.n1.yaml` turns push on, so the API and worker would refuse to start (CI
+writes a fresh `.env` and is unaffected).
 
 **Batch 3 (E8 + E9 + N2-core + N2-consent; `.claude/briefs/batch3/README.md`), started 2026-10-29, done 2026-10-30 (CI green on `d51c084`).**
 Contract steps land in order, one commit each: E8 (`feat(e8): contract step`: migrations

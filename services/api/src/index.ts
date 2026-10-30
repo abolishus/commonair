@@ -24,6 +24,7 @@ import { closeClipQueue } from "./media/clip-queue.ts";
 import { closeVodPlacementQueue } from "./media/vod-placement-queue.ts";
 import { closeModeration } from "./moderation/runtime.ts";
 import { closeWebhookQueue } from "./developer/webhook-queue.ts";
+import { closeNotifyQueue } from "./notifications/queue.ts";
 import { closeEventSub } from "./eventsub/index.ts";
 
 export { createApp, type ApiApp } from "./http.ts";
@@ -122,6 +123,7 @@ export async function buildDeps(
         ["overlay hub", closeOverlayHub],
         ["export queue", closeExportQueue],
         ["webhook queue", closeWebhookQueue],
+        ["notify queue", closeNotifyQueue],
         ["eventsub", closeEventSub],
       ] as const)
         await close(deps).catch((err: unknown) => logger.warn(`${what} close failed`, { err: (err as Error).name }));

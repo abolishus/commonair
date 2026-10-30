@@ -190,3 +190,4 @@ export function randomTokenSecret(prefix = "", bytes = 32): string {
 }
 
 export { decryptSecret, encryptSecret, signChatToken, verifyChatToken } from "./secrets.ts";
+export { signUnsubscribeToken, verifyUnsubscribeToken } from "./unsubscribe.ts";

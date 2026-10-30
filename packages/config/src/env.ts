@@ -277,6 +277,14 @@ const base64Bytes = (v: string): Uint8Array | null => {
     return null;
   }
 };
+/** VAPID public key (RFC 8292): base64url (unpadded or padded), the 65-byte uncompressed P-256 point. */
+const vapidPublicBytes = (v: string): boolean => {
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(v)) return false;
+  const bare = v.replace(/=+$/, "");
+  const b64 = bare.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - (bare.length % 4)) % 4);
+  const b = base64Bytes(b64);
+  return b?.length === 65 && b[0] === 0x04;
+};
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /**
@@ -462,6 +470,43 @@ export const developerEnv = z.object({
    */
   OUTBOUND_ALLOW_PRIVATE_NETWORKS: bool.default(false),
 });
+
+/** Web push (N1, ADR 0028 decision 1). Off by default; `init-env` generates the VAPID pair either way. */
+export const webPushShape = z.object({
+  /** Offer browser push; each viewer still opts in per browser. Off: the push procedures answer PRECONDITION_FAILED. */
+  WEB_PUSH_ENABLED: bool.default(false),
+  /** VAPID public key (RFC 8292): the uncompressed P-256 point, base64url (65 bytes). Browsers get it as `applicationServerKey`. */
+  VAPID_PUBLIC_KEY: z
+    .string()
+    .optional()
+    .refine((v) => !v || vapidPublicBytes(v), "must be a base64url uncompressed P-256 point (65 bytes, 0x04 first)"),
+  /** VAPID private key: P-256 PKCS#8 DER, base64. Worker only. */
+  VAPID_PRIVATE_KEY: z
+    .string()
+    .optional()
+    .refine((v) => !v || (base64Bytes(v)?.length ?? 0) > 32, "must be a base64 PKCS#8 P-256 private key"),
+  /** Harness only: accept http:// and private-network push endpoints. Never on a public instance. */
+  WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: bool.default(false),
+});
+/** Push on needs the VAPID pair (the public key alone for the API, both for the worker). */
+export const webPushRefinement = (
+  env: { WEB_PUSH_ENABLED: boolean; VAPID_PUBLIC_KEY?: string | undefined; VAPID_PRIVATE_KEY?: string | undefined },
+  ctx: z.RefinementCtx,
+  needPrivate: boolean,
+): void => {
+  if (env.WEB_PUSH_ENABLED && (!env.VAPID_PUBLIC_KEY || (needPrivate && !env.VAPID_PRIVATE_KEY)))
+    ctx.addIssue({
+      code: "custom",
+      path: ["WEB_PUSH_ENABLED"],
+      message: "WEB_PUSH_ENABLED needs the VAPID key pair (bun scripts/init-env.ts --merge)",
+    });
+};
+/** Worker: sends push (needs the private key). */
+export const webPushEnv = webPushShape.superRefine((env, ctx) => webPushRefinement(env, ctx, true));
+/** API: subscribe/status (the public key only). */
+export const webPushPublicEnv = webPushShape
+  .omit({ VAPID_PRIVATE_KEY: true })
+  .superRefine((env, ctx) => webPushRefinement(env, ctx, false));
 
 export const workerEnv = z.object({
   /** Per-queue concurrency, e.g. "webhooks=32,retention=1". Unlisted queues use defaults. */
@@ -662,6 +707,7 @@ export const ALL_ENV_SCHEMAS = {
   turnEnv: turnShape,
   integrityEnv,
   developerEnv,
+  webPushEnv: webPushShape,
   workerEnv,
   infraEnv,
   servicePorts,

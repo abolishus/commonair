@@ -102,6 +102,8 @@ const X25519_PRIVATE = Buffer.concat([
   Buffer.from("302e020100300506032b656e04220420", "hex"),
   Buffer.alloc(32),
 ]).toString("base64");
+/** An uncompressed P-256 point's shape (0x04 then 64 bytes), base64url: the VAPID public key. */
+const VAPID_PUBLIC = Buffer.concat([Buffer.from([4]), Buffer.alloc(64)]).toString("base64url");
 const CANDIDATES = [
   "true",
   "10",
@@ -120,6 +122,7 @@ const CANDIDATES = [
   "0".repeat(64),
   X25519_PUBLIC,
   X25519_PRIVATE,
+  VAPID_PUBLIC,
   "off",
   "stun:localhost:1",
   "turn:localhost:1",

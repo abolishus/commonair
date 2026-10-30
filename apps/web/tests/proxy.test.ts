@@ -228,6 +228,33 @@ describe("createHandler", () => {
     const res = await handler(new Request("http://localhost/rpc/instance/info"), null);
     expect(res.headers.has("content-security-policy")).toBe(false);
   });
+
+  it("answers /manifest.webmanifest from the manifest callback, with page headers", async () => {
+    const withManifest = createHandler({
+      apiUrl: API,
+      publicUrl: "https://stream.example.org",
+      clientDir: "/nonexistent-dir-for-tests/",
+      ssr: () => new Response("ssr"),
+      manifest: () => new Response('{"name":"Test"}', { headers: { "content-type": "application/manifest+json" } }),
+    });
+    for (const method of ["GET", "HEAD"]) {
+      const res = await withManifest(new Request("http://localhost/manifest.webmanifest", { method }), null);
+      expect(res.headers.get("content-type")).toBe("application/manifest+json");
+      expect(res.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    }
+    const get = await withManifest(new Request("http://localhost/manifest.webmanifest"), null);
+    expect(await get.json()).toEqual({ name: "Test" });
+    // Other methods still reach SSR.
+    const post = await withManifest(new Request("http://localhost/manifest.webmanifest", { method: "POST" }), null);
+    expect(await post.text()).toBe("ssr");
+  });
+
+  it("without the manifest option, /manifest.webmanifest reaches SSR as before", async () => {
+    const res = await handler(new Request("http://localhost/manifest.webmanifest"), null);
+    expect(await res.text()).toBe("ssr");
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+  });
 });
 
 describe("securityHeaders", () => {

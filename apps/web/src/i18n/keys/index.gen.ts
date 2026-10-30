@@ -15,6 +15,10 @@ import type { Key as E8Viewer } from "./e8-viewer.gen.ts";
 import type { Key as E9Consent } from "./e9-consent.gen.ts";
 import type { Key as E9Console } from "./e9-console.gen.ts";
 import type { Key as Money } from "./money.gen.ts";
+import type { Key as N1Discord } from "./n1-discord.gen.ts";
+import type { Key as N1Email } from "./n1-email.gen.ts";
+import type { Key as N1Inbox } from "./n1-inbox.gen.ts";
+import type { Key as N1Pwa } from "./n1-pwa.gen.ts";
 import type { Key as N2Consent } from "./n2-consent.gen.ts";
 import type { Key as Ops } from "./ops.gen.ts";
 import type { Key as P2p } from "./p2p.gen.ts";
@@ -40,6 +44,10 @@ export type MessageKey =
   | E9Consent
   | E9Console
   | Money
+  | N1Discord
+  | N1Email
+  | N1Inbox
+  | N1Pwa
   | N2Consent
   | Ops
   | P2p
@@ -64,6 +72,10 @@ export const NAMESPACES = [
   "e9-consent",
   "e9-console",
   "money",
+  "n1-discord",
+  "n1-email",
+  "n1-inbox",
+  "n1-pwa",
   "n2-consent",
   "ops",
   "p2p",

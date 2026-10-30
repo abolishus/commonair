@@ -43,6 +43,19 @@ if (existing.has("EVIDENCE_PUBLIC_KEY") !== existing.has("EVIDENCE_PRIVATE_KEY")
   console.error(`${target} has only one half of the evidence keypair; restore the other half or remove both`);
   process.exit(1);
 }
+// VAPID pair (RFC 8292, ADR 0028 decision 1): raw uncompressed P-256 public key as base64url
+// (the browser's `applicationServerKey`), PKCS#8 private key as base64. Generated even with push
+// off, so turning WEB_PUSH_ENABLED on later needs no new keys.
+const vapid = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+  "sign",
+  "verify",
+])) as CryptoKeyPair;
+const vapidPublic = Buffer.from(await crypto.subtle.exportKey("raw", vapid.publicKey)).toString("base64url");
+const vapidPrivate = b64(await crypto.subtle.exportKey("pkcs8", vapid.privateKey));
+if (existing.has("VAPID_PUBLIC_KEY") !== existing.has("VAPID_PRIVATE_KEY")) {
+  console.error(`${target} has only one half of the VAPID keypair; restore the other half or remove both`);
+  process.exit(1);
+}
 
 // Valkey's password also goes into VALKEY_URL (redis://:<password>@host:port), so the two are
 // written together: a fresh password is added to a URL without one, which is also how a merge
@@ -90,6 +103,8 @@ const out = readFileSync(".env.example", "utf8")
     if (line.endsWith("=__generate_hex64__")) return `${key}=${hex(32)}`;
     if (line.endsWith("=__generate_x25519_public__")) return `${key}=${evidencePublic}`;
     if (line.endsWith("=__generate_x25519_private__")) return `${key}=${evidencePrivate}`;
+    if (line.endsWith("=__generate_vapid_public__")) return `${key}=${vapidPublic}`;
+    if (line.endsWith("=__generate_vapid_private__")) return `${key}=${vapidPrivate}`;
     if (!line.endsWith("=__generate__")) return line;
     // Garage requires its own key formats: GK + 24 hex for ids, 64 hex for secrets.
     if (key === "S3_ACCESS_KEY_ID" || key === "S3_EVIDENCE_ACCESS_KEY_ID") return `${key}=GK${hex(12)}`;

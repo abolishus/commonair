@@ -56,6 +56,8 @@ describe("arguments", () => {
       "--unsupported-distro",
       "--turn-relay",
       "--no-turn-relay",
+      "--web-push",
+      "--no-web-push",
     ])
       expect(r.out).toContain(flag);
     expect(host().run(["install", "--help"]).out).toContain("Usage: selfhost.sh");

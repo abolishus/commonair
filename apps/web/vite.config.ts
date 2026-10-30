@@ -6,6 +6,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite-plus";
+import { pwa } from "./scripts/vite-pwa.ts";
 import { securityHeaders } from "./src/server/security.ts";
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -60,7 +61,7 @@ export default defineConfig(({ mode, command }) => {
       // `/eventsub` is the EventSub WebSocket (ADR 0027 §3; Caddy routes it in production).
       proxy: { "/api": proxied, "/rpc": proxied, "/eventsub": { ...proxied, ws: true } },
     },
-    plugins: [healthz(), tailwindcss(), tanstackStart(), react()],
+    plugins: [healthz(), pwa(), tailwindcss(), tanstackStart(), react()],
     test: {
       include: ["tests/**/*.test.{ts,tsx}"],
       environment: "node",

@@ -15,6 +15,7 @@ import { buildModerationOptions } from "./moderation/startup.ts";
 import { mailableStorageOrigin } from "./exports/build.ts";
 import { opsTestHooks } from "./ops/startup.ts";
 import { interactTestHooks } from "./interact/startup.ts";
+import { webPushSettings } from "./notify/settings.ts";
 import { defaultWebhookSettings } from "./webhooks/settings.ts";
 import { createWorker } from "./worker.ts";
 
@@ -49,6 +50,13 @@ const site = instanceSite(env);
 // otherwise the mail links the session-checked privacy page instead.
 const storageOrigin = mailableStorageOrigin(env.S3_PUBLIC_ENDPOINT);
 const mailer = createMailer(env, { site, ...(storageOrigin ? { storageOrigin } : {}) });
+// Web push (ADR 0028 decision 1): the env schema already refused push on without the VAPID pair.
+const webPush = webPushSettings(env, site);
+if (env.WEB_PUSH_ALLOW_INSECURE_ENDPOINTS)
+  logger.warn(
+    "WEB_PUSH_ALLOW_INSECURE_ENDPOINTS is on: push may go to http:// and private-network endpoints; never on a public instance",
+    { testHooks: true },
+  );
 
 // Loaded once here and on SIGHUP, never per scoring run.
 const networks = new ClassifierHolder(logger);
@@ -71,6 +79,7 @@ const worker = createWorker({
   ...(storageOrigin ? { storageOrigin } : {}),
   classifier: () => networks.classifier,
   moderation,
+  ...(webPush ? { webPush } : {}),
 });
 if (env.EVENTSUB_ALLOW_INSECURE_CALLBACKS)
   logger.warn("EVENTSUB_ALLOW_INSECURE_CALLBACKS is on: webhook callbacks may reach private networks");

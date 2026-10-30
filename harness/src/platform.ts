@@ -352,6 +352,15 @@ export class Platform {
         const info = await this.api().client.instance.info();
         return info.features.cdn ? null : "CDN origin-pull disabled";
       }
+      case "webPush": {
+        // Push runs against the harness's own receiver, never a vendor (docs/testing/n1-selectors.md).
+        const res = await fetch(`${e.HARNESS_API_URL}/healthz`, { signal: AbortSignal.timeout(3_000) }).catch(
+          () => null,
+        );
+        if (!res) return `API unreachable at ${new URL(e.HARNESS_API_URL).origin}`;
+        const health = (await res.json().catch(() => null)) as { webPush?: unknown } | null;
+        return health?.webPush === true ? null : "web push is off (WEB_PUSH_ENABLED; harness/compose.n1.yaml)";
+      }
       case "ffmpeg":
         await probeFfmpeg();
         return null;

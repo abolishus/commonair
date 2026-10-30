@@ -542,6 +542,38 @@ export const RedeliverJob = z.object({ deliveryId: z.uuid() });
 export const RevocationJob = z.object({ subscriptionId: z.uuid() });
 export type RevocationJob = z.infer<typeof RevocationJob>;
 
+// Notifications (N1, ADR 0028) ---------------------------------------------------------------
+
+/**
+ * Job names on `QUEUES.notifications`, `QUEUES.email` and `QUEUES.retention` (N1, ADR 0028 decision
+ * 8). Producers: the outbox relay (`goLive`, one per `stream.online`), the go-live job (`push`,
+ * `discord`, and its own next page), the API (`discord` for `notifications.discord.test`).
+ * `emailDigest` and `prune` are scheduled.
+ */
+export const NOTIFY_JOBS = {
+  goLive: "go-live",
+  push: "push",
+  discord: "discord",
+  emailDigest: "email-digest",
+  prune: "notify-prune",
+} as const;
+/** `NOTIFY_JOBS.goLive`: one page of the channel's followers after `after` (null: the first page). */
+export const GoLiveJob = z.object({ eventId: z.uuid(), after: z.uuid().nullable().default(null) });
+export type GoLiveJob = z.infer<typeof GoLiveJob>;
+/** `NOTIFY_JOBS.push`: every push subscription of one member for one go-live. */
+export const PushJob = z.object({ eventId: z.uuid(), userId: z.uuid(), channelId: z.uuid(), broadcastId: z.uuid() });
+export type PushJob = z.infer<typeof PushJob>;
+/** `NOTIFY_JOBS.discord`: one post (`test`: the studio's test button, no cooldown, no broadcast). */
+export const DiscordJob = z.object({
+  channelId: z.uuid(),
+  eventId: z.uuid().nullable(),
+  broadcastId: z.uuid().nullable(),
+  test: z.boolean().default(false),
+});
+export type DiscordJob = z.infer<typeof DiscordJob>;
+export const EmailDigestJob = z.object({});
+export const NotifyPruneJob = z.object({});
+
 // Co-op (E5, ADR 0020, docs/testing/e5-selectors.md) ----------------------------------------
 
 /**
@@ -608,6 +640,8 @@ export const OPS_TICK_JOBS = [
   "chat-surge-guard",
   "money-fraud-scan",
   "money-reconcile",
+  // N1: notifications retention (ADR 0028), run now by the unit's test and the harness.
+  "notify-prune",
 ] as const;
 /** Body of `INTERNAL_ROUTES.opsTick`; the response is the job's result (counts only). */
 export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });

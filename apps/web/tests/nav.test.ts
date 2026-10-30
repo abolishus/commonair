@@ -35,12 +35,13 @@ describe("site nav", () => {
 });
 
 describe("account menu", () => {
-  it("signed in: dashboard, relays, subscriptions, appeals, copyright, privacy, connected apps, co-op, then sign out after a separator", () => {
+  it("signed in: dashboard, relays, subscriptions, notifications, appeals, copyright, privacy, connected apps, co-op, then sign out after a separator", () => {
     const items = accountMenu(true);
     expect(items.map((i) => i.id)).toEqual([
       "dashboard",
       "relays",
       "subscriptions",
+      "notifications",
       "appeals",
       "copyright",
       "privacy",
@@ -52,6 +53,7 @@ describe("account menu", () => {
       "/dashboard",
       "/relays",
       "/settings/subscriptions",
+      "/settings/notifications",
       "/settings/appeals",
       "/settings/copyright",
       "/settings/privacy",
@@ -59,8 +61,8 @@ describe("account menu", () => {
       "/coop/membership",
       undefined,
     ]);
-    expect(items[8]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 8).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[9]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 9).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
   });
 
   it("adds co-op administration for admins only, before sign out", () => {
@@ -71,6 +73,7 @@ describe("account menu", () => {
       "dashboard",
       "relays",
       "subscriptions",
+      "notifications",
       "appeals",
       "copyright",
       "privacy",
@@ -90,6 +93,7 @@ describe("account menu", () => {
       "dashboard",
       "relays",
       "subscriptions",
+      "notifications",
       "appeals",
       "copyright",
       "privacy",
@@ -130,6 +134,7 @@ describe("account menu", () => {
         "/dashboard",
         "/relays",
         "/settings/subscriptions",
+        "/settings/notifications",
         "/settings/appeals",
         "/settings/copyright",
         "/settings/privacy",

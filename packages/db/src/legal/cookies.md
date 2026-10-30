@@ -31,6 +31,12 @@ These are needed for the service you asked for:
   anything else about you.
 - **Playback device id.** A random identifier in your browser's storage, used for verified viewer
   counts and abuse prevention (see the privacy policy). It is not a cross-site identifier.
+- **App files.** So the site loads quickly and can be installed as an app, your browser keeps
+  copies of the site's own program files (scripts, styles and icons) in a cache. They hold
+  nothing about you, and nothing you watch, read or type is cached.
+- **Push permission.** If you turn on browser notifications, your browser remembers that you
+  allowed them and keeps a push subscription for this site. Turning notifications off in your
+  settings, or signing out in that browser, removes the subscription.
 
 ## Preferences (optional)
 

@@ -28,6 +28,7 @@ import { rateLimitKey } from "./lib/ratelimit.ts";
 import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
 import { isOpsHookPath, opsHook } from "./ops/hooks.ts";
 import { interactHook, isInteractHookPath } from "./interact/hooks.ts";
+import { emailUnsubscribe, isEmailUnsubscribePath } from "./notifications/email-unsubscribe.ts";
 import { oauthEndpoint } from "./oauth/endpoints.ts";
 import { overlayHub } from "./overlay/stream.ts";
 import { overlayTokenHash, resolveOverlayToken } from "./overlay/tokens.ts";
@@ -64,6 +65,11 @@ export function createApp(deps: Deps): ApiApp {
   if (deps.env.INTERACT_TEST_HOOKS)
     deps.logger.warn(
       "INTERACT_TEST_HOOKS is on: POST /internal/interact/tick runs interactivity jobs on demand; never on a public instance",
+      { testHooks: true },
+    );
+  if (deps.env.WEB_PUSH_ALLOW_INSECURE_ENDPOINTS)
+    deps.logger.warn(
+      "WEB_PUSH_ALLOW_INSECURE_ENDPOINTS is on: push subscriptions may name http:// and private-network endpoints; never on a public instance",
       { testHooks: true },
     );
   const allowedOrigins = new Set(
@@ -237,6 +243,12 @@ export function createApp(deps: Deps): ApiApp {
       return interactHook(deps, raw.method, await readJson(raw));
     }
     if (path.startsWith("/internal/")) return new Response(null, { status: 404 });
+
+    // RFC 8058 one-click unsubscribe (ADR 0028): mail clients POST here with no session or origin.
+    if (isEmailUnsubscribePath(path)) {
+      const info = await requestInfo(raw, url, server);
+      return emailUnsubscribe(deps, raw, url, info.rateLimitHash);
+    }
 
     // Stripe webhooks: server to server, signature-authenticated, no cookies or CORS. The module
     // (and with it every Stripe module) loads only when the Stripe adapter is configured.

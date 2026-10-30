@@ -13,6 +13,7 @@ import { Valkey } from "iovalkey";
 import {
   EXPORT_JOBS,
   INTERNAL_ROUTES,
+  NOTIFY_JOBS,
   OpsJobResult,
   OpsTickBody,
   QUEUES,
@@ -34,6 +35,7 @@ export const OPS_JOB_QUEUES: Record<OpsJobName, { queue: string; name: string }>
   "chat-surge-guard": { queue: QUEUES.moderation, name: "chat-surge-guard" },
   "money-fraud-scan": { queue: QUEUES.payments, name: "money-fraud-scan" },
   "money-reconcile": { queue: QUEUES.payments, name: "money-reconcile" },
+  "notify-prune": { queue: QUEUES.retention, name: NOTIFY_JOBS.prune },
 };
 
 export interface OpsTickRunner {
@@ -150,5 +152,7 @@ export function opsHealth(deps: Pick<Deps, "env">) {
     oauth,
     // Media and playback are served by our own origin unless a burst CDN is configured.
     cdn: env.CDN_PROVIDER !== "none" && Boolean(env.CDN_BASE_URL),
+    // Browser push is offered (ADR 0028); the harness skips push steps under `--profile no-proprietary`.
+    webPush: env.WEB_PUSH_ENABLED,
   };
 }

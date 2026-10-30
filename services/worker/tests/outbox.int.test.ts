@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { BusEvent } from "@commonair/contracts/events";
-import { schema } from "@commonair/db";
+import { QUEUES } from "@commonair/contracts/internal";
+import { schema, uuidv7 } from "@commonair/db";
 import { createValkey } from "@commonair/service";
 import { eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
@@ -68,4 +69,44 @@ test("a hung Valkey/BullMQ call times out, rolls back and releases the row locks
   // The lock is gone: a healthy relay claims and publishes the same row right away.
   expect(await relayOutboxBatch(env.worker.ctx, 100)).toBeGreaterThanOrEqual(1);
   await waitFor(async () => seen.includes(e.id), { label: "republished" });
+});
+
+test("N1: a stream.online with no webhook subscription starts one go-live fan-out; a re-relay adds none", async () => {
+  const { user, channel } = await makeUser(env.t.db);
+  const calls: { queue: string; jobs: readonly { name: string; data: unknown; opts?: { jobId?: string } }[] }[] = [];
+  const spy = {
+    ...env.worker.ctx,
+    enqueueBulk: async (
+      queue: Parameters<typeof env.worker.ctx.enqueueBulk>[0],
+      jobs: Parameters<typeof env.worker.ctx.enqueueBulk>[1],
+    ) => {
+      calls.push({ queue, jobs });
+      await env.worker.ctx.enqueueBulk(queue, jobs);
+    },
+  };
+  const depth = async () => (await env.worker.runtime.depth())[QUEUES.notifications] ?? 0;
+  const before = await depth();
+  const e = await insertEvent(env.t.db, "stream.online", channel.id, {
+    ...broadcasterFields(user),
+    id: uuidv7(),
+    type: "live",
+    started_at: new Date().toISOString(),
+  });
+  await relayOutboxBatch(spy, 100);
+  const notify = calls.filter((c) => c.queue === QUEUES.notifications);
+  expect(notify).toEqual([
+    {
+      queue: QUEUES.notifications,
+      jobs: [{ name: "go-live", data: { eventId: e.id, after: null }, opts: { jobId: `go-live-${e.id}` } }],
+    },
+  ]);
+  // No subscription: the webhook fan-out enqueue carries nothing.
+  expect(calls.filter((c) => c.queue === QUEUES.webhooks).flatMap((c) => c.jobs)).toEqual([]);
+  expect(await depth()).toBe(before + 1);
+
+  // At-least-once: the same row relayed again enqueues under the same job id, which BullMQ drops.
+  await env.t.db.update(schema.events).set({ publishedAt: null }).where(eq(schema.events.id, e.id));
+  await relayOutboxBatch(spy, 100);
+  expect(calls.filter((c) => c.queue === QUEUES.notifications)).toHaveLength(2);
+  expect(await depth()).toBe(before + 1);
 });

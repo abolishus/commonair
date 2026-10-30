@@ -59,10 +59,16 @@ describe("exportFilename", () => {
 describe("opsHealth", () => {
   const env = (over: Record<string, unknown> = {}) =>
     ({
-      env: { OPS_TEST_HOOKS: false, PAYMENTS_PROVIDER: "manual", CDN_PROVIDER: "none", ...over },
+      env: {
+        OPS_TEST_HOOKS: false,
+        PAYMENTS_PROVIDER: "manual",
+        CDN_PROVIDER: "none",
+        WEB_PUSH_ENABLED: false,
+        ...over,
+      },
     }) as unknown as Pick<Deps, "env">;
   test("all false by default", () => {
-    expect(opsHealth(env())).toEqual({ opsTestHooks: false, stripe: false, oauth: false, cdn: false });
+    expect(opsHealth(env())).toEqual({ opsTestHooks: false, stripe: false, oauth: false, cdn: false, webPush: false });
   });
   test("each adapter flips its own boolean", () => {
     expect(opsHealth(env({ OPS_TEST_HOOKS: true })).opsTestHooks).toBe(true);
@@ -72,5 +78,6 @@ describe("opsHealth", () => {
     expect(opsHealth(env({ OAUTH_DISCORD_CLIENT_ID: "id" })).oauth).toBe(false);
     expect(opsHealth(env({ CDN_PROVIDER: "origin-pull", CDN_BASE_URL: "https://cdn.test.invalid" })).cdn).toBe(true);
     expect(opsHealth(env({ CDN_PROVIDER: "origin-pull" })).cdn).toBe(false);
+    expect(opsHealth(env({ WEB_PUSH_ENABLED: true })).webPush).toBe(true);
   });
 });

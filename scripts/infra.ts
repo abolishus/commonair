@@ -442,6 +442,7 @@ export const HARNESS_OVERRIDES = [
   "harness/compose.e8.yaml",
   "harness/compose.e9.yaml",
   "harness/compose.w1.yaml",
+  "harness/compose.n1.yaml",
   // Starts nothing unless the `multi` profile is on (`stack --harness --multi`).
   "harness/compose.multi-instance.yaml",
 ] as const;

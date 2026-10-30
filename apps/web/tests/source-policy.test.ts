@@ -51,6 +51,20 @@ interface AllowEntry {
 
 const ALLOWLIST: AllowEntry[] = [
   {
+    file: "src/pwa/theme.ts",
+    rule: "color-literal",
+    match: "#09090b",
+    count: 1,
+    reason: "manifest and theme-color cannot read CSS variables (ADR 0028 decision 7)",
+  },
+  {
+    file: "src/pwa/theme.ts",
+    rule: "color-literal",
+    match: "#ffffff",
+    count: 1,
+    reason: "manifest and theme-color cannot read CSS variables (ADR 0028 decision 7)",
+  },
+  {
     file: "src/player/player.tsx",
     rule: "raw-media-element",
     match: "<video",

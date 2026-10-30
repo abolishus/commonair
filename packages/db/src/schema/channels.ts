@@ -148,6 +148,10 @@ export const follows = pgTable(
   (t) => [
     primaryKey({ columns: [t.followerId, t.channelId] }),
     index("follows_channel_idx").on(t.channelId, t.createdAt),
+    // The go-live fan-out pages a channel's notifying followers by follower id.
+    index("follows_channel_notify_idx")
+      .on(t.channelId, t.followerId)
+      .where(sql`${t.notify}`),
   ],
 );
 
@@ -177,6 +181,18 @@ export const notifications = pgTable(
     payload: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     readAt: ts(),
     createdAt: createdAt(),
+    /** Set by writers that may run twice (go-live: `go-live-<eventId>`); unique per user. */
+    dedupeKey: text(),
   },
-  (t) => [index("notifications_user_idx").on(t.userId, t.createdAt)],
+  (t) => [
+    index("notifications_user_idx").on(t.userId, t.createdAt),
+    uniqueIndex("notifications_dedupe_uq")
+      .on(t.userId, t.dedupeKey)
+      .where(sql`${t.dedupeKey} is not null`),
+    index("notifications_user_unread_idx")
+      .on(t.userId)
+      .where(sql`${t.readAt} is null`),
+    // The `notify-prune` job deletes by age in batches.
+    index("notifications_created_idx").on(t.createdAt),
+  ],
 );

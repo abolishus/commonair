@@ -58,6 +58,8 @@ import { Route as AppCoopPatronageIndexRouteImport } from './routes/_app/coop.pa
 import { Route as AppCoopPatronagePeriodIdRouteImport } from './routes/_app/coop.patronage.$periodId'
 import { Route as AppCoopProposalsIndexRouteImport } from './routes/_app/coop.proposals.index'
 import { Route as AppCoopProposalsNewRouteImport } from './routes/_app/coop.proposals.new'
+import { Route as AppSettingsNotificationsIndexRouteImport } from './routes/_app/settings.notifications.index'
+import { Route as AppSettingsNotificationsUnsubscribeRouteImport } from './routes/_app/settings.notifications.unsubscribe'
 import { Route as StudioDeveloperAppsAppIdRouteImport } from './routes/_studio/developer.apps.$appId'
 import { Route as AppCoopProposalsIdIndexRouteImport } from './routes/_app/coop.proposals.$id.index'
 import { Route as AppCoopProposalsIdEditRouteImport } from './routes/_app/coop.proposals.$id.edit'
@@ -306,6 +308,18 @@ const AppCoopProposalsNewRoute = AppCoopProposalsNewRouteImport.update({
   path: '/coop/proposals/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsNotificationsIndexRoute =
+  AppSettingsNotificationsIndexRouteImport.update({
+    id: '/settings/notifications/',
+    path: '/settings/notifications/',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppSettingsNotificationsUnsubscribeRoute =
+  AppSettingsNotificationsUnsubscribeRouteImport.update({
+    id: '/settings/notifications/unsubscribe',
+    path: '/settings/notifications/unsubscribe',
+    getParentRoute: () => AppRoute,
+  } as any)
 const StudioDeveloperAppsAppIdRoute =
   StudioDeveloperAppsAppIdRouteImport.update({
     id: '/developer/apps/$appId',
@@ -368,9 +382,11 @@ export interface FileRoutesByFullPath {
   '/developer/': typeof StudioDeveloperIndexRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/settings/notifications/unsubscribe': typeof AppSettingsNotificationsUnsubscribeRoute
   '/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/coop/patronage/': typeof AppCoopPatronageIndexRoute
   '/coop/proposals/': typeof AppCoopProposalsIndexRoute
+  '/settings/notifications/': typeof AppSettingsNotificationsIndexRoute
   '/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
   '/coop/proposals/$id/': typeof AppCoopProposalsIdIndexRoute
 }
@@ -419,9 +435,11 @@ export interface FileRoutesByTo {
   '/developer': typeof StudioDeveloperIndexRoute
   '/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/settings/notifications/unsubscribe': typeof AppSettingsNotificationsUnsubscribeRoute
   '/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/coop/patronage': typeof AppCoopPatronageIndexRoute
   '/coop/proposals': typeof AppCoopProposalsIndexRoute
+  '/settings/notifications': typeof AppSettingsNotificationsIndexRoute
   '/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
   '/coop/proposals/$id': typeof AppCoopProposalsIdIndexRoute
 }
@@ -474,9 +492,11 @@ export interface FileRoutesById {
   '/_studio/developer/': typeof StudioDeveloperIndexRoute
   '/_app/coop/patronage/$periodId': typeof AppCoopPatronagePeriodIdRoute
   '/_app/coop/proposals/new': typeof AppCoopProposalsNewRoute
+  '/_app/settings/notifications/unsubscribe': typeof AppSettingsNotificationsUnsubscribeRoute
   '/_studio/developer/apps/$appId': typeof StudioDeveloperAppsAppIdRoute
   '/_app/coop/patronage/': typeof AppCoopPatronageIndexRoute
   '/_app/coop/proposals/': typeof AppCoopProposalsIndexRoute
+  '/_app/settings/notifications/': typeof AppSettingsNotificationsIndexRoute
   '/_app/coop/proposals/$id/edit': typeof AppCoopProposalsIdEditRoute
   '/_app/coop/proposals/$id/': typeof AppCoopProposalsIdIndexRoute
 }
@@ -527,9 +547,11 @@ export interface FileRouteTypes {
     | '/developer/'
     | '/coop/patronage/$periodId'
     | '/coop/proposals/new'
+    | '/settings/notifications/unsubscribe'
     | '/developer/apps/$appId'
     | '/coop/patronage/'
     | '/coop/proposals/'
+    | '/settings/notifications/'
     | '/coop/proposals/$id/edit'
     | '/coop/proposals/$id/'
   fileRoutesByTo: FileRoutesByTo
@@ -578,9 +600,11 @@ export interface FileRouteTypes {
     | '/developer'
     | '/coop/patronage/$periodId'
     | '/coop/proposals/new'
+    | '/settings/notifications/unsubscribe'
     | '/developer/apps/$appId'
     | '/coop/patronage'
     | '/coop/proposals'
+    | '/settings/notifications'
     | '/coop/proposals/$id/edit'
     | '/coop/proposals/$id'
   id:
@@ -632,9 +656,11 @@ export interface FileRouteTypes {
     | '/_studio/developer/'
     | '/_app/coop/patronage/$periodId'
     | '/_app/coop/proposals/new'
+    | '/_app/settings/notifications/unsubscribe'
     | '/_studio/developer/apps/$appId'
     | '/_app/coop/patronage/'
     | '/_app/coop/proposals/'
+    | '/_app/settings/notifications/'
     | '/_app/coop/proposals/$id/edit'
     | '/_app/coop/proposals/$id/'
   fileRoutesById: FileRoutesById
@@ -994,6 +1020,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppCoopProposalsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/notifications/': {
+      id: '/_app/settings/notifications/'
+      path: '/settings/notifications'
+      fullPath: '/settings/notifications/'
+      preLoaderRoute: typeof AppSettingsNotificationsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/notifications/unsubscribe': {
+      id: '/_app/settings/notifications/unsubscribe'
+      path: '/settings/notifications/unsubscribe'
+      fullPath: '/settings/notifications/unsubscribe'
+      preLoaderRoute: typeof AppSettingsNotificationsUnsubscribeRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_studio/developer/apps/$appId': {
       id: '/_studio/developer/apps/$appId'
       path: '/developer/apps/$appId'
@@ -1067,8 +1107,10 @@ interface AppRouteChildren {
   AppCoopIndexRoute: typeof AppCoopIndexRoute
   AppCoopPatronagePeriodIdRoute: typeof AppCoopPatronagePeriodIdRoute
   AppCoopProposalsNewRoute: typeof AppCoopProposalsNewRoute
+  AppSettingsNotificationsUnsubscribeRoute: typeof AppSettingsNotificationsUnsubscribeRoute
   AppCoopPatronageIndexRoute: typeof AppCoopPatronageIndexRoute
   AppCoopProposalsIndexRoute: typeof AppCoopProposalsIndexRoute
+  AppSettingsNotificationsIndexRoute: typeof AppSettingsNotificationsIndexRoute
   AppCoopProposalsIdEditRoute: typeof AppCoopProposalsIdEditRoute
   AppCoopProposalsIdIndexRoute: typeof AppCoopProposalsIdIndexRoute
 }
@@ -1094,8 +1136,11 @@ const AppRouteChildren: AppRouteChildren = {
   AppCoopIndexRoute: AppCoopIndexRoute,
   AppCoopPatronagePeriodIdRoute: AppCoopPatronagePeriodIdRoute,
   AppCoopProposalsNewRoute: AppCoopProposalsNewRoute,
+  AppSettingsNotificationsUnsubscribeRoute:
+    AppSettingsNotificationsUnsubscribeRoute,
   AppCoopPatronageIndexRoute: AppCoopPatronageIndexRoute,
   AppCoopProposalsIndexRoute: AppCoopProposalsIndexRoute,
+  AppSettingsNotificationsIndexRoute: AppSettingsNotificationsIndexRoute,
   AppCoopProposalsIdEditRoute: AppCoopProposalsIdEditRoute,
   AppCoopProposalsIdIndexRoute: AppCoopProposalsIdIndexRoute,
 }

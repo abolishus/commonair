@@ -16,6 +16,7 @@ import {
   LegalDocument01Icon,
   LiveStreaming02Icon,
   Logout03Icon,
+  Notification03Icon,
   Plug01Icon,
   ServerStack01Icon,
   Shield01Icon,
@@ -40,10 +41,14 @@ import {
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
 import { CookieSettingsButton } from "./consent/cookie-settings-button.tsx";
+import { NotificationBell } from "./notifications/bell.tsx";
+import { forgetPushSubscription } from "./pwa/push-client.ts";
 import { isLegal, isSafetyStaff } from "./safety/access.ts";
 
 async function onSignOut(): Promise<void> {
   try {
+    // Sign-out removes this browser's push subscription (ADR 0028 decision 6).
+    await forgetPushSubscription().catch(() => undefined);
     await signOut();
     // Full load: nothing rendered for the old session survives.
     window.location.assign("/");
@@ -70,6 +75,13 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("nav.subscriptions"),
         icon: icon(CreditCardIcon),
         render: <Link data-testid="account-subscriptions-link" to="/settings/subscriptions" />,
+      };
+    case "notifications":
+      return {
+        id: entry.id,
+        label: t("nav.notifications"),
+        icon: icon(Notification03Icon),
+        render: <Link data-testid="account-notifications-link" to="/settings/notifications" />,
       };
     case "appeals":
       return {
@@ -219,18 +231,21 @@ export function AppHeader({ studio = false }: { studio?: boolean }): React.JSX.E
       }
       user={
         me ? (
-          <UserMenu
-            data-testid="nav-user"
-            data-username={me.username}
-            username={me.username}
-            menuLabel={t("nav.accountMenu", { name: me.displayName })}
-            items={accountMenu(true, {
-              treasurer: isTreasurer(me),
-              safetyStaff: isSafetyStaff(me),
-              legal: isLegal(me),
-              admin: isAdmin(me),
-            }).map(accountItem)}
-          />
+          <>
+            <NotificationBell />
+            <UserMenu
+              data-testid="nav-user"
+              data-username={me.username}
+              username={me.username}
+              menuLabel={t("nav.accountMenu", { name: me.displayName })}
+              items={accountMenu(true, {
+                treasurer: isTreasurer(me),
+                safetyStaff: isSafetyStaff(me),
+                legal: isLegal(me),
+                admin: isAdmin(me),
+              }).map(accountItem)}
+            />
+          </>
         ) : (
           signIn.map((entry) => <AccountLink key={entry.id} entry={entry} />)
         )

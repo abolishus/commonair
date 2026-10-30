@@ -271,6 +271,15 @@ export const NOTIFICATION_TYPES = [
   "moderation",
   "system",
 ] as const;
+/** Where a notification can reach someone (`notification_preferences.medium`, ADR 0028 decision 4). */
+export const NOTIFY_MEDIA = ["in_app", "email", "push"] as const;
+export type NotifyMedium = (typeof NOTIFY_MEDIA)[number];
+/** Types a member sets preferences for through the API (N1: go-live only; other types keep their in-app behaviour). */
+export const PREFERENCE_TYPES = ["go_live"] as const;
+/** One-click unsubscribe lists (RFC 8058). `governance` stores email-off rows for `proposal` and `vote_open`. */
+export const UNSUBSCRIBE_LISTS = ["go_live", "governance"] as const;
+/** Why the last Discord post failed; shown in the studio (never the URL). */
+export const DISCORD_WEBHOOK_ERRORS = ["unauthorized", "not_found", "rate_limited", "rejected", "network"] as const;
 export const INCIDENT_STATUSES = ["investigating", "identified", "monitoring", "resolved"] as const;
 export const COMPONENT_STATUSES = ["operational", "degraded", "outage"] as const;
 

@@ -12,6 +12,7 @@ import { toast } from "@commonair/ui/toast";
 import { Link, Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { ChannelAppearanceCard } from "../../components/channel-appearance.tsx";
+import { DiscordWebhookSection } from "../../components/discord-webhook-section.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { IngestServerUrl, NewStreamKey } from "../../components/ingest-values.tsx";
 import { DashboardLabelNotices } from "../../components/safety/appeals.tsx";
@@ -72,6 +73,7 @@ function DashboardPage(): React.JSX.Element {
       <StreamHealthCard key={channel} channel={channel} />
       <StreamSetup channel={channel} />
       <SimulcastSection key={`simulcast-${channel}`} channel={channel} />
+      <DiscordWebhookSection key={`discord-${channel}`} channel={channel} />
       <ChannelAppearanceCard key={`appearance-${channel}`} channel={channel} />
     </PageContainer>
   );

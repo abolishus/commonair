@@ -27,6 +27,7 @@ import type { LoopHandle } from "./runtime/loop.ts";
 import { buildRegistry, type JobDefinition } from "./runtime/registry.ts";
 import { JobRuntime } from "./runtime/runtime.ts";
 import { startSegmentConsumer, type SegmentConsumerOptions } from "./segments/consumer.ts";
+import type { WebPushSettings } from "./notify/settings.ts";
 import type { WebhookSettings } from "./webhooks/settings.ts";
 
 export interface CreateWorkerOptions {
@@ -56,6 +57,8 @@ export interface CreateWorkerOptions {
   money?: MoneyJobConfig;
   /** Trust & safety runtime; `main.ts` always passes it (and exits when it cannot build it). */
   moderation?: ModerationOptions;
+  /** Web push (N1); `main.ts` passes `webPushSettings(env, site)`, absent when push is off. */
+  webPush?: WebPushSettings;
   now?: () => Date;
 }
 
@@ -98,6 +101,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     classifier: opts.classifier ?? (() => undefined),
     money: opts.money ?? moneyConfigFromEnv(),
     moderation: opts.moderation ? resolveModeration(opts.moderation, valkey) : undefined,
+    ...(opts.webPush ? { webPush: opts.webPush } : {}),
     now: opts.now ?? (() => new Date()),
   };
 

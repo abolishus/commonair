@@ -168,7 +168,11 @@ describe("export collectors", () => {
           "createdAt",
         ],
       },
-      "notifications.json": { notifications: ["type", "readAt", "createdAt"] },
+      "notifications.json": {
+        notifications: ["type", "readAt", "createdAt"],
+        preferences: ["type", "channelSlug", "medium", "enabled", "updatedAt"],
+        pushSubscriptions: ["id", "createdAt", "lastSuccessAt", "failures"],
+      },
       "consents.json": { consents: ["choices", "policyVersion", "createdAt"] },
       "developer.json": {
         oauthApps: ["name", "description", "redirectUris", "confidential", "createdAt"],
@@ -205,6 +209,7 @@ describe("export collectors", () => {
         subscriptionTiers: ["tier", "name", "priceCents", "benefits"],
         alertConfigs: ["type", "enabled", "template", "minAmountCents", "durationMs"],
         simulcastTargets: ["name", "platform", "rtmpUrl", "enabled", "createdAt"],
+        discordWebhook: ["configured", "setAt", "lastPostedAt"],
       },
       "vods.json": { vods: ["id", "title", "visibility", "status", "durationSeconds", "createdAt"] },
       "clips.json": { clips: ["id", "title", "status", "durationSeconds", "views", "createdAt"] },
@@ -220,7 +225,7 @@ describe("export collectors", () => {
 
   // Columns that hold secrets or other people: none may be selected, by any section.
   const FORBIDDEN =
-    /"(password|token|secret|backup_codes|public_key|credential_id|access_token|refresh_token|id_token|access_token_hash|refresh_token_hash|client_secret_hash|client_id|key_hash|stream_key_ciphertext|secret_ciphertext|token_hash|ip_hash|device_hash|frame_key|impersonated_by|gifted_by_id|creator_id|moderator_id|target_user_id|reporter_id|subject_id|assignee_id|resolver_id|resolution|evidence|deleted_by|reply_to_id|payload|details|body_hash)"\s*(,|from|$)/i;
+    /"(password|token|secret|subscription|endpoint_hash|backup_codes|public_key|credential_id|access_token|refresh_token|id_token|access_token_hash|refresh_token_hash|client_secret_hash|client_id|key_hash|stream_key_ciphertext|secret_ciphertext|token_hash|ip_hash|device_hash|frame_key|impersonated_by|gifted_by_id|creator_id|moderator_id|target_user_id|reporter_id|subject_id|assignee_id|resolver_id|resolution|evidence|deleted_by|reply_to_id|payload|details|body_hash)"\s*(,|from|$)/i;
 
   for (const file of EXPORT_FILES)
     for (const [name, section] of Object.entries(file.sections))
@@ -255,6 +260,12 @@ describe("export collectors", () => {
       subscriptionTiers: [],
       alertConfigs: [],
       simulcastTargets: [],
+      discordWebhook: null,
+    });
+    expect(fileValue(byName("notifications.json"), { notifications: [{ type: "go_live" }] })).toEqual({
+      notifications: [{ type: "go_live" }],
+      preferences: [],
+      pushSubscriptions: [],
     });
     expect(
       fileValue(byName("payments.json"), {

@@ -111,6 +111,7 @@ describe("bootstrap and the compose override", () => {
     });
     expect(b["membership.classes"].streamer.minStreamingHours * 3600).toBeCloseTo(36);
     expect(b["council.config"]).toEqual({ size: 50, minStreamingHours: 0.01 });
+    expect(b["notifications.goLive"]).toEqual({ cooldownHours: 4, emailDigestMinutes: 1 });
   });
 
   test("membership.classes carries every class whole, with the seeded defaults", () => {

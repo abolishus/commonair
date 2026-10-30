@@ -22,7 +22,8 @@
     "./auth": "./src/auth.ts",
     "./fixtures": "./src/fixtures.ts",
     "./oauth": "./src/oauth.ts",
-    "./eventsub": "./src/eventsub.ts"
+    "./eventsub": "./src/eventsub.ts",
+    "./notify": "./src/notify.ts"
   },
   "scripts": {
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",

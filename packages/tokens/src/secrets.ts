@@ -11,7 +11,8 @@ import { b64url, fromB64url, timingSafeEqual } from "./index.ts";
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-async function hkdfKey(
+/** HKDF-SHA-256 key for `info` (salt "commonair"). Package-internal: not re-exported from the index. */
+export async function hkdfKey(
   secret: string,
   info: string,
   usage: KeyUsage[],

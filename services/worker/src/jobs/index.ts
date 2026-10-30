@@ -31,6 +31,11 @@ import { job as moneyFraudScan } from "./money-fraud-scan.ts";
 import { job as moneyReconcile } from "./money-reconcile.ts";
 import { job as moneyReleaseHolds } from "./money-release-holds.ts";
 import { job as moneyRenew } from "./money-renew.ts";
+import { job as notifyDiscord } from "./notify-discord.ts";
+import { job as notifyEmailDigest } from "./notify-email-digest.ts";
+import { job as notifyGoLive } from "./notify-go-live.ts";
+import { job as notifyPrune } from "./notify-prune.ts";
+import { job as notifyPush } from "./notify-push.ts";
 import { job as moderationNciiClock } from "./moderation-ncii-clock.ts";
 import { job as moderationNciiHash } from "./moderation-ncii-hash.ts";
 import { job as moderationScan } from "./moderation-scan.ts";
@@ -100,4 +105,10 @@ export const JOBS = [
   chatSurgeGuard,
   moneyFraudScan,
   moneyReconcile,
+  // Notifications (N1, ADR 0028).
+  notifyGoLive,
+  notifyPush,
+  notifyEmailDigest,
+  notifyDiscord,
+  notifyPrune,
 ] as readonly JobDefinition[];

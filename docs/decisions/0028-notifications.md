@@ -257,3 +257,50 @@ Decided by the head agent within these answers (recorded so reviewers can check 
 - Integrity-excluded follows get in-app rows but no email or push.
 - Push endpoints are treated as user-supplied URLs (SSRF guard, encrypted at rest).
 - Discord posts never mention anyone, and a dead webhook clears itself.
+
+## Amendment 1 (N1 contract step)
+
+- Status: accepted (2026-10-30; orchestrator defaults and the maintainer's answers, batch 4
+  decisions (g), (n) and (o))
+- Date: 2026-10-30 (code checked at `a43aa6b`, landed on top of the W1 contract step)
+- Scope: where the code differed from this ADR's plan, and what the N1 contract step
+  ([`.claude/briefs/n1/contract-step.md`](../../.claude/briefs/n1/contract-step.md) §0) decided
+  within the decisions above. Migrations `0039_n1_notifications` and `0040_n1_protections`.
+
+**Counsel has not reviewed the privacy and cookie paragraphs** this step adds; they land as
+drafts, and the privacy bump asks members to accept again.
+
+1. **One-click unsubscribe lives on the API.** `List-Unsubscribe` points at
+   `/api/email/unsubscribe?list=…&token=…` (same origin as the site): `POST` applies it (RFC 8058),
+   `GET` answers 303 to the web confirm page `/settings/notifications/unsubscribe` with the same
+   query. The web server sends every non-API request to SSR and the dev server has no POST route,
+   so a one-click POST to a web page could not be answered. A one-click go-live unsubscribe also
+   turns off the member's per-channel email overrides, so no channel keeps mailing them.
+   `list=governance` stores email-off rows for `proposal` and `vote_open`, ready for when
+   governance mail has a sender.
+2. **The manifest comes from the instance.** One web image serves every instance and the name must
+   come from `instanceSite()`, so the web server builds `/manifest.webmanifest` from the instance
+   config; `public/` holds only icons. The two `theme-color` values are the app's only colour
+   literals (`apps/web/src/pwa/theme.ts`), because a manifest and a meta tag cannot read CSS
+   variables.
+3. **Mature broadcasts without the title.** A follower who has not confirmed 18+ is still notified
+   of a mature broadcast, with an empty title (email and push say only "is live"). "Mature" is
+   `broadcasts.mature OR channels.mature`, read when the message is built, since a channel can be
+   labelled mature after the broadcast started. Fan-out, email, push and Discord use this one rule.
+4. **Harness push without a vendor.** Headless Chromium cannot subscribe without a vendor push
+   service, so the harness makes its own subscription keys, registers them over the API (or through
+   the web toggle with `PushManager.subscribe` stubbed), receives the real encrypted POST on its own
+   receiver and decrypts it; the service worker's push handler is driven with CDP
+   `ServiceWorker.deliverPushMessage`. `webPush` is a proprietary harness need (skipped under
+   `--profile no-proprietary`) but not part of that profile's preflight, because the harness stack
+   pushes only to its own receiver (`WEB_PUSH_ALLOW_INSECURE_ENDPOINTS`, harness only).
+5. **Discord has no harness step.** N1-discord is covered by unit and integration tests against a
+   local TLS receiver with an injected resolver; no test-origin setting is added.
+6. **Smaller decisions within this ADR:** the email digest is a 30-second sweep over
+   `notification_email_queue` (replica-safe, nothing lost on a Valkey flush); go-live email strings
+   carry no counts; the bell is a popover with no `/notifications` page; a push subscription
+   belongs to the last member who subscribed that browser, and sign-out there deletes it; turning
+   push on in a browser also turns the member's go-live push default on; user blocks do not affect
+   go-live notifications; `notify-prune` deletes notifications older than 90 days and read
+   `go_live` rows older than 30 days; push sends use a generalized pinned POST
+   (`postPinned`) instead of the EventSub `postWebhook`, which stays a wrapper.

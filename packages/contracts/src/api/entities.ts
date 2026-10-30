@@ -1566,3 +1566,38 @@ export const NciiRequest = z.object({
   decisionNote: z.string().nullable(),
 });
 export type NciiRequest = z.infer<typeof NciiRequest>;
+
+/** A member's go-live preferences: defaults per medium, then per-channel overrides. */
+export const NotificationPreferences = z.object({
+  type: z.enum(E.PREFERENCE_TYPES),
+  /** The member's default per medium (their row, else the built-in `NOTIFY_DEFAULTS`). */
+  defaults: z.object({ in_app: z.boolean(), email: z.boolean(), push: z.boolean() }),
+  /** Built-in or chosen, per medium (the UI marks the built-in ones). */
+  builtIn: z.object({ in_app: z.boolean(), email: z.boolean(), push: z.boolean() }),
+  /** Channel overrides that exist; a medium absent from `media` follows the default. */
+  channels: z.array(
+    z.object({
+      channel: z.object({ id: Id, slug: Slug, displayName: z.string() }),
+      media: z.partialRecord(z.enum(E.NOTIFY_MEDIA), z.boolean()),
+    }),
+  ),
+  /** Email needs a verified address (ADR 0028 decision 4): the UI explains why email is inert. */
+  emailVerified: z.boolean(),
+});
+export type NotificationPreferences = z.infer<typeof NotificationPreferences>;
+export const PushStatus = z.object({
+  /** `WEB_PUSH_ENABLED` on this instance. */
+  enabled: z.boolean(),
+  /** The VAPID public key (base64url, 65 bytes) for `applicationServerKey`; null when disabled. */
+  vapidPublicKey: z.string().nullable(),
+  /** The caller's push subscriptions (browsers). */
+  subscriptions: z.number().int(),
+});
+export type PushStatus = z.infer<typeof PushStatus>;
+export const DiscordWebhookStatus = z.object({
+  configured: z.boolean(),
+  setAt: Timestamp.nullable(),
+  lastPostedAt: Timestamp.nullable(),
+  lastError: z.enum(E.DISCORD_WEBHOOK_ERRORS).nullable(),
+});
+export type DiscordWebhookStatus = z.infer<typeof DiscordWebhookStatus>;

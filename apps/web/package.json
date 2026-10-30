@@ -12,7 +12,7 @@
     "start": "bun server.ts",
     "test": "bun --bun vp test run --exclude '**/*.int.test.ts' --passWithNoTests",
     "test:int": "bun --bun vp test run .int.test --passWithNoTests",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p . && tsc -p src/sw"
   },
   "dependencies": {
     "@commonair/config": "workspace:*",

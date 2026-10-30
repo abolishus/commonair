@@ -149,6 +149,13 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
       "Channel points: points per block of verified watch time, block length in minutes, and the daily cap per viewer per channel (ADR 0026).",
     value: { pointsPerBlock: 10, blockMinutes: 5, dailyCapPerChannel: 1000 },
   },
+  {
+    key: "notifications.goLive",
+    protected: false,
+    description:
+      "Go-live notifications: at most one per channel per follower every cooldownHours across in-app, email and push; go-live emails wait emailDigestMinutes and go out as one digest (ADR 0028).",
+    value: { cooldownHours: 4, emailDigestMinutes: 5 },
+  },
 ] as const;
 
 export type GovernanceOverrides = Record<string, Record<string, unknown>>;

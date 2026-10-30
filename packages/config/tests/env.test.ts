@@ -18,6 +18,8 @@ import {
   paymentsEnv,
   playbackEnv,
   turnEnv,
+  webPushEnv,
+  webPushPublicEnv,
 } from "../src/env.ts";
 import { SITE, sourceLink } from "../src/site.ts";
 
@@ -102,6 +104,30 @@ describe("env", () => {
     expect(() => loadEnv(chatEnv, { CHAT_RETENTION_DAYS: "61" })).toThrow(/CHAT_REPLAY_MAX_DAYS/);
     expect(() => loadEnv(chatEnv, { CHAT_WATCH_GATE: "yes" })).toThrow(EnvError);
     expect(() => loadEnv(chatEnv, { CHAT_RETENTION_DAYS: "0" })).toThrow(EnvError);
+  });
+
+  test("web push (N1): off by default; on needs the VAPID pair; keys are shape-checked", async () => {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    const pub = Buffer.from(raw).toString("base64url");
+    const priv = Buffer.from(pkcs8).toString("base64");
+    expect(loadEnv(webPushEnv, {})).toEqual({ WEB_PUSH_ENABLED: false, WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: false });
+    expect(loadEnv(webPushPublicEnv, {}).WEB_PUSH_ENABLED).toBe(false);
+    expect(() => loadEnv(webPushEnv, { WEB_PUSH_ENABLED: "true" })).toThrow(/VAPID key pair/);
+    expect(() => loadEnv(webPushEnv, { WEB_PUSH_ENABLED: "true", VAPID_PUBLIC_KEY: pub })).toThrow(/VAPID key pair/);
+    expect(() => loadEnv(webPushPublicEnv, { WEB_PUSH_ENABLED: "true" })).toThrow(/VAPID key pair/);
+    const on = loadEnv(webPushEnv, { WEB_PUSH_ENABLED: "true", VAPID_PUBLIC_KEY: pub, VAPID_PRIVATE_KEY: priv });
+    expect(on.WEB_PUSH_ENABLED).toBe(true);
+    // The API needs only the public key; padded base64url is accepted too.
+    expect(loadEnv(webPushPublicEnv, { WEB_PUSH_ENABLED: "true", VAPID_PUBLIC_KEY: `${pub}=` }).VAPID_PUBLIC_KEY).toBe(
+      `${pub}=`,
+    );
+    // A bad public key fails even with push off: wrong length, compressed prefix, standard base64.
+    const compressed = Buffer.from([0x02, ...raw.slice(1)]).toString("base64url");
+    for (const bad of [pub.slice(0, 40), compressed, Buffer.from(raw).toString("base64").replace(/[-_]/g, "+") + "!"])
+      expect(() => loadEnv(webPushEnv, { VAPID_PUBLIC_KEY: bad })).toThrow(/P-256 point/);
+    expect(() => loadEnv(webPushEnv, { VAPID_PRIVATE_KEY: "abc" })).toThrow(/PKCS#8/);
   });
 
   test("P2P: opt in by default, STUN only, a relay without its secret refuses to start", () => {

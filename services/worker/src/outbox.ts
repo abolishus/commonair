@@ -18,6 +18,7 @@ import { applyGoalProgress } from "./interact/goals/outbox-hook.ts";
 import { WEBHOOK_JOBS } from "./jobs/names.ts";
 import { metrics } from "./metrics.ts";
 import { moderationMetrics } from "./moderation/metrics.ts";
+import { notifyJobsFor } from "./notify/outbox-jobs.ts";
 import { AdaptiveDelay, startLoop, type LoopHandle } from "./runtime/loop.ts";
 
 const { events, eventSubscriptions: subs } = schema;
@@ -137,6 +138,11 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
       .filter((e) => hooked.has(e.type))
       .map((e) => ({ name: WEBHOOK_JOBS.fanout, data: { eventId: e.id }, opts: { jobId: `fanout-${e.id}` } }));
     await withTimeout(ctx.enqueueBulk(QUEUES.webhooks, fanouts), valkeyTimeoutMs, "fan-out enqueue");
+    // N1: every stream.online starts the go-live fan-out (ADR 0028 decision 8), hooked or not.
+    // Same at-least-once rule: the job id is the event id, so a re-relayed batch enqueues nothing new.
+    const notify = notifyJobsFor(valid);
+    if (notify.length > 0)
+      await withTimeout(ctx.enqueueBulk(QUEUES.notifications, notify), valkeyTimeoutMs, "notify enqueue");
 
     const now = ctx.now();
     await tx

@@ -8,8 +8,9 @@
  *   bun server.ts            (the container's `bun run start`; listens on WEB_PORT, default 3000)
  */
 import { createLogger } from "@commonair/observability";
-import { loadWebEnv } from "./src/server/env.ts";
+import { loadWebEnv, publicConfig } from "./src/server/env.ts";
 import { createWebServer } from "./src/server/http.ts";
+import { manifestResponse } from "./src/server/pwa.ts";
 
 const env = loadWebEnv();
 const logger = createLogger({ service: "web", level: env.LOG_LEVEL });
@@ -24,6 +25,7 @@ const server = createWebServer({
   publicUrl: env.PUBLIC_URL,
   clientDir: new URL("client/", distDir).pathname,
   ssr: (req) => ssr.default.fetch(req),
+  manifest: () => manifestResponse(publicConfig(env)),
 });
 
 logger.info("web listening", { port: server.port });

@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the N1 harness scenario `notifications` (docs/testing/n1-selectors.md,
+# ADR 0028). Turns browser push on and lets it reach the harness's own receiver over http on this
+# machine: push never goes to a vendor push service in the harness. The VAPID pair comes from
+# `.env`: a `.env` written before N1 has none, and with push on the API and the worker refuse to
+# start, so run `bun scripts/init-env.ts --merge` once (it adds the pair and keeps everything else).
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      WEB_PUSH_ENABLED: "true"
+      WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: "true"
+  worker:
+    environment:
+      WEB_PUSH_ENABLED: "true"
+      WEB_PUSH_ALLOW_INSECURE_ENDPOINTS: "true"

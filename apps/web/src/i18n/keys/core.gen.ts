@@ -17,6 +17,7 @@ export type Key =
   | "nav.directory"
   | "nav.copyright"
   | "nav.connections"
+  | "nav.notifications"
   | "nav.adminDmca"
   | "nav.adminIntegrity"
   | "nav.adminEgress"

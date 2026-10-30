@@ -8,10 +8,12 @@ import { HeadContent, Outlet, Scripts, createRootRoute, useLocation, useRouter }
 import * as React from "react";
 import { localeDirection } from "@commonair/i18n";
 import { ConsentRoot } from "../components/consent/consent-root.tsx";
+import { PwaRoot } from "../components/pwa/pwa-root.tsx";
 import { onLocaleApplied, syncLocale } from "../i18n/client.ts";
 import { t, uiMessagesFor } from "../i18n/index.ts";
 import { getBootstrap } from "../lib/bootstrap.ts";
 import { rootChrome } from "../lib/overlay-page.ts";
+import { PWA_THEME_COLORS } from "../pwa/theme.ts";
 import { storeTheme, tabTheme } from "../lib/theme.ts";
 import { ThemeContext } from "../lib/theme-context.ts";
 import appCss from "../styles.css?url";
@@ -26,9 +28,17 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "color-scheme", content: "dark light" },
+      { name: "theme-color", content: PWA_THEME_COLORS.dark, media: "(prefers-color-scheme: dark)" },
+      { name: "theme-color", content: PWA_THEME_COLORS.light, media: "(prefers-color-scheme: light)" },
       { title: t("app.title") },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      // The installable app (ADR 0028 decision 7): the web server builds the manifest from the instance.
+      { rel: "manifest", href: "/manifest.webmanifest" },
+      { rel: "icon", href: "/icons/icon.svg", type: "image/svg+xml" },
+      { rel: "apple-touch-icon", href: "/icons/apple-touch-icon.png" },
+    ],
   }),
   component: RootComponent,
 });
@@ -109,6 +119,7 @@ function RootComponent(): React.JSX.Element {
             <TooltipProvider>
               <ThemeContext.Provider value={themeValue}>
                 <ConsentRoot consent={boot.consent} signedIn={boot.me !== null} pathname={pathname} />
+                <PwaRoot />
                 <Outlet />
               </ThemeContext.Provider>
               <Toaster theme={resolved} />

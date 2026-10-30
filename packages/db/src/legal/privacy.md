@@ -72,6 +72,27 @@ on 18+ or restricted streams, and stays off on metered connections, phones and t
 data-saving mode unless you turn it on yourself. Switch it off at any time from the player or
 your privacy settings; playback continues without it.
 
+## Notifications
+
+When a channel you follow goes live, we tell you in the app. We email you about it only if you
+turn go-live emails on, and only at an address you have verified; every such email has a
+one-click unsubscribe link. You get at most one go-live notification per channel within a few
+hours, however often the stream restarts. We delete notifications after 90 days, and go-live
+notifications you have read after 30 days.
+
+**Browser push** is off unless the operator offers it and you turn it on in a browser. Your
+browser then gives us an address at its push service, which your browser's maker runs (for
+example Google, Mozilla or Apple), and two encryption keys. We store them encrypted and delete
+them when you turn push off, sign out in that browser, or the push service tells us they no
+longer work. Each push message is encrypted so that only your browser can read it, and it holds
+only the channel name and stream title. The push service learns that a message was sent to your
+browser, and when, but not what it says.
+
+**Discord.** A streamer can connect their channel to a Discord channel through a Discord webhook.
+When they go live, we post their channel link and stream title there, and Discord's own terms
+and privacy policy apply to that post. We store the webhook address encrypted and never show it
+again.
+
 ## How long we keep it
 
 - Playback sessions and integrity signals: only as long as needed to compute verified viewer

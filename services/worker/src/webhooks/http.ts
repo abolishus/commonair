@@ -23,15 +23,45 @@ export interface PostOptions {
 }
 
 export type PostResult =
-  | { ok: true; status: number; body: string; latencyMs: number; truncated: boolean }
+  | {
+      ok: true;
+      status: number;
+      body: string;
+      latencyMs: number;
+      truncated: boolean;
+      /** Response headers, names lower-case, repeated ones joined with ", " (e.g. `retry-after`, `location`). */
+      headers: Record<string, string>;
+    }
   | { ok: false; error: string; latencyMs: number; rejected: boolean };
 
+/** A pinned POST's request: the caller's headers plus a content type and user agent it chooses. */
+export interface PinnedRequest {
+  headers: Record<string, string>;
+  body: string | Uint8Array;
+  contentType: string;
+  userAgent: string;
+}
+
+/** EventSub webhook delivery: a JSON body (behaviour of `postPinned` with the EventSub user agent). */
 export async function postWebhook(
   callback: string,
   headers: Record<string, string>,
   body: string,
   opts: PostOptions,
 ): Promise<PostResult> {
+  return postPinned(
+    callback,
+    { headers, body, contentType: "application/json", userAgent: "CommonAir-EventSub/1" },
+    opts,
+  );
+}
+
+/**
+ * POST to a user-supplied URL through `resolveCallback` (public, pinned address; no redirects;
+ * capped response; deadline). Web push (binary aes128gcm body) and Discord use it too (ADR 0028).
+ */
+export async function postPinned(callback: string, req: PinnedRequest, opts: PostOptions): Promise<PostResult> {
+  const { headers, body } = req;
   const started = performance.now();
   const elapsed = () => Math.round(performance.now() - started);
   let target;
@@ -56,7 +86,7 @@ export async function postWebhook(
       clearTimeout(deadline);
       resolve(r);
     };
-    const req = mod.request(
+    const request = mod.request(
       {
         method: "POST",
         protocol: url.protocol,
@@ -69,9 +99,9 @@ export async function postWebhook(
         ...(opts.ca ? { ca: opts.ca } : {}),
         headers: {
           ...headers,
-          "content-type": "application/json",
-          "content-length": String(Buffer.byteLength(body)),
-          "user-agent": "CommonAir-EventSub/1",
+          "content-type": req.contentType,
+          "content-length": String(typeof body === "string" ? Buffer.byteLength(body) : body.byteLength),
+          "user-agent": req.userAgent,
         },
       },
       (res) => {
@@ -85,6 +115,7 @@ export async function postWebhook(
             body: Buffer.concat(chunks).toString("utf8"),
             latencyMs: elapsed(),
             truncated,
+            headers: flatHeaders(res.headers),
           });
         res.on("data", (chunk: Buffer) => {
           if (truncated) return;
@@ -106,12 +137,21 @@ export async function postWebhook(
       },
     );
     const deadline = setTimeout(() => {
-      req.destroy(new Error("timeout"));
+      request.destroy(new Error("timeout"));
       finish({ ok: false, error: `timeout after ${opts.timeoutMs} ms`, latencyMs: elapsed(), rejected: false });
     }, opts.timeoutMs);
-    req.on("error", (err) => finish({ ok: false, error: sanitizeError(err), latencyMs: elapsed(), rejected: false }));
-    req.end(body);
+    request.on("error", (err) =>
+      finish({ ok: false, error: sanitizeError(err), latencyMs: elapsed(), rejected: false }),
+    );
+    request.end(body);
   });
+}
+
+function flatHeaders(h: http.IncomingHttpHeaders): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(h))
+    if (v !== undefined) out[k.toLowerCase()] = Array.isArray(v) ? v.join(", ") : v;
+  return out;
 }
 
 /** Network error text for the delivery log: the code and message, never a stack. */

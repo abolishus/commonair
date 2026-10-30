@@ -286,6 +286,18 @@ export const PointsAccrualSetting = z.object({
 });
 export type PointsAccrualSetting = z.infer<typeof PointsAccrualSetting>;
 
+/**
+ * `notifications.goLive` governance setting (ADR 0028 decision 3, ordinary decision). Range-checked
+ * by the database (`commonair_validate_notifications_go_live`, migration 0040).
+ */
+export const GoLiveSetting = z.object({
+  /** At most one go-live per channel per follower in this window, across in-app, email and push. */
+  cooldownHours: z.number().int().min(1).max(48),
+  /** Go-live emails wait this long from the first one queued for a member, then go as one digest; 0 sends at the next sweep. */
+  emailDigestMinutes: z.number().int().min(0).max(60),
+});
+export type GoLiveSetting = z.infer<typeof GoLiveSetting>;
+
 /** What a channel can upload, and which file types each purpose takes (enforced by `channels.uploadUrl`). */
 export const UPLOAD_PURPOSES = ["avatar", "banner", "panel", "emote", "alert_image", "alert_sound"] as const;
 export type UploadPurpose = (typeof UPLOAD_PURPOSES)[number];
