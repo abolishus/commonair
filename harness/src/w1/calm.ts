@@ -98,11 +98,13 @@ export interface FloodRecord {
 }
 
 /**
- * Render latency the window allows: one batch committed late, the next on time. One governor tick
- * (250 ms): on a loaded CI runner a commit can lag well past 50 ms, while a governor admitting two
- * batches less than 750 ms apart still fails.
+ * Render latency the window allows: one batch committed late, the next on time. Rows are timed
+ * when they reach the DOM, not when the governor admits them, and during the 50-messages-a-second
+ * flood a commit lagged its neighbour by more than one 250 ms tick on CI (4 rows in the window,
+ * three times). A governor with no window (batches one 250 ms tick apart) or one that admits
+ * batches less than 600 ms apart still fails.
  */
-export const RENDER_TOLERANCE_MS = 250;
+export const RENDER_TOLERANCE_MS = 400;
 
 /**
  * The most new rows that appeared within any one-second window (a true sliding window over the
@@ -114,20 +116,21 @@ export function maxNewRowsPerWindow(
   exempt: ReadonlySet<string>,
   windowMs = 1_000,
   toleranceMs = RENDER_TOLERANCE_MS,
-): { max: number; at: number } {
+): { max: number; at: number; times: number[] } {
   const times = rows
     .filter((r) => !exempt.has(r.id))
     .map((r) => r.t)
     .sort((a, b) => a - b);
   const span = windowMs - toleranceMs;
-  let best = { max: 0, at: 0 };
+  let best = { max: 0, at: 0, times: [] as number[] };
   let j = 0;
   for (let i = 0; i < times.length; i++) {
     const from = times[i] ?? 0;
     if (j < i) j = i;
     while (j + 1 < times.length && (times[j + 1] ?? 0) - from < span) j++;
     const n = j - i + 1;
-    if (n > best.max) best = { max: n, at: from };
+    // The window's own times go into a failure's details: they tell render lag from a governor bug.
+    if (n > best.max) best = { max: n, at: from, times: times.slice(i, j + 1).map(Math.round) };
   }
   return best;
 }

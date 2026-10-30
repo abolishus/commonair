@@ -53,13 +53,19 @@ describe("maxNewRowsPerWindow", () => {
   test("a sliding one-second window over the recorded times", () => {
     // The governor's pattern: 3 rows at one tick, the next 3 a second later.
     const steady = [row("a", 100), row("b", 101), row("c", 102), row("d", 1_100), row("e", 1_101), row("f", 1_102)];
-    expect(maxNewRowsPerWindow(steady, new Set())).toEqual({ max: 3, at: 100 });
+    expect(maxNewRowsPerWindow(steady, new Set())).toEqual({ max: 3, at: 100, times: [100, 101, 102] });
     // One batch rendered late by less than the tolerance still reads as separate seconds.
     const late = [row("a", 130), row("b", 131), row("c", 132), row("d", 1_100)];
     expect(maxNewRowsPerWindow(late, new Set()).max).toBe(3);
+    // CI: a batch committed ~300 ms late next to an on-time one is still two seconds of rows.
+    const lagged = [row("a", 300), row("b", 301), row("c", 302), row("d", 1_000), row("e", 1_001), row("f", 1_002)];
+    expect(maxNewRowsPerWindow(lagged, new Set()).max).toBe(3);
+    // A governor with no window at all (every 250 ms tick admits 3) is caught.
+    const unlimited = [0, 250, 500, 750].flatMap((t) => [row(`a${t}`, t), row(`b${t}`, t), row(`c${t}`, t)]);
+    expect(maxNewRowsPerWindow(unlimited, new Set()).max).toBeGreaterThan(3);
     // A real overflow inside the window is caught wherever it starts.
-    const over = [row("a", 0), row("b", 400), row("c", 500), row("d", 600), row("e", 2_000)];
-    expect(maxNewRowsPerWindow(over, new Set())).toEqual({ max: 4, at: 0 });
+    const over = [row("a", 0), row("b", 300), row("c", 400), row("d", 500), row("e", 2_000)];
+    expect(maxNewRowsPerWindow(over, new Set())).toEqual({ max: 4, at: 0, times: [0, 300, 400, 500] });
     expect(maxNewRowsPerWindow([row("a", 1_000 - RENDER_TOLERANCE_MS - 1), row("b", 0)], new Set()).max).toBe(2);
   });
 
@@ -67,7 +73,7 @@ describe("maxNewRowsPerWindow", () => {
     const burst = [row("a", 0), row("b", 0), row("c", 0), row("m", 1)];
     expect(maxNewRowsPerWindow(burst, new Set()).max).toBe(4);
     expect(maxNewRowsPerWindow(burst, new Set(["m"])).max).toBe(3);
-    expect(maxNewRowsPerWindow([], new Set())).toEqual({ max: 0, at: 0 });
+    expect(maxNewRowsPerWindow([], new Set())).toEqual({ max: 0, at: 0, times: [] });
   });
 });
 
