@@ -58,7 +58,7 @@ describe("pickRenditions", () => {
 describe("the channel URL with diagnostics", () => {
   it("carries targetLatency and rendition as the player reads them", () => {
     expect(W1_ROUTES.channel("river", { targetLatency: FORCED_LATENCIES.far, rendition: "480p" })).toBe(
-      "/river?targetLatency=12&rendition=480p",
+      "/river?targetLatency=9&rendition=480p",
     );
   });
 });
@@ -66,7 +66,7 @@ describe("the channel URL with diagnostics", () => {
 describe("checkReplay", () => {
   const T0 = Date.parse("2026-10-30T12:00:00.000Z");
   const iso = (ms: number) => new Date(ms).toISOString();
-  // The near viewer (3 s) sent first, the far viewer (12 s) a second later: far's moment is earlier.
+  // The near viewer (3 s) sent first, the far viewer (9 s) a second later: far's moment is earlier.
   const sent: SentMarker[] = [
     { label: "near", marker: "m-near", mediaTs: iso(T0) },
     { label: "far", marker: "m-far", mediaTs: iso(T0 - 8_000) },

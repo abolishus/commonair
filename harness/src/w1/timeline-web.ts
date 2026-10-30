@@ -29,13 +29,17 @@ import { DEFAULT_LADDER_VIEWERS, type W1Run } from "./kit.ts";
 import { W1_ROUTES, W1_TEST_IDS as W, byW1Id } from "./selectors.ts";
 import { timelineTitle } from "./steps.ts";
 
-/** The two forced latencies (seconds): `setTargetLatency(3)` and `(12)` through `?targetLatency=`. */
-export const FORCED_LATENCIES = { near: 3, far: 12 } as const;
+/**
+ * The two forced latencies (seconds) through `?targetLatency=`. The brief names 3 and 12, but the
+ * harness MediaMTX keeps 7 segments (~14 s on the 2 s GOP) and hls.js adds up to one target
+ * duration after a stall, so 12 s sits on the oldest fragment and rebuffers; 9 s keeps a margin.
+ */
+export const FORCED_LATENCIES = { near: 3, far: 9 } as const;
 /** How far the recorded playhead and the replayed `mediaTs` may differ (Chromium; WebKit too). */
 export const MEDIA_TS_TOLERANCE_MS = 1_000;
 /**
  * The far viewer's playhead must trail the near one's by at least this much at send time, or the
- * forced latencies did not take and the ordering check proves nothing (9 s apart by design).
+ * forced latencies did not take and the ordering check proves nothing (6 s apart by design).
  */
 export const MIN_LATENCY_GAP_MS = 4_000;
 

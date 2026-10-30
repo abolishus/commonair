@@ -259,7 +259,8 @@ export class PlayerController {
    * Hold the playhead `seconds` behind the live edge (clamped to `TARGET_LATENCY_RANGE`): hls.js
    * `liveSyncDuration` for this session, replacing `liveSyncDurationCount`, and a step to the new
    * sync position once one is known. Returns the value applied. Native HLS exposes no target, so
-   * it changes nothing and returns the current latency (NaN while unknown).
+   * it changes nothing and returns the current latency (NaN while unknown). Before `start()` the
+   * path is not decided yet: the value is stored and returned, and applies only if hls.js attaches.
    */
   setTargetLatency(seconds: number): number {
     if (this.native) return this.latencySeconds() ?? Number.NaN;
