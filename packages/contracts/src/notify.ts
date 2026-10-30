@@ -3,6 +3,7 @@
 
 /** Go-live notifications, web push and the Discord adapter (N1, ADR 0028): shared rules and payloads. */
 import { z } from "zod";
+import { Slug } from "./api/common.ts";
 import type { NotifyMedium, PREFERENCE_TYPES } from "./enums.ts";
 
 export const NOTIFY_RULES = {
@@ -44,7 +45,7 @@ export const NOTIFY_DEFAULTS: Readonly<
  */
 export const GoLiveNotificationPayload = z.object({
   channelId: z.uuid(),
-  slug: z.string(),
+  slug: Slug,
   broadcastId: z.uuid(),
   title: z.string().max(140),
 });

@@ -4,7 +4,6 @@
 /** `notifications` step selection (harness/src/n1/run.ts) and the step modules' contract. */
 import { describe, expect, test } from "vite-plus/test";
 import { step as cooldown } from "../../src/n1/cooldown.ts";
-import { decryptPushBody, newHarnessSubscription, verifyVapidAuthorization } from "../../src/n1/ece.ts";
 import { step as email } from "../../src/n1/email.ts";
 import { step as inapp } from "../../src/n1/inapp.ts";
 import { step as inbox } from "../../src/n1/inbox.ts";
@@ -87,11 +86,11 @@ describe("planN1Steps", () => {
     });
   });
 
-  test("today every step is pending, so all runs nothing", () => {
-    expect([...PENDING_N1_STEPS]).toEqual([...N1_STEP_NUMBERS]);
+  test("every unit has merged, so all runs every step", () => {
+    expect([...PENDING_N1_STEPS]).toEqual([]);
     const plan = planN1Steps(parseN1Steps("all"), MODULES, "web");
-    expect(plan.run).toEqual([]);
-    expect(plan.skipped).toHaveLength(7);
+    expect(plan.run).toEqual([...N1_STEP_NUMBERS]);
+    expect(plan.skipped).toEqual([]);
   });
 });
 
@@ -119,11 +118,5 @@ describe("step modules", () => {
       const m = MODULES[n];
       await expect(m.run({} as never)).rejects.toThrow(`${m.owner} not merged`);
     }
-  });
-
-  test("the ece stub keeps its final signatures until N1-push fills it", async () => {
-    await expect(newHarnessSubscription("http://h/push/a")).rejects.toThrow("N1-push not merged");
-    await expect(decryptPushBody(new Uint8Array(), {} as never)).rejects.toThrow("N1-push not merged");
-    await expect(verifyVapidAuthorization("vapid", "http://h/push/a", "k", 0)).rejects.toThrow("N1-push not merged");
   });
 });

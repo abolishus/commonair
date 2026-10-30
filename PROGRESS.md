@@ -46,9 +46,22 @@ the list only inside `end`; the message menu carries `data-moderation` so e2e-so
 moderator menus; the flood check allows one governor tick (250 ms) of render lag;
 `signInViaUi` retries the `auth` bucket's "Too many attempts" for up to its window (scenarios in a
 shard share an address). `timeline-sync` and `surge-guard` stay `inFull: false` until the
-milestone wiring, so their steps have not run in CI yet. **Next:** wave 2 (W1-data-mode, N1-fanout,
-N1-email, N1-push, N1-inbox, N1-pwa) once CI is green; W1-data-mode takes over the player files
-with the "Player seam" text in `docs/testing/w1-selectors.md`.
+milestone wiring, so their steps have not run in CI yet. **Wave 2 merged** (W1-data-mode,
+N1-fanout, N1-email, N1-push, N1-inbox, N1-pwa). Contract requests applied: every N1 step and the
+`data-mode` W1 extension lifted from the pending lists; the one-click unsubscribe route test
+expects GET 303 / forged POST 400; `GoLiveNotificationPayload.slug` is a contract `Slug`;
+`PushToggle` `onPushOn` makes the settings page reread the go-live push default; the sign-out menu
+item carries `nav-signout` (`UserMenuItem.testId`); ADR 0018 Amendment 1 (LL-HLS stripped for `dm`
+tokens, the 256 kbit/s harness throttle, embeds ignore the saved choice, the mid-session switch
+limitation) and ADR 0028 Amendment 2 (`userVisibleOnly`, duplicate pushes, push title with in-app
+off); the overhead-factor comment; selectors docs and the data-mode docs row. Declined, with
+reasons in the ADRs or here: a durable push dedupe marker (it would block the job's own retries;
+the tag replaces a duplicate), a title on `PushJob` (the push job already builds it), `authSecret`
+on `WorkerContext` (the digest uses the same secret through `ctx.webhooks`; cosmetic), push
+`status` `thisBrowser` (optional). Follow-ups, not scheduled: judge only the origin stretch of a
+session moved there by data mode (ADR 0018 Amendment 1 item 4); the n1 selectors check in
+`apps/web/tests/selectors.test.ts` after N1-discord. **Next:** wave 3 (N1-discord) once CI is
+green, then the milestone wiring.
 
 Planning (2026-10-30): briefs,
 both contract-step docs and ADR 0036 (payment fraud floor) are on main (`e8fc926`); the decisions

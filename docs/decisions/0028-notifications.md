@@ -304,3 +304,18 @@ drafts, and the privacy bump asks members to accept again.
    go-live notifications; `notify-prune` deletes notifications older than 90 days and read
    `go_live` rows older than 30 days; push sends use a generalized pinned POST
    (`postPinned`) instead of the EventSub `postWebhook`, which stays a wrapper.
+
+## Amendment 2 (N1 wave 2, 2026-10-30)
+
+Recorded by the orchestrator when N1-push and N1-pwa merged.
+
+1. **Decision 7 (`userVisibleOnly: true`):** a push the service worker rejects as invalid shows no
+   notification, so Chromium may show its own generic one and, after repeated silent pushes, revoke
+   the permission. Accepted: only the instance's worker sends pushes, and it never sends invalid
+   ones.
+2. **Duplicate pushes:** push job ids dedupe only while BullMQ still holds the job, so a full
+   re-run of the same go-live event (outbox redelivery, a stalled fan-out page) can send a push
+   twice. Not deduplicated further: a durable marker would also block the job's own retries, and
+   the service worker's per-channel tag makes the second notification replace the first.
+3. **Push title with in-app off:** the push job builds the payload from the broadcast with the
+   same mature rule when the member has no in-app `go_live` row, so `PushJob` carries no title.

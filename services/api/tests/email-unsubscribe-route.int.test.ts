@@ -3,7 +3,7 @@
 
 /**
  * The RFC 8058 one-click route (N1, ADR 0028) is a raw route ahead of the oRPC handler: GET and
- * POST reach `emailUnsubscribe` (501 until N1-email), with no session, origin or CORS involved.
+ * POST reach `emailUnsubscribe` (GET 303, POST applies), with no session, origin or CORS involved.
  */
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { EMAIL_UNSUBSCRIBE_PATH } from "@commonair/contracts/notify";
@@ -28,8 +28,8 @@ test.each(["GET", "POST"])("%s reaches the one-click handler, not the oRPC handl
         }
       : {}),
   });
-  expect(res.status).toBe(501);
-  expect(await res.text()).toBe("");
+  // GET redirects to the confirm page; this POST's token is forged.
+  expect(res.status).toBe(method === "GET" ? 303 : 400);
   expect(res.headers.get("access-control-allow-origin")).toBeNull();
 });
 

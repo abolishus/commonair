@@ -11,6 +11,15 @@ import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { NotificationBell } from "../src/components/notifications/bell.tsx";
 import { NotificationSettings } from "../src/components/notifications/settings.tsx";
+
+// The real switch needs a browser's push stack; this one only reports "turned on".
+vi.mock("../src/components/pwa/push-toggle.tsx", () => ({
+  PushToggle: ({ onPushOn }: { onPushOn?: () => void }) => (
+    <button type="button" data-testid="fake-push-on" onClick={() => onPushOn?.()}>
+      push on
+    </button>
+  ),
+}));
 import { en } from "../src/i18n/en.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 import type {
@@ -267,6 +276,7 @@ const follow = (slug: string, notify = true): FollowDto => ({
 });
 
 interface SettingsFixture extends SettingsClient {
+  preferences: ReturnType<typeof vi.fn<() => Promise<NotificationPreferencesDto>>>;
   setPreference: ReturnType<typeof vi.fn<(input: SetPreferenceInput) => Promise<NotificationPreferencesDto>>>;
   setBell: ReturnType<typeof vi.fn<(channel: string, notify: boolean) => Promise<void>>>;
 }
@@ -317,6 +327,22 @@ describe("NotificationSettings", () => {
     await waitFor(() =>
       expect(client.setPreference).toHaveBeenCalledWith({ medium: "email", channel: null, enabled: true }),
     );
+  });
+
+  it("turning browser push on rereads the go-live push default", async () => {
+    const client = settings(prefsFixture());
+    wrap(<NotificationSettings client={client} />);
+    await loaded();
+    expect(byId("notify-default-push")?.getAttribute("data-state")).toBe("off");
+    client.preferences.mockResolvedValue(
+      prefsFixture({
+        defaults: { in_app: true, email: false, push: true },
+        builtIn: { in_app: true, email: true, push: false },
+      }),
+    );
+    fireEvent.click(byId("fake-push-on") as HTMLElement);
+    await waitFor(() => expect(byId("notify-default-push")?.getAttribute("data-state")).toBe("on"));
+    expect(byId("notify-default-push")?.getAttribute("data-builtin")).toBe("false");
   });
 
   it("a default switch is optimistic: on at once, then the server's answer", async () => {

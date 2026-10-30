@@ -77,8 +77,15 @@ describe("payloads", () => {
   });
 
   test("GoLiveNotificationPayload allows the empty mature title", () => {
-    const p = { channelId: id(1), slug: "s", broadcastId: id(2), title: "" };
+    const p = { channelId: id(1), slug: "ann_live", broadcastId: id(2), title: "" };
     expect(GoLiveNotificationPayload.parse(p)).toEqual(p);
+  });
+
+  test("GoLiveNotificationPayload refuses a slug that is not a channel slug", () => {
+    for (const slug of ["", "s", "Ann", "../x", "a".repeat(26)])
+      expect(
+        GoLiveNotificationPayload.safeParse({ channelId: id(1), slug, broadcastId: id(2), title: "" }).success,
+      ).toBe(false);
   });
 
   test("defaults and rules", () => {

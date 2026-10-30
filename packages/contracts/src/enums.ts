@@ -435,7 +435,11 @@ export const FRAUD_REVIEW_HOLD = "fraud_review";
  * claim's [32 000, 8 000 000] bit/s.
  */
 export const DATA_MODE = {
-  /** fMP4 boxes, LL-HLS part and playlist polling on top of the media bitrate (measured by W1-data-mode). */
+  /**
+   * fMP4 boxes and one playlist reload per segment on top of the media bitrate (the origin strips
+   * LL-HLS for `dm` tokens). Measured by W1-data-mode: about 1.16 for the 96k audio rung on 2 s
+   * segments, 1.32 on 1 s, about 1.02 for video.
+   */
   overheadFactor: 1.15,
   minCeilingBps: 32_000,
   maxCeilingBps: 8_000_000,

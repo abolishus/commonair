@@ -15,6 +15,7 @@ written yet.
 | [operators/payment-fraud-review.md](operators/payment-fraud-review.md) | Payment fraud review: flags, four eyes, confirming, the admin release |
 | [viewers/](viewers/)                                                   | Guides for viewers                                                    |
 | [viewers/payment-breakdown.md](viewers/payment-breakdown.md)           | Where your payment goes: the breakdown, fee schedule and estimate     |
+| [viewers/data-mode.md](viewers/data-mode.md)                           | Data saver: the budget, the audio-only floor and the meter            |
 | [viewers/calm-chat.md](viewers/calm-chat.md)                           | Calm Chat and blocking users                                          |
 | [streamers/chat-replay.md](streamers/chat-replay.md)                   | Chat replay and how long chat is kept                                 |
 | [streamers/verified-watch-gate.md](streamers/verified-watch-gate.md)   | The verified-watch gate and the surge guard                           |

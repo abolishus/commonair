@@ -49,7 +49,7 @@ export type W1Extension<S extends W1ExtendedScenario = W1ExtendedScenario> = (ty
  */
 export const PENDING_TIMELINE_STEPS: readonly TimelineStep[] = [];
 export const PENDING_SURGE_STEPS: readonly SurgeStep[] = [];
-export const PENDING_W1_EXTENSIONS: readonly W1Extension[] = ["data-mode"];
+export const PENDING_W1_EXTENSIONS: readonly W1Extension[] = [];
 
 /** No W1 step needs another: each sets up its own channel, viewers and messages. */
 export const TIMELINE_STEP_PREREQUISITES: Readonly<Record<TimelineStep, readonly TimelineStep[]>> = {

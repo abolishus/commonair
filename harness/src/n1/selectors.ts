@@ -20,6 +20,7 @@ export const N1_TEST_IDS = {
   empty: "notification-empty",
   settingsLink: "notification-settings-link",
   accountLink: "account-notifications-link",
+  signOut: "nav-signout",
   // Settings
   defaultInApp: "notify-default-in_app",
   defaultEmail: "notify-default-email",

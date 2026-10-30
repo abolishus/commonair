@@ -105,7 +105,9 @@ their ids and show `data-hold-reason`.
 
 `data-mode-toggle` (`data-state`), `data-mode-budget` with options `data-mode-budget-50`,
 `data-mode-budget-800`, `data-mode-budget-1900` and `data-mode-budget-custom`, `data-usage`
-(`data-bytes`, `data-mb-per-hour`), `data-mode-estimate` (`data-mb-per-hour`), `data-mode-notice`
+(`data-bytes`, `data-mb-per-hour`; `data-unknown="true"` instead when native HLS reports no bytes)
+and `data-mode-estimate` (`data-mb-per-hour`), both shown while data saver is on and the player is
+playing (never in embeds), `data-mode-notice`
 (`data-reason` `native-reload|dvr|vod`). The `player` element gains `data-data-mode` (the ceiling
 in bit/s, empty when off).
 

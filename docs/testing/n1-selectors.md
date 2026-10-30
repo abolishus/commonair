@@ -46,6 +46,7 @@ checks them against this file.
 | `notification-empty`         | Shown instead of the list when there is nothing                                                 |
 | `notification-settings-link` | Link to `/settings/notifications`                                                               |
 | `account-notifications-link` | The account menu's entry for `/settings/notifications`                                          |
+| `nav-signout`                | The account menu's sign-out entry (step 7 signs out to drop the subscription)                   |
 
 ### Settings (`/settings/notifications`)
 
@@ -137,6 +138,8 @@ checks them against this file.
    `ServiceWorker.deliverPushMessage` with a `PushPayload` shows one notification
    (`registration.getNotifications()`) whose title contains the slug and whose `data.url` is
    `/<slug>` (the click handler is unit-tested; headless Chromium cannot click a notification).
+   The PWA steps run Chromium's new headless mode with a persistent profile
+   (`channel: "chromium"`, which `playwright install chromium` provides).
 7. **Push from the browser** (N1-pwa; web only; harness need `webPush`; needs 4 and 6): with
    `PushManager.subscribe` stubbed to return a harness subscription and the `notifications`
    permission granted, `push-toggle` goes `off` → `on`, `push.status().subscriptions` is 1, the

@@ -72,7 +72,7 @@ export type N1StepNumber = (typeof N1_STEP_NUMBERS)[number];
  * Steps whose implementing unit has not merged yet: reported pending and skipped under `all`, but
  * run when named (`--set steps=4`), so a unit can try its step on a live stack.
  */
-export const PENDING_N1_STEPS: readonly N1StepNumber[] = [1, 2, 3, 4, 5, 6, 7];
+export const PENDING_N1_STEPS: readonly N1StepNumber[] = [];
 
 /** What every step module exports as `step` (the owning unit implements `run`). */
 export interface N1Step {

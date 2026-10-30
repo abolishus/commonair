@@ -209,3 +209,25 @@ The maintainer accepted the recommended answers.
 5. Head-agent calls recorded for review: `dm` is a ceiling in bits per second, data-mode sessions
    are origin-only, the origin filters the multivariant playlist, and integrity needs no per-mode
    bounds because it judges object counts, not bytes.
+
+## Amendment 1 (W1-data-mode, 2026-10-30)
+
+Recorded by the orchestrator when W1-data-mode merged.
+
+1. **Decision 5:** for `dm` tokens the origin also strips the LL-HLS layer (parts, preload hints,
+   rendition reports, `EXT-X-PART-INF`, `EXT-X-SERVER-CONTROL`) from media playlists. A
+   token-carrying playlist polled once per part costs several times the audio bitrate (W1-data-mode
+   measured about 363 kbit/s of playlists alone); stripped, one reload per segment puts the 96k
+   audio rung at about 1.16× on 2 s segments (1.32× on 1 s) and video near 1.02×, so the 1.15
+   overhead factor stays. Data-mode viewers sit a few seconds further behind live.
+2. **Decision 8:** the harness check is a Chromium viewer throttled to 256 kbit/s (above the
+   96–192 kbit/s audio renditions; 64 kbit/s cannot carry any of them, and the viewer would fail
+   the interim watch ratio) and an unthrottled WebKit viewer, both on audio-only, staying verified.
+   CDP cannot shape WebKit and the harness proxy has no bandwidth shaping.
+3. **Embeds** never apply the site's saved choice and have no data-saver panel.
+4. **Known limitation:** a session moved to the origin by turning data mode on mid-session is then
+   judged by `fetch_pattern` against origin fetches for its whole `watchSeconds`, so a long CDN or
+   relay stretch before the switch can leave an honest viewer `too_few_segments` /
+   `media_unconfirmed`. Follow-up (not scheduled): record the switch point
+   (`playback_sessions.origin_since_watch_seconds`, set by the heartbeat's `switchTo`) and judge
+   only the origin stretch against origin fetches.

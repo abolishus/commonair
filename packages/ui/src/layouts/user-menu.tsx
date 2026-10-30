@@ -21,6 +21,7 @@ export interface UserMenuItem {
   onSelect?: () => void;
   destructive?: boolean;
   separatorBefore?: boolean;
+  testId?: string;
 }
 export interface UserMenuProps extends React.ComponentProps<"div"> {
   username: string;
@@ -44,6 +45,7 @@ export function UserMenu({ username, avatar, menuLabel, items, ...props }: UserM
                 render={item.render ?? (item.href ? <a href={item.href}>{item.label}</a> : undefined)}
                 onClick={item.onSelect}
                 variant={item.destructive ? "destructive" : "default"}
+                data-testid={item.testId}
               >
                 {item.icon}
                 {item.label}

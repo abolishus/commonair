@@ -151,6 +151,7 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         id: entry.id,
         label: t("nav.signOut"),
         icon: icon(Logout03Icon),
+        testId: "nav-signout",
         onSelect: () => void onSignOut(),
         destructive: entry.destructive,
         separatorBefore: entry.separatorBefore,

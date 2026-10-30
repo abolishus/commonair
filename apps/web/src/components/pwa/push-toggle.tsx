@@ -11,9 +11,10 @@ import { type PushEnv, type PushState, browserPushEnv, readPushState, turnPushOf
 /**
  * The browser push switch on the notification settings page (N1-inbox mounts it). `data-state`
  * is the push state (docs/testing/n1-selectors.md); with push off on the instance it renders
- * nothing. Permission is only asked when the member turns it on.
+ * nothing. Permission is only asked when the member turns it on. Turning it on can also turn the
+ * go-live push default on (ADR 0028 Amendment 1 item 6), so `onPushOn` lets the page reread it.
  */
-export function PushToggle({ env }: { env?: PushEnv } = {}): React.JSX.Element | null {
+export function PushToggle({ env, onPushOn }: { env?: PushEnv; onPushOn?: () => void } = {}): React.JSX.Element | null {
   const id = React.useId();
   const [state, setState] = React.useState<PushState>("busy");
   const [pushEnv] = React.useState(() => env ?? browserPushEnv());
@@ -39,8 +40,10 @@ export function PushToggle({ env }: { env?: PushEnv } = {}): React.JSX.Element |
     try {
       const next = on ? await turnPushOn(pushEnv) : await turnPushOff(pushEnv);
       setState(next);
-      if (next === "on") toast.success(t("push.toast.on"));
-      else if (next === "off" && !on) toast.success(t("push.toast.off"));
+      if (next === "on") {
+        toast.success(t("push.toast.on"));
+        onPushOn?.();
+      } else if (next === "off" && !on) toast.success(t("push.toast.off"));
     } catch {
       toast.error(on ? t("push.error.on") : t("push.error.off"));
       await refresh();

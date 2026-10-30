@@ -75,6 +75,20 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
     };
   }, [client]);
 
+  // Turning browser push on may also have turned the go-live push default on, outside this page.
+  const adoptPushDefault = React.useCallback(async () => {
+    const cell = ":push";
+    const mine = (seq.current.get(cell) ?? 0) + 1;
+    seq.current.set(cell, mine);
+    try {
+      const answer = await client.preferences();
+      if (seq.current.get(cell) === mine)
+        setPrefs((p) => (p ? copyPreferenceCell(p, answer, { medium: "push", channel: null }) : p));
+    } catch {
+      // The switch already reports push itself; the default shows its last known state.
+    }
+  }, [client]);
+
   const change = React.useCallback(
     async (input: SetPreferenceInput, channel?: { id: string; slug: string; displayName: string }) => {
       const cell = `${input.channel ?? ""}:${input.medium}`;
@@ -115,7 +129,7 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
         <h2 id="notify-push-title" className="text-base font-medium">
           {t("notifySettings.push.title")}
         </h2>
-        <PushToggle />
+        <PushToggle onPushOn={() => void adoptPushDefault()} />
       </section>
       <ChannelsSection client={client} prefs={prefs} onChange={(input, channel) => void change(input, channel)} />
     </div>

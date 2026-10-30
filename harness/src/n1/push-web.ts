@@ -86,8 +86,8 @@ export function goLivePushProblems(plaintext: string, slug: string): string[] {
   return problems;
 }
 
-/** The account menu's sign-out entry: the menu's only destructive item (it has no test id). */
-export const SIGN_OUT_ITEM = '[role="menuitem"][data-variant="destructive"]';
+/** The account menu's sign-out entry. */
+export const SIGN_OUT_ITEM = `[data-testid="${N1_TEST_IDS.signOut}"]`;
 
 async function toggleState(page: Page): Promise<string | null> {
   return byN1Id(page, N1_TEST_IDS.pushToggle).first().getAttribute("data-state", { timeout: UI_TIMEOUT_MS });
