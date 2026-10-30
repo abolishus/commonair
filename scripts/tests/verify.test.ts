@@ -153,11 +153,22 @@ describe("CI verify jobs", () => {
   });
 
   // A dispatch on a branch is how a harness fix is proven before main; it ran nothing before.
-  test("harness runs on main, nightly and a manual dispatch, never on a pull request", () => {
+  test("harness runs on main, nightly and a manual dispatch, never on a pull request; a docs-only push skips it", () => {
     expect(ci.jobs.harness.if).toBe(
-      "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || " +
-        "(github.event_name == 'push' && github.ref == 'refs/heads/main')",
+      "(github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || " +
+        "(github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.changes.outputs.code == 'true'",
     );
+    expect(ci.jobs.harness.needs).toBe("changes");
+  });
+
+  test("the release dry run and the self-host test run only when something they build or install changed", () => {
+    for (const job of [ci.jobs["release-dry-run"], ci.jobs["selfhost-e2e"]]) {
+      expect(job.needs).toBe("changes");
+      expect(job.if).toBe("github.event_name != 'pull_request' && needs.changes.outputs.deploy == 'true'");
+    }
+    expect(ci.jobs.changes.steps.at(-1).run).toContain("bun scripts/ci-changes.ts");
+    expect(ci.jobs.changes.steps.at(-1).run).toContain("--status success");
+    expect(ci.jobs["ci-ok"].needs).toContain("changes");
   });
 
   test("compose groups pin podman compose to podman-compose, not the runner's docker-compose plugin", () => {

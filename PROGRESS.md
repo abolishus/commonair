@@ -63,6 +63,13 @@ header vs `reuse lint` (`585f5d0`); the e9-subs app-limit test left 10,000 rows 
 later list test paged through them past the timeout (`1b0d749`); `developer-platform` step 2
 replayed inside the 2 s refresh reuse grace (`aee8112`). CI green on `dbe2723` (contract steps).
 
+**CI selection (2026-10-29, user):** a `changes` job (`scripts/ci-changes.ts`) diffs a push against
+the last green `ci` run on main. Docs- and brief-only pushes skip the harness shards; the release
+dry run and the three self-host e2e jobs run only when images, the installer, release tooling,
+compose, workflows, lockfiles, migrations or `.env.example` change. The gate always runs; the
+nightly run and a dispatch run everything. Next step if wanted: map changed paths to harness
+scenarios.
+
 **Open (batch 3):**
 
 - First live runs of `interact`, `channel-bot` and `developer-platform` are on CI now; none ran

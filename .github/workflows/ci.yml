@@ -4,7 +4,10 @@
 # Backstop CI: runs the same `bun run verify` used locally, one job per group of its steps. If it
 # goes red on main, fix main immediately. Pull requests run the gate; main, the nightly schedule
 # and a manual dispatch also run the full harness scenario, a release dry run (release.yml) and
-# the self-host end-to-end test. `ci-ok` is the one check branch protection requires.
+# the self-host end-to-end test. On a push to main, `changes` (scripts/ci-changes.ts) skips the
+# harness for a docs-only push and the release dry run and self-host test unless something they
+# build or install changed; the nightly run and a dispatch run everything. `ci-ok` is the one
+# check branch protection requires (skipped jobs count as passed).
 name: ci
 
 on:
@@ -30,6 +33,37 @@ env:
   GO_VERSION: "1.27.3"
 
 jobs:
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      # Reads the last green run on main, the base the diff is taken against.
+      actions: read
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      deploy: ${{ steps.classify.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      # Against the last green run, not `event.before`: a superseded (cancelled) push never ran,
+      # and its changes must still count. No green run yet, or none readable: everything runs.
+      - id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          BASE=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // ""' || true)
+          export BASE
+          bun scripts/ci-changes.ts
+
   lint-workflows:
     name: lint workflows
     runs-on: ubuntu-24.04
@@ -182,7 +216,8 @@ jobs:
     # shard of `full` (FULL_SHARDS in harness/src/shards.ts), each on its own stack, so the
     # scenario takes the longest shard's time, not the sum. Parallel to the verify groups.
     name: verify (harness ${{ matrix.shard }})
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: changes
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     permissions:
@@ -240,7 +275,8 @@ jobs:
 
   release-dry-run:
     name: release dry run
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.deploy == 'true'
     # The `$/` self-repository form is not understood by actionlint 1.7.12 or by our pin check
     # (scripts/supply-chain.ts exempts only `./`); `./` resolves to this same commit.
     uses: ./.github/workflows/release.yml # zizmor: ignore[self-repository]
@@ -256,7 +292,8 @@ jobs:
 
   selfhost-e2e:
     name: self-host e2e (${{ matrix.distro }}, ${{ matrix.storage }})
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
@@ -310,7 +347,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [lint-workflows, verify, harness, release-dry-run, selfhost-e2e]
+    needs: [changes, lint-workflows, verify, harness, release-dry-run, selfhost-e2e]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
