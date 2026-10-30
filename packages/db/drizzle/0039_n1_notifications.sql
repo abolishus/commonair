@@ -67,4 +67,5 @@ CREATE INDEX "push_subscriptions_user_idx" ON "push_subscriptions" USING btree (
 CREATE INDEX "follows_channel_notify_idx" ON "follows" USING btree ("channel_id","follower_id") WHERE "follows"."notify";--> statement-breakpoint
 CREATE UNIQUE INDEX "notifications_dedupe_uq" ON "notifications" USING btree ("user_id","dedupe_key") WHERE "notifications"."dedupe_key" is not null;--> statement-breakpoint
 CREATE INDEX "notifications_user_unread_idx" ON "notifications" USING btree ("user_id") WHERE "notifications"."read_at" is null;--> statement-breakpoint
-CREATE INDEX "notifications_created_idx" ON "notifications" USING btree ("created_at");
+CREATE INDEX "notifications_created_idx" ON "notifications" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "notifications_go_live_channel_idx" ON "notifications" USING btree (("payload"->>'channelId')) WHERE "notifications"."type" = 'go_live';

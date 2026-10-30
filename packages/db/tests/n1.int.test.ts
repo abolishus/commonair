@@ -6,7 +6,7 @@
  * and one override per channel per medium (nulls not distinct), go-live notifications dedupe per
  * user, and deleting a channel cascades its notification working state.
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test";
 import type { Database } from "../src/client.ts";
 import { uuidv7 } from "../src/ids.ts";
@@ -165,6 +165,29 @@ describe("notifications.dedupe_key", () => {
     ]);
     const rows = await app.select().from(s.notifications).where(eq(s.notifications.userId, u));
     expect(rows).toHaveLength(3);
+  });
+});
+
+describe("notifications_go_live_channel_idx", () => {
+  test("account deletion's go_live delete by channel can use the index, not a scan", async () => {
+    const [u, c] = [await newUser(), await newChannel()];
+    await app.insert(s.notifications).values([
+      { userId: u, type: "go_live", payload: { channelId: c } },
+      { userId: u, type: "system", payload: { channelId: c } },
+    ]);
+    const plan = await owner.transaction(async (tx) => {
+      await tx.execute(sql`set local enable_seqscan = off`);
+      const rows = await tx.execute<{ "QUERY PLAN": string }>(
+        sql`explain delete from notifications where type = 'go_live' and payload->>'channelId' = ${c}`,
+      );
+      return [...rows].map((r) => r["QUERY PLAN"]).join("\n");
+    });
+    expect(plan).toContain("notifications_go_live_channel_idx");
+    const gone = await app
+      .delete(s.notifications)
+      .where(sql`${s.notifications.type} = 'go_live' and ${s.notifications.payload}->>'channelId' = ${c}`)
+      .returning({ type: s.notifications.type });
+    expect(gone.map((r) => r.type)).toEqual(["go_live"]);
   });
 });
 

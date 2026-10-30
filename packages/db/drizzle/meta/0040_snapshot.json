@@ -1,6 +1,6 @@
 {
-  "id": "ef7978ad-2cc2-4094-8cc0-686d9da8210c",
-  "prevId": "1cf14b73-305f-43b2-8dbf-51946e108452",
+  "id": "9f959028-2660-4a53-be66-0e594ae19419",
+  "prevId": "b7886ef6-f495-4e73-88d1-0627212fabe4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1592,6 +1592,22 @@
           "isUnique": false,
           "with": {},
           "method": "btree",
+          "concurrently": false
+        },
+        "notifications_go_live_channel_idx": {
+          "name": "notifications_go_live_channel_idx",
+          "columns": [
+            {
+              "expression": "(\"payload\"->>'channelId')",
+              "isExpression": true,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"notifications\".\"type\" = 'go_live'",
           "concurrently": false
         }
       },

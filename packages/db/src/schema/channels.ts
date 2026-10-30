@@ -194,5 +194,9 @@ export const notifications = pgTable(
       .where(sql`${t.readAt} is null`),
     // The `notify-prune` job deletes by age in batches.
     index("notifications_created_idx").on(t.createdAt),
+    // Account deletion removes every follower's go_live rows about a deleted channel.
+    index("notifications_go_live_channel_idx")
+      .on(sql`(${t.payload}->>'channelId')`)
+      .where(sql`${t.type} = 'go_live'`),
   ],
 );
