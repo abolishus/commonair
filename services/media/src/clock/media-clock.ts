@@ -51,6 +51,13 @@ export interface SettlePolicy {
 export const DEFAULT_SETTLE: SettlePolicy = { pollMs: 1_000, waitMs: 45_000, acceptAfterMs: 120_000 };
 
 /**
+ * Read again every `pollMs` within one `w0()` call. A muxer restarting (`not_ready`) or with no
+ * complete segment yet (`playlist`) is seconds from ready: left to the supervisor's doubling
+ * backoff, a 10 s MediaMTX muxer restart cost a WHIP AAC copy 18 s before its first frame on CI.
+ */
+const POLLED: ReadonlySet<W0Error["reason"]> = new Set(["unsettled", "not_ready", "playlist"]);
+
+/**
  * A clock that never has W0 (tests and tools that do not care about the clock): readers that need
  * W0 cannot start, the recorder keeps raw times, or `anchor`'s offsets when one is given.
  */
@@ -94,19 +101,21 @@ export function createMediaClock(opts: MediaClockOptions): MediaClock {
         unsettledSince.delete(broadcastId);
         return r;
       } catch (err) {
-        if (!(err instanceof W0Error) || err.reason !== "unsettled") throw err;
-        const since = unsettledSince.get(broadcastId) ?? now();
-        unsettledSince.set(broadcastId, since);
-        if (now() - since >= settle.acceptAfterMs) {
-          const r = await read(path, false);
-          log.warn("W0 never settled; using the newest segment's", {
-            broadcastId,
-            consumer,
-            errorCode: "W0_UNSETTLED",
-            driftMs: r.settle ? Math.round(r.settle.driftMs) : null,
-            spanMs: r.settle ? Math.round(r.settle.spanMs) : null,
-          });
-          return r;
+        if (!(err instanceof W0Error) || !POLLED.has(err.reason)) throw err;
+        if (err.reason === "unsettled") {
+          const since = unsettledSince.get(broadcastId) ?? now();
+          unsettledSince.set(broadcastId, since);
+          if (now() - since >= settle.acceptAfterMs) {
+            const r = await read(path, false);
+            log.warn("W0 never settled; using the newest segment's", {
+              broadcastId,
+              consumer,
+              errorCode: "W0_UNSETTLED",
+              driftMs: r.settle ? Math.round(r.settle.driftMs) : null,
+              spanMs: r.settle ? Math.round(r.settle.spanMs) : null,
+            });
+            return r;
+          }
         }
         if (now() + settle.pollMs > deadline) throw err;
         await sleep(settle.pollMs);

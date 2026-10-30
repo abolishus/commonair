@@ -548,6 +548,19 @@ describe("fetchW0", () => {
     expect(r.sample.pdtMs).toBe(Date.parse("2026-10-28T00:53:49.377Z"));
   });
 
+  test("a playlist answering 500 or 503 is not ready; 404 and segment errors stay http", async () => {
+    for (const status of [500, 503]) {
+      const restarting = fake({ "/live/alice/index.m3u8": () => new Response("x", { status }) });
+      await expect(
+        fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: restarting.doFetch }),
+      ).rejects.toMatchObject({ reason: "not_ready" });
+    }
+    const segment = fake({ "/live/alice/x_video1_seg27.mp4": () => new Response("x", { status: 500 }) });
+    await expect(
+      fetchW0({ hlsBase: BASE, path: "live/alice", password: "p", fetch: segment.doFetch }),
+    ).rejects.toMatchObject({ reason: "http" });
+  });
+
   test("a reference segment that cannot be read fails the fetch (retried), never skips the check", async () => {
     const gone = fake({ "/live/alice/x_video1_seg26.mp4": () => new Response("gone", { status: 404 }) });
     await expect(
@@ -724,6 +737,50 @@ describe("media clock", () => {
     });
     await expect(down.w0("b1", "live/a", "ladder")).rejects.toMatchObject({ reason: "http" });
     expect(httpCalls).toBe(1);
+  });
+
+  test("a playlist that is not ready yet (muxer restarting, no segment) is polled every pollMs", async () => {
+    let t = 0;
+    const reasons: string[] = [];
+    const clock = createMediaClock({
+      hlsBase: "http://m",
+      password: "p",
+      logger: captureLogger().logger,
+      settle: { pollMs: 1_000, waitMs: 45_000, acceptAfterMs: 120_000 },
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms;
+      },
+      fetchW0: async () => {
+        // MediaMTX's 10 s muxer restart, then a playlist with no complete segment yet.
+        const reason = t < 10_000 ? "not_ready" : t < 12_000 ? "playlist" : null;
+        reasons.push(reason ?? "ok");
+        if (reason) throw new W0Error(`multivariant playlist of live/a: ${reason}`, reason);
+        return result(42);
+      },
+    });
+    expect(await clock.w0("b1", "live/a", "aac")).toBe(42);
+    // Ready at 12 s and read then: no 1-2-4-8 s backoff overshooting it.
+    expect(t).toBe(12_000);
+    expect(reasons.filter((r) => r === "not_ready")).toHaveLength(10);
+
+    // A path that stays not ready fails after waitMs, for the supervisor to retry.
+    const stuck = createMediaClock({
+      hlsBase: "http://m",
+      password: "p",
+      logger: captureLogger().logger,
+      settle: { pollMs: 1_000, waitMs: 5_000, acceptAfterMs: 1_000 },
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms;
+      },
+      fetchW0: async () => {
+        throw new W0Error("multivariant playlist of live/a: HTTP 500", "not_ready");
+      },
+    });
+    t = 0;
+    await expect(stuck.w0("b1", "live/a", "aac")).rejects.toMatchObject({ reason: "not_ready" });
+    expect(t).toBe(5_000);
   });
 
   test("one call waits at most waitMs; past acceptAfterMs unsettled, the newest W0 is taken with a warning", async () => {

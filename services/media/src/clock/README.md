@@ -304,6 +304,12 @@ recorder all go through it; the recorder still never waits on W0 (its fetch is i
 background). With the fix the first W0 was accepted at 25.6 s, 6 ms from the settled value, and
 the AAC copy started on it was **+5 ms** from the source on every segment.
 
+The same poll covers a playlist that is not ready yet: HTTP 500/503 while MediaMTX's muxer
+restarts (`W0Error("not_ready")`; MediaMTX waits 10 s after a muxer crash, e.g. a WHIP source
+whose first video arrived before its SPS) and no complete segment yet (`"playlist"`). Left to the
+supervisor's 1-2-4-8 s backoff, that 10 s restart once held a WHIP AAC copy, and with it the
+first frame of a viewer waiting for it, for 18 s on CI.
+
 **Cost.** The AAC copy of a WHIP broadcast starts ~25 s after publish instead of at once (live
 ~9 s after that); a ladder requested in that window waits the same way.
 

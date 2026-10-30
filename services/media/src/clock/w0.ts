@@ -49,7 +49,7 @@ const WRAP_REFUSE_FROM_SECONDS = PTS_WRAP_SECONDS - FFMPEG_WRAP_WINDOW_SECONDS -
 export class W0Error extends Error {
   constructor(
     message: string,
-    readonly reason: "timeout" | "http" | "too_large" | "playlist" | "segment" | "wrap" | "unsettled",
+    readonly reason: "timeout" | "http" | "not_ready" | "too_large" | "playlist" | "segment" | "wrap" | "unsettled",
   ) {
     super(message);
     this.name = "W0Error";
@@ -258,7 +258,10 @@ export async function fetchW0(opts: FetchW0Options): Promise<W0Result> {
       }
       if (!res.ok) {
         await res.body?.cancel();
-        throw new W0Error(`${what} of ${opts.path}: HTTP ${res.status}`, "http");
+        // MediaMTX answers a playlist with 500 while its muxer restarts (10 s after a crash, e.g.
+        // a WHIP source whose first video arrived before its SPS) and 503 while it starts.
+        const notReady = what.includes("playlist") && (res.status === 500 || res.status === 503);
+        throw new W0Error(`${what} of ${opts.path}: HTTP ${res.status}`, notReady ? "not_ready" : "http");
       }
       return readCapped(res, max, `${what} of ${opts.path}`);
     }
