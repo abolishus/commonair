@@ -120,7 +120,10 @@ describe("writeChatLatency", () => {
   test("runs at the end of each scoring pass", async () => {
     const live = await liveChannel();
     for (const ms of [6_000, 7_000, 8_000]) await session(live, ms);
-    const counts = await runScoring(ctx());
+    // The pass's clock a minute back, so scoring leaves these heartbeat-less fixtures alone (it only
+    // rescores sessions started by `now`) and the writer sees them verified, whatever the skew
+    // between this host and Postgres.
+    const counts = await runScoring({ ...ctx(), now: () => new Date(Date.now() - 60_000) });
     expect(counts.chatLatencyChannels).toBeGreaterThanOrEqual(1);
     expect(await ctx().valkey.get(KEYS.chatLatency(live.channelId))).toBe("7");
   });

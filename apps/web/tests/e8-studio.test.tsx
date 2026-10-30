@@ -578,7 +578,12 @@ describe("/interact: goals", () => {
     fireEvent.click(await screen.findByTestId("goal-end"));
     await screen.findByRole("alertdialog");
     expect(m.interact.goals.end).not.toHaveBeenCalled();
-    m.interact.goals.list.mockResolvedValue([goal({ endedAt: "2026-10-29T11:00:00.000Z" })]);
+    // The list shows the goal ended only once `end` ran, so a background refetch cannot pass early.
+    m.interact.goals.end.mockImplementation(async (input: { id: string }) => {
+      const ended = goal({ id: input.id, endedAt: "2026-10-29T11:00:00.000Z" });
+      m.interact.goals.list.mockResolvedValue([ended]);
+      return ended;
+    });
     await confirm();
     await waitFor(() => expect(screen.getByTestId("goal-row").dataset.ended).toBe("true"));
     expect(m.interact.goals.end).toHaveBeenCalledWith({ channel: "ann", id: goal().id });
