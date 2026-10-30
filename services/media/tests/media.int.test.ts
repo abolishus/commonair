@@ -451,8 +451,13 @@ describe("media pipeline", () => {
       .from(schema.broadcasts)
       .where(eq(schema.broadcasts.id, broadcastId));
     expect(b?.t).toBe(false);
-    const last = busEvents.filter((e) => e.type === "renditions").pop();
-    expect(last?.type === "renditions" ? last.renditions : null).toEqual(["source"]);
+    // The bus event follows the Valkey and database writes; wait for it rather than read it at once.
+    const lastRenditions = () => {
+      const last = busEvents.filter((e) => e.type === "renditions").pop();
+      return last?.type === "renditions" ? last.renditions : null;
+    };
+    await waitFor("source-only renditions published", async () => lastRenditions()?.join() === "source");
+    expect(lastRenditions()).toEqual(["source"]);
   }, 90_000);
 
   test("VOD recording uploads segments and the playlist while live", async () => {
