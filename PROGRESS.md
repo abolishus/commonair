@@ -22,6 +22,16 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), planned 2026-10-30, not started.** Briefs,
+both contract-step docs and ADR 0036 (payment fraud floor) are on main (`e8fc926`); the decisions
+table in the batch4 README is final (user: ADR 0036 with confirmed flags holding payouts until an
+admin releases the payee, data-mode presets 50/800/1900 MB/h, watch gate ships off with CDN
+fetch-judging owned by S1 stage 4, W1 and N1 legal drafts land with re-acceptance). **Next:** land
+the W1 contract step (migrations 0037–0038), then N1's (0039–0040), each implement → review → fix
+on main; then wave 1 (six W1 units), wave 2 (W1-data-mode + five N1 units), wave 3 (N1-discord).
+After the N1 step, the user runs `bun scripts/init-env.ts --merge` (VAPID keys) before a local
+harness stack.
+
 **Batch 3 (E8 + E9 + N2-core + N2-consent; `.claude/briefs/batch3/README.md`), started 2026-10-29, done 2026-10-30 (CI green on `d51c084`).**
 Contract steps land in order, one commit each: E8 (`feat(e8): contract step`: migrations
 `0033_e8_interactivity` and `0034_e8_protections`, `packages/interact`, the `PluginHost`
