@@ -29,6 +29,7 @@ import { Input } from "@commonair/ui/components/input";
 import { Textarea } from "@commonair/ui/components/textarea";
 import { toast } from "@commonair/ui/toast";
 import { Invoice01Icon, MoneyReceive01Icon } from "@hugeicons/core-free-icons";
+import { FRAUD_REVIEW_HOLD } from "@commonair/contracts/enums";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
@@ -50,6 +51,8 @@ import {
   type TreasurerPaymentDto,
   type TreasurerPayoutDto,
 } from "../../lib/money.ts";
+import type { TreasuryCoopTab, TreasuryPanels } from "../coop/treasury.tsx";
+import { fraudHoldLabel } from "./fraud-review.tsx";
 
 /**
  * `/treasury` pieces. Each takes its data and actions as props (the route wires them to
@@ -98,6 +101,81 @@ export function TreasuryTabs({ value, onValueChange, ...panels }: TreasuryTabsPr
           content: panel("accounts"),
         },
         { id: "costs", label: t("treasury.tab.costs"), "data-testid": "treasury-tab-costs", content: panel("costs") },
+      ]}
+    />
+  );
+}
+
+/** A payout's hold reason in words; a fraud hold (ADR 0036) reads as one. */
+export function payoutHoldLabel(reason: string): string {
+  return reason === FRAUD_REVIEW_HOLD ? fraudHoldLabel() : holdReasonLabel(reason);
+}
+
+// ── Every treasury tab (E4b, E5 and the W1 fraud review) ──────────────────────────────────────
+
+export type TreasuryPageTab = TreasuryCoopTab | "fraud";
+const PAGE_TABS: readonly TreasuryPageTab[] = [
+  "payments",
+  "payouts",
+  "accounts",
+  "costs",
+  "shares",
+  "patronage",
+  "fraud",
+];
+const isPageTab = (value: unknown): value is TreasuryPageTab => PAGE_TABS.some((tab) => tab === value);
+
+/**
+ * The treasury page's tabs: `TreasuryCoopTabs`' six (same ids, labels and test ids), then
+ * "Fraud review" (`treasury-tab-fraud`).
+ */
+export function TreasuryPageTabs({
+  value,
+  onValueChange,
+  panels,
+}: {
+  value: TreasuryPageTab;
+  onValueChange: (tab: TreasuryPageTab) => void;
+  panels: TreasuryPanels & { fraud: React.ReactNode };
+}): React.JSX.Element {
+  const panel = (tab: TreasuryPageTab) => <div className="flex flex-col gap-4 pt-4">{panels[tab]}</div>;
+  return (
+    <PageTabs
+      value={value}
+      onValueChange={(next) => isPageTab(next) && onValueChange(next)}
+      items={[
+        {
+          id: "payments",
+          label: t("treasury.tab.payments"),
+          "data-testid": "treasury-tab-payments",
+          content: panel("payments"),
+        },
+        {
+          id: "payouts",
+          label: t("treasury.tab.payouts"),
+          "data-testid": "treasury-tab-payouts",
+          content: panel("payouts"),
+        },
+        {
+          id: "accounts",
+          label: t("treasury.tab.accounts"),
+          "data-testid": "treasury-tab-accounts",
+          content: panel("accounts"),
+        },
+        { id: "costs", label: t("treasury.tab.costs"), "data-testid": "treasury-tab-costs", content: panel("costs") },
+        {
+          id: "shares",
+          label: t("coop.treasury.tabShares"),
+          "data-testid": "treasury-tab-shares",
+          content: panel("shares"),
+        },
+        {
+          id: "patronage",
+          label: t("coop.treasury.tabPatronage"),
+          "data-testid": "treasury-tab-patronage",
+          content: panel("patronage"),
+        },
+        { id: "fraud", label: t("fraud.tab"), "data-testid": "treasury-tab-fraud", content: panel("fraud") },
       ]}
     />
   );
@@ -465,7 +543,7 @@ export function PayoutsPanel({
         return (
           <div className="flex flex-col items-start gap-1">
             <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>
-            {p.holdReason && <span className="text-xs text-muted-foreground">{holdReasonLabel(p.holdReason)}</span>}
+            {p.holdReason && <span className="text-xs text-muted-foreground">{payoutHoldLabel(p.holdReason)}</span>}
           </div>
         );
       },
