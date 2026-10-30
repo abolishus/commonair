@@ -134,6 +134,13 @@ interface Stored {
 const marker = (what: string) => `w1t ${what} ${crypto.randomUUID().slice(0, 8)}`;
 
 type Sql = DbHandle["sql"];
+
+/**
+ * Timestamps read through the raw client as epoch milliseconds: drizzle's postgres-js driver turns
+ * the shared client's timestamp parsers off, so a raw `timestamptz` comes back as a string.
+ */
+const epochMs = (sql: Sql, column: string) => sql.unsafe(`(extract(epoch from ${column}) * 1000)::float8`);
+const msDate = (ms: number | null): Date | null => (ms === null ? null : new Date(ms));
 const handles = new WeakMap<W1Run, Sql>();
 
 /** A raw SQL connection for reads and updates (inserts go through `run.db`); closed when the scenario ends. */
@@ -152,12 +159,13 @@ async function storedRow(sql: Sql, where: { id: string } | { body: string }, sig
   return waitFor(
     `chat row ${"id" in where ? where.id : JSON.stringify(where.body)} persisted`,
     async () => {
-      const rows = await sql<{ id: string; created_at: Date; media_ts: Date | null }[]>`
-        select id, created_at, media_ts from chat_messages
+      const rows = await sql<{ id: string; created_at: number; media_ts: number | null }[]>`
+        select id, ${epochMs(sql, "created_at")} as created_at, ${epochMs(sql, "media_ts")} as media_ts
+          from chat_messages
          where ${"id" in where ? sql`id = ${where.id}` : sql`body = ${where.body}`}
          limit 1`;
       const row = rows[0];
-      return row ? { id: row.id, createdAt: row.created_at, mediaTs: row.media_ts } : null;
+      return row ? { id: row.id, createdAt: new Date(row.created_at), mediaTs: msDate(row.media_ts) } : null;
     },
     { timeoutMs: PERSIST_TIMEOUT_MS, intervalMs: 100, signal },
   );
@@ -188,9 +196,10 @@ async function sendHinted(
 }
 
 async function liveStartedAt(sql: Sql, channelId: string): Promise<Date | null> {
-  const rows = await sql<{ started_at: Date }[]>`
-    select b.started_at from channels c join broadcasts b on b.id = c.live_broadcast_id where c.id = ${channelId}`;
-  return rows[0]?.started_at ?? null;
+  const rows = await sql<{ started_at: number }[]>`
+    select ${epochMs(sql, "b.started_at")} as started_at
+      from channels c join broadcasts b on b.id = c.live_broadcast_id where c.id = ${channelId}`;
+  return msDate(rows[0]?.started_at ?? null);
 }
 
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
@@ -488,11 +497,11 @@ export async function stepReplayExclusions(run: W1Run): Promise<void> {
     waitFor(
       "clear_chat mod action",
       async () => {
-        const rows = await sql<{ created_at: Date }[]>`
-          select created_at from mod_actions
+        const rows = await sql<{ created_at: number }[]>`
+          select ${epochMs(sql, "created_at")} as created_at from mod_actions
            where channel_id = ${channelId} and action = 'clear_chat'
            order by created_at limit 1`;
-        return rows[0]?.created_at ?? null;
+        return msDate(rows[0]?.created_at ?? null);
       },
       { timeoutMs: 10_000, intervalMs: 200, signal: ctx.signal },
     ),
@@ -527,9 +536,9 @@ export async function stepReplayExclusions(run: W1Run): Promise<void> {
       { timeoutMs: 10_000, intervalMs: 200, signal: ctx.signal },
     );
   });
-  const [lastBan] = await sql<{ at: Date | null }[]>`
-    select max(created_at) as at from chat_bans where channel_id = ${channelId}`;
-  const banAt = lastBan?.at ?? new Date();
+  const [lastBan] = await sql<{ at: number | null }[]>`
+    select ${epochMs(sql, "max(created_at)")} as at from chat_bans where channel_id = ${channelId}`;
+  const banAt = msDate(lastBan?.at ?? null) ?? new Date();
   // After the timeout ran out: shown.
   const timedAfter = await seed(timedOut.id, "timed-after", new Date(banAt.getTime() + 2_000), at(400));
   await sql`update broadcasts set ended_at = ${new Date(banAt.getTime() + 5_000)} where id = ${broadcastId}`;
