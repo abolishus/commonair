@@ -91,9 +91,10 @@ settled (for example the payee proved the payments were genuine, or the disputed
 recovered) and the payee should be paid again. W1 has no web control for this; call the API while
 signed in as the admin.
 
-1. Find the flag's id: in the Fraud review tab, filter by **Confirmed**; each flag's element
-   carries `data-flag-id`. A treasurer can also list them:
-   `GET /api/treasurer/fraud-flags?status=confirmed`.
+1. Get the flag's id from a treasurer: the flag list is treasurer-only, so an admin who is not a
+   treasurer cannot open the Fraud review tab. The treasurer finds it in that tab filtered by
+   **Confirmed** (each flag's element carries `data-flag-id`) or with
+   `GET /api/treasurer/fraud-flags?status=confirmed`, and passes the id to the admin.
 2. Sign in to the web app as the admin, open the browser's developer console on any page of the
    instance and run:
 

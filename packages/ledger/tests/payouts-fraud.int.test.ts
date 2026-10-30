@@ -19,6 +19,9 @@ import {
   fraudHeldPayouts,
   holdPayoutsForFraud,
   insertFraudFlag,
+  loadMoneySettings,
+  lockFraudPayoutBatch,
+  lockPayoutBatch,
   newPayeeEvidence,
   payeeHasHoldingFlag,
   paymentSucceeded,
@@ -252,6 +255,25 @@ describe("runPayoutBatch with fraud flags", () => {
     });
   });
 
+  test("a first large payout raises new_payee even when another flag already holds the payee", async () => {
+    const cur = freshCurrency();
+    const payee = await makeUser();
+    await readyAccount(payee);
+    const manual = await flagOf(payee);
+    await earn(payee, 60_000, cur);
+    await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 });
+    const kinds = (await db.select().from(s.paymentFraudFlags).where(eq(s.paymentFraudFlags.payeeUserId, payee))).map(
+      (f) => f.kind,
+    );
+    expect(kinds.sort()).toEqual(["manual", "new_payee"]);
+
+    // Clearing the first flag leaves the large first payout held for its own review.
+    await review(manual, await makeUser("treasurer"), "clear");
+    await decide(manual, await makeUser("treasurer"), "clear");
+    expect(await releaseFraudHolds(db, payee)).toEqual({ released: 0, accountNotReady: 0 });
+    expect((await payoutsOf(payee))[0]).toMatchObject({ status: "held", holdReason: FRAUD_REVIEW_HOLD });
+  });
+
   test("a small first payout, or a large second one, raises nothing", async () => {
     const cur = freshCurrency();
     const payee = await makeUser();
@@ -263,6 +285,32 @@ describe("runPayoutBatch with fraud flags", () => {
     const rows = await payoutsOf(payee);
     expect(rows.map((p) => p.status).sort()).toEqual(["pending", "pending"]);
     expect(await db.select().from(s.paymentFraudFlags).where(eq(s.paymentFraudFlags.payeeUserId, payee))).toEqual([]);
+  });
+});
+
+describe("lockFraudPayoutBatch", () => {
+  test("waits for a payout batch holding the lock", async () => {
+    const { payoutRules } = await loadMoneySettings(db);
+    let releaseBatch!: () => void;
+    const batchHeld = new Promise<void>((r) => (releaseBatch = r));
+    let locked!: () => void;
+    const batchLocked = new Promise<void>((r) => (locked = r));
+    const batch = db.transaction(async (tx) => {
+      await lockPayoutBatch(tx, payoutRules.currency);
+      locked();
+      await batchHeld;
+    });
+    await batchLocked;
+    let acquired = false;
+    const fraud = db.transaction(async (tx) => {
+      await lockFraudPayoutBatch(tx);
+      acquired = true;
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(acquired).toBe(false);
+    releaseBatch();
+    await Promise.all([batch, fraud]);
+    expect(acquired).toBe(true);
   });
 });
 

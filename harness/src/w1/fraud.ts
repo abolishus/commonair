@@ -242,6 +242,16 @@ export async function stepFraudHold(ext: MoneyExtension): Promise<void> {
     held,
   );
   if (!held) return;
+  // With a zero platform cut the tips reach the new_payee threshold too, and clearing
+  // payer_concentration alone would leave the payout held: stop here with the reason.
+  const newPayee = await db.sql<{ id: string }[]>`
+    select id from payment_fraud_flags where payee_user_id = ${payee.id} and kind = 'new_payee'`;
+  ctx.assert(
+    "the payout run raised no new_payee flag (a zero platform cut puts the fixture tips over its threshold)",
+    newPayee.length === 0,
+    { newPayee: newPayee.map((r) => r.id), payoutCents: held.amount.cents },
+  );
+  if (newPayee.length > 0) return;
 
   // 4. The database refuses releasing it by hand.
   const refused = await errorOf(() =>
@@ -262,9 +272,7 @@ export async function stepFraudHold(ext: MoneyExtension): Promise<void> {
       await treasurer.api.client.money.treasurer.fraudFlags.review({ id: flag.id, recommendation: "clear", note: "" });
   });
   if (t1Page) {
-    const decide = byW1Id(t1Page, W.fraudFlag, { payee: payee.username })
-      .first()
-      .locator('[data-testid="fraud-flag-decide"]');
+    const decide = byW1Id(byW1Id(t1Page, W.fraudFlag, { payee: payee.username }).first(), W.fraudFlagDecide);
     const disabled = (await decide.isDisabled({ timeout: UI_TIMEOUT_MS }).catch(() => false)) === true;
     ctx.check("fraud-flag-decide is disabled for the reviewer", disabled);
   }

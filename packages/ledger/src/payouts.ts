@@ -265,6 +265,17 @@ export async function recordFraudFlag(
 }
 
 /**
+ * Take the payout batch lock for a fraud change (raise, clear, release). `runPayoutBatch` reads the
+ * held payees once under this lock, so a flag change that does not wait for it could clear a payee
+ * the batch still treats as held and leave a fraud_review payout with no flag behind it.
+ * Lock order: payout batch → flag → payouts.
+ */
+export async function lockFraudPayoutBatch(tx: Executor): Promise<void> {
+  const { payoutRules } = await loadMoneySettings(tx);
+  await lockPayoutBatch(tx, payoutRules.currency);
+}
+
+/**
  * Raise a flag and hold the payee's payouts, with its audit and outbox rows, in the caller's
  * transaction (the scan and `raise`). Takes the payout batch lock first (lock order: payout batch
  * → payment → creator), so a batch running now cannot create a `pending` payout after the re-tag.
@@ -274,8 +285,7 @@ export async function raiseFraudFlag(
   tx: Executor,
   f: NewFraudFlag & { actorType: (typeof ACTOR_TYPES)[number] },
 ): Promise<{ flag: FlagRow; held: number; heldPayouts: number } | null> {
-  const { payoutRules } = await loadMoneySettings(tx);
-  await lockPayoutBatch(tx, payoutRules.currency);
+  await lockFraudPayoutBatch(tx);
   const flag = await insertFraudFlag(tx, f);
   if (!flag) return null;
   const held = await holdPayoutsForFraud(tx, f.payeeUserId);
@@ -475,7 +485,8 @@ export async function runPayoutBatch(
       const acct = accountsByUser.get(c.userId);
       // ADR 0036: a first payout this large raises `new_payee` before it is inserted, held.
       let raised: FlagRow | null = null;
-      if (!fraudHeld.has(c.userId) && !(await hadPayout(tx, c.userId))) {
+      // Also for a payee another flag already holds: clearing that flag must not release this payout unreviewed.
+      if (!(await hadPayout(tx, c.userId))) {
         const evidence = newPayeeEvidence(r.amountCents);
         if (evidence) {
           raised = await insertFraudFlag(tx, {

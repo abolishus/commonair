@@ -16,6 +16,7 @@ import { type Executor, schema } from "@commonair/db";
 import {
   FRAUD_REVIEW_HOLD,
   type FraudAction,
+  lockFraudPayoutBatch,
   raiseFraudFlag,
   recordFraudFlag,
   releaseFraudHolds,
@@ -208,6 +209,8 @@ export const treasurerFraudHandlers = {
     const row = await guarded(
       () =>
         deps.db.transaction(async (tx) => {
+          // A clear releases holds: wait for a running payout batch first (lockFraudPayoutBatch).
+          if (input.decision === "clear") await lockFraudPayoutBatch(tx);
           const flag = await lockedFlag(tx, input.id);
           if (flag.status !== "reviewed") throw conflict(`This flag is ${flag.status}, not reviewed`);
           const me = caller.user.id;
@@ -242,6 +245,8 @@ export const treasurerFraudHandlers = {
     const row = await guarded(
       () =>
         deps.db.transaction(async (tx) => {
+          // A release releases holds: wait for a running payout batch first (lockFraudPayoutBatch).
+          await lockFraudPayoutBatch(tx);
           const flag = await lockedFlag(tx, input.id);
           if (flag.status !== "confirmed" || flag.releasedAt !== null)
             throw conflict("Only a confirmed flag that was not released yet can be released");
