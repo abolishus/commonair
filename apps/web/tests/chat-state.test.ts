@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ChatConnection, MAX_MESSAGES, type ChatMessageFrame, type SocketLike } from "../src/chat/connection.ts";
 import { noticeMessage } from "../src/chat/messages.ts";
-import { chatReducer, type ChatAction, type ChatRow } from "../src/chat/state.ts";
+import { chatReducer, EMPTY_GATE, gateReducer, type ChatAction, type ChatRow } from "../src/chat/state.ts";
 import { t } from "../src/i18n/index.ts";
 
 const UUID = (n: number) => `0190f000-0000-7000-8000-${n.toString().padStart(12, "0")}`;
@@ -220,5 +220,25 @@ describe("ChatConnection settings and surge frames", () => {
     conn.handleFrame(JSON.stringify({ op: "surge", channel: CHANNEL, state: "bogus", until: null }));
     expect(settings).toEqual([next]);
     expect(surges).toEqual([{ state: "suppressed", until: null }]);
+  });
+});
+
+describe("gateReducer (what the panel hands <SurgeBanner/>)", () => {
+  it("a mid-surge joiner has the surge from the joined frame at once, and every rejoin starts over", () => {
+    const until = "2026-10-30T12:10:00.000Z";
+    // The order the panel dispatches for a joined frame: joined, settings, surge.
+    let s = gateReducer(EMPTY_GATE, { type: "joined" });
+    s = gateReducer(s, { type: "surge", surge: { state: "on", until } });
+    expect(s.surge).toEqual({ state: "on", until });
+    expect(s.gateDenied).toBe(false);
+    s = gateReducer(s, { type: "denied" });
+    expect(gateReducer(s, { type: "denied" })).toBe(s);
+    // A reconnect: the join clears the denial; the new joined frame's surge replaces the old one.
+    s = gateReducer(s, { type: "joined" });
+    expect(s.gateDenied).toBe(false);
+    s = gateReducer(s, { type: "surge", surge: { state: "off", until: null } });
+    expect(s.surge).toEqual({ state: "off", until: null });
+    expect(gateReducer(s, { type: "joined" })).toBe(s);
+    expect(gateReducer(s, { type: "reset" })).toBe(EMPTY_GATE);
   });
 });
