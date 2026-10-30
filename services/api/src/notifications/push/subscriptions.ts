@@ -9,7 +9,7 @@
 import { NOTIFY_RULES, NOTIFY_SECRET_PURPOSES } from "@commonair/contracts/notify";
 import { schema, type Database } from "@commonair/db";
 import { encryptSecret, fromB64url, hmacHex } from "@commonair/tokens";
-import { and, count, desc, eq, notInArray } from "drizzle-orm";
+import { and, count, desc, eq, notInArray, sql } from "drizzle-orm";
 import { badRequest } from "../../lib/errors.ts";
 
 const { pushSubscriptions } = schema;
@@ -81,6 +81,8 @@ export async function upsertSubscription(
   input: { userId: string; hash: string; subscription: string; now: Date },
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    // Serialize one member's subscribes, so two at once cannot both trim from a stale view (11 rows).
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`push-subscriptions:${input.userId}`}, 0))`);
     await tx
       .insert(pushSubscriptions)
       .values({

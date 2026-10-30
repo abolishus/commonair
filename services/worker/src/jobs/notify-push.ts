@@ -13,5 +13,5 @@ export const job = defineJob({
   data: PushJob,
   attempts: 4,
   backoffMs: 30_000,
-  handler: (data, ctx) => runPushJob(ctx, data),
+  handler: (data, ctx, meta) => runPushJob(ctx, data, meta),
 });

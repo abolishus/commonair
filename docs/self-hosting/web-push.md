@@ -78,6 +78,17 @@ push service refuses messages signed with another one. If you rotate it (delete 
 run `init-env --merge` again), the worker deletes each subscription after its fifth refusal, and
 every viewer has to turn push on again in each browser. Rotate only if the private key leaked.
 
+A `VAPID_PRIVATE_KEY` that is not a P-256 PKCS#8 key (truncated, or pasted with its PEM lines)
+passes the startup check but stops every push: the worker logs "VAPID_PRIVATE_KEY cannot be
+imported" and sends nothing until it is fixed. No subscription is deleted for it.
+
+**Rotating `AUTH_SECRET` strands every subscription.** The stored addresses are encrypted with it.
+The worker cannot read them after a rotation, so it logs an error and skips them; it does not
+delete them, because the same error also means one worker was started with a different
+`AUTH_SECRET` from the API, and those rows are still good. Stranded rows go when their owners turn
+push off or sign out; viewers turn push on again to be reached. Every API and worker replica must
+share one `AUTH_SECRET`.
+
 Back up the pair with the rest of `commonair.env` ([Backups](backups.md)).
 
 ## Turning it off

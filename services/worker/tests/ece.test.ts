@@ -11,6 +11,7 @@ import {
   encryptPushPayload,
   hkdfExpand,
   hkdfExtract,
+  PushKeyInvalid,
   PushPayloadTooLarge,
 } from "../src/notify/push/ece.ts";
 
@@ -174,6 +175,30 @@ describe("encryptPushPayload", () => {
     await expect(
       encryptPushPayload({ plaintext, uaPublic: b.uaPublic, authSecret: b.authSecret, salt: new Uint8Array(8) }),
     ).rejects.toThrow(/salt/);
+  });
+
+  test("a browser key problem is PushKeyInvalid (the row's fault); the payload bound is not", async () => {
+    const b = await browser();
+    const plaintext = enc.encode("x");
+    await expect(
+      encryptPushPayload({ plaintext, uaPublic: b.uaPublic.subarray(1), authSecret: b.authSecret }),
+    ).rejects.toBeInstanceOf(PushKeyInvalid);
+    await expect(
+      encryptPushPayload({ plaintext, uaPublic: b.uaPublic, authSecret: b.authSecret.subarray(0, 15) }),
+    ).rejects.toBeInstanceOf(PushKeyInvalid);
+    // 0x04 and 65 bytes, but not on the curve.
+    const offCurve = new Uint8Array(65).fill(0x01);
+    offCurve[0] = 0x04;
+    await expect(
+      encryptPushPayload({ plaintext, uaPublic: offCurve, authSecret: b.authSecret }),
+    ).rejects.toBeInstanceOf(PushKeyInvalid);
+    await expect(
+      encryptPushPayload({
+        plaintext: new Uint8Array(NOTIFY_RULES.maxPushPayloadBytes + 1),
+        uaPublic: b.uaPublic,
+        authSecret: b.authSecret,
+      }),
+    ).rejects.not.toBeInstanceOf(PushKeyInvalid);
   });
 
   test("a tampered tag, body or header fails to decrypt", async () => {

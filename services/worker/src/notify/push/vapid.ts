@@ -15,7 +15,8 @@ const enc = new TextEncoder();
 // Imported keys per process, by their PKCS#8 text: the key never changes while the worker runs.
 const keys = new Map<string, Promise<CryptoKey>>();
 
-function signingKey(privateKeyPkcs8: string): Promise<CryptoKey> {
+/** The imported VAPID private key; rejects when `VAPID_PRIVATE_KEY` is not a P-256 PKCS#8 key. */
+export function vapidSigningKey(privateKeyPkcs8: string): Promise<CryptoKey> {
   let key = keys.get(privateKeyPkcs8);
   if (!key) {
     key = crypto.subtle.importKey(
@@ -60,7 +61,7 @@ export async function vapidAuthorization(input: VapidInput): Promise<string> {
   const signature = new Uint8Array(
     await crypto.subtle.sign(
       { name: "ECDSA", hash: "SHA-256" },
-      await signingKey(input.privateKeyPkcs8),
+      await vapidSigningKey(input.privateKeyPkcs8),
       enc.encode(signingInput),
     ),
   );

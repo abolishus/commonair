@@ -13,6 +13,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { WorkerContext } from "../../context.ts";
 import { metrics } from "./metrics.ts";
 import { sendPush, type PushOutcome } from "./send.ts";
+import { vapidSigningKey } from "./vapid.ts";
 
 const { pushSubscriptions, notifications, broadcasts, channels, users } = schema;
 
@@ -22,6 +23,14 @@ const TITLE_MAX = 140;
 export interface PushJobResult {
   sent: number;
   removed: number;
+}
+
+/** `VAPID_PRIVATE_KEY` does not import: no subscription is touched, and the job retries. */
+export class VapidKeyUnusable extends Error {
+  constructor() {
+    super("VAPID_PRIVATE_KEY is not a P-256 PKCS#8 key; no push sent");
+    this.name = "VapidKeyUnusable";
+  }
 }
 
 export class PushRetry extends Error {
@@ -75,9 +84,13 @@ export async function pushPayloadFor(ctx: Pick<WorkerContext, "db">, job: PushJo
  * Send to each of the member's subscriptions (newest first, at most the per-member cap). When any
  * send is retryable, throw after the others are done so BullMQ retries the job: a retry re-sends to
  * the ones that succeeded, and the service worker's per-channel tag makes the duplicate replace
- * the first notification.
+ * the first notification. A retry does not count 400/401/403 again (`attemptsMade` > 0).
  */
-export async function runPushJob(ctx: JobCtx, job: PushJob): Promise<PushJobResult> {
+export async function runPushJob(
+  ctx: JobCtx,
+  job: PushJob,
+  meta: { attemptsMade: number } = { attemptsMade: 0 },
+): Promise<PushJobResult> {
   const push = ctx.webPush;
   // Push was turned off after the fan-out enqueued this.
   if (!push) return { sent: 0, removed: 0 };
@@ -90,12 +103,20 @@ export async function runPushJob(ctx: JobCtx, job: PushJob): Promise<PushJobResu
   if (rows.length === 0) return { sent: 0, removed: 0 };
   const payload = await pushPayloadFor(ctx, job);
   if (!payload) return { sent: 0, removed: 0 };
+  try {
+    await vapidSigningKey(push.privateKeyPkcs8);
+  } catch {
+    // The operator's key, not the browsers': fail loudly before any row is looked at.
+    ctx.logger.error("VAPID_PRIVATE_KEY cannot be imported; push is not sent until it is fixed");
+    throw new VapidKeyUnusable();
+  }
+  const countRefusal = meta.attemptsMade === 0;
 
   const outcomes: PushOutcome[] = [];
   for (const row of rows) {
     let outcome: PushOutcome;
     try {
-      outcome = await sendPush(ctx, push, row, payload, job.channelId);
+      outcome = await sendPush(ctx, push, row, payload, job.channelId, { countRefusal });
     } catch (err) {
       // A database hiccup on one row must not stop the others; the job retries.
       ctx.logger.error("push send failed", {

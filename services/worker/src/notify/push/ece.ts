@@ -29,6 +29,14 @@ export class PushPayloadTooLarge extends Error {
   }
 }
 
+/** The browser's stored keys are malformed (not the server's fault): sending to them can never work. */
+export class PushKeyInvalid extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PushKeyInvalid";
+  }
+}
+
 function concat(...parts: Uint8Array[]): Bytes {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
@@ -85,19 +93,19 @@ async function webPushIkm(
 }
 
 async function ecdh(privateKey: CryptoKey, peerPublic: Uint8Array): Promise<Bytes> {
-  const pub = await crypto.subtle.importKey(
-    "raw",
-    concat(peerPublic),
-    { name: "ECDH", namedCurve: "P-256" },
-    false,
-    [],
-  );
+  let pub: CryptoKey;
+  try {
+    pub = await crypto.subtle.importKey("raw", concat(peerPublic), { name: "ECDH", namedCurve: "P-256" }, false, []);
+  } catch {
+    // Right length and prefix, but not a point on the curve.
+    throw new PushKeyInvalid("peer public key is not a P-256 point");
+  }
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: pub }, privateKey, 256));
 }
 
 function checkPoint(name: string, point: Uint8Array): void {
   if (point.length !== P256_POINT_BYTES || point[0] !== 0x04)
-    throw new Error(`${name} must be an uncompressed P-256 point (65 bytes, 0x04 first)`);
+    throw new PushKeyInvalid(`${name} must be an uncompressed P-256 point (65 bytes, 0x04 first)`);
 }
 
 export interface EncryptPushInput {
@@ -117,7 +125,7 @@ export async function encryptPushPayload(input: EncryptPushInput): Promise<Bytes
   const { plaintext, uaPublic, authSecret } = input;
   if (plaintext.length > NOTIFY_RULES.maxPushPayloadBytes) throw new PushPayloadTooLarge(plaintext.length);
   checkPoint("uaPublic", uaPublic);
-  if (authSecret.length !== AUTH_SECRET_BYTES) throw new Error("authSecret must be 16 bytes");
+  if (authSecret.length !== AUTH_SECRET_BYTES) throw new PushKeyInvalid("authSecret must be 16 bytes");
   const salt = input.salt ?? crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   if (salt.length !== SALT_BYTES) throw new Error("salt must be 16 bytes");
   const pair =

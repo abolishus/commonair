@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
 import { job as pushJobDef } from "../src/jobs/notify-push.ts";
 import { decryptPushPayload } from "../src/notify/push/ece.ts";
-import { PushRetry, runPushJob } from "../src/notify/push/job.ts";
+import { PushRetry, runPushJob, VapidKeyUnusable } from "../src/notify/push/job.ts";
 import { PUSH_FAILURE_LIMIT, pushTopic } from "../src/notify/push/send.ts";
 import type { WebPushSettings } from "../src/notify/settings.ts";
 import { AUTH_SECRET, makeBroadcast, makeUser } from "./fixtures.ts";
@@ -262,12 +262,67 @@ describe("notify-push job", () => {
     expect(await rowOf(s.row.id)).toBeUndefined();
   });
 
-  test("a row that cannot be decrypted (rotated AUTH_SECRET) is deleted without a POST", async () => {
+  test("a row this worker cannot decrypt (AUTH_SECRET differs from the API's) is kept, with no POST", async () => {
     const { follower, data } = await scene();
     const s = await subscribe(follower.user.id, tag());
-    const rotated = { ...ctx, webhooks: { authSecret: "another-secret-0123456789-abcdefghijklmnop" } } as WorkerContext;
-    expect(await runPushJob(rotated, data)).toEqual({ sent: 0, removed: 1 });
+    const other = { ...ctx, webhooks: { authSecret: "another-secret-0123456789-abcdefghijklmnop" } } as WorkerContext;
+    logLines.length = 0;
+    expect(await runPushJob(other, data)).toEqual({ sent: 0, removed: 0 });
     expect(requestsTo(s.path)).toHaveLength(0);
+    expect(await rowOf(s.row.id)).toMatchObject({ failures: 0 });
+    expect(logLines.some((l) => l.includes('"level":"error"'))).toBe(true);
+  });
+
+  test("a row that decrypts to something other than a subscription is deleted", async () => {
+    const { follower, data } = await scene();
+    const s = await subscribe(follower.user.id, tag());
+    const junk = await encryptSecret(AUTH_SECRET, NOTIFY_SECRET_PURPOSES.pushSubscription, '{"endpoint":1}');
+    await owner.update(subs).set({ subscription: junk }).where(eq(subs.id, s.row.id));
+    expect(await runPushJob(ctx, data)).toEqual({ sent: 0, removed: 1 });
+    expect(await rowOf(s.row.id)).toBeUndefined();
+  });
+
+  test("stored keys of the wrong shape delete the row without a POST", async () => {
+    const { follower, data } = await scene();
+    const s = await subscribe(follower.user.id, tag());
+    const bad = await encryptSecret(
+      AUTH_SECRET,
+      NOTIFY_SECRET_PURPOSES.pushSubscription,
+      JSON.stringify({ endpoint: s.endpoint, p256dh: b64url(s.uaPublic), auth: b64url(new Uint8Array(8)) }),
+    );
+    await owner.update(subs).set({ subscription: bad }).where(eq(subs.id, s.row.id));
+    expect(await runPushJob(ctx, data)).toEqual({ sent: 0, removed: 1 });
+    expect(requestsTo(s.path)).toHaveLength(0);
+    expect(await rowOf(s.row.id)).toBeUndefined();
+  });
+
+  test("a VAPID_PRIVATE_KEY that does not import throws before any send and keeps every row", async () => {
+    const { follower, data } = await scene();
+    const a = await subscribe(follower.user.id, tag());
+    const b = await subscribe(follower.user.id, tag());
+    for (const privateKeyPkcs8 of [
+      "bm90IGEga2V5IGF0IGFsbCwganVzdCB0ZXh0IGJ5dGVz",
+      webPush.privateKeyPkcs8.slice(0, 40),
+    ]) {
+      const broken = { ...ctx, webPush: { ...webPush, privateKeyPkcs8 } } as WorkerContext;
+      logLines.length = 0;
+      await expect(runPushJob(broken, data)).rejects.toBeInstanceOf(VapidKeyUnusable);
+      expect(logLines.some((l) => l.includes('"level":"error"') && l.includes("VAPID_PRIVATE_KEY"))).toBe(true);
+    }
+    expect(requestsTo(a.path)).toHaveLength(0);
+    expect(requestsTo(b.path)).toHaveLength(0);
+    expect(await rowOf(a.row.id)).toBeDefined();
+    expect(await rowOf(b.row.id)).toBeDefined();
+  });
+
+  test("a retry attempt does not count a 403 again", async () => {
+    const { follower, data } = await scene();
+    const s = await subscribe(follower.user.id, tag());
+    statuses.set(s.path, 403);
+    expect(await runPushJob(ctx, data, { attemptsMade: 0 })).toEqual({ sent: 0, removed: 0 });
+    for (let attempt = 1; attempt < 4; attempt++) await runPushJob(ctx, data, { attemptsMade: attempt });
+    expect(requestsTo(s.path)).toHaveLength(4);
+    expect((await rowOf(s.row.id))?.failures).toBe(1);
   });
 
   test("push off after the enqueue → zeros and nothing sent", async () => {

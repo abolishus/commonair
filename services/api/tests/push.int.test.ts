@@ -177,6 +177,16 @@ describe("notifications.push", () => {
     expect((await status(m)).subscriptions).toBe(NOTIFY_RULES.maxPushSubscriptionsPerUser);
   });
 
+  test("concurrent subscribes by one member never leave more than the cap", async () => {
+    const m = await signUpAndSignIn(api);
+    const n = NOTIFY_RULES.maxPushSubscriptionsPerUser + 6;
+    const answers = await Promise.all(
+      Array.from({ length: n }, (_, i) => subscribe(m, endpointFor(`race${i}`)).then((r) => r.status)),
+    );
+    expect(answers.every((s) => s === 200)).toBe(true);
+    expect(await rowsOf(m.userId)).toHaveLength(NOTIFY_RULES.maxPushSubscriptionsPerUser);
+  });
+
   test("unsubscribe is scoped to the caller and answers ok when nothing matched", async () => {
     const a = await signUpAndSignIn(api);
     const b = await signUpAndSignIn(api);

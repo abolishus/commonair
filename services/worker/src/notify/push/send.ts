@@ -9,12 +9,12 @@
 import { NOTIFY_RULES, NOTIFY_SECRET_PURPOSES, type PushPayload } from "@commonair/contracts/notify";
 import { schema } from "@commonair/db";
 import { b64url, decryptSecret, fromB64url } from "@commonair/tokens";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { WorkerContext } from "../../context.ts";
 import { postPinned, type PostResult } from "../../webhooks/http.ts";
 import type { WebPushSettings } from "../settings.ts";
-import { encryptPushPayload } from "./ece.ts";
+import { encryptPushPayload, PushKeyInvalid } from "./ece.ts";
 import { vapidAuthorization } from "./vapid.ts";
 
 const { pushSubscriptions } = schema;
@@ -33,7 +33,8 @@ export type StoredSubscription = z.infer<typeof StoredSubscription>;
  * - `sent`: the push service accepted it.
  * - `removed`: the row was deleted (expired, refused for good, or unsendable).
  * - `retry`: worth trying again (429, 5xx, network, DNS).
- * - `failed`: not sent, not retried (413, or a 4xx below the failure limit).
+ * - `failed`: not sent, not retried (413, a 4xx below the failure limit, a row this worker cannot
+ *   decrypt, or a payload it cannot encrypt).
  */
 export type PushOutcome = "sent" | "removed" | "retry" | "failed";
 
@@ -68,19 +69,33 @@ type SendCtx = Pick<WorkerContext, "db" | "logger" | "now"> & {
   webhooks: Pick<WorkerContext["webhooks"], "authSecret" | "resolve">;
 };
 
-async function openRow(authSecret: string, row: PushRow): Promise<StoredSubscription | undefined> {
+type Opened = { ok: true; sub: StoredSubscription } | { ok: false; reason: "secret" | "corrupt" };
+
+async function openRow(authSecret: string, row: PushRow): Promise<Opened> {
+  let plain: string;
   try {
-    const parsed = StoredSubscription.safeParse(
-      JSON.parse(await decryptSecret(authSecret, NOTIFY_SECRET_PURPOSES.pushSubscription, row.subscription)),
-    );
-    return parsed.success ? parsed.data : undefined;
+    plain = await decryptSecret(authSecret, NOTIFY_SECRET_PURPOSES.pushSubscription, row.subscription);
   } catch {
-    return undefined;
+    return { ok: false, reason: "secret" };
+  }
+  try {
+    const parsed = StoredSubscription.safeParse(JSON.parse(plain));
+    return parsed.success ? { ok: true, sub: parsed.data } : { ok: false, reason: "corrupt" };
+  } catch {
+    return { ok: false, reason: "corrupt" };
   }
 }
 
 async function remove(ctx: SendCtx, id: string): Promise<void> {
   await ctx.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, id));
+}
+
+export interface SendOptions {
+  /**
+   * Count a 400/401/403 towards the failure limit. False on a job's retry attempts, so one
+   * go-live counts once however often the job reruns for another browser's 429.
+   */
+  countRefusal: boolean;
 }
 
 /** Send `payload` to one stored subscription and apply the push service's answer to its row. */
@@ -90,46 +105,70 @@ export async function sendPush(
   row: PushRow,
   payload: PushPayload,
   channelId: string,
+  opts: SendOptions = { countRefusal: true },
 ): Promise<PushOutcome> {
-  const sub = await openRow(ctx.webhooks.authSecret, row);
-  if (!sub) {
-    // AUTH_SECRET rotated or the row is corrupt: it can never be sent to.
-    ctx.logger.warn("push subscription cannot be decrypted; deleting it", { subscriptionId: row.id });
+  const opened = await openRow(ctx.webhooks.authSecret, row);
+  if (!opened.ok) {
+    if (opened.reason === "secret") {
+      // Usually this worker's AUTH_SECRET differs from the API's (a misconfigured replica): the row
+      // is fine for a correctly configured worker, so keep it. A genuinely rotated secret leaves
+      // rows that go when their owners turn push off or sign out.
+      ctx.logger.error("push subscription cannot be decrypted with this worker's AUTH_SECRET", {
+        subscriptionId: row.id,
+      });
+      return "failed";
+    }
+    // Decrypted, so the secret is right, but the content is not a subscription: it never will be.
+    ctx.logger.warn("push subscription is corrupt; deleting it", { subscriptionId: row.id });
     await remove(ctx, row.id);
     return "removed";
   }
-  let body: Uint8Array;
+  const sub = opened.sub;
+
+  let endpoint: URL;
+  let uaPublic: Uint8Array;
+  let uaAuth: Uint8Array;
   try {
-    body = await encryptPushPayload({
-      plaintext: new TextEncoder().encode(JSON.stringify(payload)),
-      uaPublic: fromB64url(sub.p256dh),
-      authSecret: fromB64url(sub.auth),
-    });
-  } catch (err) {
-    // The API validated the keys, so this is a bad row (or our bug): it would fail every time.
-    ctx.logger.error("push subscription keys unusable; deleting it", {
-      subscriptionId: row.id,
-      error: err instanceof Error ? err.name : "unknown",
-    });
+    endpoint = new URL(sub.endpoint);
+    uaPublic = fromB64url(sub.p256dh);
+    uaAuth = fromB64url(sub.auth);
+  } catch {
+    // The API refuses these, so the row itself is bad and can never be sent to.
+    ctx.logger.warn("push subscription endpoint or keys malformed; deleting it", { subscriptionId: row.id });
     await remove(ctx, row.id);
     return "removed";
   }
 
-  let authorization: string;
+  let body: Uint8Array;
   try {
-    authorization = await vapidAuthorization({
-      endpoint: sub.endpoint,
-      subject: push.subject,
-      publicKey: push.publicKey,
-      privateKeyPkcs8: push.privateKeyPkcs8,
-      now: ctx.now(),
+    body = await encryptPushPayload({
+      plaintext: new TextEncoder().encode(JSON.stringify(payload)),
+      uaPublic,
+      authSecret: uaAuth,
     });
-  } catch {
-    // An endpoint that is not a URL cannot be sent to (the API refuses those).
-    ctx.logger.warn("push endpoint is not a URL; deleting it", { subscriptionId: row.id });
-    await remove(ctx, row.id);
-    return "removed";
+  } catch (err) {
+    if (err instanceof PushKeyInvalid) {
+      ctx.logger.warn("push subscription keys unusable; deleting it", { subscriptionId: row.id });
+      await remove(ctx, row.id);
+      return "removed";
+    }
+    // Our side (payload too large, a Web Crypto failure): the row is not to blame.
+    ctx.logger.error("push payload could not be encrypted", {
+      subscriptionId: row.id,
+      error: err instanceof Error ? err.name : "unknown",
+    });
+    return "failed";
   }
+
+  // Not caught here: a bad VAPID_PRIVATE_KEY is the instance's fault, never the row's. The job
+  // checks the key before any send; should it still throw, the job counts the send as retryable.
+  const authorization = await vapidAuthorization({
+    endpoint: endpoint.href,
+    subject: push.subject,
+    publicKey: push.publicKey,
+    privateKeyPkcs8: push.privateKeyPkcs8,
+    now: ctx.now(),
+  });
 
   const result = await postPinned(
     sub.endpoint,
@@ -152,10 +191,10 @@ export async function sendPush(
       ...(ctx.webhooks.resolve ? { resolve: ctx.webhooks.resolve } : {}),
     },
   );
-  return applyVerdict(ctx, row.id, result);
+  return applyVerdict(ctx, row.id, result, opts);
 }
 
-async function applyVerdict(ctx: SendCtx, id: string, result: PostResult): Promise<PushOutcome> {
+async function applyVerdict(ctx: SendCtx, id: string, result: PostResult, opts: SendOptions): Promise<PushOutcome> {
   const verdict = classifyPushResult(result);
   const status = result.ok ? result.status : null;
   switch (verdict) {
@@ -185,15 +224,16 @@ async function applyVerdict(ctx: SendCtx, id: string, result: PostResult): Promi
       return "retry";
     case "refused": {
       ctx.logger.warn("push service refused the message", { subscriptionId: id, status });
-      await ctx.db
+      if (!opts.countRefusal) return "failed";
+      // One statement: concurrent jobs for the same member cannot lose an increment.
+      const [counted] = await ctx.db
         .update(pushSubscriptions)
         .set({ failures: sql`${pushSubscriptions.failures} + 1` })
-        .where(eq(pushSubscriptions.id, id));
-      const gone = await ctx.db
-        .delete(pushSubscriptions)
-        .where(and(eq(pushSubscriptions.id, id), gte(pushSubscriptions.failures, PUSH_FAILURE_LIMIT)))
-        .returning({ id: pushSubscriptions.id });
-      return gone.length > 0 ? "removed" : "failed";
+        .where(eq(pushSubscriptions.id, id))
+        .returning({ failures: pushSubscriptions.failures });
+      if (!counted || counted.failures < PUSH_FAILURE_LIMIT) return "failed";
+      await remove(ctx, id);
+      return "removed";
     }
   }
 }
