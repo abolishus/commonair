@@ -10,6 +10,7 @@
  */
 import { ServerFrame, type ClientFrame } from "@commonair/contracts/chat";
 import type { ChannelChatSettings } from "@commonair/contracts/shapes";
+import { playbackMode, playheadWallclock } from "../player/media-clock.ts";
 import { backoffDelay } from "./backoff.ts";
 
 export type ChatStatus = "connecting" | "open" | "closed";
@@ -217,11 +218,28 @@ export class ChatConnection {
     }
   }
 
-  /** Send a chat message; false when not connected. */
+  /**
+   * Send a chat message; false when not connected. With a player of this channel on the page, the
+   * frame carries the PDT under its playhead (`mediaTs`, read at send time) and, only when behind
+   * the live edge, `playbackMode` (ADR 0012 amendment 1 decisions 1–2). Without a player (embedded
+   * or overlay chat) it carries neither and the server uses its own clock.
+   */
   send(body: string): boolean {
     const text = body.trim();
     if (!text || this.status !== "open") return false;
-    return this.raw({ op: "send", channel: this.channel, body: text, isAction: false, nonce: `m${++this.nonce}` });
+    const frame: Extract<ClientFrame, { op: "send" }> = {
+      op: "send",
+      channel: this.channel,
+      body: text,
+      isAction: false,
+      nonce: `m${++this.nonce}`,
+    };
+    const at = playheadWallclock(this.channel);
+    if (at) frame.mediaTs = at.toISOString();
+    // Absent means `live`: frames stay small for nearly every sender.
+    const mode = playbackMode(this.channel);
+    if (mode !== "live") frame.playbackMode = mode;
+    return this.raw(frame);
   }
 
   stop(): void {

@@ -6,6 +6,7 @@ import {
   HeartbeatAccountant,
   MAX_PLAYED_PER_HEARTBEAT,
   nextHeartbeatDelay,
+  playbackFields,
   withToken,
   type CumulativeStats,
 } from "../src/player/heartbeat.ts";
@@ -212,5 +213,20 @@ describe("withToken", () => {
   });
   it("leaves URLs without a token alone", () => {
     expect(withToken("http://o/seg/1.mp4", "new")).toBe("http://o/seg/1.mp4");
+  });
+});
+
+describe("playbackFields", () => {
+  it("live: playbackMode live and behindLiveSeconds null (W1 sends this on every beat)", () => {
+    expect(playbackFields("live")).toEqual({ playbackMode: "live", behindLiveSeconds: null });
+    expect(playbackFields("live", 30)).toEqual({ playbackMode: "live", behindLiveSeconds: null });
+  });
+
+  it("dvr: how far behind, within the contract's 0..86400, null when unknown", () => {
+    expect(playbackFields("dvr")).toEqual({ playbackMode: "dvr", behindLiveSeconds: null });
+    expect(playbackFields("dvr", 42.5)).toEqual({ playbackMode: "dvr", behindLiveSeconds: 42.5 });
+    expect(playbackFields("dvr", -3).behindLiveSeconds).toBe(0);
+    expect(playbackFields("dvr", 1e9).behindLiveSeconds).toBe(86_400);
+    expect(playbackFields("dvr", Number.NaN).behindLiveSeconds).toBeNull();
   });
 });

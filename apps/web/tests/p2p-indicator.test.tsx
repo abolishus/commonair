@@ -25,6 +25,10 @@ class FakeController {
   disableP2P = vi.fn<() => void>();
   start = vi.fn<() => Promise<void>>(async () => undefined);
   stop = vi.fn<() => Promise<void>>(async () => undefined);
+  // The player seam the player registers with the media clock (W1-player).
+  playheadWallclock = () => null;
+  playbackMode = () => "live" as const;
+  onPlaybackMode = () => () => undefined;
   /** Whether the notice was on screen when this session was created. */
   noticeOnScreen = document.querySelector('[data-testid="player-p2p-notice"]') !== null;
   constructor(public opts: PlayerControllerOptions) {

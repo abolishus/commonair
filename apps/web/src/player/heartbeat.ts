@@ -107,6 +107,25 @@ export function nextHeartbeatDelay(intervalMs: number, jitter = 0.1, random: () 
   return Math.max(1_000, Math.round(intervalMs * (1 + (random() * 2 - 1) * jitter)));
 }
 
+/** Where the playhead is on every beat (ADR 0016 decision 6; the contract's `Heartbeat`). */
+export interface PlaybackFields {
+  playbackMode: "live" | "dvr";
+  /** Seconds behind the live edge in DVR mode; null at the edge and always in W1 (W2-dvr fills it). */
+  behindLiveSeconds: number | null;
+}
+
+/**
+ * The playback-mode fields every heartbeat carries. Sent even when `live` (the contract's
+ * default) so a missing field always means an older client.
+ */
+export function playbackFields(mode: "live" | "dvr", behindLiveSeconds: number | null = null): PlaybackFields {
+  const behind =
+    mode === "dvr" && behindLiveSeconds !== null && Number.isFinite(behindLiveSeconds)
+      ? Math.min(86_400, Math.max(0, behindLiveSeconds))
+      : null;
+  return { playbackMode: mode, behindLiveSeconds: behind };
+}
+
 /** Replace the `t` (playback token) query parameter, if the URL carries one. */
 export function withToken(url: string, token: string, param = "t"): string {
   const u = new URL(url);

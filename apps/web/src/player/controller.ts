@@ -11,19 +11,26 @@
  * session ask for it (`p2pCapable`), and only when the server granted it (`p2p.enabled`) and gave
  * ICE servers does the P2P loader (`./p2p/engine.ts`, its own chunk) load. Anything else is plain
  * hls.js exactly as without P2P.
+ *
+ * The player seam (docs/testing/w1-selectors.md "Player seam"): `playheadWallclock`,
+ * `seekToWallclock`, `setTargetLatency`, `onTextTrack`, `playbackMode`/`onPlaybackMode`. Later
+ * features (DVR, captions, data mode, watch rooms) build on these instead of reaching into hls.js.
  */
 import type Hls from "hls.js";
 import type { HlsConfig } from "hls.js";
+import { RENDITIONS } from "@commonair/contracts/enums";
 import type { Api } from "../lib/api.ts";
 import {
   HeartbeatAccountant,
   MAX_P2P_PEERS,
   RENDITION_SOURCE,
   nextHeartbeatDelay,
+  playbackFields,
   withToken,
   type CumulativeStats,
 } from "./heartbeat.ts";
-import { P2P_WATCHING_WINDOW_MS, p2pHlsConfig } from "./p2p/config.ts";
+import type { PlaybackMode } from "./media-clock.ts";
+import { P2P_TUNING, P2P_WATCHING_WINDOW_MS, p2pHlsConfig, renditionOf } from "./p2p/config.ts";
 import { DigestValidator } from "./p2p/digest.ts";
 import type { P2PHls } from "./p2p/engine.ts";
 import { fetchIceServers, iceRefreshDelay } from "./p2p/ice.ts";
@@ -76,6 +83,63 @@ export interface PlayerControllerOptions {
   onP2P?: (status: P2PStatus) => void;
   /** Tests: load the P2P engine module (default: the lazy chunk). */
   loadP2PEngine?: () => Promise<EngineModule>;
+  /** Diagnostic (`?targetLatency=`): the hls.js target latency in seconds from the start. */
+  targetLatency?: number | undefined;
+  /** Diagnostic (`?rendition=`): pin the hls.js level of this rendition (`source`, `720p`, …). */
+  rendition?: string | undefined;
+}
+
+/** Bounds of `setTargetLatency` (seconds): below one second hls.js stalls, past a minute it is DVR. */
+export const TARGET_LATENCY_RANGE = { min: 1, max: 60 } as const;
+/** Bounds of the `targetLatency` query parameter (seconds). */
+export const DIAGNOSTIC_LATENCY_RANGE = { min: 1, max: 30 } as const;
+
+/** The player's diagnostic query parameters (`timeline-sync` step 2); invalid values are dropped. */
+export interface DiagnosticParams {
+  targetLatency?: number;
+  rendition?: string;
+}
+
+/**
+ * Read `targetLatency=<seconds>` (1–30) and `rendition=<name>` (one of `RENDITIONS`) from a
+ * `location.search`. The page has no quality picker and no handle on hls.js, so the harness pins
+ * viewers through these; anything else is ignored so a hand-edited URL cannot break playback.
+ */
+export function diagnosticParams(search: string): DiagnosticParams {
+  const q = new URLSearchParams(search);
+  const out: DiagnosticParams = {};
+  const latency = q.get("targetLatency")?.trim();
+  if (latency !== undefined && /^\d+(\.\d+)?$/.test(latency)) {
+    const n = Number(latency);
+    if (n >= DIAGNOSTIC_LATENCY_RANGE.min && n <= DIAGNOSTIC_LATENCY_RANGE.max) out.targetLatency = n;
+  }
+  const rendition = q.get("rendition");
+  if (rendition !== null && (RENDITIONS as readonly string[]).includes(rendition)) out.rendition = rendition;
+  return out;
+}
+
+/** A fragment's place on both clocks (hls.js `Fragment`: `start`/`duration` in seconds, PDT in epoch ms). */
+export interface PdtFragment {
+  start: number;
+  duration: number;
+  programDateTime: number | null;
+}
+
+/**
+ * The media time whose PDT is `at`, from a playlist's fragments; null when `at` lies outside the
+ * playlist window or no fragment carries PDT.
+ */
+export function mediaTimeOfWallclock(fragments: readonly PdtFragment[], at: number): number | null {
+  for (const f of fragments) {
+    if (f.programDateTime === null || !Number.isFinite(f.programDateTime)) continue;
+    const offset = (at - f.programDateTime) / 1000;
+    if (offset >= 0 && offset < f.duration) return f.start + offset;
+  }
+  return null;
+}
+
+function clampLatency(seconds: number): number {
+  return Math.min(TARGET_LATENCY_RANGE.max, Math.max(TARGET_LATENCY_RANGE.min, seconds));
 }
 
 const PLAYLIST_WAIT_MS = 45_000;
@@ -131,8 +195,133 @@ export class PlayerController {
   private p2pOff = false;
   /** When the server last acknowledged a heartbeat (it then lists the session as watching). */
   private lastAckAt: number | null = null;
+  /** The target latency asked for (seconds), applied to hls.js now or when it attaches. */
+  private targetLatencyS: number | null = null;
+  private mode: PlaybackMode = "live";
+  private readonly modeListeners = new Set<(mode: PlaybackMode) => void>();
+  private readonly textTrackUnsubs = new Set<() => void>();
 
-  constructor(private readonly opts: PlayerControllerOptions) {}
+  constructor(private readonly opts: PlayerControllerOptions) {
+    const t = opts.targetLatency;
+    if (t !== undefined && Number.isFinite(t) && t > 0) this.targetLatencyS = clampLatency(t);
+  }
+
+  // ------------------------------------------------------------ the player seam
+
+  /**
+   * The PDT under the playhead: what chat sends as `mediaTs` (ADR 0012 amendment 1 decision 1).
+   * The same instant has the same PDT on every rendition, so it depends on neither the viewer's
+   * clock nor their rung. hls.js: `playingDate`; native HLS: `getStartDate()` + `currentTime`.
+   * Null before the first frame, without PDT, or once stopped.
+   */
+  playheadWallclock(): Date | null {
+    if (this.stopped) return null;
+    if (this.hls) {
+      const at = this.hls.playingDate;
+      return at && Number.isFinite(at.getTime()) ? new Date(at.getTime()) : null;
+    }
+    const v = this.opts.video as HTMLVideoElement & { getStartDate?: () => Date };
+    // HAVE_METADATA: before it, `currentTime` is 0 whatever the playlist says.
+    if (v.readyState < 1) return null;
+    const start = v.getStartDate?.().getTime();
+    if (start === undefined || !Number.isFinite(start)) return null;
+    return new Date(start + v.currentTime * 1000);
+  }
+
+  /**
+   * Move the playhead to the media whose PDT is `t` (DVR, alert history, watch rooms). hls.js: the
+   * fragment of the playing level whose PDT window holds `t`; native: `currentTime` from
+   * `getStartDate()`, within `seekable`. False, and nothing moves, when `t` is out of range.
+   */
+  seekToWallclock(t: Date): boolean {
+    const at = t.getTime();
+    if (this.stopped || !Number.isFinite(at)) return false;
+    const { video } = this.opts;
+    let target: number | null = null;
+    if (this.hls) {
+      const levels = this.hls.levels;
+      const level = levels[this.hls.currentLevel] ?? levels.find((l) => l.details);
+      target = mediaTimeOfWallclock(level?.details?.fragments ?? [], at);
+    } else {
+      const v = video as HTMLVideoElement & { getStartDate?: () => Date };
+      const start = v.getStartDate?.().getTime();
+      if (v.readyState >= 1 && start !== undefined && Number.isFinite(start)) {
+        const candidate = (at - start) / 1000;
+        if (inRanges(v.seekable, candidate)) target = candidate;
+      }
+    }
+    if (target === null) return false;
+    video.currentTime = target;
+    return true;
+  }
+
+  /**
+   * Hold the playhead `seconds` behind the live edge (clamped to `TARGET_LATENCY_RANGE`): hls.js
+   * `liveSyncDuration` for this session, replacing `liveSyncDurationCount`, and a step to the new
+   * sync position once one is known. Returns the value applied. Native HLS exposes no target, so
+   * it changes nothing and returns the current latency (NaN while unknown). Before `start()` the
+   * path is not decided yet: the value is stored and returned, and applies only if hls.js attaches.
+   */
+  setTargetLatency(seconds: number): number {
+    if (this.native) return this.latencySeconds() ?? Number.NaN;
+    if (!Number.isFinite(seconds)) return this.targetLatencyS ?? Number.NaN;
+    const applied = clampLatency(seconds);
+    this.targetLatencyS = applied;
+    const hls = this.hls;
+    if (hls) {
+      // hls.js jumps to the sync position whenever latency passes this, so it must stay above the target.
+      const max = hls.config.liveMaxLatencyDuration;
+      if (max !== undefined && max <= applied) hls.config.liveMaxLatencyDuration = applied + P2P_TUNING.maxLatencySlack;
+      hls.targetLatency = applied;
+      const sync = hls.liveSyncPosition;
+      const media = this.opts.video;
+      if (sync !== null && Number.isFinite(sync) && hls.media && !media.seeking) media.currentTime = sync;
+    }
+    return applied;
+  }
+
+  /**
+   * Text tracks appearing, disappearing or changing on the video (captions, W2). Fires with the
+   * element's `TextTrackList`; W1 adds no tracks, so only what the playlist brings shows up.
+   * Returns the unsubscribe function.
+   */
+  onTextTrack(cb: (tracks: TextTrackList) => void): () => void {
+    const tracks = this.opts.video.textTracks as TextTrackList | undefined;
+    if (!tracks || typeof tracks.addEventListener !== "function") return () => undefined;
+    const fire = () => cb(tracks);
+    const events = ["addtrack", "removetrack", "change"] as const;
+    for (const e of events) tracks.addEventListener(e, fire);
+    const unsub = () => {
+      if (!this.textTrackUnsubs.delete(unsub)) return;
+      for (const e of events) tracks.removeEventListener(e, fire);
+    };
+    this.textTrackUnsubs.add(unsub);
+    return unsub;
+  }
+
+  /** Where the playhead is: `live` at the edge, `dvr` behind it. Always `live` in W1. */
+  playbackMode(): PlaybackMode {
+    return this.mode;
+  }
+
+  /** Subscribe to playback-mode changes; returns the unsubscribe function. */
+  onPlaybackMode(cb: (mode: PlaybackMode) => void): () => void {
+    const listener = (mode: PlaybackMode) => cb(mode);
+    this.modeListeners.add(listener);
+    return () => {
+      this.modeListeners.delete(listener);
+    };
+  }
+
+  /** W2-dvr's switch between the live edge and DVR; nothing calls it in W1. */
+  setPlaybackMode(mode: PlaybackMode): void {
+    if (this.stopped || this.mode === mode) return;
+    this.mode = mode;
+    // Deleting from a Set while iterating it is safe, so a listener may unsubscribe itself.
+    for (const l of this.modeListeners) l(mode);
+  }
+
+  // ------------------------------------------------------------ session
 
   private setState(s: PlayerState): void {
     if (this.stopped || this.state === s) return;
@@ -264,7 +453,7 @@ export class PlayerController {
       this.p2pStats = stats;
       this.p2p = plan.engine.createP2PHls({
         Hls: HlsCtor,
-        hlsConfig: { ...BASE_HLS_CONFIG, ...p2pHlsConfig(), xhrSetup },
+        hlsConfig: { ...BASE_HLS_CONFIG, ...this.p2pLatencyConfig(), xhrSetup },
         p2p: plan.info,
         iceServers: plan.iceServers,
         validateP2PSegment: digests.validate,
@@ -284,7 +473,7 @@ export class PlayerController {
       this.scheduleIceRefresh(plan.expiresAt);
       this.emitP2P();
     } else {
-      hls = new HlsCtor({ ...BASE_HLS_CONFIG, ...LL_HLS_CONFIG, xhrSetup });
+      hls = new HlsCtor({ ...BASE_HLS_CONFIG, ...this.llLatencyConfig(), xhrSetup });
       hls.on(HlsCtor.Events.FRAG_LOADED, (_e, data) => {
         this.bytesHttp += data.frag.stats.loaded;
       });
@@ -298,9 +487,31 @@ export class PlayerController {
       else if (data.type === HlsCtor.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
       else this.setState("error");
     });
+    const rendition = this.opts.rendition;
+    if (rendition !== undefined) {
+      // Pinned before the first fragment loads; `currentLevel` also turns ABR off for the session.
+      hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
+        const i = hls.levels.findIndex((l) => renditionOf(l.uri) === rendition);
+        if (i >= 0) hls.currentLevel = i;
+      });
+    }
     hls.loadSource(url);
     hls.attachMedia(this.opts.video);
     this.hls = hls;
+  }
+
+  /** Low-latency hls.js, with `liveSyncDuration` in place of the segment count once a target is set. */
+  private llLatencyConfig(): Partial<HlsConfig> {
+    const t = this.targetLatencyS;
+    // hls.js refuses a config that sets both.
+    return t === null ? LL_HLS_CONFIG : { lowLatencyMode: true, liveSyncDuration: t };
+  }
+
+  /** The P2P latency window, moved to the target when one is set (the slack above it kept). */
+  private p2pLatencyConfig(): Partial<HlsConfig> {
+    const base = p2pHlsConfig();
+    const t = this.targetLatencyS;
+    return t === null ? base : { ...base, liveSyncDuration: t, liveMaxLatencyDuration: t + P2P_TUNING.maxLatencySlack };
   }
 
   /** TURN credentials expire: fetch fresh ones at ~80 % of their lifetime and apply them at runtime. */
@@ -336,15 +547,8 @@ export class PlayerController {
   }
 
   private latencySeconds(): number | null {
-    const now = Date.now();
-    if (this.hls) {
-      const at = this.hls.playingDate;
-      return at ? (now - at.getTime()) / 1000 : null;
-    }
-    const v = this.opts.video as HTMLVideoElement & { getStartDate?: () => Date };
-    const start = v.getStartDate?.().getTime();
-    if (start === undefined || !Number.isFinite(start)) return null;
-    return (now - (start + v.currentTime * 1000)) / 1000;
+    const at = this.playheadWallclock();
+    return at ? (Date.now() - at.getTime()) / 1000 : null;
   }
 
   private cumulative(): CumulativeStats {
@@ -387,6 +591,7 @@ export class PlayerController {
         rendition: RENDITION_SOURCE,
         fingerprint: collectFingerprint(this.native),
         ...this.accountant.delta(totals),
+        ...playbackFields(this.playbackMode()),
       });
       // Throttled: the server recorded nothing, so the deltas ride along with the next beat.
       if (!this.accountant.settle(totals, res)) return;
@@ -429,6 +634,8 @@ export class PlayerController {
     this.abort.abort();
     if (this.timer) clearTimeout(this.timer);
     if (this.iceTimer) clearTimeout(this.iceTimer);
+    this.modeListeners.clear();
+    for (const unsub of this.textTrackUnsubs) unsub();
     const { video } = this.opts;
     video.removeEventListener("playing", this.onPlaying);
     video.removeEventListener("error", this.onVideoError);
@@ -444,4 +651,11 @@ export class PlayerController {
     this.session = null;
     if (session) await this.endSession(session.id, session.token);
   }
+}
+
+/** Whether `t` lies in one of the ranges (`video.seekable`). */
+function inRanges(ranges: TimeRanges | undefined, t: number): boolean {
+  if (!ranges || !Number.isFinite(t)) return false;
+  for (let i = 0; i < ranges.length; i++) if (t >= ranges.start(i) && t <= ranges.end(i)) return true;
+  return false;
 }
