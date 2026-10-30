@@ -5,6 +5,7 @@ import type { EmailCatalog } from "./messages/en.ts";
 import type { TemplateDefinition, TemplateId } from "./template.tsx";
 import { magicLink, passwordReset, verifyEmail } from "./templates/account.tsx";
 import { councilReviewRequested, governanceResultPublished, governanceVoteOpened } from "./templates/governance.tsx";
+import { goLiveDigest } from "./templates/notify.tsx";
 import { chargebackNotice, payoutSent } from "./templates/payments.tsx";
 import { accountDeletionCompleted, accountDeletionScheduled, dataExportReady } from "./templates/privacy.tsx";
 import { newSignIn, streamKeyRevoked, twoFactorDisabled, twoFactorEnabled } from "./templates/security.tsx";
@@ -34,6 +35,7 @@ export const templates = {
   governanceVoteOpened,
   governanceResultPublished,
   councilReviewRequested,
+  goLiveDigest,
   dmcaNoticeReceived,
   dmcaNoticeDecided,
   dmcaCounterNoticeForwarded,
@@ -41,7 +43,10 @@ export const templates = {
   appealDecided,
   enforcementStatement,
 } satisfies {
-  [K in TemplateId]: Omit<TemplateDefinition<never, EmailCatalog[K]>, "links"> & { links: readonly string[] };
+  [K in TemplateId]: Omit<TemplateDefinition<never, EmailCatalog[K]>, "links" | "linkLists"> & {
+    links: readonly string[];
+    linkLists?: readonly { field: string; key: string }[];
+  };
 };
 
 export type Templates = typeof templates;

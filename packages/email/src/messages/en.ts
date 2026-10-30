@@ -170,6 +170,24 @@ export const en = {
     action: "Review and respond",
     public: "The council's response is published with the proposal.",
   },
+  goLiveDigest: {
+    /** One channel. The digest strings carry no counts (no plurals until N2-email). */
+    subjectOne: "{channel} is live on {instance}",
+    /** Several channels in one digest. */
+    subjectMany: "Channels you follow are live on {instance}",
+    previewOne: "{channel} just went live. Come and watch.",
+    previewMany: "Channels you follow just went live. Come and watch.",
+    headingOne: "{channel} is live",
+    headingMany: "Channels you follow are live",
+    /** One listed channel: its linked name and the broadcast title. */
+    item: "{channel}: {title}",
+    /** One listed channel without a title (none set, or a mature stream the member has not confirmed 18+ for). */
+    itemNoTitle: "{channel}",
+    /** Shown, linking the home page, when more channels went live than the digest lists. */
+    more: "More channels you follow are live",
+    why: "You turned on go-live emails for channels you follow on {instance}.",
+    settings: "Choose which go-live emails you get",
+  },
   dmcaNoticeReceived: {
     subject: "Copyright notice about {content}",
     preview: "We received a copyright notice about your content.",

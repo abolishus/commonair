@@ -92,6 +92,30 @@ export function normalizeLinks<D>(
   return out as D;
 }
 
+/**
+ * Return a copy of `data` with the link in `key` of every item of each declared list validated and
+ * normalised (`normalizeInstanceUrl`). A list field that is not an array, or an item that is not an
+ * object, is refused like a bad link. The error names the field and index, never the value.
+ */
+export function normalizeLinkLists<D>(
+  data: D,
+  lists: readonly { field: string; key: string }[],
+  site: Pick<InstanceSite, "publicUrl">,
+): D {
+  const out = { ...data } as Record<string, unknown>;
+  for (const { field, key } of lists) {
+    const items = out[field];
+    if (!Array.isArray(items)) throw new EmailLinkError(field);
+    out[field] = items.map((item: unknown, i) => {
+      const where = `${field}[${i}].${key}`;
+      if (typeof item !== "object" || item === null) throw new EmailLinkError(where);
+      const record = item as Record<string, unknown>;
+      return { ...record, [key]: normalizeInstanceUrl(record[key], site, where) };
+    });
+  }
+  return out as D;
+}
+
 // html-to-text upper-cases headings by default, which is wrong for many scripts (and Turkish i).
 const TEXT_SELECTORS = [
   { selector: "h1", options: { uppercase: false } },
@@ -107,10 +131,11 @@ export async function renderEmail<K extends TemplateId>(
   const { locale, catalog } = resolveCatalog(opts.locale ?? opts.site.defaultLocale, opts.catalogs);
   // The registry is keyed by id, so this pairing is sound; TS cannot correlate the generic.
   const def = templates[id] as unknown as TemplateDefinition<TemplateData<K>, unknown>;
-  const data = normalizeLinks(input, def.links, opts.site, {
-    links: def.storageLinks ?? [],
-    origin: opts.storageOrigin,
-  });
+  const data = normalizeLinkLists(
+    normalizeLinks(input, def.links, opts.site, { links: def.storageLinks ?? [], origin: opts.storageOrigin }),
+    (def.linkLists ?? []) as readonly { field: string; key: string }[],
+    opts.site,
+  );
   const ctx = createContext(opts.site, locale, catalog.layout, catalog[id] as unknown) as EmailContext<unknown>;
   const subject = singleLine(def.subject(ctx, data));
   const preview = def.preview ? def.preview(ctx, data) : ctx.text((catalog[id] as { preview: string }).preview);

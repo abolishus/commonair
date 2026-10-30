@@ -55,6 +55,14 @@ export interface EmailContext<M> {
 /** Keys of `D` whose values are strings: the only fields that may be declared as links. */
 export type StringKeys<D> = { [K in keyof D]-?: D[K] extends string ? K : never }[keyof D] & string;
 
+/** Keys of `D` whose values are arrays of objects: the only fields that may be declared as link lists. */
+export type ListKeys<D> = { [K in keyof D]-?: D[K] extends readonly object[] ? K : never }[keyof D] & string;
+
+/** One link-list declaration: every item of `field` has a link in its `key` property. */
+export type LinkList<D> = {
+  [K in ListKeys<D>]: { field: K; key: D[K] extends readonly (infer I)[] ? StringKeys<I> : never };
+}[ListKeys<D>];
+
 export interface TemplateDefinition<D, M> {
   /**
    * The data fields that are URLs. Only these are rendered as links, and each must be an
@@ -67,6 +75,11 @@ export interface TemplateDefinition<D, M> {
    * when the mailer was given `storageOrigin`. Each must also be listed in `links`.
    */
   storageLinks?: readonly string[];
+  /**
+   * Array fields whose items carry a link in `key` (e.g. the channels of a go-live digest). Each
+   * item's link is validated and normalised exactly like a `links` field (same `EmailLinkError`).
+   */
+  linkLists?: readonly LinkList<D>[];
   subject(ctx: EmailContext<M>, data: D): string;
   preview?(ctx: EmailContext<M>, data: D): string;
   body(ctx: EmailContext<M>, data: D): ReactNode;

@@ -42,6 +42,7 @@ test("the registry covers every notice the platform sends", () => {
       "governanceVoteOpened",
       "governanceResultPublished",
       "councilReviewRequested",
+      "goLiveDigest",
       "dmcaNoticeReceived",
       "dmcaNoticeDecided",
       "dmcaCounterNoticeForwarded",
@@ -108,7 +109,7 @@ test("only member announcements carry an unsubscribe link", async () => {
       };
     }),
   );
-  const announcements = new Set(["governanceResultPublished", "governanceVoteOpened"]);
+  const announcements = new Set(["governanceResultPublished", "governanceVoteOpened", "goLiveDigest"]);
   expect(rows).toEqual(rows.map(({ id }) => ({ id, header: announcements.has(id), footer: announcements.has(id) })));
 });
 

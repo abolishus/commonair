@@ -29,8 +29,9 @@ await mailer.close();
 - `send(template, props, to)` renders HTML and a plain-text alternative, sets `From`
   (`MAIL_FROM`, otherwise `"<instance name>" <noreply@…>`: the flagship's noreply contact on the
   flagship, `noreply@<public host>` elsewhere), `Auto-Submitted: auto-generated`, and for
-  member announcements (governance vote opened / result published) `List-Unsubscribe` plus
-  RFC 8058 `List-Unsubscribe-Post`. The unsubscribe URL must accept a one-click `POST`.
+  member announcements (governance vote opened / result published, the go-live digest)
+  `List-Unsubscribe` plus RFC 8058 `List-Unsubscribe-Post`. The unsubscribe URL must accept a
+  one-click `POST`.
 - `to` must be one bare address; anything else throws `InvalidRecipientError`.
 - **Links are declared per template** (`links: ["resetUrl"]`). Each declared field must be an
   absolute http(s) URL on the instance's `PUBLIC_URL` origin, without credentials, whitespace,
@@ -39,6 +40,14 @@ await mailer.close();
   Every other field is free text, always rendered as escaped text, never as a link, so a title
   that contains a URL cannot block a required notice. Signed downloads (data exports) go through
   an instance page that checks the session and redirects, never a raw storage URL.
+- **Link lists** (`linkLists: [{ field: "channels", key: "url" }]`) declare array fields whose
+  items carry a link; each item's link is checked and normalised exactly like a `links` field
+  (the `EmailLinkError` names `channels[1].url`, never the value).
+- **Unsubscribe URLs** are `${PUBLIC_URL}/api/email/unsubscribe?list=<list>&token=<token>`
+  (`EMAIL_UNSUBSCRIBE_PATH`; lists `go_live` and `governance`; the token is
+  `signUnsubscribeToken(AUTH_SECRET, userId, list)` from `@commonair/tokens`, with no expiry). The
+  API answers a `POST` (RFC 8058 one-click) by turning that list's email off, and a `GET` with a
+  303 to the web confirm page `/settings/notifications/unsubscribe` with the same query.
 - STARTTLS is required (`requireTLS`) when `SMTP_REQUIRE_TLS=true`, and always when SMTP
   credentials are configured without implicit TLS. `close()` waits for in-flight sends, then
   rejects new ones with `MailerClosedError`.
@@ -62,6 +71,7 @@ await mailer.close();
 | `governanceVoteOpened`                        | `proposalTitle`, `closesAt`, `voteUrl`, `unsubscribeUrl`                           |
 | `governanceResultPublished`                   | `proposalTitle`, `outcome`, `turnout` (0..1), `resultUrl`, `unsubscribeUrl`        |
 | `councilReviewRequested` (to council members) | `proposalTitle`, `reviewEndsAt`, `respondUrl`                                      |
+| `goLiveDigest` (opt-in go-live digest)        | `channels` (`name`, `title`, `url`; 20 listed), `settingsUrl`, `unsubscribeUrl`    |
 | `dmcaNoticeReceived`                          | `contentTitle`, `noticeRef`, `receivedAt`, `noticeUrl`                             |
 | `contentRestored`                             | `contentTitle`, `restoredAt`, `contentUrl`                                         |
 | `appealDecided`                               | `appealRef`, `kind`, `outcome` (`upheld`/`overturned`), `decidedAt`, `decisionUrl` |

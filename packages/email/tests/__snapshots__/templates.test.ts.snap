@@ -389,6 +389,32 @@ Questions? Write to hello@air.example.test.
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd."
 `;
 
+exports[`goLiveDigest > renders accessible HTML and a plain-text alternative 1`] = `
+"Channels you follow are live on Example Air
+
+Example Air https://air.example.test
+
+
+Channels you follow are live
+
+ * ada_plays https://air.example.test/ada_plays: Speedrun night, part 2
+ * Ada https://air.example.test/sample_channel
+
+You turned on go-live emails for channels you follow on Example Air.
+
+Choose which go-live emails you get https://air.example.test/settings/notifications
+
+----------------------------------------
+
+You are receiving this email because of your account on Example Air.
+
+Questions? Write to hello@air.example.test.
+
+Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
+
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=go_live&token=sample"
+`;
+
 exports[`governanceResultPublished > renders accessible HTML and a plain-text alternative 1`] = `
 "Vote result: Raise the creator share to 85%
 
@@ -417,7 +443,7 @@ Questions? Write to hello@air.example.test.
 
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
 
-Unsubscribe from these emails https://air.example.test/settings/notifications/unsubscribe?list=governance&token=sample"
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
 `;
 
 exports[`governanceVoteOpened > renders accessible HTML and a plain-text alternative 1`] = `
@@ -446,7 +472,7 @@ Questions? Write to hello@air.example.test.
 
 Example Air runs on free software. Get the source code https://forge.example.test/air/commonair/tree/0123abcd.
 
-Unsubscribe from these emails https://air.example.test/settings/notifications/unsubscribe?list=governance&token=sample"
+Unsubscribe from these emails https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
 `;
 
 exports[`magicLink > renders accessible HTML and a plain-text alternative 1`] = `
