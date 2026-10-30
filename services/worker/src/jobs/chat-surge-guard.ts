@@ -3,6 +3,7 @@
 
 import { QUEUES } from "@commonair/contracts/internal";
 import { z } from "zod";
+import { runSurgeGuard } from "../chat-gate/surge.ts";
 import { withRunLock } from "../integrity/lock.ts";
 import { defineJob } from "../runtime/registry.ts";
 
@@ -18,8 +19,7 @@ export const job = defineJob({
       ctx.valkey,
       "worker:lock:moderation:chat-surge-guard",
       { ttlMs: 30_000, maxHoldMs: 30 * 60_000, job: "chat-surge-guard", logger: ctx.logger },
-      // Stub: W1-watch-gate implements it.
-      async () => ({ channels: 0, begun: 0, ended: 0 }),
+      () => runSurgeGuard(ctx),
     );
     return r.acquired ? r.value : { skipped: 1 };
   },
