@@ -8,6 +8,9 @@
  * playlists say. So when the presented token has less than a minute left, the origin
  * embeds a freshly signed token (same claims, new iat/exp) instead.
  *
+ * A data-mode token (ADR 0018) is re-signed with its `dm`; reuse is keyed on (`sid`, `dm`), so a
+ * token minted after the viewer changed their budget is never answered with an older one.
+ *
  * Refresh is granted only while the playback session exists and has not ended
  * (`playback_sessions.ended_at` is null), so an ended or unknown session cannot keep
  * itself alive through the origin; that check is cached per session for 15 s.
@@ -47,12 +50,13 @@ export class TokenRefresher {
   async tokenFor(claims: PlaybackClaims, presented: string): Promise<string> {
     const now = this.now();
     if (claims.exp - now >= this.threshold) return presented;
-    const reuse = this.issued.get(claims.sid);
+    const cacheKey = `${claims.sid}|${claims.dm ?? ""}`;
+    const reuse = this.issued.get(cacheKey);
     if (reuse && reuse.exp - now >= this.threshold) return reuse.token;
     if (!(await this.sessionActive(claims.sid))) return presented;
     const exp = now + (this.opts.ttlSeconds ?? PLAYBACK_TOKEN_TTL_SECONDS);
     const token = await signPlaybackToken(this.opts.key, { ...claims, iat: now, exp });
-    this.issued.set(claims.sid, { token, exp }, (exp - now) * 1000);
+    this.issued.set(cacheKey, { token, exp }, (exp - now) * 1000);
     return token;
   }
 

@@ -237,3 +237,97 @@ export function synthesizeMultivariant(sources: VariantSource[]): string {
   for (const v of c.variants) out.push(v.inf, v.uri, "");
   return out.join("\n");
 }
+
+// ---------------------------------------------------------------------------------------
+// Data mode (ADR 0018 decision 5)
+
+/** LL-HLS tags a data-mode media playlist drops (RFC 8216bis §4.4.3.7–4.4.5.3, §4.4.3.8). */
+const LOW_LATENCY_TAGS = [
+  "#EXT-X-PART-INF:",
+  "#EXT-X-PART:",
+  "#EXT-X-PRELOAD-HINT:",
+  "#EXT-X-RENDITION-REPORT:",
+  "#EXT-X-SERVER-CONTROL:",
+];
+
+/**
+ * A media playlist without its low-latency layer, for data-mode tokens: complete segments only.
+ * Every rewritten URI carries the viewer's ~330-character token, so an LL-HLS playlist is several
+ * kilobytes, and an LL player reloads it once per part (5 times a second); on an audio-only budget
+ * that polling costs more than the audio itself. Without parts and `CAN-BLOCK-RELOAD` players
+ * reload once per target duration and fetch whole segments (integrity counts both the same way).
+ * Tags of the in-progress segment, which has parts but no `EXTINF` yet, go with it.
+ */
+export function stripLowLatency(media: string): string {
+  const lines = media.split(/\r?\n/).filter((l) => !LOW_LATENCY_TAGS.some((tag) => l.trim().startsWith(tag)));
+  let lastUri = -1;
+  lines.forEach((l, i) => {
+    const t = l.trim();
+    if (t !== "" && !t.startsWith("#")) lastUri = i;
+  });
+  if (lastUri === -1) return lines.join("\n");
+  const tail = lines.slice(lastUri + 1).filter((l) => l.trim() === "" || l.trim() === "#EXT-X-ENDLIST");
+  return [...lines.slice(0, lastUri + 1), ...tail].join("\n");
+}
+
+/**
+ * The multivariant playlist for a data-mode token: video variants whose BANDWIDTH is at most `dm`
+ * (bit/s), plus every audio-only variant, which is the floor and is kept even above the ceiling
+ * (the player's meter shows what is actually spent). With no video variant under the ceiling the
+ * audio-only variants are listed first, so players start on them. Media groups that no kept
+ * variant references are dropped. A ladder with neither an audio-only variant nor a video variant
+ * under the ceiling keeps its lowest variant rather than serve an unplayable playlist.
+ *
+ * Input is `synthesizeMultivariant`'s output, before rewriting; kept lines keep their order.
+ */
+export function filterForDataMode(multivariant: string, dm: number): string {
+  const lines = multivariant.split(/\r?\n/).map((l) => l.trim());
+  const header: string[] = [];
+  const media: { line: string; key: string | undefined }[] = [];
+  const variants: { inf: string; attrs: AttributeList; uri: string; bandwidth: number; audioOnly: boolean }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      let j = i + 1;
+      while (j < lines.length && (lines[j] === "" || lines[j]?.startsWith("#"))) j++;
+      const uri = lines[j];
+      if (uri === undefined) continue;
+      i = j;
+      const attrs = parseAttributes(line.slice(18));
+      const codecs = (unquote(attr(attrs, "CODECS")) ?? "").split(",").map((s) => s.trim());
+      variants.push({
+        inf: line,
+        attrs,
+        uri,
+        bandwidth: Number(attr(attrs, "BANDWIDTH")) || 0,
+        audioOnly: attr(attrs, "RESOLUTION") === undefined && codecs.every((cd) => AUDIO_CODEC.test(cd)),
+      });
+    } else if (line.startsWith("#EXT-X-MEDIA:")) {
+      const attrs = parseAttributes(line.slice(13));
+      const type = attr(attrs, "TYPE");
+      const group = attr(attrs, "GROUP-ID");
+      // TYPE values are the STREAM-INF attribute names that reference the group (AUDIO, VIDEO, …).
+      media.push({ line, key: type && group ? `${type}|${group}` : undefined });
+    } else if (line !== "") header.push(line);
+  }
+
+  const fits = (v: (typeof variants)[number]) => v.audioOnly || v.bandwidth <= dm;
+  const anyVideoFits = variants.some((v) => !v.audioOnly && v.bandwidth <= dm);
+  let kept = anyVideoFits ? variants.filter(fits) : variants.filter((v) => v.audioOnly);
+  if (kept.length === 0) {
+    const lowest = [...variants].sort((a, b) => a.bandwidth - b.bandwidth)[0];
+    kept = lowest ? [lowest] : [];
+  }
+
+  const referenced = new Set<string>();
+  for (const v of kept)
+    for (const g of GROUP_ATTRS) {
+      const value = attr(v.attrs, g);
+      if (value && value !== "NONE") referenced.add(`${g}|${value}`);
+    }
+  const keptMedia = media.filter((m) => m.key === undefined || referenced.has(m.key));
+
+  const out = [...header, "", ...keptMedia.map((m) => m.line), ""];
+  for (const v of kept) out.push(v.inf, v.uri, "");
+  return out.join("\n");
+}

@@ -126,6 +126,15 @@ export function playbackFields(mode: "live" | "dvr", behindLiveSeconds: number |
   return { playbackMode: mode, behindLiveSeconds: behind };
 }
 
+/**
+ * The heartbeat's `dataMode` (ADR 0018 decision 3): a change the server has not applied yet is
+ * sent (the ceiling, or null to turn data mode off); with nothing pending the field is absent,
+ * which the server reads as "unchanged".
+ */
+export function dataModeField(pending: number | null | undefined): { dataMode?: number | null } {
+  return pending === undefined ? {} : { dataMode: pending };
+}
+
 /** Replace the `t` (playback token) query parameter, if the URL carries one. */
 export function withToken(url: string, token: string, param = "t"): string {
   const u = new URL(url);

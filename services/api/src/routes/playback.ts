@@ -64,7 +64,18 @@ function playlistBase(deps: Deps, a: Assignment): string {
 export const playlistUrl = (base: string, path: string, token: string) =>
   `${base}/hls/${path}/index.m3u8?t=${encodeURIComponent(token)}`;
 
-async function signFor(deps: Deps, sid: string, channelId: string, path: string, a: Assignment) {
+/**
+ * `dm` (ADR 0018 decision 1) rides only on origin tokens: callers move a data-mode session to the
+ * origin before minting, and the claim schema refuses anything else.
+ */
+async function signFor(
+  deps: Deps,
+  sid: string,
+  channelId: string,
+  path: string,
+  a: Assignment,
+  dataMode: number | null,
+) {
   const iat = Math.floor(deps.now().getTime() / 1000);
   const claims: PlaybackClaims = {
     v: 1,
@@ -73,6 +84,7 @@ async function signFor(deps: Deps, sid: string, channelId: string, path: string,
     path,
     src: a.source,
     ...(a.source === "relay" ? { rid: a.relayId } : {}),
+    ...(dataMode !== null ? { dm: dataMode } : {}),
     iat,
     exp: iat + PLAYBACK_TOKEN_TTL_SECONDS,
   };
@@ -184,8 +196,8 @@ export const playback = {
       },
       channelVerifiedViewers: await viewerCount(deps, c.id),
       avoidCdn,
-      // W1-data-mode sets this from `input.dataMode` (ADR 0018 decision 4).
-      originOnly: false,
+      // ADR 0018 decision 4: data-mode sessions are origin sessions (the origin filters per token).
+      originOnly: input.dataMode !== null,
     });
     const network = deps.classifier.classify(req.ip);
     // P2P shows the viewer's address to peers (ADR 0005 amendment 1), so 18+, mature-category and
@@ -194,7 +206,8 @@ export const playback = {
     // (`instance.info` `features.p2pDefault`), so a viewer who has not opted in never gets a grant.
     // There are no private or subscriber-only live streams yet (`visibility` is VOD only); whoever
     // adds one excludes it here.
-    const p2pAvailable = deps.env.P2P_ENABLED && !input.nativeHls && !isGated;
+    // Data mode never gets P2P (ADR 0018 decision 6): uploading to peers spends the viewer's budget.
+    const p2pAvailable = deps.env.P2P_ENABLED && !input.nativeHls && !isGated && input.dataMode === null;
     const p2pEnabled = p2pAvailable && input.p2pCapable;
     await deps.db.insert(playbackSessions).values({
       id: sid,
@@ -216,7 +229,7 @@ export const playback = {
     });
     // The grant is what the tracker and `p2p.iceServers` check; the swarm id is the broadcast id.
     if (p2pEnabled) await deps.valkey.set(KEYS.p2pGrant(sid), b.id, "EX", P2P_GRANT_TTL_SECONDS);
-    const { token, claims } = await signFor(deps, sid, c.id, path, assignment);
+    const { token, claims } = await signFor(deps, sid, c.id, path, assignment, input.dataMode);
     return {
       sessionId: sid,
       token,
@@ -233,8 +246,7 @@ export const playback = {
       expiresAt: iso(new Date(claims.exp * 1000)),
       renditions: await renditionsFor(deps, c.id),
       captions: [],
-      // W1-data-mode fills this (ADR 0018).
-      dataMode: null,
+      dataMode: claims.dm ?? null,
     };
   }),
 
@@ -319,6 +331,9 @@ export const playback = {
       bytesP2p: input.bytesP2p,
       ...(input.fingerprint ? { fingerprint: input.fingerprint } : {}),
     });
+    // ADR 0018 decision 3: absent carries the token's ceiling forward, null turns data mode off.
+    const dataMode = input.dataMode === undefined ? (claims.dm ?? null) : input.dataMode;
+    const dataModeChanged = dataMode !== (claims.dm ?? null);
     // A stream that became gated mid-session (T1 restriction, mature flag, mature category) loses
     // P2P: the grant goes, and the tracker closes the socket at its next re-check. Only sessions
     // holding a grant pay for the gate query.
@@ -331,7 +346,8 @@ export const playback = {
       .expire(verifyKey(s.id), VERIFY_STATE_TTL_SECONDS)
       .zadd(KEYS.viewers(s.channelId), now.getTime(), s.id);
     if (granted) {
-      if (gate) tx.del(KEYS.p2pGrant(s.id));
+      // Data mode loses P2P as a gated stream does (ADR 0018 decision 6).
+      if (gate || dataMode !== null) tx.del(KEYS.p2pGrant(s.id));
       else tx.expire(KEYS.p2pGrant(s.id), P2P_GRANT_TTL_SECONDS);
     }
     // A newly verified viewer should show up without waiting for the cache to expire.
@@ -344,7 +360,15 @@ export const playback = {
     // integrity then judges it on origin fetches. That fails safe: an honest viewer's relay
     // segments are missing from the origin count, but no watch time goes unproven.
     let assignment: Assignment | null = null;
-    if (claims.src === "relay" && claims.rid) {
+    // Turning data mode on moves a relay or CDN session to the origin the same way (ADR 0018
+    // decision 4); turning it off leaves the session where it is.
+    if (dataMode !== null && claims.src !== "origin") {
+      assignment = { source: "origin" };
+      await deps.db
+        .update(playbackSessions)
+        .set({ assignedSource: "origin", relayId: null })
+        .where(eq(playbackSessions.id, s.id));
+    } else if (claims.src === "relay" && claims.rid) {
       const relays = await activeRelays(deps);
       if (!relays.some((r) => r.id === claims.rid && r.status === "active")) {
         assignment = { source: "origin" };
@@ -355,7 +379,9 @@ export const playback = {
       }
     }
     const nowSeconds = Math.floor(now.getTime() / 1000);
-    if (!assignment && claims.exp - nowSeconds > REFRESH_BEFORE_SECONDS) return { ok: true as const };
+    // A changed ceiling re-mints now, not at the refresh point, so the player can reload at once.
+    if (!assignment && !dataModeChanged && claims.exp - nowSeconds > REFRESH_BEFORE_SECONDS)
+      return { ok: true as const };
     const a: Assignment =
       assignment ??
       (claims.src === "relay" && claims.rid
@@ -371,7 +397,7 @@ export const playback = {
     gate ??= await sessionGated(deps, s.broadcastId);
     if (gate && !(await confirmedAdult(deps, s.userId ?? undefined)))
       throw apiError("FORBIDDEN", "Confirm you are 18 or older to watch this stream");
-    const { token } = await signFor(deps, s.id, s.channelId, claims.path, a);
+    const { token } = await signFor(deps, s.id, s.channelId, claims.path, a, dataMode);
     return {
       ok: true as const,
       token,

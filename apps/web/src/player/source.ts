@@ -37,18 +37,35 @@ function decodeBase64Url(s: string): string | null {
  * when it cannot be read. Informational only: the server verifies tokens, the client never does.
  */
 export function tokenSource(token: string | undefined): DeliverySource | null {
+  const src = tokenClaims(token)?.src;
+  return typeof src === "string" && (DELIVERY_SOURCES as readonly string[]).includes(src)
+    ? (src as DeliverySource)
+    : null;
+}
+
+/** A playback token's claims as an untyped object, or null when they cannot be read. */
+function tokenClaims(token: string | undefined): Record<string, unknown> | null {
   const body = token?.split(".")[0];
   if (!body) return null;
   const json = decodeBase64Url(body);
   if (json === null) return null;
   try {
-    const src: unknown = (JSON.parse(json) as { src?: unknown }).src;
-    return typeof src === "string" && (DELIVERY_SOURCES as readonly string[]).includes(src)
-      ? (src as DeliverySource)
-      : null;
+    const claims: unknown = JSON.parse(json);
+    return typeof claims === "object" && claims !== null ? (claims as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The data-mode ceiling in a playback token (the `dm` claim, ADR 0018): a number when data mode
+ * is on, null when it is off, undefined when the token cannot be read. Informational only.
+ */
+export function tokenDataMode(token: string | undefined): number | null | undefined {
+  const claims = tokenClaims(token);
+  if (!claims) return undefined;
+  const dm = claims.dm;
+  return typeof dm === "number" && Number.isFinite(dm) ? dm : null;
 }
 
 /**
