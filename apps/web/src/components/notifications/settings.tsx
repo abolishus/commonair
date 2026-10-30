@@ -22,9 +22,9 @@ import {
   type SettingsClient,
   applyPreference,
   choiceEnabled,
+  copyPreferenceCell,
   isOverrideChoice,
   overrideChoice,
-  revertPreference,
   settingsClient,
 } from "../../lib/notifications.ts";
 import { PushToggle } from "../pwa/push-toggle.tsx";
@@ -85,9 +85,10 @@ export function NotificationSettings({ client: given }: NotificationSettingsProp
       setPrefs((p) => (p ? applyPreference(p, input, channel) : p));
       try {
         const answer = await client.setPreference(input);
-        if (seq.current.get(cell) === mine) setPrefs(answer);
+        // Only this cell: taking the whole answer would undo other cells still being saved.
+        if (seq.current.get(cell) === mine) setPrefs((p) => (p ? copyPreferenceCell(p, answer, input) : p));
       } catch (err) {
-        if (seq.current.get(cell) === mine) setPrefs((p) => (p ? revertPreference(p, before, input) : p));
+        if (seq.current.get(cell) === mine) setPrefs((p) => (p ? copyPreferenceCell(p, before, input) : p));
         saveFailed(err);
       }
     },
@@ -160,7 +161,7 @@ function DefaultSwitch({
             : medium === "email"
               ? t("notifySettings.medium.email.hint")
               : t("notifySettings.medium.push.hint")}
-          {builtIn && <span className="ms-1">({t("notifySettings.builtIn")})</span>}
+          {builtIn && <span className="ms-1">{t("notifySettings.builtIn")}</span>}
         </p>
       </div>
       {medium === "in_app" ? (
@@ -400,12 +401,19 @@ function ChannelsSection({
   const setNotify = (slug: string, notify: boolean) =>
     setFollows((list) => list.map((f) => (f.channel.slug === slug ? { ...f, notify } : f)));
 
+  // The latest bell request per channel, and the value before it: as for the preference cells,
+  // an older answer never overwrites a newer click, and a failure restores what the member saw.
+  const bellSeq = React.useRef(new Map<string, number>());
   const bell = async (follow: FollowDto, notify: boolean) => {
-    setNotify(follow.channel.slug, notify);
+    const slug = follow.channel.slug;
+    const mine = (bellSeq.current.get(slug) ?? 0) + 1;
+    bellSeq.current.set(slug, mine);
+    const previous = follow.notify;
+    setNotify(slug, notify);
     try {
-      await client.setBell(follow.channel.slug, notify);
+      await client.setBell(slug, notify);
     } catch (err) {
-      setNotify(follow.channel.slug, !notify);
+      if (bellSeq.current.get(slug) === mine) setNotify(slug, previous);
       saveFailed(err);
     }
   };

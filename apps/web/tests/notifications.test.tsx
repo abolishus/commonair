@@ -344,6 +344,34 @@ describe("NotificationSettings", () => {
     expect(byId("notify-default-push")?.getAttribute("data-state")).toBe("on");
   });
 
+  it("one cell's answer does not undo another cell still being saved", async () => {
+    const client = settings(prefsFixture());
+    const pending: ((p: NotificationPreferencesDto) => void)[] = [];
+    client.setPreference.mockImplementation(
+      () =>
+        new Promise((r) => {
+          pending.push(r);
+        }),
+    );
+    wrap(<NotificationSettings client={client} />);
+    await loaded();
+    fireEvent.click(byId("notify-default-email") as HTMLElement);
+    fireEvent.click(byId("notify-default-push") as HTMLElement);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    // The email answer predates the push save, so it still says push is off.
+    await act(async () => {
+      pending[0]?.(
+        prefsFixture({
+          defaults: { in_app: true, email: true, push: false },
+          builtIn: { in_app: true, email: false, push: true },
+        }),
+      );
+    });
+    expect(byId("notify-default-email")?.getAttribute("data-state")).toBe("on");
+    expect(byId("notify-default-push")?.getAttribute("data-state")).toBe("on");
+    expect(byId("notify-default-push")?.getAttribute("data-builtin")).toBe("false");
+  });
+
   it("a failed default change rolls back and shows notify-save-error", async () => {
     const error = vi.spyOn(toast, "error").mockImplementation(() => 1);
     const client = settings(prefsFixture());
@@ -390,6 +418,42 @@ describe("NotificationSettings", () => {
     expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off");
 
     client.setBell.mockRejectedValueOnce(new Error("boom"));
+    fireEvent.click(byId("notify-channel-bell") as HTMLElement);
+    await waitFor(() => expect(client.setBell).toHaveBeenCalledWith("alpha", true));
+    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off"));
+  });
+
+  it("out-of-order bell answers: a late failure of an older click does not undo the newer one", async () => {
+    vi.spyOn(toast, "error").mockImplementation(() => 1);
+    const client = settings(prefsFixture(), [follow("alpha")]);
+    const pending: { resolve: () => void; reject: (e: Error) => void }[] = [];
+    client.setBell.mockImplementation(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          pending.push({ resolve, reject });
+        }),
+    );
+    wrap(<NotificationSettings client={client} />);
+    await waitFor(() => expect(byId("notify-channel-bell")).not.toBeNull());
+    fireEvent.click(byId("notify-channel-bell") as HTMLElement); // on -> off
+    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off"));
+    fireEvent.click(byId("notify-channel-bell") as HTMLElement); // off -> on
+    await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("on"));
+    fireEvent.click(byId("notify-channel-bell") as HTMLElement); // on -> off
+    await waitFor(() => expect(pending).toHaveLength(3));
+    await act(async () => pending[2]?.resolve());
+    await act(async () => pending[1]?.resolve());
+    // The first click's failure arrives last; rolling it back would turn the bell on again.
+    await act(async () => pending[0]?.reject(new Error("boom")));
+    expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off");
+  });
+
+  it("a failed bell rolls back to the value before the click", async () => {
+    vi.spyOn(toast, "error").mockImplementation(() => 1);
+    const client = settings(prefsFixture(), [follow("alpha", false)]);
+    client.setBell.mockRejectedValueOnce(new Error("boom"));
+    wrap(<NotificationSettings client={client} />);
+    await waitFor(() => expect(byId("notify-channel-bell")).not.toBeNull());
     fireEvent.click(byId("notify-channel-bell") as HTMLElement);
     await waitFor(() => expect(client.setBell).toHaveBeenCalledWith("alpha", true));
     await waitFor(() => expect(byId("notify-channel-bell")?.getAttribute("data-state")).toBe("off"));

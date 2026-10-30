@@ -16,7 +16,7 @@ import {
   isOverrideChoice,
   markItemsRead,
   overrideChoice,
-  revertPreference,
+  copyPreferenceCell,
   targetPath,
 } from "../src/lib/notifications.ts";
 
@@ -62,12 +62,22 @@ describe("describeNotification", () => {
       { channelId: CH, slug: "rivertide" },
       { channelId: CH, slug: "../admin", broadcastId: BC, title: "" },
       { channelId: CH, slug: "https://evil.example", broadcastId: BC, title: "" },
+      // The contract's Slug is 3-25 characters.
+      { channelId: CH, slug: "ab", broadcastId: BC, title: "" },
+      { channelId: CH, slug: "a".repeat(26), broadcastId: BC, title: "" },
     ])
       expect(describeNotification({ type: "go_live", payload })).toEqual({
         kind: "generic",
         label: "notifications.type.go_live",
         target: null,
       });
+  });
+
+  it("go_live accepts slugs at the contract's bounds", () => {
+    for (const slug of ["abc", "a".repeat(25)])
+      expect(
+        describeNotification({ type: "go_live", payload: { channelId: CH, slug, broadcastId: BC, title: "" } }),
+      ).toMatchObject({ kind: "go_live", target: { kind: "channel", slug } });
   });
 
   it("proposal and vote_open link the proposal when the payload names a valid id", () => {
@@ -184,21 +194,21 @@ describe("preferences helpers", () => {
     );
   });
 
-  it("revertPreference restores one cell and keeps the others", () => {
+  it("copyPreferenceCell restores one cell and keeps the others", () => {
     const changed = applyPreference(
       applyPreference(prefs, { medium: "email", channel: "bravo", enabled: false }),
       { medium: "push", channel: "alpha", enabled: true },
       A,
     );
-    const reverted = revertPreference(changed, prefs, { medium: "email", channel: "bravo" });
+    const reverted = copyPreferenceCell(changed, prefs, { medium: "email", channel: "bravo" });
     expect(overrideChoice(reverted, "bravo", "email")).toBe("on");
     expect(overrideChoice(reverted, "alpha", "push")).toBe("on");
     // A cell that had no override goes back to none.
     expect(
-      overrideChoice(revertPreference(changed, prefs, { medium: "push", channel: "alpha" }), "alpha", "push"),
+      overrideChoice(copyPreferenceCell(changed, prefs, { medium: "push", channel: "alpha" }), "alpha", "push"),
     ).toBe("default");
     const def = applyPreference(prefs, { medium: "push", channel: null, enabled: true });
-    const back = revertPreference(def, prefs, { medium: "push", channel: null });
+    const back = copyPreferenceCell(def, prefs, { medium: "push", channel: null });
     expect(back.defaults.push).toBe(false);
     expect(back.builtIn.push).toBe(true);
   });

@@ -102,7 +102,11 @@ const TYPE_LABEL: Record<NotificationType, MessageKey> = {
   system: "notifications.type.system",
 };
 
-const SLUG = /^[a-z0-9_]{1,40}$/;
+/**
+ * The contract's `Slug` (api/common.ts): 3-25 of [a-z0-9_]. Mirrored, not imported: the root
+ * `@commonair/contracts` barrel adds ~76 KB to the client bundle.
+ */
+const SLUG = /^[a-z0-9_]{3,25}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
@@ -242,20 +246,23 @@ export function applyPreference(
   };
 }
 
-/** Restore one (channel, medium) cell of `prefs` to what `before` had, leaving every other cell as it is now. */
-export function revertPreference(
+/**
+ * Set one (channel, medium) cell of `prefs` to what `from` has, leaving every other cell as it is
+ * now: rolls a failed change back, and takes a save's answer without undoing other pending cells.
+ */
+export function copyPreferenceCell(
   prefs: NotificationPreferencesDto,
-  before: NotificationPreferencesDto,
+  from: NotificationPreferencesDto,
   change: Pick<SetPreferenceInput, "medium" | "channel">,
 ): NotificationPreferencesDto {
   if (change.channel === null)
     return {
       ...prefs,
-      defaults: { ...prefs.defaults, [change.medium]: before.defaults[change.medium] },
-      builtIn: { ...prefs.builtIn, [change.medium]: before.builtIn[change.medium] },
+      defaults: { ...prefs.defaults, [change.medium]: from.defaults[change.medium] },
+      builtIn: { ...prefs.builtIn, [change.medium]: from.builtIn[change.medium] },
     };
   const slug = change.channel;
-  const old = before.channels.find((c) => c.channel.slug === slug);
+  const old = from.channels.find((c) => c.channel.slug === slug);
   const enabled = old?.media[change.medium];
   return applyPreference(prefs, { ...change, enabled: enabled ?? null }, old?.channel);
 }

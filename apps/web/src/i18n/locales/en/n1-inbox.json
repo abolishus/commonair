@@ -37,7 +37,7 @@
   "notifySettings.medium.email.hint": "Grouped into one email when several channels go live close together.",
   "notifySettings.medium.push": "By browser push",
   "notifySettings.medium.push.hint": "In every browser where you turned push on.",
-  "notifySettings.builtIn": "Default setting",
+  "notifySettings.builtIn": "(default setting)",
   "notifySettings.emailUnverified": "Your email address is not verified yet. You can turn email on now, but nothing is sent until you verify it.",
   "notifySettings.push.title": "Push in this browser",
   "notifySettings.channels.title": "Channels you follow",
