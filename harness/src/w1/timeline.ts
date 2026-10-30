@@ -77,6 +77,15 @@ export interface ReplayItemLike {
 }
 
 /** Items are in media-time order (`at`, then id), and `at` is the media time or, flagged, the receive time. */
+/**
+ * `at` as a sortable [milliseconds, sub-millisecond digits] pair: replay sends Postgres's
+ * microseconds, and two rows in the same millisecond must still compare in order.
+ */
+export function atKey(iso: string): [number, number] {
+  const frac = /\.(\d+)/.exec(iso)?.[1] ?? "";
+  return [Date.parse(iso), Number(frac.slice(3, 6).padEnd(3, "0"))];
+}
+
 export function replayOrderProblems(items: readonly ReplayItemLike[]): string[] {
   const problems: string[] = [];
   items.forEach((it, i) => {
@@ -86,9 +95,10 @@ export function replayOrderProblems(items: readonly ReplayItemLike[]): string[] 
       problems.push(`${it.id}: catchingUp ${it.catchingUp} with mediaTs ${String(it.mediaTs)}`);
     const prev = items[i - 1];
     if (!prev) return;
-    const a = Date.parse(prev.at);
-    const b = Date.parse(it.at);
-    if (a > b || (a === b && prev.id > it.id)) problems.push(`${prev.id} before ${it.id} out of order`);
+    const [a, au] = atKey(prev.at);
+    const [b, bu] = atKey(it.at);
+    const cmp = a - b || au - bu;
+    if (cmp > 0 || (cmp === 0 && prev.id > it.id)) problems.push(`${prev.id} before ${it.id} out of order`);
   });
   return problems;
 }

@@ -146,12 +146,14 @@ describe("order and paging", () => {
     expect(r.body.nextCursor).toBeNull();
     expect(r.body.items.map((i) => i.id)).toEqual([early, late, dvr]);
     const byId = new Map(r.body.items.map((i) => [i.id, i]));
+    // `at` carries Postgres's microseconds, the precision order and cursor use.
+    const micros = (d: Date) => d.toISOString().replace("Z", "000Z");
     expect(byId.get(late)).toMatchObject({
-      at: t(9.5).toISOString(),
+      at: micros(t(9.5)),
       mediaTs: t(9.5).toISOString(),
       catchingUp: false,
     });
-    expect(byId.get(dvr)).toMatchObject({ at: t(9.75).toISOString(), mediaTs: null, catchingUp: true });
+    expect(byId.get(dvr)).toMatchObject({ at: micros(t(9.75)), mediaTs: null, catchingUp: true });
     expect(byId.get(dvr)?.createdAt).toBe(t(9.75).toISOString());
   });
 
@@ -185,6 +187,11 @@ describe("order and paging", () => {
     // Equal media times order by id; the two sub-millisecond rows come after the five (µs later).
     expect(seen.slice(0, 5)).toEqual([...ids].sort());
     expect(pages.flatMap((p) => p.items.map((i) => i.body)).slice(5)).toEqual(["micro-1", "micro-2"]);
+    // Their `at` keeps the microseconds, so a client sees them in order whatever their ids.
+    expect(pages.flatMap((p) => p.items.map((i) => i.at)).slice(5)).toEqual([
+      same.toISOString().replace("Z", "100Z"),
+      same.toISOString().replace("Z", "200Z"),
+    ]);
     expect(await all(null, "vods", id, 3)).toHaveLength(7);
   });
 
@@ -285,7 +292,7 @@ describe("what replay hides", () => {
     hidden.push(await say(b.id, suspendedForever, t(73), t(73)));
     shown.push(await say(b.id, suspensionOver, t(74), t(74)));
 
-    // Blocked by the stranger only. A reply quoting the blocked line shows a blank quote to them.
+    // Blocked by the stranger only. A reply quoting the blocked line loses its quote for them.
     const blockedLine = await say(b.id, blocked, t(80), t(80), { body: "blocked words" });
     const reply = await say(b.id, plain, t(81), t(81), { replyToId: blockedLine });
     shown.push(reply);
@@ -297,11 +304,8 @@ describe("what replay hides", () => {
 
     const forStranger = await all(stranger.client, "vods", id);
     expect(new Set(forStranger.map((i) => i.id))).toEqual(new Set(shown));
-    expect(forStranger.find((i) => i.id === reply)?.replyTo).toEqual({
-      id: blockedLine,
-      username: expect.any(String),
-      body: "",
-    });
+    // The quote goes entirely: a blank body would still name the hidden author.
+    expect(forStranger.find((i) => i.id === reply)?.replyTo).toBeNull();
     // Others still see the quote.
     expect((await all(null, "vods", id)).find((i) => i.id === reply)?.replyTo?.body).toBe("blocked words");
 

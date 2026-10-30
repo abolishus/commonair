@@ -7,6 +7,7 @@ import {
   expectedMediaTs,
   latencyMatches,
   MEDIA_TS_WINDOW_MS,
+  atKey,
   replayOrderProblems,
   retentionDeletes,
   type ClampCase,
@@ -73,6 +74,26 @@ describe("replayOrderProblems", () => {
     mediaTs,
     createdAt,
     catchingUp: mediaTs === null,
+  });
+
+  test("rows in the same millisecond order by their microseconds, not id", () => {
+    expect(
+      replayOrderProblems([
+        item("b", "2026-10-30T12:00:00.123100Z", null, "2026-10-30T12:00:00.123Z"),
+        item("a", "2026-10-30T12:00:00.123900Z", null, "2026-10-30T12:00:00.123Z"),
+      ]),
+    ).toEqual([]);
+    expect(
+      replayOrderProblems([
+        item("a", "2026-10-30T12:00:00.123900Z", null, "2026-10-30T12:00:00.123Z"),
+        item("b", "2026-10-30T12:00:00.123100Z", null, "2026-10-30T12:00:00.123Z"),
+      ]),
+    ).toHaveLength(1);
+  });
+
+  test("atKey splits milliseconds from sub-millisecond digits", () => {
+    expect(atKey("2026-10-30T12:00:00.123456Z")).toEqual([Date.parse("2026-10-30T12:00:00.123Z"), 456]);
+    expect(atKey("2026-10-30T12:00:00Z")).toEqual([Date.parse("2026-10-30T12:00:00Z"), 0]);
   });
 
   test("media-time order with ties by id is fine", () => {

@@ -19,6 +19,8 @@ export const CHAT_LATENCY_TTL_SECONDS = 60;
 export const CHAT_LATENCY_MIN_SESSIONS = 3;
 /** The clamp window: a larger latency would only be clamped away. */
 export const CHAT_LATENCY_MAX_MS = 60_000;
+/** A session silent this long is not concurrent: `scoreSessions`' default `staleSeconds`, which the worker uses. */
+export const CHAT_LATENCY_STALE_SECONDS = 120;
 
 interface Row {
   channel_id: string;
@@ -37,6 +39,8 @@ export async function channelLatencies(ctx: Pick<WorkerContext, "db">): Promise<
         on ps.channel_id = c.id
        and ps.broadcast_id = c.live_broadcast_id
        and ps.ended_at is null
+       -- A tab that is gone but not yet closed by the stale-session job no longer counts.
+       and coalesce(ps.last_heartbeat_at, ps.started_at) > now() - make_interval(secs => ${CHAT_LATENCY_STALE_SECONDS})
      where c.live_broadcast_id is not null
        and ps.latency_ms is not null
        and ${GATE_ELIGIBLE}

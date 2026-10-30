@@ -4,8 +4,10 @@
 /**
  * Chat replay (ADR 0012 amendment 1 decisions 5 to 7): one broadcast's messages inside a
  * wall-clock window, in media-time order, minus everything the live room could no longer see and
- * everything this viewer chose not to see. Rows are read through
- * `chat_messages_broadcast_media_idx (broadcast_id, media_ts)`.
+ * everything this viewer chose not to see. The sort key is `coalesce(media_ts, created_at)`, which
+ * `chat_messages_broadcast_media_idx (broadcast_id, media_ts)` only narrows to the broadcast: each
+ * page sorts that broadcast's rows until an expression index on
+ * `(broadcast_id, coalesce(media_ts, created_at), id)` lands (contract request to packages/db).
  */
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { dto } from "@commonair/contracts";
@@ -154,7 +156,8 @@ export async function replayPage(
     const mediaTs = row?.m.mediaTs ?? null;
     return {
       ...d,
-      at: (mediaTs ?? row?.m.createdAt ?? new Date(d.createdAt)).toISOString(),
+      // Microsecond text, the same value order and cursor use, so equal-millisecond rows read in order.
+      at: row?.atText ?? d.createdAt,
       catchingUp: mediaTs === null,
     };
   });
@@ -162,7 +165,10 @@ export async function replayPage(
   return { items, nextCursor, retained };
 }
 
-/** A quoted reply whose target replay hides (a blocked or banned author, a cleared line) shows blank, as a deleted one does. */
+/**
+ * A quoted reply whose target replay hides (a blocked or banned author, a cleared line) drops the
+ * quote entirely: a blank body alone would still name the hidden author.
+ */
 async function blankHiddenQuotes(
   deps: Pick<Deps, "db">,
   b: ReplayBroadcast,
@@ -181,5 +187,5 @@ async function blankHiddenQuotes(
         .where(and(inArray(m.id, quoted), replayable(b, viewerId, now)))
     ).map((r) => r.id),
   );
-  for (const d of dtos) if (d.replyTo && !visible.has(d.replyTo.id)) d.replyTo = { ...d.replyTo, body: "" };
+  for (const d of dtos) if (d.replyTo && !visible.has(d.replyTo.id)) d.replyTo = null;
 }

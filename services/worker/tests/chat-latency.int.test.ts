@@ -8,6 +8,7 @@ import { FETCH_UNJUDGED } from "@commonair/integrity";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
+  CHAT_LATENCY_STALE_SECONDS,
   CHAT_LATENCY_TTL_SECONDS,
   channelLatencies,
   latencySecondsText,
@@ -61,6 +62,10 @@ describe("writeChatLatency", () => {
     await session(median, 50_000, { scoredAt: null });
     await session(median, 50_000, { verdictReasons: [FETCH_UNJUDGED] });
     await session(median, 50_000, { endedAt: new Date() });
+    // Open but silent past the stale window (a closed tab the stale-session job has not reached).
+    const silent = new Date(Date.now() - (CHAT_LATENCY_STALE_SECONDS + 30) * 1000);
+    await session(median, 50_000, { startedAt: silent, lastHeartbeatAt: silent });
+    await session(median, 50_000, { startedAt: silent, lastHeartbeatAt: null });
     await session(median, null);
     // A session of an earlier broadcast of the same channel.
     const earlier = await makeBroadcast(env.t.db, median.channelId, new Date(Date.now() - 86_400_000));
