@@ -23,7 +23,7 @@
   "discord.saved": "Discord webhook saved.",
   "discord.saveFailed": "Could not save the Discord webhook.",
   "discord.test": "Send a test post",
-  "discord.testSent": "Test post sent. Check your Discord channel.",
+  "discord.testSent": "Test post queued. It should appear in your Discord channel within a minute.",
   "discord.testFailed": "Could not send a test post.",
   "discord.remove": "Remove webhook",
   "discord.removeTitle": "Remove the Discord webhook?",

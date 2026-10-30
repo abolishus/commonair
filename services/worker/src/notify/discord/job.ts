@@ -32,8 +32,10 @@ export type DiscordJobOutcome =
   | "none"
   /** A go-live post already went out within the cooldown (including this event's own). */
   | "cooldown"
-  /** The channel or broadcast is gone. */
+  /** The channel or broadcast is gone, or the broadcast has ended (a late retry must not say "is live"). */
   | "missing"
+  /** The stored URL cannot be decrypted (AUTH_SECRET differs); kept so a fixed config works again. */
+  | "undecryptable"
   /** Rate limited with a long wait: a delayed copy of the job was enqueued. */
   | "rescheduled";
 
@@ -145,10 +147,16 @@ async function buildMessage(
   if (data.test) return { message: testMessage({ instance, channel: c.name }), ownerId: c.ownerId };
   if (!data.broadcastId) return undefined;
   const [b] = await ctx.db
-    .select({ title: broadcasts.title, mature: broadcasts.mature, channelId: broadcasts.channelId })
+    .select({
+      title: broadcasts.title,
+      mature: broadcasts.mature,
+      channelId: broadcasts.channelId,
+      endedAt: broadcasts.endedAt,
+    })
     .from(broadcasts)
     .where(eq(broadcasts.id, data.broadcastId));
-  if (!b || b.channelId !== data.channelId) return undefined;
+  // A retry (BullMQ backoff or a long 429 re-enqueue) can run hours later: never announce an ended stream.
+  if (!b || b.channelId !== data.channelId || b.endedAt !== null) return undefined;
   const url = `${publicUrl.replace(/\/+$/, "")}/${c.slug}`;
   return {
     message: goLiveMessage({ channel: c.name, title: b.title, url, mature: b.mature || c.mature }),
@@ -181,10 +189,11 @@ export async function runDiscordJob(
   try {
     url = await decryptSecret(ctx.webhooks.authSecret, NOTIFY_SECRET_PURPOSES.discordWebhook, hook.url);
   } catch {
-    // Sealed with another AUTH_SECRET: it can never be read, so it can never work.
-    ctx.logger.error("discord webhook cannot be decrypted; removing it", { channelId: data.channelId });
-    await ctx.db.transaction((tx) => removeWebhook(ctx, data.channelId, built.ownerId, tx));
-    return { posted: 0, outcome: "blocked" };
+    // Sealed with another AUTH_SECRET: most likely a worker/API secret mismatch or a rotation in
+    // progress. Deleting would wipe every channel's webhook on a misconfiguration, so leave the row:
+    // a correctly configured run reads it again, and the owner can re-save it.
+    ctx.logger.error("discord webhook cannot be decrypted; not posted", { channelId: data.channelId });
+    return { posted: 0, outcome: "undecryptable" };
   }
 
   const now = ctx.now();

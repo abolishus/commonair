@@ -106,10 +106,11 @@ describe("classifyDiscordResult", () => {
     [ok(503), { kind: "network" }],
     [fail("timeout after 10000 ms", false), { kind: "network" }],
     [fail("ECONNRESET: socket hang up", false), { kind: "network" }],
-    [fail("host does not resolve", true), { kind: "network" }],
+    // postPinned's real messages: CallbackRejected prefixes the reason.
+    [fail("callback rejected: host does not resolve", true), { kind: "network" }],
     [fail("callback resolution failed", true), { kind: "network" }],
-    [fail("address is loopback", true), { kind: "blocked" }],
-    [fail("scheme must be https", true), { kind: "blocked" }],
+    [fail("callback rejected: address is loopback", true), { kind: "blocked" }],
+    [fail("callback rejected: scheme must be https", true), { kind: "blocked" }],
   ] as const)("%j → %j", (result, expected) => {
     expect(classifyDiscordResult(result)).toEqual(expected);
   });

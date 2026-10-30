@@ -403,6 +403,48 @@ describe("notify-discord job", () => {
     ]);
   });
 
+  test("a failed DNS lookup is retried, not treated as a refusal: the webhook stays", async () => {
+    const s = await scene();
+    const failing = {
+      allowInsecure: false,
+      resolve: async () => {
+        throw new Error("ENOTFOUND");
+      },
+      ca,
+      port: server.port,
+    };
+    await expect(runDiscordJob(s.goLive(), ctx, failing)).rejects.toBeInstanceOf(DiscordRetry);
+    const row = await hookOf(s.streamer.channel.id);
+    expect(row).toBeDefined();
+    expect(row?.lastError).toBe("network");
+    expect(row?.failures).toBe(0);
+    expect(row?.lastPostedAt).toBeNull();
+    expect(postsTo(s.path)).toHaveLength(0);
+  });
+
+  test("a go-live whose broadcast has since ended is not posted (a late retry)", async () => {
+    const s = await scene();
+    await owner
+      .update(schema.broadcasts)
+      .set({ endedAt: new Date(clock.getTime() + 1000) })
+      .where(eq(schema.broadcasts.id, s.broadcast.id));
+    expect(await runDiscordJob(s.goLive(), ctx, transport)).toEqual({ posted: 0, outcome: "missing" });
+    expect(postsTo(s.path)).toHaveLength(0);
+    expect((await hookOf(s.streamer.channel.id))?.lastPostedAt).toBeNull();
+  });
+
+  test("a URL sealed with another AUTH_SECRET is not posted and not deleted", async () => {
+    const s = await scene();
+    const other = { ...ctx, webhooks: { ...ctx.webhooks, authSecret: `${AUTH_SECRET}-rotated` } };
+    expect(await runDiscordJob(s.goLive(), other, transport)).toEqual({ posted: 0, outcome: "undecryptable" });
+    expect(postsTo(s.path)).toHaveLength(0);
+    const row = await hookOf(s.streamer.channel.id);
+    expect(row).toBeDefined();
+    expect(row?.lastPostedAt).toBeNull();
+    // With the right secret again, it works.
+    expect((await runDiscordJob(s.goLive(), ctx, transport)).posted).toBe(1);
+  });
+
   test("the registered handler never allows loopback: discord.com resolving to 127.0.0.1 is refused", async () => {
     const s = await scene();
     const handlerCtx = { ...ctx, webhooks: { ...ctx.webhooks, resolve: toLoopback } } as unknown as WorkerContext;

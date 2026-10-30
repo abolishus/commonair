@@ -152,6 +152,16 @@ describe("DiscordWebhookPanel", () => {
     expect(f.calls.filter((c) => c === "test")).toHaveLength(1);
   });
 
+  it("test when the webhook was removed meanwhile: shows Not set up, not a success", async () => {
+    const f = fake(ON);
+    show(f.client);
+    await waitFor(() => expect(statusEl().getAttribute("data-configured")).toBe("true"));
+    f.client.test = async () => OFF;
+    await act(async () => fireEvent.click(screen.getByTestId("discord-webhook-test")));
+    await waitFor(() => expect(statusEl().getAttribute("data-configured")).toBe("false"));
+    expect(screen.queryByText(t("discord.testSent"))).toBeNull();
+  });
+
   it("remove asks first: cancel keeps it, confirm removes it", async () => {
     const f = fake(ON);
     show(f.client);

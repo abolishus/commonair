@@ -82,7 +82,10 @@ export function DiscordWebhookPanel({
     try {
       const status = await client.test();
       setLoad({ kind: "loaded", status });
-      toast.success(t("discord.testSent"));
+      // The API only queues the post, and queues nothing when the webhook is gone (say, removed by
+      // the worker after repeated failures): the refreshed status then reads "Not set up".
+      if (status.configured) toast.success(t("discord.testSent"));
+      else toast.warning(t("discord.status.off"));
     } catch (err) {
       toastActionError(err, t("discord.testFailed"));
     } finally {

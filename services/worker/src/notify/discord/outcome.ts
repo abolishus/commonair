@@ -24,11 +24,15 @@ export type DiscordOutcome =
 export const MAX_RETRY_AFTER_MS = 3_600_000;
 
 // resolveCallback's own words for a lookup that may work next time; every other rejection is final.
+// postPinned passes CallbackRejected's message, which prefixes the reason with "callback rejected: ".
 const TRANSIENT_REJECTIONS = new Set(["host does not resolve", "callback resolution failed"]);
+const rejectionReason = (error: string): string => error.replace(/^callback rejected: /, "");
 
 export function classifyDiscordResult(result: PostResult): DiscordOutcome {
   if (!result.ok)
-    return result.rejected && !TRANSIENT_REJECTIONS.has(result.error) ? { kind: "blocked" } : { kind: "network" };
+    return result.rejected && !TRANSIENT_REJECTIONS.has(rejectionReason(result.error))
+      ? { kind: "blocked" }
+      : { kind: "network" };
   const s = result.status;
   if (s >= 200 && s < 300) return { kind: "posted" };
   if (s === 429) return { kind: "rate_limited", retryAfterMs: retryAfterMs(result.body, result.headers) };
