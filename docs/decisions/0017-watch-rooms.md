@@ -86,9 +86,11 @@ platform-banned or suspended, or hold an active `chat_bans` row on the host chan
 during a room removes the member at once. Room chat goes through the host channel's word filter and
 the platform filter.
 
-**Blocks.** User-to-user blocks do not exist. W3's contract step adds them (a `user_blocks` table
-and `me.blocks` routes, new); a room refuses a join when the joiner and any member have blocked each
-other in either direction. Rooms do not ship without this check.
+**Blocks.** ~~User-to-user blocks do not exist. W3's contract step adds them (a `user_blocks` table
+and `me.blocks` routes, new);~~ Superseded 2026-10-30 by [ADR 0012](0012-media-clock.md)
+amendment 1 decision 8: blocks (`user_blocks`, `me.blocks.*`, the block action) ship in W1, so W3
+reuses them. A room refuses a join when the joiner and any member have blocked each other in
+either direction. Rooms do not ship without this check.
 
 ### 3. Strict age separation
 
@@ -123,7 +125,8 @@ room moderation reference the room and users by id.
 ## Consequences
 
 - W3-watch-rooms needs a contract step before it starts: the three room tables and the age-band
-  trigger, `user_blocks` and the block routes, the `watch_room` report subject, room frames and
+  trigger, the room-join block check (`user_blocks` and the block routes come from W1; note of
+  2026-10-30), the `watch_room` report subject, room frames and
   `CHAT_LIMITS` entries.
 - A family where a parent and a child want to watch together cannot use a room. That is the cost of
   the strict rule, accepted.
@@ -162,3 +165,7 @@ The maintainer accepted this ADR with the recommended answers. **Counsel has sti
 Also settled here (no separate question was asked): unknown age fails closed, minor rooms are
 invite-only with no public presence, the age rule is a database trigger, and user-to-user blocks
 are built in W3's contract step because rooms depend on them.
+
+**Note (2026-10-30).** The "blocks are built in W3's contract step" lines above are superseded by
+ADR 0012 amendment 1 decision 8: blocks ship in W1 (batch 4). W3's contract step adds only the
+room-join block check on top of W1's `user_blocks` table.

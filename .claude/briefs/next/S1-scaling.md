@@ -68,6 +68,10 @@ single instance, and managed Valkey has no ACL users (password auth instead).
 | 3 media tier     | separate ingest/transcode droplets (MediaMTX + media), streams placed on one of them, origin routes playlist and segment fetches to the placed host                    | monthly egress past the budget the ADR sets                                                        |
 | 4 egress         | member relays and the P1 browser P2P client carry viewers; then a CDN adapter (off by default) or an unmetered media origin elsewhere (ADR 0025 consequences)          | none: this is the long-term shape                                                                  |
 
+**Stage 4 owns CDN fetch-judging** (decided 2026-10-30, batch 4): ADR 0015 GA criterion 1 needs
+the CDN adapter to judge fetches per session the way origin and relays do. W1's verified-watch
+gate ships with `CHAT_WATCH_GATE=off` and its GA waits for this stage.
+
 Egress is likely the first limit, not compute: DigitalOcean meters transfer past the pooled
 allowance (about 1.35 GB per viewer-hour at 3 Mbps). Stage 4's relays and P1 matter from day one;
 P1 can run in parallel with all of S1.
