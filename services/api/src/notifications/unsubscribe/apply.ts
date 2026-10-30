@@ -45,14 +45,17 @@ export async function applyUnsubscribe(
   if (token.length === 0 || token.length > MAX_UNSUBSCRIBE_TOKEN_LENGTH) return null;
   const userId = await verifyUnsubscribeToken(authSecret, token, list);
   if (userId === null) return null;
-  const [user] = await db
-    .select({ deletedAt: schema.users.deletedAt })
-    .from(schema.users)
-    .where(eq(schema.users.id, userId));
-  if (!user) return null;
-  if (user.deletedAt !== null) return userId;
   const types = UNSUBSCRIBE_LIST_TYPES[list];
-  await db.transaction(async (tx) => {
+  // The member is read (and held) inside the write transaction, so a deletion racing this request
+  // cannot turn the insert into a foreign-key failure.
+  return db.transaction(async (tx) => {
+    const [user] = await tx
+      .select({ deletedAt: schema.users.deletedAt })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .for("share");
+    if (!user) return null;
+    if (user.deletedAt !== null) return userId;
     for (const type of types) {
       // `notification_prefs_uq` treats the null channel as equal, so this targets the one default row.
       await tx.execute(sql`
@@ -73,6 +76,6 @@ export async function applyUnsubscribe(
           eq(np.enabled, true),
         ),
       );
+    return userId;
   });
-  return userId;
 }

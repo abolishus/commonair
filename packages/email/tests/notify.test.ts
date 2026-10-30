@@ -40,6 +40,8 @@ describe("goLiveDigest", () => {
     expect(mail.text).toContain(en.goLiveDigest.why.replace("{instance}", site.name));
     expect(mail.html).toContain(`href="${origin}/settings/notifications"`);
     expect(mail.text).not.toContain(en.goLiveDigest.more);
+    // Physical list indent on the reading side (Outlook ignores logical padding).
+    expect(mail.html).toMatch(/<ul style="margin:0;padding:0 0 0 20px"/);
   });
 
   test("several channels: one subject without a count, every channel listed and linked", async () => {

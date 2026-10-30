@@ -51,7 +51,8 @@ export const goLiveDigest = defineTemplate("goLiveDigest", {
           {d.channels.length === 1 && first ? ctx.t(m.headingOne, { channel: first.name }) : ctx.t(m.headingMany)}
         </H1>
         <Section style={{ margin: "0 0 16px" }}>
-          <ul style={{ margin: 0, paddingInlineStart: "20px" }}>
+          {/* Physical sides from the layout: Outlook's Word engine ignores logical padding. */}
+          <ul style={{ margin: 0, padding: ctx.layout.dir === "rtl" ? "0 20px 0 0" : "0 0 0 20px" }}>
             {shown.map((c, i) => {
               const name = (
                 <Link className="ca-link" href={c.url} style={{ ...styles.link, fontWeight: 600 }}>

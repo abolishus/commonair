@@ -13,7 +13,7 @@ import { NOTIFICATION_SETTINGS_PATH, EMAIL_UNSUBSCRIBE_PATH, NOTIFY_DEFAULTS } f
 import { schema, type Database } from "@commonair/db";
 import type { GoLiveDigestChannel } from "@commonair/email";
 import { signUnsubscribeToken } from "@commonair/tokens";
-import { and, asc, eq, inArray, lt, min, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, min, notInArray, sql } from "drizzle-orm";
 import type { WorkerContext } from "../../context.ts";
 import { goLiveSetting } from "../settings.ts";
 
@@ -51,10 +51,22 @@ export function emailEnabledFor(
   return fallback ? fallback.enabled : NOTIFY_DEFAULTS.go_live.email;
 }
 
-/** One sweep: drop stale rows, then send each due member's digest. */
+/** After a failed send a member is skipped for this long, so failing mailboxes cannot fill every sweep. */
+export const DIGEST_FAILURE_BACKOFF_MS = 300_000;
+
+/**
+ * Members whose last send failed, with the time they may be tried again. Per process: another
+ * replica may still try them, which is harmless. Bounded by the members with queued rows.
+ */
+const failedUntil = new Map<string, number>();
+
+/** For tests: forget every member's failure backoff. */
+export function resetDigestBackoff(): void {
+  failedUntil.clear();
+}
+
+/** One sweep: drop stale rows (even with no mailer, so the queue never grows unbounded), then send each due member's digest. */
 export async function sweepEmailDigests(ctx: WorkerContext): Promise<DigestSweepResult> {
-  const { mailer, site } = ctx;
-  if (!mailer || !site) return { users: 0, sent: 0 };
   const { emailDigestMinutes } = await goLiveSetting(ctx.db, ctx.logger);
   const windowMs = emailDigestMinutes * 60_000;
   const nowMs = ctx.now().getTime();
@@ -70,9 +82,15 @@ export async function sweepEmailDigests(ctx: WorkerContext): Promise<DigestSweep
       users: new Set(stale.map((r) => r.userId)).size,
     });
 
+  const { mailer, site } = ctx;
+  if (!mailer || !site) return { users: 0, sent: 0 };
+  for (const [userId, until] of failedUntil) if (until <= nowMs) failedUntil.delete(userId);
+  const backingOff = [...failedUntil.keys()];
+
   const due = await ctx.db
     .select({ userId: q.userId })
     .from(q)
+    .where(backingOff.length > 0 ? notInArray(q.userId, backingOff) : undefined)
     .groupBy(q.userId)
     .having(sql`${min(q.queuedAt)} <= ${dueBefore.toISOString()}::timestamptz`)
     .orderBy(asc(min(q.queuedAt)))
@@ -82,6 +100,8 @@ export async function sweepEmailDigests(ctx: WorkerContext): Promise<DigestSweep
   for (const { userId } of due) {
     const outcome = await ctx.db.transaction((tx) => digestFor(ctx, tx, userId, dueBefore));
     if (outcome === "locked") continue;
+    if (outcome === "failed") failedUntil.set(userId, nowMs + DIGEST_FAILURE_BACKOFF_MS);
+    else failedUntil.delete(userId);
     result.users++;
     if (outcome === "sent") result.sent++;
   }
@@ -171,7 +191,8 @@ async function digestFor(ctx: WorkerContext, tx: Tx, userId: string, dueBefore: 
     return "none";
   }
 
-  // The worker's AUTH_SECRET reaches the context as the webhook settings' secret.
+  // The worker's AUTH_SECRET reaches the context as the webhook settings' secret (main.ts); the API
+  // verifies with its own AUTH_SECRET, so the two must stay the same value.
   const token = await signUnsubscribeToken(ctx.webhooks.authSecret, userId, "go_live");
   try {
     await mailer.send(

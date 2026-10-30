@@ -8,17 +8,20 @@
  * go-live email linking the channel, with `List-Unsubscribe` on the one-click route and RFC 8058
  * `List-Unsubscribe-Post`. A POST of that URL turns go-live email off.
  */
-import { EMAIL_UNSUBSCRIBE_PATH } from "@commonair/contracts/notify";
+import { EMAIL_UNSUBSCRIBE_PATH, NOTIFY_RULES } from "@commonair/contracts/notify";
 import { extractLinks, type MailMessage } from "../mailpit.ts";
 import { FixturePublisher } from "../safety-io.ts";
 import { benignPatternSource, runSeed } from "../safety.ts";
 import { rtmpPublishUrl } from "../streamer.ts";
+import { sleep } from "../wait.ts";
 import { waitLive } from "../e8/kit.ts";
 import { type N1Run, type N1Step } from "./run.ts";
 
 /** The harness digest window is one minute and the sweep runs every 30 s (contract step §8: 120 s), plus CI slack. */
 export const GO_LIVE_EMAIL_TIMEOUT_MS = 150_000;
 const ONE_CLICK_BODY = "List-Unsubscribe=One-Click";
+/** Slack past one sweep before counting emails, for a loaded runner and Mailpit's delivery. */
+const DUPLICATE_SLACK_MS = 5_000;
 
 /** Every value of a header in Mailpit's `headers()` answer, matched case-insensitively. */
 export function headerValues(headers: Record<string, string[]>, name: string): string[] {
@@ -126,6 +129,8 @@ async function run(r: N1Run): Promise<void> {
   });
 
   await ctx.step("2. email: exactly one go-live email for the channel", async () => {
+    // A duplicate would come from a later sweep, so give one full sweep (plus slack) to show up.
+    await sleep(NOTIFY_RULES.emailDigestSweepMs + DUPLICATE_SLACK_MS, ctx.signal);
     const all = await mailpit.search(`to:"${viewer.email}"`);
     let count = 0;
     for (const s of all) if (linksChannel(await mailpit.get(s.id), streamer.channel)) count++;

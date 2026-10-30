@@ -9,7 +9,12 @@ import { verifyUnsubscribeToken } from "@commonair/tokens";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import type { WorkerContext } from "../src/context.ts";
-import { DIGEST_STALE_AFTER_MS, sweepEmailDigests } from "../src/notify/email/digest.ts";
+import {
+  DIGEST_FAILURE_BACKOFF_MS,
+  DIGEST_STALE_AFTER_MS,
+  resetDigestBackoff,
+  sweepEmailDigests,
+} from "../src/notify/email/digest.ts";
 import { clearGoLiveSettingCache, goLiveSetting } from "../src/notify/settings.ts";
 import { siteAt } from "./e6-fixtures.ts";
 import { AUTH_SECRET, makeBroadcast, makeUser, quietLogger, setup, type TestEnv } from "./fixtures.ts";
@@ -24,6 +29,7 @@ beforeAll(async () => {
 afterAll(() => env.close());
 beforeEach(async () => {
   await env.t.db.delete(schema.notificationEmailQueue);
+  resetDigestBackoff();
   await pinWindow(5);
 });
 
@@ -219,7 +225,7 @@ describe("sweepEmailDigests", () => {
     expect(await queued(m.id)).toBe(0);
   });
 
-  test("a send that throws keeps the rows for the next sweep", async () => {
+  test("a send that throws keeps the rows, and the member is retried after a backoff", async () => {
     const now = new Date();
     const m = await member();
     await queue(m, await liveChannel(), ago(now, 6 * MIN));
@@ -230,7 +236,15 @@ describe("sweepEmailDigests", () => {
     expect(await sweepEmailDigests(context(failing, now))).toEqual({ users: 1, sent: 0 });
     expect(await queued(m.id)).toBe(1);
     const mailer = new MemoryMailer({ site });
+    // Backing off: the next sweep skips the member, and another member is still served.
+    const other = await member();
+    await queue(other, await liveChannel(), ago(now, 6 * MIN));
     expect(await sweepEmailDigests(context(mailer, now))).toEqual({ users: 1, sent: 1 });
+    expect(mailer.to(other.email)).toHaveLength(1);
+    expect(mailer.to(m.email)).toHaveLength(0);
+    const later = new Date(now.getTime() + DIGEST_FAILURE_BACKOFF_MS);
+    expect(await sweepEmailDigests(context(mailer, later))).toEqual({ users: 1, sent: 1 });
+    expect(mailer.to(m.email)).toHaveLength(1);
     expect(await queued(m.id)).toBe(0);
   });
 
@@ -292,5 +306,14 @@ describe("sweepEmailDigests", () => {
     const { mailer: _drop, ...rest } = context(new MemoryMailer({ site }), now);
     expect(await sweepEmailDigests(rest)).toEqual({ users: 0, sent: 0 });
     expect(await queued(m.id)).toBe(1);
+  });
+
+  test("without a mailer stale rows are still dropped", async () => {
+    const now = new Date();
+    const m = await member();
+    await queue(m, await liveChannel(), ago(now, 5 * MIN + DIGEST_STALE_AFTER_MS + MIN));
+    const { mailer: _drop, ...rest } = context(new MemoryMailer({ site }), now);
+    expect(await sweepEmailDigests(rest)).toEqual({ users: 0, sent: 0 });
+    expect(await queued(m.id)).toBe(0);
   });
 });
