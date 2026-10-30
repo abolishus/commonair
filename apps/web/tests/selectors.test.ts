@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9- and n2-selectors.md): every test id in the
+ * The web ↔ harness contract (docs/testing/e1-, e2-, e3-, e4b-, e4c-, e5-, e7-, e8-, e9-, n2-, w1- and n1-selectors.md): every test id in the
  * docs' "Test ids" tables must be rendered somewhere in the app (or, for ids the house primitives
  * own, in packages/ui), so renaming one without updating the docs and scenarios fails here.
  */
@@ -342,5 +342,39 @@ describe.each(["e8-selectors.md", "e9-selectors.md", "n2-selectors.md"])("%s", (
   it.each(ids)("renders %s", (id) => {
     const asProp = text.includes(`"data-testid": "${id}"`) || new RegExp(`[tT]estId = "${id}"`).test(text);
     expect(onElement(id, text) || asProp).toBe(true);
+  });
+});
+
+/** Backticked id-shaped spans in the doc's "## Test ids" section (W1 lists them in prose). */
+function proseTestIds(doc: string): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing", doc), "utf8");
+  const section = text.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  const spans = [...section.matchAll(/`([^`]+)`/g)].map((m) => m[1] ?? "");
+  return [...new Set(spans.filter((s) => /^[a-z0-9]+(-[a-z0-9]+)+$/.test(s) && !/^(data|aria)-/.test(s)))];
+}
+
+/**
+ * Batch 4 (docs/testing/w1- and n1-selectors.md): every test id is set in web or ui source, as for
+ * batch 3, or as a string literal a conditional picks (`review ? "a" : "b"`, `testId: "…"`), or from
+ * a template whose literal prefix it starts with (`fraud-decision-${d}`); the units' render tests
+ * check those in the DOM.
+ */
+const templatePrefixes = (text: string) =>
+  [...text.matchAll(/`([a-z0-9-]+-)\$\{/g)].flatMap((m) => (m[1] ? [m[1]] : []));
+describe.each([
+  ["w1-selectors.md", proseTestIds("w1-selectors.md")],
+  ["n1-selectors.md", testIds("n1-selectors.md")],
+])("%s", (_doc, ids) => {
+  const text = `${appText}\n${uiText}`;
+  const prefixes = templatePrefixes(text);
+
+  it("lists test ids", () => {
+    expect(ids.length).toBeGreaterThan(0);
+  });
+
+  it.each(ids)("renders %s", (id) => {
+    const literal = text.includes(`"${id}"`);
+    const templated = prefixes.some((p) => id.startsWith(p) && id.length > p.length);
+    expect(onElement(id, text) || literal || templated).toBe(true);
   });
 });

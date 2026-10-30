@@ -51,8 +51,7 @@ export default defineScenario({
   description:
     "follow → go live → in-app row → email digest with one-click unsubscribe → cooldown holds across a restart → encrypted web push to a local endpoint → bell and settings → installable PWA and the service worker's push → push from the browser toggle",
   needs: ["api", "web", "chat", "mail", "worker", "media", "ffmpeg", "browser"],
-  // N1 milestone end: the orchestrator sets this true and adds it to FULL_REQUIRED and a shard.
-  inFull: false,
+  inFull: true,
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selection = parseN1Steps(ctx.param("steps", "all"));

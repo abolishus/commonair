@@ -44,8 +44,7 @@ export default defineScenario({
   description:
     "chat mediaTs clamped on the live media clock → browser viewers at forced latencies replay in media-time order → replay leaves out deleted, held, cleared, banned and blocked lines → chat retention on backdated rows",
   needs: ["api", "web", "chat", "irc", "mail", "media", "origin", "worker", "ffmpeg", "browser"],
-  // W1 milestone end: the orchestrator sets this true and adds it to FULL_REQUIRED and a shard.
-  inFull: false,
+  inFull: true,
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseTimelineSteps(ctx.param("steps", "all"));

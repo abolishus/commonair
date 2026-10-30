@@ -100,7 +100,7 @@ export const discordWebhooks = pgTable("discord_webhooks", {
   url: text().notNull(),
   setBy: uuid().references(() => users.id, { onDelete: "set null" }),
   setAt: createdAt(),
-  /** The last go-live post (the per-channel cooldown) or test. */
+  /** The last go-live post (the per-channel cooldown); test posts do not set it. */
   lastPostedAt: ts(),
   /** Consecutive 401/404 answers; at `NOTIFY_RULES.discordFailureLimit` the row is deleted. */
   failures: integer().notNull().default(0),

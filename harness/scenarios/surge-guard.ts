@@ -56,8 +56,7 @@ export default defineScenario({
   description:
     "fetch-less and CDN bots refused by the verified-watch gate → one address, one refusal → real and audio-only viewers chat after verifying → a surge trips the guard, a moderator ends it, it reverts → /chat and the surge banner",
   needs: ["api", "web", "chat", "mail", "media", "origin", "worker", "ffmpeg", "browser"],
-  // W1 milestone end: the orchestrator sets this true and adds it to FULL_REQUIRED and a shard.
-  inFull: false,
+  inFull: true,
   timeoutMs: 20 * 60_000,
   async run(ctx) {
     const selected = parseSurgeSteps(ctx.param("steps", "all"));

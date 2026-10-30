@@ -102,7 +102,7 @@ checks them against this file.
 | `discord-webhook-save`           | Saves the URL                                                                         |
 | `discord-webhook-test`           | Sends a test post                                                                     |
 | `discord-webhook-remove`         | Opens a `ConfirmDialog` to remove the webhook                                         |
-| `discord-webhook-remove-confirm` | Confirms the removal                                                                  |
+| `discord-webhook-remove-confirm` | The removal ConfirmDialog; confirm with its `confirm-dialog-confirm`                  |
 
 ## Scenarios
 

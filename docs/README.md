@@ -19,6 +19,8 @@ written yet.
 | [viewers/calm-chat.md](viewers/calm-chat.md)                           | Calm Chat and blocking users                                          |
 | [streamers/chat-replay.md](streamers/chat-replay.md)                   | Chat replay and how long chat is kept                                 |
 | [streamers/verified-watch-gate.md](streamers/verified-watch-gate.md)   | The verified-watch gate and the surge guard                           |
+| [streamers/discord.md](streamers/discord.md)                           | Optional Discord go-live posts, and the open alternatives             |
+| [self-hosting/web-push.md](self-hosting/web-push.md)                   | Browser push: VAPID keys, `--web-push`, what the push services see    |
 | [deploy/digitalocean.md](deploy/digitalocean.md)                       | Staging and production on DigitalOcean droplets (ADR 0025)            |
 | [runbooks/](runbooks/)                                                 | Operational procedures for running an instance (coming)               |
 | [self-hosting/](self-hosting/)                                         | How to deploy and operate your own instance (coming)                  |

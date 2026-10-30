@@ -60,8 +60,19 @@ the tag replaces a duplicate), a title on `PushJob` (the push job already builds
 on `WorkerContext` (the digest uses the same secret through `ctx.webhooks`; cosmetic), push
 `status` `thisBrowser` (optional). Follow-ups, not scheduled: judge only the origin stretch of a
 session moved there by data mode (ADR 0018 Amendment 1 item 4); the n1 selectors check in
-`apps/web/tests/selectors.test.ts` after N1-discord. **Next:** wave 3 (N1-discord) once CI is
-green, then the milestone wiring.
+`apps/web/tests/selectors.test.ts` after N1-discord. **Wave 3 merged** (N1-discord: the optional
+Discord webhook adapter, cooldown claim, 429/5xx retries, auto-removal after repeated 401/404 with
+an owner notification and audit row, studio panel; no harness step per ADR 0028 Amendment 1).
+Applied: the `discord-webhook-remove-confirm` row names the dialog (its confirm is
+`confirm-dialog-confirm`); the `lastPostedAt` comment (test posts do not set it). **Milestone
+wiring:** `timeline-sync`, `surge-guard` and `notifications` are `inFull: true`, in
+`FULL_REQUIRED`, and run in a new `features` shard (the CI matrix follows `FULL_SHARDS`; decision
+(m): `notifications` stays in `features` unless the shard passes ~12 minutes); w1 and n1 selectors
+checks in `apps/web/tests/selectors.test.ts` (literal, conditional and templated ids); docs index
+rows for the N1 pages. CI flakes seen on `b3b3d68` and its rerun, not reproduced and not tied to a
+change: `integrity-basic` "count converges to 7" timed out at 150 s once (36–64 s on other runs),
+and `simulcast` hit its 10-minute scenario timeout with every assertion passed on a rerun whose
+`rest` shard took 1387 s (usually ~800 s). Watch both.
 
 Planning (2026-10-30): briefs,
 both contract-step docs and ADR 0036 (payment fraud floor) are on main (`e8fc926`); the decisions

@@ -62,6 +62,11 @@ export const FULL_REQUIRED = [
   "channel-bot",
   // E9: OAuth apps, EventSub and the SDK (ADR 0027).
   "developer-platform",
+  // W1: the media-time spine and chat replay, the verified-watch gate (ADR 0012 amendment 1, ADR 0015).
+  "timeline-sync",
+  "surge-guard",
+  // N1: go-live notifications, push and the PWA (ADR 0028).
+  "notifications",
 ] as const;
 
 /** `full`'s scenarios that one shard runs, in `full`'s order. Pure. */
