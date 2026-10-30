@@ -7,6 +7,7 @@ import { toast } from "@commonair/ui/toast";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import { FormError } from "../../components/form-error.tsx";
+import { YourPayments } from "../../components/money/breakdown-payments.tsx";
 import { SubscriptionList } from "../../components/support/subscription-list.tsx";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
@@ -60,6 +61,7 @@ function SubscriptionsPage(): React.JSX.Element {
           onCancelError={(err) => toastActionError(err, t("subscriptions.cancelFailed"))}
         />
       )}
+      <YourPayments />
     </PageContainer>
   );
 }
