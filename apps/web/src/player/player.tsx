@@ -8,8 +8,16 @@ import * as React from "react";
 import type { LegalDoc } from "../components/legal-document-link.tsx";
 import { t } from "../i18n/index.ts";
 import { api, apiKeepalive } from "../lib/api.ts";
-import { P2P_STATUS_OFF, PlayerController, prefersNativeHls, type P2PStatus, type PlayerState } from "./controller.ts";
+import {
+  P2P_STATUS_OFF,
+  PlayerController,
+  diagnosticParams,
+  prefersNativeHls,
+  type P2PStatus,
+  type PlayerState,
+} from "./controller.ts";
 import { pageLifecycle } from "./lifecycle.ts";
+import { registerMediaClock, type PlaybackMode } from "./media-clock.ts";
 import { P2PDialog, P2PIndicator, P2PNotice } from "./p2p/p2p-ui.tsx";
 import { deviceSignals, noticeDue, p2pAllowed, type DeviceSignals } from "./p2p/policy.ts";
 import { markP2PNoticeSeen, readP2PPrefs, setP2PPreference } from "./p2p/preference.ts";
@@ -62,6 +70,7 @@ export function Player({
   const [source, setSource] = React.useState<PlayerSource | undefined>(undefined);
   // Bumped to start a fresh session after a failure (e.g. the stream is not ready yet).
   const [attempt, setAttempt] = React.useState(0);
+  const [playbackMode, setPlaybackMode] = React.useState<PlaybackMode>("live");
   // Latest callback without restarting the session when the parent re-renders.
   const onStartErrorRef = React.useRef(onStartError);
   React.useEffect(() => {
@@ -111,6 +120,9 @@ export function Player({
     // Not yet: the device is unknown, or the first-run notice is not on screen yet.
     if (!gateOpen) return;
     let retry: ReturnType<typeof setTimeout> | undefined;
+    // Diagnostics for the harness (`timeline-sync` step 2), read straight from the URL so the
+    // route's search schema stays untouched; see `diagnosticParams`.
+    const diag = diagnosticParams(window.location.search);
     const controller = new PlayerController({
       channel,
       video,
@@ -125,8 +137,14 @@ export function Player({
       },
       p2pWanted: (native) => p2pWanted.current(native),
       onP2P: setP2P,
+      targetLatency: diag.targetLatency,
+      rendition: diag.rendition,
     });
     controllerRef.current = controller;
+    // The chat panel reads this channel's playhead at send time (`chat/connection.ts`).
+    const unregisterClock = registerMediaClock(channel, controller);
+    setPlaybackMode(controller.playbackMode());
+    const unsubscribeMode = controller.onPlaybackMode(setPlaybackMode);
     // `start` reports `loading` first, so a retry after an error shows loading again.
     void controller.start();
     const lifecycle = pageLifecycle(
@@ -139,6 +157,8 @@ export function Player({
       clearTimeout(retry);
       window.removeEventListener("pagehide", lifecycle.pagehide);
       window.removeEventListener("pageshow", lifecycle.pageshow);
+      unsubscribeMode();
+      unregisterClock();
       if (controllerRef.current === controller) controllerRef.current = null;
       void controller.stop();
       setSource(undefined);
@@ -175,6 +195,7 @@ export function Player({
         data-state={state}
         data-source={source}
         data-p2p={p2p.state}
+        data-playback-mode={playbackMode}
         variant={live ? "live" : "offline"}
         liveBadgeProps={{ "data-testid": "live-badge" }}
         stage={stage}
