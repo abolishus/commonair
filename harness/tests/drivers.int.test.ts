@@ -223,6 +223,7 @@ function startFakeApi(playlistUrl: string) {
           expiresAt: new Date(Date.now() + 120_000).toISOString(),
           renditions: ["source"],
           captions: [],
+          dataMode: null,
         });
       }
       if (path === "/rpc/playback/heartbeat") {

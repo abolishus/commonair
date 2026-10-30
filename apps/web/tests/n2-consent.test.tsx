@@ -74,7 +74,7 @@ function Page({ consent, pathname = "/" }: { consent: StoredConsent | null; path
           <main>
             <a href="/somewhere">Page content</a>
           </main>
-          <InstanceFooter instance={{ name: "Test Air", sourceUrl: null, p2pDefault: "off" }} />
+          <InstanceFooter instance={{ name: "Test Air", sourceUrl: null, p2pDefault: "off", chatSafety: false }} />
         </TooltipProvider>
       </LocaleProvider>
     </RouterContextProvider>

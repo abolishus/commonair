@@ -8,9 +8,9 @@
  * so concurrent disputes can never reverse more than was paid.
  */
 import { and, eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import { type Executor, schema } from "@commonair/db";
 import { lockCreator, lockPayment } from "./locks.ts";
+import { PaymentMetaV2, ReversalMetaV2 } from "./meta.ts";
 import { IdempotencyConflictError, type PostResult, post } from "./poster.ts";
 import { creatorBalances, holdLots } from "./queries.ts";
 import { chargeback, chargebackReversal, refund } from "./rules.ts";
@@ -21,30 +21,6 @@ export class PaymentNotFoundError extends Error {
 export class ReversalExceedsPaymentError extends Error {
   override name = "ReversalExceedsPaymentError";
 }
-
-const Settlement = z.enum(["cash", "receivable"]);
-
-/** Metadata written by `paymentSucceeded`. */
-const PaymentMeta = z.object({
-  creatorUserId: z.uuid(),
-  provider: z.string(),
-  settlement: Settlement,
-  revenueGrossCents: z.number().int().positive(),
-  taxCents: z.number().int().nonnegative(),
-  streamerShare: z.number(),
-  coopShare: z.number(),
-});
-
-/** Metadata written by `chargeback`. */
-const ChargebackMeta = z.object({
-  creatorUserId: z.uuid(),
-  provider: z.string(),
-  settlement: Settlement,
-  revenueGrossCents: z.number().int().negative(),
-  taxCents: z.number().int().nonpositive(),
-  creatorCents: z.number().int().nonpositive(),
-  coopCents: z.number().int().nonpositive(),
-});
 
 async function existing(tx: Executor, key: string, refId: string): Promise<PostResult | null> {
   const [row] = await tx
@@ -103,7 +79,7 @@ export async function postReversal(db: Executor, i: PostReversalInput): Promise<
       .from(schema.ledgerTransactions)
       .where(eq(schema.ledgerTransactions.idempotencyKey, `payment:${i.paymentId}`));
     if (!original) throw new PaymentNotFoundError(`payment ${i.paymentId} is not in the ledger`);
-    const meta = PaymentMeta.parse(original.metadata);
+    const meta = PaymentMetaV2.parse(original.metadata);
     const currency = await transactionCurrency(tx, original.id);
     const already = await alreadyReversed(tx, i.paymentId);
     if (already + i.amountCents > meta.revenueGrossCents) {
@@ -163,7 +139,7 @@ export async function postChargebackReversal(
     await lockPayment(tx, paymentId);
     const replay = await existing(tx, `chargeback-reversal:${i.disputeId}`, paymentId);
     if (replay) return replay;
-    const meta = ChargebackMeta.parse(cb.metadata);
+    const meta = ReversalMetaV2.parse(cb.metadata);
     const currency = await transactionCurrency(tx, cb.id);
     await lockCreator(tx, meta.creatorUserId);
     const balances = await creatorBalances(tx, meta.creatorUserId, currency);

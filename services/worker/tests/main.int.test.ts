@@ -24,6 +24,8 @@ test("main.ts serves /healthz and /readyz and shuts down on SIGTERM", async () =
       DATABASE_URL: t.url,
       VALKEY_URL,
       AUTH_SECRET,
+      // W1: verified-watch jitter (ADR 0015 decision 4).
+      INTERNAL_API_SECRET: "test-internal-secret-0123456789-abcdefghij",
       WORKER_PORT: String(port),
       WORKER_BULL_PREFIX: `test-bull-${crypto.randomUUID()}`,
       // These are synthetic local settings: startup composes required storage and sealing clients

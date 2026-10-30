@@ -86,7 +86,14 @@ function harness(limits: Partial<SessionLimits> = {}, opts: { failSend?: (f: Cli
     },
     async join(slug = "dallas", me = { badges: ["subscriber/2"], canModerate: false, canChat: true }) {
       await h.lines(`JOIN #${slug}`);
-      await h.frame({ op: "joined", channel: slug, channelId: CHANNEL_ID, settings, me });
+      await h.frame({
+        op: "joined",
+        surge: { state: "off", until: null },
+        channel: slug,
+        channelId: CHANNEL_ID,
+        settings,
+        me,
+      });
     },
   };
   return h;
@@ -250,6 +257,7 @@ describe("channels", () => {
     expect(h.sent.at(-1)).toMatchObject({ op: "join", channel: "dallas" });
     await h.frame({
       op: "joined",
+      surge: { state: "off", until: null },
       channel: "dallas",
       channelId: CHANNEL_ID,
       settings,
@@ -288,6 +296,7 @@ describe("channels", () => {
     ]);
     await h.frame({
       op: "joined",
+      surge: { state: "off", until: null },
       channel: "aaa",
       channelId: CHANNEL_ID,
       settings,
@@ -680,7 +689,14 @@ describe("join pacing and expiry", () => {
     await sleep(50);
     await h.lines("JOIN #slow");
     expect(joinsSent(h)).toEqual(["slow", "slow"]);
-    await h.frame({ op: "joined", channel: "slow", channelId: CHANNEL_ID, settings, me: notMember });
+    await h.frame({
+      op: "joined",
+      surge: { state: "off", until: null },
+      channel: "slow",
+      channelId: CHANNEL_ID,
+      settings,
+      me: notMember,
+    });
     expect(h.session.channelCount).toBe(1);
     h.session.close("done", false);
   });
@@ -691,7 +707,14 @@ describe("join pacing and expiry", () => {
     await h.lines("JOIN #late");
     await sleep(40);
     h.take();
-    await h.frame({ op: "joined", channel: "late", channelId: CHANNEL_ID, settings, me: notMember });
+    await h.frame({
+      op: "joined",
+      surge: { state: "off", until: null },
+      channel: "late",
+      channelId: CHANNEL_ID,
+      settings,
+      me: notMember,
+    });
     expect(h.take()).toEqual([]);
     expect(h.sent.at(-1)).toMatchObject({ op: "part", channel: "late" });
     expect(h.session.channelCount).toBe(0);

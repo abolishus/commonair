@@ -9,6 +9,8 @@ import {
   moderationEnv,
   coopEnv,
   interactEnv,
+  chatEnv,
+  internalEnv,
   evidenceSealEnv,
   evidenceStorageEnv,
   mailEnv,
@@ -46,6 +48,10 @@ export const workerEnv = z
     ...opsEnv.shape,
     // E8: the interactivity test hook (ADR 0026).
     ...interactEnv.shape,
+    // W1: chat retention, the verified-watch writer and the surge guard (ADR 0012 amendment 1, ADR 0015).
+    ...chatEnv.shape,
+    // W1: verified-watch jitter (ADR 0015 decision 4)
+    ...internalEnv.pick({ INTERNAL_API_SECRET: true }).shape,
   })
   .superRefine((env, ctx) => {
     if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
@@ -53,6 +59,13 @@ export const workerEnv = z
         code: "custom",
         path: ["MODERATION_CLASSIFIER"],
         message: "the scripted classifier needs MODERATION_TEST_HOOKS=true (harness only)",
+      });
+    // `.shape` drops chatEnv's refine; the retention job reads both.
+    if (env.CHAT_REPLAY_MAX_DAYS < env.CHAT_RETENTION_DAYS)
+      ctx.addIssue({
+        code: "custom",
+        path: ["CHAT_REPLAY_MAX_DAYS"],
+        message: "CHAT_REPLAY_MAX_DAYS must be at least CHAT_RETENTION_DAYS",
       });
   });
 export type WorkerEnv = z.output<typeof workerEnv>;

@@ -273,6 +273,16 @@ describe.skipIf(!storage)("data export", () => {
         expiresAt: new Date(Date.now() + 3_600_000),
         ipAddress: "198.51.100.9",
       });
+    // W1: U blocked S and W; V's block of U and of W are V's, not U's.
+    const W = await makeUser(db());
+    await db()
+      .insert(schema.userBlocks)
+      .values([
+        { userId: U.user.id, blockedUserId: S.user.id, createdAt: new Date(Date.now() - 2000) },
+        { userId: U.user.id, blockedUserId: W.user.id, createdAt: new Date(Date.now() - 1000) },
+        { userId: V.user.id, blockedUserId: U.user.id },
+        { userId: V.user.id, blockedUserId: W.user.id },
+      ]);
     const secrets = [...(await seedSecrets(U.user.id, U.channel.id)), ...(await seedSecrets(V.user.id, V.channel.id))];
     // A statement of reasons about U and one about V (W0-sor): U's archive holds U's only.
     const uStatement = await seedStatement(U.user.id, U.channel.id);
@@ -309,6 +319,7 @@ describe.skipIf(!storage)("data export", () => {
       "consents.json",
       "developer.json",
       "interact.json",
+      "blocks.json",
     ];
     expect(Object.keys(acc.files).sort()).toEqual([...accountFiles, MANIFEST].sort());
     expect(acc.json("enforcement_statements.json")).toEqual([
@@ -324,6 +335,10 @@ describe.skipIf(!storage)("data export", () => {
     ]);
     expect(Object.keys((acc.json("enforcement_statements.json") as object[])[0] ?? {})).not.toContain("moderatorNote");
     expect(acc.json(MANIFEST)).toMatchObject({ kind: "account", exportId: accountId, userId: U.user.id });
+    expect(acc.json("blocks.json")).toEqual([
+      { username: S.user.username, blockedAt: expect.any(String) },
+      { username: W.user.username, blockedAt: expect.any(String) },
+    ]);
     expect((acc.json(MANIFEST) as { files: { name: string }[] }).files.map((f) => f.name)).toEqual(accountFiles);
     expect(acc.json("account.json")).toMatchObject({
       id: U.user.id,

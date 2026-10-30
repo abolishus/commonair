@@ -7,8 +7,9 @@
  * protocol over one upstream connection per IRC client.
  */
 import { z } from "zod";
+import { Timestamp } from "./api/common.ts";
 import { ChatMessage } from "./api/entities.ts";
-import { BOT_CONTROL_SCOPES, RAID_STATUSES } from "./enums.ts";
+import { BOT_CONTROL_SCOPES, PLAYBACK_MODES, RAID_STATUSES } from "./enums.ts";
 import type { EventPayload } from "./events.ts";
 import { ChannelChatSettings, type EmoteRange } from "./shapes.ts";
 
@@ -23,6 +24,10 @@ export const ClientFrame = z.discriminatedUnion("op", [
     body: z.string().min(1).max(500),
     replyToId: z.uuid().optional(),
     isAction: z.boolean().default(false),
+    /** PDT under the sender's playhead (`playheadWallclock()`), ISO 8601 with offset; a hint chat clamps (ADR 0012 amendment 1 decision 2). */
+    mediaTs: Timestamp.optional(),
+    /** `dvr` drops the hint (decision 2); absent = `live`. */
+    playbackMode: z.enum(PLAYBACK_MODES).optional(),
     nonce: z.string().max(64).optional(),
   }),
   /** Moderator commands sent from chat (/ban, /timeout, /slow …); same authorization as the REST API. */
@@ -54,6 +59,7 @@ export const NOTICE_CODES = [
   "msg_channel_suspended",
   "msg_requires_login",
   "msg_links_blocked",
+  "msg_verified_watch",
   "no_permission",
   "usage",
   "invalid_user",
@@ -83,6 +89,8 @@ export const ServerFrame = z.discriminatedUnion("op", [
     channelId: z.uuid(),
     settings: ChannelChatSettings,
     me: z.object({ badges: z.array(z.string()), canModerate: z.boolean(), canChat: z.boolean() }),
+    /** Surge mode at join (ADR 0015 decision 6); `off` when the guard is off, the channel has none, or Valkey is unreadable. */
+    surge: z.object({ state: z.enum(["off", "on", "suppressed"]), until: z.string().nullable() }),
   }),
   z.object({ op: z.literal("parted"), channel }),
   z.object({
@@ -138,6 +146,17 @@ export const ServerFrame = z.discriminatedUnion("op", [
     toDisplayName: z.string(),
     executeAt: z.string(),
   }),
+  /**
+   * Surge guard (ADR 0015 decision 6), on the channel's chat control: sent when surge mode starts,
+   * ends or is suppressed by a moderator. Viewers' chat inputs show "watchers-only for now"; the mod
+   * view shows why. Published by the `chat-surge-guard` job and the override procedure.
+   */
+  z.object({
+    op: z.literal("surge"),
+    channel,
+    state: z.enum(["off", "on", "suppressed"]),
+    until: z.string().nullable(),
+  }),
   z.object({ op: z.literal("pong"), nonce: z.string().optional() }),
   z.object({
     op: z.literal("error"),
@@ -174,7 +193,7 @@ export const InvalidateMessage = z.object({
 });
 export type InvalidateMessage = z.infer<typeof InvalidateMessage>;
 
-const CONTROL_OPS = new Set(["ban", "delete", "clear", "settings", "raid"]);
+const CONTROL_OPS = new Set(["ban", "delete", "clear", "settings", "raid", "surge"]);
 export const ChatControlMessage = z.union([
   InvalidateMessage,
   ServerFrame.refine((f) => CONTROL_OPS.has(f.op), "not a control frame"),

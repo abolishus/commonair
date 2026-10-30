@@ -93,6 +93,7 @@ export function messageDto(
     isAction: m.isAction,
     replyTo: reply ? { id: reply.id, username: reply.username, body: reply.deleted ? "" : reply.body } : null,
     createdAt: iso(m.createdAt),
+    mediaTs: m.mediaTs ? iso(m.mediaTs) : null,
   };
 }
 

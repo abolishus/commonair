@@ -552,6 +552,7 @@ describe("money-release-holds", () => {
       feeCents: 0,
       currency: "usd",
       cut: DEFAULT_PLATFORM_CUT,
+      cutHistoryId: null,
       occurredAt: at,
     });
 
@@ -569,6 +570,7 @@ describe("money-release-holds", () => {
         feeCents: 0,
         currency: "usd",
         cut: DEFAULT_PLATFORM_CUT,
+        cutHistoryId: null,
         occurredAt: at,
       });
     await post(db(), mk(1000, ago(7 * DAY_MS)));

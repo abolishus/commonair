@@ -9,11 +9,17 @@
  * timers are injected so the protocol handling is unit-testable.
  */
 import { ServerFrame, type ClientFrame } from "@commonair/contracts/chat";
+import type { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { backoffDelay } from "./backoff.ts";
 
 export type ChatStatus = "connecting" | "open" | "closed";
 export type ChatMessageFrame = Extract<ServerFrame, { op: "message" }>["message"];
 export type ChatRaidFrame = Omit<Extract<ServerFrame, { op: "raid" }>, "op" | "channel">;
+/** The surge guard's state (ADR 0015 decision 6), from the `surge` frame or the `joined` frame. */
+export interface ChatSurge {
+  state: "off" | "on" | "suppressed";
+  until: string | null;
+}
 
 export interface SocketLike {
   readonly readyState: number;
@@ -46,6 +52,10 @@ export interface ChatEvents {
   onEvent?: (type: string, data: Record<string, unknown>) => void;
   /** This channel's outgoing raid (E8): `pending` (countdown), then `completed` or `canceled`. */
   onRaid?: (raid: ChatRaidFrame) => void;
+  /** The channel's chat settings: from the `joined` frame, then every `settings` frame. */
+  onSettings?: (settings: ChannelChatSettings) => void;
+  /** Surge mode: from the `joined` frame (so a mid-surge joiner learns it at once), then every `surge` frame. */
+  onSurge?: (surge: ChatSurge) => void;
 }
 
 const OPEN = 1;
@@ -160,6 +170,14 @@ export class ChatConnection {
         this.attempt = 0;
         this.setStatus("open");
         this.events.onJoined({ canChat: f.me.canChat, canModerate: f.me.canModerate });
+        this.events.onSettings?.(f.settings);
+        this.events.onSurge?.({ state: f.surge.state, until: f.surge.until });
+        return;
+      case "settings":
+        if (f.channel === this.channel) this.events.onSettings?.(f.settings);
+        return;
+      case "surge":
+        if (f.channel === this.channel) this.events.onSurge?.({ state: f.state, until: f.until });
         return;
       case "message":
         if (f.channel !== this.channel) return;

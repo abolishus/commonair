@@ -23,6 +23,8 @@ test("main.ts warns about co-op test hooks and reports coop_test_hooks on /healt
       DATABASE_URL: t.url,
       VALKEY_URL,
       AUTH_SECRET,
+      // W1: verified-watch jitter (ADR 0015 decision 4).
+      INTERNAL_API_SECRET: "test-internal-secret-0123456789-abcdefghij",
       WORKER_PORT: String(port),
       WORKER_BULL_PREFIX: `test-bull-${crypto.randomUUID()}`,
       // Synthetic local settings, as in main.int.test.ts: no storage operation or scoring happens.

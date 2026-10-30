@@ -15,6 +15,7 @@ import {
   moderationEnv,
   coopEnv,
   interactEnv,
+  chatEnv,
   opsEnv,
   paymentsEnv,
   playbackEnv,
@@ -53,6 +54,8 @@ const SCHEMAS = [
   coopEnv,
   opsEnv,
   interactEnv,
+  // W1: verified-watch gate, surge guard and chat retention (ADR 0015, ADR 0012 amendment 1).
+  chatEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -74,7 +77,8 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof bullPrefixEnv> &
   z.output<typeof coopEnv> &
   z.output<typeof opsEnv> &
-  z.output<typeof interactEnv>;
+  z.output<typeof interactEnv> &
+  z.output<typeof chatEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

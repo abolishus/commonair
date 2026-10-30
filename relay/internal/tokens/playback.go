@@ -47,6 +47,8 @@ type PlaybackClaims struct {
 	Src  string
 	// RID is empty unless Src is "relay".
 	RID string
+	// DM is the data-mode ceiling in bit/s: 0 when absent; set only on origin live tokens (ADR 0018).
+	DM  int64
 	IAT int64
 	EXP int64
 }
@@ -120,6 +122,15 @@ func parseClaims(b []byte) (PlaybackClaims, error) {
 	// The contract's refine: rid is required exactly when src is relay.
 	if (c.Src == "relay") != (c.RID != "") {
 		return c, ErrMalformed
+	}
+	// The contract's second refine (ADR 0018): dm only on origin tokens for a live path.
+	if dm, present := raw["dm"]; present {
+		if c.DM, err = jsonInt(dm); err != nil || c.DM < 32000 || c.DM > 8000000 {
+			return c, ErrMalformed
+		}
+		if c.Src != "origin" || strings.HasPrefix(c.Path, "vod/") {
+			return c, ErrMalformed
+		}
 	}
 	if c.IAT, err = jsonInt(raw["iat"]); err != nil {
 		return c, ErrMalformed

@@ -123,7 +123,7 @@ export const APPEAL_SUBJECTS = [
 export const APPEAL_STATUSES = ["open", "upheld", "overturned"] as const;
 export const ACTOR_TYPES = ["user", "moderator", "admin", "system", "bot", "app"] as const;
 
-export const REPORT_SUBJECTS = ["user", "channel", "chat_message", "vod", "clip", "broadcast"] as const;
+export const REPORT_SUBJECTS = ["user", "channel", "chat_message", "vod", "clip", "broadcast", "message_set"] as const;
 export const REPORT_REASONS = [
   "spam",
   "harassment",
@@ -357,3 +357,87 @@ export const ENFORCEMENT_SOURCE_ACTIONS = [
   "ncii.auto_hide",
   "moderation.t0.match",
 ] as const;
+
+// Feature wins, wave 1 (W1; docs/testing/w1-selectors.md) ----------------------------------
+
+/** Where a viewer's playhead is (ADR 0012 amendment 1 decision 1, ADR 0016 decision 6). */
+export const PLAYBACK_MODES = ["live", "dvr"] as const;
+/** User-to-user blocks (ADR 0012 amendment 1 decision 8; built in W1, not W3). */
+export const BLOCK_RULES = { maxPerUser: 1000 } as const;
+/** A "Report wave" (Calm Chat) groups at most this many messages of one channel. */
+export const MESSAGE_SET_RULES = { minMessages: 2, maxMessages: 50 } as const;
+/** `PaymentBreakdown.lines[].kind` (feature-wins §4.1). Gross side: tax, creator, coop_share, reversal. Co-op expense side: processor_fee, dispute_fee. Derived: coop_net. */
+export const BREAKDOWN_LINE_KINDS = [
+  "tax",
+  "creator",
+  "coop_share",
+  "processor_fee",
+  "coop_net",
+  "reversal",
+  "dispute_fee",
+] as const;
+/** The part of gross a `reversal` line takes back. */
+export const BREAKDOWN_COMPONENTS = ["tax", "creator", "coop_share"] as const;
+/** `PaymentBreakdown.timeline[].kind`, one per ledger transaction of the payment. */
+export const BREAKDOWN_EVENT_KINDS = ["paid", "hold_released", "refunded", "charged_back", "chargeback_won"] as const;
+/** The governance keys the fee schedule shows (`coop.feeSchedule`). */
+export const FEE_SCHEDULE_KEYS = ["platform.cut", "payout.rules"] as const;
+/**
+ * The Support dialog's "typical fee" estimate (feature-wins §4.1): a range, labelled an estimate,
+ * because card country and tax are unknown before payment. Accepted 2026-10-30 (Stripe's published
+ * card pricing spans roughly 1.5 % + 25 ¢ for domestic EEA cards to 3.9 % + 30 ¢ with an
+ * international surcharge); `manual` has no processor fee.
+ */
+export const PROCESSOR_FEE_ESTIMATE = {
+  manual: null,
+  stripe: { lowBps: 150, highBps: 390, fixedCents: 30 },
+} as const;
+/** Payment fraud floor (ADR 0036, W1-fraud-floor). */
+export const PAYMENT_FRAUD_KINDS = ["payer_velocity", "payer_concentration", "new_payee", "manual"] as const;
+/** open → reviewed (first treasurer) → cleared | confirmed (a second treasurer or an admin). A confirmed flag holds until an admin releases it (ADR 0036 decision 3). */
+export const PAYMENT_FRAUD_STATUSES = ["open", "reviewed", "cleared", "confirmed"] as const;
+export const PAYMENT_FRAUD_DECISIONS = ["clear", "confirm"] as const;
+/**
+ * The scan's thresholds (W1-fraud-floor). Ids, counts and cents only reach evidence.
+ * - payer_velocity: one payer's succeeded payments to any channel in `velocityWindowMinutes` above
+ *   `velocityMaxPayments` flags every payee of that window.
+ * - payer_concentration: over the last `concentrationWindowDays`, when a payee's gross is at least
+ *   `concentrationMinGrossCents` and either the top `concentrationTopN` payers bring at least
+ *   `concentrationShare` of it, or payers whose accounts were younger than `newPayerAccountDays` at
+ *   payment bring at least `newPayerShare` of it.
+ * - new_payee: a payee's first payout ever at or above `newPayeeFirstPayoutCents`.
+ */
+export const PAYMENT_FRAUD_RULES = {
+  velocityWindowMinutes: 60,
+  velocityMaxPayments: 10,
+  concentrationWindowDays: 30,
+  concentrationMinGrossCents: 50_000,
+  concentrationTopN: 3,
+  concentrationShare: 0.8,
+  newPayerAccountDays: 7,
+  newPayerShare: 0.5,
+  newPayeeFirstPayoutCents: 50_000,
+} as const;
+/** `payouts.hold_reason` while the payee has a holding fraud flag: open, reviewed, or confirmed and not released (DB-enforced, migration 0038). */
+export const FRAUD_REVIEW_HOLD = "fraud_review";
+/**
+ * Data mode (ADR 0018). Accepted 2026-10-30 (W1 contract step §8.3 has the derivation).
+ * `ceilingFor(mbPerHour)` = round(mbPerHour × 8 000 000 / 3600 / overheadFactor), clamped to the
+ * claim's [32 000, 8 000 000] bit/s.
+ */
+export const DATA_MODE = {
+  /** fMP4 boxes, LL-HLS part and playlist polling on top of the media bitrate (measured by W1-data-mode). */
+  overheadFactor: 1.15,
+  minCeilingBps: 32_000,
+  maxCeilingBps: 8_000_000,
+  /** Budget presets in MB per hour: audio only, ≤ 480p, ≤ 720p. */
+  presetsMbPerHour: [50, 800, 1900] as const,
+  /** Custom budget bounds (the claim bounds through the formula: about 16.6 and 4140 MB/h). */
+  minMbPerHour: 20,
+  maxMbPerHour: 4000,
+} as const;
+export const dataModeCeilingBps = (mbPerHour: number): number =>
+  Math.min(
+    DATA_MODE.maxCeilingBps,
+    Math.max(DATA_MODE.minCeilingBps, Math.round((mbPerHour * 8_000_000) / 3600 / DATA_MODE.overheadFactor)),
+  );

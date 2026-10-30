@@ -21,6 +21,10 @@ export const IntegrityThresholds = z.object({
   relayOverReportTolerance: z.number().min(0).max(10),
   /** Concurrent sessions allowed per device and per account. */
   maxSessionsPerDevice: z.number().int().positive(),
+  /** ADR 0015 decision 3: accounts unlocked per exact address per channel per broadcast. */
+  gateUnlocksPerAddress: z.number().int().min(1).max(100).default(5),
+  /** ADR 0015 decision 5: account age privacy-relay viewers need while the gate is on. */
+  gateFallbackAccountAgeDays: z.number().int().min(0).max(365).default(7),
 });
 export type IntegrityThresholds = z.infer<typeof IntegrityThresholds>;
 

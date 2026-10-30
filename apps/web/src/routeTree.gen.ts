@@ -22,6 +22,7 @@ import { Route as AppSignupRouteImport } from './routes/_app/signup'
 import { Route as AppTakedownRouteImport } from './routes/_app/takedown'
 import { Route as AppTransparencyRouteImport } from './routes/_app/transparency'
 import { Route as StudioBotRouteImport } from './routes/_studio/bot'
+import { Route as StudioChatRouteImport } from './routes/_studio/chat'
 import { Route as StudioContentRouteImport } from './routes/_studio/content'
 import { Route as StudioDashboardRouteImport } from './routes/_studio/dashboard'
 import { Route as StudioInteractRouteImport } from './routes/_studio/interact'
@@ -121,6 +122,11 @@ const AppTransparencyRoute = AppTransparencyRouteImport.update({
 const StudioBotRoute = StudioBotRouteImport.update({
   id: '/bot',
   path: '/bot',
+  getParentRoute: () => StudioRoute,
+} as any)
+const StudioChatRoute = StudioChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
   getParentRoute: () => StudioRoute,
 } as any)
 const StudioContentRoute = StudioContentRouteImport.update({
@@ -328,6 +334,7 @@ export interface FileRoutesByFullPath {
   '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
   '/bot': typeof StudioBotRoute
+  '/chat': typeof StudioChatRoute
   '/content': typeof StudioContentRoute
   '/dashboard': typeof StudioDashboardRoute
   '/interact': typeof StudioInteractRoute
@@ -378,6 +385,7 @@ export interface FileRoutesByTo {
   '/takedown': typeof AppTakedownRoute
   '/transparency': typeof AppTransparencyRoute
   '/bot': typeof StudioBotRoute
+  '/chat': typeof StudioChatRoute
   '/content': typeof StudioContentRoute
   '/dashboard': typeof StudioDashboardRoute
   '/interact': typeof StudioInteractRoute
@@ -431,6 +439,7 @@ export interface FileRoutesById {
   '/_app/takedown': typeof AppTakedownRoute
   '/_app/transparency': typeof AppTransparencyRoute
   '/_studio/bot': typeof StudioBotRoute
+  '/_studio/chat': typeof StudioChatRoute
   '/_studio/content': typeof StudioContentRoute
   '/_studio/dashboard': typeof StudioDashboardRoute
   '/_studio/interact': typeof StudioInteractRoute
@@ -484,6 +493,7 @@ export interface FileRouteTypes {
     | '/takedown'
     | '/transparency'
     | '/bot'
+    | '/chat'
     | '/content'
     | '/dashboard'
     | '/interact'
@@ -534,6 +544,7 @@ export interface FileRouteTypes {
     | '/takedown'
     | '/transparency'
     | '/bot'
+    | '/chat'
     | '/content'
     | '/dashboard'
     | '/interact'
@@ -586,6 +597,7 @@ export interface FileRouteTypes {
     | '/_app/takedown'
     | '/_app/transparency'
     | '/_studio/bot'
+    | '/_studio/chat'
     | '/_studio/content'
     | '/_studio/dashboard'
     | '/_studio/interact'
@@ -728,6 +740,13 @@ declare module '@tanstack/react-router' {
       path: '/bot'
       fullPath: '/bot'
       preLoaderRoute: typeof StudioBotRouteImport
+      parentRoute: typeof StudioRoute
+    }
+    '/_studio/chat': {
+      id: '/_studio/chat'
+      path: '/chat'
+      fullPath: '/chat'
+      preLoaderRoute: typeof StudioChatRouteImport
       parentRoute: typeof StudioRoute
     }
     '/_studio/content': {
@@ -1085,6 +1104,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 interface StudioRouteChildren {
   StudioBotRoute: typeof StudioBotRoute
+  StudioChatRoute: typeof StudioChatRoute
   StudioContentRoute: typeof StudioContentRoute
   StudioDashboardRoute: typeof StudioDashboardRoute
   StudioInteractRoute: typeof StudioInteractRoute
@@ -1098,6 +1118,7 @@ interface StudioRouteChildren {
 
 const StudioRouteChildren: StudioRouteChildren = {
   StudioBotRoute: StudioBotRoute,
+  StudioChatRoute: StudioChatRoute,
   StudioContentRoute: StudioContentRoute,
   StudioDashboardRoute: StudioDashboardRoute,
   StudioInteractRoute: StudioInteractRoute,

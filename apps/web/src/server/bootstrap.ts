@@ -36,13 +36,18 @@ export async function loadBootstrap(cookie: string | undefined): Promise<Bootstr
     try {
       const info = await serverApi(env.API_INTERNAL_URL).instance.info();
       instanceCache = {
-        value: { name: info.name, sourceUrl: safeHttpUrl(info.sourceUrl), p2pDefault: info.features.p2pDefault },
+        value: {
+          name: info.name,
+          sourceUrl: safeHttpUrl(info.sourceUrl),
+          p2pDefault: info.features.p2pDefault,
+          chatSafety: info.features.watchGate || info.features.surgeGuard,
+        },
         at: Date.now(),
       };
       return instanceCache.value;
     } catch {
       // The footer still renders the instance name; the source link waits for the API, and P2P stays opt-in.
-      return { name: config.instanceName, sourceUrl: null, p2pDefault: "off" };
+      return { name: config.instanceName, sourceUrl: null, p2pDefault: "off", chatSafety: false };
     }
   };
 

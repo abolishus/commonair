@@ -300,6 +300,14 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         "chat_messages",
         tx.delete(s.chatMessages).where(eq(s.chatMessages.userId, userId)).returning({ id: s.chatMessages.id }),
       );
+      // W1: blocks in both directions (ADR 0012 decision 8); fraud flags stay (money records, ids only).
+      await del(
+        "user_blocks",
+        tx
+          .delete(s.userBlocks)
+          .where(or(eq(s.userBlocks.userId, userId), eq(s.userBlocks.blockedUserId, userId)))
+          .returning({ u: s.userBlocks.userId }),
+      );
       await del(
         "consent_records",
         tx.delete(s.consentRecords).where(eq(s.consentRecords.userId, userId)).returning({ id: s.consentRecords.id }),

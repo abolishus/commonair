@@ -103,13 +103,21 @@ export async function recordAcceptances(
   return { accepted, missing: current.filter((c) => !wanted.has(c.id)) };
 }
 
-/** Values for the `{{placeholders}}` legal texts may use, from this instance's identity. */
-export function legalVariables(site: InstanceSite, minAge: number): Record<string, string> {
+/** The chat retention figures the privacy policy states (`chatEnv`, ADR 0012 amendment 1 decision 6). */
+export interface LegalChatRetention {
+  CHAT_RETENTION_DAYS: number;
+  CHAT_REPLAY_MAX_DAYS: number;
+}
+
+/** Values for the `{{placeholders}}` legal texts may use, from this instance's identity and env. */
+export function legalVariables(site: InstanceSite, minAge: number, chat: LegalChatRetention): Record<string, string> {
   const vars: Record<string, string> = {
     instanceName: site.name,
     publicUrl: site.publicUrl,
     sourceUrl: sourceLink(site),
     minAge: String(minAge),
+    chatRetentionDays: String(chat.CHAT_RETENTION_DAYS),
+    chatReplayMaxDays: String(chat.CHAT_REPLAY_MAX_DAYS),
   };
   for (const [k, v] of Object.entries(site.contacts)) vars[`contacts.${k}`] = v;
   return vars;

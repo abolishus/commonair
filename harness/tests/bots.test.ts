@@ -86,6 +86,7 @@ function startFakeChat(opts: { requireBearer?: string } = {}) {
           case "join":
             send(ws, {
               op: "joined",
+              surge: { state: "off", until: null },
               channel: frame.channel,
               channelId: CHANNEL_ID,
               settings: ChannelChatSettings.parse({}),

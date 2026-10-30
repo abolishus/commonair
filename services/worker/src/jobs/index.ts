@@ -9,6 +9,8 @@
 import { integrityJobs } from "../integrity/jobs.ts";
 import type { JobDefinition } from "../runtime/registry.ts";
 import { job as accountDeletion } from "./account-deletion.ts";
+import { job as chatRetention } from "./chat-retention.ts";
+import { job as chatSurgeGuard } from "./chat-surge-guard.ts";
 import { job as closeStaleSessions } from "./close-stale-sessions.ts";
 import { job as coopCouncilRecompute } from "./coop-council-recompute.ts";
 import { job as coopElectionsAdvance } from "./coop-elections-advance.ts";
@@ -25,6 +27,8 @@ import { job as legalConsentRetention } from "./legal-consent-retention.ts";
 import { job as liveCounters } from "./live-counters.ts";
 import { job as oauthExpire } from "./oauth-expire.ts";
 import { job as moneyExpirePending } from "./money-expire-pending.ts";
+import { job as moneyFraudScan } from "./money-fraud-scan.ts";
+import { job as moneyReconcile } from "./money-reconcile.ts";
 import { job as moneyReleaseHolds } from "./money-release-holds.ts";
 import { job as moneyRenew } from "./money-renew.ts";
 import { job as moderationNciiClock } from "./moderation-ncii-clock.ts";
@@ -91,4 +95,9 @@ export const JOBS = [
   // Developer platform (E9, ADR 0027).
   webhookRevocation,
   oauthExpire,
+  // Feature wins, wave 1 (W1).
+  chatRetention,
+  chatSurgeGuard,
+  moneyFraudScan,
+  moneyReconcile,
 ] as readonly JobDefinition[];

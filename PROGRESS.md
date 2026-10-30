@@ -115,11 +115,21 @@ i18n (Hosted Weblate, Spanish first), 0030 federation, 0032 scaling (NYC3; track
 droplet). Proposed: 0031 Twitch import (waits for counsel), 0033 SeaweedFS (answers recorded;
 waits for the phase 0 spike; replaces Garage outright, no migration tool). The milestone plans and
 feature-wins.md are corrected to match. Open for the maintainer: the SDK's npm organisation and the dual licence of
-the contract files its bundle inlines (ADR 0035; the licence itself is decided, Apache-2.0); owners for CDN
-fetch-judging (0015 GA) and for user blocks (0012 amd 1, 0017); budgets under ~86 MB/h (0018);
+the contract files its bundle inlines (ADR 0035; the licence itself is decided, Apache-2.0);
 0031's three departures from the N3 plan; 0030's 7-day inbox drop and follower loss on suspension.
 Legal seed follow-ups for E8/N2: done in batch 3 (terms, privacy and cookies seeds bumped);
 **counsel has reviewed none of them**.
+Legal seed follow-ups for W1: the privacy draft carries chat replay, chat retention
+(`{{chatRetentionDays}}`/`{{chatReplayMaxDays}}`) and blocks at `2026-10-30-chat-replay-draft`;
+**counsel has not reviewed it** (decision (g)). Batch 4 decisions (2026-10-30, batch4 README):
+user blocks ship in W1, so ADR 0017's "W3's contract step adds them" line carries a dated
+superseded note (ADR 0012 amendment 1 decision 8); CDN fetch-judging (ADR 0015 GA criterion 1) is
+S1 stage 4's, and `CHAT_WATCH_GATE` ships off until then; data-mode budgets are the `DATA_MODE`
+presets 50/800/1900 MB/h with no ladder change in W1 (budgets under ~86 MB/h are met by the audio
+rung when the ladder runs; ADR 0018); ADR 0036 (payment fraud floor) is accepted; the chat replay
+panel is deferred to W2 and the payment receipt email with the breakdown to M1. **Staging reset for `PaymentMeta` v2** (ADR 0013
+decision 2): when the W1 contract step deploys, the rc droplet's Postgres volume is recreated (as
+for ADR 0020); its v1 ledger rows are not migrated.
 **Batch 2 state (2026-10-28): waves 1–3 merged and pushed; CI green on main `048d397` (every job, all four harness shards). Batch done; open findings below.**
 
 | Unit              | Wave | Commits (branch)                   | State                                                                                     |

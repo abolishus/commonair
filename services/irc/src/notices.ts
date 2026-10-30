@@ -29,6 +29,7 @@ export const NOTICE_MSG_IDS: Readonly<Record<NoticeCode, string>> = {
   msg_channel_suspended: "msg_channel_suspended",
   msg_requires_login: "msg_requires_login",
   msg_links_blocked: "msg_links_blocked",
+  msg_verified_watch: "msg_verified_watch",
   no_permission: "no_permission",
   unrecognized_cmd: "unrecognized_cmd",
   cmd_success: "cmd_success",

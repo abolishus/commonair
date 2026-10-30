@@ -12,11 +12,15 @@
  *   on a broadcast, VOD or clip they also open a report-derived T1 case, which moderators can
  *   review and escalate to legal like any other case.
  * - Report details stay on the (mutable) report row; audit rows carry ids and enums only.
+ * - `message_set` (a Calm Chat "Report wave", W1): several messages of one channel, keyed on a
+ *   representative `subjectId` among them; every body is kept as evidence, and removing the
+ *   content deletes them all. A wave has several senders, so it is never a suspension or ban target.
  */
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { REPORT_REASONS, REPORT_SUBJECTS } from "@commonair/contracts/enums";
 import { MODERATION_CONSTANTS } from "@commonair/moderation";
 import { schema, type Executor } from "@commonair/db";
+import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { publishControl, publishUserControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor, pageOf } from "../lib/cursor.ts";
@@ -54,7 +58,19 @@ interface SubjectInfo {
   evidence: Record<string, unknown>;
 }
 
-async function subjectInfo(db: Executor, type: ReportSubject, id: string): Promise<SubjectInfo | null> {
+/** The messages a `message_set` report keeps (`evidence.messages`), as stored. */
+interface WaveMessage {
+  id: string;
+  userId: string;
+  body: string;
+}
+
+async function subjectInfo(
+  db: Executor,
+  type: ReportSubject,
+  id: string,
+  messageIds: readonly string[] = [],
+): Promise<SubjectInfo | null> {
   switch (type) {
     case "user": {
       const [u] = await db
@@ -79,6 +95,30 @@ async function subjectInfo(db: Executor, type: ReportSubject, id: string): Promi
       // The message text is kept on the report in case the message is deleted.
       return m ? { channelId: m.channelId, userId: m.userId, evidence: { body: m.body } } : null;
     }
+    case "message_set": {
+      const ids = [...new Set(messageIds)];
+      if (ids.length === 0 || !ids.includes(id)) return null;
+      const rows = await db
+        .select({
+          id: chatMessages.id,
+          channelId: chatMessages.channelId,
+          userId: chatMessages.userId,
+          body: chatMessages.body,
+        })
+        .from(chatMessages)
+        .where(inArray(chatMessages.id, ids))
+        .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id));
+      const channelIds = new Set(rows.map((m) => m.channelId));
+      const first = rows[0];
+      if (!first || rows.length !== ids.length || channelIds.size !== 1) return null;
+      // Every text is kept on the report in case the messages are deleted (as for chat_message).
+      const messages: WaveMessage[] = rows.map((m) => ({ id: m.id, userId: m.userId, body: m.body }));
+      return {
+        channelId: first.channelId,
+        userId: null,
+        evidence: { messages, senders: new Set(rows.map((m) => m.userId)).size },
+      };
+    }
     case "vod":
     case "clip":
     case "broadcast": {
@@ -91,6 +131,32 @@ async function subjectInfo(db: Executor, type: ReportSubject, id: string): Promi
       return r ? { channelId: r.channelId, userId: r.owner, evidence: {} } : null;
     }
   }
+}
+
+/** `evidence.messages` of a `message_set` report (written by `subjectInfo`); empty for anything else. */
+function waveMessages(evidence: unknown): WaveMessage[] {
+  const list = (evidence as { messages?: unknown } | null)?.messages;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (m): m is WaveMessage =>
+      typeof m === "object" &&
+      m !== null &&
+      typeof (m as WaveMessage).id === "string" &&
+      typeof (m as WaveMessage).userId === "string",
+  );
+}
+
+/** One `delete` control frame per removed message, after commit, so live chats drop the lines. */
+async function publishWaveDeletes(deps: Deps, ids: string[]) {
+  if (ids.length === 0) return;
+  const rows = await deps.db
+    .select({ id: chatMessages.id, channelId: chatMessages.channelId, slug: channels.slug, username: users.username })
+    .from(chatMessages)
+    .innerJoin(channels, eq(channels.id, chatMessages.channelId))
+    .innerJoin(users, eq(users.id, chatMessages.userId))
+    .where(inArray(chatMessages.id, ids));
+  for (const m of rows)
+    await publishControl(deps, m.channelId, { op: "delete", channel: m.slug, messageId: m.id, username: m.username });
 }
 
 async function toReports(db: Executor, rows: ReportRow[]) {
@@ -124,7 +190,10 @@ export const safety = {
   report: os.safety.report.handler(async ({ context, input }) => {
     const { deps } = context;
     const caller = requireCaller(context);
-    const info = await subjectInfo(deps.db, input.subjectType, input.subjectId);
+    // The contract's refine already ties `messageIds` to `message_set`; repeat it for direct callers.
+    if ((input.subjectType === "message_set") !== (input.messageIds !== undefined))
+      throw badRequest("messageIds is required exactly for message_set");
+    const info = await subjectInfo(deps.db, input.subjectType, input.subjectId, input.messageIds);
     if (!info) throw notFound("Nothing to report was found");
     const priority = reportPriority(input.reason);
     const row = await deps.db.transaction(async (tx) => {
@@ -230,11 +299,19 @@ export const safety = {
       const [r] = await tx.select().from(reports).where(eq(reports.id, input.id)).for("update");
       if (!r) throw notFound("Report not found");
       if (r.status !== "open") throw conflict("This report is already resolved");
-      const info = await subjectInfo(tx, r.subjectType, r.subjectId);
+      // A wave's messages live in its evidence; reloading them would fail once one is hard-deleted.
+      const wave = r.subjectType === "message_set" ? waveMessages(r.evidence) : [];
+      const info =
+        r.subjectType === "message_set"
+          ? { channelId: r.channelId, userId: null, evidence: r.evidence }
+          : await subjectInfo(tx, r.subjectType, r.subjectId);
       if (info?.userId === caller.user.id) throw forbidden("You cannot resolve a report about yourself");
       let ended: EndedBroadcast | null = null;
       let suspendedUser: string | null = null;
       let chatBan: { channelId: string; userId: string } | null = null;
+      let removedMessages: string[] = [];
+      if (r.subjectType === "message_set" && (input.action === "suspend_user" || input.action === "ban_from_channel"))
+        throw badRequest("A wave has several senders: act on each message");
       switch (input.action) {
         case "none":
           break;
@@ -250,7 +327,24 @@ export const safety = {
               .update(chatMessages)
               .set({ deletedAt: now, deletedBy: caller.user.id })
               .where(and(eq(chatMessages.id, r.subjectId), isNull(chatMessages.deletedAt)));
-          else if (r.subjectType === "broadcast" && info?.channelId)
+          else if (r.subjectType === "message_set") {
+            if (wave.length > 0) {
+              const removed = await tx
+                .update(chatMessages)
+                .set({ deletedAt: now, deletedBy: caller.user.id })
+                .where(
+                  and(
+                    inArray(
+                      chatMessages.id,
+                      wave.map((m) => m.id),
+                    ),
+                    isNull(chatMessages.deletedAt),
+                  ),
+                )
+                .returning({ id: chatMessages.id });
+              removedMessages = removed.map((m) => m.id);
+            }
+          } else if (r.subjectType === "broadcast" && info?.channelId)
             ended = await endBroadcastInTx(tx, info.channelId, r.subjectId, now);
           else throw badRequest("Accounts and channels are suspended, not removed");
           break;
@@ -328,7 +422,7 @@ export const safety = {
           durationSeconds: input.durationSeconds ?? null,
         },
       });
-      return { updated, ended, suspendedUser, chatBan };
+      return { updated, ended, suspendedUser, chatBan, removedMessages };
     });
     await afterBroadcastEnded(deps, result.ended);
     if (result.suspendedUser)
@@ -339,6 +433,7 @@ export const safety = {
         scope: "user",
         userId: result.chatBan.userId,
       });
+    await publishWaveDeletes(deps, result.removedMessages);
     const [dtoRow] = await toReports(deps.db, [result.updated]);
     if (!dtoRow) throw new Error("report vanished");
     return dtoRow;

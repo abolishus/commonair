@@ -34,6 +34,9 @@ export interface PostingEntry {
  * A balanced set of entries ready to post. Descriptions and memos are fixed strings and ids;
  * never personal data (ADR 0004).
  */
+/** A JSON value in posting metadata (`PaymentMetaV2.shares` is an array of objects). */
+export type LedgerMetaValue = string | number | boolean | null | LedgerMetaValue[] | { [key: string]: LedgerMetaValue };
+
 export interface Posting {
   kind: PostingKind;
   description: string;
@@ -45,7 +48,7 @@ export interface Posting {
   occurredAt: Date;
   reversesId?: string | null;
   /** Ids and amounts only. `creatorUserId`/`revenueGrossCents` drive patronage revenue. */
-  metadata: Record<string, string | number | boolean | null>;
+  metadata: { [key: string]: LedgerMetaValue };
   entries: PostingEntry[];
 }
 

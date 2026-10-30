@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Chat service entry point. */
-import { coreEnv, databaseEnv, internalEnv, loadEnv, servicePorts, valkeyEnv } from "@commonair/config";
+import { chatEnv, coreEnv, databaseEnv, internalEnv, loadEnv, servicePorts, valkeyEnv } from "@commonair/config";
 import { createDb } from "@commonair/db";
 import { createLogger, initTelemetry } from "@commonair/observability";
 import { startChatService } from "./server.ts";
 
-const env = loadEnv(coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(servicePorts));
+const env = loadEnv(coreEnv.and(databaseEnv).and(valkeyEnv).and(internalEnv).and(servicePorts).and(chatEnv));
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "chat" });
 const logger = createLogger({ service: "chat", level: env.LOG_LEVEL });
 const db = createDb({
@@ -25,6 +25,9 @@ const chat = await startChatService({
   logger,
   // Enough for a join's parallel reads, without holding the whole pool open.
   warmConnections: Math.min(4, env.DATABASE_POOL_MAX),
+  // W1: off until their GA criteria are met (ADR 0015).
+  watchGate: env.CHAT_WATCH_GATE === "on",
+  surgeGuard: env.CHAT_SURGE_GUARD === "on",
   // SIGTERM/SIGINT close sockets and flush chat first; then the pool and telemetry.
   onShutdown: async () => {
     await Promise.allSettled([db.close(), telemetry.shutdown()]);

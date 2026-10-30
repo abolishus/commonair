@@ -18,6 +18,17 @@ const claims = {
   iat: 1_700_000_000,
   exp: 1_700_000_120,
 };
+/** ADR 0018: an origin token for a live path carrying the data-mode ceiling. */
+const dataModeClaims = {
+  v: 1 as const,
+  sid: claims.sid,
+  cid: claims.cid,
+  path: "live/alice",
+  src: "origin" as const,
+  dm: 111_111,
+  iat: 1_700_000_000,
+  exp: 1_700_000_120,
+};
 const receipt = {
   v: 1 as const,
   relayId: "01890000-0000-7000-8000-000000000003",
@@ -34,6 +45,7 @@ process.stdout.write(
       privateKeyPkcs8: TEST_KEY,
       publicKey: key.publicKeyB64,
       playback: { claims, token: await signPlaybackToken(key, claims) },
+      playbackDataMode: { claims: dataModeClaims, token: await signPlaybackToken(key, dataModeClaims) },
       receipt: { payload: receipt, signed: await signReceipt(key, receipt) },
     },
     null,

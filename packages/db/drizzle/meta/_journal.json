@@ -260,6 +260,20 @@
       "when": 1793311758847,
       "tag": "0036_n2_users_locale",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793333100606,
+      "tag": "0037_w1_quick_wins",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793333110921,
+      "tag": "0038_w1_protections",
+      "breakpoints": true
     }
   ]
 }

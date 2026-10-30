@@ -39,6 +39,7 @@ export function supportInfo(over: Partial<SupportInfo> = {}): SupportInfo {
       messageMaxLength: MONEY_LIMITS.tipMessageMaxLength,
     },
     gift: { maxCount: MONEY_LIMITS.giftMaxCount },
+    feeEstimate: null,
     viewer: { subscription: null, isOwner: false },
     ...over,
   };

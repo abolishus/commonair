@@ -119,6 +119,8 @@ export const instance = {
         p2pDefault: env.P2P_DEFAULT,
         cdn: env.CDN_PROVIDER !== "none" && Boolean(env.CDN_BASE_URL),
         vod: true,
+        watchGate: env.CHAT_WATCH_GATE === "on",
+        surgeGuard: env.CHAT_SURGE_GUARD === "on",
       },
       minAge: env.AUTH_MIN_AGE,
     };

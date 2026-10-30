@@ -116,7 +116,7 @@ export const meEnforcement = {
           .orderBy(desc(appeals.createdAt), desc(appeals.id))
       : [];
 
-    const vars = legalVariables(deps.site, deps.env.AUTH_MIN_AGE);
+    const vars = legalVariables(deps.site, deps.env.AUTH_MIN_AGE, deps.env);
     const explanation = (r: Row): string => {
       const n = notices.get(r.noticeDocumentId);
       const section = n ? noticeSection(renderLegalText(n.body, vars), r.clauseId) : null;

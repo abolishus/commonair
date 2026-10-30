@@ -20,6 +20,11 @@ import type { Key as Ops } from "./ops.gen.ts";
 import type { Key as P2p } from "./p2p.gen.ts";
 import type { Key as Safety } from "./safety.gen.ts";
 import type { Key as Support } from "./support.gen.ts";
+import type { Key as W1Breakdown } from "./w1-breakdown.gen.ts";
+import type { Key as W1CalmChat } from "./w1-calm-chat.gen.ts";
+import type { Key as W1DataMode } from "./w1-data-mode.gen.ts";
+import type { Key as W1Fraud } from "./w1-fraud.gen.ts";
+import type { Key as W1WatchGate } from "./w1-watch-gate.gen.ts";
 
 /** Every message key, typed from the English catalogs. */
 export type MessageKey =
@@ -39,7 +44,12 @@ export type MessageKey =
   | Ops
   | P2p
   | Safety
-  | Support;
+  | Support
+  | W1Breakdown
+  | W1CalmChat
+  | W1DataMode
+  | W1Fraud
+  | W1WatchGate;
 
 export const NAMESPACES = [
   "coop",
@@ -59,4 +69,9 @@ export const NAMESPACES = [
   "p2p",
   "safety",
   "support",
+  "w1-breakdown",
+  "w1-calm-chat",
+  "w1-data-mode",
+  "w1-fraud",
+  "w1-watch-gate",
 ] as const;

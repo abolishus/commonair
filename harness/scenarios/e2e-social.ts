@@ -20,6 +20,9 @@ import { twitchTagProblems } from "../src/bots/tmi-bot.ts";
 import { playerBundles } from "../src/player-server.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
+import { stepBlock, stepFlood } from "../src/w1/calm.ts";
+import type { SocialExtension } from "../src/w1/kit.ts";
+import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
 import {
   ApiActor,
   type SocialActor,
@@ -380,6 +383,28 @@ async function e2eSocial(ctx: ScenarioContext, sessions: WebSession[], check: Sc
   const unfollowed = await ctx.step("fan: unfollow", () => F.toggleFollow(ui));
   ctx.assert("follow-button data-following=false", !unfollowed.following, unfollowed);
   check("follower-count back to where it started", unfollowed.count === before.count, { before, unfollowed });
+
+  // W1 extensions, while the channel is still live. `--set w1=` names pending ones; by default
+  // only merged extensions run (src/w1/steps.ts).
+  const extensions = w1Extensions("e2e-social", ctx.param("w1", ""));
+  ctx.data("w1.extensions", extensions);
+  if (extensions.length > 0) {
+    const ext: SocialExtension = {
+      ctx,
+      via,
+      channel,
+      streamer,
+      fan,
+      troll,
+      actors: { streamer: S, fan: F, troll: Tr },
+      chat: (user) => p.chat(user),
+    };
+    const W1_STEPS: Readonly<Record<W1Extension<"e2e-social">, (e: SocialExtension) => Promise<void>>> = {
+      flood: stepFlood,
+      block: stepBlock,
+    };
+    for (const name of extensions) await ctx.step(extensionTitle(name, "run"), () => W1_STEPS[name](ext));
+  }
 
   await ctx.step("stop publishing", () => encoder.stop());
   ctx.metric(

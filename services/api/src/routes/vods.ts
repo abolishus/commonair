@@ -38,6 +38,7 @@ import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
 import { urlsWithheld, viewerAudience, vodShown, vodVisible } from "../media/visibility.ts";
 import { requestVodPlacement } from "../media/vod-placement-queue.ts";
+import { vodChat } from "../chat-replay/handlers.ts";
 
 const { broadcasts, channelRoles, channels, clips: clipsT, vods: vodsT } = schema;
 type VodRow = typeof vodsT.$inferSelect;
@@ -268,6 +269,7 @@ export const vods = {
     await requestVodPlacement(deps, row.v.id);
     return { ok: true as const };
   }),
+  chat: vodChat,
 };
 
 const surroundings = (channel: { id: string; suspendedAt: Date | null }, restrictedAt: Date | null) => ({

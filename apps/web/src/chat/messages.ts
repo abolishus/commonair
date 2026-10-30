@@ -24,6 +24,7 @@ const NOTICES: Record<NoticeCode, MessageKey> = {
   msg_channel_suspended: "chat.notice.channelSuspended",
   msg_requires_login: "chat.notice.requiresLogin",
   msg_links_blocked: "chat.notice.linksBlocked",
+  msg_verified_watch: "chat.notice.verifiedWatch",
   no_permission: "chat.notice.noPermission",
   usage: "chat.notice.usage",
   invalid_user: "chat.notice.invalidUser",

@@ -52,7 +52,7 @@ const { THEME_COOKIE, THEME_SESSION_KEY } = await import("../src/lib/theme.ts");
 function boot(over: Partial<Bootstrap> = {}): Bootstrap {
   return {
     config: {} as Bootstrap["config"],
-    instance: { name: "Test Air", sourceUrl: null, p2pDefault: "off" },
+    instance: { name: "Test Air", sourceUrl: null, p2pDefault: "off", chatSafety: false },
     me: null,
     theme: "dark",
     now: 0,

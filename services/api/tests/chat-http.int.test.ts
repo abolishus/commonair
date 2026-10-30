@@ -174,6 +174,42 @@ describe("chat.send over REST", () => {
   });
 });
 
+describe("chat settings: instance flags (W1)", () => {
+  type Err = { code: string; data?: { requirement?: string } };
+  const patch = (body: Record<string, unknown>) =>
+    streamer.client.call<Err & { minVerifiedWatchSeconds?: number; surgeGuard?: { enabled: boolean } }>(
+      "PATCH",
+      path(streamer.username, "/chat/settings"),
+      body,
+    );
+
+  test("the gate and the guard cannot be switched on while the instance flags are off", async () => {
+    const gate = await patch({ minVerifiedWatchSeconds: 120 });
+    expect(gate.status).toBe(412);
+    expect(gate.body.data).toEqual({ requirement: "watch_gate_off" });
+    const guard = await patch({ surgeGuard: { enabled: true } });
+    expect(guard.status).toBe(412);
+    expect(guard.body.data).toEqual({ requirement: "surge_guard_off" });
+    // Switching them off and other fields still save.
+    expect((await patch({ minVerifiedWatchSeconds: 0, surgeGuard: { enabled: false } })).status).toBe(200);
+  });
+
+  test("with the flags on they save", async () => {
+    const env = api.deps.env as { CHAT_WATCH_GATE: "off" | "on"; CHAT_SURGE_GUARD: "off" | "on" };
+    env.CHAT_WATCH_GATE = "on";
+    env.CHAT_SURGE_GUARD = "on";
+    try {
+      const r = await patch({ minVerifiedWatchSeconds: 120, surgeGuard: { enabled: true } });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ minVerifiedWatchSeconds: 120, surgeGuard: { enabled: true } });
+    } finally {
+      await patch({ minVerifiedWatchSeconds: 0, surgeGuard: { enabled: false } });
+      env.CHAT_WATCH_GATE = "off";
+      env.CHAT_SURGE_GUARD = "off";
+    }
+  });
+});
+
 describe("held messages", () => {
   let filterId: string;
   let modRoom: Observer;

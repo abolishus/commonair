@@ -69,6 +69,14 @@ describe("legal seed documents", () => {
     expect(body("privacy")).toMatch(/poll votes/);
   });
 
+  test("privacy describes chat replay, chat retention and blocks (ADR 0012 amendment 1)", () => {
+    const body = (kind: string) => docs.find((d) => d.kind === kind)?.body ?? "";
+    expect(body("privacy")).toMatch(/replayed/);
+    expect(body("privacy")).toMatch(/\{\{chatRetentionDays\}\} days/);
+    expect(body("privacy")).toMatch(/\{\{chatReplayMaxDays\}\} days/);
+    expect(body("privacy")).toMatch(/blocked users/);
+  });
+
   test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {
     const required = Object.fromEntries(docs.map((d) => [d.kind, d.requiresAcceptance]));
     expect(required).toEqual({
@@ -86,7 +94,8 @@ describe("legal seed documents", () => {
       expect(d.body.startsWith("> **Draft pending lawyer review.**"), d.kind).toBe(true);
       const words = d.body.split(/\s+/).filter(Boolean).length;
       expect(words, d.kind).toBeGreaterThanOrEqual(300);
-      expect(words, d.kind).toBeLessThanOrEqual(1000);
+      // Privacy grew past 1000 words with chat replay and blocks (W1); keep it under 1200.
+      expect(words, d.kind).toBeLessThanOrEqual(d.kind === "privacy" ? 1200 : 1000);
     }
   });
 

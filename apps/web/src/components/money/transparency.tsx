@@ -26,6 +26,7 @@ import {
 } from "../../lib/money.ts";
 import { formatBytes } from "../../lib/relays.ts";
 import { CoopTransparency } from "../coop/transparency.tsx";
+import { FeeSchedule } from "./fee-schedule.tsx";
 
 /**
  * `/transparency` pieces (Transparency board) for the months shown, with the co-op's governance
@@ -46,7 +47,13 @@ export function TransparencyEmpty(): React.JSX.Element {
 export function TransparencyReport({ months }: { months: TransparencyMonthDto[] }): React.JSX.Element {
   const { locale } = useLocale();
   const first = months[0];
-  if (!first) return <TransparencyEmpty />;
+  if (!first)
+    return (
+      <>
+        <TransparencyEmpty />
+        <FeeSchedule />
+      </>
+    );
   const totals = transparencyTotals(months, first.revenue.currency);
   const money = (cents: number) => <MoneyAmount value={{ cents, currency: totals.currency }} colorNegative />;
   const stats = [
@@ -173,6 +180,7 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
           })}
         />
       </ResponsiveGrid>
+      <FeeSchedule />
     </>
   );
 }

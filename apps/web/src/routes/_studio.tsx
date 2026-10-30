@@ -4,6 +4,7 @@
 import { StudioShell, type NavItem } from "@commonair/ui/layouts";
 import {
   BotIcon,
+  BubbleChatSecureIcon,
   ChartBarLineIcon,
   DashboardSquare01Icon,
   Money03Icon,
@@ -17,9 +18,10 @@ import { Link, Outlet, createFileRoute, useLocation } from "@tanstack/react-rout
 import type * as React from "react";
 import { AppFooter, AppHeader } from "../components/site-chrome.tsx";
 import { t } from "../i18n/index.ts";
+import { useBootstrap } from "../lib/bootstrap.ts";
 import { studioNav, type StudioEntry } from "../lib/nav.ts";
 
-/** Creator tools (stream manager, overlays, polls and raids, channel bot, content, revenue, relays, developer) in the studio sidebar. Each page guards its own session. */
+/** Creator tools (stream manager, overlays, polls and raids, channel bot, chat safety, content, revenue, relays, developer) in the studio sidebar. Each page guards its own session. */
 export const Route = createFileRoute("/_studio")({ component: StudioLayout });
 
 function studioItem(entry: StudioEntry): NavItem {
@@ -52,6 +54,13 @@ function studioItem(entry: StudioEntry): NavItem {
         label: t("studio.bot"),
         icon: <HugeiconsIcon icon={BotIcon} strokeWidth={2} aria-hidden />,
         render: <Link data-testid="studio-bot-link" to="/bot" />,
+      };
+    case "chat":
+      return {
+        ...base,
+        label: t("studio.chat"),
+        icon: <HugeiconsIcon icon={BubbleChatSecureIcon} strokeWidth={2} aria-hidden />,
+        render: <Link data-testid="studio-chat-link" to="/chat" />,
       };
     case "content":
       return {
@@ -86,10 +95,11 @@ function studioItem(entry: StudioEntry): NavItem {
 
 function StudioLayout(): React.JSX.Element {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const { instance } = useBootstrap();
   return (
     <StudioShell
       header={<AppHeader studio />}
-      groups={[{ id: "studio", items: studioNav(pathname).map(studioItem) }]}
+      groups={[{ id: "studio", items: studioNav(pathname, { chatSafety: instance.chatSafety }).map(studioItem) }]}
       sidebarLabel={t("studio.nav")}
       skipLabel={t("nav.skipToContent")}
       footer={<AppFooter />}

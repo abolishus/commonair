@@ -75,6 +75,14 @@ is the original rounding rule applied to the first N cents of the gross (tax pro
 However a payment is refunded in slices, the slices add up to exactly the original tax, creator
 share and cut. Pass the cut recorded in the original posting's metadata, not today's setting.
 
+**Metadata is `PaymentMeta` v2** (`src/meta.ts`, ADR 0013 decision 2). A payment records `v: 2`,
+the split, `cutHistoryId` (the `platform.cut` history row in effect, null for the founding seed),
+`splitVersionId` (null until Ledger Splits) and `shares` (one owner share at 10,000 bps today).
+Refunds, chargebacks and won chargebacks record `ReversalMetaV2`, whose `shares` split each
+recipient's reversed creator cents into `fromOwnLotCents` (this payment's hold lot) and
+`ownerCoveredCents` (released earnings, other lots, the receivable); the two always sum to
+`−creatorCents`. There is no v1 reader: staging is reset when v2 deploys.
+
 **Where clawbacks come from.**
 
 - Refund: this payment's own remaining hold → released earnings → any other hold → receivable.

@@ -79,6 +79,7 @@ export function startFakeUpstream(users: Record<string, FakeUser>) {
         ws.data.rooms.add(f.channel);
         return send(ws, {
           op: "joined",
+          surge: { state: "off", until: null },
           channel: f.channel,
           channelId: channelIdOf(f.channel),
           settings,

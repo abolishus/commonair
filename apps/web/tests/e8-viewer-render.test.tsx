@@ -873,6 +873,7 @@ describe("OverlayChatPage", () => {
     act(() =>
       ws.push({
         op: "joined",
+        surge: { state: "off", until: null },
         channel: "rivertide",
         channelId: UUID(9),
         settings: {

@@ -13,7 +13,18 @@ import { compileFilters, type CompiledFilter } from "./content.ts";
 import { mergeEmotes } from "./emotes.ts";
 import type { ChannelState, EmoteDef, Standing, UserProfile } from "./types.ts";
 
-const { users, channels, channelRoles, follows, subscriptions, chatBans, emotes, wordFilters, memberships } = schema;
+const {
+  users,
+  channels,
+  broadcasts,
+  channelRoles,
+  follows,
+  subscriptions,
+  chatBans,
+  emotes,
+  wordFilters,
+  memberships,
+} = schema;
 
 export interface DirectoryOptions {
   channelTtlMs?: number;
@@ -114,8 +125,15 @@ export class Directory {
   }
 
   private async loadChannel(slug: string): Promise<LoadedChannel | null> {
-    const [row] = await this.db.select().from(channels).where(eq(channels.slug, slug)).limit(1);
-    if (!row) return null;
+    // The live broadcast's start is the media-time clamp's lower bound (ADR 0012 amendment 1).
+    const [found] = await this.db
+      .select({ row: channels, liveStartedAt: broadcasts.startedAt })
+      .from(channels)
+      .leftJoin(broadcasts, eq(broadcasts.id, channels.liveBroadcastId))
+      .where(eq(channels.slug, slug))
+      .limit(1);
+    if (!found) return null;
+    const row = found.row;
     const [own, global, filters] = await Promise.all([
       this.db
         .select({ id: emotes.id, code: emotes.code, tier: emotes.tier, channelId: emotes.channelId })
@@ -148,6 +166,7 @@ export class Directory {
       settings: parsed.success ? parsed.data : ChannelChatSettings.parse({}),
       suspended: row.suspendedAt !== null,
       liveBroadcastId: row.liveBroadcastId,
+      liveStartedAt: row.liveBroadcastId ? found.liveStartedAt : null,
       emotes: mergeEmotes(global, own),
       filters,
     };
@@ -225,6 +244,8 @@ export class Directory {
       followedAt: follow[0]?.createdAt ?? null,
       subscriberTier: sub[0]?.tier ?? null,
       ban: ban[0] ? { expiresAt: ban[0].expiresAt, reason: ban[0].reason } : null,
+      // The gate state is never cached with the standing: core loads it per send.
+      verifiedWatch: null,
     };
   }
 }

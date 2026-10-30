@@ -77,6 +77,7 @@ const EXPECTED: Record<string, ProcedureMeta["access"]> = {
   "coop.patronage.approve": "finance",
   "coop.patronage.periods": "finance",
   "coop.transparency": "public",
+  "coop.feeSchedule": "public",
 };
 
 type Proc = { "~orpc": { meta: ProcedureMeta; route: { method?: string } } };

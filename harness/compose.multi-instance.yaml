@@ -104,6 +104,9 @@ services:
       INTERACT_TEST_HOOKS: "true"
       # harness/compose.e9.yaml
       EVENTSUB_ALLOW_INSECURE_CALLBACKS: "true"
+      # harness/compose.w1.yaml
+      CHAT_WATCH_GATE: "on"
+      CHAT_SURGE_GUARD: "on"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z
@@ -122,6 +125,9 @@ services:
     environment:
       <<: *app-env
       OTEL_SERVICE_NAME: chat
+      # harness/compose.w1.yaml
+      CHAT_WATCH_GATE: "on"
+      CHAT_SURGE_GUARD: "on"
     ports: ["${BIND_ADDRESS:-127.0.0.1}:${CHAT_2_PORT:-3102}:3002"]
     depends_on: *app-depends
     healthcheck: *app-healthcheck
@@ -166,6 +172,9 @@ services:
       INTERACT_TEST_HOOKS: "true"
       # harness/compose.e9.yaml
       EVENTSUB_ALLOW_INSECURE_CALLBACKS: "true"
+      # harness/compose.w1.yaml
+      CHAT_WATCH_GATE: "on"
+      CHAT_SURGE_GUARD: "on"
     volumes:
       - ${MODERATION_HASHLIST_CSAM:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/csam.pdq:ro,Z
       - ${MODERATION_HASHLIST_NCII:-./infra/moderation/empty-hashlist}:/var/lib/commonair/moderation/ncii.pdq:ro,Z

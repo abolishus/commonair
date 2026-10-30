@@ -527,6 +527,8 @@ export class IrcSession {
       }
       case "raid":
         return; // an outgoing raid countdown has no Twitch IRC line (the incoming raid is the channel.raid USERNOTICE)
+      case "surge":
+        return; // surge mode has no Twitch IRC line; the denial NOTICE carries it
       case "pong":
         return;
     }

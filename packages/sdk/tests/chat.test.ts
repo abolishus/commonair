@@ -60,6 +60,7 @@ function fakeChat(opts: { requireBearer?: string; heartbeatMs?: number; welcome?
           else
             send(ws, {
               op: "joined",
+              surge: { state: "off", until: null },
               channel: frame.channel,
               channelId: CHANNEL_ID,
               settings: ChannelChatSettings.parse({}),

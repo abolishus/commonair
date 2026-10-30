@@ -22,7 +22,7 @@ import { os } from "../lib/orpc.ts";
 type LegalRow = typeof schema.legalDocuments.$inferSelect;
 
 function toDto(deps: Deps, row: LegalRow) {
-  const vars = legalVariables(deps.site, deps.env.AUTH_MIN_AGE);
+  const vars = legalVariables(deps.site, deps.env.AUTH_MIN_AGE, deps.env);
   return {
     id: row.id,
     kind: row.kind,

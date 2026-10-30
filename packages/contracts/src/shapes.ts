@@ -41,6 +41,27 @@ export const ChannelChatSettings = z.object({
   minAccountAgeDays: z.number().int().min(0).max(365).default(0),
   requireVerifiedEmail: z.boolean().default(true),
   linksAllowed: z.boolean().default(true),
+  /**
+   * Verified-watch gate (ADR 0015 decision 7): seconds of gate-eligible watching this broadcast a
+   * signed-in viewer needs before chatting; 0 = off, else 60–3600. Applies only while the instance
+   * flag `CHAT_WATCH_GATE` is on (`instance.info` `features.watchGate`).
+   */
+  minVerifiedWatchSeconds: z
+    .number()
+    .int()
+    .refine((s) => s === 0 || (s >= 60 && s <= 3600), "0 (off) or 60–3600")
+    .default(0),
+  /** Subscribers skip the gate (broadcaster, moderators, VIPs and verified bots always do). */
+  verifiedWatchExemptSubscribers: z.boolean().default(true),
+  /** Surge guard (ADR 0015 decision 6). Applies only while `CHAT_SURGE_GUARD` is on (`features.surgeGuard`). */
+  surgeGuard: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** Share of new sessions older than 60 s that are not gate-eligible which trips the guard. */
+      triggerUnverifiedRatio: z.number().min(0.1).max(1).default(0.5),
+      cooldownMinutes: z.number().int().min(1).max(120).default(10),
+    })
+    .default({ enabled: false, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 }),
 });
 export type ChannelChatSettings = z.infer<typeof ChannelChatSettings>;
 

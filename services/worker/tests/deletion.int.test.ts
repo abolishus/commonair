@@ -663,6 +663,26 @@ describe.skipIf(!storage)("account deletion (E6)", () => {
     expect(o?.username).toBe(otherName);
   });
 
+  test("blocks go in both directions; other users' blocks stay (W1)", async () => {
+    const U = await makeUser(db());
+    const A = await makeUser(db());
+    const B = await makeUser(db());
+    await app()
+      .insert(schema.userBlocks)
+      .values([
+        { userId: U.user.id, blockedUserId: A.user.id },
+        { userId: B.user.id, blockedUserId: U.user.id },
+        { userId: A.user.id, blockedUserId: B.user.id },
+      ]);
+    await schedule(U.user.id);
+    expect(await runAccountDeletions(ctx())).toMatchObject({ completed: 1, failed: 0 });
+    const left = await db()
+      .select()
+      .from(schema.userBlocks)
+      .where(inArray(schema.userBlocks.userId, [U.user.id, A.user.id, B.user.id]));
+    expect(left.map((r) => [r.userId, r.blockedUserId])).toEqual([[A.user.id, B.user.id]]);
+  });
+
   test("a deleted owner's OAuth apps go with every grant; each app's connections are told to close (E9)", async () => {
     const O = await makeUser(db());
     const V = await makeUser(db());

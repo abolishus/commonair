@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 CommonAir contributors
+# SPDX-License-Identifier: CC0-1.0
+#
+# Compose override for the W1 harness scenarios (docs/testing/w1-selectors.md, ADR 0015).
+# Turns the verified-watch gate and the surge guard on instance-wide. Both stay off per channel
+# until a streamer enables them, so every other scenario is unaffected. The defaults stay `off`
+# everywhere else until their GA criteria are met.
+#
+# Part of the harness stack, which layers every harness override:
+#
+#   bun scripts/infra.ts stack --harness
+
+services:
+  api:
+    environment:
+      CHAT_WATCH_GATE: "on"
+      CHAT_SURGE_GUARD: "on"
+  chat:
+    environment:
+      CHAT_WATCH_GATE: "on"
+      CHAT_SURGE_GUARD: "on"
+  worker:
+    environment:
+      CHAT_WATCH_GATE: "on"
+      CHAT_SURGE_GUARD: "on"

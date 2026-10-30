@@ -7,6 +7,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   ALL_ENV_SCHEMAS,
   EnvError,
+  chatEnv,
   coreEnv,
   evidenceOpenEnv,
   evidenceSealEnv,
@@ -88,6 +89,19 @@ describe("env", () => {
       loadEnv(moderationEnv, { MODERATION_CLASSIFIER: "scripted", MODERATION_TEST_HOOKS: "true" })
         .MODERATION_CLASSIFIER,
     ).toBe("scripted");
+  });
+
+  test("chat (W1): gate and guard off by default; replay window at least the retention window", () => {
+    expect(loadEnv(chatEnv, {})).toEqual({
+      CHAT_WATCH_GATE: "off",
+      CHAT_SURGE_GUARD: "off",
+      CHAT_RETENTION_DAYS: 30,
+      CHAT_REPLAY_MAX_DAYS: 60,
+    });
+    expect(loadEnv(chatEnv, { CHAT_RETENTION_DAYS: "45", CHAT_REPLAY_MAX_DAYS: "45" }).CHAT_REPLAY_MAX_DAYS).toBe(45);
+    expect(() => loadEnv(chatEnv, { CHAT_RETENTION_DAYS: "61" })).toThrow(/CHAT_REPLAY_MAX_DAYS/);
+    expect(() => loadEnv(chatEnv, { CHAT_WATCH_GATE: "yes" })).toThrow(EnvError);
+    expect(() => loadEnv(chatEnv, { CHAT_RETENTION_DAYS: "0" })).toThrow(EnvError);
   });
 
   test("P2P: opt in by default, STUN only, a relay without its secret refuses to start", () => {

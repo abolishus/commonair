@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Integration-test helpers: seeding, chat instances, and a frame-recording WebSocket client. */
-import type { ChannelChatSettings, ServerFrame } from "@commonair/contracts";
+import { ChannelChatSettings, type ServerFrame } from "@commonair/contracts";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import { createLogger } from "@commonair/observability";
 import { randomSecret, sha256Hex, signChatToken } from "@commonair/tokens";
@@ -69,7 +69,7 @@ export async function createChannel(
     ownerId: owner.id,
     slug: owner.username,
     displayName: owner.username,
-    chatSettings: {
+    chatSettings: ChannelChatSettings.parse({
       slowModeSeconds: 0,
       followersOnlyMinutes: null,
       subscribersOnly: false,
@@ -78,7 +78,7 @@ export async function createChannel(
       requireVerifiedEmail: true,
       linksAllowed: true,
       ...settings,
-    },
+    }),
   });
   return { id, slug: owner.username };
 }

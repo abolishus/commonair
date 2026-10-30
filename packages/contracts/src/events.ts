@@ -28,6 +28,8 @@ import {
   MEMBERSHIP_BASES,
   MEMBERSHIP_STATUSES,
   PATRONAGE_STATUSES,
+  PAYMENT_FRAUD_KINDS,
+  PAYMENT_FRAUD_STATUSES,
   SHARE_STATUSES,
 } from "./enums.ts";
 
@@ -557,6 +559,44 @@ export const EVENTS = {
     internal: true,
     description: "Internal: a board election opened voting or closed",
     payload: { election_id: id, class: z.enum(MEMBER_CLASSES), status: z.enum(ELECTION_STATUSES) },
+  }),
+  // Internal (W1, ADR 0015 decision 6): surge mode. Audited in the same transaction.
+  "chat.surge.begin": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: surge mode started on a channel (the job or a moderator)",
+    payload: {
+      trigger: z.enum(["new_sessions", "follow_burst", "moderator"]),
+      until: ts,
+      by_user_id: id.nullable(),
+    },
+  }),
+  "chat.surge.end": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: surge mode ended (cooldown, expiry or a moderator)",
+    payload: { reason: z.enum(["cooldown", "expired", "moderator"]), by_user_id: id.nullable() },
+  }),
+  // Internal (W1-fraud-floor): a payee's payouts are held for, or released from, fraud review.
+  "money.fraud.flag": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description: "Internal: a payment fraud flag was raised, reviewed, decided or released",
+    payload: {
+      flag_id: id,
+      payee_user_id: id,
+      kind: z.enum(PAYMENT_FRAUD_KINDS),
+      status: z.enum(PAYMENT_FRAUD_STATUSES),
+      /** A confirmed flag an admin released (ADR 0036 decision 3). */
+      released: z.boolean(),
+      held_payouts: z.number().int(),
+    },
   }),
   // Internal (trust & safety, ADR 0006). Ids and enums only: never frames, URLs, keys or PII.
   "moderation.flagged": def({

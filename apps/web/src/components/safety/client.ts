@@ -65,6 +65,8 @@ export interface ReportClient {
     subjectId: string;
     reason: ReportReason;
     details: string;
+    /** `message_set` only: the wave's messages (W1, Calm Chat). */
+    messageIds?: string[];
   }): Promise<{ id: string }>;
 }
 export const reportClient = (): ReportClient => ({ report: (input) => api().safety.report(input) });

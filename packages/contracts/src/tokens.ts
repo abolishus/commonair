@@ -35,10 +35,19 @@ export const PlaybackClaims = z
     src: z.enum(DELIVERY_SOURCES),
     /** Relay id when src = relay. */
     rid: z.uuid().optional(),
+    /**
+     * Data mode (ADR 0018): the viewer's bitrate ceiling in bit/s. Only on origin tokens for a live
+     * path; the origin keeps variants with BANDWIDTH ≤ dm plus the audio-only variant. Absent = off.
+     */
+    dm: z.number().int().min(32_000).max(8_000_000).optional(),
     iat: z.number().int(),
     exp: z.number().int(),
   })
-  .refine((c) => (c.src === "relay") === (c.rid !== undefined), "rid is required exactly when src is relay");
+  .refine((c) => (c.src === "relay") === (c.rid !== undefined), "rid is required exactly when src is relay")
+  .refine(
+    (c) => c.dm === undefined || (c.src === "origin" && !c.path.startsWith("vod/")),
+    "dm only on origin tokens for a live path",
+  );
 export type PlaybackClaims = z.infer<typeof PlaybackClaims>;
 
 export const PLAYBACK_TOKEN_TTL_SECONDS = 120;

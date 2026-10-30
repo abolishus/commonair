@@ -53,6 +53,8 @@ export interface ChannelState {
   settings: ChannelChatSettings;
   suspended: boolean;
   liveBroadcastId: string | null;
+  /** The live broadcast's `started_at` (the clamp's lower bound); null when offline. */
+  liveStartedAt: Date | null;
   /** Channel emotes override global emotes with the same code. */
   emotes: ReadonlyMap<string, EmoteDef>;
   filters: readonly WordFilterDef[];
@@ -68,6 +70,22 @@ export interface Standing {
   subscriberTier: number | null;
   /** Active ban or timeout; `expiresAt` null = permanent. */
   ban: { expiresAt: Date | null; reason: string } | null;
+  /** Set by core for the send path only; null when no gate applies (and on joins). */
+  verifiedWatch: WatchGateState | null;
+}
+
+/** What the verified-watch gate needs for one sender (ADR 0015), loaded by `WatchGate.load`. */
+export interface WatchGateState {
+  /** Seconds required now: max(minVerifiedWatchSeconds, 60 while surge mode is on); 0 = no gate applies. */
+  requiredSeconds: number;
+  /** `KEYS.verifiedWatch` for the channel's live broadcast; null when absent or for another broadcast. */
+  verified: { broadcastId: string; seconds: number; fallback: boolean } | null;
+  /** Surge mode only: the sender had a non-deleted message in the channel before the surge began. */
+  surgeExempt: boolean;
+  /** `integrity.thresholds.gateFallbackAccountAgeDays`: the account age a `fallback` (privacy-relay) viewer also needs (decision 5). */
+  fallbackAccountAgeDays: number;
+  /** Valkey could not be read: fail open (decision 1). */
+  unavailable: boolean;
 }
 
 export const NO_STANDING: Standing = {
@@ -77,6 +95,7 @@ export const NO_STANDING: Standing = {
   followedAt: null,
   subscriberTier: null,
   ban: null,
+  verifiedWatch: null,
 };
 
 /** Who is on the other end of a socket. */

@@ -19,8 +19,11 @@ import { z } from "zod";
 import type { WorkerContext } from "../context.ts";
 import { refreshViewerCounts } from "../counters.ts";
 import { metrics } from "../metrics.ts";
+import { safeErrorCode } from "../moderation/records.ts";
 import { defineJob, type JobDefinition } from "../runtime/registry.ts";
+import { writeChatLatency } from "./chat-latency.ts";
 import { withRunLock } from "./lock.ts";
+import { writeVerifiedWatch } from "./verified-watch.ts";
 
 export const INTEGRITY_JOBS = {
   scoreSessions: "score-sessions",
@@ -98,6 +101,21 @@ async function channelsOf(ctx: WorkerContext, sessionIds: readonly string[]): Pr
   return rows.map((r) => r.channel_id);
 }
 
+/** A writer that reads this scoring pass's verdicts: a failure is logged and counted, never fails scoring. */
+async function postScoring<T>(ctx: WorkerContext, name: string, run: () => Promise<T>): Promise<T | null> {
+  try {
+    return await run();
+  } catch (err) {
+    ctx.logger.error("integrity post-scoring writer failed", {
+      writer: name,
+      errorName: err instanceof Error ? err.name : "Error",
+      errorCode: safeErrorCode(err),
+    });
+    metrics.integrityActions.add(1, { kind: `${name}_failed` });
+    return null;
+  }
+}
+
 export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_BATCH.sessions): Promise<Counts> {
   const r = await scoreActiveSessions(ctx.db, ctx.valkey, ctx.now(), { classifier: ctx.classifier(), limit });
   for (const [verdict, n] of Object.entries(r.counts)) if (n > 0) metrics.integritySessions.add(n, { verdict });
@@ -114,6 +132,10 @@ export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_B
   // An exclusion, restore or supersede changes who counts: republish those channels' counts now.
   const changed = [...r.newlyExcluded, ...r.restored, ...r.superseded];
   const channels = await refreshViewerCounts(ctx, await channelsOf(ctx, changed));
+  // W1: writers that read this pass's verdicts (ADR 0015 decision 1, ADR 0012 amendment 1 decision 4).
+  // A failure is logged and counted, never fails scoring.
+  const vw = await postScoring(ctx, "verified-watch", () => writeVerifiedWatch(ctx));
+  const cl = await postScoring(ctx, "chat-latency", () => writeChatLatency(ctx));
   const counts = {
     scored: r.scored,
     verified: r.counts.verified,
@@ -125,6 +147,8 @@ export async function runScoring(ctx: WorkerContext, limit: number = INTEGRITY_B
     p2pEvidenced: r.p2p.evidenced,
     p2pErrors: r.p2p.errors,
     channelsRecounted: channels,
+    verifiedWatchKeys: vw?.keys ?? 0,
+    chatLatencyChannels: cl?.channels ?? 0,
   };
   if (changed.length > 0) ctx.logger.info("integrity scoring", counts);
   else ctx.logger.debug("integrity scoring", counts);

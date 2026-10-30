@@ -149,6 +149,8 @@ describe("events", () => {
     expect(INTERNAL_EVENT_TYPES.toSorted()).toEqual([
       "account.action.recorded",
       "account.action.reversed",
+      "chat.surge.begin",
+      "chat.surge.end",
       "coop.council.recomputed",
       "coop.council.response",
       "coop.election.update",
@@ -167,6 +169,7 @@ describe("events", () => {
       "moderation.flagged",
       "moderation.restriction",
       "moderation.t0.media_preserved",
+      "money.fraud.flag",
       "ncii.request.decided",
       "ncii.request.received",
       "ncmec.draft.created",
@@ -175,7 +178,11 @@ describe("events", () => {
       expect(PUBLIC_EVENT_TYPES).not.toContain(t);
       expect(isInternalEvent(t)).toBe(true);
       // Ids and enums only: no field that could carry personal data, URLs or evidence keys.
-      for (const k of Object.keys(EVENTS[t].payload.shape))
+      // An enum `reason` (`chat.surge.end`) names a cause from a fixed list, not free text.
+      const keys = Object.entries(EVENTS[t].payload.shape)
+        .filter(([k, v]) => !(k === "reason" && v instanceof z.ZodEnum))
+        .map(([k]) => k);
+      for (const k of keys)
         expect(k).not.toMatch(/email|name|url|key|(^|_)ip(_|$)|login|frame|bytes|hash|pdq|note|reason$|choice|body/);
       // Secret ballot (e5-selectors.md): a vote event names the proposal only.
       expect(Object.keys(EVENTS["coop.vote.cast"].payload.shape)).toEqual(["proposal_id"]);

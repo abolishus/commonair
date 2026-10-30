@@ -176,6 +176,7 @@ async function pay(i: PayInput): Promise<string> {
     feeCents: 0,
     currency: "usd",
     cut: CUT,
+    cutHistoryId: null,
     occurredAt,
   });
   if (i.postAt) await postAtMicros(posting, i.postAt);
@@ -228,6 +229,7 @@ interface Summary {
 }
 interface Line {
   id: string;
+  paymentId: string | null;
   type: string;
   tier: number | null;
   quantity: number;
@@ -474,6 +476,11 @@ describe("revenue ledger", () => {
       .from(schema.payments)
       .where(eq(schema.payments.id, P.gift ?? ""));
     expect(gift?.reference).toBe(row?.ref);
+    // Every payment and reversal row names its payment (the breakdown entry point).
+    expect(gift?.paymentId).toBe(P.gift);
+    expect(sub?.paymentId).toBe(P.sub);
+    expect(tip?.paymentId).toBe(P.tip);
+    for (const l of lines) expect(l.paymentId).not.toBeNull();
   });
 
   test("without a period it lists the current UTC month; a bad cursor is a client error", async () => {
@@ -666,6 +673,7 @@ describe("payouts", () => {
       [-4500, null, null, "BANK-1002"],
       [-4500, null, null, "BANK-0822"],
     ]);
+    expect(payouts.every((l) => l.paymentId === null)).toBe(true);
 
     const audits = await db()
       .select({

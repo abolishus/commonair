@@ -149,11 +149,15 @@ describe("takeWithinCap", () => {
 });
 
 describe("money job wiring", () => {
-  test("three scheduled jobs on the payments queue", () => {
+  test("five scheduled jobs on the payments queue (three here, two from W1)", () => {
     const money = JOBS.filter((j) => j.queue === QUEUES.payments);
-    expect(money.map((j) => j.name).sort()).toEqual(Object.values(MONEY_JOBS).sort());
+    expect(money.map((j) => j.name).sort()).toEqual(
+      [...Object.values(MONEY_JOBS), "money-fraud-scan", "money-reconcile"].sort(),
+    );
     for (const j of money) expect(j.schedule).toBeDefined();
     const by = new Map(money.map((j) => [j.name, j]));
+    expect(by.get("money-fraud-scan")!.schedule).toEqual({ every: 900_000 });
+    expect(by.get("money-reconcile")!.schedule).toEqual({ pattern: "17 3 * * *" });
     expect(by.get(MONEY_JOBS.expirePending)!.schedule).toEqual({ every: 300_000 });
     expect(by.get(MONEY_JOBS.renew)!.schedule).toEqual({ every: 300_000 });
     expect(by.get(MONEY_JOBS.releaseHolds)!.schedule).toEqual({ pattern: "41 * * * *" });

@@ -82,6 +82,7 @@ export async function tip(
       feeCents: 0,
       currency: "usd",
       cut: DEFAULT_PLATFORM_CUT,
+      cutHistoryId: null,
       occurredAt: new Date(),
     }),
   );

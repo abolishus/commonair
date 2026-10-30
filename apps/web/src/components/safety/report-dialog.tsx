@@ -32,6 +32,8 @@ export interface ReportButtonProps {
   signedIn: boolean;
   subjectType: ReportSubject;
   subjectId: string;
+  /** `message_set` only (a Calm Chat "Report wave"): the messages, `subjectId` among them. */
+  messageIds?: string[];
   client?: ReportClient;
 }
 
@@ -43,6 +45,7 @@ export function ReportButton({
   signedIn,
   subjectType,
   subjectId,
+  messageIds,
   client = reportClient(),
 }: ReportButtonProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false);
@@ -75,7 +78,13 @@ export function ReportButton({
         >
           <ReportForm
             onSubmit={async (reason, details) => {
-              const created = await client.report({ subjectType, subjectId, reason, details });
+              const created = await client.report({
+                subjectType,
+                subjectId,
+                reason,
+                details,
+                ...(messageIds ? { messageIds } : {}),
+              });
               setReportId(created.id);
               setOpen(false);
             }}

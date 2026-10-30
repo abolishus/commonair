@@ -265,7 +265,7 @@ async function bookSubscriptionPayment(
     quantity: 1,
     succeededAt: receivedAt,
   });
-  const { cut } = await loadMoneySettings(tx);
+  const { cut, cutHistoryId } = await loadMoneySettings(tx);
   await post(
     tx,
     paymentSucceeded({
@@ -279,6 +279,7 @@ async function bookSubscriptionPayment(
       feeCents,
       currency: a.currency,
       cut,
+      cutHistoryId,
       occurredAt: receivedAt,
     }),
   );

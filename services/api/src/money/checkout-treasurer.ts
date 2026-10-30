@@ -109,7 +109,7 @@ export async function confirmPaymentTx(
     .returning({ id: payments.id });
   if (!updated) throw conflict("This payment is no longer pending");
 
-  const { cut } = await loadMoneySettings(tx);
+  const { cut, cutHistoryId } = await loadMoneySettings(tx);
   await post(
     tx,
     paymentSucceeded({
@@ -123,6 +123,7 @@ export async function confirmPaymentTx(
       feeCents: o.feeCents,
       currency: p.currency,
       cut,
+      cutHistoryId,
       occurredAt: receivedAt,
     }),
   );

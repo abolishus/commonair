@@ -23,12 +23,14 @@ Principles:
 
 ## Thresholds (`integrity.thresholds`, an ordinary governance setting)
 
-| Key                        | Default | Meaning                                                                   |
-| -------------------------- | ------- | ------------------------------------------------------------------------- |
-| `sessionExcludeScore`      | 0.7     | A session whose combined score is **above** this is excluded              |
-| `maxSessionsPerDevice`     | 3       | Concurrent sessions allowed per device and per account                    |
-| `followBurstPerMinute`     | 30      | Follows per minute on one channel above which low-quality follows are cut |
-| `relayOverReportTolerance` | 0.1     | Allowed relay over-report: reported / issued − 1                          |
+| Key                          | Default | Meaning                                                                                                  |
+| ---------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `sessionExcludeScore`        | 0.7     | A session whose combined score is **above** this is excluded                                             |
+| `maxSessionsPerDevice`       | 3       | Concurrent sessions allowed per device and per account                                                   |
+| `followBurstPerMinute`       | 30      | Follows per minute on one channel above which low-quality follows are cut                                |
+| `relayOverReportTolerance`   | 0.1     | Allowed relay over-report: reported / issued − 1                                                         |
+| `gateUnlocksPerAddress`      | 5       | Verified-watch gate (ADR 0015 decision 3): accounts unlocked per exact address per channel per broadcast |
+| `gateFallbackAccountAgeDays` | 7       | Verified-watch gate (ADR 0015 decision 5): account age in days a privacy-relay viewer also needs         |
 
 ## Session scoring (`scoreSession`)
 

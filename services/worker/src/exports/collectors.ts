@@ -478,6 +478,11 @@ const channelModActionFields = {
 const asNumber = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? 0));
 
 /** Every file of both kinds, in archive order. */
+const blockFields = {
+  username: s.users.username,
+  blockedAt: s.userBlocks.createdAt,
+};
+
 export const EXPORT_FILES: readonly ExportFile[] = [
   {
     name: "account.json",
@@ -910,6 +915,23 @@ export const EXPORT_FILES: readonly ExportFile[] = [
             .innerJoin(s.channels, eq(s.channels.id, s.songRequests.channelId))
             .where(eq(s.songRequests.requesterId, userId))
             .orderBy(asc(s.songRequests.createdAt)),
+      },
+    },
+  },
+  // W1: users the requester blocked (ADR 0012 decision 8), as their public slug and the time.
+  {
+    name: "blocks.json",
+    kind: "account",
+    sections: {
+      blocks: {
+        fields: blockFields,
+        query: (tx, { userId }) =>
+          tx
+            .select(blockFields)
+            .from(s.userBlocks)
+            .innerJoin(s.users, eq(s.users.id, s.userBlocks.blockedUserId))
+            .where(eq(s.userBlocks.userId, userId))
+            .orderBy(asc(s.userBlocks.createdAt)),
       },
     },
   },

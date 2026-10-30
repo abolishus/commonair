@@ -22,6 +22,10 @@ type vectorFile struct {
 		Claims map[string]any `json:"claims"`
 		Token  string         `json:"token"`
 	} `json:"playback"`
+	PlaybackDataMode struct {
+		Claims map[string]any `json:"claims"`
+		Token  string         `json:"token"`
+	} `json:"playbackDataMode"`
 	Receipt struct {
 		Payload ReceiptPayload `json:"payload"`
 		Signed  SignedReceipt  `json:"signed"`
@@ -93,6 +97,45 @@ func TestVerifyPlaybackVector(t *testing.T) {
 	}
 	if err := b.Check(c, "live/alice/720p/seg1.mp4"); err != nil {
 		t.Fatalf("rendition binding: %v", err)
+	}
+}
+
+func TestVerifyPlaybackDataModeVector(t *testing.T) {
+	v, priv, pub := loadVectors(t)
+	c, err := VerifyPlayback(pub, v.PlaybackDataMode.Token, vectorNow, DefaultSkew)
+	if err != nil {
+		t.Fatalf("data-mode vector rejected: %v", err)
+	}
+	want := PlaybackClaims{
+		V: 1, SID: "01890000-0000-7000-8000-000000000001", CID: "01890000-0000-7000-8000-000000000002",
+		Path: "live/alice", Src: "origin", DM: 111111, IAT: 1700000000, EXP: 1700000120,
+	}
+	if c != want {
+		t.Fatalf("claims = %+v, want %+v", c, want)
+	}
+	base := v.PlaybackDataMode.Claims
+	mutate := func(f func(m map[string]any)) string {
+		m := cloneClaims(base)
+		f(m)
+		return sign(priv, m)
+	}
+	bad := map[string]string{
+		"dm on relay": mutate(func(m map[string]any) {
+			m["src"] = "relay"
+			m["rid"] = "01890000-0000-7000-8000-000000000003"
+		}),
+		"dm on vod":   mutate(func(m map[string]any) { m["path"] = "vod/01890000-0000-7000-8000-000000000009" }),
+		"dm too low":  mutate(func(m map[string]any) { m["dm"] = 1000 }),
+		"dm too high": mutate(func(m map[string]any) { m["dm"] = 9000000 }),
+		"dm string":   mutate(func(m map[string]any) { m["dm"] = "1" }),
+		"dm fraction": mutate(func(m map[string]any) { m["dm"] = 111111.5 }),
+	}
+	for name, tok := range bad {
+		t.Run(name, func(t *testing.T) {
+			if _, err := VerifyPlayback(pub, tok, vectorNow, DefaultSkew); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("got %v, want ErrMalformed", err)
+			}
+		})
 	}
 }
 

@@ -31,11 +31,11 @@ export const ENFORCEMENT_NOTICE_SEED_VERSION = "2026-10-27-draft";
 export const TERMS_SEED_VERSION = "2026-10-29-points-draft";
 /**
  * `privacy` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
- * `LEGAL_SEED_VERSION` reached databases, and moved again for the channel-features paragraph
- * (ADR 0026). Each new version sorts after the accepted one, so every signed-in user is asked to
+ * `LEGAL_SEED_VERSION` reached databases, moved again for the channel-features paragraph
+ * (ADR 0026), and again for chat replay, retention and blocks (ADR 0012 amendment 1). Each new version sorts after the accepted one, so every signed-in user is asked to
  * accept it again. Draft: counsel has not reviewed the paragraph.
  */
-export const PRIVACY_SEED_VERSION = "2026-10-29-interact-draft";
+export const PRIVACY_SEED_VERSION = "2026-10-30-chat-replay-draft";
 /**
  * `cookies` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, and moved again for the language line in Preferences
@@ -61,6 +61,9 @@ export const LEGAL_PLACEHOLDERS = [
   "contacts.privacy",
   "contacts.governance",
   "contacts.conduct",
+  // Chat retention (ADR 0012 amendment 1 decision 6), from CHAT_RETENTION_DAYS / CHAT_REPLAY_MAX_DAYS.
+  "chatRetentionDays",
+  "chatReplayMaxDays",
 ] as const;
 export type LegalPlaceholder = (typeof LEGAL_PLACEHOLDERS)[number];
 

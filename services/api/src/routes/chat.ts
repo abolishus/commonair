@@ -14,6 +14,7 @@ import { schema, type Executor } from "@commonair/db";
 import { listHeld, resolveHeld } from "../chat/held.ts";
 import { messageDtos } from "../chat/messages.ts";
 import { outcomeError, relayToChat, unavailable, type RelayRequest } from "../chat/relay.ts";
+import { chatSurge } from "../chat/surge.ts";
 import { chatTokenFor } from "../chat/token.ts";
 import type { Deps } from "../deps.ts";
 import type { Caller } from "../lib/access.ts";
@@ -22,7 +23,7 @@ import { broadcasterFields, emit, moderatorFields, userFields } from "../events/
 import { channelBySlug, iso, isoOrNull, mediaUrl, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, conflict, forbidden, isUniqueViolation, notFound } from "../lib/errors.ts";
+import { badRequest, conflict, forbidden, isUniqueViolation, notFound, precondition } from "../lib/errors.ts";
 import { liftChatBanInTx } from "../moderation/chat-bans.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
 import { unsafeFilterRegexReason } from "@commonair/safe-regex";
@@ -201,6 +202,11 @@ export const chat = {
     const caller = requireCaller(context);
     const c = requireChannel(context);
     const { channel: _slug, ...patch } = input;
+    // W1: the instance flags decide whether the gate and the guard can be switched on at all.
+    if (deps.env.CHAT_WATCH_GATE !== "on" && (patch.minVerifiedWatchSeconds ?? 0) > 0)
+      throw precondition("watch_gate_off", "The verified-watch gate is not enabled on this instance");
+    if (deps.env.CHAT_SURGE_GUARD !== "on" && patch.surgeGuard?.enabled === true)
+      throw precondition("surge_guard_off", "The surge guard is not enabled on this instance");
     const before = chatSettingsOf(c);
     const settings = ChannelChatSettings.parse({
       ...before,
@@ -543,6 +549,8 @@ export const chat = {
     const { token, exp } = await chatTokenFor(deps, caller, CHAT_TOKEN_TTL_SECONDS);
     return { token, url: deps.env.CHAT_PUBLIC_URL, expiresAt: iso(new Date(exp * 1000)) };
   }),
+
+  surge: chatSurge,
 };
 
 /** Whether `id` is a stored, undeleted message of `channelId` (one primary-key lookup). */

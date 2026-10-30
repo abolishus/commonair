@@ -176,6 +176,7 @@ describe("CSV statement", () => {
 
   const line = (over: Partial<RevenueLineDto>): RevenueLineDto => ({
     id: "019a0000-0000-7000-8000-000000000001",
+    paymentId: null,
     occurredAt: "2026-10-05T12:00:00+02:00",
     type: "subscription",
     tier: 2,

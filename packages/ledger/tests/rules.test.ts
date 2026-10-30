@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from "vite-plus/test";
 import { accounts } from "../src/accounts.ts";
+import { PaymentMetaV2, ReversalMetaV2 } from "../src/meta.ts";
 import { type Posting, UnbalancedPostingError, validatePosting } from "../src/posting.ts";
 import {
   DEFAULT_PLATFORM_CUT,
@@ -77,6 +78,7 @@ function pay(gross: number, tax: number, fee: number, cut = DEFAULT_PLATFORM_CUT
     feeCents: fee,
     currency: "usd",
     cut,
+    cutHistoryId: null,
     occurredAt: AT,
   });
 }
@@ -146,6 +148,7 @@ describe("paymentSucceeded", () => {
       feeCents: 0,
       currency: "eur",
       cut: DEFAULT_PLATFORM_CUT,
+      cutHistoryId: null,
       occurredAt: AT,
     });
     expectWellFormed(p);
@@ -407,6 +410,120 @@ describe("chargeback reversal", () => {
     expect(() =>
       chargebackReversal({ ...base, chargeback: { ...base.chargeback, coopCents: 99 }, receivableCents: 0 }),
     ).toThrow(RangeError);
+  });
+});
+
+describe("PaymentMeta v2 (ADR 0013 decision 2)", () => {
+  const HISTORY = "01890000-0000-7000-8000-0000000000c7";
+
+  test("a payment writes v2 with one owner share and its cut history id", () => {
+    const meta = PaymentMetaV2.parse(
+      paymentSucceeded({
+        paymentId: PAYMENT,
+        paymentKind: "tip",
+        provider: "stripe",
+        creatorUserId: CREATOR,
+        grossCents: 1099,
+        taxCents: 99,
+        feeCents: 62,
+        currency: "usd",
+        cut: DEFAULT_PLATFORM_CUT,
+        cutHistoryId: HISTORY,
+        occurredAt: AT,
+      }).metadata,
+    );
+    expect(meta).toMatchObject({ v: 2, cutHistoryId: HISTORY, splitVersionId: null, creatorCents: 900 });
+    expect(meta.shares).toEqual([{ userId: CREATOR, role: "owner", bps: 10_000, creatorCents: 900 }]);
+    expect(PaymentMetaV2.parse(pay(1099, 99, 62).metadata).cutHistoryId).toBeNull();
+  });
+
+  const invariant = (m: ReversalMetaV2) => {
+    for (const s of m.shares) expect(s.fromOwnLotCents + s.ownerCoveredCents).toBe(-s.creatorCents);
+    expect(m.shares.reduce((t, s) => t + s.creatorCents, 0)).toBe(m.creatorCents);
+  };
+
+  test("a partial refund splits its share between the own lot and the owner's other sources", () => {
+    const meta = ReversalMetaV2.parse(
+      refund(
+        reversalInput({
+          amountCents: 1000,
+          balances: { liabilityCents: 500, holdLots: [{ paymentId: PAYMENT, cents: 300 }] },
+        }),
+      ).metadata,
+    );
+    expect(meta.v).toBe(2);
+    expect(meta.shares).toHaveLength(1);
+    expect(meta.shares[0]).toMatchObject({ userId: CREATOR, role: "owner", fromOwnLotCents: 300 });
+    expect(meta.shares[0]?.ownerCoveredCents).toBe(-meta.creatorCents - 300);
+    invariant(meta);
+  });
+
+  test("a chargeback takes released earnings first, so the own lot covers only the rest", () => {
+    const meta = ReversalMetaV2.parse(
+      chargeback({
+        ...reversalInput({ balances: { liabilityCents: 500, holdLots: [{ paymentId: PAYMENT, cents: 900 }] } }),
+        disputeFeeCents: 1500,
+      }).metadata,
+    );
+    expect(meta).toMatchObject({ v: 2, creatorCents: -900, disputeFeeCents: 1500 });
+    expect(meta.shares[0]).toMatchObject({ fromOwnLotCents: 400, ownerCoveredCents: 500 });
+    invariant(meta);
+  });
+
+  test("a shortfall booked as a receivable counts as covered by the owner", () => {
+    const meta = ReversalMetaV2.parse(
+      refund(reversalInput({ balances: { liabilityCents: 0, holdLots: [] } })).metadata,
+    );
+    expect(meta.shares[0]).toMatchObject({ fromOwnLotCents: 0, ownerCoveredCents: 900 });
+    expect(meta.receivableCents).toBe(900);
+    invariant(meta);
+  });
+
+  test("a won chargeback writes v2 with one owner share restored outside the lot", () => {
+    const meta = ReversalMetaV2.parse(
+      chargebackReversal({
+        disputeId: "01890000-0000-7000-8000-0000000000d1",
+        paymentId: PAYMENT,
+        creatorUserId: CREATOR,
+        provider: "stripe",
+        currency: "usd",
+        occurredAt: AT,
+        chargeback: { amountCents: 1099, taxCents: 99, creatorCents: 900, coopCents: 100 },
+        receivableCents: 600,
+      }).metadata,
+    );
+    expect(meta).toMatchObject({ v: 2, creatorCents: 900, feeRefundCents: 0 });
+    expect(meta.shares).toEqual([
+      { userId: CREATOR, role: "owner", creatorCents: 900, fromOwnLotCents: 0, ownerCoveredCents: -900 },
+    ]);
+    invariant(meta);
+  });
+
+  test("property: every refund keeps own lot + owner covered = the reversed creator share", () => {
+    const r = prng(13);
+    let checked = 0;
+    for (let n = 0; n < 200; n++) {
+      const gross = 1 + int(r, 50_000);
+      const amount = 1 + int(r, gross - 1);
+      const meta = ReversalMetaV2.parse(
+        refund(
+          reversalInput({
+            original: { grossCents: gross, taxCents: int(r, gross) },
+            amountCents: amount,
+            balances: {
+              liabilityCents: int(r, 20_000),
+              holdLots: [
+                { paymentId: "01890000-0000-7000-8000-0000000000ab", cents: int(r, 20_000) },
+                { paymentId: PAYMENT, cents: int(r, 20_000) },
+              ],
+            },
+          }),
+        ).metadata,
+      );
+      invariant(meta);
+      checked += 1;
+    }
+    expect(checked).toBe(200);
   });
 });
 

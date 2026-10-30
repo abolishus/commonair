@@ -331,6 +331,25 @@ export const interactEnv = z.object({
   INTERACT_TEST_HOOKS: bool.default(false),
 });
 
+const chatShape = z.object({
+  /** ADR 0015 decision 7: the verified-watch gate; `off` until its GA criteria are met (S1 stage 4 owns CDN fetch-judging). */
+  CHAT_WATCH_GATE: z.enum(["off", "on"]).default("off"),
+  /** ADR 0015 decision 6: the surge guard; stays `off` by default after GA. */
+  CHAT_SURGE_GUARD: z.enum(["off", "on"]).default("off"),
+  /** ADR 0012 amendment 1 decision 6: days chat is kept when its broadcast has no VOD (the report window). */
+  CHAT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+  /** Days chat attached to a VOD is kept at most. */
+  CHAT_REPLAY_MAX_DAYS: z.coerce.number().int().min(1).max(3650).default(60),
+});
+export const chatEnv = chatShape.superRefine((env, ctx) => {
+  if (env.CHAT_REPLAY_MAX_DAYS < env.CHAT_RETENTION_DAYS)
+    ctx.addIssue({
+      code: "custom",
+      path: ["CHAT_REPLAY_MAX_DAYS"],
+      message: "CHAT_REPLAY_MAX_DAYS must be at least CHAT_RETENTION_DAYS",
+    });
+});
+
 export const moderationEnv = moderationShape.superRefine((env, ctx) => {
   if (env.MODERATION_CLASSIFIER === "scripted" && !env.MODERATION_TEST_HOOKS)
     ctx.addIssue({
@@ -635,6 +654,7 @@ export const ALL_ENV_SCHEMAS = {
   coopEnv,
   opsEnv,
   interactEnv,
+  chatEnv: chatShape,
   evidenceSealEnv,
   evidenceOpenEnv,
   evidenceStorageEnv,

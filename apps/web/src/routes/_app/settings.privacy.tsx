@@ -5,6 +5,7 @@ import { PageHeader } from "@commonair/ui/blocks/headers";
 import { PageContainer } from "@commonair/ui/layouts";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 import type * as React from "react";
+import { BlockedUsers } from "../../components/blocks/blocked-users.tsx";
 import { DeletionSection, ExportSection } from "../../components/privacy-panels.tsx";
 import { t } from "../../i18n/index.ts";
 import { getSessionUser, useBootstrap } from "../../lib/bootstrap.ts";
@@ -26,6 +27,7 @@ function PrivacyPage(): React.JSX.Element {
       <P2PSettingsSection />
       <ExportSection hasChannel={me.channelSlug !== null} />
       <DeletionSection username={me.username} />
+      <BlockedUsers />
     </PageContainer>
   );
 }

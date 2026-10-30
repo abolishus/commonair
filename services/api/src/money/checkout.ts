@@ -7,6 +7,7 @@
  */
 import { and, desc, eq, inArray, lt, notInArray, sql } from "drizzle-orm";
 import { MONEY_LIMITS } from "@commonair/contracts/currency";
+import { PROCESSOR_FEE_ESTIMATE } from "@commonair/contracts/enums";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { loadMoneySettings } from "@commonair/ledger";
 import { type PaymentAdapter, createAdapter, manualInstructions } from "@commonair/payments";
@@ -158,6 +159,7 @@ export const checkoutHandlers = {
         messageMaxLength: MONEY_LIMITS.tipMessageMaxLength,
       },
       gift: { maxCount: MONEY_LIMITS.giftMaxCount },
+      feeEstimate: PROCESSOR_FEE_ESTIMATE[deps.env.PAYMENTS_PROVIDER],
       viewer: caller
         ? {
             subscription: await holdingSubscription(deps.db, caller.user.id, c.id),

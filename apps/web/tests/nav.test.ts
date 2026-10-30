@@ -179,6 +179,31 @@ describe("studio nav", () => {
     expect(current.map((i) => i.id)).toEqual([id]);
   });
 
+  it("adds chat safety after the bot only when the instance runs the watch gate or surge guard", () => {
+    expect(studioNav("/dashboard", { chatSafety: false }).some((i) => i.id === "chat")).toBe(false);
+    expect(studioNav("/dashboard", { chatSafety: true }).map((i) => [i.id, i.to])).toEqual([
+      ["streamManager", "/dashboard"],
+      ["overlays", "/overlays"],
+      ["interact", "/interact"],
+      ["bot", "/bot"],
+      ["chat", "/chat"],
+      ["content", "/content"],
+      ["revenue", "/revenue"],
+      ["relays", "/relays"],
+      ["developer", "/developer"],
+    ]);
+  });
+
+  it.each(["/chat", "/chat/"])("on %s marks chat safety current (and only it)", (path) => {
+    expect(
+      studioNav(path, { chatSafety: true })
+        .filter((i) => i.current)
+        .map((i) => i.id),
+    ).toEqual(["chat"]);
+    // A channel named like it is never the studio's chat page.
+    expect(studioNav("/chats", { chatSafety: true }).some((i) => i.current)).toBe(false);
+  });
+
   it("marks nothing current elsewhere", () => {
     expect(studioNav("/").some((i) => i.current)).toBe(false);
     expect(studioNav("/dashboards").some((i) => i.current)).toBe(false);

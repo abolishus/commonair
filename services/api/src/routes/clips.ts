@@ -22,6 +22,7 @@ import { os, requireCaller } from "../lib/orpc.ts";
 import { clipQueue } from "../media/clip-queue.ts";
 import { clipVisible, urlsWithheld, viewerAudience, vodShown } from "../media/visibility.ts";
 import { matureGate } from "./playback.ts";
+import { clipChat } from "../chat-replay/handlers.ts";
 
 const { broadcasts, channelRoles, channels, clips: clipsT, vods } = schema;
 type ClipRow = typeof clipsT.$inferSelect;
@@ -265,4 +266,5 @@ export const clips = {
     });
     return { ok: true as const };
   }),
+  chat: clipChat,
 };

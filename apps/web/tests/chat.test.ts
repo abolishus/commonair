@@ -127,6 +127,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 const welcome = { op: "welcome", sessionId: "s1", user: null, heartbeatMs: 30_000 };
 const joinedFrame = (canChat = true) => ({
   op: "joined",
+  surge: { state: "off", until: null },
   channel: CHANNEL,
   channelId: UUID(1),
   settings: {

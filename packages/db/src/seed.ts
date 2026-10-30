@@ -127,6 +127,8 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
       followBurstPerMinute: 30,
       relayOverReportTolerance: 0.1,
       maxSessionsPerDevice: 3,
+      gateUnlocksPerAddress: 5,
+      gateFallbackAccountAgeDays: 7,
     },
   },
   {

@@ -32,6 +32,7 @@ import {
 import { restrictedIds, withRestriction } from "../moderation/restriction.ts";
 import { appUrl, sendNotice } from "../mail.ts";
 import { createExport, listExports } from "../privacy/exports.ts";
+import { meBlocks } from "./me-blocks.ts";
 import { meEnforcement } from "./me-enforcement.ts";
 
 const { users, channels, follows, memberships, notifications, oauthTokens, botConfigs } = schema;
@@ -421,4 +422,5 @@ export const me = {
       return { token: toAccessToken(token, null), accessToken };
     }),
   },
+  blocks: meBlocks,
 };

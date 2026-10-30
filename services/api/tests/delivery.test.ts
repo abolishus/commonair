@@ -80,3 +80,47 @@ test("CDN takes the origin share only above the burst threshold", () => {
   expect(mixed("cdn")).toBeGreaterThan(0.4);
   expect(mixed("r")).toBeGreaterThan(0.4);
 });
+
+test("originOnly (data mode, ADR 0018 decision 4): origin even with relays and the CDN on", () => {
+  const cdn = { enabled: true, threshold: 10 };
+  for (let i = 0; i < 200; i++)
+    expect(
+      assignSource({
+        sessionId: uuidv7(),
+        relays: [relay("a", 100), relay("b", 300)],
+        cdn,
+        channelVerifiedViewers: 1_000,
+        originOnly: true,
+      }),
+    ).toEqual({ source: "origin" });
+});
+
+test("avoidCdn (ADR 0015 decision 2): above the threshold, a relay draw or the origin, never the CDN", () => {
+  const cdn = { enabled: true, threshold: 10 };
+  const seen = new Set<string>();
+  for (let i = 0; i < 2_000; i++) {
+    const a = assignSource({
+      sessionId: uuidv7(),
+      relays: [relay("a", 100)],
+      cdn,
+      channelVerifiedViewers: 1_000,
+      avoidCdn: true,
+    });
+    seen.add(a.source);
+  }
+  expect([...seen].sort()).toEqual(["origin", "relay"]);
+  expect(assignSource({ sessionId: uuidv7(), relays: [], cdn, channelVerifiedViewers: 1_000, avoidCdn: true })).toEqual(
+    { source: "origin" },
+  );
+});
+
+test("neither flag: the CDN still takes the origin's share above the threshold", () => {
+  const cdn = { enabled: true, threshold: 10 };
+  const flags = { avoidCdn: false, originOnly: false };
+  expect(assignSource({ sessionId: uuidv7(), relays: [], cdn, channelVerifiedViewers: 11, ...flags })).toEqual({
+    source: "cdn",
+  });
+  expect(assignSource({ sessionId: uuidv7(), relays: [], cdn, channelVerifiedViewers: 10, ...flags })).toEqual({
+    source: "origin",
+  });
+});

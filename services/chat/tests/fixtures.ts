@@ -48,6 +48,7 @@ export const channel = (
   settings: ChannelChatSettings.parse({ requireVerifiedEmail: false, ...settings }),
   suspended: false,
   liveBroadcastId: null,
+  liveStartedAt: null,
   emotes: new Map([
     ["Kappa", emote("Kappa")],
     ["SubHype", emote("SubHype", 2)],

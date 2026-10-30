@@ -274,6 +274,8 @@ export const PlaybackStart = z.object({
   expiresAt: Timestamp,
   renditions: z.array(z.enum(E.RENDITIONS)),
   captions: z.array(z.object({ language: z.string(), label: z.string(), url: z.string() })),
+  /** The data-mode ceiling in the session's token (ADR 0018), null when off. */
+  dataMode: z.number().int().nullable(),
 });
 export const Heartbeat = z.object({
   sessionId: Id,
@@ -298,6 +300,12 @@ export const Heartbeat = z.object({
   ttffMs: z.number().int().min(0).nullable(),
   visible: z.boolean(),
   muted: z.boolean(),
+  /** ADR 0012 amendment 1 / ADR 0016 decision 6. Absent = `live`. Accepted from W1, recorded from W2-dvr on. */
+  playbackMode: z.enum(E.PLAYBACK_MODES).optional(),
+  /** Seconds behind the live edge in `dvr` mode (W2-dvr); accepted and ignored in W1. */
+  behindLiveSeconds: z.number().min(0).max(86_400).nullable().optional(),
+  /** ADR 0018 decision 3: the data-mode ceiling in bit/s, null = turn off, absent = unchanged. */
+  dataMode: z.number().int().min(E.DATA_MODE.minCeilingBps).max(E.DATA_MODE.maxCeilingBps).nullable().optional(),
   /**
    * Coarse client capability signals for headless detection; no persistent identifiers. Known keys:
    * `webdriver` (navigator.webdriver), `automation` (automation globals present), `plugins`
@@ -338,6 +346,8 @@ export const ChatMessage = z.object({
   emotes: z.array(EmoteRange),
   isAction: z.boolean(),
   replyTo: z.object({ id: Id, username: Slug, body: z.string() }).nullable(),
+  /** PDT under the sender's playhead, clamped by chat (ADR 0012 amendment 1 decisions 1-4); null when the channel was not live, in DVR mode, or for history rows written before W1. Optional so Twitch-shaped fixtures need no churn; every live frame and history row sets it. */
+  mediaTs: Timestamp.nullable().optional(),
   createdAt: Timestamp,
 });
 export type ChatMessage = z.infer<typeof ChatMessage>;
@@ -449,6 +459,8 @@ export const RevenueSummary = z.object({
 export const RevenueLine = z.object({
   /** Ledger transaction id. */
   id: Id,
+  /** The payment the line belongs to (payments and their reversals); null for payouts. The breakdown entry point. */
+  paymentId: Id.nullable(),
   occurredAt: Timestamp,
   type: z.enum(E.REVENUE_LINE_TYPES),
   tier: z.number().int().nullable(),
@@ -465,6 +477,102 @@ export const RevenueLine = z.object({
   /** Change to what the co-op owes the creator. */
   net: Money,
 });
+export const BreakdownLine = z.object({
+  kind: z.enum(E.BREAKDOWN_LINE_KINDS),
+  /** Signed: gross-side lines positive, reversal lines negative; fees positive (a co-op expense); coop_net signed. */
+  amount: Money,
+  /** Set on `creator` lines (one per recipient; Ledger Splits adds crew lines) and on creator `reversal` lines. */
+  recipientUserId: Id.nullable(),
+  /** `reversal` lines only: which part of gross they take back. */
+  component: z.enum(E.BREAKDOWN_COMPONENTS).nullable(),
+  /** The ledger transaction the line comes from; null for the derived `coop_net`. */
+  transactionId: Id.nullable(),
+});
+export const PaymentBreakdown = z.object({
+  paymentId: Id,
+  kind: z.enum(E.PAYMENT_KINDS),
+  channel: z.object({ slug: Slug, displayName: z.string() }),
+  /** Who is looking: the payer, or the channel owner (payee). */
+  viewerRole: z.enum(["payer", "payee"]),
+  /** Null when the payment is anonymous and the viewer is the payee (`payments.anonymous`). */
+  payer: UserPublic.pick({ id: true, username: true, displayName: true }).nullable(),
+  gross: Money,
+  succeededAt: Timestamp,
+  lines: z.array(BreakdownLine),
+  /** `succeededAt + payout.rules.holdDays`; null once released. */
+  holdReleasesAt: Timestamp.nullable(),
+  holdReleasedAt: Timestamp.nullable(),
+  /** The `platform.cut` that fixed the split (`cutHistoryId` in the posting; null history id = the founding seed). */
+  cutSource: z.object({
+    historyId: Id.nullable(),
+    changedAt: Timestamp.nullable(),
+    proposalId: Id.nullable(),
+    streamerShare: z.number(),
+    coopShare: z.number(),
+  }),
+  timeline: z.array(
+    z.object({ kind: z.enum(E.BREAKDOWN_EVENT_KINDS), at: Timestamp, amount: Money.nullable(), transactionId: Id }),
+  ),
+});
+export const FeeScheduleEntry = z.object({
+  /** `governance_settings_history.id`; null for the founding seed value (no history row exists for it). */
+  id: Id.nullable(),
+  key: z.enum(E.FEE_SCHEDULE_KEYS),
+  value: z.record(z.string(), z.unknown()),
+  previous: z.record(z.string(), z.unknown()).nullable(),
+  /** Null for the seed. */
+  changedAt: Timestamp.nullable(),
+  proposalId: Id.nullable(),
+});
+export const BlockedUser = z.object({
+  user: UserPublic.pick({ id: true, username: true, displayName: true }),
+  createdAt: Timestamp,
+});
+export const SurgeState = z.object({
+  /** `off`: no override. `on`: surge mode (gate at max(minVerifiedWatchSeconds, 60)). `suppressed`: a moderator ended it; no re-trigger until `until`. */
+  state: z.enum(["off", "on", "suppressed"]),
+  since: Timestamp.nullable(),
+  until: Timestamp.nullable(),
+  /** Who started or ended it by hand; null for the job. */
+  by: UserPublic.pick({ id: true, username: true }).nullable(),
+  /** Valkey could not be read: the gate fails open (ADR 0015 decision 1). */
+  unavailable: z.boolean(),
+});
+export const PaymentFraudFlag = z.object({
+  id: Id,
+  payee: UserPublic.pick({ id: true, username: true, displayName: true }),
+  kind: z.enum(E.PAYMENT_FRAUD_KINDS),
+  status: z.enum(E.PAYMENT_FRAUD_STATUSES),
+  /** Ids, counts and cents only. */
+  evidence: z.record(z.string(), z.union([z.string(), z.number()])),
+  raisedAt: Timestamp,
+  /** Null when the scan raised it. */
+  raisedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  reviewedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  recommendation: z.enum(E.PAYMENT_FRAUD_DECISIONS).nullable(),
+  reviewedAt: Timestamp.nullable(),
+  decidedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  decidedAt: Timestamp.nullable(),
+  /** A confirmed flag holds until an admin releases it (ADR 0036 decision 3); null otherwise. */
+  releasedBy: UserPublic.pick({ id: true, username: true }).nullable(),
+  releasedAt: Timestamp.nullable(),
+  note: z.string(),
+  /** Payouts of this payee held for review now. */
+  heldPayouts: z.number().int(),
+});
+export const ChatReplayPage = z.object({
+  items: z.array(
+    ChatMessage.extend({
+      /** Where replay places the line: `mediaTs`, or `createdAt` for a message sent while catching up. */
+      at: Timestamp,
+      /** Sent in DVR mode (`mediaTs` null): shown as "said while catching up". */
+      catchingUp: z.boolean(),
+    }),
+  ),
+  nextCursor: z.string().nullable(),
+  /** False once the window's messages have aged out (ADR 0012 amendment 1 decision 6): the UI says chat is no longer kept. */
+  retained: z.boolean(),
+});
 /** Everything the Support dialog needs for one channel. */
 export const SupportInfo = z.object({
   provider: z.enum(E.PAYMENT_PROVIDERS),
@@ -474,6 +582,10 @@ export const SupportInfo = z.object({
   split: z.object({ streamerShare: z.number(), coopShare: z.number() }),
   tip: z.object({ minCents: z.number().int(), maxCents: z.number().int(), messageMaxLength: z.number().int() }),
   gift: z.object({ maxCount: z.number().int() }),
+  /** "Typical fee" range for the estimate (PROCESSOR_FEE_ESTIMATE[provider]); null when the provider charges none. */
+  feeEstimate: z
+    .object({ lowBps: z.number().int(), highBps: z.number().int(), fixedCents: z.number().int() })
+    .nullable(),
   /** Null for anonymous callers. */
   viewer: z
     .object({
@@ -1237,6 +1349,10 @@ export const InstanceInfo = z.object({
     p2pDefault: z.enum(["off", "on"]),
     cdn: z.boolean(),
     vod: z.boolean(),
+    /** CHAT_WATCH_GATE (ADR 0015 decision 7): the studio shows the gate setting only when true. */
+    watchGate: z.boolean(),
+    /** CHAT_SURGE_GUARD (ADR 0015 decision 6). */
+    surgeGuard: z.boolean(),
   }),
   minAge: z.number().int(),
 });

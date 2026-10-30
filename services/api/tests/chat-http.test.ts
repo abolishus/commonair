@@ -254,6 +254,7 @@ const row = (over: Partial<MessageRow["m"]> = {}): MessageRow =>
       deletedAt: null,
       deletedBy: null,
       createdAt: new Date("2026-10-27T10:00:00Z"),
+      mediaTs: null,
       ...over,
     },
     u: {
@@ -288,8 +289,13 @@ describe("held DTO", () => {
       isAction: false,
       replyTo: { id: channel.ownerId, username: "streamer", body: "" },
       createdAt: "2026-10-27T10:00:00.000Z",
+      mediaTs: null,
     });
     expect(messageDto(row(), [], undefined).replyTo).toBeNull();
+    // W1: media time on the wire as ISO 8601 once the clamp stored one.
+    expect(messageDto(row({ mediaTs: new Date("2026-10-27T09:59:58Z") }), [], undefined).mediaTs).toBe(
+      "2026-10-27T09:59:58.000Z",
+    );
   });
 });
 

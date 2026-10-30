@@ -18,7 +18,10 @@ you chose), birth date (to enforce the minimum age and the 18+ gate for mature c
 profile picture and bio, settings, and which legal documents you accepted and when.
 
 **What you publish.** Streams, VODs, clips, thumbnails, chat messages, follows, channel settings,
-and moderation actions you take as a channel moderator.
+and moderation actions you take as a channel moderator. Live chat messages are saved with the
+broadcast and replayed beside its VOD and clips; messages that were deleted or moderated are never
+replayed, and people you block stay hidden from you in replay. Your list of blocked users is kept
+until you remove them or one of you deletes the account.
 
 **Viewing and integrity signals.** When you watch a stream we create a short-lived playback
 session with a random device identifier, heartbeats (watch time, buffering, bytes delivered over
@@ -75,6 +78,8 @@ your privacy settings; playback continues without it.
   counts, patronage and appeals, then deleted or aggregated.
 - Server logs: short-lived, and without IP addresses, emails or tokens.
 - Account data and content: until you delete them or your account.
+- Chat messages: {{chatRetentionDays}} days, or longer while the broadcast's VOD exists, but
+  never more than {{chatReplayMaxDays}} days (a report keeps the reported text as evidence).
 - Ledger, tax and governance records: as long as the law or the co-op's bylaws require.
 
 ## Export and deletion

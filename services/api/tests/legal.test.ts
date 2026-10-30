@@ -16,7 +16,7 @@ const site: InstanceSite = {
   isFlagship: false,
   defaultLocale: "en",
 };
-const vars = legalVariables(site, 16);
+const vars = legalVariables(site, 16, { CHAT_RETENTION_DAYS: 30, CHAT_REPLAY_MAX_DAYS: 60 });
 
 describe("legalVariables", () => {
   test("covers every placeholder the shipped drafts may use", () => {
@@ -29,6 +29,13 @@ describe("legalVariables", () => {
     expect(vars["contacts.dmca"]).toBe("dmca@example.test");
     expect(vars.sourceUrl).toBe("https://source.example.test/commonair/tree/abc123");
     expect(vars.minAge).toBe("16");
+  });
+
+  test("renders the chat retention figures from the env (ADR 0012 amendment 1 decision 6)", () => {
+    expect(vars.chatRetentionDays).toBe("30");
+    expect(vars.chatReplayMaxDays).toBe("60");
+    const privacy = legalSeedDocuments().find((d) => d.kind === "privacy");
+    expect(renderLegalText(privacy?.body ?? "", vars)).toMatch(/Chat messages: 30 days, .* 60 days/s);
   });
 });
 

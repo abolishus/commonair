@@ -17,6 +17,8 @@ import { splitChatCommand } from "./commands.ts";
 import { ChatCore, REQUIRES_LOGIN } from "./core.ts";
 import { Directory, type DirectoryOptions } from "./directory.ts";
 import { type Limiter, ValkeyLimiter } from "./limiter.ts";
+import { ChannelLatency } from "./chat-latency.ts";
+import { WatchGate } from "./watch-gate.ts";
 import { createMetrics } from "./metrics.ts";
 import { MODERATE_SCOPE, Moderation } from "./moderation.ts";
 import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "./filter-runner.ts";
@@ -71,6 +73,10 @@ export interface ChatServiceOptions {
   warmConnections?: number;
   /** Runs last during shutdown (close the DB pool, flush telemetry). */
   onShutdown?: () => Promise<void>;
+  /** `CHAT_WATCH_GATE` (ADR 0015 decision 7). Default off. */
+  watchGate?: boolean;
+  /** `CHAT_SURGE_GUARD` (ADR 0015 decision 6). Default off. */
+  surgeGuard?: boolean;
 }
 
 export interface ChatService {
@@ -160,12 +166,22 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     logger,
     deleteRetryMs: opts.deleteRetryMs,
   });
+  const limiter = opts.limiter ?? new ValkeyLimiter(valkey);
+  const latency = new ChannelLatency(valkey);
+  const watchGate = new WatchGate({
+    valkey,
+    db: opts.db,
+    limiter,
+    metrics,
+    logger,
+    enabled: { watchGate: opts.watchGate ?? false, surgeGuard: opts.surgeGuard ?? false },
+  });
   const chat = new ChatCore({
     db: opts.db,
     bus,
     rooms,
     directory,
-    limiter: opts.limiter ?? new ValkeyLimiter(valkey),
+    limiter,
     writer,
     moderation,
     middlewares,
@@ -174,6 +190,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     frameWriter,
     maxRoomsPerConnection: opts.maxRoomsPerConnection ?? 100,
     filterRunner,
+    latency,
+    watchGate,
   });
   core = chat;
 
@@ -291,6 +309,8 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
       body,
       isAction: frame.isAction || cmd !== null,
       replyToId: frame.replyToId ?? null,
+      mediaTs: frame.mediaTs ?? null,
+      playbackMode: frame.playbackMode ?? null,
     });
     if (r.notice) replyNotice(ws, to, r.notice);
     ack(r.id, r.held);

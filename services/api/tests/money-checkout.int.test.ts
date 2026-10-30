@@ -136,13 +136,17 @@ let tipPayment: Instructions; // alice's anonymous tip on S
 
 describe("tiers and support info", () => {
   test("without tiers the channel takes tips but no subscriptions", async () => {
-    const info = await alice.client.call<{ tiers: unknown[]; provider: string; viewer: { isOwner: boolean } }>(
-      "GET",
-      `/api/channels/${streamer.username}/support`,
-    );
+    const info = await alice.client.call<{
+      tiers: unknown[];
+      provider: string;
+      feeEstimate: unknown;
+      viewer: { isOwner: boolean };
+    }>("GET", `/api/channels/${streamer.username}/support`);
     expect(info.status).toBe(200);
     expect(info.body.tiers).toEqual([]);
     expect(info.body.provider).toBe("manual");
+    // The manual adapter charges no processor fee, so the dialog shows no estimate (W1 §3.2).
+    expect(info.body.feeEstimate).toBeNull();
     expect(info.body.viewer).toEqual({ subscription: null, isOwner: false });
     const sub = await subscribe(alice, streamer.username, { tier: 1 });
     expect(sub.status).toBe(412);

@@ -42,6 +42,7 @@ describe("export collectors", () => {
       "consents.json",
       "developer.json",
       "interact.json",
+      "blocks.json",
     ]);
     expect(filesFor("channel").map((f) => f.name)).toEqual([
       "channel.json",
@@ -183,6 +184,7 @@ describe("export collectors", () => {
         predictionBets: ["channelSlug", "predictionId", "outcomeId", "points", "payout", "placedAt"],
         songRequests: ["channelSlug", "url", "status", "createdAt"],
       },
+      "blocks.json": { blocks: ["username", "blockedAt"] },
       "channel.json": {
         settings: [
           "slug",

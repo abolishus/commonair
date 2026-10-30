@@ -22,6 +22,9 @@ import {
   disputeKind,
   disputeStatus,
   id,
+  paymentFraudDecision,
+  paymentFraudKind,
+  paymentFraudStatus,
   paymentKind,
   paymentProvider,
   paymentStatus,
@@ -207,6 +210,46 @@ export const payouts = pgTable(
   (t) => [
     index("payouts_user_idx").on(t.userId, t.periodStart),
     uniqueIndex("payouts_period_uq").on(t.userId, t.periodStart),
+  ],
+);
+
+/**
+ * Payment fraud floor (ADR 0036, W1-fraud-floor). A payee with a holding flag (open, reviewed, or
+ * confirmed and not released) gets no payout released (migration 0038's trigger); deciding needs
+ * two different people (four eyes); only an admin releases a confirmed flag. Flags are never
+ * deleted. `evidence` holds ids, counts and cents only; `note` is the treasurers' own text on this
+ * mutable row, never copied into the audit log.
+ */
+export const paymentFraudFlags = pgTable(
+  "payment_fraud_flags",
+  {
+    id: id(),
+    payeeUserId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    kind: paymentFraudKind().notNull(),
+    status: paymentFraudStatus().notNull().default("open"),
+    evidence: jsonb().$type<Record<string, string | number>>().notNull().default({}),
+    /** Null when the scan raised it. */
+    raisedById: uuid().references(() => users.id, { onDelete: "restrict" }),
+    raisedAt: ts().notNull().defaultNow(),
+    reviewedById: uuid().references(() => users.id, { onDelete: "restrict" }),
+    recommendation: paymentFraudDecision(),
+    reviewedAt: ts(),
+    decidedById: uuid().references(() => users.id, { onDelete: "restrict" }),
+    decision: paymentFraudDecision(),
+    decidedAt: ts(),
+    /** ADR 0036 decision 3: the admin who released a confirmed flag; null until then. */
+    releasedById: uuid().references(() => users.id, { onDelete: "restrict" }),
+    releasedAt: ts(),
+    note: text().notNull().default(""),
+  },
+  (t) => [
+    index("payment_fraud_flags_payee_idx").on(t.payeeUserId, t.status),
+    // One undecided flag per payee and kind: the scan re-finding it adds nothing.
+    uniqueIndex("payment_fraud_flags_open_uq")
+      .on(t.payeeUserId, t.kind)
+      .where(sql`status in ('open', 'reviewed')`),
   ],
 );
 

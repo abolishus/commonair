@@ -6,8 +6,9 @@ import { afterAll, beforeAll, describe, expect, test, vi } from "vite-plus/test"
 import { and, eq } from "drizzle-orm";
 import { createValkey } from "@commonair/service";
 import { BUS, type BusEvent, EVENTS, type ServerFrame } from "@commonair/contracts";
-import { schema } from "@commonair/db";
+import { schema, uuidv7 } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
+import { Directory } from "../src/directory.ts";
 import type { ChatService } from "../src/server.ts";
 import {
   chatToken,
@@ -102,7 +103,14 @@ describe("fan-out across instances", () => {
         .select()
         .from(schema.chatMessages)
         .where(eq(schema.chatMessages.id, ack.id ?? ""));
-      expect(row).toMatchObject({ body: "to the bus", userId: viewer.id, channelId: ch.id, heldAt: null });
+      // W1: the media-time clamp is a stub until W1-spine, so nothing is stored yet.
+      expect(row).toMatchObject({
+        body: "to the bus",
+        userId: viewer.id,
+        channelId: ch.id,
+        heldAt: null,
+        mediaTs: null,
+      });
     } finally {
       await listener.quit();
     }
@@ -502,5 +510,42 @@ describe("joined frame", () => {
     const c = await connect(b, viewer.id);
     const joined = await c.join(ch.slug);
     expect(joined.me.badges).toEqual(["vip", "subscriber/2"]);
+  });
+
+  test("carries the surge state (W1: off while the guard is off)", async () => {
+    const { viewer, ch } = await room();
+    const c = await connect(a, viewer.id);
+    expect((await c.join(ch.slug)).surge).toEqual({ state: "off", until: null });
+  });
+});
+
+describe("W1 scaffolding", () => {
+  test("a surge control frame reaches every viewer", async () => {
+    const { viewer, ch } = await room();
+    const c = await connect(b, viewer.id);
+    await c.join(ch.slug);
+    const pub = createValkey(VALKEY_URL);
+    const until = new Date(Date.now() + 600_000).toISOString();
+    await pub.publish(
+      iso.busPrefix + BUS.chatControl(ch.id),
+      JSON.stringify({ op: "surge", channel: ch.slug, state: "on", until }),
+    );
+    await pub.quit();
+    const frame = await c.waitFor<"surge">((f) => f.op === "surge");
+    expect(frame).toMatchObject({ state: "on", until });
+  });
+
+  test("the channel state carries the live broadcast's start", async () => {
+    const { ch } = await room();
+    const directory = new Directory(t.db);
+    expect((await directory.channel(ch.slug))?.state.liveStartedAt).toBeNull();
+    const broadcastId = uuidv7();
+    const startedAt = new Date(Date.now() - 60_000);
+    await t.db
+      .insert(schema.broadcasts)
+      .values({ id: broadcastId, channelId: ch.id, ingestProtocol: "rtmp", path: `live/${ch.slug}`, startedAt });
+    await t.db.update(schema.channels).set({ liveBroadcastId: broadcastId }).where(eq(schema.channels.id, ch.id));
+    directory.invalidateChannel(ch.id);
+    expect((await directory.channel(ch.slug))?.state.liveStartedAt?.getTime()).toBe(startedAt.getTime());
   });
 });

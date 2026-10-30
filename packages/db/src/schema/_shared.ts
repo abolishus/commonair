@@ -111,3 +111,7 @@ export const enforcementSource = pgEnum("enforcement_source", E.ENFORCEMENT_SOUR
 export const enforcementAutomatedDecision = pgEnum("enforcement_automated_decision", E.ENFORCEMENT_AUTOMATED_DECISIONS);
 export const enforcementGround = pgEnum("enforcement_ground", E.ENFORCEMENT_GROUNDS);
 export const enforcementDeliveryChannel = pgEnum("enforcement_delivery_channel", E.ENFORCEMENT_DELIVERY_CHANNELS);
+// Payment fraud floor (ADR 0036, W1).
+export const paymentFraudKind = pgEnum("payment_fraud_kind", E.PAYMENT_FRAUD_KINDS);
+export const paymentFraudStatus = pgEnum("payment_fraud_status", E.PAYMENT_FRAUD_STATUSES);
+export const paymentFraudDecision = pgEnum("payment_fraud_decision", E.PAYMENT_FRAUD_DECISIONS);

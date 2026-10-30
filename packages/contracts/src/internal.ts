@@ -233,7 +233,37 @@ export const KEYS = {
   botTimerLock: (timerId: string) => `bot:timer-lock:${timerId}`,
   /** SET NX EX: a command's cooldown (per channel and command, not per user). */
   botCooldown: (channelId: string, command: string) => `bot:cooldown:${channelId}:${command}`,
+  /**
+   * ADR 0015 decision 1: STRING JSON `VerifiedWatchValue`, `SET … EX 600` by the integrity worker
+   * after each scoring pass, for channels with the gate on or the surge guard enabled.
+   */
+  verifiedWatch: (channelId: string, userId: string) => `verified-watch:${channelId}:${userId}`,
+  /** ADR 0015 decision 6: STRING JSON `SurgeOverride`, TTL `until − now + 60 s`. */
+  surgeOverride: (channelId: string) => `surge-override:${channelId}`,
+  /** ADR 0012 amendment 1 decision 4: STRING, the median viewer latency in seconds, TTL 60 s. */
+  chatLatency: (channelId: string) => `chat-latency:${channelId}`,
 } as const;
+
+/** `KEYS.verifiedWatch` value: broadcast, gate-eligible seconds after jitter, privacy-relay fallback (ADR 0015 decisions 1, 4, 5). */
+export const VerifiedWatchValue = z.object({
+  b: z.uuid(),
+  s: z.number().int().min(0),
+  f: z.union([z.literal(0), z.literal(1)]),
+});
+export type VerifiedWatchValue = z.infer<typeof VerifiedWatchValue>;
+/** `KEYS.surgeOverride` value. `by` is a user id or null for the job. */
+export const SurgeOverride = z.object({
+  state: z.enum(["on", "suppressed"]),
+  since: z.string(),
+  until: z.string(),
+  by: z.uuid().nullable(),
+});
+export type SurgeOverride = z.infer<typeof SurgeOverride>;
+/** ADR 0015 decision 4: verified-watch jitter (seconds) = HMAC-SHA256(INTERNAL_API_SECRET, prefix + broadcastId + ":" + userId) mod 31. */
+export const VERIFIED_WATCH_JITTER = { prefix: "vw-jitter-v1:", modulo: 31 } as const;
+export const VERIFIED_WATCH_TTL_SECONDS = 600;
+/** ADR 0015 decision 4: denied sends per user per channel per minute before `msg_ratelimit`. */
+export const WATCH_GATE_ATTEMPTS = { perMinute: 6, bucket: "chat-gate" } as const;
 
 /**
  * Server-side P2P evidence rule (ADR 0005). Whether a client runs the P2P loader is client input,
@@ -568,7 +598,17 @@ export type ExportBuildJob = z.infer<typeof ExportBuildJob>;
 export const exportObjectKey = (userId: string, exportId: string) => `exports/${userId}/${exportId}.zip`;
 
 /** Jobs the ops test hook can run now. Each already runs on its own schedule. */
-export const OPS_TICK_JOBS = ["account-deletion", "export-cleanup", "vod-retention", "vod-placement"] as const;
+export const OPS_TICK_JOBS = [
+  "account-deletion",
+  "export-cleanup",
+  "vod-retention",
+  "vod-placement",
+  // W1: the harness runs these now through the ops hook.
+  "chat-retention",
+  "chat-surge-guard",
+  "money-fraud-scan",
+  "money-reconcile",
+] as const;
 /** Body of `INTERNAL_ROUTES.opsTick`; the response is the job's result (counts only). */
 export const OpsTickBody = z.object({ job: z.enum(OPS_TICK_JOBS) });
 export type OpsTickBody = z.infer<typeof OpsTickBody>;

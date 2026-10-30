@@ -11,6 +11,8 @@ import { BusEvent, type dto, type ServerFrame } from "@commonair/contracts";
 import { schema, uuidv7, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import { badgesFor, colorFor } from "./badges.ts";
+import type { ChannelLatency } from "./chat-latency.ts";
+import { clampMediaTs } from "./clamp.ts";
 import type { Bus } from "./bus.ts";
 import { parseCommand } from "./commands.ts";
 import { ChatControlMessage, type ChatFanout, parseJson } from "./control.ts";
@@ -27,6 +29,7 @@ import { type MessageContext, type MessageMiddleware, runSendPipeline } from "./
 import type { Audience, Rooms } from "./rooms.ts";
 import { canChatHint } from "./rules.ts";
 import { type ChatSocket, sendFrame, type Writer } from "./socket.ts";
+import type { WatchGate } from "./watch-gate.ts";
 import {
   type ChannelState,
   type Identity,
@@ -41,6 +44,10 @@ export interface SendInput {
   body: string;
   isAction: boolean;
   replyToId: string | null;
+  /** PDT under the sender's playhead: a hint the clamp bounds (ADR 0012 amendment 1 decision 2). */
+  mediaTs?: string | null;
+  /** `dvr` drops the hint; absent = `live`. */
+  playbackMode?: "live" | "dvr" | null;
 }
 
 export interface SendOutcome {
@@ -63,6 +70,8 @@ export interface CoreDeps {
   frameWriter: Writer;
   maxRoomsPerConnection: number;
   filterRunner?: FilterRunner;
+  latency: ChannelLatency;
+  watchGate: WatchGate;
 }
 
 const noChannel: Rejection = { code: "msg_rejected", text: "No such channel." };
@@ -84,6 +93,9 @@ export class ChatCore {
     const channel = loaded.state;
     const user = identity.userId ? await this.d.directory.profile(identity.userId) : null;
     const standing = user ? await this.d.directory.standing(channel, user.id) : NO_STANDING;
+    // ADR 0015: the gate state is loaded per send, never cached with the standing.
+    const gate = user ? await this.d.watchGate.load(channel, user.id, receivedAt) : null;
+    const sendStanding: Standing = gate ? { ...standing, verifiedWatch: gate } : standing;
     const result = await runSendPipeline(
       {
         limiter: this.d.limiter,
@@ -98,7 +110,7 @@ export class ChatCore {
         viaAppId: identity.appId,
         channel,
         filters: loaded.filters,
-        standing,
+        standing: sendStanding,
         body: input.body,
         isAction: input.isAction,
         replyToId: input.replyToId,
@@ -106,12 +118,26 @@ export class ChatCore {
       },
     );
     if (!result.ok) {
-      this.d.metrics.dropped("rejected", { code: result.rejection.code });
-      return { id: null, held: false, notice: result.rejection };
+      let rejection = result.rejection;
+      if (rejection.code === "msg_verified_watch" && user)
+        rejection = await this.d.watchGate.denied(channel.id, user.id, rejection, receivedAt);
+      this.d.metrics.dropped("rejected", { code: rejection.code });
+      return { id: null, held: false, notice: rejection };
     }
     // The pipeline only accepts messages from a logged-in user.
     const author = result.ctx.user;
     const replyTo = input.replyToId ? await this.lookupReply(channel.id, input.replyToId) : null;
+    const hint = input.mediaTs ? new Date(input.mediaTs) : null;
+    const mode = input.playbackMode ?? "live";
+    const mediaTs = clampMediaTs({
+      receivedAt,
+      hint: hint && !Number.isNaN(hint.getTime()) ? hint : null,
+      playbackMode: mode,
+      liveStartedAt: channel.liveStartedAt,
+      // The median is read only when it can be used: no hint, live mode, a live broadcast.
+      channelLatencySeconds:
+        hint || mode === "dvr" || !channel.liveStartedAt ? null : await this.d.latency.get(channel.id),
+    });
     const message: dto.ChatMessage = {
       id: messageId,
       channelId: channel.id,
@@ -128,6 +154,7 @@ export class ChatCore {
       isAction: input.isAction,
       replyTo,
       createdAt: receivedAt.toISOString(),
+      mediaTs: mediaTs?.toISOString() ?? null,
     };
     // Acked right away with the id minted above; the row is committed within one flush interval.
     this.d.writer.enqueue({
@@ -142,6 +169,7 @@ export class ChatCore {
       viaAppId: identity.appId,
       heldAt: result.held ? receivedAt : null,
       createdAt: receivedAt,
+      mediaTs,
     });
     if (result.held) {
       await this.fanout(channel.id, { op: "message", channel: channel.slug, message, held: true }, "moderators");
@@ -254,7 +282,9 @@ export class ChatCore {
       return null;
     }
     data.rooms.set(ch.slug, ch.id);
-    sendFrame(ws, this.joinedFrame(ch, user, standing, data.identity, canMod), w);
+    // Mid-surge joiners see the hint at once (ADR 0015 decision 6); `off` on any error.
+    const surge = await this.d.watchGate.surge(ch, new Date());
+    sendFrame(ws, this.joinedFrame(ch, user, standing, data.identity, canMod, surge), w);
     return null;
   }
 
@@ -264,6 +294,7 @@ export class ChatCore {
     standing: Standing,
     identity: Identity,
     canMod: boolean,
+    surge: { state: "off" | "on" | "suppressed"; until: string | null },
   ): ServerFrame {
     return {
       op: "joined",
@@ -278,6 +309,7 @@ export class ChatCore {
         canModerate: canMod,
         canChat: canChatHint(user, identity.scopes, ch, standing, new Date()),
       },
+      surge,
     };
   }
 
@@ -346,6 +378,8 @@ export class ChatCore {
       this.d.rooms.deliver(channelId, JSON.stringify({ ...msg, reason: "" }), "viewers");
       return;
     }
+    // Still delivered to every viewer below: their chat inputs show the surge hint.
+    if (msg.op === "surge") this.d.watchGate.invalidate(channelId);
     this.d.rooms.deliver(channelId, JSON.stringify(msg));
   }
 

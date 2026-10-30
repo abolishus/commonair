@@ -52,6 +52,13 @@ const legal = base.meta({ access: "legal" });
 const safetyStaff = base.meta({ access: "safety-staff" });
 const finance = base.meta({ access: "finance" });
 
+/** `vods.chat` / `clips.chat` (ADR 0012 amendment 1 decision 5). */
+const ChatReplayInput = z.object({
+  id: Id,
+  cursor: z.string().max(200).optional(),
+  limit: z.number().int().min(1).max(500).default(200),
+});
+
 const ChannelUpdate = z.object({
   title: z.string().max(140).optional(),
   description: z.string().max(2000).optional(),
@@ -305,6 +312,33 @@ export const contract = {
           }),
         )
         .output(z.object({ token: D.AccessToken, accessToken: z.string().describe("Shown once.") })),
+    },
+    blocks: {
+      list: user
+        .route({ method: "GET", path: "/me/blocks", summary: "Users you blocked", ...tag("Users") })
+        .input(PageInput)
+        .output(page(D.BlockedUser)),
+      /** All blocked user ids (at most BLOCK_RULES.maxPerUser), for hiding them in live chat. */
+      ids: user
+        .route({ method: "GET", path: "/me/blocks/ids", summary: "Ids of users you blocked", ...tag("Users") })
+        .output(z.object({ userIds: z.array(Id).max(E.BLOCK_RULES.maxPerUser) })),
+      add: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/me/blocks",
+          summary: "Block a user: hidden from you in chat and chat replay",
+          description:
+            "Idempotent. Refused for yourself (BAD_REQUEST) and beyond BLOCK_RULES.maxPerUser (PRECONDITION_FAILED `block_limit`).",
+          ...tag("Users"),
+        })
+        .input(z.object({ username: Slug }))
+        .output(D.BlockedUser),
+      remove: user
+        .meta({ access: "user", rateLimit: "write" })
+        .route({ method: "DELETE", path: "/me/blocks/{username}", summary: "Unblock a user", ...tag("Users") })
+        .input(z.object({ username: Slug }))
+        .output(Ok),
     },
   },
 
@@ -695,6 +729,14 @@ export const contract = {
            */
           p2pCapable: z.boolean().default(false),
           nativeHls: z.boolean().default(false),
+          /** ADR 0018: the data-mode ceiling in bit/s, null or absent = off. */
+          dataMode: z
+            .number()
+            .int()
+            .min(E.DATA_MODE.minCeilingBps)
+            .max(E.DATA_MODE.maxCeilingBps)
+            .nullable()
+            .default(null),
         }),
       )
       .output(D.PlaybackStart),
@@ -779,6 +821,11 @@ export const contract = {
       .route({ method: "DELETE", path: "/vods/{id}", summary: "Delete a VOD", ...tag("VODs") })
       .input(z.object({ id: Id }))
       .output(Ok),
+    /** ADR 0012 amendment 1 decisions 5 and 7: the broadcast's chat in media-time order; served exactly when the VOD is playable to the caller; filtered per viewer (blocks), never shared-cached. */
+    chat: base
+      .route({ method: "GET", path: "/vods/{id}/chat", summary: "Chat replay for a VOD", ...tag("VODs") })
+      .input(ChatReplayInput)
+      .output(D.ChatReplayPage),
   },
 
   clips: {
@@ -825,6 +872,16 @@ export const contract = {
       })
       .input(z.object({ id: Id }))
       .output(Ok),
+    /** As `vods.chat`, for the wall-clock window the clip was cut from. */
+    chat: base
+      .route({
+        method: "GET",
+        path: "/clips/{id}/chat",
+        summary: "Chat replay for a clip (the wall-clock window it was cut from)",
+        ...tag("Clips"),
+      })
+      .input(ChatReplayInput)
+      .output(D.ChatReplayPage),
   },
 
   chat: {
@@ -1028,6 +1085,29 @@ export const contract = {
         ...tag("Chat"),
       })
       .output(z.object({ token: z.string(), url: z.string(), expiresAt: Timestamp })),
+    surge: {
+      state: mod
+        .meta({ access: "moderator", scopes: ["moderator:manage:chat"] })
+        .route({
+          method: "GET",
+          path: "/channels/{channel}/chat/surge",
+          summary: "Surge-guard state",
+          ...tag("Moderation"),
+        })
+        .input(ChannelRef)
+        .output(D.SurgeState),
+      /** ADR 0015 decision 6: one click; `end` writes `suppressed` for the cooldown. Audited, with an outbox event. */
+      override: mod
+        .meta({ access: "moderator", scopes: ["moderator:manage:chat"], rateLimit: "write" })
+        .route({
+          method: "POST",
+          path: "/channels/{channel}/chat/surge",
+          summary: "Start or end surge mode by hand",
+          ...tag("Moderation"),
+        })
+        .input(ChannelRef.extend({ action: z.enum(["start", "end"]) }))
+        .output(D.SurgeState),
+    },
   },
 
   money: {
@@ -1201,6 +1281,25 @@ export const contract = {
       })
       .input(PageInput)
       .output(page(D.LedgerLine)),
+    /** feature-wins §4.1. The payer, or the owner of the payee channel; anything else is NOT_FOUND (ids are time-ordered, so authorization is the guard). */
+    paymentBreakdown: user
+      .route({
+        method: "GET",
+        path: "/payments/{paymentId}/breakdown",
+        summary: "Where one payment's money went",
+        ...tag("Monetization"),
+      })
+      .input(z.object({ paymentId: Id }))
+      .output(D.PaymentBreakdown),
+    paymentBreakdowns: user
+      .route({
+        method: "GET",
+        path: "/me/payment-breakdowns",
+        summary: "Breakdowns of your payments, or of payments to your channel",
+        ...tag("Monetization"),
+      })
+      .input(PageInput.extend({ role: z.enum(["payer", "payee"]).default("payer") }))
+      .output(page(D.PaymentBreakdown)),
     /** Manual adapter: the treasurer records offline payments, refunds and payouts. */
     treasurer: {
       payments: treasurer
@@ -1317,6 +1416,59 @@ export const contract = {
           }),
         )
         .output(Ok),
+      fraudFlags: {
+        list: treasurer
+          .route({ method: "GET", path: "/treasurer/fraud-flags", summary: "Payment fraud flags", ...tag("Treasury") })
+          .input(PageInput.extend({ status: z.enum(E.PAYMENT_FRAUD_STATUSES).optional() }))
+          .output(page(D.PaymentFraudFlag)),
+        raise: treasurer
+          .route({
+            method: "POST",
+            path: "/treasurer/fraud-flags",
+            summary: "Hold a payee's payouts for fraud review",
+            ...tag("Treasury"),
+          })
+          .input(z.object({ username: Slug, note: z.string().max(500).default("") }))
+          .output(D.PaymentFraudFlag),
+        review: treasurer
+          .route({
+            method: "POST",
+            path: "/treasurer/fraud-flags/{id}/review",
+            summary: "First review: recommend clearing or confirming",
+            ...tag("Treasury"),
+          })
+          .input(
+            z.object({
+              id: Id,
+              recommendation: z.enum(E.PAYMENT_FRAUD_DECISIONS),
+              note: z.string().max(500).default(""),
+            }),
+          )
+          .output(D.PaymentFraudFlag),
+        /** Four eyes: a different treasurer, or an admin, than the reviewer (database-enforced). Clearing releases the payee's fraud holds when no other flag is open. */
+        decide: finance
+          .route({
+            method: "POST",
+            path: "/treasurer/fraud-flags/{id}/decide",
+            summary: "Second review: clear or confirm",
+            ...tag("Treasury"),
+          })
+          .errors(SECOND_APPROVER)
+          .input(
+            z.object({ id: Id, decision: z.enum(E.PAYMENT_FRAUD_DECISIONS), note: z.string().max(500).default("") }),
+          )
+          .output(D.PaymentFraudFlag),
+        /** ADR 0036 decision 3: an admin's audited account action, the only release of a confirmed flag (database-enforced: admin, not the payee, once). Releases the payee's fraud holds when no other flag holds. */
+        release: admin
+          .route({
+            method: "POST",
+            path: "/treasurer/fraud-flags/{id}/release",
+            summary: "Admin: release the payouts a confirmed fraud flag holds",
+            ...tag("Treasury"),
+          })
+          .input(z.object({ id: Id }))
+          .output(D.PaymentFraudFlag),
+      },
     },
   },
 
@@ -2427,6 +2579,14 @@ export const contract = {
       })
       .input(z.object({ months: z.number().int().min(1).max(36).default(12) }))
       .output(z.array(D.TransparencyMonth)),
+    feeSchedule: base
+      .route({
+        method: "GET",
+        path: "/transparency/fee-schedule",
+        summary: "Every change to the platform cut and payout rules, with dates",
+        ...tag("Transparency"),
+      })
+      .output(z.array(D.FeeScheduleEntry)),
   },
 
   integrity: {
@@ -2527,16 +2687,32 @@ export const contract = {
       .route({
         method: "POST",
         path: "/reports",
-        summary: "Report a user, channel, message, VOD, clip or broadcast",
+        summary: "Report a user, channel, message, VOD, clip or broadcast, or a wave of chat messages",
         ...tag("Safety"),
       })
       .input(
-        z.object({
-          subjectType: z.enum(E.REPORT_SUBJECTS),
-          subjectId: Id,
-          reason: z.enum(E.REPORT_REASONS),
-          details: z.string().max(5000).default(""),
-        }),
+        z
+          .object({
+            subjectType: z.enum(E.REPORT_SUBJECTS),
+            subjectId: Id,
+            reason: z.enum(E.REPORT_REASONS),
+            details: z.string().max(5000).default(""),
+            /** `message_set` only (a Calm Chat wave): the messages, all in one channel; `subjectId` must be one of them. */
+            messageIds: z
+              .array(Id)
+              .min(E.MESSAGE_SET_RULES.minMessages)
+              .max(E.MESSAGE_SET_RULES.maxMessages)
+              .optional(),
+          })
+          .refine(
+            (i) =>
+              (i.subjectType === "message_set") === (i.messageIds !== undefined) &&
+              (i.messageIds === undefined || i.messageIds.includes(i.subjectId)),
+            {
+              message: "messageIds is required exactly for message_set and must contain subjectId",
+              path: ["messageIds"],
+            },
+          ),
       )
       .output(z.object({ id: Id })),
     queue: platformMod

@@ -47,6 +47,9 @@ import {
 } from "../src/integrity-viewers.ts";
 import { internalSecret } from "../src/safety-io.ts";
 import { defineScenario, excludedNeeds } from "../src/scenario.ts";
+import { stepThrottledViewer } from "../src/w1/data-mode.ts";
+import type { IntegrityExtension } from "../src/w1/kit.ts";
+import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
 import type { Viewer } from "../src/viewer.ts";
 import { ViewbotSwarm } from "../src/viewbot.ts";
 import { waitFor } from "../src/wait.ts";
@@ -501,6 +504,25 @@ export default defineScenario({
           });
         }
       }
+    }
+
+    // W1 extension, while the channel is still live. `--set w1=` names a pending one; by default
+    // only merged extensions run (src/w1/steps.ts).
+    const extensions = w1Extensions("integrity-basic", ctx.param("w1", ""));
+    ctx.data("w1.extensions", extensions);
+    if (extensions.length > 0) {
+      const ext: IntegrityExtension = {
+        ctx,
+        channel,
+        streamer,
+        platform: p,
+        databaseUrl: process.env.DATABASE_URL,
+        honest,
+      };
+      const W1_STEPS: Readonly<Record<W1Extension<"integrity-basic">, (e: IntegrityExtension) => Promise<void>>> = {
+        "data-mode": stepThrottledViewer,
+      };
+      for (const name of extensions) await ctx.step(extensionTitle(name, "run"), () => W1_STEPS[name](ext));
     }
 
     await ctx.step("stop", () =>

@@ -136,6 +136,7 @@ export function playbackStart(over: { enabled?: boolean; available?: boolean; tr
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
     renditions: ["source" as const],
     captions: [],
+    dataMode: null,
   };
 }
 

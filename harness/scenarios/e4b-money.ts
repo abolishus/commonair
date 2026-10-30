@@ -77,6 +77,10 @@ import {
 import { playerBundles } from "../src/player-server.ts";
 import { DEFAULT_REPORT_DIR } from "../src/report.ts";
 import { defineScenario, type ScenarioContext } from "../src/scenario.ts";
+import { stepBreakdown, stepReconciliation } from "../src/w1/breakdown.ts";
+import { stepFraudHold } from "../src/w1/fraud.ts";
+import { type MoneyExtension, w1HooksFor } from "../src/w1/kit.ts";
+import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
 import { ApiActor, type SocialActor, type WaitBudget, WebActor, remainingMs } from "../src/social.ts";
 import type { SignedInUser } from "../src/users.ts";
 import { waitFor } from "../src/wait.ts";
@@ -818,4 +822,37 @@ async function e4bMoney(ctx: ScenarioContext, sessions: WebSession[], check: Sce
   }
   const unbalanced = unbalancedTransactions(ledger.rows);
   ctx.assert("every transaction sums to zero per currency", unbalanced.length === 0, { unbalanced });
+
+  // ------------------------------------------------------------ W1 extensions
+  // `--set w1=` names pending ones; by default only merged extensions run (src/w1/steps.ts).
+  const extensions = w1Extensions("e4b-money", ctx.param("w1", ""));
+  ctx.data("w1.extensions", extensions);
+  if (extensions.length === 0) return;
+  // Stripe: the checkout's reference is empty until the payment succeeds; its PaymentIntent is the reference then.
+  const pay = (v: { paymentId: string; reference: string }) => ({
+    paymentId: v.paymentId,
+    reference: paymentIntents.get(v.paymentId) ?? v.reference,
+  });
+  const ext: MoneyExtension = {
+    ctx,
+    via,
+    provider,
+    databaseUrl,
+    channel,
+    currency,
+    streamer,
+    treasurer: treasurerUser,
+    payers: { a, b, c },
+    payments: { sub: pay(sub), gift: pay(gift), tip: pay(tip) },
+    refunded: pay(tip),
+    chargedBack: pay(sub),
+    stripe: webhook,
+    hooks: w1HooksFor(ctx),
+  };
+  const W1_STEPS: Readonly<Record<W1Extension<"e4b-money">, (e: MoneyExtension) => Promise<void>>> = {
+    breakdown: stepBreakdown,
+    reconciliation: stepReconciliation,
+    "fraud-hold": stepFraudHold,
+  };
+  for (const name of extensions) await ctx.step(extensionTitle(name, "run"), () => W1_STEPS[name](ext));
 }

@@ -39,6 +39,9 @@ export function createMetrics() {
   const upgradeTimeouts = m.createCounter("chat.upgrade.timeouts", {
     description: "WebSocket upgrades answered 503 because a dependency did not answer in time, by stage",
   });
+  const watchGateUnavailable = m.createCounter("chat.watch_gate.unavailable", {
+    description: "Sends the verified-watch gate let through because Valkey could not be read (fail open)",
+  });
   return {
     upgradeTimedOut: (stage: string) => upgradeTimeouts.add(1, { stage }),
     connectionOpened: (via: string) => connections.add(1, { via }),
@@ -52,6 +55,7 @@ export function createMetrics() {
     /** Reasons are fixed validator messages (low cardinality); the first clause is enough. */
     filterSkipped: (reason: string) => filterSkipped.add(1, { reason: reason.split(":")[0] ?? reason }),
     fanoutLatency: (ms: number) => fanout.record(Math.max(0, ms)),
+    watchGateUnavailable: () => watchGateUnavailable.add(1),
   };
 }
 export type Metrics = ReturnType<typeof createMetrics>;

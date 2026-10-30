@@ -15,6 +15,19 @@
     },
     "token": "eyJ2IjoxLCJzaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJjaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJwYXRoIjoibGl2ZS9hbGljZSIsInNyYyI6InJlbGF5IiwicmlkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDAxMjB9.QRAE1Z90cUwcPC-GDgL63Cqe0N7tfIz0RvxUjOI9Zn6HeDgvX8PqygzQjMjSbSOgOzzw5MauwDy5DHPsCz5NBg"
   },
+  "playbackDataMode": {
+    "claims": {
+      "v": 1,
+      "sid": "01890000-0000-7000-8000-000000000001",
+      "cid": "01890000-0000-7000-8000-000000000002",
+      "path": "live/alice",
+      "src": "origin",
+      "dm": 111111,
+      "iat": 1700000000,
+      "exp": 1700000120
+    },
+    "token": "eyJ2IjoxLCJzaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJjaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJwYXRoIjoibGl2ZS9hbGljZSIsInNyYyI6Im9yaWdpbiIsImRtIjoxMTExMTEsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwMTIwfQ.WQqR64S5sudhxLmIaIcdEdLQ0Pcv1OVOQz7KAU-jl6mc2yItI0xRSwJvq6qYv8I3XYDfK3_TCtgNhywZOeB5DA"
+  },
   "receipt": {
     "payload": {
       "v": 1,

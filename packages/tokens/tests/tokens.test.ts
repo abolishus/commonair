@@ -30,6 +30,7 @@ describe("vectors", () => {
   test("signing is deterministic and matches the committed vectors", async () => {
     const key = await importSigningKey(vectors.privateKeyPkcs8);
     expect(await signPlaybackToken(key, vectors.playback.claims as never)).toBe(vectors.playback.token);
+    expect(await signPlaybackToken(key, vectors.playbackDataMode.claims as never)).toBe(vectors.playbackDataMode.token);
     expect(await signReceipt(key, vectors.receipt.payload as never)).toEqual(vectors.receipt.signed);
   });
 });
@@ -117,6 +118,37 @@ describe("claims", () => {
       /rid is required/,
     );
     await expect(signPlaybackToken(key, { ...base, src: "origin" } as never)).rejects.toThrow(/rid is required/);
+  });
+});
+
+describe("data mode claim (ADR 0018)", () => {
+  /** Signs raw claims, bypassing the schema, as a forger with the key would. */
+  async function signRaw(claims: Record<string, unknown>): Promise<string> {
+    const key = await importSigningKey(vectors.privateKeyPkcs8);
+    const body = new TextEncoder().encode(JSON.stringify(claims));
+    const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key.privateKey, body));
+    return `${Buffer.from(body).toString("base64url")}.${Buffer.from(sig).toString("base64url")}`;
+  }
+
+  test("the data-mode vector verifies with its ceiling", async () => {
+    const key = await importSigningKey(vectors.privateKeyPkcs8);
+    const r = await verifyPlaybackTokenSignature(key.publicKey, vectors.playbackDataMode.token);
+    expect(r).toEqual({ ok: true, value: vectors.playbackDataMode.claims });
+    expect(r.ok && r.value.dm).toBe(111_111);
+  });
+
+  test.each([
+    ["on a relay token", { ...vectors.playback.claims }],
+    ["on a VOD path", { path: "vod/01890000-0000-7000-8000-000000000009" }],
+    ["below the floor", { dm: 1000 }],
+    ["above the ceiling", { dm: 9_000_000 }],
+    ["as a string", { dm: "1" }],
+  ])("refuses dm %s as malformed", async (_, patch) => {
+    const key = await importSigningKey(vectors.privateKeyPkcs8);
+    const claims = { ...vectors.playbackDataMode.claims, ...patch, dm: "dm" in patch ? patch.dm : 111_111 };
+    const token = await signRaw(claims);
+    expect(await verifyPlaybackTokenSignature(key.publicKey, token)).toEqual({ ok: false, error: "malformed" });
+    await expect(signPlaybackToken(key, claims as never)).rejects.toThrow(/dm|Too|expected/);
   });
 });
 

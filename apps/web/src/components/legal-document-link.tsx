@@ -34,15 +34,18 @@ export function splitByAcceptance<D extends Pick<LegalDoc, "requiresAcceptance">
   };
 }
 
-/** A legal document's title that opens its full text in a dialog (no navigation away from the form). */
-export function LegalDocumentLink({ doc }: { doc: LegalDoc }): React.JSX.Element {
+/**
+ * A legal document's title (or `label`) that opens its full text in a dialog (no navigation away
+ * from the form).
+ */
+export function LegalDocumentLink({ doc, label }: { doc: LegalDoc; label?: string }): React.JSX.Element {
   return (
     <Dialog>
       <DialogTrigger
         data-legal-kind={doc.kind}
         className="underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
-        {doc.title}
+        {label ?? doc.title}
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>

@@ -79,6 +79,7 @@ function payment(creator: string, gross: number, at: Date, opts: { tax?: number;
     feeCents: opts.fee ?? 0,
     currency: "usd",
     cut: DEFAULT_PLATFORM_CUT,
+    cutHistoryId: null,
     occurredAt: at,
   });
 }
@@ -369,6 +370,7 @@ describe("hold lots", () => {
         feeCents: 0,
         currency: cur,
         cut: DEFAULT_PLATFORM_CUT,
+        cutHistoryId: null,
         occurredAt: at,
       });
     const drained = [mk(1000, daysAgo(20)), mk(1000, daysAgo(19))];
@@ -396,6 +398,7 @@ describe("payouts", () => {
         feeCents: 0,
         currency: cur,
         cut: DEFAULT_PLATFORM_CUT,
+        cutHistoryId: null,
         occurredAt: daysAgo(30),
       }),
     );
@@ -464,6 +467,7 @@ describe("payouts", () => {
       feeCents: 0,
       currency: cur,
       cut: DEFAULT_PLATFORM_CUT,
+      cutHistoryId: null,
       occurredAt: daysAgo(30),
     });
     await post(db, p);
@@ -577,6 +581,7 @@ describe("payouts count only what was available at period end", () => {
       feeCents: 0,
       currency: cur,
       cut: DEFAULT_PLATFORM_CUT,
+      cutHistoryId: null,
       occurredAt: at(when),
     });
     await post(db, p);
@@ -826,6 +831,7 @@ describe("period close", () => {
         feeCents: 2000,
         currency: cur,
         cut: DEFAULT_PLATFORM_CUT,
+        cutHistoryId: null,
         occurredAt: new Date("2025-05-10T00:00:00Z"),
       }),
     );
@@ -913,6 +919,7 @@ describe("statements and transparency", () => {
         feeCents: fee,
         currency: cur,
         cut: DEFAULT_PLATFORM_CUT,
+        cutHistoryId: null,
         occurredAt: at,
       });
     const p1 = mk(10_100, jan, 300);
@@ -1014,5 +1021,33 @@ describe("settings", () => {
     const m = await loadMoneySettings(db);
     expect(m.cut).toEqual({ streamerShare: 0.9, coopShare: 0.1 });
     expect(m.payoutRules).toMatchObject({ minimumCents: 2500, holdDays: 7, currency: "usd" });
+  });
+
+  test("cutHistoryId is null on a fresh seed and the newest platform.cut history id after a change", async () => {
+    expect((await loadMoneySettings(db)).cutHistoryId).toBeNull();
+    // A passed proposal is the only way to change the cut; here the owner skips the guard in a
+    // transaction that is rolled back, so the history trigger writes the row as it would.
+    const done = new Error("rolled back");
+    const run = t.db.transaction(async (tx) => {
+      await tx.execute(sql`alter table governance_settings disable trigger governance_settings_guard`);
+      const change = async (cut: { streamerShare: number; coopShare: number }) => {
+        await tx.update(s.governanceSettings).set({ value: cut }).where(eq(s.governanceSettings.key, "platform.cut"));
+        const [h] = await tx
+          .select({ id: s.governanceSettingsHistory.id })
+          .from(s.governanceSettingsHistory)
+          .where(eq(s.governanceSettingsHistory.key, "platform.cut"))
+          .orderBy(sql`changed_at desc`)
+          .limit(1);
+        return h!.id;
+      };
+      await change({ streamerShare: 0.85, coopShare: 0.15 });
+      const newest = await change({ streamerShare: 0.8, coopShare: 0.2 });
+      const m = await loadMoneySettings(tx);
+      expect(m.cutHistoryId).toBe(newest);
+      expect(m.cut).toEqual({ streamerShare: 0.8, coopShare: 0.2 });
+      throw done;
+    });
+    await expect(run).rejects.toBe(done);
+    expect((await loadMoneySettings(db)).cutHistoryId).toBeNull();
   });
 });

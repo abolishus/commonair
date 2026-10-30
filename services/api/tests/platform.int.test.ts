@@ -657,7 +657,11 @@ describe("tokens, bots and the API surface", () => {
       "GET",
       "/api/instance",
     );
-    expect(info.body).toMatchObject({ minAge: 13, features: { payments: "manual" } });
+    // W1: the verified-watch gate and the surge guard are off unless the operator turns them on.
+    expect(info.body).toMatchObject({
+      minAge: 13,
+      features: { payments: "manual", watchGate: false, surgeGuard: false },
+    });
     const status = await client(api).call<{ status: string; components: { id: string; status: string }[] }>(
       "GET",
       "/api/status",
@@ -681,6 +685,32 @@ describe("tokens, bots and the API surface", () => {
       body: JSON.stringify({ json: { channel: alice.username } }),
     });
     expect(rpc.status).toBe(501);
+  });
+
+  test("W1 stubs answer 501 until their units land", async () => {
+    const id = crypto.randomUUID();
+    const calls: [string, string][] = [
+      ["GET", "/api/me/blocks"],
+      ["GET", "/api/me/blocks/ids"],
+      ["POST", "/api/me/blocks"],
+      ["DELETE", `/api/me/blocks/${alice.username}`],
+      ["GET", `/api/vods/${id}/chat`],
+      ["GET", `/api/clips/${id}/chat`],
+      ["GET", `/api/channels/${alice.username}/chat/surge`],
+      ["POST", `/api/channels/${alice.username}/chat/surge`],
+      ["GET", `/api/payments/${id}/breakdown`],
+      ["GET", "/api/me/payment-breakdowns"],
+      ["GET", "/api/transparency/fee-schedule"],
+    ];
+    const bodies: Record<string, unknown> = {
+      "/api/me/blocks": { username: alice.username },
+      [`/api/channels/${alice.username}/chat/surge`]: { action: "start" },
+    };
+    for (const [method, url] of calls) {
+      const r = await alice.client.call<{ code: string }>(method, url, method === "POST" ? bodies[url] : undefined);
+      expect(r.status, `${method} ${url}`).toBe(501);
+      expect(r.body.code).toBe("NOT_IMPLEMENTED");
+    }
   });
 
   test("validation errors are 400 with issues; unknown routes 404", async () => {

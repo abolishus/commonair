@@ -12,6 +12,7 @@
  */
 import { accounts, assertCurrency, describeAccount } from "./accounts.ts";
 import { assertCents, floorShare, mulDivFloor, negate } from "./math.ts";
+import { PaymentMetaV2, ReversalMetaV2 } from "./meta.ts";
 import { type Posting, type PostingEntry, nonZero, validatePosting } from "./posting.ts";
 
 /** The `platform.cut` governance setting. */
@@ -121,6 +122,8 @@ export interface PaymentSucceededInput {
   currency: string;
   /** The `platform.cut` in effect; recorded in metadata so reversals can reuse it. */
   cut: PlatformCut;
+  /** `governance_settings_history.id` of that cut (`loadMoneySettings`); null = the founding seed. */
+  cutHistoryId: string | null;
   occurredAt: Date;
 }
 
@@ -145,7 +148,8 @@ export function paymentSucceeded(i: PaymentSucceededInput): Posting {
     idempotencyKey: `payment:${i.paymentId}`,
     currency: i.currency,
     occurredAt: i.occurredAt,
-    metadata: {
+    metadata: PaymentMetaV2.parse({
+      v: 2,
       paymentKind: i.paymentKind,
       creatorUserId: i.creatorUserId,
       provider: i.provider,
@@ -157,7 +161,10 @@ export function paymentSucceeded(i: PaymentSucceededInput): Posting {
       feeCents: i.feeCents,
       streamerShare: i.cut.streamerShare,
       coopShare: i.cut.coopShare,
-    },
+      cutHistoryId: i.cutHistoryId,
+      splitVersionId: null,
+      shares: [{ userId: i.creatorUserId, role: "owner", bps: 10_000, creatorCents }],
+    } satisfies PaymentMetaV2),
     entries: [
       { code: settle, amountCents: i.grossCents, memo: "gross received" },
       { code: accounts.taxPayable(), amountCents: -i.taxCents, memo: "tax collected" },
@@ -284,7 +291,7 @@ function reversal(
   kind: "refund" | "chargeback",
   sources: Source[],
   extra: PostingEntry[],
-  extraMeta: Posting["metadata"],
+  extraMeta: { disputeFeeCents?: number },
 ): Posting {
   assertCurrency(i.currency);
   const split = reversalSplit(i.original, i.cut, i.alreadyReversedCents, i.amountCents);
@@ -293,6 +300,12 @@ function reversal(
   const receivable = accounts.creatorReceivable(i.creatorUserId);
   const creatorEntries = drawFrom(split.creatorCents, sources, receivable);
   const receivableCents = creatorEntries.filter((e) => e.code === receivable).reduce((s, e) => s + e.amountCents, 0);
+  // ADR 0013 decision 5: what this payment's own hold lot gave back, and what the owner's other
+  // sources (released earnings, other lots, the receivable) covered.
+  const ownLot = { code: accounts.creatorHold(i.creatorUserId), memo: holdMemo(i.paymentId) };
+  const fromOwnLotCents = creatorEntries
+    .filter((e) => e.code === ownLot.code && e.memo === ownLot.memo)
+    .reduce((s, e) => s + e.amountCents, 0);
   return finish({
     kind,
     description: kind === "refund" ? "Payment refunded" : "Payment charged back",
@@ -302,7 +315,8 @@ function reversal(
     currency: i.currency,
     occurredAt: i.occurredAt,
     reversesId: i.originalTransactionId ?? null,
-    metadata: {
+    metadata: ReversalMetaV2.parse({
+      v: 2,
       disputeId: i.disputeId,
       creatorUserId: i.creatorUserId,
       provider: i.provider,
@@ -313,7 +327,16 @@ function reversal(
       coopCents: negate(split.coopCents),
       receivableCents,
       ...extraMeta,
-    },
+      shares: [
+        {
+          userId: i.creatorUserId,
+          role: "owner",
+          creatorCents: negate(split.creatorCents),
+          fromOwnLotCents,
+          ownerCoveredCents: split.creatorCents - fromOwnLotCents,
+        },
+      ],
+    } satisfies ReversalMetaV2),
     entries: [
       { code: settle, amountCents: -i.amountCents, memo: `${kind} paid out` },
       { code: accounts.taxPayable(), amountCents: split.taxCents, memo: "tax reversed" },
@@ -401,7 +424,8 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
     currency: i.currency,
     occurredAt: i.occurredAt,
     reversesId: i.chargebackTransactionId ?? null,
-    metadata: {
+    metadata: ReversalMetaV2.parse({
+      v: 2,
       disputeId: i.disputeId,
       creatorUserId: i.creatorUserId,
       provider: i.provider,
@@ -411,7 +435,18 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
       creatorCents: c.creatorCents,
       coopCents: c.coopCents,
       feeRefundCents: fee,
-    },
+      // A won chargeback restores the share to the owner's receivable and released earnings; hold
+      // lots are never re-opened, so nothing goes back to the payment's own lot.
+      shares: [
+        {
+          userId: i.creatorUserId,
+          role: "owner",
+          creatorCents: c.creatorCents,
+          fromOwnLotCents: 0,
+          ownerCoveredCents: -c.creatorCents,
+        },
+      ],
+    } satisfies ReversalMetaV2),
     entries: [
       { code: settle, amountCents: c.amountCents, memo: "chargeback reversed" },
       { code: accounts.taxPayable(), amountCents: -c.taxCents, memo: "tax restored" },

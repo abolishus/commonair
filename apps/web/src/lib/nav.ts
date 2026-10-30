@@ -53,8 +53,8 @@ export interface SignedOutEntry {
 }
 
 export interface StudioEntry {
-  id: "streamManager" | "overlays" | "interact" | "bot" | "content" | "revenue" | "relays" | "developer";
-  to: "/dashboard" | "/overlays" | "/interact" | "/bot" | "/content" | "/revenue" | "/relays" | "/developer";
+  id: "streamManager" | "overlays" | "interact" | "bot" | "chat" | "content" | "revenue" | "relays" | "developer";
+  to: "/dashboard" | "/overlays" | "/interact" | "/bot" | "/chat" | "/content" | "/revenue" | "/relays" | "/developer";
   current: boolean;
 }
 
@@ -150,13 +150,19 @@ export function accountMenu(
   ];
 }
 
-export function studioNav(pathname: string): StudioEntry[] {
+export interface StudioNavOptions {
+  /** The instance runs the verified-watch gate or the surge guard (`features.watchGate || features.surgeGuard`). */
+  chatSafety?: boolean;
+}
+
+export function studioNav(pathname: string, options: StudioNavOptions = {}): StudioEntry[] {
   const path = normalize(pathname);
   return [
     { id: "streamManager", to: "/dashboard", current: path === "/dashboard" },
     { id: "overlays", to: "/overlays", current: path === "/overlays" },
     { id: "interact", to: "/interact", current: path === "/interact" },
     { id: "bot", to: "/bot", current: path === "/bot" },
+    ...(options.chatSafety === true ? [{ id: "chat", to: "/chat", current: path === "/chat" } as const] : []),
     { id: "content", to: "/content", current: path === "/content" },
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "relays", to: "/relays", current: path === "/relays" },

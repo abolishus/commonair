@@ -20,7 +20,7 @@ import { IngestServerUrl, NewStreamKey } from "../src/components/ingest-values.t
 import { SignInPasswordField, SignUpPasswordField } from "../src/components/password-fields.tsx";
 import { NewRelayToken, RelayTable } from "../src/components/relays.tsx";
 import { InstanceFooter } from "../src/components/site-chrome.tsx";
-import { locale, uiMessages } from "../src/i18n/index.ts";
+import { locale, t, uiMessages } from "../src/i18n/index.ts";
 import type { RelayNodeDto } from "../src/lib/relays.ts";
 import { Player } from "../src/player/player.tsx";
 import {
@@ -208,6 +208,15 @@ describe("composition-rendered selectors", () => {
     seenIds.add("chat-input").add("chat-send");
   });
 
+  it("chat: the replay disclosure sits in the input area for every viewer (ADR 0012 decision 9)", () => {
+    for (const signedIn of [true, false]) {
+      const doc = render(<ChatPanel channel="rivertide" signedIn={signedIn} />);
+      const line = one(doc, '[data-testid="chat-replay-disclosure"]');
+      expect(line.closest("footer")).not.toBeNull();
+      expect(line.textContent).toContain(t("chat.replayDisclosure"));
+    }
+  });
+
   it("auth: the password ids are on the <input> elements", () => {
     const signIn = one(render(<SignInPasswordField />), '[data-testid="signin-password"]');
     expect([signIn.tagName, signIn.getAttribute("name"), signIn.getAttribute("autocomplete")]).toEqual([
@@ -227,7 +236,12 @@ describe("composition-rendered selectors", () => {
   it("footer: footer-source-link is the AGPL source link", () => {
     const doc = render(
       <InstanceFooter
-        instance={{ name: "Test Air", sourceUrl: "https://code.example.org/commonair", p2pDefault: "off" }}
+        instance={{
+          name: "Test Air",
+          sourceUrl: "https://code.example.org/commonair",
+          p2pDefault: "off",
+          chatSafety: false,
+        }}
       />,
     );
     const link = one(doc, '[data-testid="footer-source-link"]');
@@ -592,6 +606,7 @@ describe("composition-rendered selectors", () => {
   });
   const line = (id: string, over: Partial<RevenueLineDto> = {}): RevenueLineDto => ({
     id,
+    paymentId: null,
     occurredAt: "2026-10-05T12:00:00.000Z",
     type: "subscription",
     tier: 2,
@@ -979,7 +994,7 @@ describe("composition-rendered selectors", () => {
 
   it("footer: footer-transparency-link goes to /transparency", () => {
     const link = one(
-      render(<InstanceFooter instance={{ name: "Test Air", sourceUrl: null, p2pDefault: "off" }} />),
+      render(<InstanceFooter instance={{ name: "Test Air", sourceUrl: null, p2pDefault: "off", chatSafety: false }} />),
       '[data-testid="footer-transparency-link"]',
     );
     expect([link.tagName, link.getAttribute("href")]).toEqual(["A", "/transparency"]);

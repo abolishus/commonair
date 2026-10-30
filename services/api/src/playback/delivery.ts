@@ -8,7 +8,9 @@
  * capacity; the origin keeps a weight of (total relay capacity / N), i.e. at least
  * 1/(N+1) of new sessions. The pick is a deterministic function of the session id.
  * Sessions the origin keeps go to the CDN instead when origin-pull CDN is enabled and
- * the channel's verified viewers exceed the burst threshold.
+ * the channel's verified viewers exceed the burst threshold, unless the session must avoid the CDN
+ * (a signed-in viewer of a gated or surging channel, ADR 0015 decision 2). Data-mode sessions always
+ * stay on the origin (ADR 0018 decision 4).
  */
 import { z } from "zod";
 import { stableHash } from "../discovery/ranking.ts";
@@ -33,6 +35,10 @@ export interface AssignInput {
   relays: ReadonlyArray<{ id: string } & RelayEntry>;
   cdn: { enabled: boolean; threshold: number };
   channelVerifiedViewers: number;
+  /** ADR 0015 decision 2: no CDN for a signed-in viewer of a gated or surging channel. */
+  avoidCdn?: boolean;
+  /** ADR 0018 decision 4: data-mode sessions are origin sessions. */
+  originOnly?: boolean;
 }
 
 export function eligibleRelays(relays: AssignInput["relays"]) {
@@ -45,6 +51,7 @@ export function eligibleRelays(relays: AssignInput["relays"]) {
 export const unitHash = (s: string) => stableHash(`delivery:${s}`) / 0x1_0000_0000;
 
 export function assignSource(input: AssignInput): Assignment {
+  if (input.originOnly) return { source: "origin" };
   const relays = eligibleRelays(input.relays);
   if (relays.length > 0) {
     const total = relays.reduce((s, r) => s + r.capacityMbps, 0);
@@ -60,6 +67,7 @@ export function assignSource(input: AssignInput): Assignment {
       if (last) return { source: "relay", relayId: last.id, url: last.url };
     }
   }
-  if (input.cdn.enabled && input.channelVerifiedViewers > input.cdn.threshold) return { source: "cdn" };
+  if (!input.avoidCdn && input.cdn.enabled && input.channelVerifiedViewers > input.cdn.threshold)
+    return { source: "cdn" };
   return { source: "origin" };
 }

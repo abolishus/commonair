@@ -341,6 +341,8 @@ async function revenueLedger(
       const gross = isPayout || r.gross === null ? null : num(r.gross);
       return {
         id: r.id,
+        // The breakdown entry point: payments and their reversals reference the payment.
+        paymentId: r.ref_type === "payment" ? r.ref_id : null,
         occurredAt: at.toISOString(),
         type: revenueLineType(kind, facts),
         tier: pay?.tier ?? null,

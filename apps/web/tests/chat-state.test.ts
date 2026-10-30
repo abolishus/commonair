@@ -155,3 +155,70 @@ describe("ChatConnection ban frames", () => {
     expect(bans).toEqual([[UUID(3), "troll"]]);
   });
 });
+
+describe("ChatConnection settings and surge frames", () => {
+  const SETTINGS = {
+    slowModeSeconds: 0,
+    followersOnlyMinutes: null,
+    subscribersOnly: false,
+    emoteOnly: false,
+    minAccountAgeDays: 0,
+    requireVerifiedEmail: true,
+    linksAllowed: true,
+    minVerifiedWatchSeconds: 120,
+    verifiedWatchExemptSubscribers: true,
+    surgeGuard: { enabled: true, triggerUnverifiedRatio: 0.5, cooldownMinutes: 10 },
+  };
+
+  function connect() {
+    const settings: unknown[] = [];
+    const surges: unknown[] = [];
+    const conn = new ChatConnection(
+      CHANNEL,
+      {
+        getToken: async () => ({ token: "t", url: "ws://chat.test/ws" }),
+        createSocket: () => ({}) as SocketLike,
+      },
+      {
+        onStatus: () => undefined,
+        onJoined: () => undefined,
+        onMessage: () => undefined,
+        onDelete: () => undefined,
+        onClear: () => undefined,
+        onNotice: () => undefined,
+        onSettings: (s) => settings.push(s),
+        onSurge: (f) => surges.push(f),
+      },
+    );
+    return { conn, settings, surges };
+  }
+
+  it("reports the joined frame's settings and surge, so a mid-surge joiner knows at once", () => {
+    const { conn, settings, surges } = connect();
+    const until = "2026-10-30T12:10:00.000Z";
+    conn.handleFrame(
+      JSON.stringify({
+        op: "joined",
+        channel: CHANNEL,
+        channelId: UUID(1),
+        settings: SETTINGS,
+        me: { badges: [], canModerate: false, canChat: true },
+        surge: { state: "on", until },
+      }),
+    );
+    expect(settings).toEqual([SETTINGS]);
+    expect(surges).toEqual([{ state: "on", until }]);
+  });
+
+  it("forwards settings and surge frames for this channel only", () => {
+    const { conn, settings, surges } = connect();
+    const next = { ...SETTINGS, slowModeSeconds: 30 };
+    conn.handleFrame(JSON.stringify({ op: "settings", channel: CHANNEL, settings: next }));
+    conn.handleFrame(JSON.stringify({ op: "settings", channel: "other_chan", settings: next }));
+    conn.handleFrame(JSON.stringify({ op: "surge", channel: CHANNEL, state: "suppressed", until: null }));
+    conn.handleFrame(JSON.stringify({ op: "surge", channel: "other_chan", state: "on", until: null }));
+    conn.handleFrame(JSON.stringify({ op: "surge", channel: CHANNEL, state: "bogus", until: null }));
+    expect(settings).toEqual([next]);
+    expect(surges).toEqual([{ state: "suppressed", until: null }]);
+  });
+});

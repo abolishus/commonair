@@ -4,7 +4,7 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { RENDITIONS } from "@commonair/contracts/enums";
-import { KEYS, mediaPath, P2P_GRANT_TTL_SECONDS } from "@commonair/contracts/internal";
+import { KEYS, mediaPath, P2P_GRANT_TTL_SECONDS, SurgeOverride } from "@commonair/contracts/internal";
 import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/contracts/tokens";
 import { schema, uuidv7 } from "@commonair/db";
 import { recordHeartbeat } from "@commonair/integrity";
@@ -17,6 +17,7 @@ import { viewerCount } from "../lib/viewers.ts";
 import { assignSource, RelayEntry, type Assignment } from "../playback/delivery.ts";
 import { recordP2PHeartbeat } from "../playback/metrics.ts";
 import { MIN_HEARTBEAT_WALL_SECONDS, nextVerdict, type VerifyState } from "../playback/verify.ts";
+import { chatSettingsOf } from "./chat.ts";
 import { confirmedAdult } from "./me.ts";
 
 const { playbackSessions, broadcasts, categories } = schema;
@@ -137,6 +138,25 @@ async function sessionGated(deps: Deps, broadcastId: string | null): Promise<boo
   return row ? gated(deps, row.b, row.c) : false;
 }
 
+type ChannelRow = typeof schema.channels.$inferSelect;
+
+/** ADR 0015 decision 7: the instance flag is on and the channel set a verified-watch minimum. */
+const watchGateOn = (deps: Deps, c: ChannelRow) =>
+  deps.env.CHAT_WATCH_GATE === "on" && chatSettingsOf(c).minVerifiedWatchSeconds > 0;
+
+/** ADR 0015 decision 6: surge mode is on for the channel. A Valkey error reads as off (fail toward serving). */
+async function surgeActive(deps: Deps, channelId: string): Promise<boolean> {
+  if (deps.env.CHAT_SURGE_GUARD !== "on") return false;
+  try {
+    const raw = await deps.valkey.get(KEYS.surgeOverride(channelId));
+    if (!raw) return false;
+    const parsed = SurgeOverride.safeParse(JSON.parse(raw));
+    return parsed.success && parsed.data.state === "on";
+  } catch {
+    return false;
+  }
+}
+
 export const playback = {
   start: os.playback.start.handler(async ({ context, input }) => {
     const { deps, caller, req } = context;
@@ -152,6 +172,9 @@ export const playback = {
 
     const sid = uuidv7();
     const path = mediaPath(c.slug);
+    // ADR 0015 decision 2: a signed-in viewer of a gated or surging channel stays off the CDN, so
+    // their fetches reach a server that can judge them.
+    const avoidCdn = caller !== null && (watchGateOn(deps, c) || (await surgeActive(deps, c.id)));
     const assignment = assignSource({
       sessionId: sid,
       relays: await activeRelays(deps),
@@ -160,6 +183,9 @@ export const playback = {
         threshold: deps.env.CDN_BURST_VIEWER_THRESHOLD,
       },
       channelVerifiedViewers: await viewerCount(deps, c.id),
+      avoidCdn,
+      // W1-data-mode sets this from `input.dataMode` (ADR 0018 decision 4).
+      originOnly: false,
     });
     const network = deps.classifier.classify(req.ip);
     // P2P shows the viewer's address to peers (ADR 0005 amendment 1), so 18+, mature-category and
@@ -207,6 +233,8 @@ export const playback = {
       expiresAt: iso(new Date(claims.exp * 1000)),
       renditions: await renditionsFor(deps, c.id),
       captions: [],
+      // W1-data-mode fills this (ADR 0018).
+      dataMode: null,
     };
   }),
 

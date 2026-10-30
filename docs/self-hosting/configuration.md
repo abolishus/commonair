@@ -168,6 +168,15 @@ The object backups' settings, `BACKUP_OBJECTS_REMOTE_*` (`ENDPOINT`, `REGION`, `
 `selfhost.sh backup` alone and given to no unit. [backups.md](backups.md#set-it-up-digitalocean-spaces)
 lists every one.
 
+## Chat retention and the verified-watch gate
+
+`CHAT_WATCH_GATE` (the verified-watch gate, ADR 0015) and `CHAT_SURGE_GUARD` (the surge guard)
+stay `off` until their GA criteria are met. While a flag is off, chat ignores the per-channel
+setting and the API refuses to turn it on, so leave both off on a public instance. Chat without a
+VOD is kept `CHAT_RETENTION_DAYS` (30), chat attached to a VOD at most `CHAT_REPLAY_MAX_DAYS`
+(60, never less than the retention). The privacy policy states these figures from the same
+variables, so changing them changes what your policy says.
+
 ## Reference
 
 Generated from `packages/config/src/env.ts` by `bun scripts/config-reference.ts`; do not edit
@@ -334,6 +343,15 @@ the tables by hand. Columns:
 | Variable              | Required | Default | Self-host | Description                                                                      |
 | --------------------- | -------- | ------- | --------- | -------------------------------------------------------------------------------- |
 | `INTERACT_TEST_HOOKS` | no       | `false` | —         | Harness only: serves `POST /internal/interact/tick`. Never on a public instance. |
+
+### `chatEnv`
+
+| Variable               | Required | Default | Self-host | Description                                                                                                            |
+| ---------------------- | -------- | ------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `CHAT_WATCH_GATE`      | no       | `off`   | —         | ADR 0015 decision 7: the verified-watch gate; `off` until its GA criteria are met (S1 stage 4 owns CDN fetch-judging). |
+| `CHAT_SURGE_GUARD`     | no       | `off`   | —         | ADR 0015 decision 6: the surge guard; stays `off` by default after GA.                                                 |
+| `CHAT_RETENTION_DAYS`  | no       | `30`    | —         | ADR 0012 amendment 1 decision 6: days chat is kept when its broadcast has no VOD (the report window).                  |
+| `CHAT_REPLAY_MAX_DAYS` | no       | `60`    | —         | Days chat attached to a VOD is kept at most.                                                                           |
 
 ### `evidenceSealEnv`
 

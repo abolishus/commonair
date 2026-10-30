@@ -53,7 +53,7 @@ export type AppUnit = (typeof APP_UNITS)[number];
  * main.ts and fails when they differ.
  */
 export const MAIN_TS_SCHEMAS: Record<"chat" | "irc" | "origin" | "tracker", SchemaPart[]> = {
-  chat: ["coreEnv", "databaseEnv", "valkeyEnv", "internalEnv", "servicePorts"],
+  chat: ["coreEnv", "databaseEnv", "valkeyEnv", "internalEnv", "servicePorts", "chatEnv"],
   irc: ["coreEnv", ["internalEnv", ["CHAT_INTERNAL_URL"]], "servicePorts", "ircEnv"],
   origin: [
     "coreEnv",
