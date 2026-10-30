@@ -22,7 +22,18 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
-**Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30.** Contract steps
+**Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30, done 2026-10-30 (CI
+green on `8065ce3`, every job including all seven harness shards; self-host e2e last ran green on
+the contract steps).** Milestone checks (batch4 README): no `notImplemented` left in the W1 route
+files or under `routes/notifications/`; `timeline-sync`, `surge-guard` and `notifications` pass
+with no pending steps, `inFull`, in `FULL_REQUIRED`, in the `features` and `notify` shards; the six
+W1 extension steps run in `e4b-money`, `e2e-social` and `integrity-basic`; w1 and n1 selectors
+checks are in; the privacy and cookie drafts are at `2026-10-30-notifications-draft` (counsel not
+reviewed); `CHAT_WATCH_GATE` stays `off` by default. Not run in CI: `notifications` under
+`--profile no-proprietary` (steps 4 and 7 skipped) and step 6's installability check on a real
+browser profile beyond headless Chromium; the user runs those and the visual checks. **Next:** the
+rest of N2 (es catalog, N2-ui, N2-email, switcher, Weblate), which N1-email's merge unblocks; the
+data-mode origin-stretch scoring follow-up (ADR 0018 Amendment 1 item 4). Contract steps
 landed with CI green: W1 `a29063e` + review fix `c842658` (0037/0038), N1 `30e046b` + review fix
 `c444b15` (0039/0040). **Wave 1 merged** (W1-breakdown, W1-calm-chat, W1-spine, W1-player,
 W1-watch-gate, W1-fraud-floor; each implement → independent review → fix in its own worktree,
