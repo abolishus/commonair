@@ -5,7 +5,7 @@
 import type { Page } from "playwright";
 import { type Mailpit, findTokenLink } from "../mailpit.ts";
 import type { UserCredentials } from "../users.ts";
-import { waitFor } from "../wait.ts";
+import { sleep, waitFor } from "../wait.ts";
 import { ROUTES, TEST_IDS as T, type TestId, tid } from "./selectors.ts";
 import { type WebSession, byTestId, readValue } from "./session.ts";
 import { browserVerificationUrl } from "./urls.ts";
@@ -32,7 +32,17 @@ export async function waitForOneOf<Id extends TestId>(
   return seen.id;
 }
 
-/** Fill and submit the sign-in form on the current page; resolves once `nav-user` shows. */
+/** The `error.rateLimited` form error (core.json, en): the `auth` bucket is full for this address. */
+const RATE_LIMITED_FORM_ERROR = /too many attempts/i;
+/** The `auth` bucket's window (services/api/src/lib/ratelimit.ts) plus a margin. */
+const AUTH_WINDOW_WAIT_MS = 65_000;
+const RATE_LIMITED_RETRY_MS = 5_000;
+
+/**
+ * Fill and submit the sign-in form on the current page; resolves once `nav-user` shows. Scenarios
+ * in one shard share an address and so the `auth` bucket (10 a minute): a rate-limited submit is
+ * retried every few seconds until the window frees a slot.
+ */
 export async function signInViaUi(
   page: Page,
   creds: { email: string; password: string },
@@ -42,8 +52,20 @@ export async function signInViaUi(
   const ui = { timeout: timeoutMs };
   await byTestId(page, T.signinEmail).fill(creds.email, ui);
   await byTestId(page, T.signinPassword).fill(creds.password, ui);
-  await byTestId(page, T.signinSubmit).click(ui);
-  await waitForOneOf(page, [T.navUser], timeoutMs, signal);
+  const deadline = Date.now() + AUTH_WINDOW_WAIT_MS;
+  for (;;) {
+    await byTestId(page, T.signinSubmit).click(ui);
+    try {
+      await waitForOneOf(page, [T.navUser], timeoutMs, signal);
+      return;
+    } catch (err) {
+      const limited = err instanceof Error && RATE_LIMITED_FORM_ERROR.test(err.message);
+      if (!limited || Date.now() + RATE_LIMITED_RETRY_MS > deadline) throw err;
+      await sleep(RATE_LIMITED_RETRY_MS, signal);
+      // A stale error can outlive a submit that went through: signed in is signed in.
+      if (await byTestId(page, T.navUser).first().isVisible()) return;
+    }
+  }
 }
 
 /**
