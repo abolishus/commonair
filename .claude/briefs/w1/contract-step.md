@@ -1410,7 +1410,7 @@ Presets (`DATA_MODE.presetsMbPerHour`) and their ceilings (`dataModeCeilingBps`)
 | ------ | ---- | ------------ | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Audio  | 50   | 96 618       | `audio` rung (fits the budget)                                | derived audio-only (kept below the ceiling; the meter shows ≈ 66–83 MB/h) |
 | Low    | 800  | 1 545 894    | `480p` (MediaMTX's measured BANDWIDTH ≈ 1.35–1.5 Mbit/s fits) | the source only if its advertised BANDWIDTH ≤ dm, else audio-only         |
-| Medium | 1900 | 4 589 372    | `720p`                                                        | likewise                                                                  |
+| Medium | 1900 | 3 671 498    | `720p`                                                        | likewise                                                                  |
 | Off    | —    | none         | everything                                                    | everything                                                                |
 
 - **Budgets under ~86 MB/h** (open question in ADR 0018 / feature-wins §4.6): met by the `audio`
