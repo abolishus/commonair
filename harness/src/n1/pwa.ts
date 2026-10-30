@@ -19,6 +19,12 @@ import { N1_ROUTES } from "./selectors.ts";
 
 const SW_READY_MS = 45_000;
 const NOTIFICATION_WAIT_MS = 20_000;
+/**
+ * CDP's deliverPushMessage is fire-and-forget: a push the browser drops (a worker between
+ * versions) is never reported. Once on CI no notification came in 20 s. Delivering again is
+ * harmless: the go-live tag replaces the notification, so "exactly one" still holds.
+ */
+const PUSH_REDELIVER_MS = 5_000;
 const CDP_EVENT_MS = 15_000;
 
 /** The service worker's caches are all named this (apps/web/src/sw/cache.ts). */
@@ -126,12 +132,22 @@ function fail(what: string, problems: readonly string[]): void {
   if (problems.length > 0) throw new Error(`${what}: ${problems.join("; ")}`);
 }
 
-/** The active worker's state, waiting for the page's idle-time registration. */
+/**
+ * The active worker's state, waiting for the page's idle-time registration and then for it to
+ * finish activating: a push sent to a worker still activating can be lost.
+ */
 async function activeWorker(page: Page): Promise<string | null> {
   return page.evaluate(
     (ms) =>
       Promise.race([
-        navigator.serviceWorker.ready.then((r) => r.active?.state ?? null),
+        navigator.serviceWorker.ready.then(async (r) => {
+          const w = r.active;
+          if (w?.state === "activating")
+            await new Promise<void>((resolve) =>
+              w.addEventListener("statechange", () => w.state !== "activating" && resolve()),
+            );
+          return w?.state ?? null;
+        }),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
       ]),
     SW_READY_MS,
@@ -191,7 +207,7 @@ async function run(r: N1Run): Promise<void> {
   const page = await openHydrated(context, webUrl, "/");
 
   const state = await activeWorker(page);
-  if (state !== "activated" && state !== "activating")
+  if (state !== "activated")
     throw new Error(`the service worker is not active within ${SW_READY_MS} ms (state ${state})`);
   const cdp = await context.newCDPSession(page);
   ctx.defer(() => cdp.detach().catch(() => undefined));
@@ -213,24 +229,38 @@ async function run(r: N1Run): Promise<void> {
   // Any path-safe slug: the worker only formats it; nothing is fetched for it.
   const slug = `n1pwa_${crypto.randomUUID().slice(0, 8)}`;
   const id = await registrationId(cdp, `${origin}/`);
-  await cdp.send("ServiceWorker.deliverPushMessage", {
-    origin,
-    registrationId: id,
-    data: JSON.stringify({ v: 1, type: "go_live", slug, title: "harness push check" }),
-  });
+  let deliveries = 0;
+  const deliver = async () => {
+    deliveries++;
+    await cdp.send("ServiceWorker.deliverPushMessage", {
+      origin,
+      registrationId: id,
+      data: JSON.stringify({ v: 1, type: "go_live", slug, title: "harness push check" }),
+    });
+  };
+  await deliver();
   const deadline = Date.now() + NOTIFICATION_WAIT_MS;
+  let nextDelivery = Date.now() + PUSH_REDELIVER_MS;
   let shown = await shownNotifications(page);
   while (notificationProblems(shown, slug).length > 0 && Date.now() < deadline) {
+    if (Date.now() >= nextDelivery) {
+      await deliver();
+      nextDelivery = Date.now() + PUSH_REDELIVER_MS;
+    }
     await page.waitForTimeout(250);
     shown = await shownNotifications(page);
   }
-  fail("notification", notificationProblems(shown, slug));
+  fail(
+    "notification",
+    [...notificationProblems(shown, slug)].map((p) => `${p} after ${deliveries} push(es)`),
+  );
 
   ctx.data("n1.pwa", {
     instance: instance.name,
     workerState: state,
     caches: cached.map((c) => ({ name: c.name, entries: c.urls.length })),
     notification: shown.find((n) => n.tag === `go-live-${slug}`)?.title,
+    pushDeliveries: deliveries,
   });
 }
 
