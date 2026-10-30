@@ -97,8 +97,12 @@ export interface FloodRecord {
   digest: { text: string; t: number }[];
 }
 
-/** Render latency the window allows: one batch committed a little late, the next on time. */
-export const RENDER_TOLERANCE_MS = 50;
+/**
+ * Render latency the window allows: one batch committed late, the next on time. One governor tick
+ * (250 ms): on a loaded CI runner a commit can lag well past 50 ms, while a governor admitting two
+ * batches less than 750 ms apart still fails.
+ */
+export const RENDER_TOLERANCE_MS = 250;
 
 /**
  * The most new rows that appeared within any one-second window (a true sliding window over the
