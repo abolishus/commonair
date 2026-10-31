@@ -1,4 +1,13 @@
 {
   "preferences.pageTitle": "Preferences",
-  "preferences.footerLanguage": "Language"
+  "preferences.footerLanguage": "Language",
+  "preferences.language.title": "Language",
+  "preferences.language.description": "The language of menus, buttons and notices. What people write is shown as they wrote it.",
+  "preferences.language.label": "Display language",
+  "preferences.language.auto": "Automatic",
+  "preferences.language.autoHint": "Uses your browser's language",
+  "preferences.language.saving": "Saving…",
+  "preferences.language.saved": "Saved",
+  "localeSwitcher.saveFailed": "Couldn't change the language. Try again.",
+  "localeSwitcher.appliesOnReload": "Your choice is saved. The new language applies when you reload the page."
 }

@@ -16,8 +16,8 @@ export const Route = createFileRoute("/_app/settings/preferences")({
 });
 
 function PreferencesRoute(): React.JSX.Element {
-  const { me } = useBootstrap();
+  const { me, locale, localeFromUser } = useBootstrap();
   // Client fallback for a session that ended after the guard ran.
   if (!me) return <Navigate to="/signin" replace />;
-  return <PreferencesPage />;
+  return <PreferencesPage initial={localeFromUser ? locale : null} />;
 }

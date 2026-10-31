@@ -1,0 +1,13 @@
+{
+  "preferences.pageTitle": "Preferencias",
+  "preferences.footerLanguage": "Idioma",
+  "preferences.language.title": "Idioma",
+  "preferences.language.description": "El idioma de los menús, los botones y los avisos. Lo que escriben las personas se muestra tal como lo escribieron.",
+  "preferences.language.label": "Idioma de la interfaz",
+  "preferences.language.auto": "Automático",
+  "preferences.language.autoHint": "Usa el idioma de tu navegador",
+  "preferences.language.saving": "Guardando…",
+  "preferences.language.saved": "Guardado",
+  "localeSwitcher.saveFailed": "No se pudo cambiar el idioma. Inténtalo de nuevo.",
+  "localeSwitcher.appliesOnReload": "Tu elección se guardó. El nuevo idioma se aplicará cuando recargues la página."
+}

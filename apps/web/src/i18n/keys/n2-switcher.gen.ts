@@ -5,4 +5,13 @@
 
 export type Key =
   | "preferences.pageTitle"
-  | "preferences.footerLanguage";
+  | "preferences.footerLanguage"
+  | "preferences.language.title"
+  | "preferences.language.description"
+  | "preferences.language.label"
+  | "preferences.language.auto"
+  | "preferences.language.autoHint"
+  | "preferences.language.saving"
+  | "preferences.language.saved"
+  | "localeSwitcher.saveFailed"
+  | "localeSwitcher.appliesOnReload";
