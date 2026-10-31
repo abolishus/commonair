@@ -1,0 +1,15 @@
+{
+  "pwa.push.live": "{channel} está en vivo",
+  "pwa.update.message": "Ya está disponible una nueva versión de este sitio.",
+  "pwa.update.reload": "Recargar",
+  "pwa.update.dismiss": "Más tarde",
+  "push.toggle.label": "Notificaciones en este navegador",
+  "push.toggle.description": "Recibe una notificación en este dispositivo cuando un canal que sigues empiece a transmitir en vivo, incluso con este sitio cerrado.",
+  "push.vendorNote": "El fabricante de tu navegador retransmite estas notificaciones a este dispositivo. Viajan cifradas y solo llevan el canal y el título de la transmisión.",
+  "push.unsupported": "Este navegador no puede mostrar notificaciones de este sitio. Prueba con otro navegador o instala primero el sitio como aplicación.",
+  "push.deniedHelp": "Las notificaciones están bloqueadas para este sitio. Permítelas en la configuración del sitio de tu navegador (el ícono junto a la dirección) y luego recarga esta página.",
+  "push.toast.on": "Las notificaciones están activadas en este navegador.",
+  "push.toast.off": "Las notificaciones están desactivadas en este navegador.",
+  "push.error.on": "No se pudieron activar las notificaciones. Inténtalo de nuevo.",
+  "push.error.off": "No se pudieron desactivar las notificaciones. Inténtalo de nuevo."
+}
