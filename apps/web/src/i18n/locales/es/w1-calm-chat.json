@@ -1,7 +1,7 @@
 {
   "calmChat.toggle": "Chat en calma",
-  "calmChat.toggleOn": "Chat en calma está activado: los mensajes repetidos se agrupan y las líneas nuevas llegan más despacio",
-  "calmChat.toggleOff": "Chat en calma está desactivado: se muestran todas las líneas",
+  "calmChat.toggleOn": "El chat en calma está activado: los mensajes repetidos se agrupan y las líneas nuevas llegan más despacio",
+  "calmChat.toggleOff": "El chat en calma está desactivado: se muestran todas las líneas",
   "calmChat.settings.open": "Configuración de Chat en calma",
   "calmChat.settings.title": "Chat en calma",
   "calmChat.settings.intro": "Agrupa los mensajes repetidos y limita cuántas líneas nuevas aparecen por segundo. Las menciones a ti, a quien transmite y al equipo de moderación siempre se muestran. Se guarda en este dispositivo.",
@@ -26,7 +26,7 @@
   "blocks.replyToBlocked": "Respondiendo a una persona bloqueada",
   "blocks.block": "Bloquear a {name}",
   "blocks.confirmTitle": "¿Bloquear a {name}?",
-  "blocks.confirmBody": "Sus mensajes quedan ocultos para ti en el chat y en la repetición del chat. No se le avisa. Puedes desbloquear en Configuración, Privacidad.",
+  "blocks.confirmBody": "Sus mensajes quedan ocultos para ti en el chat y en la repetición del chat. No se le avisa. Puedes desbloquear a esta persona en Configuración, Privacidad.",
   "blocks.confirm": "Bloquear",
   "blocks.done": "Bloqueaste a {name}",
   "blocks.failed": "No se pudo bloquear a esta persona. Inténtalo de nuevo.",

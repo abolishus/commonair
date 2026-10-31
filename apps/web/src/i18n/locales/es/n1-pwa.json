@@ -1,6 +1,6 @@
 {
   "pwa.push.live": "{channel} está en vivo",
-  "pwa.update.message": "Hay una nueva versión de este sitio lista.",
+  "pwa.update.message": "Ya está disponible una nueva versión de este sitio.",
   "pwa.update.reload": "Recargar",
   "pwa.update.dismiss": "Más tarde",
   "push.toggle.label": "Notificaciones en este navegador",

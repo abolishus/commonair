@@ -3,12 +3,12 @@
   "unsubscribe.title.governance": "¿Dejar de recibir correos de gobernanza de la cooperativa?",
   "unsubscribe.intro.go_live": "Ya no recibirás un correo cuando los canales que sigues empiecen a transmitir en vivo. Las notificaciones de la aplicación y del navegador no cambian.",
   "unsubscribe.intro.governance": "Ya no recibirás correos sobre nuevas votaciones de la cooperativa ni sobre sus resultados.",
-  "unsubscribe.confirm": "Cancelar la suscripción",
-  "unsubscribe.done.title": "Cancelaste la suscripción",
+  "unsubscribe.confirm": "Darme de baja",
+  "unsubscribe.done.title": "Te diste de baja",
   "unsubscribe.done.go_live": "Ya no recibirás correos de transmisiones en vivo. Puedes volver a activarlos en tu configuración de notificaciones.",
   "unsubscribe.done.governance": "Ya no recibirás correos de gobernanza de la cooperativa. Puedes volver a activarlos en tu configuración de notificaciones.",
   "unsubscribe.settings": "Configuración de notificaciones",
-  "unsubscribe.invalid.title": "Este enlace para cancelar la suscripción no funciona",
+  "unsubscribe.invalid.title": "Este enlace para darte de baja no funciona",
   "unsubscribe.invalid.body": "Puede que el enlace esté incompleto o vencido. Ábrelo de nuevo desde el correo o elige tus correos en tu configuración de notificaciones.",
-  "unsubscribe.failed": "No se pudo cancelar la suscripción. Inténtalo de nuevo."
+  "unsubscribe.failed": "No se pudo completar la baja. Inténtalo de nuevo."
 }
