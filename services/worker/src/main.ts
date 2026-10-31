@@ -80,7 +80,10 @@ const worker = createWorker({
   classifier: () => networks.classifier,
   moderation,
   ...(webPush ? { webPush } : {}),
+  demoSeedFull: env.DEMO_SEED_FULL,
 });
+if (env.DEMO_SEED_FULL)
+  logger.warn("DEMO_SEED_FULL is on: channel points accrue on demo data (local and staging only)");
 if (env.EVENTSUB_ALLOW_INSECURE_CALLBACKS)
   logger.warn("EVENTSUB_ALLOW_INSECURE_CALLBACKS is on: webhook callbacks may reach private networks");
 

@@ -14,7 +14,7 @@ export const job = defineJob({
   schedule: { every: 60_000 },
   attempts: 1,
   handler: async (_data, ctx) => {
-    const r = await accruePoints(ctx);
+    const r = await accruePoints(ctx, { includeDemo: ctx.demoSeedFull === true });
     return { viewers: r.viewers, points: r.points };
   },
 });

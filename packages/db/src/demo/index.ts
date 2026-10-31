@@ -5,5 +5,5 @@
 export { anchoredUser, demoIdentity } from "./anchors.ts";
 export { CLEAR_STEPS, type ClearReport, clearDemo, clearDemoRows } from "./clear.ts";
 export * from "./data.ts";
-export { generatePassword, hashPassword, verifyPassword } from "./password.ts";
+export { generatePassword, hashPassword, passwordProblem, verifyPassword } from "./password.ts";
 export { type SeedResult, type SeedSummary, countAnchoredUsers, seedDemo, seedDemoRows } from "./seed.ts";

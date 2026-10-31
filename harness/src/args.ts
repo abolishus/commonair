@@ -4,6 +4,7 @@
 /** CLI argument parsing (pure, unit-tested). */
 import { parseDuration } from "./metrics.ts";
 import { PROFILES, type Profile } from "./scenario.ts";
+import { SEED_SCALE_NAMES, type SeedScaleName, isSeedScaleName } from "./seed/scale.ts";
 
 export interface CommonFlags {
   profile: Profile;
@@ -23,6 +24,8 @@ export type Command =
       browserViewers?: number;
       protocol: "rtmp" | "whip";
     } & CommonFlags)
+  | { kind: "seed-full"; scale: SeedScaleName; seed: number; confirm?: string }
+  | { kind: "seed-live"; channels: number; durationMs?: number }
   | { kind: "help" };
 
 export class UsageError extends Error {
@@ -36,11 +39,16 @@ export const USAGE = `Usage:
   bun harness/src/cli.ts run <scenario...> [--profile no-proprietary] [--report <path>]
                                            [--set key=value]... [--player harness|web] [--skip-unavailable]
   bun harness/src/cli.ts list [--json]
+  bun harness/src/cli.ts seed full --confirm <host:port/db> [--scale small|medium|large] [--seed <n>]
+  bun harness/src/cli.ts seed live [--channels <K>] [--duration <30m>]
   bun harness/src/cli.ts load --streamers <N> --viewers <M> --duration <120s>
                               [--browser-viewers <K>] [--protocol rtmp|whip] [--report <path>]
 
   run       run scenarios against the running stack ("full" runs every scenario)
   list      list available scenarios
+  seed full fill a fresh local or staging database with demo data for every feature
+            (needs DEMO_SEED_FULL=true and a database with no users; remove it by resetting)
+  seed live keep K seeded channels streaming with chat until stopped (or for --duration)
   load      N streamers x M viewers for a duration; reports origin egress, CPU,
             p95 glass-to-glass latency and TTFF, and stall rate
 
@@ -147,6 +155,39 @@ export function parseArgs(argv: readonly string[]): Command {
         protocol,
         ...common,
       };
+    }
+    case "seed": {
+      const [sub, ...extra] = positional;
+      if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+      if (Object.keys(params).length > 0) throw new UsageError("--set is not an option for seed");
+      if (sub === "full") {
+        known(["--scale", "--seed", "--confirm"]);
+        const scale = flags.get("--scale") ?? "small";
+        if (!isSeedScaleName(scale)) throw new UsageError(`--scale must be one of ${SEED_SCALE_NAMES.join(", ")}`);
+        const confirm = flags.get("--confirm");
+        return {
+          kind: "seed-full",
+          scale,
+          seed: positiveInt("--seed", flags.get("--seed") ?? "1"),
+          ...(confirm ? { confirm } : {}),
+        };
+      }
+      if (sub === "live") {
+        known(["--channels", "--duration"]);
+        const channels = positiveInt("--channels", flags.get("--channels") ?? "3");
+        if (channels < 1) throw new UsageError("--channels must be at least 1");
+        const d = flags.get("--duration");
+        let durationMs: number | undefined;
+        if (d !== undefined) {
+          try {
+            durationMs = parseDuration(d);
+          } catch (err) {
+            throw new UsageError((err as Error).message);
+          }
+        }
+        return { kind: "seed-live", channels, ...(durationMs === undefined ? {} : { durationMs }) };
+      }
+      throw new UsageError("seed needs full or live");
     }
     default:
       throw new UsageError(`unknown command "${command}"`);

@@ -59,6 +59,8 @@ export interface CreateWorkerOptions {
   moderation?: ModerationOptions;
   /** Web push (N1); `main.ts` passes `webPushSettings(env, site)`, absent when push is off. */
   webPush?: WebPushSettings;
+  /** DEMO_SEED_FULL (local and staging only); see `WorkerContext.demoSeedFull`. */
+  demoSeedFull?: boolean;
   now?: () => Date;
 }
 
@@ -102,6 +104,7 @@ export function createWorker(opts: CreateWorkerOptions): WorkerHandle {
     money: opts.money ?? moneyConfigFromEnv(),
     moderation: opts.moderation ? resolveModeration(opts.moderation, valkey) : undefined,
     ...(opts.webPush ? { webPush: opts.webPush } : {}),
+    ...(opts.demoSeedFull ? { demoSeedFull: true } : {}),
     now: opts.now ?? (() => new Date()),
   };
 

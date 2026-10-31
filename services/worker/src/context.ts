@@ -63,5 +63,7 @@ export interface WorkerContext {
   moderation?: ModerationRuntime;
   /** Web push (N1); absent when WEB_PUSH_ENABLED is off. */
   webPush?: WebPushSettings;
+  /** DEMO_SEED_FULL: demo data is disposable (local and staging), so jobs need not skip it. */
+  demoSeedFull?: boolean;
   now(): Date;
 }

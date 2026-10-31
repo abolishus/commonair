@@ -345,6 +345,12 @@ the tables by hand. Columns:
 | --------------------- | -------- | ------- | --------- | -------------------------------------------------------------------------------- |
 | `INTERACT_TEST_HOOKS` | no       | `false` | —         | Harness only: serves `POST /internal/interact/tick`. Never on a public instance. |
 
+### `seedEnv`
+
+| Variable         | Required | Default | Self-host | Description                                                                                             |
+| ---------------- | -------- | ------- | --------- | ------------------------------------------------------------------------------------------------------- |
+| `DEMO_SEED_FULL` | no       | `false` | —         | Local and staging only: allow the full seed, and points accrual on demo data. Never on a real instance. |
+
 ### `chatEnv`
 
 | Variable               | Required | Default | Self-host | Description                                                                                                            |

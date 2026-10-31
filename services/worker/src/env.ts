@@ -9,6 +9,7 @@ import {
   moderationEnv,
   coopEnv,
   interactEnv,
+  seedEnv,
   chatEnv,
   internalEnv,
   evidenceSealEnv,
@@ -50,6 +51,8 @@ export const workerEnv = z
     ...opsEnv.shape,
     // E8: the interactivity test hook (ADR 0026).
     ...interactEnv.shape,
+    // The full-coverage seed: points accrue on demo data only while it is on (local and staging).
+    ...seedEnv.shape,
     // W1: chat retention, the verified-watch writer and the surge guard (ADR 0012 amendment 1, ADR 0015).
     ...chatEnv.shape,
     // W1: verified-watch jitter (ADR 0015 decision 4)

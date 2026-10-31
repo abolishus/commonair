@@ -19,7 +19,8 @@
  * Skipped: the channel's own owner, bot accounts, platform-suspended and deleted accounts, channels
  * whose points are off, and demo data (a demo channel's viewers and a demo viewer anywhere; the
  * `demo:clear` two-anchor rule), because a `loyalty_transactions` row is append-only and
- * `restrict`, so one on demo data would make `demo:clear` fail as a whole.
+ * `restrict`, so one on demo data would make `demo:clear` fail as a whole. The full seed's
+ * disposable databases (`DEMO_SEED_FULL`, removed by a reset) pass `includeDemo` to credit them.
  */
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { anchoredUser, postPointsInTx, schema as s, type Database } from "@commonair/db";
@@ -38,6 +39,8 @@ export interface AccrueOptions {
   now?: Date;
   batchSize?: number;
   maxViewers?: number;
+  /** Credit demo data too (`DEMO_SEED_FULL`: local and staging databases removed by a reset). */
+  includeDemo?: boolean;
 }
 
 export interface AccrueResult {
@@ -56,6 +59,8 @@ interface Candidate {
 const tsz = (d: Date): SQL => sql`${d.toISOString()}::timestamptz`;
 
 const POINTS_OFF = sql`coalesce(bc.config->'loyalty'->>'enabled', 'true') = 'false'`;
+const NOT_DEMO = sql`and not exists (select 1 from users where users.id = c.owner_id and ${anchoredUser()})
+       and not exists (select 1 from users where users.id = ps.user_id and ${anchoredUser()})`;
 const SUSPENDED = (now: Date): SQL => sql`(u.banned and (u.ban_expires is null or u.ban_expires > ${tsz(now)}))`;
 
 /**
@@ -83,7 +88,12 @@ async function markUnearnable(db: Database, now: Date, everyone: boolean): Promi
 }
 
 /** Who may earn on which channel: everything but the time itself (see the module comment). */
-function candidates(now: Date, after: { channelId: string; userId: string } | null, limit: number): SQL {
+function candidates(
+  now: Date,
+  after: { channelId: string; userId: string } | null,
+  limit: number,
+  includeDemo: boolean,
+): SQL {
   const since = new Date(now.getTime() - SCORED_LOOKBACK_MS);
   const cursor = after
     ? sql`and (ps.channel_id, ps.user_id) > (${after.channelId}::uuid, ${after.userId}::uuid)`
@@ -106,8 +116,7 @@ function candidates(now: Date, after: { channelId: string; userId: string } | nu
        and u.deleted_at is null
        and not ${SUSPENDED(now)}
        and not ${POINTS_OFF}
-       and not exists (select 1 from users where users.id = c.owner_id and ${anchoredUser()})
-       and not exists (select 1 from users where users.id = ps.user_id and ${anchoredUser()})
+       ${includeDemo ? sql`` : NOT_DEMO}
        ${cursor}
      group by ps.channel_id, ps.user_id
      order by ps.channel_id, ps.user_id
@@ -192,6 +201,7 @@ export async function accruePoints(
   const now = opts.now ?? new Date();
   const batch = Math.max(1, opts.batchSize ?? ACCRUAL_BATCH);
   const max = Math.max(1, opts.maxViewers ?? ACCRUAL_MAX_VIEWERS);
+  const includeDemo = opts.includeDemo === true;
   const setting = await readPointsAccrual(ctx.db, ctx.logger);
   const result: AccrueResult = { viewers: 0, points: 0 };
   await markUnearnable(ctx.db, now, setting.dailyCapPerChannel === 0);
@@ -202,11 +212,11 @@ export async function accruePoints(
   for (;;) {
     const limit = Math.min(batch, max - handled);
     if (limit <= 0) {
-      const more = (await ctx.db.execute(candidates(now, after, 1))) as unknown as Candidate[];
+      const more = (await ctx.db.execute(candidates(now, after, 1, includeDemo))) as unknown as Candidate[];
       if (more.length > 0) ctx.logger.warn("points accrual stopped early; the next run continues", { handled, max });
       break;
     }
-    const rows = (await ctx.db.execute(candidates(now, after, limit))) as unknown as Candidate[];
+    const rows = (await ctx.db.execute(candidates(now, after, limit, includeDemo))) as unknown as Candidate[];
     for (const c of rows) {
       const points = await accrueOne(ctx.db, c, setting, now);
       if (points > 0) {

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Harness CLI: `run <scenario...>`, `list`, `load`. Exit code 0 only when every scenario passed
+ * Harness CLI: `run <scenario...>`, `list`, `load`, `seed full|live`. Exit code 0 only when every scenario passed
  * (or was skipped by the profile); reports land in `harness/reports/`.
  */
 import { createLogger } from "@commonair/observability";
@@ -15,6 +15,7 @@ import { FULL_SHARDS, loadRegistry, onlySelected } from "./registry.ts";
 import { DEFAULT_REPORT_DIR, formatHuman, writeReport } from "./report.ts";
 import { formatSkipTable, newRunId, runScenarios } from "./runner.ts";
 import { defineScenario } from "./scenario.ts";
+import { runSeedFull, runSeedLive } from "./seed/run.ts";
 
 async function main(argv: string[]): Promise<number> {
   let command: Command;
@@ -30,6 +31,21 @@ async function main(argv: string[]): Promise<number> {
   if (command.kind === "help") {
     console.log(USAGE);
     return 0;
+  }
+
+  if (command.kind === "seed-live") return runSeedLive({ channels: command.channels, durationMs: command.durationMs });
+  if (command.kind === "seed-full") {
+    const env = loadHarnessEnv(process.env);
+    const controller = new AbortController();
+    process.once("SIGINT", () => controller.abort(new Error("interrupted")));
+    return runSeedFull({
+      scale: command.scale,
+      seed: command.seed,
+      confirm: command.confirm,
+      env,
+      log: createLogger({ service: "harness-seed", level: env.LOG_LEVEL }),
+      signal: controller.signal,
+    });
   }
 
   const registry = await loadRegistry();

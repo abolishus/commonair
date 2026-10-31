@@ -248,6 +248,15 @@ describe("demo data (decided 2026-10-29: demo:clear keeps working)", () => {
     await accruePoints(ctx());
     expect(await balance(c.id, onlyName)).toBe(10);
   });
+
+  test("with includeDemo (DEMO_SEED_FULL), demo viewers on demo channels earn", async () => {
+    const streamer = await user(demo(`s${tag()}`));
+    const c = await channel(streamer);
+    const v = await user(demo(`v${tag()}`));
+    await session(c.id, v, 60);
+    await accruePoints(ctx(), { includeDemo: true });
+    expect(await balance(c.id, v)).toBe(10);
+  });
 });
 
 describe("how much", () => {

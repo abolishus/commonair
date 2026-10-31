@@ -339,6 +339,17 @@ export const interactEnv = z.object({
   INTERACT_TEST_HOOKS: bool.default(false),
 });
 
+/**
+ * The full-coverage seed (`harness seed full`, `.claude/briefs/seed-full`). Local and staging only:
+ * the harness refuses to seed unless this is on and the database has no users, and the worker
+ * credits channel points to demo users only while it is on (demo data on a real instance must stay
+ * removable by `demo:clear`). The database is reset to remove a full seed.
+ */
+export const seedEnv = z.object({
+  /** Local and staging only: allow the full seed, and points accrual on demo data. Never on a real instance. */
+  DEMO_SEED_FULL: bool.default(false),
+});
+
 const chatShape = z.object({
   /** ADR 0015 decision 7: the verified-watch gate; `off` until its GA criteria are met (S1 stage 4 owns CDN fetch-judging). */
   CHAT_WATCH_GATE: z.enum(["off", "on"]).default("off"),
@@ -699,6 +710,7 @@ export const ALL_ENV_SCHEMAS = {
   coopEnv,
   opsEnv,
   interactEnv,
+  seedEnv,
   chatEnv: chatShape,
   evidenceSealEnv,
   evidenceOpenEnv,

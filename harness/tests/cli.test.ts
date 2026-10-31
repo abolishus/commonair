@@ -74,6 +74,34 @@ describe("argument parsing", () => {
   });
 
   test("list and help", () => {
+    expect(parseArgs(["seed", "full", "--confirm", "localhost:5432/commonair"])).toEqual({
+      kind: "seed-full",
+      scale: "small",
+      seed: 1,
+      confirm: "localhost:5432/commonair",
+    });
+    expect(parseArgs(["seed", "full", "--scale=large", "--seed", "42"])).toEqual({
+      kind: "seed-full",
+      scale: "large",
+      seed: 42,
+    });
+    expect(parseArgs(["seed", "live"])).toEqual({ kind: "seed-live", channels: 3 });
+    expect(parseArgs(["seed", "live", "--channels", "5", "--duration", "30m"])).toEqual({
+      kind: "seed-live",
+      channels: 5,
+      durationMs: 30 * 60_000,
+    });
+    for (const bad of [
+      ["seed"],
+      ["seed", "fill"],
+      ["seed", "full", "--scale", "huge"],
+      ["seed", "full", "--channels", "2"],
+      ["seed", "full", "extra"],
+      ["seed", "full", "--set", "a=b"],
+      ["seed", "live", "--channels", "0"],
+      ["seed", "live", "--scale", "small"],
+    ])
+      expect(() => parseArgs(bad), bad.join(" ")).toThrow(UsageError);
     expect(parseArgs(["list", "--json"])).toEqual({ kind: "list", json: true });
     expect(parseArgs([])).toEqual({ kind: "help" });
     expect(parseArgs(["--help"])).toEqual({ kind: "help" });

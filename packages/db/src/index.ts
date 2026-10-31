@@ -11,6 +11,7 @@ export * as schema from "./schema/index.ts";
 export { runMigrations, MIGRATIONS_DIR } from "./migrate.ts";
 /** Demo-data anchors (both required), so jobs can skip demo users and channels as `demo:clear` selects them. */
 export { anchoredUser } from "./demo/anchors.ts";
+export { schemaTableNames } from "./table-names.ts";
 export { DEFAULT_GOVERNANCE_SETTINGS, seedGovernanceSettings, seedLegalDocuments } from "./seed.ts";
 export {
   CONSENT_CATEGORIES,
