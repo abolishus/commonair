@@ -1,17 +1,17 @@
 {
   "appeals.account.queueIntro": "Apelaciones abiertas, de la más antigua a la más reciente. Revocar deshace lo que se puede: se quita la etiqueta para adultos, se levanta el bloqueo permanente o la suspensión vigente y se revierte la acción sobre la cuenta.",
   "appeals.account.title": "Acciones sobre la cuenta",
-  "appeals.account.intro": "Advertencias por derechos de autor y suspensiones registradas en tu cuenta. Si alguna es incorrecta, apélala y el equipo de moderación la revisará.",
+  "appeals.account.intro": "Faltas por derechos de autor y suspensiones registradas en tu cuenta. Si alguna es incorrecta, apélala y el equipo de moderación la revisará.",
   "appeals.account.loading": "Cargando las acciones sobre tu cuenta…",
   "appeals.account.loadFailed": "No se pudieron cargar las acciones sobre tu cuenta. Recarga la página para intentarlo de nuevo.",
   "appeals.account.empty": "No hay acciones sobre la cuenta",
   "appeals.account.emptyHint": "No se registró nada en contra de tu cuenta.",
-  "appeals.account.action.dmca_strike": "Advertencia por derechos de autor",
+  "appeals.account.action.dmca_strike": "Falta por derechos de autor",
   "appeals.account.action.dmca_termination": "Suspendida por infracción reiterada",
   "appeals.account.inEffect": "Vigente",
   "appeals.account.reversal.appeal_overturned": "Revertida tras una apelación",
   "appeals.account.reversal.counter_notice_restored": "Revertida tras tu contranotificación",
-  "appeals.account.reversal.strikes_below_threshold": "Revertida: por debajo del límite de advertencias",
+  "appeals.account.reversal.strikes_below_threshold": "Revertida: por debajo del límite de faltas",
   "appeals.account.recorded": "Registrada",
   "appeals.account.appeal": "Apelar",
   "appeals.account.appealPending": "Apelación pendiente de revisión",
@@ -35,7 +35,7 @@
   "appeals.account.effect.liftsSuspension": "Revocar levanta la suspensión.",
   "appeals.account.effect.recordsOnly": "Revocar solo registra la decisión.",
   "appeals.account.effect.moderationAction": "Revocar levanta el bloqueo permanente del chat, la expulsión temporal o la suspensión mientras estén vigentes. Cualquier otra acción solo se registra.",
-  "appeals.account.effect.reversesStrike": "Revocar revierte la advertencia y, si la cuenta queda por debajo del límite, la suspensión por infracción reiterada.",
+  "appeals.account.effect.reversesStrike": "Revocar revierte la falta y, si la cuenta queda por debajo del límite, la suspensión por infracción reiterada.",
   "appeals.account.effect.reversesTermination": "Revocar revierte la cancelación de la cuenta y levanta la suspensión.",
-  "appeals.account.effect.accountAction": "Revocar revierte la advertencia o la cancelación de la cuenta. Una cancelación revertida levanta la suspensión por infracción reiterada."
+  "appeals.account.effect.accountAction": "Revocar revierte la falta o la cancelación de la cuenta. Una cancelación revertida levanta la suspensión por infracción reiterada."
 }

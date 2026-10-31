@@ -3,6 +3,6 @@
   "layout.contact": "¿Tienes preguntas? Escribe a {contact}.",
   "layout.source": "{instance} funciona con software libre. {sourceLink}.",
   "layout.sourceLinkLabel": "Obtén el código fuente",
-  "layout.unsubscribe": "Cancelar la suscripción a estos correos",
+  "layout.unsubscribe": "Darte de baja de estos correos",
   "layout.buttonFallback": "Si el botón no funciona, copia este enlace en tu navegador: {url}"
 }

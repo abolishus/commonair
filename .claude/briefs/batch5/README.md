@@ -126,6 +126,61 @@ for the es units (keys come from English).
 A unit that needs a recurring term not in the table picks one, uses it consistently, and lists it
 in its final message; the orchestrator adds it here and N2-weblate's CSV takes the merged table.
 
+Added after wave 1 (2026-10-31, from the units' reports; conflicts resolved by the orchestrator):
+
+| English                                                   | Spanish                                                                       |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| amount                                                    | monto                                                                         |
+| tip / tipped                                              | propina / dio una propina                                                     |
+| tier                                                      | nivel                                                                         |
+| gift sub / gifted subscriptions                           | suscripción de regalo / suscripciones de regalo                               |
+| chargeback                                                | contracargo                                                                   |
+| earnings / balance                                        | ganancias / saldo                                                             |
+| held / owed / surplus                                     | retenido / adeudado / excedente                                               |
+| payout account / payout run                               | cuenta de liquidación / ronda de liquidaciones                                |
+| member share                                              | aportación de miembro                                                         |
+| supporter                                                 | la persona que apoya / quienes apoyan                                         |
+| creators / creator council                                | quienes crean contenido / consejo de creadores                                |
+| broadcaster                                               | streamer ("quien transmite" in running prose)                                 |
+| offline (not streaming)                                   | no está en vivo / fuera del aire ("sin conexión" only for a network or relay) |
+| moderator / admin / treasurer as actor                    | el equipo de moderación / la administración / la tesorería                    |
+| unsubscribe                                               | darse de baja (never "cancelar la suscripción", which is the paid kind)       |
+| notice / counter-notice (DMCA)                            | aviso / contraaviso                                                           |
+| claimant / uploader                                       | quien reclama / quien subió el material                                       |
+| strike (copyright)                                        | falta                                                                         |
+| repeat infringer                                          | infractor reincidente                                                         |
+| fair use                                                  | uso legítimo (fair use)                                                       |
+| takedown request / legal hold                             | solicitud de retirada / retención legal                                       |
+| dismiss / uphold / overturn                               | desestimar / mantener / revertir la decisión                                  |
+| audit log                                                 | registro de auditoría                                                         |
+| board / board minute                                      | junta directiva / acta de la junta                                            |
+| quorum / turnout / electorate                             | quórum / participación / censo electoral                                      |
+| ballot / approval ballot                                  | papeleta / voto por aprobación                                                |
+| candidacy / seat / rank / term                            | candidatura / puesto / posición / mandato                                     |
+| patronage statement                                       | estado de cuenta del retorno cooperativo                                      |
+| simulcast                                                 | retransmisión simultánea                                                      |
+| fingerprint                                               | huella digital                                                                |
+| cooldown                                                  | tiempo de espera                                                              |
+| song requests / leaderboard                               | peticiones de canciones / clasificación                                       |
+| pool / bet / outcome (prediction)                         | bote / apuesta / resultado                                                    |
+| encoder / bitrate / keyframe                              | codificador / tasa de bits / fotograma clave                                  |
+| egress                                                    | tráfico de salida                                                             |
+| source (egress) / origin                                  | fuente / origen                                                               |
+| integrity flags                                           | alertas de integridad                                                         |
+| display name                                              | nombre visible                                                                |
+| wave (surge)                                              | ráfaga                                                                        |
+| two-factor authentication / recovery codes / security key | autenticación en dos pasos / códigos de recuperación / llave de seguridad     |
+| community guidelines                                      | normas de la comunidad                                                        |
+| data export                                               | exportación de datos                                                          |
+| sidebar / breadcrumb / command palette                    | barra lateral / ruta de navegación / paleta de comandos                       |
+| theme (dark / light / system)                             | tema (oscuro / claro / sistema)                                               |
+| Preferences / Language / Automatic                        | Preferencias / Idioma / Automático                                            |
+| ID                                                        | ID (always capitals)                                                          |
+| try again                                                 | "Reintentar" on buttons, "Inténtalo de nuevo." in sentences                   |
+
+Numbers: amounts use the decimal comma in examples (5,00; 12,50); four-digit numbers take no group
+separator (8000). Months are capitalised; the month label is "{month} de {year}".
+
 ## Shared rules
 
 - Units are told "read and implement `<brief>`", one git worktree each, branch `n2/<unit>`

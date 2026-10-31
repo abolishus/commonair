@@ -93,7 +93,7 @@ Se revirtió por contracargo el pago de una persona que te apoya
 
 Un pago a tu canal se disputó ante el emisor de la tarjeta y el dinero se devolvió a quien pagó.
 
-Importe
+Monto
 
 4,99 €
 
@@ -105,7 +105,7 @@ Referencia
 
 CB-7731
 
-El importe se descontó de tu saldo. Si tu saldo queda por debajo de cero, se recupera de tus ganancias futuras.
+El monto se descontó de tu saldo. Si tu saldo queda por debajo de cero, se recupera de tus ganancias futuras.
 
 Ver ganancias https://air.example.test/dashboard/earnings
 
@@ -412,7 +412,7 @@ Recibes este correo por tu cuenta en Example Air.
 
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
 
-Cancelar la suscripción a estos correos https://air.example.test/api/email/unsubscribe?list=go_live&token=sample"
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=go_live&token=sample"
 `;
 
 exports[`governanceResultPublished in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
@@ -443,7 +443,7 @@ Recibes este correo por tu cuenta en Example Air.
 
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
 
-Cancelar la suscripción a estos correos https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
 `;
 
 exports[`governanceVoteOpened in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
@@ -472,7 +472,7 @@ Recibes este correo por tu cuenta en Example Air.
 
 Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
 
-Cancelar la suscripción a estos correos https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
+Darte de baja de estos correos https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
 `;
 
 exports[`magicLink in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
@@ -572,7 +572,7 @@ Tu liquidación va en camino
 
 Te enviamos una liquidación de 1234,56 €.
 
-Importe
+Monto
 
 1234,56 €
 

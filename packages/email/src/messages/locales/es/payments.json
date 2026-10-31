@@ -3,7 +3,7 @@
   "payoutSent.preview": "Tu liquidación va en camino.",
   "payoutSent.heading": "Tu liquidación va en camino",
   "payoutSent.body": "Te enviamos una liquidación de {amount}.",
-  "payoutSent.amountLabel": "Importe",
+  "payoutSent.amountLabel": "Monto",
   "payoutSent.sentLabel": "Enviada",
   "payoutSent.referenceLabel": "Referencia",
   "payoutSent.timing": "Según tu banco, puede tardar algunos días hábiles en llegar.",
@@ -15,10 +15,10 @@
   "chargebackNotice.headingClawback": "Se revirtieron algunas de tus ganancias",
   "chargebackNotice.bodyChargeback": "Un pago a tu canal se disputó ante el emisor de la tarjeta y el dinero se devolvió a quien pagó.",
   "chargebackNotice.bodyClawback": "Se revirtieron ganancias que ya se te habían acreditado, tras un reembolso o un caso de fraude confirmado.",
-  "chargebackNotice.amountLabel": "Importe",
+  "chargebackNotice.amountLabel": "Monto",
   "chargebackNotice.dateLabel": "Fecha",
   "chargebackNotice.referenceLabel": "Referencia",
-  "chargebackNotice.balance": "El importe se descontó de tu saldo. Si tu saldo queda por debajo de cero, se recupera de tus ganancias futuras.",
+  "chargebackNotice.balance": "El monto se descontó de tu saldo. Si tu saldo queda por debajo de cero, se recupera de tus ganancias futuras.",
   "chargebackNotice.action": "Ver ganancias",
   "chargebackNotice.question": "Si crees que es un error, escribe a {contact}."
 }

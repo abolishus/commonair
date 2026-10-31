@@ -81,6 +81,13 @@ describe("checkCatalog", () => {
     expect(problems.join("\n")).not.toContain('"a.b_c"');
   });
 
+  it("lets a caller widen later key segments, never the first", () => {
+    const dir = fixture({ "en/ok.json": { "clause.self-harm": "x", "self-harm.x": "x", "a.b_c": "x" } });
+    const problems = checkCatalog(readNamespaces(dir), { keySegment: /[A-Za-z0-9_-]+/ });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('"self-harm.x"');
+  });
+
   it("reports a message that does not parse, with the offset", () => {
     const dir = fixture({ "en/a.json": { "a.b": "{n, number}" }, "es/a.json": { "a.b": "{n, plural, one {x}}" } });
     const problems = checkCatalog(readNamespaces(dir));

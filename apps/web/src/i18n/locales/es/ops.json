@@ -150,7 +150,7 @@
   "content.vodDeleted": "Video eliminado.",
   "content.clipDeleted": "Clip eliminado.",
   "content.clippedBy": "Clip de {name}",
-  "content.views": "{count} reproducciones",
+  "content.views": "{formatted} {count, plural, one {reproducción} other {reproducciones}}",
   "content.actionFailed": "No se pudo guardar ese cambio. Inténtalo de nuevo.",
   "content.loadFailed": "No se pudieron cargar tus videos y clips.",
   "privacy.title": "Privacidad",

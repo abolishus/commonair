@@ -31,9 +31,8 @@ const samples = sampleData(site.publicUrl);
 
 describe("catalogs", () => {
   test("parse, keep English's arguments in every translation, and have no stray keys", () => {
-    // Email keys carry the moderation clause ids, some of which contain "-" (`clause.safety.self-harm`):
-    // `KEY_NAME` in @commonair/i18n does not allow that yet (contract request), so only that rule is waived.
-    const problems = checkCatalog(namespaces).filter((p) => !/: key "[^"]*-[^"]*" must match/.test(p));
+    // Email keys carry the moderation clause ids, some of which contain "-" (`clause.safety.self-harm`).
+    const problems = checkCatalog(namespaces, { keySegment: /[A-Za-z0-9_-]+/ });
     expect(problems).toEqual([]);
   });
 

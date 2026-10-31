@@ -385,14 +385,7 @@ describe.each([
  * template (`locale-option-${tag}`). Ids whose unit has not merged wait in PENDING_N2_SWITCHER_IDS,
  * and a pending id that is already rendered fails, so the list is emptied when N2-switcher merges.
  */
-const PENDING_N2_SWITCHER_IDS: readonly string[] = [
-  "locale-select",
-  "locale-option-auto",
-  "locale-option-<tag>",
-  "locale-save-status",
-  "footer-locale-switcher",
-  "footer-locale-option-<tag>",
-];
+const PENDING_N2_SWITCHER_IDS: readonly string[] = [];
 
 function sectionTestIds(doc: string, heading: string): string[] {
   const text = readFileSync(join(ROOT, "docs/testing", doc), "utf8");

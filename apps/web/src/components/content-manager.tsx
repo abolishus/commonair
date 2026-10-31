@@ -115,7 +115,7 @@ export function ContentManager({ channel }: { channel: string }): React.JSX.Elem
       vods={vodList ? vodRows(vodList) : null}
       clips={
         clipList
-          ? clipRows(clipList, (views) => t("content.views", { count: formatCompactNumber(views, locale) }))
+          ? clipRows(clipList, (views) => t("content.views", { count: views, formatted: formatCompactNumber(views, locale) }))
           : null
       }
       labels={labels()}

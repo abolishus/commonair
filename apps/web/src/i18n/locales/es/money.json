@@ -167,7 +167,7 @@
   "treasury.payouts.runFailed": "No se pudieron ejecutar las liquidaciones.",
   "treasury.payouts.ran": "Ronda de liquidaciones terminada",
   "treasury.payouts.result": "Ronda de liquidaciones terminada",
-  "treasury.payouts.resultBody": "{created} liquidaciones creadas, {held} retenidas, {total} en total.",
+  "treasury.payouts.resultBody": "{created, plural, one {# liquidación creada} other {# liquidaciones creadas}}, {held, plural, one {# retenida} other {# retenidas}}, {total} en total.",
   "treasury.payouts.caption": "Liquidaciones",
   "treasury.payouts.creator": "Creador",
   "treasury.payouts.amount": "Monto",

@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { parseMessage } from "@commonair/i18n";
-import { checkTranslation } from "@commonair/i18n/catalog";
+import { checkTranslation, parseMessage } from "@commonair/i18n";
 import { BUNDLED } from "./bundled.ts";
 import { en, type EmailCatalog } from "./en.ts";
 import type { Catalogs, PartialCatalog } from "./types.ts";
@@ -13,7 +12,7 @@ export type { Catalogs, PartialCatalog } from "./types.ts";
 
 /**
  * Whether a translated string can stand in for English: it parses and uses the same arguments the
- * same ways (`@commonair/i18n/catalog` `checkTranslation`). Anything else renders English.
+ * same ways (`@commonair/i18n` `checkTranslation`). Anything else renders English.
  */
 function usable(english: string, translated: unknown): translated is string {
   if (typeof translated !== "string") return false;

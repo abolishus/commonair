@@ -267,7 +267,7 @@
   "coop.elections.seats": "Seats",
   "coop.elections.nominationsClose": "Nominations close",
   "coop.elections.votingEnds": "Voting ends",
-  "coop.elections.votes": "{count} votes",
+  "coop.elections.votes": "{count, plural, one {# vote} other {# votes}}",
   "coop.elections.candidates": "Candidates",
   "coop.elections.elected": "Elected",
   "coop.elections.noCandidates": "No candidates yet.",

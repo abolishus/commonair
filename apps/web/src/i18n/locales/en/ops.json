@@ -150,7 +150,7 @@
   "content.vodDeleted": "Video deleted.",
   "content.clipDeleted": "Clip deleted.",
   "content.clippedBy": "Clipped by {name}",
-  "content.views": "{count} views",
+  "content.views": "{formatted} {count, plural, one {view} other {views}}",
   "content.actionFailed": "That change could not be saved. Try again.",
   "content.loadFailed": "Your videos and clips could not be loaded.",
   "privacy.title": "Privacy",

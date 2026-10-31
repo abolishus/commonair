@@ -167,7 +167,7 @@
   "treasury.payouts.runFailed": "Could not run payouts.",
   "treasury.payouts.ran": "Payout run finished",
   "treasury.payouts.result": "Payout run finished",
-  "treasury.payouts.resultBody": "{created} payouts created, {held} held, {total} in total.",
+  "treasury.payouts.resultBody": "{created, plural, one {# payout created} other {# payouts created}}, {held, plural, other {# held}}, {total} in total.",
   "treasury.payouts.caption": "Payouts",
   "treasury.payouts.creator": "Creator",
   "treasury.payouts.amount": "Amount",

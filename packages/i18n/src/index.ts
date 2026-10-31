@@ -18,6 +18,7 @@ export {
   parseMessage,
   printMessage,
 } from "./format.ts";
+export { type ArgumentKind, checkTranslation, messageArguments } from "./parity.ts";
 export { localeDirection, negotiateLocale, parseAcceptLanguage, pickLocale } from "./negotiate.ts";
 export { PSEUDO_LOCALE, pseudoLocalize } from "./pseudo.ts";
 export { createTranslator } from "./translator.ts";

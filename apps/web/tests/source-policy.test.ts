@@ -79,13 +79,6 @@ const ALLOWLIST: AllowEntry[] = [
     count: 1,
     reason: "The self-hosted ALTCHA proof-of-work widget is a web component; there is no React or shadcn equivalent.",
   },
-  {
-    file: "src/lib/relays.ts",
-    rule: "inline-format",
-    match: "new Intl.NumberFormat",
-    count: 1,
-    reason: "formatBytes needs Intl unit formatting (kB, MB, …) with the locale; @commonair/ui has no byte formatter.",
-  },
 ];
 
 const RAW_INTERACTIVE = new Set(["button", "input", "select", "textarea", "table", "dialog"]);

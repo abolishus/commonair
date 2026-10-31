@@ -31,6 +31,23 @@ checks, `@commonair/i18n` in ui and email, `formatLanguageName`, `/settings/pref
 N2-es-a/b/c) and wave 2 (N2-rtl, N2-weblate, N2-pseudo). Orchestrator defaults are decisions
 (c)–(m) in the README.
 
+**Batch 5 wave 1 merged 2026-10-31** (N2-ui, N2-email, N2-switcher, N2-es-a/b/c; each implement →
+independent review (Spanish-fluent for es) → fix). Web `es` at 100% across every namespace, `ui.json`
+and the email catalogs in `en`/`es`, locale-aware formatters (`formatPercent`, `parseAmountInput`
+accepting either decimal convention), Intl policy tests, the preferences page and footer
+switcher. Contract requests applied: `relays.ts` source-policy allowlist entry removed;
+`PENDING_N2_SWITCHER_IDS` emptied; `@commonair/i18n` exports `checkTranslation` from the browser-safe
+`parity.ts` and `checkCatalog` takes `keySegment` (email allows `-` for clause ids; waiver dropped);
+seven count strings became ICU plurals in `en`+`es` (`content.views`, `safety.modq.nciiItems`,
+`safety.modq.openNcii`, `dmcaq.strikes.count`, `dmcaq.itemCount`, `coop.elections.votes`,
+`treasury.payouts.resultBody`); glossary conflicts settled (monto, darse de baja, falta) and the
+additions merged into the README table. Declined: removing the legacy `locale`/`uiMessages` exports
+from `apps/web/src/i18n/index.ts` (36 test importers, harmless; N2-ui withdrew it). Open:
+`services/api/src/routes/me-enforcement.ts` reads clause titles from email `en` (should use
+`resolveCatalog(member.locale)`); English wording nits in `copyright.receipt.restoreAfter` and the
+duplicate `dmcaq.counter.suitNote*`; e7-dmca verbatim English keys for N2-weblate to lock:
+`dmca.goodFaith`, `dmca.accuracy`, `copyright.counter.goodFaith`, `copyright.counter.jurisdiction`.
+
 **Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30, done 2026-10-30 (CI
 green on `8065ce3`, every job including all seven harness shards; self-host e2e last ran green on
 the contract steps).** Milestone checks (batch4 README): no `notImplemented` left in the W1 route
