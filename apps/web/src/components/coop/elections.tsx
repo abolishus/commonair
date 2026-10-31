@@ -134,9 +134,7 @@ export function ElectionItem({ election: e, meId, classes, onNominate, onVote }:
                   {c.statement ? <span className="wrap-anywhere text-muted-foreground">{c.statement}</span> : null}
                 </div>
                 {c.votes !== null ? (
-                  <span className="shrink-0 text-xs tabular-nums">
-                    {t("coop.elections.votes", { count: c.votes })}
-                  </span>
+                  <span className="shrink-0 text-xs tabular-nums">{t("coop.elections.votes", { count: c.votes })}</span>
                 ) : null}
               </li>
             ))}
