@@ -2,15 +2,168 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { PageHeader } from "@commonair/ui/blocks/headers";
+import { Label } from "@commonair/ui/components/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
 import { PageContainer } from "@commonair/ui/layouts";
-import type * as React from "react";
+import { toast } from "@commonair/ui/toast";
+import { useRouter } from "@tanstack/react-router";
+import * as React from "react";
+import { applyLocale } from "../../i18n/client.ts";
 import { t } from "../../i18n/index.ts";
+import { api } from "../../lib/api.ts";
+import { LanguageLabel, switchableLocales } from "./language-label.tsx";
 
-/** Settings → Preferences: the language choice (batch 5 decision (e)). A stub until N2-switcher fills it. */
-export function PreferencesPage(): React.JSX.Element {
+/** The select's value for `users.locale` = null. */
+export const AUTO = "auto";
+type Status = "idle" | "saving" | "saved" | "error";
+
+/**
+ * A switch remounts the whole tree (`applyLocale`, or the root's `syncLocale` after a reload), so
+ * the page the member sees afterwards is a new instance. The saving instance leaves its outcome
+ * here for that one to show and announce in the new language. It expires, because "Automatic" may
+ * resolve to the language already shown, and then no remount takes it.
+ */
+let carried: { value: string; at: number } | null = null;
+const CARRY_MS = 10_000;
+const ANNOUNCE_DELAY_MS = 100;
+
+function carriedValue(): string | null {
+  return carried && Date.now() - carried.at < CARRY_MS ? carried.value : null;
+}
+
+/**
+ * Settings → Preferences: the member's language (batch 5 decision (e)). The saved choice is
+ * `Me.locale` (null: Automatic, so the cookie, the browser's languages and the instance default
+ * decide), read with `me.get`; until it answers, `initial` (the root loader's locale when the
+ * member's choice decided it, else null) stands in so the server render already shows it.
+ * A choice saves at once; there is no unsaved state to lose when the tree remounts.
+ */
+export function PreferencesPage({ initial }: { initial: string | null }): React.JSX.Element {
+  const router = useRouter();
+  const [value, setValue] = React.useState(() => carriedValue() ?? initial ?? AUTO);
+  const [status, setStatus] = React.useState<Status>("idle");
+  const busy = React.useRef(false);
+  // A choice made before `me.get` answers wins over its (older) answer.
+  const touched = React.useRef(false);
+  const selectId = React.useId();
+  const hintId = React.useId();
+
+  // Announce the save that remounted this page. Set a moment after mount: a screen reader speaks
+  // a change to a live region it has already seen, not one that arrives already filled.
+  const [arrived] = React.useState(() => carriedValue() !== null);
+  React.useEffect(() => {
+    if (!arrived) return;
+    carried = null;
+    const id = window.setTimeout(() => setStatus("saved"), ANNOUNCE_DELAY_MS);
+    return () => window.clearTimeout(id);
+  }, [arrived]);
+
+  React.useEffect(() => {
+    let live = true;
+    api()
+      .me.get()
+      .then(
+        (me) => {
+          if (live && !touched.current) setValue(me.locale ?? AUTO);
+        },
+        () => {
+          // Keep the stand-in; saving still works and says so if it fails.
+        },
+      );
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const choose = async (next: string): Promise<void> => {
+    if (next === value || busy.current) return;
+    busy.current = true;
+    touched.current = true;
+    const previous = value;
+    setValue(next);
+    setStatus("saving");
+    try {
+      await api().me.update({ locale: next === AUTO ? null : next });
+    } catch {
+      busy.current = false;
+      setValue(previous);
+      setStatus("error");
+      toast.error(t("localeSwitcher.saveFailed"));
+      return;
+    }
+    busy.current = false;
+    carried = { value: next, at: Date.now() };
+    setStatus("saved");
+    if (next === AUTO) {
+      // The root loader negotiates again without a saved choice; the root then applies its answer.
+      await router.invalidate();
+      return;
+    }
+    try {
+      await applyLocale(next);
+    } catch {
+      // The catalog did not load: the choice is saved, so let the root sync from the server.
+      await router.invalidate();
+    }
+  };
+
+  const autoLabel = t("preferences.language.auto");
   return (
     <PageContainer width="narrow" data-testid="preferences-page" className="flex flex-col gap-6 py-8">
       <PageHeader title={t("preferences.pageTitle")} />
+      <section aria-labelledby={`${selectId}-title`} className="flex flex-col gap-3">
+        <h2 id={`${selectId}-title`} className="text-base font-medium">
+          {t("preferences.language.title")}
+        </h2>
+        <p id={hintId} className="text-sm text-muted-foreground">
+          {t("preferences.language.description")}
+        </p>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor={selectId}>{t("preferences.language.label")}</Label>
+          <Select<string>
+            value={value}
+            disabled={status === "saving"}
+            onValueChange={(v) => {
+              if (typeof v === "string") void choose(v);
+            }}
+          >
+            <SelectTrigger
+              id={selectId}
+              data-testid="locale-select"
+              data-value={value}
+              aria-describedby={hintId}
+              className="w-full sm:w-80"
+            >
+              <SelectValue>{(v: string) => (v === AUTO ? autoLabel : <LanguageLabel tag={v} />)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={AUTO} data-testid="locale-option-auto">
+                <span className="flex flex-col gap-0.5">
+                  <span>{autoLabel}</span>
+                  <span className="text-muted-foreground">{t("preferences.language.autoHint")}</span>
+                </span>
+              </SelectItem>
+              {switchableLocales().map((tag) => (
+                <SelectItem key={tag} value={tag} data-testid={`locale-option-${tag}`}>
+                  <LanguageLabel tag={tag} />
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p
+          aria-live="polite"
+          data-testid="locale-save-status"
+          data-state={status}
+          className="min-h-5 text-sm text-muted-foreground"
+        >
+          {status === "saving"
+            ? t("preferences.language.saving")
+            : status === "saved"
+              ? t("preferences.language.saved")
+              : null}
+        </p>
+      </section>
     </PageContainer>
   );
 }
