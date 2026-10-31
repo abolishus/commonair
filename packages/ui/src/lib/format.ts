@@ -10,9 +10,9 @@
 
 import { minorUnits } from "@commonair/contracts/currency";
 
-const cache = new Map<string, Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat>();
+const cache = new Map<string, Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat | Intl.DisplayNames>();
 
-function cached<T extends Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat>(
+function cached<T extends Intl.NumberFormat | Intl.RelativeTimeFormat | Intl.DateTimeFormat | Intl.DisplayNames>(
   key: string,
   make: () => T,
 ): T {
@@ -190,6 +190,24 @@ export function formatDateTime(date: Date, locale: string, timeZone?: string): s
     `dt|${locale}|${timeZone ?? ""}`,
     () => new Intl.DateTimeFormat(locale, { dateStyle: "long", timeStyle: "short", timeZone }),
   ).format(date);
+}
+
+/**
+ * A language's name for a locale switcher: `formatLanguageName("es")` -> "Español" (its own
+ * name), `formatLanguageName("es", "en")` -> "Spanish". The first letter is upper-cased for the
+ * display locale, as a menu item starts; an unknown or malformed tag comes back as given.
+ */
+export function formatLanguageName(tag: string, displayLocale: string = tag): string {
+  let name: string | undefined;
+  try {
+    name = cached(`lang|${displayLocale}`, () => new Intl.DisplayNames([displayLocale], { type: "language" })).of(tag);
+  } catch {
+    return tag;
+  }
+  // Unknown languages come back as the canonical tag ("zz-zz" -> "zz-ZZ"): not a name.
+  if (!name || name === tag || name === Intl.getCanonicalLocales(tag)[0]) return tag;
+  const [first = "", ...rest] = Array.from(name);
+  return first.toLocaleUpperCase(displayLocale) + rest.join("");
 }
 
 const LETTER = /[\p{L}\p{N}]/u;

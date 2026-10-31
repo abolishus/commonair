@@ -10,12 +10,13 @@ One commit on `main` (`feat(n2): batch 5 contract step`), pushed, CI green befor
 
 ## 1. `@commonair/i18n/catalog`: parity and coverage (decision (j))
 
-- `messageArguments(message): Map<string, "simple" | "plural" | "select" | "selectordinal">`
-  from the parsed AST (nested arguments included; `#` is not an argument).
-- `checkTranslation(english, translated): string | undefined`: a problem when the argument
-  names differ or an argument's kind differs; a plural must keep `other`; a select must keep
-  every English case name it uses plus `other`. Wording, not exact sets of plural categories
-  (`es` may drop `=0` only if English has none).
+- `messageArguments(message): Map<string, ArgumentKind[]>` (`"simple" | "plural" | "selectordinal" | "select"`,
+  sorted; an argument can be used more than one way) from the parsed AST, nested arguments
+  included; `#` is not an argument.
+- `checkTranslation(english, translated): string | undefined`: a problem when the argument names or
+  kinds differ (so `{n}` replacing `#` inside a plural is rejected: `#` is locale-formatted), a
+  select lacks a case English names, a plural lacks an exact case English has (`=0`, `=1`), or a
+  plural's `offset` differs. Plural categories may differ (`es` adds `many`; the parser requires `other`).
 - `checkCatalog` calls it for every non-English key (`<lang>/<ns>.json: <key> arguments differ (…)`).
 - `coverage(namespaces, lang): { total: number; translated: number; missing: string[] }` over
   English keys (an `es` value identical to English counts as translated; decision (h)).
@@ -43,13 +44,13 @@ capitalize the first letter for the display locale (`español`→`Español`). Ex
 - `apps/web/src/routes/_app/settings.preferences.tsx`: like `settings.connections.tsx`
   (`requireSession`, head title `t("preferences.pageTitle")`), rendering
   `<PreferencesPage/>` from `components/locale/preferences-page.tsx`, a stub that renders
-  `<section data-testid="preferences-page">` with the page heading.
-- `components/locale/footer-locale-switcher.tsx`: `export function FooterLocaleSwitcher(): React.JSX.Element | null { return null; }`
-  (N2-switcher fills it). Mount it in `InstanceFooter` (`site-chrome.tsx`) as one more `links`
-  entry, after the cookie settings button: `{ label: t("preferences.footerLanguage"), render: <FooterLocaleSwitcher/> }`
-  — or, if `SiteFooter`'s `links` cannot take a `null` render, add an optional `extra?: React.ReactNode`
-  slot to `SiteFooter` (`packages/ui/src/layouts/site-footer.tsx`) rendered after the links, and
-  mount it there. Pick whichever keeps the footer's existing test ids and layout.
+  `<PageContainer width="narrow" data-testid="preferences-page">` with a `PageHeader`.
+- `components/locale/footer-locale-switcher.tsx`: `FooterLocaleSwitcher(props: { children?: React.ReactNode })`
+  returning null (N2-switcher fills it). Mounted in `InstanceFooter` (`site-chrome.tsx`) as one more
+  `links` entry after the cookie settings button,
+  `{ label: t("preferences.footerLanguage"), render: <FooterLocaleSwitcher /> }`; `SiteFooter`
+  clones it with the label as its child, as it does `CookieSettingsButton`. No `SiteFooter` change.
+- The account menu gets `account-preferences-link` (Settings02 icon) after Connected apps.
 - `nav.ts`: `{ id: "preferences", to: "/settings/preferences" }` after `connections`; the route
   union gains `"/settings/preferences"`; `nav.preferences` = `"Preferences"` in `en/core.json`;
   `tests/nav.test.ts` updated; regenerate `routeTree.gen.ts`.
@@ -63,8 +64,10 @@ capitalize the first letter for the display locale (`español`→`Español`). Ex
 `docs/testing/n2-selectors.md`: a "Language switchers (batch 5)" section with
 `preferences-page`, `locale-select` (settings `<Select>` trigger), `locale-option-<tag>` (each
 item; `auto` for Automatic), `locale-save-status`, `footer-locale-switcher` (trigger),
-`footer-locale-option-<tag>`. Extend the n2 selectors check in `apps/web/tests/selectors.test.ts`
-so these ids must appear in source (templated ids count, as in w1).
+`footer-locale-option-<tag>`, plus `account-preferences-link`. A batch 5 describe in
+`apps/web/tests/selectors.test.ts` checks the section's literal ids (templated ids by prefix, as in
+w1) except those in `PENDING_N2_SWITCHER_IDS`, which the orchestrator empties when N2-switcher
+merges. `tests/n2-consent.test.tsx` reads only its own "## Test ids" section.
 
 ## 6. Check and push
 

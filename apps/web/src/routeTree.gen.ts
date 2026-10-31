@@ -50,6 +50,7 @@ import { Route as AppOauth2AuthorizeRouteImport } from './routes/_app/oauth2.aut
 import { Route as AppSettingsAppealsRouteImport } from './routes/_app/settings.appeals'
 import { Route as AppSettingsConnectionsRouteImport } from './routes/_app/settings.connections'
 import { Route as AppSettingsCopyrightRouteImport } from './routes/_app/settings.copyright'
+import { Route as AppSettingsPreferencesRouteImport } from './routes/_app/settings.preferences'
 import { Route as AppSettingsPrivacyRouteImport } from './routes/_app/settings.privacy'
 import { Route as AppSettingsSubscriptionsRouteImport } from './routes/_app/settings.subscriptions'
 import { Route as StudioDeveloperIndexRouteImport } from './routes/_studio/developer.index'
@@ -266,6 +267,11 @@ const AppSettingsCopyrightRoute = AppSettingsCopyrightRouteImport.update({
   path: '/settings/copyright',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsPreferencesRoute = AppSettingsPreferencesRouteImport.update({
+  id: '/settings/preferences',
+  path: '/settings/preferences',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsPrivacyRoute = AppSettingsPrivacyRouteImport.update({
   id: '/settings/privacy',
   path: '/settings/privacy',
@@ -375,6 +381,7 @@ export interface FileRoutesByFullPath {
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/connections': typeof AppSettingsConnectionsRoute
   '/settings/copyright': typeof AppSettingsCopyrightRoute
+  '/settings/preferences': typeof AppSettingsPreferencesRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
@@ -428,6 +435,7 @@ export interface FileRoutesByTo {
   '/settings/appeals': typeof AppSettingsAppealsRoute
   '/settings/connections': typeof AppSettingsConnectionsRoute
   '/settings/copyright': typeof AppSettingsCopyrightRoute
+  '/settings/preferences': typeof AppSettingsPreferencesRoute
   '/settings/privacy': typeof AppSettingsPrivacyRoute
   '/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/developer/bots': typeof StudioDeveloperBotsRoute
@@ -485,6 +493,7 @@ export interface FileRoutesById {
   '/_app/settings/appeals': typeof AppSettingsAppealsRoute
   '/_app/settings/connections': typeof AppSettingsConnectionsRoute
   '/_app/settings/copyright': typeof AppSettingsCopyrightRoute
+  '/_app/settings/preferences': typeof AppSettingsPreferencesRoute
   '/_app/settings/privacy': typeof AppSettingsPrivacyRoute
   '/_app/settings/subscriptions': typeof AppSettingsSubscriptionsRoute
   '/_studio/developer/bots': typeof StudioDeveloperBotsRoute
@@ -540,6 +549,7 @@ export interface FileRouteTypes {
     | '/settings/appeals'
     | '/settings/connections'
     | '/settings/copyright'
+    | '/settings/preferences'
     | '/settings/privacy'
     | '/settings/subscriptions'
     | '/developer/bots'
@@ -593,6 +603,7 @@ export interface FileRouteTypes {
     | '/settings/appeals'
     | '/settings/connections'
     | '/settings/copyright'
+    | '/settings/preferences'
     | '/settings/privacy'
     | '/settings/subscriptions'
     | '/developer/bots'
@@ -649,6 +660,7 @@ export interface FileRouteTypes {
     | '/_app/settings/appeals'
     | '/_app/settings/connections'
     | '/_app/settings/copyright'
+    | '/_app/settings/preferences'
     | '/_app/settings/privacy'
     | '/_app/settings/subscriptions'
     | '/_studio/developer/bots'
@@ -964,6 +976,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsCopyrightRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/preferences': {
+      id: '/_app/settings/preferences'
+      path: '/settings/preferences'
+      fullPath: '/settings/preferences'
+      preLoaderRoute: typeof AppSettingsPreferencesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/privacy': {
       id: '/_app/settings/privacy'
       path: '/settings/privacy'
@@ -1102,6 +1121,7 @@ interface AppRouteChildren {
   AppSettingsAppealsRoute: typeof AppSettingsAppealsRoute
   AppSettingsConnectionsRoute: typeof AppSettingsConnectionsRoute
   AppSettingsCopyrightRoute: typeof AppSettingsCopyrightRoute
+  AppSettingsPreferencesRoute: typeof AppSettingsPreferencesRoute
   AppSettingsPrivacyRoute: typeof AppSettingsPrivacyRoute
   AppSettingsSubscriptionsRoute: typeof AppSettingsSubscriptionsRoute
   AppCoopIndexRoute: typeof AppCoopIndexRoute
@@ -1131,6 +1151,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsAppealsRoute: AppSettingsAppealsRoute,
   AppSettingsConnectionsRoute: AppSettingsConnectionsRoute,
   AppSettingsCopyrightRoute: AppSettingsCopyrightRoute,
+  AppSettingsPreferencesRoute: AppSettingsPreferencesRoute,
   AppSettingsPrivacyRoute: AppSettingsPrivacyRoute,
   AppSettingsSubscriptionsRoute: AppSettingsSubscriptionsRoute,
   AppCoopIndexRoute: AppCoopIndexRoute,

@@ -19,6 +19,7 @@ import {
   Notification03Icon,
   Plug01Icon,
   ServerStack01Icon,
+  Settings02Icon,
   Shield01Icon,
   SquareLock01Icon,
 } from "@hugeicons/core-free-icons";
@@ -41,6 +42,7 @@ import {
 import { ThemeContext } from "../lib/theme-context.ts";
 import { safeHttpUrl } from "../lib/url.ts";
 import { CookieSettingsButton } from "./consent/cookie-settings-button.tsx";
+import { FooterLocaleSwitcher } from "./locale/footer-locale-switcher.tsx";
 import { NotificationBell } from "./notifications/bell.tsx";
 import { forgetPushSubscription } from "./pwa/push-client.ts";
 import { isLegal, isSafetyStaff } from "./safety/access.ts";
@@ -110,6 +112,13 @@ function accountItem(entry: AccountEntry): UserMenuItem {
         label: t("nav.connections"),
         icon: icon(Plug01Icon),
         render: <Link data-testid="account-connections-link" to="/settings/connections" />,
+      };
+    case "preferences":
+      return {
+        id: entry.id,
+        label: t("nav.preferences"),
+        icon: icon(Settings02Icon),
+        render: <Link data-testid="account-preferences-link" to="/settings/preferences" />,
       };
     case "coop":
       return {
@@ -288,6 +297,7 @@ export function InstanceFooter({ instance }: { instance: Instance }): React.JSX.
       links={[
         ...footerNav().map(footerLink),
         { label: t("consent.footer.settings"), render: <CookieSettingsButton /> },
+        { label: t("preferences.footerLanguage"), render: <FooterLocaleSwitcher /> },
       ]}
       license={t("footer.license")}
       sourceLink={

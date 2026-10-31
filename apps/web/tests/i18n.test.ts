@@ -5,7 +5,7 @@
  * Repository checks for the message catalogs (ADR 0029 decision 2): the JSON namespaces under
  * `src/i18n/locales/`, the generated key modules, and how source code uses keys.
  */
-import { checkCatalog, readNamespaces, renderKeyModules } from "@commonair/i18n/catalog";
+import { checkCatalog, coverage, readNamespaces, renderKeyModules } from "@commonair/i18n/catalog";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
@@ -23,6 +23,9 @@ const KEYS = join(I18N, "keys");
  * (`nav.account`, `safety.appealq.intro`) were dead and removed. Add a key here only with a reason.
  */
 const UNUSED_ALLOWED: readonly string[] = [];
+
+/** Released locales: every English key translated (batch 5 decision (j)). Others may lag. */
+const REQUIRED_LOCALES: readonly string[] = [];
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -45,8 +48,12 @@ describe("message catalogs", () => {
     expect(Object.keys(en).length).toBeGreaterThan(1800);
   });
 
-  it("passes the catalog check (unique keys, names, every message parses, no orphan translation)", () => {
+  it("passes the catalog check (unique keys, names, every message parses, no orphan translation, argument parity)", () => {
     expect(checkCatalog(namespaces)).toEqual([]);
+  });
+
+  it("has every English key in each required locale", () => {
+    for (const lang of REQUIRED_LOCALES) expect(coverage(namespaces, lang).missing, lang).toEqual([]);
   });
 
   it("has fresh generated key modules (`bun run i18n:gen`)", () => {

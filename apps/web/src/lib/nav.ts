@@ -23,6 +23,7 @@ export interface AccountEntry {
     | "copyright"
     | "privacy"
     | "connections"
+    | "preferences"
     | "coop"
     | "treasury"
     | "moderation"
@@ -39,6 +40,7 @@ export interface AccountEntry {
     | "/settings/copyright"
     | "/settings/privacy"
     | "/settings/connections"
+    | "/settings/preferences"
     | "/coop/membership"
     | "/treasury"
     | "/admin/moderation"
@@ -141,6 +143,7 @@ export function accountMenu(
       { id: "copyright", to: "/settings/copyright" },
       { id: "privacy", to: "/settings/privacy" },
       { id: "connections", to: "/settings/connections" },
+      { id: "preferences", to: "/settings/preferences" },
       { id: "coop", to: "/coop/membership" },
       ...staff,
       { id: "signOut", separatorBefore: true, destructive: true },

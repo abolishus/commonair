@@ -40,3 +40,21 @@ None new. The banner and the dialog appear on every page except `/overlay/*` and
 | `consent-policy-link`        | Wrapper around the `LegalDocumentLink` of the `cookies` document (`legal.get({ kind: "cookies" })`), which opens the policy text in a nested dialog; there is no `/legal` route   |
 | `consent-error`              | Inline notice when the record could not be saved to the server (the choice still applies on this device); `data-code` (`rate_limited`, `network`, `policy_changed`)               |
 | `footer-cookie-settings`     | Footer button that opens `consent-dialog`                                                                                                                                         |
+
+## Language switchers (batch 5)
+
+N2-switcher fills the `/settings/preferences` page and the footer switcher the batch 5 contract
+step mounted (`.claude/briefs/batch5/README.md` decisions (e)–(g)). `en-XA` never appears as an
+option. Templated ids (`<tag>` is a supported locale tag such as `es`) are checked by the unit's
+render tests; `apps/web/tests/selectors.test.ts` checks the literal ones and the template prefixes.
+
+| Test id                      | Element and attributes                                                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `account-preferences-link`   | In the account menu, a link to `/settings/preferences`                                                                      |
+| `preferences-page`           | The page container of `/settings/preferences` (members only)                                                                |
+| `locale-select`              | The Language `Select` trigger on the page; `data-value` = the saved choice (`auto` when `users.locale` is null, else a tag) |
+| `locale-option-auto`         | The "Automatic" item (save `users.locale` = null)                                                                           |
+| `locale-option-<tag>`        | One item per supported locale except `en-XA`; its label carries `lang="<tag>"`                                              |
+| `locale-save-status`         | Polite live region announcing the save; `data-state` = `idle`, `saving`, `saved` or `error`                                 |
+| `footer-locale-switcher`     | The footer's language menu trigger (every page); `data-locale` = the active locale                                          |
+| `footer-locale-option-<tag>` | One menu item per supported locale except `en-XA`; its label carries `lang="<tag>"`                                         |

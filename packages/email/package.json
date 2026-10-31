@@ -16,6 +16,7 @@
   "dependencies": {
     "@commonair/config": "workspace:*",
     "@commonair/contracts": "workspace:*",
+    "@commonair/i18n": "workspace:*",
     "@react-email/components": "1.0.12",
     "@react-email/render": "2.0.6",
     "nodemailer": "10.1.7",

@@ -378,3 +378,56 @@ describe.each([
     expect(onElement(id, text) || literal || templated).toBe(true);
   });
 });
+
+/**
+ * Batch 5 (docs/testing/n2-selectors.md "Language switchers (batch 5)"): literal ids set in web or
+ * ui source, as for batch 4; a templated id (`locale-option-<tag>`) by its literal prefix in a
+ * template (`locale-option-${tag}`). Ids whose unit has not merged wait in PENDING_N2_SWITCHER_IDS,
+ * and a pending id that is already rendered fails, so the list is emptied when N2-switcher merges.
+ */
+const PENDING_N2_SWITCHER_IDS: readonly string[] = [
+  "locale-select",
+  "locale-option-auto",
+  "locale-option-<tag>",
+  "locale-save-status",
+  "footer-locale-switcher",
+  "footer-locale-option-<tag>",
+];
+
+function sectionTestIds(doc: string, heading: string): string[] {
+  const text = readFileSync(join(ROOT, "docs/testing", doc), "utf8");
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const section = text.split(new RegExp(`^## ${escaped}$`, "m"))[1]?.split(/^## /m)[0] ?? "";
+  return [...section.matchAll(/^\|\s*`([a-z0-9-]+(?:<tag>)?)`\s*\|/gm)].flatMap((m) => (m[1] ? [m[1]] : []));
+}
+
+describe("n2-selectors.md: language switchers (batch 5)", () => {
+  const ids = sectionTestIds("n2-selectors.md", "Language switchers (batch 5)");
+  const text = `${appText}\n${uiText}`;
+  const prefixes = templatePrefixes(text);
+  const rendered = (id: string): boolean =>
+    id.endsWith("<tag>")
+      ? prefixes.includes(id.slice(0, -"<tag>".length))
+      : onElement(id, text) ||
+        text.includes(`"${id}"`) ||
+        prefixes.some((p) => id.startsWith(p) && id.length > p.length);
+
+  it("lists test ids, templated ones included, and only listed ones are pending", () => {
+    for (const id of [
+      "preferences-page",
+      "account-preferences-link",
+      "locale-option-<tag>",
+      "footer-locale-option-<tag>",
+    ])
+      expect(ids).toContain(id);
+    for (const id of PENDING_N2_SWITCHER_IDS) expect(ids).toContain(id);
+  });
+
+  it.each(ids.filter((id) => !PENDING_N2_SWITCHER_IDS.includes(id)))("renders %s", (id) => {
+    expect(rendered(id)).toBe(true);
+  });
+
+  it.each(PENDING_N2_SWITCHER_IDS)("%s is still pending (lift it once rendered)", (id) => {
+    expect(rendered(id)).toBe(false);
+  });
+});

@@ -326,7 +326,9 @@ describe("the cookie settings dialog", () => {
 
 describe("the selector contract (docs/testing/n2-selectors.md)", () => {
   const doc = readFileSync(join(import.meta.dirname, "../../../docs/testing/n2-selectors.md"), "utf8");
-  const ids = [...doc.slice(doc.indexOf("## Test ids")).matchAll(/^\|\s*`([a-z0-9-]+)`\s*\|/gm)].map((m) => m[1]);
+  // Only N2-consent's section: the batch 5 switcher ids follow under their own heading.
+  const section = doc.split(/^## Test ids$/m)[1]?.split(/^## /m)[0] ?? "";
+  const ids = [...section.matchAll(/^\|\s*`([a-z0-9-]+)`\s*\|/gm)].map((m) => m[1]);
 
   it("lists the ids this unit renders", () => {
     expect(ids).toHaveLength(11);

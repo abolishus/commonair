@@ -4,6 +4,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   formatCompactNumber,
+  formatLanguageName,
   formatMoney,
   formatNumber,
   formatRelativeTime,
@@ -216,5 +217,24 @@ describe("getInitial", () => {
     expect(getInitial("🇺🇦", "en")).toBe("🇺🇦");
     expect(getInitial("", "en")).toBe("?");
     expect(getInitial("   ", "en")).toBe("?");
+  });
+});
+
+describe("formatLanguageName", () => {
+  test("names a language in itself by default, capitalized", () => {
+    expect(formatLanguageName("en")).toBe("English");
+    expect(formatLanguageName("es")).toBe("Español");
+  });
+
+  test("names it in a display locale, regions included", () => {
+    expect(formatLanguageName("es", "en")).toBe("Spanish");
+    expect(formatLanguageName("en", "es")).toBe("Inglés");
+    expect(formatLanguageName("es-MX", "en")).toMatch(/^Mexican Spanish$|^Spanish \(Mexico\)$/);
+  });
+
+  test("returns an unknown or malformed tag as given", () => {
+    expect(formatLanguageName("zz")).toBe("zz");
+    expect(formatLanguageName("zz-zz", "en")).toBe("zz-zz");
+    expect(formatLanguageName("not a tag")).toBe("not a tag");
   });
 });

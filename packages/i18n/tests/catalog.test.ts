@@ -5,7 +5,15 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
-import { checkCatalog, parseFlatJson, readNamespaces, renderKeyModules } from "../src/catalog.ts";
+import {
+  checkCatalog,
+  checkTranslation,
+  coverage,
+  messageArguments,
+  parseFlatJson,
+  readNamespaces,
+  renderKeyModules,
+} from "../src/catalog.ts";
 import { runGen } from "../src/cli.ts";
 
 const dirs: string[] = [];
@@ -171,5 +179,114 @@ describe("cli gen", () => {
     expect(run([]).exitCode).toBe(0);
     expect(run(["--check"]).exitCode).toBe(0);
     expect(Bun.spawnSync(["bun", cli, "nope"], { stderr: "pipe" }).exitCode).toBe(2);
+  });
+});
+
+describe("messageArguments", () => {
+  it("lists every argument with how it is used, nested ones included", () => {
+    expect(
+      messageArguments(
+        "{who} has {n, plural, one {# vote for {item}} other {# votes}} as {role, select, admin {an admin} other {{role}}}",
+      ),
+    ).toEqual(
+      new Map([
+        ["who", ["simple"]],
+        ["n", ["plural"]],
+        ["item", ["simple"]],
+        ["role", ["select", "simple"]],
+      ]),
+    );
+    expect(messageArguments("{n, selectordinal, one {#st} other {#th}}")).toEqual(new Map([["n", ["selectordinal"]]]));
+    expect(messageArguments("No arguments, '{quoted}'")).toEqual(new Map());
+  });
+});
+
+describe("checkTranslation", () => {
+  it("accepts reordered arguments and different plural categories", () => {
+    expect(checkTranslation("{a} and {b}", "{b} y {a}")).toBeUndefined();
+    expect(
+      checkTranslation(
+        "{n, plural, one {# item} other {# items}}",
+        "{n, plural, one {# elemento} many {# elementos} other {# elementos}}",
+      ),
+    ).toBeUndefined();
+    expect(checkTranslation("Plain", "Sencillo")).toBeUndefined();
+  });
+
+  it("rejects a missing, extra or renamed argument", () => {
+    expect(checkTranslation("Hi {name}", "Hola")).toMatch(/arguments differ \(English: name; translation: none\)/);
+    expect(checkTranslation("Hi", "Hola {name}")).toMatch(/arguments differ/);
+    expect(checkTranslation("Hi {name}", "Hola {nombre}")).toMatch(/arguments differ/);
+  });
+
+  it("rejects a changed kind, nested inside a select too", () => {
+    expect(checkTranslation("{n, plural, one {#} other {#}}", "{n}")).toMatch(/n: plural/);
+    expect(checkTranslation("{n, plural, one {#} other {#}}", "{n, selectordinal, one {#} other {#}}")).toMatch(
+      /arguments differ/,
+    );
+    expect(
+      checkTranslation(
+        "{g, select, a {{n, plural, one {# x} other {# xs}}} other {{n, plural, one {# y} other {# ys}}}}",
+        "{g, select, a {{n} x} other {{n, plural, one {# y} other {# ys}}}}",
+      ),
+    ).toMatch(/n: plural\|simple/);
+  });
+
+  it("requires English's exact plural cases and offsets", () => {
+    expect(
+      checkTranslation(
+        "{n, plural, =0 {None} one {# item} other {# items}}",
+        "{n, plural, one {# elemento} other {# elementos}}",
+      ),
+    ).toBe("plural n is missing =0");
+    expect(
+      checkTranslation(
+        "{n, plural, =0 {None} other {# items}}",
+        "{n, plural, =0 {Ninguno} =1 {Uno} other {# elementos}}",
+      ),
+    ).toBeUndefined();
+    expect(
+      checkTranslation(
+        "{n, plural, offset:1 =1 {{host}} other {{host} and # others}}",
+        "{n, plural, =1 {{host}} other {{host} y # más}}",
+      ),
+    ).toBe("plural n offset differs");
+  });
+
+  it("requires every select case English names", () => {
+    expect(checkTranslation("{r, select, admin {A} mod {M} other {O}}", "{r, select, admin {A} other {O}}")).toBe(
+      "select r is missing mod",
+    );
+    expect(
+      checkTranslation("{r, select, admin {A} other {O}}", "{r, select, admin {A} mod {M} other {O}}"),
+    ).toBeUndefined();
+  });
+
+  it("leaves unparsable messages to the parse check", () => {
+    expect(checkTranslation("{a}", "{a")).toBeUndefined();
+  });
+
+  it("is part of checkCatalog for non-English catalogs", () => {
+    const dir = fixture({
+      "en/core.json": { "core.hi": "Hi {name}", "core.n": "{n, plural, one {# x} other {# xs}}" },
+      "es/core.json": { "core.hi": "Hola", "core.n": "{n, plural, one {# x} other {# xs}}" },
+    });
+    expect(checkCatalog(readNamespaces(dir))).toEqual([
+      "es/core.json: core.hi arguments differ (English: name; translation: none)",
+    ]);
+  });
+});
+
+describe("coverage", () => {
+  it("counts English keys a locale has, a value equal to English included", () => {
+    const dir = fixture({
+      "en/a.json": { "a.one": "One", "a.two": "Two" },
+      "en/b.json": { "b.three": "Three" },
+      "es/a.json": { "a.one": "Uno", "a.two": "Two" },
+    });
+    const namespaces = readNamespaces(dir);
+    expect(coverage(namespaces, "es")).toEqual({ total: 3, translated: 2, missing: ["b.json: b.three"] });
+    expect(coverage(namespaces, "en")).toEqual({ total: 3, translated: 3, missing: [] });
+    expect(coverage(namespaces, "fr").missing).toHaveLength(3);
   });
 });

@@ -7,7 +7,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { I18nSyntaxError, parseMessage } from "./format.ts";
+import { I18nSyntaxError, type MessageAst, parseMessage } from "./format.ts";
 
 export const SOURCE_LOCALE = "en";
 export const NAMESPACE_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -94,12 +94,137 @@ export function readNamespaces(dir: string): Namespace[] {
   return out;
 }
 
+export type ArgumentKind = "simple" | "plural" | "selectordinal" | "select";
+
+/**
+ * What a parsed message's arguments look like: kinds per name, the case names of each select, and
+ * each plural's exact-number cases (`=0`) and offsets, which a translation must keep.
+ */
+interface ArgumentShape {
+  kinds: Map<string, Set<ArgumentKind>>;
+  selectCases: Map<string, Set<string>>;
+  exactCases: Map<string, Set<string>>;
+  offsets: Map<string, Set<number>>;
+}
+
+const addTo = <T>(map: Map<string, Set<T>>, name: string, values: Iterable<T>) => {
+  const set = map.get(name) ?? new Set<T>();
+  for (const value of values) set.add(value);
+  map.set(name, set);
+};
+
+function argumentShape(ast: MessageAst): ArgumentShape {
+  const shape: ArgumentShape = { kinds: new Map(), selectCases: new Map(), exactCases: new Map(), offsets: new Map() };
+  const add = (name: string, kind: ArgumentKind) => {
+    const kinds = shape.kinds.get(name) ?? new Set<ArgumentKind>();
+    kinds.add(kind);
+    shape.kinds.set(name, kinds);
+  };
+  const walk = (nodes: MessageAst) => {
+    for (const node of nodes) {
+      if (typeof node === "string" || node.type === "pound") continue;
+      if (node.type === "arg") {
+        add(node.name, "simple");
+        continue;
+      }
+      if (node.type === "plural") {
+        add(node.name, node.ordinal ? "selectordinal" : "plural");
+        // "=0 {No votes}" reads differently from "0 votes"; `offset` shifts what `#` shows.
+        addTo(
+          shape.exactCases,
+          node.name,
+          [...node.options.keys()].filter((selector) => selector.startsWith("=")),
+        );
+        addTo(shape.offsets, node.name, [node.offset]);
+      } else {
+        add(node.name, "select");
+        addTo(shape.selectCases, node.name, node.options.keys());
+      }
+      for (const branch of node.options.values()) walk(branch);
+    }
+  };
+  walk(ast);
+  return shape;
+}
+
+/** Every argument of a message (nested ones included) and how it is used; `#` is not an argument. */
+export function messageArguments(message: string): Map<string, ArgumentKind[]> {
+  const { kinds } = argumentShape(parseMessage(message));
+  return new Map([...kinds].map(([name, set]) => [name, [...set].sort()]));
+}
+
+const describeKinds = (kinds: Map<string, Set<ArgumentKind>>): string =>
+  [...kinds]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, set]) => (set.has("simple") && set.size === 1 ? name : `${name}: ${[...set].sort().join("|")}`))
+    .join(", ") || "none";
+
+/**
+ * Whether a translation can stand in for its English source (ADR 0029, batch 5 decision (j)): the
+ * same argument names used the same ways, every select case and exact plural case (`=0`) English
+ * names, and the same plural offsets. Plural categories may differ (languages have different ones;
+ * the parser already requires `other`). An argument English uses only through `#` must not become
+ * `{n}` inside the plural: `#` is formatted for the locale, `{n}` is not. Undefined when fine or
+ * when either side does not parse (the parse check reports that).
+ */
+export function checkTranslation(english: string, translated: string): string | undefined {
+  let source: ArgumentShape;
+  let target: ArgumentShape;
+  try {
+    source = argumentShape(parseMessage(english));
+    target = argumentShape(parseMessage(translated));
+  } catch {
+    return undefined;
+  }
+  if (describeKinds(source.kinds) !== describeKinds(target.kinds))
+    return `arguments differ (English: ${describeKinds(source.kinds)}; translation: ${describeKinds(target.kinds)})`;
+  for (const [name, cases] of source.selectCases) {
+    const missing = [...cases].filter((selector) => !target.selectCases.get(name)?.has(selector));
+    if (missing.length > 0) return `select ${name} is missing ${missing.join(", ")}`;
+  }
+  for (const [name, cases] of source.exactCases) {
+    const missing = [...cases].filter((selector) => !target.exactCases.get(name)?.has(selector));
+    if (missing.length > 0) return `plural ${name} is missing ${missing.join(", ")}`;
+  }
+  for (const [name, offsets] of source.offsets) {
+    const theirs = [...(target.offsets.get(name) ?? [])].sort((a, b) => a - b).join(",");
+    if ([...offsets].sort((a, b) => a - b).join(",") !== theirs) return `plural ${name} offset differs`;
+  }
+  return undefined;
+}
+
+export interface Coverage {
+  /** English keys. */
+  total: number;
+  /** English keys the locale has (a value equal to English counts: some strings stay English). */
+  translated: number;
+  /** `<namespace>.json: <key>` for every English key the locale lacks, in file order. */
+  missing: string[];
+}
+
+/** How much of English a locale covers, over every English namespace. */
+export function coverage(namespaces: readonly Namespace[], lang: string): Coverage {
+  const have = new Map<string, Set<string>>();
+  for (const ns of namespaces) if (ns.lang === lang) have.set(ns.name, new Set(ns.entries.map(([k]) => k)));
+  const result: Coverage = { total: 0, translated: 0, missing: [] };
+  for (const ns of namespaces) {
+    if (ns.lang !== SOURCE_LOCALE) continue;
+    const keys = have.get(ns.name);
+    for (const [key] of ns.entries) {
+      result.total++;
+      if (keys?.has(key)) result.translated++;
+      else result.missing.push(`${ns.name}.json: ${key}`);
+    }
+  }
+  return result;
+}
+
 /** Problems with the catalogs, one line each; empty when they are fine. */
 export function checkCatalog(namespaces: readonly Namespace[]): string[] {
   const problems: string[] = [];
   const english = namespaces.filter((ns) => ns.lang === SOURCE_LOCALE);
   if (english.length === 0) problems.push(`no ${SOURCE_LOCALE}/ catalog: English is the source of truth`);
-  const englishKeys = new Map<string, Set<string>>(english.map((ns) => [ns.name, new Set(ns.entries.map(([k]) => k))]));
+  const englishKeys = new Map<string, Map<string, string>>(english.map((ns) => [ns.name, new Map(ns.entries)]));
   const owner = new Map<string, string>();
   for (const ns of namespaces) {
     const where = `${ns.lang}/${ns.name}.json`;
@@ -126,8 +251,13 @@ export function checkCatalog(namespaces: readonly Namespace[]): string[] {
         const first = owner.get(key);
         if (first !== undefined && first !== ns.name) problems.push(`${where}: key ${key} is also in ${first}.json`);
         else owner.set(key, ns.name);
-      } else if (inEnglish && !inEnglish.has(key)) {
-        problems.push(`${where}: key ${key} is not in ${SOURCE_LOCALE}/${ns.name}.json`);
+      } else if (inEnglish) {
+        const source = inEnglish.get(key);
+        if (source === undefined) problems.push(`${where}: key ${key} is not in ${SOURCE_LOCALE}/${ns.name}.json`);
+        else {
+          const mismatch = checkTranslation(source, message);
+          if (mismatch) problems.push(`${where}: ${key} ${mismatch}`);
+        }
       }
     }
   }

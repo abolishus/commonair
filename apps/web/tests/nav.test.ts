@@ -46,6 +46,7 @@ describe("account menu", () => {
       "copyright",
       "privacy",
       "connections",
+      "preferences",
       "coop",
       "signOut",
     ]);
@@ -58,11 +59,12 @@ describe("account menu", () => {
       "/settings/copyright",
       "/settings/privacy",
       "/settings/connections",
+      "/settings/preferences",
       "/coop/membership",
       undefined,
     ]);
-    expect(items[9]).toMatchObject({ separatorBefore: true, destructive: true });
-    expect(items.slice(0, 9).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
+    expect(items[10]).toMatchObject({ separatorBefore: true, destructive: true });
+    expect(items.slice(0, 10).every((i) => !i.destructive && !i.separatorBefore)).toBe(true);
   });
 
   it("adds co-op administration for admins only, before sign out", () => {
@@ -78,6 +80,7 @@ describe("account menu", () => {
       "copyright",
       "privacy",
       "connections",
+      "preferences",
       "coop",
       "moderation",
       "adminCoop",
@@ -98,6 +101,7 @@ describe("account menu", () => {
       "copyright",
       "privacy",
       "connections",
+      "preferences",
       "coop",
       "treasury",
       "signOut",
@@ -139,6 +143,7 @@ describe("account menu", () => {
         "/settings/copyright",
         "/settings/privacy",
         "/settings/connections",
+        "/settings/preferences",
         "/coop/membership",
         "/treasury",
         "/admin/coop",

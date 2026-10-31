@@ -20,6 +20,7 @@ import type { Key as N1Email } from "./n1-email.gen.ts";
 import type { Key as N1Inbox } from "./n1-inbox.gen.ts";
 import type { Key as N1Pwa } from "./n1-pwa.gen.ts";
 import type { Key as N2Consent } from "./n2-consent.gen.ts";
+import type { Key as N2Switcher } from "./n2-switcher.gen.ts";
 import type { Key as Ops } from "./ops.gen.ts";
 import type { Key as P2p } from "./p2p.gen.ts";
 import type { Key as Safety } from "./safety.gen.ts";
@@ -49,6 +50,7 @@ export type MessageKey =
   | N1Inbox
   | N1Pwa
   | N2Consent
+  | N2Switcher
   | Ops
   | P2p
   | Safety
@@ -77,6 +79,7 @@ export const NAMESPACES = [
   "n1-inbox",
   "n1-pwa",
   "n2-consent",
+  "n2-switcher",
   "ops",
   "p2p",
   "safety",
