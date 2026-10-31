@@ -97,7 +97,7 @@
   "enforcementStatement.restrictionOther": "Una restricción sobre tu contenido o tu cuenta",
   "enforcementStatement.restriction.visibility.removed": "Se retiró tu contenido",
   "enforcementStatement.restriction.visibility.disabled": "Se ocultó tu contenido mientras se resuelve una solicitud",
-  "enforcementStatement.restriction.visibility.restricted": "Se limitó tu transmisión mientras la revisa el equipo de moderación",
+  "enforcementStatement.restriction.visibility.restricted": "Se limitó tu transmisión durante la revisión",
   "enforcementStatement.restriction.visibility.age_gated": "Tu canal se marcó como para adultos (18+)",
   "enforcementStatement.restriction.account.suspended": "Se suspendió tu cuenta",
   "enforcementStatement.restriction.service.suspended": "Se suspendió tu canal",

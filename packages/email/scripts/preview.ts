@@ -5,8 +5,8 @@
  * Render every template with sample data to `.preview/<id>.html` (+ `.txt`)
  * for a quick look in a browser. Identity comes from the environment, like a
  * real instance: `PUBLIC_URL=https://air.example.test bun run preview`.
- * `--locale <tag>` previews a bundled locale (`es`), or for any other tag English strings with that
- * tag's date and number formatting.
+ * `--locale <tag>` previews a bundled locale (`es`); a regional tag (`es-MX`) uses its language's
+ * strings and any other tag English strings, both with the tag's own date and number formatting.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,8 +22,11 @@ const samples = sampleData(site.publicUrl);
 const out = join(import.meta.dir, "..", ".preview");
 mkdirSync(out, { recursive: true });
 
-// An unbundled tag still gets its own date and number formatting, over English strings.
-const catalogs = locale && resolveCatalog(locale).locale === "en" ? { ...BUNDLED, [locale]: {} } : BUNDLED;
+// Register the requested tag itself, so a regional (`es-MX`) or unbundled tag keeps its own date
+// and number formatting over the strings of the locale it resolves to.
+const resolved = locale ? resolveCatalog(locale).locale : undefined;
+const catalogs =
+  locale && resolved && resolved !== locale ? { ...BUNDLED, [locale]: BUNDLED[resolved] ?? {} } : BUNDLED;
 const index: string[] = [];
 for (const id of TEMPLATE_IDS) {
   const mail = await renderEmail(id, samples[id], { site, locale, catalogs });

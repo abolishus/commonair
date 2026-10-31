@@ -323,7 +323,7 @@ Example Air funciona con software libre. Obtén el código fuente https://forge.
 `;
 
 exports[`enforcementStatement in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
-"Declaración de motivos: Se limitó tu transmisión mientras la revisa el equipo de moderación
+"Declaración de motivos: Se limitó tu transmisión durante la revisión
 
 Example Air https://air.example.test
 
@@ -340,7 +340,7 @@ SR-3F9A21C7
 
 Qué restringimos
 
-Se limitó tu transmisión mientras la revisa el equipo de moderación
+Se limitó tu transmisión durante la revisión
 
 Hasta
 

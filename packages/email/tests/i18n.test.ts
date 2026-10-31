@@ -287,6 +287,18 @@ describe("plurals", () => {
     }
   });
 
+  // Spanish has a `many` category (exact millions); the catalog writes only one/other, so it must land on other.
+  test("es exact millions fall back to the other branch", () => {
+    const catalog = resolveCatalog("es").catalog;
+    expect(interpolate(catalog.goLiveDigest.headingMany, { count: 1_000_000 }, "es")).toBe(
+      "1.000.000 canales que sigues están en vivo",
+    );
+    expect(interpolate(catalog.goLiveDigest.more, { count: 1_000_000 }, "es")).toBe(
+      "1.000.000 canales más que sigues están en vivo",
+    );
+    expect(interpolate(catalog.verifyEmail.expiry, { minutes: 1_000_000 }, "es")).toContain("1.000.000 minutos");
+  });
+
   test("the digest counts its channels in the subject, heading and 'more' line, in both languages", async () => {
     const two = await digest(2, "en");
     expect(two.subject).toBe("2 channels you follow are live on Example Air");
