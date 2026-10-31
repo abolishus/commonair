@@ -5,7 +5,7 @@ import type * as React from "react";
 import { Cancel01Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { cn } from "@commonair/ui/lib/utils";
-import { formatNumber } from "../../lib/format.ts";
+import { formatNumber, formatPercent } from "../../lib/format.ts";
 import { useResolvedLocale } from "../../lib/locale.tsx";
 import type { DataAttributes } from "../../lib/data-attributes.ts";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
@@ -85,7 +85,7 @@ export function TallyTable({
   const turnout = (row: TallyTableRow): string => {
     if (row.eligible <= 0) return "–";
     const share = (row.yes + row.no + row.abstain) / row.eligible;
-    return new Intl.NumberFormat(resolved, { style: "percent", maximumFractionDigits: 1 }).format(share);
+    return formatPercent(share, resolved, { maximumFractionDigits: 1 });
   };
   const columns: DataTableColumn<TallyTableRow>[] = [
     { id: "scope", header: labels.scope, cell: ({ row }) => <span className="font-medium">{row.original.label}</span> },

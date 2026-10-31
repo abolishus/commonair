@@ -4,7 +4,7 @@
 /** Pure helpers for the `/relays` page: status badges, byte sizes, the run command, links. */
 import type { RelayNode } from "@commonair/contracts/dto";
 import { RELAY_STATUSES } from "@commonair/contracts/enums";
-import type { StatusTone } from "@commonair/ui";
+import { type StatusTone, formatUnit } from "@commonair/ui";
 import type { z } from "zod";
 import { t, type MessageKey } from "../i18n/index.ts";
 
@@ -48,7 +48,7 @@ const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte", "pet
 
 /**
  * A byte count in SI units (1 kB = 1000 B, as bandwidth is billed), one fraction digit from kB
- * up. Non-finite or negative input is treated as 0.
+ * up. Non-finite or negative input is treated as 0. `locale` is the caller's `activeLocale()`.
  */
 export function formatBytes(bytes: number, locale: string): string {
   let value = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
@@ -62,13 +62,11 @@ export function formatBytes(bytes: number, locale: string): string {
     value /= 1000;
     unit++;
   }
-  return new Intl.NumberFormat(locale, {
-    style: "unit",
-    unit: BYTE_UNITS[unit],
-    unitDisplay: "short",
-    maximumFractionDigits: unit === 0 ? 0 : 1,
-    minimumFractionDigits: unit === 0 ? 0 : 1,
-  }).format(value);
+  const digits = unit === 0 ? 0 : 1;
+  return formatUnit(value, BYTE_UNITS[unit] ?? "byte", locale, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 /** The host part the member fills in: where their relay is reachable over HTTPS. */

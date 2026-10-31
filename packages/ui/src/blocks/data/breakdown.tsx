@@ -7,6 +7,8 @@ import { Bar, BarChart, XAxis, YAxis } from "recharts";
 import { ChartContainer, type ChartConfig } from "@commonair/ui/components/chart";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
 import { cn } from "@commonair/ui/lib/utils";
+import { formatNumber, formatPercent } from "../../lib/format.ts";
+import { useResolvedLocale } from "../../lib/locale.tsx";
 
 export type ChartColor = `--chart-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`;
 /** `data-*` attributes for one legend row (test ids, raw values the visible text formats). */
@@ -33,8 +35,12 @@ export interface LegendItem {
 export interface LegendProps extends React.ComponentProps<"ul"> {
   items: LegendItem[];
   layout?: "inline" | "list";
+  /** Default: the number grouped for the locale. */
   formatValue?: (value: number) => React.ReactNode;
+  /** `share` is a whole percentage (0–100). Default: a locale percentage ("45%", "45 %"). */
   formatShare?: (share: number) => React.ReactNode;
+  /** Formats the defaults; defaults to the `LocaleProvider`'s locale. */
+  locale?: string;
 }
 export function getSegmentShares(segments: BreakdownSegment[]): number[] {
   const total = segments.reduce((sum, item) => sum + Math.max(0, item.value), 0);
@@ -54,11 +60,15 @@ export function getSegmentShares(segments: BreakdownSegment[]): number[] {
 export function Legend({
   items,
   layout = "list",
-  formatValue = String,
-  formatShare = (value) => `${value}%`,
+  formatValue: formatValueProp,
+  formatShare: formatShareProp,
+  locale,
   className,
   ...props
 }: LegendProps) {
+  const resolved = useResolvedLocale(locale);
+  const formatValue = formatValueProp ?? ((value: number) => formatNumber(value, resolved));
+  const formatShare = formatShareProp ?? ((share: number) => formatPercent(share / 100, resolved));
   // Key-only items count as zero, so shares are over the items that carry a value.
   const shares = getSegmentShares(items.map((item) => ({ id: item.id, label: item.label, value: item.value ?? 0 })));
   const listClass = cn("flex gap-x-4 gap-y-2", layout === "list" ? "flex-col" : "flex-wrap", className);
@@ -147,6 +157,8 @@ export interface BreakdownTallyProps {
   votesLabel: string;
   votes: number;
   formatLabel: BreakdownBarProps["formatLabel"];
+  /** Formats the vote count; defaults to the `LocaleProvider`'s locale. */
+  locale?: string;
 }
 export function BreakdownTally({
   label,
@@ -157,7 +169,9 @@ export function BreakdownTally({
   votesLabel,
   votes,
   formatLabel,
+  locale,
 }: BreakdownTallyProps) {
+  const resolved = useResolvedLocale(locale);
   return (
     <section className="grid gap-2">
       <header className="flex flex-wrap items-center justify-between gap-2">
@@ -167,7 +181,7 @@ export function BreakdownTally({
       <p className="text-xs text-muted-foreground">{note}</p>
       <BreakdownBar segments={segments} label={label} formatLabel={formatLabel} showLegend={false} />
       <p className="text-xs text-muted-foreground tabular-nums">
-        {votesLabel}: {votes.toLocaleString()}
+        {votesLabel}: {formatNumber(votes, resolved)}
       </p>
     </section>
   );

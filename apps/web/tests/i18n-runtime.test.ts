@@ -34,8 +34,9 @@ describe("t() and activeLocale()", () => {
     expect(t("nav.signIn")).toMatch(/^\[Šîĝñ îñ~+\]$/);
   });
 
-  it("ships English and en-XA, with no other locale yet", () => {
-    expect(SUPPORTED_LOCALES).toEqual(["en", "en-XA"]);
+  it("ships English first and en-XA last", () => {
+    expect(SUPPORTED_LOCALES[0]).toBe("en");
+    expect(SUPPORTED_LOCALES.at(-1)).toBe("en-XA");
   });
 });
 
@@ -64,7 +65,6 @@ describe("en-XA", () => {
     expect(xa.viewerCount("1", 1)).toMatch(/^\[1 ṽéŕîƒîéð ṽîéŵéŕ~+\]$/);
     expect(uiMessagesFor("en-XA")).toBe(xa);
     expect(uiMessagesFor("en")).toBe(enMessages);
-    expect(uiMessagesFor("es")).toBe(enMessages);
   });
 
   it("maps to a real language for third-party widgets", () => {
@@ -72,6 +72,96 @@ describe("en-XA", () => {
     expect(baseLanguage("pt-BR")).toBe("pt");
     expect(baseLanguage("es")).toBe("es");
     expect(baseLanguage("")).toBe("en");
+  });
+});
+
+describe("UiMessages per locale", () => {
+  it("are Spanish once loadLocale('es') resolved", async () => {
+    await loadLocale("es");
+    const es = uiMessagesFor("es");
+    expect(es.close).toBe("Cerrar");
+    expect(es.discoveryReason.new).toBe("Streamer nuevo");
+    expect(es.viewerCount("1", 1)).toBe("1 espectador verificado");
+    expect(es.viewerCount("1.234", 1234)).toBe("1.234 espectadores verificados");
+    // Built once per catalog.
+    expect(uiMessagesFor("es")).toBe(es);
+  });
+
+  it("fall back from a regional tag to its language, and from anything else to English", async () => {
+    await loadLocale("es-MX");
+    expect(uiMessagesFor("es-MX")).toBe(uiMessagesFor("es"));
+    expect((await loadLocale("fr")).locale).toBe("en");
+    expect(uiMessagesFor("fr")).toBe(enMessages);
+    expect(uiMessagesFor("en-GB")).toBe(enMessages);
+    expect(uiMessagesFor("")).toBe(enMessages);
+  });
+
+  const english = { "./locales/en/core.json": { "app.title": "Title" } };
+
+  it("are English until the locale is loaded, and load with it", async () => {
+    let loads = 0;
+    const reg = createLocaleRegistry({
+      english,
+      lazy: {},
+      ui: {
+        es: async () => {
+          loads++;
+          return { "ui.close": "Cerrar" };
+        },
+      },
+    });
+    expect(reg.uiMessages("es")).toBe(enMessages);
+    await Promise.all([reg.load("es-AR"), reg.load("es")]);
+    expect(loads).toBe(1);
+    expect(reg.uiMessages("es").close).toBe("Cerrar");
+    // Per-key English fallback.
+    expect(reg.uiMessages("es").cancel).toBe("Cancel");
+    expect(reg.uiMessages("es-AR")).toBe(reg.uiMessages("es"));
+  });
+
+  it("stay English when the ui chunk fails, and retry later", async () => {
+    let fail = true;
+    const reg = createLocaleRegistry({
+      english,
+      lazy: {},
+      ui: {
+        es: async () => {
+          if (fail) throw new Error("chunk");
+          return { "ui.close": "Cerrar" };
+        },
+      },
+    });
+    expect((await reg.load("es")).locale).toBe("en");
+    expect(reg.uiMessages("es")).toBe(enMessages);
+    fail = false;
+    await reg.load("es");
+    expect(reg.uiMessages("es").close).toBe("Cerrar");
+  });
+
+  it("stay English while the app's own catalog for the locale fails, so the page never mixes", async () => {
+    let fail = true;
+    const reg = createLocaleRegistry({
+      english,
+      lazy: {
+        "./locales/es/core.json": async () => {
+          if (fail) throw new Error("chunk");
+          return { "app.title": "Título" };
+        },
+      },
+      ui: { es: async () => ({ "ui.close": "Cerrar" }) },
+    });
+    expect((await reg.load("es")).locale).toBe("en");
+    expect(reg.uiMessages("es")).toBe(enMessages);
+    fail = false;
+    expect((await reg.load("es")).locale).toBe("es");
+    expect(reg.uiMessages("es").close).toBe("Cerrar");
+  });
+
+  it("are English for every tag without a ui option", async () => {
+    const reg = createLocaleRegistry({ english, lazy: {} });
+    await reg.load("es");
+    expect(reg.uiMessages("es")).toBe(enMessages);
+    expect(reg.uiMessages("en-XA").close).toMatch(/^\[Çļöšé~+\]$/);
   });
 });
 

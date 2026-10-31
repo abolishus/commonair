@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as React from "react";
-import { minorUnits } from "@commonair/contracts/currency";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@commonair/ui/components/field";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "@commonair/ui/components/input-group";
 import { ToggleGroup, ToggleGroupItem } from "@commonair/ui/components/toggle-group";
+import { currencySymbol, formatAmountInput, parseAmountInput } from "../../lib/format.ts";
+import { useResolvedLocale } from "../../lib/locale.tsx";
 
 export interface AmountPreset {
   label: React.ReactNode;
@@ -16,6 +17,7 @@ export interface AmountFieldProps {
   currency: string;
   value: number;
   onValueChange: (minorValue: number) => void;
+  /** Separators and symbol; defaults to the `LocaleProvider`'s locale. */
   locale?: string;
   presets?: readonly AmountPreset[];
   min?: number;
@@ -44,33 +46,14 @@ export interface AmountFieldProps {
  * Integer arithmetic only, so "1.005" never rounds through a float.
  */
 export function parseAmount(text: string, currency: string, locale: string): number | null {
-  const parts = new Intl.NumberFormat(locale).formatToParts(12345.6);
-  const decimal = parts.find((part) => part.type === "decimal")?.value ?? ".";
-  const group = parts.find((part) => part.type === "group")?.value;
-  let normalized = text.trim();
-  if (group) normalized = normalized.split(group).join("");
-  if (decimal !== ".") normalized = normalized.replace(decimal, ".");
-  if (!/^\d*(?:\.\d*)?$/.test(normalized) || normalized === "" || normalized === ".") return null;
-  const [whole = "0", fraction = ""] = normalized.split(".");
-  const digits = minorUnits(currency);
-  if (fraction.length > digits) return null;
-  const amount = Number(whole) * 10 ** digits + Number((fraction + "0".repeat(digits)).slice(0, digits) || 0);
-  return Number.isSafeInteger(amount) ? amount : null;
-}
-function formatValue(value: number, currency: string, locale: string): string {
-  const digits = minorUnits(currency);
-  return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-    useGrouping: false,
-  }).format(value / 10 ** digits);
+  return parseAmountInput(text, currency, locale);
 }
 export function AmountField({
   label,
   currency,
   value,
   onValueChange,
-  locale = "en-US",
+  locale: localeProp,
   presets = [],
   min,
   max,
@@ -83,15 +66,9 @@ export function AmountField({
   ...props
 }: AmountFieldProps): React.JSX.Element {
   const id = React.useId();
-  const digits = minorUnits(currency);
+  const locale = useResolvedLocale(localeProp);
   const [draft, setDraft] = React.useState<string | null>(null);
-  const parts = new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  }).formatToParts(0);
-  const symbol = parts.find((part) => part.type === "currency")?.value ?? currency;
+  const symbol = currencySymbol(currency, locale);
   const unparsed = draft !== null && parseAmount(draft, currency, locale) === null;
   const outOfRange = value < (min ?? Number.MIN_SAFE_INTEGER) || value > (max ?? Number.MAX_SAFE_INTEGER);
   const invalid = unparsed || outOfRange;
@@ -140,7 +117,7 @@ export function AmountField({
           id={id}
           data-cents={unparsed ? "" : value}
           inputMode="decimal"
-          value={draft ?? formatValue(value, currency, locale)}
+          value={draft ?? formatAmountInput(value, currency, locale)}
           aria-invalid={invalid || undefined}
           onChange={(event) => {
             const text = event.currentTarget.value;

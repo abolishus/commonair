@@ -7,6 +7,7 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle }
 import { cn } from "@commonair/ui/lib/utils";
 import type { DataAttributes } from "../../lib/data-attributes.ts";
 import { TargetLink, type LinkTarget } from "../../lib/link.tsx";
+import { formatPercent } from "../../lib/format.ts";
 import { useResolvedLocale } from "../../lib/locale.tsx";
 import { MoneyAmount, type MoneyValue } from "../../primitives/money-amount.tsx";
 import { StatusBadge } from "../../primitives/status-badge.tsx";
@@ -90,9 +91,7 @@ export function StatementView({
 }: StatementViewProps): React.JSX.Element {
   const resolved = useResolvedLocale(locale);
   const percent = (share: number): string =>
-    new Intl.NumberFormat(resolved, { style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
-      share,
-    );
+    formatPercent(share, resolved, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (
     <section
       data-status={status}

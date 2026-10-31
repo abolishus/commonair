@@ -71,8 +71,10 @@ they are stale.
   string that bypasses `t()` shows up unaccented. It ships in every build and has no files (it is
   computed from English). Reach it with the cookie `commonair-locale=en-XA` or, signed in, with
   `me.update({ locale: "en-XA" })`; never through `Accept-Language`.
-- Design-system strings (`UiMessages`) come from `uiMessagesFor(locale)`: English for now (N2-ui),
-  pseudo-localized for `en-XA`.
+- Design-system strings (`UiMessages`) come from `uiMessagesFor(locale)`: built from
+  `packages/ui/src/locales/<lang>/ui.json`, loaded by `loadLocale` with the app's catalogs (a
+  regional tag uses its language's file, anything else English, per key), pseudo-localized for
+  `en-XA`. A new `ui.json` locale is also listed in `UI_CATALOGS` (`packages/ui/src/lib/messages.ts`).
 
 ## How to add a namespace (E8/E9 wave-2 and wave-3 units and N2-consent)
 
