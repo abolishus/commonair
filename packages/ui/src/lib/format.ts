@@ -260,3 +260,138 @@ export function formatDuration(seconds: number): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
+
+/** Shown for a number that cannot be formatted (`NaN`): a dash reads as "no value" in every locale. */
+export const NO_VALUE = "—";
+
+function clampDigits(digits: number): number {
+  return Math.min(20, Math.max(0, Math.trunc(digits)));
+}
+
+export interface FormatPercentOptions {
+  minimumFractionDigits?: number;
+  /** Default 0, raised to `minimumFractionDigits` when that is larger. */
+  maximumFractionDigits?: number;
+}
+
+/** A share as a percentage, `value` a fraction: 0.125 -> "12.5%" (en), "12,5 %" (es, de). `NaN` -> `NO_VALUE`. */
+export function formatPercent(value: number, locale: string, options: FormatPercentOptions = {}): string {
+  if (Number.isNaN(value)) return NO_VALUE;
+  const min = clampDigits(options.minimumFractionDigits ?? 0);
+  const max = Math.max(min, clampDigits(options.maximumFractionDigits ?? 0));
+  return cached(
+    `percent|${locale}|${min}|${max}`,
+    () => new Intl.NumberFormat(locale, { style: "percent", minimumFractionDigits: min, maximumFractionDigits: max }),
+  ).format(value);
+}
+
+/** A count with grouping, rounded to a whole number: 1234.5 -> "1,235" (en), "1.235" (es, de). `NaN` -> `NO_VALUE`. */
+export function formatInteger(value: number, locale: string): string {
+  if (Number.isNaN(value)) return NO_VALUE;
+  return cached(`integer|${locale}`, () => new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })).format(value);
+}
+
+export interface FormatUnitOptions {
+  minimumFractionDigits?: number;
+  /** Default 3, raised to `minimumFractionDigits` when that is larger. */
+  maximumFractionDigits?: number;
+  unitDisplay?: "short" | "long" | "narrow";
+}
+
+/**
+ * A measurement in one of `Intl`'s sanctioned units ("kilobyte", "second", …):
+ * `formatUnit(1.5, "kilobyte", "en")` -> "1.5 kB". `NaN` -> `NO_VALUE`.
+ */
+export function formatUnit(value: number, unit: string, locale: string, options: FormatUnitOptions = {}): string {
+  if (Number.isNaN(value)) return NO_VALUE;
+  const min = clampDigits(options.minimumFractionDigits ?? 0);
+  const max = Math.max(min, clampDigits(options.maximumFractionDigits ?? 3));
+  const display = options.unitDisplay ?? "short";
+  return cached(
+    `unit|${locale}|${unit}|${display}|${min}|${max}`,
+    () =>
+      new Intl.NumberFormat(locale, {
+        style: "unit",
+        unit,
+        unitDisplay: display,
+        minimumFractionDigits: min,
+        maximumFractionDigits: max,
+      }),
+  ).format(value);
+}
+
+/**
+ * The twelve month names for a date picker, January first: "January" (en), "enero" (es),
+ * "Januar" (de).
+ */
+export function monthNames(locale: string, width: "long" | "short" = "long"): string[] {
+  const fmt = cached(
+    `month|${locale}|${width}`,
+    () => new Intl.DateTimeFormat(locale, { month: width, timeZone: "UTC" }),
+  );
+  return Array.from({ length: 12 }, (_, index) => fmt.format(new Date(Date.UTC(2020, index, 1))));
+}
+
+export interface NumberSeparators {
+  decimal: string;
+  /** The grouping separator; `""` for a locale that never groups. */
+  group: string;
+}
+
+/** The locale's decimal and grouping separators: en "." and ",", de "," and ".", fr "," and a narrow no-break space. */
+export function numberSeparators(locale: string): NumberSeparators {
+  const parts = cached(`number|${locale}`, () => new Intl.NumberFormat(locale)).formatToParts(12345.6);
+  return {
+    decimal: parts.find((part) => part.type === "decimal")?.value ?? ".",
+    group: parts.find((part) => part.type === "group")?.value ?? "",
+  };
+}
+
+/** The currency's symbol in the locale: USD -> "$" (en), "US$" (es); falls back to the code. */
+export function currencySymbol(currency: string, locale: string): string {
+  const code = currency.toUpperCase();
+  const parts = cached(
+    `symbol|${locale}|${code}`,
+    () => new Intl.NumberFormat(locale, { style: "currency", currency: code }),
+  ).formatToParts(0);
+  return parts.find((part) => part.type === "currency")?.value ?? code;
+}
+
+/**
+ * Text typed into an amount field -> integer minor units, or `null` when it is not an amount
+ * (empty, negative, non-numeric, more decimals than the currency has, beyond a safe integer).
+ * Reads the locale's separators ("1.234,5" in de); where the group separator is a space of some
+ * kind, any whitespace is accepted. Integer arithmetic only, so "1.005" never rounds through a float.
+ */
+export function parseAmountInput(text: string, currency: string, locale: string): number | null {
+  const { decimal, group } = numberSeparators(locale);
+  let normalized = text.trim();
+  if (/^\s$/u.test(group)) normalized = normalized.replace(/\s/gu, "");
+  else if (group) normalized = normalized.split(group).join("");
+  if (decimal !== ".") normalized = normalized.replace(decimal, ".");
+  if (!/^\d*(?:\.\d*)?$/.test(normalized) || normalized === "" || normalized === ".") return null;
+  const [whole = "0", fraction = ""] = normalized.split(".");
+  const digits = minorDigits(currency.toUpperCase());
+  if (fraction.length > digits) return null;
+  const amount = Number(whole) * 10 ** digits + Number((fraction + "0".repeat(digits)).slice(0, digits) || 0);
+  return Number.isSafeInteger(amount) ? amount : null;
+}
+
+/**
+ * Integer minor units -> the text an amount field shows: 123456 USD -> "1234.56" (en),
+ * "1234,56" (de); no grouping and no symbol, so `parseAmountInput` reads it back. A value that
+ * is not a safe integer shows as empty.
+ */
+export function formatAmountInput(cents: number, currency: string, locale: string): string {
+  if (!Number.isSafeInteger(cents)) return "";
+  const digits = minorDigits(currency.toUpperCase());
+  return cached(
+    `input|${locale}|${digits}`,
+    () =>
+      new Intl.NumberFormat(locale, {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+        useGrouping: false,
+      }),
+  ).format(toMajorUnits(cents, digits));
+}

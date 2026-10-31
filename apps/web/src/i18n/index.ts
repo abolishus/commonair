@@ -8,7 +8,7 @@
  * before hydrating, and English anywhere else (tests, scripts). `t()` is not reactive: a switch
  * remounts the tree (`applyLocale`).
  */
-import { PSEUDO_LOCALE, pseudoLocalize } from "@commonair/i18n";
+import { PSEUDO_LOCALE } from "@commonair/i18n";
 import { enMessages, type UiMessages } from "@commonair/ui/lib/messages";
 import { type LocaleRegistry, type Translator, defaultRegistry } from "./catalogs.ts";
 import type { MessageKey } from "./keys/index.gen.ts";
@@ -54,30 +54,21 @@ export function baseLanguage(tag: string): string {
   return tag.split("-")[0]?.toLowerCase() || "en";
 }
 
-/** Load a locale's catalog (once) and return its translator; unsupported tags get English. */
+/**
+ * Load a locale's catalog and its design-system strings (once) and return its translator;
+ * unsupported tags get English.
+ */
 export function loadLocale(tag: string): Promise<Translator> {
   return registry.load(tag);
 }
 
-let pseudoUi: UiMessages | null = null;
-
-function pseudoMessages(messages: UiMessages): UiMessages {
-  const walk = (value: unknown): unknown => {
-    if (typeof value === "string") return pseudoLocalize(value);
-    if (typeof value === "function")
-      return (...args: unknown[]) => pseudoLocalize(String((value as (...a: unknown[]) => unknown)(...args)));
-    if (value && typeof value === "object")
-      return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, walk(v)]));
-    return value;
-  };
-  return walk(messages) as UiMessages;
-}
-
-/** Design-system strings for `locale`: English until N2-ui ships translations, pseudo for `en-XA`. */
+/**
+ * Design-system strings for `locale`, for `LocaleProvider`: the locale's `ui.json` once
+ * `loadLocale(locale)` resolved (`es-MX` falls back to `es`, anything else to English), English
+ * pseudo-localized for `en-XA`. Synchronous, so the root can call it while rendering.
+ */
 export function uiMessagesFor(locale: string): UiMessages {
-  if (locale !== PSEUDO_LOCALE) return enMessages;
-  pseudoUi ??= pseudoMessages(enMessages);
-  return pseudoUi;
+  return registry.uiMessages(locale);
 }
 
 /**

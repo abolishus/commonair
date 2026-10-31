@@ -5,6 +5,8 @@ import * as React from "react";
 import { Progress, ProgressIndicator, ProgressTrack } from "@commonair/ui/components/progress";
 import { Card, CardContent, CardHeader, CardTitle } from "@commonair/ui/components/card";
 import { cn } from "@commonair/ui/lib/utils";
+import { formatNumber, formatPercent } from "../../lib/format.ts";
+import { useResolvedLocale } from "../../lib/locale.tsx";
 
 export type ProgressTone = "default" | "accent" | "success" | "warning" | "danger";
 export interface ProgressRowProps extends Omit<React.ComponentProps<"div">, "title"> {
@@ -100,6 +102,8 @@ export interface PollCardProps extends Omit<React.ComponentProps<"div">, "title"
   options: PollOption[];
   voted?: boolean;
   closed?: boolean;
+  /** Formats the counts and percentages; defaults to the `LocaleProvider`'s locale. */
+  locale?: string;
 }
 export function PollCard({
   question,
@@ -108,9 +112,11 @@ export function PollCard({
   options,
   voted = false,
   closed = false,
+  locale,
   className,
   ...props
 }: PollCardProps) {
+  const resolved = useResolvedLocale(locale);
   return (
     <Card size="sm" className={className} {...props}>
       <CardHeader>
@@ -123,8 +129,8 @@ export function PollCard({
             key={option.id}
             label={option.label}
             value={option.percent}
-            valueText={`${option.percent}%`}
-            note={voted || closed ? `${option.value.toLocaleString()}` : undefined}
+            valueText={formatPercent(option.percent / 100, resolved, { maximumFractionDigits: 1 })}
+            note={voted || closed ? formatNumber(option.value, resolved) : undefined}
           />
         ))}
       </CardContent>

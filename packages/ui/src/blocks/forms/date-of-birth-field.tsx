@@ -4,11 +4,14 @@
 import * as React from "react";
 import { Field, FieldError, FieldLabel, FieldSet, FieldLegend } from "@commonair/ui/components/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@commonair/ui/components/select";
+import { monthNames } from "../../lib/format.ts";
+import { useResolvedLocale } from "../../lib/locale.tsx";
 
 export interface DateOfBirthFieldProps {
   label: React.ReactNode;
   value?: string;
   onValueChange?: (isoDate: string | undefined) => void;
+  /** Month names; defaults to the `LocaleProvider`'s locale. */
   locale?: string;
   monthLabel: string;
   dayLabel: string;
@@ -21,7 +24,7 @@ export function DateOfBirthField({
   label,
   value,
   onValueChange,
-  locale = "en-US",
+  locale: localeProp,
   monthLabel,
   dayLabel,
   yearLabel,
@@ -43,9 +46,7 @@ export function DateOfBirthField({
       : value !== undefined && valid
         ? { year: 0, month: 0, day: 0 }
         : innerParts;
-  const months = Array.from({ length: 12 }, (_, index) =>
-    new Intl.DateTimeFormat(locale, { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2020, index, 1))),
-  );
+  const months = monthNames(useResolvedLocale(localeProp));
   const emit = (next: typeof parts): void => {
     if (value === undefined || !valid) setInnerParts(next);
     if (next.year && next.month && next.day) {
