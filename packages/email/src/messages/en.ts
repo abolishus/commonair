@@ -2,365 +2,54 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * English email catalog: the default and the shape every translation follows.
- * `{name}` placeholders are filled at render time (values may be links);
- * translators may reorder them but must keep every placeholder.
- * `{instance}` (the instance name) is available in every string.
+ * The English email catalog: the default and the shape every translation follows. The strings
+ * live in `locales/en/<group>.json` (flat `block.field` keys, the ICU subset of ADR 0029); this
+ * module nests them back into blocks, typed from the JSON, so a missing key is a type error in
+ * templates. `{instance}` (the instance name) is available in every string. Translator notes:
+ * `NOTES.md`.
  */
-export const en = {
-  layout: {
-    /** Text direction for this locale: "ltr" or "rtl". */
-    dir: "ltr",
-    reason: "You are receiving this email because of your account on {instance}.",
-    contact: "Questions? Write to {contact}.",
-    source: "{instance} runs on free software. {sourceLink}.",
-    sourceLinkLabel: "Get the source code",
-    unsubscribe: "Unsubscribe from these emails",
-    buttonFallback: "If the button does not work, copy this link into your browser: {url}",
-  },
-  verifyEmail: {
-    subject: "Confirm your email address for {instance}",
-    preview: "Confirm your email address to finish setting up your account.",
-    heading: "Confirm your email address",
-    greeting: "Hi {displayName},",
-    body: "Please confirm this is your email address to finish setting up your {instance} account.",
-    action: "Confirm email address",
-    expiry: "This link expires in {minutes} minutes.",
-    ignore: "If you did not create an account, you can ignore this email.",
-  },
-  magicLink: {
-    subject: "Your sign-in link for {instance}",
-    preview: "Use this link to sign in. It works once.",
-    heading: "Sign in to {instance}",
-    body: "Use the button below to sign in. The link works once.",
-    action: "Sign in",
-    expiry: "This link expires in {minutes} minutes.",
-    ignore: "If you did not ask to sign in, you can ignore this email. Nobody can sign in without this link.",
-  },
-  passwordReset: {
-    subject: "Reset your {instance} password",
-    preview: "Someone asked to reset the password for your account.",
-    heading: "Reset your password",
-    body: "Someone asked to reset the password for your {instance} account. If it was you, choose a new password below.",
-    action: "Choose a new password",
-    expiry: "This link expires in {minutes} minutes.",
-    ignore: "If you did not ask for this, ignore this email. Your password stays the same.",
-  },
-  twoFactorEnabled: {
-    subject: "Two-factor authentication is on",
-    preview: "Two-factor authentication was turned on for your account.",
-    heading: "Two-factor authentication is on",
-    body: "Two-factor authentication was turned on for your {instance} account on {date}. You will now need your authenticator app or a security key to sign in.",
-    recovery: "Keep your recovery codes somewhere safe. They are the only way in if you lose your device.",
-    action: "Review security settings",
-    notYou: "If you did not do this, secure your account now and contact {contact}.",
-  },
-  twoFactorDisabled: {
-    subject: "Two-factor authentication is off",
-    preview: "Two-factor authentication was turned off for your account.",
-    heading: "Two-factor authentication is off",
-    body: "Two-factor authentication was turned off for your {instance} account on {date}. Your account is now protected by your password alone.",
-    action: "Turn it back on",
-    notYou: "If you did not do this, change your password now and contact {contact}.",
-  },
-  newSignIn: {
-    subject: "New sign-in to your {instance} account",
-    preview: "Your account was signed in to from a new device.",
-    heading: "New sign-in from a new device",
-    body: "Your {instance} account was signed in to from a device we have not seen before.",
-    whenLabel: "When",
-    deviceLabel: "Device",
-    locationLabel: "Approximate location",
-    itWasYou: "If this was you, there is nothing to do.",
-    action: "Review active sessions",
-    notYou: "If this was not you, sign out that session and change your password.",
-  },
-  streamKeyRevoked: {
-    subject: "Your stream key for {channel} was revoked",
-    preview: "We found your stream key in public and revoked it to protect your channel.",
-    heading: "We revoked a leaked stream key",
-    body: "We found the stream key for {channel} in a public place and revoked it so nobody else can stream to your channel.",
-    detectedLabel: "Detected",
-    sourceLabel: "Found in",
-    next: "Create a new stream key and update it in your streaming software before you go live again.",
-    action: "Manage stream keys",
-    tip: "Never show your stream key on stream or share it in screenshots.",
-  },
-  dataExportReady: {
-    subject: "Your {instance} data export is ready",
-    preview: "Your data export is ready to download.",
-    heading: "Your data export is ready",
-    body: "The copy of your data you asked for is ready to download.",
-    action: "Download your data",
-    expiry: "The download is available until {date}. After that, request a new export.",
-    signInNote: "You will need to sign in to download it.",
-  },
-  accountDeletionScheduled: {
-    subject: "Your {instance} account will be deleted on {date}",
-    preview: "Your account is scheduled for deletion. You can still cancel.",
-    heading: "Your account is scheduled for deletion",
-    body: "You asked us to delete your {instance} account. It will be deleted permanently on {date}.",
-    cancelInfo: "Changed your mind? Cancel any time before then and everything stays as it is.",
-    action: "Cancel deletion",
-    notYou: "If you did not ask for this, cancel now and contact {contact}.",
-  },
-  accountDeletionCompleted: {
-    subject: "Your {instance} account has been deleted",
-    preview: "Your account and personal data have been deleted.",
-    heading: "Your account has been deleted",
-    body: "Your {instance} account was deleted on {date}. Your personal data has been removed.",
-    retained: "Records the law requires us to keep, such as payment records, are kept without your personal details.",
-    farewell: "Thank you for being part of {instance}.",
-  },
-  payoutSent: {
-    subject: "Payout sent: {amount}",
-    preview: "Your payout is on its way.",
-    heading: "Your payout is on its way",
-    body: "We sent you a payout of {amount}.",
-    amountLabel: "Amount",
-    sentLabel: "Sent",
-    referenceLabel: "Reference",
-    timing: "Depending on your bank, it can take a few business days to arrive.",
-    action: "View earnings",
-  },
-  chargebackNotice: {
-    subjectChargeback: "A payment was charged back: {amount}",
-    subjectClawback: "Earnings were reversed: {amount}",
-    preview: "A payment to your channel was reversed.",
-    headingChargeback: "A supporter's payment was charged back",
-    headingClawback: "Some of your earnings were reversed",
-    bodyChargeback:
-      "A payment to your channel was disputed with the card issuer and the money was returned to the payer.",
-    bodyClawback: "Earnings that were already credited to you were reversed after a refund or a confirmed fraud case.",
-    amountLabel: "Amount",
-    dateLabel: "Date",
-    referenceLabel: "Reference",
-    balance:
-      "The amount has been deducted from your balance. If your balance goes below zero, it is recovered from future earnings.",
-    action: "View earnings",
-    question: "If you think this is a mistake, contact {contact}.",
-  },
-  governanceVoteOpened: {
-    subject: "Vote now: {proposal}",
-    preview: "A new co-op vote is open.",
-    heading: "A new vote is open",
-    body: "Members can now vote on: {proposal}",
-    closesLabel: "Voting closes",
-    why: "As a member of the {instance} co-op, your vote decides how the platform is run.",
-    action: "Read the proposal and vote",
-  },
-  governanceResultPublished: {
-    subject: "Vote result: {proposal}",
-    preview: "The result of a co-op vote has been published.",
-    heading: "The result is in",
-    body: "The vote on {proposal} has closed.",
-    outcomeLabel: "Outcome",
-    outcomePassed: "Passed",
-    outcomeRejected: "Not passed",
-    turnoutLabel: "Turnout",
-    action: "See the full result",
-  },
-  councilReviewRequested: {
-    subject: "Council review requested: {proposal}",
-    preview: "A proposal that affects creators needs the council's response.",
-    heading: "A proposal needs the council's review",
-    body: "{proposal} affects creators and has entered council review.",
-    dueLabel: "Review period ends",
-    duty: "As a member of the creator council, you can publish the council's response before members vote.",
-    action: "Review and respond",
-    public: "The council's response is published with the proposal.",
-  },
-  goLiveDigest: {
-    /** One channel. The digest strings carry no counts (no plurals until N2-email). */
-    subjectOne: "{channel} is live on {instance}",
-    /** Several channels in one digest. */
-    subjectMany: "Channels you follow are live on {instance}",
-    previewOne: "{channel} just went live. Come and watch.",
-    previewMany: "Channels you follow just went live. Come and watch.",
-    headingOne: "{channel} is live",
-    headingMany: "Channels you follow are live",
-    /** One listed channel: its linked name and the broadcast title. */
-    item: "{channel}: {title}",
-    /** One listed channel without a title (none set, or a mature stream the member has not confirmed 18+ for). */
-    itemNoTitle: "{channel}",
-    /** Shown, linking the home page, when more channels went live than the digest lists. */
-    more: "More channels you follow are live",
-    why: "You turned on go-live emails for channels you follow on {instance}.",
-    settings: "Choose which go-live emails you get",
-  },
-  dmcaNoticeReceived: {
-    subject: "Copyright notice about {content}",
-    preview: "We received a copyright notice about your content.",
-    heading: "We received a copyright notice",
-    body: "We received a copyright (DMCA) notice about {content}, and it is no longer available while the notice is handled.",
-    noticeLabel: "Notice reference",
-    receivedLabel: "Received",
-    counter:
-      "If you believe the notice is a mistake or you have the rights to this content, you can send a counter-notice.",
-    action: "Review the notice",
-    policy: "Questions about copyright? Write to {contact}.",
-  },
-  dmcaNoticeDecided: {
-    subjectActioned: "Your copyright notice {noticeRef} was actioned",
-    subjectRejected: "Your copyright notice {noticeRef} could not be actioned",
-    preview: "A decision was made on your copyright (DMCA) notice.",
-    headingActioned: "We acted on your copyright notice",
-    headingRejected: "We could not act on your copyright notice",
-    bodyActioned:
-      "We reviewed your copyright (DMCA) notice {noticeRef} and disabled access to the material it identified.",
-    bodyActionedPartial:
-      "We reviewed your copyright (DMCA) notice {noticeRef} and disabled access to the material at {removed} of the {total} locations it identified. The other locations did not point to material we host that was still available.",
-    bodyActionedNone:
-      "We reviewed your copyright (DMCA) notice {noticeRef}. None of the locations it identified pointed to material we host that was still available, so nothing was removed.",
-    bodyRejected:
-      "We reviewed your copyright (DMCA) notice {noticeRef} and could not act on it as it stands. The note below says what is missing or wrong.",
-    noticeLabel: "Notice reference",
-    decidedLabel: "Decided",
-    noteLabel: "Note from our team",
-    resubmit: "You can send a new, complete notice at any time.",
-    policy: "Questions about copyright? Write to our designated agent at {contact}.",
-  },
-  dmcaCounterNoticeForwarded: {
-    subject: "Counter-notice received for your copyright notice {noticeRef}",
-    preview: "The uploader sent a counter-notice; here is a copy.",
-    heading: "The uploader sent a counter-notice",
-    body: "The person whose material was removed under your copyright (DMCA) notice {noticeRef} sent the counter-notice below. We are forwarding it to you as the law requires.",
-    nameLabel: "Name",
-    addressLabel: "Address",
-    phoneLabel: "Telephone",
-    statementLabel: "Their statement",
-    signatureLabel: "Signature",
-    itemsLabel: "Material the counter-notice covers",
-    receivedLabel: "Counter-notice received",
-    restoreLabel: "Material will be restored after",
-    statements:
-      "The sender stated, under penalty of perjury, that they believe in good faith the material was removed by mistake or misidentification. They consented to the jurisdiction of the federal district court for their address (or, outside the United States, any judicial district in which we may be found) and agreed to accept service of process from you or your agent.",
-    restore:
-      "We will restore the material after {restoreAfter} unless, before then, you tell our designated agent at {contact} that you have filed a court action seeking to restrain the sender from the infringing activity.",
-  },
-  contentRestored: {
-    subject: "Your content is available again: {content}",
-    preview: "Content that was taken down has been restored.",
-    heading: "Your content has been restored",
-    body: "{content} is available again.",
-    restoredLabel: "Restored",
-    action: "View the content",
-  },
-  appealDecided: {
-    subject: "Your appeal {appealRef} has been decided",
-    preview: "A decision has been made on your appeal.",
-    heading: "Your appeal has been decided",
-    body: "We reviewed your appeal {appealRef}.",
-    kindLabel: "Appeal about",
-    kindIntegrity: "An integrity review",
-    kindModeration: "A moderation action",
-    kindDmca: "A copyright takedown",
-    kindAccount: "An account action",
-    outcomeLabel: "Decision",
-    outcomeOverturned: "Overturned: the original action has been reversed",
-    outcomeUpheld: "Upheld: the original action stays in place",
-    decidedLabel: "Decided",
-    action: "Read the decision",
-    final: "You can find the reasons and any further options on the decision page.",
-  },
-  /**
-   * Statement of reasons (ADR 0019, DSA Art. 17). The `clause.*`, `restriction.*`, `content.*`,
-   * `category.*`, `decision.*` and `legalBasis.*` keys are also the labels the API returns
-   * (`me.enforcement.list` `clauseTitle`); keys follow `@commonair/moderation` `CLAUSES[].titleKey`.
-   * NOT REVIEWED BY COUNSEL.
-   */
-  enforcementStatement: {
-    subject: "Statement of reasons: {restriction}",
-    preview: "What we restricted, why, and how you can challenge it.",
-    heading: "Statement of reasons",
-    body: "On {appliedAt} we took an action about your {content}. This statement says what we did, why, and how you can challenge it.",
-    draft:
-      "The wording of this statement comes from a draft notice that has not been reviewed by a lawyer yet. It may change.",
-    refLabel: "Reference",
-    restrictionLabel: "What we restricted",
-    endsLabel: "Until",
-    endsIndefinite: "No end date: it stays in place until it is lifted",
-    endsNotApplicable: "Nothing was restricted",
-    scopeLabel: "Where",
-    scopeAll: "Everywhere {instance} is available",
-    factsLabel: "What led to it",
-    factsClassifierT1:
-      "Automated checks found {category} in content captured on {capturedAt}, at or above the threshold of {threshold} set for automatic action.",
-    factsClassifierT2:
-      "Automated checks found {category} in content captured on {capturedAt}, at or above the threshold of {threshold} set for the mature label.",
-    factsReview: "A moderator reviewed case {caseRef} and decided: {decision}.",
-    factsNcii:
-      "We received a request about intimate images on {receivedAt} (request {requestRef}). We had until {deadlineAt} to act on it.",
-    factsHash:
-      "Content captured on {capturedAt} matched an image on our list of intimate images removed after earlier requests.",
-    sourceLabel: "How it came to our attention",
-    sourceOwn: "Our own checks or moderators",
-    sourceNotice: "A notice from someone else (we do not say who)",
-    automationLabel: "Automated means",
-    detectionYes: "Software detected it.",
-    detectionNo: "No software was used to detect it.",
-    decisionFully: "Software made the decision, without a person.",
-    decisionPartially: "Software helped a person make the decision.",
-    decisionNot: "A person made the decision.",
-    groundLabel: "Rule or law relied on",
-    groundTerms: "Our community guidelines: {clause} ({ref})",
-    groundIllegal: "Illegal content: {clause} ({ref}), under {legalBasis}",
-    explanationLabel: "What the rule says",
-    redressHeading: "How to challenge this decision",
-    appeal:
-      "You can appeal on your appeals page while you are signed in. If you cannot reach it, write to {contact} and quote the reference above.",
-    // A suspended account cannot start a new session: only one still signed in reaches the page.
-    appealSuspended:
-      "Your account is suspended, so you may not be able to sign in. If you are still signed in on a device, you can appeal on your appeals page. Otherwise, write to {contact} and quote the reference above.",
-    noAppeal: "This decision cannot be appealed on the appeals page. If you think it is wrong, write to {contact}.",
-    courts:
-      "You can also take the dispute to an out-of-court dispute settlement body where one is available to you, or to the courts.",
-    action: "Open your appeals page",
-    restrictionOther: "A restriction on your content or account",
-    "restriction.visibility.removed": "Your content was removed",
-    "restriction.visibility.disabled": "Your content was hidden while a request is decided",
-    "restriction.visibility.restricted": "Your stream was limited while a moderator reviews it",
-    "restriction.visibility.age_gated": "Your channel was labelled mature (adults only)",
-    "restriction.account.suspended": "Your account was suspended",
-    "restriction.service.suspended": "Your channel was suspended",
-    "restriction.warning.none": "A warning, with no restriction",
-    "content.broadcast": "stream",
-    "content.vod": "video",
-    "content.clip": "clip",
-    "content.upload": "upload",
-    "content.channel": "channel",
-    "content.account": "account",
-    "category.sexual": "sexual content",
-    "category.graphic_violence": "graphic violence",
-    "category.weapons": "weapons",
-    "category.self_harm": "self-harm",
-    "decision.clear": "no action",
-    "decision.warn": "a warning",
-    "decision.end_stream": "end the stream",
-    "decision.suspend": "a suspension",
-    "decision.escalate_legal": "refer to our legal team",
-    "clause.mature.unlabelled": "Mature content without the mature label",
-    "clause.safety.sexual-explicit": "Sexual activity or explicit nudity",
-    "clause.safety.graphic-violence": "Extreme graphic violence",
-    "clause.safety.weapons": "Dangerous weapons",
-    "clause.safety.self-harm": "Self-harm and suicide",
-    "clause.safety.violence": "Threats and incitement",
-    "clause.safety.minors": "Safety of minors",
-    "clause.safety.illegal-activity": "Illegal activity",
-    "clause.decency.harassment": "Harassment",
-    "clause.decency.hate": "Hateful conduct",
-    "clause.decency.intimate-images": "Intimate images shared without consent",
-    "clause.honesty.impersonation": "Impersonation",
-    "clause.honesty.spam": "Spam and scams",
-    "clause.creative.copyright": "Other people's creative work",
-    "clause.guidelines.general": "Our community guidelines",
-    "clause.illegal.ncii": "Intimate images shared without consent",
-    "legalBasis.us.take-it-down": "the United States TAKE IT DOWN Act",
-  },
-} as const;
+import account from "./locales/en/account.json" with { type: "json" };
+import governance from "./locales/en/governance.json" with { type: "json" };
+import layout from "./locales/en/layout.json" with { type: "json" };
+import notify from "./locales/en/notify.json" with { type: "json" };
+import payments from "./locales/en/payments.json" with { type: "json" };
+import privacy from "./locales/en/privacy.json" with { type: "json" };
+import security from "./locales/en/security.json" with { type: "json" };
+import trust from "./locales/en/trust.json" with { type: "json" };
 
-type Widen<T> = { -readonly [K in keyof T]: T[K] extends string ? string : Widen<T[K]> };
+/** Every English JSON group, by file name (the order of `locales/en/`). */
+export const EN_GROUPS = { account, governance, layout, notify, payments, privacy, security, trust } as const;
+
+type Flat = typeof account &
+  typeof governance &
+  typeof layout &
+  typeof notify &
+  typeof payments &
+  typeof privacy &
+  typeof security &
+  typeof trust;
+
+type BlockOf<K> = K extends `${infer B}.${string}` ? B : never;
+
+/** Flat `block.field` keys back to `{ block: { field: string } }` (the field may contain dots). */
+export type Nested<T> = {
+  [B in BlockOf<keyof T>]: { [K in keyof T as K extends `${B}.${infer F}` ? F : never]: string };
+};
 
 /** The full message catalog for one locale. */
-export type EmailCatalog = Widen<typeof en>;
+export type EmailCatalog = Nested<Flat>;
 export type LayoutMessages = EmailCatalog["layout"];
+
+/** Nest flat `block.field` entries (split at the first dot). */
+export function nestFlat(flat: Readonly<Record<string, string>>): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const [key, message] of Object.entries(flat)) {
+    const dot = key.indexOf(".");
+    if (dot <= 0) continue;
+    const block = key.slice(0, dot);
+    (out[block] ??= {})[key.slice(dot + 1)] = message;
+  }
+  return out;
+}
+
+export const en: EmailCatalog = nestFlat(Object.assign({}, ...Object.values(EN_GROUPS))) as unknown as EmailCatalog;

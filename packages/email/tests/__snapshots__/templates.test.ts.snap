@@ -390,12 +390,12 @@ Example Air runs on free software. Get the source code https://forge.example.tes
 `;
 
 exports[`goLiveDigest > renders accessible HTML and a plain-text alternative 1`] = `
-"Channels you follow are live on Example Air
+"2 channels you follow are live on Example Air
 
 Example Air https://air.example.test
 
 
-Channels you follow are live
+2 channels you follow are live
 
  * ada_plays https://air.example.test/ada_plays: Speedrun night, part 2
  * Ada https://air.example.test/sample_channel

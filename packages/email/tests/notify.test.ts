@@ -39,15 +39,15 @@ describe("goLiveDigest", () => {
     expect(mail.text).toContain("Speedrun night");
     expect(mail.text).toContain(en.goLiveDigest.why.replace("{instance}", site.name));
     expect(mail.html).toContain(`href="${origin}/settings/notifications"`);
-    expect(mail.text).not.toContain(en.goLiveDigest.more);
+    expect(mail.text).not.toMatch(/more channels? you follow/);
     // Physical list indent on the reading side (Outlook ignores logical padding).
     expect(mail.html).toMatch(/<ul style="margin:0;padding:0 0 0 20px"/);
   });
 
-  test("several channels: one subject without a count, every channel listed and linked", async () => {
+  test("several channels: a counted subject and heading, every channel listed and linked", async () => {
     const mail = await render(digest([channel(1), channel(2), channel(3)]));
-    expect(mail.subject).toBe("Channels you follow are live on Example Air");
-    expect(mail.subject).not.toMatch(/\d/);
+    expect(mail.subject).toBe("3 channels you follow are live on Example Air");
+    expect(mail.text).toContain("3 channels you follow are live\n");
     for (const i of [1, 2, 3]) {
       expect(mail.html).toContain(`href="${origin}/channel_${i}"`);
       expect(mail.text).toContain(`Title ${i}`);
@@ -61,14 +61,16 @@ describe("goLiveDigest", () => {
     expect(mail.html.match(/<li[\s>]/g)).toHaveLength(GO_LIVE_DIGEST_MAX_CHANNELS);
     expect(mail.html).toContain(`href="${origin}/channel_${GO_LIVE_DIGEST_MAX_CHANNELS}"`);
     expect(mail.html).not.toContain(`href="${origin}/channel_${GO_LIVE_DIGEST_MAX_CHANNELS + 1}"`);
-    expect(mail.text).toContain(en.goLiveDigest.more);
-    expect(mail.html).toMatch(new RegExp(`href="${origin}/?"[^>]*>${en.goLiveDigest.more}`));
+    expect(mail.text).toContain("5 more channels you follow are live");
+    expect(mail.html).toMatch(
+      new RegExp(`href="${origin}/?"[^>]*>(<!-- -->)?5(<!-- -->)? more channels you follow are live`),
+    );
   });
 
   test("exactly the maximum lists everything and has no 'more' line", async () => {
     const mail = await render(digest(Array.from({ length: GO_LIVE_DIGEST_MAX_CHANNELS }, (_, i) => channel(i + 1))));
     expect(mail.html.match(/<li[\s>]/g)).toHaveLength(GO_LIVE_DIGEST_MAX_CHANNELS);
-    expect(mail.text).not.toContain(en.goLiveDigest.more);
+    expect(mail.text).not.toMatch(/more channels? you follow/);
   });
 
   test("an empty title (the mature rule) shows the channel alone", async () => {

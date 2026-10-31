@@ -67,10 +67,15 @@ test("a member with no chosen language gets the instance default (ADR 0029)", as
   await withEs.send("magicLink", { ...samples.magicLink, locale: null }, "a@air.example.test");
   expect(withEs.sent[0]).toMatchObject({ locale: "es", subject: "Inicia sesión en Example Air" });
 
+  // Without explicit catalogs the bundled ones apply: Spanish ships.
+  const bundled = new MemoryMailer({ site: esSite });
+  await bundled.send("magicLink", { ...samples.magicLink, locale: null }, "a@air.example.test");
+  expect(bundled.sent[0]).toMatchObject({ locale: "es", subject: "Tu enlace para iniciar sesión en Example Air" });
+
   // No catalog for the default: English.
-  const noEs = new MemoryMailer({ site: esSite });
-  await noEs.send("magicLink", { ...samples.magicLink, locale: null }, "a@air.example.test");
-  expect(noEs.sent[0]?.locale).toBe("en");
+  const noDe = new MemoryMailer({ site: testSite({ INSTANCE_DEFAULT_LOCALE: "de" }) });
+  await noDe.send("magicLink", { ...samples.magicLink, locale: null }, "a@air.example.test");
+  expect(noDe.sent[0]?.locale).toBe("en");
 
   // An explicit choice wins over the default.
   const chosen = new MemoryMailer({ site: esSite, catalogs: esCatalogs });

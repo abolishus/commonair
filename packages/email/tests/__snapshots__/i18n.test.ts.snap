@@ -1,0 +1,706 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`accountDeletionCompleted in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Se eliminó tu cuenta de Example Air
+
+Example Air https://air.example.test
+
+
+Se eliminó tu cuenta
+
+Tu cuenta de Example Air se eliminó el 18 de octubre de 2026. Se borraron tus datos personales.
+
+Los registros que la ley nos obliga a conservar, como los registros de pagos, se guardan sin tus datos personales.
+
+Gracias por ser parte de Example Air.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`accountDeletionScheduled in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu cuenta de Example Air se eliminará el 17 de noviembre de 2026
+
+Example Air https://air.example.test
+
+
+La eliminación de tu cuenta está programada
+
+Nos pediste eliminar tu cuenta de Example Air. Se eliminará de forma permanente el 17 de noviembre de 2026.
+
+¿Cambiaste de opinión? Cancela en cualquier momento antes de esa fecha y todo quedará como está.
+
+Cancelar la eliminación https://air.example.test/settings/account/deletion
+
+Si no lo pediste, cancela ahora y escribe a privacy@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`appealDecided in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Se resolvió tu apelación AP-1207
+
+Example Air https://air.example.test
+
+
+Se resolvió tu apelación
+
+Revisamos tu apelación AP-1207.
+
+Apelación sobre
+
+Una medida de moderación
+
+Decisión
+
+Revocada: la medida original se revirtió
+
+Fecha de la decisión
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Leer la decisión https://air.example.test/settings/appeals/sample
+
+En la página de la decisión encontrarás los motivos y las demás opciones que tengas.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`chargebackNotice in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Se revirtió un pago por contracargo: 4,99 €
+
+Example Air https://air.example.test
+
+
+Se revirtió por contracargo el pago de una persona que te apoya
+
+Un pago a tu canal se disputó ante el emisor de la tarjeta y el dinero se devolvió a quien pagó.
+
+Importe
+
+4,99 €
+
+Fecha
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Referencia
+
+CB-7731
+
+El importe se descontó de tu saldo. Si tu saldo queda por debajo de cero, se recupera de tus ganancias futuras.
+
+Ver ganancias https://air.example.test/dashboard/earnings
+
+Si crees que es un error, escribe a hello@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`contentRestored in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu contenido vuelve a estar disponible: Speedrun night, part 2
+
+Example Air https://air.example.test
+
+
+Se restauró tu contenido
+
+Speedrun night, part 2 vuelve a estar disponible.
+
+Restaurado
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Ver el contenido https://air.example.test/videos/sample
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`councilReviewRequested in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Se pide la revisión del consejo: Raise the creator share to 85%
+
+Example Air https://air.example.test
+
+
+Una propuesta necesita la revisión del consejo
+
+Raise the creator share to 85% afecta a quienes crean contenido y entró en revisión del consejo.
+
+El periodo de revisión termina
+
+25 de octubre de 2026 a las 18:00 UTC
+
+Como miembro del consejo de creadores, puedes publicar la respuesta del consejo antes de que voten los miembros.
+
+Revisar y responder https://air.example.test/coop/proposals/sample/council-response
+
+La respuesta del consejo se publica junto con la propuesta.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dataExportReady in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu exportación de datos de Example Air está lista
+
+Example Air https://air.example.test
+
+
+Tu exportación de datos está lista
+
+La copia de tus datos que pediste está lista para descargar.
+
+Descargar tus datos https://air.example.test/settings/privacy/exports/sample
+
+La descarga está disponible hasta el 25 de octubre de 2026 a las 14:30 UTC. Después de esa fecha, pide una exportación nueva.
+
+Tendrás que iniciar sesión para descargarla.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dmcaCounterNoticeForwarded in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Contraaviso recibido para tu aviso de derechos de autor DMCA-2026-0091
+
+Example Air https://air.example.test
+
+
+Quien subió el material envió un contraaviso
+
+La persona cuyo material se retiró por tu aviso de derechos de autor (DMCA) DMCA-2026-0091 envió el contraaviso que aparece abajo. Te lo reenviamos como exige la ley.
+
+Nombre
+
+Ada
+
+Dirección
+
+1 Example Street, Springfield
+
+Teléfono
+
++1 555 0100
+
+Su declaración
+
+I recorded this performance myself and hold the rights to it.
+
+Firma
+
+/s/ Ada
+
+Material que cubre el contraaviso
+
+https://air.example.test/ada_plays/clip/sample
+
+Contraaviso recibido
+
+18 de octubre de 2026 a las 14:30 UTC
+
+El material se restaurará después del
+
+3 de noviembre de 2026 a las 14:30 UTC
+
+Quien envió el contraaviso declaró, bajo pena de perjurio, que cree de buena fe que el material se retiró por error o por una identificación equivocada. Se sometió a la jurisdicción del tribunal federal de distrito correspondiente a su dirección (o, fuera de los Estados Unidos, de cualquier distrito judicial en el que se nos pueda encontrar) y aceptó recibir notificaciones judiciales tuyas o de tu representante.
+
+Restauraremos el material después del 3 de noviembre de 2026 a las 14:30 UTC, salvo que antes de esa fecha le informes a nuestro agente designado en dmca@air.example.test que presentaste una acción judicial para impedir que quien envió el contraaviso continúe con la actividad infractora.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dmcaNoticeDecided in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"No pudimos actuar sobre tu aviso de derechos de autor DMCA-2026-0091
+
+Example Air https://air.example.test
+
+
+No pudimos actuar sobre tu aviso de derechos de autor
+
+Revisamos tu aviso de derechos de autor (DMCA) DMCA-2026-0091 y no pudimos actuar sobre él tal como está. La nota de abajo indica qué falta o qué está mal.
+
+Referencia del aviso
+
+DMCA-2026-0091
+
+Fecha de la decisión
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Nota de nuestro equipo
+
+The notice does not identify the copyrighted work.
+
+Puedes enviar un aviso nuevo y completo en cualquier momento.
+
+¿Tienes preguntas sobre derechos de autor? Escribe a nuestro agente designado en dmca@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`dmcaNoticeReceived in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Aviso de derechos de autor sobre Speedrun night, part 2
+
+Example Air https://air.example.test
+
+
+Recibimos un aviso de derechos de autor
+
+Recibimos un aviso de derechos de autor (DMCA) sobre Speedrun night, part 2, que no estará disponible mientras se tramita el aviso.
+
+Referencia del aviso
+
+DMCA-2026-0091
+
+Recibido
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Si crees que el aviso es un error o tienes los derechos de este contenido, puedes enviar un contraaviso.
+
+Revisar el aviso https://air.example.test/settings/copyright?notice=sample
+
+¿Tienes preguntas sobre derechos de autor? Escribe a dmca@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`enforcementStatement in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Declaración de motivos: Se limitó tu transmisión durante la revisión
+
+Example Air https://air.example.test
+
+
+Declaración de motivos
+
+El texto de esta declaración viene de un aviso en borrador que todavía no tuvo revisión legal. Puede cambiar.
+
+El 18 de octubre de 2026 a las 14:30 UTC tomamos una medida sobre tu transmisión. Esta declaración explica qué hicimos, por qué y cómo puedes impugnarlo.
+
+Referencia
+
+SR-3F9A21C7
+
+Qué restringimos
+
+Se limitó tu transmisión durante la revisión
+
+Hasta
+
+Sin fecha de fin: se mantiene hasta que se levante
+
+Dónde
+
+En todos los lugares donde Example Air está disponible
+
+Qué lo motivó
+
+Las comprobaciones automáticas encontraron armas en contenido capturado el 18 de octubre de 2026 a las 14:30 UTC, con un valor igual o superior al umbral del 95 % fijado para actuar automáticamente.
+
+Cómo llegó a nuestro conocimiento
+
+Nuestras propias comprobaciones o el equipo de moderación
+
+Medios automatizados
+
+Un software lo detectó. Un software tomó la decisión, sin intervención de una persona.
+
+Norma o ley aplicada
+
+Nuestras normas de la comunidad: Armas peligrosas (safety.weapons@1)
+
+Qué dice la norma
+
+Content that shows weapons in a way that threatens people or puts them at serious risk is not allowed.
+
+Cómo impugnar esta decisión
+
+Puedes apelar en tu página de apelaciones mientras tengas la sesión iniciada. Si no puedes acceder, escribe a abuse@air.example.test e indica la referencia de arriba.
+
+If you think we got it wrong, you can appeal from your account's appeals page.
+
+También puedes llevar la disputa a un órgano de resolución extrajudicial de litigios, si tienes uno disponible, o a los tribunales.
+
+Abrir tu página de apelaciones https://air.example.test/settings/appeals
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`goLiveDigest in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"2 canales que sigues están en vivo en Example Air
+
+Example Air https://air.example.test
+
+
+2 canales que sigues están en vivo
+
+ * ada_plays https://air.example.test/ada_plays: Speedrun night, part 2
+ * Ada https://air.example.test/sample_channel
+
+Activaste los correos de transmisiones en vivo de los canales que sigues en Example Air.
+
+Elige qué correos de transmisiones en vivo recibes https://air.example.test/settings/notifications
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Cancelar la suscripción a estos correos https://air.example.test/api/email/unsubscribe?list=go_live&token=sample"
+`;
+
+exports[`governanceResultPublished in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Resultado de la votación: Raise the creator share to 85%
+
+Example Air https://air.example.test
+
+
+Ya está el resultado
+
+La votación sobre Raise the creator share to 85% cerró.
+
+Resultado
+
+Aprobada
+
+Participación
+
+41,2 %
+
+Ver el resultado completo https://air.example.test/coop/proposals/sample
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Cancelar la suscripción a estos correos https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
+`;
+
+exports[`governanceVoteOpened in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Vota ahora: Raise the creator share to 85%
+
+Example Air https://air.example.test
+
+
+Hay una nueva votación abierta
+
+Los miembros ya pueden votar sobre: Raise the creator share to 85%
+
+La votación cierra
+
+1 de noviembre de 2026 a las 18:00 UTC
+
+Como miembro de la cooperativa de Example Air, tu voto decide cómo se gestiona la plataforma.
+
+Leer la propuesta y votar https://air.example.test/coop/proposals/sample
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd.
+
+Cancelar la suscripción a estos correos https://air.example.test/api/email/unsubscribe?list=governance&token=sample"
+`;
+
+exports[`magicLink in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Tu enlace para iniciar sesión en Example Air
+
+Example Air https://air.example.test
+
+
+Inicia sesión en Example Air
+
+Usa el botón de abajo para iniciar sesión. El enlace funciona una sola vez.
+
+Iniciar sesión https://air.example.test/sign-in/magic?token=sample
+
+Este enlace vence en 15 minutos.
+
+Si no pediste iniciar sesión, puedes ignorar este correo. Nadie puede iniciar sesión sin este enlace.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`newSignIn in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Nuevo inicio de sesión en tu cuenta de Example Air
+
+Example Air https://air.example.test
+
+
+Nuevo inicio de sesión desde un dispositivo nuevo
+
+Se inició sesión en tu cuenta de Example Air desde un dispositivo que no habíamos visto antes.
+
+Cuándo
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Dispositivo
+
+Firefox on Linux
+
+Ubicación aproximada
+
+Lisbon, Portugal
+
+Si fuiste tú, no tienes que hacer nada.
+
+Si no fuiste tú, cierra esa sesión y cambia tu contraseña.
+
+Revisar las sesiones activas https://air.example.test/settings/security/sessions
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`passwordReset in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Restablece tu contraseña de Example Air
+
+Example Air https://air.example.test
+
+
+Restablece tu contraseña
+
+Alguien pidió restablecer la contraseña de tu cuenta de Example Air. Si fuiste tú, elige una contraseña nueva abajo.
+
+Elegir una contraseña nueva https://air.example.test/reset-password?token=sample
+
+Este enlace vence en 30 minutos.
+
+Si no lo pediste, ignora este correo. Tu contraseña no cambia.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`payoutSent in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Liquidación enviada: 1234,56 €
+
+Example Air https://air.example.test
+
+
+Tu liquidación va en camino
+
+Te enviamos una liquidación de 1234,56 €.
+
+Importe
+
+1234,56 €
+
+Enviada
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Referencia
+
+PO-2026-10-0042
+
+Según tu banco, puede tardar algunos días hábiles en llegar.
+
+Ver ganancias https://air.example.test/dashboard/earnings
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`streamKeyRevoked in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Revocamos tu clave de transmisión de ada_plays
+
+Example Air https://air.example.test
+
+
+Revocamos una clave de transmisión filtrada
+
+Encontramos la clave de transmisión de ada_plays en un lugar público y la revocamos para que nadie más pueda transmitir en tu canal.
+
+Detectada
+
+18 de octubre de 2026 a las 14:30 UTC
+
+Encontrada en
+
+a public code repository
+
+Crea una clave de transmisión nueva y actualízala en tu software de transmisión antes de volver a transmitir en vivo.
+
+Administrar claves de transmisión https://air.example.test/dashboard/stream-keys
+
+Nunca muestres tu clave de transmisión mientras transmites ni la compartas en capturas de pantalla.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`twoFactorDisabled in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"La autenticación en dos pasos está desactivada
+
+Example Air https://air.example.test
+
+
+La autenticación en dos pasos está desactivada
+
+Se desactivó la autenticación en dos pasos en tu cuenta de Example Air el 18 de octubre de 2026 a las 14:30 UTC. Ahora tu cuenta está protegida solo por tu contraseña.
+
+Volver a activarla https://air.example.test/settings/security
+
+Si no fuiste tú, cambia tu contraseña ahora y escribe a security@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`twoFactorEnabled in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"La autenticación en dos pasos está activada
+
+Example Air https://air.example.test
+
+
+La autenticación en dos pasos está activada
+
+Se activó la autenticación en dos pasos en tu cuenta de Example Air el 18 de octubre de 2026 a las 14:30 UTC. A partir de ahora necesitarás tu app de autenticación o una llave de seguridad para iniciar sesión.
+
+Guarda tus códigos de recuperación en un lugar seguro. Son la única forma de entrar si pierdes tu dispositivo.
+
+Revisar la configuración de seguridad https://air.example.test/settings/security
+
+Si no fuiste tú, protege tu cuenta ahora y escribe a security@air.example.test.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;
+
+exports[`verifyEmail in Spanish > renders with lang and dir, and differs from English in subject and body 1`] = `
+"Confirma tu correo electrónico en Example Air
+
+Example Air https://air.example.test
+
+
+Confirma tu correo electrónico
+
+Hola, Ada:
+
+Confirma que esta es tu dirección de correo para terminar de configurar tu cuenta de Example Air.
+
+Confirmar correo electrónico https://air.example.test/verify-email?token=sample
+
+Este enlace vence en 60 minutos.
+
+Si no creaste una cuenta, puedes ignorar este correo.
+
+----------------------------------------
+
+Recibes este correo por tu cuenta en Example Air.
+
+¿Tienes preguntas? Escribe a hello@air.example.test.
+
+Example Air funciona con software libre. Obtén el código fuente https://forge.example.test/air/commonair/tree/0123abcd."
+`;

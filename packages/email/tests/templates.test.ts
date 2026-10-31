@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { sourceLink } from "@commonair/config";
+import { parseMessage, printMessage, type MessageAst } from "@commonair/i18n";
 import { describe, expect, test } from "vite-plus/test";
 import {
   EmailLinkError,
@@ -119,23 +120,26 @@ test("only member announcements carry an unsubscribe link", async () => {
 
 const LATIN = "abcdefghijklmnopqrstuvwxyz";
 const CYRILLIC = "абцдефгхийклмнопярстувшхыз";
-const pseudo = (s: string) =>
-  s
-    .split(/(\{\w+\})/)
-    .map((part, i) =>
-      i % 2 === 1
-        ? part
-        : part.replace(/[a-z]/gi, (c) => {
-            const mapped = CYRILLIC[LATIN.indexOf(c.toLowerCase())] ?? c;
-            return c === c.toLowerCase() ? mapped : mapped.toUpperCase();
-          }),
-    )
-    .join("");
+const cyrillic = (text: string) =>
+  text.replace(/[a-z]/gi, (c) => {
+    const mapped = CYRILLIC[LATIN.indexOf(c.toLowerCase())] ?? c;
+    return c === c.toLowerCase() ? mapped : mapped.toUpperCase();
+  });
+
+/** Transliterate the text of a message, leaving arguments, plural/select syntax and `#` intact. */
+const transliterate = (ast: MessageAst): MessageAst =>
+  ast.map((node) => {
+    if (typeof node === "string") return cyrillic(node);
+    if (node.type === "plural" || node.type === "select")
+      return { ...node, options: new Map([...node.options].map(([k, branch]) => [k, transliterate(branch)] as const)) };
+    return node;
+  });
+const pseudo = (s: string) => printMessage(transliterate(parseMessage(s)));
 
 function pseudoCatalog(): EmailCatalog {
   const out: Record<string, Record<string, string>> = {};
   for (const [block, messages] of Object.entries(en)) {
-    out[block] = Object.fromEntries(Object.entries(messages).map(([k, v]) => [k, k === "dir" ? "rtl" : pseudo(v)]));
+    out[block] = Object.fromEntries(Object.entries(messages).map(([k, v]) => [k, pseudo(v)]));
   }
   return out as unknown as EmailCatalog;
 }
@@ -188,7 +192,7 @@ test("a translated catalog changes every visible string (pseudo-locale)", async 
   for (const id of TEMPLATE_IDS) {
     const mail = await renderEmail(id, data[id], { site: cyrSite, locale: "ru", catalogs: { ru: pseudoCatalog() } });
     expect(mail.locale).toBe("ru");
-    expect(mail.html).toContain('<html dir="rtl" lang="ru">');
+    expect(mail.html).toContain('<html dir="ltr" lang="ru">');
     for (const [where, value] of [
       ["subject", mail.subject],
       ["text", mail.text],

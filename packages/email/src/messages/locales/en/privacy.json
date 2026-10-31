@@ -1,0 +1,22 @@
+{
+  "dataExportReady.subject": "Your {instance} data export is ready",
+  "dataExportReady.preview": "Your data export is ready to download.",
+  "dataExportReady.heading": "Your data export is ready",
+  "dataExportReady.body": "The copy of your data you asked for is ready to download.",
+  "dataExportReady.action": "Download your data",
+  "dataExportReady.expiry": "The download is available until {date}. After that, request a new export.",
+  "dataExportReady.signInNote": "You will need to sign in to download it.",
+  "accountDeletionScheduled.subject": "Your {instance} account will be deleted on {date}",
+  "accountDeletionScheduled.preview": "Your account is scheduled for deletion. You can still cancel.",
+  "accountDeletionScheduled.heading": "Your account is scheduled for deletion",
+  "accountDeletionScheduled.body": "You asked us to delete your {instance} account. It will be deleted permanently on {date}.",
+  "accountDeletionScheduled.cancelInfo": "Changed your mind? Cancel any time before then and everything stays as it is.",
+  "accountDeletionScheduled.action": "Cancel deletion",
+  "accountDeletionScheduled.notYou": "If you did not ask for this, cancel now and contact {contact}.",
+  "accountDeletionCompleted.subject": "Your {instance} account has been deleted",
+  "accountDeletionCompleted.preview": "Your account and personal data have been deleted.",
+  "accountDeletionCompleted.heading": "Your account has been deleted",
+  "accountDeletionCompleted.body": "Your {instance} account was deleted on {date}. Your personal data has been removed.",
+  "accountDeletionCompleted.retained": "Records the law requires us to keep, such as payment records, are kept without your personal details.",
+  "accountDeletionCompleted.farewell": "Thank you for being part of {instance}."
+}

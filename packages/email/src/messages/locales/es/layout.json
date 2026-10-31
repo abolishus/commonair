@@ -1,0 +1,8 @@
+{
+  "layout.reason": "Recibes este correo por tu cuenta en {instance}.",
+  "layout.contact": "¿Tienes preguntas? Escribe a {contact}.",
+  "layout.source": "{instance} funciona con software libre. {sourceLink}.",
+  "layout.sourceLinkLabel": "Obtén el código fuente",
+  "layout.unsubscribe": "Cancelar la suscripción a estos correos",
+  "layout.buttonFallback": "Si el botón no funciona, copia este enlace en tu navegador: {url}"
+}

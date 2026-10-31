@@ -7,6 +7,7 @@
  * visible string comes from the message catalog; components never carry text.
  */
 import { sourceLink, type InstanceSite } from "@commonair/config";
+import { localeDirection } from "@commonair/i18n";
 import {
   Body,
   Button,
@@ -38,11 +39,13 @@ export type Contact = keyof InstanceSite["contacts"];
 export interface EmailContext<M> {
   site: InstanceSite;
   locale: string;
+  /** Text direction of `locale` (`localeDirection`), for the few physical styles mail clients need. */
+  dir: "ltr" | "rtl";
   messages: M;
   layout: LayoutMessages;
-  /** Message with `{placeholders}` filled by nodes; `{instance}` is always available. */
+  /** A message (ICU subset) with arguments filled by nodes; `{instance}` is always available. */
   t(message: string, vars?: Record<string, ReactNode>): ReactNode;
-  /** Message with `{placeholders}` filled by strings (subjects, previews). */
+  /** A message (ICU subset) with arguments filled by strings and numbers (subjects, previews). */
   text(message: string, vars?: Record<string, string | number>): string;
   dateTime(value: DateInput): string;
   date(value: DateInput): string;
@@ -106,10 +109,11 @@ export function createContext<M>(
   return {
     site,
     locale,
+    dir: localeDirection(locale),
     messages,
     layout,
-    t: (message, vars = {}) => interpolateNodes(message, { instance, ...vars }),
-    text: (message, vars = {}) => interpolate(message, { instance, ...vars }),
+    t: (message, vars = {}) => interpolateNodes(message, { instance, ...vars }, locale),
+    text: (message, vars = {}) => interpolate(message, { instance, ...vars }, locale),
     dateTime: (value) => formatDateTime(value, locale),
     date: (value) => formatDate(value, locale),
     money: (amount, currency) => formatMoney(amount, currency, locale),
@@ -212,7 +216,7 @@ export function Layout({
 }) {
   const { site, layout } = ctx;
   return (
-    <Html lang={ctx.locale} dir={layout.dir === "rtl" ? "rtl" : "ltr"}>
+    <Html lang={ctx.locale} dir={ctx.dir}>
       <Head>
         <meta name="color-scheme" content="light dark" />
         <meta name="supported-color-schemes" content="light dark" />
