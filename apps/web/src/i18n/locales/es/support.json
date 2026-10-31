@@ -49,7 +49,7 @@
   "support.submit.tip": "Enviar una propina de {amount}",
   "support.submit.invalid": "Revisa los datos de arriba",
   "support.error.generic": "No se pudo iniciar el pago. Inténtalo de nuevo.",
-  "support.instructions.title": "Paga para completar",
+  "support.instructions.title": "Completa el pago",
   "support.instructions.reference": "Referencia de pago",
   "support.instructions.amount": "Monto",
   "support.instructions.hint": "Indica la referencia junto con tu pago. Se confirma cuando la tesorería de la cooperativa lo recibe.",
@@ -59,7 +59,7 @@
   "support.instructions.done": "Listo",
   "support.redirecting": "Abriendo el pago…",
   "subscriptions.title": "Suscripciones",
-  "subscriptions.intro": "Los canales a los que estás suscrito. Si cancelas, conservas tus beneficios hasta que termine el período.",
+  "subscriptions.intro": "Los canales a los que te suscribiste. Si cancelas, conservas tus beneficios hasta que termine el período.",
   "subscriptions.loading": "Cargando tus suscripciones…",
   "subscriptions.loadFailed": "No se pudieron cargar tus suscripciones. Recarga la página para intentarlo de nuevo.",
   "subscriptions.empty": "Aún no tienes suscripciones",
@@ -82,7 +82,7 @@
   "chat.badge.member": "Miembro de la cooperativa",
   "chat.event.subscribe": "{name} se suscribió en el nivel {tier}",
   "chat.event.gift": "{total, plural, one {{name} regaló una suscripción de nivel {tier}} other {{name} regaló # suscripciones de nivel {tier}}}",
-  "chat.event.giftAnonymous": "{total, plural, one {Un espectador anónimo regaló una suscripción de nivel {tier}} other {Un espectador anónimo regaló # suscripciones de nivel {tier}}}",
+  "chat.event.giftAnonymous": "{total, plural, one {Una persona anónima regaló una suscripción de nivel {tier}} other {Una persona anónima regaló # suscripciones de nivel {tier}}}",
   "chat.event.tip": "{name} dio una propina",
   "chat.event.tipAnonymous": "Alguien dio una propina"
 }
