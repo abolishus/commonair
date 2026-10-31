@@ -138,6 +138,25 @@ describe("UiMessages per locale", () => {
     expect(reg.uiMessages("es").close).toBe("Cerrar");
   });
 
+  it("stay English while the app's own catalog for the locale fails, so the page never mixes", async () => {
+    let fail = true;
+    const reg = createLocaleRegistry({
+      english,
+      lazy: {
+        "./locales/es/core.json": async () => {
+          if (fail) throw new Error("chunk");
+          return { "app.title": "Título" };
+        },
+      },
+      ui: { es: async () => ({ "ui.close": "Cerrar" }) },
+    });
+    expect((await reg.load("es")).locale).toBe("en");
+    expect(reg.uiMessages("es")).toBe(enMessages);
+    fail = false;
+    expect((await reg.load("es")).locale).toBe("es");
+    expect(reg.uiMessages("es").close).toBe("Cerrar");
+  });
+
   it("are English for every tag without a ui option", async () => {
     const reg = createLocaleRegistry({ english, lazy: {} });
     await reg.load("es");

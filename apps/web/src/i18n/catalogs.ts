@@ -128,8 +128,15 @@ export function createLocaleRegistry(opts: {
   };
 
   const ui = createUiMessages(opts.ui ?? {});
+  // Both chunks load side by side, but the UI strings follow the app: when the app has a catalog
+  // for the language and its chunk failed, Spanish design-system labels in an English page would
+  // read as broken. (Tags reaching `load` are negotiated, so a regional tag is one the app serves.)
+  const appServes = (tag: string): boolean => loaders.has(tag) || loaders.has(tag.split("-")[0]?.toLowerCase() ?? "");
   const load = (tag: string): Promise<Translator> =>
-    Promise.all([loadMessages(tag), ui.load(tag)]).then(([translator]) => translator);
+    Promise.all([loadMessages(tag), ui.load(tag)]).then(([translator]) => {
+      if (translator !== englishTranslator || !appServes(tag)) ui.enable(tag);
+      return translator;
+    });
 
   return { supported, english, englishTranslator, peek, load, uiMessages: ui.get };
 }
@@ -137,9 +144,12 @@ export function createLocaleRegistry(opts: {
 /** `UiMessages` per locale: loaded with the locale, read synchronously while rendering. */
 function createUiMessages(loaders: Readonly<Record<string, () => Promise<UiCatalog>>>): {
   load: (tag: string) => Promise<void>;
+  enable: (tag: string) => void;
   get: (tag: string) => UiMessages;
 } {
   const ready = new Map<string, UiMessages>([[SOURCE_LOCALE, enMessages]]);
+  // Loaded catalogs that `get` may serve; see `load` in createLocaleRegistry.
+  const enabled = new Set<string>([SOURCE_LOCALE]);
   const pending = new Map<string, Promise<void>>();
   let pseudo: UiMessages | null = null;
 
@@ -180,10 +190,15 @@ function createUiMessages(loaders: Readonly<Record<string, () => Promise<UiCatal
       return pseudo;
     }
     const source = catalogFor(tag);
-    return (source === undefined ? undefined : ready.get(source)) ?? enMessages;
+    return (source !== undefined && enabled.has(source) ? ready.get(source) : undefined) ?? enMessages;
   };
 
-  return { load, get };
+  const enable = (tag: string): void => {
+    const source = catalogFor(tag);
+    if (source !== undefined && ready.has(source)) enabled.add(source);
+  };
+
+  return { load, enable, get };
 }
 
 export function defaultRegistry(): LocaleRegistry {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { DISCOVERY_REASONS } from "@commonair/contracts/dto";
+import type { DISCOVERY_REASONS } from "@commonair/contracts/dto";
 import { type MessageArgs, createTranslator } from "@commonair/i18n";
 import english from "../locales/en/ui.json" with { type: "json" };
 
@@ -90,10 +90,17 @@ export function uiMessagesFromCatalog(
     mature: m("ui.mature"),
     live: m("ui.live"),
     viewerCount: (formatted, count) => m("ui.viewerCount", { formatted, count }),
-    discoveryReason: Object.fromEntries(DISCOVERY_REASONS.map((key) => [key, reason(key)])) as Record<
-      DiscoveryReason,
-      string
-    >,
+    // Spelled out so the contract stays a type-only import; the Record type makes the compiler
+    // reject a missing or extra reason.
+    discoveryReason: {
+      popular: reason("popular"),
+      spotlight: reason("spotlight"),
+      new: reason("new"),
+      following: reason("following"),
+      random: reason("random"),
+      category: reason("category"),
+      search: reason("search"),
+    },
     theme: {
       label: m("ui.theme.label"),
       dark: m("ui.theme.dark"),

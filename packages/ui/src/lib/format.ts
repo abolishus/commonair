@@ -265,7 +265,8 @@ export function formatDuration(seconds: number): string {
 export const NO_VALUE = "—";
 
 function clampDigits(digits: number): number {
-  return Math.min(20, Math.max(0, Math.trunc(digits)));
+  // NaN or ±Infinity would make Intl throw a RangeError; treat them as 0.
+  return Number.isFinite(digits) ? Math.min(20, Math.max(0, Math.trunc(digits))) : 0;
 }
 
 export interface FormatPercentOptions {
@@ -359,21 +360,40 @@ export function currencySymbol(currency: string, locale: string): string {
 
 /**
  * Text typed into an amount field -> integer minor units, or `null` when it is not an amount
- * (empty, negative, non-numeric, more decimals than the currency has, beyond a safe integer).
- * Reads the locale's separators ("1.234,5" in de); where the group separator is a space of some
- * kind, any whitespace is accepted. Integer arithmetic only, so "1.005" never rounds through a float.
+ * (empty, negative, non-numeric, ambiguous, more decimals than the currency has, beyond a safe
+ * integer). Reads the locale's separators ("1.234,5" in de); where the group separator is a space
+ * of some kind, any whitespace is accepted. The group separator is only dropped where it groups
+ * thousands correctly ("1.234", "12.345.678"), so a misplaced one is rejected, never deleted.
+ * With no locale decimal present, a lone "." or "," followed by at most the currency's minor
+ * digits is read as the decimal: "12.50" in es is $12.50, not $1,250 (people type the other
+ * convention). Integer arithmetic only, so "1.005" never rounds through a float.
  */
 export function parseAmountInput(text: string, currency: string, locale: string): number | null {
   const { decimal, group } = numberSeparators(locale);
-  let normalized = text.trim();
-  if (/^\s$/u.test(group)) normalized = normalized.replace(/\s/gu, "");
-  else if (group) normalized = normalized.split(group).join("");
-  if (decimal !== ".") normalized = normalized.replace(decimal, ".");
-  if (!/^\d*(?:\.\d*)?$/.test(normalized) || normalized === "" || normalized === ".") return null;
-  const [whole = "0", fraction = ""] = normalized.split(".");
   const digits = minorDigits(currency.toUpperCase());
+  const spaceGroup = /^\s$/u.test(group);
+  const normalized = spaceGroup ? text.replace(/\s/gu, "") : text.trim();
+  let whole: string;
+  let fraction = "";
+  const pieces = normalized.split(decimal);
+  if (pieces.length > 2) return null;
+  if (pieces.length === 2) {
+    [whole = "", fraction = ""] = pieces;
+  } else {
+    whole = normalized;
+    const other = /^(\d+)([.,])(\d+)$/.exec(normalized);
+    const [, head = "", mark = "", tail = ""] = other ?? [];
+    const isGrouping = mark === group && tail.length === 3;
+    if (other && !isGrouping && tail.length <= digits) [whole, fraction] = [head, tail];
+  }
+  if (group && !spaceGroup && whole.includes(group)) {
+    const escaped = group.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!new RegExp(`^\\d{1,3}(?:${escaped}\\d{3})+$`, "u").test(whole)) return null;
+    whole = whole.split(group).join("");
+  }
+  if (!/^\d*$/.test(whole) || !/^\d*$/.test(fraction) || whole + fraction === "") return null;
   if (fraction.length > digits) return null;
-  const amount = Number(whole) * 10 ** digits + Number((fraction + "0".repeat(digits)).slice(0, digits) || 0);
+  const amount = Number(whole || "0") * 10 ** digits + Number((fraction + "0".repeat(digits)).slice(0, digits) || 0);
   return Number.isSafeInteger(amount) ? amount : null;
 }
 

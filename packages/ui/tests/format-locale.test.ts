@@ -48,6 +48,12 @@ describe("formatPercent", () => {
     expect(formatPercent(Number.NaN, "en")).toBe(NO_VALUE);
     expect(formatPercent(Number.NaN, "es")).toBe("—");
   });
+
+  test("non-finite digit options read as 0 instead of throwing", () => {
+    expect(formatPercent(0.125, "en", { maximumFractionDigits: Number.NaN })).toBe("13%");
+    expect(formatPercent(0.125, "en", { minimumFractionDigits: Number.POSITIVE_INFINITY })).toBe("13%");
+    expect(formatUnit(1.5, "kilobyte", "en", { maximumFractionDigits: Number.NaN })).toBe("2 kB");
+  });
 });
 
 describe("formatInteger and formatNumber", () => {
@@ -142,6 +148,30 @@ describe("parseAmountInput and formatAmountInput", () => {
       expect(parseAmountInput(text, "USD", "en")).toBe(null);
     expect(parseAmountInput("12,5", "JPY", "de")).toBe(null);
     expect(parseAmountInput("9".repeat(20), "USD", "en")).toBe(null);
+  });
+
+  test("a dot or comma decimal from the other convention is read as the decimal, never as grouping", () => {
+    expect(parseAmountInput("12.50", "USD", "es")).toBe(1250);
+    expect(parseAmountInput("12.5", "USD", "de")).toBe(1250);
+    expect(parseAmountInput("12,50", "USD", "en")).toBe(1250);
+    expect(parseAmountInput("12.50", "EUR", "fr")).toBe(1250);
+    expect(parseAmountInput("0.5", "USD", "es")).toBe(50);
+  });
+
+  test("the group separator is dropped only where it groups thousands", () => {
+    expect(parseAmountInput("1.234", "USD", "es")).toBe(123400);
+    expect(parseAmountInput("1.234,56", "USD", "es")).toBe(123456);
+    expect(parseAmountInput("12.345.678,9", "USD", "es")).toBe(1234567890);
+    expect(parseAmountInput("1,234", "USD", "en")).toBe(123400);
+    for (const text of ["1.2.3", "12.34.567", "1.23,4", "1.2345", ",5,", "1,234.56", "1.234.5"])
+      expect(parseAmountInput(text, "USD", "es")).toBe(null);
+    for (const text of ["1,2,3", "12,34,567", "1.234,56"]) expect(parseAmountInput(text, "USD", "en")).toBe(null);
+  });
+
+  test("a three-digit tail is grouping where it matches the group, a decimal for a three-decimal currency otherwise", () => {
+    expect(parseAmountInput("1.234", "KWD", "es")).toBe(1234000);
+    expect(parseAmountInput("1,234", "KWD", "es")).toBe(1234);
+    expect(parseAmountInput("12.5", "JPY", "de")).toBe(null);
   });
 
   test("zero-decimal and three-decimal currencies", () => {
