@@ -96,13 +96,14 @@ locales vary (`en`, `es`, `en-XA`) so batch 5's switcher has data.
    consents, data exports and deletions.
 6. **seed-platform:** OAuth apps, codes, tokens and device codes, EventSub subscriptions,
    webhook deliveries to a local sink, Discord webhooks to a local sink, push subscriptions,
-   simulcast targets.
+   notifications and preferences.
 7. **seed-media:** recorded VODs and clips, broadcast health and egress samples, stream hours,
-   `seed live`.
+   simulcast targets, relays, `seed live`.
 
 Units 1–7 each own only their own `harness/src/seed/<domain>.ts` file and its tests. Unit 1 runs
 first, because the others need its users and channels; units 2–7 then run in parallel. Each unit
-goes implement → independent review → fix, as in batch 4. Then milestone wiring: the
+goes implement → independent review → fix, as in batch 4. Briefs: [common.md](common.md) (rules for every unit) and
+`seed-<unit>.md` for each unit. Then milestone wiring: the
 `seed-coverage` scenario becomes `inFull`, and a docs page (`docs/testing/seeding.md`).
 
 ## Decisions (user, 2026-10-31)
