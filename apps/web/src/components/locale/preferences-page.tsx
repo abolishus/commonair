@@ -8,8 +8,8 @@ import { PageContainer } from "@commonair/ui/layouts";
 import { toast } from "@commonair/ui/toast";
 import { useRouter } from "@tanstack/react-router";
 import * as React from "react";
-import { applyLocale } from "../../i18n/client.ts";
-import { t } from "../../i18n/index.ts";
+import { applyLocale, tabLocale } from "../../i18n/client.ts";
+import { activeLocale, t } from "../../i18n/index.ts";
 import { api } from "../../lib/api.ts";
 import { LanguageLabel, switchableLocales } from "./language-label.tsx";
 
@@ -20,15 +20,28 @@ type Status = "idle" | "saving" | "saved" | "error";
 /**
  * A switch remounts the whole tree (`applyLocale`, or the root's `syncLocale` after a reload), so
  * the page the member sees afterwards is a new instance. The saving instance leaves its outcome
- * here for that one to show and announce in the new language. It expires, because "Automatic" may
- * resolve to the language already shown, and then no remount takes it.
+ * here for that one to show and announce in the new language. When no remount follows ("Automatic"
+ * resolving to the language already shown) the saving page clears it; it also expires, so a lost
+ * remount cannot announce a stale save on a later visit.
  */
 let carried: { value: string; at: number } | null = null;
 const CARRY_MS = 10_000;
 const ANNOUNCE_DELAY_MS = 100;
+const SETTLE_MS = 2_000;
 
 function carriedValue(): string | null {
   return carried && Date.now() - carried.at < CARRY_MS ? carried.value : null;
+}
+
+/**
+ * The locale the root will apply after reloading its loader (as `syncLocale` decides), or
+ * undefined when its data does not say (then nothing will switch).
+ */
+function negotiated(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const { locale, localeFromUser } = data as { locale?: unknown; localeFromUser?: unknown };
+  if (typeof locale !== "string") return undefined;
+  return (localeFromUser !== true && tabLocale()) || locale;
 }
 
 /**
@@ -75,6 +88,30 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
     };
   }, []);
 
+  // Every path that ends without a remount settles here: the save is announced on this page, in
+  // the language still shown, and the select is enabled again.
+  const mounted = React.useRef(true);
+  const fallback = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      window.clearTimeout(fallback.current);
+    };
+  }, []);
+  const settle = (): void => {
+    window.clearTimeout(fallback.current);
+    carried = null;
+    busy.current = false;
+    if (mounted.current) setStatus("saved");
+  };
+  // The remount normally replaces this page within a frame or two; if it never comes, do not
+  // leave the select disabled.
+  const awaitRemount = (): void => {
+    window.clearTimeout(fallback.current);
+    fallback.current = window.setTimeout(settle, SETTLE_MS);
+  };
+
   const choose = async (next: string): Promise<void> => {
     if (next === value || busy.current) return;
     busy.current = true;
@@ -91,19 +128,24 @@ export function PreferencesPage({ initial }: { initial: string | null }): React.
       toast.error(t("localeSwitcher.saveFailed"));
       return;
     }
-    busy.current = false;
+    // Stay "saving" (and the select disabled) through the switch: the remounted page announces
+    // "Saved" once, in the new language, and a second choice cannot race this one.
     carried = { value: next, at: Date.now() };
-    setStatus("saved");
     if (next === AUTO) {
       // The root loader negotiates again without a saved choice; the root then applies its answer.
       await router.invalidate();
+      const want = negotiated(router.state.matches[0]?.loaderData);
+      if (want === undefined || want === activeLocale()) settle();
+      else awaitRemount();
       return;
     }
     try {
       await applyLocale(next);
+      awaitRemount();
     } catch {
       // The catalog did not load: the choice is saved, so let the root sync from the server.
       await router.invalidate();
+      settle();
     }
   };
 

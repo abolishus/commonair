@@ -11,7 +11,7 @@ import type * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const fake = vi.hoisted(() => ({
-  boot: { me: null as unknown },
+  boot: { me: null } as { me: unknown; locale?: string; localeFromUser?: boolean },
   get: vi.fn<() => Promise<{ locale: string | null }>>(),
   update: vi.fn<(input: { locale?: string | null }) => Promise<unknown>>(),
   applyLocale: vi.fn<(tag: string) => Promise<void>>(),
@@ -166,7 +166,7 @@ describe("PreferencesPage", () => {
     expect(must("locale-select").textContent).toContain(en["preferences.language.auto"]);
   });
 
-  it("choosing a language saves it, then applies it, and announces Saved", async () => {
+  it("choosing a language saves it, then applies it, and stays saving until the remount", async () => {
     await mount(<PreferencesPage initial={null} />);
     await waitFor(() => expect(fake.get).toHaveBeenCalled());
     await pick("locale-select", "locale-option-es");
@@ -174,8 +174,41 @@ describe("PreferencesPage", () => {
     expect(fake.update).toHaveBeenCalledWith({ locale: "es" });
     expect(fake.update.mock.invocationCallOrder[0]).toBeLessThan(fake.applyLocale.mock.invocationCallOrder[0] ?? 0);
     expect(must("locale-select").dataset.value).toBe("es");
-    expect(must("locale-save-status").dataset.state).toBe("saved");
-    expect(must("locale-save-status").textContent).toBe(en["preferences.language.saved"]);
+    // No "Saved" in the old language: the remounted page announces it once, in the new one.
+    await act(async () => undefined);
+    expect(must("locale-save-status").dataset.state).toBe("saving");
+    expect(must("locale-save-status").textContent).toBe(en["preferences.language.saving"]);
+    expect(must("locale-select").hasAttribute("data-disabled")).toBe(true);
+  });
+
+  it("when the catalog fails to load, it reloads the root loader and settles on Saved", async () => {
+    fake.applyLocale.mockRejectedValue(new Error("chunk"));
+    const router = await mount(<PreferencesPage initial={null} />);
+    const invalidate = vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
+    await waitFor(() => expect(fake.get).toHaveBeenCalled());
+    await pick("locale-select", "locale-option-es");
+    await waitFor(() => expect(must("locale-save-status").dataset.state).toBe("saved"));
+    expect(invalidate).toHaveBeenCalled();
+    expect(must("locale-select").hasAttribute("data-disabled")).toBe(false);
+    cleanup();
+    // Nothing carried: the next visit is quiet.
+    await mount(<PreferencesPage initial="es" />);
+    await waitFor(() => expect(fake.get).toHaveBeenCalled());
+    expect(must("locale-save-status").dataset.state).toBe("idle");
+  });
+
+  it("a save carried for a remount expires after ten seconds", async () => {
+    await mount(<PreferencesPage initial={null} />);
+    await waitFor(() => expect(fake.get).toHaveBeenCalled());
+    await pick("locale-select", "locale-option-es");
+    await waitFor(() => expect(fake.applyLocale).toHaveBeenCalled());
+    cleanup();
+    vi.setSystemTime(Date.now() + 10_001);
+    fake.get.mockImplementation(() => new Promise(() => undefined));
+    await mount(<PreferencesPage initial={null} />);
+    expect(must("locale-select").dataset.value).toBe("auto");
+    await act(async () => new Promise((r) => setTimeout(r, 150)));
+    expect(must("locale-save-status").dataset.state).toBe("idle");
   });
 
   it("the page remounted by the switch keeps the choice and announces Saved after mount", async () => {
@@ -210,7 +243,43 @@ describe("PreferencesPage", () => {
     expect(fake.update).toHaveBeenCalledWith({ locale: null });
     expect(fake.applyLocale).not.toHaveBeenCalled();
     expect(must("locale-select").dataset.value).toBe("auto");
+    // The loader data names no locale, so nothing will switch: settle here.
     expect(must("locale-save-status").dataset.state).toBe("saved");
+  });
+
+  it("Automatic resolving to the language shown announces Saved here and carries nothing", async () => {
+    fake.boot = { me: ME, locale: "en", localeFromUser: false };
+    fake.get.mockResolvedValue({ locale: "en" });
+    const router = await mount(<PreferencesPage initial="en" />);
+    vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
+    await waitFor(() => expect(fake.get).toHaveBeenCalled());
+    await pick("locale-select", "locale-option-auto");
+    await waitFor(() => expect(must("locale-save-status").dataset.state).toBe("saved"));
+    expect(must("locale-select").hasAttribute("data-disabled")).toBe(false);
+    cleanup();
+    // Back within ten seconds: quiet, and the value comes from initial, not a stale carry.
+    fake.get.mockImplementation(() => new Promise(() => undefined));
+    await mount(<PreferencesPage initial="en" />);
+    expect(must("locale-select").dataset.value).toBe("en");
+    await act(async () => new Promise((r) => setTimeout(r, 150)));
+    expect(must("locale-save-status").dataset.state).toBe("idle");
+  });
+
+  it("Automatic resolving to another language leaves Saved to the remounted page", async () => {
+    fake.boot = { me: ME, locale: "es", localeFromUser: false };
+    fake.get.mockResolvedValue({ locale: "en" });
+    const router = await mount(<PreferencesPage initial="en" />);
+    vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
+    await waitFor(() => expect(fake.get).toHaveBeenCalled());
+    await pick("locale-select", "locale-option-auto");
+    await waitFor(() => expect(fake.update).toHaveBeenCalledWith({ locale: null }));
+    await act(async () => undefined);
+    expect(must("locale-save-status").dataset.state).toBe("saving");
+    cleanup();
+    fake.get.mockImplementation(() => new Promise(() => undefined));
+    await mount(<PreferencesPage initial={null} />);
+    expect(must("locale-select").dataset.value).toBe("auto");
+    await waitFor(() => expect(must("locale-save-status").dataset.state).toBe("saved"));
   });
 
   it("a choice made before me.get answers wins over its answer", async () => {
@@ -262,8 +331,8 @@ describe("FooterLocaleSwitcher", () => {
   it("signed out without Preferences consent keeps the choice in the tab, then applies it", async () => {
     await mount(<FooterLocaleSwitcher />);
     await pick("footer-locale-switcher", "footer-locale-option-es");
-    await waitFor(() => expect(fake.applyLocale).toHaveBeenCalledWith("es"));
-    expect(fake.rememberLocale).toHaveBeenCalledWith("es", { preferencesAllowed: false });
+    await waitFor(() => expect(fake.rememberLocale).toHaveBeenCalledWith("es", { preferencesAllowed: false }));
+    expect(fake.applyLocale).toHaveBeenCalledWith("es");
     expect(fake.update).not.toHaveBeenCalled();
   });
 
@@ -272,19 +341,56 @@ describe("FooterLocaleSwitcher", () => {
     await mount(<FooterLocaleSwitcher />);
     await pick("footer-locale-switcher", "footer-locale-option-es");
     await waitFor(() => expect(fake.applyLocale).toHaveBeenCalledWith("es"));
-    expect(fake.rememberLocale).toHaveBeenCalledWith("es", { preferencesAllowed: true });
-    expect(fake.rememberLocale.mock.invocationCallOrder[0]).toBeLessThan(
-      fake.applyLocale.mock.invocationCallOrder[0] ?? 0,
+    await waitFor(() => expect(fake.rememberLocale).toHaveBeenCalledWith("es", { preferencesAllowed: true }));
+    // Kept only once the switch worked.
+    expect(fake.applyLocale.mock.invocationCallOrder[0]).toBeLessThan(
+      fake.rememberLocale.mock.invocationCallOrder[0] ?? 0,
     );
+  });
+
+  it("signed out, a catalog that fails to load toasts, keeps nothing and re-enables the trigger", async () => {
+    const error = vi.spyOn(toast, "error").mockImplementation(() => 1);
+    fake.applyLocale.mockRejectedValue(new Error("chunk"));
+    await mount(<FooterLocaleSwitcher />);
+    await pick("footer-locale-switcher", "footer-locale-option-es");
+    await waitFor(() => expect(error).toHaveBeenCalledWith(en["localeSwitcher.saveFailed"]));
+    expect(fake.rememberLocale).not.toHaveBeenCalled();
+    await waitFor(() => expect(must("footer-locale-switcher").hasAttribute("disabled")).toBe(false));
+  });
+
+  it("signed in, a catalog that fails to load reloads the root and says a reload applies it", async () => {
+    const error = vi.spyOn(toast, "error").mockImplementation(() => 1);
+    fake.boot = { me: ME };
+    fake.applyLocale.mockRejectedValue(new Error("chunk"));
+    const router = await mount(<FooterLocaleSwitcher />);
+    const invalidate = vi.spyOn(router, "invalidate").mockResolvedValue(undefined);
+    await pick("footer-locale-switcher", "footer-locale-option-es");
+    await waitFor(() => expect(error).toHaveBeenCalledWith(en["localeSwitcher.appliesOnReload"]));
+    expect(fake.update).toHaveBeenCalledWith({ locale: "es" });
+    expect(invalidate).toHaveBeenCalled();
+    expect(fake.rememberLocale).not.toHaveBeenCalled();
+    expect(must("footer-locale-switcher").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("signed in with Preferences consent passes the consent on", async () => {
+    fake.boot = { me: ME };
+    fake.preferencesAllowed.mockReturnValue(true);
+    await mount(<FooterLocaleSwitcher />);
+    await pick("footer-locale-switcher", "footer-locale-option-es");
+    await waitFor(() => expect(fake.rememberLocale).toHaveBeenCalledWith("es", { preferencesAllowed: true }));
+    expect(fake.update).toHaveBeenCalledWith({ locale: "es" });
   });
 
   it("signed in saves users.locale first, then remembers and applies", async () => {
     fake.boot = { me: ME };
     await mount(<FooterLocaleSwitcher />);
     await pick("footer-locale-switcher", "footer-locale-option-es");
-    await waitFor(() => expect(fake.applyLocale).toHaveBeenCalledWith("es"));
+    await waitFor(() => expect(fake.rememberLocale).toHaveBeenCalled());
     expect(fake.update).toHaveBeenCalledWith({ locale: "es" });
-    expect(fake.update.mock.invocationCallOrder[0]).toBeLessThan(fake.rememberLocale.mock.invocationCallOrder[0] ?? 0);
+    expect(fake.update.mock.invocationCallOrder[0]).toBeLessThan(fake.applyLocale.mock.invocationCallOrder[0] ?? 0);
+    expect(fake.applyLocale.mock.invocationCallOrder[0]).toBeLessThan(
+      fake.rememberLocale.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("signed in, a failed save toasts and switches nothing", async () => {

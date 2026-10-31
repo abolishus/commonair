@@ -8,5 +8,6 @@
   "preferences.language.autoHint": "Usa el idioma de tu navegador",
   "preferences.language.saving": "Guardando…",
   "preferences.language.saved": "Guardado",
-  "localeSwitcher.saveFailed": "No se pudo cambiar el idioma. Inténtalo de nuevo."
+  "localeSwitcher.saveFailed": "No se pudo cambiar el idioma. Inténtalo de nuevo.",
+  "localeSwitcher.appliesOnReload": "Tu elección se guardó. El nuevo idioma se aplicará cuando recargues la página."
 }

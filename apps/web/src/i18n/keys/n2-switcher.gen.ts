@@ -13,4 +13,5 @@ export type Key =
   | "preferences.language.autoHint"
   | "preferences.language.saving"
   | "preferences.language.saved"
-  | "localeSwitcher.saveFailed";
+  | "localeSwitcher.saveFailed"
+  | "localeSwitcher.appliesOnReload";
