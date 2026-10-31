@@ -23,9 +23,10 @@ can't be removed that way, so this plan has two tiers:
 | `full`  | `bun harness/src/cli.ts seed full --scale <s>` | local and the DigitalOcean staging env only | **database reset**, not row-wise (see guard) |
 
 **Guard for `full`:** it refuses unless `DEMO_SEED_FULL=true` (new env var, default false, in
-`packages/config` and `.env.example`) **and** `NODE_ENV` is not `production` or the instance is
-explicitly marked staging. It also refuses on an instance that has any non-demo user. The point
-is that it can never run against a real instance by accident.
+`packages/config` and `.env.example`), **and** `--confirm <host:port/db>` names the target
+database exactly, **and** the database has no users at all. `NODE_ENV` can't be the gate because
+staging runs with `NODE_ENV=production`. The point is that it can never run against a real
+instance by accident.
 Reset: local `bun scripts/infra.ts` recreates the database; staging gets a `selfhost.sh
 --reset-staging` step (drop, migrate, base seed), refused on a production env.
 
@@ -110,5 +111,6 @@ goes implement → independent review → fix, as in batch 4. Then milestone wir
   triggers (ADR 0004).
 - b. Staging is reset and reseeded by hand only, never after every deploy.
 - c. `seed live` is in scope for this batch (unit 7).
-- d. Runs alongside batch 5 (N2). The contract step is built on branch `seed/contract-step` and
-  merges to `main` after batch 5's contract step lands.
+- d. Runs alongside batch 5 (N2). The contract step was built on branch `seed/contract-step` and
+  merged to `main` on 2026-10-31, ahead of batch 5's contract step (user's call). Batch 5 rebases
+  onto it; the overlap is `packages/config/src/env.ts`, `.env.example` and the generated config doc.
