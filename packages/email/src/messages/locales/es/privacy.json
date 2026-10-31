@@ -1,0 +1,22 @@
+{
+  "dataExportReady.subject": "Tu exportación de datos de {instance} está lista",
+  "dataExportReady.preview": "Tu exportación de datos está lista para descargar.",
+  "dataExportReady.heading": "Tu exportación de datos está lista",
+  "dataExportReady.body": "La copia de tus datos que pediste está lista para descargar.",
+  "dataExportReady.action": "Descargar tus datos",
+  "dataExportReady.expiry": "La descarga está disponible hasta el {date}. Después de esa fecha, pide una exportación nueva.",
+  "dataExportReady.signInNote": "Tendrás que iniciar sesión para descargarla.",
+  "accountDeletionScheduled.subject": "Tu cuenta de {instance} se eliminará el {date}",
+  "accountDeletionScheduled.preview": "La eliminación de tu cuenta está programada. Todavía puedes cancelarla.",
+  "accountDeletionScheduled.heading": "La eliminación de tu cuenta está programada",
+  "accountDeletionScheduled.body": "Nos pediste eliminar tu cuenta de {instance}. Se eliminará de forma permanente el {date}.",
+  "accountDeletionScheduled.cancelInfo": "¿Cambiaste de opinión? Cancela en cualquier momento antes de esa fecha y todo quedará como está.",
+  "accountDeletionScheduled.action": "Cancelar la eliminación",
+  "accountDeletionScheduled.notYou": "Si no lo pediste, cancela ahora y escribe a {contact}.",
+  "accountDeletionCompleted.subject": "Se eliminó tu cuenta de {instance}",
+  "accountDeletionCompleted.preview": "Se eliminaron tu cuenta y tus datos personales.",
+  "accountDeletionCompleted.heading": "Se eliminó tu cuenta",
+  "accountDeletionCompleted.body": "Tu cuenta de {instance} se eliminó el {date}. Se borraron tus datos personales.",
+  "accountDeletionCompleted.retained": "Los registros que la ley nos obliga a conservar, como los registros de pagos, se guardan sin tus datos personales.",
+  "accountDeletionCompleted.farewell": "Gracias por ser parte de {instance}."
+}

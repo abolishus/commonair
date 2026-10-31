@@ -1,0 +1,13 @@
+{
+  "goLiveDigest.subjectOne": "{channel} está en vivo en {instance}",
+  "goLiveDigest.subjectMany": "{count, plural, one {# canal que sigues está en vivo en {instance}} other {# canales que sigues están en vivo en {instance}}}",
+  "goLiveDigest.previewOne": "{channel} acaba de empezar a transmitir en vivo. Ven a verlo.",
+  "goLiveDigest.previewMany": "{count, plural, one {# canal que sigues acaba de empezar a transmitir en vivo.} other {# canales que sigues acaban de empezar a transmitir en vivo.}} Ven a verlos.",
+  "goLiveDigest.headingOne": "{channel} está en vivo",
+  "goLiveDigest.headingMany": "{count, plural, one {# canal que sigues está en vivo} other {# canales que sigues están en vivo}}",
+  "goLiveDigest.item": "{channel}: {title}",
+  "goLiveDigest.itemNoTitle": "{channel}",
+  "goLiveDigest.more": "{count, plural, one {# canal más que sigues está en vivo} other {# canales más que sigues están en vivo}}",
+  "goLiveDigest.why": "Activaste los correos de transmisiones en vivo de los canales que sigues en {instance}.",
+  "goLiveDigest.settings": "Elige qué correos de transmisiones en vivo recibes"
+}

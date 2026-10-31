@@ -5,8 +5,8 @@ SPDX-License-Identifier: CC-BY-SA-4.0
 
 # @commonair/email
 
-Transactional and member email for CommonAir: React Email templates, an English message
-catalog, and an SMTP mailer (nodemailer).
+Transactional and member email for CommonAir: React Email templates, message catalogs (English
+and Spanish, every locale bundled), and an SMTP mailer (nodemailer).
 
 ## Sending
 
@@ -85,20 +85,35 @@ instance footer with the contact address and the AGPL §13 source link (`instanc
 
 ## Translations
 
-`src/messages/en.ts` is the catalog and its shape (`EmailCatalog`). A translation is a
-`PartialCatalog`; missing strings fall back to English. Pass catalogs to the mailer and a
-`locale` per message; `pt-BR` falls back to `pt`, then English. Set `layout.dir` to `"rtl"` for
-right-to-left languages. Keep every `{placeholder}`.
+The strings live in `src/messages/locales/<lang>/<group>.json`, one file per template group
+(`layout`, `account`, `security`, `privacy`, `payments`, `governance`, `notify`, `trust`), flat
+`block.field` keys (`verifyEmail.subject`) in the ICU subset of ADR 0029 (`{name}`, `plural` with
+`#`, `select`; see `apps/web/src/i18n/README.md`). English is the source; `EmailCatalog` is typed
+from the English JSON (`src/messages/en.ts`), so a missing key is a type error in a template.
+Translator notes: [`src/messages/NOTES.md`](src/messages/NOTES.md).
+
+- **Every locale is bundled** (`BUNDLED`, `src/messages/bundled.ts`): mail renders on the server
+  only. Today: `en`, `es`. Adding a language is adding `locales/<lang>/*.json` and one line in
+  `bundled.ts` (a test fails until it is there).
+- **Resolution**: a `locale` per message (null: `site.defaultLocale`); the exact tag, then its
+  language (`es-MX` → `es`), then English. Passing `catalogs` (a `PartialCatalog` per tag) to the
+  mailer or `renderEmail` replaces the bundled set.
+- **Fallback per string**: a missing string, one that does not parse, or one whose arguments differ
+  from English's renders English (`catalogFallbacks(partial)` lists them). The tests require every
+  bundled locale at 100% with argument parity (`checkCatalog`, `coverage`).
+- **Direction** comes from the locale (`localeDirection`, `<html dir>`), not from a string.
 
 ## Preview
 
 ```sh
 bun run preview                    # → .preview/index.html (gitignored)
-bun run preview --locale de        # German date/number formatting
+bun run preview --locale es        # Spanish (any bundled locale)
+bun run preview --locale de        # English strings, German date/number formatting
 ```
 
 ## Tests
 
-`bun run test` renders every template (text snapshots, link and asset checks, a pseudo-locale
+`bun run test` renders every template (text snapshots in English and Spanish, link and asset
+checks, catalog parity and coverage, plurals, a pseudo-locale
 that must replace every visible string). `bun run test:int` sends through Mailpit
 (`localhost:1025`) and reads the message back from its API.

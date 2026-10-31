@@ -3,8 +3,8 @@
 
 /**
  * Go-live notification mail (ADR 0028 decisions 3 and 4): one digest per member and window, for
- * one channel or many, opt-in only, with RFC 8058 one-click unsubscribe. The strings carry no
- * counts: the email catalog has no plurals until N2-email.
+ * one channel or many, opt-in only, with RFC 8058 one-click unsubscribe. Several channels are
+ * counted (plurals); the count is `channels.length`, so callers pass nothing extra.
  */
 import { Link, Section } from "@react-email/components";
 import { defineTemplate, H1, Muted, P } from "../template.tsx";
@@ -35,11 +35,11 @@ export const goLiveDigest = defineTemplate("goLiveDigest", {
   subject: (ctx, d: GoLiveDigestData) =>
     d.channels.length === 1
       ? ctx.text(ctx.messages.subjectOne, { channel: d.channels[0]?.name ?? "" })
-      : ctx.text(ctx.messages.subjectMany),
+      : ctx.text(ctx.messages.subjectMany, { count: d.channels.length }),
   preview: (ctx, d: GoLiveDigestData) =>
     d.channels.length === 1
       ? ctx.text(ctx.messages.previewOne, { channel: d.channels[0]?.name ?? "" })
-      : ctx.text(ctx.messages.previewMany),
+      : ctx.text(ctx.messages.previewMany, { count: d.channels.length }),
   unsubscribeUrl: (d: GoLiveDigestData) => d.unsubscribeUrl,
   body: (ctx, d: GoLiveDigestData) => {
     const m = ctx.messages;
@@ -48,11 +48,13 @@ export const goLiveDigest = defineTemplate("goLiveDigest", {
     return (
       <>
         <H1>
-          {d.channels.length === 1 && first ? ctx.t(m.headingOne, { channel: first.name }) : ctx.t(m.headingMany)}
+          {d.channels.length === 1 && first
+            ? ctx.t(m.headingOne, { channel: first.name })
+            : ctx.t(m.headingMany, { count: d.channels.length })}
         </H1>
         <Section style={{ margin: "0 0 16px" }}>
-          {/* Physical sides from the layout: Outlook's Word engine ignores logical padding. */}
-          <ul style={{ margin: 0, padding: ctx.layout.dir === "rtl" ? "0 20px 0 0" : "0 0 0 20px" }}>
+          {/* Physical sides from the locale direction: Outlook's Word engine ignores logical padding. */}
+          <ul style={{ margin: 0, padding: ctx.dir === "rtl" ? "0 20px 0 0" : "0 0 0 20px" }}>
             {shown.map((c, i) => {
               const name = (
                 <Link className="ca-link" href={c.url} style={{ ...styles.link, fontWeight: 600 }}>
@@ -72,7 +74,7 @@ export const goLiveDigest = defineTemplate("goLiveDigest", {
         {d.channels.length > GO_LIVE_DIGEST_MAX_CHANNELS ? (
           <P>
             <Link className="ca-link" href={ctx.site.publicUrl} style={styles.link}>
-              {ctx.t(m.more)}
+              {ctx.t(m.more, { count: d.channels.length - GO_LIVE_DIGEST_MAX_CHANNELS })}
             </Link>
           </P>
         ) : null}
