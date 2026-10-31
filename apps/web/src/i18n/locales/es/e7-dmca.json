@@ -1,6 +1,6 @@
 {
   "dmca.title": "Denunciar una infracción de derechos de autor (DMCA)",
-  "dmca.intro": "Si material de este servicio infringe derechos de autor de los que eres titular o en cuyo nombre estás autorizado a actuar, envía aquí un aviso de retirada. No necesitas una cuenta.",
+  "dmca.intro": "Si material de este servicio infringe derechos de autor de los que eres titular o en cuyo nombre tienes autorización para actuar, envía aquí un aviso de retirada. No necesitas una cuenta.",
   "dmca.howTitle": "Cómo se tramita un aviso",
   "dmca.how1": "Un aviso completo incluye todos los elementos que exige la Digital Millennium Copyright Act (DMCA) de Estados Unidos: tu firma, la obra, dónde está el material en este servicio, tus datos de contacto y las dos declaraciones de abajo.",
   "dmca.how2": "Nuestro equipo lo revisa y, si está completo, deshabilita el acceso al material y se lo comunica a quien lo publicó. Un aviso incompleto recibe una respuesta que indica qué falta.",
@@ -49,7 +49,7 @@
   "copyright.emptyBody": "Cuando alguien envíe un aviso de derechos de autor sobre tu contenido y actuemos en consecuencia, aparecerá aquí.",
   "copyright.notice.from": "Aviso de {name}",
   "copyright.notice.work": "Obra protegida que identificaron",
-  "copyright.notice.repeat": "Cada aviso sobre el que actuamos cuenta como una falta contra tu cuenta. Las faltas repetidas pueden suspenderla; una falta se elimina cuando un contraaviso restaura el contenido o una apelación la anula.",
+  "copyright.notice.repeat": "Cada aviso sobre el que actuamos cuenta como una falta contra tu cuenta. Las faltas repetidas pueden suspenderla; una falta se elimina cuando un contraaviso restaura el contenido o una apelación la revierte.",
   "copyright.subject.vod": "Video",
   "copyright.subject.clip": "Clip",
   "copyright.subject.broadcast": "Transmisión en vivo",
