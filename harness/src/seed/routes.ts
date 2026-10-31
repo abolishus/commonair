@@ -44,6 +44,7 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
 
   "/settings/privacy": viewer,
   "/settings/connections": viewer,
+  "/settings/preferences": viewer,
   "/settings/subscriptions": viewer,
   "/settings/notifications/": viewer,
   "/settings/notifications/unsubscribe": {
