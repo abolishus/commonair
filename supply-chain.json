@@ -11,6 +11,18 @@
       "package": "deepmerge",
       "reason": "deepmerge 4.3.1 comes only through @react-email/render -> html-to-text, which merges its own formatter options with ours when packages/email turns a rendered template into plain text (render.tsx: toPlainText(html, { selectors: TEXT_SELECTORS })). Both inputs are constants in this repository; no user-supplied object is ever merged, so prototype poisoning cannot be triggered. No fixed deepmerge release exists yet (4.3.1 is the latest and affected); upgrade or override when one ships.",
       "expires": "2027-01-27"
+    },
+    {
+      "id": "GHSA-3g3m-2fjr-6pw4",
+      "package": "glob",
+      "reason": "glob 13.0.6 comes only through @storybook/react-vite -> @joshwooding/vite-plugin-react-docgen-typescript 0.7.0, which globs this repository's own component files while Storybook builds. Nothing passes it an AbortSignal, so the cancellation bypass cannot apply, and no untrusted input reaches it. The fix is glob 14.0.2 (published 2026-10-27, inside the 7-day cooldown until 2026-11-03), a major version outside the plugin's ^13 range. After 2026-11-03: override to 14.x if Storybook still builds, or take a plugin release that allows it.",
+      "expires": "2026-11-17"
+    },
+    {
+      "id": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "reason": "minimatch 10.2.6 comes only through the same Storybook docgen plugin's glob, matching patterns written in that plugin and our Storybook config, never user input, so the globparts amplification cannot be triggered. The fix is minimatch 11.0.1 (published 2026-10-27, inside the 7-day cooldown until 2026-11-03) and arrives with the glob 14 upgrade above.",
+      "expires": "2026-11-17"
     }
   ],
   "trustedDependencies": {}
