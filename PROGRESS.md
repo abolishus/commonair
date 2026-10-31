@@ -22,6 +22,15 @@ Updated by the orchestrator after every integration step. Phases and units: [PLA
 
 ## In flight
 
+**Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
+Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
+editing" for human review; Arabic waits for the next batch (N2-rtl still makes `packages/ui`
+logical and adds RTL tests). Contract step (`n2/batch5-contract-step.md`: parity and coverage
+checks, `@commonair/i18n` in ui and email, `formatLanguageName`, `/settings/preferences`, the
+`n2-switcher` namespace, the footer mount), then wave 1 (N2-ui, N2-email, N2-switcher,
+N2-es-a/b/c) and wave 2 (N2-rtl, N2-weblate, N2-pseudo). Orchestrator defaults are decisions
+(c)–(m) in the README.
+
 **Batch 4 (W1 + N1; `.claude/briefs/batch4/README.md`), started 2026-10-30, done 2026-10-30 (CI
 green on `8065ce3`, every job including all seven harness shards; self-host e2e last ran green on
 the contract steps).** Milestone checks (batch4 README): no `notImplemented` left in the W1 route
