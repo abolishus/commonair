@@ -5,7 +5,7 @@
  * Word-filter worker thread: runs `applyFilters` off the main thread so the runner can terminate
  * it if a single regex runs past its hard timeout. Compiled filter sets are cached by key.
  */
-import { applyFilters, type CompiledFilter } from "./content.ts";
+import { applyFilters, type CompiledFilter } from "./filter.ts";
 import type { RunRequest, WorkerReply } from "./filter-protocol.ts";
 
 declare const self: Worker;

@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /** Messages between the filter runner and its worker threads. */
-import type { FilterOutcome } from "./content.ts";
-import type { WordFilterDef } from "./types.ts";
+import type { FilterOutcome, WordFilterDef } from "./filter.ts";
 
 /** A compiled filter as it crosses the thread boundary (RegExp objects are rebuilt there). */
 export interface WireFilter {

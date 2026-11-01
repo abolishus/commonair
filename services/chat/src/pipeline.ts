@@ -16,8 +16,8 @@ import { CHAT_LIMITS, type dto, type EmoteRange, type NoticeCode } from "@common
 import type { Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
 import type { ValkeyClient } from "@commonair/service";
-import { type CompiledFilter, containsLink } from "./content.ts";
-import { type FilterRunner, inlineFilterRunner } from "./filter-runner.ts";
+import { type CompiledFilter, type FilterRunner, inlineFilterRunner } from "@commonair/chat-filter";
+import { containsLink } from "./content.ts";
 import { emoteTierFor, parseEmotes } from "./emotes.ts";
 import type { Limiter, Reservation } from "./limiter.ts";
 import { errorFields } from "./errors.ts";

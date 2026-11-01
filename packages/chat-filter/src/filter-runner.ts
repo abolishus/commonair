@@ -16,7 +16,7 @@
  *   so one busy channel cannot starve the others.
  */
 import type { Logger } from "@commonair/observability";
-import { applyFilters, type CompiledFilter, FILTER_BUDGET_MS, type FilterOutcome } from "./content.ts";
+import { applyFilters, type CompiledFilter, FILTER_BUDGET_MS, type FilterOutcome } from "./filter.ts";
 import type { RunRequest, WireFilter, WorkerReply } from "./filter-protocol.ts";
 
 export interface FilterRunner {

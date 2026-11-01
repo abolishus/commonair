@@ -9,7 +9,7 @@ import { and, desc, eq, exists, inArray, isNull, sql } from "drizzle-orm";
 import { ChannelChatSettings } from "@commonair/contracts";
 import { schema, type Database } from "@commonair/db";
 import { TtlCache } from "./cache.ts";
-import { compileFilters, type CompiledFilter } from "./content.ts";
+import { compileFilters, type CompiledFilter } from "@commonair/chat-filter";
 import { mergeEmotes } from "./emotes.ts";
 import type { ChannelState, EmoteDef, Standing, UserProfile } from "./types.ts";
 

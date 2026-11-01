@@ -4,17 +4,10 @@
 /** Builders for unit tests. */
 import { ChannelChatSettings } from "@commonair/contracts";
 import { createLogger } from "@commonair/observability";
-import { compileFilters } from "../src/content.ts";
+import { compileFilters, type WordFilterDef } from "@commonair/chat-filter";
 import { MemoryLimiter } from "../src/limiter.ts";
 import type { MessageMiddleware, PipelineInput } from "../src/pipeline.ts";
-import {
-  type ChannelState,
-  type EmoteDef,
-  NO_STANDING,
-  type Standing,
-  type UserProfile,
-  type WordFilterDef,
-} from "../src/types.ts";
+import { type ChannelState, type EmoteDef, NO_STANDING, type Standing, type UserProfile } from "../src/types.ts";
 
 export const NOW = new Date("2026-10-18T12:00:00Z");
 export const silentLogger = createLogger({ service: "chat-test", write: () => {} });
