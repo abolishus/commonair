@@ -48,6 +48,52 @@ are `$channel_.vods.$vodId` / `$channel_.clips.$clipId` because `$channel.tsx` h
 publisher end (W2-rehearsal driver watches `broadcasts.ended_at`); `harness/compose.w2-captions.yaml`
 layering only into the captions shard (orchestrator, when W2-captions merges).
 
+**Batch 6 wave 1 merged 2026-11-01** (W2-splits, W2-captions, W2-rollup-analytics,
+W2-enforcement-report, W2-dvr, W2-rehearsal; each implement → independent review → fix; one
+`--no-ff` merge per unit, no file shared). Landed: crew splits with per-recipient holds, suspense,
+two-person write-offs and the `/crew` page; open captions (whisper.cpp sidecar, live WebVTT tracks
+named `<anchorMs>-<n>.vtt`, the studio and VOD cue editor, the player CC toggle and style menu);
+the broadcast rollup (sweep peak, groups under 5 hidden, 24 h display delay) and `/analytics`;
+the public enforcement report on `/transparency` (k = 10 suppression across overlapping windows,
+day-aligned `30d`); free live DVR (`/dvr/` origin route, one concurrency pool per device and
+account, the scrubber, studio settings); rehearsal mode (driver, cap sweep, invitee watch, report).
+Contract requests applied: DVR per-mode fetch evidence (`integrity:fetch:<sid>:dvr`, origin
+`mode` in the segment log, heartbeat `mode`) and patronage viewer-hours net of `dvr_seconds`;
+`ANALYTICS_JOBS.broadcastRollupRetention` and `REHEARSAL_JOBS.capSweep` registered;
+`money.treasurer.splits.suspense` (contract and handler: recipients with withheld shares, so a
+pseudonymized one can be found); `TransparencyMonth.splitSuspense` filled, the payer breakdown
+shows one creator total, `owed` includes the split shortfall; `ChannelMediaSettings.captionsState`;
+SUBTITLES in the origin multivariant for viewer origin tokens only (relay pulls wait on the relay
+follow-up); W0 consumer `captions`; `CAPTIONS_MODEL` (deploy schema, compose only);
+`harness/compose.w2-captions.yaml` and the `captions` profile layered only by `stack --harness
+--captions`, which `verify` passes for the captions shard or scenario (decision (c)); `whisper`
+is built by compose but not yet a release image (`UNRELEASED_IMAGES`); the rehearsal gate refuses
+and kicks a publish whose arm was disarmed before ready (a lapsed arm still rehearses) and a
+reconnect past the first start's cap, and the session marker never outlives cap plus grace;
+the worker env declares `CHAT_INTERNAL_URL`, `MEDIAMTX_API_URL` and an optional
+`MEDIA_INTERNAL_PASSWORD`; migration `0044_w2_indexes` (four enforcement-report indexes);
+`@commonair/moderation` exports `clauses.ts`; the scrubber's thumb carries its accessible name
+and value text; `BroadcastSummary.catchingUpCount` shown beside the viewer count on the channel
+page (`channel.catchingUp`, en+es). Rulings recorded: ADR 0014, a hidden group's size is knowable
+but never its category, and the swarm's groups follow the score (the harness `group` step asserts
+the swarm's excluded groups match its first-reason categories, not one `datacenter` group);
+ADR 0019, the enforcement report's window note. Lifted: `PENDING_CAPTIONS/DVR/REHEARSAL_STEPS`
+emptied, `PENDING_W2_EXTENSIONS` down to `signed`, `tamper`, `group-appeal`, `replay-panel`, and
+`PENDING_W2_IDS` down to the wave 2 units' ids. Declined: optional `AnalyticsRange.pending`, a
+shared-analytics page, `costModel` on `WorkerContext`, a `broadcastId` filter on share links,
+`VodState.dvr.dvrWindowSeconds`, an `"ncii"` report tier, `RehearsalReport.chat.heldIds`, a
+`controller.ts` text-track callback (frozen) and batched `vodCaptionTracks` (all optional); the
+optional 0043 destination check for suspense postings (a protections change of its own). Open:
+the relay must neither count nor pin `/captions/` `.vtt` (no `Ledger.AddSegment`/`AddBytes`,
+`max-age=30`, a 30 s cache expiry, a Go test) before relay pulls get SUBTITLES; a self-host
+whisper unit, selfhost.sh option, AVX2 note and the `whisper` release image; the rehearsal
+report's moderation sample count (`KEYS.rehearsalModerationSamples`, written by media's frame
+scan, which needs its narrow Valkey seam widened); `report.resolve` / `user.suspend` statements of
+reasons (and then excluding them from `modActionCells`); the speech fixture audio
+(`harness/fixtures/captions/speech.ogg`, needs espeak-ng); `captions`, `live-dvr` and `rehearsal`
+into `FULL_REQUIRED` with their shards (milestone). Counsel on split recipients stays open
+(decision (a)).
+
 **Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
 Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
 editing" for human review; Arabic waits for the next batch (N2-rtl still makes `packages/ui`
