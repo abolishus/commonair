@@ -233,12 +233,11 @@ export class WatchRooms implements WatchRoomHandler {
             ? REFUSALS.age_band
             : null;
     for (const ws of kicked) {
-      if (notice) sendNotice(ws, { channel: null, ...notice }, this.d.frameWriter);
-      sendFrame(
-        ws,
-        { op: "room.closed", roomId: msg.roomId, reason: notice ? "moderation" : "host_left" },
-        this.d.frameWriter,
-      );
+      // A member who left on their own (another tab) just stops getting the room; a removal says why.
+      if (notice) {
+        sendNotice(ws, { channel: null, ...notice }, this.d.frameWriter);
+        sendFrame(ws, { op: "room.closed", roomId: msg.roomId, reason: "moderation" }, this.d.frameWriter);
+      }
       entry.sockets.delete(ws);
       ws.data.watchRooms.delete(msg.roomId);
     }
