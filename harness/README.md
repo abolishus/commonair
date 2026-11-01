@@ -353,6 +353,17 @@ at the end of `e4b-money` (`breakdown`, `reconciliation`, `fraud-hold`), `e2e-so
 are pending (`src/w1/steps.ts`): `--set steps=` names pending steps of the two new scenarios, and
 `--set w1=<extension>[,…]` (or `none`) the extension steps of the three extended ones.
 
+W2's scenarios, `captions` (open live captions), `live-dvr` (free live DVR) and `rehearsal`
+(private test broadcasts), and the extension steps W2 adds to `e4b-money` (`split-release`,
+`split-clawback`, `split-won-chargeback`, `split-new-payee`), `integrity-basic` (`group`,
+`signed`, `tamper`, `group-appeal`, after the viewers stop), `trust-safety` (`enforcement`, around
+steps 4 and 5) and `timeline-sync` (`replay-panel`, after steps 1 and 3) are documented with
+[docs/testing/w2-selectors.md](../docs/testing/w2-selectors.md). Pending steps are listed in
+`src/w2/steps.ts`; `--set steps=` names those of the three new scenarios and `--set
+w2=<extension>[,…]` (or `none`) the extensions, which add the extensions and scenario steps they
+need. `captions` runs in its own CI shard, only on pushes that reach captions, media or origin
+code (`PATH_FILTERED_SHARDS`) and on the nightly run; `live-dvr` and `rehearsal` run in `notify`.
+
 `e2e-basic` drives `apps/web` with Playwright and selects only by the routes and `data-testid`s in
 [docs/testing/e1-selectors.md](../docs/testing/e1-selectors.md), mirrored in `src/web/selectors.ts`
 (a unit test fails when they drift). The `web` need is met when `HARNESS_WEB_URL/healthz` answers 200. It publishes to `<stream-server-url>/<stream-key>` exactly as shown on the dashboard;

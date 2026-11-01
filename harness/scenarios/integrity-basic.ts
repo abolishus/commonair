@@ -31,6 +31,9 @@
  * them lands on the CDN anyway; with a higher threshold the CDN step is skipped with that reason.
  * Its stream-hour check runs the stream-hours pass through the co-op test hook
  * (`harness/compose.e5-coop.yaml`, `COOP_TEST_HOOKS=true`) and is skipped without it.
+ *
+ * Extensions: W1's `data-mode` (`--set w1=`) while the channel is live; W2's `group`, `signed`,
+ * `tamper` and `group-appeal` (`--set w2=`, `src/w2/steps.ts`) after the viewers stop.
  */
 import { CoopHooks, CoopHooksOff } from "../src/coop-io.ts";
 import { HttpViewer } from "../src/http-viewer.ts";
@@ -51,6 +54,11 @@ import { stepThrottledViewer } from "../src/w1/data-mode.ts";
 import type { IntegrityExtension } from "../src/w1/kit.ts";
 import { type W1Extension, extensionTitle, w1Extensions } from "../src/w1/steps.ts";
 import type { Viewer } from "../src/viewer.ts";
+import { stepSigned, stepTamper } from "../src/w2/attestations.ts";
+import { stepGroupAppeal } from "../src/w2/group-appeals.ts";
+import type { IntegrityW2Extension } from "../src/w2/kit.ts";
+import { stepGroup } from "../src/w2/rollup.ts";
+import { type W2Extension, w2ExtensionTitle, w2Extensions } from "../src/w2/steps.ts";
 import { ViewbotSwarm } from "../src/viewbot.ts";
 import { waitFor } from "../src/wait.ts";
 
@@ -170,12 +178,34 @@ async function hourCounts(url: string, botSession: string): Promise<HourCounts |
 
 const row = (r: SessionRow) => ({ verdict: r.verdict, reasons: r.verdict_reasons });
 
+/** The broadcast a session watched, for the W2 extensions (null without the database or a session). */
+async function broadcastOf(url: string | undefined, sessionId: string | undefined): Promise<string | null> {
+  if (url === undefined || sessionId === undefined) return null;
+  const sql = new Bun.SQL(url);
+  try {
+    const [r] = (await sql`select broadcast_id from playback_sessions where id = ${sessionId}::uuid`) as {
+      broadcast_id: string | null;
+    }[];
+    return r?.broadcast_id ?? null;
+  } finally {
+    await sql.close();
+  }
+}
+
+const W2_STEPS: Readonly<Record<W2Extension<"integrity-basic">, (e: IntegrityW2Extension) => Promise<void>>> = {
+  group: stepGroup,
+  signed: stepSigned,
+  tamper: stepTamper,
+  "group-appeal": stepGroupAppeal,
+};
+
 export default defineScenario({
   name: "integrity-basic",
   description:
     "honest (incl. a household and a hidden tab) + datacenter, fetch-less and CDN bots; count converges to the honest audience",
   needs: ["api", "mail", "media", "origin", "ffmpeg", "browser"],
-  timeoutMs: 10 * 60_000,
+  // The W2 extensions add a broadcast end, the settle override, the rollup and attestation jobs.
+  timeoutMs: 15 * 60_000,
   async run(ctx) {
     const p = ctx.platform;
     const bots = ctx.intParam("bots", 12);
@@ -525,8 +555,37 @@ export default defineScenario({
       for (const name of extensions) await ctx.step(extensionTitle(name, "run"), () => W1_STEPS[name](ext));
     }
 
+    // `--set w2=` names a pending one; by default only merged extensions run (src/w2/steps.ts).
+    const w2 = w2Extensions("integrity-basic", ctx.param("w2", ""));
+    ctx.data("w2.extensions", w2);
+    const broadcastId = w2.run.length > 0 ? await broadcastOf(process.env.DATABASE_URL, swarm.sessionIds[0]) : null;
+
     await ctx.step("stop", () =>
       Promise.all([swarm.stop(), ...honest.map((v) => v.stop()), ...fetchless.map((f) => f.stop()), cdnBot?.stop()]),
     );
+
+    if (w2.run.length > 0) {
+      const { id: channelId } = await streamer.api.client.channels.get({ channel });
+      let ended: Promise<void> | null = null;
+      const ext: IntegrityW2Extension = {
+        ctx,
+        channel,
+        channelId,
+        streamer,
+        platform: p,
+        databaseUrl: process.env.DATABASE_URL,
+        broadcastId,
+        honestCount: expected,
+        swarmSessionIds: [...swarm.sessionIds],
+        endBroadcast() {
+          ended ??= ctx.step("end the broadcast", async () => {
+            await s.stop();
+            await p.waitForLive(channel, false, 60_000);
+          });
+          return ended;
+        },
+      };
+      for (const name of w2.run) await ctx.step(w2ExtensionTitle(name, "run"), () => W2_STEPS[name](ext));
+    }
   },
 });

@@ -5,7 +5,9 @@
  * Which of CI's expensive jobs a push needs (`ci.yml` job `changes`). The gate always runs. The
  * harness runs only the scenarios a push can affect: none for docs, briefs and tests alone; for a
  * change inside the harness, the scenarios whose modules import the changed file (transitively);
- * every scenario for anything else. The release dry run and the self-host end-to-end run only when
+ * every scenario for anything else. A path-filtered shard (`PATH_FILTERED_SHARDS`, the captions
+ * shard) runs only when the push reaches its paths or narrows the harness to one of its
+ * scenarios. The release dry run and the self-host end-to-end run only when
  * something they build or install changed. The nightly run and a manual dispatch run everything,
  * as does any push whose diff cannot be read.
  *
@@ -18,7 +20,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FULL_SHARDS } from "../harness/src/shards.ts";
+import { FULL_SHARDS, PATH_FILTERED_SHARDS } from "../harness/src/shards.ts";
 
 export const ALL = "all";
 export type Selection = typeof ALL | readonly string[];
@@ -28,9 +30,11 @@ export interface Changes {
   scenarios: Selection;
   /** Images, the installer, release tooling, compose, workflows, lockfiles or migrations. */
   deploy: boolean;
+  /** The path-filtered shards whose paths the changes reach (`PATH_FILTERED_SHARDS`). */
+  filteredShards: readonly string[];
 }
 
-export const EVERYTHING: Changes = { scenarios: ALL, deploy: true };
+export const EVERYTHING: Changes = { scenarios: ALL, deploy: true, filteredShards: Object.keys(PATH_FILTERED_SHARDS) };
 
 /** Docs and planning text no test or build reads (docs/testing, docs/self-hosting and docs/developers are read by tests). */
 export function isDocsOnly(path: string): boolean {
@@ -61,6 +65,17 @@ const DEPLOY: readonly RegExp[] = [
 ];
 
 export const isDeploy = (path: string): boolean => DEPLOY.some((re) => re.test(path));
+
+const FILTERS: readonly [string, readonly RegExp[]][] = Object.entries(PATH_FILTERED_SHARDS).map(([shard, sources]) => [
+  shard,
+  (sources ?? []).map((src) => new RegExp(src)),
+]);
+
+/** The path-filtered shards `files` reach, in FULL_SHARDS order (docs and tests never count). */
+export function filteredShardsReached(files: readonly string[]): string[] {
+  const code = files.filter((f) => !isDocsOnly(f) && !isTestOnly(f));
+  return FILTERS.filter(([, res]) => code.some((f) => res.some((re) => re.test(f)))).map(([shard]) => shard);
+}
 
 /** Repository-relative `.ts` module → the repository-relative modules it imports by relative path. */
 export type ImportGraph = ReadonlyMap<string, readonly string[]>;
@@ -143,7 +158,22 @@ export function shardsFor(selection: Selection): string[] {
 }
 
 export function classify(files: readonly string[], graph: ImportGraph): Changes {
-  return { scenarios: selectScenarios(files, graph), deploy: files.some(isDeploy) };
+  return {
+    scenarios: selectScenarios(files, graph),
+    deploy: files.some(isDeploy),
+    filteredShards: filteredShardsReached(files),
+  };
+}
+
+/**
+ * The harness matrix: the shards the selection needs, less the path-filtered ones the changes did
+ * not reach when every scenario is selected. A narrowed selection keeps a path-filtered shard
+ * that holds one of its scenarios (a harness change reached that scenario).
+ */
+export function matrixShards(c: Changes): string[] {
+  const shards = shardsFor(c.scenarios);
+  if (c.scenarios !== ALL) return shards;
+  return shards.filter((s) => !(s in PATH_FILTERED_SHARDS) || c.filteredShards.includes(s));
 }
 
 /** A push's changes since BASE, or everything when the event is not a push or the diff cannot be read. */
@@ -165,7 +195,7 @@ export function changesFor(
 /** The step outputs. `shards` is never empty: an empty matrix is an error even on a skipped job. */
 export function outputs(c: Changes): string {
   const scenarios = c.scenarios === ALL ? ALL : c.scenarios.join(",");
-  const shards = c.scenarios === ALL || c.scenarios.length > 0 ? shardsFor(c.scenarios) : Object.keys(FULL_SHARDS);
+  const shards = c.scenarios === ALL || c.scenarios.length > 0 ? matrixShards(c) : Object.keys(FULL_SHARDS);
   return `code=${scenarios !== ""}\nscenarios=${scenarios}\nshards=${JSON.stringify(shards)}\ndeploy=${c.deploy}\n`;
 }
 

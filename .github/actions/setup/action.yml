@@ -25,8 +25,12 @@ inputs:
   browsers:
     description: Install the Playwright browsers
     default: "false"
-  model:
+  # One flag per model, so each job fetches only the weights it runs.
+  moderation-model:
     description: Fetch the pinned moderation model
+    default: "false"
+  captions-model:
+    description: Fetch the pinned captions (whisper) weights; a no-op until they are pinned
     default: "false"
 
 runs:
@@ -144,13 +148,30 @@ runs:
       shell: bash
       run: bun scripts/init-env.ts
     - name: Moderation model cache
-      if: inputs.model == 'true'
+      if: inputs.moderation-model == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: .cache/models
         key: moderation-model-${{ hashFiles('packages/moderation/src/model.ts') }}
     - name: Moderation model
       # The classifier's integration test runs the pinned weights; fetch-model checks their sha256.
-      if: inputs.model == 'true'
+      if: inputs.moderation-model == 'true'
       shell: bash
       run: bun scripts/fetch-model.ts
+    - name: Captions model cache
+      if: inputs.captions-model == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .cache/models/whisper-ggml-base-q5_1.bin
+        key: captions-model-${{ hashFiles('packages/captions/src/model.ts') }}
+    - name: Captions model
+      # The captions shard's whisper sidecar mounts these (batch 6 decision (j)); fetch-model checks
+      # their sha256. Until W2-captions pins the revision there is nothing to fetch, so skip.
+      if: inputs.captions-model == 'true'
+      shell: bash
+      run: |
+        if bun -e 'import { captionsModelUrl } from "./packages/captions/src/model.ts"; process.exit(captionsModelUrl() === null ? 1 : 0)'; then
+          bun scripts/fetch-model.ts --model captions
+        else
+          echo "captions weights not pinned yet (packages/captions/src/model.ts); nothing to fetch"
+        fi

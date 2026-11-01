@@ -33,12 +33,17 @@ const form: SeedRoute = { as: "anonymous", expectData: false };
 export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/": viewer,
   "/$channel": { ...viewer, params: { channel: ch("streamer1") } },
+  // W2-vod-watch: streamer1's public VOD and a clip of it, published by seed-media.
+  "/$channel/vods/$vodId": { ...viewer, params: { channel: ch("streamer1"), vodId: ex("media", "vodId") } },
+  "/$channel/clips/$clipId": { ...viewer, params: { channel: ch("streamer1"), clipId: ex("media", "clipId") } },
   "/embed/$channel": { as: "anonymous", params: { channel: ch("streamer1") }, expectData: true },
   "/signin": form,
   "/signup": form,
   "/dmca": form,
   "/takedown": form,
   "/transparency": { as: "anonymous", expectData: true },
+  // W2b-attestations: the public verifier (a form until a statement is pasted or linked).
+  "/attestations/verify": form,
   "/activate": { as: "viewer1", query: ex("platform", "activateQuery"), expectData: false },
   "/oauth2/authorize": { as: "viewer1", query: ex("platform", "authorizeQuery"), expectData: true },
 
@@ -74,6 +79,12 @@ export const SEED_ROUTES: Readonly<Record<string, SeedRoute>> = {
   "/interact": studio,
   "/bot": studio,
   "/overlays": studio,
+  // W2 studio pages: crew splits, captions settings and corrections, analytics. Rehearse is idle
+  // (nothing armed) after the seed, so it is only checked for errors.
+  "/crew": studio,
+  "/captions": studio,
+  "/analytics": studio,
+  "/rehearse": { as: "streamer1", expectData: false },
   "/developer/": { as: "developer", expectData: true },
   "/developer/bots": { as: "developer", expectData: true },
   "/developer/apps/$appId": { as: "developer", params: { appId: ex("platform", "appId") }, expectData: true },
