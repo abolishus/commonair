@@ -11,11 +11,14 @@
  * 3. Import title, tags, category, description and emotes, with the art assertion.
  * 4. The channel page shows the title.
  * 5. Accepted emotes work in chat; the T0 fixture emote is rejected and its T0 case opened.
+ *    A T0 match bans the importer and suspends their channel (`suspendForT0`), so the T0 emote is
+ *    left out of step 3 and imported by a streamer of its own here: the step 3 streamer must
+ *    still be able to chat.
  * 6. The schedule is carried, not applied.
  * 7. Paste panels (own actor) and see them on the channel.
  * 8. The mock recorded the revocation of every token it issued.
  *
- * Steps 1–6 and 8 share one streamer; step 7 uses its own. `--set via=web` (the default) drives
+ * Steps 1–6 and 8 share one streamer; steps 5 (the T0 import) and 7 use their own. `--set via=web` (the default) drives
  * `/import` in a browser; `via=api` the same through the API (the authorization is then followed
  * with the streamer's own session cookies). The browser on this machine cannot resolve
  * `host.containers.internal` (the authorize base the containers use), so web steps rewrite that
@@ -55,6 +58,15 @@ const T0_TIMEOUT_MS = 60_000;
 const CATEGORY_SLUG = "pixel-art-gardening";
 /** Offered emotes that should land; the T0 one is offered too, and refused by the pipeline. */
 const ACCEPTED = ["pgWave", "pgHype", "pgHi"] as const;
+
+/**
+ * Step 3's emote choices: everything offered but the T0 fixture. Importing that one bans the
+ * importer and suspends the channel, and the step 3 streamer goes on to chat (step 5), so step 5
+ * imports it with a streamer of its own.
+ */
+export function chatEmoteChoices(offered: readonly string[]): string[] {
+  return offered.filter((code) => code !== TWITCH_FIXTURE.t0Emote);
+}
 
 /** Pasted in step 7: two panels, one with markup that must not survive, one with a link. */
 export const PANEL_PASTE = [
@@ -176,6 +188,18 @@ async function importPage(run: TwitchImportRun, user: SignedInUser): Promise<Pag
 
 // ------------------------------------------------------------------ 1. connect
 
+/** Authorize through the API and follow the mock's redirect with the user's session; the outcome. */
+async function connectViaApi(run: TwitchImportRun, mock: TwitchMock, user: SignedInUser): Promise<string | null> {
+  const { authorizeUrl } = await user.api.client.twitchImport.connect({ channel: channelOf(user) });
+  const u = new URL(authorizeUrl);
+  // The mock answers on this machine; the redirect goes to the instance's callback.
+  const res = await fetch(`${mock.origin}${u.pathname}${u.search}`, { redirect: "manual", signal: run.ctx.signal });
+  const cb = new URL(res.headers.get("location") ?? "");
+  const api = new URL(user.api.baseUrl);
+  const back = await user.api.fetch(new Request(`${api.origin}${cb.pathname}${cb.search}`, { redirect: "manual" }));
+  return new URL(back.headers.get("location") ?? "http://x/").searchParams.get("twitch");
+}
+
 async function connect(run: TwitchImportRun): Promise<void> {
   const { ctx } = run;
   const mock = await mockOf(run);
@@ -201,18 +225,7 @@ async function connect(run: TwitchImportRun): Promise<void> {
       page.url(),
     );
   } else {
-    const outcome = await ctx.step(title(1, "connect through the API"), async () => {
-      const { authorizeUrl } = await streamer.api.client.twitchImport.connect({ channel });
-      const u = new URL(authorizeUrl);
-      // The mock answers on this machine; the redirect goes to the instance's callback.
-      const res = await fetch(`${mock.origin}${u.pathname}${u.search}`, { redirect: "manual", signal: ctx.signal });
-      const cb = new URL(res.headers.get("location") ?? "");
-      const api = new URL(streamer.api.baseUrl);
-      const back = await streamer.api.fetch(
-        new Request(`${api.origin}${cb.pathname}${cb.search}`, { redirect: "manual" }),
-      );
-      return new URL(back.headers.get("location") ?? "http://x/").searchParams.get("twitch");
-    });
+    const outcome = await ctx.step(title(1, "connect through the API"), () => connectViaApi(run, mock, streamer));
     ctx.assert("1. the callback says connected", outcome === "connected", { outcome });
   }
   const auth = mock.authorizations.at(-1);
@@ -301,14 +314,24 @@ async function runImport(run: TwitchImportRun): Promise<void> {
   run.startedAt = new Date();
   if (run.via === "web") {
     const page = await importPage(run, streamer);
+    await ctx.step(title(3, "leave the T0 emote out (step 5 imports it)"), async () => {
+      const box = page.locator(tid("import-emote", { code: TWITCH_FIXTURE.t0Emote })).locator('[data-slot="checkbox"]');
+      await box.click({ timeout: UI_TIMEOUT_MS });
+      await page
+        .locator(tid("import-emote", { code: TWITCH_FIXTURE.t0Emote }))
+        .locator('[data-slot="checkbox"][aria-checked="false"]')
+        .waitFor({ timeout: UI_TIMEOUT_MS });
+    });
     await ctx.step(title(3, "assert the emote rights and start on /import"), async () => {
       await page.locator(tid("import-assertion")).click({ timeout: UI_TIMEOUT_MS });
       await page.locator(tid("import-start")).click({ timeout: UI_TIMEOUT_MS });
       await page.locator(tid("import-progress", { status: "done" })).waitFor({ timeout: IMPORT_TIMEOUT_MS });
     });
   } else {
-    const emotes = preview.preview.items.filter((i) => i.kind === "emote" && i.outcome === null).map((i) => i.ref);
-    await ctx.step(title(3, "start with the channel and every offered emote"), () =>
+    const emotes = chatEmoteChoices(
+      preview.preview.items.filter((i) => i.kind === "emote" && i.outcome === null).map((i) => i.ref),
+    );
+    await ctx.step(title(3, "start with the channel and every offered emote but the T0 one"), () =>
       streamer.api.client.twitchImport.start({
         channel,
         id: preview.id,
@@ -332,6 +355,8 @@ async function runImport(run: TwitchImportRun): Promise<void> {
       outcomeOf(done, "emote", code)?.outcome === "imported",
       outcomeOf(done, "emote", code),
     );
+  const left = outcomeOf(done, "emote", TWITCH_FIXTURE.t0Emote);
+  ctx.assert("3. the T0 emote was left out", left?.outcome === "skipped" && left.reason === "not_chosen", left);
   if (run.via === "web" && run.page)
     for (const code of ACCEPTED)
       await run.page
@@ -377,19 +402,12 @@ async function emotesInChat(run: TwitchImportRun): Promise<void> {
   ctx.assert("5. DATABASE_URL is set (run from the repo root so Bun loads .env)", run.databaseUrl !== undefined);
   const streamer = run.streamer as SignedInUser;
   const channel = channelOf(streamer);
-  const t0 = outcomeOf(run.done, "emote", TWITCH_FIXTURE.t0Emote);
-  ctx.assert(
-    "5. the T0 emote was refused with the opaque reason",
-    t0?.outcome === "rejected" && t0.reason === "upload_rejected",
-    t0,
-  );
   const list = await ctx.platform.api().client.chat.emotes.list({ channel });
   ctx.assert(
     "5. the accepted emotes are the channel's",
     ACCEPTED.every((code) => list.some((e) => e.code === code)),
     list.map((e) => e.code),
   );
-  ctx.assert("5. no T0 emote on the channel", !list.some((e) => e.code === TWITCH_FIXTURE.t0Emote));
   ctx.check(
     "5. the emotes are served from this instance, never Twitch",
     list.every((e) => !e.url.includes(String(run.mock?.port ?? TWITCH_MOCK_PORT)) && !e.url.includes("jtvnw")),
@@ -401,19 +419,57 @@ async function emotesInChat(run: TwitchImportRun): Promise<void> {
   await chat.join(channel);
   const body = `pgWave hello pgHi ${ctx.runId.slice(0, 6)}`;
   const seen = chat.next("message", (f) => f.message.body === body, UI_TIMEOUT_MS);
+  // Awaited below unless an assertion throws first; a rejection then must not outlive the scenario.
+  seen.catch(() => undefined);
   // Chat caches emotes: the worker's invalidate is immediate, but give a loaded runner a moment.
   const ack = await ctx.step(title(5, "send a message with two imported emotes"), () => chat.send(channel, body));
-  ctx.assert("5. the message was accepted", ack.id !== null, ack);
+  const notices = chat.frames.filter((f) => f.op === "notice" && f.nonce === ack.nonce);
+  ctx.assert("5. the message was accepted", ack.id !== null, { ack, notices });
   const frame = await seen;
   const codes = frame.message.emotes.map((e) => body.slice(e.start, e.end)).sort();
   ctx.assert("5. both emotes are recognised in chat", codes.includes("pgWave") && codes.includes("pgHi"), codes);
 
-  const channelId = (await ctx.platform.api().client.channels.get({ channel })).id;
+  // The T0 emote, with a streamer of its own: the match bans them and suspends their channel.
+  const mock = await mockOf(run);
+  const importer = await ctx.step(title(5, "sign up a streamer for the T0 emote"), () =>
+    ctx.platform.signUp({ prefix: "n3_t0" }),
+  );
+  const t0Channel = channelOf(importer);
+  const outcome = await ctx.step(title(5, "connect through the API"), () => connectViaApi(run, mock, importer));
+  ctx.assert("5. the callback says connected", outcome === "connected", { outcome });
+  const preview = await ctx.step(title(5, "read the preview"), () =>
+    importer.api.client.twitchImport.preview({ channel: t0Channel }),
+  );
+  const startedAt = new Date();
+  await ctx.step(title(5, "import the T0 emote alone"), () =>
+    importer.api.client.twitchImport.start({
+      channel: t0Channel,
+      id: preview.id,
+      choices: { channel: false, panels: false, emotes: [TWITCH_FIXTURE.t0Emote] },
+      assertEmoteRights: true,
+    }),
+  );
+  const done = await ctx.step(title(5, "the worker applies it"), () => waitDone(run, importer));
+  ctx.assert("5. the T0 import finished", done.status === "done", { status: done.status, result: done.result });
+  const t0 = outcomeOf(done, "emote", TWITCH_FIXTURE.t0Emote);
+  ctx.assert(
+    "5. the T0 emote was refused with the opaque reason",
+    t0?.outcome === "rejected" && t0.reason === "upload_rejected",
+    t0,
+  );
+  const t0List = await ctx.platform.api().client.chat.emotes.list({ channel: t0Channel });
+  ctx.assert(
+    "5. no T0 emote on either channel",
+    !t0List.some((e) => e.code === TWITCH_FIXTURE.t0Emote) && !list.some((e) => e.code === TWITCH_FIXTURE.t0Emote),
+    t0List.map((e) => e.code),
+  );
+
+  const channelId = (await ctx.platform.api().client.channels.get({ channel: t0Channel })).id;
   const cases = await ctx.step(title(5, "the refused image opened a T0 case"), () =>
     waitFor(
       "a T0 case for the channel",
       async () => {
-        const n = await t0CasesSince(run.databaseUrl as string, channelId, run.startedAt as Date);
+        const n = await t0CasesSince(run.databaseUrl as string, channelId, startedAt);
         return n > 0 ? n : null;
       },
       { timeoutMs: T0_TIMEOUT_MS, intervalMs: 2_000, signal: ctx.signal },

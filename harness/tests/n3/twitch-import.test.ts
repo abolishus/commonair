@@ -11,7 +11,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { panelPaste } from "../../../packages/twitch/src/panels.ts";
 import { startTwitchMock, TWITCH_FIXTURE, type TwitchMock } from "../../src/mocks/twitch/server.ts";
-import { PANEL_EXPECTED, PANEL_PASTE, TWITCH_IMPORT_STEP_RUNNERS, TWITCH_MOCK_PORT } from "../../src/n3/index.ts";
+import {
+  chatEmoteChoices,
+  PANEL_EXPECTED,
+  PANEL_PASTE,
+  TWITCH_IMPORT_STEP_RUNNERS,
+  TWITCH_MOCK_PORT,
+} from "../../src/n3/index.ts";
 import { TWITCH_IMPORT_STEP_NUMBERS } from "../../src/w3/steps.ts";
 
 const T0 = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9]);
@@ -205,6 +211,13 @@ describe("the scenario", () => {
   test("every step has a runner; the mock port is the overlay's", () => {
     for (const n of TWITCH_IMPORT_STEP_NUMBERS) expect(typeof TWITCH_IMPORT_STEP_RUNNERS[n]).toBe("function");
     expect(TWITCH_MOCK_PORT).toBe(4791);
+  });
+
+  test("step 3 imports every offered emote but the T0 one (its match bans the importer)", () => {
+    const offered = ["pgWave", "pgHype", "pgHi", TWITCH_FIXTURE.t0Emote];
+    expect(chatEmoteChoices(offered)).toEqual(["pgWave", "pgHype", "pgHi"]);
+    expect(chatEmoteChoices([])).toEqual([]);
+    expect(chatEmoteChoices([TWITCH_FIXTURE.t0Emote])).toEqual([]);
   });
 
   test("step 7's expected panels are what panelPaste makes of the paste", () => {

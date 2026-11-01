@@ -298,8 +298,10 @@ Steps are pending until the unit that implements them merges (`harness/src/w3/st
   channel's bundle is refused at import (`bundle-import-standing` `refused`).
 - **`twitch-import` (N3-import; needs `oauth`):** `import-connect` through the mock; the preview
   shows the fixture channel; import title, tags, category, description and emotes with
-  `import-assertion`; the channel page shows the title; accepted emotes work in chat and the T0
-  emote is rejected with the T0 job run; `import-schedule` is carried, not applied; pasted panels
+  `import-assertion` (the T0 emote unticked); the channel page shows the title; accepted emotes
+  work in chat; a second streamer imports the T0 emote alone and it is rejected with the T0 job run
+  (the T0 match bans the importer and suspends their channel, so the chatting streamer cannot be
+  the one who imports it); `import-schedule` is carried, not applied; pasted panels
   (`import-panels-save`) show on the channel page; the mock recorded the revocation. The flag-off
   `import-unavailable` page is not a scenario step: the `w3` stack forces the flag on for every
   replica, so the API integration tests and web unit tests cover it.
