@@ -15,6 +15,7 @@ import {
   crewTid,
   expectedSlices,
   ownerClawbackOwed,
+  readCrewPreview,
   splitFixtureDates,
 } from "../../src/w2/splits.ts";
 
@@ -145,5 +146,37 @@ describe("crew selectors", () => {
   test("attribute selectors are escaped", () => {
     expect(crewTid("crew-split", { status: "accepted" })).toBe('[data-testid="crew-split"][data-status="accepted"]');
     expect(crewTid("x", { a: 'q"\\' })).toBe('[data-testid="x"][data-a="q\\"\\\\"]');
+  });
+});
+
+describe("readCrewPreview", () => {
+  /** A preview whose recipient attribute reads `recipient` in turn, then keeps the last value. */
+  const preview = (recipient: (string | null)[], example = "1000") => {
+    let i = 0;
+    return {
+      reads: () => i,
+      getAttribute: async (name: string) =>
+        name === "data-example-cents" ? example : (recipient[Math.min(i++, recipient.length - 1)] ?? null),
+    };
+  };
+
+  test("waits past the unpriced (empty) preview while the instance's cut loads", async () => {
+    // CI run 41345495956: read once right after the fill, before money.support answered.
+    const p = preview(["", "", "180"]);
+    expect(await readCrewPreview(p, { timeoutMs: 1_000, intervalMs: 1 })).toEqual({
+      recipientCents: 180,
+      exampleCents: 1000,
+    });
+    expect(p.reads()).toBe(3);
+  });
+
+  test("a priced zero is a value, not a wait", async () => {
+    expect((await readCrewPreview(preview(["0"]), { timeoutMs: 1_000, intervalMs: 1 })).recipientCents).toBe(0);
+  });
+
+  test("a preview that never prices times out instead of reading as zero", async () => {
+    await expect(readCrewPreview(preview([null, ""]), { timeoutMs: 30, intervalMs: 5 })).rejects.toThrow(
+      /crew-preview priced/,
+    );
   });
 });

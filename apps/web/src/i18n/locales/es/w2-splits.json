@@ -29,6 +29,7 @@
   "splits.preview.recipient": "{username}: {amount}",
   "splits.preview.invalid": "Añade cada destinatario y una parte entre 1 y 9999 puntos básicos para ver qué paga una propina.",
   "splits.preview.tooMuch": "Las partes del equipo deben dejarte algo: mantén su total por debajo de 10 000 puntos básicos.",
+  "splits.preview.loading": "Cargando la comisión de esta instancia para mostrar qué paga una propina…",
   "splits.mine.title": "Los repartos de tu canal",
   "splits.mine.hint": "Todas las versiones, de la más reciente a la más antigua. Terminar una la detiene para los pagos posteriores a ahora.",
   "splits.mine.empty": "Aún no hay repartos",

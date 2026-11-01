@@ -34,6 +34,7 @@ export type Key =
   | "splits.preview.recipient"
   | "splits.preview.invalid"
   | "splits.preview.tooMuch"
+  | "splits.preview.loading"
   | "splits.mine.title"
   | "splits.mine.hint"
   | "splits.mine.empty"

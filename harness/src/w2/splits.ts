@@ -35,6 +35,7 @@ import {
 } from "@commonair/ledger";
 import type { Locator, Page } from "playwright";
 import type { SignedInUser } from "../users.ts";
+import { waitFor } from "../wait.ts";
 import { signInViaUi } from "../web/flows.ts";
 import { ROUTES, TEST_IDS as T } from "../web/selectors.ts";
 import { WebSession, byTestId } from "../web/session.ts";
@@ -71,6 +72,33 @@ export function crewTid(id: string, data: Record<string, string> = {}): string {
   return `[data-testid="${id}"]${attrs}`;
 }
 const byCrewId = (scope: Page | Locator, id: string, data?: Record<string, string>) => scope.locator(crewTid(id, data));
+
+/** The preview's priced attributes, as the propose form renders them (empty until the form is complete). */
+export interface CrewPreviewAttributes {
+  getAttribute(name: string, opts?: { timeout?: number }): Promise<string | null>;
+}
+
+/**
+ * The recipient's and the example's cents from the propose form's preview, once it is priced. The
+ * page prices the example only after `money.support` answers with the instance's cut, so a read
+ * right after filling the form can see the unpriced (empty) preview. Waits for a value; never
+ * accepts an empty or non-numeric one.
+ */
+export async function readCrewPreview(
+  preview: CrewPreviewAttributes,
+  opts: { timeoutMs: number; intervalMs?: number; signal?: AbortSignal },
+): Promise<{ recipientCents: number; exampleCents: number }> {
+  const recipientCents = await waitFor(
+    "crew-preview priced",
+    async () => {
+      const raw = (await preview.getAttribute("data-recipient-cents", { timeout: opts.timeoutMs })) ?? "";
+      return /^\d+$/.test(raw) ? Number(raw) : null;
+    },
+    { timeoutMs: opts.timeoutMs, intervalMs: opts.intervalMs ?? 100, ...(opts.signal ? { signal: opts.signal } : {}) },
+  );
+  const exampleCents = Number((await preview.getAttribute("data-example-cents")) ?? "");
+  return { recipientCents, exampleCents };
+}
 
 /**
  * When the fixture tips succeeded: `released` past the hold and a new crew recipient's extra days
@@ -233,9 +261,10 @@ async function setUp(ext: MoneyExtension, prefix: string): Promise<SplitSetup> {
       await byCrewId(page, CREW_IDS.recipient).first().fill(crew.username, { timeout: UI_TIMEOUT_MS });
       await byCrewId(page, CREW_IDS.bps).first().fill(String(CREW_BPS), { timeout: UI_TIMEOUT_MS });
     });
-    const preview = byCrewId(page, CREW_IDS.preview);
-    const previewCents = Number((await preview.getAttribute("data-recipient-cents", { timeout: UI_TIMEOUT_MS })) ?? "");
-    const example = Number((await preview.getAttribute("data-example-cents")) ?? "");
+    const { recipientCents: previewCents, exampleCents: example } = await readCrewPreview(
+      byCrewId(page, CREW_IDS.preview),
+      { timeoutMs: UI_TIMEOUT_MS, signal: ctx.signal },
+    );
     const expected = expectedSlices(example, settings.cut, owner.id, crew.id);
     ctx.check("crew-preview prices the example tip for the recipient", previewCents === expected.crew, {
       previewCents,

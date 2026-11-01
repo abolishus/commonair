@@ -29,6 +29,7 @@
   "splits.preview.recipient": "{username}: {amount}",
   "splits.preview.invalid": "Add each recipient and a share between 1 and 9,999 basis points to see what a tip pays.",
   "splits.preview.tooMuch": "The crew's shares must leave you something: keep their total under 10,000 basis points.",
+  "splits.preview.loading": "Loading this instance's cut to show what a tip pays…",
   "splits.mine.title": "Your channel's splits",
   "splits.mine.hint": "Every version, newest first. Ending one stops it for payments after now.",
   "splits.mine.empty": "No splits yet",
