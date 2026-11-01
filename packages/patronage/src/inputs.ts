@@ -107,6 +107,9 @@ export async function viewerHoursByMember(
     from playback_sessions ps join channels c on c.id = ps.channel_id
     where ps.started_at >= ${iso(period.start)} and ps.started_at < ${iso(period.end)}
       and c.owner_id in (${idList(userIds)})
+      -- A rehearsal's invitee sessions are not viewer-hours (batch 6 decision (f)); 0043 cannot
+      -- refuse them, since patronage inputs carry no broadcast.
+      and not exists (select 1 from broadcasts b where b.id = ps.broadcast_id and b.kind = 'rehearsal')
     group by c.owner_id`);
   return new Map([...rows].map((r) => [r.user_id, { verified: Number(r.verified), excluded: Number(r.excluded) }]));
 }

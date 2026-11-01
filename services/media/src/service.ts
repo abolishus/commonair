@@ -16,6 +16,7 @@ import { storageFromEnv, type ObjectStorage } from "@commonair/storage";
 import { hostSynchronized, initHostClock } from "./clock/host.ts";
 import { createMediaClock } from "./clock/media-clock.ts";
 import { createClockMetrics, observeHostSynchronized } from "./clock/metrics.ts";
+import { registerCaptions } from "./captions/index.ts";
 import { assertSrtSecret } from "./ffmpeg/args.ts";
 import type { MediaContext } from "./context.ts";
 import type { MediaServiceEnv } from "./env.ts";
@@ -24,6 +25,7 @@ import { errorCategory } from "./moderation/logging.ts";
 import { probeCapabilities, type Capabilities } from "./ffmpeg/hwaccel.ts";
 import { startJobs, type Jobs } from "./jobs.ts";
 import { LiveCoordinator } from "./lifecycle.ts";
+import { MediaSessionHooks } from "./hooks.ts";
 import { every, type Loop } from "./loop.ts";
 import { startRtspPublishProxy } from "./ffmpeg/rtsp-publish-proxy.ts";
 import { MediaMtxClient } from "./mediamtx.ts";
@@ -192,6 +194,7 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
         throw err;
       });
 
+  const sessionHooks = new MediaSessionHooks(logger);
   const jobsRef: { jobs?: Jobs } = {};
   const jobsNotStarted = () => new Error("job queues not started");
   const ctx: MediaContext = {
@@ -232,10 +235,13 @@ export async function createMediaService(opts: MediaServiceOptions): Promise<Med
     },
     diskBudget,
     transcodeSlots,
+    sessionHooks,
     simulcastAllowPrivate: env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
     // ADR 0012 variant A2: W0 from the source's LL-HLS, recorder runs anchored from it.
     clock,
   };
+  // Feature hooks beside the ladder (batch 6 decision (n)); captions keeps its own slot limiter.
+  registerCaptions(sessionHooks, { ctx, env });
   coordinator = new LiveCoordinator(ctx);
   const live = coordinator;
 

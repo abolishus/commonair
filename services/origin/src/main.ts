@@ -52,6 +52,7 @@ const origin = await createOrigin({
   cacheMb: env.ORIGIN_CACHE_MB,
   cdn: { provider: env.CDN_PROVIDER, baseUrl: env.CDN_BASE_URL },
   trustedProxyCidrs: env.TRUSTED_PROXY_CIDRS,
+  dvrMaxWindowSeconds: env.DVR_MAX_WINDOW_SECONDS,
   issuance: { enabled: env.ORIGIN_ISSUANCE_ENABLED },
   media: { storage: storageFromEnv(env), bucket: env.S3_BUCKET_MEDIA },
   logger,

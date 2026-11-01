@@ -16,6 +16,7 @@ import { Bus } from "./bus.ts";
 import { splitChatCommand } from "./commands.ts";
 import { ChatCore, REQUIRES_LOGIN } from "./core.ts";
 import { Directory, type DirectoryOptions } from "./directory.ts";
+import { createDryRunRoute } from "./dry-run.ts";
 import { type Limiter, ValkeyLimiter } from "./limiter.ts";
 import { ChannelLatency } from "./chat-latency.ts";
 import { WatchGate } from "./watch-gate.ts";
@@ -25,6 +26,7 @@ import { type FilterRunner, inlineFilterRunner, WorkerFilterRunner } from "@comm
 import { MessageWriter, type WriterOptions } from "./persistence.ts";
 import { errorFields } from "./errors.ts";
 import { BUS, UserControlMessage, userControlTargets } from "@commonair/contracts";
+import { INTERNAL_ROUTES } from "@commonair/contracts/internal";
 import { parseJson } from "./control.ts";
 import type { MessageMiddleware, PluginHost } from "./pipeline.ts";
 import { plugins } from "./plugins/index.ts";
@@ -459,8 +461,20 @@ export async function startChatService(opts: ChatServiceOptions): Promise<ChatSe
     return { ok: true, identity: result.identity, user };
   };
 
+  // Rehearsal's simulated chat (W2): the send pipeline without persistence or fan-out.
+  const dryRunRoute = createDryRunRoute({
+    db: opts.db,
+    directory,
+    limiter,
+    middlewares,
+    filterRunner,
+    logger,
+    internalSecret: opts.internalSecret,
+  });
+
   async function upgrade(req: Request, server: Server<ConnData>): Promise<Response | undefined> {
     const { pathname } = new URL(req.url);
+    if (pathname === INTERNAL_ROUTES.chatDryRun) return dryRunRoute(req);
     if (pathname !== "/ws") return Response.json({ error: "not_found" }, { status: 404 });
     if (draining) return Response.json({ error: "shutting_down" }, { status: 503 });
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket")

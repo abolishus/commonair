@@ -25,6 +25,7 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { REHEARSAL_RULES } from "@commonair/contracts/enums";
 import { isVodOwnPrefix, vodPlacement, vodPrefix, type VodPlacementState } from "@commonair/contracts/storage";
 import { schema, type Database } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
@@ -151,9 +152,11 @@ export async function finalizeVod(
       broadcastId: schema.vods.broadcastId,
       storagePrefix: schema.vods.storagePrefix,
       retentionDays: schema.channels.vodRetentionDays,
+      broadcastKind: schema.broadcasts.kind,
     })
     .from(schema.vods)
     .innerJoin(schema.channels, eq(schema.channels.id, schema.vods.channelId))
+    .innerJoin(schema.broadcasts, eq(schema.broadcasts.id, schema.vods.broadcastId))
     .where(eq(schema.vods.id, vodId));
   if (!vod || vod.status === "ready" || vod.status === "deleted" || vod.status === "failed") return "skipped";
   // Never publish anything from a broadcast with a T0 match (found live, before or while this job
@@ -300,7 +303,11 @@ export async function finalizeVod(
         storagePrefix: target,
         durationSeconds: totalDuration(segments),
         sizeBytes: totalSize,
-        expiresAt: new Date(now.getTime() + vod.retentionDays * DAY_MS),
+        // A rehearsal's VOD is kept 24 h from its end, whatever the channel's retention (decision (g)).
+        expiresAt: new Date(
+          now.getTime() +
+            (vod.broadcastKind === "rehearsal" ? REHEARSAL_RULES.vodKeepSeconds * 1000 : vod.retentionDays * DAY_MS),
+        ),
         ...(thumbnailKey ? { thumbnailKey } : {}),
       })
       .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")))

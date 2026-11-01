@@ -9,6 +9,7 @@ import { PLAYBACK_TOKEN_TTL_SECONDS, type PlaybackClaims } from "@commonair/cont
 import { schema, uuidv7 } from "@commonair/db";
 import { recordHeartbeat } from "@commonair/integrity";
 import { hmacHex, signPlaybackToken, verifyPlaybackToken } from "@commonair/tokens";
+import { captionsStateFor, captionTracksFor } from "../captions/tracks.ts";
 import type { Deps } from "../deps.ts";
 import { channelBySlug, iso } from "../lib/dto.ts";
 import { apiError, conflict, notFound, precondition } from "../lib/errors.ts";
@@ -245,8 +246,9 @@ export const playback = {
       heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
       expiresAt: iso(new Date(claims.exp * 1000)),
       renditions: await renditionsFor(deps, c.id),
-      captions: [],
-      captionsState: "off",
+      // W2-captions owns both (services/api/src/captions/tracks.ts).
+      captions: await captionTracksFor(deps, b),
+      captionsState: await captionsStateFor(deps, b),
       dataMode: claims.dm ?? null,
       // W2-dvr owns these (contract step §4): no DVR until it lands.
       dvrWindowSeconds: 0,

@@ -32,13 +32,15 @@ import { signPlaybackToken } from "@commonair/tokens";
 import type { Deps } from "../deps.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { channelBySlug, iso, isoOrNull, mediaUrl } from "../lib/dto.ts";
-import { badRequest, notFound, notImplemented } from "../lib/errors.ts";
+import { badRequest, notFound } from "../lib/errors.ts";
 import { channelAuthority, type Caller, type ChannelRole } from "../lib/access.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { audit } from "../events/audit.ts";
 import { urlsWithheld, viewerAudience, vodShown, vodVisible } from "../media/visibility.ts";
 import { requestVodPlacement } from "../media/vod-placement-queue.ts";
 import { vodChat } from "../chat-replay/handlers.ts";
+import { vodCaptions } from "../captions/handlers.ts";
+import { vodCaptionTracks } from "../captions/tracks.ts";
 
 const { broadcasts, channelRoles, channels, clips: clipsT, vods: vodsT } = schema;
 type VodRow = typeof vodsT.$inferSelect;
@@ -126,8 +128,7 @@ async function toVod(
     createdAt: iso(v.createdAt),
     expiresAt: isoOrNull(v.expiresAt),
     failedReason: v.status === "failed" ? failedReason(v.failedReason) : null,
-    // W2-captions wires the ready tracks in through services/api/src/captions (contract step §4).
-    captions: [],
+    captions: withheld ? [] : await vodCaptionTracks(deps, v),
   };
 }
 
@@ -272,11 +273,7 @@ export const vods = {
     return { ok: true as const };
   }),
   chat: vodChat,
-  // W2 contract step: stubs the scaffolding moves to services/api/src/captions/handlers.ts (W2-captions).
-  captions: {
-    get: os.vods.captions.get.handler(notImplemented),
-    update: os.vods.captions.update.handler(notImplemented),
-  },
+  captions: vodCaptions,
 };
 
 const surroundings = (channel: { id: string; suspendedAt: Date | null }, restrictedAt: Date | null) => ({

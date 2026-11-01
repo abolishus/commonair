@@ -4,3 +4,5 @@
 export { createOrigin, type Origin, type OriginOptions } from "./origin.ts";
 export { cdnAuthValue, CDN_AUTH_HEADER } from "./auth.ts";
 export * from "./issuance.ts";
+export { SegmentLog } from "./accounting.ts";
+export { OriginRouteRegistry, routeNotFound, type OriginRoute, type OriginRouteContext } from "./routes.ts";
