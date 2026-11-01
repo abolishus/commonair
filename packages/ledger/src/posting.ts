@@ -20,6 +20,11 @@ export const POSTING_KINDS = [
   "patronage_allocation",
   "patronage_payout",
   "manual_confirmation",
+  // W2-splits (ADR 0013 decisions 6, 7). Migration 0043 lets only the two suspense kinds debit
+  // `liability:split-suspense:*`, and posts a write-off only for an approved two-person proposal.
+  "split_shortfall_writeoff",
+  "split_suspense_release",
+  "split_suspense_forfeit",
 ] as const;
 export type PostingKind = (typeof POSTING_KINDS)[number];
 

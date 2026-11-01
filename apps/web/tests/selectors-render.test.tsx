@@ -959,6 +959,7 @@ describe("composition-rendered selectors", () => {
       egressBySource: { origin: 600, relay: 400, p2p: 0, cdn: 0 },
       governance: [],
       members: { streamer: 0, viewer: 0, worker: 0 },
+      splitSuspense: { released: 0, forfeited: 0, writeOffs: 0, heldAtMonthEnd: usd(0) },
     });
     const doc = render(<TransparencyReport months={[month("2026-10", 10_000), month("2026-09", 5000)]} />);
     const stats = [...doc.querySelectorAll('[data-testid="transparency-stat"]')];

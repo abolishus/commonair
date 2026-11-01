@@ -28,7 +28,8 @@ const { broadcasts, channelRoles, channels, clips: clipsT, vods } = schema;
 type ClipRow = typeof clipsT.$inferSelect;
 type ChannelRow = typeof channels.$inferSelect;
 type Clip = z.infer<typeof dto.Clip>;
-type Labelled = { mature: boolean; categoryId: string | null };
+/** The clip's broadcast as the 18+ gate and `windowStartedAt` need it. */
+type Labelled = { mature: boolean; categoryId: string | null; startedAt?: Date | null };
 
 /**
  * A live clip ends this far behind the live edge: what viewers just saw (HLS plays seconds behind),
@@ -36,6 +37,10 @@ type Labelled = { mature: boolean; categoryId: string | null };
  * MediaMTX). Cutting up to "now" finds no finished segment and the clip fails.
  */
 export const LIVE_CLIP_LAG_SECONDS = 10;
+
+/** The clip window's wall-clock start, as `clips.chat` places it (chat-replay/handlers.ts). */
+const windowStart = (b: Labelled | null | undefined, startOffset: number): string | null =>
+  b?.startedAt ? new Date(b.startedAt.getTime() + startOffset * 1000).toISOString() : null;
 
 /** `labels[i]` is clip i's broadcast (null when gone); mature media URLs follow the 18+ gate. */
 async function toClips(
@@ -66,11 +71,14 @@ async function toClips(
       thumbnailUrl: playable ? mediaUrl(deps, c.thumbnailKey) : null,
       views: c.views,
       createdAt: iso(c.createdAt),
+      // As `clips.chat` places the window (chat-replay/handlers.ts).
+      windowStartedAt: windowStart(labels[i], c.startOffset),
     };
   });
 }
 
-const labelsOf = (b: Labelled | null) => (b ? { mature: b.mature, categoryId: b.categoryId } : null);
+const labelsOf = (b: Labelled | null) =>
+  b ? { mature: b.mature, categoryId: b.categoryId, startedAt: b.startedAt ?? null } : null;
 
 /** Where the cut starts, in seconds from the start of the broadcast, and which broadcast. */
 async function clipSource(
@@ -167,7 +175,13 @@ export const clips = {
       }
     }
     const rows = await deps.db
-      .select({ c: clipsT, mature: broadcasts.mature, categoryId: broadcasts.categoryId, bid: broadcasts.id })
+      .select({
+        c: clipsT,
+        mature: broadcasts.mature,
+        categoryId: broadcasts.categoryId,
+        bid: broadcasts.id,
+        startedAt: broadcasts.startedAt,
+      })
       .from(clipsT)
       .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
       .where(and(eq(clipsT.channelId, channel.id), clipVisible(audience), after))
@@ -180,7 +194,9 @@ export const clips = {
       context.caller,
       channel,
       page.map((r) => r.c),
-      page.map((r) => (r.bid === null ? null : { mature: r.mature ?? false, categoryId: r.categoryId })),
+      page.map((r) =>
+        r.bid === null ? null : { mature: r.mature ?? false, categoryId: r.categoryId, startedAt: r.startedAt },
+      ),
     );
     const last = page[page.length - 1]?.c;
     const nextCursor =
@@ -204,13 +220,20 @@ export const clips = {
     const audience = await viewerAudience(deps, context.caller, head.channel);
     if (audience !== "owner" && head.channel.suspendedAt !== null) throw notFound("Clip not found");
     const [row] = await deps.db
-      .select({ c: clipsT, mature: broadcasts.mature, categoryId: broadcasts.categoryId, bid: broadcasts.id })
+      .select({
+        c: clipsT,
+        mature: broadcasts.mature,
+        categoryId: broadcasts.categoryId,
+        bid: broadcasts.id,
+        startedAt: broadcasts.startedAt,
+      })
       .from(clipsT)
       .leftJoin(broadcasts, eq(broadcasts.id, clipsT.broadcastId))
       .where(and(eq(clipsT.id, input.id), clipVisible(audience)))
       .limit(1);
     if (!row) throw notFound("Clip not found");
-    const labels = row.bid === null ? null : { mature: row.mature ?? false, categoryId: row.categoryId };
+    const labels =
+      row.bid === null ? null : { mature: row.mature ?? false, categoryId: row.categoryId, startedAt: row.startedAt };
     const [out] = await toClips(deps, context.caller, head.channel, [row.c], [labels]);
     return out as Clip;
   }),

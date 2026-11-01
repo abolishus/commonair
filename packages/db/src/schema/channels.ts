@@ -4,6 +4,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -14,7 +15,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { ChannelChatSettings, type ChannelTheme } from "@commonair/contracts/shapes";
+import { ChannelCaptionsSettings, ChannelChatSettings, type ChannelTheme } from "@commonair/contracts/shapes";
 import { users } from "./auth.ts";
 import { cents, channelRole, createdAt, id, notificationType, raidPolicy, ts, updatedAt } from "./_shared.ts";
 
@@ -53,6 +54,14 @@ export const channels = pgTable(
     chatSettings: jsonb().$type<ChannelChatSettings>().notNull().default(ChannelChatSettings.parse({})),
     vodEnabled: boolean().notNull().default(false),
     vodRetentionDays: integer().notNull().default(14),
+    /**
+     * W2-captions (ADR 0011): the channel's captions choice, spoken language and mask list (jsonb,
+     * parsed with `ChannelCaptionsSettings`). `enabled: null` follows `captions.defaultEnabled`.
+     */
+    captionsSettings: jsonb().$type<ChannelCaptionsSettings>().notNull().default(ChannelCaptionsSettings.parse({})),
+    /** W2-dvr (ADR 0016, decision (b)): DVR needs VODs on; the effective window is capped by `DVR_MAX_WINDOW_SECONDS`. */
+    dvrEnabled: boolean().notNull().default(true),
+    dvrWindowSeconds: integer().notNull().default(1800),
     /** ADR 0026 decision 4; checked at raid start and again at execute. */
     raidPolicy: raidPolicy().notNull().default("anyone"),
     /** Set while a broadcast is live; maintained by the ingest lifecycle hooks. */
@@ -69,6 +78,7 @@ export const channels = pgTable(
       .on(t.liveBroadcastId)
       .where(sql`${t.liveBroadcastId} is not null`),
     index("channels_category_idx").on(t.categoryId),
+    check("channels_dvr_window_range", sql`${t.dvrWindowSeconds} between 60 and 86400`),
     index("channels_search_idx").using(
       "gin",
       sql`to_tsvector('simple', ${t.displayName} || ' ' || ${t.title} || ' ' || ${t.description})`,

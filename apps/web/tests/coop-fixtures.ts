@@ -315,6 +315,7 @@ export function month(key: string, over: Partial<CoopMonthDto> = {}): CoopMonthD
     egressBySource: { origin: 600, relay: 400, p2p: 0, cdn: 0 },
     governance: [],
     members: { streamer: 2, viewer: 1, worker: 1 },
+    splitSuspense: { released: 0, forfeited: 0, writeOffs: 0, heldAtMonthEnd: usd(0) },
     ...over,
   };
 }

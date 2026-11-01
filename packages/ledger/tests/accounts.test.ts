@@ -21,6 +21,10 @@ describe("chart of accounts", () => {
       [accounts.paymentFees(), "expense", null],
       [accounts.infrastructure("hosting"), "expense", null],
       [accounts.retainedSurplus(), "equity", null],
+      // W2-splits (ADR 0013 decisions 6, 7).
+      [accounts.splitShortfall(USER), "asset", USER],
+      [accounts.splitSuspense(USER), "liability", USER],
+      [accounts.splitShortfallWriteOff(), "expense", null],
     ];
     for (const [code, type, owner] of cases) {
       const info = describeAccount(code);
@@ -33,6 +37,13 @@ describe("chart of accounts", () => {
   test("creator and creator-hold codes are distinct and not prefixes of each other", () => {
     expect(accounts.creator(USER)).toBe(`liability:creator:${USER}`);
     expect(accounts.creatorHold(USER).startsWith("liability:creator:")).toBe(false);
+  });
+
+  test("the split accounts are their own codes, apart from the creator clawback receivable", () => {
+    expect(accounts.splitShortfall(USER)).toBe(`asset:receivable:split-shortfall:${USER}`);
+    expect(accounts.splitSuspense(USER)).toBe(`liability:split-suspense:${USER}`);
+    expect(accounts.splitShortfall(USER).startsWith("asset:receivable:creator:")).toBe(false);
+    expect(() => describeAccount("asset:receivable:split-shortfall:not-a-uuid")).toThrow(RangeError);
   });
 
   test("user ids are normalized to lowercase; garbage is rejected", () => {

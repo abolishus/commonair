@@ -23,6 +23,8 @@
   "oauth.scope.channel.read.points.body": "See how many points viewers hold on your channel.",
   "oauth.scope.channel.manage.points.title": "Give and take channel points",
   "oauth.scope.channel.manage.points.body": "Add points to or remove points from viewers on your channel.",
+  "oauth.scope.channel.manage.splits.title": "Manage revenue splits",
+  "oauth.scope.channel.manage.splits.body": "Propose, accept, refuse and end shares of your channel's revenue.",
   "oauth.scope.user.read.email.title": "See your email address",
   "oauth.scope.user.read.email.body": "Read the email address on your account.",
   "oauth.scope.user.read.follows.title": "See who you follow",

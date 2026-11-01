@@ -64,6 +64,7 @@ export const MAIN_TS_SCHEMAS: Record<"chat" | "irc" | "origin" | "tracker", Sche
     "playbackEnv",
     "storageEnv",
     "servicePorts",
+    "dvrEnv",
   ],
   tracker: [
     "coreEnv",
@@ -104,6 +105,11 @@ const X25519_PRIVATE = Buffer.concat([
 ]).toString("base64");
 /** An uncompressed P-256 point's shape (0x04 then 64 bytes), base64url: the VAPID public key. */
 const VAPID_PUBLIC = Buffer.concat([Buffer.from([4]), Buffer.alloc(64)]).toString("base64url");
+/** An Ed25519 PKCS#8 key's shape: `INTEGRITY_SIGNING_KEY`. */
+const ED25519_PRIVATE = Buffer.concat([
+  Buffer.from("302e020100300506032b657004220420", "hex"),
+  Buffer.alloc(32),
+]).toString("base64");
 const CANDIDATES = [
   "true",
   "10",
@@ -123,6 +129,9 @@ const CANDIDATES = [
   X25519_PUBLIC,
   X25519_PRIVATE,
   VAPID_PUBLIC,
+  ED25519_PRIVATE,
+  // `INFRA_COST_MODEL` (JSON).
+  "{}",
   "off",
   "stun:localhost:1",
   "turn:localhost:1",

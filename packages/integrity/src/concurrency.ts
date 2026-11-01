@@ -14,6 +14,7 @@
  *
  * Remaining live sessions are ranked newest first per device and per account.
  */
+import type { PLAYBACK_MODES } from "@commonair/contracts/enums";
 import type { Concurrency } from "./types.ts";
 
 export interface LiveSession {
@@ -24,6 +25,11 @@ export interface LiveSession {
   startedAt: Date;
   /** Last heartbeat, or the start time before the first one. */
   lastSeenAt: Date;
+  /**
+   * `playback_sessions.playback_mode` (ADR 0016 decision 6): a `dvr` session is catching up, not a
+   * live viewer. Absent = `live`. Filled by `jobs.ts`; W2-dvr applies it here.
+   */
+  mode?: (typeof PLAYBACK_MODES)[number];
 }
 
 export interface SupersedeOptions {

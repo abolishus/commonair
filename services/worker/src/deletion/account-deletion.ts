@@ -346,6 +346,31 @@ export async function completeDeletion(ctx: WorkerContext, deletionId: string): 
         tx.delete(s.songRequests).where(eq(s.songRequests.requesterId, userId)).returning({ id: s.songRequests.id }),
       );
       await tx.update(s.clips).set({ creatorId: null }).where(eq(s.clips.creatorId, userId));
+      // W2: caption corrections and share links keep no trace of who made them (ids only, now
+      // detached, as for clips); rehearsal invitations are deleted.
+      await del(
+        "caption_edits",
+        tx
+          .update(s.captionEdits)
+          .set({ editorUserId: null })
+          .where(eq(s.captionEdits.editorUserId, userId))
+          .returning({ id: s.captionEdits.id }),
+      );
+      await tx
+        .update(s.analyticsShareLinks)
+        .set({ createdById: null })
+        .where(eq(s.analyticsShareLinks.createdById, userId));
+      await tx
+        .update(s.attestationShareLinks)
+        .set({ createdById: null })
+        .where(eq(s.attestationShareLinks.createdById, userId));
+      await del(
+        "rehearsal_invitees",
+        tx
+          .delete(s.rehearsalInvitees)
+          .where(eq(s.rehearsalInvitees.userId, userId))
+          .returning({ u: s.rehearsalInvitees.userId }),
+      );
 
       // The identity as it is now, before pseudonymization below replaces it: the outbox is
       // scrubbed of it last, after every write in this transaction that can emit an event.

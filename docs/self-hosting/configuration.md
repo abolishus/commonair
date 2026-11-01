@@ -409,6 +409,31 @@ the tables by hand. Columns:
 | --------------------------------- | -------- | ------- | --------- | ------------------------------------------------------------------------------------- |
 | `INTEGRITY_DATACENTER_CIDRS_FILE` | no       | —       | —         | Operator-supplied hosting-provider CIDR list (one per line) for datacenter detection. |
 
+### `captionsEnv`
+
+| Variable               | Required | Default | Self-host | Description                                                                                   |
+| ---------------------- | -------- | ------- | --------- | --------------------------------------------------------------------------------------------- |
+| `CAPTIONS_MAX_STREAMS` | no       | `2`     | —         | Live caption workers per media host (FIFO queue beyond it); 0 turns live captions off.        |
+| `WHISPER_URL`          | no       | —       | —         | The whisper.cpp sidecar's HTTP server (internal network only); unset: live captions stay off. |
+
+### `dvrEnv`
+
+| Variable                 | Required | Default | Self-host | Description                                                                                    |
+| ------------------------ | -------- | ------- | --------- | ---------------------------------------------------------------------------------------------- |
+| `DVR_MAX_WINDOW_SECONDS` | no       | `7200`  | —         | Instance cap on a channel's DVR window in seconds (channels default to 1800); 0 turns DVR off. |
+
+### `costModelEnv`
+
+| Variable           | Required | Default                              | Self-host | Description                                                                                                 |
+| ------------------ | -------- | ------------------------------------ | --------- | ----------------------------------------------------------------------------------------------------------- |
+| `INFRA_COST_MODEL` | no       | `{"currency":"usd","centsPerGb":{}}` | —         | JSON `{"currency":"usd","centsPerGb":{"origin":1,"relay":0,"p2p":0,"cdn":2}}`; unset: every source costs 0. |
+
+### `attestationEnv`
+
+| Variable                | Required | Default | Self-host | Description                                                                                             |
+| ----------------------- | -------- | ------- | --------- | ------------------------------------------------------------------------------------------------------- |
+| `INTEGRITY_SIGNING_KEY` | yes      | —       | generated | Attestation signing key (Ed25519 PKCS#8 DER, base64). Rotate by replacing it and restarting the worker. |
+
 ### `developerEnv`
 
 | Variable                               | Required | Default | Self-host | Description                                                                                                                                                                              |

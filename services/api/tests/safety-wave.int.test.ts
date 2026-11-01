@@ -67,6 +67,8 @@ const resolve = (id: string, action: string) =>
     status: "actioned",
     resolution: "wave removed",
     action,
+    // ADR 0019 acceptance answer 3: a platform action cites a clause.
+    ...(action === "none" || action === "ban_from_channel" ? {} : { clauseId: "decency.harassment" }),
   });
 
 describe("message_set reports", () => {

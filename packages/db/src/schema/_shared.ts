@@ -117,3 +117,13 @@ export const enforcementDeliveryChannel = pgEnum("enforcement_delivery_channel",
 export const paymentFraudKind = pgEnum("payment_fraud_kind", E.PAYMENT_FRAUD_KINDS);
 export const paymentFraudStatus = pgEnum("payment_fraud_status", E.PAYMENT_FRAUD_STATUSES);
 export const paymentFraudDecision = pgEnum("payment_fraud_decision", E.PAYMENT_FRAUD_DECISIONS);
+// Feature wins, wave 2 (W2).
+export const broadcastKind = pgEnum("broadcast_kind", E.BROADCAST_KINDS);
+export const playbackMode = pgEnum("playback_mode", E.PLAYBACK_MODES);
+export const splitBasis = pgEnum("split_basis", E.SPLIT_BASES);
+export const splitStatus = pgEnum("split_status", E.SPLIT_STATUSES);
+export const splitAcceptanceDecision = pgEnum("split_acceptance_decision", E.SPLIT_ACCEPTANCE_DECISIONS);
+export const splitWriteoffStatus = pgEnum("split_writeoff_status", E.SPLIT_WRITEOFF_STATUSES);
+export const captionTrackStatus = pgEnum("caption_track_status", E.CAPTION_TRACK_STATUSES);
+export const attestationKind = pgEnum("attestation_kind", E.ATTESTATION_KINDS);
+export const exclusionCategory = pgEnum("exclusion_category", E.EXCLUSION_CATEGORIES);

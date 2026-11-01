@@ -4,8 +4,10 @@
 import {
   authEnv,
   coreEnv,
+  costModelEnv,
   databaseEnv,
   developerEnv,
+  dvrEnv,
   evidenceOpenEnv,
   evidenceSealEnv,
   internalEnv,
@@ -59,6 +61,10 @@ const SCHEMAS = [
   chatEnv,
   // N1: web push (ADR 0028 decision 1); on without the VAPID public key refuses to start.
   webPushPublicEnv,
+  // W2: the DVR window cap (ADR 0016) and the analytics cost model (decision (k)). Never
+  // `attestationEnv`: the API cannot sign attestations (decision (l)).
+  dvrEnv,
+  costModelEnv,
 ] as const;
 
 export type ApiEnv = z.output<typeof coreEnv> &
@@ -82,7 +88,9 @@ export type ApiEnv = z.output<typeof coreEnv> &
   z.output<typeof opsEnv> &
   z.output<typeof interactEnv> &
   z.output<typeof chatEnv> &
-  z.output<typeof webPushPublicEnv>;
+  z.output<typeof webPushPublicEnv> &
+  z.output<typeof dvrEnv> &
+  z.output<typeof costModelEnv>;
 
 /** Validate the API's whole environment; throws EnvError listing every problem across schemas. */
 export function loadApiEnv(source: Record<string, string | undefined> = process.env): ApiEnv {

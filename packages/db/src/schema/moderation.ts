@@ -10,6 +10,7 @@
  */
 import { sql } from "drizzle-orm";
 import { boolean, check, doublePrecision, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { RULE_REF_PATTERN } from "@commonair/contracts/enums";
 import { channels } from "./channels.ts";
 import { legalHolds } from "./safety.ts";
 import {
@@ -61,11 +62,17 @@ export const moderationCases = pgTable(
     /** The decision code (`MODERATION_REVIEW_DECISIONS`, `confirmed`, `dismissed`, `overturned`). */
     resolution: text(),
     resolutionNote: text(),
+    /** Decision (d): the clause the case cites (`<id>@<version>`); null for a CSAM-list T0 (ADR 0019 decision 1). */
+    ruleRef: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index("moderation_cases_queue_idx").on(t.tier, t.status, t.priority, t.createdAt),
+    check(
+      "moderation_cases_rule_ref_format",
+      sql`${t.ruleRef} is null or ${t.ruleRef} ~ '${sql.raw(RULE_REF_PATTERN)}'`,
+    ),
     index("moderation_cases_user_idx").on(t.userId),
     index("moderation_cases_subject_idx").on(t.subjectType, t.subjectId),
     uniqueIndex("moderation_cases_open_uq")

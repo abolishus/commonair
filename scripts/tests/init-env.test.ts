@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
-import { ALL_ENV_SCHEMAS, infraEnv, loadEnv } from "../../packages/config/src/env.ts";
+import { ALL_ENV_SCHEMAS, attestationEnv, infraEnv, loadEnv } from "../../packages/config/src/env.ts";
 import { z } from "zod";
 import { loadApiEnv } from "../../services/api/src/env.ts";
 import { workerEnv } from "../../services/worker/src/env.ts";
@@ -175,5 +175,36 @@ describe("VAPID keypair (N1, ADR 0028)", () => {
       expect(proc.stderr.toString()).toContain("VAPID keypair");
       expect(readFileSync(out, "utf8")).toBe(half);
     }
+  });
+});
+
+describe("attestation signing key (ADR 0014 decision 1)", () => {
+  test("a fresh env gets its own Ed25519 key, never the playback key, and the worker accepts it", async () => {
+    const env = initEnv();
+    expect(env.INTEGRITY_SIGNING_KEY).toBeTruthy();
+    expect(env.INTEGRITY_SIGNING_KEY).not.toBe(env.PLAYBACK_SIGNING_KEY);
+    const key = await crypto.subtle.importKey(
+      "pkcs8",
+      Buffer.from(env.INTEGRITY_SIGNING_KEY!, "base64"),
+      { name: "Ed25519" },
+      false,
+      ["sign"],
+    );
+    expect(key.type).toBe("private");
+    expect(() => loadEnv(attestationEnv, env)).not.toThrow();
+    expect(() => loadEnv(attestationEnv, { INTEGRITY_SIGNING_KEY: env.EVIDENCE_PRIVATE_KEY })).toThrow(/Ed25519/);
+    expect(initEnv().INTEGRITY_SIGNING_KEY).not.toBe(env.INTEGRITY_SIGNING_KEY);
+  });
+
+  test("a merge keeps an existing key and adds a missing one", () => {
+    const first = initEnv();
+    expect(initEnv(`INTEGRITY_SIGNING_KEY=${first.INTEGRITY_SIGNING_KEY}\n`).INTEGRITY_SIGNING_KEY).toBe(
+      first.INTEGRITY_SIGNING_KEY,
+    );
+    // An .env from before W2: the playback key stays, the new key is generated and differs.
+    const added = initEnv(`PLAYBACK_SIGNING_KEY=${first.PLAYBACK_SIGNING_KEY}\n`);
+    expect(added.PLAYBACK_SIGNING_KEY).toBe(first.PLAYBACK_SIGNING_KEY);
+    expect(added.INTEGRITY_SIGNING_KEY).not.toBe(first.PLAYBACK_SIGNING_KEY);
+    expect(() => loadEnv(attestationEnv, added)).not.toThrow();
   });
 });

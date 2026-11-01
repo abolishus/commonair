@@ -27,6 +27,7 @@
   "appeals.account.subject.integrity_flag": "Integrity flag",
   "appeals.account.subject.dmca_notice": "Copyright notice",
   "appeals.account.subject.account_action": "Account action",
+  "appeals.account.subject.exclusion_group": "Excluded viewers of a broadcast",
   "appeals.account.kind.integrity": "Integrity",
   "appeals.account.kind.moderation": "Moderation",
   "appeals.account.kind.dmca": "Copyright",

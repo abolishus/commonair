@@ -14,6 +14,7 @@ import {
   HASH_LIST_CATEGORIES,
   MODERATION_CATEGORIES,
   MODERATION_SUBJECTS,
+  PLAYBACK_MODES,
   RENDITIONS,
 } from "./enums.ts";
 
@@ -95,6 +96,24 @@ export const INTERNAL_ROUTES = {
    * `InteractJobResult`.
    */
   interactTick: "/internal/interact/tick",
+  /**
+   * W2 analytics and attestation test hook (served only while `OPS_TEST_HOOKS=true`, otherwise
+   * 404; harness only). `POST` an `AnalyticsTickBody`: the API enqueues that `ANALYTICS_JOBS` job for
+   * one broadcast now, with the settle delay overridden, waits (60 s) and returns its result.
+   */
+  analyticsTick: "/internal/analytics/tick",
+  /**
+   * W2 test hook (same gate): `PUT` an `AnalyticsDisplayBypassBody`. While set, the analytics,
+   * share-link and attestation reads skip the 24 h display delay for that channel
+   * (`KEYS.analyticsDisplayBypass`, TTL `ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS`).
+   */
+  analyticsDisplayBypass: "/internal/analytics/display-bypass",
+  /**
+   * Chat dry run (W2-rehearsal, served by services/chat with the internal secret): `POST` a
+   * `ChatDryRunBody`; the full send pipeline runs for a synthetic sender against the channel's
+   * state and answers a `ChatDryRunResult`, never broadcasting or saving the message.
+   */
+  chatDryRun: "/internal/chat/dry-run",
 } as const;
 
 /**
@@ -244,7 +263,31 @@ export const KEYS = {
   surgeOpen: (channelId: string) => `surge-open:${channelId}`,
   /** ADR 0012 amendment 1 decision 4: STRING, the median viewer latency in seconds, TTL 60 s. */
   chatLatency: (channelId: string) => `chat-latency:${channelId}`,
+  /**
+   * W2-rehearsal (decision (f)): STRING JSON `RehearsalArm`, `SET … EX REHEARSAL_RULES.armTtlSeconds`
+   * by `stream.rehearsal.arm`. While it exists `mediaAuth` accepts the channel's normal key and
+   * `mediaReady` starts a `rehearsal` broadcast instead of a live one.
+   */
+  rehearsalArmed: (channelId: string) => `rehearsal:armed:${channelId}`,
+  /** W2-rehearsal: STRING JSON report (worker writes every 5 s, the API reads), TTL 24 h. */
+  rehearsalReport: (broadcastId: string) => `rehearsal:report:${broadcastId}`,
+  /** W2 test hook: set while the 24 h analytics display delay is bypassed for the channel. */
+  analyticsDisplayBypass: (channelId: string) => `analytics:display-bypass:${channelId}`,
+  /** W2-dvr (ADR 0016 decision 6): cached catching-up (DVR mode) viewer count, beside `viewerCount`. */
+  catchingUpCount: (channelId: string) => `catching-up-count:${channelId}`,
 } as const;
+
+/** `KEYS.rehearsalArmed` value. Ids and times only. */
+export const RehearsalArm = z.object({
+  armId: z.uuid(),
+  ownerId: z.uuid(),
+  armedAt: z.iso.datetime({ offset: true }),
+});
+export type RehearsalArm = z.infer<typeof RehearsalArm>;
+/** TTL of `KEYS.rehearsalReport`. */
+export const REHEARSAL_REPORT_TTL_SECONDS = 86_400;
+/** TTL of `KEYS.analyticsDisplayBypass`. */
+export const ANALYTICS_DISPLAY_BYPASS_TTL_SECONDS = 3600;
 
 /** `KEYS.verifiedWatch` value: broadcast, gate-eligible seconds after jitter, privacy-relay fallback (ADR 0015 decisions 1, 4, 5). */
 export const VerifiedWatchValue = z.object({
@@ -325,6 +368,11 @@ export const SegmentFetch = z.object({
    * segments per session rather than requests. Optional for older producers.
    */
   obj: z.string().max(256).optional(),
+  /**
+   * ADR 0016 decision 6: which route served it, so integrity judges each playback mode's claimed
+   * seconds against that mode's fetches. Absent = `live` (every producer before W2-dvr).
+   */
+  mode: z.enum(PLAYBACK_MODES).optional(),
 });
 export type SegmentFetch = z.infer<typeof SegmentFetch>;
 
@@ -349,6 +397,10 @@ export const QUEUES = {
   coop: "coop",
   /** Interactivity (E8, ADR 0026): `INTERACT_JOBS`. */
   interact: "interact",
+  /** W2: the per-broadcast audience rollup and signed attestations (`ANALYTICS_JOBS`). */
+  analytics: "analytics",
+  /** W2-rehearsal: one driver job per armed rehearsal (`REHEARSAL_JOBS`). */
+  rehearsal: "rehearsal",
 } as const;
 
 // Trust & safety (ADR 0006, docs/testing/e4c-selectors.md) ---------------------------------
@@ -673,3 +725,69 @@ export type InteractTickBody = z.infer<typeof InteractTickBody>;
 /** What an interactivity job returns (counts only; logged and returned by the test hook). */
 export const InteractJobResult = z.record(z.string(), z.number().int());
 export type InteractJobResult = z.infer<typeof InteractJobResult>;
+
+// Feature wins, wave 2 (W2; .claude/briefs/w2/contract-step.md §1.4) ------------------------
+
+/**
+ * Jobs on `QUEUES.analytics`. Producers: the outbox relay (`broadcastRollup` delayed by
+ * `AUDIENCE_SETTLE_SECONDS` on `stream.offline`, `reason: "rescore"` on `integrity.sessions.rescored`;
+ * `integrityAttestation` on `analytics.rollup.ready`), the worker's daily `attestationReconcile`
+ * schedule, and the API on the test hook (`reason: "test"`). Both per-broadcast jobs are idempotent
+ * and safe to re-run; enqueue with `jobId = analyticsJobId(name, broadcastId, reason)`.
+ */
+export const ANALYTICS_JOBS = {
+  broadcastRollup: "broadcast-rollup",
+  integrityAttestation: "integrity-attestation",
+  /** Daily: re-check broadcasts re-scored or re-rolled after their latest attestation entry. */
+  attestationReconcile: "attestation-reconcile",
+} as const;
+export type AnalyticsJobName = (typeof ANALYTICS_JOBS)[keyof typeof ANALYTICS_JOBS];
+export const BroadcastRollupJob = z.object({
+  broadcastId: z.uuid(),
+  reason: z.enum(["offline", "rescore", "test"]),
+  /** Test hook only: settle delay to wait for instead of `AUDIENCE_SETTLE_SECONDS` (0 = now). */
+  settleSeconds: z.number().int().min(0).max(86_400).optional(),
+});
+export type BroadcastRollupJob = z.infer<typeof BroadcastRollupJob>;
+export const IntegrityAttestationJob = z.object({
+  broadcastId: z.uuid(),
+  reason: z.enum(["rollup", "recheck", "reconcile", "test"]),
+});
+export type IntegrityAttestationJob = z.infer<typeof IntegrityAttestationJob>;
+export const AttestationReconcileJob = z.object({});
+export const analyticsJobId = (name: AnalyticsJobName, broadcastId: string, reason: string) =>
+  `${name}:${broadcastId}:${reason}`;
+/** What an analytics job returns (counts only). */
+export const AnalyticsJobResult = z.record(z.string(), z.number().int());
+export type AnalyticsJobResult = z.infer<typeof AnalyticsJobResult>;
+/** Body of `INTERNAL_ROUTES.analyticsTick`; the response is the job's `AnalyticsJobResult`. */
+export const AnalyticsTickBody = z.object({
+  job: z.enum([ANALYTICS_JOBS.broadcastRollup, ANALYTICS_JOBS.integrityAttestation]),
+  broadcastId: z.uuid(),
+  /** Defaults to 0: run as if the settle delay had passed. */
+  settleSeconds: z.number().int().min(0).max(86_400).default(0),
+});
+export type AnalyticsTickBody = z.infer<typeof AnalyticsTickBody>;
+/** Body of `INTERNAL_ROUTES.analyticsDisplayBypass`. */
+export const AnalyticsDisplayBypassBody = z.object({ channelId: z.uuid(), enabled: z.boolean() });
+export type AnalyticsDisplayBypassBody = z.infer<typeof AnalyticsDisplayBypassBody>;
+
+/** Jobs on `QUEUES.rehearsal`: one driver per arm, started on `rehearsal.armed` (`jobId = rehearsal:<armId>`). */
+export const REHEARSAL_JOBS = { driver: "rehearsal-driver" } as const;
+export const RehearsalDriverJob = z.object({ armId: z.uuid(), channelId: z.uuid() });
+export type RehearsalDriverJob = z.infer<typeof RehearsalDriverJob>;
+
+/** Body of `INTERNAL_ROUTES.chatDryRun`: one simulated message for a channel. Never stored. */
+export const ChatDryRunBody = z.object({
+  channelId: z.uuid(),
+  /** A stable synthetic sender id (never a real account) so duplicate and rate rules apply per sender. */
+  senderKey: z.string().min(1).max(64),
+  body: z.string().min(1).max(500),
+});
+export type ChatDryRunBody = z.infer<typeof ChatDryRunBody>;
+export const ChatDryRunResult = z.object({
+  outcome: z.enum(["accepted", "held", "rejected"]),
+  /** The notice code the sender would have seen (`CHAT_NOTICE` codes), null when accepted. */
+  code: z.string().max(64).nullable(),
+});
+export type ChatDryRunResult = z.infer<typeof ChatDryRunResult>;

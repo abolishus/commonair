@@ -125,6 +125,7 @@ func TestVerifyPlaybackDataModeVector(t *testing.T) {
 			m["rid"] = "01890000-0000-7000-8000-000000000003"
 		}),
 		"dm on vod":   mutate(func(m map[string]any) { m["path"] = "vod/01890000-0000-7000-8000-000000000009" }),
+		"dm on dvr":   mutate(func(m map[string]any) { m["path"] = "dvr/01890000-0000-7000-8000-000000000009" }),
 		"dm too low":  mutate(func(m map[string]any) { m["dm"] = 1000 }),
 		"dm too high": mutate(func(m map[string]any) { m["dm"] = 9000000 }),
 		"dm string":   mutate(func(m map[string]any) { m["dm"] = "1" }),

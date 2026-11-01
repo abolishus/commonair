@@ -60,7 +60,16 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
     key: "payout.rules",
     protected: true,
     description: "Minimum payout, schedule, and chargeback hold period.",
-    value: { minimumCents: 2500, schedule: "monthly", holdDays: 7, currency: "usd" },
+    // The split fields (ADR 0013, decision (i)) are the `PayoutRulesSetting` defaults.
+    value: {
+      minimumCents: 2500,
+      schedule: "monthly",
+      holdDays: 7,
+      currency: "usd",
+      splitShortfallWriteOffDays: 365,
+      splitNewRecipientHoldDays: 7,
+      splitRecipientMinAccountAgeDays: 30,
+    },
   },
   {
     key: "membership.classes",
@@ -155,6 +164,13 @@ export const DEFAULT_GOVERNANCE_SETTINGS = [
     description:
       "Go-live notifications: at most one per channel per follower every cooldownHours across in-app, email and push; go-live emails wait emailDigestMinutes and go out as one digest (ADR 0028).",
     value: { cooldownHours: 4, emailDigestMinutes: 5 },
+  },
+  {
+    key: "captions.defaultEnabled",
+    protected: false,
+    description:
+      "Open captions (ADR 0011): whether channels that have not chosen get live captions. A channel's own choice wins; off until the instance has capacity.",
+    value: { enabled: false },
   },
 ] as const;
 

@@ -271,8 +271,63 @@ export const PayoutRulesSetting = z.object({
   schedule: z.enum(["monthly"]),
   holdDays: z.number().nonnegative(),
   currency: z.string().regex(/^[a-z]{3}$/),
+  /**
+   * ADR 0013 decision 6: days without a credit to the owner's earnings after which a treasurer may
+   * propose writing off the owner's split-shortfall suspense balance.
+   */
+  splitShortfallWriteOffDays: z.number().int().min(30).max(3650).default(365),
+  /** Decision (i): days added to the payment hold for a split recipient's first released crew lot. */
+  splitNewRecipientHoldDays: z.number().int().min(0).max(90).default(7),
+  /** Decision (i): a split recipient's account must be at least this old at propose and at accept. */
+  splitRecipientMinAccountAgeDays: z.number().int().min(0).max(365).default(30),
 });
 export type PayoutRulesSetting = z.infer<typeof PayoutRulesSetting>;
+
+/**
+ * W2 channel settings (contract step §1.2). Captions live in `channels.captions_settings` (jsonb,
+ * like chat settings: the mask list is a list); DVR lives in two columns (`dvr_enabled`,
+ * `dvr_window_seconds`) because the origin's per-request state check reads them. The full shapes
+ * carry the defaults, the patch shapes none (Zod applies `.default()` even inside `.partial()`).
+ */
+const captionsSettingFields = {
+  /** The channel's own choice; null follows the instance default (`captions.defaultEnabled`). */
+  enabled: z.boolean().nullable(),
+  /** A BCP 47 tag for the speech model; null = `channels.language`. */
+  spokenLanguage: z
+    .string()
+    .regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,4})?$/)
+    .nullable(),
+  /**
+   * Patterns masked in captions (word-filter syntax; the settings handler validates each with
+   * `@commonair/safe-regex`). A match becomes a fixed token; cue timing stays.
+   */
+  maskWords: z.array(z.string().min(1).max(200)).max(100),
+};
+export const ChannelCaptionsSettings = z.object({
+  enabled: captionsSettingFields.enabled.default(null),
+  spokenLanguage: captionsSettingFields.spokenLanguage.default(null),
+  maskWords: captionsSettingFields.maskWords.default([]),
+});
+export type ChannelCaptionsSettings = z.infer<typeof ChannelCaptionsSettings>;
+export const ChannelCaptionsSettingsPatch = z.object(captionsSettingFields).partial();
+export type ChannelCaptionsSettingsPatch = z.infer<typeof ChannelCaptionsSettingsPatch>;
+
+const dvrSettingFields = {
+  enabled: z.boolean(),
+  /** Seconds viewers may rewind; clamped to `DVR_MAX_WINDOW_SECONDS` on save and on read. */
+  windowSeconds: z.number().int().min(60).max(86_400),
+};
+export const ChannelDvrSettings = z.object({
+  enabled: dvrSettingFields.enabled.default(true),
+  windowSeconds: dvrSettingFields.windowSeconds.default(1800),
+});
+export type ChannelDvrSettings = z.infer<typeof ChannelDvrSettings>;
+export const ChannelDvrSettingsPatch = z.object(dvrSettingFields).partial();
+export type ChannelDvrSettingsPatch = z.infer<typeof ChannelDvrSettingsPatch>;
+
+/** `captions.defaultEnabled` governance setting (ordinary, seeded `{enabled: false}`; decision (j)). */
+export const CaptionsDefaultSetting = z.object({ enabled: z.boolean() });
+export type CaptionsDefaultSetting = z.infer<typeof CaptionsDefaultSetting>;
 
 /**
  * `interact.points.accrual` governance setting (ADR 0026 decision 1, ordinary decision). Range-checked

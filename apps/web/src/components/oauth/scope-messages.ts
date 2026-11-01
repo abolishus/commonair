@@ -50,6 +50,10 @@ export const SCOPE_MESSAGES: Readonly<Record<Scope, ScopeMessage>> = {
     title: "oauth.scope.channel.manage.points.title",
     body: "oauth.scope.channel.manage.points.body",
   },
+  "channel:manage:splits": {
+    title: "oauth.scope.channel.manage.splits.title",
+    body: "oauth.scope.channel.manage.splits.body",
+  },
   "user:read:email": { title: "oauth.scope.user.read.email.title", body: "oauth.scope.user.read.email.body" },
   "user:read:follows": { title: "oauth.scope.user.read.follows.title", body: "oauth.scope.user.read.follows.body" },
   "user:manage:follows": {
@@ -68,6 +72,7 @@ export const SENSITIVE_SCOPES: ReadonlySet<Scope> = new Set<Scope>([
   "channel:manage",
   "moderator:manage:chat",
   "channel:manage:points",
+  "channel:manage:splits",
 ]);
 
 export const isSensitiveScope = (scope: Scope): boolean => SENSITIVE_SCOPES.has(scope);

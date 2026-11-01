@@ -187,9 +187,16 @@ describe("scope messages", () => {
     for (const scope of SCOPE_NAMES) expect(en[SCOPE_MESSAGES[scope].body]).not.toBe(reference[scope]);
   });
 
-  it("marks exactly the four sensitive scopes", () => {
+  it("marks exactly the five sensitive scopes", () => {
+    // W2: `channel:manage:splits` decides who a channel's revenue goes to.
     expect([...SENSITIVE_SCOPES].sort()).toEqual(
-      ["channel:manage", "channel:manage:points", "moderator:manage:chat", "user:read:email"].sort(),
+      [
+        "channel:manage",
+        "channel:manage:points",
+        "channel:manage:splits",
+        "moderator:manage:chat",
+        "user:read:email",
+      ].sort(),
     );
   });
 

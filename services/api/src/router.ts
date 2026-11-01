@@ -13,7 +13,7 @@ import { coop } from "./routes/coop.ts";
 import { developer } from "./routes/developer/index.ts";
 import { categoriesRoutes, directory } from "./routes/directory.ts";
 import { instance } from "./routes/instance.ts";
-import { integrity } from "./routes/integrity.ts";
+import { analytics, integrity, transparency } from "./routes/integrity.ts";
 import { interact } from "./routes/interact.ts";
 import { legal } from "./routes/legal.ts";
 import { me } from "./routes/me.ts";
@@ -48,6 +48,8 @@ export const router = base.router({
   interact,
   coop,
   integrity,
+  analytics,
+  transparency,
   appeals,
   safety,
   legal,

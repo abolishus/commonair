@@ -8,7 +8,7 @@ import { broadcasterFields, emit, userFields } from "../events/outbox.ts";
 import { channelBySlug, iso, loadUsersPublic, toChannelDto, toPanelDto, userByUsername } from "../lib/dto.ts";
 import { publishControl } from "../lib/control.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
-import { badRequest, forbidden, notFound } from "../lib/errors.ts";
+import { badRequest, forbidden, notFound, notImplemented } from "../lib/errors.ts";
 import { redactKeys, scanAndRevoke, type LeakSource } from "../lib/leaks.ts";
 import { instanceMediaBase, isInstanceMediaRef } from "../lib/media-ref.ts";
 import { os, requireCaller, requireChannel, type Ctx } from "../lib/orpc.ts";
@@ -292,6 +292,9 @@ export const channelsRoutes = {
       return { ok: true as const };
     }),
   },
+  // W2 contract step: stubs the scaffolding implements (the channel settings handler, §4).
+  mediaSettings: os.channels.mediaSettings.handler(notImplemented),
+  updateMediaSettings: os.channels.updateMediaSettings.handler(notImplemented),
 };
 
 async function changeRole(

@@ -5,6 +5,7 @@
 import {
   coreEnv,
   databaseEnv,
+  dvrEnv,
   internalEnv,
   loadEnv,
   mediaEnv,
@@ -29,7 +30,8 @@ const env = loadEnv(
     .and(mediaEnv)
     .and(playbackEnv)
     .and(storageEnv)
-    .and(servicePorts),
+    .and(servicePorts)
+    .and(dvrEnv),
 );
 
 const telemetry = await initTelemetry({ serviceName: env.OTEL_SERVICE_NAME ?? "origin" });
