@@ -116,6 +116,48 @@ export function crewEarnedSlice(
   return crewNow.liabilityCents + crewNow.reservedCents === releasedCrewCents && crewNow.holdCents === liveHeldCents;
 }
 
+/**
+ * What a chargeback leaves the owner owing (ADR 0013 decision 5). The owner covers the rest of its
+ * own slice first and then the crew's, from its released earnings and held lots as they stood
+ * before the chargeback (`ownerBefore`, less what its own lot already gave). Whatever is left of
+ * its own slice becomes the clawback receivable, and whatever is left of the crew's becomes the
+ * split shortfall. A payout run that reserves nothing (each slice under the payout minimum) leaves
+ * the owner's slice in released earnings, so the receivable is then 0.
+ */
+export function ownerClawbackOwed(
+  ownerBefore: { liabilityCents: number; holdCents: number },
+  ownerSlice: { sliceCents: number; fromOwnLotCents: number },
+  crewOwnerCoveredCents: number,
+): { receivableCents: number; splitShortfallCents: number } {
+  let sources =
+    Math.max(0, ownerBefore.liabilityCents) + Math.max(0, ownerBefore.holdCents - ownerSlice.fromOwnLotCents);
+  const ownRest = ownerSlice.sliceCents - ownerSlice.fromOwnLotCents;
+  const own = Math.min(ownRest, sources);
+  sources -= own;
+  const crew = Math.min(crewOwnerCoveredCents, sources);
+  return { receivableCents: ownRest - own, splitShortfallCents: crewOwnerCoveredCents - crew };
+}
+
+/**
+ * A gross (at least `SPLIT_TIP_CENTS`) whose crew slice reaches the payout minimum, so
+ * the run creates the crew member's first payout: a 2000 tip's 360 crew slice is under the
+ * seeded 2500 minimum and would be carried over instead.
+ */
+export function crewPayoutTipCents(
+  minimumCents: number,
+  cut: PlatformCut,
+  owner: string,
+  crew: string,
+  crewBps = CREW_BPS,
+): number {
+  let gross = Math.max(SPLIT_TIP_CENTS, Math.ceil((minimumCents * 10_000) / (crewBps * cut.streamerShare)));
+  // The proportional estimate ignores rounding; step up the few cents it can miss.
+  for (let i = 0; i < 1000; i++, gross++) {
+    if (expectedSlices(gross, cut, owner, crew, crewBps).crew >= minimumCents) return gross;
+  }
+  throw new RangeError("no tip reaches the payout minimum for the crew slice");
+}
+
 interface SplitSetup {
   owner: SignedInUser;
   crew: SignedInUser;
@@ -128,6 +170,7 @@ interface SplitSetup {
   cut: PlatformCut;
   holdDays: number;
   newRecipientHoldDays: number;
+  minimumPayoutCents: number;
 }
 
 async function openAs(ext: MoneyExtension, label: string, user: SignedInUser, path: string): Promise<Page> {
@@ -242,6 +285,7 @@ async function setUp(ext: MoneyExtension, prefix: string): Promise<SplitSetup> {
     cut: settings.cut,
     holdDays: settings.payoutRules.holdDays,
     newRecipientHoldDays: settings.payoutRules.splitNewRecipientHoldDays,
+    minimumPayoutCents: settings.payoutRules.minimumCents,
   };
 }
 
@@ -406,9 +450,12 @@ export async function stepSplitClawback(ext: MoneyExtension): Promise<void> {
   const paymentId = await ctx.step("w2sc: a tip past the hold (fixture)", () =>
     fixtureTip(s, ext.currency, dates.released),
   );
-  // The run releases both lots and reserves both payouts: nothing is left to draw on.
+  // The run releases both lots. Whether it also reserves payouts depends on the payout minimum
+  // (the seeded 2500 is above both slices), so the owner's expectation is computed from its
+  // balances just before the chargeback.
   await runPayouts(ext, "w2sc");
   const crewBefore = await creatorBalances(s.db, s.crew.id, ext.currency);
+  const ownerBefore = await creatorBalances(s.db, s.owner.id, ext.currency);
   const meta = await chargebackOf(ext, s, paymentId, "w2sc");
   const expected = expectedSlices(SPLIT_TIP_CENTS, s.cut, s.owner.id, s.crew.id);
   const crewSlice = meta?.shares.find((x) => x.userId === s.crew.id.toLowerCase());
@@ -427,10 +474,18 @@ export async function stepSplitClawback(ext: MoneyExtension): Promise<void> {
     { crewBefore, crewAfter },
   );
   const owner = await creatorBalances(s.db, s.owner.id, ext.currency);
+  const ownerSlice = meta?.shares.find((x) => x.userId === s.owner.id.toLowerCase());
+  const owed = ownerClawbackOwed(
+    ownerBefore,
+    { sliceCents: expected.owner, fromOwnLotCents: ownerSlice?.fromOwnLotCents ?? 0 },
+    crewSlice?.ownerCoveredCents ?? 0,
+  );
   ctx.assert(
     "what the owner could not cover is its receivable (own slice) and split shortfall (the crew's)",
-    owner.splitShortfallCents === expected.crew && owner.receivableCents === expected.owner,
-    { owner, expected },
+    owner.receivableCents - ownerBefore.receivableCents === owed.receivableCents &&
+      owner.splitShortfallCents - ownerBefore.splitShortfallCents === owed.splitShortfallCents &&
+      owed.splitShortfallCents > 0,
+    { ownerBefore, owner, expected, owed },
   );
 
   // The transparency page's split lines.
@@ -500,8 +555,10 @@ export async function stepSplitNewPayee(ext: MoneyExtension): Promise<void> {
   const { ctx } = ext;
   const s = await setUp(ext, "w2sn");
   const dates = splitFixtureDates(new Date(), s.holdDays, s.newRecipientHoldDays);
+  // Big enough that the crew slice reaches the payout minimum, so the run creates their first payout.
+  const oldCents = crewPayoutTipCents(s.minimumPayoutCents, s.cut, s.owner.id, s.crew.id);
   const old = await ctx.step("w2sn: a tip past the new-recipient hold (fixture)", () =>
-    fixtureTip(s, ext.currency, dates.released),
+    fixtureTip(s, ext.currency, dates.released, oldCents),
   );
   const young = await ctx.step("w2sn: a tip past the hold only (fixture)", () =>
     fixtureTip(s, ext.currency, dates.ownerOnly),
@@ -519,7 +576,7 @@ export async function stepSplitNewPayee(ext: MoneyExtension): Promise<void> {
       (await paymentHoldRemaining(s.db, young, s.crew.id, ext.currency)) > 0,
     { old, young },
   );
-  const flags = await ext.treasurer.api.client.money.treasurer.fraudFlags.list({ limit: 100 });
+  const flags = await ext.treasurer.api.client.money.treasurer.fraudFlags.list({ limit: 100, status: "open" });
   const flag = flags.items.find((f) => f.payee.username === s.crew.username && f.kind === "new_payee");
   ctx.assert("the crew member's first payout raised new_payee", flag?.status === "open", flag);
   const payouts = await ext.treasurer.api.client.money.treasurer.payouts({ limit: 100 });
