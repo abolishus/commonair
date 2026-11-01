@@ -203,7 +203,12 @@ function PreviewBody(props: ImportViewProps & { dto: ImportDto; emotesChosen: bo
       )}
       {props.emotesChosen && (
         <Field orientation="horizontal">
-          <Checkbox id={assertId} checked={props.asserted} onCheckedChange={(on: boolean) => props.onAssert(on)} />
+          <Checkbox
+            id={assertId}
+            data-testid="bundle-import-assert"
+            checked={props.asserted}
+            onCheckedChange={(on: boolean) => props.onAssert(on)}
+          />
           <FieldLabel htmlFor={assertId}>{t("portability.import.assert")}</FieldLabel>
         </Field>
       )}
