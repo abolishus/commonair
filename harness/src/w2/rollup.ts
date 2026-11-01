@@ -154,8 +154,14 @@ interface RollupRow {
   bySeconds: ByCategory;
 }
 
-async function readRollup(url: string, broadcastId: string, swarm: readonly string[]) {
+/**
+ * Rollup and verdict figures straight from the database. Bun.SQL binds a JS array as its joined
+ * text (no braces, `""` when empty), so `${ids}::uuid[]` is a malformed array literal: arrays go
+ * through `sql.array` (CI run 41291975172).
+ */
+export async function readRollup(url: string, broadcastId: string, swarm: readonly string[]) {
   const sql = new Bun.SQL(url);
+  const swarmIds = sql.array([...swarm], "uuid");
   try {
     const [t] = (await sql`
       select sessions, verified_viewer_seconds::int as verified, unverified_viewer_seconds::int as unverified,
@@ -173,7 +179,7 @@ async function readRollup(url: string, broadcastId: string, swarm: readonly stri
          where ps.broadcast_id = ${broadcastId}::uuid)
       select count(*) filter (where counted)::int as sessions,
              count(*) filter (where counted and verdict = 'excluded')::int as excluded,
-             count(*) filter (where verdict = 'excluded' and id = any(${[...swarm]}::uuid[]))::int as "swarmExcluded"
+             count(*) filter (where verdict = 'excluded' and id = any(${swarmIds}))::int as "swarmExcluded"
         from s`) as {
       sessions: number;
       excluded: number;
@@ -183,7 +189,7 @@ async function readRollup(url: string, broadcastId: string, swarm: readonly stri
       select ps.verdict_reasons as reasons
         from playback_sessions ps join broadcasts b on b.id = ps.broadcast_id
        where ps.broadcast_id = ${broadcastId}::uuid and ps.verdict = 'excluded'
-         and ps.id = any(${[...swarm]}::uuid[])
+         and ps.id = any(${swarmIds})
          and least(coalesce(ps.ended_at, b.ended_at), b.ended_at) - greatest(ps.started_at, b.started_at)
                >= interval '1 second'`) as { reasons: string[] | null }[];
     return {
