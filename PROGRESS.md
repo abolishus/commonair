@@ -123,6 +123,24 @@ seek in the replay panel starts a fresh span; p2p bytes are not attested (needs 
 the `notify` shard's time with `live-dvr` and `rehearsal` is unmeasured; browser, visual and
 `en-XA` checks of the new pages and the end-of-batch CI run (milestone) are the user's.
 
+**Batch 6 done; W2 milestone switched on 2026-11-01.** CI green on `8a562d9a`: the push run and
+a full `workflow_dispatch` run (the nightly's shape: all eight harness shards including `captions`,
+the three self-host e2e jobs, the release dry run). CI-only fixes after the waves, all in the
+harness except two: raw-SQL timestamps on the Drizzle-wrapped client (`harness/src/w2/sql-time.ts`),
+`sql.array` for Bun.SQL arrays, the rollup job reading a blank `INFRA_COST_MODEL` through `loadEnv`
+(worker), whisper's encoder context bounded (`audio_ctx=512`, media; live cues kept up on CI), the
+captions publisher's lead and tail, the WER gate at 0.40 over three passes (ADR 0011 history: base
+q5_1 on eSpeak in 3 s chunks measures 0.25–0.33; `small` or a human reading would lower it), the
+rehearsal scenario turning VODs on, and split / group-appeal expectations that ignored the seeded
+payout minimum and multi-category viewbots. Flakes seen (watch list): `services/media`
+`clock-mediamtx.int` "fMP4 times are the SRT timeline" (240 s timeout) and `media.int` "T0 live"
+("timed out waiting for source ready in MediaMTX"), once each in the same run, green on rerun.
+Open for the user: the dual licence of the contracts files before the SDK publishes (ADR 0035);
+counsel on split recipients and the draft privacy section; the captions model (base vs small) and
+fixture (eSpeak vs a CC0 human reading); whether a group-appeal re-score should re-apply the
+scorer's exclude threshold (today any remaining signal keeps a session excluded); visual, `es` and
+`en-XA` checks of the W2 pages. Next: plan batch 7 (W3 + N3 + N4).
+
 **Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
 Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
 editing" for human review; Arabic waits for the next batch (N2-rtl still makes `packages/ui`
