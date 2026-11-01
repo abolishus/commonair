@@ -6,6 +6,8 @@
  * `encryptSecret` under the federation purpose and never logged. Rotation keeps the key id
  * (`<actor>#main-key`), appends the retired public key to `federation_actor_keys` (append-only,
  * not served), writes an audit row, and queues the `rotate` job, which sends `Update{Service}`.
+ * Split of work with the worker: here the key is stored and audited; a `rotate` job with a
+ * `channelId` only sends `Update`, and one without does the yearly sweep (and audits it itself).
  */
 import { generateActorKey } from "@commonair/federation";
 import { schema, uuidv7 } from "@commonair/db";
@@ -50,9 +52,12 @@ export async function rotateKeys(deps: Deps, adminId: string, slug: string | und
       .from(federationActors)
       .where(eq(federationActors.channelId, c.id));
   } else {
+    // Every federating actor; a channel that is off rotates when named, or when it turns on again
+    // and the yearly job finds its key old.
     targets = await deps.db
       .select({ channelId: federationActors.channelId })
       .from(federationActors)
+      .where(eq(federationActors.enabled, true))
       .orderBy(asc(federationActors.channelId));
   }
 

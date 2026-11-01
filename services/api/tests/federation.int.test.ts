@@ -9,7 +9,7 @@
  * audited), key rotation (history, audit, the rotate job), turning off (the actor `Delete` queued,
  * followers dropped, 410), the followers procedures, and that no route makes an outbound request.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { FEDERATION_JOBS, type FederationDeliverJob } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
@@ -40,6 +40,8 @@ let other: Account;
 let plain: Account;
 const channelIds: Record<string, string> = {};
 const jobs: { kind: "rotate" | "deliver"; data: unknown; key: string }[] = [];
+/** When set, the fake queue refuses deliver jobs to the inboxes it matches. */
+let failDeliver: ((inbox: string) => boolean) | null = null;
 
 const owner = () => api.db.db;
 const host = () => new URL(api.url).host;
@@ -52,6 +54,7 @@ beforeAll(async () => {
       jobs.push({ kind: "rotate", data: { channelId }, key: rotationId });
     },
     async deliver(job, key) {
+      if (failDeliver?.(job.inbox)) throw new Error("queue down");
       jobs.push({ kind: "deliver", data: job, key });
     },
     async close() {},
@@ -205,13 +208,18 @@ describe("turning a channel on", () => {
     expect(await publicKeyPemFromPrivate(pem)).toBe(actor!.publicKeyPem);
     const [c] = await owner().select().from(schema.channels).where(eq(schema.channels.id, id));
     expect(c!.federationSettings.enabled).toBe(true);
-    // Turning it on again keeps the key.
+    // Turning it on again keeps the key and writes no second audit row.
     await enable(streamer, true);
     const [again] = await owner()
       .select()
       .from(schema.federationActors)
       .where(eq(schema.federationActors.channelId, id));
     expect(again!.privateKeyEnc).toBe(actor!.privateKeyEnc);
+    const audits = await owner()
+      .select()
+      .from(schema.auditLog)
+      .where(and(eq(schema.auditLog.action, "federation.channel.enable"), eq(schema.auditLog.subjectId, id)));
+    expect(audits).toHaveLength(1);
   });
 });
 
@@ -349,6 +357,36 @@ describe("discovery and documents", () => {
     };
     expect(second.orderedItems.map((o) => o.object)).toEqual([`${api.url}/ap/objects/${rows[0]!.id}`]);
     expect(second.next).toBeUndefined();
+  });
+
+  test("outbox paging skips nothing when objects share a millisecond", async () => {
+    const a = await signUpAndSignIn(api);
+    expect((await enable(a, true)).status).toBe(200);
+    const [c] = await owner().select().from(schema.channels).where(eq(schema.channels.slug, a.username));
+    const rows = Array.from({ length: 23 }, () => ({
+      id: uuidv7(),
+      channelId: c!.id,
+      kind: "video" as const,
+      subjectKind: "vod" as const,
+      subjectId: uuidv7(),
+    }));
+    await owner().insert(schema.federationObjects).values(rows);
+    // One millisecond, 23 different microseconds; ids in the opposite order to the times.
+    for (const [i, r] of rows.entries())
+      await owner().execute(
+        sql`update federation_objects set published_at = ${`2026-10-02T00:00:00.000${String(900 - i * 30).padStart(3, "0")}Z`}::timestamptz where id = ${r.id}`,
+      );
+    const seen: string[] = [];
+    let next: string | undefined = `${api.url}/ap/channels/${c!.id}/outbox?page=true`;
+    while (next) {
+      const page = (await (await fetch(next, { headers: { accept: AP } })).json()) as {
+        orderedItems: { object: string }[];
+        next?: string;
+      };
+      seen.push(...page.orderedItems.map((o) => o.object));
+      next = page.next;
+    }
+    expect(seen.sort()).toEqual(rows.map((r) => `${api.url}/ap/objects/${r.id}`).sort());
   });
 
   test("NodeInfo: links to 2.1; no usage counts", async () => {
@@ -519,7 +557,10 @@ describe("key rotation (admin)", () => {
     ).toBe(404);
     // All actors.
     const all = await admin.client.call<{ rotated: number }>("POST", "/api/admin/federation/keys/rotate", {});
-    const actors = await owner().select().from(schema.federationActors);
+    const actors = await owner()
+      .select()
+      .from(schema.federationActors)
+      .where(eq(schema.federationActors.enabled, true));
     expect(all.body.rotated).toBe(actors.length);
   });
 });
@@ -544,7 +585,13 @@ describe("followers procedures (owner)", () => {
     expect((await streamer.client.call("DELETE", `${settingsPath(streamer.username)}/followers/${f.id}`)).status).toBe(
       404,
     );
-    // Paging walks the rest.
+    // Paging walks the rest, including rows that share a millisecond.
+    for (const [i, name] of ["ana", "bo", "cy"].entries()) {
+      const extra = await addFollower(id, `https://masto.example/users/${name}`);
+      await owner().execute(
+        sql`update federation_followers set created_at = ${`2026-10-03T00:00:00.000${100 + i * 300}Z`}::timestamptz where id = ${extra.id}`,
+      );
+    }
     const all: string[] = [];
     let cursor: string | null = null;
     do {
@@ -637,7 +684,7 @@ describe("suspension and turning off", () => {
       .select()
       .from(schema.auditLog)
       .where(and(eq(schema.auditLog.action, "federation.channel.disable"), eq(schema.auditLog.subjectId, id)));
-    expect(audit).toMatchObject({ actorId: streamer.userId, details: { followersDropped: 3 } });
+    expect(audit).toMatchObject({ actorId: streamer.userId, details: { followers: 3 } });
 
     // Turning it off again queues nothing more.
     jobs.length = 0;
@@ -651,6 +698,35 @@ describe("suspension and turning off", () => {
       .where(eq(schema.federationActors.channelId, id));
     expect(back!.privateKeyEnc).toBe(before!.privateKeyEnc);
     expect((await get(`/ap/channels/${id}`)).status).toBe(200);
+  });
+
+  test("off: a failed enqueue keeps those followers, and turning off again sends their Delete", async () => {
+    const id = channelIds[streamer.username]!;
+    await owner().delete(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id));
+    expect((await enable(streamer, true)).status).toBe(200);
+    await addFollower(id, "https://up.example/users/ok");
+    const stuck = await addFollower(id, "https://down.example/users/kept");
+    jobs.length = 0;
+    failDeliver = (inbox) => inbox.startsWith("https://down.example/");
+    try {
+      expect((await enable(streamer, false)).status).toBe(200);
+    } finally {
+      failDeliver = null;
+    }
+    expect(jobs.map((j) => (j.data as FederationDeliverJob).inbox)).toEqual(["https://up.example/users/ok/inbox"]);
+    const left = await owner()
+      .select()
+      .from(schema.federationFollowers)
+      .where(eq(schema.federationFollowers.channelId, id));
+    expect(left.map((f) => f.id)).toEqual([stuck.id]);
+
+    jobs.length = 0;
+    expect((await enable(streamer, false)).status).toBe(200);
+    expect(jobs.map((j) => (j.data as FederationDeliverJob).inbox)).toEqual(["https://down.example/users/kept/inbox"]);
+    expect(
+      await owner().select().from(schema.federationFollowers).where(eq(schema.federationFollowers.channelId, id)),
+    ).toHaveLength(0);
+    expect((await enable(streamer, true)).status).toBe(200);
   });
 });
 

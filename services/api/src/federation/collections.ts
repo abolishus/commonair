@@ -11,13 +11,17 @@
  */
 import { AS2_CONTEXT, AS2_PUBLIC } from "@commonair/federation";
 import { schema } from "@commonair/db";
-import { and, count, desc, eq, isNull, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Deps } from "../deps.ts";
 import { createActivityUrl, followersUrl, objectUrl, outboxUrl } from "./ids.ts";
 
 const { federationFollowers, federationObjects } = schema;
 
 export const OUTBOX_PAGE_SIZE = 20;
+
+// The cursor carries milliseconds; published_at has microseconds. Comparing at millisecond
+// precision keeps rows that share a millisecond from being skipped between pages.
+const publishedMs = sql<Date>`date_trunc('milliseconds', ${federationObjects.publishedAt})`;
 
 export async function followersCollection(deps: Pick<Deps, "db">, actor: string, channelId: string) {
   const [row] = await deps.db
@@ -78,14 +82,11 @@ export async function outboxCollection(
       and(
         live,
         cursor
-          ? or(
-              lt(federationObjects.publishedAt, cursor.t),
-              and(eq(federationObjects.publishedAt, cursor.t), lt(federationObjects.id, cursor.id)),
-            )
+          ? sql`(${publishedMs}, ${federationObjects.id}) < (${cursor.t.toISOString()}::timestamptz, ${cursor.id}::uuid)`
           : undefined,
       ),
     )
-    .orderBy(desc(federationObjects.publishedAt), desc(federationObjects.id))
+    .orderBy(desc(publishedMs), desc(federationObjects.id))
     .limit(OUTBOX_PAGE_SIZE + 1);
   const items = rows.slice(0, OUTBOX_PAGE_SIZE);
   const last = items.at(-1);

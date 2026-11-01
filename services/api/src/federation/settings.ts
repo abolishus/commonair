@@ -9,14 +9,16 @@
  *   together.
  * - Turning it off keeps the key and stops delivery: the actor answers 410 from then on, and the
  *   actor `Delete` is queued to every follower inbox (deliver jobs; the worker signs and sends).
- *   The follower rows go in the same transaction, because a remote server drops the follow when
- *   it gets that `Delete`, and the rows hold remote people's handles (decision 6).
+ *   A follower row is deleted only once the `Delete` for its inbox is queued: the rows are the
+ *   only record of those inboxes, so a failed enqueue (or a crash after commit) leaves them, and
+ *   turning off again retries. Remote servers drop the follow on that `Delete`, and the rows hold
+ *   remote people's handles (decision 6).
  * - Followers are listed to the owner (handle and server) and removable; removal deletes the row.
  */
 import { AS2_CONTEXT, AS2_PUBLIC } from "@commonair/federation";
 import { ChannelFederationSettings } from "@commonair/contracts/shapes";
 import { schema, uuidv7 } from "@commonair/db";
-import { and, count, desc, eq, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
@@ -27,6 +29,10 @@ import { newActorKey } from "./keys.ts";
 import { federationQueue } from "./queue.ts";
 
 const { channels, federationActors, federationFollowers, users } = schema;
+
+// The cursor carries milliseconds; created_at has microseconds. Comparing at millisecond
+// precision keeps rows that share a millisecond from being skipped between pages.
+const followerCreatedMs = sql<Date>`date_trunc('milliseconds', ${federationFollowers.createdAt})`;
 
 type ChannelRow = typeof channels.$inferSelect;
 
@@ -72,6 +78,42 @@ export function actorDeleteActivity(actor: string, id: string) {
   };
 }
 
+/**
+ * Queue the actor `Delete` once per distinct inbox, then delete the followers whose inbox it was
+ * queued for. A failed enqueue keeps those rows, so turning off again sends it then.
+ */
+async function sendActorDelete(
+  deps: Deps,
+  channelId: string,
+  actor: string,
+  followers: { id: string; inbox: string; sharedInbox: string | null }[],
+): Promise<void> {
+  if (followers.length === 0) return;
+  const byInbox = new Map<string, string[]>();
+  for (const f of followers) {
+    const inbox = f.sharedInbox ?? f.inbox;
+    byInbox.set(inbox, [...(byInbox.get(inbox) ?? []), f.id]);
+  }
+  const deleteId = uuidv7(deps.now().getTime());
+  const activity = actorDeleteActivity(actor, deleteId);
+  const sent: string[] = [];
+  for (const [i, [inbox, ids]] of [...byInbox].entries()) {
+    try {
+      await federationQueue(deps).deliver(
+        { channelId, inbox, objectId: null, activity, attempt: 1 },
+        `${deleteId}-${i}`,
+      );
+      sent.push(...ids);
+    } catch (err) {
+      deps.logger.error("federation delete enqueue failed", { channelId, err: (err as Error).name });
+    }
+  }
+  if (sent.length > 0)
+    await deps.db
+      .delete(federationFollowers)
+      .where(and(eq(federationFollowers.channelId, channelId), inArray(federationFollowers.id, sent)));
+}
+
 export async function updateSettings(deps: Deps, channel: ChannelRow, userId: string, enabled: boolean | undefined) {
   if (enabled === undefined) return getSettings(deps, channel);
   const actor = actorUrl(deps.site, channel.id);
@@ -93,6 +135,12 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
       if (!c) throw notFound("Channel not found");
       if (c.suspended)
         throw apiError("FORBIDDEN", "A suspended channel cannot federate", { reason: "channel_suspended" });
+      const [prior] = await tx
+        .select({ enabled: federationActors.enabled })
+        .from(federationActors)
+        .where(eq(federationActors.channelId, channel.id))
+        .for("update");
+      const was = Boolean(ChannelFederationSettings.parse(c.settings).enabled && prior?.enabled);
       await tx
         .update(channels)
         .set({ federationSettings: { ...ChannelFederationSettings.parse(c.settings), enabled: true } })
@@ -115,17 +163,19 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
           .update(federationActors)
           .set({ enabled: true, updatedAt: now })
           .where(eq(federationActors.channelId, channel.id));
-      await audit(tx, {
-        actorType: "user",
-        actorId: userId,
-        action: "federation.channel.enable",
-        subjectType: "channel",
-        subjectId: channel.id,
-        channelId: channel.id,
-      });
+      // Audited on a change only: a repeated "on" is a no-op.
+      if (!was)
+        await audit(tx, {
+          actorType: "user",
+          actorId: userId,
+          action: "federation.channel.enable",
+          subjectType: "channel",
+          subjectId: channel.id,
+          channelId: channel.id,
+        });
     });
   } else {
-    const inboxes = await deps.db.transaction(async (tx) => {
+    const followers = await deps.db.transaction(async (tx) => {
       const [c] = await tx
         .select({ settings: channels.federationSettings })
         .from(channels)
@@ -142,10 +192,15 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
         .set({ enabled: false, updatedAt: deps.now() })
         .where(and(eq(federationActors.channelId, channel.id), eq(federationActors.enabled, true)))
         .returning({ id: federationActors.channelId });
-      const followers = await tx
-        .delete(federationFollowers)
-        .where(eq(federationFollowers.channelId, channel.id))
-        .returning({ inbox: federationFollowers.inbox, sharedInbox: federationFollowers.sharedInbox });
+      // Kept until their `Delete` is queued (below); a repeated "off" retries what is left.
+      const rows = await tx
+        .select({
+          id: federationFollowers.id,
+          inbox: federationFollowers.inbox,
+          sharedInbox: federationFollowers.sharedInbox,
+        })
+        .from(federationFollowers)
+        .where(eq(federationFollowers.channelId, channel.id));
       if (was || off.length > 0)
         await audit(tx, {
           actorType: "user",
@@ -154,20 +209,11 @@ export async function updateSettings(deps: Deps, channel: ChannelRow, userId: st
           subjectType: "channel",
           subjectId: channel.id,
           channelId: channel.id,
-          details: { followersDropped: followers.length },
+          details: { followers: rows.length },
         });
-      return off.length > 0 ? [...new Set(followers.map((f) => f.sharedInbox ?? f.inbox))] : [];
+      return rows;
     });
-    if (inboxes.length > 0) {
-      const deleteId = uuidv7(deps.now().getTime());
-      const activity = actorDeleteActivity(actor, deleteId);
-      for (const [i, inbox] of inboxes.entries())
-        await federationQueue(deps)
-          .deliver({ channelId: channel.id, inbox, objectId: null, activity, attempt: 1 }, `${deleteId}-${i}`)
-          .catch((err: unknown) =>
-            deps.logger.error("federation delete enqueue failed", { channelId: channel.id, err: (err as Error).name }),
-          );
-    }
+    await sendActorDelete(deps, channel.id, actor, followers);
   }
   const [fresh] = await deps.db.select().from(channels).where(eq(channels.id, channel.id));
   return getSettings(deps, fresh ?? channel);
@@ -182,14 +228,11 @@ export async function listFollowers(deps: Deps, channelId: string, input: { curs
       and(
         eq(federationFollowers.channelId, channelId),
         cursor
-          ? or(
-              lt(federationFollowers.createdAt, new Date(cursor.t)),
-              and(eq(federationFollowers.createdAt, new Date(cursor.t)), lt(federationFollowers.id, cursor.id)),
-            )
+          ? sql`(${followerCreatedMs}, ${federationFollowers.id}) < (${cursor.t}::timestamptz, ${cursor.id}::uuid)`
           : undefined,
       ),
     )
-    .orderBy(desc(federationFollowers.createdAt), desc(federationFollowers.id))
+    .orderBy(desc(followerCreatedMs), desc(federationFollowers.id))
     .limit(input.limit + 1);
   return pageOf(
     rows,

@@ -53,14 +53,14 @@ async function limitGet(deps: Deps, rateLimitHash: string): Promise<Response | n
   return error(429, "RATE_LIMITED", "Too many requests", { "retry-after": String(rl.retryAfterSeconds) });
 }
 
-async function inbox(deps: Deps, req: Request, channelId: string | null): Promise<Response> {
+async function inbox(deps: Deps, req: Request, channelId: string | null, rateLimitHash: string): Promise<Response> {
   if (channelId) {
     const found = await federatedChannel(deps, channelId);
     if (found.state === "missing") return NOT_FOUND();
     if (found.state === "gone") return GONE();
   }
   const url = new URL(req.url);
-  const outcome = await checkInbox(req, `${url.pathname}${url.search}`, inboxSeams(deps, channelId));
+  const outcome = await checkInbox(req, `${url.pathname}${url.search}`, inboxSeams(deps, channelId, rateLimitHash));
   recordInboxOutcome(outcome);
   if (outcome.kind === "refused")
     return error(
@@ -74,8 +74,8 @@ async function inbox(deps: Deps, req: Request, channelId: string | null): Promis
 
 export async function federationHttp(ctx: BaseContext, req: Request, route: FederationRoute): Promise<Response> {
   const { deps } = ctx;
-  if (route.kind === "inbox") return inbox(deps, req, route.channelId);
-  if (route.kind === "sharedInbox") return inbox(deps, req, null);
+  if (route.kind === "inbox") return inbox(deps, req, route.channelId, ctx.req.rateLimitHash);
+  if (route.kind === "sharedInbox") return inbox(deps, req, null, ctx.req.rateLimitHash);
 
   const limited = await limitGet(deps, ctx.req.rateLimitHash);
   if (limited) return limited;

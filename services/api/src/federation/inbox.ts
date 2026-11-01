@@ -9,7 +9,8 @@
  * Checks, in order: content type; body size (`FEDERATION_RULES.inboxMaxBytes`) and JSON; the
  * activity type (`Follow`, `Undo`, `Delete`; anything else is 202 and dropped unstored); the
  * `actor` host equals the `Signature` `keyId` host and is not blocked (domain or subdomain); the
- * `Date` within the skew; a per-domain rate limit. Refusals are 4xx and counted by reason only.
+ * `Date` within the skew; a per-address, then a per-domain rate limit. Refusals are 4xx and
+ * counted by reason only.
  */
 import { FEDERATION_RULES } from "@commonair/contracts/enums";
 import { KEYS } from "@commonair/contracts/internal";
@@ -28,6 +29,12 @@ export type HandledType = (typeof HANDLED_TYPES)[number];
 
 /** Per remote domain: a busy server's fan-out of `Delete`s fits, a flood does not. */
 export const INBOX_DOMAIN_RULE: RateLimitRule = { max: 300, windowMs: 60_000 };
+/**
+ * Per sending address (its hash). The domain is only claimed until the worker verifies the
+ * signature, so this caps one client rotating made-up domains, and is counted first so a
+ * spoofer spends its own budget before a real domain's.
+ */
+export const INBOX_ADDRESS_RULE: RateLimitRule = { max: 600, windowMs: 60_000 };
 
 /** Headers never stored: credentials and client addresses (the item outlives the request). */
 const DROPPED_HEADERS = new Set([
@@ -44,6 +51,10 @@ const DROPPED_HEADERS = new Set([
 ]);
 const MAX_HEADERS = 64;
 const MAX_HEADER_VALUE = 4096;
+/** Kept whole and outside the header cap: the worker needs them to rebuild the signing string. */
+const ESSENTIAL_HEADERS = ["signature", "date", "digest", "host", "content-type", "content-length"];
+
+const isDropped = (key: string) => DROPPED_HEADERS.has(key) || key.startsWith("x-forwarded-");
 
 /** RFC 7231 IMF-fixdate, as `verifyRequest` requires (`packages/federation/src/signature.ts`). */
 const IMF_FIXDATE =
@@ -131,17 +142,34 @@ export function dateRefusal(raw: string | null, now: Date, skewSeconds: number):
   return null;
 }
 
-/** The headers kept with the item, lower-cased, plus `(request-target)` for the worker's signing string. */
-export function storedHeaders(req: Request, path: string): Record<string, string> {
+/**
+ * The headers kept with the item, lower-cased, plus `(request-target)` for the worker's signing
+ * string. The essential and `signed` headers are kept whole; the rest are capped in count and length.
+ */
+export function storedHeaders(req: Request, path: string, signed: readonly string[] = []): Record<string, string> {
   const out: Record<string, string> = { "(request-target)": `${req.method.toLowerCase()} ${path}` };
+  for (const key of new Set([...ESSENTIAL_HEADERS, ...signed])) {
+    if (key.startsWith("(") || isDropped(key)) continue;
+    const value = req.headers.get(key);
+    if (value !== null) out[key] = value;
+  }
   let n = 0;
   req.headers.forEach((value, name) => {
     const key = name.toLowerCase();
-    if (DROPPED_HEADERS.has(key) || key.startsWith("x-forwarded-") || n >= MAX_HEADERS) return;
+    if (key in out || isDropped(key) || n >= MAX_HEADERS) return;
     out[key] = value.slice(0, MAX_HEADER_VALUE);
     n++;
   });
   return out;
+}
+
+/** A signed header the item could not keep whole (a credential or client-address header, or too long). */
+export function unstorableSignedHeader(req: Request, signed: readonly string[]): boolean {
+  return signed.some((key) => {
+    if (key.startsWith("(")) return false;
+    const value = req.headers.get(key);
+    return value !== null && (isDropped(key) || value.length > MAX_HEADER_VALUE);
+  });
 }
 
 export interface InboxSeams {
@@ -151,6 +179,8 @@ export interface InboxSeams {
   /** `http:` actors are refused unless the instance allows private networks (harness peers). */
   allowHttp: boolean;
   blockFor(host: string): Promise<string | null>;
+  /** Per sending address, counted before the per-domain bucket. */
+  addressLimit(): Promise<{ allowed: boolean; retryAfterSeconds: number }>;
   rateLimit(host: string): Promise<{ allowed: boolean; retryAfterSeconds: number }>;
   store(item: { headers: Record<string, string>; body: string }): Promise<string>;
 }
@@ -191,13 +221,18 @@ export async function checkInbox(req: Request, path: string, seams: InboxSeams):
   const sig = parseSignatureHeader(req.headers.get("signature") ?? "");
   if (!sig) return refuse("missing_signature");
   if (hostOf(sig.keyId) !== actorHost) return refuse("key_actor_mismatch");
+  // The worker could never verify a signature over a header the item does not keep whole.
+  if (unstorableSignedHeader(req, sig.headers)) return refuse("malformed");
+  // Before the first database read and the domain bucket: the sender's own budget goes first.
+  const byAddress = await seams.addressLimit();
+  if (!byAddress.allowed) return refuse("rate_limited", byAddress.retryAfterSeconds);
   if (await seams.blockFor(actorHost)) return refuse("blocked");
   const date = dateRefusal(req.headers.get("date"), seams.now, seams.skewSeconds);
   if (date) return refuse(date);
   const rl = await seams.rateLimit(actorHost);
   if (!rl.allowed) return refuse("rate_limited", rl.retryAfterSeconds);
 
-  const itemId = await seams.store({ headers: storedHeaders(req, path), body: text });
+  const itemId = await seams.store({ headers: storedHeaders(req, path, sig.headers), body: text });
   return { kind: "stored", itemId, type: type as HandledType };
 }
 
@@ -219,8 +254,8 @@ export async function storeInboxItem(
   });
 }
 
-/** The real seams: the block list, the Valkey rate limiter and the store. */
-export function inboxSeams(deps: Deps, channelId: string | null): InboxSeams {
+/** The real seams: the block list, the Valkey rate limiters and the store. */
+export function inboxSeams(deps: Deps, channelId: string | null, rateLimitHash: string): InboxSeams {
   const now = deps.now();
   return {
     now,
@@ -228,6 +263,13 @@ export function inboxSeams(deps: Deps, channelId: string | null): InboxSeams {
     skewSeconds: FEDERATION_RULES.dateSkewSeconds,
     allowHttp: deps.env.OUTBOUND_ALLOW_PRIVATE_NETWORKS,
     blockFor: (host) => blockFor(deps.db, host),
+    addressLimit: () =>
+      deps.rateLimitStore.hit(
+        KEYS.rateLimit("federation", `inbox-addr:${rateLimitHash}`),
+        INBOX_ADDRESS_RULE,
+        now.getTime(),
+        `${now.getTime()}:${crypto.randomUUID()}`,
+      ),
     rateLimit: (host) =>
       deps.rateLimitStore.hit(
         KEYS.rateLimit("federation", `inbox:${host}`),

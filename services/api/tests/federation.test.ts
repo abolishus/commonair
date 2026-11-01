@@ -273,20 +273,32 @@ describe("inbox cheap checks", () => {
     headers?: Record<string, string>;
     blocked?: string[];
     limited?: boolean;
+    addressLimited?: boolean;
     maxBytes?: number;
     allowHttp?: boolean;
   }
   async function run(
     o: Opts = {},
-  ): Promise<{ out: InboxOutcome; stored: { headers: Record<string, string>; body: string }[] }> {
+  ): Promise<{ out: InboxOutcome; stored: { headers: Record<string, string>; body: string }[]; calls: string[] }> {
     const stored: { headers: Record<string, string>; body: string }[] = [];
+    const calls: string[] = [];
     const seams: InboxSeams = {
       now: NOW,
       maxBytes: o.maxBytes ?? FEDERATION_RULES.inboxMaxBytes,
       skewSeconds: FEDERATION_RULES.dateSkewSeconds,
       allowHttp: o.allowHttp ?? false,
-      blockFor: async (host) => isBlockedBy(host, o.blocked ?? []),
-      rateLimit: async () => ({ allowed: !o.limited, retryAfterSeconds: o.limited ? 7 : 0 }),
+      blockFor: async (host) => {
+        calls.push("block");
+        return isBlockedBy(host, o.blocked ?? []);
+      },
+      addressLimit: async () => {
+        calls.push("address");
+        return { allowed: !o.addressLimited, retryAfterSeconds: o.addressLimited ? 3 : 0 };
+      },
+      rateLimit: async () => {
+        calls.push("domain");
+        return { allowed: !o.limited, retryAfterSeconds: o.limited ? 7 : 0 };
+      },
       store: async (item) => {
         stored.push(item);
         return "0192f000-0000-7000-8000-0000000000aa";
@@ -303,7 +315,7 @@ describe("inbox cheap checks", () => {
       },
       body: o.body ?? JSON.stringify(mastodonFollow),
     });
-    return { out: await checkInbox(req, `/ap/channels/${ID}/inbox`, seams), stored };
+    return { out: await checkInbox(req, `/ap/channels/${ID}/inbox`, seams), stored, calls };
   }
   const refused = (out: InboxOutcome) => (out.kind === "refused" ? [out.reason, out.status] : out.kind);
 
@@ -426,6 +438,41 @@ describe("inbox cheap checks", () => {
     const { out, stored } = await run({ limited: true });
     expect(out).toEqual({ kind: "refused", reason: "rate_limited", status: 429, retryAfterSeconds: 7 });
     expect(stored).toHaveLength(0);
+  });
+
+  test("per-address limit: counted first, before any lookup or the domain's bucket", async () => {
+    const { out, stored, calls } = await run({ addressLimited: true });
+    expect(out).toEqual({ kind: "refused", reason: "rate_limited", status: 429, retryAfterSeconds: 3 });
+    expect(stored).toHaveLength(0);
+    expect(calls).toEqual(["address"]);
+    expect((await run()).calls).toEqual(["address", "block", "domain"]);
+  });
+
+  test("a signed header the item cannot keep whole is refused, not truncated", async () => {
+    const long = `SHA-256=${"a".repeat(5000)}`;
+    expect(refused((await run({ headers: { digest: long } })).out)).toEqual(["malformed", 400]);
+    const signsCookie = await run({
+      headers: {
+        cookie: "s=1",
+        signature: `keyId="https://mastodon.example/users/alice#main-key",headers="(request-target) date cookie",signature="c2ln"`,
+      },
+    });
+    expect(refused(signsCookie.out)).toEqual(["malformed", 400]);
+    // An unsigned header that long is only cut.
+    const { out, stored } = await run({ headers: { "x-note": long } });
+    expect(out.kind).toBe("stored");
+    expect(stored[0]!.headers["x-note"]).toHaveLength(4096);
+  });
+
+  test("signed and essential headers survive the header cap", () => {
+    const extra = Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`x-h${i}`, "v"]));
+    const req = new Request("https://streams.example/ap/inbox", {
+      method: "POST",
+      headers: { ...extra, "x-signed": "kept", date: "d", digest: "SHA-256=abc", signature: "sig", host: "h" },
+    });
+    const h = storedHeaders(req, "/ap/inbox", ["(request-target)", "x-signed", "date"]);
+    expect(h).toMatchObject({ "x-signed": "kept", date: "d", digest: "SHA-256=abc", signature: "sig", host: "h" });
+    expect(Object.keys(h).filter((k) => k.startsWith("x-h"))).toHaveLength(64);
   });
 
   test("stored headers never keep cookies, credentials or client addresses", () => {
