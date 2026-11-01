@@ -5,26 +5,47 @@ import { PageTabs, type PageTab } from "@commonair/ui/blocks/headers";
 import { Link } from "@tanstack/react-router";
 import type * as React from "react";
 import { t } from "../../i18n/index.ts";
+import { coopNav, type CoopEntry } from "../../lib/nav.ts";
 
-export type CoopTab = "overview" | "membership" | "proposals" | "council" | "settings" | "patronage";
+export type CoopTab = "overview" | "membership" | "proposals" | "council" | "jury" | "settings" | "patronage";
 
-/** The co-op section tabs (`/coop/*`), as on the boards; links, not panels. */
+function coopTab(entry: CoopEntry): PageTab {
+  switch (entry.id) {
+    case "overview":
+      // Exact: otherwise the router marks Overview active on every /coop/* page.
+      return {
+        id: entry.id,
+        label: t("coop.tab.overview"),
+        render: <Link to="/coop" activeOptions={{ exact: true }} />,
+      };
+    case "membership":
+      return { id: entry.id, label: t("coop.tab.membership"), render: <Link to="/coop/membership" /> };
+    case "proposals":
+      return { id: entry.id, label: t("coop.tab.proposals"), render: <Link to="/coop/proposals" /> };
+    case "council":
+      return { id: entry.id, label: t("coop.tab.council"), render: <Link to="/coop/council" /> };
+    case "jury":
+      return {
+        id: entry.id,
+        label: t("coop.tab.jury"),
+        render: <Link data-testid="coop-jury-link" to="/coop/jury" />,
+      };
+    case "settings":
+      return { id: entry.id, label: t("coop.tab.settings"), render: <Link to="/coop/settings" /> };
+    case "patronage":
+      return { id: entry.id, label: t("coop.tab.patronage"), render: <Link to="/coop/patronage" /> };
+    case "transparency":
+      return { id: entry.id, label: t("coop.tab.transparency"), render: <Link to="/transparency" /> };
+  }
+}
+
+/** The co-op section tabs (`/coop/*`, from `coopNav()`), as on the boards; links, not panels. */
 export function CoopTabs({ current }: { current: CoopTab | null }): React.JSX.Element {
-  const items: PageTab[] = [
-    // Exact: otherwise the router marks Overview active on every /coop/* page.
-    { id: "overview", label: t("coop.tab.overview"), render: <Link to="/coop" activeOptions={{ exact: true }} /> },
-    { id: "membership", label: t("coop.tab.membership"), render: <Link to="/coop/membership" /> },
-    { id: "proposals", label: t("coop.tab.proposals"), render: <Link to="/coop/proposals" /> },
-    { id: "council", label: t("coop.tab.council"), render: <Link to="/coop/council" /> },
-    { id: "settings", label: t("coop.tab.settings"), render: <Link to="/coop/settings" /> },
-    { id: "patronage", label: t("coop.tab.patronage"), render: <Link to="/coop/patronage" /> },
-    { id: "transparency", label: t("coop.tab.transparency"), render: <Link to="/transparency" /> },
-  ];
   return (
     <PageTabs
       variant="default"
       aria-label={t("coop.tabs")}
-      items={items.map((item) => ({ ...item, current: item.id === current }))}
+      items={coopNav().map((entry) => ({ ...coopTab(entry), current: entry.id === current }))}
     />
   );
 }

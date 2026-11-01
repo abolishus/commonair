@@ -14,6 +14,7 @@ export type Key =
   | "coop.tab.membership"
   | "coop.tab.proposals"
   | "coop.tab.council"
+  | "coop.tab.jury"
   | "coop.tab.settings"
   | "coop.tab.patronage"
   | "coop.tab.transparency"

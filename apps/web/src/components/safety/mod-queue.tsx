@@ -36,6 +36,7 @@ import {
   type ReviewDecision,
 } from "./client.ts";
 import { caseStatusBadge, categoryLabel, decisionLabel, nciiStatusBadge, reportReasonLabel } from "./labels.ts";
+import { WatchRoomEvidence } from "./watch-room-evidence.tsx";
 
 export const NOTE_MAX = 2000;
 const SLA_WARN_MS = 5 * 60_000;
@@ -685,6 +686,9 @@ export function ReportDetail({
           ]}
         />
         {report.details ? <p className="text-sm whitespace-pre-wrap">{report.details}</p> : null}
+        {report.subjectType === "watch_room" ? (
+          <WatchRoomEvidence reportId={report.id} evidence={report.evidence} />
+        ) : null}
         <ChoiceToggle
           label={t("safety.modq.resolveAs")}
           value={status}

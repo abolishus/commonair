@@ -116,9 +116,12 @@ function fakeClient(over: Partial<InteractClient> = {}) {
     balance: vi.fn<InteractClient["balance"]>(),
     pollCurrent: vi.fn<InteractClient["pollCurrent"]>(),
     predictionCurrent: vi.fn<InteractClient["predictionCurrent"]>(),
+    giveawayCurrent: vi.fn<InteractClient["giveawayCurrent"]>(),
+    giveawayEnter: vi.fn<InteractClient["giveawayEnter"]>(),
   };
   calls.pollCurrent.mockResolvedValue(null);
   calls.predictionCurrent.mockResolvedValue(null);
+  calls.giveawayCurrent.mockResolvedValue(null);
   calls.balance.mockResolvedValue(balance());
   const client: InteractClient = {
     pollCurrent: over.pollCurrent ?? calls.pollCurrent,
@@ -126,6 +129,8 @@ function fakeClient(over: Partial<InteractClient> = {}) {
     predictionCurrent: over.predictionCurrent ?? calls.predictionCurrent,
     bet: over.bet ?? calls.bet,
     balance: over.balance ?? calls.balance,
+    giveawayCurrent: over.giveawayCurrent ?? calls.giveawayCurrent,
+    giveawayEnter: over.giveawayEnter ?? calls.giveawayEnter,
   };
   return { client, calls };
 }

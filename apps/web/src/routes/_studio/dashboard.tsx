@@ -14,6 +14,7 @@ import * as React from "react";
 import { ChannelAppearanceCard } from "../../components/channel-appearance.tsx";
 import { DiscordWebhookSection } from "../../components/discord-webhook-section.tsx";
 import { DvrSettings } from "../../components/dvr-settings.tsx";
+import { FederationSettings } from "../../components/federation/settings.tsx";
 import { FormError } from "../../components/form-error.tsx";
 import { IngestServerUrl, NewStreamKey } from "../../components/ingest-values.tsx";
 import { DashboardLabelNotices } from "../../components/safety/appeals.tsx";
@@ -77,6 +78,7 @@ function DashboardPage(): React.JSX.Element {
       <SimulcastSection key={`simulcast-${channel}`} channel={channel} />
       <DiscordWebhookSection key={`discord-${channel}`} channel={channel} />
       <ChannelAppearanceCard key={`appearance-${channel}`} channel={channel} />
+      <FederationSettings key={`fed:${channel}`} channel={channel} />
     </PageContainer>
   );
 }

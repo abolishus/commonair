@@ -70,6 +70,8 @@ export interface StudioEntry {
     | "revenue"
     | "crew"
     | "relays"
+    | "move"
+    | "import"
     | "developer";
   to:
     | "/dashboard"
@@ -84,8 +86,24 @@ export interface StudioEntry {
     | "/revenue"
     | "/crew"
     | "/relays"
+    | "/move"
+    | "/import"
     | "/developer";
   current: boolean;
+}
+
+/** The co-op section's tabs (`/coop/*`, and the public transparency page). */
+export interface CoopEntry {
+  id: "overview" | "membership" | "proposals" | "council" | "jury" | "settings" | "patronage" | "transparency";
+  to:
+    | "/coop"
+    | "/coop/membership"
+    | "/coop/proposals"
+    | "/coop/council"
+    | "/coop/jury"
+    | "/coop/settings"
+    | "/coop/patronage"
+    | "/transparency";
 }
 
 export interface FooterEntry {
@@ -110,7 +128,18 @@ export interface AccountMenuOptions {
 }
 
 export interface AdminEntry {
-  id: "treasury" | "moderation" | "appeals" | "dmca" | "legal" | "coop" | "integrity" | "egress" | "incidents" | "apps";
+  id:
+    | "treasury"
+    | "moderation"
+    | "appeals"
+    | "dmca"
+    | "legal"
+    | "coop"
+    | "integrity"
+    | "egress"
+    | "incidents"
+    | "apps"
+    | "federation";
   to:
     | "/treasury"
     | "/admin/moderation"
@@ -121,7 +150,8 @@ export interface AdminEntry {
     | "/admin/integrity"
     | "/admin/egress"
     | "/admin/incidents"
-    | "/admin/apps";
+    | "/admin/apps"
+    | "/admin/federation";
   current: boolean;
 }
 
@@ -132,7 +162,7 @@ export interface AdminNavOptions {
   /** Moderators and admins: the appeals and DMCA queues. */
   platformModerator?: boolean;
   legal?: boolean;
-  /** Admins: co-op administration (appoint workers), integrity flags, egress, incidents and OAuth apps. */
+  /** Admins: co-op administration (appoint workers), integrity flags, egress, incidents, OAuth apps and federation. */
   admin?: boolean;
 }
 
@@ -207,7 +237,23 @@ export function studioNav(pathname: string, options: StudioNavOptions = {}): Stu
     { id: "revenue", to: "/revenue", current: path === "/revenue" },
     { id: "crew", to: "/crew", current: path === "/crew" },
     { id: "relays", to: "/relays", current: path === "/relays" },
+    { id: "move", to: "/move", current: path === "/move" },
+    { id: "import", to: "/import", current: path === "/import" },
     { id: "developer", to: "/developer", current: path === "/developer" || path.startsWith("/developer/") },
+  ];
+}
+
+/** The co-op section's tabs, in order (the jury sits beside the council: ADR 0038). */
+export function coopNav(): CoopEntry[] {
+  return [
+    { id: "overview", to: "/coop" },
+    { id: "membership", to: "/coop/membership" },
+    { id: "proposals", to: "/coop/proposals" },
+    { id: "council", to: "/coop/council" },
+    { id: "jury", to: "/coop/jury" },
+    { id: "settings", to: "/coop/settings" },
+    { id: "patronage", to: "/coop/patronage" },
+    { id: "transparency", to: "/transparency" },
   ];
 }
 
@@ -247,6 +293,7 @@ export function adminNav(pathname: string, options: AdminNavOptions): AdminEntry
           { id: "egress", to: "/admin/egress" },
           { id: "incidents", to: "/admin/incidents" },
           { id: "apps", to: "/admin/apps" },
+          { id: "federation", to: "/admin/federation" },
         ] as const)
       : []),
   ];

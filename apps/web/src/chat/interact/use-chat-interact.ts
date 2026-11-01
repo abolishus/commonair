@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The chat panel's interactivity state for one channel: the current poll and prediction (loaded
- * on join, then kept current by event frames), the viewer's points (on join, after their own
- * votes and bets, and every 60 s) and the outgoing-raid banner. The panel feeds it frames from
+ * The chat panel's interactivity state for one channel: the current poll, prediction and giveaway
+ * (loaded on join, then kept current by event frames), the viewer's points (on join, after their
+ * own votes and bets, and every 60 s) and the outgoing-raid banner. The panel feeds it frames from
  * its `ChatConnection` and renders what it returns.
  */
 import * as React from "react";
@@ -13,12 +13,16 @@ import type { InteractClient } from "./client.ts";
 import {
   POINTS_REFRESH_MS,
   RESULTS_VISIBLE_MS,
+  applyGiveawayFrame,
   applyPollFrame,
   applyPredictionFrame,
+  giveawayVisible,
   pollVisible,
   predictionVisible,
   raidStep,
   routeEventFrame,
+  type GiveawayDto,
+  type GiveawayFrame,
   type LoyaltyBalanceDto,
   type PollFrame,
   type PollViewDto,
@@ -39,6 +43,8 @@ export interface ChatInteractOptions {
 export interface ChatInteract {
   poll: PollViewDto | null;
   prediction: PredictionViewDto | null;
+  /** The open (or just drawn) giveaway; always null while the instance has giveaways off. */
+  giveaway: GiveawayDto | null;
   points: LoyaltyBalanceDto | null;
   raid: RaidBannerState | null;
   /** True when the frame belonged to a card (handled or dropped); false sends it to the log. */
@@ -46,12 +52,15 @@ export interface ChatInteract {
   onRaid: (frame: ChatRaidFrame) => void;
   setPoll: (poll: PollViewDto) => void;
   setPrediction: (prediction: PredictionViewDto) => void;
+  /** After the viewer's own entry (`interact.giveaways.enter` returns the updated giveaway). */
+  setGiveaway: (giveaway: GiveawayDto) => void;
   refreshPoints: () => void;
 }
 
 interface InteractState {
   poll: PollViewDto | null;
   prediction: PredictionViewDto | null;
+  giveaway: GiveawayDto | null;
   points: LoyaltyBalanceDto | null;
   raid: RaidBannerState | null;
 }
@@ -61,6 +70,8 @@ type InteractAction =
   | { type: "resetPoints" }
   | { type: "pollLoaded"; poll: PollViewDto | null }
   | { type: "predictionLoaded"; prediction: PredictionViewDto | null }
+  | { type: "giveaway"; giveaway: GiveawayDto | null }
+  | { type: "giveawayFrame"; frame: GiveawayFrame }
   | { type: "poll"; poll: PollViewDto }
   | { type: "prediction"; prediction: PredictionViewDto | null }
   | { type: "pollFrame"; frame: PollFrame }
@@ -68,7 +79,7 @@ type InteractAction =
   | { type: "points"; points: LoyaltyBalanceDto }
   | { type: "raid"; raid: RaidBannerState | null };
 
-const EMPTY: InteractState = { poll: null, prediction: null, points: null, raid: null };
+const EMPTY: InteractState = { poll: null, prediction: null, giveaway: null, points: null, raid: null };
 
 function interactReducer(state: InteractState, action: InteractAction): InteractState {
   switch (action.type) {
@@ -96,6 +107,10 @@ function interactReducer(state: InteractState, action: InteractAction): Interact
       return { ...state, poll: applyPollFrame(state.poll, action.frame) };
     case "predictionFrame":
       return { ...state, prediction: applyPredictionFrame(state.prediction, action.frame) };
+    case "giveaway":
+      return { ...state, giveaway: action.giveaway };
+    case "giveawayFrame":
+      return { ...state, giveaway: applyGiveawayFrame(state.giveaway, action.frame) };
     case "points":
       return { ...state, points: action.points };
     case "raid":
@@ -130,6 +145,17 @@ export function useChatInteract({
     );
   }, []);
 
+  // Giveaway frames carry neither the prize nor the viewer's entry: `current` has both.
+  const refreshGiveaway = React.useCallback(() => {
+    const { client: c, channel: ch } = live.current;
+    c.giveawayCurrent(ch).then(
+      (giveaway) => {
+        if (live.current.channel === ch) dispatch({ type: "giveaway", giveaway });
+      },
+      () => undefined,
+    );
+  }, []);
+
   const refreshPoints = React.useCallback(() => {
     const { client: c, channel: ch } = live.current;
     if (!signedIn || !self) return;
@@ -157,10 +183,16 @@ export function useChatInteract({
       },
       () => undefined,
     );
+    client.giveawayCurrent(channel).then(
+      (giveaway) => {
+        if (!gone) dispatch({ type: "giveaway", giveaway });
+      },
+      () => undefined,
+    );
     return () => {
       gone = true;
     };
-    // `signedIn` changes who `myVote`/`myBet` describe, so reload with it.
+    // `signedIn` changes who `myVote`/`myBet`/`giveaway.me` describe, so reload with it.
   }, [channel, client, signedIn]);
 
   // The points chip: on join, then every minute. The ref is current before this runs (effects
@@ -174,10 +206,11 @@ export function useChatInteract({
   }, [channel, signedIn, self, refreshPoints]);
 
   // An ended card leaves after RESULTS_VISIBLE_MS; tick only while one is showing results.
-  const { poll, prediction } = state;
+  const { poll, prediction, giveaway } = state;
   const showingResults =
     (poll !== null && poll.status !== "active") ||
-    (prediction !== null && (prediction.status === "resolved" || prediction.status === "canceled"));
+    (prediction !== null && (prediction.status === "resolved" || prediction.status === "canceled")) ||
+    giveaway?.status === "drawn";
   React.useEffect(() => {
     if (!showingResults) return;
     const timer = setInterval(() => setNow(Date.now()), Math.min(5_000, RESULTS_VISIBLE_MS));
@@ -196,10 +229,13 @@ export function useChatInteract({
           refreshPrediction();
           refreshPoints();
         }
+      } else if (routed.kind === "giveaway") {
+        dispatch({ type: "giveawayFrame", frame: routed.frame });
+        refreshGiveaway();
       }
       return true;
     },
-    [refreshPrediction, refreshPoints],
+    [refreshPrediction, refreshPoints, refreshGiveaway],
   );
 
   const onRaid = React.useCallback((frame: ChatRaidFrame) => {
@@ -214,18 +250,21 @@ export function useChatInteract({
     (p: PredictionViewDto) => dispatch({ type: "prediction", prediction: p }),
     [],
   );
+  const setGiveaway = React.useCallback((g: GiveawayDto) => dispatch({ type: "giveaway", giveaway: g }), []);
 
   // `now` moves only while results show: a card that ended long before the panel mounted is
   // hidden at once, one that ends later leaves within a tick of RESULTS_VISIBLE_MS.
   return {
     poll: pollVisible(poll, now) ? poll : null,
     prediction: predictionVisible(prediction, now) ? prediction : null,
+    giveaway: giveawayVisible(giveaway, now) ? giveaway : null,
     points: signedIn && state.points?.enabled ? state.points : null,
     raid: state.raid,
     onEvent,
     onRaid,
     setPoll,
     setPrediction,
+    setGiveaway,
     refreshPoints,
   };
 }
