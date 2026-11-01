@@ -4,34 +4,40 @@
 // No imports: scripts/ (the gate, CI's tests) read the shard list without the harness's types.
 
 /**
- * Parts of `full` for parallel runners (clock-skew ~20 min holds a broadcast through a ladder
- * restart; the others as measured below). `rest` is everything the named shards leave, so a new
- * scenario is always in some shard. Each shard runs in `full`'s order.
+ * Parts of `full` for parallel runners, each under the batch 7 README's ~12 min cap where one
+ * scenario allows it. `rest` is everything the named shards leave, so a new scenario is always in
+ * some shard. Each shard runs in `full`'s order.
  *
- * Scenario time per shard on the full run of 8a562d9a (2026-11-01, run 41309310706): relay 8m09s,
- * long 7m42s (trust-safety 4m36, e5-coop 3m06), interact 11m29s, notify 7m48s, rest 16m20s.
- * `rest` is over the batch 7 README's ~12 min cap: split it once its per-scenario times are
- * measured (open follow-up, recorded for the orchestrator).
+ * Scenario time per shard on the push run of fc1fc4ff (2026-11-01, run 41357496846, batch 7 wave
+ * 2), before this split: interact 16m07s (interact 8m50, channel-bot 7m17), rest 15m46s,
+ * features 14m49s (surge-guard 9m58, timeline-sync 4m51), relay 13m60s, clock 12m49s, long
+ * 12m44s (trust-safety 8m17, e5-coop 4m27), notify 8m04s, captions 3m46s. `relay` (e2e-relay) and
+ * `clock` (clock-skew holds a broadcast through a ladder restart) are single scenarios.
  */
 export const FULL_SHARDS = {
   relay: ["e2e-relay"],
-  long: ["trust-safety", "e5-coop"],
+  long: ["trust-safety"],
   clock: ["clock-skew"],
-  interact: ["interact", "channel-bot"],
-  // W1 (batch 4): ~15 min with both, so N1's notifications runs apart (decision (m), ~12 min cap).
-  features: ["timeline-sync", "surge-guard"],
-  // Batch 6 joined W2's DVR and rehearsal scenarios to N1's notifications. Measured on the full
-  // run of 8a562d9a (2026-11-01, run 41309310706): 7m48s (live-dvr 4m08, notifications 2m47,
-  // rehearsal 53s), under the ~12 min cap, so nothing moved. B7-followups' rehearsal step is short.
+  // E8, with W3's giveaway, surge-raid and fair-prediction steps (batch 7 decision (d)).
+  interact: ["interact"],
+  bot: ["channel-bot"],
+  // W1 (batch 4) ran timeline-sync and surge-guard together; at ~15 min they run apart, and
+  // e5-coop (with W3's jury step) joins timeline-sync.
+  features: ["timeline-sync", "e5-coop"],
+  surge: ["surge-guard"],
+  // Batch 6 joined W2's DVR and rehearsal scenarios to N1's notifications: 8m04s on fc1fc4ff
+  // (live-dvr 4m11, notifications 2m55, rehearsal 58s).
   notify: ["notifications", "live-dvr", "rehearsal"],
   // W2 (batch 6 decision (c)): the whisper sidecar and its weights, path-filtered on pushes
   // (`PATH_FILTERED_SHARDS`) and always on the nightly run.
   captions: ["captions"],
   // Batch 7 decision (d): W3's watch rooms and portability, N3's Twitch import and N4's
   // federation, on the stack with the batch 7 overrides (scripts/verify.ts `w3Stack`). Not
-  // path-filtered. Re-measure after wave 2, as `interact` (11m29s on the same run: channel-bot
-  // 7m28, interact 4m00), which gains the giveaway, surge-raid and fair-prediction steps.
+  // path-filtered.
   w3: ["watch-room", "portability", "twitch-import", "federation"],
+  // The longest of `rest` (8a562d9a: integrity-basic 2m52, viewers 2m04, e4b-money 1m34,
+  // multi-instance 1m28), so `rest` drops from ~16 min to ~8.
+  core: ["integrity-basic", "viewers", "e4b-money", "multi-instance"],
   rest: null,
 } as const satisfies Record<string, readonly string[] | null>;
 export type FullShard = keyof typeof FULL_SHARDS;
