@@ -77,6 +77,9 @@ describe("readGroup", () => {
   test("the category's excluded sessions by first reason, and the rollup row", async () => {
     const g = await readGroup(t.url, broadcastId, "datacenter");
     expect(g.sessionIds.sort()).toEqual([...dc].sort());
+    // With their stored reasons, for the overturn's expected outcome.
+    expect(g.sessions.map((x) => x.id).sort()).toEqual([...dc].sort());
+    expect(g.sessions.every((x) => x.verdict === "excluded" && x.reasons?.[0] === "datacenter_ip")).toBe(true);
     expect(g.rollup).toEqual({
       rolledUpAtMs: rolledUpAt.getTime(),
       verified: 60,
@@ -85,7 +88,7 @@ describe("readGroup", () => {
     });
     expect((await readGroup(t.url, broadcastId, "automation")).sessionIds).toEqual([auto]);
     const none = await readGroup(t.url, uuidv7(), "datacenter");
-    expect(none).toEqual({ sessionIds: [], rollup: null });
+    expect(none).toEqual({ sessions: [], sessionIds: [], rollup: null });
   });
 });
 

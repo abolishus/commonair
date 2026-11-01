@@ -3,7 +3,15 @@
 
 /** The `group-appeal` step's pure helpers (`src/w2/group-appeals.ts`). */
 import { describe, expect, it } from "vite-plus/test";
-import { groupDropped, latestFor, newSupersede, pickGroup, stillInGroup } from "../../src/w2/group-appeals.ts";
+import {
+  expectedAfterOverturn,
+  groupDropped,
+  latestFor,
+  newSupersede,
+  overturnOutcome,
+  pickGroup,
+  stillInGroup,
+} from "../../src/w2/group-appeals.ts";
 
 const B = "01900000-0000-7000-8000-0000000000b1";
 const OTHER = "01900000-0000-7000-8000-0000000000b2";
@@ -54,6 +62,83 @@ describe("stillInGroup", () => {
         "datacenter",
       ),
     ).toEqual(["a"]);
+  });
+});
+
+describe("expectedAfterOverturn", () => {
+  it("no other signal left: restored (null), whatever non-signal reasons remain", () => {
+    expect(expectedAfterOverturn(["datacenter_ip"], "datacenter")).toBeNull();
+    expect(
+      expectedAfterOverturn(["datacenter_ip", "fetch_unjudged", "insufficient_heartbeats"], "datacenter"),
+    ).toBeNull();
+    expect(expectedAfterOverturn(["device_concurrency", "account_concurrency"], "concurrency")).toBeNull();
+    expect(expectedAfterOverturn([], "datacenter")).toBeNull();
+    expect(expectedAfterOverturn(null, "datacenter")).toBeNull();
+  });
+
+  it("another category's signal left: the group of the first one (CI run 41305101320's viewbots)", () => {
+    expect(expectedAfterOverturn(["device_concurrency", "headless", "fetch_pattern"], "concurrency")).toBe(
+      "automation",
+    );
+    expect(expectedAfterOverturn(["datacenter_ip", "fetch_pattern", "headless"], "datacenter")).toBe(
+      "playback_pattern",
+    );
+  });
+});
+
+describe("overturnOutcome", () => {
+  const s = (id: string, verdict: string, reasons: string[]) => ({ id, verdict, reasons });
+
+  it("restored and moved sessions are both as expected", () => {
+    const before = [s("a", "excluded", ["datacenter_ip"]), s("b", "excluded", ["datacenter_ip", "headless"])];
+    const after = [s("a", "verified", ["allowed_on_appeal"]), s("b", "excluded", ["headless", "allowed_on_appeal"])];
+    expect(overturnOutcome(before, after, "datacenter")).toEqual({
+      notRestored: [],
+      notMoved: [],
+      restorable: 1,
+      restored: 1,
+      moved: 1,
+    });
+  });
+
+  it("pending counts as restored", () => {
+    const o = overturnOutcome(
+      [s("a", "excluded", ["datacenter_ip"])],
+      [s("a", "pending", ["allowed_on_appeal", "insufficient_heartbeats"])],
+      "datacenter",
+    );
+    expect(o).toMatchObject({ notRestored: [], restored: 1 });
+  });
+
+  it("a group where every session carries another signal: none restored, all moved, nothing wrong", () => {
+    const reasons = ["device_concurrency", "headless", "fetch_pattern"];
+    const before = ["a", "b", "c"].map((id) => s(id, "excluded", reasons));
+    const after = ["a", "b", "c"].map((id) => s(id, "excluded", ["headless", "fetch_pattern", "allowed_on_appeal"]));
+    expect(overturnOutcome(before, after, "concurrency")).toEqual({
+      notRestored: [],
+      notMoved: [],
+      restorable: 0,
+      restored: 0,
+      moved: 3,
+    });
+  });
+
+  it("flags a session left excluded without another signal, one restored that should move, and a missing one", () => {
+    const before = [
+      s("a", "excluded", ["datacenter_ip"]),
+      s("b", "excluded", ["datacenter_ip", "headless"]),
+      s("c", "excluded", ["datacenter_ip", "headless"]),
+      s("d", "excluded", ["datacenter_ip"]),
+    ];
+    const after = [
+      s("a", "excluded", ["datacenter_ip"]),
+      s("b", "verified", ["allowed_on_appeal"]),
+      s("c", "excluded", ["datacenter_ip", "headless"]),
+    ];
+    expect(overturnOutcome(before, after, "datacenter")).toMatchObject({
+      notRestored: ["a", "d"],
+      notMoved: ["b", "c"],
+    });
   });
 });
 
