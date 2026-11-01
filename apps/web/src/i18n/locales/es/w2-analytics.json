@@ -71,7 +71,7 @@
   "analytics.groupAppeal.loading": "Comprobando recursos",
   "analytics.groupAppeal.appealed": "Recurrido",
   "analytics.groupAppeal.limited": "Sin recursos disponibles",
-  "analytics.groupAppeal.reason.own": "Ya recurriste este grupo. El resultado aparecerá a su lado cuando el equipo decida.",
+  "analytics.groupAppeal.reason.own": "Ya recurriste este grupo.",
   "analytics.groupAppeal.reason.broadcast": "Esta emisión ya tiene un recurso de grupo. Cada emisión admite uno.",
   "analytics.groupAppeal.reason.limited": "Ya usaste los {perChannel} recursos de grupo de esta semana. Podrás volver a recurrir después del {date}.",
   "analytics.groupAppeal.title": "Recurrir este grupo",
@@ -82,9 +82,10 @@
   "analytics.groupAppeal.body": "Por qué estos espectadores son reales",
   "analytics.groupAppeal.bodyHint": "Por ejemplo, la red de un colegio o de una oficina, o un público que usa VPN. Entre {min} y {max} caracteres.",
   "analytics.groupAppeal.submit": "Enviar recurso",
-  "analytics.groupAppeal.done": "Recurso enviado. El equipo revisará el grupo.",
+  "analytics.groupAppeal.done": "Recurso enviado. El equipo revisará el grupo; el resultado también aparece en Configuración, Apelaciones.",
   "analytics.groupAppeal.failed": "No se pudo enviar el recurso. Inténtalo más tarde.",
-  "analytics.groupAppeal.rateLimited": "Ahora mismo no puedes recurrir ningún grupo de esta emisión.",
+  "analytics.groupAppeal.rateLimited": "Ahora mismo no puedes presentar un recurso de grupo. La lista se ha actualizado con el motivo.",
   "analytics.groupAppeal.status": "{status, select, open {Recurso pendiente de revisión} upheld {Recurso desestimado} overturned {Recurso estimado} other {Recurso}}",
+  "analytics.groupAppeal.statusOther": "{status, select, open {Recurso sobre «{category}» pendiente de revisión} upheld {Recurso sobre «{category}» desestimado} overturned {Recurso sobre «{category}» estimado} other {Recurso sobre «{category}»}}",
   "analytics.groupAppeal.result": "{status, select, open {El equipo aún no ha decidido. El resultado aparecerá aquí cuando lo haga.} upheld {El equipo revisó el grupo y las exclusiones se mantienen.} overturned {El equipo revisó el grupo: estas sesiones vuelven a contar y se están actualizando tus cifras y tu certificación.} other {}}"
 }

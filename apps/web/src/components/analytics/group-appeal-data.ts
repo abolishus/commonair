@@ -42,6 +42,11 @@ export interface GroupAppealView {
   state: GroupAppealState;
   /** This group's own appeal (its status is the decided result), or null. */
   own: Appeal | null;
+  /**
+   * The broadcast's group appeal (any category), newest first, so a row of another category can
+   * say which group was appealed and how it was decided: an overturn drops its own group's row.
+   */
+  broadcastAppeal: Appeal | null;
   /** Appeals left on the channel in the rolling window. */
   remaining: number;
   /** When the next one frees up (ISO), while none is left. */
@@ -60,7 +65,10 @@ export function groupAppealView(
 ): GroupAppealView {
   const groups = appeals.filter((a) => a.subjectType === "exclusion_group");
   const own = groups.find((a) => a.subjectId === q.broadcastId && a.exclusionCategory === q.category) ?? null;
-  const onBroadcast = groups.some((a) => a.subjectId === q.broadcastId);
+  const broadcastAppeal =
+    groups
+      .filter((a) => a.subjectId === q.broadcastId)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
   const inWindow = groups
     .map((a) => Date.parse(a.createdAt))
     .filter((t) => t > q.now - GROUP_APPEAL_WINDOW_MS)
@@ -68,8 +76,8 @@ export function groupAppealView(
   const remaining = Math.max(0, GROUP_APPEAL_RULES.perChannel - inWindow.length);
   const freeing = remaining === 0 ? inWindow[inWindow.length - GROUP_APPEAL_RULES.perChannel] : undefined;
   const nextAt = freeing === undefined ? null : new Date(freeing + GROUP_APPEAL_WINDOW_MS).toISOString();
-  const state: GroupAppealState = onBroadcast ? "appealed" : remaining === 0 ? "limited" : "available";
-  return { state, own, remaining, nextAt };
+  const state: GroupAppealState = broadcastAppeal ? "appealed" : remaining === 0 ? "limited" : "available";
+  return { state, own, broadcastAppeal, remaining, nextAt };
 }
 
 /** `retryAfterSeconds` of a RATE_LIMITED refusal, or null for any other error. */
@@ -101,7 +109,10 @@ class GroupAppealStore {
     this.snapshot = s;
     for (const l of this.listeners) l();
   }
-  /** Load once for every row; `force` reloads (after a refusal says the list was stale). */
+  /**
+   * One request for every row: `force` reloads while the last list stays on screen, so a page
+   * visited again shows decisions made since (the store outlives the page).
+   */
   load(force = false): void {
     if (this.loading || (!force && this.snapshot.appeals !== null)) return;
     this.loading = this.client
@@ -135,7 +146,7 @@ export function useGroupAppeals(client?: GroupAppealClient) {
   }
   const s = store;
   const snapshot = React.useSyncExternalStore(s.subscribe, s.get, s.get);
-  React.useEffect(() => s.load(), [s]);
+  React.useEffect(() => s.load(true), [s]);
   return {
     ...snapshot,
     reload: () => s.load(true),

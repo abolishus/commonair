@@ -75,6 +75,7 @@ describe("groupAppealView", () => {
     expect(groupAppealView([appeal({ subjectType: "session", exclusionCategory: null })], q)).toEqual({
       state: "available",
       own: null,
+      broadcastAppeal: null,
       remaining: 3,
       nextAt: null,
     });
@@ -82,11 +83,9 @@ describe("groupAppealView", () => {
 
   it("appealed: this group's own appeal, or another group of the broadcast", () => {
     const own = appeal();
-    expect(groupAppealView([own], q)).toMatchObject({ state: "appealed", own, remaining: 2 });
-    expect(groupAppealView([appeal({ exclusionCategory: "automation" })], q)).toMatchObject({
-      state: "appealed",
-      own: null,
-    });
+    expect(groupAppealView([own], q)).toMatchObject({ state: "appealed", own, broadcastAppeal: own, remaining: 2 });
+    const other = appeal({ exclusionCategory: "automation" });
+    expect(groupAppealView([other], q)).toMatchObject({ state: "appealed", own: null, broadcastAppeal: other });
   });
 
   it("limited once the week's three are used, freeing when the oldest leaves the window", () => {
@@ -102,6 +101,7 @@ describe("groupAppealView", () => {
     expect(v).toEqual({
       state: "limited",
       own: null,
+      broadcastAppeal: null,
       remaining: 0,
       nextAt: new Date(old + GROUP_APPEAL_WINDOW_MS).toISOString(),
     });
@@ -199,7 +199,12 @@ describe("GroupAppealAction", () => {
     expect(b.getAttribute("aria-disabled")).toBe("true");
     const reason = document.getElementById(b.getAttribute("aria-describedby") ?? "");
     expect(reason?.textContent).toContain("already has a group appeal");
-    expect(byId("group-appeal-status")).toHaveLength(0);
+    // An overturn drops the appealed group's own row, so the others name it and its result.
+    const status = byId("group-appeal-status");
+    expect(status).toHaveLength(1);
+    expect(status[0]?.getAttribute("data-category")).toBe("automation");
+    expect(status[0]?.getAttribute("data-status")).toBe("open");
+    expect(status[0]?.textContent).toContain("Appeal on");
   });
 
   it("limited: disabled, saying when the next appeal is possible", async () => {
@@ -222,6 +227,39 @@ describe("GroupAppealAction", () => {
     );
     await waitFor(() => expect(byId("group-appeal-status")[0]?.getAttribute("data-status")).toBe("upheld"));
     expect(byId("group-appeal-status")[0]?.textContent).toContain("Appeal upheld");
+    const reason = document.getElementById(openButton()!.getAttribute("aria-describedby") ?? "");
+    expect(reason?.textContent).toContain("the exclusions stand");
+  });
+
+  it("an overturn of another group shows on this broadcast's remaining rows", async () => {
+    wrap(
+      <GroupAppealAction
+        broadcastId={B1}
+        category="datacenter"
+        sessions={6}
+        client={fakeClient([appeal({ exclusionCategory: "automation", status: "overturned" })])}
+        now={NOW}
+      />,
+    );
+    await waitFor(() => expect(byId("group-appeal-status")[0]?.getAttribute("data-status")).toBe("overturned"));
+    expect(byId("group-appeal-status")[0]?.getAttribute("data-category")).toBe("automation");
+  });
+
+  it("a page mounted again reloads the list, showing the last one meanwhile", async () => {
+    let status: Appeal["status"] = "open";
+    const a = appeal();
+    const client = fakeClient([], { mine: vi.fn<GroupAppealClient["mine"]>(async () => [{ ...a, status }]) });
+    const first = wrap(
+      <GroupAppealAction broadcastId={B1} category="datacenter" sessions={6} client={client} now={NOW} />,
+    );
+    await waitFor(() => expect(byId("group-appeal-status")[0]?.getAttribute("data-status")).toBe("open"));
+    first.unmount();
+    status = "overturned";
+    wrap(<GroupAppealAction broadcastId={B1} category="datacenter" sessions={6} client={client} now={NOW} />);
+    // The cached list renders at once, then the reload brings the decision.
+    expect(byId("group-appeal-status")[0]?.getAttribute("data-status")).toBe("open");
+    await waitFor(() => expect(byId("group-appeal-status")[0]?.getAttribute("data-status")).toBe("overturned"));
+    expect(client.mine).toHaveBeenCalledTimes(2);
   });
 
   it("a rate-limit refusal toasts and reloads the list; the form stays", async () => {

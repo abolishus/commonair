@@ -82,7 +82,11 @@ export function GroupAppealAction({
   const view = groupAppealView(appeals.appeals ?? [], { broadcastId, category, now: now ?? clock });
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {view.own ? <AppealStatus appeal={view.own} /> : null}
+      {view.own ? (
+        <AppealStatus appeal={view.own} />
+      ) : view.broadcastAppeal ? (
+        <AppealStatus appeal={view.broadcastAppeal} other />
+      ) : null}
       {view.state === "available" ? (
         <Button
           data-testid="group-appeal-open"
@@ -124,10 +128,21 @@ export function GroupAppealAction({
   );
 }
 
-function AppealStatus({ appeal }: { appeal: Appeal }): React.JSX.Element {
+/** The appeal's status; `other` when it is another group's appeal on the broadcast, named. */
+function AppealStatus({ appeal, other = false }: { appeal: Appeal; other?: boolean }): React.JSX.Element {
   return (
-    <StatusBadge data-testid="group-appeal-status" data-status={appeal.status} tone={STATUS_TONE[appeal.status]}>
-      {t("analytics.groupAppeal.status", { status: appeal.status })}
+    <StatusBadge
+      data-testid="group-appeal-status"
+      data-status={appeal.status}
+      data-category={appeal.exclusionCategory ?? undefined}
+      tone={STATUS_TONE[appeal.status]}
+    >
+      {other
+        ? t("analytics.groupAppeal.statusOther", {
+            status: appeal.status,
+            category: t("analytics.category", { category: appeal.exclusionCategory ?? "other" }),
+          })
+        : t("analytics.groupAppeal.status", { status: appeal.status })}
     </StatusBadge>
   );
 }
@@ -135,8 +150,9 @@ function AppealStatus({ appeal }: { appeal: Appeal }): React.JSX.Element {
 function DisabledOpen({ view }: { view: GroupAppealView }): React.JSX.Element {
   const { locale } = useLocale();
   const reasonId = React.useId();
+  // The dialog does not reopen once appealed, so the reason carries the result text.
   const reason = view.own
-    ? t("analytics.groupAppeal.reason.own")
+    ? `${t("analytics.groupAppeal.reason.own")} ${t("analytics.groupAppeal.result", { status: view.own.status })}`
     : view.state === "appealed"
       ? t("analytics.groupAppeal.reason.broadcast")
       : t("analytics.groupAppeal.reason.limited", {

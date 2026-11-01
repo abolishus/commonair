@@ -63,6 +63,21 @@ export interface StoredSession {
 export const stillInGroup = (sessions: readonly StoredSession[], category: ExclusionCategory): string[] =>
   sessions.filter((s) => s.verdict === "excluded" && firstReasonCategory(s.reasons) === category).map((s) => s.id);
 
+/**
+ * Whether the re-run rollup has dropped the appealed group. A session still pending at the
+ * overturn was not in the group, so the scorer may still exclude it under the same category
+ * before finalize: such newcomers may be counted, the appealed sessions may not.
+ */
+export function groupDropped(
+  appealed: readonly string[],
+  rerun: { sessionIds: readonly string[]; counted: number },
+): { ok: boolean; newcomers: string[]; returned: string[] } {
+  const was = new Set(appealed);
+  const returned = rerun.sessionIds.filter((id) => was.has(id));
+  const newcomers = rerun.sessionIds.filter((id) => !was.has(id));
+  return { ok: returned.length === 0 && rerun.counted <= newcomers.length, newcomers, returned };
+}
+
 export interface RollupRow {
   rolledUpAtMs: number;
   verified: number;
@@ -272,11 +287,15 @@ export async function stepGroupAppeal(ext: IntegrityW2Extension): Promise<void> 
   ctx.data("groupAppeal.verdicts", { sessions: verdicts.length, verified, rescored: overturned });
   ctx.check("the group's sessions count as verified again", verified > 0, { verified, sessions: verdicts.length });
   const rolled = rerun.rollup;
-  ctx.assert(
-    "the re-run rollup no longer counts the group",
-    rolled !== null && (rolled.bySessions[category] ?? 0) === 0 && rerun.sessionIds.length === 0,
-    { rollup: rolled?.bySessions, stillExcluded: rerun.sessionIds.length },
-  );
+  const dropped = groupDropped(before.sessionIds, {
+    sessionIds: rerun.sessionIds,
+    counted: rolled?.bySessions[category] ?? 0,
+  });
+  ctx.assert("the re-run rollup no longer counts the group", rolled !== null && dropped.ok, {
+    rollup: rolled?.bySessions,
+    returned: dropped.returned,
+    newcomers: dropped.newcomers.length,
+  });
   ctx.assert("verified watch time did not go down", rolled !== null && rolled.verified >= prior.verified, {
     before: prior.verified,
     after: rolled?.verified,

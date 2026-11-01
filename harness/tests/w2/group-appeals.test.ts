@@ -3,7 +3,7 @@
 
 /** The `group-appeal` step's pure helpers (`src/w2/group-appeals.ts`). */
 import { describe, expect, it } from "vite-plus/test";
-import { latestFor, newSupersede, pickGroup, stillInGroup } from "../../src/w2/group-appeals.ts";
+import { groupDropped, latestFor, newSupersede, pickGroup, stillInGroup } from "../../src/w2/group-appeals.ts";
 
 const B = "01900000-0000-7000-8000-0000000000b1";
 const OTHER = "01900000-0000-7000-8000-0000000000b2";
@@ -54,6 +54,21 @@ describe("stillInGroup", () => {
         "datacenter",
       ),
     ).toEqual(["a"]);
+  });
+});
+
+describe("groupDropped", () => {
+  it("dropped when no appealed session is back and nothing is counted", () => {
+    expect(groupDropped(["a", "b"], { sessionIds: [], counted: 0 })).toEqual({ ok: true, newcomers: [], returned: [] });
+  });
+
+  it("tolerates sessions excluded after the overturn, up to their number", () => {
+    expect(groupDropped(["a", "b"], { sessionIds: ["c"], counted: 1 })).toMatchObject({ ok: true, newcomers: ["c"] });
+    expect(groupDropped(["a", "b"], { sessionIds: ["c"], counted: 2 }).ok).toBe(false);
+  });
+
+  it("fails when an appealed session is back in the group", () => {
+    expect(groupDropped(["a", "b"], { sessionIds: ["b"], counted: 1 })).toMatchObject({ ok: false, returned: ["b"] });
   });
 });
 

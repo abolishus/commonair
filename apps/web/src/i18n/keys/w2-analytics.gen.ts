@@ -91,4 +91,5 @@ export type Key =
   | "analytics.groupAppeal.failed"
   | "analytics.groupAppeal.rateLimited"
   | "analytics.groupAppeal.status"
+  | "analytics.groupAppeal.statusOther"
   | "analytics.groupAppeal.result";

@@ -71,7 +71,7 @@
   "analytics.groupAppeal.loading": "Checking appeals",
   "analytics.groupAppeal.appealed": "Appealed",
   "analytics.groupAppeal.limited": "No appeals left",
-  "analytics.groupAppeal.reason.own": "You already appealed this group. The result shows beside it once staff decide.",
+  "analytics.groupAppeal.reason.own": "You already appealed this group.",
   "analytics.groupAppeal.reason.broadcast": "This broadcast already has a group appeal. Each broadcast takes one.",
   "analytics.groupAppeal.reason.limited": "You have used this week's {perChannel} group appeals. You can appeal again after {date}.",
   "analytics.groupAppeal.title": "Appeal this group",
@@ -82,9 +82,10 @@
   "analytics.groupAppeal.body": "Why these viewers are real",
   "analytics.groupAppeal.bodyHint": "For example a school or office network, or an audience that uses VPNs. {min} to {max} characters.",
   "analytics.groupAppeal.submit": "Send appeal",
-  "analytics.groupAppeal.done": "Appeal sent. Staff will review the group.",
+  "analytics.groupAppeal.done": "Appeal sent. Staff will review the group; the result also shows under Settings, Appeals.",
   "analytics.groupAppeal.failed": "The appeal could not be sent. Try again later.",
-  "analytics.groupAppeal.rateLimited": "No group appeal is available for this broadcast right now.",
+  "analytics.groupAppeal.rateLimited": "You cannot make a group appeal right now. The list has been updated with the reason.",
   "analytics.groupAppeal.status": "{status, select, open {Appeal waiting for review} upheld {Appeal upheld} overturned {Appeal overturned} other {Appeal}}",
+  "analytics.groupAppeal.statusOther": "{status, select, open {Appeal on “{category}” waiting for review} upheld {Appeal on “{category}” upheld} overturned {Appeal on “{category}” overturned} other {Appeal on “{category}”}}",
   "analytics.groupAppeal.result": "{status, select, open {Staff have not decided yet. The result shows here once they do.} upheld {Staff reviewed the group and the exclusions stand.} overturned {Staff reviewed the group: these sessions count again, and your figures and attestation are being updated.} other {}}"
 }
