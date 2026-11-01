@@ -1,0 +1,7 @@
+{
+  "@context": "https://www.w3.org/ns/activitystreams",
+  "id": "https://mastodon.example/users/alice#follows/4242",
+  "type": "Follow",
+  "actor": "https://mastodon.example/users/alice",
+  "object": "https://streams.example/ap/channels/0192f000-0000-7000-8000-000000000001"
+}

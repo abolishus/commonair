@@ -1,0 +1,42 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/activitystreams",
+    "https://w3id.org/security/v1",
+    {
+      "manuallyApprovesFollowers": "as:manuallyApprovesFollowers",
+      "toot": "http://joinmastodon.org/ns#",
+      "discoverable": "toot:discoverable"
+    }
+  ],
+  "id": "https://mastodon.example/users/newsbot",
+  "type": "Service",
+  "following": "https://mastodon.example/users/newsbot/following",
+  "followers": "https://mastodon.example/users/newsbot/followers",
+  "inbox": "https://mastodon.example/users/newsbot/inbox",
+  "outbox": "https://mastodon.example/users/newsbot/outbox",
+  "preferredUsername": "newsbot",
+  "name": "News Bot",
+  "summary": "<p>Automated headlines.</p>",
+  "url": "https://mastodon.example/@newsbot",
+  "manuallyApprovesFollowers": false,
+  "discoverable": true,
+  "published": "2024-01-01T00:00:00Z",
+  "publicKey": {
+    "id": "https://mastodon.example/users/newsbot#main-key",
+    "owner": "https://mastodon.example/users/newsbot",
+    "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAfixture\n-----END PUBLIC KEY-----\n"
+  },
+  "endpoints": {
+    "sharedInbox": "https://mastodon.example/inbox"
+  },
+  "icon": {
+    "type": "Image",
+    "mediaType": "image/png",
+    "url": "https://files.mastodon.example/accounts/avatars/newsbot.png"
+  },
+  "image": {
+    "type": "Image",
+    "mediaType": "image/png",
+    "url": "https://files.mastodon.example/accounts/headers/newsbot.png"
+  }
+}
