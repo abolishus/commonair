@@ -772,7 +772,7 @@ export type AnalyticsTickBody = z.infer<typeof AnalyticsTickBody>;
 export const AnalyticsDisplayBypassBody = z.object({ channelId: z.uuid(), enabled: z.boolean() });
 export type AnalyticsDisplayBypassBody = z.infer<typeof AnalyticsDisplayBypassBody>;
 
-/** Jobs on `QUEUES.rehearsal`: one driver per arm, started on `rehearsal.armed` (`jobId = rehearsal:<armId>`). */
+/** Jobs on `QUEUES.rehearsal`: one driver per arm, started on `rehearsal.armed` (`jobId = rehearsal-<armId>`: BullMQ refuses a two-part id with a colon). */
 export const REHEARSAL_JOBS = { driver: "rehearsal-driver" } as const;
 export const RehearsalDriverJob = z.object({ armId: z.uuid(), channelId: z.uuid() });
 export type RehearsalDriverJob = z.infer<typeof RehearsalDriverJob>;

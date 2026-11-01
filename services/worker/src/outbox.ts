@@ -7,7 +7,8 @@
  * `FOR UPDATE SKIP LOCKED`, so replicas never claim the same row. Delivery is
  * at-least-once: if the commit fails after publishing, the batch is published
  * again (consumers dedupe by event id). Internal (trust & safety) events are validated and
- * marked published without ever reaching the bus or webhook fan-out.
+ * marked published without ever reaching the bus or webhook fan-out; the W2 hook
+ * (`w2/outbox-jobs.ts`) still starts jobs from them.
  */
 import { BusEvent, EVENTS, isInternalEvent, type EventType } from "@commonair/contracts/events";
 import { QUEUES } from "@commonair/contracts/internal";
@@ -20,6 +21,7 @@ import { metrics } from "./metrics.ts";
 import { moderationMetrics } from "./moderation/metrics.ts";
 import { notifyJobsFor } from "./notify/outbox-jobs.ts";
 import { AdaptiveDelay, startLoop, type LoopHandle } from "./runtime/loop.ts";
+import { w2JobsFor } from "./w2/outbox-jobs.ts";
 
 const { events, eventSubscriptions: subs } = schema;
 type EventRow = typeof events.$inferSelect;
@@ -80,12 +82,16 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
     if (rows.length === 0) return 0;
 
     const valid: BusEvent[] = [];
+    // Rows that passed validation, internal ones included: the W2 job hook reads both.
+    const handled: EventRow[] = [];
     for (const row of rows) {
       if (isInternalEvent(row.type)) {
         // Audit and service fan-out only: never on BUS.events, never offered to apps.
         const c = checkInternalEvent(row);
-        if (c.ok) moderationMetrics.outboxInternal.add(1, { type: row.type });
-        else {
+        if (c.ok) {
+          moderationMetrics.outboxInternal.add(1, { type: row.type });
+          handled.push(row);
+        } else {
           metrics.outboxInvalid.add(1, { type: row.type });
           ctx.logger.error("internal outbox event failed catalog validation", {
             eventId: row.id,
@@ -96,8 +102,10 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
         continue;
       }
       const r = toBusEvent(row);
-      if (r.ok) valid.push(r.event);
-      else {
+      if (r.ok) {
+        valid.push(r.event);
+        handled.push(row);
+      } else {
         // Marked published anyway: a poison row must not block the outbox forever.
         metrics.outboxInvalid.add(1, { type: row.type });
         ctx.logger.error("outbox event failed catalog validation; skipped", {
@@ -143,6 +151,18 @@ export async function relayOutboxBatch(ctx: WorkerContext, batchSize = 200, valk
     const notify = notifyJobsFor(valid);
     if (notify.length > 0)
       await withTimeout(ctx.enqueueBulk(QUEUES.notifications, notify), valkeyTimeoutMs, "notify enqueue");
+    // Feature wins, wave 2 (W2): the delayed audience rollup, attestation re-checks and the
+    // rehearsal driver (`w2/outbox-jobs.ts`). Same job-id idempotency as above.
+    const w2 = await w2JobsFor(tx, handled, ctx.now());
+    for (const queue of new Set(w2.map((j) => j.queue)))
+      await withTimeout(
+        ctx.enqueueBulk(
+          queue,
+          w2.filter((j) => j.queue === queue),
+        ),
+        valkeyTimeoutMs,
+        "w2 enqueue",
+      );
 
     const now = ctx.now();
     await tx
