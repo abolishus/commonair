@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The batch 7 contract step's API seams (§5.1, §5.3): every unit's route file is mounted (its stub
- * answers 501, not 404), the raw routes dispatch (federation 404 while the flag is off, 501 on;
- * the portability keys under /api; the Twitch callback only when the import is available), the
- * report and follow hooks are reached, and the b7 test hooks enqueue on the right queue.
+ * The batch 7 contract step's API seams (§5.1, §5.3): every unit's route file is mounted (its
+ * handler answers, never 404 or a 501 stub), the raw routes dispatch (federation 404 while the
+ * flag is off, the handlers on; the portability keys under /api; the Twitch callback only when the
+ * import is available), the report and follow hooks are reached, and the b7 test hooks enqueue on
+ * the right queue.
  */
 import { Worker } from "bullmq";
 import { eq } from "drizzle-orm";
@@ -55,8 +56,8 @@ async function withEnv(patch: Record<string, unknown>, fn: () => Promise<void>) 
   }
 }
 
-describe("unit route files are mounted (stubs answer 501)", () => {
-  test("one procedure of each group reaches its stub", async () => {
+describe("unit route files are mounted (no stub left)", () => {
+  test("one procedure of each wave 2 group reaches its handler", async () => {
     const c = alice.client;
     const calls: [string, string, unknown?][] = [
       ["GET", `/api/channels/${alice.username}/twitch-import`],
@@ -64,7 +65,7 @@ describe("unit route files are mounted (stubs answer 501)", () => {
     ];
     for (const [method, path, body] of calls) {
       const r = await c.call(method, path, body);
-      expect([r.status, path]).toEqual([501, path]);
+      expect([[404, 501].includes(r.status), path]).toEqual([false, path]);
     }
   });
 });
@@ -94,10 +95,13 @@ describe("raw routes", () => {
     }
   });
 
-  test("federation on: every route reaches its stub (501), a wrong method is 405", async () => {
+  test("federation on: every route reaches its handler, a wrong method is 405", async () => {
     await withEnv({ FEDERATION_ENABLED: true }, async () => {
-      for (const [method, path] of fed) {
-        expect([(await send(method, path)).status, path]).toEqual([501, path]);
+      // Unknown resource and channel: 404 from the handler; the empty `{}` POSTs fail the inbox's
+      // cheap checks (400).
+      const expected = [404, 200, 200, 404, 404, 404, 404, 400];
+      for (const [i, [method, path]] of fed.entries()) {
+        expect([(await send(method, path)).status, path]).toEqual([expected[i], path]);
         const wrong = await send(method === "GET" ? "POST" : "GET", path);
         expect([wrong.status, wrong.headers.get("allow")]).toEqual([405, method]);
       }
@@ -145,7 +149,10 @@ describe("raw routes", () => {
     await withEnv(
       { TWITCH_IMPORT_ENABLED: true, OAUTH_TWITCH_CLIENT_ID: "id", OAUTH_TWITCH_CLIENT_SECRET: "secret" },
       async () => {
-        expect((await fetch(`${api.url}${path}`)).status).toBe(501);
+        // A state that was never issued: back to the import page with `?twitch=invalid`.
+        const res = await fetch(`${api.url}${path}`, { redirect: "manual" });
+        expect(res.status).toBe(303);
+        expect(new URL(res.headers.get("location") ?? "").searchParams.get("twitch")).toBe("invalid");
         expect((await fetch(`${api.url}${path}`, { method: "POST" })).status).toBe(405);
         const info = await client(api).call<{ features: { twitchImport: boolean } }>("GET", "/api/instance");
         expect(info.body.features.twitchImport).toBe(true);

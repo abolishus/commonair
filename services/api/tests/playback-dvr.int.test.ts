@@ -38,7 +38,6 @@ type MutableEnv = {
 };
 const env = () => api.deps.env as unknown as MutableEnv;
 const db = () => api.db.db;
-const RELAY_URL = "https://relay.example.invalid";
 const ORIGIN = () => api.deps.env.PLAYBACK_PUBLIC_URL.replace(/\/+$/, "");
 
 const claimsOf = async (token: string) => {
@@ -275,40 +274,12 @@ describe("playback.start: the DVR grant matrix", () => {
     await expectGranted(await start(client(api), live.owner.username), live);
   });
 
-  test("a relay- or CDN-assigned session gets its DVR playlist on the origin", async () => {
+  test("a CDN-assigned session gets its DVR playlist on the origin (relay sessions: playback-dvr-relay.int.test.ts)", async () => {
     const live = await liveRecording({ viewers: 100 });
     Object.assign(env(), { CDN_PROVIDER: "origin-pull", CDN_BASE_URL: "https://cdn.example.invalid" });
     const cdn = await start(client(api), live.owner.username);
     expect(cdn.source).toBe("cdn");
     await expectGranted(cdn, live);
-
-    Object.assign(env(), { CDN_PROVIDER: "none", CDN_BASE_URL: undefined });
-    const relayId = uuidv7();
-    await db()
-      .insert(schema.relayNodes)
-      .values({
-        id: relayId,
-        ownerId: live.owner.userId,
-        name: "dvr test relay",
-        publicUrl: RELAY_URL,
-        declaredCapacityMbps: 1000,
-        publicKey: "test",
-        tokenHash: `dvr-${relayId}`,
-        status: "active",
-      });
-    await api.deps.valkey.hset(
-      KEYS.relays,
-      relayId,
-      JSON.stringify({ url: RELAY_URL, capacityMbps: 1000, status: "active", load: 0 }),
-    );
-    let relay: Start | undefined;
-    for (let i = 0; i < 40 && !relay; i++) {
-      const s = await start(client(api), live.owner.username);
-      if (s.source === "relay") relay = s;
-    }
-    if (!relay) throw new Error("no session drawn onto the relay in 40 tries");
-    await expectGranted(relay, live);
-    expect(relay.dvrPlaylistUrl?.startsWith(RELAY_URL)).toBe(false);
   });
 });
 

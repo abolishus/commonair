@@ -170,7 +170,12 @@ export async function startImport(
       .where(and(eq(imports.id, input.id), eq(imports.channelId, input.channelId)))
       .for("update");
     if (!cur) throw notFound("Import not found");
-    if (cur.status !== "previewed" || (cur.preview as { state?: string }).state !== "ready")
+    // A Twitch preview starts only through the Twitch start (its expiry, audit and panel rules).
+    if (
+      cur.status !== "previewed" ||
+      cur.source !== "commonair" ||
+      (cur.preview as { state?: string }).state !== "ready"
+    )
       throw conflict("This import is not ready to start");
     const available = new Set(
       items((cur.preview as { items?: unknown }).items)
