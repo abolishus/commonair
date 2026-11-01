@@ -8,14 +8,13 @@
  * line says why with a `rtl-physical: <reason>` comment (a progress or goal-bar fill, a media
  * timeline, centring with `left-1/2 -translate-x-1/2`).
  *
- * `apps/web/src` has none. `packages/ui/src` is held by `logical-css.baseline.json` (count per
- * file): a count may only go down and a file not in the baseline must have none, until N2-ui
- * converts the shadcn components.
+ * `apps/web/src` and `packages/ui/src` have none. The shadcn components were converted the way
+ * upstream's RTL transform does (`components.json` `rtl`); physical sides that stay physical
+ * (Base UI's `side="left"`, a drawer's `swipeDirection`) carry the comment.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
-import baseline from "./logical-css.baseline.json" with { type: "json" };
 
 interface PhysicalMatch {
   line: number;
@@ -166,33 +165,8 @@ describe("logical CSS (ADR 0029 decision 5)", () => {
     expect(scanPhysical(".a { margin-left: 0 }", "css").map((h) => h.logical)).toEqual(["margin-inline-start"]);
   });
 
-  it("finds none in apps/web/src", () => {
-    const problems = [...scanTree("apps/web/src")].flatMap(([file, hits]) => describeHits(file, hits));
-    expect(problems).toEqual([]);
-  });
-
-  it("only goes down in packages/ui/src (logical-css.baseline.json)", () => {
-    const counts = baseline as Record<string, number>;
-    const problems: string[] = [];
-    const scanned = scanTree("packages/ui/src");
-    for (const [file, hits] of scanned) {
-      const allowed = counts[file] ?? 0;
-      if (hits.length > allowed)
-        problems.push(
-          `${file}: ${hits.length} physical-direction classes, baseline ${allowed}` +
-            (allowed === 0 ? " (a new file must have none)" : ""),
-          ...describeHits(file, hits),
-        );
-    }
-    // A ratchet, not a ceiling: a count that went down is written down, so it cannot creep back.
-    for (const [file, allowed] of Object.entries(counts)) {
-      const now = scanned.get(file)?.length ?? 0;
-      if (!existsSync(join(ROOT, file))) problems.push(`${file}: no longer exists, remove it from the baseline`);
-      else if (now < allowed)
-        problems.push(
-          now === 0 ? `${file}: has none now, remove it from the baseline` : `${file}: lower the baseline to ${now}`,
-        );
-    }
+  it.each(["apps/web/src", "packages/ui/src"])("finds none in %s", (dir) => {
+    const problems = [...scanTree(dir)].flatMap(([file, hits]) => describeHits(file, hits));
     expect(problems).toEqual([]);
   });
 });

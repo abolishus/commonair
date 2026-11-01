@@ -81,7 +81,7 @@ export function SiteHeader({
           <HugeiconsIcon icon={Search01Icon} />
         </Button>
       ) : null}
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ms-auto flex shrink-0 items-center gap-2">
         {desktopActions ? <div className="hidden items-center gap-2 md:flex">{desktopActions}</div> : null}
         {actions}
         {user}

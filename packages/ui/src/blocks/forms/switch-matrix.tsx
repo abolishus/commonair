@@ -44,7 +44,7 @@ export function SwitchMatrix({ label, columns, rows, onValueChange, ...props }: 
                 return (
                   <TableCell
                     key={column.id}
-                    className="flex items-center justify-between gap-2 text-left sm:table-cell sm:text-center"
+                    className="flex items-center justify-between gap-2 text-start sm:table-cell sm:text-center"
                   >
                     <span className="sm:hidden">{column.label}</span>
                     <Switch

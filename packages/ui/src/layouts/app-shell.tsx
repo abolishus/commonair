@@ -26,7 +26,7 @@ export function AppShell({
   const skip = (
     <a
       href={`#${mainId}`}
-      className="sr-only z-50 bg-background p-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+      className="sr-only z-50 bg-background p-2 focus:not-sr-only focus:fixed focus:top-2 focus:start-2"
     >
       {skipLabel}
     </a>

@@ -30,7 +30,7 @@ export function Timeline({ steps, updates, className, ...props }: TimelineProps)
     return (
       <ol className={cn("flex flex-col gap-3", className)} {...props}>
         {updates.map((item) => (
-          <li key={item.id} className="flex min-w-0 items-start gap-3 border-l pl-3">
+          <li key={item.id} className="flex min-w-0 items-start gap-3 border-s ps-3">
             <StatusBadge tone={item.tone} className="shrink-0">
               {item.status}
             </StatusBadge>
