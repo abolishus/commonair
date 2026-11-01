@@ -32,6 +32,22 @@ crypto and vectors, the DVR player seam, stubs and scaffolding), then wave 1 (W2
 W2-rollup-analytics, W2-enforcement-report, W2-dvr, W2-rehearsal) and wave 2 (W2b-attestations,
 W2b-group-appeals, W2-vod-watch with the chat replay panel). Handoff: `batch6/HANDOFF.md`.
 
+**Batch 6 contract step merged 2026-11-01** (six parallel parts, then a four-dimension independent
+review and fix). Migrations `0042_w2` / `0043_w2_protections` (splits with frozen shares once
+answered, suspense debits only by release/forfeit with a finance-authored audit row, two-approver
+write-offs with a fixed posting shape, the attestation chain trigger, `rule_ref`, rehearsal
+refusals); channel captions settings are a jsonb column (`channels.captions_settings`), DVR two
+columns. Contracts for every W2 procedure (stubs answer 501), `@commonair/tokens/attestation`
+(dual-licensed, vectors), `packages/{chat-filter,sim,captions}`, the origin route registry, media
+session hooks, the rehearsal gate (session marker for reconnects, shrunk to a 5-minute grace on
+not-ready; kick cooldown; invitee playback through an `rb` claim on origin tokens, mirrored in Go),
+`INTEGRITY_SIGNING_KEY` on the worker only, the player DVR seam, placeholder routes (the watch pages
+are `$channel_.vods.$vodId` / `$channel_.clips.$clipId` because `$channel.tsx` has no outlet),
+`w2-selectors.md` with `PENDING_W2_IDS`, `harness/src/w2/steps.ts` with `PENDING_W2_*`, the
+`captions` shard. Left for units: release/forfeit posting shapes (W2-splits); `rehearsal.ended` on
+publisher end (W2-rehearsal driver watches `broadcasts.ended_at`); `harness/compose.w2-captions.yaml`
+layering only into the captions shard (orchestrator, when W2-captions merges).
+
 **Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
 Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
 editing" for human review; Arabic waits for the next batch (N2-rtl still makes `packages/ui`
