@@ -59,6 +59,30 @@ safety, platform and media.
    Each is the exact query string (without `?`) that `/overlay/chat|alerts|goals` expects, which you
    can find in `apps/web/src/routes/overlay.*.tsx`.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written.
+
+1. **Giveaways** (ADR 0039, `GIVEAWAYS_ENABLED`; protected).
+   - A giveaway needs a live channel. Run your own short live stream for streamer1 with `Streamer`
+     (20–60 s) and do all the live work in that window: the giveaways, and the predictions below.
+     Add `media` to `after` only if you need its published keys.
+   - Open a keyword giveaway. Bulk viewers enter through chat or the API. Then close and draw it.
+     Re-run the draw with the harness's `rerunDraw` (`harness/src/w3/giveaways.ts`) and fail if it
+     doesn't match.
+   - Publish the drawn giveaway as `store.extra.interact.giveawayId`, for
+     `/$channel/giveaways/$giveawayId`.
+   - Leave a second giveaway closed but not drawn, if the API allows it.
+   - Add a verified-watching criterion only if the integrity scorer can verify viewers inside your
+     budget (about 45 s).
+2. **Fair predictions** (`prediction_bets` is protected now). Bets carry the viewer's media-clock
+   playhead, and a trigger checks them against `lock_media_ts`, so bet only through the API during
+   the live window. Follow the call shapes in `harness/src/w3/predictions.ts`. Moderators and
+   staff can't bet; leave them out of the bettor pool.
+3. **Surge raids** (`harness/src/w3/surge-raids.ts`) need `CHAT_SURGE_GUARD`. Seed one raid into a
+   channel with "Protect raids" on, if the overlay enables the guard. Otherwise mention it in
+   `notes`.
+
 ## Tests you must add
 
 - The tests in common.md.
@@ -66,11 +90,17 @@ safety, platform and media.
 - The overlay queries parse with the web route's search schema, if that schema is importable from
   `packages/**`. If it isn't, assert the key names.
 - The bot command set includes every command type the contract defines.
+- The test checks:
+  - a drawn giveaway's plan has entrants of at least `winnerCount`;
+  - `giveawayId` is published;
+  - no planned bettor is a moderator or staff.
 
 ## Routes you fill
 
 `/interact`, `/bot`, `/overlays`, `/overlay/chat`, `/overlay/alerts` and `/overlay/goals`. You also
 fill viewer1's points wherever they are shown.
+
+- `/$channel/giveaways/$giveawayId` (`giveawayId`), visited signed out.
 
 ## Done means
 

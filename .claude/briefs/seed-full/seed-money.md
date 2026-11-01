@@ -79,6 +79,26 @@ them yourself.
    - `revenuePeriod`, the UTC month that holds the revenue;
    - `paidCreators`, the list of creator handles.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written.
+
+1. **Revenue splits** (ADR 0013; every split table is protected):
+   - streamer1 proposes a 2-way crew split with `chanmod` through the API (`/crew`), and `chanmod`
+     accepts it.
+   - streamer2 has a split that was proposed but never accepted.
+   - The crew member needs a manual payout account, which the treasurer sets, and an account older
+     than `splitRecipientMinAccountAgeDays`. seed-social backdates `created_at` for that.
+   - Tips and subscription payments after acceptance post with the split, which gives
+     `revenue_split_postings` in hold.
+2. **Holds:**
+   - The W2 scenario (`harness/src/w2/splits.ts`) fakes a passed hold with owner-connection
+     fixtures. The seed can't do that (common.md rule 3), so seeded splits stay held, and the payout
+     run shows them as held. Say so in `notes`.
+   - `split_writeoff_proposals` comes from a chargeback on a released split. If you can't get one
+     within real time, leave it pending with a contract request for a test hook that ages a hold,
+     for example an `OPS_TEST_HOOKS` b7Tick job. Don't fake it.
+
 ## Tests you must add
 
 - The tests in common.md.
@@ -87,6 +107,9 @@ them yourself.
 - No float arithmetic: all amounts are integer cents.
 - Currency is explicit.
 - `subscriptionsByUser` agrees with the plan.
+- The test checks:
+  - planned split payments divide by the accepted shares with integer cents;
+  - the crew recipient has a payout account in the plan.
 
 ## Routes you fill
 
@@ -96,6 +119,8 @@ them yourself.
 - `/transparency`: revenue and costs
 - `/dashboard`: revenue tiles
 - the money events in `/$channel` chat history
+- `/crew`: streamer1's accepted split and streamer2's proposed one
+- `/transparency`: the split lines
 
 ## Done means
 

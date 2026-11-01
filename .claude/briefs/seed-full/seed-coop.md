@@ -16,8 +16,8 @@ Read these first:
 Do not look outside the repository.
 
 - Branch: `seed/coop`, from `main` after seed-social merges.
-- Wave 1. At run time you depend on `social` and `money`, so build against seed-money's published
-  keys.
+- Wave 1. At run time you depend on `social`, `money` and `safety` (the jury samples its cases), so build
+  against seed-money's and seed-safety's published keys.
 
 ## You own (write only these)
 
@@ -79,6 +79,30 @@ direct inserts.
 6. **Privacy check.** Run `leaksIn` / `rowLeaks` over the audit and event rows you caused. Ballot
    choices, comment bodies and emails must not leak.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written.
+
+1. **The advisory jury** (ADR 0038). Its rows are protected; use `harness/src/w3/jury.ts` for the
+   API and hook shapes, but not its owner-connection fixtures.
+   - **Dependency:** add `safety` to `after`. The jury samples closed T1/T2 cases and resolved
+     reports, and seed-safety makes them, publishing `store.extra.safety.juryCaseIds` and
+     `juryReportIds`. safety runs after social and media, so the order stays acyclic.
+   - **Enable it:** turn `jury.enabled` on through an ordinary proposal that passes. It counts as one
+     of your passed proposals.
+   - **Members:** at least 12 eligible members opt in (`jury_optins`). Eligibility includes worker
+     class and adult status, so read the rules; member1 is one of them. If eligibility needs
+     appointed workers, appoint bulk accounts through the governance path.
+   - **Draw:** run `JURY_JOBS.draw` through the `OPS_TEST_HOOKS` b7Tick hook, which seats a panel
+     and samples cases.
+   - **Votes:** seated jurors vote. On one case they all disagree with the outcome, which gives
+     `jury_flags`. On the rest they mostly agree.
+   - **Close:** run `JURY_JOBS.close`. Results are suppressed below k = 10, so sample enough cases
+     that the published results show.
+   - **Check:** no T0 or NCII case was sampled.
+   - **Timing:** the jury adds to your 5-minute budget, so run it beside the proposals. Report the
+     time.
+
 ## Tests you must add
 
 - The tests in common.md.
@@ -86,6 +110,10 @@ direct inserts.
   application each appear at `small`.
 - The planned votes give the planned tallies (`expectedTally`).
 - Electorate eligibility follows `qualifyingTier` / `minSubscriptionCents`.
+- The test checks:
+  - the planned jury reaches k = 10 cases;
+  - at least 12 eligible opt-ins;
+  - no T0 or NCII id in the planned sample.
 
 ## Routes you fill
 
@@ -95,6 +123,7 @@ direct inserts.
 - `/coop/patronage/` and `/coop/patronage/$periodId` (`patronagePeriodId`).
 - `/admin/coop`.
 - The co-op section of `/transparency`.
+- `/coop/jury`: member1's opt-in and the published results. The route's `expectData` becomes true at milestone wiring.
 
 ## Done means
 

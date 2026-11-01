@@ -64,10 +64,8 @@ Almost everything here is protected. Drive it through the API as the right role:
 5. **DMCA.**
    - Notices through `/dmca`'s API, against seeded clips and VODs: items in each state.
    - viewer2 receives a notice and files a counter-notice.
-6. **Integrity.** `integrity_flags` from the path the integrity scenario uses (fake viewers and
-   view-botting). If that path can only run during a live stream, take the flags from a run during
-   seed-media's recording window (a cross-unit request), or leave the table pending with a request
-   for an `OPS_TEST_HOOKS` entry.
+6. **Integrity.** `integrity_flags` come from seed-media's swarm recording (see "Batch 5–7
+   additions" below). Check that they exist, and make sure `/admin/integrity` lists them.
 7. **Legal and incidents.**
    - `legal` places a legal hold on a case.
    - `admin` opens incidents: one resolved, one ongoing.
@@ -76,6 +74,31 @@ Almost everything here is protected. Drive it through the API as the right role:
    - A bulk viewer (never a fixed login) requests account deletion and stays pending, because the
      grace period has not passed. Note which account it is.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written.
+
+1. **Signed attestations** (ADR 0014; protected).
+   - After seed-media's recordings end and roll up, run the `integrity-attestation` job for each
+     broadcast in `store.extra.media.recordedBroadcasts`. Use the `OPS_TEST_HOOKS` analytics tick.
+   - The worker signs with `INTEGRITY_SIGNING_KEY` and writes `integrity_signing_keys` itself.
+   - streamer1 creates `attestation_share_links` through the API.
+   - The 24 h display delay is skipped with the display bypass, which is a Valkey key, so it doesn't
+     survive a Valkey reset. Note that in `notes`.
+2. **Enforcement report cells.** `/transparency` suppresses every cell below k = 10. Make at least
+   10 real statements in two or more cells, through real actions on bulk accounts and never fixtures
+   (`harness/src/w2/enforcement.ts` tops cells up with owner-connection rows; don't).
+   - At least one appeal is overturned.
+   - At least one channel ban, which moves no count.
+3. **Group appeals** (`harness/src/w2/group-appeals.ts`). If seed-media's swarm recording left
+   excluded groups on `/analytics`, streamer1 appeals one of them and `admin` overturns it.
+4. **Jury inputs for seed-coop.**
+   - Publish `store.extra.safety.juryCaseIds`: closed T1/T2 cases, never T0 or NCII.
+   - Publish `store.extra.safety.juryReportIds`: resolved reports.
+   - Together they must hold at least 10 cases.
+5. **Integrity flags.** These come from seed-media's swarm recording (its brief runs one). Read them;
+   don't create them.
+
 ## Tests you must add
 
 - The tests in common.md.
@@ -83,6 +106,10 @@ Almost everything here is protected. Drive it through the API as the right role:
 - The run refuses a non-default NCMEC adapter.
 - Nothing personal reaches the append-only columns: case notes and statement text use fixed
   template text, not user free text. Assert this in the int test, if any direct writes remain.
+- The test checks:
+  - at least two enforcement cells reach k = 10 at `small`;
+  - the jury ids exclude T0 and NCII;
+  - attestations are planned for every recorded broadcast.
 
 ## Routes you fill
 
@@ -91,6 +118,7 @@ Almost everything here is protected. Drive it through the API as the right role:
 - `/settings/appeals` and `/settings/copyright`, visited as viewer2
 - `/transparency`: the enforcement counts
 - `/dmca` and `/takedown`: no data, but no errors either
+- `/attestations/verify`: a form, checked for errors only
 
 ## Done means
 

@@ -96,6 +96,31 @@ shape below is fixed: get it right first.
     - `categoryIds`;
     - `botUserId`.
 
+## Batch 5–7 additions (checked at `fc1fc4ff`)
+
+These tables and routes were added to your stub after this brief was first written. The three
+`watch_room*` tables used to be yours; they moved to seed-media, because a room opens on a live
+broadcast and you run before anything is live.
+
+1. **Account age.** Backdate `users.created_at`: the fixed logins to `ctx.now − historyDays`, and the
+   bulk accounts spread across that range. Age gates must pass, such as the split recipient's
+   `splitRecipientMinAccountAgeDays` (seed-money) and jury eligibility (seed-coop). Read each gate
+   in `@commonair/contracts` and the governance settings. If eligibility needs an adult or
+   age-attestation field, set it on the fixed logins and on about half of the bulk accounts.
+2. **Preferences** (batch 5, `/settings/preferences`). Set each account's language and display
+   preferences in the columns the page reads. The fixed logins use `en`; bulk accounts vary across
+   `en`, `es` and `en-XA`.
+3. **Move links and portability grants** (ADR 0037). These are protected, so use the API, after your
+   direct inserts and signed in as the owner:
+   - streamer1 creates move links: one active, plus one revoked (and one expired, if the API allows
+     an expiry). Publish the active link's nonce as `store.extra.social.moveLinkNonce`.
+   - A few bulk viewers follow through it. Those follows record `source = move_link`, and a trigger
+     keeps the count.
+   - Several viewers ask to be told when streamer1 moves (`follow_portability_grants`).
+   - Set "moved to" only on one bulk streamer, so its channel page shows the notice. Never set it
+     on streamer1.
+   - `harness/src/w3/portability/` shows the call shapes. Don't copy its owner-connection reads.
+
 ## Tests you must add
 
 As in common.md, plus:
@@ -110,6 +135,10 @@ As in common.md, plus:
   - better-auth can sign in with the seeded credential row (verify with `verifyPassword`);
   - the regex word filter passes the API's validation function, if that function lives in
     `packages/**`.
+- The test checks:
+  - `created_at` backdating passes every age gate you found;
+  - `moveLinkNonce` is published;
+  - the locale spread matches the plan.
 
 ## Routes you fill
 
@@ -119,6 +148,8 @@ These routes must show data:
 - `/settings/privacy`: sessions, passkeys, blocks, consents;
 - `/chat`: word filters, bans, emotes;
 - the social parts of `/dashboard`.
+- `/settings/preferences`: locales and preferences;
+- `/move` and `/m/$channel/$nonce` (`moveLinkNonce`).
 
 ## Done means
 

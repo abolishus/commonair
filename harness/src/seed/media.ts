@@ -27,6 +27,10 @@ const TABLES = [
   "analytics_share_links",
   // Batch 7: relay purge rows.
   "relay_purges",
+  // Batch 7: watch rooms open on a live broadcast, so they come from seed-media's recordings.
+  "watch_rooms",
+  "watch_room_members",
+  "watch_room_messages",
 ] as const;
 
 export const unit: SeedUnit = {
