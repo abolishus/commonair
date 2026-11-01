@@ -409,13 +409,15 @@ export function resolveStatementProblems(
   return out;
 }
 
-async function resolveAudit(h: DbHandle, reportId: string): Promise<ResolveAudit | null> {
+/** `audit_log.subject_id` is text (subjects of every kind), so the report id binds as text. */
+export async function resolveAudit(h: DbHandle, reportId: string): Promise<ResolveAudit | null> {
   const [a] = await h.sql<ResolveAudit[]>`
-    select id::text as id, details from audit_log where action = 'report.resolve' and subject_id = ${reportId}::uuid`;
+    select id::text as id, details from audit_log
+     where action = 'report.resolve' and subject_type = 'report' and subject_id = ${reportId}::text`;
   return a ?? null;
 }
 
-async function statementsOf(h: DbHandle, auditId: string): Promise<StatementOf[]> {
+export async function statementsOf(h: DbHandle, auditId: string): Promise<StatementOf[]> {
   return h.sql<StatementOf[]>`
     select recipient_user_id::text as "recipientUserId", source::text as source,
            restriction_kind::text as "restrictionKind", restriction_detail::text as "restrictionDetail",
