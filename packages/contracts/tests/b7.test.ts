@@ -4,7 +4,15 @@
 /** Batch 7 contract step (W3, N3, N4): enums, settings shapes, chat frames, events, internal shapes, procedures. */
 import type { z } from "zod";
 import { describe, expect, test } from "vite-plus/test";
-import { Channel, InstanceInfo, PredictionView, RelayPurgeFeed, SurgeState } from "../src/api/entities.ts";
+import {
+  Channel,
+  InstanceInfo,
+  PredictionView,
+  RELAY_PURGE_REASON,
+  RelayPurgeBatch,
+  RelayPurgeFeed,
+  SurgeState,
+} from "../src/api/entities.ts";
 import { contract } from "../src/api/router.ts";
 import {
   CHAT_LIMITS,
@@ -21,6 +29,7 @@ import {
   JURY_RULES,
   MOVE_LINK_RULES,
   RAID_RULES,
+  RELAY_PURGE_REASONS,
   REPORT_SUBJECTS,
   ROOM_AGE_BANDS,
   ROOM_LIMITS,
@@ -222,13 +231,33 @@ describe("api", () => {
     expect(input(contract.relays.purges).parse({ after: "12" })).toEqual({ after: 12 });
   });
 
-  test("the purge feed is a signed envelope", () => {
-    const feed = {
-      payload: { seq: 3, items: [{ seq: 3, prefix: `dvr/${id(1)}/`, reason: "vod_hidden" }] },
-      signature: "A".repeat(86),
-    };
+  test("the purge feed is a signed envelope over a base64url payload", () => {
+    const batch = { seq: 3, items: [{ seq: 3, prefix: `dvr/${id(1)}/`, reason: "vod_hidden" }] };
+    const payload = btoa(JSON.stringify(batch)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+    const feed = { payload, signature: "A".repeat(86) };
     expect(RelayPurgeFeed.safeParse(feed).success).toBe(true);
     expect(RelayPurgeFeed.safeParse({ ...feed, signature: "x" }).success).toBe(false);
+    expect(RelayPurgeFeed.safeParse({ ...feed, payload: batch }).success).toBe(false);
+    expect(RelayPurgeFeed.safeParse({ ...feed, payload: `${feed.payload}=` }).success).toBe(false);
+  });
+
+  test("the purge batch rules", () => {
+    const item = (seq: number, prefix = "live/alice/") => ({ seq, prefix, reason: "suspended" });
+    expect(RelayPurgeBatch.safeParse({ seq: 3, items: [item(2), item(3)] }).success).toBe(true);
+    expect(RelayPurgeBatch.safeParse({ seq: 9, items: [] }).success).toBe(true);
+    expect(RelayPurgeBatch.safeParse({ seq: 9, items: [], reset: true }).success).toBe(true);
+    for (const bad of [
+      { seq: 3, items: [item(3), item(2)] },
+      { seq: 4, items: [item(3)] },
+      { seq: 3, items: [item(3)], reset: true },
+      { seq: 3, items: [], reset: false },
+      { seq: 3, items: [item(3, "vod/x/")] },
+      { seq: 3, items: [item(3, "live/../x/")] },
+      { seq: 3, items: [item(3, "live/alice")] },
+      { seq: 3, items: [], extra: 1 },
+    ])
+      expect(RelayPurgeBatch.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    for (const reason of RELAY_PURGE_REASONS) expect(RELAY_PURGE_REASON.test(reason)).toBe(true);
   });
 
   test("every batch 7 procedure exists", () => {

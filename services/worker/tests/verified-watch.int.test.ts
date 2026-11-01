@@ -7,7 +7,7 @@
  */
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { KEYS, VerifiedWatchValue } from "@commonair/contracts/internal";
+import { KEYS, VERIFIED_WATCH_TTL_SECONDS, VerifiedWatchValue } from "@commonair/contracts/internal";
 import { ChannelChatSettings } from "@commonair/contracts/shapes";
 import { schema as s, uuidv7, type Database } from "@commonair/db";
 import { createTestDatabase, type TestDatabase } from "@commonair/db/testing";
@@ -15,7 +15,7 @@ import { createValkey } from "@commonair/service";
 import type { ChatGateConfig } from "../src/chat-gate/config.ts";
 import { verifiedWatchJitter } from "../src/chat-gate/unlocks.ts";
 import type { WorkerContext } from "../src/context.ts";
-import { writeVerifiedWatch } from "../src/integrity/verified-watch.ts";
+import { verifiedWatchMergeArgs, writeVerifiedWatch } from "../src/integrity/verified-watch.ts";
 import { quietLogger, VALKEY_URL } from "./fixtures.ts";
 
 const SECRET = "verified-watch-test-secret-0123456789abcdef";
@@ -216,5 +216,38 @@ describe("writeVerifiedWatch", () => {
     await session({ id: ch.id, broadcastId: old }, v, 3600);
     await writeVerifiedWatch(ctx, ON);
     expect(await read(ch.id, v)).toBeNull();
+  });
+
+  test("a raid carry for the same broadcast keeps its larger seconds and longer TTL", async () => {
+    const ch = await liveChannel();
+    const [carried, outgrown, stale] = [await user(), await user(), await user()];
+    for (const v of [carried, outgrown, stale]) await session(ch, v, 100);
+    // Longer than the pass's 600 s, so the test can tell the two TTLs apart.
+    const carryTtl = 3600;
+    // What the raid carry writes: the target's threshold as `s`, the longer TTL.
+    const carry = (v: string, sec: number, b = ch.broadcastId) =>
+      valkey.eval(...verifiedWatchMergeArgs(ch.id, v, { b, s: sec, f: 1 }, carryTtl));
+    await carry(carried, 5000);
+    await carry(outgrown, 10);
+    await carry(stale, 5000, uuidv7());
+    await writeVerifiedWatch(ctx, ON);
+
+    // Carry kept whole (larger s); TTL stays the carry's, not the pass's 600.
+    expect(await read(ch.id, carried)).toEqual({ b: ch.broadcastId, s: 5000, f: 1 });
+    expect(await valkey.ttl(KEYS.verifiedWatch(ch.id, carried))).toBeGreaterThan(VERIFIED_WATCH_TTL_SECONDS);
+    // The raider's own seconds are larger: the pass's value wins, still with the longer TTL.
+    expect(await read(ch.id, outgrown)).toEqual({
+      b: ch.broadcastId,
+      s: 100 - verifiedWatchJitter(SECRET, ch.broadcastId, outgrown),
+      f: 0,
+    });
+    expect(await valkey.ttl(KEYS.verifiedWatch(ch.id, outgrown))).toBeGreaterThan(VERIFIED_WATCH_TTL_SECONDS);
+    // A value for another broadcast is replaced, with the pass's own TTL.
+    expect((await read(ch.id, stale))?.b).toBe(ch.broadcastId);
+    expect(await valkey.ttl(KEYS.verifiedWatch(ch.id, stale))).toBeLessThanOrEqual(VERIFIED_WATCH_TTL_SECONDS);
+    // A later, shorter carry never shortens a longer key either.
+    await valkey.eval(...verifiedWatchMergeArgs(ch.id, carried, { b: ch.broadcastId, s: 1, f: 0 }, 5));
+    expect(await valkey.ttl(KEYS.verifiedWatch(ch.id, carried))).toBeGreaterThan(VERIFIED_WATCH_TTL_SECONDS);
+    expect((await read(ch.id, carried))?.s).toBe(5000);
   });
 });

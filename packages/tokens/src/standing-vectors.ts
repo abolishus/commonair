@@ -145,6 +145,7 @@ export async function purgeVectors() {
     ],
   };
   const empty: PurgeBatch = { seq: 42, items: [] };
+  const reset: PurgeBatch = { seq: 120, items: [], reset: true };
   const signed = await signPurgeBatch(key, batch);
   const canonical = JSON.stringify(batch);
   const raw = (text: string) => rawSign(key.privateKey, text);
@@ -199,6 +200,21 @@ export async function purgeVectors() {
     { name: "unknown field", signed: await raw(canonical.replace('"seq":42,', '"seq":42,"x":1,')), error: "malformed" },
     { name: "fractional seq", signed: await raw(withItems([], 42.5)), error: "malformed" },
     { name: "padded base64url payload", signed: { ...signed, payload: `${signed.payload}=` }, error: "malformed" },
+    // ADR 0016 A1.2: the signed reset for a relay behind the retained rows.
+    { name: "valid reset", signed: await signPurgeBatch(key, reset), error: null },
+    {
+      name: "reset carrying items",
+      signed: await raw(JSON.stringify({ seq: 42, items: batch.items, reset: true })),
+      error: "malformed",
+    },
+    { name: "reset false", signed: await raw('{"seq":120,"items":[],"reset":false}'), error: "malformed" },
+    { name: "reset null", signed: await raw('{"seq":120,"items":[],"reset":null}'), error: "malformed" },
+    { name: "reset as a string", signed: await raw('{"seq":120,"items":[],"reset":"true"}'), error: "malformed" },
+    {
+      name: "valid signature over a reset before items",
+      signed: await raw('{"seq":120,"reset":true,"items":[]}'),
+      error: "non_canonical",
+    },
   ];
 
   return {

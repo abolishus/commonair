@@ -49,27 +49,44 @@ What exists at `3bb7af9b`:
 ### 1. The fair draw: commit-reveal and HMAC-SHA256 with rejection sampling (decision (s))
 
 `packages/draw` (new, AGPL, Web Crypto only, no dependency) is the one draw for giveaways and the
-jury. Its vectors (`packages/draw/vectors.json`) are normative; the description below matches them.
+jury. Its vectors (`packages/draw/vectors.json`) are normative; the description below matches
+`packages/draw/src/index.ts` and `src/core.ts`.
 
-- **Seed and commitment.** The seed is 32 bytes from the CSPRNG. `commit(seed)` is the lowercase
-  hex SHA-256 of the seed bytes. The commitment is published when the draw opens (a giveaway opens;
-  a jury panel is created), **before** any entry or candidate exists, and an `audit_log` row records
+- **Seed and commitment.** A seed is lowercase hex of 16 to 64 random bytes; `newSeed()` gives
+  32 bytes from the CSPRNG. `commit(seed)` is the lowercase hex SHA-256 over the seed's **raw
+  bytes**, not its hex text. The commitment is published when the draw opens (a giveaway opens; a
+  jury panel is created), **before** any entry or candidate exists, and an `audit_log` row records
   it. The seed is revealed when the draw closes, with a second audit row; `verifyReveal` checks it
-  against the commitment. A trigger makes the commitment immutable and lets the seed be set once,
-  only if `sha256(seed) = seed_commitment` (`giveaways`, `jury_panels`).
-- **Draw.** `draw(seed, entries, count)` takes the entry list **sorted** (byte order of the
-  identifiers the caller publishes: pseudonyms for giveaways, user ids or case ids for the jury) and
-  returns `min(count, n)` distinct indices into it, in rank order. It is a partial Fisher-Yates
-  shuffle driven by HMAC-SHA256 keyed with the seed: for pick `j` (range `m = n − j`) and attempt
-  `c = 0, 1, …`, take the first 4 bytes of `HMAC-SHA256(seed, uint32be(j) ‖ uint32be(c))` as an
-  unsigned big-endian integer `r`; accept when `r < 2³² − (2³² mod m)` and use `r mod m`, else try
-  `c + 1`. Rejection sampling removes modulo bias. `count ≥ n` returns every entry in a random
-  order; `n = 0` or `count = 0` returns nothing.
+  against the commitment. A trigger (`commonair_seed_matches`, migration 0046) makes the
+  commitment immutable and lets the seed be set once, only if it is 16 to 64 bytes of lowercase
+  hex and `encode(sha256(decode(seed, 'hex')), 'hex') = seed_commitment` (`giveaways`,
+  `jury_panels`).
+- **Entries.** `draw` takes the list of identifiers the caller publishes (pseudonyms for
+  giveaways, user ids or case ids for the jury), **sorted and unique**: strictly ascending by
+  UTF-16 code unit, which is JavaScript's default `sort()` and not a database collation, so the
+  caller sorts in TypeScript. An unsorted list, a duplicate, more than 2²⁴ entries, a malformed
+  seed or a negative count throws.
+- **Draw.** `draw(seed, entries, count, domain = "")` returns `min(count, n)` distinct indices into
+  the list, in drawn (rank) order. It is a partial Fisher-Yates shuffle of `0 … n−1` fed by a PRF:
+  block `c` (`c = 0, 1, …`, one shared counter across all picks) is
+  `HMAC-SHA256(seed bytes, utf8("commonair-draw/v1\n<domain>\n<entries hash>\n<counter>"))`, where
+  `<entries hash>` is the lowercase hex SHA-256 of `JSON.stringify(entries)` (binding the draw to
+  the exact published list) and `<counter>` is `c` in decimal. The first 6 bytes of a block, big
+  endian, are a **48-bit sample** `x`. For pick `i` (range `m = n − i`), a sample with
+  `x ≥ 2⁴⁸ − (2⁴⁸ mod m)` is rejected and the next block is read; otherwise position `i` is swapped
+  with position `i + (x mod m)` and the value now at `i` is the pick. Rejection sampling removes
+  modulo bias. `count ≥ n` returns every index in random order; `n = 0` or `count = 0` returns
+  nothing.
+- **Prefix property.** For a fixed seed, list and domain, `draw(…, k)` is always a prefix of
+  `draw(…, k + 1)`: the giveaway re-draw rule (decision 2) takes the next index instead of drawing
+  again.
 - **Domain separation.** A caller that draws twice from one seed (the jury: seats, then cases)
-  separates the draws with a fixed domain label, as `packages/draw` and its vectors define it, so the
-  two draws are independent.
-- **Pseudonyms.** `pseudonym(salt, userId)` is the lowercase hex `HMAC-SHA256(salt, utf8(userId))`.
-  The salt is 32 random bytes, kept with the seed and revealed with it.
+  passes a different `domain` (at most 64 characters, no newline) for each draw, so the two draws
+  are independent: the jury uses `seats` and `cases` (both in the vectors); a giveaway uses the
+  default empty domain.
+- **Pseudonyms.** `pseudonym(salt, userId)` is the lowercase hex HMAC-SHA256 keyed with the salt's
+  raw bytes over `utf8(userId)`. The salt has the seed's format (`newSalt()` gives 32 random
+  bytes), is kept with the seed and is revealed with it.
 - **What it guarantees.** Once the commitment is published, no one can change the seed, so no one
   can pick winners after seeing the entries; anyone with the revealed seed, salt and published list
   can re-run the draw. The instance holds the seed between open and close (encrypted at rest with
@@ -154,13 +171,13 @@ Predictions stay points-only (ADR 0026 decision 3). Three rules make them fair:
   behind live (over 30 s) cannot bet, which is the price of bounding a lying client.
 - Raids into a protected channel are quiet for ten minutes except for the source's verified
   audience.
-- **Writer interaction (to settle in the contract step).** The integrity writer
-  (`verified-watch.ts`) sets `KEYS.verifiedWatch` unconditionally with `SET … EX 600`. Once a raider's
-  target session becomes gate-eligible, its next pass would overwrite the carried value with the
-  raider's (small) target seconds, and they would lose the carry until they reach the surge
-  threshold on the target. The writer must keep the larger `s` for the same `b` (and the longer
-  TTL) rather than overwrite; that file is outside W3-surge-raids' paths, so the change is a
-  contract request.
+- **Writer interaction (settled in the contract step).** The integrity writer
+  (`services/worker/src/integrity/verified-watch.ts`) no longer sets `KEYS.verifiedWatch` with a
+  plain `SET … EX 600`. Every writer, the scoring pass and the raid carry, uses its merge-write
+  (`VERIFIED_WATCH_MERGE`, `verifiedWatchMergeArgs`): for the same broadcast `b` the larger `s` and
+  the longer TTL are kept, so a raider whose target session becomes gate-eligible keeps the carry
+  until their own seconds pass it; a value for another broadcast is replaced. A worker
+  integration test covers it.
 
 ## Alternatives considered
 

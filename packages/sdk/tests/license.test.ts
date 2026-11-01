@@ -125,9 +125,12 @@ describe("SDK licence (ADR 0035)", () => {
     for (const f of INLINED_CONTRACT_FILES) expect(existsSync(path.join(ROOT, f))).toBe(true);
   });
 
-  // Until the orchestrator applies the dual-licence request (ADR 0035; the maintainer confirms it
-  // before the first publish), these files are AGPL-3.0-or-later only. Then this becomes:
-  //   every INLINED_CONTRACT_FILES header carries the dual licence (AGPL-3.0-or-later or Apache-2.0).
-  // oxlint-disable-next-line vitest/warn-todo -- pending the maintainer's dual-licence confirmation (ADR 0035)
-  test.todo("every inlined contract file's header allows Apache-2.0 (AGPL-3.0-or-later OR Apache-2.0)");
+  // Batch 7 decision (e): the maintainer confirmed the dual licence on 2026-11-01 (ADR 0035).
+  test("every inlined contract file's header is AGPL-3.0-or-later OR Apache-2.0", () => {
+    const wrong = INLINED_CONTRACT_FILES.filter((f) => {
+      const head = readFileSync(path.join(ROOT, f), "utf8").split("\n").slice(0, 3).join("\n");
+      return !new RegExp(`${LICENSE_TAG}: AGPL-3\\.0-or-later OR Apache-2\\.0\\s*$`, "m").test(head);
+    });
+    expect(wrong).toEqual([]);
+  });
 });

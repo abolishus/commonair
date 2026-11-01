@@ -117,19 +117,31 @@ moving is not a way to shed a suspension.
   loaded by the **worker only**, as the attestation key is (ADR 0014 decision 1). The worker
   publishes its public key and `kid` (`deriveKid`: the first 16 bytes of SHA-256 of the raw public
   key, base64url) to `portability_signing_keys` at start. The API serves the key history at
-  `/.well-known/commonair-portability`: each key's `kid`, public key, creation time and retirement
-  time. A retired key keeps verifying statements it signed.
-- **Fields** (`packages/tokens/src/standing.ts`, with vectors in `packages/tokens/vectors.json`
-  under `standing`): `v` (1), `kid`, `issuer` (the exporting instance's domain), `channelId`,
-  `issuedAt`, `expiresAt` (`issuedAt` + 30 days), `activeSuspension` (boolean), `legalHold`
-  (boolean), `upheld` (counts of upheld platform actions in the last 12 months, by tier: `t0`,
-  `t1`, `t2`) and `dmcaStrikes` (count in the same window). Integers and booleans only, no floats.
+  `/.well-known/commonair-portability` as `StandingKey` rows (the attestation key-history shape:
+  `kid`, `algorithm`, `publicKey`, `firstUsedAt`, `retiredAt`, `compromisedAt`). A retired key keeps
+  verifying statements it signed; a compromised one does not.
+- **Fields** (`StandingStatement` in `packages/tokens/src/standing.ts`, with vectors in
+  `packages/tokens/vectors.json` under `standing`), in this key order, which is the signed byte
+  order: `v` (1), `issuer` (the exporting instance's origin, `instanceSite()`, from which the
+  verifier fetches its keys), `kid`, `channelId`, `issuedAt`, `expiresAt` (`standingExpiry`:
+  `issuedAt` + 30 days; a statement is refused if `expiresAt` is not after `issuedAt` or more than
+  30 days later), `activeSuspension` (boolean), `legalHold` (boolean), `upheldActions` (counts of
+  upheld platform actions in the 12 months before `issuedAt`, by tier: `t0`, `t1`, `t2`) and
+  `dmcaStrikes` (count in the same window). Timestamps are UTC with milliseconds; otherwise
+  integers and booleans only, no floats. The schema is strict: an unknown field is refused, and a
+  new field needs a new `v`.
 - **No personal data.** Ids, counts and booleans; no names, reasons, free text or user ids other
   than the channel id (ADR 0004).
-- **Envelope.** `{ payload, signature }`, both base64url, the shape of receipts and attestations.
-  The signed bytes are the JSON of the Zod-parsed statement in schema key order. A verifier checks
-  the signature over the bytes first and parses after, so no JSON canonicalization is needed. It is
-  its own file, not part of the attestation code, and the SDK does not inline it.
+- **Envelope.** `SignedStanding` `{ payload, signature }`, both base64url, the shape of receipts
+  and attestations (`StandingStatementEnvelope` in `@commonair/contracts/portability` mirrors it; a
+  test in `packages/tokens` keeps them equal). The signed bytes are the JSON of the Zod-parsed
+  statement in schema key order. `verifyStanding(signed, key or key history, now)` checks the
+  signature over the bytes first, then parses, then refuses bytes that are not the canonical
+  encoding of what they parse to (`non_canonical`), a `kid` that does not match the key, a
+  statement issued more than 300 s in the future (`not_yet_valid`) and one at or past
+  `expiresAt` (`expired`). It is
+  its own file (`@commonair/tokens/standing`), not part of the attestation code, and the SDK does
+  not inline it.
 - **What it proves, and what it does not.** It proves what the issuing instance said about the
   channel on that instance at `issuedAt`. It does not bind the person importing it, and a hostile
   instance can sign anything about its own channels; a destination that does not trust the issuer

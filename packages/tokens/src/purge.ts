@@ -12,6 +12,10 @@
  * `payload.seq` is the cursor the relay sends as `after` next time: the last item's `seq`, or the
  * request's `after` when there is nothing new. Items are strictly ascending by `seq`. Replaying an
  * old batch only evicts again, so a batch carries no expiry.
+ *
+ * `reset: true` (present only when true) answers a relay whose `after` is older than the retained
+ * rows: it carries no items, and the relay evicts every cached `live/` and `dvr/` object, then
+ * continues from `seq`. Replaying a reset only empties the cache again, which is also safe.
  */
 import { z } from "zod";
 import { b64url, fromB64url, importVerifyKey, type SigningKey } from "./index.ts";
@@ -38,8 +42,14 @@ export type PurgeItem = z.infer<typeof PurgeItem>;
 
 /** Key order is the byte order of the payload (Go marshals the same struct order). */
 export const PurgeBatch = z
-  .strictObject({ seq, items: z.array(PurgeItem).max(PURGE_BATCH_MAX_ITEMS) })
+  .strictObject({
+    seq,
+    items: z.array(PurgeItem).max(PURGE_BATCH_MAX_ITEMS),
+    reset: z.literal(true).optional(),
+  })
   .superRefine((b, ctx) => {
+    if (b.reset && b.items.length > 0)
+      ctx.addIssue({ code: "custom", path: ["items"], message: "a reset carries no items" });
     for (let i = 1; i < b.items.length; i++)
       if ((b.items[i] as PurgeItem).seq <= (b.items[i - 1] as PurgeItem).seq)
         ctx.addIssue({ code: "custom", path: ["items", i, "seq"], message: "items are not strictly ascending" });

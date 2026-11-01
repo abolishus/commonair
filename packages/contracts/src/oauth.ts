@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /**
  * OAuth 2.1 for third-party apps (ADR 0027 §1-2): authorization code + PKCE (S256 only) for every

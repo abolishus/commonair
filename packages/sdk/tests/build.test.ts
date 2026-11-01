@@ -6,6 +6,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
+  assertInlinedLicenses,
   type BuildResult,
   buildSdk,
   contractTarget,
@@ -24,8 +25,8 @@ const OUT = path.join(PKG_DIR, ".cache", `build-test-${process.pid}`);
 let result: BuildResult;
 
 beforeAll(async () => {
-  // The contract files are AGPL-only until the dual licence lands (ADR 0035); the gate is tested below.
-  result = await buildSdk({ outDir: OUT, quiet: true, allowUnlicensedInline: true });
+  // A publishable build: every inlined file allows Apache-2.0 (ADR 0035, batch 7 decision (e)).
+  result = await buildSdk({ outDir: OUT, quiet: true });
 }, 120_000);
 afterAll(async () => {
   await rm(OUT, { recursive: true, force: true });
@@ -211,24 +212,25 @@ describe("the inlined-licence gate", () => {
     ).toEqual(["agpl.ts", "lookalike.ts", "none.ts"]);
   });
 
-  test("a publishable build refuses inlined files that do not allow Apache-2.0, and leaves no dist", async () => {
+  test("every inlined contract file allows Apache-2.0, so the publishable build above built", async () => {
     const ROOT = path.resolve(PKG_DIR, "../..");
     const texts: Record<string, string> = {};
     for (const f of INLINED_CONTRACT_FILES) texts[f] = await readFile(path.join(ROOT, f), "utf8");
-    const out = path.join(PKG_DIR, ".cache", `build-test-gate-${process.pid}`);
+    expect(filesNotAllowingApache(texts)).toEqual([]);
+    expect(existsSync(path.join(OUT, "index.js"))).toBe(true);
+  });
+
+  test("the gate refuses an inlined file that does not allow Apache-2.0", async () => {
+    const dir = path.join(PKG_DIR, ".cache", `gate-${process.pid}`);
+    await mkdir(dir, { recursive: true });
+    const tag = ["SPDX", "License", "Identifier"].join("-");
+    await writeFile(path.join(dir, "agpl.ts"), `// ${tag}: AGPL-3.0-or-later\nexport {};\n`);
     try {
-      // Refused while any inlined file is AGPL-only; once the dual licence lands, it builds.
-      const publishable = filesNotAllowingApache(texts).length === 0;
-      const err = await buildSdk({ outDir: out, quiet: true }).then(
-        () => null,
-        (e: unknown) => String(e),
-      );
-      expect(err === null ? "built" : /do not allow Apache-2\.0/.test(err) ? "refused" : err).toBe(
-        publishable ? "built" : "refused",
-      );
-      expect(existsSync(path.join(out, "index.js"))).toBe(publishable);
+      await expect(
+        assertInlinedLicenses([path.relative(path.resolve(PKG_DIR, "../.."), path.join(dir, "agpl.ts"))]),
+      ).rejects.toThrow(/do not allow Apache-2\.0/);
     } finally {
-      await rm(out, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
     }
-  }, 120_000);
+  });
 });

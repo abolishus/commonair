@@ -41,9 +41,14 @@ type PurgeItem struct {
 // PurgeBatch is the signed payload. Seq is the cursor for the next request:
 // the last item's seq, or the request's `after` when Items is empty. Field
 // order is the payload's byte order.
+//
+// Reset (present in the payload only when true) answers a relay whose cursor
+// is older than the retained rows: it carries no items, and the relay evicts
+// every cached live/ and dvr/ object, then continues from Seq.
 type PurgeBatch struct {
 	Seq   int64       `json:"seq"`
 	Items []PurgeItem `json:"items"`
+	Reset bool        `json:"reset,omitempty"`
 }
 
 // SignedPurgeBatch is the envelope: base64url payload bytes and signature.
@@ -54,7 +59,7 @@ type SignedPurgeBatch struct {
 
 // Validate applies the contract's schema rules.
 func (b PurgeBatch) Validate() error {
-	if b.Seq < 0 || b.Seq > maxSafeInt || len(b.Items) > PurgeBatchMaxItems {
+	if b.Seq < 0 || b.Seq > maxSafeInt || len(b.Items) > PurgeBatchMaxItems || (b.Reset && len(b.Items) > 0) {
 		return ErrMalformed
 	}
 	for i, it := range b.Items {
@@ -121,6 +126,11 @@ func VerifyPurgeBatch(pub ed25519.PublicKey, s SignedPurgeBatch) (PurgeBatch, er
 	}
 	items, hasItems := raw["items"]
 	if _, hasSeq := raw["seq"]; !hasSeq || !hasItems || len(items) == 0 || items[0] != '[' {
+		return PurgeBatch{}, ErrMalformed
+	}
+	// The TS schema is z.literal(true).optional(): false, null or a string is malformed, not
+	// merely non-canonical (which a bool would otherwise make it).
+	if reset, has := raw["reset"]; has && string(reset) != "true" {
 		return PurgeBatch{}, ErrMalformed
 	}
 	var b PurgeBatch

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 CommonAir contributors
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later OR Apache-2.0
 
 /** EventSub rules shared by the API (subscribe, WebSocket fan-out), the worker (webhooks) and the SDK. */
 import type { z } from "zod";

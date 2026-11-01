@@ -6,6 +6,9 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
 import {
   GoLiveSetting,
+  JuryCasesPerPanelSetting,
+  JuryEnabledSetting,
+  JuryPanelSizeSetting,
   PayoutRulesSetting,
   PlatformCutSetting,
   PointsAccrualSetting,
@@ -87,6 +90,9 @@ const VALUE_SHAPES: Readonly<Record<string, z.ZodType>> = {
   "discovery.ranking": DiscoveryRanking,
   "interact.points.accrual": PointsAccrualSetting,
   "notifications.goLive": GoLiveSetting,
+  "jury.enabled": JuryEnabledSetting,
+  "jury.panelSize": JuryPanelSizeSetting,
+  "jury.casesPerPanel": JuryCasesPerPanelSetting,
 };
 
 export type ClassifiedChanges =

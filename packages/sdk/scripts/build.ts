@@ -9,7 +9,7 @@
  * `dist/package.json` is written from `package.json` with exact dependency versions, and the README
  * and the Apache-2.0 licence text are copied. Every contract or tokens file the bundle inlines must allow
  * Apache-2.0 in its SPDX header (dual-licensed, ADR 0035), or the build fails; only a local or
- * dry-run build may pass `--allow-unlicensed-inline` to skip that.
+ * dry-run build may pass `--allow-unlicensed-inline` to skip that (no longer needed: batch 7 decision (e)).
  *
  *   bun run build [-- --out-dir <dir>] [--allow-unlicensed-inline]
  */

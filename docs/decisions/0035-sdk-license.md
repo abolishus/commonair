@@ -82,6 +82,12 @@ up to that commit is the maintainer's, under the DCO. No counsel was retained fo
 confirmation; it is listed for post-launch review with the other maintainer calls (batch 7
 decision (h)).
 
+Done in that step: the build reported ten files (`api/common.ts`, `api/entities.ts`,
+`api/router.ts`, `chat.ts`, `enums.ts`, `events.ts`, `eventsub.ts`, `oauth.ts`, `scopes.ts`,
+`shapes.ts`, the list in `packages/sdk/tests/inlined.ts`), and all ten now carry the dual
+licence. No `REUSE.toml` annotation covered them. `packages/sdk/tests/license.test.ts` checks every
+header, and `build.test.ts` builds without the flag.
+
 ## Alternatives considered
 
 - **AGPL-3.0-or-later like every package.** Rejected: it deters the bot and app authors the SDK is
