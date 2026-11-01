@@ -19,8 +19,10 @@
       "dependencies": {
         "@commonair/config": "workspace:*",
         "@commonair/contracts": "workspace:*",
+        "@commonair/draw": "workspace:*",
         "@commonair/i18n": "workspace:*",
         "@commonair/observability": "workspace:*",
+        "@commonair/twitch": "workspace:*",
         "@commonair/ui": "workspace:*",
         "@hugeicons/core-free-icons": "4.3.5",
         "@hugeicons/react": "1.1.10",
@@ -159,6 +161,15 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/draw": {
+      "name": "@commonair/draw",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/email": {
       "name": "@commonair/email",
       "version": "0.0.0",
@@ -177,6 +188,15 @@
         "@types/bun": "catalog:",
         "@types/nodemailer": "8.0.2",
         "@types/react": "19.3.0",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
+    "packages/federation": {
+      "name": "@commonair/federation",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
         "typescript": "catalog:",
         "vite-plus": "catalog:",
       },
@@ -395,6 +415,15 @@
         "vite-plus": "catalog:",
       },
     },
+    "packages/twitch": {
+      "name": "@commonair/twitch",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vite-plus": "catalog:",
+      },
+    },
     "packages/ui": {
       "name": "@commonair/ui",
       "version": "0.0.0",
@@ -460,7 +489,9 @@
         "@commonair/config": "workspace:*",
         "@commonair/contracts": "workspace:*",
         "@commonair/db": "workspace:*",
+        "@commonair/draw": "workspace:*",
         "@commonair/email": "workspace:*",
+        "@commonair/federation": "workspace:*",
         "@commonair/governance": "workspace:*",
         "@commonair/integrity": "workspace:*",
         "@commonair/interact": "workspace:*",
@@ -473,6 +504,7 @@
         "@commonair/service": "workspace:*",
         "@commonair/storage": "workspace:*",
         "@commonair/tokens": "workspace:*",
+        "@commonair/twitch": "workspace:*",
         "@orpc/contract": "catalog:",
         "@orpc/openapi": "catalog:",
         "@orpc/server": "catalog:",
@@ -605,7 +637,9 @@
         "@commonair/config": "workspace:*",
         "@commonair/contracts": "workspace:*",
         "@commonair/db": "workspace:*",
+        "@commonair/draw": "workspace:*",
         "@commonair/email": "workspace:*",
+        "@commonair/federation": "workspace:*",
         "@commonair/governance": "workspace:*",
         "@commonair/integrity": "workspace:*",
         "@commonair/interact": "workspace:*",
@@ -617,6 +651,7 @@
         "@commonair/sim": "workspace:*",
         "@commonair/storage": "workspace:*",
         "@commonair/tokens": "workspace:*",
+        "@commonair/twitch": "workspace:*",
         "@opentelemetry/api": "catalog:",
         "bullmq": "6.3.16",
         "drizzle-orm": "catalog:",
@@ -742,7 +777,11 @@
 
     "@commonair/db": ["@commonair/db@workspace:packages/db"],
 
+    "@commonair/draw": ["@commonair/draw@workspace:packages/draw"],
+
     "@commonair/email": ["@commonair/email@workspace:packages/email"],
+
+    "@commonair/federation": ["@commonair/federation@workspace:packages/federation"],
 
     "@commonair/governance": ["@commonair/governance@workspace:packages/governance"],
 
@@ -787,6 +826,8 @@
     "@commonair/tokens": ["@commonair/tokens@workspace:packages/tokens"],
 
     "@commonair/tracker": ["@commonair/tracker@workspace:services/tracker"],
+
+    "@commonair/twitch": ["@commonair/twitch@workspace:packages/twitch"],
 
     "@commonair/ui": ["@commonair/ui@workspace:packages/ui"],
 

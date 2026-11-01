@@ -35,6 +35,9 @@ var deliverySources = map[string]bool{"origin": true, "relay": true, "p2p": true
 // Same shape Zod's z.uuid() accepts (RFC 9562 versions 1-8, variant 10xx, nil and max).
 var uuidRE = regexp.MustCompile(`^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|[fF]{8}-[fF]{4}-[fF]{4}-[fF]{4}-[fF]{12})$`)
 
+// dvrPathRE mirrors DVR_PATH in packages/contracts/src/tokens.ts.
+var dvrPathRE = regexp.MustCompile(`^dvr/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
 // IsUUID reports whether s is a UUID in the form the contracts accept.
 func IsUUID(s string) bool { return uuidRE.MatchString(s) }
 
@@ -145,6 +148,11 @@ func parseClaims(b []byte) (PlaybackClaims, error) {
 			return c, ErrMalformed
 		}
 	}
+	// The contract's fourth refine (batch 7 decision (x)): a DVR path is exactly
+	// `dvr/<vodId>` (lowercase UUID), on an origin or a relay token.
+	if strings.HasPrefix(c.Path, "dvr/") && !dvrPathRE.MatchString(c.Path) {
+		return c, ErrMalformed
+	}
 	if c.IAT, err = jsonInt(raw["iat"]); err != nil {
 		return c, ErrMalformed
 	}
@@ -195,9 +203,15 @@ type Binding struct {
 var ErrBinding = errors.New("token not valid for this relay or path")
 
 // Check enforces src=relay, rid=this relay, and that hlsPath (for example
-// "live/alice/720p/index.m3u8") lies strictly under the token's path.
+// "live/alice/720p/index.m3u8" or "dvr/<vodId>/index.m3u8") lies strictly under
+// the token's path. A relay serves live paths and, since the signed purge
+// (batch 7 decision (x)), DVR paths `dvr/<vodId>`; any other token path (a VOD's
+// `vod/<id>`) is refused here even if it were signed for a relay.
 func (b Binding) Check(c PlaybackClaims, hlsPath string) error {
 	if c.Src != "relay" || c.RID == "" || !strings.EqualFold(c.RID, b.RelayID) {
+		return ErrBinding
+	}
+	if !strings.HasPrefix(c.Path, "live/") && !strings.HasPrefix(c.Path, "dvr/") {
 		return ErrBinding
 	}
 	if c.Path == "" || !strings.HasPrefix(hlsPath, c.Path+"/") || len(hlsPath) == len(c.Path)+1 {

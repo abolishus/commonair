@@ -191,3 +191,16 @@ export function randomTokenSecret(prefix = "", bytes = 32): string {
 
 export { decryptSecret, encryptSecret, signChatToken, verifyChatToken } from "./secrets.ts";
 export { signUnsubscribeToken, verifyUnsubscribeToken } from "./unsubscribe.ts";
+export {
+  PURGE_BATCH_MAX_ITEMS,
+  PURGE_PREFIX,
+  PURGE_PREFIX_MAX_LENGTH,
+  PURGE_REASON,
+  PurgeBatch,
+  type PurgeError,
+  PurgeItem,
+  type PurgeVerifyResult,
+  type SignedPurgeBatch,
+  signPurgeBatch,
+  verifyPurgeBatch,
+} from "./purge.ts";

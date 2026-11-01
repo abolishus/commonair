@@ -16,6 +16,9 @@
 import { z } from "zod";
 import { DELIVERY_SOURCES } from "./enums.ts";
 
+/** `dvrTokenPath(vodId)`: lowercase UUID, the form `uuidv7()` mints. */
+const DVR_PATH = /^dvr\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export const PlaybackClaims = z
   .object({
     v: z.literal(1),
@@ -30,8 +33,9 @@ export const PlaybackClaims = z
      * so the live `/hls` route (`services/origin/src/auth.ts`, exact path match) and the relay
      * (`relay/internal/tokens/playback.go` `Binding.Check`, path prefix) refuse a VOD token by
      * path mismatch; no separate token kind, crypto or vector. A DVR token (ADR 0016 decision 2)
-     * carries `dvrTokenPath(vodId)` = `dvr/<id>`, `src = "origin"`, the live session's id and the
-     * live lifetime; it is refused the same way by `/hls`, `/vod` and every relay.
+     * carries `dvrTokenPath(vodId)` = `dvr/<id>`, the live session's id and the live lifetime; it is
+     * refused the same way by `/hls` and `/vod`. Its `src` is `"origin"`, or `"relay"` with `rid`
+     * for a relay-served DVR (batch 7 decision (x), ADR 0016 Amendment 1).
      */
     path: z.string(),
     src: z.enum(DELIVERY_SOURCES),
@@ -62,6 +66,13 @@ export const PlaybackClaims = z
   .refine(
     (c) => c.rb === undefined || (c.src === "origin" && c.path.startsWith("live/")),
     "rb only on origin tokens for a live path",
+  )
+  .refine(
+    // Batch 7 decision (x): a DVR path is exactly `dvr/<vodId>`. Origin tokens and, now that the
+    // signed relay purge exists, relay tokens (`rid` set, so `Binding.Check` ties it to one relay)
+    // may carry it; the API mints relay DVR tokens only from W3-dvr-relay on.
+    (c) => !c.path.startsWith("dvr/") || DVR_PATH.test(c.path),
+    "a dvr path is dvr/<vodId>",
   );
 export type PlaybackClaims = z.infer<typeof PlaybackClaims>;
 

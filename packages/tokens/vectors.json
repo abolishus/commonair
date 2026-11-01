@@ -28,6 +28,19 @@
     },
     "token": "eyJ2IjoxLCJzaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJjaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJwYXRoIjoibGl2ZS9hbGljZSIsInNyYyI6Im9yaWdpbiIsImRtIjoxMTExMTEsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDAwMTIwfQ.WQqR64S5sudhxLmIaIcdEdLQ0Pcv1OVOQz7KAU-jl6mc2yItI0xRSwJvq6qYv8I3XYDfK3_TCtgNhywZOeB5DA"
   },
+  "playbackDvrRelay": {
+    "claims": {
+      "v": 1,
+      "sid": "01890000-0000-7000-8000-000000000001",
+      "cid": "01890000-0000-7000-8000-000000000002",
+      "path": "dvr/01890000-0000-7000-8000-000000000009",
+      "src": "relay",
+      "rid": "01890000-0000-7000-8000-000000000003",
+      "iat": 1700000000,
+      "exp": 1700000120
+    },
+    "token": "eyJ2IjoxLCJzaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJjaWQiOiIwMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDIiLCJwYXRoIjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOSIsInNyYyI6InJlbGF5IiwicmlkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiaWF0IjoxNzAwMDAwMDAwLCJleHAiOjE3MDAwMDAxMjB9.5xLyBJyETsZ3MRpV8AM19ziOW13guhcHr5WpoPjw5fmkc5l-xeRvB3aT4gB9obMPbEaeAFiuz67TfNpYwDu5BA"
+  },
   "receipt": {
     "payload": {
       "v": 1,
@@ -299,6 +312,349 @@
         "signed": {
           "payload": "eyJ2IjoxLCJraW5kIjoiYnJvYWRjYXN0Iiwib3JpZ2luIjoiaHR0cHM6Ly9pbnN0YW5jZS5leGFtcGxlIiwia2lkIjoiT2ZjVDBLWkVKVDhFVXBRaHVmVWJtdyIsImNoYW5uZWxJZCI6IjAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwYzAwMSIsImJyb2FkY2FzdElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBiMDAxIiwic2VxIjoxLCJwcmV2SGFzaCI6bnVsbCwic3VwZXJzZWRlcyI6bnVsbCwicGVyaW9kU3RhcnQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJwZXJpb2RFbmQiOiIyMDIzLTExLTE1VDAwOjEzOjIwLjAwMFoiLCJzaWduZWRBdCI6IjIwMjMtMTEtMTVUMDI6MTM6MjAuMDAwWiIsInJ1bGVzZXRWZXJzaW9uIjoxLCJ0aHJlc2hvbGRzSGFzaCI6IjAwM2NmNzVjYmE2NTFhZmMxN2UyMDJlZjIxMTk4ZjljYTVhMWRhNGE1ZTU1YTZmZmE3NmVjNTNjZTUxN2E0NTMiLCJwZWFrVmVyaWZpZWRDb25jdXJyZW50Ijo0MiwidmVyaWZpZWRWaWV3ZXJTZWNvbmRzIjoxNTEyMDAsImR1cmF0aW9uU2Vjb25kcyI6NzIwMCwidW52ZXJpZmllZFZpZXdlclNlY29uZHMiOjM2MDAsImV4Y2x1ZGVkVmlld2VyU2Vjb25kcyI6NzIwMCwicmVhc29uc0NvbW1pdG1lbnQiOiJlZWE0Njk2MDZkODFiYWU5MWMwYjIyMmU2NDkxY2EzMmZiYWM1ZTNjNTc0NzIyYjc4OWIzZDVlNThhOGI2Njk0IiwiZGVsaXZlcnlCeXRlcyI6eyJvcmlnaW4iOjEwNzM3NDE4MjQsInJlbGF5Ijo0Mjk0OTY3Mjk2LCJjZG4iOjB9fQ=",
           "signature": "vuanfyfjq3KTavVGIDFez-UfN22xRTQlZqWlwtk98j-ZLLCnKTSRFmd1_LJr0LQWjGFFJhsAmua0kFAw0QuaCg"
+        },
+        "error": "malformed"
+      }
+    ]
+  },
+  "standing": {
+    "note": "Decision (n). RFC 8032 test vector 3 key; kid is base64url of SHA-256(raw public key)[0:16].",
+    "privateKeyPkcs8": "MC4CAQAwBQYDK2VwBCIEIMWqjfQ/n4N77bdELzHct7Fm04U1B28JS4XOOi4LRFj3",
+    "publicKey": "_FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU",
+    "kid": "2sBz4BI73qWd2bO9qc9gNw",
+    "keys": [
+      {
+        "kid": "2sBz4BI73qWd2bO9qc9gNw",
+        "algorithm": "Ed25519",
+        "publicKey": "_FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU",
+        "firstUsedAt": "2023-11-14T22:13:20.000Z",
+        "retiredAt": null,
+        "compromisedAt": null
+      }
+    ],
+    "statement": {
+      "v": 1,
+      "issuer": "https://instance.example",
+      "kid": "2sBz4BI73qWd2bO9qc9gNw",
+      "channelId": "01890000-0000-7000-8000-00000000c001",
+      "issuedAt": "2023-11-14T22:13:20.000Z",
+      "expiresAt": "2023-12-14T22:13:20.000Z",
+      "activeSuspension": false,
+      "legalHold": false,
+      "upheldActions": {
+        "t0": 0,
+        "t1": 2,
+        "t2": 1
+      },
+      "dmcaStrikes": 1
+    },
+    "canonical": "{\"v\":1,\"issuer\":\"https://instance.example\",\"kid\":\"2sBz4BI73qWd2bO9qc9gNw\",\"channelId\":\"01890000-0000-7000-8000-00000000c001\",\"issuedAt\":\"2023-11-14T22:13:20.000Z\",\"expiresAt\":\"2023-12-14T22:13:20.000Z\",\"activeSuspension\":false,\"legalHold\":false,\"upheldActions\":{\"t0\":0,\"t1\":2,\"t2\":1},\"dmcaStrikes\":1}",
+    "signed": {
+      "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+      "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+    },
+    "cases": [
+      {
+        "name": "valid statement",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": null
+      },
+      {
+        "name": "valid statement reporting a suspension and a legal hold",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjp0cnVlLCJsZWdhbEhvbGQiOnRydWUsInVwaGVsZEFjdGlvbnMiOnsidDAiOjAsInQxIjoyLCJ0MiI6MX0sImRtY2FTdHJpa2VzIjoxfQ",
+          "signature": "d1nJtgHjCfOIC6c1mpN0lsij7Sf1niaKhpFsOuvdHhBBXRwEwEwoJ5RieyuwEfg1lr_XbPHNWstc0IIaNkNZBQ"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": null
+      },
+      {
+        "name": "a retired key still verifies",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "keys": [
+          {
+            "kid": "2sBz4BI73qWd2bO9qc9gNw",
+            "algorithm": "Ed25519",
+            "publicKey": "_FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU",
+            "firstUsedAt": "2023-11-14T22:13:20.000Z",
+            "retiredAt": "2023-11-20T00:00:00.000Z",
+            "compromisedAt": null
+          }
+        ],
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": null
+      },
+      {
+        "name": "just before expiry",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "now": "2023-12-14T22:13:19.999Z",
+        "error": null
+      },
+      {
+        "name": "at expiry",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "now": "2023-12-14T22:13:20.000Z",
+        "error": "expired"
+      },
+      {
+        "name": "issued in the future",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "now": "2023-11-14T22:00:00.000Z",
+        "error": "not_yet_valid"
+      },
+      {
+        "name": "suspension flag cleared after signing",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "d1nJtgHjCfOIC6c1mpN0lsij7Sf1niaKhpFsOuvdHhBBXRwEwEwoJ5RieyuwEfg1lr_XbPHNWstc0IIaNkNZBQ"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "bad_signature"
+      },
+      {
+        "name": "count changed after signing",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjAsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "bad_signature"
+      },
+      {
+        "name": "signed by another key under this kid",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "M4rCVooZrt75oFqvwBQEQGZu8-YYa6A8t4eheI1BPgeo4BHB_yIonqPvCKCojm2UvU7QGfaE9FA10P_QRFrODg"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "bad_signature"
+      },
+      {
+        "name": "kid not in the key history",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiJJZjR4MzZGVW9tRmlhX2hVQkdfU0p3IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "pzgx2CA4OXSBFp_Uj91tSCpcGL30x5bryyrSh5O6v8qLn922GQptsGItex1lqUicZOQ6c9h6Kt_ouBtiW1TwDg"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "unknown_kid"
+      },
+      {
+        "name": "compromised kid",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "nPi9SVay6rC2ifp-PWZFQFcS2p_WdW2a8gIjQn2yhwmWqerfXJcz_2awtx0F0XU-q_bMH2JkzAkeYRybbfIhDQ"
+        },
+        "keys": [
+          {
+            "kid": "2sBz4BI73qWd2bO9qc9gNw",
+            "algorithm": "Ed25519",
+            "publicKey": "_FHNjmIYoaONpH7QAjDwWAgW7RO6MwOsXeuRFUiQgCU",
+            "firstUsedAt": "2023-11-14T22:13:20.000Z",
+            "retiredAt": null,
+            "compromisedAt": "2023-11-20T00:00:00.000Z"
+          }
+        ],
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "compromised_kid"
+      },
+      {
+        "name": "valid signature over whitespace-formatted JSON",
+        "signed": {
+          "payload": "ewogInYiOiAxLAogImlzc3VlciI6ICJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLAogImtpZCI6ICIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwKICJjaGFubmVsSWQiOiAiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwKICJpc3N1ZWRBdCI6ICIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLAogImV4cGlyZXNBdCI6ICIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLAogImFjdGl2ZVN1c3BlbnNpb24iOiBmYWxzZSwKICJsZWdhbEhvbGQiOiBmYWxzZSwKICJ1cGhlbGRBY3Rpb25zIjogewogICJ0MCI6IDAsCiAgInQxIjogMiwKICAidDIiOiAxCiB9LAogImRtY2FTdHJpa2VzIjogMQp9",
+          "signature": "KuiDkvb8cKpo3KgdiuU_zvdG9ihM-_jsbhGZk8jGrHSFtsVRRbiE2sixH-YqalJsNoSHzhx3CQxp8exa1h54BA"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "non_canonical"
+      },
+      {
+        "name": "valid signature over a 31-day validity",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE1VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjF9",
+          "signature": "a5w7c2K0NvJuW3TF9LJUSEtMrnLXwu_a0OJlUhq9SkkB4Odchjhb_yIsQDt_GGWqwgH778fZcURVerQKW4P6Aw"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "malformed"
+      },
+      {
+        "name": "valid signature over a personal-data field",
+        "signed": {
+          "payload": "eyJ2IjoxLCJpc3N1ZXIiOiJodHRwczovL2luc3RhbmNlLmV4YW1wbGUiLCJraWQiOiIyc0J6NEJJNzNxV2QyYk85cWM5Z053IiwiY2hhbm5lbElkIjoiMDE4OTAwMDAtMDAwMC03MDAwLTgwMDAtMDAwMDAwMDBjMDAxIiwiaXNzdWVkQXQiOiIyMDIzLTExLTE0VDIyOjEzOjIwLjAwMFoiLCJleHBpcmVzQXQiOiIyMDIzLTEyLTE0VDIyOjEzOjIwLjAwMFoiLCJhY3RpdmVTdXNwZW5zaW9uIjpmYWxzZSwibGVnYWxIb2xkIjpmYWxzZSwidXBoZWxkQWN0aW9ucyI6eyJ0MCI6MCwidDEiOjIsInQyIjoxfSwiZG1jYVN0cmlrZXMiOjEsImVtYWlsIjoieCJ9",
+          "signature": "ELfzZWlwxdUYYA4neRqs_jknzqH3m51yuiLgqqRQmGkmwB2nSqv43ccCjQqxypNw5QNADgz-JoXFJX5cc2u0BA"
+        },
+        "now": "2023-11-20T00:00:00.000Z",
+        "error": "malformed"
+      }
+    ]
+  },
+  "purge": {
+    "note": "Decision (x). Signed with the playback test key (privateKeyPkcs8 / publicKey at the top of this file).",
+    "batch": {
+      "seq": 42,
+      "items": [
+        {
+          "seq": 40,
+          "prefix": "dvr/01890000-0000-7000-8000-000000000009/",
+          "reason": "vod_removed"
+        },
+        {
+          "seq": 41,
+          "prefix": "live/alice/",
+          "reason": "suspended"
+        },
+        {
+          "seq": 42,
+          "prefix": "live/alice/captions/",
+          "reason": "restricted"
+        }
+      ]
+    },
+    "canonical": "{\"seq\":42,\"items\":[{\"seq\":40,\"prefix\":\"dvr/01890000-0000-7000-8000-000000000009/\",\"reason\":\"vod_removed\"},{\"seq\":41,\"prefix\":\"live/alice/\",\"reason\":\"suspended\"},{\"seq\":42,\"prefix\":\"live/alice/captions/\",\"reason\":\"restricted\"}]}",
+    "signed": {
+      "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+      "signature": "G8y0xUP0Y6OkvWDB2powqhI7ERWAYNlBtRb4jF0iB5hF9vJ6mWP6Dgr1GEGZnTgpD4hJ3B5p6u7CDu6KSUClDw"
+    },
+    "cases": [
+      {
+        "name": "valid batch",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "G8y0xUP0Y6OkvWDB2powqhI7ERWAYNlBtRb4jF0iB5hF9vJ6mWP6Dgr1GEGZnTgpD4hJ3B5p6u7CDu6KSUClDw"
+        },
+        "error": null
+      },
+      {
+        "name": "valid empty batch",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W119",
+          "signature": "E274DjvJgEUzhcQqQZm0Q5sOnAI1wRxLlBxM3s8RvPanfUrU9cWhRk5db5Ss95i6gu7_-Tzw0_D2Ld5DMdL3DQ"
+        },
+        "error": null
+      },
+      {
+        "name": "prefix changed after signing",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9ib2IvIiwicmVhc29uIjoic3VzcGVuZGVkIn0seyJzZXEiOjQyLCJwcmVmaXgiOiJsaXZlL2FsaWNlL2NhcHRpb25zLyIsInJlYXNvbiI6InJlc3RyaWN0ZWQifV19",
+          "signature": "G8y0xUP0Y6OkvWDB2powqhI7ERWAYNlBtRb4jF0iB5hF9vJ6mWP6Dgr1GEGZnTgpD4hJ3B5p6u7CDu6KSUClDw"
+        },
+        "error": "bad_signature"
+      },
+      {
+        "name": "signed by another key",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "7mUAx8yOcGR9RYTSWhOa9N0u1MDWQtEK79GKHnhwqT4VpfSx-UwwFFc1-9pvdCLuWWGftbVjAaZyK86oej11Dw"
+        },
+        "error": "bad_signature"
+      },
+      {
+        "name": "signature truncated",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "G8y0xUP0Y6OkvWDB2powqhI7ERWAYNlBtRb4jF0iB5hF9vJ6mWP6Dgr1GEGZnTgpD4hJ3B5p6u7CDu6K"
+        },
+        "error": "bad_signature"
+      },
+      {
+        "name": "valid signature over whitespace-formatted JSON",
+        "signed": {
+          "payload": "ewogInNlcSI6IDQyLAogIml0ZW1zIjogWwogIHsKICAgInNlcSI6IDQwLAogICAicHJlZml4IjogImR2ci8wMTg5MDAwMC0wMDAwLTcwMDAtODAwMC0wMDAwMDAwMDAwMDkvIiwKICAgInJlYXNvbiI6ICJ2b2RfcmVtb3ZlZCIKICB9LAogIHsKICAgInNlcSI6IDQxLAogICAicHJlZml4IjogImxpdmUvYWxpY2UvIiwKICAgInJlYXNvbiI6ICJzdXNwZW5kZWQiCiAgfSwKICB7CiAgICJzZXEiOiA0MiwKICAgInByZWZpeCI6ICJsaXZlL2FsaWNlL2NhcHRpb25zLyIsCiAgICJyZWFzb24iOiAicmVzdHJpY3RlZCIKICB9CiBdCn0",
+          "signature": "9pNgSpd1FEIHetR3hgGE2ayAEyBxUgrsoZ4qc39RLIiCi88Q8Sj3-gi47yzPWfGSIOVnoCZWRdpdDY_E2BTMDA"
+        },
+        "error": "non_canonical"
+      },
+      {
+        "name": "valid signature over reordered keys",
+        "signed": {
+          "payload": "eyJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XSwic2VxIjo0Mn0",
+          "signature": "m4kAkHj5Z5JeN9HEmGikxdp9zUypBgo7FYjK2Z4ylmAnu8psRnaF7VJXpNHgjuoTz74W6frIIBnBZJKWlyjgAg"
+        },
+        "error": "non_canonical"
+      },
+      {
+        "name": "items out of order",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MiwicHJlZml4IjoibGl2ZS9hbGljZS9jYXB0aW9ucy8iLCJyZWFzb24iOiJyZXN0cmljdGVkIn0seyJzZXEiOjQxLCJwcmVmaXgiOiJsaXZlL2FsaWNlLyIsInJlYXNvbiI6InN1c3BlbmRlZCJ9XX0",
+          "signature": "_UusNkIjT6OtQ9rymT4Fj67AKlINrnBJDxmq_ivmy4kxM9ygon8LbhF221StdRLTdyXA7nYtPkR9bRL5ITbpCg"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "duplicate item seq",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MCwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "f7dv0wA0_FdW7IXj57MT_SPOZTyYTa7kLys6IzU7aOLhTJ9KNSX68TV559lvIk-JZztTMl94MUWySe8m5ez9Aw"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "seq is not the last item's",
+        "signed": {
+          "payload": "eyJzZXEiOjQzLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "aiKGpDDGKKiPjCvmKTOfr8EAuqtTP3RG3JF1UMsdQCcO2b3rOMJ-Z6_Cixad9QQljkqbTcvij0nlpLcxk7znAQ"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "path traversal prefix",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MiwicHJlZml4IjoibGl2ZS8uLi9zZWNyZXQvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "BpBE-FQuXronu3v3iWSuzaJS526X8ZezZILetqTKQIs09NzRKVhH8x4HUG8nXD3QM2Knh5FGs9jy2kMC8EWZDw"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "prefix outside live and dvr",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MiwicHJlZml4Ijoidm9kL3gvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "pjBbUzMD-8OdR5Xj2nb8-XvcLpDVcJOV_mLYMiRmokmla4lU64ErgP2IpXyGWkBeMWS2jVXvF00gBj4KuXBzDg"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "prefix without a trailing slash",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MiwicHJlZml4IjoibGl2ZS9hbGljZSIsInJlYXNvbiI6InJlc3RyaWN0ZWQifV19",
+          "signature": "FFE_wuLZOjZwBKlbusPYg_jUldXaWbxlXiRkblv7EEniArK6coM7OaCvyL4m7MNfhwoeyWP9uMnC0mWPnOjuAQ"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "unknown field",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJ4IjoxLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0",
+          "signature": "wMB-cuDtDaWqZ2HpWKVeEacku6vvI2DJFBjJfZAhglWYs6GWjLkdDh68gzCWPxYIa2UwvSYX16pL0tjeR45nDw"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "fractional seq",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLjUsIml0ZW1zIjpbXX0",
+          "signature": "5ikDPVtIznNINZ191gOKZfzytvNqaMiyf8aOz5XO_ylGm4bml-JGN_RctzBHJPn0Ixi0nbeVfj7ajs2B4yyhAA"
+        },
+        "error": "malformed"
+      },
+      {
+        "name": "padded base64url payload",
+        "signed": {
+          "payload": "eyJzZXEiOjQyLCJpdGVtcyI6W3sic2VxIjo0MCwicHJlZml4IjoiZHZyLzAxODkwMDAwLTAwMDAtNzAwMC04MDAwLTAwMDAwMDAwMDAwOS8iLCJyZWFzb24iOiJ2b2RfcmVtb3ZlZCJ9LHsic2VxIjo0MSwicHJlZml4IjoibGl2ZS9hbGljZS8iLCJyZWFzb24iOiJzdXNwZW5kZWQifSx7InNlcSI6NDIsInByZWZpeCI6ImxpdmUvYWxpY2UvY2FwdGlvbnMvIiwicmVhc29uIjoicmVzdHJpY3RlZCJ9XX0=",
+          "signature": "G8y0xUP0Y6OkvWDB2powqhI7ERWAYNlBtRb4jF0iB5hF9vJ6mWP6Dgr1GEGZnTgpD4hJ3B5p6u7CDu6KSUClDw"
         },
         "error": "malformed"
       }
