@@ -95,4 +95,25 @@ describe("rehearsal moderation samples", () => {
     expect(queue.scans).toHaveLength(1);
     expect(lines.join("\n")).toContain("could not count a rehearsal moderation sample");
   });
+
+  test("the scan does not wait for the count: the frame is queued while the count is in flight", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let queuedBeforeCount = false;
+    const inner = fakeValkey();
+    const valkey = fakeValkey({
+      incr: async (k: string) => {
+        await gate;
+        return inner.incr(k);
+      },
+    });
+    const { moderation, queue } = await makeModeration({ valkey });
+    const done = moderation.scanLiveFrame({ ...base, kind: "rehearsal" }, fakeFrame("1", 90), new Date());
+    await new Promise((r) => setTimeout(r, 20));
+    queuedBeforeCount = queue.scans.length === 1;
+    release();
+    expect(await done).toBe("clean");
+    expect(queuedBeforeCount).toBe(true);
+    expect(inner.counters.get(key)).toBe(1);
+  });
 });

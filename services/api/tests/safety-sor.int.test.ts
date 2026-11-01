@@ -327,4 +327,84 @@ describe("the enforcement report counts a stated staff action once", () => {
       });
     expect(value(cellOf(await report())?.count)).toBe(K + 1);
   });
+
+  test("a statement with no appeal leaves the action's appeals counted on the action", async () => {
+    // A channel suspended over someone else's message: stated to the owner with no appeal, while
+    // the action's target can still appeal the action itself.
+    const SPAM = "honesty.spam";
+    const spamCell = (r: EnforcementReport) => r.rows.find((x) => x.ruleRef === `${SPAM}@1` && x.tier === null);
+    const at = new Date(Date.now() - DAY);
+    const targets = await Promise.all(Array.from({ length: K }, () => signUpAndSignIn(api)));
+    const written: { auditId: string; owner: string; channelId: string }[] = [];
+    for (const t of targets) {
+      const channelId = await channelOf(t.userId);
+      const [m] = await db()
+        .insert(schema.modActions)
+        .values({
+          scope: "platform",
+          moderatorId: mod.userId,
+          targetUserId: reporter.userId,
+          channelId,
+          action: "suspend_channel",
+          reason: "r",
+          ruleRef: `${SPAM}@1`,
+          createdAt: at,
+        })
+        .returning({ id: schema.modActions.id });
+      await db().insert(schema.appeals).values({
+        appellantId: reporter.userId,
+        kind: "moderation",
+        subjectType: "moderation_action",
+        subjectId: m!.id,
+        body: "b",
+        status: "overturned",
+      });
+      const auditId = uuidv7();
+      await db()
+        .insert(schema.auditLog)
+        .values({
+          id: auditId,
+          actorType: "user",
+          actorId: mod.userId,
+          action: "report.resolve",
+          subjectType: "report",
+          subjectId: uuidv7(),
+          channelId,
+          details: { suspended: true, modActionId: m!.id },
+          createdAt: at,
+        });
+      written.push({ auditId, owner: t.userId, channelId });
+    }
+    const before = await report();
+    expect(value(spamCell(before)?.count)).toBe(K);
+    expect(value(spamCell(before)?.appealed)).toBe(K);
+    expect(value(spamCell(before)?.overturned)).toBe(K);
+
+    for (const w of written)
+      await db()
+        .insert(schema.enforcementStatements)
+        .values({
+          id: uuidv7(),
+          sourceAuditId: w.auditId,
+          sourceAction: "report.resolve",
+          recipientUserId: w.owner,
+          channelId: w.channelId,
+          contentType: "channel",
+          contentId: w.channelId,
+          restrictionKind: "service",
+          restrictionDetail: "suspended",
+          facts: { code: "moderator_review", caseId: uuidv7(), caseOrigin: "human", decision: "suspend" },
+          source: "notice_art16",
+          automatedDetection: false,
+          automatedDecision: "not",
+          groundKind: "terms",
+          clauseId: SPAM,
+          clauseVersion: 1,
+          guidelinesDocumentId: docs.guidelines,
+          noticeDocumentId: docs.notice,
+          createdAt: at,
+        });
+    const figures = (r: EnforcementReport) => ({ rows: r.rows, total: r.total, ncii: r.ncii });
+    expect(figures(await report())).toEqual(figures(before));
+  });
 });

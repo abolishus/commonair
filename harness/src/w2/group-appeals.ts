@@ -77,7 +77,7 @@ export interface OverturnWeights {
 /** Mirror of the scorer's noisy-OR (`packages/integrity/src/signals/combine.ts`), rounded at 1e-6. */
 export function noisyOr(scores: readonly number[]): number {
   let keep = 1;
-  for (const x of scores) keep *= 1 - Math.min(1, Math.max(0, x));
+  for (const x of scores) keep *= 1 - (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0);
   return Math.round((1 - keep) * 1e6) / 1e6;
 }
 
@@ -85,24 +85,33 @@ export function noisyOr(scores: readonly number[]): number {
 export const stillInGroup = (sessions: readonly StoredSession[], category: ExclusionCategory): string[] =>
   sessions.filter((s) => s.verdict === "excluded" && firstReasonCategory(s.reasons) === category).map((s) => s.id);
 
+/** Mirror of `NON_SIGNAL_REASONS` in packages/integrity/src/rescore.ts: reasons that are not signals. */
+const NON_SIGNAL_REASONS: ReadonlySet<string> = new Set([
+  "allowed_on_appeal",
+  "fetch_unjudged",
+  "insufficient_heartbeats",
+  "media_unconfirmed",
+]);
+
 /**
  * Where an overturn of `category` puts a session with these stored reasons (`rescore.ts`): null
  * when it is verified (or pending) again, else the group it moves to (the first signal left).
- * Nothing of another category left: null. With `weights` (decision (g)) the signals left are
- * weighed: at most the threshold is null too, and a signal left with no flag keeps the session
- * excluded (the re-score fails closed). Codes the harness does not know are not signals here.
+ * Without `weights` (the batch 6 rule): nothing of another category left is null. With `weights`
+ * (decision (g)) the signals left are weighed: at most the threshold is null too, and what cannot
+ * be weighed (a signal left with no flag, or a code no signal knows, which is the `other` group)
+ * keeps the session excluded, as the re-score fails closed.
  */
 export function expectedAfterOverturn(
   reasons: readonly string[] | null,
   category: ExclusionCategory,
   weights?: { threshold: number; flags: Readonly<Record<string, number>> },
 ): ExclusionCategory | null {
-  const left = (reasons ?? []).filter((r) => firstReasonCategory([r]) !== category);
+  const left = (reasons ?? []).filter((r) => NON_SIGNAL_REASONS.has(r) || firstReasonCategory([r]) !== category);
   const next = firstReasonCategory(left);
-  if (next === "other") return null;
-  if (!weights) return next;
-  const signals = left.filter((r) => firstReasonCategory([r]) !== "other");
-  if (signals.some((r) => weights.flags[r] === undefined)) return next;
+  if (!weights) return next === "other" ? null : next;
+  const signals = left.filter((r) => !NON_SIGNAL_REASONS.has(r));
+  const unweighable = signals.some((r) => firstReasonCategory([r]) === "other" || weights.flags[r] === undefined);
+  if (unweighable) return next;
   return noisyOr(signals.map((r) => weights.flags[r] ?? 0)) > weights.threshold ? next : null;
 }
 

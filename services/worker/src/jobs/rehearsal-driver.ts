@@ -322,7 +322,13 @@ async function flagged(db: Database, broadcastId: string): Promise<boolean> {
  * already counted past.
  */
 export async function moderationSamples(valkey: ValkeyClient, broadcastId: string, shown: number): Promise<number> {
-  const raw = await valkey.get(KEYS.rehearsalModerationSamples(broadcastId));
+  let raw: string | null;
+  try {
+    raw = await valkey.get(KEYS.rehearsalModerationSamples(broadcastId));
+  } catch {
+    // A missed read keeps the shown count; the rest of the report is still written.
+    return shown;
+  }
   const n = raw === null ? 0 : Number.parseInt(raw, 10);
   return Number.isSafeInteger(n) && n > shown ? n : shown;
 }

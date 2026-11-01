@@ -131,4 +131,13 @@ describe("moderationSamples", () => {
     expect(await moderationSamples(valkey("3").client, B, 5)).toBe(5);
     expect(await moderationSamples(valkey("nope").client, B, 5)).toBe(5);
   });
+
+  test("a failed read keeps the shown count instead of failing the report write", async () => {
+    const down = {
+      get: async () => {
+        throw new Error("valkey down");
+      },
+    } as unknown as ValkeyClient;
+    expect(await moderationSamples(down, B, 7)).toBe(7);
+  });
 });

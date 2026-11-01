@@ -215,6 +215,24 @@ describe("the threshold rule", () => {
     expect(expectedAfterOverturn(["datacenter_ip", "fetch_pattern"], "datacenter")).toBe("playback_pattern");
   });
 
+  it("a code no signal knows, left over, keeps the session excluded in `other`; an `other` overturn drops it", () => {
+    expect(expectedAfterOverturn(["datacenter_ip", "admin_decision"], "datacenter", w())).toBe("other");
+    expect(expectedAfterOverturn(["admin_decision", "insufficient_heartbeats"], "other", w())).toBeNull();
+    // Reasons that are not signals never block a restore.
+    expect(
+      expectedAfterOverturn(
+        ["datacenter_ip", "fetch_unjudged", "media_unconfirmed", "allowed_on_appeal"],
+        "datacenter",
+        w(),
+      ),
+    ).toBeNull();
+  });
+
+  it("noisyOr ignores a score that is not finite, as the scorer's clamp does", () => {
+    expect(noisyOr([Number.NaN, 0.5])).toBe(0.5);
+    expect(noisyOr([Number.POSITIVE_INFINITY])).toBe(0);
+  });
+
   const weights = (byId: Record<string, Record<string, number>>, threshold = 0.7): OverturnWeights => ({
     threshold,
     flags: new Map(Object.entries(byId)),

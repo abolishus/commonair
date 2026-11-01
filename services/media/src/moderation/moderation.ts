@@ -294,9 +294,19 @@ export class MediaModeration {
    * to the classifier (unless the queue is backed up, which drops the classifier job only).
    */
   async scanLiveFrame(target: LiveTarget, frame: DecodedFrame, capturedAt: Date): Promise<"clean" | "matched"> {
+    this.deps.metrics.frame("sampled");
+    // The rehearsal count (which never throws) runs beside the scan rather than ahead of it, so a
+    // first-frame kind read or the Valkey round trips do not delay matching.
+    const counted = this.countRehearsalSample(target);
+    try {
+      return await this.scanSampled(target, frame, capturedAt);
+    } finally {
+      await counted;
+    }
+  }
+
+  private async scanSampled(target: LiveTarget, frame: DecodedFrame, capturedAt: Date): Promise<"clean" | "matched"> {
     const { metrics } = this.deps;
-    metrics.frame("sampled");
-    await this.countRehearsalSample(target);
     const { pdq, match } = this.matchFrame(frame);
     if (pdq.quality < PDQ_MIN_QUALITY) metrics.frame("low_quality");
     if (match) {
