@@ -26,6 +26,7 @@
     "@commonair/observability": "workspace:*",
     "@commonair/payments": "workspace:*",
     "@commonair/service": "workspace:*",
+    "@commonair/sim": "workspace:*",
     "@commonair/storage": "workspace:*",
     "@commonair/tokens": "workspace:*",
     "@opentelemetry/api": "catalog:",
