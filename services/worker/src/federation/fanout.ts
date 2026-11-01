@@ -11,9 +11,9 @@
  * - `moderation.restriction` restricted → `Delete` of that broadcast's `Note`.
  * - `channel.suspension` suspended → `Delete` of the actor to every follower inbox, then the
  *   followers are removed (recorded choice: remote followers are lost for good).
- * - `channel.update` while the streamer's setting is off → `Delete` of the actor, followers
- *   removed (the setting went off). Today `b7JobsFor` routes no `channel.update`; the sweep
- *   catches a channel turned off (`sweepDisabledActors`) until it does.
+ * - `channel.federation` (requested internal event; `channel.update` too) while the streamer's
+ *   setting is off → `Delete` of the actor, followers removed (the setting went off). Today
+ *   `b7JobsFor` routes neither; the daily sweep catches a channel turned off until it does.
  *
  * Nothing happens unless `FEDERATION_ENABLED` and the channel federates now (both re-checked
  * here: a setting can change between the relay and this job). An object whose `Delete` went out
@@ -141,11 +141,11 @@ async function sendDelete(
 /**
  * `Delete` of the actor to every follower inbox, then the followers go. Used for suspension and
  * for a channel whose setting went off. The actor row (and key) stays for those two: the
- * deliveries sign with it. Account deletion has its own path (`deletion/federation.ts`).
+ * deliveries sign with it. `occasion` (the event id) gives each occurrence its own activity id. Account deletion has its own path (`deletion/federation.ts`).
  */
-export async function deleteActor(ctx: Ctx, ch: LocalChannel): Promise<FanoutResult> {
+export async function deleteActor(ctx: Ctx, ch: LocalChannel, occasion: string): Promise<FanoutResult> {
   const inboxes = await followerInboxes(ctx.db, ch.id);
-  const n = await enqueueDeliveries(ctx, ch.id, null, deleteActorActivity(ch.urls), inboxes);
+  const n = await enqueueDeliveries(ctx, ch.id, null, deleteActorActivity(ch.urls, occasion), inboxes);
   await ctx.db.delete(s.federationFollowers).where(eq(s.federationFollowers.channelId, ch.id));
   return { outcome: "actor_deleted", deliveries: n };
 }
@@ -194,27 +194,35 @@ async function vodState(
   isPublic: boolean,
 ): Promise<FanoutResult> {
   if (!isPublic) return sendDelete(ctx, cfg, ch, "video", "vod", vodId);
-  const [v] = await ctx.db
-    .select({
-      channelId: s.vods.channelId,
-      title: s.vods.title,
-      status: s.vods.status,
-      visibility: s.vods.visibility,
-      storagePrefix: s.vods.storagePrefix,
-      durationSeconds: s.vods.durationSeconds,
-      thumbnailKey: s.vods.thumbnailKey,
-      removedReason: s.vods.removedReason,
-      broadcastMature: s.broadcasts.mature,
-    })
-    .from(s.vods)
-    .innerJoin(s.broadcasts, eq(s.broadcasts.id, s.vods.broadcastId))
-    .where(eq(s.vods.id, vodId));
-  // Re-read: only a VOD public right now federates (subscriber and private VODs never do).
-  if (!v || v.channelId !== ch.id || v.status !== "ready" || v.visibility !== "public" || v.removedReason !== null)
-    return SKIP;
+  // The VOD row is locked from the re-read until its object row exists: a concurrent change to
+  // non-public waits, and its job then finds the object to delete (never a publish after it).
   const now = ctx.now();
-  const row = await objectFor(ctx.db, ch.id, "video", "vod", vodId, now);
-  if (row.deletedAt) return SKIP;
+  const found = await ctx.db.transaction(async (tx) => {
+    const [v] = await tx
+      .select({
+        channelId: s.vods.channelId,
+        title: s.vods.title,
+        status: s.vods.status,
+        visibility: s.vods.visibility,
+        storagePrefix: s.vods.storagePrefix,
+        durationSeconds: s.vods.durationSeconds,
+        thumbnailKey: s.vods.thumbnailKey,
+        removedReason: s.vods.removedReason,
+        broadcastMature: s.broadcasts.mature,
+        categoryMature: s.categories.mature,
+      })
+      .from(s.vods)
+      .innerJoin(s.broadcasts, eq(s.broadcasts.id, s.vods.broadcastId))
+      .leftJoin(s.categories, eq(s.categories.id, s.broadcasts.categoryId))
+      .where(eq(s.vods.id, vodId))
+      .for("update", { of: s.vods });
+    // Re-read: only a VOD public right now federates (subscriber and private VODs never do).
+    if (!v || v.channelId !== ch.id || v.status !== "ready" || v.visibility !== "public" || v.removedReason !== null)
+      return null;
+    return { v, row: await objectFor(tx, ch.id, "video", "vod", vodId, now) };
+  });
+  if (!found || found.row.deletedAt) return SKIP;
+  const { v, row } = found;
   // Only a thumbnail under the public prefix has a public URL; a token URL never federates.
   const thumb = v.thumbnailKey?.startsWith(vodPrefix(vodId, "public")) ? mediaUrl(cfg, v.thumbnailKey) : null;
   const video = mediaVideo({
@@ -225,7 +233,7 @@ async function vodState(
     durationSeconds: v.durationSeconds,
     watchUrl: vodPageUrl(cfg.site.publicUrl, ch.slug, vodId),
     thumbnailUrl: thumb,
-    mature: ch.mature || v.broadcastMature,
+    mature: ch.mature || v.broadcastMature || (v.categoryMature ?? false),
     published: now,
     locale: cfg.site.defaultLocale,
   });
@@ -240,24 +248,31 @@ async function clipState(
   isPublic: boolean,
 ): Promise<FanoutResult> {
   if (!isPublic) return sendDelete(ctx, cfg, ch, "video", "clip", clipId);
-  // Never `creatorId`: the clipper is a local user, and local users do not federate (decision 3).
-  const [c] = await ctx.db
-    .select({
-      channelId: s.clips.channelId,
-      title: s.clips.title,
-      status: s.clips.status,
-      durationSeconds: s.clips.durationSeconds,
-      thumbnailKey: s.clips.thumbnailKey,
-      removedReason: s.clips.removedReason,
-      broadcastMature: s.broadcasts.mature,
-    })
-    .from(s.clips)
-    .leftJoin(s.broadcasts, eq(s.broadcasts.id, s.clips.broadcastId))
-    .where(eq(s.clips.id, clipId));
-  if (!c || c.channelId !== ch.id || c.status !== "ready" || c.removedReason !== null) return SKIP;
   const now = ctx.now();
-  const row = await objectFor(ctx.db, ch.id, "video", "clip", clipId, now);
-  if (row.deletedAt) return SKIP;
+  // Locked as for a VOD (see `vodState`).
+  const found = await ctx.db.transaction(async (tx) => {
+    // Never `creatorId`: the clipper is a local user, and local users do not federate (decision 3).
+    const [c] = await tx
+      .select({
+        channelId: s.clips.channelId,
+        title: s.clips.title,
+        status: s.clips.status,
+        durationSeconds: s.clips.durationSeconds,
+        thumbnailKey: s.clips.thumbnailKey,
+        removedReason: s.clips.removedReason,
+        broadcastMature: s.broadcasts.mature,
+        categoryMature: s.categories.mature,
+      })
+      .from(s.clips)
+      .leftJoin(s.broadcasts, eq(s.broadcasts.id, s.clips.broadcastId))
+      .leftJoin(s.categories, eq(s.categories.id, s.broadcasts.categoryId))
+      .where(eq(s.clips.id, clipId))
+      .for("update", { of: s.clips });
+    if (!c || c.channelId !== ch.id || c.status !== "ready" || c.removedReason !== null) return null;
+    return { c, row: await objectFor(tx, ch.id, "video", "clip", clipId, now) };
+  });
+  if (!found || found.row.deletedAt) return SKIP;
+  const { c, row } = found;
   const video = mediaVideo({
     id: objectUrl(cfg.site.publicUrl, row.id),
     actor: ch.urls,
@@ -266,7 +281,7 @@ async function clipState(
     durationSeconds: c.durationSeconds,
     watchUrl: clipPageUrl(cfg.site.publicUrl, ch.slug, clipId),
     thumbnailUrl: mediaUrl(cfg, c.thumbnailKey),
-    mature: ch.mature || (c.broadcastMature ?? false),
+    mature: ch.mature || (c.broadcastMature ?? false) || (c.categoryMature ?? false),
     published: now,
     locale: cfg.site.defaultLocale,
   });
@@ -295,14 +310,18 @@ export async function runFanout(eventId: string, ctx: Ctx, cfg: FederationConfig
       const p = EVENTS["channel.suspension"].payload.parse(event.payload);
       // The suspension itself makes `federates` false; the actor and the setting are what count.
       if (!p.suspended || !ch.settingEnabled || !ch.actor?.enabled) return SKIP;
-      return deleteActor(ctx, ch);
-    }
-    case "channel.update": {
-      if (ch.settingEnabled || !ch.actor) return SKIP;
-      return deleteActor(ctx, ch);
+      return deleteActor(ctx, ch, eventId);
     }
     default:
       break;
+  }
+  // The streamer turned federation off. `channel.federation` is the internal event requested
+  // from the orchestrator (not in the contracts yet, hence the plain string); `channel.update`
+  // is accepted too. Until either is routed here, the daily sweep catches it.
+  const type: string = event.type;
+  if (type === "channel.federation" || type === "channel.update") {
+    if (ch.settingEnabled || !ch.actor) return SKIP;
+    return deleteActor(ctx, ch, eventId);
   }
   if (!federates(cfg, ch)) return SKIP;
 

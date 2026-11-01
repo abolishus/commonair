@@ -42,7 +42,9 @@ export async function runSweep(ctx: Ctx, cfg: FederationConfig): Promise<SweepRe
     .where(lte(s.federationInboxItems.receivedAt, cutoff))
     .returning({ id: s.federationInboxItems.id });
 
-  // Inboxes failing since before the cutoff with no success since.
+  // Inboxes whose failures span the whole window: failing since before the cutoff, no success
+  // since, and still failing at least `dropAfterDays` after the first failure. One failed burst
+  // followed by a quiet week (retries stop after about 2.6 h) is not enough.
   const failing = await ctx.db
     .select({ inbox: s.federationDeliveries.inbox })
     .from(s.federationDeliveries)
@@ -51,6 +53,7 @@ export async function runSweep(ctx: Ctx, cfg: FederationConfig): Promise<SweepRe
         eq(s.federationDeliveries.status, "failing"),
         isNotNull(s.federationDeliveries.firstFailedAt),
         lte(s.federationDeliveries.firstFailedAt, cutoff),
+        sql`${s.federationDeliveries.lastAttemptAt} >= ${s.federationDeliveries.firstFailedAt} + make_interval(days => ${FEDERATION_RULES.dropAfterDays}::int)`,
       ),
     );
   const inboxes = failing.map((f) => f.inbox);
@@ -95,7 +98,8 @@ export async function runSweep(ctx: Ctx, cfg: FederationConfig): Promise<SweepRe
     for (const { channelId } of off) {
       const ch = await loadChannel(ctx.db, cfg, channelId);
       if (!ch?.actor) continue;
-      await deleteActor(ctx, ch);
+      // One occasion per day: a later day's sweep is not deduped against this one.
+      await deleteActor(ctx, ch, `sweep-${now.toISOString().slice(0, 10)}`);
       actorDeletes++;
     }
   }

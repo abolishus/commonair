@@ -243,6 +243,9 @@ describe("activities", () => {
       cc: [urls.followers],
       object: urls.id,
     });
+    // One id per occasion, so a second suspension is not deduped against the first.
+    expect(deleteActorActivity(urls, "0193a5c0-ev").id).toBe(`${urls.id}#delete/0193a5c0-ev`);
+    expect(deleteActorActivity(urls, "a/b").id).toBe(`${urls.id}#delete/a%2Fb`);
   });
 
   test("Accept echoes the Follow Mastodon sent (its id, actor and object)", () => {

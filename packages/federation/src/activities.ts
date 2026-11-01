@@ -95,11 +95,15 @@ export interface DeleteActorActivity {
   object: string;
 }
 
-/** `Delete` of the actor itself (suspension, federation turned off, account deletion). */
-export function deleteActorActivity(actor: Actor): DeleteActorActivity {
+/**
+ * `Delete` of the actor itself (suspension, federation turned off, account deletion). `occasion`
+ * (the triggering event's id, say) makes the id differ per occurrence, so a second suspension
+ * is not deduped against the first; without it the id is `<actor>#delete`.
+ */
+export function deleteActorActivity(actor: Actor, occasion?: string): DeleteActorActivity {
   return {
     "@context": AS2_CONTEXT,
-    id: `${actor.id}#delete`,
+    id: occasion ? `${actor.id}#delete/${encodeURIComponent(occasion)}` : `${actor.id}#delete`,
     type: "Delete",
     actor: actor.id,
     to: [AS2_PUBLIC],
@@ -126,13 +130,13 @@ export interface AcceptActivity {
 }
 
 /**
- * `Accept{Follow}` from the channel actor to the follower. `followerRowId` (the
- * `federation_followers` id) makes the id stable per follow.
+ * `Accept{Follow}` from the channel actor to the follower. `followKey` (the
+ * `federation_followers` id plus a digest of the Follow's id) makes the id stable per follow.
  */
-export function acceptActivity(actor: Pick<ActorUrls, "id">, follow: FollowRef, followerRowId: string): AcceptActivity {
+export function acceptActivity(actor: Pick<ActorUrls, "id">, follow: FollowRef, followKey: string): AcceptActivity {
   return {
     "@context": AS2_CONTEXT,
-    id: `${actor.id}#accepts/follows/${followerRowId}`,
+    id: `${actor.id}#accepts/follows/${followKey}`,
     type: "Accept",
     actor: actor.id,
     to: [follow.actor],

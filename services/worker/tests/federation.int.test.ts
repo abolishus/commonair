@@ -27,7 +27,7 @@ import {
   startActivityPubPeer,
 } from "../../../harness/src/mocks/activitypub/peer.ts";
 import type { EnqueueOptions } from "../src/context.ts";
-import { deleteFederationData } from "../src/deletion/federation.ts";
+import { captureRetiredActor, deleteFederationData, sendRetiredActorDelete } from "../src/deletion/federation.ts";
 import { FEDERATION_KEY_PURPOSE, type FederationConfig } from "../src/federation/config.ts";
 import { runDeliver } from "../src/federation/deliver.ts";
 import { runFanout } from "../src/federation/fanout.ts";
@@ -300,6 +300,84 @@ describe("inbox", () => {
     expect((await followers(b.channel.id)).map((f) => f.actorId)).toEqual([other.actorId]);
   });
 
+  test("an unsigned actor Delete is refused unless the actor's own server says it is gone", async () => {
+    const ch = await federatedChannel();
+    await addFollower(ch.channel.id);
+    const forged = (keyId: string) =>
+      inboxItem(
+        null,
+        {
+          "@context": "https://www.w3.org/ns/activitystreams",
+          id: `${peer.actorId}#delete`,
+          type: "Delete",
+          actor: peer.actorId,
+          object: peer.actorId,
+        },
+        { keyId },
+      );
+    // A keyId that 404s, on the victim's origin: the victim's actor still answers, so refused.
+    let item = await forged(`${peer.origin}/nope#k`);
+    expect(await runInbox(item.id, ctx(), cfg())).toEqual({ outcome: "rejected", reason: "key_gone" });
+    // A keyId that 404s on another origin: refused without asking the victim's server.
+    item = await forged(`${other.origin}/nope#k`);
+    expect(await runInbox(item.id, ctx(), cfg())).toEqual({ outcome: "rejected", reason: "key_gone" });
+    expect((await followers(ch.channel.id)).map((f) => f.actorId)).toEqual([peer.actorId]);
+
+    // An actor that is really gone (its document 404s too), keyId on its origin: applied.
+    const ghost = `${peer.origin}/users/ghost-${crypto.randomUUID()}`;
+    await owner.insert(schema.federationFollowers).values({
+      id: uuidv7(),
+      channelId: ch.channel.id,
+      actorId: ghost,
+      inbox: `${ghost}/inbox`,
+      domain: "127.0.0.1",
+    });
+    item = await inboxItem(
+      null,
+      {
+        "@context": "https://www.w3.org/ns/activitystreams",
+        id: `${ghost}#delete`,
+        type: "Delete",
+        actor: ghost,
+        object: ghost,
+      },
+      { keyId: `${ghost}#main-key` },
+    );
+    expect(await runInbox(item.id, ctx(), cfg())).toEqual({ outcome: "accepted", reason: "actor_gone" });
+    expect((await followers(ch.channel.id)).map((f) => f.actorId)).toEqual([peer.actorId]);
+  });
+
+  test("a verified Follow lifts the sweep's drop of the follower's inboxes", async () => {
+    const ch = await federatedChannel();
+    for (const inbox of [peer.inbox, peer.sharedInbox!])
+      await owner
+        .insert(schema.federationDeliveries)
+        .values({ id: uuidv7(), inbox, status: "dropped", firstFailedAt: new Date(Date.now() - 9 * DAY) })
+        .onConflictDoUpdate({ target: schema.federationDeliveries.inbox, set: { status: "dropped" } });
+    const item = await inboxItem(ch.channel.id, followOf(peer, ch.urls.id));
+    expect(await runInbox(item.id, ctx(), cfg())).toEqual({ outcome: "accepted", reason: "follow" });
+    const from = peer.received.length;
+    expect(await drain()).toEqual([{ outcome: "delivered", status: 202 }]);
+    expect(verifiedOk(deliveredTo(from, "Accept", "Follow")[0])).toBe(true);
+    const rows = await owner.select().from(schema.federationDeliveries);
+    expect(rows.filter((r) => r.inbox === peer.sharedInbox)).toEqual([]);
+    expect(rows.find((r) => r.inbox === peer.inbox)?.status).toBe("ok");
+  });
+
+  test("a repeat Follow (new id) gets its own Accept id", async () => {
+    const ch = await federatedChannel();
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      queued.length = 0;
+      const item = await inboxItem(ch.channel.id, followOf(peer, ch.urls.id));
+      expect((await runInbox(item.id, ctx(), cfg())).reason).toBe("follow");
+      ids.push(((queued[0]!.data as FederationDeliverJob).activity as { id: string }).id);
+    }
+    expect(await followers(ch.channel.id)).toHaveLength(1);
+    expect(ids[0]).not.toBe(ids[1]);
+    expect(ids[0]!.split("-").slice(0, -1).join("-")).toBe(ids[1]!.split("-").slice(0, -1).join("-"));
+  });
+
   test("the block list is re-checked: a domain blocked after the API accepted the item is refused", async () => {
     const ch = await federatedChannel();
     const item = await inboxItem(ch.channel.id, followOf(peer, ch.urls.id));
@@ -439,6 +517,63 @@ describe("fan-out", () => {
     expect(note.sensitive).toBe(true);
     expect(note.summary).toBe("Mature content (18+)");
     expect(JSON.stringify(note)).not.toContain("latest.jpg");
+  });
+
+  test("a mature category marks the Note, the VOD and the clip sensitive, as the API's media gate does", async () => {
+    const [cat] = await owner
+      .insert(schema.categories)
+      .values({ slug: `adult-${crypto.randomUUID()}`, name: "Adult", mature: true })
+      .returning();
+    // The channel's own category.
+    const a = await federatedChannel();
+    await owner.update(schema.channels).set({ categoryId: cat!.id }).where(eq(schema.channels.id, a.channel.id));
+    await addFollower(a.channel.id);
+    let from = peer.received.length;
+    await runFanout((await goLiveEvent(a, (await liveBroadcast(a.channel.id)).id)).id, ctx(), cfg());
+    await drain();
+    const note = deliveredTo(from, "Create", "Note")[0]?.json?.object as Record<string, unknown>;
+    expect(note.sensitive).toBe(true);
+    expect(note.attachment).toEqual([]);
+
+    // The broadcast's category, for a VOD and a clip of it.
+    const b = await federatedChannel();
+    await addFollower(b.channel.id);
+    const bc = await liveBroadcast(b.channel.id, { endedAt: new Date(), categoryId: cat!.id });
+    const vodId = await publicVod(b.channel.id, bc.id);
+    from = peer.received.length;
+    const vodEvent = await insertEvent(owner, "media.vod.state", b.channel.id, {
+      vod_id: vodId,
+      channel_id: b.channel.id,
+      public: true,
+      reason: "ready",
+    });
+    expect((await runFanout(vodEvent.id, ctx(), cfg())).outcome).toBe("created");
+    const clipId = uuidv7();
+    await owner.insert(schema.clips).values({
+      id: clipId,
+      channelId: b.channel.id,
+      broadcastId: bc.id,
+      creatorId: b.user.id,
+      title: "That moment",
+      status: "ready",
+      startOffset: 12,
+      durationSeconds: 30,
+      thumbnailKey: `clips/${clipId}/thumb.jpg`,
+    });
+    const clipEvent = await insertEvent(owner, "media.clip.state", b.channel.id, {
+      clip_id: clipId,
+      channel_id: b.channel.id,
+      public: true,
+      reason: "ready",
+    });
+    expect((await runFanout(clipEvent.id, ctx(), cfg())).outcome).toBe("created");
+    await drain();
+    const videos = deliveredTo(from, "Create", "Video").map((r) => r.json?.object as Record<string, unknown>);
+    expect(videos).toHaveLength(2);
+    for (const v of videos) {
+      expect(v.sensitive).toBe(true);
+      expect(JSON.stringify(v)).not.toContain("thumb.jpg");
+    }
   });
 
   test("a VOD made public delivers a Video; removal sends Delete with a Tombstone", async () => {
@@ -649,7 +784,12 @@ describe("sweep", () => {
     // Six days failing: kept.
     clock = () => now;
     expect((await runSweep(ctx(), cfg())).droppedFollowers).toBe(0);
-    // Two days later (an injected clock): eight days failing, dropped.
+    // Two days later (an injected clock), with a failed attempt a day and a half on: the failures
+    // span seven and a half days, dropped.
+    await owner
+      .update(schema.federationDeliveries)
+      .set({ lastAttemptAt: new Date(now.getTime() + 1.5 * DAY) })
+      .where(eq(schema.federationDeliveries.inbox, deadInbox));
     clock = () => new Date(now.getTime() + 2 * DAY);
     const r = await runSweep(ctx(), cfg());
     expect(r.droppedInboxes).toBeGreaterThanOrEqual(1);
@@ -672,6 +812,34 @@ describe("sweep", () => {
         )
       ).outcome,
     ).toBe("blocked");
+  });
+
+  test("one failed burst followed by a quiet week does not drop the inbox", async () => {
+    const ch = await federatedChannel();
+    const inbox = `http://127.0.0.1:9/inbox/${crypto.randomUUID()}`;
+    await owner.insert(schema.federationFollowers).values({
+      id: uuidv7(),
+      channelId: ch.channel.id,
+      actorId: `http://127.0.0.1:9/users/${crypto.randomUUID()}`,
+      inbox,
+      domain: "127.0.0.1",
+    });
+    const burst = new Date(Date.now() - 8 * DAY);
+    // Retries stopped about 2.6 h after the first failure, eight days ago.
+    await owner.insert(schema.federationDeliveries).values({
+      id: uuidv7(),
+      inbox,
+      status: "failing",
+      firstFailedAt: burst,
+      lastAttemptAt: new Date(burst.getTime() + 3 * 3_600_000),
+    });
+    await runSweep(ctx(), cfg());
+    expect((await followers(ch.channel.id)).map((f) => f.inbox)).toEqual([inbox]);
+    const [h] = await owner
+      .select()
+      .from(schema.federationDeliveries)
+      .where(eq(schema.federationDeliveries.inbox, inbox));
+    expect(h?.status).toBe("failing");
   });
 
   test("a channel turned off with followers left sends Delete of the actor", async () => {
@@ -742,25 +910,50 @@ describe("rotation", () => {
 });
 
 describe("account deletion", () => {
-  test("the actor's Delete is captured in the transaction and signed after the key row is gone", async () => {
+  test("the actor's Delete is captured in the transaction, queued after commit and signed with the stash", async () => {
     const ch = await federatedChannel();
     await addFollower(ch.channel.id);
-    const counts = await t.app.db.transaction((tx) =>
-      deleteFederationData(tx, ch.channel.id, { ctx: ctx(), cfg: cfg() }),
-    );
-    expect(counts).toEqual({ federation_followers: 1, federation_actors: 1, federation_actor_deletes: 1 });
+    const { counts, retired } = await t.app.db.transaction(async (tx) => {
+      const r = await captureRetiredActor(tx, ch.channel.id, cfg());
+      return { counts: await deleteFederationData(tx, ch.channel.id), retired: r };
+    });
+    expect(counts).toEqual({ federation_followers: 1, federation_actors: 1 });
+    // Nothing leaves inside the transaction.
+    expect(queued).toEqual([]);
+    expect(retired?.inboxes).toEqual([peer.sharedInbox]);
     expect(
       await owner.select().from(schema.federationActors).where(eq(schema.federationActors.channelId, ch.channel.id)),
     ).toEqual([]);
+    expect(await sendRetiredActorDelete(ctx(), cfg(), retired!)).toBe(1);
     const from = peer.received.length;
     expect(await drain()).toEqual([{ outcome: "delivered", status: 202 }]);
     expect(verifiedOk(peer.since(from, (r) => r.type === "Delete" && r.json?.object === ch.urls.id)[0])).toBe(true);
   });
 
-  test("without deps (or with the flag off) only the rows go", async () => {
+  test("a rolled-back deletion sends nothing", async () => {
     const ch = await federatedChannel();
     await addFollower(ch.channel.id);
-    const counts = await t.app.db.transaction((tx) => deleteFederationData(tx, ch.channel.id));
+    let retired: Awaited<ReturnType<typeof captureRetiredActor>> = null;
+    await expect(
+      t.app.db.transaction(async (tx) => {
+        retired = await captureRetiredActor(tx, ch.channel.id, cfg());
+        await deleteFederationData(tx, ch.channel.id);
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
+    expect(retired).not.toBeNull();
+    expect(queued).toEqual([]);
+    expect(await followers(ch.channel.id)).toHaveLength(1);
+  });
+
+  test("with the flag off nothing is captured; only the rows go", async () => {
+    const ch = await federatedChannel();
+    await addFollower(ch.channel.id);
+    const { counts, retired } = await t.app.db.transaction(async (tx) => ({
+      retired: await captureRetiredActor(tx, ch.channel.id, cfg({ enabled: false })),
+      counts: await deleteFederationData(tx, ch.channel.id),
+    }));
+    expect(retired).toBeNull();
     expect(counts).toEqual({ federation_followers: 1, federation_actors: 1 });
     expect(queued).toEqual([]);
   });

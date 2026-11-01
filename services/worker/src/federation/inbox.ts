@@ -28,10 +28,12 @@ import {
   type SignatureError,
   verifyRequest,
 } from "@commonair/federation";
-import { and, eq, isNull } from "drizzle-orm";
+import { sha256Hex } from "@commonair/tokens";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import type { FederationConfig } from "./config.ts";
 import { enqueueDeliveries } from "./deliver.ts";
+import { fetchActivityJson } from "./http.ts";
 import { blockedDomains, federates, isBlocked, loadChannel, localChannelIdOf } from "./local.ts";
 import { remoteActor, remoteKey, remoteKeyCacheKey } from "./remote.ts";
 
@@ -102,9 +104,11 @@ async function processItem(
 
   let key = await remoteKey(ctx, cfg, sig.keyId);
   if (!key.ok) {
-    // An actor deleting itself often takes its key with it (404/410): its own server says it is
-    // gone, so removing it as a follower is safe without a signature.
-    if (inbound.kind === "delete-actor" && key.reason === "gone")
+    // An actor deleting itself often takes its key with it (404/410). The missing key proves
+    // nothing (anyone can name a keyId that 404s), so, as Mastodon does, the Delete applies
+    // unsigned only when the keyId is on the actor's own origin and the actor's own server says
+    // the actor itself is gone.
+    if (inbound.kind === "delete-actor" && key.reason === "gone" && (await actorIsGone(cfg, inbound.actor, sig.keyId)))
       return applyDeleteActor(ctx, inbound.actor, "actor_gone");
     return { outcome: "rejected", reason: `key_${key.reason}` };
   }
@@ -163,7 +167,15 @@ async function applyFollow(
     .returning({ id: s.federationFollowers.id });
   // Returned by the upsert above.
   if (!row) throw new Error("federation follower row missing after upsert");
-  const accept = acceptActivity(ch.urls, { id: follow.id, type: "Follow", actor: a.id, object: ch.urls.id }, row.id);
+  // A verified Follow means the server is back: an inbox the sweep dropped is delivered to again.
+  const reachable = [a.inbox, ...(a.sharedInbox ? [a.sharedInbox] : [])];
+  await ctx.db
+    .delete(s.federationDeliveries)
+    .where(and(inArray(s.federationDeliveries.inbox, reachable), eq(s.federationDeliveries.status, "dropped")));
+  // The follow's own id is part of the Accept's: a repeat Follow (new id) gets its own Accept,
+  // not one deduped against the first by its job id.
+  const acceptKey = `${row.id}-${(await sha256Hex(follow.id)).slice(0, 12)}`;
+  const accept = acceptActivity(ch.urls, { id: follow.id, type: "Follow", actor: a.id, object: ch.urls.id }, acceptKey);
   await enqueueDeliveries(ctx, channelId, null, accept, [a.inbox]);
   return { outcome: "accepted", reason: "follow" };
 }
@@ -180,6 +192,24 @@ async function applyUndo(
     : eq(s.federationFollowers.actorId, undo.actor);
   const gone = await ctx.db.delete(s.federationFollowers).where(where).returning({ id: s.federationFollowers.id });
   return { outcome: "accepted", reason: gone.length > 0 ? "unfollow" : "unfollow_unknown" };
+}
+
+const originOf = (u: string): string | null => {
+  try {
+    return new URL(u).origin;
+  } catch {
+    return null;
+  }
+};
+
+/** Whether a fresh GET of the actor answers 404/410 or a Tombstone, with the keyId on its origin. */
+async function actorIsGone(cfg: FederationConfig, actorId: string, keyId: string): Promise<boolean> {
+  const origin = originOf(actorId);
+  if (origin === null || originOf(keyId) !== origin) return false;
+  const res = await fetchActivityJson(actorId, cfg);
+  if (!res.ok) return res.reason === "gone";
+  const doc = res.json as { type?: unknown; id?: unknown } | null;
+  return doc !== null && typeof doc === "object" && doc.type === "Tombstone" && (doc.id ?? actorId) === actorId;
 }
 
 async function applyDeleteActor(ctx: Ctx, actorId: string, reason: string): Promise<InboxResult> {

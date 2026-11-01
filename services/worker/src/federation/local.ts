@@ -46,6 +46,7 @@ export async function loadChannel(
       displayName: s.channels.displayName,
       description: s.channels.description,
       mature: s.channels.mature,
+      categoryMature: s.categories.mature,
       suspendedAt: s.channels.suspendedAt,
       settings: s.channels.federationSettings,
       avatarKey: s.users.image,
@@ -57,6 +58,7 @@ export async function loadChannel(
     })
     .from(s.channels)
     .innerJoin(s.users, eq(s.users.id, s.channels.ownerId))
+    .leftJoin(s.categories, eq(s.categories.id, s.channels.categoryId))
     .leftJoin(s.federationActors, eq(s.federationActors.channelId, s.channels.id))
     .where(eq(s.channels.id, channelId));
   if (!row) return null;
@@ -66,7 +68,8 @@ export async function loadChannel(
     slug: row.slug,
     displayName: row.displayName,
     description: row.description,
-    mature: row.mature,
+    // As the API's media gate counts it: the channel's label or its category's.
+    mature: row.mature || (row.categoryMature ?? false),
     suspended: row.suspendedAt !== null,
     settingEnabled: settings.success && settings.data.enabled,
     avatarKey: row.avatarKey,
