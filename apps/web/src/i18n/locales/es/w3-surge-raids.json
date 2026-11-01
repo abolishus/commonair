@@ -1,1 +1,9 @@
-{}
+{
+  "surgeRaids.protect.label": "Proteger raids",
+  "surgeRaids.protect.hint": "Una raid a tu canal deja el chat solo para espectadores durante 10 minutos.",
+  "surgeRaids.protect.note": "Quienes llegan en la raid y de verdad estaban viendo el canal de origen pueden chatear enseguida. Las cuentas nuevas y los bots esperan.",
+  "surgeRaids.banner.from": "Raid de {channel}: {count, plural, =0 {ningún espectador verificado} one {# espectador verificado} other {# espectadores verificados}}.",
+  "surgeRaids.banner.until": "El chat es solo para espectadores. Se reabre {time}.",
+  "surgeRaids.banner.watchersOnly": "El chat es solo para espectadores.",
+  "surgeRaids.panel.note": "El canal al que haces la raid puede tener la protección de raids activada. En ese caso, al principio solo podrán chatear allí tus espectadores que de verdad estaban viendo."
+}

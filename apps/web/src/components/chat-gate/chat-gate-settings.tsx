@@ -5,7 +5,8 @@
  * Studio `/chat` (docs/testing/w1-selectors.md "Watch gate"): the verified-watch gate and the surge
  * guard for one channel, saved together through `chat.updateSettings`. Each control shows only
  * while the instance runs its feature (`instance.info` `features`); otherwise an empty state says
- * the instance has not enabled it.
+ * the instance has not enabled it. "Protect raids" (batch 7 decision (w), docs/testing/b7-selectors.md
+ * "Surge raids") sits under the guard.
  */
 import { EmptyState, SkeletonGroup, SkeletonText } from "@commonair/ui";
 import { Button } from "@commonair/ui/components/button";
@@ -21,6 +22,7 @@ import { api } from "../../lib/api.ts";
 import { StudioLoadError, StudioSection, TextField, ToggleField } from "../interact-studio/shared.tsx";
 import { useLoad } from "../money/use-load.ts";
 import { chatGateFeatures, type ChatGateClient } from "./features.ts";
+import { ProtectRaidsField } from "./surge-raid.tsx";
 import {
   chatGateDraft,
   chatGateInput,
@@ -85,6 +87,8 @@ function ChatGateForm({
   initial: ChannelChatSettings;
 }): React.JSX.Element {
   const [draft, setDraft] = React.useState<ChatGateDraft>(() => chatGateDraft(initial));
+  // The saved "Protect raids", shown until the switch is touched (`draft.onRaid`).
+  const [savedOnRaid, setSavedOnRaid] = React.useState(initial.surgeGuard.onRaid);
   const [errors, setErrors] = React.useState<ChatGateErrors>({});
   const [pending, setPending] = React.useState(false);
   const set = <K extends keyof ChatGateDraft>(key: K, value: ChatGateDraft[K]) =>
@@ -109,6 +113,7 @@ function ChatGateForm({
     try {
       const next = await client.chat.updateSettings({ channel, ...checked.input });
       setDraft(chatGateDraft(next));
+      setSavedOnRaid(next.surgeGuard.onRaid);
       toast.success(t("chatGate.saved"));
     } catch (err) {
       toastActionError(err, t("chatGate.saveFailed"));
@@ -182,6 +187,7 @@ function ChatGateForm({
             onChange={(v) => set("surgeEnabled", v)}
             data-testid="surge-guard-enabled"
           />
+          <ProtectRaidsField checked={draft.onRaid ?? savedOnRaid} onChange={(v) => set("onRaid", v)} />
           <FieldSeparator />
           <TextField
             label={t("chatGate.surge.ratio")}
