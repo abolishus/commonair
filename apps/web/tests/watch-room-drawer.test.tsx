@@ -280,6 +280,45 @@ describe("WatchRoomDrawer", () => {
     await waitFor(() => expect(id("watch-room-create")).toBeTruthy());
   });
 
+  it("a room.state during an in-flight refresh refetches after it, so a later joiner is listed", async () => {
+    // CI 854fd044 (watch-room step 1): the drawer dropped room.state frames while a refresh was in
+    // flight, so a member whose join landed after that refresh's read stayed missing from the list.
+    const member = (n: number) => ({
+      user: { id: `01890000-0000-7000-8000-0000000b100${n}`, username: `m${n}`, displayName: `M${n}`, avatarUrl: null },
+      joinedAt: "2026-11-01T10:02:00.000Z",
+      host: false,
+    });
+    const gets: ((r: WatchRoomDto) => void)[] = [];
+    const { client } = fakeClient({ get: () => new Promise<WatchRoomDto>((resolve) => gets.push(resolve)) });
+    const sockets = show({ client });
+    fireEvent.click(id("watch-room-open"));
+    fireEvent.click(await waitFor(() => id("watch-room-create")));
+    const s = await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+      return sockets[0]!;
+    });
+    act(() => s.emit({ op: "welcome", sessionId: "s", user: null, heartbeatMs: 30_000 }));
+    const state = { op: "room.state", roomId: ROOM, hostId: HOST, ageBand: "adult", members: [] };
+    act(() => s.emit(state));
+    expect(gets).toHaveLength(1);
+    // Another member joins while the first read is in flight; that read predates the join.
+    act(() => s.emit(state));
+    await act(async () => gets[0]!(room({ members: [...room().members, member(1)] })));
+    await waitFor(() => expect(gets).toHaveLength(2));
+    await act(async () => gets[1]!(room({ members: [...room().members, member(1), member(2)] })));
+    await waitFor(() => expect(screen.getAllByTestId("watch-room-member")).toHaveLength(3));
+    // Bursts coalesce: several frames during one read cost one more read, not one each.
+    act(() => s.emit(state));
+    act(() => s.emit(state));
+    act(() => s.emit(state));
+    expect(gets).toHaveLength(3);
+    await act(async () => gets[2]!(room({ members: [...room().members, member(1), member(2)] })));
+    await waitFor(() => expect(gets).toHaveLength(4));
+    await act(async () => gets[3]!(room({ members: [...room().members, member(1), member(2), member(3)] })));
+    await waitFor(() => expect(screen.getAllByTestId("watch-room-member")).toHaveLength(4));
+    expect(gets).toHaveLength(4);
+  });
+
   it("the host closes through the confirm dialog; a room.closed frame shows why it ended", async () => {
     const { client, calls } = fakeClient();
     show({ client });
