@@ -101,11 +101,17 @@ export async function newRehearsalRun(ctx: ScenarioContext, opts: { via: Via }):
     // Never leave the channel armed: its next publish would be another rehearsal.
     await streamer.api.client.stream.rehearsal.disarm({ channel }).catch(() => undefined);
   });
-  await ctx.step("rehearsal: the follower follows; the channel holds a word and blocks links", async () => {
-    await invitee.api.client.channels.follow({ channel, notify: true });
-    await streamer.api.client.chat.filters.create({ channel, pattern: heldWord(ctx.runId), action: "hold" });
-    await streamer.api.client.chat.updateSettings({ channel, linksAllowed: false });
-  });
+  await ctx.step(
+    "rehearsal: the follower follows; the channel records VODs, holds a word and blocks links",
+    async () => {
+      // Media records a rehearsal only on a channel with VODs on (read at session start, so before
+      // step 1 publishes); new channels default to off, and step 6 checks the rehearsal's VOD.
+      await streamer.api.client.channels.update({ channel, vodEnabled: true });
+      await invitee.api.client.channels.follow({ channel, notify: true });
+      await streamer.api.client.chat.filters.create({ channel, pattern: heldWord(ctx.runId), action: "hold" });
+      await streamer.api.client.chat.updateSettings({ channel, linksAllowed: false });
+    },
+  );
   return run;
 }
 
