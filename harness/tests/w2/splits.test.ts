@@ -10,6 +10,7 @@ import {
   CREW_IDS,
   CREW_ROUTE,
   SPLIT_TIP_CENTS,
+  crewEarnedSlice,
   crewTid,
   expectedSlices,
   splitFixtureDates,
@@ -46,6 +47,22 @@ describe("expectedSlices", () => {
       const s = expectedSlices(gross, { streamerShare: 0.873, coopShare: 0.127 }, OWNER, CREW.toUpperCase(), 3333);
       expect(s.owner + s.crew).toBe(s.creator);
     }
+  });
+});
+
+describe("crewEarnedSlice", () => {
+  // CI run 41285945456: the fixture's 360 released, the live (manual) tip's 360 still held.
+  const ci = { liabilityCents: 360, holdCents: 360, receivableCents: 0, reservedCents: 0 };
+
+  test("a live tip still inside the hold leaves its crew lot held", () => {
+    expect(crewEarnedSlice(ci, 360, 360)).toBe(true);
+    expect(crewEarnedSlice(ci, 360, 0)).toBe(false);
+  });
+
+  test("the released slice counts once, released or reserved for a payout", () => {
+    expect(crewEarnedSlice({ liabilityCents: 0, reservedCents: 360, holdCents: 0 }, 360, 0)).toBe(true);
+    expect(crewEarnedSlice({ liabilityCents: 360, reservedCents: 360, holdCents: 0 }, 360, 0)).toBe(false);
+    expect(crewEarnedSlice({ liabilityCents: 0, reservedCents: 0, holdCents: 720 }, 360, 360)).toBe(false);
   });
 });
 
