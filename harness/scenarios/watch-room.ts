@@ -14,9 +14,10 @@
  * 8. The retention hook ages a room past 30 days and it is gone.
  *
  * `--set steps=1,3` picks steps (`all` runs every step not pending; step 2 adds step 1);
- * `--set via=api` drives the web setup through the API. Steps whose unit has not merged are
- * pending (`src/w3/steps.ts`) and run only when named. W3-watch-rooms fills this file and
- * `src/w3/watch-rooms/`.
+ * `--set via=api` drives the create, join and report setup through the API (the sync steps still
+ * play in browsers). Steps listed in `PENDING_WATCH_ROOM_STEPS` (`src/w3/steps.ts`) run only when
+ * named. The steps live in `src/w3/watch-rooms/`; they need `DATABASE_URL` (the direct insert and
+ * row checks) and the b7 test hooks (`OPS_TEST_HOOKS=true`) for retention.
  *
  * Runs in the `w3` shard, on the harness stack with the batch 7 overrides
  * (`bun scripts/infra.ts stack --harness --w3`).
