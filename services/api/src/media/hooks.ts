@@ -18,7 +18,8 @@
  * after `REHEARSAL_RULES.armTtlSeconds`, or `stream.rehearsal.disarm` deletes it), so a reconnect
  * inside the TTL starts another rehearsal rather than going live. A started rehearsal also writes
  * `KEYS.rehearsalSession`, which outlives the cap: a reconnect after the arm lapsed still
- * rehearses. After a rehearsal is ended by a kick, `KEYS.rehearsalKicked` refuses the encoder's
+ * rehearses. Once the rehearsal goes not-ready the marker shrinks to the reconnect grace, so a
+ * real go-live a few minutes later is not silently another rehearsal. After a rehearsal is ended by a kick, `KEYS.rehearsalKicked` refuses the encoder's
  * automatic reconnect for a while, so it neither rehearses again nor goes publicly live.
  */
 import { and, eq, isNull } from "drizzle-orm";
@@ -284,6 +285,8 @@ export async function mediaNotReady(deps: Deps, body: unknown): Promise<number> 
       path: ended.broadcast.path,
       at: now.toISOString(),
     });
+    if (ended.broadcast.kind === "rehearsal")
+      await deps.valkey.expire(KEYS.rehearsalSession(ended.channel.id), REHEARSAL_RULES.sessionGraceSeconds);
   }
   return 204;
 }

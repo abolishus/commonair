@@ -218,6 +218,10 @@ describe("rehearsal gate", () => {
     const ttl = await api.deps.valkey.ttl(KEYS.rehearsalSession(st.channelId));
     expect(ttl).toBeGreaterThan(REHEARSAL_RULES.maxDurationSeconds);
     await hook(INTERNAL_ROUTES.mediaNotReady, st.username, first);
+    // Not-ready shrinks it to the reconnect grace: a go-live much later is live, not a rehearsal.
+    const graceTtl = await api.deps.valkey.ttl(KEYS.rehearsalSession(st.channelId));
+    expect(graceTtl).toBeGreaterThan(0);
+    expect(graceTtl).toBeLessThanOrEqual(REHEARSAL_RULES.sessionGraceSeconds);
     await api.deps.valkey.del(KEYS.rehearsalArmed(st.channelId));
     // A network drop past the arm's TTL: the encoder reconnects, and it is still a rehearsal.
     const second = await publish(st);
