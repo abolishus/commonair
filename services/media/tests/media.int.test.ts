@@ -458,12 +458,22 @@ describe("media pipeline", () => {
         return p?.ready ? p : null;
       });
       expect(p720.tracks2?.[0]?.codecProps?.height).toBe(720);
+      // The bus event is published after the Valkey and database writes, and its delivery is
+      // asynchronous: wait for it, then the database flag it follows must already be set.
+      const advertised = await waitFor("720p renditions published", async () =>
+        busEvents.find((e) => e.type === "renditions" && e.renditions.includes("720p")),
+      );
+      expect(advertised.type === "renditions" ? advertised.renditions : null).toEqual([
+        "source",
+        "720p",
+        "480p",
+        "audio",
+      ]);
       const [b] = await tdb.db
         .select({ t: schema.broadcasts.transcodeActive })
         .from(schema.broadcasts)
         .where(eq(schema.broadcasts.id, broadcastId));
       expect(b?.t).toBe(true);
-      expect(busEvents.some((e) => e.type === "renditions" && e.renditions.includes("720p"))).toBe(true);
     } finally {
       clearInterval(keepFresh);
     }
