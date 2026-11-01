@@ -32,6 +32,7 @@ import { afterBroadcastEnded, endBroadcastInTx, type EndedBroadcast } from "../m
 import { setSuspension } from "../moderation/suspension.ts";
 import { notifyRoles } from "../moderation/notify.ts";
 import { staffActorType } from "../moderation/review.ts";
+import { reportReasonRuleRef, staffRuleRef } from "../transparency/rule-ref.ts";
 
 const { reports, users, channels, chatMessages, vods, clips, broadcasts, moderationCases, modActions, auditLog } =
   schema;
@@ -240,6 +241,7 @@ export const safety = {
             channelId: info.channelId,
             userId: info.userId,
             priority,
+            ruleRef: reportReasonRuleRef(input.reason),
           })
           .onConflictDoNothing()
           .returning({ id: moderationCases.id });
@@ -406,6 +408,7 @@ export const safety = {
           subjectType: r.subjectType,
           subjectId: r.subjectId,
           reportId: r.id,
+          ruleRef: input.action === "ban_from_channel" ? null : staffRuleRef(input.clauseId),
         });
       await audit(tx, {
         actorType: staffActorType(caller.user.role),
@@ -570,6 +573,7 @@ export const safety = {
             | "unsuspend_channel",
           reason: input.reason,
           durationSeconds: input.suspended ? (input.durationSeconds ?? null) : null,
+          ruleRef: input.suspended ? staffRuleRef(input.clauseId) : null,
         });
         await audit(tx, {
           actorType: staffActorType(caller.user.role),

@@ -78,6 +78,7 @@ import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.t
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
+import { appealRuleRef } from "../transparency/rule-ref.ts";
 
 const { appeals: appealsT, playbackSessions, integrityFlags, channels, modActions, users, chatBans } = schema;
 const { contentLabels, moderationCases, broadcasts, accountActions, dmcaNoticeItems } = schema;
@@ -635,6 +636,7 @@ export const appeals = {
           subjectType: input.subjectType,
           subjectId: input.subjectId,
           body: input.body,
+          ruleRef: await appealRuleRef(deps.db, input.subjectType, input.subjectId),
           createdAt: deps.now(),
         })
         .returning();

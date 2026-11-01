@@ -30,6 +30,7 @@ import { notifyUser } from "../moderation/notify.ts";
 import { planReview, staffActorType } from "../moderation/review.ts";
 import { liftRestrictionInTx } from "../moderation/restriction.ts";
 import { moderationRuntime } from "../moderation/runtime.ts";
+import { caseDecisionRuleRef, caseRuleRefAfter } from "../transparency/rule-ref.ts";
 
 const { moderationCases, contentLabels, users, channels, evidenceObjects, ncmecReports, legalHolds } = schema;
 const { localHashList, modActions } = schema;
@@ -145,6 +146,7 @@ export const moderation = {
                 resolvedAt: now,
                 resolution: input.decision,
                 resolutionNote: input.note,
+                ruleRef: caseRuleRefAfter(c, input.decision),
                 updatedAt: now,
               },
         )
@@ -180,6 +182,7 @@ export const moderation = {
             durationSeconds: input.durationSeconds ?? null,
             subjectType: "moderation_case",
             subjectId: c.id,
+            ruleRef: caseDecisionRuleRef(c, "suspend"),
           });
         }
         if ((target === "channel" || target === "both") && c.channelId) {
@@ -199,6 +202,7 @@ export const moderation = {
             durationSeconds: input.durationSeconds ?? null,
             subjectType: "moderation_case",
             subjectId: c.id,
+            ruleRef: caseDecisionRuleRef(c, "suspend"),
           });
           ended ??= await endLiveInTx(tx, c.channelId, now);
         }
@@ -213,6 +217,7 @@ export const moderation = {
           reason: input.note,
           subjectType: "moderation_case",
           subjectId: c.id,
+          ruleRef: caseDecisionRuleRef(c, input.decision),
         });
       if (plan.notifyOwner && subjectUser)
         await notifyUser(tx, subjectUser, { kind: "moderation_decision", caseId: c.id, decision: input.decision });

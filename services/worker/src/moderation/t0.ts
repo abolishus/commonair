@@ -19,7 +19,7 @@ import {
   type ModerationT0MediaJob,
 } from "@commonair/contracts/internal";
 import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
-import { MODERATION_CONSTANTS } from "@commonair/moderation";
+import { clauseFor, clauseRef, MODERATION_CONSTANTS } from "@commonair/moderation";
 import { and, eq, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { moderationMetrics } from "./metrics.ts";
@@ -186,6 +186,11 @@ export async function applyT0Once(ctx: WorkerContext, job: ModerationT0Job): Pro
       userId,
       listCategory: job.listCategory,
       priority: MODERATION_CONSTANTS.URGENT_REPORT_PRIORITY,
+      // A CSAM-list match cites no clause (ADR 0019 decision 1).
+      ruleRef:
+        job.listCategory === "ncii"
+          ? clauseRef(clauseFor({ action: "moderation.t0.match", listCategory: "ncii" }))
+          : null,
       createdAt: now,
       updatedAt: now,
     });
