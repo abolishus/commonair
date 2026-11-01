@@ -8,6 +8,7 @@
  * always rolled back so nothing is ever written.
  */
 import { createDb } from "@commonair/db";
+import { toDate, tsParam } from "../sql-time.ts";
 
 type Sql = ReturnType<typeof createDb>["sql"];
 const ROLLBACK = Symbol("rollback");
@@ -40,12 +41,12 @@ export async function downstreamOf(
 ): Promise<Downstream> {
   return withDb(databaseUrl, async (sql) => ({
     streamEvents: await count(sql`select count(*)::text as n from events where channel_id = ${channelId}
-           and type in ('stream.online', 'stream.offline') and occurred_at >= ${since}`),
+           and type in ('stream.online', 'stream.offline') and occurred_at >= ${tsParam(since)}::timestamptz`),
     deliveries: await count(sql`select count(*)::text as n from webhook_deliveries d join events e on e.id = d.event_id
            where e.channel_id = ${channelId} and e.type in ('stream.online', 'stream.offline')
-             and e.occurred_at >= ${since}`),
+             and e.occurred_at >= ${tsParam(since)}::timestamptz`),
     goLiveNotifications: await count(sql`select count(*)::text as n from notifications where type = 'go_live'
-           and user_id = ${followerId} and created_at >= ${since}`),
+           and user_id = ${followerId} and created_at >= ${tsParam(since)}::timestamptz`),
   }));
 }
 
@@ -122,11 +123,17 @@ export interface RehearsalVod {
 export async function vodOf(databaseUrl: string, broadcastId: string): Promise<RehearsalVod | null> {
   return withDb(databaseUrl, async (sql) => {
     const [v] = await sql<
-      { id: string; visibility: string; status: string; expires_at: Date | null; created_at: Date }[]
+      { id: string; visibility: string; status: string; expires_at: string | null; created_at: string }[]
     >`select id, visibility::text as visibility, status::text as status, expires_at, created_at
         from vods where broadcast_id = ${broadcastId} limit 1`;
     return v
-      ? { id: v.id, visibility: v.visibility, status: v.status, expiresAt: v.expires_at, createdAt: v.created_at }
+      ? {
+          id: v.id,
+          visibility: v.visibility,
+          status: v.status,
+          expiresAt: toDate(v.expires_at),
+          createdAt: toDate(v.created_at),
+        }
       : null;
   });
 }
@@ -147,15 +154,15 @@ export async function storedChat(
 ): Promise<StoredChat> {
   return withDb(databaseUrl, async (sql) => ({
     channel: await count(sql`select count(*)::text as n from chat_messages
-           where channel_id = ${channelId} and created_at >= ${since}`),
+           where channel_id = ${channelId} and created_at >= ${tsParam(since)}::timestamptz`),
     broadcast: await count(sql`select count(*)::text as n from chat_messages where broadcast_id = ${broadcastId}`),
   }));
 }
 
 export async function broadcastEndedAt(databaseUrl: string, broadcastId: string): Promise<Date | null> {
   return withDb(databaseUrl, async (sql) => {
-    const [b] = await sql<{ ended_at: Date | null }[]>`select ended_at from broadcasts where id = ${broadcastId}`;
-    return b?.ended_at ?? null;
+    const [b] = await sql<{ ended_at: string | null }[]>`select ended_at from broadcasts where id = ${broadcastId}`;
+    return toDate(b?.ended_at);
   });
 }
 
@@ -168,7 +175,7 @@ export async function rehearsalAudit(
   return withDb(databaseUrl, async (sql) => {
     const rows = await sql<{ action: string; subject_type: string; subject_id: string; arm_id: string | null }[]>`
       select action, subject_type, subject_id, details->>'armId' as arm_id from audit_log
-       where channel_id = ${channelId} and action like 'rehearsal.%' and created_at >= ${since}
+       where channel_id = ${channelId} and action like 'rehearsal.%' and created_at >= ${tsParam(since)}::timestamptz
        order by created_at`;
     return rows.map((r) => ({
       action: r.action,
