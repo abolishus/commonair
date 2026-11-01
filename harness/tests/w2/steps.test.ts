@@ -142,7 +142,7 @@ describe("extensions", () => {
     for (const e of ALL_EXTENSIONS)
       for (const n of W2_SCENARIO_STEP_PREREQUISITES[e]) expect(steps[scenarioOf(e)], `${e} → ${n}`).toContain(n);
     expect(W2_SCENARIO_STEP_PREREQUISITES.enforcement).toEqual([4, 5]);
-    expect(W2_SCENARIO_STEP_PREREQUISITES["replay-panel"]).toEqual([1, 3]);
+    expect(W2_SCENARIO_STEP_PREREQUISITES["replay-panel"]).toEqual([]);
   });
 });
 
@@ -187,7 +187,8 @@ describe("w2Extensions", () => {
     expect(w2StepsNeeded(["enforcement"])).toEqual([4, 5]);
     expect(w2StepsNeeded([])).toEqual([]);
     expect(withW2Steps([1, 4], ["enforcement"])).toEqual({ steps: [1, 4, 5], added: [5] });
-    expect(withW2Steps([2], ["replay-panel"])).toEqual({ steps: [1, 2, 3], added: [1, 3] });
+    expect(withW2Steps([2], ["replay-panel"])).toEqual({ steps: [2], added: [] });
+    expect(withW2Steps([2], ["enforcement", "replay-panel"])).toEqual({ steps: [2, 4, 5], added: [4, 5] });
     expect(withW2Steps([2], [])).toEqual({ steps: [2], added: [] });
   });
 

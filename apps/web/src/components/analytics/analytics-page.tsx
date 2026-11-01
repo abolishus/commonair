@@ -35,6 +35,7 @@ import { Chart01Icon, Clock01Icon } from "@hugeicons/core-free-icons";
 import * as React from "react";
 import { t } from "../../i18n/index.ts";
 import { toastActionError } from "../../lib/action-error.ts";
+import { AttestationsPanel } from "../attestations/panel.tsx";
 import { FormError } from "../form-error.tsx";
 import { useLoad } from "../money/use-load.ts";
 import { type AnalyticsClient, analyticsClient, isPending } from "./client.ts";
@@ -302,6 +303,7 @@ export function BroadcastView({
       <Exclusions analytics={a} />
       <Delivery analytics={a} />
       <ShareLinks channel={channel} broadcastId={a.broadcastId} client={client} />
+      <AttestationsPanel channel={channel} broadcastId={a.broadcastId} />
     </div>
   );
 }

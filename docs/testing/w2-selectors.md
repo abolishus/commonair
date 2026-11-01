@@ -133,37 +133,37 @@ it and never edit `controller.ts` or `player.tsx`.
 
 ### Analytics, group appeals and attestations (W2-rollup-analytics, W2b-group-appeals, W2b-attestations)
 
-| Test id                         | Element and attributes                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------- |
-| `analytics-page`                | The `/analytics` page container                                                             |
-| `analytics-broadcast-select`    | Broadcast picker trigger; `data-value` (broadcast id)                                       |
-| `analytics-range`               | Range picker trigger; `data-value`                                                          |
-| `analytics-pending`             | "Shown 24 hours after the broadcast ends" state; `data-available-at`                        |
-| `analytics-verified`            | Verified viewer seconds; `data-seconds`                                                     |
-| `analytics-unverified`          | Unverified (pending, unjudged) viewer seconds; `data-seconds`                               |
-| `analytics-excluded-group`      | An excluded group row; `data-category`, `data-sessions`, `data-seconds`                     |
-| `analytics-small-groups-hidden` | "n small groups hidden"; `data-count`                                                       |
-| `analytics-delivery-source`     | A delivery-mix row; `data-source`, `data-bytes`, `data-share-bps`                           |
-| `analytics-cost`                | Marginal cost (owner only); `data-cents`                                                    |
-| `analytics-chart-table`         | The table fallback of a chart                                                               |
-| `analytics-share-create`        | Creates an analytics share link                                                             |
-| `analytics-share-link`          | A share link row; `data-link-id`, `data-expires-at`                                         |
-| `analytics-share-revoke`        | Revokes a share link                                                                        |
-| `group-appeal-open`             | "Appeal this group" on an excluded group; `data-state` `available`, `appealed` or `limited` |
-| `group-appeal-dialog`           | The appeal `Dialog`                                                                         |
-| `group-appeal-limit`            | Appeals left this week; `data-remaining`                                                    |
-| `group-appeal-submit`           | Submits `appeals.create` (`exclusion_group`)                                                |
-| `group-appeal-status`           | The decided appeal's result; `data-status`                                                  |
-| `attestations-panel`            | The owner's attestation list (`AttestationsPanel`)                                          |
-| `attestation-entry`             | One entry; `data-seq`, `data-kind`, `data-broadcast-id`, `data-entry-hash`                  |
-| `attestation-share-create`      | Creates an attestation share link                                                           |
-| `attestation-share-link`        | A share link row; `data-link-id`, `data-expires-at`                                         |
-| `attestation-share-revoke`      | Revokes a share link                                                                        |
-| `attestation-verify-page`       | The `/attestations/verify` page container                                                   |
-| `attestation-verify-input`      | The statement or bundle input                                                               |
-| `attestation-verify-submit`     | Runs the verifier                                                                           |
-| `attestation-verify-result`     | The result; `data-valid` `true`/`false`, `data-reason` when false                           |
-| `attestation-verify-origin`     | The instance domain the statement names, shown prominently                                  |
+| Test id                         | Element and attributes                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `analytics-page`                | The `/analytics` page container                                                                     |
+| `analytics-broadcast-select`    | Broadcast picker trigger; `data-value` (broadcast id)                                               |
+| `analytics-range`               | Range picker trigger; `data-value`                                                                  |
+| `analytics-pending`             | "Shown 24 hours after the broadcast ends" state; `data-available-at`                                |
+| `analytics-verified`            | Verified viewer seconds; `data-seconds`                                                             |
+| `analytics-unverified`          | Unverified (pending, unjudged) viewer seconds; `data-seconds`                                       |
+| `analytics-excluded-group`      | An excluded group row; `data-category`, `data-sessions`, `data-seconds`                             |
+| `analytics-small-groups-hidden` | "n small groups hidden"; `data-count`                                                               |
+| `analytics-delivery-source`     | A delivery-mix row; `data-source`, `data-bytes`, `data-share-bps`                                   |
+| `analytics-cost`                | Marginal cost (owner only); `data-cents`                                                            |
+| `analytics-chart-table`         | The table fallback of a chart                                                                       |
+| `analytics-share-create`        | Creates an analytics share link                                                                     |
+| `analytics-share-link`          | A share link row; `data-link-id`, `data-expires-at`                                                 |
+| `analytics-share-revoke`        | Revokes a share link                                                                                |
+| `group-appeal-open`             | "Appeal this group" on an excluded group; `data-state` `available`, `appealed` or `limited`         |
+| `group-appeal-dialog`           | The appeal `Dialog`                                                                                 |
+| `group-appeal-limit`            | Appeals left this week; `data-remaining`                                                            |
+| `group-appeal-submit`           | Submits `appeals.create` (`exclusion_group`)                                                        |
+| `group-appeal-status`           | The decided appeal's result; `data-status`, `data-category` (on other rows: the broadcast's appeal) |
+| `attestations-panel`            | The owner's attestation list (`AttestationsPanel`)                                                  |
+| `attestation-entry`             | One entry; `data-seq`, `data-kind`, `data-broadcast-id`, `data-entry-hash`                          |
+| `attestation-share-create`      | Creates an attestation share link                                                                   |
+| `attestation-share-link`        | A share link row; `data-link-id`, `data-expires-at`                                                 |
+| `attestation-share-revoke`      | Revokes a share link                                                                                |
+| `attestation-verify-page`       | The `/attestations/verify` page container                                                           |
+| `attestation-verify-input`      | The statement or bundle input                                                                       |
+| `attestation-verify-submit`     | Runs the verifier                                                                                   |
+| `attestation-verify-result`     | The result; `data-valid` `true`/`false`, `data-reason` when false                                   |
+| `attestation-verify-origin`     | The instance domain the statement names, shown prominently                                          |
 
 ### Enforcement report (W2-enforcement-report)
 
@@ -227,7 +227,7 @@ A hidden (below k = 10) figure's count attribute reads `suppressed` instead of a
 | Test id               | Element and attributes                                                                       |
 | --------------------- | -------------------------------------------------------------------------------------------- |
 | `vod-watch-page`      | The VOD page container; `data-vod-id`, `data-state` `ready`, `not-ready` or `gated`          |
-| `clip-watch-page`     | The clip page container; `data-clip-id`                                                      |
+| `clip-watch-page`     | The clip page container; `data-clip-id`, `data-state` as on the VOD page                     |
 | `watch-not-found`     | `EmptyState` for anything the caller may not watch (never says why)                          |
 | `watch-not-ready`     | "Not ready yet" for `processing` / `recording`                                               |
 | `watch-title`         | The title                                                                                    |
@@ -235,7 +235,7 @@ A hidden (below k = 10) figure's count attribute reads `suppressed` instead of a
 | `vod-player`          | The VOD or clip player; `data-playhead` (wall clock, ISO 8601, empty before the first frame) |
 | `vod-captions-toggle` | The CC toggle, only when `Vod.captions` has tracks                                           |
 | `replay-panel`        | The replay panel (`role="log"`, no live announcements)                                       |
-| `replay-row`          | A shown line; `data-at`, `data-message-id`                                                   |
+| `replay-row`          | A shown line; `data-at`, `data-message-id`, `data-catching-up` on a `catchingUp` line        |
 | `replay-row-time`     | A line's time button (seeks the player)                                                      |
 | `replay-catching-up`  | The "said while catching up" label on a `catchingUp` line                                    |
 | `replay-not-retained` | Notice that chat for this video is no longer kept (`retained: false`, no items)              |

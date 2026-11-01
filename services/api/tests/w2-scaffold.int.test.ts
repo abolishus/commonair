@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * The batch 6 contract step's API seams: the W2 route files are mounted (stubs answer 501, not
- * 404), `/.well-known/commonair-attestation` is served under the OpenAPI `/api` prefix (Caddy
+ * The batch 6 contract step's API seams: the W2 route files are mounted (they answer, not 404), `/.well-known/commonair-attestation` is served under the OpenAPI `/api` prefix (Caddy
  * rewrites the bare path to it), group appeals reach `createGroupAppeal`, and the analytics test
  * hooks enqueue on `QUEUES.analytics` (a BullMQ worker on a private prefix stands in for the
  * worker) and set the display bypass.
@@ -34,11 +33,11 @@ afterAll(async () => {
 });
 
 describe("well-known attestation keys", () => {
-  test("GET /api/.well-known/commonair-attestation reaches integrity.keys.list (stub: 501, not 404)", async () => {
+  test("GET /api/.well-known/commonair-attestation reaches integrity.keys.list (not 404)", async () => {
     const res = await fetch(`${api.url}/api/.well-known/commonair-attestation`);
-    expect(res.status).toBe(501);
-    expect(((await res.json()) as { code: string }).code).toBe("NOT_IMPLEMENTED");
-    // A neighbouring unknown path is still a plain 404, so the 501 above is the route matching.
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { keys: unknown[] }).keys).toEqual([]);
+    // A neighbouring unknown path is still a plain 404, so the 200 above is the route matching.
     expect((await fetch(`${api.url}/api/.well-known/commonair-nothing`)).status).toBe(404);
   });
 
@@ -48,12 +47,13 @@ describe("well-known attestation keys", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ envelope: { payload: "e30", signature: "AA" } }),
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { valid: boolean; problem: string }).problem).toBe("malformed");
   });
 });
 
 describe("W2 route files are mounted", () => {
-  test("an exclusion_group appeal goes to createGroupAppeal (stub: 501), never the generic check", async () => {
+  test("an exclusion_group appeal goes to createGroupAppeal (an unknown broadcast: 404), never the generic check", async () => {
     const r = await u.client.call("POST", "/api/appeals", {
       kind: "integrity",
       subjectType: "exclusion_group",
@@ -61,7 +61,7 @@ describe("W2 route files are mounted", () => {
       category: "datacenter",
       body: "These were students on the school network.",
     });
-    expect(r.status).toBe(501);
+    expect(r.status).toBe(404);
     // Without a category the contract refuses it before any handler runs.
     const bad = await u.client.call("POST", "/api/appeals", {
       kind: "integrity",

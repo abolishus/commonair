@@ -13,7 +13,6 @@ import {
   INSUFFICIENT_HEARTBEATS,
   MEDIA_UNCONFIRMED,
   RULESET_VERSION,
-  rescoreExclusionGroup,
   SESSION_SIGNALS,
   SIGNAL_CATEGORIES,
 } from "../src/index.ts";
@@ -43,13 +42,5 @@ describe("signal categories (decision (k))", () => {
     expect(exclusionCategoryOf(["account_concurrency"])).toBe("concurrency");
     expect(exclusionCategoryOf([])).toBe("other");
     expect(exclusionCategoryOf([INSUFFICIENT_HEARTBEATS, "retired_code"])).toBe("other");
-  });
-});
-
-describe("rescore stub", () => {
-  test("refuses until W2b-group-appeals implements it", async () => {
-    await expect(
-      rescoreExclusionGroup({} as never, { broadcastId: "b", category: "datacenter", decidedAt: new Date() }),
-    ).rejects.toThrow(/not implemented/);
   });
 });

@@ -81,6 +81,14 @@ const ALLOWLIST: AllowEntry[] = [
       "The rehearsal player's <video> is PlayerChrome's child; hls.js plays the invitee-gated stream.rehearsal.watch playlist, which playback.start (player.tsx) never resolves.",
   },
   {
+    file: "src/components/vod-watch/vod-player.tsx",
+    rule: "raw-media-element",
+    match: "<video",
+    count: 1,
+    reason:
+      "The VOD/clip player's <video> is PlayerChrome's child; hls.js (or the MP4) plays recordings, which PlayerController (bound to a live playback.start session) does not.",
+  },
+  {
     file: "src/components/altcha-field.tsx",
     rule: "custom-element",
     match: 'createElement("altcha-widget"',

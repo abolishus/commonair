@@ -93,6 +93,24 @@ When they go live, we post their channel link and stream title there, and Discor
 and privacy policy apply to that post. We store the webhook address encrypted and never show it
 again.
 
+## Captions, analytics and rehearsals
+
+Draft: counsel has not reviewed this section.
+
+**Captions.** If a streamer turns captions on, our own servers transcribe the stream's audio; no
+outside service hears it. The transcript is kept and deleted with the VOD, or deleted when the
+stream ends if the channel keeps no VODs. Corrections record which account made them.
+
+**Streamer analytics.** Streamers see totals for their own broadcasts, built from playback
+sessions and never naming a viewer. Groups of fewer than five sessions are not shown.
+Minute-by-minute figures are kept for 90 days, then only totals. Each broadcast's audience totals
+are also published as a signed statement anyone can check: counts only, with the breakdown of
+what was left out sealed for the streamer and whoever they share it with.
+
+**Rehearsals.** A streamer can rehearse privately and invite up to five followers, who watch
+signed in. We record who was invited or removed, by account. A rehearsal is never counted as a
+broadcast, and its recording is deleted after 24 hours.
+
 ## How long we keep it
 
 - Playback sessions and integrity signals: only as long as needed to compute verified viewer

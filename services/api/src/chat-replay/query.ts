@@ -40,6 +40,8 @@ export interface ReplayWindow {
 
 export interface ReplayInput {
   cursor?: string;
+  /** Start at the first `(at, id)` at or after this instant (a deep seek); ignored with `cursor`. */
+  from?: string;
   limit: number;
 }
 
@@ -132,6 +134,7 @@ export async function replayPage(
     replayable(b, viewerId, now),
   ];
   if (cursor) where.push(sql`(${at}, ${m.id}) > (${cursor.t}::timestamptz, ${cursor.id}::uuid)`);
+  else if (input.from) where.push(sql`${at} >= ${input.from}::timestamptz`);
   const rows = await deps.db
     .select({ m, u: users, atText })
     .from(m)

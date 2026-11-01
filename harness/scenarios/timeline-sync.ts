@@ -17,7 +17,7 @@
  * modules in `src/w1/`.
  *
  * W2 extension (`--set w2=`, `src/w2/steps.ts`): `replay-panel` (W2-vod-watch) after the steps; it
- * adds steps 1 and 3, whose VOD and marker messages it plays.
+ * brings its own broadcast, VOD, clip and marker lines.
  *
  * Needs `DATABASE_URL` (outbox and backdating), the ops hook (harness/compose.e6.yaml) and the
  * harness stack (harness/compose.w1.yaml).

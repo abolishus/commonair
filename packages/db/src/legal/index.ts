@@ -32,12 +32,13 @@ export const TERMS_SEED_VERSION = "2026-10-29-points-draft";
 /**
  * `privacy` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, moved again for the channel-features paragraph
- * (ADR 0026), again for chat replay, retention and blocks (ADR 0012 amendment 1), and again for
- * notifications, browser push and Discord (ADR 0028). Each new version sorts after the accepted
- * one, so every signed-in user is asked to accept it again. Draft: counsel has not reviewed the
- * paragraphs.
+ * (ADR 0026), again for chat replay, retention and blocks (ADR 0012 amendment 1), again for
+ * notifications, browser push and Discord (ADR 0028), and again for captions, streamer analytics,
+ * signed audience statements and rehearsal invitees (batch 6, W2). Each new version sorts after the
+ * accepted one, so every signed-in user is asked to accept it again. Draft: counsel has not
+ * reviewed the paragraphs.
  */
-export const PRIVACY_SEED_VERSION = "2026-10-30-notifications-draft";
+export const PRIVACY_SEED_VERSION = "2026-11-01-w2-draft";
 /**
  * `cookies` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, moved again for the language line in Preferences

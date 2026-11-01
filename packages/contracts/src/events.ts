@@ -798,6 +798,15 @@ export const EVENTS = {
       kid: z.string(),
     },
   }),
+  "integrity.key.compromised": def({
+    version: "1",
+    condition: [],
+    scopes: [],
+    internal: true,
+    description:
+      "Internal: an admin marked an attestation signing key compromised; the worker re-issues every broadcast whose latest entry it signed",
+    payload: { kid: z.string(), broadcast_ids: z.array(id) },
+  }),
   "integrity.sessions.rescored": def({
     version: "1",
     condition: [],

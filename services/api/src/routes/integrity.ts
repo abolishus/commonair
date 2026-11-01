@@ -17,25 +17,24 @@
  *   token is shown once and stored as its SHA-256 only.
  * - `bundle`: the public window proof, contiguous entries from `fromSeq` (breakdown and salt null)
  *   plus the key history. It stops before the first entry not yet published, so it stays contiguous.
- * - `keys.compromise`: an audited admin action that marks the key and enqueues a re-check of every
- *   broadcast whose current entry it signed; the worker re-issues those (`reissue`), and the daily
- *   reconciler catches any enqueue that was lost.
+ * - `keys.compromise`: an audited admin action that marks the key and, in the same transaction,
+ *   writes `integrity.key.compromised` naming every broadcast whose current entry it signed; the
+ *   outbox relay enqueues a re-check of each, the worker re-issues them (`reissue`), and the daily
+ *   reconciler catches anything that was lost.
  *
  * The public verifier and the well-known key history are `./attestation-verify.ts`.
  */
 import type { AttestationEntry, AttestationShareLink } from "@commonair/contracts/dto";
-import { ANALYTICS_JOBS, QUEUES, analyticsJobId } from "@commonair/contracts/internal";
 import { schema, uuidv7 } from "@commonair/db";
 import { randomTokenSecret, sha256Hex } from "@commonair/tokens";
 import { reasonsCommitment } from "@commonair/tokens/attestation";
-import { Queue } from "bullmq";
 import { and, asc, desc, eq, gt, gte, isNull, lt, or, sql } from "drizzle-orm";
-import { Valkey } from "iovalkey";
 import { decideFlag, listFlags } from "../admin/integrity.ts";
 import { channelSummary } from "../analytics/queries.ts";
 import { displayCutoff } from "../analytics/rules.ts";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
+import { emit } from "../events/outbox.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor, pageOf } from "../lib/cursor.ts";
 import { conflict, notFound } from "../lib/errors.ts";
 import { type Ctx, os, requireCaller, requireChannel } from "../lib/orpc.ts";
@@ -258,37 +257,10 @@ async function sharedEntry(deps: Deps, token: string): Promise<AttestationEntry>
 
 // ------------------------------------------------------------------------------- key compromise
 
-/** Enqueue a re-check per broadcast (the worker re-issues); one short-lived producer, as it is rare. */
-async function enqueueReissues(deps: Deps, kid: string, broadcastIds: readonly string[]): Promise<void> {
-  if (broadcastIds.length === 0) return;
-  // BullMQ refuses ioredis key prefixes and needs maxRetriesPerRequest: null.
-  const conn = new Valkey(deps.env.VALKEY_URL, {
-    maxRetriesPerRequest: null,
-    connectionName: "api-attestation-reissue",
-  });
-  const queue = new Queue(QUEUES.analytics, { connection: conn, prefix: deps.env.WORKER_BULL_PREFIX });
-  try {
-    await queue.addBulk(
-      broadcastIds.map((broadcastId) => ({
-        name: ANALYTICS_JOBS.integrityAttestation,
-        data: { broadcastId, reason: "recheck" as const },
-        opts: {
-          jobId: analyticsJobId(ANALYTICS_JOBS.integrityAttestation, broadcastId, `reissue-${kid}`),
-          attempts: 5,
-          backoff: { type: "exponential", delay: 5_000 },
-        },
-      })),
-    );
-  } finally {
-    await queue.close();
-    conn.disconnect();
-  }
-}
-
 async function compromiseKey(deps: Deps, adminId: string, q: { kid: string; reason: string }) {
   const k = schema.integritySigningKeys;
   const now = deps.now();
-  const { row, affected } = await deps.db.transaction(async (tx) => {
+  const row = await deps.db.transaction(async (tx) => {
     const [current] = await tx.select().from(k).where(eq(k.kid, q.kid)).for("update");
     if (!current) throw notFound("Signing key not found");
     if (current.compromisedAt) throw conflict("This key is already marked compromised");
@@ -313,14 +285,13 @@ async function compromiseKey(deps: Deps, adminId: string, q: { kid: string; reas
       reason: q.reason,
       details: { kid: q.kid, broadcasts: latest.length },
     });
-    return { row: updated, affected: latest.map((r) => r.broadcastId) };
+    // The relay starts one re-issue per broadcast; the daily reconciler catches any it misses.
+    await emit(tx, "integrity.key.compromised", null, {
+      kid: q.kid,
+      broadcast_ids: latest.map((r) => r.broadcastId),
+    });
+    return updated;
   });
-  try {
-    await enqueueReissues(deps, q.kid, affected);
-  } catch (err) {
-    // The daily reconciler re-issues whatever this missed.
-    deps.logger.error("attestation reissue enqueue failed", { kid: q.kid, broadcasts: affected.length, err });
-  }
   return {
     kid: row.kid,
     algorithm: "Ed25519" as const,

@@ -66,6 +66,7 @@ export {
   type WebhookMessageType,
   type WebhookSubscription,
 } from "./webhooks.ts";
+export * from "./attestation.ts";
 // Contract values bots commonly need, re-exported so apps never import the private contracts package.
 export { OAUTH_PATHS, PKCE_VERIFIER, DEVICE_CODE_GRANT, parseScope, pkceChallenge } from "@commonair/contracts/oauth";
 export { SCOPES, SCOPE_NAMES, TWITCH_SCOPE_MAP, type Scope } from "@commonair/contracts/scopes";

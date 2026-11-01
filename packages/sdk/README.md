@@ -97,6 +97,28 @@ Deliveries are retried with the same message id: drop repeats with `createDedupe
 WebSocket. Chat closes a socket when the token it opened with is rotated, so long-running bots
 reconnect with `await getToken()` when `closed` resolves.
 
+### Verify audience attestations: `verifyAttestationBundle`
+
+An instance signs each broadcast's audience figures (verified viewer-seconds, peak, delivery bytes)
+with Ed25519 and appends them to a per-channel hash chain. Check them offline, with WebCrypto only:
+
+```ts
+// The bundle carries the key history (also at /.well-known/commonair-attestation).
+const bundle = await client.integrity.attestations.bundle({ channel, fromSeq: 1, limit: 500 });
+const r = await verifyServedBundle(bundle); // signatures, seq/prevHash, one channel and origin
+if (r.ok) for (const e of r.latest) console.log(e.statement.broadcastId, e.statement.verifiedViewerSeconds);
+```
+
+- `verifyAttestation(envelope, keys)` checks one statement; `verifyAttestationBundle(envelopes,
+  keys)` a contiguous window, oldest first. A failure names the `problem` (`bad_signature`,
+  `chain_break`, `bad_supersedes`, `compromised_kid`, …) and the entry `index`.
+- A broadcast's current figures are its latest entry (`latest`); earlier ones are `superseded`.
+- A key marked compromised never vouches on its own: a single statement it signed fails. Inside a
+  window its entries pass as links (`compromised: true`, never in `latest`) only when a later
+  entry signed by a good key re-issues that broadcast and commits to them through `prevHash`.
+- `verifyReasons(statement, salt, breakdown)` checks a revealed exclusion breakdown (the owner's
+  view or a share link) against the statement's `reasonsCommitment`.
+
 ## Examples
 
 In [`examples/`](examples/): `device-flow-chat-bot.ts`, `webhook-receiver.ts`,

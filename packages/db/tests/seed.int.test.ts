@@ -90,6 +90,17 @@ describe("legal seed documents", () => {
     expect(COOKIES_SEED_VERSION > "2026-10-29-i18n-draft").toBe(true);
   });
 
+  test("privacy describes captions, streamer analytics, attestations and rehearsal invitees (W2)", () => {
+    const body = docs.find((d) => d.kind === "privacy")?.body ?? "";
+    expect(body).toMatch(/## Captions, analytics and rehearsals/);
+    expect(body).toMatch(/counsel has not reviewed this section/);
+    expect(body).toMatch(/\*\*Captions\.\*\*/);
+    expect(body).toMatch(/\*\*Streamer analytics\.\*\*/);
+    expect(body).toMatch(/\*\*Rehearsals\.\*\*/);
+    // On top of N1's privacy bump, so members who accepted that version are asked again.
+    expect(PRIVACY_SEED_VERSION > "2026-10-30-notifications-draft").toBe(true);
+  });
+
   test("terms, privacy and guidelines require acceptance; cookies, DMCA and the enforcement notice do not", () => {
     const required = Object.fromEntries(docs.map((d) => [d.kind, d.requiresAcceptance]));
     expect(required).toEqual({
@@ -108,8 +119,8 @@ describe("legal seed documents", () => {
       const words = d.body.split(/\s+/).filter(Boolean).length;
       expect(words, d.kind).toBeGreaterThanOrEqual(300);
       // Privacy grew past 1000 words with chat replay and blocks (W1), then notifications, push
-      // and Discord (N1); keep it under 1400.
-      expect(words, d.kind).toBeLessThanOrEqual(d.kind === "privacy" ? 1400 : 1000);
+      // and Discord (N1), then captions, analytics and rehearsals (W2); keep it under 1500.
+      expect(words, d.kind).toBeLessThanOrEqual(d.kind === "privacy" ? 1500 : 1000);
     }
   });
 

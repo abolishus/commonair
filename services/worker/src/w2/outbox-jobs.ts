@@ -12,6 +12,8 @@
  * - `analytics.rollup.ready` → `integrity-attestation` (`rollup` after an offline rollup,
  *   `recheck` after a re-score, `test` from the test hook).
  * - `integrity.sessions.rescored` → `broadcast-rollup` (`reason: "rescore"`) now.
+ * - `integrity.key.compromised` → one `integrity-attestation` (`recheck`) per broadcast whose latest
+ *   entry the key signed, so the worker re-issues it under the current key.
  * - `rehearsal.armed` → the rehearsal driver for that arm.
  *
  * Job ids are deterministic per event, so a re-relayed batch (at-least-once) enqueues nothing new
@@ -120,6 +122,17 @@ export async function w2JobsFor(tx: Executor, rows: readonly EventRow[], now: Da
           data: { broadcastId: p.broadcast_id, reason: "rescore" },
           opts: { jobId: analyticsJobId(ANALYTICS_JOBS.broadcastRollup, p.broadcast_id, `rescore-${row.id}`) },
         });
+        break;
+      }
+      case "integrity.key.compromised": {
+        const p = payloadOf("integrity.key.compromised", row);
+        for (const broadcastId of p.broadcast_ids)
+          out.push({
+            queue: QUEUES.analytics,
+            name: ANALYTICS_JOBS.integrityAttestation,
+            data: { broadcastId, reason: "recheck" },
+            opts: { jobId: analyticsJobId(ANALYTICS_JOBS.integrityAttestation, broadcastId, `reissue-${p.kid}`) },
+          });
         break;
       }
       case "rehearsal.armed": {

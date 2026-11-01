@@ -24,6 +24,10 @@ import {
 } from "../src/components/analytics/data.ts";
 import { locale, uiMessages } from "../src/i18n/index.ts";
 
+// Both fetch on their own (their own tests cover them); stubbed so this file makes no requests.
+vi.mock("../src/components/analytics/group-appeal.tsx", () => ({ GroupAppealAction: () => null }));
+vi.mock("../src/components/attestations/panel.tsx", () => ({ AttestationsPanel: () => null }));
+
 afterEach(cleanup);
 
 const NOW = Date.parse("2026-10-31T12:00:00.000Z");

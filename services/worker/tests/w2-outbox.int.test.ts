@@ -172,6 +172,21 @@ test("integrity.sessions.rescored re-runs the rollup now; rehearsal.armed starts
   expect(pending[0]?.publishedAt).not.toBeNull();
 });
 
+test("integrity.key.compromised re-checks every broadcast it names", async () => {
+  const b1 = uuidv7();
+  const b2 = uuidv7();
+  const kid = "k_test";
+  await event("integrity.key.compromised", null, { kid, broadcast_ids: [b1, b2] }, new Date());
+  expect(await relay(new Date())).toEqual(
+    [b1, b2].map((broadcastId) => ({
+      queue: QUEUES.analytics,
+      name: ANALYTICS_JOBS.integrityAttestation,
+      data: { broadcastId, reason: "recheck" },
+      opts: { jobId: analyticsJobId(ANALYTICS_JOBS.integrityAttestation, broadcastId, `reissue-${kid}`) },
+    })),
+  );
+});
+
 test("an internal event that fails validation starts nothing", async () => {
   const { channel } = await makeUser(env.t.db);
   await event("analytics.rollup.ready", channel.id, { broadcast_id: "nope" }, new Date());

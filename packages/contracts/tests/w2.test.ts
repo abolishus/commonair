@@ -277,6 +277,7 @@ describe("internal", () => {
       "channel.split.update",
       "analytics.rollup.ready",
       "integrity.attestation.appended",
+      "integrity.key.compromised",
       "integrity.sessions.rescored",
       "rehearsal.armed",
       "rehearsal.ended",

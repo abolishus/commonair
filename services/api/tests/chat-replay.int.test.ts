@@ -195,6 +195,26 @@ describe("order and paging", () => {
     expect(await all(null, "vods", id, 3)).toHaveLength(7);
   });
 
+  test("`from` starts mid-broadcast, and a cursor wins over it", async () => {
+    const start = new Date(Date.now() - 40 * MIN);
+    const b = await broadcast(start, new Date(Date.now() - MIN));
+    const id = await vod(b.id);
+    const a = await author();
+    const t = (min: number) => new Date(start.getTime() + min * MIN);
+    const ids: string[] = [];
+    for (const min of [1, 2, 3, 4, 5]) ids.push(await say(b.id, a, t(min), t(min)));
+    const from = encodeURIComponent(t(3).toISOString());
+    const mid = await call(null, `/api/vods/${id}/chat?from=${from}`);
+    expect(mid.status).toBe(200);
+    expect(mid.body.items.map((i) => i.id)).toEqual(ids.slice(2));
+    // A cursor after the first line ignores `from`: paging continues where the cursor points.
+    const first = await call(null, `/api/vods/${id}/chat?limit=1`);
+    const cursor = encodeURIComponent(first.body.nextCursor ?? "");
+    const paged = await call(null, `/api/vods/${id}/chat?cursor=${cursor}&from=${from}`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.items.map((i) => i.id)).toEqual(ids.slice(1));
+  });
+
   test("a malformed cursor is a client error", async () => {
     const b = await broadcast(new Date(Date.now() - 10 * MIN), new Date());
     const id = await vod(b.id);

@@ -94,6 +94,35 @@ reasons (and then excluding them from `modActionCells`); the speech fixture audi
 into `FULL_REQUIRED` with their shards (milestone). Counsel on split recipients stays open
 (decision (a)).
 
+**Batch 6 wave 2 merged 2026-11-01** (W2b-attestations, W2b-group-appeals, W2-vod-watch; each
+implement → independent review → fix; one `--no-ff` merge per unit, no file shared). Landed: signed
+audience attestations (worker job under a per-channel advisory lock, `broadcast` / `supersede` /
+`reissue` entries, the daily reconciler, owner panel on `/analytics`, share links, the public
+`/attestations/verify` page, `verifyAttestationBundle` / `verifyServedBundle` / `verifyReasons` in
+`@commonair/sdk`, where a compromised key's entries pass only as links a later good-key re-issue
+covers), `docs/governance/integrity-ruleset-changelog.md`; group exclusion appeals (1 per broadcast,
+3 per channel per 7 days, `rescore.ts` re-scores the ended sessions an overturn covers, the rollup
+re-runs and a `supersede` follows; the dialog, limits and status on `/analytics`); the public VOD
+and clip watch pages with the chat replay panel (wall-clock playhead, catching-up labels,
+`retained` false notice, blocked authors hidden). Contract requests applied: the SDK re-exports
+`./attestation.ts` (the harness imports it from `@commonair/sdk`); `AttestationsPanel` mounted in
+the analytics broadcast view; `w2-scaffold.int` / `platform.int` / integrity `constants.test`
+updated for built stubs (the 501 mapping moved to a unit test, `services/api/tests/errors.test.ts`);
+`integrity.key.compromised` (internal event, kid plus broadcast ids) written in the compromise
+transaction and mapped by the relay to one `recheck` attestation job per broadcast (the API's
+direct BullMQ enqueue is gone); the server honours `ChatReplayInput.from` (cursor wins); the
+`vod-player.tsx` `<video>` source-policy allowlist entry; analytics tests stub the panel and the
+appeal action; selector, chat-replay and SDK README docs; the units' extra test files accepted.
+Privacy policy: a "Captions, analytics and rehearsals" section (draft, counsel not reviewed;
+`PRIVACY_SEED_VERSION` `2026-11-01-w2-draft`, so members re-accept; length cap 1500 words).
+Lifted: `PENDING_W2_EXTENSIONS` and `PENDING_W2_IDS` are empty; `replay-panel` needs no
+timeline-sync steps (it brings its own broadcast). Declined: none. Open: the SDK build
+(`packages/sdk/scripts/build.ts`) still refuses the AGPL-only contracts files it inlines until the
+maintainer confirms their dual licence (ADR 0035; `tokens/attestation.ts` is dual already); a deep
+seek in the replay panel starts a fresh span; p2p bytes are not attested (needs statement `v` 2);
+the `notify` shard's time with `live-dvr` and `rehearsal` is unmeasured; browser, visual and
+`en-XA` checks of the new pages and the end-of-batch CI run (milestone) are the user's.
+
 **Batch 5 (rest of N2; `.claude/briefs/batch5/README.md`), planned 2026-10-31.** User decisions:
 Spanish drafted by agents now against a shared glossary and uploaded to Weblate as "needs
 editing" for human review; Arabic waits for the next batch (N2-rtl still makes `packages/ui`

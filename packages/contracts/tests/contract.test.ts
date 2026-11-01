@@ -167,6 +167,7 @@ describe("events", () => {
       "dmca.notice.decided",
       "dmca.notice.received",
       "integrity.attestation.appended",
+      "integrity.key.compromised",
       "integrity.sessions.rescored",
       "legal.hold.placed",
       "moderation.case.resolved",

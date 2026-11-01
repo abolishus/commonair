@@ -146,9 +146,9 @@ export const W2_EXTENSION_UNITS: Readonly<Record<W2Extension, { unit: string; fi
 
 /**
  * Steps whose implementing unit has not merged yet: selectable explicitly (`--set w2=group`) but
- * left out of `all`. Every one is pending until its unit merges.
+ * left out of `all`. Empty since batch 6 wave 2 merged: every W2 extension is built.
  */
-export const PENDING_W2_EXTENSIONS: readonly W2Extension[] = ["signed", "tamper", "group-appeal", "replay-panel"];
+export const PENDING_W2_EXTENSIONS: readonly W2Extension[] = [];
 
 /**
  * Extensions that read what another left: an attestation is signed over the rollup's figures, the
@@ -170,8 +170,8 @@ export const W2_EXTENSION_PREREQUISITES: Readonly<Record<W2Extension, readonly W
 
 /**
  * The scenario's own steps an extension needs: `enforcement` reads the report around the T2 label
- * and T1 restriction (trust-safety steps 4 and 5, with step 4's overturned appeal); `replay-panel`
- * plays the VOD that live media time and replay exclusions leave (timeline-sync steps 1 and 3).
+ * and T1 restriction (trust-safety steps 4 and 5, with step 4's overturned appeal). `replay-panel`
+ * brings its own broadcast, VOD, clip and lines, so it needs none of timeline-sync's steps.
  */
 export const W2_SCENARIO_STEP_PREREQUISITES: Readonly<Record<W2Extension, readonly number[]>> = {
   "split-release": [],
@@ -183,7 +183,7 @@ export const W2_SCENARIO_STEP_PREREQUISITES: Readonly<Record<W2Extension, readon
   tamper: [],
   "group-appeal": [],
   enforcement: [4, 5],
-  "replay-panel": [1, 3],
+  "replay-panel": [],
 };
 
 export interface W2Selection<S extends W2ExtendedScenario> {

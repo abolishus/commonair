@@ -18,14 +18,8 @@
  */
 import { INTERNAL_ROUTES, INTERNAL_SECRET_HEADER } from "@commonair/contracts/internal";
 import { AttestationStatement, canonicalize, fromB64url, toB64url } from "@commonair/tokens/attestation";
-// Relative until `@commonair/sdk` re-exports `./attestation.ts` (contract request): the SDK file
-// is the verifier third parties get, so the harness checks with exactly that.
-import {
-  type ServedAttestationEntry,
-  verifyAttestation,
-  verifyReasons,
-  verifyServedBundle,
-} from "../../../packages/sdk/src/attestation.ts";
+// The SDK's verifier is the one third parties get, so the harness checks with exactly that.
+import { type ServedAttestationEntry, verifyAttestation, verifyReasons, verifyServedBundle } from "@commonair/sdk";
 import { internalSecret } from "../safety-io.ts";
 import { WebSession } from "../web/session.ts";
 import type { IntegrityW2Extension } from "./kit.ts";

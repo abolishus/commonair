@@ -431,41 +431,7 @@ describe("n2-selectors.md: language switchers (batch 5)", () => {
  * unit has not merged wait in PENDING_W2_IDS; a pending id that is already rendered fails, so the
  * list is emptied as the W2 units merge (the orchestrator lifts each unit's ids at its merge).
  */
-const PENDING_W2_IDS: readonly string[] = [
-  // W2b-group-appeals
-  "group-appeal-open",
-  "group-appeal-dialog",
-  "group-appeal-limit",
-  "group-appeal-submit",
-  "group-appeal-status",
-  // W2b-attestations
-  "attestations-panel",
-  "attestation-entry",
-  "attestation-share-create",
-  "attestation-share-link",
-  "attestation-share-revoke",
-  "attestation-verify-page",
-  "attestation-verify-input",
-  "attestation-verify-submit",
-  "attestation-verify-result",
-  "attestation-verify-origin",
-  // W2-vod-watch
-  "vod-watch-page",
-  "clip-watch-page",
-  "watch-not-found",
-  "watch-not-ready",
-  "watch-title",
-  "watch-channel-link",
-  "vod-player",
-  "vod-captions-toggle",
-  "replay-panel",
-  "replay-row",
-  "replay-row-time",
-  "replay-catching-up",
-  "replay-not-retained",
-  "replay-empty",
-  "replay-loading",
-];
+const PENDING_W2_IDS: readonly string[] = [];
 
 /** First-column ids (`<x>` templates kept) of every table in the doc's "## Test ids" section. */
 function w2TestIds(): string[] {

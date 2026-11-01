@@ -24,7 +24,7 @@ import {
   sign,
   toB64url,
 } from "@commonair/tokens/attestation";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { loadApiEnv } from "../src/env.ts";
 import { client, signUpAndSignIn, startApi, type TestApi } from "./harness.ts";
@@ -382,6 +382,14 @@ describe("keys", () => {
       .where(and(eq(schema.auditLog.action, "integrity.key.compromise"), eq(schema.auditLog.subjectId, key.kid)));
     expect(row).toMatchObject({ actorId: admin.userId, actorType: "admin" });
     expect(row!.details).toMatchObject({ kid: key.kid, broadcasts: 2 });
+    // The re-issues start from the outbox, written in the same transaction.
+    const [ev] = await db()
+      .select()
+      .from(schema.events)
+      .where(
+        and(eq(schema.events.type, "integrity.key.compromised"), sql`${schema.events.payload}->>'kid' = ${key.kid}`),
+      );
+    expect((ev!.payload as { broadcast_ids: string[] }).broadcast_ids).toHaveLength(2);
     expect((await verifyCall({ envelope: { payload: e3.payload, signature: e3.signature } })).body).toMatchObject({
       valid: false,
       problem: "compromised_kid",

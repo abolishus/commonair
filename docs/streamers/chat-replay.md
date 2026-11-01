@@ -10,9 +10,11 @@ the video: a line shows up at the moment the person who wrote it was watching, n
 server happened to receive it. Why it works the way it does:
 [ADR 0012, amendment 1](../decisions/0012-media-clock.md#amendment-1-part-2-timeline-spine).
 
-In this release replay is available through the API (`vods.chat` at `GET /vods/{id}/chat`,
-`clips.chat` at `GET /clips/{id}/chat`). The replay panel on the watch page comes in a later
-release.
+Replay shows in a panel beside the player on each VOD's and clip's watch page
+(`/<channel>/vods/<id>` and `/<channel>/clips/<id>`): lines appear as the video reaches them, and
+a line's time seeks the player there. It is also available through the API (`vods.chat` at
+`GET /vods/{id}/chat`, `clips.chat` at `GET /clips/{id}/chat`; `from` starts a page at an
+instant, for a deep seek).
 
 ## Where a line is placed
 
