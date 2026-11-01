@@ -21,7 +21,7 @@ import {
   QUEUES,
   type BroadcastRollupJob as RollupData,
 } from "@commonair/contracts/internal";
-import { type InfraCostModel, costModelEnv } from "@commonair/config";
+import { type InfraCostModel, costModelEnv, loadEnv } from "@commonair/config";
 import { type Executor, lockLegalHold, schema } from "@commonair/db";
 import { AUDIENCE_SETTLE_SECONDS, FETCH_UNJUDGED, exclusionCategoryOf } from "@commonair/integrity";
 import { and, asc, eq, isNull, lt, sql } from "drizzle-orm";
@@ -241,10 +241,17 @@ export function marginalCostCents(bytes: BySource, model: Pick<InfraCostModel, "
 
 // ------------------------------------------------------------------------------- the job
 
+/**
+ * `INFRA_COST_MODEL` from an env source, read like startup reads it (`loadEnv`): a blank value, as
+ * `.env.example` and compose `env_file` leave it, is unset and means the default model, not bad JSON.
+ */
+export const costModelFromEnv = (source: Record<string, string | undefined>): InfraCostModel =>
+  loadEnv(costModelEnv, source).INFRA_COST_MODEL;
+
 let envModel: InfraCostModel | null = null;
 /** `INFRA_COST_MODEL` from the worker's env (validated at startup by `workerEnv`), read once. */
 export function envCostModel(): InfraCostModel {
-  envModel ??= costModelEnv.parse(process.env).INFRA_COST_MODEL;
+  envModel ??= costModelFromEnv(process.env);
   return envModel;
 }
 
