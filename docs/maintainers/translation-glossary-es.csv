@@ -1,0 +1,153 @@
+source,target,developer_comments
+stream,transmisión,Noun. The verb is transmitir.
+broadcast,transmisión,"Noun. In running prose, quien transmite is the broadcaster."
+go live,transmitir en vivo,
+live,en vivo,
+streamer,streamer,Kept in English.
+broadcaster,streamer,Quien transmite in running prose.
+channel,canal,
+viewer,espectador,Plural: espectadores. Prefer neutral wording (las personas que ven) where it reads well.
+verified viewers,espectadores verificados,
+follow,seguir,Verb.
+follower,seguidor,
+chat,chat,Kept in English.
+clip,clip,
+VOD,video bajo demanda (VOD),
+recording,grabación,
+stream key,clave de transmisión,
+relay,relay (nodo de retransmisión),Gloss on first use in help text; relay alone in labels.
+co-op,cooperativa,
+cooperative,cooperativa,
+member,miembro,A member of the co-op.
+patronage dividend,retorno cooperativo,
+patronage,retorno cooperativo,
+patronage statement,estado de cuenta del retorno cooperativo,
+council,consejo,
+proposal,propuesta,
+vote,voto,
+election,elección,
+treasury,tesorería,
+treasurer,tesorero,As an actor or role: la tesorería.
+subscription,suscripción,The paid kind.
+subscribe,suscribirse,
+unsubscribe,darse de baja,"From email. Never cancelar la suscripción, which is the paid subscription."
+support,apoyar,Paying to support a channel.
+supporter,la persona que apoya,Plural: quienes apoyan.
+payout,liquidación,
+payout account,cuenta de liquidación,
+payout run,ronda de liquidaciones,
+ledger,libro contable,
+fee,comisión,
+refund,reembolso,
+chargeback,contracargo,
+amount,monto,
+tip,propina,Tipped: dio una propina.
+tier,nivel,
+gift sub,suscripción de regalo,Plural: suscripciones de regalo.
+earnings,ganancias,
+balance,saldo,
+held,retenido,
+owed,adeudado,
+surplus,excedente,
+member share,aportación de miembro,
+creators,quienes crean contenido,
+creator council,consejo de creadores,
+moderator,moderador,As an actor: el equipo de moderación.
+moderation,moderación,
+admin,la administración,As an actor.
+ban,bloqueo permanente,
+timeout,expulsión temporal,
+block,bloquear,Blocking a user.
+report,denuncia,Noun; the verb is denunciar.
+appeal,apelación,
+takedown,retirada,
+takedown request,solicitud de retirada,
+legal hold,retención legal,
+statement of reasons,declaración de motivos,
+integrity,integridad,
+integrity flags,alertas de integridad,
+notice,aviso,DMCA notice.
+counter-notice,contraaviso,DMCA counter-notice.
+claimant,quien reclama,
+uploader,quien subió el material,
+strike,falta,Copyright strike.
+repeat infringer,infractor reincidente,
+fair use,uso legítimo (fair use),
+dismiss,desestimar,A report or appeal.
+uphold,mantener,A decision.
+overturn,revertir la decisión,
+audit log,registro de auditoría,
+board,junta directiva,
+board minute,acta de la junta,
+quorum,quórum,
+turnout,participación,
+electorate,censo electoral,
+ballot,papeleta,
+approval ballot,voto por aprobación,
+candidacy,candidatura,
+seat,puesto,
+rank,posición,
+term,mandato,Term of office.
+poll,encuesta,
+prediction,predicción,
+pool,bote,Prediction pool.
+bet,apuesta,
+outcome,resultado,Prediction outcome.
+raid,raid,Kept in English.
+goal,meta,
+channel points,puntos del canal,
+bot,bot,
+command,comando,
+timer,temporizador,
+overlay,overlay (superposición),Gloss on first use in help text; overlay alone in labels.
+cooldown,tiempo de espera,
+song requests,peticiones de canciones,
+leaderboard,clasificación,
+sign in,iniciar sesión,
+sign up,registrarse,
+sign out,cerrar sesión,
+settings,configuración,
+notification,notificación,Plural: notificaciones.
+instance,instancia,
+studio,estudio,
+dashboard,panel,
+developer console,consola de desarrolladores,
+app,aplicación,A developer app.
+token,token,
+scope,permiso,OAuth scope.
+webhook,webhook,
+Calm Chat,Chat en calma,Feature name.
+data mode,modo de ahorro de datos,
+watch gate,filtro de visualización verificada,The verified watch gate.
+mature (18+),para adultos (18+),
+cookie preferences,preferencias de cookies,
+simulcast,retransmisión simultánea,
+fingerprint,huella digital,
+encoder,codificador,
+bitrate,tasa de bits,
+keyframe,fotograma clave,
+egress,tráfico de salida,
+source,fuente,Egress source.
+origin,origen,Egress origin.
+display name,nombre visible,
+wave,ráfaga,A surge of viewers or messages.
+two-factor authentication,autenticación en dos pasos,
+recovery codes,códigos de recuperación,
+security key,llave de seguridad,
+community guidelines,normas de la comunidad,
+data export,exportación de datos,
+sidebar,barra lateral,
+breadcrumb,ruta de navegación,
+command palette,paleta de comandos,
+theme,tema,Dark / light / system: oscuro / claro / sistema.
+Preferences,Preferencias,
+Language,Idioma,
+Automatic,Automático,
+ID,ID,Always capitals.
+try again,Reintentar,On buttons; Inténtalo de nuevo. in sentences.
+offline,no está en vivo,Not streaming; also fuera del aire. Sin conexión only for a network or relay.
+Hosted Weblate,Hosted Weblate,Brand name; never translated.
+Stripe,Stripe,Brand name; never translated.
+Discord,Discord,Brand name; never translated.
+Twitch,Twitch,Brand name; never translated.
+OBS,OBS,Brand name; never translated.
