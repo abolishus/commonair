@@ -18,8 +18,6 @@ import {
   PAYOUT_ACCOUNT_NOT_READY,
   loadMoneySettings,
   lockPayoutBatch,
-  paymentSucceeded,
-  post,
   postChargebackReversal,
 } from "@commonair/ledger";
 import type { PaymentAdapter, StripeAction } from "@commonair/payments";
@@ -27,6 +25,7 @@ import { audit } from "../events/audit.ts";
 import { addOneMonthUtc } from "./checkout-rules.ts";
 import { endSubscriptions } from "./checkout-shared.ts";
 import { confirmPaymentTx, reversePaymentTx } from "./checkout-treasurer.ts";
+import { postPaymentWithSplit } from "./splits.ts";
 import { recordProviderRefundFailed } from "./stripe-refunds.ts";
 
 const { payments, subscriptions, tips, channels, disputes, payoutAccounts, payouts } = schema;
@@ -266,23 +265,22 @@ async function bookSubscriptionPayment(
     succeededAt: receivedAt,
   });
   const { cut, cutHistoryId } = await loadMoneySettings(tx);
-  await post(
-    tx,
-    paymentSucceeded({
-      paymentId,
-      paymentKind: "subscription",
-      provider: "stripe",
-      settlement: "cash",
-      creatorUserId: c.ownerId,
-      grossCents: a.amountPaid,
-      taxCents: a.taxCents,
-      feeCents,
-      currency: a.currency,
-      cut,
-      cutHistoryId,
-      occurredAt: receivedAt,
-    }),
-  );
+  // The split version active for subscriptions at `receivedAt`, linked in this transaction (ADR 0013).
+  await postPaymentWithSplit(tx, {
+    channelId: c.id,
+    paymentId,
+    paymentKind: "subscription",
+    provider: "stripe",
+    settlement: "cash",
+    creatorUserId: c.ownerId,
+    grossCents: a.amountPaid,
+    taxCents: a.taxCents,
+    feeCents,
+    currency: a.currency,
+    cut,
+    cutHistoryId,
+    occurredAt: receivedAt,
+  });
 }
 
 async function invoicePaid(tx: Executor, a: InvoicePaid, prepared: PreparedAction, now: Date): Promise<AppliedAction> {

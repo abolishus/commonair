@@ -15,8 +15,6 @@ import {
   ReversalExceedsPaymentError,
   loadMoneySettings,
   lockPayoutBatch,
-  paymentSucceeded,
-  post,
   postReversal,
 } from "@commonair/ledger";
 import { createAdapter, normalizeManualReference } from "@commonair/payments";
@@ -28,6 +26,7 @@ import { badRequest, conflict, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { confirmedPeriod, disputeOutcome, tierCode } from "./checkout-rules.ts";
 import { endSubscriptions, invalidateSubscribers, userEventFields } from "./checkout-shared.ts";
+import { postPaymentWithSplit } from "./splits.ts";
 import { requestProviderRefund } from "./stripe-refunds.ts";
 import { withCoopErrors } from "../coop/errors.ts";
 import { confirmShareTx } from "../coop/membership.ts";
@@ -110,23 +109,22 @@ export async function confirmPaymentTx(
   if (!updated) throw conflict("This payment is no longer pending");
 
   const { cut, cutHistoryId } = await loadMoneySettings(tx);
-  await post(
-    tx,
-    paymentSucceeded({
-      paymentId: p.id,
-      paymentKind: p.kind === "tip" ? "tip" : "subscription",
-      provider: p.provider,
-      settlement: "cash",
-      creatorUserId: c.ownerId,
-      grossCents: p.amountCents,
-      taxCents: o.taxCents,
-      feeCents: o.feeCents,
-      currency: p.currency,
-      cut,
-      cutHistoryId,
-      occurredAt: receivedAt,
-    }),
-  );
+  // The split version active for this kind at `receivedAt`, linked in this transaction (ADR 0013).
+  await postPaymentWithSplit(tx, {
+    channelId: c.id,
+    paymentId: p.id,
+    paymentKind: p.kind === "tip" ? "tip" : "subscription",
+    provider: p.provider,
+    settlement: "cash",
+    creatorUserId: c.ownerId,
+    grossCents: p.amountCents,
+    taxCents: o.taxCents,
+    feeCents: o.feeCents,
+    currency: p.currency,
+    cut,
+    cutHistoryId,
+    occurredAt: receivedAt,
+  });
 
   const subscribers: string[] = [];
   if (p.kind === "subscription") {

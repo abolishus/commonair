@@ -4,15 +4,16 @@
 /**
  * Refunds, chargebacks and won chargebacks posted from the ledger's own record of the
  * payment. Everything a reversal depends on (the original split, what was already reversed,
- * the creator's balances) is read inside one transaction under the payment and creator locks,
- * so concurrent disputes can never reverse more than was paid.
+ * every recipient's balances) is read inside one transaction under the payment lock and then the
+ * creator locks of every recipient in sorted order (ADR 0013 decision 4), so concurrent disputes
+ * can never reverse more than was paid, and a reversal racing a payout batch cannot deadlock.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { type Executor, schema } from "@commonair/db";
-import { lockCreator, lockPayment } from "./locks.ts";
+import { lockCreators, lockPayment } from "./locks.ts";
 import { PaymentMetaV2, ReversalMetaV2 } from "./meta.ts";
 import { IdempotencyConflictError, type PostResult, post } from "./poster.ts";
-import { creatorBalances, holdLots } from "./queries.ts";
+import { creatorBalances, holdLots, paymentHoldRemaining } from "./queries.ts";
 import { chargeback, chargebackReversal, refund } from "./rules.ts";
 
 export class PaymentNotFoundError extends Error {
@@ -88,9 +89,14 @@ export async function postReversal(db: Executor, i: PostReversalInput): Promise<
       );
     }
 
-    await lockCreator(tx, meta.creatorUserId);
+    await lockCreators(tx, [meta.creatorUserId, ...meta.shares.map((s) => s.userId)]);
     const balances = await creatorBalances(tx, meta.creatorUserId, currency);
     const lots = await holdLots(tx, meta.creatorUserId, currency);
+    const crewLots: Record<string, number> = {};
+    for (const s of meta.shares) {
+      if (s.role === "crew")
+        crewLots[s.userId.toLowerCase()] = await paymentHoldRemaining(tx, i.paymentId, s.userId, currency);
+    }
     const input = {
       disputeId: i.disputeId,
       paymentId: i.paymentId,
@@ -105,6 +111,8 @@ export async function postReversal(db: Executor, i: PostReversalInput): Promise<
       alreadyReversedCents: already,
       amountCents: i.amountCents,
       balances: { liabilityCents: balances.liabilityCents, holdLots: lots },
+      shares: meta.shares,
+      crewLots,
     };
     const posting =
       i.kind === "refund" ? refund(input) : chargeback({ ...input, disputeFeeCents: i.disputeFeeCents ?? 0 });
@@ -141,7 +149,7 @@ export async function postChargebackReversal(
     if (replay) return replay;
     const meta = ReversalMetaV2.parse(cb.metadata);
     const currency = await transactionCurrency(tx, cb.id);
-    await lockCreator(tx, meta.creatorUserId);
+    await lockCreators(tx, [meta.creatorUserId, ...meta.shares.map((s) => s.userId)]);
     const balances = await creatorBalances(tx, meta.creatorUserId, currency);
     return post(
       tx,
@@ -160,7 +168,14 @@ export async function postChargebackReversal(
           creatorCents: Math.abs(meta.creatorCents),
           coopCents: Math.abs(meta.coopCents),
         },
+        slices: meta.shares.map((s) => ({
+          userId: s.userId,
+          role: s.role,
+          fromOwnLotCents: s.fromOwnLotCents,
+          ownerCoveredCents: s.ownerCoveredCents,
+        })),
         receivableCents: balances.receivableCents,
+        splitShortfallCents: balances.splitShortfallCents,
         feeRefundCents: i.feeRefundCents ?? 0,
       }),
     );

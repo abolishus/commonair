@@ -193,8 +193,8 @@ describe("hold release", () => {
     expectWellFormed(p);
     expect(on(p, accounts.creatorHold(CREATOR))).toBe(900);
     expect(on(p, accounts.creator(CREATOR))).toBe(-900);
-    expect(p.idempotencyKey).toBe(`hold-release:${PAYMENT}`);
-    expect(p.entries.find((e) => e.code === accounts.creatorHold(CREATOR))?.memo).toBe(holdMemo(PAYMENT));
+    expect(p.idempotencyKey).toBe(`hold-release:${PAYMENT}:${CREATOR}`);
+    expect(p.entries.find((e) => e.code === accounts.creatorHold(CREATOR))?.memo).toBe(holdMemo(PAYMENT, CREATOR));
   });
 
   test("due date and amount bounds", () => {
@@ -262,7 +262,7 @@ describe("refund", () => {
     expectWellFormed(p);
     expect(on(p, accounts.cash("stripe"))).toBe(-1099);
     expect(on(p, accounts.taxPayable())).toBe(99);
-    expect(lots(p)).toEqual({ [holdMemo(PAYMENT)]: 900 });
+    expect(lots(p)).toEqual({ [holdMemo(PAYMENT, CREATOR)]: 900 });
     expect(on(p, accounts.platformCut())).toBe(100);
     expect(on(p, accounts.creator(CREATOR))).toBe(0);
     expect(p.kind).toBe("refund");
@@ -298,7 +298,11 @@ describe("refund", () => {
     );
     expectWellFormed(p);
     // 900 = 50 own + 100 released + 150 oldest + 300 other + 300 receivable
-    expect(lots(p)).toEqual({ [holdMemo(PAYMENT)]: 50, [holdMemo(OLDEST)]: 150, [holdMemo(OTHER)]: 300 });
+    expect(lots(p)).toEqual({
+      [holdMemo(PAYMENT, CREATOR)]: 50,
+      [holdMemo(OLDEST, CREATOR)]: 150,
+      [holdMemo(OTHER, CREATOR)]: 300,
+    });
     expect(on(p, accounts.creator(CREATOR))).toBe(100);
     expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(300);
     expect(p.metadata.receivableCents).toBe(300);
@@ -327,7 +331,7 @@ describe("refund", () => {
       );
       expectWellFormed(p);
       const drawn = lots(p);
-      for (const l of holdLots) expect(drawn[holdMemo(l.paymentId)] ?? 0).toBeLessThanOrEqual(l.cents);
+      for (const l of holdLots) expect(drawn[holdMemo(l.paymentId, CREATOR)] ?? 0).toBeLessThanOrEqual(l.cents);
       expect(on(p, accounts.creator(CREATOR))).toBeLessThanOrEqual(balances.liabilityCents);
       expect(on(p, accounts.creatorReceivable(CREATOR))).toBeGreaterThanOrEqual(0);
     }
@@ -335,7 +339,7 @@ describe("refund", () => {
 });
 
 describe("chargeback", () => {
-  test("claws back from released earnings, then lots (own first), then a receivable; records the fee", () => {
+  test("claws back from its own lot first, then released earnings, then other lots, then a receivable; records the fee", () => {
     const p = chargeback({
       ...reversalInput({
         balances: {
@@ -350,7 +354,7 @@ describe("chargeback", () => {
     });
     expectWellFormed(p);
     expect(on(p, accounts.creator(CREATOR))).toBe(300);
-    expect(lots(p)).toEqual({ [holdMemo(PAYMENT)]: 300, [holdMemo(OTHER)]: 100 });
+    expect(lots(p)).toEqual({ [holdMemo(PAYMENT, CREATOR)]: 300, [holdMemo(OTHER, CREATOR)]: 100 });
     expect(on(p, accounts.creatorReceivable(CREATOR))).toBe(200);
     expect(on(p, accounts.paymentFees())).toBe(1500);
     expect(on(p, accounts.cash("stripe"))).toBe(-1099 - 1500);
@@ -458,7 +462,7 @@ describe("PaymentMeta v2 (ADR 0013 decision 2)", () => {
     invariant(meta);
   });
 
-  test("a chargeback takes released earnings first, so the own lot covers only the rest", () => {
+  test("a chargeback takes the payment's own still-held lot first (ADR 0013 decision 5)", () => {
     const meta = ReversalMetaV2.parse(
       chargeback({
         ...reversalInput({ balances: { liabilityCents: 500, holdLots: [{ paymentId: PAYMENT, cents: 900 }] } }),
@@ -466,7 +470,7 @@ describe("PaymentMeta v2 (ADR 0013 decision 2)", () => {
       }).metadata,
     );
     expect(meta).toMatchObject({ v: 2, creatorCents: -900, disputeFeeCents: 1500 });
-    expect(meta.shares[0]).toMatchObject({ fromOwnLotCents: 400, ownerCoveredCents: 500 });
+    expect(meta.shares[0]).toMatchObject({ fromOwnLotCents: 900, ownerCoveredCents: 0 });
     invariant(meta);
   });
 

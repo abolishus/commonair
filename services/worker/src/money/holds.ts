@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Hold release: creator shares older than `payout.rules.holdDays` move from `creator-hold` to
- * `creator` (available). The rules are read per run, so a governance change applies at the next
- * tick; `releaseDueHolds` is idempotent per payment, so overlapping or repeated runs are safe.
+ * Hold release: each recipient's share of a payment older than `payout.rules.holdDays` (a new
+ * split recipient's first crew lot `splitNewRecipientHoldDays` later) moves from `creator-hold`
+ * to `creator` (available), or to split suspense for a suspended, terminated or legally held crew
+ * recipient (ADR 0013 decisions 1, 7). The rules are read per run, so a governance change applies
+ * at the next tick; `releaseDueHolds` is idempotent per (payment, recipient), so overlapping or
+ * repeated runs are safe.
  */
 import { loadMoneySettings, releaseDueHolds, type ReleaseResult } from "@commonair/ledger";
 import type { WorkerContext } from "../context.ts";
@@ -29,6 +32,7 @@ export async function releaseHolds(
   const asOf = ctx.now();
   let released = 0;
   let totalCents = 0;
+  let withheld = 0;
   // A call that released its full limit may have left more due lots: drain the backlog this run.
   const loop = await runBatches(
     {
@@ -40,16 +44,26 @@ export async function releaseHolds(
       const r = await releaseDueHolds(ctx.db, {
         asOf,
         holdDays: payoutRules.holdDays,
+        newRecipientHoldDays: payoutRules.splitNewRecipientHoldDays,
         currency: payoutRules.currency,
         limit,
       });
       released += r.released;
       totalCents += r.totalCents;
+      withheld += r.withheld ?? 0;
       return r.released;
     },
   );
   if (totalCents > 0) moneyMetrics.released.add(totalCents, { currency: payoutRules.currency });
   // Counts only: which creators were paid out of the hold is the ledger's business, not the log's.
-  if (released > 0 || loop.exhausted) ctx.logger.info("released creator holds", { released, totalCents, ...loop });
-  return { released, totalCents, holdDays: payoutRules.holdDays, batches: loop.batches, exhausted: loop.exhausted };
+  if (released > 0 || loop.exhausted)
+    ctx.logger.info("released creator holds", { released, withheld, totalCents, ...loop });
+  return {
+    released,
+    totalCents,
+    withheld,
+    holdDays: payoutRules.holdDays,
+    batches: loop.batches,
+    exhausted: loop.exhausted,
+  };
 }

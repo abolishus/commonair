@@ -115,6 +115,18 @@ function paymentPosting(transactions: readonly BreakdownTransaction[]): {
   return { tx, meta: parsed.data };
 }
 
+/** The recipient a `hold_release` released (its metadata, or the creator-hold account it debits). */
+function releaseRecipient(tx: BreakdownTransaction): string | null {
+  const m = tx.metadata as { recipientUserId?: unknown; creatorUserId?: unknown } | null;
+  if (m && typeof m.recipientUserId === "string") return m.recipientUserId;
+  for (const e of tx.entries) {
+    const code = chartCode(e.code);
+    if (e.amountCents > 0 && code.startsWith("liability:creator-hold:"))
+      return code.slice("liability:creator-hold:".length);
+  }
+  return m && typeof m.creatorUserId === "string" ? m.creatorUserId : null;
+}
+
 function parseReversal(tx: BreakdownTransaction): ReversalMetaV2 {
   const parsed = ReversalMetaV2.safeParse(tx.metadata);
   if (!parsed.success) throw new BreakdownError(`${tx.kind} posting ${tx.id} has no ReversalMeta v2`);
@@ -175,10 +187,11 @@ export function buildBreakdown(
   line("processor_fee", meta.feeCents, paid.id);
 
   const timeline: BuiltBreakdownEvent[] = [];
-  let releasedAt: Date | null = null;
-  // What this payment's refunds and chargebacks drew back out of its own hold lot (ADR 0013
-  // decision 5). A won chargeback never re-opens a lot, so it adds nothing here.
-  let drawnFromLot = 0;
+  // Per recipient (ADR 0013 decision 1): when their lot was released, and what this payment's
+  // refunds and chargebacks drew back out of it (decision 5). A won chargeback never re-opens a
+  // lot, so it adds nothing to what was drawn.
+  const releasedAt = new Map<string, Date>();
+  const drawnFromLot = new Map<string, number>();
   for (const tx of [...transactions].sort(byTime)) {
     const at = tx.occurredAt.toISOString();
     if (tx.kind === "payment") {
@@ -186,16 +199,19 @@ export function buildBreakdown(
       continue;
     }
     if (tx.kind === "hold_release") {
-      // What left the hold: the debit on the creator-hold account.
+      // One event per recipient's release: what left the hold (the debit on the creator-hold account).
       const cents = tx.entries.filter((e) => e.amountCents > 0).reduce((s, e) => s + e.amountCents, 0);
       timeline.push({ kind: "hold_released", at, amount: money(cents), transactionId: tx.id });
-      releasedAt ??= tx.occurredAt;
+      const recipient = releaseRecipient(tx) ?? meta.creatorUserId;
+      if (!releasedAt.has(recipient)) releasedAt.set(recipient, tx.occurredAt);
       continue;
     }
     const event = REVERSAL_EVENTS[tx.kind];
     if (!event) continue;
     const r = parseReversal(tx);
-    if (tx.kind !== "chargeback_reversal") drawnFromLot += r.shares.reduce((s, x) => s + x.fromOwnLotCents, 0);
+    if (tx.kind !== "chargeback_reversal") {
+      for (const x of r.shares) drawnFromLot.set(x.userId, (drawnFromLot.get(x.userId) ?? 0) + x.fromOwnLotCents);
+    }
     if (r.taxCents !== 0) line("reversal", r.taxCents, tx.id, { component: "tax" });
     const reversed = [...r.shares].sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
     for (const s of reversed) {
@@ -211,6 +227,13 @@ export function buildBreakdown(
 
   line("coop_net", coopNet(lines), null);
 
+  // Still on hold: a recipient whose lot is neither released nor drained by reversals.
+  const stillHeld = shares.some(
+    (s) => s.creatorCents > 0 && !releasedAt.has(s.userId) && (drawnFromLot.get(s.userId) ?? 0) < s.creatorCents,
+  );
+  const releases = [...releasedAt.values()].sort((a, b) => a.getTime() - b.getTime());
+  const lastRelease = releases.at(-1) ?? null;
+
   return {
     paymentId: payment.id,
     kind: payment.kind,
@@ -219,15 +242,40 @@ export function buildBreakdown(
     lines,
     // The hold runs from the posting (as `releaseDueHolds` counts it), not from the row's timestamp.
     // An emptied lot is never released (`releaseDueHolds` skips it), so it has no release date:
-    // both hold fields null means nothing of the creator's share is left on hold.
-    holdReleasesAt:
-      releasedAt || drawnFromLot >= meta.creatorCents
-        ? null
-        : holdReleaseDueAt(paid.occurredAt, holdDays).toISOString(),
-    holdReleasedAt: releasedAt ? releasedAt.toISOString() : null,
+    // both hold fields null means nothing of the creator's share is left on hold. While any
+    // recipient's lot is still held the payment is not released (a new crew recipient's first
+    // lot waits `splitNewRecipientHoldDays` longer than the base date shown here).
+    holdReleasesAt: stillHeld ? holdReleaseDueAt(paid.occurredAt, holdDays).toISOString() : null,
+    holdReleasedAt: !stillHeld && lastRelease ? lastRelease.toISOString() : null,
     cut: { historyId: meta.cutHistoryId, streamerShare: meta.streamerShare, coopShare: meta.coopShare },
     timeline,
   };
+}
+
+/**
+ * The payer's view of the lines (ADR 0013): one creator total per posting, attributed to the
+ * channel owner (the payee of record), instead of one line per split recipient. The sums, and so
+ * `coopNet` and the settlement check, are unchanged.
+ */
+export function payerLines(lines: readonly BuiltBreakdownLine[], ownerUserId: string): BuiltBreakdownLine[] {
+  const out: BuiltBreakdownLine[] = [];
+  const merged = new Map<string, BuiltBreakdownLine>();
+  for (const l of lines) {
+    const creatorSide = l.kind === "creator" || (l.kind === "reversal" && l.component === "creator");
+    if (!creatorSide) {
+      out.push(l);
+      continue;
+    }
+    const key = `${l.kind}:${l.transactionId ?? ""}`;
+    const prev = merged.get(key);
+    if (prev) prev.amount = { ...prev.amount, cents: prev.amount.cents + l.amount.cents };
+    else {
+      const first = { ...l, amount: { ...l.amount }, recipientUserId: ownerUserId };
+      merged.set(key, first);
+      out.push(first);
+    }
+  }
+  return out;
 }
 
 /** Co-op share − its reversals − processor fee − dispute fees + returned fees (signed). */
