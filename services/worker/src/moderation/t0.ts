@@ -22,6 +22,7 @@ import { lockLegalHold, schema, uuidv7, type Executor } from "@commonair/db";
 import { clauseFor, clauseRef, MODERATION_CONSTANTS } from "@commonair/moderation";
 import { and, eq, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
+import { suspensionScope, withSuspensionState } from "../media-state.ts";
 import { moderationMetrics } from "./metrics.ts";
 import {
   alert,
@@ -95,15 +96,18 @@ async function subjectBroadcast(tx: Executor, job: Pick<ModerationT0Job, "subjec
 
 /** Ban the user and suspend the channel with the T0 reason (the database then keeps them so). */
 export async function suspendForT0(tx: Executor, userId: string, channelId: string | null, now: Date) {
-  await tx.update(users).set({ banned: true, banReason: T0_REASON, banExpires: null }).where(eq(users.id, userId));
-  if (channelId)
-    await tx
-      .update(channels)
-      .set({
-        suspendedAt: sql`coalesce(${channels.suspendedAt}, ${now.toISOString()}::timestamptz)`,
-        suspendedReason: T0_REASON,
-      })
-      .where(eq(channels.id, channelId));
+  // `channel.suspension` (decision (z)) for the channel and the account's own channel.
+  await withSuspensionState(tx, suspensionScope({ userId, channelId }), now, async () => {
+    await tx.update(users).set({ banned: true, banReason: T0_REASON, banExpires: null }).where(eq(users.id, userId));
+    if (channelId)
+      await tx
+        .update(channels)
+        .set({
+          suspendedAt: sql`coalesce(${channels.suspendedAt}, ${now.toISOString()}::timestamptz)`,
+          suspendedReason: T0_REASON,
+        })
+        .where(eq(channels.id, channelId));
+  });
 }
 
 /** End what is live and hide what the subject covers: the whole broadcast for live, else the subject. */
@@ -119,9 +123,11 @@ export async function endAndHide(
   if (!ended && channel) ended = await endLiveOrRehearsal(tx, channel, now);
   let hidden: HiddenContent = { vodIds: [], clipIds: [] };
   if (subject.subjectType === "broadcast")
-    hidden = await hideContent(tx, { broadcastId: subject.subjectId }, T0_REASON);
-  else if (subject.subjectType === "vod") hidden = await hideContent(tx, { vodIds: [subject.subjectId] }, T0_REASON);
-  else if (subject.subjectType === "clip") hidden = await hideContent(tx, { clipIds: [subject.subjectId] }, T0_REASON);
+    hidden = await hideContent(tx, { broadcastId: subject.subjectId }, T0_REASON, "t0", now);
+  else if (subject.subjectType === "vod")
+    hidden = await hideContent(tx, { vodIds: [subject.subjectId] }, T0_REASON, "t0", now);
+  else if (subject.subjectType === "clip")
+    hidden = await hideContent(tx, { clipIds: [subject.subjectId] }, T0_REASON, "t0", now);
   // Stored thumbnails stop being referenced at once; t0-media moves the objects to evidence.
   const thumbs = subject.subjectType === "broadcast" ? subject.subjectId : ended?.broadcastId;
   if (thumbs) await tx.update(schema.broadcasts).set({ thumbnailKey: null }).where(eq(schema.broadcasts.id, thumbs));

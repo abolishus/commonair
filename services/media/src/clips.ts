@@ -18,6 +18,7 @@ import type { ObjectStorage } from "@commonair/storage";
 import type { DiskBudget } from "./disk.ts";
 import { clipArgs, frameArgs, type H264Encoder, type ImageFormat } from "./ffmpeg/args.ts";
 import { runCommand } from "./ffmpeg/run.ts";
+import { withMediaState } from "./media-state.ts";
 import { ActiveScratch } from "./recovery.ts";
 import { T0_REASON, type Hit, type MediaModeration } from "./moderation/moderation.ts";
 import { assembleFromStorage, concatFiles } from "./vod/assemble.ts";
@@ -188,17 +189,20 @@ export async function processClip(deps: ClipDeps, clipId: string): Promise<"read
       // runs after all uploads and the ready transition commit.
       await storage.put(bucket, clipKey(clipId), clipBytes, { contentType: "video/mp4" });
       if (thumbnailKey) await storage.put(bucket, thumbnailKey, thumb, { contentType: imageType(deps.imageFormat) });
-      const changed = await tx
-        .update(schema.clips)
-        .set({
-          status: "ready",
-          storageKey: clipKey(clipId),
-          thumbnailKey,
-          durationSeconds: Math.round(window.durationSeconds * 1000) / 1000,
-          ...(vodId && !clip.vodId ? { vodId } : {}),
-        })
-        .where(and(eq(schema.clips.id, clipId), eq(schema.clips.status, "processing")))
-        .returning({ id: schema.clips.id });
+      // `media.clip.state` (decision (z)) when the clip is public once ready.
+      const changed = await withMediaState(tx, { clips: eq(schema.clips.id, clipId) }, "ready", new Date(), () =>
+        tx
+          .update(schema.clips)
+          .set({
+            status: "ready",
+            storageKey: clipKey(clipId),
+            thumbnailKey,
+            durationSeconds: Math.round(window.durationSeconds * 1000) / 1000,
+            ...(vodId && !clip.vodId ? { vodId } : {}),
+          })
+          .where(and(eq(schema.clips.id, clipId), eq(schema.clips.status, "processing")))
+          .returning({ id: schema.clips.id }),
+      );
       return changed.length > 0;
     });
     if (!published) return "removed";

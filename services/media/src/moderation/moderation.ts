@@ -61,10 +61,20 @@ export interface RetryPolicy {
   maxMs: number;
 }
 
+/** The Valkey commands media moderation uses (the service passes its command connection). */
+export interface ModerationValkey {
+  set(key: string, value: Buffer, mode: "EX", seconds: number): Promise<unknown>;
+  incr(key: string): Promise<number>;
+  expire(key: string, seconds: number): Promise<number>;
+}
+
 export interface ModerationDeps {
   db: Database;
-  /** Command connection; the RGB frame for the classifier goes here with a TTL. */
-  valkey: { set(key: string, value: Buffer, mode: "EX", seconds: number): Promise<unknown> };
+  /**
+   * Command connection; the RGB frame for the classifier goes here with a TTL. `incr` and `expire`
+   * count samples (batch 7 §5.6: the rehearsal report's moderation sample count).
+   */
+  valkey: ModerationValkey;
   queue: ModerationQueue;
   matcher: HashMatcher;
   sealer: SealingKey;

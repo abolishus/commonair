@@ -10,7 +10,9 @@ import { schema, uuidv7 } from "@commonair/db";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { endLiveOrRehearsal, hideContent } from "../src/moderation/records.ts";
+import { suspendForT0 } from "../src/moderation/t0.ts";
 import { makeBroadcast, makeUser } from "./fixtures.ts";
+import { mediaStates, suspensions } from "./media-state-helpers.ts";
 
 let t: TestDatabase;
 beforeAll(async () => {
@@ -50,7 +52,9 @@ test("hiding a VOD hides its clips and the live-buffer clips of its broadcast, n
   const fromLive = await clip(channel.id, b.id, null);
   const unrelated = await clip(channel.id, other.id, null);
 
-  const hidden = await t.db.transaction((tx) => hideContent(tx, { vodIds: [vodId] }, "ncii_deadline"));
+  const hidden = await t.db.transaction((tx) =>
+    hideContent(tx, { vodIds: [vodId] }, "ncii_deadline", "ncii", new Date()),
+  );
   expect(hidden.vodIds).toEqual([vodId]);
   expect(hidden.clipIds.sort()).toEqual([fromVod, fromLive].sort());
 
@@ -64,6 +68,27 @@ test("hiding a VOD hides its clips and the live-buffer clips of its broadcast, n
   expect(byId.get(unrelated)?.status).toBe("ready");
   const [v] = await t.db.select().from(schema.vods).where(eq(schema.vods.id, vodId));
   expect(v?.status).toBe("deleted");
+  // Decision (z): one event per row that stopped being public, with the caller's reason.
+  expect(await mediaStates(t.db, "media.vod.state", vodId)).toEqual([[false, "ncii"]]);
+  expect(await mediaStates(t.db, "media.clip.state", fromVod)).toEqual([[false, "ncii"]]);
+  expect(await mediaStates(t.db, "media.clip.state", fromLive)).toEqual([[false, "ncii"]]);
+  expect(await mediaStates(t.db, "media.clip.state", unrelated)).toEqual([]);
+  // Hiding again changes nothing and writes nothing.
+  await t.db.transaction((tx) => hideContent(tx, { vodIds: [vodId] }, "t0_hash_match", "t0", new Date()));
+  expect(await mediaStates(t.db, "media.vod.state", vodId)).toEqual([[false, "ncii"]]);
+});
+
+test("a T0 broadcast hide writes t0 events; suspendForT0 writes channel.suspension once", async () => {
+  const { user, channel } = await makeUser(t.db);
+  const b = await makeBroadcast(t.db, channel.id, new Date(Date.now() - 3_600_000));
+  const live = await clip(channel.id, b.id, null);
+  await t.db.transaction((tx) => hideContent(tx, { broadcastId: b.id }, "t0_hash_match", "t0", new Date()));
+  expect(await mediaStates(t.db, "media.clip.state", live)).toEqual([[false, "t0"]]);
+  await t.db.transaction((tx) => suspendForT0(tx, user.id, channel.id, new Date()));
+  expect(await suspensions(t.db, channel.id)).toEqual([true]);
+  // The account's channel is found without a channel id, and is already suspended.
+  await t.db.transaction((tx) => suspendForT0(tx, user.id, null, new Date()));
+  expect(await suspensions(t.db, channel.id)).toEqual([true]);
 });
 
 test("endLiveOrRehearsal ends the live broadcast, else the open rehearsal, quietly", async () => {

@@ -35,6 +35,7 @@ import { frameArgs, type ImageFormat } from "../ffmpeg/args.ts";
 import { runCommand } from "../ffmpeg/run.ts";
 import { T0_REASON, type MediaModeration } from "../moderation/moderation.ts";
 import { errorCategory } from "../moderation/logging.ts";
+import { withMediaState } from "../media-state.ts";
 import { ActiveScratch } from "../recovery.ts";
 import { assembleFromStorage } from "./assemble.ts";
 import { parsePlaylist, renderPlaylist, totalDuration, type PlaylistSegment } from "./playlist.ts";
@@ -296,22 +297,25 @@ export async function finalizeVod(
     }
     let totalSize = 0;
     for await (const obj of storage.list(bucket, target)) totalSize += obj.size;
-    const changed = await tx
-      .update(schema.vods)
-      .set({
-        status: "ready",
-        storagePrefix: target,
-        durationSeconds: totalDuration(segments),
-        sizeBytes: totalSize,
-        // A rehearsal's VOD is kept 24 h from its end, whatever the channel's retention (decision (g)).
-        expiresAt: new Date(
-          now.getTime() +
-            (vod.broadcastKind === "rehearsal" ? REHEARSAL_RULES.vodKeepSeconds * 1000 : vod.retentionDays * DAY_MS),
-        ),
-        ...(thumbnailKey ? { thumbnailKey } : {}),
-      })
-      .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")))
-      .returning({ id: schema.vods.id });
+    // `media.vod.state` (decision (z)) when the VOD is public once ready.
+    const changed = await withMediaState(tx, { vods: eq(schema.vods.id, vodId) }, "ready", now, () =>
+      tx
+        .update(schema.vods)
+        .set({
+          status: "ready",
+          storagePrefix: target,
+          durationSeconds: totalDuration(segments),
+          sizeBytes: totalSize,
+          // A rehearsal's VOD is kept 24 h from its end, whatever the channel's retention (decision (g)).
+          expiresAt: new Date(
+            now.getTime() +
+              (vod.broadcastKind === "rehearsal" ? REHEARSAL_RULES.vodKeepSeconds * 1000 : vod.retentionDays * DAY_MS),
+          ),
+          ...(thumbnailKey ? { thumbnailKey } : {}),
+        })
+        .where(and(eq(schema.vods.id, vodId), eq(schema.vods.status, "processing")))
+        .returning({ id: schema.vods.id }),
+    );
     return changed.length > 0 ? totalSize : null;
   });
   if (size === null) {

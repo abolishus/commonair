@@ -39,6 +39,7 @@ import {
 import { and, asc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 import { withRunLock } from "../integrity/lock.ts";
+import { suspensionScope, withMediaState, withSuspensionState } from "../media-state.ts";
 import { alert, audit, emit, safeErrorCode } from "../moderation/records.ts";
 import { DmcaMediaPendingError, disableNoticeObjects } from "./disable.ts";
 import { coveredBy, coveredIds, hideObjects, objectsOf, unhideObjects, type Covered } from "./objects.ts";
@@ -150,23 +151,29 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
     if (!item) continue;
     const vodIds = cov.vods.filter((v) => !p.held.vodIds.has(v.id)).map((v) => v.id);
     const clipIds = cov.clips.filter((x) => !p.held.clipIds.has(x.id)).map((x) => x.id);
-    if (vodIds.length) {
-      await tx
-        .update(vods)
-        .set({ removedReason: null })
-        .where(and(inArray(vods.id, vodIds), eq(vods.removedReason, "dmca"), ne(vods.status, "deleted")));
-      // Retention deleted it while it was down (`coalesce(removed_reason, 'retention')` kept
-      // 'dmca'): it stays deleted, now under its real reason so its clips are not hidden for good.
-      await tx
-        .update(vods)
-        .set({ removedReason: "retention" })
-        .where(and(inArray(vods.id, vodIds), eq(vods.removedReason, "dmca"), eq(vods.status, "deleted")));
-    }
-    if (clipIds.length)
-      await tx
-        .update(clips)
-        .set({ removedReason: null })
-        .where(and(inArray(clips.id, clipIds), eq(clips.removedReason, "dmca"), ne(clips.status, "deleted")));
+    const scope = {
+      vods: vodIds.length ? inArray(vods.id, vodIds) : undefined,
+      clips: clipIds.length ? inArray(clips.id, clipIds) : undefined,
+    };
+    await withMediaState(tx, scope, "restored", asOf, async () => {
+      if (vodIds.length) {
+        await tx
+          .update(vods)
+          .set({ removedReason: null })
+          .where(and(inArray(vods.id, vodIds), eq(vods.removedReason, "dmca"), ne(vods.status, "deleted")));
+        // Retention deleted it while it was down (`coalesce(removed_reason, 'retention')` kept
+        // 'dmca'): it stays deleted, now under its real reason so its clips are not hidden for good.
+        await tx
+          .update(vods)
+          .set({ removedReason: "retention" })
+          .where(and(inArray(vods.id, vodIds), eq(vods.removedReason, "dmca"), eq(vods.status, "deleted")));
+      }
+      if (clipIds.length)
+        await tx
+          .update(clips)
+          .set({ removedReason: null })
+          .where(and(inArray(clips.id, clipIds), eq(clips.removedReason, "dmca"), ne(clips.status, "deleted")));
+    });
     const direct =
       item.subjectType === "vod"
         ? cov.vods.find((v) => v.id === item.subjectId)
@@ -248,8 +255,11 @@ async function restoreInTx(tx: Executor, c: CounterRow, p: Plan, asOf: Date): Pr
       },
       asOf,
     );
+  // `channel.suspension` (decision (z)) when lifting the repeat-infringer suspension unsuspends.
   const termination = reversedStrike
-    ? await reconcileDmcaTerminationInTx(tx, { userId: c.userId, now: asOf, byId: null })
+    ? await withSuspensionState(tx, suspensionScope({ userId: c.userId }), asOf, () =>
+        reconcileDmcaTerminationInTx(tx, { userId: c.userId, now: asOf, byId: null }),
+      )
     : null;
   if (termination)
     await emit(

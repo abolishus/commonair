@@ -20,6 +20,7 @@ import { JOBS } from "../src/jobs/index.ts";
 import { vodPlacementLockKey } from "../src/vod/placement.ts";
 import { defineJob } from "../src/runtime/registry.ts";
 import { makeBroadcast, makeSubscription, makeUser, setup, waitFor, type TestEnv } from "./fixtures.ts";
+import { mediaStates } from "./media-state-helpers.ts";
 
 let env: TestEnv;
 const deletedPrefixes: string[] = [];
@@ -324,6 +325,9 @@ describe("housekeeping", () => {
     ]);
     const status = async (id: string) => (await env.t.db.select().from(schema.vods).where(eq(schema.vods.id, id)))[0];
     expect(await status(expired.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
+    // Decision (z): an expired public VOD stops being public; a VOD that is kept writes nothing.
+    expect(await mediaStates(env.t.db, "media.vod.state", expired.id)).toEqual([[false, "expired"]]);
+    expect(await mediaStates(env.t.db, "media.vod.state", keep.id)).toEqual([]);
     expect(await status(expiredPrivate.id)).toMatchObject({ status: "deleted", removedReason: "retention" });
     for (const v of [
       broken,

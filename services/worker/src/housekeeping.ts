@@ -8,6 +8,7 @@ import { and, eq, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import type { WorkerContext } from "./context.ts";
 import { dmcaHiddenKey } from "./dmca/objects.ts";
 import { withRunLock } from "./integrity/lock.ts";
+import { withMediaState } from "./media-state.ts";
 import { ownVodPrefix, vodPlacementLockKey } from "./vod/placement.ts";
 import { vodObjectPrefixes } from "./vod/prefixes.ts";
 
@@ -188,10 +189,12 @@ export async function enforceVodRetention(ctx: WorkerContext, batch = 50) {
               objects += await storage.deletePrefix(ctx.mediaBucket, dmcaHiddenKey(prefix));
             }
             // An owner removal keeps its reason; only plain expiry is recorded as retention.
-            await tx
-              .update(v)
-              .set({ status: "deleted", removedReason: sql`coalesce(${v.removedReason}, 'retention')` })
-              .where(eq(v.id, vod.id));
+            await withMediaState(tx, { vods: eq(v.id, vod.id) }, "expired", ctx.now(), () =>
+              tx
+                .update(v)
+                .set({ status: "deleted", removedReason: sql`coalesce(${v.removedReason}, 'retention')` })
+                .where(eq(v.id, vod.id)),
+            );
           }),
       );
       // Busy: retried on the next run.

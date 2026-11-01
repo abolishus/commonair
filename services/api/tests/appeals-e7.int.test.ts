@@ -15,6 +15,7 @@ import { BUS } from "@commonair/contracts/events";
 import { schema, uuidv7 } from "@commonair/db";
 import { appealRef, DMCA_APPEAL_MESSAGE } from "../src/routes/appeals.ts";
 import { client, mailTo, signUpAndSignIn, startApi, subscriber, waitFor, type TestApi } from "./harness.ts";
+import { suspensions } from "./media-state-helpers.ts";
 
 type User = Awaited<ReturnType<typeof signUpAndSignIn>>;
 interface AppealDto {
@@ -161,6 +162,14 @@ async function repeatInfringer(userId: string, suspension: "dmca_repeat_infringe
   const termination = await accountAction(userId, "dmca_termination");
   await db().update(schema.users).set({ banned: true, banReason: suspension }).where(eq(schema.users.id, userId));
   return { strikes, termination };
+}
+
+async function channelIdOf(userId: string): Promise<string> {
+  const [c] = await db()
+    .select({ id: schema.channels.id })
+    .from(schema.channels)
+    .where(eq(schema.channels.ownerId, userId));
+  return c!.id;
 }
 
 async function accountRow(id: string) {
@@ -423,6 +432,8 @@ describe("overturned moderation_action appeals", () => {
       .from(schema.channels)
       .where(eq(schema.channels.id, ch!.id));
     expect(after).toEqual({ at: null, reason: null });
+    // Decision (z): suspended by safety.suspend, unsuspended by the overturn.
+    expect(await suspensions(db(), ch!.id)).toEqual([true, false]);
     expect(await latestModAction(v.userId, "unsuspend_channel")).toMatchObject({
       moderatorId: mod2.userId,
       channelId: ch!.id,
@@ -505,6 +516,8 @@ describe("account appeals", () => {
     });
     expect(res!.status).toBe(200);
     expect(await banOf(u.userId)).toEqual({ banned: false, banReason: null });
+    // Decision (z): lifting the repeat-infringer suspension unsuspends the channel.
+    expect(await suspensions(db(), await channelIdOf(u.userId))).toEqual([false]);
     expect((await accountRow(termination)).reversedReason).toBe("appeal_overturned");
     for (const s of strikes) expect((await accountRow(s)).reversedAt).toBeNull();
     expect(control).toContainEqual({ op: "invalidate", userId: u.userId, reason: "suspended" });
@@ -520,6 +533,7 @@ describe("account appeals", () => {
     expect(t.reversedReason).toBe("strikes_below_threshold");
     expect(t.reversedById).toBe(mod2.userId);
     expect(await banOf(u.userId)).toEqual({ banned: false, banReason: null });
+    expect(await suspensions(db(), await channelIdOf(u.userId))).toEqual([false]);
     const reversals = (await eventsOf("account.action.reversed")).filter((e) => e.payload.user_id === u.userId);
     expect(reversals.map((e) => String(e.payload.reversal)).sort((a, b) => a.localeCompare(b))).toEqual([
       "appeal_overturned",

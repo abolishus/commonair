@@ -18,6 +18,7 @@ import { decodeCursor, encodeCursor, isKeyCursor, isOffsetCursor } from "../lib/
 import { channelBySlug, iso, loadUsersPublic, mediaUrl } from "../lib/dto.ts";
 import { notFound, precondition } from "../lib/errors.ts";
 import { audit } from "../events/audit.ts";
+import { withMediaState } from "../events/media-state.ts";
 import { os, requireCaller } from "../lib/orpc.ts";
 import { clipQueue } from "../media/clip-queue.ts";
 import { clipVisible, urlsWithheld, viewerAudience, vodShown } from "../media/visibility.ts";
@@ -273,11 +274,13 @@ export const clips = {
     if (!visible) throw notFound("Clip not found");
     const reason = channelSide ? "owner" : "creator";
     await deps.db.transaction(async (tx) => {
-      const [c] = await tx
-        .update(clipsT)
-        .set({ removedReason: reason })
-        .where(and(eq(clipsT.id, input.id), ne(clipsT.status, "deleted"), isNull(clipsT.removedReason)))
-        .returning({ id: clipsT.id });
+      const [c] = await withMediaState(tx, { clips: eq(clipsT.id, input.id) }, "deleted", deps.now(), () =>
+        tx
+          .update(clipsT)
+          .set({ removedReason: reason })
+          .where(and(eq(clipsT.id, input.id), ne(clipsT.status, "deleted"), isNull(clipsT.removedReason)))
+          .returning({ id: clipsT.id }),
+      );
       if (!c) throw notFound("Clip not found");
       await audit(tx, {
         actorType: "user",

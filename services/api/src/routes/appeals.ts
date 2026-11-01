@@ -67,6 +67,7 @@ import {
 } from "@commonair/db";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
+import { suspensionScope, withSuspensionState } from "../events/media-state.ts";
 import { broadcasterFields, emit } from "../events/outbox.ts";
 import { publishControl, publishUserControl } from "../lib/control.ts";
 import { appUrl, sendNotice } from "../mail.ts";
@@ -460,10 +461,13 @@ async function overturnModAction(
       // account back to that suspension instead (permanent, as the termination imposed it).
       await lockAccountActions(tx, targetId);
       if (await activeAccountAction(tx, targetId, "dmca_termination")) {
-        await tx
-          .update(users)
-          .set({ banned: true, banReason: DMCA_SUSPENSION_REASON, banExpires: null })
-          .where(eq(users.id, targetId));
+        // Still suspended either way; tracked so a ban that lapsed meanwhile is reported too.
+        await withSuspensionState(tx, suspensionScope({ userId: targetId }), now, () =>
+          tx
+            .update(users)
+            .set({ banned: true, banReason: DMCA_SUSPENSION_REASON, banExpires: null })
+            .where(eq(users.id, targetId)),
+        );
         return { after: NOTHING, details: { effect, lifted: false, dmcaSuspensionRestored: true } };
       }
     }
@@ -543,13 +547,18 @@ async function overturnAccountAction(
   await recordReversal(tx, reversed, staff, appealId);
   let unsuspended = false;
   let terminationReversed: string | null = null;
-  if (reversed.action === "dmca_termination") unsuspended = await liftDmcaSuspensionInTx(tx, userId);
+  // `channel.suspension` (decision (z)) when lifting the repeat-infringer suspension unsuspends.
+  const account = suspensionScope({ userId });
+  if (reversed.action === "dmca_termination")
+    unsuspended = await withSuspensionState(tx, account, now, () => liftDmcaSuspensionInTx(tx, userId));
   else {
     const [before] = await tx
       .select({ banned: users.banned, banReason: users.banReason })
       .from(users)
       .where(eq(users.id, userId));
-    const termination = await reconcileDmcaTerminationInTx(tx, { userId, now, byId: staff.id });
+    const termination = await withSuspensionState(tx, account, now, () =>
+      reconcileDmcaTerminationInTx(tx, { userId, now, byId: staff.id }),
+    );
     if (termination) {
       terminationReversed = termination.id;
       await recordReversal(tx, termination, staff, appealId);

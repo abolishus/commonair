@@ -16,6 +16,7 @@ import { restoreAfter } from "../src/dmca/rules.ts";
 import { startModeration } from "../src/moderation/index.ts";
 import { recordingQueue } from "../src/moderation/queue.ts";
 import { setSuspension } from "../src/moderation/suspension.ts";
+import { mediaStates, suspensions } from "./media-state-helpers.ts";
 import {
   client,
   mailTo,
@@ -259,6 +260,10 @@ describe("action", () => {
     expect(r.body.status).toBe("actioned");
     expect(r.body.items.filter((i) => i.removedAt !== null)).toHaveLength(2);
     expect(r.body.ownerStrikes).toEqual({ [o.s.userId]: 1 });
+    // Decision (z): the VOD and both clips stop being public, in the decision's transaction.
+    expect(await mediaStates(db(), "media.vod.state", o.vod)).toEqual([[false, "dmca"]]);
+    expect(await mediaStates(db(), "media.clip.state", o.lone)).toEqual([[false, "dmca"]]);
+    expect(await mediaStates(db(), "media.clip.state", o.clipOfVod)).toEqual([[false, "dmca"]]);
 
     const [v] = await db().select().from(schema.vods).where(eq(schema.vods.id, o.vod));
     expect(v).toMatchObject({ status: "ready", removedReason: "dmca" });
@@ -375,6 +380,8 @@ describe("repeat infringers", () => {
     expect(terms).toHaveLength(1);
     const [u] = await db().select().from(schema.users).where(eq(schema.users.id, o.s.userId));
     expect(u).toMatchObject({ banned: true, banReason: "dmca_repeat_infringer" });
+    // Decision (z): the account's suspension suspends its channel.
+    expect(await suspensions(db(), o.c.id)).toEqual([true]);
     const [a] = await db()
       .select()
       .from(schema.auditLog)

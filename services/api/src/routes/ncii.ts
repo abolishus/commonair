@@ -15,6 +15,7 @@ import { schema, type Executor } from "@commonair/db";
 import { verifyAltcha } from "../auth/altcha.ts";
 import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
+import { mediaScopeOf, withMediaState } from "../events/media-state.ts";
 import { emit } from "../events/outbox.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, notFound } from "../lib/errors.ts";
@@ -111,8 +112,20 @@ async function clearUploadReferences(tx: Executor, channelId: string, key: strin
     .where(or(eq(users.image, key), eq(users.image, `${mediaBase}${key}`)));
 }
 
-/** Unpublish one resolved item for a `removed` decision. Content removed by T0 stays as it is. */
+/** Unpublish one resolved item for a `removed` decision, with its media-state events. */
 async function removeItem(tx: Executor, item: ItemRow, now: Date, mediaBase: string): Promise<EndedBroadcast | null> {
+  const scope = mediaScopeOf(item.subjectType, item.subjectId);
+  if (!scope) return removeItemRows(tx, item, now, mediaBase);
+  return withMediaState(tx, scope, "ncii", now, () => removeItemRows(tx, item, now, mediaBase));
+}
+
+/** Unpublish one resolved item for a `removed` decision. Content removed by T0 stays as it is. */
+async function removeItemRows(
+  tx: Executor,
+  item: ItemRow,
+  now: Date,
+  mediaBase: string,
+): Promise<EndedBroadcast | null> {
   let ended: EndedBroadcast | null = null;
   switch (item.subjectType) {
     case "vod": {

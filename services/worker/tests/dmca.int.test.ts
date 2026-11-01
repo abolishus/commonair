@@ -19,6 +19,7 @@ import { DMCA_HIDDEN_PREFIX, dmcaHiddenKey } from "../src/dmca/objects.ts";
 import { runDmcaRestoreOnce, SWEEP_GRACE_MS } from "../src/dmca/restore.ts";
 import { siteAt } from "./e6-fixtures.ts";
 import { makeBroadcast, makeUser } from "./fixtures.ts";
+import { mediaStates, suspensions } from "./media-state-helpers.ts";
 
 const BUCKET = "media";
 const site = siteAt("http://localhost:3000");
@@ -355,6 +356,10 @@ describe("dmca-restore", () => {
     expect(reasonsAtPut).toEqual(["dmca"]);
     expect(await reasonOf("clip", f.lone)).toEqual({ s: "ready", r: null });
     expect(await reasonOf("vod", f.vodId)).toEqual({ s: "ready", r: null });
+    // Decision (z): the restored VOD, the clip of it and the lone clip are public again.
+    expect(await mediaStates(t.db, "media.vod.state", f.vodId)).toEqual([[true, "restored"]]);
+    expect(await mediaStates(t.db, "media.clip.state", f.clipOfVod)).toEqual([[true, "restored"]]);
+    expect(await mediaStates(t.db, "media.clip.state", f.lone)).toEqual([[true, "restored"]]);
     for (const k of [...f.keys.vod, f.keys.clipOfVod, f.keys.lone, f.keys.thumb]) {
       expect(objects.has(k), k).toBe(true);
       expect(objects.has(dmcaHiddenKey(k)), k).toBe(false);
@@ -520,6 +525,8 @@ describe("dmca-restore", () => {
     expect(after?.reversedReason).toBe("strikes_below_threshold");
     const [u] = await t.db.select().from(schema.users).where(eq(schema.users.id, f.userId));
     expect(u).toMatchObject({ banned: false, banReason: null });
+    // Decision (z): lifting the repeat-infringer suspension unsuspends the channel.
+    expect(await suspensions(t.db, f.channelId)).toEqual([false]);
     expect(published.map((m) => JSON.parse(m) as { op: string; userId: string })).toContainEqual(
       expect.objectContaining({ op: "invalidate", userId: f.userId }),
     );
