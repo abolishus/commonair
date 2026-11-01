@@ -11,8 +11,11 @@
  *   be `concurrency` or `automation`);
  * - a second group appeal on the same broadcast is `RATE_LIMITED`;
  * - an admin of its own (signed up here, role granted with the operator CLI) overturns it;
- * - the worker re-runs the rollup: no session of the group is still excluded under it, the rollup
- *   no longer counts the group, and the verified watch time did not go down;
+ * - the worker re-runs the rollup: no session of the group is still excluded under it; a session
+ *   with no other category's signal counts as verified (or pending) again, one that also carries
+ *   another category's signal stays excluded and moves to that group (the swarm's viewbots share
+ *   devices and are headless, so their concurrency group moves to `automation`); the rollup no
+ *   longer counts the group, and the verified watch time did not go down;
  * - the channel's attestation chain gains a `supersede` entry for the broadcast that verifies
  *   against the instance key history and replaces the broadcast's previous entry.
  */
@@ -64,6 +67,51 @@ export const stillInGroup = (sessions: readonly StoredSession[], category: Exclu
   sessions.filter((s) => s.verdict === "excluded" && firstReasonCategory(s.reasons) === category).map((s) => s.id);
 
 /**
+ * Where an overturn of `category` puts a session with these stored reasons (`rescore.ts`): null
+ * when no other category's signal is left (verified, or pending), else the group it moves to (the
+ * first signal left). Codes the harness does not know are not counted as signals.
+ */
+export function expectedAfterOverturn(
+  reasons: readonly string[] | null,
+  category: ExclusionCategory,
+): ExclusionCategory | null {
+  const left = (reasons ?? []).filter((r) => firstReasonCategory([r]) !== category);
+  const next = firstReasonCategory(left);
+  return next === "other" ? null : next;
+}
+
+export interface OverturnOutcome {
+  /** Sessions with no other signal that are not verified or pending after the overturn. */
+  notRestored: string[];
+  /** Sessions with another category's signal that are not excluded under it after the overturn. */
+  notMoved: string[];
+  restorable: number;
+  restored: number;
+  moved: number;
+}
+
+/** Compares the group's sessions before the overturn with their verdicts after it. */
+export function overturnOutcome(
+  before: readonly StoredSession[],
+  after: readonly StoredSession[],
+  category: ExclusionCategory,
+): OverturnOutcome {
+  const now = new Map(after.map((s) => [s.id, s]));
+  const out: OverturnOutcome = { notRestored: [], notMoved: [], restorable: 0, restored: 0, moved: 0 };
+  for (const s of before) {
+    const want = expectedAfterOverturn(s.reasons, category);
+    const got = now.get(s.id);
+    if (want === null) {
+      out.restorable++;
+      if (got && (got.verdict === "verified" || got.verdict === "pending")) out.restored++;
+      else out.notRestored.push(s.id);
+    } else if (got?.verdict === "excluded" && firstReasonCategory(got.reasons) === want) out.moved++;
+    else out.notMoved.push(s.id);
+  }
+  return out;
+}
+
+/**
  * Whether the re-run rollup has dropped the appealed group. A session still pending at the
  * overturn was not in the group, so the scorer may still exclude it under the same category
  * before finalize: such newcomers may be counted, the appealed sessions may not.
@@ -102,8 +150,10 @@ export async function readGroup(url: string, broadcastId: string, category: Excl
              verified_viewer_seconds::float8 as verified, excluded_viewer_seconds::float8 as excluded,
              excluded_sessions_by_category as "bySessions"
         from broadcast_audience_totals where broadcast_id = ${broadcastId}::uuid`) as RollupRow[];
+    const sessions = rows.filter((r) => firstReasonCategory(r.reasons) === category);
     return {
-      sessionIds: rows.filter((r) => firstReasonCategory(r.reasons) === category).map((r) => r.id),
+      sessions,
+      sessionIds: sessions.map((r) => r.id),
       rollup: t
         ? { ...t, rolledUpAtMs: Number(t.rolledUpAtMs), verified: Number(t.verified), excluded: Number(t.excluded) }
         : null,
@@ -284,8 +334,19 @@ export async function stepGroupAppeal(ext: IntegrityW2Extension): Promise<void> 
   const left = stillInGroup(verdicts, category);
   ctx.assert("no session of the group is still excluded under it", left.length === 0, { left });
   const verified = verdicts.filter((v) => v.verdict === "verified").length;
-  ctx.data("groupAppeal.verdicts", { sessions: verdicts.length, verified, rescored: overturned });
-  ctx.check("the group's sessions count as verified again", verified > 0, { verified, sessions: verdicts.length });
+  const outcome = overturnOutcome(before.sessions, verdicts, category);
+  ctx.data("groupAppeal.verdicts", { sessions: verdicts.length, verified, outcome, rescored: overturned });
+  // Which of the two applies depends on the signals the swarm happened to trip (CI run 41305101320:
+  // every concurrency session was also headless, so none could be restored).
+  ctx.check(
+    "the group's sessions with no other signal count as verified (or pending) again",
+    outcome.notRestored.length === 0,
+    outcome,
+  );
+  ctx.check("the group's sessions with another category's signal move to that group", outcome.notMoved.length === 0, {
+    ...outcome,
+    reasons: verdicts.filter((v) => outcome.notMoved.includes(v.id)).map((v) => v.reasons),
+  });
   const rolled = rerun.rollup;
   const dropped = groupDropped(before.sessionIds, {
     sessionIds: rerun.sessionIds,

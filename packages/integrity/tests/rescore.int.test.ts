@@ -192,6 +192,27 @@ describe("rescoreExclusionGroup", () => {
     ).toHaveLength(1);
   });
 
+  // CI run 41305101320: the harness swarm's concurrency group (viewbots sharing a device, also
+  // headless) was overturned and none of its sessions became verified. They carry another
+  // category's signal, so they stay excluded and move to that group, as specified.
+  test("a concurrency group whose sessions are also headless moves to automation, none verified", async () => {
+    const ctx = await broadcast();
+    const bots = await Promise.all(
+      Array.from({ length: 6 }, () => session(ctx, ["device_concurrency", "headless", "fetch_pattern"])),
+    );
+    const r = await app.transaction((tx) =>
+      rescoreExclusionGroup(tx, { broadcastId: ctx.broadcastId, category: "concurrency", decidedAt: NOW }),
+    );
+    expect(r).toEqual({ rescored: 6, restored: 0 });
+    const after = await verdicts(bots);
+    for (const id of bots)
+      expect(after[id]).toMatchObject({
+        verdict: "excluded",
+        reasons: ["headless", "fetch_pattern", "allowed_on_appeal"],
+        score: 0.5,
+      });
+  });
+
   test("on a live broadcast only closed sessions are covered", async () => {
     const ctx = await broadcast();
     await app.update(s.broadcasts).set({ endedAt: null }).where(eq(s.broadcasts.id, ctx.broadcastId));
