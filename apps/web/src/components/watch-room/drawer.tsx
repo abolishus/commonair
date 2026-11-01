@@ -154,16 +154,25 @@ export function WatchRoomDrawer({
     let firstToken = current.token;
     const nonce = current.nonce;
     const driver = new RoomSyncDriver({ player: () => roomPlayer(channel), reducedMotion });
+    // One read at a time; a room.state that arrives during a read may describe a join that read
+    // missed, so it queues exactly one more read instead of being dropped.
     let refreshing = false;
+    let again = false;
+    let left = false;
     const refresh = () => {
-      if (refreshing) return;
+      if (refreshing) {
+        again = true;
+        return;
+      }
       refreshing = true;
+      again = false;
       client
         .get(roomId)
         .then((room) => setView((v) => (v.kind === "room" && v.room.id === room.id ? { ...v, room } : v)))
         .catch(() => undefined)
         .finally(() => {
           refreshing = false;
+          if (again && !left) refresh();
         });
     };
     const onFrame = (f: RoomFrame) => {
@@ -223,6 +232,7 @@ export function WatchRoomDrawer({
     setMessages([]);
     c.start();
     return () => {
+      left = true;
       c.stop();
       driver.reset();
       if (conn.current === c) conn.current = null;

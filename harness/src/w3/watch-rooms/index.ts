@@ -267,8 +267,28 @@ async function stepChromiumSync(run: WatchRoomRun): Promise<void> {
   await ctx.step(t("every member plays live with the room drawer open"), () =>
     Promise.all(members.map((m) => watchInRoom(m, ch.channel, room.roomId))),
   );
-  const count = await members[0]!.page.locator(sel(WR.member)).count();
-  ctx.check(t("the drawer lists four members"), count === 4, { count });
+  // A drawer re-reads the members on each `room.state`, which chat sends when a member's room socket
+  // joins; the last joiner's socket can connect after its page reports the drawer, so wait for it.
+  const want = members.map((m) => m.user.id).sort();
+  let listed: Record<string, string[]> = {};
+  const settled = await waitFor(
+    "every drawer lists the four members",
+    async () => {
+      listed = {};
+      for (const m of members) {
+        const ids = await m.page
+          .locator(sel(WR.member))
+          .evaluateAll((els) => els.map((el) => el.getAttribute("data-user-id") ?? ""));
+        listed[m.label] = ids.sort();
+      }
+      return Object.values(listed).every((ids) => ids.join() === want.join()) || null;
+    },
+    { timeoutMs: UI_TIMEOUT_MS, intervalMs: 250, signal: ctx.signal },
+  ).catch(() => false);
+  ctx.check(t("the drawer lists four members"), settled === true, {
+    count: listed[host.label]?.length ?? 0,
+    counts: Object.fromEntries(Object.entries(listed).map(([k, v]) => [k, v.length])),
+  });
   await ctx.step(t(`play together for ${SYNC_SETTLE_MS / 1000} s`), () => sleep(SYNC_SETTLE_MS, ctx.signal));
   const summary = summarizeDelta(
     samples,
