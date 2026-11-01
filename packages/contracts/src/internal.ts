@@ -345,6 +345,11 @@ export const KEYS = {
   roomSync: (roomId: string) => `room:sync:${roomId}`,
   /** Decision (x) test hook: STRING seconds the purge feed holds an empty long poll (absent = `RELAY_PURGE_RULES.holdSeconds`). */
   relayPurgeHold: "relay-purge:hold",
+  /**
+   * Decision (x): STRING, the highest `relay_purges.seq` the cleanup deleted (the feed's reset
+   * watermark). Only ever raised, and written before the delete.
+   */
+  relayPurgeWatermark: "relay-purge:watermark",
 } as const;
 
 /** `KEYS.roomPresence` field value. Ids and times only. */

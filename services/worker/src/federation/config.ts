@@ -18,8 +18,8 @@ import type { WorkerContext } from "../context.ts";
 import { DEFAULT_BACKOFF_MS } from "../webhooks/backoff.ts";
 import type { Resolver } from "../webhooks/ssrf.ts";
 
-/** `encryptSecret` purpose of `federation_actors.private_key_enc` (shared with the API's key writer). */
-export const FEDERATION_KEY_PURPOSE = "federation-actor-key";
+/** `encryptSecret` purpose of `federation_actors.private_key_enc`, shared with the API's key writer. */
+export { FEDERATION_KEY_PURPOSE } from "@commonair/contracts/enums";
 /** User agent of every federation request. */
 export const FEDERATION_USER_AGENT = "CommonAir-Federation/1";
 

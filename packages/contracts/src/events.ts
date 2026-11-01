@@ -1065,6 +1065,8 @@ export const BUS = {
   room: (roomId: string) => `room:${roomId}`,
   /** Batch 7 watch rooms: `RoomControlMessage` (`room.close`, `room.kick`), from the API and the worker. */
   roomControl: "bus:room-control",
+  /** Batch 7 decision (x): the relay purge emitter's nudge after a commit; held `relays.purges` polls wake on it. */
+  relayPurges: "bus:relay-purges",
 } as const;
 
 /**

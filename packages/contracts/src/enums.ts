@@ -670,6 +670,8 @@ export const FEDERATION_RULES = {
   dropAfterDays: 7,
   keyRotateDays: 365,
 } as const;
+/** `encryptSecret` purpose of `federation_actors.private_key_enc` (the API and the worker both write it; the worker reads it). */
+export const FEDERATION_KEY_PURPOSE = "federation-actor-key";
 /** `federation_objects.kind`: a go-live note or a VOD or clip video. */
 export const FEDERATION_OBJECT_KINDS = ["note", "video"] as const;
 /** What a federation object is about. */

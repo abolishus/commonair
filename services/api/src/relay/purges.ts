@@ -22,6 +22,7 @@
  */
 import { asc, gt, sql } from "drizzle-orm";
 import { RELAY_PURGE_RULES } from "@commonair/contracts/enums";
+import { BUS } from "@commonair/contracts/events";
 import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import type { Logger } from "@commonair/observability";
@@ -31,16 +32,10 @@ import type { Deps } from "../deps.ts";
 import { apiError } from "../lib/errors.ts";
 import { os } from "../lib/orpc.ts";
 
-/**
- * The emitter's nudge channel (`services/worker/src/relay-purge/emit.ts`). Contract request:
- * `BUS.relayPurges` in `@commonair/contracts/events`.
- */
-export const RELAY_PURGE_NUDGE_CHANNEL = "bus:relay-purges";
-/**
- * The cleanup's deleted-seq watermark (`services/worker/src/relay-purge/cleanup.ts`). Contract
- * request: `KEYS.relayPurgeWatermark` in `@commonair/contracts/internal`.
- */
-export const RELAY_PURGE_WATERMARK_KEY = "relay-purge:watermark";
+/** The emitter's nudge channel (`services/worker/src/relay-purge/emit.ts`). */
+export const RELAY_PURGE_NUDGE_CHANNEL = BUS.relayPurges;
+/** The cleanup's deleted-seq watermark (`services/worker/src/relay-purge/cleanup.ts`). */
+export const RELAY_PURGE_WATERMARK_KEY = KEYS.relayPurgeWatermark;
 /** How often a held request re-reads the table even without a nudge. */
 export const POLL_FALLBACK_MS = 5_000;
 /** The same while the subscriber is down. */

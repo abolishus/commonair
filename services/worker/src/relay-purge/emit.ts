@@ -27,7 +27,7 @@
  */
 import { RELAY_PURGE_PREFIX } from "@commonair/contracts/dto";
 import { RELAY_PURGE_RULES, type RelayPurgeReason } from "@commonair/contracts/enums";
-import { EVENTS, type EventType } from "@commonair/contracts/events";
+import { BUS, EVENTS, type EventType } from "@commonair/contracts/events";
 import { schema, type Executor } from "@commonair/db";
 import { and, desc, eq, inArray, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { z } from "zod";
@@ -37,10 +37,9 @@ const { events, relayPurges, relayNodes, channels, broadcasts, vods } = schema;
 
 /**
  * Valkey pub/sub channel the emitter publishes to after a commit, waking the API's held
- * `relays.purges` polls. The API listens on the same name (`services/api/src/relay/purges.ts`).
- * Contract request: `BUS.relayPurges` in `@commonair/contracts/events`.
+ * `relays.purges` polls (`services/api/src/relay/purges.ts` listens on it).
  */
-export const RELAY_PURGE_NUDGE_CHANNEL = "bus:relay-purges";
+export const RELAY_PURGE_NUDGE_CHANNEL = BUS.relayPurges;
 
 export interface PurgeRow {
   prefix: string;

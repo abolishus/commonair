@@ -15,16 +15,13 @@
  * the DVR window and the 5 s playlist rule still applies.
  */
 import { RELAY_PURGE_RULES } from "@commonair/contracts/enums";
+import { KEYS } from "@commonair/contracts/internal";
 import { schema } from "@commonair/db";
 import { sql } from "drizzle-orm";
 import type { WorkerContext } from "../context.ts";
 
-/**
- * The watermark's Valkey key (STRING, decimal seq). The API reads the same name
- * (`services/api/src/relay/purges.ts`). Contract request: `KEYS.relayPurgeWatermark` in
- * `@commonair/contracts/internal`.
- */
-export const RELAY_PURGE_WATERMARK_KEY = "relay-purge:watermark";
+/** The watermark's Valkey key (STRING, decimal seq); the API reads it too (`services/api/src/relay/purges.ts`). */
+export const RELAY_PURGE_WATERMARK_KEY = KEYS.relayPurgeWatermark;
 
 /** SET key to max(current, ARGV[1]); returns the stored string (seqs are below 2^53, exact as Lua numbers). */
 const RAISE = `local cur = redis.call('GET', KEYS[1]) or '0'

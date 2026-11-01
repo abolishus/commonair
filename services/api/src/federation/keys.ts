@@ -9,6 +9,7 @@
  * Split of work with the worker: here the key is stored and audited; a `rotate` job with a
  * `channelId` only sends `Update`, and one without does the yearly sweep (and audits it itself).
  */
+import { FEDERATION_KEY_PURPOSE } from "@commonair/contracts/enums";
 import { generateActorKey } from "@commonair/federation";
 import { schema, uuidv7 } from "@commonair/db";
 import { encryptSecret } from "@commonair/tokens";
@@ -21,11 +22,7 @@ import { federationQueue } from "./queue.ts";
 
 const { channels, federationActorKeys, federationActors } = schema;
 
-/**
- * The `encryptSecret` purpose of actor private keys. N4-delivery decrypts with the same string
- * (contract request: export it from `packages/federation`).
- */
-export const FEDERATION_KEY_PURPOSE = "federation";
+export { FEDERATION_KEY_PURPOSE };
 
 export interface SealedActorKey {
   publicKeyPem: string;
