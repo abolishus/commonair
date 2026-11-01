@@ -1888,17 +1888,28 @@ export type AnalyticsShareLink = z.infer<typeof AnalyticsShareLink>;
  * bytes and signature (`@commonair/tokens/attestation`); verifiers verify the bytes first and
  * parse after. `breakdown` and `salt` reveal the reasons commitment: owner or share link only.
  */
-export const AttestationEnvelope = z.object({ payload: z.string(), signature: z.string() });
+/**
+ * Lengths only: a verifier must answer `malformed` (not a 400) for a padded or non-base64url
+ * payload, so the charset is the verifier's to judge.
+ */
+export const AttestationEnvelope = z.object({
+  payload: z.string().min(1).max(8192),
+  signature: z.string().min(1).max(256),
+});
+/** Lowercase hex SHA-256: `entryHash`, `prevHash` and `supersedes` (`@commonair/tokens/attestation`). */
+const AttestationHash = z.string().regex(/^[0-9a-f]{64}$/);
+/** base64url of the first 16 bytes of SHA-256 over the raw public key (`deriveKid`). */
+const AttestationKid = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
 export const AttestationEntry = z.object({
   id: Id,
   channelSlug: Slug,
   broadcastId: Id,
   seq: z.number().int().positive(),
   kind: z.enum(E.ATTESTATION_KINDS),
-  kid: z.string(),
-  entryHash: z.string(),
-  prevHash: z.string().nullable(),
-  supersedes: z.string().nullable(),
+  kid: AttestationKid,
+  entryHash: AttestationHash,
+  prevHash: AttestationHash.nullable(),
+  supersedes: AttestationHash.nullable(),
   signedAt: Timestamp,
   envelope: AttestationEnvelope,
   /** A later entry for the same broadcast replaces this one (it still verifies). */
@@ -1908,10 +1919,10 @@ export const AttestationEntry = z.object({
 });
 export type AttestationEntry = z.infer<typeof AttestationEntry>;
 export const AttestationKey = z.object({
-  kid: z.string(),
+  kid: AttestationKid,
   algorithm: z.literal("Ed25519"),
-  /** Raw 32-byte public key, base64url. */
-  publicKey: z.string(),
+  /** Raw 32-byte public key, base64url without padding. */
+  publicKey: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   firstUsedAt: Timestamp,
   retiredAt: Timestamp.nullable(),
   compromisedAt: Timestamp.nullable(),
@@ -1923,7 +1934,19 @@ export const AttestationVerifyResult = z.object({
   valid: z.boolean(),
   /** Why not, when `valid` is false. */
   problem: z
-    .enum(["bad_signature", "unknown_kid", "compromised_kid", "wrong_origin", "chain_break", "malformed", "superseded"])
+    .enum([
+      // `@commonair/tokens/attestation` `verify` errors, passed through as they are.
+      "malformed",
+      "non_canonical",
+      "bad_signature",
+      "kid_mismatch",
+      "unknown_kid",
+      "compromised_kid",
+      // Checks the API adds: the signing origin, bundle chain links, a replaced entry.
+      "wrong_origin",
+      "chain_break",
+      "superseded",
+    ])
     .nullable(),
   origin: z.string().nullable(),
   /** The parsed statement, only once the signature verified. */

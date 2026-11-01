@@ -12,6 +12,9 @@
  *   - `integrity`: `session` (their own playback session), `user` (their own account) or
  *     `integrity_flag` (a flag on their session, their account or their channel). An overturned
  *     appeal on these is an integrity allowance (`packages/integrity/src/allowance.ts`).
+ *     `exclusion_group` (one exclusion category within one of their broadcasts, batch 6 decision
+ *     (m)) is W2b-group-appeals': `createGroupAppeal` checks and inserts it, `onGroupAppealResolved`
+ *     re-scores on an overturn (`../analytics/appeals.ts`).
  *   - `moderation` on `moderation_action` (a `mod_actions` row that targeted them). Overturning:
  *       - channel `ban`/`timeout`: lifts the chat ban if it is still in force (`liftChatBanInTx`:
  *         `unban`/`untimeout` mod action, audit `chat.unban`/`chat.untimeout` with `appealId`,
@@ -70,6 +73,7 @@ import { appUrl, sendNotice } from "../mail.ts";
 import { isActiveBan, liftChatBanInTx } from "../moderation/chat-bans.ts";
 import { liftRestrictionInTx } from "../moderation/restriction.ts";
 import { setSuspension } from "../moderation/suspension.ts";
+import { createGroupAppeal, onGroupAppealResolved } from "../analytics/appeals.ts";
 import { decodeCursor, encodeCursor, isKeyCursor, pageOf } from "../lib/cursor.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { badRequest, conflict, forbidden, isUniqueViolation, notFound } from "../lib/errors.ts";
@@ -85,7 +89,7 @@ type Subject = (typeof APPEAL_SUBJECTS)[number];
 
 /** Subject types each kind accepts. */
 export const KIND_SUBJECTS: Record<Kind, readonly Subject[]> = {
-  integrity: ["session", "user", "integrity_flag"],
+  integrity: ["session", "user", "integrity_flag", "exclusion_group"],
   moderation: ["moderation_action", "content_label", "moderation_case", "ncii_request_item"],
   dmca: ["dmca_notice"],
   account: ["account_action"],
@@ -595,6 +599,23 @@ export const appeals = {
     const caller = requireCaller(context);
     if (!KIND_SUBJECTS[input.kind].includes(input.subjectType))
       throw badRequest(`A ${input.kind} appeal cannot be about a ${input.subjectType}`);
+    // W2b-group-appeals owns every check and the insert for a group (the contract requires `category`).
+    if (input.subjectType === "exclusion_group") {
+      if (!input.category) throw badRequest("A group appeal names its exclusion category");
+      try {
+        return toAppeal(
+          await createGroupAppeal(deps, {
+            appellantId: caller.user.id,
+            broadcastId: input.subjectId,
+            category: input.category,
+            body: input.body,
+          }),
+        );
+      } catch (err) {
+        if (isUniqueViolation(err)) throw conflict("You already have an open appeal about this");
+        throw err;
+      }
+    }
     if (!(await subjectConcerns(deps, input.subjectType, input.subjectId, caller.user.id)))
       throw notFound("Nothing to appeal was found");
     if (input.subjectType === "dmca_notice") throw badRequest(DMCA_APPEAL_MESSAGE);
@@ -727,6 +748,15 @@ export const appeals = {
         overturn = await overturnModAction(tx, a.subjectId, staff, now, a.id);
       if (input.status === "overturned" && a.subjectType === "account_action")
         overturn = await overturnAccountAction(tx, a.subjectId, a.appellantId, staff, now, a.id);
+      if (a.subjectType === "exclusion_group")
+        overturn = {
+          after: NOTHING,
+          details: await onGroupAppealResolved(tx, updated, {
+            status: input.status,
+            staffId: caller.user.id,
+            decidedAt: now,
+          }),
+        };
       // Ids and enums only: the appeal body and the resolution text stay on the (mutable) appeal
       // row, never in the append-only log (ADR 0004).
       await audit(tx, {

@@ -96,6 +96,9 @@ const QUEUE_DEFAULTS: Partial<Record<QueueName, number>> = {
   // and a scheduled job holding one never blocks a T0 (they finish in seconds).
   [QUEUES.moderation]: 6,
   [QUEUES.deletions]: 1,
+  // W2-rehearsal: a driver job lives as long as its rehearsal (up to the 30-minute cap), mostly
+  // waiting, so a handful of slots would cap concurrent rehearsals per worker.
+  [QUEUES.rehearsal]: 16,
 };
 export const DEFAULT_CONCURRENCY: Record<QueueName, number> = Object.fromEntries(
   QUEUE_NAMES.map((q) => [q, QUEUE_DEFAULTS[q] ?? 4]),

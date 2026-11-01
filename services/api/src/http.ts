@@ -27,6 +27,7 @@ import { overlayTokenOf, type BaseContext, type RequestInfo } from "./lib/orpc.t
 import { rateLimitKey } from "./lib/ratelimit.ts";
 import { coopHook, isCoopHookPath } from "./coop/hooks.ts";
 import { isOpsHookPath, opsHook } from "./ops/hooks.ts";
+import { analyticsHook, isAnalyticsHookPath } from "./ops/analytics-hooks.ts";
 import { interactHook, isInteractHookPath } from "./interact/hooks.ts";
 import { emailUnsubscribe, isEmailUnsubscribePath } from "./notifications/email-unsubscribe.ts";
 import { oauthEndpoint } from "./oauth/endpoints.ts";
@@ -59,7 +60,7 @@ export function createApp(deps: Deps): ApiApp {
     );
   if (deps.env.OPS_TEST_HOOKS)
     deps.logger.warn(
-      "OPS_TEST_HOOKS is on: POST /internal/ops/tick runs deletion, export cleanup and VOD retention on demand; never on a public instance",
+      "OPS_TEST_HOOKS is on: POST /internal/ops/tick runs deletion, export cleanup and VOD retention on demand, and /internal/analytics/* runs the W2 rollup and attestation jobs and bypasses the analytics display delay; never on a public instance",
       { testHooks: true },
     );
   if (deps.env.INTERACT_TEST_HOOKS)
@@ -235,6 +236,12 @@ export function createApp(deps: Deps): ApiApp {
       if (!deps.env.OPS_TEST_HOOKS) return new Response(null, { status: 404 });
       if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
       return opsHook(deps, raw.method, await readJson(raw));
+    }
+    if (isAnalyticsHookPath(path)) {
+      // W2 analytics and attestation hooks, behind the same flag; off: 404 before the secret check.
+      if (!deps.env.OPS_TEST_HOOKS) return new Response(null, { status: 404 });
+      if (!internalAuthorized(raw)) return new Response(null, { status: 401 });
+      return analyticsHook(deps, path, raw.method, await readJson(raw));
     }
     if (isInteractHookPath(path)) {
       // Off: 404 before the secret check, like any unknown internal path.

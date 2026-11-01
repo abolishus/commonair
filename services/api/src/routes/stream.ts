@@ -11,12 +11,13 @@ import type { Deps } from "../deps.ts";
 import { audit } from "../events/audit.ts";
 import { iso, isoOrNull } from "../lib/dto.ts";
 import { publishLive } from "../lib/control.ts";
-import { badRequest, notFound, notImplemented, precondition } from "../lib/errors.ts";
+import { badRequest, notFound, precondition } from "../lib/errors.ts";
 import { os, requireCaller, requireChannel } from "../lib/orpc.ts";
 import { displayPrefix, newStreamKeySecret, obsStreamKey } from "../lib/streamkeys.ts";
 import { viewerBreakdown } from "../lib/viewers.ts";
 import { outboundUrlProblem } from "../lib/outbound.ts";
 import { RECOMMENDED_ENCODER, ingestUrls, obsServiceConfig } from "../stream/ingest.ts";
+import { rehearsal } from "./rehearsal.ts";
 
 const { streamKeys, broadcasts, broadcastHealthSamples, simulcastTargets } = schema;
 const MAX_SIMULCAST_TARGETS = 5;
@@ -287,13 +288,6 @@ export const stream = {
       return { ok: true as const };
     }),
   },
-  // W2 contract step: stubs the scaffolding moves to routes/rehearsal.ts (W2-rehearsal implements them).
-  rehearsal: {
-    arm: os.stream.rehearsal.arm.handler(notImplemented),
-    disarm: os.stream.rehearsal.disarm.handler(notImplemented),
-    status: os.stream.rehearsal.status.handler(notImplemented),
-    invite: os.stream.rehearsal.invite.handler(notImplemented),
-    report: os.stream.rehearsal.report.handler(notImplemented),
-    watch: os.stream.rehearsal.watch.handler(notImplemented),
-  },
+  // W2-rehearsal's own route file.
+  rehearsal,
 };

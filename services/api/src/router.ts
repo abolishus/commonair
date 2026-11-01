@@ -4,6 +4,7 @@
 /** The full router. `base.router` type-checks that every contract procedure is implemented. */
 import { base } from "./lib/orpc.ts";
 import { admin } from "./routes/admin.ts";
+import { analytics } from "./routes/analytics.ts";
 import { appeals } from "./routes/appeals.ts";
 import { bot } from "./routes/bot.ts";
 import { channelsRoutes } from "./routes/channels.ts";
@@ -13,7 +14,7 @@ import { coop } from "./routes/coop.ts";
 import { developer } from "./routes/developer/index.ts";
 import { categoriesRoutes, directory } from "./routes/directory.ts";
 import { instance } from "./routes/instance.ts";
-import { analytics, integrity, transparency } from "./routes/integrity.ts";
+import { integrity } from "./routes/integrity.ts";
 import { interact } from "./routes/interact.ts";
 import { legal } from "./routes/legal.ts";
 import { me } from "./routes/me.ts";
@@ -26,6 +27,7 @@ import { playback } from "./routes/playback.ts";
 import { relays } from "./routes/relays.ts";
 import { safety } from "./routes/safety.ts";
 import { stream } from "./routes/stream.ts";
+import { transparency } from "./routes/transparency.ts";
 import { users } from "./routes/users.ts";
 import { vods } from "./routes/vods.ts";
 
