@@ -129,6 +129,15 @@ Predictions stay points-only (ADR 0026 decision 3). Three rules make them fair:
 - **Who may bet.** The bettor needs verified-watch standing on the channel (a current
   `KEYS.verifiedWatch` for the live broadcast) at bet time. The owner, channel moderators and
   editors cannot bet; a trigger on `prediction_bets` refuses them as the backstop.
+
+  _Proposed at wave 1 (maintainer to accept):_ standing is required only where the instance
+  measures it (`CHAT_WATCH_GATE` with a channel minimum, or `CHAT_SURGE_GUARD` with the channel's
+  guard on) and the channel is live. The integrity worker writes `KEYS.verifiedWatch` only there,
+  and both flags default off, so requiring it everywhere would make predictions unusable on a
+  default instance. Offline predictions keep the wall-clock lock and store no `lock_media_ts`.
+  VIPs keep standing, as in chat. A Valkey error refuses the bet. The alternative is for the worker
+  to also measure every live channel with an open or locked prediction.
+
 - **The lock is by media time.** `lock` (and the auto-lock at `locksAt`) stores `lock_media_ts`, the
   broadcast's media-clock edge at lock time, read as the chat clamp reads it (ADR 0012). A bet
   carries `mediaTs` (the player's `playheadWallclock`) and `playbackMode`, and:
@@ -212,10 +221,11 @@ For the maintainer. Each item is the recommended default; accepting this ADR acc
 1. **Draw (s):** `packages/draw`, SHA-256 commit-reveal, HMAC-SHA256 with rejection sampling over a
    sorted list; commitment and reveal audited; one draw for giveaways and the jury.
 2. **Giveaways (t):** off by default; free entry; eligibility by account age, follow age and
-   verified watching only; one open per channel; up to 10 winners and 24 hours; salted pseudonyms
-   revealed with the seed; in-app winner notice; no prize handling. Post-launch review of
+   verified watching only; one open per channel; up to 10 winners and 24 hours; salted pseudonyms (the
+   salt is never published; each entrant sees their own); in-app winner notice; no prize handling. Post-launch review of
    sweepstakes rules and the official-rules draft.
-3. **Predictions (v):** verified bettors only; no owner, moderator or editor bets; media-time lock
+3. **Predictions (v):** verified bettors only, where the instance measures watching (the wave 1
+   proposal in §3); no owner, moderator or editor bets; media-time lock
    with the 30 s edge bound and 30 s grace; resolver audited; payouts proven to sum to the pool.
 4. **Surge raids (w):** a raid opens a 10-minute surge when the target's guard and `onRaid` are on;
    verified watchers of the source carry their standing; chat unchanged.
