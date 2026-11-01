@@ -124,6 +124,42 @@ Open items:
 - N3 needs a browser-facing authorize base, or a `page.route` rewrite, because the harness host
   cannot resolve `host.containers.internal`.
 
+**Batch 7 wave 1 merged (2026-11-01).** Six units, each implemented, independently reviewed and
+then fixed in its own worktree: W3-watch-rooms (`7d320481`), W3-portability (`6c4b2bd9`),
+W3-giveaways (`0056f6b6`), W3-jury (`fa36d686`), W3-surge-raids (`e58ec50c`) and
+W3-fair-predictions (`11857ff1`). They were merged by sha, and no two touched one file. An
+integration pass then:
+
+- applied the units' contract requests:
+  - chat checks the room token's signature;
+  - `player.tsx` registers for room sync;
+  - `safety.users.lookup` gives the evidence renderer usernames;
+  - the moved email, the follow grant switch, `chat.surge.state.raid`, and the prediction merge;
+- added migration `0047` (the jury backstop: no bot seats, no `labelled` cases, message authors and
+  set senders age- and hold-checked);
+- lifted every W3 wave 1 step and test id from the pending lists;
+- added draft terms §11 "Giveaways" and a privacy section on giveaways and the jury, marked "not
+  reviewed by counsel (none retained)".
+
+The `services/media` "transcode ladder" test failed twice running and was fixed as a test race
+(`a8a95426`: it now waits for the renditions event before reading the flag).
+
+Proposed for the maintainer: ADR 0039 §3 asks for bettor standing only where the instance measures
+verified watching (the watch gate or surge guard is on); otherwise the wall-clock rules apply.
+
+Deferred:
+
+- giveaways CR9/CR10 (a CR10 would show winners' usernames to streamers; pseudonym-only stays);
+- the jury flag-to-case link;
+- prediction betting during the grace window in the web;
+- the watch-room `edgeWallclock` field;
+- seeding `moveLinkNonce`/`giveawayId` (seed-full);
+- giveaway entries in the data export;
+- a moderator re-starting a raid surge drops the `raid` field from the banner.
+
+Milestone: bump `TERMS_SEED_VERSION` as well as `PRIVACY_SEED_VERSION`. Privacy text for watch rooms,
+portability grants and federation is still to write.
+
 **Batch 6 (W2; `.claude/briefs/batch6/README.md`), planned 2026-11-01.** User decisions: ledger
 splits ship enabled (counsel on split recipients is not a blocker; live money stays gated by M1);
 DVR defaults to a 30-minute window per channel under the 2 h cap; the `captions` scenario runs in
