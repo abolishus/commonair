@@ -4,15 +4,17 @@
 /**
  * Refunds, chargebacks and won chargebacks posted from the ledger's own record of the
  * payment. Everything a reversal depends on (the original split, what was already reversed,
- * the creator's balances) is read inside one transaction under the payment and creator locks,
- * so concurrent disputes can never reverse more than was paid.
+ * every recipient's balances) is read inside one transaction under the payment lock and then the
+ * creator locks of every recipient in sorted order (ADR 0013 decision 4), so concurrent disputes
+ * can never reverse more than was paid, and a reversal racing a payout batch cannot deadlock.
  */
 import { and, eq, sql } from "drizzle-orm";
 import { type Executor, schema } from "@commonair/db";
-import { lockCreator, lockPayment } from "./locks.ts";
+import { lockCreators, lockPayment } from "./locks.ts";
 import { PaymentMetaV2, ReversalMetaV2 } from "./meta.ts";
 import { IdempotencyConflictError, type PostResult, post } from "./poster.ts";
-import { creatorBalances, holdLots } from "./queries.ts";
+import { recipientWithheld } from "./holds.ts";
+import { creatorBalances, holdLots, paymentHoldRemaining } from "./queries.ts";
 import { chargeback, chargebackReversal, refund } from "./rules.ts";
 
 export class PaymentNotFoundError extends Error {
@@ -53,6 +55,20 @@ async function alreadyReversed(tx: Executor, paymentId: string): Promise<number>
   return sum === 0 ? 0 : -sum;
 }
 
+/** Each recipient's net creator cents already reversed for a payment, from the recorded slices. */
+async function reversedByRecipient(tx: Executor, paymentId: string): Promise<Record<string, number>> {
+  // Reversal slices are recorded negative, a won chargeback's restored slices positive.
+  const rows = await tx.execute<{ user_id: string; total: string }>(sql`
+    select lower(s->>'userId') as user_id, sum((s->>'creatorCents')::bigint)::text as total
+    from ledger_transactions t, jsonb_array_elements(coalesce(t.metadata->'shares', '[]'::jsonb)) s
+    where t.ref_type = 'payment' and t.ref_id = ${paymentId}
+      and t.kind in ('refund', 'chargeback', 'chargeback_reversal')
+    group by 1`);
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.user_id] = -Number(r.total);
+  return out;
+}
+
 export interface PostReversalInput {
   kind: "refund" | "chargeback";
   /** The dispute row; keys the posting (`refund:<id>` / `chargeback:<id>`). */
@@ -88,9 +104,14 @@ export async function postReversal(db: Executor, i: PostReversalInput): Promise<
       );
     }
 
-    await lockCreator(tx, meta.creatorUserId);
+    await lockCreators(tx, [meta.creatorUserId, ...meta.shares.map((s) => s.userId)]);
     const balances = await creatorBalances(tx, meta.creatorUserId, currency);
     const lots = await holdLots(tx, meta.creatorUserId, currency);
+    const crewLots: Record<string, number> = {};
+    for (const s of meta.shares) {
+      if (s.role === "crew")
+        crewLots[s.userId.toLowerCase()] = await paymentHoldRemaining(tx, i.paymentId, s.userId, currency);
+    }
     const input = {
       disputeId: i.disputeId,
       paymentId: i.paymentId,
@@ -105,6 +126,9 @@ export async function postReversal(db: Executor, i: PostReversalInput): Promise<
       alreadyReversedCents: already,
       amountCents: i.amountCents,
       balances: { liabilityCents: balances.liabilityCents, holdLots: lots },
+      shares: meta.shares,
+      crewLots,
+      reversedByRecipient: await reversedByRecipient(tx, i.paymentId),
     };
     const posting =
       i.kind === "refund" ? refund(input) : chargeback({ ...input, disputeFeeCents: i.disputeFeeCents ?? 0 });
@@ -141,8 +165,16 @@ export async function postChargebackReversal(
     if (replay) return replay;
     const meta = ReversalMetaV2.parse(cb.metadata);
     const currency = await transactionCurrency(tx, cb.id);
-    await lockCreator(tx, meta.creatorUserId);
+    await lockCreators(tx, [meta.creatorUserId, ...meta.shares.map((s) => s.userId)]);
     const balances = await creatorBalances(tx, meta.creatorUserId, currency);
+    // Read under every recipient's lock, as a hold release does, so a restriction applied before
+    // this commits is honoured.
+    const withheld = new Set<string>();
+    for (const s of meta.shares) {
+      if (s.role === "crew" && s.fromOwnLotCents !== 0 && (await recipientWithheld(tx, s.userId, i.occurredAt))) {
+        withheld.add(s.userId);
+      }
+    }
     return post(
       tx,
       chargebackReversal({
@@ -160,7 +192,15 @@ export async function postChargebackReversal(
           creatorCents: Math.abs(meta.creatorCents),
           coopCents: Math.abs(meta.coopCents),
         },
+        slices: meta.shares.map((s) => ({
+          userId: s.userId,
+          role: s.role,
+          fromOwnLotCents: s.fromOwnLotCents,
+          ownerCoveredCents: s.ownerCoveredCents,
+          withheld: withheld.has(s.userId),
+        })),
         receivableCents: balances.receivableCents,
+        splitShortfallCents: balances.splitShortfallCents,
         feeRefundCents: i.feeRefundCents ?? 0,
       }),
     );

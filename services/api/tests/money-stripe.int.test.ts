@@ -971,6 +971,49 @@ describe("follow-up fixes", () => {
   });
 });
 
+describe("ledger splits (ADR 0013)", () => {
+  test("a renewal is posted under the channel's accepted split version and linked in its transaction", async () => {
+    const c = await channelId();
+    // An accepted subscription split with bob as crew, written as the owner (the flow is money-splits.int.test.ts).
+    const owner = api.db.db;
+    const [v] = await owner
+      .insert(schema.revenueSplits)
+      .values({ channelId: c, version: 1, basis: "subs", startsAt: new Date(Date.now() - 60_000) })
+      .returning();
+    await owner.insert(schema.revenueSplitShares).values({ splitId: v!.id, recipientUserId: bob.userId, bps: 2000 });
+    await owner
+      .insert(schema.revenueSplitAcceptances)
+      .values({ splitId: v!.id, recipientUserId: bob.userId, decision: "accepted" });
+    await owner
+      .update(schema.revenueSplits)
+      .set({ status: "accepted", acceptedAt: new Date(Date.now() - 30_000) })
+      .where(eq(schema.revenueSplits.id, v!.id));
+    const pi = `pi_${rand()}`;
+    const r = await deliver(renewalInvoice(pi, SUB_A, subPay.paymentId, 999));
+    expect(r.status).toBe(200);
+    const [paid] = await db()
+      .select()
+      .from(schema.payments)
+      .where(and(eq(schema.payments.provider, "stripe"), eq(schema.payments.providerRef, pi)));
+    const [tx] = await db()
+      .select()
+      .from(schema.ledgerTransactions)
+      .where(eq(schema.ledgerTransactions.idempotencyKey, `payment:${paid!.id}`));
+    expect(tx?.metadata).toMatchObject({ splitVersionId: v!.id });
+    const [link] = await db()
+      .select()
+      .from(schema.revenueSplitPostings)
+      .where(eq(schema.revenueSplitPostings.ledgerTransactionId, tx!.id));
+    expect(link?.splitId).toBe(v!.id);
+    const lots = await db().execute<{ memo: string; cents: string }>(sql`
+      select e.memo, sum(e.amount_cents)::text as cents from ledger_entries e
+      where e.transaction_id = ${tx!.id} and e.memo like 'hold:%' group by e.memo order by e.memo`);
+    expect([...lots].map((l) => l.memo).sort()).toEqual(
+      [`hold:${paid!.id}:${bob.userId}`, `hold:${paid!.id}:${streamer.userId}`].sort(),
+    );
+  });
+});
+
 test("every ledger transaction balances", async () => {
   const off = await db().execute<{ transaction_id: string }>(sql`
     select transaction_id from ledger_entries group by transaction_id, currency having sum(amount_cents) <> 0`);

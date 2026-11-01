@@ -186,9 +186,10 @@ export const isCategorySlug = (s: string): boolean => /^[a-z0-9][a-z0-9-]{0,39}$
 
 /**
  * Expense categories outside `infrastructure:` (from the chart of accounts). Transparency lists
- * costs by their short name, so an infrastructure category may not reuse one of these.
+ * costs by their short name, so an infrastructure category may not reuse one of these. The split
+ * shortfall write-off (ADR 0013 decision 6) is its own line, never folded into payment fees.
  */
-export const RESERVED_COST_CATEGORIES: readonly string[] = ["payment-fees"];
+export const RESERVED_COST_CATEGORIES: readonly string[] = ["payment-fees", "split-shortfall-writeoff"];
 export const isReservedCostCategory = (s: string): boolean => RESERVED_COST_CATEGORIES.includes(s);
 
 /** Keyset cursor at microsecond precision (Postgres timestamps), plus a uuid tie-break. */

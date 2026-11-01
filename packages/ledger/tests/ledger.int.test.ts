@@ -127,7 +127,14 @@ describe("poster", () => {
     expect(r.created).toBe(true);
     expect(await txSum(r.transactionId)).toBe(0);
     const b = await creatorBalances(db, creator, "usd");
-    expect(b).toEqual({ liabilityCents: 0, holdCents: 900, receivableCents: 0, reservedCents: 0, availableCents: 0 });
+    expect(b).toEqual({
+      liabilityCents: 0,
+      holdCents: 900,
+      receivableCents: 0,
+      splitShortfallCents: 0,
+      reservedCents: 0,
+      availableCents: 0,
+    });
     expect(await paymentHoldRemaining(db, p.refId!, creator, "usd")).toBe(900);
     expect(await accountBalance(db, accounts.paymentFees(), "usd", "expense")).toBeGreaterThanOrEqual(62);
   });
@@ -218,6 +225,7 @@ describe("reversals", () => {
       liabilityCents: 0,
       holdCents: 0,
       receivableCents: 0,
+      splitShortfallCents: 0,
       reservedCents: 0,
       availableCents: 0,
     });
@@ -379,7 +387,7 @@ describe("hold lots", () => {
     for (const p of drained) await postReversal(db, reverse("refund", p.refId!, 1000));
     // With a batch size of one, the drained (older) payments must not block the live one.
     const r = await releaseDueHolds(db, { asOf: new Date(), holdDays: 7, currency: cur, limit: 1 });
-    expect(r).toEqual({ released: 1, totalCents: 1800 });
+    expect(r).toEqual({ released: 1, totalCents: 1800, withheld: 0 });
     expect((await creatorBalances(db, creator, cur)).liabilityCents).toBe(1800);
   });
 });
@@ -516,6 +524,7 @@ describe("payouts", () => {
       liabilityCents: 4500,
       holdCents: 0,
       receivableCents: 300,
+      splitShortfallCents: 0,
       reservedCents: 0,
       availableCents: 4200,
     });
@@ -655,7 +664,7 @@ describe("payouts count only what was available at period end", () => {
     const [rel] = await db
       .select()
       .from(s.ledgerTransactions)
-      .where(eq(s.ledgerTransactions.idempotencyKey, `hold-release:${late}`));
+      .where(eq(s.ledgerTransactions.idempotencyKey, `hold-release:${late}:${creator}`));
     expect(rel?.occurredAt.toISOString()).toBe("2026-01-27T00:00:00.000Z");
     expect(await runPayoutBatch(db, { ...JAN, currency: cur, minimumCents: 100 })).toMatchObject({
       totalCents: 2700,

@@ -40,12 +40,17 @@ describe("computePayoutBatch", () => {
 });
 
 describe("reservableAt", () => {
-  const b = (liabilityCents: number, receivableCents: number) => ({ liabilityCents, receivableCents });
+  const b = (liabilityCents: number, receivableCents: number, splitShortfallCents = 0) => ({
+    liabilityCents,
+    receivableCents,
+    splitShortfallCents,
+  });
 
   test("reserves what was available at period end, netting the receivable owed by then", () => {
     expect(reservableAt(b(5000, 300), b(5000, 300))).toEqual({
       amountCents: 4700,
       nettedCents: 300,
+      shortfallNettedCents: 0,
       balances: b(5000, 300),
     });
   });
@@ -55,7 +60,12 @@ describe("reservableAt", () => {
   });
 
   test("a receivable owed after period end is not netted, and what is available now caps the amount", () => {
-    expect(reservableAt(b(4500, 0), b(4500, 300))).toEqual({ amountCents: 4200, nettedCents: 0, balances: b(4200, 0) });
+    expect(reservableAt(b(4500, 0), b(4500, 300))).toEqual({
+      amountCents: 4200,
+      nettedCents: 0,
+      shortfallNettedCents: 0,
+      balances: b(4200, 0),
+    });
   });
 
   test("the lowest running balance after period end caps the amount", () => {
@@ -68,6 +78,18 @@ describe("reservableAt", () => {
 
   test("never nets more than is still owed now", () => {
     expect(reservableAt(b(5000, 300), b(5000, 100))).toMatchObject({ amountCents: 4700, nettedCents: 100 });
+  });
+
+  test("split shortfall is netted after the creator receivable (ADR 0013 decision 6)", () => {
+    const r = reservableAt(b(5000, 300, 1200), b(5000, 300, 1000));
+    expect(r).toEqual({
+      amountCents: 3500,
+      nettedCents: 300,
+      shortfallNettedCents: 1000,
+      balances: b(4800, 300, 1000),
+    });
+    // A shortfall first owed after period end is not netted, but caps the amount.
+    expect(reservableAt(b(5000, 0, 0), b(5000, 0, 800))).toMatchObject({ amountCents: 4200, shortfallNettedCents: 0 });
   });
 
   test("an empty or overdrawn balance reserves nothing positive", () => {

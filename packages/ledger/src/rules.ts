@@ -7,11 +7,20 @@
  * rule can never hand the poster an unbalanced set.
  *
  * Hold lots: every entry on a `liability:creator-hold` account carries the memo
- * `hold:<paymentId>`, so the hold is tracked per payment ("lot") and a release can only ever
- * release what is still attributable to that payment.
+ * `hold:<paymentId>:<recipientUserId>`, so the hold is tracked per payment and per recipient
+ * ("lot", ADR 0013 decision 1) and a release can only ever release what is still attributable to
+ * that recipient's slice of that payment. A single-creator payment is the one-recipient case.
  */
 import { accounts, assertCurrency, describeAccount } from "./accounts.ts";
-import { assertCents, floorShare, mulDivFloor, negate } from "./math.ts";
+import {
+  apportionCumulative,
+  assertCents,
+  compareUserIds,
+  floorShare,
+  mulDivFloor,
+  negate,
+  splitNetN,
+} from "./math.ts";
 import { PaymentMetaV2, ReversalMetaV2 } from "./meta.ts";
 import { type Posting, type PostingEntry, nonZero, validatePosting } from "./posting.ts";
 
@@ -32,8 +41,17 @@ export class InsufficientBalanceError extends Error {
   override name = "InsufficientBalanceError";
 }
 
-/** The memo that attributes a hold entry to one payment. */
-export const holdMemo = (paymentId: string) => `hold:${paymentId}`;
+/** The memo that attributes a hold entry to one recipient's lot of one payment (decision (i)). */
+export const holdMemo = (paymentId: string, userId: string) => `hold:${paymentId}:${userId.toLowerCase()}`;
+
+/** The (payment, recipient) a hold memo names, or null for anything else. */
+export function parseHoldMemo(memo: string): { paymentId: string; userId: string } | null {
+  const m = /^hold:([0-9a-f-]{36}):([0-9a-f-]{36})$/.exec(memo);
+  return m?.[1] && m[2] ? { paymentId: m[1], userId: m[2] } : null;
+}
+
+/** The memo on a `liability:split-suspense` entry: which owner's channel the withheld share came from. */
+export const suspenseMemo = (ownerUserId: string) => `owner:${ownerUserId.toLowerCase()}`;
 
 export function assertCut(cut: PlatformCut): void {
   const ok = (x: number) => Number.isFinite(x) && x >= 0 && x <= 1;
@@ -60,7 +78,7 @@ interface Split {
 }
 
 /** The split of the first `cumulativeCents` of a payment's gross, on the original's rounding rules. */
-function splitAt(cumulativeCents: number, grossCents: number, taxCents: number, cut: PlatformCut): Split {
+export function splitAt(cumulativeCents: number, grossCents: number, taxCents: number, cut: PlatformCut): Split {
   const tax = mulDivFloor(taxCents, BigInt(cumulativeCents), BigInt(grossCents));
   return { taxCents: tax, ...splitNet(cumulativeCents - tax, cut) };
 }
@@ -125,12 +143,21 @@ export interface PaymentSucceededInput {
   /** `governance_settings_history.id` of that cut (`loadMoneySettings`); null = the founding seed. */
   cutHistoryId: string | null;
   occurredAt: Date;
+  /** The split version active for this payment's kind at `occurredAt`; absent or null: the owner alone. */
+  split?: PaymentSplit | null;
+}
+
+/** The split version a payment is posted under (ADR 0013 decision 3): its id and its crew. */
+export interface PaymentSplit {
+  versionId: string;
+  crew: readonly { userId: string; bps: number }[];
 }
 
 /**
  * A subscription or tip payment: the payer's money arrives (cash or provider receivable), tax
- * becomes payable, and the net is split between the creator's hold and the co-op's revenue.
- * The metadata is everything `postReversal` needs to reverse it later.
+ * becomes payable, the co-op cut is taken once, and the creator share is divided between the
+ * owner and any crew (`splitNetN`), each into their own hold lot. The metadata is everything
+ * `postReversal` needs to reverse it later, the share vector included.
  */
 export function paymentSucceeded(i: PaymentSucceededInput): Posting {
   assertCents("gross", i.grossCents, { allowZero: false });
@@ -140,6 +167,7 @@ export function paymentSucceeded(i: PaymentSucceededInput): Posting {
   const settlement = i.settlement ?? "cash";
   const settle = settlementAccount(i.provider, settlement);
   const { creatorCents, coopCents } = splitNet(i.grossCents - i.taxCents, i.cut);
+  const shares = splitNetN(creatorCents, i.creatorUserId, i.split?.crew ?? []);
   return finish({
     kind: "payment",
     description: i.paymentKind === "subscription" ? "Subscription payment" : "Tip payment",
@@ -151,7 +179,7 @@ export function paymentSucceeded(i: PaymentSucceededInput): Posting {
     metadata: PaymentMetaV2.parse({
       v: 2,
       paymentKind: i.paymentKind,
-      creatorUserId: i.creatorUserId,
+      creatorUserId: i.creatorUserId.toLowerCase(),
       provider: i.provider,
       settlement,
       revenueGrossCents: i.grossCents,
@@ -162,13 +190,17 @@ export function paymentSucceeded(i: PaymentSucceededInput): Posting {
       streamerShare: i.cut.streamerShare,
       coopShare: i.cut.coopShare,
       cutHistoryId: i.cutHistoryId,
-      splitVersionId: null,
-      shares: [{ userId: i.creatorUserId, role: "owner", bps: 10_000, creatorCents }],
+      splitVersionId: i.split ? i.split.versionId : null,
+      shares,
     } satisfies PaymentMetaV2),
     entries: [
       { code: settle, amountCents: i.grossCents, memo: "gross received" },
       { code: accounts.taxPayable(), amountCents: -i.taxCents, memo: "tax collected" },
-      { code: accounts.creatorHold(i.creatorUserId), amountCents: -creatorCents, memo: holdMemo(i.paymentId) },
+      ...shares.map((s) => ({
+        code: accounts.creatorHold(s.userId),
+        amountCents: -s.creatorCents,
+        memo: holdMemo(i.paymentId, s.userId),
+      })),
       { code: accounts.platformCut(), amountCents: -coopCents, memo: "co-op share" },
       { code: accounts.paymentFees(), amountCents: i.feeCents, memo: "processor fee" },
       { code: settle, amountCents: -i.feeCents, memo: "processor fee" },
@@ -184,35 +216,63 @@ export function holdReleaseDueAt(succeededAt: Date, holdDays: number): Date {
 
 export interface HoldReleaseInput {
   paymentId: string;
+  /** The recipient whose lot is released: the owner, or a crew member. */
   creatorUserId: string;
-  /** What is still attributable to this payment's hold lot. */
+  /** The payment's owner; defaults to the recipient (a single-creator payment). */
+  ownerUserId?: string;
+  /** What is still attributable to this recipient's lot of the payment. */
   amountCents: number;
   currency: string;
   occurredAt: Date;
+  /**
+   * A crew recipient who is suspended, terminated or under a legal hold (ADR 0013 decision 7): the
+   * lot moves to `liability:split-suspense:<recipient>` instead of their released earnings.
+   */
+  withheld?: boolean;
 }
 
-/** Creator share moves from the hold to the payable liability once the hold period ends. */
+/** The idempotency key of one recipient's release of one payment's lot. */
+export const holdReleaseKey = (paymentId: string, userId: string) =>
+  `hold-release:${paymentId}:${userId.toLowerCase()}`;
+
+/**
+ * One recipient's share moves from the hold to the payable liability once the hold period ends,
+ * or into split suspense when the recipient is withheld. Keyed per recipient, so one recipient's
+ * release (or ban) never blocks or releases another's lot (ADR 0013 decision 1).
+ */
 export function holdRelease(i: HoldReleaseInput): Posting {
   assertCents("amount", i.amountCents, { allowZero: false });
+  const recipient = i.creatorUserId.toLowerCase();
+  const owner = (i.ownerUserId ?? i.creatorUserId).toLowerCase();
+  const role = recipient === owner ? "owner" : "crew";
+  if (i.withheld && role === "owner") throw new RangeError("only a crew share is withheld into split suspense");
   return finish({
     kind: "hold_release",
-    description: "Hold period ended",
+    description: i.withheld ? "Hold period ended; share withheld" : "Hold period ended",
     refType: "payment",
     refId: i.paymentId,
-    idempotencyKey: `hold-release:${i.paymentId}`,
+    idempotencyKey: holdReleaseKey(i.paymentId, recipient),
     currency: i.currency,
     occurredAt: i.occurredAt,
-    metadata: { creatorUserId: i.creatorUserId },
+    metadata: {
+      creatorUserId: recipient,
+      recipientUserId: recipient,
+      ownerUserId: owner,
+      role,
+      withheld: !!i.withheld,
+    },
     entries: [
-      { code: accounts.creatorHold(i.creatorUserId), amountCents: i.amountCents, memo: holdMemo(i.paymentId) },
-      { code: accounts.creator(i.creatorUserId), amountCents: -i.amountCents, memo: "released from hold" },
+      { code: accounts.creatorHold(recipient), amountCents: i.amountCents, memo: holdMemo(i.paymentId, recipient) },
+      i.withheld
+        ? { code: accounts.splitSuspense(recipient), amountCents: -i.amountCents, memo: suspenseMemo(owner) }
+        : { code: accounts.creator(recipient), amountCents: -i.amountCents, memo: "released from hold" },
     ],
   });
 }
 
 // Refunds and chargebacks -------------------------------------------------------------------
 
-/** What remains on hold for one payment. */
+/** What remains on hold for one payment in one recipient's hold account. */
 export interface HoldLot {
   paymentId: string;
   cents: number;
@@ -226,6 +286,13 @@ export interface CreatorBalances {
   holdLots: readonly HoldLot[];
 }
 
+/** One recipient's recorded slice of the payment (`PaymentMetaV2.shares`). */
+export interface RecipientShare {
+  userId: string;
+  role: "owner" | "crew";
+  creatorCents: number;
+}
+
 export interface PaymentReversalInput {
   /** The dispute row (kind refund or chargeback); keys the posting. */
   disputeId: string;
@@ -235,6 +302,7 @@ export interface PaymentReversalInput {
   provider: string;
   /** The account the money leaves from (default cash). */
   settlement?: Settlement;
+  /** The channel owner, who covers every shortfall (ADR 0013 decision 5). */
   creatorUserId: string;
   currency: string;
   occurredAt: Date;
@@ -244,7 +312,17 @@ export interface PaymentReversalInput {
   /** Net amount already reversed (refunds + chargebacks − won chargebacks). */
   alreadyReversedCents: number;
   amountCents: number;
+  /** The owner's balances: released earnings and every hold lot. */
   balances: CreatorBalances;
+  /** The payment's recorded share vector; absent: the owner alone. */
+  shares?: readonly RecipientShare[];
+  /** What is still held in each crew recipient's own lot of this payment (by user id). */
+  crewLots?: Readonly<Record<string, number>>;
+  /**
+   * Each recipient's net creator cents already reversed (refunds + chargebacks − won), by user id,
+   * from earlier reversals' recorded slices. Needed once a chargeback was won (`reversalSlices`).
+   */
+  reversedByRecipient?: Readonly<Record<string, number>>;
 }
 
 interface Source {
@@ -253,43 +331,77 @@ interface Source {
   available: number;
 }
 
-/** Take `amount` from sources in order; the shortfall becomes a receivable from the creator. */
-function drawFrom(amount: number, sources: Source[], shortfallCode: string): PostingEntry[] {
-  const entries: PostingEntry[] = [];
+/** Take up to `amount` from sources in order (mutating what they have left); returns the shortfall. */
+function drawFrom(amount: number, sources: Source[], into: PostingEntry[]): number {
   let left = amount;
   for (const s of sources) {
     const used = Math.min(left, Math.max(0, s.available));
     if (used > 0) {
-      entries.push({ code: s.code, amountCents: used, memo: s.memo });
+      into.push({ code: s.code, amountCents: used, memo: s.memo });
+      s.available -= used;
       left -= used;
     }
   }
-  if (left > 0) entries.push({ code: shortfallCode, amountCents: left, memo: "clawback shortfall" });
-  return entries;
+  return left;
 }
 
-/** The reversed payment's own hold lot, and the other lots oldest first. */
-function holdSources(i: PaymentReversalInput): { own: Source[]; others: Source[] } {
-  const code = accounts.creatorHold(i.creatorUserId);
-  const toSource = (l: HoldLot): Source => ({ code, memo: holdMemo(l.paymentId), available: l.cents });
-  return {
-    own: i.balances.holdLots.filter((l) => l.paymentId === i.paymentId).map(toSource),
-    others: i.balances.holdLots.filter((l) => l.paymentId !== i.paymentId).map(toSource),
-  };
+/** Entries on the same account with the same memo, summed (and zeros dropped). */
+function merged(entries: readonly PostingEntry[]): PostingEntry[] {
+  const out: PostingEntry[] = [];
+  const at = new Map<string, number>();
+  for (const e of entries) {
+    const k = `${e.code}\u0000${e.memo ?? ""}`;
+    const idx = at.get(k);
+    const prev = idx === undefined ? undefined : out[idx];
+    if (prev) prev.amountCents += e.amountCents;
+    else {
+      at.set(k, out.length);
+      out.push({ ...e });
+    }
+  }
+  return out.filter((e) => e.amountCents !== 0);
 }
 
-function liabilitySource(i: PaymentReversalInput): Source {
-  return {
-    code: accounts.creator(i.creatorUserId),
-    memo: "creator share reversed",
-    available: i.balances.liabilityCents,
-  };
+/**
+ * Each recipient's slice of a reversal's creator portion: the difference of two cumulative
+ * apportionments over the recorded `creatorCents` vector (ADR 0013 decision 3), so any sequence
+ * of partial reversals returns exactly each recipient's share and no slice is ever negative.
+ *
+ * A won chargeback gives back its own slices, not the end of that sequence, so after one the
+ * per-recipient net (`reversed`, aligned with `shares`) no longer matches the cumulative
+ * position. Then the slice is apportioned over what each recipient still has unreversed, so no
+ * recipient is reversed beyond its share; a cent the remainders cannot hold (the creator total
+ * is itself apportioned from the net gross) falls to the owner (`ownerIndex`), who covers anyway.
+ */
+export function reversalSlices(
+  shares: readonly RecipientShare[],
+  creatorBeforeCents: number,
+  creatorCents: number,
+  opts: { reversed?: readonly number[]; ownerIndex?: number } = {},
+): number[] {
+  const weights = shares.map((s) => s.creatorCents);
+  const before = apportionCumulative(Math.min(creatorBeforeCents, sumOf(weights)), weights);
+  const net = opts.reversed;
+  if (!net || before.every((b, k) => b === (net[k] ?? 0))) {
+    const after = apportionCumulative(creatorBeforeCents + creatorCents, weights);
+    return after.map((a, k) => a - (before[k] ?? 0));
+  }
+  const remaining = weights.map((w, k) => Math.max(0, w - Math.max(0, net[k] ?? 0)));
+  const room = sumOf(remaining);
+  const slices = apportionCumulative(Math.min(creatorCents, room), remaining);
+  const excess = creatorCents - Math.min(creatorCents, room);
+  if (excess > 0) {
+    if (opts.ownerIndex === undefined) throw new RangeError("a reversal exceeds what its recipients have left");
+    slices[opts.ownerIndex] = (slices[opts.ownerIndex] ?? 0) + excess;
+  }
+  return slices;
 }
+
+const sumOf = (xs: readonly number[]) => xs.reduce((s, x) => s + x, 0);
 
 function reversal(
   i: PaymentReversalInput,
   kind: "refund" | "chargeback",
-  sources: Source[],
   extra: PostingEntry[],
   extraMeta: { disputeFeeCents?: number },
 ): Posting {
@@ -297,15 +409,69 @@ function reversal(
   const split = reversalSplit(i.original, i.cut, i.alreadyReversedCents, i.amountCents);
   const settlement = i.settlement ?? "cash";
   const settle = settlementAccount(i.provider, settlement);
-  const receivable = accounts.creatorReceivable(i.creatorUserId);
-  const creatorEntries = drawFrom(split.creatorCents, sources, receivable);
-  const receivableCents = creatorEntries.filter((e) => e.code === receivable).reduce((s, e) => s + e.amountCents, 0);
-  // ADR 0013 decision 5: what this payment's own hold lot gave back, and what the owner's other
-  // sources (released earnings, other lots, the receivable) covered.
-  const ownLot = { code: accounts.creatorHold(i.creatorUserId), memo: holdMemo(i.paymentId) };
-  const fromOwnLotCents = creatorEntries
-    .filter((e) => e.code === ownLot.code && e.memo === ownLot.memo)
-    .reduce((s, e) => s + e.amountCents, 0);
+  const owner = i.creatorUserId.toLowerCase();
+  const total = splitAt(i.original.grossCents, i.original.grossCents, i.original.taxCents, i.cut).creatorCents;
+  const shares = [...(i.shares ?? [{ userId: owner, role: "owner" as const, creatorCents: total }])].sort((a, b) =>
+    compareUserIds(a.userId, b.userId),
+  );
+  if (shares.reduce((s, x) => s + x.creatorCents, 0) !== total) {
+    throw new RangeError("the recorded shares do not sum to the payment's creator share");
+  }
+  const owners = shares.filter((s) => s.role === "owner");
+  if (owners.length !== 1 || owners[0]?.userId.toLowerCase() !== owner) {
+    throw new RangeError("a payment has exactly one owner share, the payment's owner");
+  }
+  const before = splitAt(i.alreadyReversedCents, i.original.grossCents, i.original.taxCents, i.cut).creatorCents;
+  const reversedBy = i.reversedByRecipient;
+  const slices = reversalSlices(shares, before, split.creatorCents, {
+    reversed: reversedBy ? shares.map((s) => reversedBy[s.userId.toLowerCase()] ?? 0) : undefined,
+    ownerIndex: shares.findIndex((s) => s.role === "owner"),
+  });
+
+  const entries: PostingEntry[] = [];
+  const holdCode = accounts.creatorHold(owner);
+  const ownMemo = holdMemo(i.paymentId, owner);
+  const ownerLot = i.balances.holdLots.find((l) => l.paymentId === i.paymentId)?.cents ?? 0;
+  const ownLot: Source = { code: holdCode, memo: ownMemo, available: ownerLot };
+  const released: Source = {
+    code: accounts.creator(owner),
+    memo: "creator share reversed",
+    available: i.balances.liabilityCents,
+  };
+  const others: Source[] = i.balances.holdLots
+    .filter((l) => l.paymentId !== i.paymentId)
+    .map((l) => ({ code: holdCode, memo: holdMemo(l.paymentId, owner), available: l.cents }));
+
+  // 1. Every slice first from its recipient's own still-held lot of this payment.
+  const fromOwnLot = shares.map((s, k) => {
+    const slice = slices[k] ?? 0;
+    if (s.role === "owner") return slice - drawFrom(slice, [ownLot], entries);
+    const lot = Math.max(0, i.crewLots?.[s.userId.toLowerCase()] ?? 0);
+    const used = Math.min(slice, lot);
+    if (used > 0) {
+      entries.push({ code: accounts.creatorHold(s.userId), amountCents: used, memo: holdMemo(i.paymentId, s.userId) });
+    }
+    return used;
+  });
+  // 2. Crew: nothing else. 3. The owner covers the rest, its own slice first, from today's order.
+  const sources = kind === "refund" ? [ownLot, released, ...others] : [released, ownLot, ...others];
+  const ownerIdx = shares.findIndex((s) => s.role === "owner");
+  const ownerRest = (slices[ownerIdx] ?? 0) - (fromOwnLot[ownerIdx] ?? 0);
+  const crewRest = shares.reduce(
+    (sum, s, k) => (s.role === "crew" ? sum + (slices[k] ?? 0) - (fromOwnLot[k] ?? 0) : sum),
+    0,
+  );
+  // 4. What the owner cannot cover: its own slice is an ordinary clawback receivable; what it
+  //    absorbed for the crew goes to the split-shortfall suspense (decision 6), never to the crew.
+  const receivableCents = drawFrom(ownerRest, sources, entries);
+  const shortfallCents = drawFrom(crewRest, sources, entries);
+  if (receivableCents > 0) {
+    entries.push({ code: accounts.creatorReceivable(owner), amountCents: receivableCents, memo: "clawback shortfall" });
+  }
+  if (shortfallCents > 0) {
+    entries.push({ code: accounts.splitShortfall(owner), amountCents: shortfallCents, memo: "split shortfall" });
+  }
+
   return finish({
     kind,
     description: kind === "refund" ? "Payment refunded" : "Payment charged back",
@@ -318,7 +484,7 @@ function reversal(
     metadata: ReversalMetaV2.parse({
       v: 2,
       disputeId: i.disputeId,
-      creatorUserId: i.creatorUserId,
+      creatorUserId: owner,
       provider: i.provider,
       settlement,
       revenueGrossCents: -i.amountCents,
@@ -327,20 +493,18 @@ function reversal(
       coopCents: negate(split.coopCents),
       receivableCents,
       ...extraMeta,
-      shares: [
-        {
-          userId: i.creatorUserId,
-          role: "owner",
-          creatorCents: negate(split.creatorCents),
-          fromOwnLotCents,
-          ownerCoveredCents: split.creatorCents - fromOwnLotCents,
-        },
-      ],
+      shares: shares.map((s, k) => ({
+        userId: s.userId.toLowerCase(),
+        role: s.role,
+        creatorCents: negate(slices[k] ?? 0),
+        fromOwnLotCents: fromOwnLot[k] ?? 0,
+        ownerCoveredCents: (slices[k] ?? 0) - (fromOwnLot[k] ?? 0),
+      })),
     } satisfies ReversalMetaV2),
     entries: [
       { code: settle, amountCents: -i.amountCents, memo: `${kind} paid out` },
       { code: accounts.taxPayable(), amountCents: split.taxCents, memo: "tax reversed" },
-      ...creatorEntries,
+      ...merged(entries),
       { code: accounts.platformCut(), amountCents: split.coopCents, memo: "co-op share reversed" },
       ...extra,
     ],
@@ -348,29 +512,28 @@ function reversal(
 }
 
 /**
- * Full or partial refund. Reverses tax, creator share and cut proportionally; the creator
- * share comes first from this payment's own hold lot, then released earnings, then other hold
- * lots oldest first, and any shortfall becomes a receivable from the creator.
+ * Full or partial refund. Reverses tax, creator share and cut proportionally. Each recipient's
+ * slice comes first from their own still-held lot of this payment; the owner covers the rest
+ * (its own lot, then released earnings, then other lots oldest first). What the owner cannot
+ * cover becomes a clawback receivable (its own slice) or split-shortfall suspense (the crew's);
+ * a crew recipient is never drawn on beyond their own lot and never owes the co-op.
  * Use `postReversal`, which reads these inputs from the ledger under locks.
  */
 export function refund(i: PaymentReversalInput): Posting {
-  const { own, others } = holdSources(i);
-  return reversal(i, "refund", [...own, liabilitySource(i), ...others], [], {});
+  return reversal(i, "refund", [], {});
 }
 
 /**
- * Chargeback with clawback: reversed like a refund, but the creator share is taken from
- * released earnings first, then hold lots (own first, then oldest), then booked as a
- * receivable. Dispute fees are an expense paid from the same settlement account.
+ * Chargeback with clawback: reversed like a refund (own lots first), but the owner covers the
+ * rest from released earnings first, then its own lot, then other lots. Dispute fees are an
+ * expense paid from the same settlement account.
  */
 export function chargeback(i: PaymentReversalInput & { disputeFeeCents: number }): Posting {
   assertCents("disputeFee", i.disputeFeeCents);
   const settle = settlementAccount(i.provider, i.settlement ?? "cash");
-  const { own, others } = holdSources(i);
   return reversal(
     i,
     "chargeback",
-    [liabilitySource(i), ...own, ...others],
     [
       { code: accounts.paymentFees(), amountCents: i.disputeFeeCents, memo: "dispute fee" },
       { code: settle, amountCents: -i.disputeFeeCents, memo: "dispute fee" },
@@ -379,10 +542,24 @@ export function chargeback(i: PaymentReversalInput & { disputeFeeCents: number }
   );
 }
 
+/** One recipient's slice of a chargeback being reversed (positive amounts, from its metadata). */
+export interface ChargebackSlice {
+  userId: string;
+  role: "owner" | "crew";
+  fromOwnLotCents: number;
+  ownerCoveredCents: number;
+  /**
+   * A crew recipient withheld at reversal time (ADR 0013 decision 7): its own-lot part goes to its
+   * split suspense, not its released earnings, so it cannot be paid out while restricted.
+   */
+  withheld?: boolean;
+}
+
 export interface ChargebackReversalInput {
   /** The dispute the chargeback was posted for. */
   disputeId: string;
   paymentId: string;
+  /** The channel owner. */
   creatorUserId: string;
   provider: string;
   settlement?: Settlement;
@@ -390,17 +567,23 @@ export interface ChargebackReversalInput {
   occurredAt: Date;
   /** The original chargeback's amounts (positive), from its metadata. */
   chargeback: { amountCents: number; taxCents: number; creatorCents: number; coopCents: number };
-  /** The creator's current clawback receivable (natural). */
+  /** The chargeback's per-recipient slices; absent: the owner covered all of it. */
+  slices?: readonly ChargebackSlice[];
+  /** The owner's current clawback receivable (natural). */
   receivableCents: number;
+  /** The owner's current split-shortfall suspense (natural). */
+  splitShortfallCents?: number;
   /** Dispute fee returned by the provider, if any. */
   feeRefundCents?: number;
   chargebackTransactionId?: string;
 }
 
 /**
- * A chargeback the co-op won: the money comes back, tax and cut are restored, and the creator
- * share first cancels what the creator still owes, then is credited as released earnings (a
- * decided dispute carries no further hold risk, and hold lots are never re-opened).
+ * A chargeback the co-op won: the money comes back, tax and cut are restored, and each slice goes
+ * back to where it came from (ADR 0013 decision 5). What a recipient's own lot gave is credited to
+ * that recipient as released earnings (lots are never re-opened, and a decided dispute carries no
+ * further hold risk), or to its split suspense if it is withheld right now (decision 7); what the owner covered first cancels the owner's split-shortfall suspense,
+ * then its clawback receivable, then is credited as the owner's released earnings.
  */
 export function chargebackReversal(i: ChargebackReversalInput): Posting {
   const c = i.chargeback;
@@ -412,9 +595,27 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
   }
   const fee = i.feeRefundCents ?? 0;
   assertCents("feeRefund", fee);
+  const owner = i.creatorUserId.toLowerCase();
+  const slices = [
+    ...(i.slices ?? [{ userId: owner, role: "owner" as const, fromOwnLotCents: 0, ownerCoveredCents: c.creatorCents }]),
+  ].sort((a, b) => compareUserIds(a.userId, b.userId));
+  for (const s of slices) {
+    assertCents("fromOwnLot", s.fromOwnLotCents);
+    assertCents("ownerCovered", s.ownerCoveredCents);
+  }
+  if (slices.reduce((s, x) => s + x.fromOwnLotCents + x.ownerCoveredCents, 0) !== c.creatorCents) {
+    throw new RangeError("the chargeback's slices must sum to its creator portion");
+  }
   const settlement = i.settlement ?? "cash";
   const settle = settlementAccount(i.provider, settlement);
-  const cancel = Math.max(0, Math.min(c.creatorCents, i.receivableCents));
+  const covered = slices.reduce((s, x) => s + x.ownerCoveredCents, 0);
+  const cancelShortfall = Math.max(0, Math.min(covered, i.splitShortfallCents ?? 0));
+  const cancelReceivable = Math.max(0, Math.min(covered - cancelShortfall, i.receivableCents));
+  const restored: PostingEntry[] = slices.map((s) =>
+    s.withheld && s.role === "crew"
+      ? { code: accounts.splitSuspense(s.userId), amountCents: -s.fromOwnLotCents, memo: suspenseMemo(owner) }
+      : { code: accounts.creator(s.userId), amountCents: -s.fromOwnLotCents, memo: "own lot restored" },
+  );
   return finish({
     kind: "chargeback_reversal",
     description: "Chargeback won",
@@ -427,7 +628,7 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
     metadata: ReversalMetaV2.parse({
       v: 2,
       disputeId: i.disputeId,
-      creatorUserId: i.creatorUserId,
+      creatorUserId: owner,
       provider: i.provider,
       settlement,
       revenueGrossCents: c.amountCents,
@@ -435,30 +636,142 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
       creatorCents: c.creatorCents,
       coopCents: c.coopCents,
       feeRefundCents: fee,
-      // A won chargeback restores the share to the owner's receivable and released earnings; hold
-      // lots are never re-opened, so nothing goes back to the payment's own lot.
-      shares: [
-        {
-          userId: i.creatorUserId,
-          role: "owner",
-          creatorCents: c.creatorCents,
-          fromOwnLotCents: 0,
-          ownerCoveredCents: -c.creatorCents,
-        },
-      ],
+      // Negative: this restores what the chargeback took from each lot and what the owner covered.
+      shares: slices.map((s) => ({
+        userId: s.userId.toLowerCase(),
+        role: s.role,
+        creatorCents: s.fromOwnLotCents + s.ownerCoveredCents,
+        fromOwnLotCents: negate(s.fromOwnLotCents),
+        ownerCoveredCents: negate(s.ownerCoveredCents),
+      })),
     } satisfies ReversalMetaV2),
     entries: [
       { code: settle, amountCents: c.amountCents, memo: "chargeback reversed" },
       { code: accounts.taxPayable(), amountCents: -c.taxCents, memo: "tax restored" },
-      { code: accounts.creatorReceivable(i.creatorUserId), amountCents: -cancel, memo: "clawback cancelled" },
-      {
-        code: accounts.creator(i.creatorUserId),
-        amountCents: -(c.creatorCents - cancel),
-        memo: "creator share restored",
-      },
+      ...merged([
+        ...restored,
+        { code: accounts.splitShortfall(owner), amountCents: -cancelShortfall, memo: "split shortfall cancelled" },
+        { code: accounts.creatorReceivable(owner), amountCents: -cancelReceivable, memo: "clawback cancelled" },
+        {
+          code: accounts.creator(owner),
+          amountCents: -(covered - cancelShortfall - cancelReceivable),
+          memo: "creator share restored",
+        },
+      ]),
       { code: accounts.platformCut(), amountCents: -c.coopCents, memo: "co-op share restored" },
       { code: settle, amountCents: fee, memo: "dispute fee returned" },
       { code: accounts.paymentFees(), amountCents: -fee, memo: "dispute fee returned" },
+    ],
+  });
+}
+
+// Split shortfall and suspense (ADR 0013 decisions 6, 7) --------------------------------------
+
+export interface SplitShortfallWriteOffInput {
+  /** The approved `split_writeoff_proposals` row. */
+  proposalId: string;
+  ownerUserId: string;
+  amountCents: number;
+  currency: string;
+  occurredAt: Date;
+}
+
+/**
+ * Write off an owner's uncollectable split shortfall to the co-op's own expense line, never
+ * inside payment fees. Migration 0043 posts it only for an approved two-person proposal, and
+ * only as exactly these two entries for the proposal's amount.
+ */
+export function splitShortfallWriteOff(i: SplitShortfallWriteOffInput): Posting {
+  assertCents("amount", i.amountCents, { allowZero: false });
+  return finish({
+    kind: "split_shortfall_writeoff",
+    description: "Split shortfall written off",
+    refType: "split_writeoff",
+    refId: i.proposalId,
+    idempotencyKey: `split-writeoff:${i.proposalId}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    metadata: { ownerUserId: i.ownerUserId.toLowerCase(), amountCents: i.amountCents },
+    entries: [
+      { code: accounts.splitShortfallWriteOff(), amountCents: i.amountCents, memo: "written off" },
+      { code: accounts.splitShortfall(i.ownerUserId), amountCents: -i.amountCents, memo: "written off" },
+    ],
+  });
+}
+
+export interface SplitSuspenseInput {
+  /** A fresh id for this release or forfeit; keys the posting. */
+  actionId: string;
+  recipientUserId: string;
+  /** The withheld balance by the owner whose channel it came from (`suspenseMemo`). */
+  byOwner: readonly { ownerUserId: string; cents: number }[];
+  currency: string;
+  occurredAt: Date;
+}
+
+function suspenseDebits(i: SplitSuspenseInput): { total: number; entries: PostingEntry[] } {
+  let total = 0;
+  const entries: PostingEntry[] = [];
+  for (const o of [...i.byOwner].sort((a, b) => compareUserIds(a.ownerUserId, b.ownerUserId))) {
+    assertCents("withheld", o.cents);
+    if (o.cents === 0) continue;
+    total += o.cents;
+    entries.push({
+      code: accounts.splitSuspense(i.recipientUserId),
+      amountCents: o.cents,
+      memo: suspenseMemo(o.ownerUserId),
+    });
+  }
+  if (total === 0) throw new RangeError("nothing is withheld");
+  return { total, entries };
+}
+
+/**
+ * The recipient's restriction was lifted: their withheld shares move to their released earnings.
+ * Migration 0043 refuses it without a treasurer's or admin's `audit_log` row for the transaction.
+ */
+export function splitSuspenseRelease(i: SplitSuspenseInput): Posting {
+  const { total, entries } = suspenseDebits(i);
+  return finish({
+    kind: "split_suspense_release",
+    description: "Withheld split shares released",
+    refType: "split_suspense",
+    refId: i.actionId,
+    idempotencyKey: `split-suspense-release:${i.actionId}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    metadata: { recipientUserId: i.recipientUserId.toLowerCase(), amountCents: total },
+    entries: [
+      ...entries,
+      { code: accounts.creator(i.recipientUserId), amountCents: -total, memo: "withheld share released" },
+    ],
+  });
+}
+
+/**
+ * The recipient was deleted or permanently terminated: their withheld shares go back to the
+ * owners whose channels they came from, as released earnings, never silently to the co-op.
+ */
+export function splitSuspenseForfeit(i: SplitSuspenseInput): Posting {
+  const { total, entries } = suspenseDebits(i);
+  return finish({
+    kind: "split_suspense_forfeit",
+    description: "Withheld split shares forfeited to the owner",
+    refType: "split_suspense",
+    refId: i.actionId,
+    idempotencyKey: `split-suspense-forfeit:${i.actionId}`,
+    currency: i.currency,
+    occurredAt: i.occurredAt,
+    metadata: { recipientUserId: i.recipientUserId.toLowerCase(), amountCents: total },
+    entries: [
+      ...entries,
+      ...i.byOwner
+        .filter((o) => o.cents > 0)
+        .map((o) => ({
+          code: accounts.creator(o.ownerUserId),
+          amountCents: -o.cents,
+          memo: "withheld share forfeited",
+        })),
     ],
   });
 }
@@ -470,9 +783,24 @@ export function chargebackReversal(i: ChargebackReversalInput): Posting {
 // moves clearing → cash. A chargeback after the batch therefore cannot touch reserved money
 // (it books a receivable instead), and a failed payout *cancels* the reservation.
 
-/** What a creator can be paid now: released earnings net of what they owe the co-op. */
-export function availableToPay(b: { liabilityCents: number; receivableCents: number }): number {
-  return b.liabilityCents - b.receivableCents;
+/** A creator's natural balances a payout nets: released earnings, the clawback receivable and split shortfall. */
+export interface NettableBalances {
+  liabilityCents: number;
+  receivableCents: number;
+  /** `asset:receivable:split-shortfall:<owner>` (ADR 0013 decision 6); absent = 0. */
+  splitShortfallCents?: number;
+}
+
+/** What a creator can be paid now: released earnings net of what they owe the co-op (both receivables). */
+export function availableToPay(b: NettableBalances): number {
+  return b.liabilityCents - b.receivableCents - (b.splitShortfallCents ?? 0);
+}
+
+/** How much of each receivable a reservation nets: the creator receivable first, then split shortfall. */
+export function nettedReceivables(b: NettableBalances): { receivableCents: number; splitShortfallCents: number } {
+  const receivableCents = Math.max(0, Math.min(b.receivableCents, b.liabilityCents));
+  const splitShortfallCents = Math.max(0, Math.min(b.splitShortfallCents ?? 0, b.liabilityCents - receivableCents));
+  return { receivableCents, splitShortfallCents };
 }
 
 export interface PayoutReserveInput {
@@ -481,8 +809,8 @@ export interface PayoutReserveInput {
   amountCents: number;
   currency: string;
   occurredAt: Date;
-  /** Natural balances: released earnings and any clawback receivable. */
-  balances: { liabilityCents: number; receivableCents: number };
+  /** Natural balances: released earnings, any clawback receivable and any split shortfall. */
+  balances: NettableBalances;
   /** `payout.rules.minimumCents`. */
   minimumCents: number;
   /** Closing an account pays out whatever is left, even below the minimum. */
@@ -490,8 +818,9 @@ export interface PayoutReserveInput {
 }
 
 /**
- * Reserve a payout. Any clawback receivable is netted against earnings in the same
- * transaction, so after reserving everything available both accounts are settled.
+ * Reserve a payout. Any clawback receivable, then any split shortfall (ADR 0013 decision 6), is
+ * netted against earnings in the same transaction, so after reserving everything available every
+ * account is settled.
  */
 export function payoutReserve(i: PayoutReserveInput): Posting {
   assertCents("amount", i.amountCents, { allowZero: false });
@@ -503,7 +832,8 @@ export function payoutReserve(i: PayoutReserveInput): Posting {
   if (i.amountCents < i.minimumCents && !i.closingAccount) {
     throw new PayoutBelowMinimumError(`payout of ${i.amountCents} is below the minimum of ${i.minimumCents} cents`);
   }
-  const offset = Math.max(0, Math.min(i.balances.receivableCents, i.balances.liabilityCents));
+  const netted = nettedReceivables(i.balances);
+  const offset = netted.receivableCents + netted.splitShortfallCents;
   return finish({
     kind: "payout_reserve",
     description: i.closingAccount ? "Final payout reserved (account closed)" : "Payout reserved",
@@ -512,10 +842,20 @@ export function payoutReserve(i: PayoutReserveInput): Posting {
     idempotencyKey: `payout-reserve:${i.payoutId}`,
     currency: i.currency,
     occurredAt: i.occurredAt,
-    metadata: { userId: i.userId, amountCents: i.amountCents, receivableNettedCents: offset },
+    metadata: {
+      userId: i.userId,
+      amountCents: i.amountCents,
+      receivableNettedCents: netted.receivableCents,
+      splitShortfallNettedCents: netted.splitShortfallCents,
+    },
     entries: [
       { code: accounts.creator(i.userId), amountCents: i.amountCents + offset, memo: "reserved for payout" },
-      { code: accounts.creatorReceivable(i.userId), amountCents: -offset, memo: "clawback netted" },
+      { code: accounts.creatorReceivable(i.userId), amountCents: -netted.receivableCents, memo: "clawback netted" },
+      {
+        code: accounts.splitShortfall(i.userId),
+        amountCents: -netted.splitShortfallCents,
+        memo: "split shortfall netted",
+      },
       { code: accounts.payoutClearing(i.userId), amountCents: -i.amountCents, memo: "reserved for payout" },
     ],
   });
@@ -555,6 +895,8 @@ export interface PayoutCancelInput {
   amountCents: number;
   /** The receivable netted when the payout was reserved (restored as owed again). */
   receivableNettedCents: number;
+  /** The split shortfall netted when the payout was reserved (restored as owed again). */
+  splitShortfallNettedCents?: number;
   currency: string;
   occurredAt: Date;
 }
@@ -563,6 +905,8 @@ export interface PayoutCancelInput {
 export function payoutCancel(i: PayoutCancelInput): Posting {
   assertCents("amount", i.amountCents, { allowZero: false });
   assertCents("receivableNetted", i.receivableNettedCents);
+  const shortfall = i.splitShortfallNettedCents ?? 0;
+  assertCents("splitShortfallNetted", shortfall);
   return finish({
     kind: "payout_cancel",
     description: "Payout cancelled",
@@ -575,9 +919,10 @@ export function payoutCancel(i: PayoutCancelInput): Posting {
     entries: [
       { code: accounts.payoutClearing(i.userId), amountCents: i.amountCents, memo: "reservation cancelled" },
       { code: accounts.creatorReceivable(i.userId), amountCents: i.receivableNettedCents, memo: "clawback restored" },
+      { code: accounts.splitShortfall(i.userId), amountCents: shortfall, memo: "split shortfall restored" },
       {
         code: accounts.creator(i.userId),
-        amountCents: -(i.amountCents + i.receivableNettedCents),
+        amountCents: -(i.amountCents + i.receivableNettedCents + shortfall),
         memo: "reservation cancelled",
       },
     ],

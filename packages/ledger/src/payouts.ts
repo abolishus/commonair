@@ -25,7 +25,7 @@ import { EVENTS } from "@commonair/contracts/events";
 import { type Executor, schema, uuidv7 } from "@commonair/db";
 import { accounts, assertCurrency, parseStoredCode, storedCode } from "./accounts.ts";
 import { lockCreator, lockPayoutBatch } from "./locks.ts";
-import { assertCents, negate } from "./math.ts";
+import { assertCents, compareUserIds, negate } from "./math.ts";
 import { type PostResult, post } from "./poster.ts";
 import { creatorBalances } from "./queries.ts";
 import { InsufficientBalanceError, payoutCancel, payoutReserve, payoutSent } from "./rules.ts";
@@ -42,10 +42,13 @@ export interface PayoutBatch {
   carriedOver: CreatorAvailable[];
 }
 
-/** Pure: who gets paid this period. Ordered by user id for determinism. */
+/**
+ * Pure: who gets paid this period. Ordered by `compareUserIds`, the order `lockCreators` locks in,
+ * so the batch takes its creator locks in the one documented order (ADR 0013 decision 4).
+ */
 export function computePayoutBatch(creators: readonly CreatorAvailable[], minimumCents: number): PayoutBatch {
   assertCents("minimum", minimumCents);
-  const sorted = [...creators].sort((a, b) => a.userId.localeCompare(b.userId));
+  const sorted = [...creators].sort((a, b) => compareUserIds(a.userId, b.userId));
   const batch: PayoutBatch = { payouts: [], carriedOver: [] };
   for (const c of sorted) {
     if (c.availableCents > 0 && c.availableCents >= minimumCents) {
@@ -307,6 +310,23 @@ export function newPayeeEvidence(
   return firstPayoutCents >= rules.newPayeeFirstPayoutCents ? { payoutCents: firstPayoutCents } : null;
 }
 
+/**
+ * Whether the user was ever a crew recipient of a posted payment (a hold lot of theirs on a payment
+ * someone else owns): decision (i) sends a crew member's first payout through `new_payee`.
+ */
+async function isCrewRecipient(tx: Executor, userId: string): Promise<boolean> {
+  // Through the user's own hold accounts (owner and account indexes), never a scan of every payment.
+  const rows = await tx.execute<{ crew: boolean }>(sql`
+    select exists (
+      select 1 from ledger_accounts a
+      join ledger_entries e on e.account_id = a.id
+      join ledger_transactions t on t.id = e.transaction_id
+      where a.owner_user_id = ${userId} and a.code like 'liability:creator-hold:%'
+        and t.kind = 'payment' and lower(t.metadata->>'creatorUserId') <> ${userId.toLowerCase()}
+    ) as crew`);
+  return rows[0]?.crew === true;
+}
+
 /** Whether the creator ever had a payout (any status): `new_payee` judges only the first. */
 async function hadPayout(tx: Executor, userId: string): Promise<boolean> {
   const rows = await tx
@@ -323,11 +343,15 @@ export interface PayableBalances {
   liabilityCents: number;
   /** Clawback shortfall the creator owes. */
   receivableCents: number;
+  /** Split shortfall the owner owes (ADR 0013 decision 6); netted after the receivable. */
+  splitShortfallCents?: number;
 }
 
+const owed = (b: PayableBalances) => b.liabilityCents - b.receivableCents - (b.splitShortfallCents ?? 0);
+
 /**
- * Creators' liability and receivable counting only postings dated at or before `asOf`, in one
- * statement. All creators in the currency, or just `userId`.
+ * Creators' liability, receivable and split shortfall counting only postings dated at or before
+ * `asOf`, in one statement. All creators in the currency, or just `userId`.
  */
 async function payableAsOf(
   tx: Executor,
@@ -336,8 +360,8 @@ async function payableAsOf(
   userId?: string,
 ): Promise<Map<string, PayableBalances>> {
   const owner = userId
-    ? sql`and a.code in (${storedCode(accounts.creator(userId), currency)}, ${storedCode(accounts.creatorReceivable(userId), currency)})`
-    : sql`and (a.code like 'liability:creator:%' or a.code like 'asset:receivable:creator:%')`;
+    ? sql`and a.code in (${storedCode(accounts.creator(userId), currency)}, ${storedCode(accounts.creatorReceivable(userId), currency)}, ${storedCode(accounts.splitShortfall(userId), currency)})`
+    : sql`and (a.code like 'liability:creator:%' or a.code like 'asset:receivable:creator:%' or a.code like 'asset:receivable:split-shortfall:%')`;
   const rows = await tx.execute<{ code: string; total: string }>(sql`
     select a.code,
            coalesce(sum(e.amount_cents) filter (where t.occurred_at <= ${asOf.toISOString()}::timestamptz), 0)::text as total
@@ -350,9 +374,10 @@ async function payableAsOf(
   for (const b of rows) {
     const code = parseStoredCode(b.code).code;
     const id = code.slice(code.lastIndexOf(":") + 1);
-    const cur = out.get(id) ?? { liabilityCents: 0, receivableCents: 0 };
-    // Liability is credit-normal (owed = −raw); the receivable is debit-normal.
+    const cur = out.get(id) ?? { liabilityCents: 0, receivableCents: 0, splitShortfallCents: 0 };
+    // Liability is credit-normal (owed = −raw); the receivables are debit-normal.
     if (code.startsWith("liability:")) cur.liabilityCents = negate(Number(b.total));
+    else if (code.startsWith("asset:receivable:split-shortfall:")) cur.splitShortfallCents = Number(b.total);
     else cur.receivableCents = Number(b.total);
     out.set(id, cur);
   }
@@ -360,7 +385,7 @@ async function payableAsOf(
 }
 
 /**
- * The lowest running available balance (liability − receivable) of one creator at any posting
+ * The lowest running available balance (liability − both receivables) of one creator at any posting
  * date after `asOf`, counting every posting whatever its date (later reservations, cancels,
  * reversals, releases, and anything dated in the future); null when nothing is dated after it.
  * Postings sharing a timestamp count together.
@@ -377,7 +402,7 @@ async function lowestAvailableAfter(
       from ledger_entries e
       join ledger_accounts a on a.id = e.account_id
       join ledger_transactions t on t.id = e.transaction_id
-      where a.code in (${storedCode(accounts.creator(userId), currency)}, ${storedCode(accounts.creatorReceivable(userId), currency)})
+      where a.code in (${storedCode(accounts.creator(userId), currency)}, ${storedCode(accounts.creatorReceivable(userId), currency)}, ${storedCode(accounts.splitShortfall(userId), currency)})
       group by t.occurred_at
     ), r as (
       select at, sum(delta) over (order by at) as running from d
@@ -401,18 +426,24 @@ export function reservableAt(
   atPeriodEnd: PayableBalances,
   now: PayableBalances,
   lowestAfterCents: number | null = null,
-): { amountCents: number; nettedCents: number; balances: PayableBalances } {
-  const amountCents = Math.min(
-    atPeriodEnd.liabilityCents - atPeriodEnd.receivableCents,
-    now.liabilityCents - now.receivableCents,
-    lowestAfterCents ?? Number.POSITIVE_INFINITY,
-  );
-  // Never net more than is owed now (a later netting may have settled part of it).
+): { amountCents: number; nettedCents: number; shortfallNettedCents: number; balances: PayableBalances } {
+  const amountCents = Math.min(owed(atPeriodEnd), owed(now), lowestAfterCents ?? Number.POSITIVE_INFINITY);
+  // Never net more than is owed now (a later netting may have settled part of it). The creator
+  // receivable first, then split shortfall (ADR 0013 decision 6).
   const nettedCents = Math.max(0, Math.min(atPeriodEnd.receivableCents, now.receivableCents));
+  const shortfallNettedCents = Math.max(
+    0,
+    Math.min(atPeriodEnd.splitShortfallCents ?? 0, now.splitShortfallCents ?? 0),
+  );
   return {
     amountCents,
     nettedCents,
-    balances: { liabilityCents: amountCents + nettedCents, receivableCents: nettedCents },
+    shortfallNettedCents,
+    balances: {
+      liabilityCents: amountCents + nettedCents + shortfallNettedCents,
+      receivableCents: nettedCents,
+      splitShortfallCents: shortfallNettedCents,
+    },
   };
 }
 
@@ -438,7 +469,7 @@ export async function runPayoutBatch(
     await lockPayoutBatch(tx, opts.currency);
     const atEnd = await payableAsOf(tx, opts.currency, opts.periodEnd);
     const candidates = computePayoutBatch(
-      [...atEnd].map(([userId, b]) => ({ userId, availableCents: b.liabilityCents - b.receivableCents })),
+      [...atEnd].map(([userId, b]) => ({ userId, availableCents: owed(b) })),
       opts.minimumCents,
     );
     const already = new Set(
@@ -477,9 +508,12 @@ export async function runPayoutBatch(
         continue;
       }
       // payoutReserve checks only the shaped balances; check against today's real ones too.
-      if (r.amountCents > now.availableCents || r.amountCents + r.nettedCents > now.liabilityCents) {
+      if (
+        r.amountCents > now.availableCents ||
+        r.amountCents + r.nettedCents + r.shortfallNettedCents > now.liabilityCents
+      ) {
         throw new InsufficientBalanceError(
-          `payout of ${r.amountCents} (+${r.nettedCents} netted) exceeds the available ${now.availableCents} cents`,
+          `payout of ${r.amountCents} (+${r.nettedCents + r.shortfallNettedCents} netted) exceeds the available ${now.availableCents} cents`,
         );
       }
       const acct = accountsByUser.get(c.userId);
@@ -487,7 +521,10 @@ export async function runPayoutBatch(
       let raised: FlagRow | null = null;
       // Also for a payee another flag already holds: clearing that flag must not release this payout unreviewed.
       if (!(await hadPayout(tx, c.userId))) {
-        const evidence = newPayeeEvidence(r.amountCents);
+        // Decision (i): a crew recipient's first payout always gets the four-eyes check.
+        const evidence = (await isCrewRecipient(tx, c.userId))
+          ? { payoutCents: r.amountCents, splitRecipient: 1 }
+          : newPayeeEvidence(r.amountCents);
         if (evidence) {
           raised = await insertFraudFlag(tx, {
             payeeUserId: c.userId,
@@ -543,7 +580,7 @@ export async function runPayoutBatch(
       else result.held += 1;
       result.totalCents += r.amountCents;
     }
-    result.carriedOver.sort((a, b) => a.userId.localeCompare(b.userId));
+    result.carriedOver.sort((a, b) => compareUserIds(a.userId, b.userId));
     return result;
   });
 }
@@ -552,7 +589,11 @@ export class PayoutStateError extends Error {
   override name = "PayoutStateError";
 }
 
-const ReserveMeta = z.object({ amountCents: z.number().int().positive(), receivableNettedCents: z.number().int() });
+const ReserveMeta = z.object({
+  amountCents: z.number().int().positive(),
+  receivableNettedCents: z.number().int(),
+  splitShortfallNettedCents: z.number().int().default(0),
+});
 
 async function lockedPayout(tx: Executor, payoutId: string) {
   const [peek] = await tx
@@ -635,6 +676,7 @@ export async function cancelPayout(
           userId: row.userId,
           amountCents: meta.amountCents,
           receivableNettedCents: meta.receivableNettedCents,
+          splitShortfallNettedCents: meta.splitShortfallNettedCents,
           currency: row.currency,
           occurredAt: opts.at,
         }),
