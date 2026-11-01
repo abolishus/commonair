@@ -12,9 +12,13 @@
  * 6. A data-mode (`dm`) token is refused.
  * 7. VODs off ⇒ `dvrWindowSeconds` 0.
  *
- * `--set steps=1,3` picks steps (`all` runs every step not pending); `--set via=api` drives the
- * web setup through the API. Steps whose unit has not merged are pending (`src/w2/steps.ts`) and
- * run only when named. W2-dvr fills this file and `src/w2/dvr/`.
+ * `--set steps=1,3` picks steps (`all` runs every step not pending); `--set via=api` skips the
+ * browser parts (step 1's scrubber and "back to live", step 7's `data-dvr-window="0"`). Steps 1,
+ * 2, 4 and 6 share one live channel; 3, 5 and 7 each start their own (`src/w2/dvr/`). Step 1 takes
+ * `--set dvrWatchSeconds=120 --set dvrVerifySeconds=300 --set dvrBehindSeconds=60`. Step 4 needs
+ * no relay: it checks the origin's relay and CDN pull routes and, with `PLAYBACK_SIGNING_KEY` in
+ * the repo `.env`, a relay-sourced DVR token (the relay's own path binding is covered by its Go
+ * tests).
  */
 import { parseVia } from "../src/money.ts";
 import { defineScenario } from "../src/scenario.ts";
