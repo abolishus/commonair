@@ -25,20 +25,23 @@ export const ENFORCEMENT_NOTICE_SEED_VERSION = "2026-10-27-draft";
 /**
  * The terms reached databases at `LEGAL_SEED_VERSION`; the channel points clause (ADR 0026
  * decision 3: points have no cash value) is a new version, so every signed-in user is asked to
- * accept the terms again (same publishedAt, the version sorts later). Draft: counsel has not
- * reviewed the clause.
+ * accept the terms again (same publishedAt, the version sorts later). Batch 7 moved it again for
+ * the giveaway rules (§11) and the watch-room, moving, Twitch-import and federation clauses (§12).
+ * The tag is `w3`, not `b7`: versions compare as strings, and `…-b7-…` would sort before privacy's
+ * `2026-11-01-w2-draft`. Draft: not reviewed by counsel (none retained).
  */
-export const TERMS_SEED_VERSION = "2026-10-29-points-draft";
+export const TERMS_SEED_VERSION = "2026-11-01-w3-draft";
 /**
  * `privacy` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, moved again for the channel-features paragraph
  * (ADR 0026), again for chat replay, retention and blocks (ADR 0012 amendment 1), again for
  * notifications, browser push and Discord (ADR 0028), and again for captions, streamer analytics,
- * signed audience statements and rehearsal invitees (batch 6, W2). Each new version sorts after the
- * accepted one, so every signed-in user is asked to accept it again. Draft: counsel has not
- * reviewed the paragraphs.
+ * signed audience statements and rehearsal invitees (batch 6, W2), and again for giveaways, the
+ * jury, watch rooms, portability, the Twitch import and federation (batch 7; see the terms note on
+ * the `w3` tag). Each new version sorts after the accepted one, so every signed-in user is asked to
+ * accept it again. Draft: not reviewed by counsel (none retained).
  */
-export const PRIVACY_SEED_VERSION = "2026-11-01-w2-draft";
+export const PRIVACY_SEED_VERSION = "2026-11-01-w3-draft";
 /**
  * `cookies` took its own version for the peer-to-peer sections (ADR 0005 amendment 1) after
  * `LEGAL_SEED_VERSION` reached databases, moved again for the language line in Preferences

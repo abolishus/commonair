@@ -122,19 +122,32 @@ Streamers on {{instanceName}} may run giveaways when the instance operator has t
    See the privacy policy.
 8. **Cancellation.** A streamer may cancel a giveaway before the draw; no prize is then owed.
 
-## 12. Disclaimers and liability
+## 12. Watch rooms, moving channels and federation
+
+Draft: not reviewed by counsel (none retained).
+
+- **Watch rooms.** The community guidelines apply in rooms. Any member may report a room, and the
+  report gives the co-op's moderators a copy of its messages.
+- **Moving.** Move links, move notices and bundles are for your own channel. Moving does not end or
+  refund subscriptions, and an import does not lift a suspension or legal hold.
+- **Twitch import.** By importing emotes you confirm you made the art or have the right to use it
+  here. Imported material is moderated like any upload.
+- **Federation.** If you turn it on, your channel's public posts go to other servers we do not
+  control; we cannot make them delete copies.
+
+## 13. Disclaimers and liability
 
 The service is provided "as is". Live streaming depends on networks and volunteers we do not
 control, so we cannot promise it will always be available or error-free. To the extent the law
 allows, the co-op is not liable for indirect or consequential losses. Nothing in these terms
 limits rights you have under consumer law that cannot be waived.
 
-## 13. Ending your use
+## 14. Ending your use
 
 You can delete your account at any time from your settings; the privacy policy explains what is
 kept and why. We may suspend or end accounts that seriously or repeatedly break these terms.
 
-## 14. Changes
+## 15. Changes
 
 When we change these terms we publish a new version with a new date. If the change is material,
 we ask you to accept the new version before you continue using features that need an account.
