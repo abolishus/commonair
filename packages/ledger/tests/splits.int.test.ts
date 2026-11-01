@@ -294,6 +294,50 @@ describe("clawback (ADR 0013 decision 5)", () => {
     expect((await creatorBalances(db, a, cur)).liabilityCents).toBe(180);
   });
 
+  test("released and unpaid (below the payout minimum), the owner's released earnings cover its own slice first", async () => {
+    // CI run 41295322622 (harness w2 split-clawback): a 2000 tip, crew 20%, both lots released,
+    // the payout run reserved nothing (1440 and 360 are under the 2500 minimum).
+    const cur = freshCurrency();
+    const [o, a] = [await makeUser(), await makeUser()];
+    const p = await tip(o, 2000, cur, daysAgo(10), [{ userId: a, bps: 2000 }]);
+    await releaseDueHolds(db, { asOf: new Date(), holdDays: 7, currency: cur, newRecipientHoldDays: 0 });
+    const run = await runPayoutBatch(db, {
+      periodStart: new Date(Date.now() - 31 * DAY),
+      periodEnd: new Date(),
+      currency: cur,
+      minimumCents: 2500,
+    });
+    expect(run.created).toBe(0);
+    await postReversal(db, { ...dispute("chargeback", p, 2000), disputeFeeCents: 0 });
+    // Owner: 1440 + 360 to cover from 1440 released; its own slice first, so no receivable.
+    expect(await creatorBalances(db, o, cur)).toMatchObject({
+      liabilityCents: 0,
+      holdCents: 0,
+      receivableCents: 0,
+      splitShortfallCents: 360,
+      availableCents: -360,
+    });
+    expect(await creatorBalances(db, a, cur)).toMatchObject({
+      liabilityCents: 360,
+      receivableCents: 0,
+      splitShortfallCents: 0,
+    });
+
+    // The same tip with the owner's released earnings already gone: its own slice is the receivable.
+    const o2 = await makeUser();
+    const a2 = await makeUser();
+    const p2 = await tip(o2, 2000, cur, daysAgo(10), [{ userId: a2, bps: 2000 }]);
+    await releaseDueHolds(db, { asOf: new Date(), holdDays: 7, currency: cur, newRecipientHoldDays: 0 });
+    await drain(o2, 1440, cur);
+    await postReversal(db, { ...dispute("chargeback", p2, 2000), disputeFeeCents: 0 });
+    expect(await creatorBalances(db, o2, cur)).toMatchObject({
+      liabilityCents: 0,
+      receivableCents: 1440,
+      splitShortfallCents: 360,
+    });
+    expect((await creatorBalances(db, a2, cur)).liabilityCents).toBe(360);
+  });
+
   test("a won chargeback restores each own-lot slice to its recipient's released earnings", async () => {
     const cur = freshCurrency();
     const [o, a, b] = [await makeUser(), await makeUser(), await makeUser()];
