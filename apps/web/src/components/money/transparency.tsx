@@ -44,6 +44,70 @@ export function TransparencyEmpty(): React.JSX.Element {
   );
 }
 
+/** The split-shortfall write-off cost line across the months shown (ADR 0013 decision 6). */
+export function splitWriteOffCents(months: readonly Pick<TransparencyMonthDto, "costs">[]): number {
+  return months.reduce(
+    (sum, m) => sum + m.costs.filter((c) => c.category === SPLIT_WRITEOFF).reduce((s, c) => s + c.amount.cents, 0),
+    0,
+  );
+}
+
+const SPLIT_WRITEOFF = "split-shortfall-writeoff";
+
+/**
+ * Split shortfalls written off (the co-op's own expense line, never inside payment fees) and
+ * withheld split shares (ADR 0013 decisions 6, 7): totals and counts only, never who.
+ */
+export function SplitLines({
+  months,
+  currency,
+}: {
+  months: readonly TransparencyMonthDto[];
+  currency: string;
+}): React.JSX.Element {
+  const writeOff = splitWriteOffCents(months);
+  // Months arrive newest first: the latest month end is what is withheld now.
+  const held = months[0]?.splitSuspense.heldAtMonthEnd.cents ?? 0;
+  const counts = months.reduce(
+    (acc, m) => ({
+      released: acc.released + m.splitSuspense.released,
+      forfeited: acc.forfeited + m.splitSuspense.forfeited,
+      writeOffs: acc.writeOffs + m.splitSuspense.writeOffs,
+    }),
+    { released: 0, forfeited: 0, writeOffs: 0 },
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("splits.transparency.title")}</CardTitle>
+        <CardDescription>{t("splits.transparency.hint")}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+          <div data-testid="transparency-split-writeoff" data-cents={writeOff} className="flex flex-col gap-1">
+            <dt className="text-muted-foreground">{t("splits.transparency.writeOff")}</dt>
+            <dd className="text-lg font-medium tabular-nums">
+              <MoneyAmount value={{ cents: writeOff, currency }} />
+            </dd>
+            <dd className="text-xs text-muted-foreground">
+              {t("splits.transparency.writeOffCount", { count: counts.writeOffs })}
+            </dd>
+          </div>
+          <div data-testid="transparency-split-suspense" data-cents={held} className="flex flex-col gap-1">
+            <dt className="text-muted-foreground">{t("splits.transparency.suspense")}</dt>
+            <dd className="text-lg font-medium tabular-nums">
+              <MoneyAmount value={{ cents: held, currency }} />
+            </dd>
+            <dd className="text-xs text-muted-foreground">
+              {t("splits.transparency.suspenseCounts", { released: counts.released, forfeited: counts.forfeited })}
+            </dd>
+          </div>
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function TransparencyReport({ months }: { months: TransparencyMonthDto[] }): React.JSX.Element {
   const { locale } = useLocale();
   const first = months[0];
@@ -167,6 +231,7 @@ export function TransparencyReport({ months }: { months: TransparencyMonthDto[] 
           />
         </CardContent>
       </Card>
+      <SplitLines months={months} currency={totals.currency} />
       <CoopTransparency months={months} />
       <ResponsiveGrid cols={3}>
         <MetricPanel
